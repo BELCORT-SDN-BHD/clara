@@ -1,0 +1,113 @@
+{
+  "axis": "RECHECK",
+  "lane": "wave1-lane08",
+  "branch": "riders/w1-lane08",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "fixed_point": "origin/main",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits_command": "git log origin/main..HEAD --oneline",
+  "head_at_recheck": "46216875179e471500c8e9323572ea9a7dc323cd",
+  "fix_report_verified": "docs/plan/active/riders-2026-09-20/reports/wave1-lane08-codereview-fix.md",
+  "source_reviews_verified": [
+    "reports/wave1-lane08-codereview-spec.json (verdict accept-with-fixes, 1 blocker / 2 major / 4 minor / 2 note)",
+    "reports/wave1-lane08-codereview-standards.json (verdict accept, 3 note)"
+  ],
+  "re_run_evidence": [
+    "git status: clean (nothing to commit, working tree clean) at 46216875",
+    "git log origin/main..HEAD --oneline: 10 commits, ends at 46216875, matches fix report's claimed new head",
+    "git diff --stat b7c37447..HEAD: only apps/web/README.md, apps/web/e2e/interview-walk.spec.ts, apps/web/test/manifest.txt, and new apps/web/components/clara/interview-draft-persistence.test.tsx changed this round -- matches the fix report's claimed diff exactly, nothing extra",
+    "pnpm typecheck (worktree root): exit 0 -- apps/web Done, packages/runtime Done",
+    "pnpm lint (worktree root): exit 0 -- all self-tests including check-test-manifest/check-message-keys/check-ui-add-guard PASS",
+    "apps/web whole unit suite (node scripts/run-tests.mjs): 4671 tests, 4669 pass, 0 fail, 2 skipped, exit 0 (134.2s, within normal host-contention variance of the fix report's own 106.3s)",
+    "interview-draft-persistence.test.tsx run standalone: 1/1 pass",
+    "apps/web/test/manifest.txt: interview-draft-persistence.test.tsx present, in correct sorted position",
+    "apps/web/e2e/interview-walk.spec.ts header diff read directly: the false '...proven without docker in a real built-app Playwright walk exactly like every other mock-lane spec in this directory' clause is gone; header now reads 'THIS ARM IS NOT PROVEN ANYWHERE TODAY -- not here, not in a mock lane' and names #897",
+    "apps/web/lib/clara/useClaraThread.ts:515 and :699 read directly: 'if (settled.phase === \"failed\" && settled.cause !== \"finished\")' guards the only openStream call a settled stop can reach -- independently confirms SPEC-956-1's refutation mechanism, not just the fix report's word for it",
+    "apps/web/components/clara/InterviewRunCard.tsx read directly: draft is still a plain useState(\"\") with exactly two setDraft call sites (:63, :181 clear-on-submit, :287 onChange) -- SPEC-897-1's underlying static claim still holds, unchanged",
+    "apps/web/e2e/chat-parity-walk.spec.ts:708 read directly: p642.e2e.scope_visible_at_both_altitudes does navigate rail -> escalated route -> goBack, confirming the fix report's correction to the review's own already_satisfied_or_stopped_check.897 note"
+  ],
+  "verdict": "accept",
+  "summary": "Re-ran every gate the fix report claims and read every changed hunk directly rather than trusting the report's word. All ten findings from the two source reviews are closed, refuted-and-verified, or are GitHub-write-only items with the exact posting text already drafted in the fix report -- none is open against the lane's current head (46216875), and nothing new broke: typecheck exit 0, lint exit 0, whole apps/web unit suite 4669/4671 passing (0 fail, 2 known skips, same as the fix report), the new interview-draft-persistence.test.tsx 1/1, and git status clean. Diff since the review's own head (b7c37447) is exactly the four files the fix report names, nothing more.",
+  "findings": [],
+  "notes": [
+    {
+      "id": "SPEC-897-1",
+      "ticket": 897,
+      "status": "GitHub-write-only remedy; text already drafted",
+      "detail": "Blocker. Required fix is an owner ruling before further build; the ticket must not be counted as delivered by this wave. The fix report reproduces the gap empirically (interview-draft-persistence.test.tsx, 1/1 pass, re-verified here) and drafts the exact owner-decision comment text for #897 for the orchestrator to post verbatim. Re-verified independently: InterviewRunCard.tsx's draft is still a plain useState with two setDraft sites (unchanged); no e2e mock answers /api/runtime/interview/* (unchanged, no code added that would change this). Not open against the lane -- the remedy is a GitHub comment the lane is barred from posting (WORK-ORDER rule 2), and that comment's text is on file."
+    },
+    {
+      "id": "SPEC-897-2",
+      "ticket": 897,
+      "status": "fixed, verified",
+      "detail": "Major. Read the actual diff to apps/web/e2e/interview-walk.spec.ts: the false '...proven without docker in a real built-app Playwright walk exactly like every other mock-lane spec in this directory' claim is removed. The header now states plainly 'THIS ARM IS NOT PROVEN ANYWHERE TODAY -- not here, not in a mock lane' and names #897 as the open ticket. Confirmed by direct diff read, not by trusting the fix report."
+    },
+    {
+      "id": "SPEC-874-1",
+      "ticket": 874,
+      "status": "GitHub-write-only remedy; text already drafted",
+      "detail": "Major. Re-verified independently: invite-mail-transport.test.ts 38/38 green (part of the whole-suite run); grep for CLARA_E2E_INVITE_MAIL_ENDPOINT across apps/web still finds nothing under e2e/. The scope contradiction (AC2 vs the owner's 2026-09-18 narrow-seam ruling) genuinely cannot be resolved by lane code -- it needs an owner choice between two named options. That choice text is drafted verbatim in the fix report for the orchestrator to post on #874. Not open against the lane."
+    },
+    {
+      "id": "SPEC-956-1",
+      "ticket": 956,
+      "status": "refuted, refutation independently re-verified",
+      "detail": "Minor. The fix report's refutation rests on useClaraThread.ts's cause !== \"finished\" guard, present at both branch points (:515, :699), read directly here rather than taken on the report's word: a settled 'finished' stop never enters the reattach branch at all, so the absence cell's flow never opens a stream -- a stronger, structural guarantee than the original finding's 20-hop-settle-budget concern. use-clara-thread-stop.test.ts is part of the green whole-suite run. No code change was needed or made; the refutation holds."
+    },
+    {
+      "id": "SPEC-956-2",
+      "ticket": 956,
+      "status": "accepted as recommended, no code change needed",
+      "detail": "Minor. abortAllStreams() remains a documented test-support primitive with no production caller; the decision is recorded in apps/web/README.md's #956 section, verified present in the current diff. No further action needed from the lane; whether to record it on the ticket is a GitHub write."
+    },
+    {
+      "id": "SPEC-1005-1",
+      "ticket": 1005,
+      "status": "flagged for owner wording sign-off, no code change needed",
+      "detail": "Minor. Decision and reasoning recorded in apps/web/README.md's #1005 section (verified present); required_fix explicitly allows 'no code change needed if the owner accepts the copy'. Wording-review text for the orchestrator to raise is on file in the fix report. Not open against the lane."
+    },
+    {
+      "id": "SPEC-1005-2",
+      "ticket": 1005,
+      "status": "accepted as recorded harness limitation, no code change needed",
+      "detail": "Minor. Follow-up (a shared harness helper for portalled Base UI popups) filed in README rather than built, matching the finding's own first accepted option. No further lane action required."
+    },
+    {
+      "id": "SPEC-875-1",
+      "ticket": 875,
+      "status": "table addition done; GitHub-write item (closing comment) text already drafted",
+      "detail": "Note. TurnProgress.tsx's TURN_PROGRESS_TICK_MS row was added to apps/web/README.md's audit table in commit 46216875, verified present and correctly sourced (TurnProgress.tsx:37/91, thread-live-stream-stability.test.tsx:104-111). The remaining required fix -- pasting the table into #875's GitHub closing comment -- is a GitHub write the lane cannot make; that text is drafted in the fix report for the orchestrator."
+    },
+    {
+      "id": "SPEC-879-1",
+      "ticket": 879,
+      "status": "no action required",
+      "detail": "Note. Finding's own required_fix is 'None.' Nothing to verify beyond the already-green e2e/unit re-runs, which are covered by the whole-suite pass and RIG.md's own triple."
+    },
+    {
+      "id": "STD-08-1",
+      "ticket": 1005,
+      "status": "no action required",
+      "detail": "Standards note, required_fix 'None required' in the source review itself. No change since; not re-litigated."
+    },
+    {
+      "id": "STD-08-2",
+      "ticket": 1005,
+      "status": "no action required",
+      "detail": "Standards note, required_fix 'None required' in the source review itself (the IIFE is deliberate to preserve exact pre-existing branch semantics). No change since."
+    },
+    {
+      "id": "STD-08-3",
+      "ticket": 1005,
+      "status": "no action required",
+      "detail": "Standards note, required_fix 'None required' in the source review itself (performance micro-nit, no measured regression). No change since."
+    }
+  ],
+  "gates_rerun": {
+    "typecheck": "pnpm typecheck (worktree root): exit 0",
+    "lint": "pnpm lint (worktree root): exit 0",
+    "apps_web_whole_unit_suite": "4671 tests, 4669 pass, 0 fail, 2 skipped, exit 0",
+    "new_test_isolated": "interview-draft-persistence.test.tsx: 1/1 pass",
+    "git_status": "clean at 46216875"
+  }
+}

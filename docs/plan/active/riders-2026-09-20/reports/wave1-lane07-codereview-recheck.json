@@ -1,0 +1,140 @@
+{
+  "lane": "wave1-lane07",
+  "lens": "RECHECK",
+  "branch": "riders/w1-lane07",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "head_checked": "308bbecd4b8ca1e431cb76ec2c35f3ee53383758",
+  "head_confirmed_by": "git rev-parse HEAD in the worktree matches exactly; git status --porcelain empty before and after every re-run in this recheck",
+  "source_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane07-codereview-spec.json (SPEC axis, 9 findings CRS-07-01..09, reviewed at head 278f0795)",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane07-codereview-standards.json (STANDARDS axis, verdict accept, 6 findings STD-01..06, reviewed at head 278f0795)",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane07-codereview-fix.md — DOES NOT EXIST. No fix-round report file was ever written for these two axes (every other lane in this wave with a codereview-spec/standards pair also has a matching *-codereview-fix.md; lane07 does not). The fix round nonetheless happened: five commits dated 07:19-07:31, all after the two axis reports' 07:01/07:04 timestamps and each an explicit 'code-review fix round' commit citing CRS-07-xx/STD-0x ids by number, carry the substance a fix report would have. This recheck was performed by reading those five commits' full diffs and messages directly in place of the missing report, and by independently re-running gates."
+  ],
+  "verdict": "accept",
+  "summary": "All three majors (CRS-07-01 #987, CRS-07-02 #904, CRS-07-03 #903) and four of six STANDARDS findings (STD-01..04) are fixed at HEAD (308bbecd), verified by reading each diff hunk against its required_fix rather than trusting the commit prose. Two minors (CRS-07-04 #987 fiscal-year label, CRS-07-05 #903 stripped fixtures) are recorded-not-fixed with an in-code comment whose reasoning holds on inspection. Four items remain genuinely open and unaddressed by any commit: CRS-07-07 (#900, minor), CRS-07-08 (#842, minor, note-only remedy), CRS-07-09 (#878, minor) and STD-05 (#878, minor) — none above minor. STD-06 (#904, note) is unchanged, non-blocking as originally scored. Re-ran all 17 test files the lane's diff touches (127 tests, 127 pass, 0 fail), pnpm typecheck (exit 0, apps/web + packages/runtime both Done) and pnpm lint (exit 0, including check-test-manifest, check-message-keys and check-ui-add-guard selftests all green) — nothing broke. git status is clean throughout. Nothing above minor remains, so this lane's two code-review reports are accepted as fixed on the current head.",
+  "gates_rerun": {
+    "web unit — first batch (11 files)": "node --import ./test/bootstrap.mjs --import tsx --test on periodic-adjustments-table.test.tsx, interview-run-field-composition.test.tsx, state.test.tsx, document-detail-live-refresh.test.tsx, document-kind-labels.test.tsx, needs-you-counts.test.tsx, opening-refusal-and-staleness.test.tsx, work-question-form.test.tsx, reads.test.ts, receipts.test.ts, use-review-queue.test.ts: 82 tests, 82 pass, 0 fail",
+    "web unit — second batch (6 files)": "documents-workbench-refresh.test.tsx, client-financial-charts.test.tsx, compliance-watch-affordance.test.tsx, compliance-watch-receipt.test.tsx, needs-you-a11y.test.tsx, firm-admin-a11y.test.tsx: 45 tests, 45 pass, 0 fail",
+    "pnpm typecheck (worktree root)": "exit 0 — apps/web typecheck: Done; packages/runtime typecheck: Done",
+    "pnpm lint (worktree root, full chain)": "exit 0 — check-token-contrast all WCAG AA pairs pass, check-test-manifest 485 files listed/matched + selftest all PASS, check-message-keys 4301 keys resolve + selftest all PASS, check-ui-add-guard selftest all PASS, eslint clean across every package including reporting-render",
+    "git status --porcelain (before and after every command above)": "empty throughout",
+    "git diff origin/main...HEAD --stat": "unchanged shape from the axis reports' own record — 34 files, apps/web only",
+    "code read against required_fix, per fixed finding": "opening-seed-workbench.tsx branches openingPeriodWallMessage on detail.fy_status ('closing' -> new closingPeriodRefusal key naming the close run and 'finish or be abandoned', never 'reopened'; 'closed' -> unchanged closedPeriodRefusal), messages/en.json carries both keys at 4181-4182 (CRS-07-01, exact required_fix); document-detail.tsx's tasksPoll onTick now reads the fresh tasks result and calls the narrow setTaskOverride on an intermediate tick but a full reload() on the settling tick (last task turns terminal), matching documents-workbench.tsx's own settled-tick law (CRS-07-02, exact required_fix); lib/firm/needs-you.ts's ReviewQueueEnvelope no longer declares watermark at all (grep-confirmed: no `watermark\\s*:` in needs-you.ts, no `.watermark` in the hook, no watermark key in any of the 8 typed fixture files) — CRS-07-03 taken via the deletion fork, CRS-07-05 correctly needs no fixture edit under that fork; document-detail.tsx/documents-workbench.tsx's settlePoll prop is now `Pick<SettlePollOptions, ...>` from use-settle-poll.ts's own exported type instead of a third hand copy (STD-03, exact required_fix); hasNonTerminalTask is bound once and reused in both enabled and tasksExhausted (STD-02, exact required_fix); needs-you-counts.test.tsx's 903.comment readFileSync/regex cell is gone, only 903.chips (a real DOM render+count) remains (STD-04, exact required_fix); documents-intake-mock.mjs now exports its own module-scope inParam(url, key) byte-identical to its two sibling files, with namedLaneDocumentsIn composed as (inParam(url, key) ?? []).filter(...) matching document-correction-mock.mjs's own composition (STD-01, exact required_fix)."
+  },
+  "findings": [
+    {
+      "id": "CRS-07-07",
+      "ticket": 900,
+      "severity": "minor",
+      "status": "still open — unaddressed by any commit in this diff",
+      "title": "AC1's error-placement leg is still not delivered for InterviewRunCard's answer field",
+      "file": "apps/web/components/clara/InterviewRunCard.tsx",
+      "evidence": "Line 249 is unchanged since the axis review: `{run.error ? <StateBanner tone=\"error\">{run.error}</StateBanner> : null}` still renders the submit failure as the card's chrome banner above the thread log, not through a `FieldError` inside the answer `Field`. No commit in origin/main..HEAD touches InterviewRunCard.tsx after the codereview-spec.json review point (278f0795); grep confirms no `FieldError` import or usage anywhere in the file.",
+      "required_fix": "As the axis report stated: either render `run.error` through a `FieldError` inside the answer `Field` when the failure came from `submitAnswer`, or add an explicit note against AC1 (report + code comment) that the error leg is deferred and where the failure surfaces instead. Neither happened."
+    },
+    {
+      "id": "CRS-07-08",
+      "ticket": 842,
+      "severity": "minor",
+      "status": "still open — remedy (a note) was never written anywhere",
+      "title": "`CENTS_PARTICULARS`'s five-key scope-creep override was never named as an override, in a report or on the ticket",
+      "file": "apps/web/components/accounting/periodic-adjustments-table.tsx",
+      "evidence": "The comment at lines 121-125 is unchanged from before the axis review: it explains why the five keys are cents-typed (migration 0212 evidence) but does not frame this as a deliberate override of #842's explicit out-of-scope line, and no wave1-lane07-codereview-fix.md or ticket comment exists to carry that framing. The axis report itself said 'No code change needed', so this is not a code defect, but its one required remedy — naming the override — is unmet.",
+      "required_fix": "Record in the (missing) fix report and, when the lane's work reaches integration, on #842 itself: quote the out-of-scope line and the migration evidence that retires it, so the ticket is not closed against a criterion it no longer literally matches. Lane workers cannot write to GitHub (WORK-ORDER rule 2), so this note belongs to the integrator once a fix report exists to carry it."
+    },
+    {
+      "id": "CRS-07-09",
+      "ticket": 878,
+      "severity": "minor",
+      "status": "still open — unaddressed",
+      "title": "AC1's cell is still a source-text proxy, not a rendered-behaviour assertion",
+      "file": "apps/web/components/documents/document-kind-labels.test.tsx",
+      "evidence": "The `[878]` cell (lines ~180-206) still only asserts on `dialogSource` text (import present, `.map(` call present, full `DOCUMENT_KINDS.map(` absent, retired comment phrase absent). No `assert.doesNotMatch(dialogSource, /consent_evidence/)` whole-file check and no mounted-dialog assertion was added. A literal `<SelectItem value=\"consent_evidence\">` written beside the map would still pass every assertion in this cell.",
+      "required_fix": "Add `assert.doesNotMatch(dialogSource, /consent_evidence/)` (proving the string is absent from the file entirely) as the axis report suggested, or record in a report that AC1 is accepted as met by source-pin under the [633] idiom. Neither happened."
+    },
+    {
+      "id": "STD-05",
+      "ticket": 878,
+      "severity": "minor",
+      "status": "still open — unaddressed",
+      "title": "The retired-comment-prose assertion bundled inside the [878] structural-pin cell is still present",
+      "file": "apps/web/components/documents/document-kind-labels.test.tsx",
+      "evidence": "The fourth assertion in the `[878]` cell — `assert.doesNotMatch(dialogSource, /observation it would not change/, \"the dialog's own comment must no longer claim the full roster is permanent here\")` — is unchanged since the axis review. It checks a retired comment's wording, not which roster the Select maps, and is not covered by the popup-mounts-lazily justification the rest of the cell states.",
+      "required_fix": "Drop the fourth assertion, or move it to its own clearly-labelled comment-hygiene cell, so the structural-pin cell's scope matches its own stated justification. Not done."
+    }
+  ],
+  "confirmed_fixed": [
+    {
+      "id": "CRS-07-01",
+      "ticket": 987,
+      "severity": "major",
+      "verification": "opening-seed-workbench.tsx now computes `openingPeriodWallMessage` branching on `openingClosedPeriodRefusal?.detail?.fy_status === \"closing\"`, rendering the new `closingPeriodRefusal` message key (names the close run, offers 'finish or be abandoned', never 'reopened') for the closing case and the unchanged `closedPeriodRefusal` for the closed case. New cell in opening-refusal-and-staleness.test.tsx re-run green (7/7 in that file per the full-batch run above); the existing 987 and 987.L07-05 cells for the `closed` case are unchanged and still pass."
+    },
+    {
+      "id": "CRS-07-02",
+      "ticket": 904,
+      "severity": "major",
+      "verification": "document-detail.tsx's tasksPoll onTick reads the fresh tasks list; if still non-terminal it sets the narrow taskOverride (one read, unchanged cost); if every task is now terminal (the settling tick) it awaits the full `reload()` once instead, matching documents-workbench.tsx's own settled-tick law for the receipts poll. document-detail-live-refresh.test.tsx re-run green (part of the 82-test first batch above, including the file's own CRS-07-02 cell)."
+    },
+    {
+      "id": "CRS-07-03",
+      "ticket": 903,
+      "severity": "major",
+      "verification": "`watermark` is deleted from ReviewQueueEnvelope in lib/firm/needs-you.ts (grep-confirmed: no `watermark\\s*:` declaration remains), taking the deletion fork rather than restoring the field. use-review-queue.test.ts's '903' cell (re-run green, part of the 82-test batch) greps both the type and the hook for zero remaining reference via a property-declaration pattern that would not false-negative on the explanatory comment."
+    },
+    {
+      "id": "STD-01",
+      "ticket": 876,
+      "severity": "minor",
+      "verification": "documents-intake-mock.mjs now exports its own module-scope `inParam(url, key)` byte-identical to document-correction-mock.mjs / documents-viewer-mock.mjs's existing helper; `namedLaneDocumentsIn` is now `(inParam(url, key) ?? []).filter(laneDocumentIds().includes)`, matching how document-correction-mock.mjs composes the same two steps — exactly the required_fix. The commit records an ad-hoc behavioural-equivalence check and a rerun of e2e-fixture-ownership.test.ts + mock-dispatch.test.ts (26/26); lint (part of this recheck's own full lint run) is clean."
+    },
+    {
+      "id": "STD-02",
+      "ticket": 904,
+      "severity": "minor",
+      "verification": "`hasNonTerminalTask` is bound once (`tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status))`) and reused in both `enabled` and `tasksExhausted` — exactly the required_fix. No duplicate expression remains in document-detail.tsx."
+    },
+    {
+      "id": "STD-03",
+      "ticket": 904,
+      "severity": "minor",
+      "verification": "Both documents-workbench.tsx and document-detail.tsx now declare `settlePoll?: Pick<SettlePollOptions, \"maxTicks\" | \"baseDelayMs\" | \"maxDelayMs\">`, importing `SettlePollOptions` from use-settle-poll.ts, instead of a third hand-written copy of the three-field shape — exactly the required_fix."
+    },
+    {
+      "id": "STD-04",
+      "ticket": 903,
+      "severity": "minor",
+      "verification": "needs-you-counts.test.tsx's `903.comment` readFileSync+regex cell is gone (grep-confirmed: file only mentions 'EIGHT counts'/'NINE counts' in a code comment about the change, not in a test assertion); only `903.chips`, which renders NeedsYouCounts and counts real DOM badges, remains — exactly the required_fix."
+    }
+  ],
+  "recorded_not_code_fix": [
+    {
+      "id": "CRS-07-04",
+      "ticket": 987,
+      "severity": "minor",
+      "verification": "opening-seed-workbench.tsx carries a new code comment at the substitution site naming the dropped fiscal-year label explicitly, explaining that restoring it would require this workbench growing its own clara.list_fiscal_years read, and citing WORK-ORDER rule 5 scope discipline as the reason it was left out this round, flagged for the owner to rule on. The reasoning holds on inspection: the refusal's own `detail` genuinely carries only `fiscal_year_id`, not a label (confirmed at 0056:748-749 as cited), so resolving it would be a new read, not a one-line change."
+    },
+    {
+      "id": "CRS-07-05",
+      "ticket": 903,
+      "severity": "minor",
+      "verification": "Since CRS-07-03 was resolved via the deletion fork (watermark removed entirely), the eight typed fixtures' existing lack of a watermark key is now the CORRECT shape, not stale residue — confirmed by grep across all eight files (firm-admin-a11y.test.tsx x3, compliance-watch-affordance/receipt.test.tsx x2, needs-you-a11y.test.tsx x4, use-review-queue.test.ts x1): none declares watermark, consistent with the type. No fixture edit was needed under this fork, as the fix commit's message states; the reasoning holds."
+    }
+  ],
+  "left_alone_as_instructed": [
+    {
+      "id": "STD-06",
+      "ticket": 904,
+      "severity": "note",
+      "reason": "Unchanged since the axis review: document-metadata.tsx's new extraction-tasks Refresh button still reads t(\"receiptsRefresh\"), the same key intake-receipts.tsx uses for its own unrelated control. Non-blocking as originally scored (a naming note, not a defect); no commit in this diff touches this key or either call site."
+    }
+  ],
+  "newly_broken": [],
+  "typecheck_lint_status": "Both green, re-run independently at the worktree root: pnpm typecheck exit 0 (apps/web typecheck: Done; packages/runtime typecheck: Done); pnpm lint exit 0, including check-token-contrast, check-test-manifest (+selftest), check-message-keys (+selftest) and check-ui-add-guard (+selftest) all passing, eslint clean across every package in the monorepo.",
+  "notes": [
+    "The fix report this recheck was asked to verify (wave1-lane07-codereview-fix.md) does not exist on disk or in git history — confirmed by a filesystem search of the whole riders-2026-09-20/reports tree. Every other lane with a codereview-spec/standards pair (lane02, lane04, lane09, lane10) has a matching *-codereview-fix.md; lane07 does not. The five commits addressing these findings (981d160a, a17f6a87, 5fe37c2b, 4c507495, 308bbecd, all dated 2026-09-20 07:19-07:31, after the two axis reports' 07:01/07:04 review point) carry fix-report-equivalent detail in their commit messages and in code comments at each fix site, which this recheck read and verified directly in place of the missing file. This is a documentation-process gap worth an integrator's attention, not a code defect against the lane.",
+    "No file outside this report was written or modified in the worktree or the main checkout during this recheck; no push, no PR, no GitHub write, no other worktree touched, no subagent spawned, no process killed that this session did not start.",
+    "git status --porcelain was empty at the start of this recheck and remained empty after every test/typecheck/lint run.",
+    "Verdict is accept because nothing above minor remains open: the three majors (CRS-07-01, CRS-07-02, CRS-07-03) are fixed and verified against their exact required_fix; the four still-open items (CRS-07-07, CRS-07-08, CRS-07-09, STD-05) and the one left-alone note (STD-06) are all minor or note severity, none newly broken, and none blocks acceptance under this recheck's own instruction."
+  ]
+}

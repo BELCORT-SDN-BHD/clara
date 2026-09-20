@@ -1,0 +1,75 @@
+{
+  "lane": "wave1-lane05",
+  "axis": "RECHECK",
+  "reviewer": "/code-review recheck reviewer (read-only)",
+  "branch": "riders/w1-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "head": "ab6683c0",
+  "fixed_point": "origin/main",
+  "origin_main_at_recheck": "e7f0a10a",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits": [
+    "ab6683c0 docs(web): #969 fix round \u2014 record the strip-after-write window explicitly",
+    "509b22d7 test(db): #957 fix round \u2014 prove redo refuses on a non-rig target",
+    "b39240c8 fix(scripts): #849 fix round \u2014 retire's missing-path fall-through, denominator, canary exclusion",
+    "a4db0de2 fix(web): #969 ui:add guard drops the bogus cn dependency the pinned CLI adds",
+    "247dfc89 fix(lint): #994 NO_RAW_COLOR_VALUES message names the ticket-reference case",
+    "e488a57b fix(scripts): #959 maskComments no longer swallows the rest of the input on an unterminated quote/dollar tag",
+    "0d906477 feat(db): #957 guarded migration redo mode",
+    "10b603a4 fix(ops): #917 dsn-pipe.mjs --child-os wsl CA respelling",
+    "f01b4d34 feat(scripts): #849 --print-closure reverse index and --retire command"
+  ],
+  "inputs_read": {
+    "fix_report_named_in_task": "docs/plan/active/riders-2026-09-20/reports/wave1-lane05-codereview-fix.md",
+    "fix_report_exists": false,
+    "fix_report_note": "This file does not exist in the reports directory (unlike lanes 02/04/09/10, which each have a *-codereview-fix.md). No committed narration of the second fix round exists anywhere \u2014 the corresponding code changes were found only as uncommitted working-tree edits (see RC-01).",
+    "spec_report": "docs/plan/active/riders-2026-09-20/reports/wave1-lane05-codereview-spec.json (head ab6683c0, verdict accept-with-fixes, 7 findings L05B-S01..S07)",
+    "standards_report": "docs/plan/active/riders-2026-09-20/reports/wave1-lane05-codereview-standards.json (head ab6683c0, verdict accept-with-fixes, 4 findings L05-STD-01..04)"
+  },
+  "verdict": "accept-with-fixes",
+  "summary": "Every finding in both source reports that called for a code change (L05B-S01, S02, S03, S04, S05 and L05-STD-02, L05-STD-03, L05-STD-04) has a correct, tested fix for it sitting in the worktree, and I re-ran every touched cell plus typecheck and the full root lint: all green, nothing else broke. L05B-S06, L05B-S07 and L05-STD-01 needed no fix (their own reports say so \u2014 documented divergence, no behavioural consequence, and an already-made commit's trailer respectively) and still hold on inspection. But none of that fix work is committed: `git status` on the lane's HEAD (ab6683c0, unchanged since both source reports were generated) shows 14 modified tracked files with no corresponding commit, and the `wave1-lane05-codereview-fix.md` report the task asks me to check against does not exist. Re-running tests against the working tree (which is what 'is it fixed' has to mean operationally) shows every fix works; re-running `git log`/`git status` (what the RECHECK axis explicitly also requires) shows the lane's own commit history and reports do not yet reflect any of it. That gap, not any functional defect, is what keeps this out of a plain accept.",
+  "findings": [
+    {
+      "id": "RC-01",
+      "tickets": [917, 969, 849, 994, 957],
+      "severity": "major",
+      "kind": "uncommitted-fix / process-gap",
+      "title": "The entire second fix round is sitting as uncommitted working-tree edits; HEAD (ab6683c0) has not moved since wave1-lane05-codereview-spec.json/standards.json were generated on it, and git status is not clean",
+      "evidence": "`git log origin/main..HEAD --oneline` on the lane's current head still ends at ab6683c0 \u2014 the exact commit both source reports name as `head`. `git status --short` shows 14 modified, uncommitted tracked files: apps/web/components/ui/README.md, apps/web/scripts/check-ui-add-guard.selftest.mjs, apps/web/scripts/ui-add.mjs, docs/plan/active/refresh-wave-2026-09-18/RELEASE-RUNBOOK-0225-0233.md, eslint.config.mjs, packages/db/README.md, packages/db/scripts/migrate.mjs, packages/db/tests/migrate-redo.test.mjs, scripts/check-frozen-workflows.mjs, scripts/check-frozen-workflows.selftest.mjs, scripts/eslint-config.selftest.mjs, scripts/freeze-lint-retire.mjs, scripts/ops/dsn-pipe.mjs, scripts/ops/dsn-pipe.selftest.mjs. I read every diff: they correctly and specifically address L05B-S01 (dsn-pipe.mjs header + packages/db/README.md TLS-exclusivity paragraph), L05B-S02 (WSL_ENV_LIST gains CLARA_BACKUP_DIR/p, plus a new dsn-pipe.selftest.mjs cell), L05B-S03 (ui-add.mjs strips/warns on a non-zero spawnAdd exit, plus three new check-ui-add-guard.selftest.mjs cells), L05B-S04 (freeze-lint-retire.mjs's new exported checkRetiredRecords, wired into check-frozen-workflows.mjs's own verify path, plus two new selftest cells including a real CLI success-path retire against a temp repo), L05B-S05 (eslint.config.mjs's message now states the 3/4/6/8 hex-run condition, plus a new eslint-config.selftest.mjs cell), L05-STD-02 (check-frozen-workflows.mjs's new optionalArgAfterFlag helper replacing three inline copies, plus a regression cell proving --ruling no longer swallows a following flag as its ruling text), L05-STD-03 (migrate.mjs's redo/normal branches now share one per-migration body over a `targets` list) and L05-STD-04 (migrate-redo.test.mjs's AC1 checksum assertions now compare against independent literal sha256 hex strings I recomputed myself with a standalone `crypto.createHash('sha256')` call and confirmed byte-equal, not `migrationChecksum(sameString)`). REVIEWER RE-RAN every touched test file against this working tree: `node scripts/check-frozen-workflows.selftest.mjs` (OK, includes the new L05B-S04/L05-STD-02 cells), `node scripts/ops/dsn-pipe.selftest.mjs` (ALL GREEN, 3 skipped \u2014 the pre-existing Windows-only skips), `node apps/web/scripts/check-ui-add-guard.selftest.mjs` (all cases passed, includes the 3 new L05B-S03 cells), `node scripts/eslint-config.selftest.mjs` (OK, includes the new L05B-S05 cell), `node scripts/check-wiki-dynamic-sql.selftest.mjs` (OK, untouched by this round but re-run as a sibling sanity check), and from packages/db with the real $GATES chain against clara_l05\u2014`tests/migrate-redo.test.mjs` (8/8 pass, matches the count the spec report expected), `tests/operation-census.test.mjs` (10/10 pass) and `tests/rig-isolation.test.mjs` (20/20 pass, 1 known destructive skip). `pnpm typecheck` (both workspaces Done) and `pnpm lint` from the worktree root both exit 0. Nothing is broken \u2014 but none of it is a commit, so the lane's own git history (what an integrator actually merges) still shows every one of these seven findings as open, and the `wave1-lane05-codereview-fix.md` report this recheck was told to verify against was never written to narrate any of this.",
+      "required_fix": "Commit the 14 modified files as the fix round's own commit(s) \u2014 following WORK-ORDER rule 2's trailer and rule 4's per-slice-or-small-group shape \u2014 and write docs/plan/active/riders-2026-09-20/reports/wave1-lane05-codereview-fix.md narrating what changed and why, the same way lanes 02/04/09/10 did. Until that happens this lane's committed head does not contain any of the fixes this recheck verified in the working tree."
+    }
+  ],
+  "source_findings_disposition": [
+    { "id": "L05B-S01", "ticket": 917, "status": "fix present in working tree, verified correct; NOT committed", "verified_via": "git diff scripts/ops/dsn-pipe.mjs, packages/db/README.md; node scripts/ops/dsn-pipe.selftest.mjs ALL GREEN" },
+    { "id": "L05B-S02", "ticket": 917, "status": "fix present in working tree, verified correct; NOT committed", "verified_via": "git diff scripts/ops/dsn-pipe.mjs (WSL_ENV_LIST), scripts/ops/dsn-pipe.selftest.mjs (new cell green), docs/plan/.../RELEASE-RUNBOOK-0225-0233.md, packages/db/README.md" },
+    { "id": "L05B-S03", "ticket": 969, "status": "fix present in working tree, verified correct; NOT committed", "verified_via": "git diff apps/web/scripts/ui-add.mjs, apps/web/components/ui/README.md; node apps/web/scripts/check-ui-add-guard.selftest.mjs all cases passed (3 new cells)" },
+    { "id": "L05B-S04", "ticket": 849, "status": "fix present in working tree, verified correct; NOT committed", "verified_via": "git diff scripts/freeze-lint-retire.mjs (new checkRetiredRecords export), scripts/check-frozen-workflows.mjs (wired into verify path); node scripts/check-frozen-workflows.selftest.mjs OK (2 new cells incl. a real CLI success-path retire against a temp repo); node scripts/check-frozen-workflows.mjs direct run still OK (312 frozen, 3 retired)" },
+    { "id": "L05B-S05", "ticket": 994, "status": "fix present in working tree, verified correct; NOT committed", "verified_via": "git diff eslint.config.mjs (message now states 3/4/6/8); node scripts/eslint-config.selftest.mjs OK (1 new cell)" },
+    { "id": "L05B-S06", "ticket": 959, "status": "no fix required (documented divergence, source report says so); holds", "verified_via": "re-read skipQuoted/skipDollar contract note in maskComments; unchanged" },
+    { "id": "L05B-S07", "ticket": 957, "status": "no fix required (no behavioural consequence, source report says so); holds", "verified_via": "re-read migrate.mjs return-shape split; unchanged, only caller (isMain block) still ignores the value" },
+    { "id": "L05-STD-01", "ticket": 0, "status": "no fix possible/expected (informational only \u2014 already-made commit trailers); holds", "verified_via": "git show -s --format=%B on b39240c8/509b22d7/ab6683c0 still end with the session's own attribution trailer, as the source report already recorded; rewriting landed commits was correctly not attempted" },
+    { "id": "L05-STD-02", "ticket": 849, "status": "fix present in working tree, verified correct; NOT committed", "verified_via": "git diff scripts/check-frozen-workflows.mjs (new optionalArgAfterFlag helper); node scripts/check-frozen-workflows.selftest.mjs OK (1 new regression cell proving --ruling no longer swallows a following flag)" },
+    { "id": "L05-STD-03", "ticket": 957, "status": "fix present in working tree, verified correct; NOT committed", "verified_via": "git diff packages/db/scripts/migrate.mjs (shared targets/pending loop); packages/db tests/migrate-redo.test.mjs 8/8 pass" },
+    { "id": "L05-STD-04", "ticket": 957, "status": "fix present in working tree, verified correct; NOT committed", "verified_via": "git diff packages/db/tests/migrate-redo.test.mjs (independent literal sha256 hex); REVIEWER recomputed both literals independently with a standalone crypto.createHash('sha256') call \u2014 byte-identical to the literals used" }
+  ],
+  "gates_rerun_by_reviewer": [
+    "node scripts/check-frozen-workflows.selftest.mjs -> OK, all cases passed",
+    "node scripts/check-frozen-workflows.mjs (direct run) -> OK, 312 frozen file(s), 3 retired entr(ies)",
+    "node scripts/ops/dsn-pipe.selftest.mjs -> ALL GREEN (3 skipped, pre-existing Windows-only)",
+    "node apps/web/scripts/check-ui-add-guard.selftest.mjs -> all cases passed",
+    "node scripts/eslint-config.selftest.mjs -> OK, all cases passed",
+    "node scripts/check-wiki-dynamic-sql.selftest.mjs -> OK (untouched by this round, re-run as sanity check)",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/migrate-redo.test.mjs against clara_l05@127.0.0.1:55745 -> 8/8 pass",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/operation-census.test.mjs -> 10/10 pass",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/rig-isolation.test.mjs -> 20/20 pass, 1 known destructive skip",
+    "pnpm typecheck (worktree root) -> both workspaces Done, no errors",
+    "pnpm lint (worktree root) -> exit 0, full chain including apps/web's own lint and packages/reporting-render",
+    "git status --short -> 14 modified tracked files, NOT clean",
+    "git log origin/main..HEAD --oneline -> unchanged, still ends at ab6683c0"
+  ],
+  "gh_write_only_notes": [],
+  "not_rerun": [
+    "The whole apps/web unit suite (node scripts/run-tests.mjs) \u2014 not touched by this fix round and already recorded as flaky at that size in earlier reports; the fix-round files that live under apps/web are exercised through their own selftest / lint chain instead.",
+    "#917 AC1 end-to-end through backup.mjs --profile full \u2014 needs a hosted DSN and pg_dump 17; unchanged from the source spec report's own not_rerun list."
+  ]
+}

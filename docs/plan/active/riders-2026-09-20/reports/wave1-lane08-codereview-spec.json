@@ -1,0 +1,127 @@
+{
+  "axis": "SPEC",
+  "lane": "wave1-lane08",
+  "branch": "riders/w1-lane08",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "fixed_point": "origin/main",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits": [
+    "b7c37447 fix(web): #1005 STD-1005-4 — pin trigger/option label parity at the two composed-label sites",
+    "ff3521f1 fix(web): #875/#879 fix-round — land the audit table, empty-state cell, mock hardening; #897/#956 docs",
+    "1659c4f1 fix(web): #874 fence the invite-mail endpoint override (ADV-1 blocker), reconcile AC2, doc env var",
+    "80a94719 fix(web): #1005/#956 fix-round — census bypasses, unmatched-value fallback, five missing cells, rejecting-sleep hang",
+    "79037366 test(e2e): #879 first Playwright coverage for the staffAdvances tab",
+    "cf76a22a feat(web): #874 a test-only seam on the invite mail endpoint alone",
+    "02c6938b fix(web): #956 an abort cancels a pending reconnect, not just the read",
+    "61f56acf fix(web): #1005 SelectValue requires a label source, by construction"
+  ],
+  "spec_sources": [
+    "issue 1005 — body Agent Brief",
+    "issue 956 — body Agent Brief",
+    "issue 875 — triage comment Agent Brief (re-scoped to the audit)",
+    "issue 874 — triage comment Agent Brief + owner ruling 2026-09-18 (narrow seam)",
+    "issue 879 — triage comment Agent Brief",
+    "issue 897 — triage comment Agent Brief + owner confirmation 2026-09-18 (mock lane)"
+  ],
+  "re_run_evidence": [
+    "pnpm typecheck (worktree root): exit 0 — apps/web Done, packages/runtime Done",
+    "pnpm lint (worktree root): exit 0",
+    "node --test tests/select-value-label-census.test.ts components/ui/select.test.tsx tests/invite-mail-transport.test.ts tests/streamReattach.test.mjs -> 61 pass / 0 fail",
+    "node --test over the ten #1005 component test files -> 74 pass / 0 fail",
+    "lib/clara/use-clara-thread-stop.test.ts isolated x5 -> 26 pass / 0 fail each run",
+    "e2e/e2e-fixture-ownership.test.ts -> 20 pass / 0 fail",
+    "CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3570 CLARA_E2E_NEXT_PORT=3571 CLARA_E2E_RUNTIME_PORT=3572 pnpm --filter @clara/web e2e staff-advances-register -> 4 passed (14.7s)"
+  ],
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "SPEC-897-1",
+      "ticket": 897,
+      "severity": "blocker",
+      "kind": "missing-requirement",
+      "title": "#897 delivered 1 of 4 acceptance criteria — no mock-lane walk for the full-screen altitude arm exists",
+      "evidence": "Agent Brief (owner-confirmed 2026-09-18) AC1: \"A named mock-lane cell drives the full-screen altitude change and asserts focus return and typed-data survival, and runs green without docker.\" AC2: \"The fixture is an OPEN, unanswered park independent of any other arm's state.\" AC3: \"e2e-fixture-ownership.test.ts passes with the new fixture and verbs declared.\" Only AC4 (the live-stack header note) was touched. Verified on this branch: the entire #897 diff is 9 added comment lines in apps/web/e2e/interview-walk.spec.ts; git diff origin/main...HEAD -- apps/web/e2e/e2e-fixture-ownership.test.ts adds only #879's staff-advances lane. I re-verified the lane's blocking evidence independently rather than taking it: grep over apps/web/e2e for interview/client/start, interview/state and /api/runtime/interview matches nothing (only lib/interview/api.ts:281/302), so no e2e mock answers the interview runtime endpoints; apps/web/components/clara/InterviewRunCard.tsx:63 holds the typed answer in a plain useState(\"\"); apps/web/components/clara/ClaraRail.tsx:53/135 escalates via <Link href={escalateHref}> and ClaraFullScreenThread.tsx:60 collapses via <Link href={returnHref}>. The criterion is therefore very likely false in the product, not merely untested — which makes this a ticket that needs an owner decision, not a lane that can simply finish it.",
+      "required_fix": "Owner ruling before any further build: does \"typed but unsubmitted answers survive the change\" (and focus return) mean literal cross-route-group survival? If yes, #897 needs production work first (persist InterviewRunCard's draft the way claraThreadStore.drafts already persists the composer's) before a walk can assert anything true. If no, the brief must be narrowed. Either way #897 must not be counted as delivered by this wave."
+    },
+    {
+      "id": "SPEC-897-2",
+      "ticket": 897,
+      "severity": "major",
+      "kind": "implementation-wrong",
+      "title": "The AC4 header note added to interview-walk.spec.ts asserts coverage that does not exist anywhere",
+      "evidence": "AC4: \"The live-stack spec's header records that this arm lives in the mock lane.\" The note landed in apps/web/e2e/interview-walk.spec.ts (+9 lines, commit ff3521f1) reads: \"The arm belongs to whichever mock lane owns `ClaraRail`'s onboarding card fixtures instead, proven without docker in a real built-app Playwright walk exactly like every other mock-lane spec in this directory.\" No such walk exists on this branch or on main (SPEC-897-1). A reader of interview-walk.spec.ts is told the arm is proven elsewhere while nothing proves it — the exact false-coverage state #897 was filed to remove (\"a real acceptance criterion ... has no runnable proof anywhere in CI or locally\"). The note also names no open ticket a reader could chase back.",
+      "required_fix": "Reword the header to state plainly that the arm is not proven anywhere today, name #897 as the open ticket, and drop the \"proven without docker ... exactly like every other mock-lane spec in this directory\" clause — or remove the note until the mock-lane walk actually lands."
+    },
+    {
+      "id": "SPEC-874-1",
+      "ticket": 874,
+      "severity": "major",
+      "kind": "missing-requirement",
+      "title": "#874 AC2 unmet: the seam reaches no harness, and the owner's narrow scope appears to make AC2 unreachable as written",
+      "evidence": "Agent Brief AC2: \"With the seam set to a local URL, a walk substitutes it and asserts on the posted mail body with no outbound network call.\" Owner ruling 2026-09-18: \"only the mail endpoint becomes overridable ... the Supabase admin calls stay real ... The walk asserts what would have been sent.\" Verified here: grep -rn CLARA_E2E_INVITE_MAIL_ENDPOINT across apps/web matches only .env.example:42, lib/members/invite-mail.ts:79 and tests/invite-mail-transport.test.ts:305 — nothing under e2e/. The lane's blocker re-verifies too: e2e/members-lifecycle-mock.mjs:37 still records that the harness sets no RESEND_API_KEY, and invite-mail.ts:261/265 gate send() behind canMintFor/mintSupabaseTokenHash, which the ruling deliberately kept real. So under the scope the owner chose, a browser walk cannot reach send() at all: AC2 and the ruling are in tension, not merely unbuilt. AC1 is genuinely met — tests/invite-mail-transport.test.ts (38 cells including the loopback fence) re-run green here, and productionInviteMailer posts to RESEND_ENDPOINT whenever the override is absent, blank or non-loopback.",
+      "required_fix": "Take this back to the owner as a scope contradiction rather than leaving it as a lane-side deferral: either authorise the second seam (GoTrueAdminApi listUsers/generateLink mocked under /e2e-supabase) so AC2 becomes buildable, or amend AC2 to the unit-level pin that now exists and close #874 on that."
+    },
+    {
+      "id": "SPEC-956-1",
+      "ticket": 956,
+      "severity": "minor",
+      "kind": "partial-requirement",
+      "title": "#956 AC3 is met for cross-cell leaks only; the absence cell's own reattach timer can still outlast its settle budget undetected",
+      "evidence": "Agent Brief AC3: \"The absence cell cannot pass by luck: a leaked open arriving after its settle budget is either impossible or still detected.\" The cell at lib/clara/use-clara-thread-stop.test.ts:1029 hydrates task-over as status \"running\", which opens a reattach loop the already-finished stop never calls abortStream for, then spends absenceSettle(h, 20) — 20 macrotask hops — against a real ~1s first backoff. An open landing after hop 20 is neither impossible nor detected inside that cell. What the fix genuinely closes is the cross-cell half: test.afterEach(() => claraThreadStore.abortAllStreams()) plus stream.ts's abortableSleep means no earlier cell's pending timer can reach a later cell's fetch stub. AC1/AC2/AC4/AC5 verified here: the file is 26/26 across five isolated runs, and streamReattach.test.mjs's three new #956 cells (abort mid-backoff against a never-resolving sleepImpl, the already-aborted fast path, the rejecting-sleepImpl case) all pass. The lane records the gap itself under fix-round SPEC-956-1.",
+      "required_fix": "Either give useClaraThread/attachClaraStream an optional sleepImpl so the absence cell can pin a zero backoff, or have that cell abort its own task-over handle before opening the absence window. If neither is proportionate, get AC3 amended on the ticket rather than leaving it recorded as unmet."
+    },
+    {
+      "id": "SPEC-956-2",
+      "ticket": 956,
+      "severity": "minor",
+      "kind": "scope-creep",
+      "title": "claraThreadStore.abortAllStreams() is new production store API with no production caller, added for test teardown",
+      "evidence": "Agent Brief Out of scope: \"Changing production stop or cancel behaviour to make a test pass.\" apps/web/lib/clara/threadStore.ts gains an exported abortAllStreams() whose own doc comment states \"Not reached by any production surface today\"; its only caller is the new test.afterEach in use-clara-thread-stop.test.ts. It changes no behaviour (nothing in the app calls it), so this is added surface rather than a behaviour change — but it is production API the ticket did not ask for. The lane's ADV-7 investigation found both ways of giving it a real caller are wrong: threadStore.ts's own header documents that \"a live tab keeps a task's read running across an ordinary sign-out, BY DESIGN\", so wiring it into sign-out would contradict a recorded product decision.",
+      "required_fix": "Accept it as a documented test-support primitive (my recommendation — both alternatives are worse) or move teardown into the test file over its own tracked task ids. Either way record the decision on #956 so a later reader does not treat an uncalled export as dead code to delete."
+    },
+    {
+      "id": "SPEC-1005-1",
+      "ticket": 1005,
+      "severity": "minor",
+      "kind": "scope-creep",
+      "title": "Three new user-visible message keys invent a display state the ticket never asked for",
+      "evidence": "Agent Brief Desired behavior: \"Every select trigger shows the same human label the option list shows for the selected item, on first render ... A placeholder still shows when nothing is selected.\" The fix round added withUnmatchedFallback (components/ui/select.tsx) plus AccountingWork.filterClientUnknown / filterPurposeUnknown / filterInitiatorUnknown and Activity.filterClientUnknown in apps/web/messages/en.json — new product copy (\"A client not in this list\", \"A kind not in this list\", \"Someone not in this list\") for values the option list carries no entry for. The underlying concern is real and well argued (an applied filter on an archived client previously rendered the same text as no filter at all), but it is a third display state the brief does not specify, shipped without owner wording review, and it renders on a trigger whose popup then offers no matching option.",
+      "required_fix": "Flag the three strings for owner wording approval before release, or record on #1005 that a new 'value present but unlabelable' display state was introduced. No code change needed if the owner accepts the copy."
+    },
+    {
+      "id": "SPEC-1005-2",
+      "ticket": 1005,
+      "severity": "minor",
+      "kind": "scope-creep",
+      "title": "Four production components gained never-used props and one module-private component was exported, purely to make unit cells mountable",
+      "evidence": "Agent Brief AC3 asks only for \"A unit test per affected component asserts the trigger's text on first render\". To reach it, correction-wizard.tsx gained initialToClient, document-kind-control.tsx and document-kind-dialog.tsx each gained initialKind, and firm/documents/unassigned-sources.tsx gained initialClientId while SourceRow and UnassignedRow were widened from module-private to export. Each doc comment states \"no production caller sets this\". WORK-ORDER rule 4 binds the lane to \"Test behaviour through the public interface, never an internal collaborator, a private function or a side channel\" — four never-used props are a side channel widened into the public interface. The stated reason is genuine (the DOM harness has no seam for opening a Base UI portalled popup), and all 74 cells pass on re-run.",
+      "required_fix": "Either accept and record the harness limitation, filing the popup-opening harness seam as a follow-up so these props can later be removed, or replace the four props with one shared harness helper that drives the portalled popup. Do not let the pattern spread to further components unremarked."
+    },
+    {
+      "id": "SPEC-875-1",
+      "ticket": 875,
+      "severity": "note",
+      "kind": "requirement-met-differently",
+      "title": "#875's AC2 'delivery comment' lands in apps/web/README.md instead, and one interval is absent from the audit table (checked separately, harmless)",
+      "evidence": "Agent Brief AC2: \"Pollers with no budget cell at all are listed in the delivery comment as a separate gap, not silently addressed.\" The lane may not comment on GitHub (WORK-ORDER rule 2), so the eight-row table plus two further pollers landed in apps/web/README.md. I re-verified every row against source rather than trusting it: all twelve file paths exist and all eight constants resolve (CLARA_RUN_POLL_MS=4000 useClaraThread.ts:83, DEFAULT_POLL_INTERVAL_MS=1000 useUploadQueue.ts:157, POLL_MS=3000 useInterviewRun.ts:30, CLIENT_WORK_PACK_REFRESH_MS use-client-work-pack.ts:63, WORK_POLL_MS use-work-detail.ts:41, CHECKOUT_REFRESH_INTERVAL_MS/CHECKOUT_REFRESH_BUDGET_MS checkout-waiting.tsx:64/67, WORK_CARD_POLL_MS WorkCards.tsx:113, plus FINANCIAL_PACK_REFRESH_MS and FIRM_PORTFOLIO_REFRESH_MS). One setInterval site is missing from the table entirely: components/clara/TurnProgress.tsx:91 (TURN_PROGRESS_TICK_MS). I checked it myself — components/clara/thread-live-stream-stability.test.tsx:109/208 captures that interval and fires it manually — so the table's conclusion (\"no poller anywhere in the app was found with no budget cell at all\") still holds.",
+      "required_fix": "When #875 is closed, its closing comment must carry the table, since the AC names a delivery comment. Optionally add the TurnProgress row so the census is literally exhaustive."
+    },
+    {
+      "id": "SPEC-879-1",
+      "ticket": 879,
+      "severity": "note",
+      "kind": "observation",
+      "title": "#879 fully delivered; its fourth cell is order-dependent by design",
+      "evidence": "All four Agent Brief criteria verified by re-running, not by reading the report: pnpm --filter @clara/web e2e staff-advances-register on lane 08's own triple (3570/3571/3572) -> 4 passed (14.7s), covering the tab render plus axe, the empty first-use state (fix-round SPEC-879-1), enrol -> retire -> book application -> complete particulars end to end with the summary re-reading \"RM 700.00 outstanding\", and the statement panel's Payroll deduction / -RM 300.00 / RM 700.00 closing balance. e2e/e2e-fixture-ownership.test.ts -> 20/20 with staff-advances-register-mock.mjs declared and its client ids clean. The one observation: the statement cell at staff-advances-register-walk.spec.ts:165 reads state that cell 3 mutated, so it cannot pass under a --grep of that cell alone. The spec header says so and it is the house pattern every stateful lane here relies on (playwright.config.ts fullyParallel: false, workers: 1).",
+      "required_fix": "None. Recorded so a future bisection of this spec does not mistake the ordering for a flake."
+    }
+  ],
+  "already_satisfied_or_stopped_check": {
+    "897": "STOPPED by the lane — confirmed NOT satisfied on main and not satisfied by this branch (SPEC-897-1). The stop is well-evidenced: no e2e mock answers /api/runtime/interview/*, and the typed interview draft is un-persisted local state across a real route-group navigation. One correction to the lane's reasoning, in the lane's favour and narrowing its successor contract: the rail -> escalated route -> Back navigation is ALREADY driven in a mock lane today (e2e/chat-parity-walk.spec.ts:708, p642.e2e.scope_visible_at_both_altitudes, which does page.goto(/clients/:id/clara/:threadId) then page.goBack()), so the genuinely missing piece is the interview OPEN-park fixture and the interview runtime handlers — not the altitude navigation itself.",
+    "874": "PARTIAL as reported — AC1 met and re-verified (38 cells green), AC2 genuinely unmet on this branch and on main (SPEC-874-1).",
+    "875": "DONE as an audit with no code change — re-verified row by row against source; the conclusion holds, with one absent interval checked separately (SPEC-875-1).",
+    "1005_956_879": "Claimed done; all re-run here and green (see re_run_evidence). None was claimed 'already satisfied'."
+  },
+  "summary": "Four of the lane's six tickets (#1005, #956, #875, #879) are delivered and stand up to re-running: typecheck and lint clean, 61 + 74 unit cells green, use-clara-thread-stop 26/26 across five isolated runs, fixture ownership 20/20, and the new staffAdvances walk 4/4 on lane 08's own Playwright triple. Two are not delivered. #897 landed 1 of 4 criteria, and its one landed criterion — the live-stack header note — asserts the arm is \"proven ... in a real built-app Playwright walk\" when nothing proves it anywhere, which recreates the false-coverage state the ticket exists to remove. #874's AC2 is unmet in a way that reads as a contradiction inside the owner's own 2026-09-18 narrow ruling (send() sits behind Supabase admin calls the ruling kept real) rather than a lane shortfall. Both need an owner decision, not more lane work. The remaining findings are small scope observations: three new user-visible strings and four never-used production props shipped under #1005, and an uncalled production store export under #956.",
+  "counts": { "blocker": 1, "major": 2, "minor": 4, "note": 2 }
+}

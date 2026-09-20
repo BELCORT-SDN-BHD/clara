@@ -1,0 +1,208 @@
+{
+  "lane": "wave 1, lane 08",
+  "branch": "riders/w1-lane08",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "merge_base": "dd3f8f1d",
+  "head": "79037366",
+  "lens": "SPEC + STANDARDS",
+  "reviewer_mode": "read-only (no tracked file edited, no commit, no push)",
+  "verdict": "accept-with-fixes",
+  "diff_note": "The task text says to review `git diff origin/main..HEAD`. origin/main has advanced to e7f0a10a (PR #1013) since this branch was cut, so that diff shows FOUR SPURIOUS DELETIONS that are not this lane's: docs/PROGRESS.md (-43), docs/plan/active/refresh-wave-2026-09-18/RELEASE-AS-RUN.md (-32), .../ceremony/reads-0234.mjs (-113), docs/plan/active/riders-2026-09-20/GRILL-2026-09-20.md (-66). Against the merge base dd3f8f1d the lane deletes nothing: 30 files, +1551/-19. Every finding below is measured against dd3f8f1d..HEAD.",
+  "gates_rerun_by_reviewer": {
+    "pnpm typecheck (worktree root)": "exit 0 - apps/web Done, packages/runtime Done",
+    "pnpm lint (worktree root)": "exit 0 - all packages Done",
+    "apps/web whole unit suite (node scripts/run-tests.mjs)": "4654 tests, 4652 pass, 0 fail, 2 skipped, 90.2s - matches the lane report exactly",
+    "node scripts/check-frozen-workflows.mjs": "OK - 312 frozen files verified, no manifest diff",
+    "#1005 cells (select.test.tsx + census + matching-section + activity-filters + knowledge-panel-freshness + knowledge-firm-panel + accounting-work-list)": "46 tests, 46 pass, 0 fail",
+    "#956 use-clara-thread-stop.test.ts isolated": "12 consecutive runs, 12 pass, 0 fail (lane claimed 25/25; I sampled 12)",
+    "#956 streamReattach + #874 invite-mail-transport + threadStore": "54 tests, 54 pass, 0 fail",
+    "e2e/e2e-fixture-ownership.test.ts": "20 tests, 20 pass",
+    "#879 staff-advances-register-walk (triple 3570/3571/3572)": "3 passed (13.6s)",
+    "#879 dispatch-order neighbour staff-expense-claim-walk": "13 passed (36.4s) - no regression from the serve-built.mjs insertion"
+  },
+  "house_standards": {
+    "no applied migration edited": "PASS - no packages/db change at all in dd3f8f1d..HEAD",
+    "no new migration in a wave-1 lane": "PASS - none",
+    "frozen manifest diff": "PASS - check-frozen-workflows.mjs clean",
+    "docs/PRD.md and docs/ARCHITECTURE.md untouched": "PASS",
+    "shared files minimal, at the sorted position": "PASS - test/manifest.txt +3 (all at sorted positions), e2e-fixture-ownership.test.ts +1 LANE_MOCKS entry + 1 declaration (both alphabetically before staff-expense-claim-mock.mjs), serve-built.mjs +1 import +1 dispatch line. messages/en.json, lib/navigation/tree.ts, CONTEXT.md, packages/db/*, .github/actions/* all untouched",
+    "message keys for every new string": "PASS - every new items[] label is sourced from t(...) or from a field already on the row; no new hard-coded user-visible string, so no en.json hunk was needed",
+    "web test manifest updated": "PASS - components/firm/activity/activity-filters.test.tsx, components/ui/select.test.tsx, tests/select-value-label-census.test.ts added; the two other test files touched (tests/invite-mail-transport.test.ts, tests/streamReattach.test.mjs) already had entries",
+    "fixture-ownership census updated": "PASS - 20/20 including the client-id and verb-ownership censuses",
+    "docs updated where behaviour moved": "PASS for #1005/#956/#874/#879 (apps/web/README.md, four sections). Gap for #875 - see STD-875-2",
+    "typecheck and lint green": "PASS - both re-run by me",
+    "commits name their ticket": "PASS - 4 commits, one ticket each, each subject naming its ticket and each body ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`"
+  },
+  "per_ticket": {
+    "1005": {
+      "status": "done-with-gaps",
+      "AC1 matching-tab bank-account + period triggers show labels on first render, no row id, no __all sentinel": "DONE - components/bank/matching-section.test.tsx new [1005] cell asserts the composed label and doesNotMatch(/\\bacc1\\b/) / doesNotMatch(/__all\\b/); re-run green in the 46/46 batch",
+      "AC2 Activity client filter + both knowledge filters show labels on first render": "DONE - activity-filters.test.tsx (new), knowledge-panel-freshness.test.tsx, knowledge-firm-panel.test.tsx new cells, all green in the 46/46 batch",
+      "AC3 a unit test PER affected component asserts the trigger's text on first render": "PARTIAL - see SPEC-1005-1",
+      "AC4 a census-style check fails when a new select renders its value without a label source": "PARTIAL - the check exists and is non-vacuous for the self-closing shape and for direct @base-ui/react/select imports, but has a confirmed blind spot for the exact bypass its own comment claims to catch; see SPEC-1005-3",
+      "AC5 message keys carry every label": "DONE - verified at all ten converted call sites; no en.json change required",
+      "base_ui_doc_check": "CONFIRMED against current Base UI docs via Context7 (/websites/base-ui_react, 'Formatting the value' + 'Select > Value'): Select.Value renders the raw value by default; items on Select.Root or a function children on Select.Value are the two supported label paths; the placeholder 'can be overridden by children', which is why the wrapper re-implements the null-to-placeholder fallback itself. The wrapper's approach is a documented path."
+    },
+    "956": {
+      "status": "done-with-caveat",
+      "AC1 25 consecutive isolated runs, zero failures, command and count recorded": "DONE (lane) / CORROBORATED (12/12 by me)",
+      "AC2 whole suite 5 consecutive runs, no failure attributable to this file": "DONE (lane) / CORROBORATED (1 whole-suite run, 0 fail)",
+      "AC3 the absence cell cannot pass by luck": "PARTIAL - see SPEC-956-1",
+      "AC4 a regression cell proves an aborted task opens no further read after its backoff would have elapsed": "DONE - tests/streamReattach.test.mjs two new cells, structurally non-vacuous (a sleepImpl that never resolves means the only exit is the abort; { timeout: 2000 } turns a regression into a failure not a hang). Re-run green",
+      "AC5 the two claims the file owns still hold": "DONE - both cells green across all 12 of my isolated runs",
+      "diagnosis_quality": "GOOD - the mechanism is named at file:line, the two halves are separated (abortableSleep is necessary-not-sufficient; abortAllStreams closes the rest), and the production half is a genuine product fix (a stop button whose task kept reattaching for up to 30s), not a test-only patch. This satisfies the brief's 'prefer the production-side fix'."
+    },
+    "875": {
+      "status": "audited, no code change - accepted with two completeness gaps",
+      "AC1 each listed poller's budget/ceiling cell audited, non-vacuity assertion added where the settle is faster than the first tick": "DONE for the eight pollers the brief names. I spot-verified three rows of the table independently: lib/documents/useUploadQueue.test.ts:760 does pass pollIntervalMs: 0; components/work/work-detail.test.tsx pays real 3_100/6_500 ms waits (five sites); components/firm/work-question-affordance.tsx has no interval/timeout poll at all (only a rAF/setTimeout(...,0) next-frame wait). No poller needed a fix - plausible and consistent with what I read",
+      "AC2 pollers with NO budget cell at all listed as a separate gap": "PARTIAL - see SPEC-875-1",
+      "AC3 the web unit suite stays green": "DONE - 4652/4654 pass, 0 fail"
+    },
+    "874": {
+      "status": "partial, disclosed",
+      "AC1 with the seam unset, production behaviour is unchanged, pinned by a unit test": "DONE - tests/invite-mail-transport.test.ts '#874' suite, five cells (absent, blank, whitespace-padded, never-in-missing, set). Re-run green in the 54/54 batch. Structurally non-vacuous: the suite imports INVITE_MAIL_ENDPOINT_ENV_NAME, which does not exist pre-fix, and the SET cell asserts the posted URL is the override and notEqual RESEND_ENDPOINT",
+      "AC2 with the seam set to a local URL, A WALK substitutes it and asserts on the posted mail body with no outbound network call": "MISSING at the walk level - see SPEC-874-1",
+      "owner_ruling_respected": "YES - only the mail endpoint is overridable; canMintFor/mintSupabaseTokenHash are untouched (verified in the diff). The override is optional, trimmed, never added to `missing`"
+    },
+    "879": {
+      "status": "done",
+      "AC1 a named walk cell reaches the staffAdvances tab and asserts the register renders": "DONE - cell 1, re-run green, includes a zero-violation axe scan",
+      "AC2 one cell drives enrol, then book application, then complete particulars end to end": "DONE - cell 2 (plus retire), re-run green; all four doors have their own mock verb and their own UI assertion",
+      "AC3 one cell asserts the statement panel reflects a booked advance": "DONE - cell 3, re-run green (Payroll deduction, -RM 300.00, closing RM 700.00)",
+      "AC4 e2e-fixture-ownership.test.ts passes with the new verbs declared": "DONE - 20/20 re-run by me",
+      "desired_behaviour_gap": "the brief's 'Desired behavior' also names 'the empty first-use state'; no cell drives it - see SPEC-879-1",
+      "non_vacuity": "ARGUED, not staged: the lane cites its own build cycle (cell 3 genuinely failed on the same assertions before the book-application locators were fixed). The three cells are order-dependent by design (workers: 1, fullyParallel: false) and the spec says so"
+    },
+    "897": {
+      "status": "stopped - the stop is honest but too broad",
+      "AC1 a named mock-lane cell drives the altitude change and asserts focus return AND typed-data survival, green without docker": "MISSING (both halves)",
+      "AC2 the fixture is an OPEN, unanswered park independent of any other arm's state": "MISSING",
+      "AC3 e2e-fixture-ownership.test.ts passes with the new fixture and verbs declared": "MISSING (the file gained only #879's entry)",
+      "AC4 the live-stack spec's header records that this arm lives in the mock lane": "MISSING - e2e/interview-walk.spec.ts is unchanged in dd3f8f1d..HEAD",
+      "stop_reasoning_verified": "The two load-bearing facts check out independently: components/clara/ClaraRail.tsx:53 and :134-135 escalate through `<Link href={escalateHref}>` (a real Next navigation into the sibling `(full)` route group), and components/clara/InterviewRunCard.tsx:63 holds the typed answer in a plain `useState(\"\")`. So the criterion is very likely false today, as the lane says. The stop's PREMISE is sound; its SCOPE is not - see SPEC-897-1"
+    }
+  },
+  "findings": [
+    {
+      "id": "SPEC-897-1",
+      "ticket": 897,
+      "severity": "blocker",
+      "title": "#897 was stopped whole, but three of its four acceptance criteria do not depend on the question that blocked it",
+      "evidence": "The lane's blocker is one clause of AC1 ('typed but unsubmitted answers survive the change'), and I confirmed its premise independently: components/clara/ClaraRail.tsx:53 + :134-135 escalate via `<Link href={escalateHref}>` into the sibling `(full)` route group, and components/clara/InterviewRunCard.tsx:63 holds the answer in a plain `useState(\"\")`, so nothing persists it. That is a sound reason to refuse to assert survival. But nothing in it blocks: AC4, a documentation-only change the brief's own Key interfaces scopes to 'interview-walk.spec.ts: header note only' (verified unchanged in dd3f8f1d..HEAD); AC2, the OPEN unanswered park fixture, which the lane's own report calls 'otherwise straightforward and was not the blocker'; AC3, its fixture-ownership declaration (e2e-fixture-ownership.test.ts gained only #879's entry); or the FOCUS-RETURN half of AC1, which is independent of typed-data survival. Nothing was delivered for #897 at all - no commit, no fixture, no header note. Under the riders work order rule 5 and the base order rule 6 ('do every part that does not depend on it, take the most conservative reading for the rest'), the stop is wider than the blocker.",
+      "required_fix": "Land the independent parts before the ticket is handed back: the interview-walk.spec.ts header note (AC4), the OPEN-park fixture and its fixture-ownership declaration (AC2, AC3), and the focus-return half of AC1. Leave only the typed-data-survival clause for the owner's ruling, with the successor contract the lane already wrote."
+    },
+    {
+      "id": "SPEC-1005-2",
+      "ticket": 1005,
+      "severity": "major",
+      "title": "A shipped source comment claims coverage that does not exist, contradicting the lane's own report",
+      "evidence": "apps/web/components/ui/select.test.tsx's header states: 'every real call site is proved at its own integration point instead (matching-section.test.tsx, activity-filters.test.tsx, knowledge-panel-freshness.test.tsx, knowledge-firm-panel.test.tsx, work-question-form.test.tsx, unassigned-sources.test.tsx, correction-wizard.test.tsx, document-kind-control.test.tsx, document-kind-dialog.test.tsx, work-list-filters.test.tsx)'. Measured in the worktree: components/documents/correction-wizard.test.tsx, components/documents/document-kind-control.test.tsx, components/documents/document-kind-dialog.test.tsx and components/work/work-list-filters.test.tsx DO NOT EXIST; components/work/work-question-form.test.tsx and components/firm/documents/unassigned-sources.test.tsx exist but contain zero occurrences of '1005' (grep -c '1005' = 0 for both). The lane's own final report says the opposite and names the same five components as uncovered. This is a claim-without-evidence in the code itself, which future readers will trust.",
+      "required_fix": "Rewrite that header paragraph to name only the five test files that actually carry a #1005 cell, and state the five uncovered components and why (the same sentence the final report already got right)."
+    },
+    {
+      "id": "SPEC-1005-3",
+      "ticket": 1005,
+      "severity": "major",
+      "title": "The AC4 census does not catch the bypass its own comment says it exists to catch",
+      "evidence": "tests/select-value-label-census.test.ts's header claims it catches 'an `as any`/`@ts-expect-error` bypass at a `<SelectValue>` call site'. Its childIsFunction() returns true for ANY JsxExpression child that is an Identifier or PropertyAccessExpression, so `<SelectValue>{value}</SelectValue>` - the exact defect shape - is treated as a legitimate function child. CONFIRMED by running the census's own tagNameOf/hasItemsAttribute/childIsFunction logic verbatim (same typescript 5.9.3 resolved from the worktree) against a synthetic source containing a @ts-expect-error'd `<SelectValue>{value}</SelectValue>`: output was 'SelectValue sites: 1 violations flagged: 0'. The census's other two arms (self-closing with no items=, and a direct @base-ui/react/select import outside the wrapper) do work, and its non-vacuity cell (>= 11 sites found) is genuine. So the backstop is real but narrower than advertised - and AC4 asks it to 'fail when a new select renders its value without a label source'.",
+      "required_fix": "Tighten childIsFunction to accept only ArrowFunction/FunctionExpression children, or resolve an Identifier child to its declaration and require it to be a function; then either the comment's claim becomes true, or the comment is narrowed to what the census actually guarantees."
+    },
+    {
+      "id": "SPEC-1005-1",
+      "ticket": 1005,
+      "severity": "major",
+      "title": "AC3 partial: five of the eleven converted Select call sites have no first-render trigger-text cell",
+      "evidence": "The brief's AC3 is 'A unit test per affected component asserts the trigger's text on first render'. dd3f8f1d..HEAD touches only five test files for #1005: components/bank/matching-section.test.tsx, components/firm/activity/activity-filters.test.tsx (new), components/registers/knowledge-panel-freshness.test.tsx, components/registers/knowledge-firm-panel.test.tsx, components/work/accounting-work-list.test.tsx. The five components with no dedicated per-selected-value cell are correction-wizard.tsx, document-kind-control.tsx, document-kind-dialog.tsx, unassigned-sources.tsx and work-question-form.tsx. The lane discloses this and gives a real reason (test/hookHarness.ts has no seam for opening a portalled Base UI popup and selecting an option). The disclosure is honest; the criterion is still not met for those five.",
+      "required_fix": "Either accept the residual explicitly on the ticket (the compile-time union + the census + select.test.tsx do cover the mechanism), or drive a pre-selected value into each of the five by passing an initial `value` at mount - which does not need the popup at all, and is exactly what select.test.tsx already does for the wrapper."
+    },
+    {
+      "id": "SPEC-874-1",
+      "ticket": 874,
+      "severity": "major",
+      "title": "AC2 is not met even at the harness level: nothing wires INVITE_MAIL_ENDPOINT_OVERRIDE into the e2e rig",
+      "evidence": "AC2 reads 'With the seam set to a local URL, a walk substitutes it and asserts on the posted mail body with no outbound network call.' dd3f8f1d..HEAD touches only lib/members/invite-mail.ts, tests/invite-mail-transport.test.ts and README.md for this ticket - e2e/serve-built.mjs, playwright.config.ts and e2e/members-lifecycle-mock.mjs are all untouched by commit cf76a22a, and grep finds INVITE_MAIL_ENDPOINT_OVERRIDE nowhere outside invite-mail.ts, its test and the README. The lane's stated blocker (a walk cannot reach send() until GoTrueAdminApi's listUsers/generateLink are mocked) is real and the owner did keep those calls real - but the harness-side half (setting the override in the e2e server env and standing up a capture endpoint) is INDEPENDENT of that blocker and was not built either, so the seam is never demonstrated reachable from the harness at all. The ticket's 'Out of scope: the invite-to-pending-row Playwright walk itself' cuts the other way here and should be reconciled by the orchestrator.",
+      "required_fix": "Either reconcile the ticket (AC2's walk clause is superseded by the 'Out of scope' clause plus the second-seam blocker - say so on the ticket and close AC2 as descoped), or add the cheap half: set INVITE_MAIL_ENDPOINT_OVERRIDE in the e2e server env, add a capture endpoint to the members lane, and pin that the override is what the built server actually reads."
+    },
+    {
+      "id": "SPEC-956-1",
+      "ticket": 956,
+      "severity": "minor",
+      "title": "AC3 ('the absence cell cannot pass by luck') is met for cross-cell leaks only; the cell's own reattach timer is unchanged and no detector was added",
+      "evidence": "lib/clara/use-clara-thread-stop.test.ts:1029-1054 snapshots `const before = net.streams.length` AFTER its own hydration, then spends `absenceSettle(h, 20)` (a fixed macrotask budget) and asserts equality. In that cell `stopReply()` resolves as 'finished', so nothing calls abortStream for its own task - its reattach loop, scheduled by withRunFetch's empty-200 close, is still a real ~1s backoff racing that fixed budget. The two-part fix makes a leak from ANY cell die at the file-level test.afterEach (verified: threadStore.ts:525/530 keep the controller in streamAborts for as long as runClaraTaskStream has not returned, so abortAllStreams can reach it; abortableSleep then resolves synchronously on abort), which is the 'impossible' arm for cross-cell leakage. The 'still detected' arm was not built. Measured green 12/12 isolated + 1 whole-suite by me, 25/25 + 5/5 by the lane, so this is a residual risk, not an observed failure.",
+      "required_fix": "Accept explicitly on the ticket, or close the last gap cheaply: give this one cell an injected sleepImpl (the runner already accepts one) so its own backoff is deterministic rather than a real 1s timer racing a 20-hop budget."
+    },
+    {
+      "id": "SPEC-875-1",
+      "ticket": 875,
+      "severity": "minor",
+      "title": "AC2's 'pollers with no budget cell at all' claim is scoped to the brief's eight without saying so; two further interval pollers were never surveyed",
+      "evidence": "The report concludes 'no poller was found with NO budget cell at all (the brief's other flagged gap category)'. The survey covers exactly the eight surfaces the brief names. Grepping the repo for interval constants finds two more that are neither in the brief's list nor in the audit table: lib/dashboard/use-financial-pack.ts:57 (FINANCIAL_PACK_REFRESH_MS = 30_000, setInterval at :192) and lib/firm/use-firm-portfolio.ts:67 (FIRM_PORTFOLIO_REFRESH_MS = 30_000, setInterval at :212). I checked both myself: lib/dashboard/use-financial-pack.test.ts:160-161 and lib/firm/use-firm-portfolio.test.ts:131 both capture `intervals` and assert the constant - the capture-and-manually-fire shape, structurally non-vacuous. So there is NO hidden defect; the gap is that a completeness claim was made on an unstated scope.",
+      "required_fix": "One sentence in the report/ticket: the survey covers the eight pollers the brief names, and use-financial-pack / use-firm-portfolio were checked separately and are structurally non-vacuous."
+    },
+    {
+      "id": "STD-875-2",
+      "ticket": 875,
+      "severity": "minor",
+      "title": "#875's entire deliverable is an audit table that lands nowhere in the repo",
+      "evidence": "#875 produced no commit (git log dd3f8f1d..HEAD is four commits, none for #875) and apps/web/README.md gained no #875 section, though it gained one each for #1005, #956, #874 and #879. The audit table - which poller uses which mechanism and why each is non-vacuous - exists only inside the uncommitted final report in the main checkout. The ticket's value is that the next person adding a poller can check themselves against it; nothing in the repo lets them.",
+      "required_fix": "Land the audit table as a short section in apps/web/README.md (or apps/web/test/README) in a docs commit naming #875, so the finding survives the report."
+    },
+    {
+      "id": "STD-874-2",
+      "ticket": 874,
+      "severity": "minor",
+      "title": "The new environment variable is missing from apps/web/.env.example",
+      "evidence": "apps/web/.env.example:35 documents INVITE_MAIL_FROM with a comment, alongside the other three required INVITE_MAIL_* variables. INVITE_MAIL_ENDPOINT_OVERRIDE is absent from it (grep over the worktree finds the name only in lib/members/invite-mail.ts, tests/invite-mail-transport.test.ts and README.md). The invite-mail.ts header says it is 'named alongside INVITE_MAIL_ENV_NAMES so every environment variable this transport reads is findable in one place' - the .env.example is the other such place and was not updated. No census enforces this, so nothing is red.",
+      "required_fix": "Add a commented entry to apps/web/.env.example marking it test-only and to be left unset in every real deployment."
+    },
+    {
+      "id": "SPEC-879-1",
+      "ticket": 879,
+      "severity": "minor",
+      "title": "The brief's 'empty first-use state' is never driven",
+      "evidence": "The brief's Desired behavior names five core states: 'the empty first-use state, enrolling an account, booking an application, completing particulars, and the statement panel showing a booked advance's balance'. e2e/staff-advances-register-mock.mjs seeds one enrolled account with one outstanding advance from the first request, so cell 1 asserts a POPULATED register (it explicitly checks '2026-02-01', 'RM 1,000.00' and the enrolled account row) and no cell ever sees the register with no enrolments. The three checkbox acceptance criteria are all met and re-ran green (3 passed), so this is a desired-behaviour residual, not an AC miss. For contrast, the sibling lane does cover it: staff-expense-claim-walk.spec.ts:417 'an EMPTY register is its own state, not a failure'.",
+      "required_fix": "Either add a fourth cell against a second, empty client id in the same lane (the mock is already client-scoped, so this is cheap), or record the residual on the ticket."
+    },
+    {
+      "id": "STD-879-2",
+      "ticket": 879,
+      "severity": "minor",
+      "title": "The new mock defines a private POST-body reader instead of the shared readCachedJson, and reads the body before deciding lane ownership",
+      "evidence": "The base work order (rule 8) says to 'read POST bodies only through the shared readCachedJson (never a private reader)'. e2e/staff-advances-register-mock.mjs:91 defines its own readJson - a verbatim copy of e2e/mock-dispatch.mjs:34's readCachedJson, including the same __e2eParsedBody cache key - and all seven RPC branches call `const body = await readJson(request)` BEFORE the `if (body?.p_client !== SAR.clientId) return false` ownership check, the order mock-dispatch.mjs:50-54's own comment warns against ('call this BEFORE readCachedJson, so a verb this lane does not own returns false without the stream ever being touched'). This is safe today only because the cache key is shared and this hook is dispatched early; it is not safe by construction. House precedent exists - staff-expense-claim-mock.mjs:216 does the identical thing - and the walks all pass (3 + 13 green), so nothing is broken.",
+      "required_fix": "Import readCachedJson from ./mock-dispatch.mjs and drop the private copy; optionally gate on an owned-verb Set before touching the stream, which is what the shared helper's own comment recommends."
+    },
+    {
+      "id": "STD-1005-4",
+      "ticket": 1005,
+      "severity": "minor",
+      "title": "The new items= array duplicates each SelectContent option list with nothing pinning their parity",
+      "evidence": "All ten converted call sites now build the same roster twice - e.g. components/bank/matching-section.tsx builds the liveStatements label string for items= and renders the identical label again inside SelectContent. I checked parity at every site I read (matching-section account + period, activity-filters, work-list-filters x3, knowledge-panel, knowledge-firm-panel, work-question-form, unassigned-sources, correction-wizard, document-kind-control, document-kind-dialog) and it is correct TODAY; correction-wizard.tsx even hoists a shared `toClientOptions` const specifically to avoid the divergence. Nothing prevents a future edit to one side only, and the failure mode is silent: the trigger falls back to the placeholder instead of showing the raw value, so the census and typecheck both stay green.",
+      "required_fix": "Either hoist the shared roster to one const at the remaining call sites (the correction-wizard.tsx pattern), or have SelectContent derive its items from the same array the trigger is given."
+    },
+    {
+      "id": "NOTE-956-2",
+      "ticket": 956,
+      "severity": "note",
+      "title": "abortAllStreams() is a new public store API with no production caller, added for a test's benefit",
+      "evidence": "lib/clara/threadStore.ts:565-569. Its own header says so honestly ('Not reached by any production surface today... this exists as the store's own hard-reset primitive'). It is the right place for it (better than reaching into streamAborts from a test), and threadStore.test.ts is green (54/54 with its neighbours), so this is an observation rather than a defect.",
+      "required_fix": "None. If it is still uncalled in production after the next sign-out work, either wire it there or move the comment's promise into a follow-up."
+    },
+    {
+      "id": "NOTE-1005-5",
+      "ticket": 1005,
+      "severity": "note",
+      "title": "SelectValue's useCallback never memoises in practice",
+      "evidence": "components/ui/select.tsx's resolveChildren is wrapped in React.useCallback with [items, children, placeholder], but almost every call site passes a freshly allocated array literal (e.g. activeAccounts.map(...)), so the dependency changes on every render and the memo never hits. Harmless - the callback is cheap and Base UI re-invokes it per render anyway - but the useCallback buys nothing.",
+      "required_fix": "None required."
+    },
+    {
+      "id": "NOTE-STD-1",
+      "ticket": 1005,
+      "severity": "note",
+      "title": "Vacuity controls were not re-staged by this review",
+      "evidence": "The lane reports git stash/pop vacuity controls for #1005 (12 assertions red pre-fix), #956 (both regression cells red pre-fix), #874 (import error pre-fix) and an in-build-cycle control for #879. As a read-only reviewer I did not re-stage any of them (doing so means editing tracked files in the lane's worktree). I assessed each new cell structurally instead and each one would genuinely fail against the pre-fix subject: select.test.tsx asserts doesNotMatch on the raw value/sentinel that pre-fix select.tsx renders; the census has its own non-vacuity cell (>= 11 sites, re-run green); streamReattach's abort cells use a sleepImpl that never resolves, so pre-fix they hang into the 2000 ms timeout; invite-mail-transport's SET cell asserts the posted URL is the override and notEqual RESEND_ENDPOINT. The lane's vacuity claims are plausible and consistent with the code, but they are the lane's measurement, not mine.",
+      "required_fix": "None. Recorded so the orchestrator knows which evidence is re-run (everything in gates_rerun_by_reviewer) and which is carried from the lane."
+    }
+  ],
+  "summary": "Four clean commits, one ticket each, correct trailers, no migration, no frozen-manifest diff, no blueprint edit, shared files touched minimally at sorted positions. I re-ran every gate: typecheck 0, lint 0, whole apps/web suite 4654 tests / 4652 pass / 0 fail / 2 skipped (matching the lane report exactly), frozen-workflows OK, fixture-ownership 20/20, the #1005 batch 46/46, the #956 file 12/12 isolated, streamReattach+invite-mail+threadStore 54/54, and both Playwright lanes green (3 + 13). #1005, #956 and #879 are genuinely delivered and their new cells are non-vacuous by construction. Four things need action before this lands: #897 was stopped whole although three of its four acceptance criteria are independent of the one question that blocked it (blocker); #1005's shipped select.test.tsx header claims per-call-site coverage that does not exist, contradicting the lane's own honest report (major); #1005's AST census has a confirmed blind spot for exactly the @ts-expect-error bypass its comment says it catches (major, reproduced); and #874's AC2 is unmet even at the harness level (major, but arguably superseded by the ticket's own out-of-scope clause - orchestrator's call). The rest are minors: five uncovered Select call sites, items/SelectContent duplication, #875's unstated survey scope and its audit landing nowhere in the repo, the missing .env.example entry, #879's uncovered empty state, and a private POST-body reader where the work order names the shared one."
+}

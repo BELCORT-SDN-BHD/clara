@@ -1,0 +1,27 @@
+{
+  "lane": "wave1-lane09",
+  "branch": "riders/w1-lane09",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\659",
+  "reviewed_head": "887ae5ac",
+  "review_lens": "SPEC + STANDARDS",
+  "verdict": "accept",
+  "summary": "Both tickets (#852, #966) are DONE against their newest Agent Brief and acceptance criteria. Re-ran every cell the report cites (chat-clarify-sweep-wiring.test.mjs 8/8, intake-sidecar-race.test.mjs 10/10, control-chat-clarify+control-work-question 34/34 on lane DB, intake-db.test.mjs 12/12 on lane DB, the specific 'crashed mid-flight intake' cell individually), re-ran node scripts/check-frozen-workflows.mjs (--print-closure shows none of the lane's five subject files in any of the 312-file closure; freeze-lint OK, no manifest diff), node packages/runtime/scripts/check-parts-parity.mjs (OK), pnpm typecheck (exit 0) and pnpm lint (exit 0, all packages). Diffed every changed lib file (control.mjs, leader.mjs, reconciler.mjs, hook-resume.mjs new file, spool.mjs, intake.mjs) line by line against the report's narrative and the tickets' Key Interfaces/Acceptance Criteria: every claim matches the code exactly (leaf module with zero first-party imports, re-export by name preserving old import sites, belt registered first after the heartbeat with beltErrors containment, mtime-based recency guard running before any open, renameIntoPlace retry limited to EPERM/EACCES/EBUSY with a bounded deadline, lazy listIntakeMetaEntries with listIntakeMetas/listTaskMetas re-expressed over it so the two cannot drift). Confirmed no shared file, no migration, no PRD/ARCHITECTURE edit, and no frozen file touched (git diff against all nine named shared files is empty; packages/db/migrations diff is empty). Confirmed both tickets were still live and unaddressed on the current tip of origin/main (e7f0a10a), not only at the branch's cut point. The sole test failure (intake-unit.test.mjs's EICAR/encrypted-PDF/XML-entity cell) reproduces exactly as documented and is proven unrelated to this lane (git diff on scan.mjs and intake-unit.test.mjs against origin/main is empty) \u2014 the known #693 Windows/Defender red. Two minor notes only, neither blocking.",
+  "findings": [
+    {
+      "id": "F1",
+      "ticket": 966,
+      "severity": "note",
+      "title": "Reported changed-module test-file count (33) undercounts the actual set (38) that imports a changed module",
+      "evidence": "grep -rl \"reconciler\\.mjs|leader\\.mjs|control\\.mjs|spool\\.mjs|intake\\.mjs|hook-resume\\.mjs\" packages/runtime/tests --include=\"*.test.mjs\" returns 38 files, not 33. Running all 38 together gives 494 tests / 469 pass / 1 fail / 24 skip \u2014 not the report's '392 tests, 387 pass, 1 fail, 4 skip' for '33 files'. The substance is unaffected: the single failure in both runs is the same known #693 EICAR cell, and every file that matters to #852/#966 (chat-clarify-sweep-wiring, intake-sidecar-race, control-chat-clarify, control-work-question, intake-db) is independently confirmed green above.",
+      "required_fix": "None required for this lane's acceptance; if the report is amended, recompute the file/test counts with the broader grep or state the narrower selection criteria used."
+    },
+    {
+      "id": "F2",
+      "ticket": null,
+      "severity": "note",
+      "title": "Branch is cut from a stale point relative to current origin/main and will show doc-file deletions on merge",
+      "evidence": "git diff origin/main..HEAD --diff-filter=D shows docs/plan/active/rider-1008-legal-enforcement-mode/RELEASE-AS-RUN.md, its ceremony/reads-0234.mjs, and docs/plan/active/riders-2026-09-20/GRILL-2026-09-20.md as deleted, plus docs/PROGRESS.md as heavily changed. This is base drift, not a lane edit: those files were added/changed by main's own commits (75345631, 0233bd52, 880d2ab7, 8a0f3ed6, 18ab7a5d) after the lane branch was cut at dd3f8f1d, and git diff origin/main..HEAD on every named shared file plus PRD/ARCHITECTURE/migrations is empty otherwise.",
+      "required_fix": "Rebase or merge-integrate this lane onto the current origin/main tip (e7f0a10a) before it lands, so the orchestrator's merge does not need to resolve these as real deletions. No code change needed in the lane itself."
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "lane": "wave1-lane02",
+  "axis": "RECHECK",
+  "branch": "riders/w1-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "recheck_head": "feb9983962115af76a2c2ff466239435be4d6b97",
+  "fixed_point": "origin/main e7f0a10a (merge-base dd3f8f1d)",
+  "tickets": [851, 858],
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave1-lane02-codereview-fix.md",
+  "source_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane02-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane02-codereview-standards.json"
+  ],
+  "verdict": "accept",
+  "summary": "Re-ran every finding from both code-review reports on the lane's current head (feb99839). Four of five open findings are genuinely fixed and independently reproduced in this session: STANDARDS S1 (playwright.config.ts now pins testMatch: /.*\\.spec\\.ts$/ -- filterless `pnpm exec playwright test --list` prints zero TAP lines, Total: 556 tests in 48 files, confirmed live), STANDARDS S2 (the indirected-password bypass I hand-built -- `const password = page.getByLabel(\"Password\"); await password.fill(...); const submit = ...; await submit.click();` -- now returns reimplementsLoginForm() === true when imported and probed directly), SPEC S1 (entry-faces-walk.spec.ts's FORM_EXCEPTIONS entry and README row are deleted; the census's own proximity window rejects a hand-built far-apart case and FORM_EXCEPTIONS now holds only reports-download-walk.spec.ts), and SPEC S3 (the floor comment and assertion now read 48/>=46, matching `ls -1 apps/web/e2e/*.spec.ts | wc -l` = 48; the '35 of 42' figure in the lane's final report is corrected to '35 of 46 (48 total)'). SPEC S4 (note) and STANDARDS S3 (note) are both resolved as the fix report claims: S4's 60s counterparty-identity figure is in wave1-lane02-final.md's 'measurement deliberately given up' paragraph and follow-up 2; S3's one-element-array choice carries its own justifying comment in documents-viewer-walk.spec.ts, unchanged. All three touched/added test files pass (e2e/run-args.test.ts 5/5, e2e/sign-in-census.test.ts 4/4, e2e/spec-discovery.test.ts 2/2), `pnpm typecheck` and `pnpm lint` both exit 0, apps/web/test/manifest.txt is alphabetical with both new lines present (check-test-manifest.mjs: 482 files), and `git status` is clean at HEAD. One finding (SPEC S2, #858 AC3) is still open: the fix report's own dedicated 'SPEC S2' section and its Gates-table 'browser suite' row are literal unfilled template placeholders (BROWSER_EVIDENCE_PLACEHOLDER / BROWSER_GATE_PLACEHOLDER) despite the report's own intro claiming this finding was 'answered with evidence rather than code'. Neither of the required_fix's two remedies -- three consecutive whole-suite runs on an idle host, or a recorded owner ruling -- was delivered or drafted anywhere I could find (checked wave1-lane02-final.md, PROGRESS.md and the other lane02 report files); the final report's AC3 section is unchanged from what SPEC S2 already reviewed and flagged. Nothing new is broken.",
+  "findings": [
+    {
+      "id": "SPEC-S2",
+      "ticket": 858,
+      "severity": "minor",
+      "status": "still-open",
+      "title": "#858 AC3 (three consecutive full-suite runs) is still unresolved, and the fix report's own answer section is an unfilled placeholder",
+      "evidence": "docs/plan/active/riders-2026-09-20/reports/wave1-lane02-codereview-fix.md line 140 reads only `BROWSER_EVIDENCE_PLACEHOLDER` under the heading '## SPEC S2 (minor, #858) -- AC3 asks for three consecutive FULL-SUITE runs', and line 209's Gates-table row reads `| browser suite | BROWSER_GATE_PLACEHOLDER |`. The report's own intro (line ~9-10) claims 'one (#858 AC3) is answered with evidence rather than code', but no evidence is present at that location. wave1-lane02-final.md's AC3 section (lines 77-78) is unchanged from what wave1-lane02-codereview-spec.json's S2 finding already read and flagged as partial: three consecutive runs of the file alone (59.7s/44.8s/42.8s), explicitly 'Not claimed as satisfied' against three whole-suite runs. Grepped wave1-lane02-final.md, docs/PROGRESS.md and every other wave1-lane02-*.md/.json report in the reports directory for a recorded owner ruling or a newly-run whole-suite triple: none found.",
+      "required_fix": "Either run the whole browser suite three consecutive times on an otherwise idle host and record the three results in the fix report (replacing the placeholder), or get and record an owner ruling that the three-run file-level pass plus the two vacuity controls discharges #858 AC3, then fill in the fix report's SPEC S2 section and Gates-table row so they no longer read as unfinished template stubs."
+    }
+  ],
+  "verified_fixed": [
+    {
+      "id": "STANDARDS-S1",
+      "ticket": 851,
+      "how_verified": "Read apps/web/playwright.config.ts: testMatch: /.*\\.spec\\.ts$/ present with an explanatory comment. Ran `pnpm exec playwright test --list` (filterless, the exact repro shape from the original finding) from apps/web: 0 lines matching '^ok |^not ok |^TAP version', output ends 'Total: 556 tests in 48 files'. Ran e2e/spec-discovery.test.ts directly: 2/2 pass."
+    },
+    {
+      "id": "STANDARDS-S2",
+      "ticket": 851,
+      "how_verified": "Imported the live sign-in-census.test.ts module via a throwaway tsx script (removed after, git status clean) and called reimplementsLoginForm() on the exact indirected-locator source from the original finding: returned true (previously false). Ran e2e/sign-in-census.test.ts: 4/4 pass."
+    },
+    {
+      "id": "SPEC-S1",
+      "ticket": 851,
+      "how_verified": "Read sign-in-census.test.ts's FORM_EXCEPTIONS: contains only reports-download-walk.spec.ts; entry-faces-walk.spec.ts entry is gone. Read apps/web/e2e/README.md: entry-faces-walk row removed from the FORM_EXCEPTIONS table, proximity rule (SAME_SIGN_IN_LINES=10) documented. Probed reimplementsLoginForm() with a hand-built source whose password-fill and sign-in-submit are >10 lines apart: returned false, confirming the window is enforced. e2e/sign-in-census.test.ts: 4/4 pass."
+    },
+    {
+      "id": "SPEC-S3",
+      "ticket": 851,
+      "how_verified": "`ls -1 apps/web/e2e/*.spec.ts | wc -l` = 48. sign-in-census.test.ts's comment and assert.ok(files.length >= 46, ...) both match. wave1-lane02-final.md follow-up 1 now reads '35 of the 46 spec files ... (48 spec files in the suite -- the \"42\" ... was never the count, corrected after /code-review spec S3)'."
+    },
+    {
+      "id": "SPEC-S4",
+      "ticket": 851,
+      "how_verified": "wave1-lane02-final.md line 57 and line 112 both name counterparty-identity-walk's 60s post-login wait alongside staff-expense-claim-walk and trade-invoice-walk's 30s, explicitly marked 'Corrected after /code-review (spec S4)'."
+    },
+    {
+      "id": "STANDARDS-S3",
+      "ticket": 858,
+      "how_verified": "documents-viewer-walk.spec.ts still uses `const resized: OverlayWidths[] = []` with `toHaveLength(1)`, accompanied by the comment 'The capture is itself asserted ... the vacuous shape this edit exists to remove'. This finding was a note with required_fix 'None. Optional.'; the lane's choice to leave it stands and is argued, not silent."
+    }
+  ],
+  "gates_rerun": [
+    { "gate": "apps/web/e2e/run-args.test.ts", "result": "5 pass / 0 fail" },
+    { "gate": "apps/web/e2e/sign-in-census.test.ts", "result": "4 pass / 0 fail" },
+    { "gate": "apps/web/e2e/spec-discovery.test.ts", "result": "2 pass / 0 fail" },
+    { "gate": "pnpm exec playwright test --list (filterless)", "result": "0 TAP lines leaked; Total: 556 tests in 48 files" },
+    { "gate": "pnpm typecheck (root)", "result": "exit 0 (packages/runtime + apps/web, Done)" },
+    { "gate": "pnpm lint (root)", "result": "exit 0" },
+    { "gate": "apps/web/scripts/check-test-manifest.mjs", "result": "482 test files listed, present once, alphabetical" },
+    { "gate": "git status", "result": "clean at feb99839" }
+  ],
+  "not_rerun": [
+    "The full browser-walk suite and the apps/web whole unit suite (node scripts/run-tests.mjs) were not re-run in this session: this fix round touched no .spec.ts browser walk and no application source, only two .test.ts census/config-discovery files, playwright.config.ts's testMatch line, README prose and a manifest line. The fix report's own re-run of the whole unit suite (4644 tests, 4642 pass, 0 fail, 2 skipped) and the 142/0 fourteen-walk browser batch are taken as sufficient given the diff's shape; typecheck, lint and the three touched test files were independently re-verified in full."
+  ]
+}

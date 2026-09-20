@@ -1,0 +1,140 @@
+{
+  "lens": "CODE-REVIEW · AXIS: SPEC",
+  "lane": "wave1-lane03",
+  "branch": "riders/w1-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "head_reviewed": "efdea055e1190e29dce64b4e5c6308b6819246ed",
+  "fixed_point": "origin/main (dd3f8f1d)",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits": [
+    "efdea055 fix(db): #884 fix round 1 — assert the refusal's account code on DETAIL, not detail-or-message",
+    "1ea21b05 fix(db): #844 fix round 1 — renumber the colliding os.15 cell to os.19",
+    "e985085a fix(db): #845 fix round 1 — non-delegating spy, widened reset( predicate, CI-leg gap named",
+    "6219a61c test(db): #884 prove the K-family opening-balance exclusion arm behaviourally",
+    "fc81a0fa test(db): #844 pin the operator queue's arm-1 i.id desc tie-break",
+    "fd141984 test(db): #845 route every reset()-gated upgrade drill through guardedReset"
+  ],
+  "spec_sources": [
+    "gh issue view 845 --comments (OPEN, ready-for-agent; Agent Brief 2026-09-17T16:58:18Z — newest, no owner ruling comment dated 2026-09-20)",
+    "gh issue view 844 --comments (OPEN, ready-for-agent; Agent Brief 2026-09-17T17:00:29Z — newest)",
+    "gh issue view 884 --comments (OPEN, ready-for-agent; Agent Brief 2026-09-17T17:02:51Z — newest, supersedes the body's CLR38/scheduled_run framing)"
+  ],
+  "rig": "PGHOST=127.0.0.1 PGPORT=55743 PGUSER=postgres PGDATABASE=clara_l03 CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1 — CLARA_RIG_ALLOW_RESET / CLARA_RIG_ALLOW_ROLE_SWEEP never set at any point in this review",
+  "verdict": "accept-with-fixes",
+  "claims_rerun_before_accepting": [
+    "tests/reset-gate-routing.test.mjs → 5 tests, 5 pass, 0 fail (report claims 5/5) — CONFIRMED",
+    "tests/operator-support.test.mjs → 20 tests, 20 pass, 0 fail, os.19 present and os.VACUITY CONTROL green at EXPECTED_CELLS=19 (report claims 20/20) — CONFIRMED",
+    "tests/fixed-asset-acquisition.test.mjs → 23 tests, 23 pass, 0 fail, p639.birth.opening_excluded + p639.birth.opening_admitted both green (report claims 23/23) — CONFIRMED",
+    "deployed clara._operator_support_cases(boolean,text,uuid) prosrc carries \"order by (i.status in ('paid', 'consumed')) desc, i.opened_at desc, i.id desc\" — the os.19 companion SELECT is a faithful copy of the shipped predicate — CONFIRMED",
+    "EPHEMERAL_DB = /(^|[._-])(ci|test|tmp|temp|scratch|ephemeral)$/i (packages/db/lib/guard.mjs:32); every database name CI creates for the 10 drills with a CI leg ends in _ci, and no workflow or action sets DATABASE_URL/POSTGRES_URL, so guardedReset cannot refuse a CI leg that passes today — CONFIRMED, no CI regression from the wrapping"
+  ],
+  "already_satisfied_or_stopped_audit": {
+    "lane_claim": "all three tickets live and open before building; none already satisfied on main; none stopped",
+    "verdict": "TRUE, independently verified against origin/main",
+    "evidence": [
+      "#845: `git cat-file -e origin/main:packages/db/tests/reset-gate-routing.test.mjs` → ABSENT; `git grep -l guardedReset origin/main -- packages/db/tests` → only rig-isolation.test.mjs, rig-reset-guard.mjs, rig-reset-guard.test.mjs, i.e. exactly the one T19 caller the triage comment measured at 65fde7f3",
+      "#844: `git show origin/main:packages/db/tests/operator-support.test.mjs | grep -c 'os\\.19'` → 0; EXPECTED_CELLS = 18 on main",
+      "#884: `git show origin/main:packages/db/tests/fixed-asset-acquisition.test.mjs | grep -c opening_excluded` → 0",
+      "All three issues are state OPEN with label ready-for-agent at review time"
+    ]
+  },
+  "findings": [
+    {
+      "id": "L03-CRS1",
+      "ticket": 844,
+      "severity": "major",
+      "kind": "requirement-implemented-but-wrong",
+      "title": "os.19 does NOT fail when the id key is removed from the lateral — measured: 6 of 10 tied worlds on this rig still return the same row without it",
+      "spec_line": "#844 Agent Brief, acceptance criteria: \"[ ] The cell fails if the id key is removed from the lateral; state how that was checked.\" and Current behavior: \"The third ordering key is proven by inspection only; removing it would stay green.\"",
+      "evidence": "packages/db/tests/operator-support.test.mjs, os.19's acceptance-#3 block substitutes REVERSAL for REMOVAL: it runs two hand-written companion SELECTs over clara.checkout_intents (one with `i.id asc`, one with `i.id desc`) and asserts they name the loser / the winner. Those two queries are literals inside the test file — mutating them mutates a COPY, never the deployed lateral, so they cannot make the cell red for any change to clara._operator_support_cases. The cell's only assertion against the real door is `detail.intent_id === winner` (winner = the greater uuid, from `select ($1::uuid > $2::uuid)`), which IS sensitive to the key being reversed but not to it being dropped. Measured on clara_l03 @ 55743 against every registration in the database carrying three intents with exactly two distinct opened_at values (the os.19 shape, 10 such worlds left by this and prior runs): running 0188's arm-1 predicate with the `i.id desc` clause DELETED and everything else identical returned the SAME row as the shipped predicate in 6 of 10 worlds, and a different row in 4 — i.e. with the key removed, os.19 stays GREEN roughly 60% of the time. Per-world sample: reg 197af7d8… shipped winner df9f5552, no-id-key winner df9f5552 (cell passes); reg 4b4807f8… shipped f308b5c5, no-id-key f308b5c5 (cell passes); reg 354c8310… shipped b0fd4182, no-id-key 7b646328 (cell fails). The ticket's own statement of the defect — \"removing it would stay green\" — therefore still holds after this ticket, for the majority of worlds.",
+      "note_on_the_lane_argument": "The lane's reasoning (\"without any id clause Postgres promises nothing about which tied row a bare LIMIT 1 returns, so that comparison would not be reproducible\") is correct about the PROMISE and is stated in the cell and in README.md, which satisfies the criterion's \"state how that was checked\" half. It does not satisfy the \"the cell fails\" half, and the measurement above shows the practical consequence rather than a theoretical one.",
+      "required_fix": "Pair the behavioural tie with a control that is deterministic under REMOVAL, not only under reversal. Cheapest: add a structural pin the repo's own standard already admits — assert the deployed `clara._operator_support_cases` prosrc (or migration 0188's arm-1 lateral) still carries `i.id desc`, in the same cell, so a recut that drops the key is red by construction. Stronger alternative: have os.19 build N independent tied worlds (6–8) and require the case door to name the greater-id intent in EVERY one, collapsing the accidental-pass probability. Either way, correct the cell comment and packages/db/tests/README.md's #844 section, which currently present the reversal companion as discharging the criterion."
+    },
+    {
+      "id": "L03-CRS2",
+      "ticket": 845,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "Acceptance 1's standing guard has a measured blind spot: discovery matches only the DYNAMIC import spelling, so a static-import caller with a bare reset() keeps the suite green",
+      "spec_line": "#845 Agent Brief, acceptance criteria: \"[ ] A grep for `reset(` under the db package's tests finds no unwrapped call behind the rig-reset gate.\" and Desired behavior: \"Every test or kit module under the db package's tests that calls `reset()` behind the rig-reset gate routes the call through `guardedReset()`\".",
+      "evidence": "packages/db/tests/reset-gate-routing.test.mjs:79 — `const RESET_IMPORT_RE = /import\\([\"'][^\"']*scripts\\/reset\\.mjs[\"']\\)/;`. Discovery requires a literal `import(` CALL, so cells 1, 2 and 3 all skip any module that obtains the destructive reset by static `import { reset } from \"../scripts/reset.mjs\"`. Measured: a temporary probe module `packages/db/tests/zz-reviewer-probe-static-reset.mjs` containing exactly `import { reset } from \"../scripts/reset.mjs\"` and `await reset({ log: () => {} })` was added; the suite still reported `# tests 5 / # pass 5 / # fail 0` (cell 1's deepEqual did not notice a new file, cell 2 never read it). The probe was deleted in the same command and `git status --short` in the worktree is empty. The statement this blind spot falsifies is asserted twice as fact: reset-gate-routing.test.mjs:17 (\"A file added later that imports `reset` unwrapped is caught by Cell 2 without anyone updating a list\") and packages/db/tests/README.md (\"A file added later that imports the destructive `reset` unwrapped is caught by this suite without anyone maintaining a list\").",
+      "required_fix": "Key discovery on the PATH rather than on the call shape: widen RESET_IMPORT_RE to also match a static `from \"…/scripts/reset.mjs\"` (e.g. /(?:import\\(|from\\s*)[\"'][^\"']*scripts\\/reset\\.mjs[\"']/), re-run cell 1 to confirm the discovered set is still exactly the 14, and re-run the same static-import probe to see cell 2 go red. Adjust the two prose claims if the fix is not taken."
+    },
+    {
+      "id": "L03-CRS3",
+      "ticket": 845,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "Acceptance 3 (\"every affected drill still passes its ordinary run\") is unmeasured — the 14 files were only observed to SKIP, and 3 of them have no CI leg to measure it anywhere",
+      "spec_line": "#845 Agent Brief, acceptance criteria: \"[ ] Every affected drill still passes its ordinary run on a rig at or above its migration frontier.\"",
+      "evidence": "The lane report's own #845 row: \"Ran all 14 files' consumer test files WITHOUT `CLARA_RIG_ALLOW_RESET`: … all skip on the existing gate\" and \"Unverified: the real reset+re-migrate drill body on each of the 14 files\". A skip is not the drill's ordinary run, so the criterion is evidenced only as \"no import-time crash from the added dynamic import\". The gap is not symmetric across the 14: `grep -rn \"checkout-convergence-upgrade\\|wave-a-upgrade\\|rig-runtime-upgrade\" .github/` returns nothing, so those three files' destructive path runs in no CI leg at all and will not be exercised by anyone after this change; the other ten do run for real (.github/actions/closed-wave-upgrade-drills/action.yml lines 27, 57, 82, 114, 150, 187, 223, 322, 353 and .github/actions/frontier-leg/action.yml:253 via the x42-NNNN drills that import x42-split-upgrade-kit's freshDb()). The residual risk is small — guardedReset(reset, options) forwards options and returns reset's own result, and every CI database name ends in _ci so EPHEMERAL_DB admits it (verified) — but the criterion as written is not met and this review records it as partial, not done.",
+      "required_fix": "State acceptance 3 as PARTIAL in the lane report rather than DONE-with-a-caveat, and file the follow-up the README already describes (a CI leg for checkout-convergence-upgrade, rig-runtime-upgrade and wave-a-upgrade). Landing such a leg is out of this lane's scope — no change to the diff is required for this finding, only to the claim."
+    },
+    {
+      "id": "L03-CRS4",
+      "ticket": 845,
+      "severity": "minor",
+      "kind": "scope-creep",
+      "title": "Cell 1's exact-match EXPECTED_GATED_FILES goes RED for a CORRECTLY wrapped new gated file — a false red in the package's ordinary battery, beyond what the criterion asked for",
+      "spec_line": "#845 Agent Brief, acceptance criteria: \"[ ] A grep for `reset(` under the db package's tests finds no unwrapped call behind the rig-reset gate.\" — the criterion is about unwrapped CALLS, not about the membership of the file set.",
+      "evidence": "packages/db/tests/reset-gate-routing.test.mjs:108-113 asserts `assert.deepEqual(found, EXPECTED_GATED_FILES, …)`. `reset-gate-routing.test.mjs` is picked up by packages/db/package.json's `\"tests/**/*.test.mjs\"` glob, so this cell now runs in the ordinary db battery and in CI's db-estate/db-live legs. A future PR that adds a new reset-gated drill and wraps it correctly on day one turns this cell red until the constant is edited — a failure whose message (\"a file was added, removed, or renamed\") a later lane will read as its own regression. The lane's own report lists exactly this as its single follow-up. Cell 2 already enforces the criterion without any list.",
+      "required_fix": "Make cell 1 a SUPERSET check (every name in EXPECTED_GATED_FILES is still discovered; extra discovered files are reported, not failed) and leave the hard bar to cell 2, or keep the exact match and add the one-line note the lane proposed to the next wave's work order so the false red is not misread."
+    },
+    {
+      "id": "L03-CRS5",
+      "ticket": 884,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "\"zero register rows\" is asserted as \"unchanged from before\", and the before-count is never pinned to zero",
+      "spec_line": "#884 Agent Brief, acceptance criteria: \"[ ] A named cell drives the gl-balance-on-enrolled leg and asserts SQLSTATE CLR40, reason `fa_k_gl_balance_on_enrolled`, the account code on the detail, zero register rows, full rollback.\"",
+      "evidence": "packages/db/tests/fixed-asset-acquisition.test.mjs, p639.birth.opening_excluded: `const beforeAssets = await assetCountOf(o.client);` … `assert.equal(await assetCountOf(o.client), beforeAssets, \"opening_excluded: no clara.fixed_assets row was born by the refused approval\")`. beforeAssets is never asserted to be 0, so the cell would read green on a fixture that had already produced a register row before the refused approval — the delta is pinned, the absolute the criterion names is not. (The other three halves of this criterion are met and were re-run: err.code === \"CLR40\"; the reason token via `refuses(…, ACQ.kGlBalance, …)`, whose `reasonToken` reads the DETAIL `{\"reason\":…}` discriminant first; `JSON.parse(err.detail).account_code === COST`; and both entries still `draft` after the deferred belt unwinds the approval.)",
+      "required_fix": "Add `assert.equal(beforeAssets, 0, …)` right after the capture (or assert the post-refusal count is 0 outright) so the cell says what the criterion says."
+    },
+    {
+      "id": "L03-CRS6",
+      "ticket": 845,
+      "severity": "note",
+      "kind": "implementation-detail",
+      "title": "The refusal 13 new call sites now raise still says \"T19 reset REFUSED\" — it names a cell that is not the caller",
+      "spec_line": "#845 Agent Brief, key interfaces: \"`guardedReset`: unchanged signature, becomes the single call shape for every gated `reset()`.\"",
+      "evidence": "packages/db/tests/rig-reset-guard.mjs, assertResetTargetDisposable: `throw new Error(\\`T19 reset REFUSED for ${label}: …\\`)`. After this diff, thirteen other modules (checkout-convergence, hrd-a/hrd-b, rig-docs, rig-events, rig-runtime, s6, wave-a, wb-0020, x37/x40/x41, x42 split kit) route through that same throw, so an operator running e.g. the x42 split drill against a non-disposable name is told a cell they are not running refused. The ticket froze the SIGNATURE, not the message, so a reword is admissible; it is recorded as a note because the refusal itself is correct and nothing in the ticket asked for it.",
+      "required_fix": "Optional: interpolate the resolved caller or drop \"T19\" for \"reset\" in the message. No behavioural change."
+    },
+    {
+      "id": "L03-CRS7",
+      "ticket": 844,
+      "severity": "note",
+      "kind": "scope-creep",
+      "title": "forceOpenedAt disables a production trigger TABLE-WIDE rather than per-row or per-transaction",
+      "spec_line": "#844 Agent Brief, key interfaces: \"The battery's existing intent helpers (as `os.14` uses them).\"",
+      "evidence": "packages/db/tests/operator-support.test.mjs, forceOpenedAt: `alter table clara.checkout_intents disable trigger t_checkout_intents_session_stamp` … `enable` in a `finally`. The disable is a DDL on the whole table, not scoped to the three fixture rows or to one transaction, so any writer landing a checkout intent inside that window silently skips the session stamp. No hazard was observed and none is expected under the house runner (`node --test --test-concurrency=1`, cells sequential within the file), and the helper mirrors checkout-convergence-fixtures.mjs's own `backdateStatus` idiom, which is why this is a note and not a finding against correctness. It is nonetheless a NEW helper where the brief named the existing ones.",
+      "required_fix": "None required. If tightened later, prefer `alter table … disable trigger` inside the same transaction as the UPDATE, or a session-level `session_replication_role` scope, so a concurrent writer cannot be affected."
+    },
+    {
+      "id": "L03-CRS8",
+      "ticket": 845,
+      "severity": "note",
+      "kind": "scope-creep-justified",
+      "title": "Four drill headers' documented PGDATABASE recipes were rewritten and one brand-new recipe was added — not asked for, but a necessary consequence of the wrapping",
+      "spec_line": "#845 Agent Brief, out of scope: \"Rig cluster provisioning or naming-convention changes.\"",
+      "evidence": "checkout-convergence-upgrade.test.mjs (clara_0186_upgrade → clara_0186_upgrade_ci), wave-a-upgrade.test.mjs (clara_waveA_upgrade → clara_waveA_upgrade_ci), wave-b/wb-0020-upgrade.test.mjs (clara_wb20_upgrade → clara_wb20_upgrade_ci, which also aligns the header with the name CI itself creates at closed-wave-upgrade-drills/action.yml:112), and rig-runtime-upgrade.test.mjs, which had NO recipe at all and gained one (clara_runtime_upgrade_ci). Recorded for transparency, not as a defect: the old names do not match EPHEMERAL_DB, so leaving them would have shipped headers instructing an operator to use a database the new guard refuses. Verified there is no stale non-disposable recipe left anywhere: `grep -rn \"PGDATABASE=\" packages/db/tests/**.mjs` shows every drill recipe now ends in _ci, and no naming convention outside these comments was changed."
+    }
+  ],
+  "requirements_verified_met": [
+    "#845 acceptance 2 — reset-gate-routing.test.mjs cell 4 points guardedReset at PGDATABASE=clara_631 with CLARA_ALLOW_DESTRUCTIVE=1 and CLARA_RIG_ALLOW_RESET=1 and asserts /does not look disposable/ with a non-delegating spy at `entered === 0`; the real ../scripts/reset.mjs export is imported and asserted callable but never invoked. Green, and the env buffer is restored (cell 5). Matches \"the same way the guard's own proof cell does for T19\".",
+    "#845 desired behaviour — all 13 previously-unwrapped call sites now read `await guardedReset(reset, { log: () => {} })` (17 call sites across 13 files, counted in the diff); lib/guard.mjs is untouched, and rig-cluster-reset.mjs / restore.mjs / restore-full.mjs / dr-selftest.mjs / seed.mjs / migrate-harness.mjs are unmodified, honouring the brief's out-of-scope line.",
+    "#844 acceptance 1 — os.19 builds three intents on one registration, forces first/second to the identical instant 2026-01-01T00:00:00Z and third an hour earlier, and asserts the tie by reading opened_at as root (openedOf(first) === openedOf(second), both > openedOf(third)).",
+    "#844 acceptance 2 — `paymentsFor(registration).length === 0` and `registrationRow(registration).status === \"open\"`, plus `row.payment_recorded_at === null` on the queue row: arm 1, undecided, no payment row.",
+    "#844 acceptance 4 — operator-support.test.mjs re-run at 20/20 including os.VACUITY CONTROL at EXPECTED_CELLS = 19; the os.19 id does not collide (the file's section-7 series runs os.15 through os.18).",
+    "#844 desired behaviour, \"states which intent is not chosen\" — `assert.notEqual(detail.intent_id, loser, …)`.",
+    "#884 acceptance 1 (three of its four halves) — CLR40, the reason token via DETAIL, the account code parsed off DETAIL (`JSON.parse(err.detail).account_code === COST`), and the full rollback (both entries still `draft`, the deferred belt unwinding the whole approval).",
+    "#884 acceptance 2 — p639.birth.opening_admitted asserts the opening entry is approved and is_opening_balance === true, then `select id from clara.fixed_assets where acquisition_entry_id=$1` gives rowCount 1 and that id equals seed_fixed_asset's own receipt id. The A/B is genuinely controlled: kSeededFaClient (x41-fa-world.mjs:361-374) enrols COST/ACCUM/EXPENSE through upsert_fa_account_profile and seeds cost = 500_000 on COST — the SAME account, the SAME enrolment and the SAME 500_000 the refused cell uses, so the only variable between the two cells is the item shape (gl_balance vs itemised fixed_asset), exactly the brief's \"an opening entry carrying the same balance as an itemised fixed-asset opening item is admitted\".",
+    "#884 acceptance 3 — every act runs through w.users.alice / bob / hana via the wb door wrappers; the one non-persona write, wb.recordParsedTargets, goes through ROLES.runtime (wave-b/wb-calls.mjs:80, the parsed lane's designed machine caller), not root; root appears only in the fixed_assets / journal_entries readbacks.",
+    "#884 acceptance 4 — p639.birth.exclusions' comment now names the belt (clara._tf_fa_movement_belt, 0041 arm (e)), CLR40 fa_k_gl_balance_on_enrolled, and the two new cells by name, and retracts both false claims (no opening-seed fixture; the birth trigger raising the refusal). The prosrc string assertion is PAIRED, not deleted, which the brief admits."
+  ],
+  "scope_creep_none_found_in": [
+    "No production surface changed: the diff is packages/db/tests + packages/db/tests/README.md only (17 files). No migration, no frozen workflow body, no docs/PRD.md or docs/ARCHITECTURE.md, no shared-file hunk outside packages/db/tests.",
+    "No change to migration 0188 or the queue's ordering (#844 out of scope), none to lib/guard.mjs (#845 out of scope), none to the belt, the birth trigger or the opening lane (#884 out of scope) — verified against the diffstat."
+  ],
+  "summary": "Three tickets, six commits, test-only. All three were genuinely live on origin/main before the lane built (independently re-derived: reset-gate-routing.test.mjs absent, guardedReset imported by T19 alone, os.19 absent with EXPECTED_CELLS=18, opening_excluded absent), so the lane's 'none already satisfied' claim is true and nothing was wrongly declared stopped. Every pass/fail count the lane's report carries was re-run rather than taken on its word: 5/5, 20/20, 23/23. #884 is the cleanest of the three — all four acceptance criteria met, with a genuinely controlled A/B (same COST account, same 500_000, same enrolment; only the item shape differs) — leaving one minor gap: 'zero register rows' is asserted as a delta against an unpinned before-count. #845 lands its wrapping correctly at all 17 call sites in 13 files with lib/guard.mjs untouched, and its acceptance-2 proof is sound; but acceptance 1's standing guard has a measured blind spot (a static `import { reset } from '…/scripts/reset.mjs'` with a bare reset() leaves the suite 5/5 green — demonstrated with a temporary probe, removed), acceptance 3 is evidenced only as a SKIP with three of the fourteen drills having no CI leg anywhere, and cell 1's exact-match file list will go red for a correctly wrapped future file. The one major finding is on #844: the cell does not fail if the id key is REMOVED from the deployed lateral, which is precisely the defect the ticket names. The shipped substitute mutates a hand-written copy of the predicate, not the door; measured against every three-intent/two-instant world on clara_l03, deleting `i.id desc` from 0188's arm-1 predicate returns the same row the cell expects in 6 of 10 worlds, so os.19 would stay green about 60% of the time. Fix by pairing the behavioural tie with a deterministic control (a prosrc pin on `i.id desc`, or several independent tied worlds). Nothing was pushed, no PR opened, no GitHub write, no tracked file edited, no other worktree touched, CLARA_RIG_ALLOW_RESET never set; the worktree is clean at efdea055."
+}

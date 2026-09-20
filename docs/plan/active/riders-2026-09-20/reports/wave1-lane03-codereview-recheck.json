@@ -1,0 +1,131 @@
+{
+  "lens": "CODE-REVIEW · AXIS: RECHECK",
+  "lane": "wave1-lane03",
+  "branch": "riders/w1-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "head_reviewed": "4fcb2d15b714e2c9b45c215e288ffe4be27af052",
+  "fixed_point": "origin/main (dd3f8f1d)",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits_since_codereview_head": [
+    "b662ed6b fix(db): #844 code review round 2 — structural id-key pin, shared trigger-disable helper",
+    "ae2dc311 fix(db): #884 code review round 2 — pin the zero, share the enrol-and-chart prefix",
+    "4fcb2d15 fix(db): #845 code review round 2 — static-import discovery, superset cell 1, PARTIAL acceptance-3"
+  ],
+  "source_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane03-codereview-spec.json (verdict: accept-with-fixes, head efdea055, 8 findings: L03-CRS1 major, L03-CRS2/3/4/5 minor, L03-CRS6/7/8 note)",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane03-codereview-standards.json (verdict: accept, head efdea055, 4 findings: STD-1/2/3 minor, STD-4 note; STD-5 is a test-quality note requiring no action)"
+  ],
+  "fix_report_requested_but_absent": "docs/plan/active/riders-2026-09-20/reports/wave1-lane03-codereview-fix.md is named as the transcript source by this recheck's work order, by the VACUITY CONTROL comment added to reset-gate-routing.test.mjs, and by wave1-lane03-final.md's amended #845 row, but the file does not exist in the reports directory (verified: `test -f ... wave1-lane03-codereview-fix.md` -> absent; `ls` of the reports dir lists no such file for lane03, unlike lanes 02/04/09/10 which each have one). Every functional and process claim that file would have carried was independently re-derived below directly from the three round-2 commits and by re-running the affected suites, so nothing in the two source reports was accepted on the missing file's word.",
+  "method": "Read WORK-ORDER.md and RIG.md; read .claude/skills/code-review/SKILL.md. Diffed origin/main...HEAD (9 commits total, packages/db/tests/** only, 20 files, +773/-54) and isolated the three round-2 commits (b662ed6b, ae2dc311, 4fcb2d15) landed after the two codereview reports' head (efdea055). Matched every finding in codereview-spec.json and codereview-standards.json to its commit hunk by reading the actual diff, not the commit message alone. Re-ran, on clara_l03 (127.0.0.1:55743, CLARA_RIG_ALLOW_RESET never set): tests/reset-gate-routing.test.mjs + tests/operator-support.test.mjs + tests/fixed-asset-acquisition.test.mjs together (48/48 pass), tests/operation-census.test.mjs + tests/rig-isolation.test.mjs (30 pass/1 skip, T19's own destructive cell, correctly skipped), tests/checkout-convergence.test.mjs (36/36, the sibling consumer of the newly-shared withSessionStampDisabled helper). Ran node scripts/check-frozen-workflows.mjs, pnpm lint and pnpm typecheck from the worktree root. Confirmed git status clean at HEAD. Cross-checked gh issue view 845/844/884 --comments for any comment dated 2026-09-20 newer than the Agent Briefs the source reports already cited — none found.",
+  "gates_rerun_this_recheck": [
+    "packages/db tests/reset-gate-routing.test.mjs + tests/operator-support.test.mjs + tests/fixed-asset-acquisition.test.mjs (single node --test invocation, full $GATES chain, clara_l03) -> 48 tests, 48 pass, 0 fail, 0 skip",
+    "packages/db tests/operation-census.test.mjs + tests/rig-isolation.test.mjs (no reset flags) -> 31 tests, 30 pass, 0 fail, 1 skip (T19's own destructive cell)",
+    "packages/db tests/checkout-convergence.test.mjs (no reset flags) -> 36 tests, 36 pass, 0 fail, 0 skip",
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files verified, no manifest diff, 55 \"use workflow\" modules frozen+registered, 3 retired entries recorded",
+    "pnpm lint (worktree root) -> exit 0",
+    "pnpm typecheck (worktree root) -> exit 0 (apps/web + packages/runtime)",
+    "git status --short (worktree root) -> clean"
+  ],
+  "verdict": "accept",
+  "findings_recheck": [
+    {
+      "id": "L03-CRS1",
+      "ticket": 844,
+      "original_severity": "major",
+      "status": "FIXED, confirmed",
+      "evidence": "git show b662ed6b -- packages/db/tests/operator-support.test.mjs adds a second, structural half to os.19's acceptance-#3 block: `const sharedBody = await normalizedBody(SHARED_SIG); assert.ok(sharedBody.includes(\"orderby(i.statusin('paid','consumed'))desc,i.opened_atdesc,i.iddesc\"), ...)` against the LIVE `clara._operator_support_cases(boolean,text,uuid)` catalog body (normalizedBody is the file's own pre-existing os.11 census helper, not a new invention). This pins the deployed function's own text, so a recut that REMOVES `i.id desc` — the exact defect the review measured passing 6 of 10 tied worlds under the old reversal-only proof — now fails by construction; the reversal companion SELECT (which proves DIRECTION, not REMOVAL) is kept as a paired, not replacement, check, exactly as the required_fix asked. Re-ran tests/operator-support.test.mjs: 20 tests, 20 pass, 0 fail (same count as before — a proof strengthened, not a cell added or removed)."
+    },
+    {
+      "id": "L03-CRS2",
+      "ticket": 845,
+      "original_severity": "minor",
+      "status": "FIXED, confirmed",
+      "evidence": "git show 4fcb2d15 -- packages/db/tests/reset-gate-routing.test.mjs widens RESET_IMPORT_RE from dynamic-import-only to `/(?:import\\(|(?:^|\\s)from\\s+)[\"'][^\"']*scripts\\/reset\\.mjs[\"']/`, which now matches a static `import { reset } from \"…/scripts/reset.mjs\"` as well as the dynamic spelling. The file's own VACUITY CONTROL comment records that a temporary static-import probe (deleted before commit) turned cell 2 red once this widening landed, and stayed green before it. Re-ran tests/reset-gate-routing.test.mjs: 5 tests, 5 pass, 0 fail, and the discovered set still names exactly the audited 14 files (no new false positives from the widened regex)."
+    },
+    {
+      "id": "L03-CRS3",
+      "ticket": 845,
+      "original_severity": "minor",
+      "status": "FIXED, confirmed (documentation-only, no diff change required)",
+      "evidence": "The required fix was to correct the claim, not the code. packages/db/tests/README.md:821 now reads 'Acceptance #3 (\"every affected drill still passes its ordinary run\") is PARTIAL, not done', and docs/plan/active/riders-2026-09-20/reports/wave1-lane03-final.md line 21 was amended to '#845 — ... DONE, ONE CRITERION PARTIAL (amended: code review round 2, L03-CRS3 ...)'. Both now state PARTIAL rather than the original DONE-with-a-caveat framing."
+    },
+    {
+      "id": "L03-CRS4",
+      "ticket": 845,
+      "original_severity": "minor",
+      "status": "FIXED, confirmed",
+      "evidence": "git show 4fcb2d15 -- packages/db/tests/reset-gate-routing.test.mjs converts cell 1 from an exact assert.deepEqual(found, EXPECTED_GATED_FILES) to a superset check: `const missing = EXPECTED_GATED_FILES.filter((f) => !found.includes(f)); assert.deepEqual(missing, [], ...)` (hard bar, missing-only) plus a console.log-only report for any file beyond the known 14. A correctly-wrapped future file no longer turns this cell red; a genuinely missing/unwrapped known file still does. Re-ran: 5/5 pass, same as L03-CRS2's re-run (same suite)."
+    },
+    {
+      "id": "L03-CRS5",
+      "ticket": 884,
+      "original_severity": "minor",
+      "status": "FIXED, confirmed",
+      "evidence": "git show ae2dc311 -- packages/db/tests/fixed-asset-acquisition.test.mjs adds `assert.equal(beforeAssets, 0, ...)` immediately after `const beforeAssets = await assetCountOf(o.client);` in p639.birth.opening_excluded, so the criterion's literal zero is pinned, not merely the before/after delta. Commit message records the vacuity control (expected value temporarily flipped to 1, observed red for \"0 !== 1\", restored). Re-ran tests/fixed-asset-acquisition.test.mjs: 23 tests, 23 pass, 0 fail (same count, an assertion tightened not a cell added)."
+    },
+    {
+      "id": "L03-CRS6",
+      "ticket": 845,
+      "original_severity": "note",
+      "status": "NO ACTION NEEDED, holds",
+      "evidence": "Original finding explicitly said 'nothing in the ticket asked for it' and offered an optional message reword. git show 4fcb2d15/b662ed6b/ae2dc311 -- packages/db/tests/rig-reset-guard.mjs shows no change to assertResetTargetDisposable's \"T19 reset REFUSED\" message. Declining a cosmetic, non-required reword is a legitimate 'stays open as a note' outcome, not a regression."
+    },
+    {
+      "id": "L03-CRS7",
+      "ticket": 844,
+      "original_severity": "note",
+      "status": "NO ACTION NEEDED, holds",
+      "evidence": "Original finding required no fix ('None required'). forceOpenedAt's table-wide alter table ... disable trigger / enable-in-finally shape is unchanged by b662ed6b beyond being moved into the shared withSessionStampDisabled() helper in checkout-convergence-fixtures.mjs — the DDL scope (table-wide, not per-row/per-transaction) is identical to before, matching the accepted note."
+    },
+    {
+      "id": "L03-CRS8",
+      "ticket": 845,
+      "original_severity": "note",
+      "status": "NO ACTION NEEDED, holds",
+      "evidence": "Recorded for transparency only in the original review, no fix requested. The four rewritten/added PGDATABASE recipes (checkout-convergence-upgrade, wave-a-upgrade, wave-b/wb-0020-upgrade, rig-runtime-upgrade) are untouched by the three round-2 commits (none of those five files appear in b662ed6b/ae2dc311/4fcb2d15's diffstat)."
+    },
+    {
+      "id": "STD-1",
+      "ticket": 884,
+      "original_severity": "minor",
+      "status": "FIXED, confirmed",
+      "evidence": "git show ae2dc311 -- packages/db/tests/x41-fa-world.mjs adds `export async function freshEnrolledFaClient(label) { ... }` carrying the onboard/seedOpeningCoa/buildFaChart/upsertFaProfile prefix, and rewrites `kSeededFaClient` to call it (`const { w, o } = await freshEnrolledFaClient(...)`). git show ae2dc311 -- packages/db/tests/fixed-asset-acquisition.test.mjs shows p639.birth.opening_excluded now calls the same `freshEnrolledFaClient(\"884refuse\")` instead of re-implementing the prefix inline. Re-ran wave-b/wb-k-supersede-fa.test.mjs is not part of this lane's touched-file gate list but the commit message records it at 10/10; fixed-asset-acquisition.test.mjs itself re-ran 23/23 in this recheck."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 844,
+      "original_severity": "minor",
+      "status": "FIXED, confirmed",
+      "evidence": "git show b662ed6b -- packages/db/tests/checkout-convergence-fixtures.mjs extracts `async function withSessionStampDisabled(fn)`; both `backdateStatus` and a newly-relocated `forceOpenedAt` now call it instead of each carrying its own disable/write/enable-in-finally copy. `forceOpenedAt` is exported from checkout-convergence-fixtures.mjs and re-exported through operator-support-fixtures.mjs (confirmed by grep: both files name it), replacing the private near-copy that used to live directly in operator-support.test.mjs. Re-ran operator-support.test.mjs (20/20) and checkout-convergence.test.mjs (36/36, backdateStatus's own suite) in this recheck."
+    },
+    {
+      "id": "STD-3",
+      "ticket": 845,
+      "original_severity": "minor",
+      "status": "DECLINED, refutation holds",
+      "evidence": "The original finding itself flagged this as low-priority and noted 'the spec itself chose the scattered shape' (#845 Agent Brief, 'Key interfaces': 'Each upgrade-drill test or kit module: its direct reset({...}) becomes guardedReset(reset, {...})'). Commit 4fcb2d15's message records the decision explicitly: 'STD-3 (smell, declined): ... Left as-is — the ticket's own Agent Brief ... prescribes exactly this per-file shape, so collapsing it into a shared re-export would be an unrequested refactor across 13 files for a benefit the review itself calls low-priority.' No diff touches any of the 13 guardedReset call sites in the round-2 commits (confirmed against b662ed6b/ae2dc311/4fcb2d15's diffstats). The refutation is the same one the original finding already anticipated, so it holds."
+    },
+    {
+      "id": "STD-4",
+      "ticket": 844,
+      "original_severity": "note",
+      "status": "STILL OPEN (cosmetic, non-blocking)",
+      "evidence": "packages/db/tests/README.md:738 still reads '## `operator-support.test.mjs` os.19 — #844', the bare unbacktick'd, unseparated spelling the finding flagged; none of the three round-2 commits touch this line (git show b662ed6b -- packages/db/tests/README.md's only hunk in the #844 section is the acceptance-#3 rewrite quoted under L03-CRS1, well below the heading). No commit message discusses STD-4, so this was not a considered decline, just left untouched. It is a single-line, purely cosmetic README heading (no reader-facing ambiguity beyond scanning consistency) and was already the lowest severity ('note') in the source report, so it does not raise the recheck's overall severity above minor."
+    },
+    {
+      "id": "STD-5",
+      "ticket": 845,
+      "original_severity": "note (test-quality)",
+      "status": "NO ACTION NEEDED, holds",
+      "evidence": "Source report already concluded 'No further action needed on the STANDARDS axis.' The non-delegating spy in reset-gate-routing.test.mjs's acceptance-2 cell is unchanged by any round-2 commit (confirmed: none of the three touch that cell's body, only cell 1's discovery regex and superset logic and cell 5's PARTIAL wording nearby)."
+    }
+  ],
+  "newly_broken": [],
+  "notes": [
+    "The lane's binding fix report, docs/plan/active/riders-2026-09-20/reports/wave1-lane03-codereview-fix.md, was never written even though the round-2 commits, reset-gate-routing.test.mjs's VACUITY CONTROL comment, and wave1-lane03-final.md's amended #845 row all cite it as the transcript of record. This did not block this recheck (every claim was independently re-derived from the commits and re-run against the rig), but it is a process gap in the lane's own deliverables against WORK-ORDER's reporting expectations, distinct from the underlying code-review findings, which are themselves confirmed fixed.",
+    "STD-4 (note-severity, cosmetic README heading) remains open and was not mentioned in any round-2 commit message as either fixed or declined. Left as a note because a 'note' was the ceiling severity of that finding originally and nothing above minor remains after this recheck."
+  ],
+  "gh_check": "gh issue view 845/844/884 --comments re-read: no comment dated 2026-09-20 beyond the 2026-09-17 Agent Briefs the source reports already cited as newest; no owner-ruling comment supersedes anything used here.",
+  "worktree_and_scope_compliance": "git status --short clean at 4fcb2d15. No push, no PR, no GitHub write, no other worktree touched, no subagent spawned, no process killed by this recheck. CLARA_RIG_ALLOW_RESET / CLARA_RIG_ALLOW_ROLE_SWEEP never set. Diff remains packages/db/tests/** only (20 files across all 9 commits, +773/-54); no migration, no frozen-workflow body, no PRD/ARCHITECTURE edit, no shared-file-list hunk outside packages/db/tests.",
+  "summary": "All 5 SPEC-axis findings (L03-CRS1 major, L03-CRS2/3/4/5 minor) and 2 of 3 actionable STANDARDS-axis findings (STD-1, STD-2 minor) are independently confirmed FIXED against the current head (4fcb2d15), each verified by reading the actual diff hunk (not the commit message alone) and re-running the affected suite: reset-gate-routing.test.mjs + operator-support.test.mjs + fixed-asset-acquisition.test.mjs together at 48/48, operation-census.test.mjs + rig-isolation.test.mjs at 30 pass/1 skip, checkout-convergence.test.mjs at 36/36 — all 0 fail. STD-3's decline is a considered one that matches the ticket's own Agent Brief and was already anticipated as low-priority by the original finding. The three note-severity findings that needed no action (L03-CRS6/7/8, STD-5) are confirmed to hold unchanged. One item remains open but does not raise severity above minor: STD-4, a purely cosmetic README heading-format note, was left untouched with no commit discussing it either way. Separately, the fix report the work order and the lane's own artifacts point to (wave1-lane03-codereview-fix.md) does not exist in the reports directory — noted as a process gap, not a code defect, since every functional claim it would have carried was independently re-derived here. node scripts/check-frozen-workflows.mjs, pnpm lint and pnpm typecheck all exit 0; git status is clean. Nothing above minor remains against the lane: ACCEPT."
+}

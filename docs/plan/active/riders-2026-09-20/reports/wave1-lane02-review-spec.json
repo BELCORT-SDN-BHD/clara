@@ -1,0 +1,28 @@
+{
+  "lane": "wave1-lane02",
+  "branch": "riders/w1-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "reviewed_head": "71722f5b",
+  "merge_base": "dd3f8f1d",
+  "review_lens": "SPEC + STANDARDS",
+  "verdict": "accept",
+  "summary": "Both tickets (#851, #858) are DONE (or honestly partial where disclosed) against their newest Agent Brief and acceptance criteria, and every claim in wave1-lane02-final.md that could be cheaply re-run was re-run and matched exactly. #851: confirmed both AC1 and AC2 were genuinely unaddressed at the cut point (git show dd3f8f1d has no --no-build in run.mjs and no OverlayWidths/cellBudgetMs in documents-viewer-walk.spec.ts). Re-ran e2e/run-args.test.ts (5/5 pass) and e2e/sign-in-census.test.ts (4/4 pass). Reproduced both vacuity controls myself: disabling the --no-build branch in run-args.mjs reds run-args.test.ts to 3/2 exactly as claimed; replacing PASSWORD_FILL with a non-matching regex reds sign-in-census.test.ts to 2/2. Confirmed --no-build works end-to-end (`pnpm --filter @clara/web e2e -- --no-build --list documents-viewer-walk` printed the reuse banner and listed all 22 cells without forwarding the flag). Confirmed the fourteenth migrated file (intake-batch-walk.spec.ts) really did carry the wrong fixture password and regex locators before the fold, from the diff itself. #858: re-ran the full documents-viewer-walk.spec.ts file on the lane's own Playwright triple (3510/3511/3512) -- 22 passed -- and re-ran THE LADDER cell alone (5.5s, well inside its cellBudgetMs budget), confirming both the poll-snapshot fix and the test.setTimeout call are real and green. AC3 of #858 (three consecutive full-suite runs) is correctly reported as partial/deviation rather than claimed satisfied, for a reason grounded in this repo's own documented 'one worker, one host' rule (nine other lanes were live on the same host) -- this is an honest limitation, not a defect. House standards all verified independently: node scripts/check-frozen-workflows.mjs -> OK, 312 files, no manifest diff; pnpm lint -> exit 0 across every workspace; pnpm typecheck -> exit 0; full apps/web unit suite via node scripts/run-tests.mjs -> 4642 tests, 4640 pass, 0 fail, 2 skipped, 135 suites (matches the report exactly); no migration files in the diff; docs/PRD.md and docs/ARCHITECTURE.md untouched; apps/web/messages/en.json, e2e/e2e-fixture-ownership.test.ts, lib/navigation/tree.ts, packages/db/*, .github/actions/db-live-gates/action.yml and CONTEXT.md all untouched; apps/web/test/manifest.txt carries exactly two new lines at the correct sorted position; every commit is scoped to e2e/web-only files (verified per-commit with git show --stat) and named its ticket with the work order's required Co-Authored-By line. No message-key gate applies -- the ticket is e2e-harness-only with no new user-facing strings. One informational note only (shared across every lane cut before the #1013 docs merge, not specific to this lane's work): git diff origin/main..HEAD shows docs/PROGRESS.md changed and two unrelated files deleted; this is base drift from the lane being cut at dd3f8f1d before origin/main advanced to e7f0a10a, not an edit made by any of the three lane commits (confirmed via git show --stat on each of 24bc1b50/c5560a5b/71722f5b, none of which touch docs/ at all).",
+  "findings": [
+    {
+      "id": "F1",
+      "ticket": null,
+      "severity": "note",
+      "title": "Branch cut before the #1013 docs merge will show unrelated doc deletions in a base diff",
+      "evidence": "git diff origin/main..HEAD (origin/main local ref at e7f0a10a) shows docs/PROGRESS.md changed and docs/plan/active/rider-1008-legal-enforcement-mode/RELEASE-AS-RUN.md, its ceremony/reads-0234.mjs, and docs/plan/active/riders-2026-09-20/GRILL-2026-09-20.md deleted. Confirmed this is base drift, not a lane edit: git merge-base origin/main HEAD = dd3f8f1d (matches the report's claimed cut point), and `git show --stat` on each of the three lane commits (24bc1b50, c5560a5b, 71722f5b) shows only apps/web/e2e/* and apps/web/test/manifest.txt touched -- no docs/ files in any of them. The apparent deletions are files origin/main gained after dd3f8f1d (PR #1013) that this branch, cut earlier, never had.",
+      "required_fix": "None required in this lane. The orchestrator should rebase or merge-integrate this lane onto the current origin/main tip before landing so the integration diff does not need to resolve these as real deletions."
+    },
+    {
+      "id": "F2",
+      "ticket": 858,
+      "severity": "note",
+      "title": "#858 AC3 (three consecutive full-suite runs) is only partially satisfied, and the report says so",
+      "evidence": "The report explicitly marks AC3 'partial, recorded as a deviation' rather than done, because nine other lanes were live on the shared host and apps/web/e2e/README.md's own 'one worker, one host' rule makes a whole-suite run under contention evidence about contention rather than about this file. I independently re-ran the file (22/22 pass) and the LADDER cell alone (5.5s) on the lane's own triple; nothing contradicts the report, and the disclosure matches an actual documented house constraint rather than an excuse invented for this ticket.",
+      "required_fix": "None required from this lane; this is correctly self-reported rather than mis-claimed as satisfied. Whoever integrates the lanes should run three consecutive whole-suite passes of this file on an otherwise idle host before treating #858 AC3 as fully closed."
+    }
+  ]
+}

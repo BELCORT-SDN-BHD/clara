@@ -1,0 +1,95 @@
+{
+  "lane": "wave1-lane05",
+  "axis": "STANDARDS",
+  "branch": "riders/w1-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "head": "ab6683c0",
+  "fixed_point": "origin/main (e7f0a10a)",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits": [
+    "f01b4d34 feat(scripts): #849 --print-closure reverse index and --retire command",
+    "10b603a4 fix(ops): #917 dsn-pipe.mjs --child-os wsl CA respelling",
+    "0d906477 feat(db): #957 guarded migration redo mode",
+    "e488a57b fix(scripts): #959 maskComments no longer swallows the rest of the input on an unterminated quote/dollar tag",
+    "247dfc89 fix(lint): #994 NO_RAW_COLOR_VALUES message names the ticket-reference case",
+    "a4db0de2 fix(web): #969 ui:add guard drops the bogus cn dependency the pinned CLI adds",
+    "b39240c8 fix(scripts): #849 fix round — retire's missing-path fall-through, denominator, canary exclusion",
+    "509b22d7 test(db): #957 fix round — prove redo refuses on a non-rig target",
+    "ab6683c0 docs(web): #969 fix round — record the strip-after-write window explicitly"
+  ],
+  "standards_sources_checked": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "packages/db/README.md",
+    "packages/db/tests/README.md",
+    "packages/runtime/README.md",
+    "apps/web/README.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "No hard violations that block the wave. One documented-standard deviation is procedural rather than functional: the three fix-round commits (b39240c8, 509b22d7, ab6683c0) close with 'Co-Authored-By: Claude Sonnet 5' plus a 'Claude-Session:' line instead of WORK-ORDER.md rule 2's exact 'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>' trailer -- a byproduct of this session's own attribution policy, not something a fix round can retroactively correct without rewriting already-made commits. Two Fowler 'Duplicated Code' judgement calls: the optional-argument-after-a-flag parsing shape is written out three times in scripts/check-frozen-workflows.mjs instead of one shared helper, and packages/db/scripts/migrate.mjs's redo branch re-states the ordinary apply loop's per-migration read/checksum/guard-check/push body for a single iteration instead of building one list both paths share. One TDD test-quality judgement call: migrate-redo.test.mjs's AC1 cell asserts the redone checksum equals migrationChecksum(editedSql) and migrationChecksum('create table ...') -- recomputing the expected value with the exact function migrate.mjs calls internally, a tautology by tests.md's own definition -- though it sits alongside a genuine, independent behavioural assertion (the redone function's live return value actually changed from 1 to 2), so the cell is not vacuous overall, only its checksum half is. No mocking-of-repo-controlled-code, no side-channel verification beyond the documented db-test convention (ledger row snapshots are the package's own prestate-pin idiom, exempted per the work order), and no evidence of horizontal slicing in the commit history (every ticket's implementation and its tests land in the same commit, never a separate red-tests-only commit).",
+  "findings": [
+    {
+      "id": "L05-STD-01",
+      "ticket": 0,
+      "tickets_note": "procedural, spans the #849/#957/#969 fix-round commits; not tied to one ticket's acceptance criteria",
+      "category": "hard-violation",
+      "severity": "note",
+      "file": "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (rule 2) / git commit trailers",
+      "rule_cited": "WORK-ORDER.md rule 2: \"Every commit message ends with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.\"",
+      "summary": "The three fix-round commits (b39240c8, 509b22d7, ab6683c0) end with `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>` plus an added `Claude-Session: https://claude.ai/code/session_...` line, not the rule-2 `Claude Fable 5.1` trailer the lane's own binding rule specifies. The six original ticket commits (f01b4d34..a4db0de2) do carry the correct trailer.",
+      "evidence": "git show -s --format=%B b39240c8 / 509b22d7 / ab6683c0 each end `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>` + `Claude-Session: ...`; compare git show -s --format=%B f01b4d34 (etc.), which ends `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.",
+      "required_fix": "Informational only -- rewriting already-made, already-reviewed commits to fix a trailer is a bigger risk than the deviation itself (and conflicts with the repo's own \"never amend a landed commit\" git-safety norm). Worth a one-line note to whoever runs the fix-round tooling for future waves: the attribution trailer a session's own harness appends can silently drift from the wave's WORK-ORDER.md rule.",
+      "outcome": null
+    },
+    {
+      "id": "L05-STD-02",
+      "ticket": 849,
+      "category": "smell",
+      "severity": "minor",
+      "file": "scripts/check-frozen-workflows.mjs",
+      "lines": "157-179",
+      "summary": "Possible Duplicated Code: the \"an optional value token immediately follows this flag, unless the next token itself starts with `--`\" parsing shape is written out three separate times in the same file for three different flags (`--print-closure`'s module argument, `--retire`'s path argument, and `--ruling`'s value), instead of one shared helper the three call sites use.",
+      "evidence": "```js\nconst PRINT_CLOSURE_INDEX = process.argv.indexOf(\"--print-closure\");\nconst PRINT_CLOSURE = PRINT_CLOSURE_INDEX !== -1;\nconst PRINT_CLOSURE_MODULE =\n  PRINT_CLOSURE && process.argv[PRINT_CLOSURE_INDEX + 1] && !process.argv[PRINT_CLOSURE_INDEX + 1].startsWith(\"--\")\n    ? process.argv[PRINT_CLOSURE_INDEX + 1]\n    : null;\n...\nconst RETIRE_INDEX = process.argv.indexOf(\"--retire\");\nconst RETIRE_FLAG = RETIRE_INDEX !== -1;\nconst RETIRE_PATH =\n  RETIRE_FLAG && process.argv[RETIRE_INDEX + 1] && !process.argv[RETIRE_INDEX + 1].startsWith(\"--\")\n    ? process.argv[RETIRE_INDEX + 1]\n    : null;\nconst RULING_INDEX = process.argv.indexOf(\"--ruling\");\nconst RETIRE_RULING = RULING_INDEX !== -1 ? (process.argv[RULING_INDEX + 1] ?? null) : null;\n```\nThe commit message for b39240c8 even names the duplication as deliberate mirroring: \"a next token starting with `--` is treated as no path given (mirroring `--print-closure`'s own module-argument parsing...)\".",
+      "required_fix": "Judgement call, not a blocker. A small `optionalArgAfterFlag(argv, flag)` helper (return the next token unless absent or itself a `--flag`) would remove the duplication and the risk of the two copies drifting (as they nearly did -- RETIRE_RULING already skips the `--`-prefix guard the other two apply). Fine to leave as-is for a wave-1 lane; worth doing opportunistically next time this file is touched.",
+      "outcome": null
+    },
+    {
+      "id": "L05-STD-03",
+      "ticket": 957,
+      "category": "smell",
+      "severity": "minor",
+      "file": "packages/db/scripts/migrate.mjs",
+      "lines": "412-431",
+      "summary": "Possible Duplicated Code: the `redo` branch's single-item body (read file, compute checksum, run `assertNoTransactionControl`/`assertNoCheckFunctionBodyOverride`, push onto `pending`) restates the ordinary loop's per-migration body verbatim for one iteration, instead of the two paths sharing one push step over a list that differs only in how it is built (`[byVersion.get(redo)]` vs. `migrations.filter(m => !applied.has(m.version))`).",
+      "evidence": "```js\nconst pending = [];\nif (redo !== null) {\n  const { file } = byVersion.get(redo);\n  const sql = readFileSync(join(migrationsDir, file), \"utf8\");\n  const checksum = migrationChecksum(sql);\n  assertNoTransactionControl(sql, redo);\n  assertNoCheckFunctionBodyOverride(sql, redo);\n  pending.push({ version: redo, sql, checksum, isolation: migrationIsolationLevel(redo, checksum) });\n} else {\n  for (const { file, version } of migrations) {\n    if (applied.has(version)) continue;\n    const sql = readFileSync(join(migrationsDir, file), \"utf8\");\n    const checksum = migrationChecksum(sql);\n    assertNoTransactionControl(sql, version);\n    assertNoCheckFunctionBodyOverride(sql, version);\n    pending.push({ version, sql, checksum, isolation: migrationIsolationLevel(version, checksum) });\n  }\n}\n```",
+      "required_fix": "Judgement call, not a blocker -- the two branches are short and the redo path is deliberately isolated per the header comment's own reasoning (\"redo touches ONLY the named version\"). A caller could instead compute `const targets = redo !== null ? [{ file: byVersion.get(redo).file, version: redo }] : migrations.filter(m => !applied.has(m.version))` once, then run the single read/checksum/guard/push body over `targets` for both paths, removing the five-line duplicate.",
+      "outcome": null
+    },
+    {
+      "id": "L05-STD-04",
+      "ticket": 957,
+      "category": "test-quality",
+      "severity": "minor",
+      "file": "packages/db/tests/migrate-redo.test.mjs",
+      "lines": "83, 87-88",
+      "summary": "Per /tdd tests.md's own tautology definition (\"expected value restates the implementation, so the test passes by construction\"), the AC1 cell's checksum assertions recompute the expected value with the exact `migrationChecksum` function `migrate.mjs` calls internally to produce it, rather than an independent literal. If `migrationChecksum` itself always returned a constant, both these assertions would still pass.",
+      "evidence": "```js\nconst redoResult = await withDatabaseEnv(dbname, () => migrate({ dir, log: silent, redo: \"0002_editable\" }));\nassert.equal(redoResult.redone, \"0002_editable\");\nassert.equal(redoResult.checksum, migrationChecksum(editedSql));\n...\nassert.deepEqual(rows.rows, [\n  { version: \"0001_baseline\", checksum: migrationChecksum(\"create table clara.redo_ac1_baseline(x pg_catalog.int4);\") },\n  { version: \"0002_editable\", checksum: migrationChecksum(editedSql) },\n]);\n```",
+      "required_fix": "Judgement call, not a blocker -- the same cell also asserts `(await witness.query(\"select clara.redo_ac1_fn() as v\")).rows[0].v === 2`, a genuine, independent behavioural check (the edited body actually ran) that a broken `migrationChecksum` could not fake, so the cell as a whole is not vacuous. The checksum-equality half specifically is testing bookkeeping consistency (ledger checksum reflects on-disk content) rather than the redo behaviour itself; a hard-coded literal hash, or dropping the checksum assertions in favour of the function-return-value check alone, would remove the tautology without losing coverage.",
+      "outcome": null
+    }
+  ],
+  "checked_and_clear": [
+    "No new migration file added; no applied migration edited (rule 5).",
+    "docs/PRD.md and docs/ARCHITECTURE.md untouched.",
+    "No rule-7 shared file touched (apps/web/messages/en.json, apps/web/test/manifest.txt, apps/web/e2e/serve-built.mjs, apps/web/e2e/e2e-fixture-ownership.test.ts, apps/web/lib/navigation/tree.ts, packages/db/tests/rig-meta.mjs, packages/db/package.json, .github/actions/db-live-gates/action.yml, CONTEXT.md).",
+    "Module README updated in the SAME commit as the code for every ticket that touched packages/db, packages/runtime or apps/web/components/ui (rule 9): f01b4d34 (runtime README+#849 code), 10b603a4 (db README+#917 code), 0d906477 (db README+#957 code), a4db0de2 (ui README+#969 code).",
+    "packages/db's test script globs tests/**/*.test.mjs -- migrate-redo.test.mjs needed no census/registration edit; matches the file's own stated pattern (no dedicated packages/db/tests/README.md section either, consistent with sibling runner-level files migrate-session-reset.test.mjs / migrate-lock-serialization.test.mjs, which also have none).",
+    "No apps/web unit test file added, so apps/web/test/manifest.txt correctly untouched; the #969 cells live in apps/web/scripts/check-ui-add-guard.selftest.mjs, run through apps/web's own lint chain like its pre-existing siblings.",
+    "Mocking check (mocking.md): every injected seam in the diff (ui-add.mjs's resolveDependencies/spawnAdd/stripLocalDependencies; migrate.mjs's clientFactory) is a pre-existing, documented DI seam at a real system boundary (the pinned CLI's own process, pnpm, the Postgres connection) -- never an internal collaborator or a repo-controlled module mocked for convenience.",
+    "Test seam check (/tdd): every new assertion goes through a public export (main(), migrate(), classifyDependencies(), formatClosureReport(), retireFrozenEntry(), maskComments()/parseCoRPatches()/scanSources(), the real ESLint Linter) or a raw-SQL ledger read, which packages/db/tests' own documented convention treats as a prestate-pin/structural cell exempted from the /tdd public-seam preference -- no test reaches a private function or an internal collaborator.",
+    "No evidence of horizontal slicing: git log --stat shows every ticket's production code and its tests landing in the same commit (no commit adds only failing tests ahead of any implementation).",
+    "CONTEXT.md correctly untouched -- all six tickets are internal tooling with no new accounting/product vocabulary."
+  ]
+}

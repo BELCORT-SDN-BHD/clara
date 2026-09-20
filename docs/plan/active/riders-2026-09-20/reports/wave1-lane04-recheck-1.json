@@ -1,0 +1,63 @@
+{
+  "lane": "wave1-lane04",
+  "lens": "RECHECK",
+  "branch": "riders/w1-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "head_checked": "0b592123901cfb0612ca53742c2016ce49bf234a",
+  "head_confirmed_by": "git rev-parse HEAD in the worktree, matches exactly; git status clean before and after every re-run",
+  "source_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane04-review-spec.json (verdict accept-with-fixes; findings L04-S01..L04-S15)",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane04-fixround-1.md (fix round claiming L04-S01,S02,S03,S04,S05,S06,S07,S09,S10,S12,S13,S14 addressed; S11/S15 left, out of assignment)"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "Independently re-ran every gate the fix round claims and every claim reproduced exactly: role-census-reset.test.mjs 8/8 (was 7), rig-isolation.test.mjs 23 tests/22 pass/1 skip with both new T10b-AC2 cells present and passing, opening-balance-evidence-link.test.mjs 5/5, the combined 8-file re-run 155/154/1-skip/0-fail, check-document-region-field-paths.selftest.mjs 21/21 (was 17) with a clean worktree afterward, pnpm typecheck exit 0, pnpm lint exit 0 (confirmed the #857 check + selftest ran inside it), check-frozen-workflows.mjs OK (312 files, no manifest diff). Diff from 9e3a8c1e to HEAD touches exactly the 8 files the fix-round report lists, no migration, no PRD/ARCHITECTURE, no other shared file beyond the already-reviewed rig-meta.mjs hunk. Independently re-queried the live rig's pg_roles/pg_auth_members for clara_stripe_webhook[_login]/clara_auth_wall[_login] (L04-S03): posture matches migrations 0160/0163 byte-for-byte, restoration holds. All ten minor/major findings this round claims to fix are genuinely fixed, each verified either by a re-run that could only pass with the described code present (L04-S01, S09, S10, S14) or by reading the diff against the finding's own required_fix (S05, S06, S07, S12, S13) plus a passing re-run of the file it lives in. One major finding (L04-S04) is not fixed and cannot be fixed by this lane or any fix round under WORK-ORDER's 'never write to GitHub' rule: the #854 follow-up issue for the measured opening-balance double-posting is still not filed. The fix round's response (correct the false 'was filed' claim, name the exact repro, ask the integrator explicitly) is the right handoff, not a code defect, but the ticket's own required_fix ('file the residual issue... before this branch merges') remains outstanding and belongs to the orchestrator/integrator step, not this lane.",
+  "gates_rerun": {
+    "packages/db/tests/role-census-reset.test.mjs": "8 pass / 0 fail (was 7 pre-fix; matches fix-round claim)",
+    "packages/db/tests/rig-isolation.test.mjs": "23 tests, 22 pass, 1 known skip (T19); both T10b-AC2 cells (worldSchemaPresent false-on-no-World, real leak named by agentReachableOutsideClara) present and passing (ok 7, ok 8)",
+    "packages/db/tests/opening-balance-evidence-link.test.mjs": "5 pass / 0 fail",
+    "combined re-run (rig-isolation + operation-census + role-census-reset + opening-balance-evidence-link + coding-lane-evidence-link + checkout-gate-c2 + checkout-gate-c3 + wave-b/wb-k-approval, one process)": "155 tests, 154 pass, 1 skip, 0 fail — matches fix-round report exactly",
+    "scripts/check-document-region-field-paths.selftest.mjs (standalone)": "21/21 pass (was 17); worktree git status clean before and after, including the main()-subprocess cases that stage/unstage a decoy file",
+    "pnpm typecheck (worktree root)": "exit 0 (apps/web, packages/runtime both Done)",
+    "pnpm lint (worktree root, full chain)": "exit 0; confirmed check-document-region-field-paths.mjs and its selftest both ran inside the chain and reported clean/OK",
+    "node scripts/check-frozen-workflows.mjs": "OK — 312 frozen files verified, no manifest diff, 55 workflow modules",
+    "git diff 9e3a8c1e..HEAD --stat": "exactly the 8 files the fix-round report lists (packages/db/README.md, packages/db/scripts/role-census-reset.mjs, packages/db/tests/README.md, packages/db/tests/opening-balance-evidence-link.test.mjs, packages/db/tests/rig-isolation.test.mjs, packages/db/tests/role-census-reset.test.mjs, scripts/check-document-region-field-paths.mjs, scripts/check-document-region-field-paths.selftest.mjs)",
+    "git diff dd3f8f1d..HEAD -- packages/db/migrations docs/PRD.md docs/ARCHITECTURE.md": "empty — nothing touched",
+    "live rig role posture (clara_stripe_webhook[_login], clara_auth_wall[_login])": "queried directly via pg client: rolcanlogin=false/rolinherit=true on all four; clara_*_login members of clara_stripe_webhook/clara_auth_wall respectively; postgres member of both _login roles — matches migrations 0160/0163 exactly, independent of the reviewer's or lane's own claim"
+  },
+  "findings": [
+    {
+      "id": "L04-S04",
+      "ticket": 854,
+      "severity": "major",
+      "status": "still open",
+      "title": "The #854 follow-up issue for the measured opening-balance double-posting is still not filed",
+      "evidence": "packages/db/tests/README.md and opening-balance-evidence-link.test.mjs's file header now correctly say the issue was NOT filed (fixing L04-S05's false claim) and ask the integrator to file it before merge, naming the exact repro (obw.race.evidence_then_opening). But no GitHub issue exists for this defect as of this recheck (gh issue view/search not re-run here since this is a known, self-disclosed gap, not a claim to verify) — the underlying required_fix ('file the residual issue... before this branch merges, put its number in the cell's own comment') is unmet.",
+      "why_not_fixable_here": "WORK-ORDER rule 2 binds every lane worker to 'never comment on or close a GitHub issue' and this lane's own report states it 'never writes to GitHub'; the fix round is bound by the same constraint and says so explicitly. This is a real, structural handoff to whoever integrates the branch, not a defect in the fix round's own work.",
+      "required_action": "Before this branch merges into main: file the follow-up issue (repro = obw.race.evidence_then_opening, candidate fix = a fresh re-read of entry_evidence_links under the document lock, or an explicit SELECT ... FOR UPDATE on entry_evidence_links) and replace the placeholder sentence in packages/db/tests/README.md and the test file's header with its number. This is an orchestrator/integrator action, not a lane fix."
+    }
+  ],
+  "confirmed_fixed": [
+    {"id": "L04-S01", "ticket": 866, "severity": "major", "verification": "rig-isolation.test.mjs re-run shows both new cells (ok 7, ok 8); the leak cell plants a real PUBLIC-executable function and asserts agentReachableOutsideClara() names it — a genuinely red-capable assertion, not a skip arm."},
+    {"id": "L04-S02", "ticket": 867, "severity": "major", "verification": "packages/db/README.md now reads 'expected, not yet verified end to end' instead of asserting the unrun chain as settled fact; this is the reviewer's own sanctioned fallback option, and #867 is explicitly left open on the residual (tracked as follow-up 3, unchanged from the original report)."},
+    {"id": "L04-S03", "ticket": 867, "severity": "major", "verification": "no code change was owed per the reviewer's own required_fix; independently re-queried pg_roles/pg_auth_members on the live rig and confirmed the two _login roles' posture matches migrations 0160/0163 byte-for-byte."},
+    {"id": "L04-S05", "ticket": 854, "severity": "minor", "verification": "packages/db/tests/README.md's #854 section now says plainly the issue was not filed, names both reports, and asks the integrator to file before merge."},
+    {"id": "L04-S06", "ticket": 854, "severity": "minor", "verification": "assertLoserRefusal now takes an expectedShape argument and reds by name on a mismatch; the one call site pins \"CLR13\"; opening-balance-evidence-link.test.mjs re-run 5/5 pass."},
+    {"id": "L04-S07", "ticket": 854, "severity": "minor", "verification": "both the test file header and tests/README.md now present the second-updater account as this lane's own reading, name the SSI pivot/rw-antidependency alternative, and ask a successor to verify the mechanism before assuming either."},
+    {"id": "L04-S09", "ticket": 857, "severity": "minor", "verification": "two new selftest cases spawn the real script as a real subprocess and assert exit code; re-run 21/21 pass, worktree left clean (git status --porcelain empty) after the stage/unstage of the decoy fixture."},
+    {"id": "L04-S10", "ticket": 857, "severity": "minor", "verification": "enclosingObjectLiteralSpan() replaces the 200-char window with a string-literal-aware brace scan; new unit case reproduces the exact false-negative under the old logic and passes under the new one; the real 927-file scan stays at 0 violations."},
+    {"id": "L04-S12", "ticket": 866, "severity": "minor", "verification": "packages/db/tests/README.md's #866 section link corrected from ../runtime/README.md to ../../runtime/README.md; confirmed packages/runtime/README.md exists at that resolved path and packages/db/runtime/README.md does not."},
+    {"id": "L04-S13", "ticket": 867, "severity": "minor", "verification": "packages/db/README.md's recorded drop order corrected to base-role-before-login-twin, confirmed against 0160_checkout_gate_c2_stripe_events.sql:120-123 and 0163_checkout_gate_c3_folded_door.sql:165-168's own create-role order, which rolesMintedAfterPin() reads and apply() iterates unchanged."},
+    {"id": "L04-S14", "ticket": 867, "severity": "minor", "verification": "role-census-reset.test.mjs's tautological assert.equal(matchesPin, wouldReadAfterDrop === 14) replaced with two direct assertions; isClaraRole() filter added to both check()'s existing-role filter and apply()'s drop loop; new red-first cell (decoy 'create role postgres') passes; full file re-run 8/8."}
+  ],
+  "left_alone_as_instructed": [
+    {"id": "L04-S11", "severity": "note", "reason": "not in this fix round's assignment per its own report; unchanged, still a valid note (lint only sees git-tracked files)."},
+    {"id": "L04-S15", "severity": "note", "reason": "not in this fix round's assignment per its own report; unchanged, still a valid note (sharedDependents()'s dead 'm' branch)."}
+  ],
+  "newly_broken": [],
+  "typecheck_lint_status": "both green, re-run independently at the worktree root, not merely trusted from the fix-round report",
+  "notes": [
+    "This lane's cluster (clara_l04) was never re-migrated from scratch during this recheck; no destructive or reset flag was set; CLARA_RIG_ALLOW_RESET/CLARA_RIG_ALLOW_ROLE_SWEEP were never touched.",
+    "No file outside this report was written or modified in the worktree or the main checkout during this recheck; no push, no PR, no GitHub write, no other worktree touched, no subagent spawned, no process killed that this session did not start.",
+    "Verdict is accept-with-fixes rather than accept solely because of L04-S04's still-unfiled GitHub issue, which is a structural handoff (WORK-ORDER's own 'never write to GitHub' rule) rather than a code or test defect — nothing above minor remains in the lane's own deliverable."
+  ]
+}

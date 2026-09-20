@@ -1,0 +1,136 @@
+{
+  "lens": "STANDARDS",
+  "lane": "wave1-lane03",
+  "branch": "riders/w1-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "head_reviewed": "efdea055",
+  "fixed_point": "origin/main",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits": [
+    "fd141984 test(db): #845 route every reset()-gated upgrade drill through guardedReset",
+    "fc81a0fa test(db): #844 pin the operator queue's arm-1 i.id desc tie-break",
+    "6219a61c test(db): #884 prove the K-family opening-balance exclusion arm behaviourally",
+    "e985085a fix(db): #845 fix round 1 — non-delegating spy, widened reset( predicate, CI-leg gap named",
+    "1ea21b05 fix(db): #844 fix round 1 — renumber the colliding os.15 cell to os.19",
+    "efdea055 fix(db): #884 fix round 1 — assert the refusal's account code on DETAIL, not detail-or-message"
+  ],
+  "tickets": [845, 844, 884],
+  "standards_sources_read": [
+    "AGENTS.md",
+    "CONTEXT.md (spot-checked for new vocabulary; none introduced)",
+    "packages/db/README.md",
+    "packages/db/tests/README.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    ".claude/skills/tdd/SKILL.md",
+    ".claude/skills/tdd/tests.md",
+    ".claude/skills/tdd/mocking.md",
+    "packages/runtime/README.md and apps/web/README.md named as sources but not applicable: the diff touches only packages/db/tests/**"
+  ],
+  "method": "Read the full diff (17 files, 655 insertions / 33 deletions, all under packages/db/tests/) and git log --stat --reverse for the six commits. Cross-checked every new/changed cell against packages/db/tests/README.md's own documented conventions (persona discipline, frontier gating, drift-guard precedent), the tdd skill + tests.md + mocking.md, and the three tickets' Agent Briefs (gh issue view 845/844/884 --comments) to confirm no scope creep before judging style. Read the sibling helper modules each new test reaches into (x41-fa-world.mjs, checkout-convergence-fixtures.mjs, operator-support-fixtures.mjs) to tell genuine duplication from an already-established repo idiom. Cross-referenced the prior SPEC review (wave1-lane03-review-spec.json), fix-round report and RECHECK (wave1-lane03-recheck-1.json, verdict accept) so this STANDARDS pass does not re-litigate findings already fixed and confirmed on this same head.",
+  "hard_violations": [],
+  "judgement_calls": [
+    {
+      "id": "STD-1",
+      "ticket": 884,
+      "severity": "minor",
+      "category": "duplicated-code",
+      "smell": "Duplicated Code",
+      "file": "packages/db/tests/fixed-asset-acquisition.test.mjs",
+      "title": "opening_excluded re-implements kSeededFaClient's enrol-and-chart prefix instead of sharing it",
+      "evidence": "New cell (fixed-asset-acquisition.test.mjs): `const w = await faWorld(); const o = await wb.onboardingClient(w.users.hana, \"884refuse\"); await wb.seedOpeningCoa(w.users.alice, o.client); await buildFaChart(w.users.alice, o.client); await upsertFaProfile(w.users.alice, { client: o.client, assetAccount: COST, accumAccount: ACCUM, expenseAccount: EXPENSE });` is, line for line, the same shape as the first five lines of the existing `kSeededFaClient` in x41-fa-world.mjs:370-374: `const w = await faWorld(); const o = await wb.onboardingClient(w.users.hana, \\`x41k_${label}_${uniqTag()}\\`); await wb.seedOpeningCoa(w.users.alice, o.client); await buildFaChart(w.users.alice, o.client); await upsertFaProfile(w.users.alice, { client: o.client, assetAccount: COST, accumAccount: ACCUM, expenseAccount: EXPENSE });` — the only difference is the client label.",
+      "why_it_matters": "The two call sites are now two independent sources of truth for 'what does an enrolled FA onboarding client look like'; a future change to enrolment (e.g. a new required profile field) has to be made in both places or the new cell silently drifts from the fixture kSeededFaClient's own callers already rely on.",
+      "suggested_fix": "Extract the shared prefix into its own exported helper in x41-fa-world.mjs (e.g. freshEnrolledFaClient(label) returning { w, o }) and have both kSeededFaClient and p639.birth.opening_excluded call it.",
+      "note": "Judgement call per the code-review skill's Fowler baseline, not a documented-standard breach; no repo standard endorses or forbids this duplication."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 844,
+      "severity": "minor",
+      "category": "duplicated-code",
+      "smell": "Duplicated Code",
+      "file": "packages/db/tests/operator-support.test.mjs",
+      "title": "forceOpenedAt duplicates backdateStatus's trigger-disable idiom instead of generalizing it",
+      "evidence": "New local helper: `async function forceOpenedAt(intent, isoTimestamp) { await rootQuery(\"alter table clara.checkout_intents disable trigger t_checkout_intents_session_stamp\"); try { await rootQuery(\"update clara.checkout_intents set opened_at=$2 where id=$1\", [intent, isoTimestamp]); } finally { await rootQuery(\"alter table clara.checkout_intents enable trigger t_checkout_intents_session_stamp\"); } }` is structurally identical to the pre-existing, exported `backdateStatus` in checkout-convergence-fixtures.mjs:253-262 (same disable/try/update/finally-enable shape against the same trigger, a different column). The new function's own comment even names backdateStatus as the idiom it mirrors.",
+      "why_it_matters": "The disable/re-arm dance around t_checkout_intents_session_stamp is now defined twice, once shared (checkout-convergence-fixtures.mjs, exported, reusable) and once private to operator-support.test.mjs; a third file needing to force a different column on the same table would be tempted to paste a third copy rather than reuse one place.",
+      "suggested_fix": "Generalize backdateStatus into a small `withSessionStampDisabled(fn)` or `forceColumn(intent, column, value)` helper exported from checkout-convergence-fixtures.mjs, and have forceOpenedAt (and backdateStatus) call it, instead of a new private near-copy in the test file.",
+      "note": "Judgement call, not a documented-standard breach — the repo already tolerates this exact shape once (backdateStatus itself); this is the second instance of it."
+    },
+    {
+      "id": "STD-3",
+      "ticket": 845,
+      "severity": "minor",
+      "category": "duplicated-code",
+      "smell": "Duplicated Code / Shotgun Surgery",
+      "file": "packages/db/tests/{checkout-convergence-upgrade,hrd-a-recut-guard,rig-docs-upgrade,rig-events-upgrade,rig-runtime-upgrade,s6-upgrade,wave-a-upgrade,x37-0037-upgrade,x40-0040-upgrade,x41-0041-upgrade}.test.mjs, hrd-b-upgrade-kit.mjs, wave-b/wb-0020-upgrade.test.mjs, x42-split-upgrade-kit.mjs",
+      "title": "the guardedReset wrap is the same two-line insertion repeated near-identically in 13 files",
+      "evidence": "e.g. hrd-a-recut-guard.test.mjs: `const { reset } = await import(\"../scripts/reset.mjs\"); const { guardedReset } = await import(\"./rig-reset-guard.mjs\"); const { migrate } = await import(\"../scripts/migrate.mjs\"); await guardedReset(reset, { log: () => {} });` — the same `const { guardedReset } = await import(...)` + `guardedReset(reset, ...)` pair appears essentially verbatim 13 times across this diff.",
+      "why_it_matters": "A future rename of rig-reset-guard.mjs's export, or a change to what a caller must pass, is a 13-site shotgun edit rather than a one-place change; the drift-guard test this same ticket adds (reset-gate-routing.test.mjs) exists specifically because this kind of scattered per-file duplication is easy to leave inconsistent.",
+      "suggested_fix": "A shared `guardedFreshReset()`-style re-export (one place obtains both reset and guardedReset and returns the wrapped callable) would collapse the 13 duplicated import pairs to one definition, at the cost of one more indirection.",
+      "note": "The ticket's own Agent Brief (#845, 'Key interfaces') explicitly prescribes this exact per-file shape ('Each upgrade-drill test or kit module: its direct reset({...}) becomes guardedReset(reset, {...})'), so this is a low-priority observation, not something the diff got wrong relative to its own spec — flagged only because the Fowler baseline applies even where a spec is silent on style, and here the spec itself chose the scattered shape."
+    },
+    {
+      "id": "STD-4",
+      "ticket": 844,
+      "severity": "note",
+      "category": "documentation-style",
+      "smell": "Mysterious Name (minor, doc heading)",
+      "file": "packages/db/tests/README.md",
+      "title": "new os.19 heading breaks the file's own heading convention",
+      "evidence": "New heading: `## \\`operator-support.test.mjs\\` os.19 — #844`. Sibling headings in the same file consistently backtick-wrap any cell-prefix qualifier and separate it with its own delimiter, e.g. `## \\`firm-commercial-settings.test.mjs\\` — #635 / migration 0233 (cell prefix \\`p635.db.\\`)` and `## \\`bank-line-existing-booking.test.mjs\\` — #657 (migration 0226)`. The new heading instead runs the bare, unbacktick'd `os.19` directly after the filename with no separator before the em dash.",
+      "why_it_matters": "Cosmetic only — a reader scanning headings for the qualifier pattern (ticket / migration / cell-prefix) sees one inconsistent entry.",
+      "suggested_fix": "e.g. `## \\`operator-support.test.mjs\\` — #844 (cell \\`os.19\\`)` to match the file's own established heading shape."
+    }
+  ],
+  "test_quality_notes": [
+    {
+      "id": "STD-5",
+      "ticket": 845,
+      "severity": "note",
+      "category": "mocking",
+      "title": "acceptance-2 substitutes a non-delegating spy for scripts/reset.mjs's real export — checked against mocking.md and found justified, not a violation",
+      "evidence": "reset-gate-routing.test.mjs's acceptance-2 cell fetches the real `reset` export only to assert `typeof realReset === \"function\"`, then calls `guardedReset(wrapped, { log: () => {} })` with `wrapped = async () => { spy.entered += 1; }` standing in for it.",
+      "assessment": "mocking.md says 'don't mock ... anything you control', which this could look like on its face (scripts/reset.mjs is repo-owned). Two things clear it: (1) guardedReset(fn, options) takes its destructive callback as an injected parameter by design — substituting a benign callback to unit-test the guard's own refuse-before-invoke behaviour is exactly mocking.md's own dependency-injection guidance, not mocking an internal collaborator to shortcut a real assertion; (2) RIG.md forbids ever setting CLARA_RIG_ALLOW_RESET on this shared rig, so exercising the actual DROP SCHEMA path here is not an option this suite has — the destructive reset() is the closest thing this test has to a system boundary. The exact same non-delegating-spy shape already exists for T19 in rig-reset-guard.test.mjs; this cell was reviewed and fixed in fix round 1 (L03-S1) specifically to match that established precedent (it originally delegated to the real export, which the SPEC review correctly flagged as dangerous; the fix removed the delegation). No further action needed on the STANDARDS axis."
+    }
+  ],
+  "confirmed_compliant": [
+    "packages/db/tests/README.md:52-53's documented rule for fixed-asset-acquisition.test.mjs ('every assertion under test runs through a humanQuery/roleQuery persona ... rootQuery appears only as a readback') is honoured by both new #884 cells: the acts (onboarding, enrolment, drafting, approval) all run through wb.* / upsertFaProfile humanQuery-backed door wrappers under w.users.alice/bob/hana; rootQuery is used only for assetCountOf/entryRowOf readbacks and the belt-detail JSON parse of the thrown error.",
+    "os.19 (operator-support.test.mjs) follows the same persona discipline os.14 already established: the door reads under test (supportQueue/supportCase) are humanQuery-backed; rootQuery is used only for fixture arrangement (forceStatus, forceOpenedAt, both pre-existing or directly modelled on a pre-existing idiom) and readbacks (intentState, the tie-instant check, the winner/loser SELECTs).",
+    "reset-gate-routing.test.mjs's source-scanning structural cells (file-census, no-bare-reset(, guardedReset-import-count) are not an ad hoc anti-pattern: they match an already-established repo convention for this exact class of problem (chain-minted-roles-drift-guard.test.mjs's 'independent second derivation' drift guard), and the ticket's own acceptance criteria are themselves phrased as a text-grep ('a grep for reset( finds no unwrapped call'), so testing at the source-text seam is what the brief asked for, not a seam the brief withheld.",
+    "No evidence of horizontal slicing: git log --stat --reverse shows each ticket's test additions and the mechanical guardedReset wrapping landing together in that ticket's own commit (never a whole battery of red cells committed before any implementation), and every commit message documents a same-session red-for-the-right-reason vacuity control.",
+    "Docs updated in the same commits as the code they describe (WORK-ORDER rule 9): packages/db/tests/README.md gained a section per ticket in the same commit; no CONTEXT.md change, and none of the three tickets' vocabulary (guardedReset, arm-1, K-family opening-balance exclusion) is new — all three are already used elsewhere in the test suite before this diff.",
+    "No shared file from WORK-ORDER rule 7's list was touched; no migration, no frozen-workflow file, no PRD/ARCHITECTURE edit."
+  ],
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 884,
+      "severity": "minor",
+      "title": "opening_excluded re-implements kSeededFaClient's enrol-and-chart prefix instead of sharing it",
+      "evidence": "See judgement_calls[0]."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 844,
+      "severity": "minor",
+      "title": "forceOpenedAt duplicates backdateStatus's trigger-disable idiom instead of generalizing it",
+      "evidence": "See judgement_calls[1]."
+    },
+    {
+      "id": "STD-3",
+      "ticket": 845,
+      "severity": "minor",
+      "title": "the guardedReset wrap is the same two-line insertion repeated near-identically in 13 files",
+      "evidence": "See judgement_calls[2]."
+    },
+    {
+      "id": "STD-4",
+      "ticket": 844,
+      "severity": "note",
+      "title": "new os.19 heading breaks the file's own heading convention",
+      "evidence": "See judgement_calls[3]."
+    }
+  ],
+  "verdict": "accept",
+  "summary": "No hard violations of a documented repo standard found in this diff (packages/db/tests/** only, 6 commits, tickets #845/#844/#884). The four findings are all Fowler-baseline judgement calls, all minor-or-note: three instances of Duplicated Code (a new fixed-asset cell re-deriving kSeededFaClient's enrolment prefix instead of sharing it; a new forceOpenedAt helper duplicating the existing backdateStatus trigger-disable idiom instead of generalizing it; the guardedReset wrap repeated near-identically across 13 files, though that shape is what #845's own Agent Brief prescribes) and one cosmetic README heading inconsistency. On TEST QUALITY against /tdd: the one test double in the diff (reset-gate-routing.test.mjs's non-delegating spy standing in for scripts/reset.mjs) was checked against mocking.md and judged justified — it substitutes a callback into a higher-order guard function by design (dependency injection), mirrors an already-established repo idiom (T19's own spy in rig-reset-guard.test.mjs), and is the only safe way to prove a refuse-before-run guarantee given RIG.md's standing prohibition on ever exercising the real destructive path on this shared rig; it was also independently re-verified non-delegating by the SPEC-axis recheck already on file. No tautological expectations were found (every new assertion's expected value is either a fixture-supplied literal or a cross-check against a second, independent read, never a recomputation of the code's own formula). No evidence of horizontal slicing in git log --stat. The repo's own documented persona-discipline standard for fixed-asset-acquisition.test.mjs (README.md:52-53) is honoured by both new #884 cells, and reset-gate-routing.test.mjs's source-scanning structural cells match an established repo drift-guard convention rather than inventing a new anti-pattern seam. Nothing here blocks acceptance; the four findings are optional cleanups, not required fixes."
+}

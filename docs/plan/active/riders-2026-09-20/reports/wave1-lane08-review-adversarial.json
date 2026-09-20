@@ -1,0 +1,122 @@
+{
+  "lane": "wave 1, lane 08",
+  "branch": "riders/w1-lane08",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "merge_base": "dd3f8f1d202b6eade2211f33c34f263d033768f1",
+  "head_commits": [
+    "79037366 test(e2e): #879 first Playwright coverage for the staffAdvances tab",
+    "cf76a22a feat(web): #874 a test-only seam on the invite mail endpoint alone",
+    "02c6938b fix(web): #956 an abort cancels a pending reconnect, not just the read",
+    "61f56acf fix(web): #1005 SelectValue requires a label source, by construction"
+  ],
+  "lens": "adversarial",
+  "verdict": "accept-with-fixes",
+  "gates_reproduced_by_reviewer": [
+    "pnpm typecheck (worktree root): exit 0, apps/web + packages/runtime clean",
+    "lib/clara/use-clara-thread-stop.test.ts isolated x3: 26/26 pass each run",
+    "components/ui/select.test.tsx + tests/select-value-label-census.test.ts + tests/streamReattach.test.mjs + tests/invite-mail-transport.test.ts + components/firm/activity/activity-filters.test.tsx in one run: 54/54 pass",
+    "git status in the worktree: clean; apps/web/test/manifest.txt lists all 3 new unit test files at their sorted positions"
+  ],
+  "findings": [
+    {
+      "id": "ADV-1",
+      "ticket": 874,
+      "severity": "blocker",
+      "title": "INVITE_MAIL_ENDPOINT_OVERRIDE is a production-live outbound-egress override with no fence, and the repo already deleted exactly this seam once on a recorded ruling",
+      "evidence": "apps/web/lib/members/invite-mail.ts:111-120 reads INVITE_MAIL_ENDPOINT_OVERRIDE from the env unconditionally, in every environment; :541-550 posts the invite mail (recipient, subject, the invite link) to config.mailEndpoint ?? RESEND_ENDPOINT. There is no NODE_ENV gate, no loopback allowlist, no CLARA_E2E_ naming, and no receipt. apps/web/lib/checkout/stripe-session.ts:145-165 is this repo's own recorded precedent for the identical class: 'THE ONE BASE, AND IT IS NOT OVERRIDABLE - a decision this lane made, reversed, and is recording... An earlier cut added a CLARA_E2E_STRIPE_API_BASE override... fenced behind the estate's own dev/loopback carve-out... hard constraint 14's operative clause forbids exactly that: the product's security mechanisms are the thing under test and are NEVER weakened or bypassed for testing convenience. So the override is GONE rather than relaxed.' The #874 seam is strictly weaker than the one that was deleted (that one at least had a fence), and that same note explains why an unfenced seam is the only shape that could reach a `next start` walk - the fence is what made the Stripe version useless. Every other live e2e seam in this estate takes the opposite shape (apps/web/lib/require-firm-scope.ts:294,482 and lib/supabase/proxy.ts:70, all gated on CLARA_E2E_MONEY_INPUT_HARNESS === '1'). Compounding: AC2, the walk that substitutes it, was NOT delivered - the lane's own report records it as unit-level only - so production egress surface was added and nothing was bought with it.",
+      "required_fix": "Either (a) fence it the way the estate's other e2e seams are fenced - honour the override only when an explicit CLARA_E2E_* harness flag is set AND the parsed URL's host is loopback, and rename it CLARA_E2E_INVITE_MAIL_ENDPOINT so a seam census finds it - or (b) drop the seam from this branch until the walk that justifies it exists, and take the Stripe reversal note back to the owner: the 2026-09-18 ruling said 'unset in production' as a convention, not as a mechanism, and predates anyone re-reading stripe-session.ts."
+    },
+    {
+      "id": "ADV-2",
+      "ticket": 1005,
+      "severity": "major",
+      "title": "PROVED: an unmatched value now renders the placeholder, so a filter that IS applied reads as 'All clients'",
+      "evidence": "components/ui/select.tsx's resolveChildren returns resolveSelectValueLabel(value, items) ?? placeholder ?? \"\". In every '__all' sentinel select the placeholder IS the 'All X' label, so a value absent from items now renders the label for the OPPOSITE state. Reachable: apps/web/lib/firm/activity.ts:415 and apps/web/lib/work/work-list-url-state.ts:153 both accept ?client= on shape alone (isClientIdShape), never against the roster the trigger's items is built from - a bookmarked, archived or out-of-scope client id reaches it. Proved by running a probe copy of the lane's own activity-filters.test.tsx harness with state.client set to a well-formed uuid absent from clients: rendered trigger text was 'ClientAll clients...' while the feed is filtered by that client (the probe asserted doesNotMatch(/All clients/) and failed). Before this diff the same case rendered the raw uuid - ugly, but true. No cell covers it; components/ui/select.test.tsx:91-113 ('a value absent from items falls back to the placeholder') pins the new behaviour as correct. Probe deleted; worktree left clean.",
+      "required_fix": "Do not conflate 'no value' with 'a value I cannot label'. Either render a truthful fallback for a non-empty unmatched value (the value, or a distinct message-keyed 'Filtered' label), or clamp state.client to the roster in ActivityFilters / WorkListFilterControls before it reaches the Select. Add the unmatched-but-non-empty cell at those two URL-driven surfaces, not only at the wrapper."
+    },
+    {
+      "id": "ADV-3",
+      "ticket": 1005,
+      "severity": "major",
+      "title": "PROVED: the census does not catch the bypass its own header says it catches (AC4 hole)",
+      "evidence": "apps/web/tests/select-value-label-census.test.ts's header claims it catches 'a file that skips our wrapper entirely and imports Base UI's OWN Select.Value (or Value) straight from @base-ui/react/select'. Two holes: (1) the import check matches only the literal specifier '@base-ui/react/select', but '.' is a real export of @base-ui/react@1.7.0 (verified against the installed package.json exports map), so `import { Select } from \"@base-ui/react\"` is invisible; (2) tagNameOf() returns null for any qualified JSX name, so `<Select.Value />` is never counted as a call site at all. Proved by adding components/ui/zz-probe-bypass.tsx with exactly that import and a bare <Select.Value /> inside a Select.Root: the census ran 2 pass / 0 fail. TypeScript does not catch it either (Base UI's own Value.Props makes children optional) and there is no no-restricted-imports rule for @base-ui/react in this repo. Probe deleted after the run.",
+      "required_fix": "Make tagNameOf handle ts.isPropertyAccessExpression tag names and flag any <*.Value> outside components/ui/select.tsx; match the import by prefix ('@base-ui/react' and its subpaths) rather than one exact specifier. Re-run the probe above as the census's own vacuity control."
+    },
+    {
+      "id": "ADV-4",
+      "ticket": 956,
+      "severity": "major",
+      "title": "PROVED: abortableSleep turns a sleepImpl rejection into an unhandled rejection and hangs the reattach loop forever",
+      "evidence": "apps/web/lib/clara/stream.ts:459 - `void sleepImpl(ms).then(finish);` has no rejection handler, and finish() is the only path that resolves the returned promise. Before this diff, `await sleep(delayMs)` propagated a rejecting sleep out of runClaraTaskStream to its caller. Proved by a probe test injecting sleepImpl: async () => { throw new Error('transport clock exploded'); }: node:test reported failureType 'unhandledRejection', error 'transport clock exploded', stack 'sleepImpl -> <anonymous> (stream.ts:459:10) -> new Promise -> abortableSleep (stream.ts:450:10) -> runClaraTaskStream (stream.ts:606:11)', and the awaited runClaraTaskStream promise never settled. sleepImpl is a public, documented option on RunClaraTaskStreamOptions - the lane's own two new cells inject it - so this is a reachable error path the diff converted from 'the caller sees the failure' into 'the process sees an unhandled rejection, the read hangs, and a live abort listener leaks'. Probe deleted after the run.",
+      "required_fix": "`void sleepImpl(ms).then(finish, finish);` (or a .catch that calls finish) so a failing clock ends the backoff the way an elapsed one does; if the failure should still surface, capture it and rethrow after the loop's own aborted check rather than dropping it. Add a cell for the rejecting-sleep case."
+    },
+    {
+      "id": "ADV-5",
+      "ticket": 1005,
+      "severity": "major",
+      "title": "components/ui/select.test.tsx's header claims per-call-site coverage that does not exist, and contradicts the lane's own report",
+      "evidence": "components/ui/select.test.tsx lines 4-9 state 'every real call site is proved at its own integration point instead' and name ten files. Four do not exist in the tree: components/documents/correction-wizard.test.tsx, components/documents/document-kind-control.test.tsx, components/documents/document-kind-dialog.test.tsx, components/work/work-list-filters.test.tsx. Two exist but contain zero occurrences of '1005': components/work/work-question-form.test.tsx, components/firm/documents/unassigned-sources.test.tsx. The lane's own final report says the opposite ('Not covered by a dedicated per-selected-value test: correction-wizard.tsx, document-kind-control.tsx, document-kind-dialog.tsx, unassigned-sources.tsx, work-question-form.tsx'). AGENTS.md rule 6: a claim about the state of the world needs a checkable source; this one is checkable and false, and it is the artifact a future agent reads first.",
+      "required_fix": "Rewrite that header to name exactly the four surfaces that have per-call-site cells (matching-section, activity-filters, knowledge-panel-freshness, knowledge-firm-panel, plus accounting-work-list's WorkListFilterBar cells) and to say which five rest on typecheck plus census only - mirroring the report's own honest paragraph."
+    },
+    {
+      "id": "ADV-6",
+      "ticket": 897,
+      "severity": "major",
+      "title": "Stopped on all four acceptance criteria when at least three were independent of the disputed one",
+      "evidence": "The Agent Brief's four ACs are separable: AC2 is the OPEN, unanswered park fixture; AC3 is e2e-fixture-ownership.test.ts passing with the new fixture and verbs declared; AC4 is a header note in interview-walk.spec.ts; AC1 asks one named cell to assert focus return AND typed-data survival. Only the typed-data-survival half of AC1 is blocked by the lane's product-gap conclusion - which I verified is correctly traced (components/clara/InterviewRunCard.tsx:63 is a plain useState draft; components/clara/ClaraRail.tsx:52-53 escalates via an href into a sibling route group). The lane's own report concedes 'the mock-lane fixture design ... is otherwise straightforward and was not the blocker', and AC4 alone is one sentence at zero risk. Zero of four were delivered.",
+      "required_fix": "Deliver AC2, AC3, AC4 and the focus-return half of AC1 as a partial, naming typed-data survival as the one criterion held open by the successor contract - which is what work-order rule 3 ('if it is partly satisfied, build only the rest and say so') asks for. Also convert the 'likely false today' conclusion from argument to evidence with the cheap probe the report itself describes."
+    },
+    {
+      "id": "ADV-7",
+      "ticket": 956,
+      "severity": "minor",
+      "title": "claraThreadStore.abortAllStreams() is production API with no production caller, added to serve one test file's afterEach",
+      "evidence": "apps/web/lib/clara/threadStore.ts:543-568 - its own doc comment says 'Not reached by any production surface today ... this exists as the store's own hard-reset primitive for whoever next needs...'. Its only caller is the new test.afterEach at lib/clara/use-clara-thread-stop.test.ts:57-59. #956's brief names the interfaces it expects to change (abortStream, the runner's sleepImpl and backoff policy, the unmount contract) and lists 'Changing production stop or cancel behaviour to make a test pass' as out of scope; work-order rule 4 forbids speculative code for tests not written. The same isolation is reachable test-locally by tracking the task ids the file hydrated and calling the existing public abortStream(taskId).",
+      "required_fix": "Either move the teardown into the test file over its own task ids using the existing abortStream, or give abortAllStreams a real production caller in this same change. Do not ship a public store method whose header says nothing calls it."
+    },
+    {
+      "id": "ADV-8",
+      "ticket": 956,
+      "severity": "minor",
+      "title": "AC3 ('the absence cell cannot pass by luck') is satisfied only for cross-cell leaks; nothing was added to the absence cell itself",
+      "evidence": "The brief's AC3 reads 'a leaked open arriving after its settle budget is either impossible or still detected'. The fix makes leaks from EARLIER cells impossible (afterEach plus abortableSleep), which the 25/25 isolated and 5x whole-suite runs evidence and which my own 3x isolated re-run supports. But the absence cell still spends a fixed SETTLE_PASSES budget (lib/clara/use-clara-thread-stop.test.ts:36) with no cell-level detection added, so a stray open scheduled inside that same cell and landing after the budget is neither impossible nor detected - only much less likely. The report does not claim otherwise but also does not mark AC3 partial.",
+      "required_fix": "Add the cheap detection the AC asks for (re-read the recorded stream count after the afterEach abort, or fail the cell if any controller in the store is still un-aborted at its end), or record AC3 as met-for-cross-cell-only with that reasoning."
+    },
+    {
+      "id": "ADV-9",
+      "ticket": 1005,
+      "severity": "minor",
+      "title": "AC3 ('a unit test per affected component') is unmet for five of eleven call sites, and the stated reason does not hold",
+      "evidence": "Self-declared in the lane's report: correction-wizard.tsx, document-kind-control.tsx, document-kind-dialog.tsx, unassigned-sources.tsx and work-question-form.tsx have no cell asserting their trigger's text on first render. The reason given is that test/hookHarness.ts cannot open a Base UI portalled popup and click an option - but none of these five needs that: each renders from a value already in component state (kind / clientId / toClient), so a cell can mount with that value preset and read the trigger text without ever opening the popup, which is exactly what select.test.tsx's own five cells do.",
+      "required_fix": "Add the five first-render cells (mount with a preset value, assert the label present and the raw value absent), or replace the stated reason with one that survives - the current one does not."
+    },
+    {
+      "id": "ADV-10",
+      "ticket": 879,
+      "severity": "minor",
+      "title": "The walk's third cell can only pass as part of a whole-file run, and its refusal check passes on an empty DOM",
+      "evidence": "apps/web/e2e/staff-advances-register-mock.mjs's `state` is module-level and never reset; staff-advances-register-walk.spec.ts cell 3 asserts the 'Payroll deduction' / -RM 300.00 / RM 700.00 rows that cell 2 created. Running cell 3 alone (pnpm --filter @clara/web e2e -g 'statement panel', the normal way to debug one cell) makes it red for a reason unrelated to the code under test. Only playwright.config.ts's retries: 0 prevents the worse case: a retried cell 2 would enrol 1191 a second time (the mock's enrol handler pushes unconditionally), so page.getByRole('row').filter({hasText: SAR.freshAccount}) would match two rows - a strict-mode violation masking the original failure - and appliedCents would double to 600, breaking the RM 700.00 assertion. Separately, `await expect(page.getByText(/CLR\\d/)).toHaveCount(0)` passes instantly against an empty DOM and cannot catch a refusal banner rendering a frame later.",
+      "required_fix": "Make the mock resettable (export reset() called from a beforeAll, or make the enrol handler idempotent per account code) so a cell can be run alone and a retry is survivable; put a positive post-booking assertion before the CLR absence check so the absence is asserted against a settled page."
+    },
+    {
+      "id": "ADV-11",
+      "ticket": 875,
+      "severity": "note",
+      "title": "The audit table cites a file path that does not exist (the content claim itself is correct)",
+      "evidence": "The report's poller table names work-question-affordance.tsx under components/work/; the file is components/firm/work-question-affordance.tsx. The content claim is accurate - verified by grep: the only timers are requestAnimationFrame / setTimeout(..., 0) at lines 109-112, no interval-driven poll. Raised only because #875's entire deliverable is an evidence table, and a path a reader cannot open weakens the one artifact the ticket produced.",
+      "required_fix": "Correct the path in the report."
+    }
+  ],
+  "checked_and_found_sound": [
+    "#956 abortableSleep's abort race: stream.ts:590-608 re-reads opts.signal.aborted at the top of the next iteration before opening another attach, and finish() removes the listener on both arms, so there is no listener leak on the normal path.",
+    "#956 the two new streamReattach cells are not vacuous: the fast-path cell's sleepCalls === 0 can only hold via abortableSleep's aborted short-circuit, and the mid-backoff cell's exit can only come from the abort because the injected sleep never resolves on its own.",
+    "#1005 matching-section.tsx is NOT exposed to ADV-2: effectiveAccountId (line 91) is always null or a member of activeAccounts, so the placeholder fallback there only ever means 'nothing selected'.",
+    "#1005 the wrapper's items/children union mirrors Base UI 1.7.0's real SelectValue implementation (node_modules/.../select/value/SelectValue.js: a function childrenProp is always called with value and overrides the placeholder prop), so the wrapper's own value == null -> placeholder branch is required, not redundant.",
+    "#879 the mock is genuinely stateful, not hard-coded: book_staff_advance_application sums p_allocations from the posted body into state.appliedCents and outstandingCents() derives every summary/tie/statement figure from it, so the RM 700.00 assertions cannot pass without the booking landing.",
+    "#879 dispatch hygiene: handleStaffAdvancesRegisterSupabase reads the request body only inside a matched verb branch and caches on the shared __e2eParsedBody key that mock-dispatch.mjs and three sibling lanes already use, so it cannot consume another lane's body.",
+    "#875 the useWorkDetail verdict is defensible: the terminal-poll cell (work-detail.test.tsx:895) is a pure absence assertion, but the same file's transient-failure cell (~line 855) is the positive control - same 3_100 ms harness wait, asserting attempt >= 2 - so a poll that never ticked at all would be caught.",
+    "apps/web/test/manifest.txt carries all three new unit test files at their sorted positions; no new test file is missing from the whole-suite run.",
+    "No frozen-workflow surface is touched: the diff is apps/web only (30 files), with no packages/runtime change, no migration and no workflow body."
+  ],
+  "summary": "Four commits of genuinely careful work: #1005's wrapper makes the label path compulsory at the type level, and #956's diagnosis of the reattach-timer leak is correct and measured - both confirmed here (pnpm typecheck exit 0; 26/26 on the flaky file across 3 isolated runs; 54/54 across the new cells). Three defects were proved by running something: the unmatched-value fallback now renders 'All clients' while a client filter is applied (ADV-2), the #1005 census misses the exact Base UI bypass its own header claims to catch (ADV-3), and abortableSleep converts a sleepImpl rejection into an unhandled rejection plus a permanently hung loop (ADV-4). The blocker is not a defect but a posture regression: #874 adds an unfenced, production-live override of the invite-mail endpoint - the same class of seam this repo already built, fenced, and then deleted on a recorded hard-constraint ruling in stripe-session.ts - and the walk that was its only justification was never built. Do not land the branch until ADV-1 is settled with the owner; ADV-2 through ADV-5 are single-file fixes."
+}

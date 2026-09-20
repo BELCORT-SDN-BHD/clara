@@ -1,0 +1,69 @@
+{
+  "lane": "wave1-lane06",
+  "axis": "RECHECK",
+  "reviewer": "/code-review recheck reviewer (read-only)",
+  "branch": "riders/w1-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\656",
+  "head": "50d954d7",
+  "fixed_point": "origin/main",
+  "origin_main_at_recheck": "e7f0a10a",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits": [
+    "50d954d7 docs(db): #963 fix round 2 - the DRIFT wording claim was false; state what the migrations show",
+    "cf3c863f fix(runtime): #967 fix round 2 - a live-DB re-run of AC1's blocker, and a named residual against AC3",
+    "5be70900 fix(runtime): #850 fix round 2 - a real guard instead of a declined one, and an honest AC1",
+    "de3b251a fix(runtime): #967 + #850 fix round 1 - a real drained failure, a masked error, two mislabels",
+    "b89671ce docs(db): #963 fix round 1 - restore the migration-number qualifier, note 0214's earlier wording",
+    "7f956c6b docs(db): #963 name the cross-migration body-pin convention 0233 relies on",
+    "c00fc8d4 fix(runtime): #967 drain each intake CI leg's queue before it exits",
+    "ebbaa2ee perf(runtime): #850 overlap the two-build drill's two scratch builds"
+  ],
+  "inputs_read": {
+    "fix_report_named_in_task": "docs/plan/active/riders-2026-09-20/reports/wave1-lane06-codereview-fix.md",
+    "fix_report_exists": true,
+    "spec_report": "docs/plan/active/riders-2026-09-20/reports/wave1-lane06-codereview-spec.json (head de3b251a, verdict accept-with-fixes, 10 findings L06-SPEC-R2-01..10)",
+    "standards_report": "docs/plan/active/riders-2026-09-20/reports/wave1-lane06-codereview-standards.json (head de3b251a, verdict accept-with-fixes, 4 findings L06-STD-1..4)",
+    "final_report": "docs/plan/active/riders-2026-09-20/reports/wave1-lane06-final.md (read for the per-ticket Status lines; found stale, see LR-01)"
+  },
+  "git_status_clean": true,
+  "verdict": "accept",
+  "summary": "All ten spec findings and all four standards findings are answered, and every code-level answer holds up against an independent re-run on the lane's current head (50d954d7), git status is clean, and nothing else broke. The blocker (L06-SPEC-R2-01) is the one worth real scrutiny: I independently re-ran intake-e2e.mjs then intake-admission-e2e.mjs, in real CI order, on a freshly created clara_intake_ci (template copy of clara_l06, bootstrapped) - leg 1 passed with the new drain firing cleanly (polls=2, waited=429ms), and leg 2 failed, but on the pre-existing, already-documented Windows-only EPERM/rename race (packages/runtime/README.md's '#693 family'), at intake-admission-e2e.mjs's own line 559, well before its waitForQueueDrain call at line 762 - the new throw was never reached, matching the fix report's own claim exactly. L06-SPEC-R2-02, 03, 05, 06, 07, 08 are all verified fixed by direct inspection of the current file contents (action.yml's honest 'AC1 REMAINS UNMET' wording, scratch-image.mjs's tested shouldOverlapSecondBuild/OVERLAP_MIN_CORES guard, packages/db/README.md's corrected DRIFT-wording paragraph, queue-drain.mjs's named two-gap residual, the dropped wave-local citation/finding-ids). L06-SPEC-R2-04, 09, 10 and L06-STD-1, 2, 4 are correctly left as recorded judgement calls / GitHub-write notes, not silently dropped, and L06-STD-3 was already a clean sweep. Gates re-run by this reviewer: queue-drain.test.mjs 6/6, scratch-image-overlap.test.mjs 4/4, node --check on all seven touched .mjs files OK, check-frozen-workflows.mjs OK (312 frozen, no manifest diff), check-parts-parity.mjs OK, pnpm typecheck clean (both workspaces Done), pnpm lint clean (exit 0, all package self-tests green). apps/web was untouched by this lane so its unit/e2e suites were correctly not re-run. One residual, minor: wave1-lane06-final.md - the canonical WORK-ORDER-rule-10 report - still says 'Status: done' for both #850 and #967 with no AC1-unmet caveat; the corrected 'partial' status lives only in the codereview-fix.md's own 'Per-ticket status' section, not in final.md itself.",
+  "source_findings_disposition": [
+    { "id": "L06-SPEC-R2-01", "ticket": 967, "severity": "blocker", "status": "fixed via re-verification; independently reconfirmed", "verified_via": "Reviewer's own fresh clara_intake_ci (drop+create template clara_l06, bootstrap) run: leg 1 intake-e2e.mjs PASS with '[queue-drain] drained (polls=2, waited=429ms)'; leg 2 intake-admission-e2e.mjs FAILED with 'EPERM: operation not permitted, rename ...spool\\intake-....json...' at its own line 559 (LEG 3 duplicate-bytes assertion), never reaching its waitForQueueDrain call at line 762-763 - the new throw was not exercised in this run because the leg died first on a pre-existing race packages/runtime/README.md:1353 already names as the '#693 family'. Matches the fix report's own Run A exactly. Databases dropped after the check; clara_l06 confirmed untouched." },
+    { "id": "L06-SPEC-R2-02", "ticket": 850, "severity": "major", "status": "fixed, verified", "verified_via": "action.yml lines ~419-425 now read 'AC1 (the step's own before/after wall clock, measured on CI) REMAINS UNMET: the 78.0s/124s pair below is a Windows-host measurement from the #637 fix round, not a CI one, and no CI figure for this step ... has ever been recorded.'" },
+    { "id": "L06-SPEC-R2-03", "ticket": 850, "severity": "major", "status": "fixed, verified", "verified_via": "packages/runtime/tests/scratch-image.mjs exports OVERLAP_MIN_CORES=4 and shouldOverlapSecondBuild(availableCores); two-build-cutover-e2e.mjs calls it via os.availableParallelism() to gate the overlap. node --test tests/scratch-image-overlap.test.mjs -> 4/4 pass (reviewer re-run)." },
+    { "id": "L06-SPEC-R2-04", "ticket": 967, "severity": "major", "status": "correctly reported partial, not silently closed - holds", "verified_via": "fix report's own 'Per-ticket status' marks #967 partial on AC1; action.yml/queue-drain.mjs make no false completeness claim about the line-count reduction. See LR-01 for the one place this correction did not propagate (final.md)." },
+    { "id": "L06-SPEC-R2-05", "ticket": 963, "severity": "minor", "status": "fixed, verified", "verified_via": "packages/db/README.md now reads '...so \"settled from 0221 onward\" is not a claim this file can make. The one invariant across every wording is the phrase has DRIFTED' and no longer calls 0214 'the FIRST instance'." },
+    { "id": "L06-SPEC-R2-06", "ticket": 967, "severity": "minor", "status": "fixed (documented residual), verified", "verified_via": "queue-drain.mjs header now has a 'NAMED RESIDUAL AGAINST AC3 (L06-SPEC-R2-06, fix round 2)' block naming both the pre-drain-call gap and the Promise.all three-statement race. queue-drain.test.mjs 6/6 (reviewer re-run) confirms no runtime statement changed." },
+    { "id": "L06-SPEC-R2-07", "ticket": 850, "severity": "minor", "status": "fixed, verified", "verified_via": "grep -n 'docs/plan/active|L06-850|L06-967|L06-SPEC' .github/actions/db-live-gates/action.yml -> no matches; the citation and finding-ids are gone from the shared file." },
+    { "id": "L06-SPEC-R2-08", "ticket": 963, "severity": "minor", "status": "fixed, verified", "verified_via": "packages/db/README.md now reads 'The instances DOCUMENTED below are findable by the pinned function's name' (no 'every migration ... is findable' completeness claim), plus the 16-migration list." },
+    { "id": "L06-SPEC-R2-09", "ticket": 967, "severity": "note", "status": "correctly left as a note; GitHub-write text is drafted in the fix report for the orchestrator, not open against the lane", "verified_via": "no ticket comment posted (correct - lane may never write to GitHub); text present verbatim in wave1-lane06-codereview-fix.md's 'For the orchestrator' section" },
+    { "id": "L06-SPEC-R2-10", "ticket": 850, "severity": "note", "status": "correctly left as a note, no action required", "verified_via": "fix report records it for the orchestrator's own read; no code change needed per the source finding" },
+    { "id": "L06-STD-1", "tickets": [967, 850], "severity": "major", "status": "answered going forward, correctly not undone - holds", "verified_via": "git log de3b251a..HEAD --oneline shows three new commits, each single-ticket (5be70900 #850 only, cf3c863f #967 only, 50d954d7 #963 only); de3b251a itself (the bundled commit) is unchanged, consistent with the finding's own statement that a history rewrite is outside this worker's authority." },
+    { "id": "L06-STD-2", "tickets": [850, 967], "severity": "minor", "status": "correctly left as a judgement call, no functional fix required", "verified_via": "action.yml diff is prose-only in both blocks (confirmed by reading the current file); the finding itself asks for no functional fix, only orchestrator attention on integration." },
+    { "id": "L06-STD-3", "tickets": [967], "severity": "note", "status": "clean sweep, still holds", "verified_via": "queue-drain.test.mjs re-run 6/6; no violation reintroduced." },
+    { "id": "L06-STD-4", "tickets": [967], "severity": "note", "status": "correctly left as a judgement call, no action required", "verified_via": "fakeRig's ordering-dependent regex routing in queue-drain.test.mjs is unchanged and still self-documented with the same comment the finding quotes." }
+  ],
+  "gates_rerun_by_reviewer": [
+    "node --test tests/queue-drain.test.mjs (packages/runtime) -> 6/6 pass, 0 fail",
+    "node --test tests/scratch-image-overlap.test.mjs (packages/runtime) -> 4/4 pass, 0 fail",
+    "node --check on queue-drain.mjs, queue-drain.test.mjs, scratch-image-overlap.test.mjs, scratch-image.mjs, two-build-cutover-e2e.mjs, intake-e2e.mjs, intake-admission-e2e.mjs -> all OK",
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen file(s) verified, no manifest diff, 3 retired entries recorded",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, reader superset of emittable holds",
+    "pnpm typecheck (repo root) -> both packages/runtime and apps/web 'Done', clean",
+    "pnpm lint (repo root) -> exit 0, all package self-tests green (check-token-contrast, check-test-manifest, check-message-keys, check-ui-add-guard, eslint packages)",
+    "git status --short (worktree) -> empty both before and after this recheck's own live-DB probe",
+    "Live-DB re-verification of L06-SPEC-R2-01: fresh clara_intake_ci created from template clara_l06, bootstrapped, ran intake-e2e.mjs then intake-admission-e2e.mjs in CI order; temporary database dropped afterward; clara_l06 (the lane's fixed rig database) confirmed untouched"
+  ],
+  "findings": [
+    {
+      "id": "LR-01",
+      "tickets": [850, 967],
+      "severity": "minor",
+      "kind": "stale-report",
+      "title": "wave1-lane06-final.md (the WORK-ORDER-rule-10 canonical report) still says 'Status: done' for #850 and #967 with no AC1-unmet caveat, even though the fix round's own findings (L06-SPEC-R2-02, L06-SPEC-R2-04) and the fix report's own 'Per-ticket status' section both establish these as partial",
+      "evidence": "docs/plan/active/riders-2026-09-20/reports/wave1-lane06-final.md line 20: '**Status: done**, by overlap rather than by sharing one staged tree (measured first, per the ticket's own rule).' under '## #850'; line 74: '**Status: done** for the two legs that precede another leg on the shared database' under '## #967'. Neither section was edited to add the AC1-unmet caveat. wave1-lane06-codereview-fix.md's own 'Per-ticket status (for the orchestrator's roll-up)' section correctly says '#850 - partial' and '#967 - partial', and L06-SPEC-R2-02's required_fix explicitly asked to 'Downgrade #850 to partial in the lane's report' - but that correction landed only in the fix-round report, not in final.md itself, which is the file WORK-ORDER.md rule 10 names as the lane's report of record.",
+      "required_fix": "Either edit wave1-lane06-final.md's #850 and #967 sections to state the AC1-unmet caveat (matching the codereview-fix.md's own per-ticket status), or have the orchestrator treat wave1-lane06-codereview-fix.md as the authoritative status for these two tickets during roll-up and note explicitly that final.md is superseded on this point. No code or test change is implicated; this is a documentation-consistency gap only."
+    }
+  ]
+}

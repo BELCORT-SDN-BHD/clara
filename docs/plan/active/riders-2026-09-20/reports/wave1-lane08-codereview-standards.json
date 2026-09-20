@@ -1,0 +1,73 @@
+{
+  "lane": "wave 1, lane 08",
+  "branch": "riders/w1-lane08",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "fixed_point": "origin/main",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits_command": "git log origin/main..HEAD --oneline",
+  "head": "b7c37447",
+  "axis": "STANDARDS (never merged with SPEC/ADVERSARIAL)",
+  "reviewer_mode": "read-only (no tracked file edited, no commit, no push)",
+  "standards_sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "apps/web/README.md (the sections this diff touches: Membership/#874, #879, #1005, #956, #875)",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "apps/web/e2e/mock-dispatch.mjs (the readCachedJson/matchVerb house idiom, cross-checked against ~15 sibling *-mock.mjs files for convention conformance)",
+    "packages/db/README.md, packages/db/tests/README.md, packages/runtime/README.md — read; not applicable, this lane's diff touches only apps/web"
+  ],
+  "commits_reviewed": [
+    "61f56acf fix(web): #1005 SelectValue requires a label source, by construction",
+    "02c6938b fix(web): #956 an abort cancels a pending reconnect, not just the read",
+    "cf76a22a feat(web): #874 a test-only seam on the invite mail endpoint alone",
+    "79037366 test(e2e): #879 first Playwright coverage for the staffAdvances tab",
+    "80a94719 fix(web): #1005/#956 fix-round — census bypasses, unmatched-value fallback, five missing cells, rejecting-sleep hang",
+    "1659c4f1 fix(web): #874 fence the invite-mail endpoint override (ADV-1 blocker), reconcile AC2, doc env var",
+    "ff3521f1 fix(web): #875/#879 fix-round — land the audit table, empty-state cell, mock hardening; #897/#956 docs",
+    "b7c37447 fix(web): #1005 STD-1005-4 — pin trigger/option label parity at the two composed-label sites"
+  ],
+  "verdict": "accept",
+  "summary": "No hard violation of a documented repo standard found across the eight-commit diff (2408 insertions / 54 deletions, all under apps/web). The shared-file hunks (test/manifest.txt, e2e/serve-built.mjs, e2e/e2e-fixture-ownership.test.ts, messages/en.json) are minimal and at the sorted/logical position WORK-ORDER.md rule 7 requires. The new e2e mock (staff-advances-register-mock.mjs) was rebuilt in the fix round onto this repo's own readCachedJson/matchVerb/OWNED_RPC_VERBS idiom (mock-dispatch.mjs), matching roughly fifteen sibling lane mocks byte-for-shape rather than inventing a private reader. The #1005 census (select-value-label-census.test.ts) is exactly the 'catalog census' structural-cell shape WORK-ORDER.md rule 4 carves out of the general TDD seam preference, so it is not flagged for reaching an AST rather than a runtime seam. Every unit test read (activity-filters, accounting-work-list, matching-section, correction-wizard, document-kind-control/dialog, unassigned-sources/SourceRow, work-question-form, invite-mail-transport, streamReattach) drives a real public seam (a mounted component's rendered text, an exported capability/mailer function, runClaraTaskStream's own signal/sleepImpl injection points) with expected values sourced from independent literals (fixture names, en.json strings, known URLs) rather than recomputed from the implementation — no tautological assertion and no internal-collaborator mock found; fetch and the backoff clock (sleepImpl) are the only things stubbed, both genuine system boundaries per mocking.md. No evidence of horizontal slicing: each commit lands tests and their corresponding implementation together, and the #1005 wrapper's discriminated-union type in fact requires every call site to convert atomically for the build to compile, which is the forcing reason all eleven sites move in one commit rather than a scope smell. Two note-level Fowler-baseline judgement calls are recorded below, both defensible on the lane's own stated reasoning and neither rising above 'possible smell.' This is a fresh pass; it corroborates rather than duplicates the independent RECHECK (wave1-lane08-recheck-1.json, verdict accept) and the SPEC/ADVERSARIAL rounds already on file for this lane.",
+  "findings": [
+    {
+      "id": "STD-08-1",
+      "ticket": 1005,
+      "severity": "note",
+      "category": "duplicated-code",
+      "title": "possible Duplicated Code: knowledge-panel.tsx and knowledge-firm-panel.tsx each build the same KINDS-mapping shape twice (items= and SelectContent), the exact pattern STD-1005-4 extracted a shared label function to avoid elsewhere",
+      "evidence": "components/registers/knowledge-panel.tsx and components/registers/knowledge-firm-panel.tsx each now carry, twice in the same file: `KINDS.map((k) => ({ value: k, label: t(`kind.${k}`) }))` for `items=` and an structurally identical `KINDS.map((k) => <SelectItem ...>{t(`kind.${k}`)}</SelectItem>)` for `SelectContent`. b7c37447's own commit message explains why matching-section.tsx and work-question-form.tsx got a shared `accountOptionLabel`/`periodOptionLabel` function instead: 'the other eight #1005 call sites pass a single existing field ... through unchanged in both places already, so the duplication there is structural, not a second, independently-editable copy of the same text.' I verified that claim holds for these two files specifically — both places call the identical `t(`kind.${k}`)` (or `tKind(...)`) expression, so the two cannot drift text-wise even though the mapping expression itself is written twice.",
+      "required_fix": "None required — this is a judgement call, not a violation, and the lane's own stated rationale for treating structural (same-function-call) duplication differently from composed-literal duplication is sound and matches what it actually did. If a third or fourth KINDS-shaped Select appears, extracting a tiny `kindItems(t)`/`kindItems(tKind)` helper would remove even the structural echo, but nothing here regresses correctness or drifts today."
+    },
+    {
+      "id": "STD-08-2",
+      "ticket": 1005,
+      "severity": "note",
+      "category": "readability",
+      "title": "mild readability wrinkle: work-question-form.tsx scopes the account-field Select in an immediately-invoked arrow function inside a JSX ternary rather than hoisting activeAccounts above the ternary",
+      "evidence": "`components/work/work-question-form.tsx`'s QuestionField: `accounts !== null && accounts.length > 0 ? (() => { const activeAccounts = accounts.filter((a) => a.is_active); return (<Select>...</Select>); })() : (<Input .../>)`. Hoisting `const activeAccounts = accounts?.filter(...) ?? []` above the ternary and branching on `activeAccounts.length > 0` would read more plainly, but would silently change behaviour: the pre-existing gate is `accounts.length > 0` (any accounts at all), not 'any ACTIVE account' — a client with accounts, none currently active, must still hit this branch (and its Select renders an empty option list) rather than fall to the plain Input. The IIFE is the mechanism that keeps the original gate's semantics byte-identical while still sharing one filtered roster with both items= and SelectContent.",
+      "required_fix": "None required — the IIFE is deliberate and preserves exact pre-existing branching semantics; a straightforward hoist would have been a silent behaviour change, which the diff correctly avoided. Worth a one-line comment explaining the guard/filter distinction if this function is touched again, but not a defect today."
+    },
+    {
+      "id": "STD-08-3",
+      "ticket": 1005,
+      "severity": "note",
+      "category": "efficiency",
+      "title": "SelectValue's resolveChildren useCallback is memoized on items/children/placeholder, but every call site passes a freshly-allocated items array/object literal on each render, so the memoization rarely avoids recomputation",
+      "evidence": "components/ui/select.tsx: `const resolveChildren = React.useCallback((value) => {...}, [items, children, placeholder])` — every one of the eleven converted call sites (e.g. `items={activeAccounts.map((a) => ({ value: a.id, label: accountOptionLabel(a) }))}`) constructs a new array literal inline on every render, so `items` is a new reference each time and the useCallback dependency array virtually never matches across renders.",
+      "required_fix": "None required — this is a performance micro-nit, not a correctness or standards issue; the wrapper is small, render frequency for a Select trigger is low, and no documented repo standard or measured regression makes this worth a change. Noted only because it is the one place in this diff where an optimization primitive is present but structurally undercut by every caller's own shape."
+    }
+  ],
+  "checked_and_found_sound": [
+    "Shared-file hunks (apps/web/test/manifest.txt, apps/web/e2e/serve-built.mjs, apps/web/e2e/e2e-fixture-ownership.test.ts, apps/web/messages/en.json) are each minimal, additive and at the correct sorted/logical position — WORK-ORDER.md rule 7.",
+    "e2e/staff-advances-register-mock.mjs (fix round) uses mock-dispatch.mjs's readCachedJson/matchVerb and an OWNED_RPC_VERBS allow-list checked before any body read — the same idiom used by activity-mock.mjs, bank-close-registers-mock.mjs, bank-match-mock.mjs, client-create-mock.mjs, document-correction-mock.mjs, members-lifecycle-mock.mjs, opening-ledger-source-mock.mjs, prepayments-mock.mjs and others; the earlier private readJson this fix round replaced was the deviation, not the fix.",
+    "select-value-label-census.test.ts is a repo-wide AST 'catalog census' (WORK-ORDER.md rule 4's own exception for a structural cell) that independently backstops select.tsx's TypeScript-enforced discriminated union against an `as any`/`@ts-expect-error` bypass or a direct `@base-ui/react/select` import; its own two regression cells (SPEC-1005-3, ADV-3) are proven against synthetic fixture source, not the real tree, so they cannot bit-rot silently.",
+    "No test read reaches an internal collaborator, a private function, or a side channel: every #1005 cell asserts on a mounted component's rendered text (via test/hookHarness's renderComponent/textOf, or document.body for portalled Dialog/Select content per the close-t1-opener.test.tsx house pattern); stream.ts's tests inject sleepImpl/fetchImpl (declared public options on runClaraTaskStream) rather than reaching into module internals; invite-mail-transport.test.ts calls inviteMailCapability/productionInviteMailer, both exported, and stubs only the outbound fetch.",
+    "No tautological expectations found: every assertion's expected value is an independent literal (a fixture's name, an en.json string, a known URL/account code), never the same formula the implementation uses to produce it.",
+    "No horizontal slicing: each commit pairs its new/changed tests with the implementation that makes them pass in the same commit; the #1005 wrapper's discriminated-union type change forces all eleven call sites to convert atomically (the build will not compile otherwise), which is the reason they land together rather than a scope or slicing violation.",
+    "No new vocabulary requiring a CONTEXT.md entry: the diff's new terms (SelectValue's items/children, withUnmatchedFallback, abortableSleep, mailEndpoint) are implementation-level, not domain/accounting vocabulary — CONTEXT.md is unmodified, consistent with WORK-ORDER.md rule 9.",
+    "apps/web/README.md gained one section per ticket (#1005, #956, #874 paragraph, #879, #875 table), each in the same '## #NNNN — title' shape the file already uses elsewhere, satisfying WORK-ORDER.md rule 9's 'docs in the same commits' requirement.",
+    "select.tsx's business-logic addition (withUnmatchedFallback, the items/children discriminated union) stays generic over {value, label} shapes with no domain import, so it does not read as smuggled domain logic into a shadcn-derived UI primitive, and does not implicate the 'shadcn upstream is the standard for UI primitives' ruling (that ruling governs acquiring new components via `ui:add`, not owned-code customization of an existing wrapper — shadcn's own model is copy-and-own)."
+  ]
+}

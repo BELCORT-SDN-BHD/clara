@@ -1,0 +1,80 @@
+{
+  "lane": "wave1-lane09",
+  "branch": "riders/w1-lane09",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\659",
+  "lens": "RECHECK",
+  "head": "3f686871",
+  "verdict": "accept",
+  "summary": "Independently re-ran every finding from wave1-lane09-review-adversarial.json against head 3f686871 and re-ran the fix round's own gates. All three actionable findings (L09-A major, L09-B minor, L09-C minor) are FIXED, verified by re-running the cells that carry the claim, not by reading the fix-round report. The four note-level findings (L09-D, L09-E, L09-F, L09-G) needed no code fix per the adversarial review itself; L09-D and L09-F additionally got the README wording each asked for, confirmed present in the diff; L09-E is an orchestrator hosted-alert check, not a code change; L09-G is recorded as an out-of-scope follow-up in both reports and the code does not claim otherwise. Nothing is newly broken: node scripts/check-frozen-workflows.mjs (freeze-lint OK, 312 frozen files, no manifest diff) and --print-closure grepped for the lane's six subject modules (no match), node packages/runtime/scripts/check-parts-parity.mjs (OK), pnpm typecheck (exit 0), pnpm lint (exit 0), and every runtime test file the lane's own two reports named as touching a changed module all re-run green except the one pre-existing, documented, unrelated red. Working tree in the worktree remains clean at 3f686871; nothing was pushed, committed, or edited by this recheck.",
+  "gates_reverified": {
+    "node scripts/check-frozen-workflows.mjs": "freeze-lint: OK - 312 frozen file(s) verified against frozen-workflows.json, no manifest diff, 3 retired entries recorded",
+    "node scripts/check-frozen-workflows.mjs --print-closure, grepped for reconciler|control.mjs|leader.mjs|spool.mjs|intake.mjs|hook-resume": "no match against the 312-module closure listing",
+    "node packages/runtime/scripts/check-parts-parity.mjs": "OK - reader superset of emittable confirmed at this commit",
+    "pnpm typecheck (worktree root)": "exit 0, apps/web and packages/runtime both Done",
+    "pnpm lint (worktree root)": "exit 0, all packages including apps/web's ui-add-guard selftest and @clara/reporting-render eslint",
+    "node --test tests/intake-sidecar-race.test.mjs, x3": "14 tests, 14 pass, 0 fail on every run",
+    "CLARA_INTAKE_SIDECAR_QUIET_MS=1 node --test tests/intake-sidecar-race.test.mjs": "12 pass, 2 fail - only the two p966.quiet cells (the guard's own declared vacuity control), matching the fix round's claim exactly",
+    "CLARA_SPOOL_RENAME_RETRY_MS=0 node --test tests/intake-sidecar-race.test.mjs": "13 pass, 1 fail - only p966.race (the retry's own declared vacuity control), matching the fix round's claim exactly",
+    "node --test tests/intake-db.test.mjs tests/intake-recovery-db.test.mjs tests/intake-recovery-unit.test.mjs tests/intake-reconcile.test.mjs tests/intake-unit.test.mjs (clara_l09, PG 55749)": "48 tests, 47 pass, 1 fail = the documented #693 EICAR/Defender red only (git diff on scan.mjs and intake-unit.test.mjs against origin/main is empty)",
+    "node --test tests/intake-batch-unit.test.mjs": "14 tests, 14 pass",
+    "node --test tests/document-ingest-v2.test.mjs tests/document-ingest-v2-db.test.mjs tests/document-route-e2e.test.mjs tests/f4-egress-release-hold.test.mjs tests/ingest-workflow-db.test.mjs tests/s6-matcher-reconcile.test.mjs tests/chat-clarify-sweep-wiring.test.mjs tests/control-chat-clarify.test.mjs tests/control-work-question.test.mjs (clara_l09)": "109 tests, 109 pass, 0 fail",
+    "git status in worktree, before and after": "clean both times, HEAD 3f686871 unchanged"
+  },
+  "findings_rechecked": [
+    {
+      "id": "L09-A",
+      "ticket": 966,
+      "original_severity": "major",
+      "status": "fixed",
+      "verification": "Diffed packages/runtime/lib/intake.mjs 887ae5ac..3f686871: RECOVERY_BATCH now bounds ACTIONS handled (handled += 1 only on a usable meta), a separate RECOVERY_OPEN_BUDGET = RECOVERY_BATCH * 3 bounds opens, and an unusable read (null/corrupt/id-less) is counted and logged once per sweep instead of silently consuming a slot. Re-ran the two new cells independently: 'p966.budget: sidecars the belt cannot USE never spend the ten slots it acts with' (12 junk entries ahead of one crashed intake -> crashed.reads===1, deferred===1) and 'p966.budget: ...and the READ bound survives' (60 junk entries -> exactly 30 opened, crashed.reads===0, TTL reaper is the stated backstop) both pass, 3 runs. sweepSpoolTtl's regex was also widened from the strict 36-hex-uuid form to /^intake-.+\\.(?:bin|json)$/i so a non-uuid junk sidecar is now reapable; 'p966.reap' cell passes."
+    },
+    {
+      "id": "L09-B",
+      "ticket": 966,
+      "original_severity": "minor",
+      "status": "fixed",
+      "verification": "Diffed intake-sidecar-race.test.mjs: new ownSpool(t) helper mkdtemps a private CLARA_SPOOL_DIR per cell and restores the previous value in t.after; applied to every filesystem-touching cell (p966.race, p966.expire, p966.resume, both p966.listing cells, p966.reap, p966.giveup). Re-ran the exact reproduction from the review: CLARA_INTAKE_SIDECAR_QUIET_MS=1 node --test tests/intake-sidecar-race.test.mjs no longer reds p966.expire (was 'not ok 7... 2 !== 1' on 887ae5ac); with the fix it fails ONLY the two p966.quiet cells, whose subject is the guard itself."
+    },
+    {
+      "id": "L09-C",
+      "ticket": 966,
+      "original_severity": "minor",
+      "status": "fixed",
+      "verification": "Diffed spool.mjs: RENAME_RETRY_MS default changed from 2000 to 250 (Math.max(0, Number(process.env.CLARA_SPOOL_RENAME_RETRY_MS || 250))). New cell p966.giveup holds a read handle on the meta file, writes over it, and asserts (win32) the original EPERM surfaces, elapsed < 1000ms, and no .tmp residue remains. Re-ran it directly 3 times: elapsed 266-278ms every run, well under the assertion and consistent with a ~250ms deadline. CLARA_SPOOL_RENAME_RETRY_MS=0 still reds only p966.race (13/14), confirming the retry is not vacuous at the new default."
+    },
+    {
+      "id": "L09-D",
+      "ticket": 852,
+      "original_severity": "note",
+      "status": "no_fix_required_addressed_anyway",
+      "verification": "Adversarial review itself said 'None required' for this note (behaviour change is intentional and covered by the ticket's own criterion). Fix round additionally added a sentence to packages/runtime/README.md's Order paragraph stating out loud that a sweep which cannot record its own beat now skips this belt too. Confirmed present in the README diff 887ae5ac..3f686871. No code or test change was needed or made."
+    },
+    {
+      "id": "L09-E",
+      "ticket": 852,
+      "original_severity": "note",
+      "status": "not_a_code_fix_orchestrator_item",
+      "verification": "Adversarial review explicitly scoped this to the orchestrator's pre-release check of hosted alerts/saved searches matching the old 'chat clarify belt error' string; 'No code change needed.' Fix round's own report confirms it made no change here. Nothing to re-verify in the lane's code or tests; this is a release-time check, not a lane defect."
+    },
+    {
+      "id": "L09-F",
+      "ticket": 852,
+      "original_severity": "note",
+      "status": "fixed",
+      "verification": "packages/runtime/README.md's #852 section previously overstated that a chatClarify counter key is 'positive evidence that the belt ran'; the belt returns the same zeroed bag with no statement when resumeHook is absent or delivery columns aren't present. Diff confirms the sentence now reads 'the belt was REACHED and did not throw -- not that it did any work' and names both dormant cases. The reviewer's alternative (a new sweep cell exercising a live resting row) was correctly not taken -- that is coverage, not the defect, and control-chat-clarify.test.mjs already covers the belt directly."
+    },
+    {
+      "id": "L09-G",
+      "ticket": 966,
+      "original_severity": "note",
+      "status": "no_fix_required_recorded_as_followup",
+      "verification": "Both the adversarial review ('Consistent with the ticket's scope... recorded rather than charged. None for this ticket.') and the fix round ('recorded by the reviewer as out of #966's scope and stays a follow-up') treat this as out-of-scope for the ticket. Confirmed listIntakeMetas/listIntakeMetaEntries were the only listing changed; listTaskMetas() is untouched by this diff (git diff 887ae5ac..3f686871 -- packages/runtime/lib/spool.mjs shows no change to listTaskMetas), matching the record that it was deliberately left alone."
+    }
+  ],
+  "newly_broken": [],
+  "still_open": [],
+  "unverified": [
+    "Hosted behaviour: this recheck, like both prior reviews and the fix round, is local-only on clara_l09 / this Windows host; no hosted evidence exists for this lane.",
+    "The exact contention duration a real stuck AV/indexer handle holds on a production host was not independently measured here; the 250ms default is accepted on the same reasoning the fix round gave (a reader handle is microseconds; 250ms is already 1000x that), not on a fresh measurement of production contention."
+  ]
+}

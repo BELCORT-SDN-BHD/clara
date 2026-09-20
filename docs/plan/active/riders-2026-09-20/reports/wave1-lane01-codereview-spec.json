@@ -1,0 +1,144 @@
+{
+  "lane": "wave1-lane01",
+  "axis": "spec",
+  "branch": "riders/w1-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "fixed_point": "origin/main",
+  "diff": "git diff origin/main...HEAD (15 files, +712/-150)",
+  "commits": [
+    "c35d8199 fix(web): #862 repoint every lane mock's private body reader onto the shared cache",
+    "c9a3f284 fix(web): #863 widen the RPC verb-opener census past three dispatch spellings",
+    "3ae738e0 feat(web): #902 scope the client-work-pack e2e mock by p_client",
+    "e8cdc6d4 fix(web): #853 activity-mock.mjs honours p_work, mirroring migration 0202",
+    "9855331b fix(web): #853 the second Work fixture must not collide on label or object id",
+    "162b9a98 fix(web): #865 make the build-then-test path impossible to miss",
+    "726bcfdd feat(web): #848 walk arm proving Reactivate reaches migration 0211's door",
+    "f4c8f554 fix(web): wave1-lane01 fix round - #848 onReactivated re-read evidence, #863 collision cell, #865 README warning"
+  ],
+  "spec_sources": [
+    "gh issue view 862 --comments (newest triage comment 2026-09-19 supersedes the body)",
+    "gh issue view 863 --comments",
+    "gh issue view 865 --comments",
+    "gh issue view 902 --comments",
+    "gh issue view 853 --comments",
+    "gh issue view 848 --comments"
+  ],
+  "verdict": "accept-with-fixes",
+  "reruns_performed": [
+    "node --import ./test/bootstrap.mjs --import tsx --test e2e/e2e-fixture-ownership.test.ts -> 34 tests, 34 pass, 0 fail (the final report says 33/33; the fix round's extra collision cell makes it 34)",
+    "CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3500 CLARA_E2E_NEXT_PORT=3501 CLARA_E2E_RUNTIME_PORT=3502 pnpm --filter @clara/web e2e journal-work-walk activity-feed-walk -> 40 passed (journal-work 23 incl. the three #848 cells, activity-feed 17)",
+    "same triple, home-board-walk accrual-walk -> 41 passed (home-board 27, accrual 14)",
+    "the #865 startup line observed live in my own run: '[e2e] serving .next BUILD_ID pFAb3ykp8Q6ZCAq1lAflI, built 0.0 min ago'",
+    "body-reader census RED-before check: both census regexes re-run against origin/main's LANE_MOCKS sources -> exactly the seven files the ticket names; on HEAD, none",
+    "#902 wire-shape probe: hydrateClientWorkPack(POPULATED_WORK_PACK) (apps/web/lib/work/client-work-pack.ts) -> {activeCount:1, activeRows:0, recentCount:1, recentRows:0} (scratch test file, removed; worktree clean)"
+  ],
+  "already_satisfied_or_stopped_claims_checked": [
+    {
+      "ticket": 862,
+      "lane_claim": "the originally-named fixed-asset-mock.mjs instance was already fixed incidentally by #651",
+      "verdict": "TRUE on main - git show origin/main:apps/web/e2e/fixed-asset-mock.mjs line 39 imports readCachedJson and line 405 calls it; no private reader remains"
+    },
+    {
+      "ticket": 863,
+      "lane_claim": "no lane mock uses the historical rpc === spelling today; intake-batch-mock.mjs's path !== \"/rest/v1/rpc/get_intake_batch\" was genuinely invisible",
+      "verdict": "TRUE - grep over apps/web/e2e/*.mjs: zero `rpc === \"` sites, exactly one `path !== \"/rest/v1/rpc/` site (intake-batch-mock.mjs:150); the pre-#863 three-shape opener matches nothing in that file"
+    },
+    {
+      "ticket": 853,
+      "lane_claim": "the ownership declaration is honestly unchanged (list_activity still scopes by client)",
+      "verdict": "TRUE - the handler still returns false for another client; declaration untouched and the census is green"
+    },
+    {
+      "ticket": 848,
+      "lane_claim": "the new verb needs no manual declaration because it is scoped and the general handler census picks it up",
+      "verdict": "TRUE - path === \"/rest/v1/rpc/reactivate_client_egress_purpose\" is matched by RPC_VERB_OPENER (re-derived here), the block contains return false, census green"
+    }
+  ],
+  "findings": [
+    {
+      "id": "L01-SPEC-01",
+      "ticket": 902,
+      "kind": "implemented-but-wrong",
+      "severity": "major",
+      "title": "The populated work pack is populated in a shape the app's own hydrator throws away",
+      "evidence": "Ticket: 'One new dedicated fixture client id gets a distinct, populated pack' and AC1 'A cell proves two client ids' get_client_work_pack responses differ (one populated, one empty)'. apps/web/e2e/home-board-mock.mjs:99-124 gives each facet rows of {id, label, state, updated_at}. The door's wire contract (packages/db/migrations/0214_client_work_pack.sql:324-337 active arm, :365-390 recent_success arm) projects work_id, purpose, status, memo, attempts, current_run_status, retrying, created_at and (recent_success) committed_at, receipt_id, entry_id - and apps/web/lib/work/client-work-pack.ts:158-174 hydrateRow returns null for any row without work_id ('a row with no Work id cannot be linked to, so it is not a row'). Re-run here: hydrateClientWorkPack(POPULATED_WORK_PACK) -> {activeCount:1, activeRows:0, recentCount:1, recentRows:0}, i.e. a count of 1 with an EMPTY preview under preview_limit 5, a shape the real door cannot produce. The row 'state' values are wrong too: in_progress is not in accounting_work's status roster (packages/db/migrations/0178_accounting_work_journal_successor.sql:306-307: queued, running, awaiting_input, stopping, completed, refused, failed, cancelled, expired). The new cell cannot catch this because it asserts deepEqual against the very constant the mock returns (apps/web/e2e/e2e-fixture-ownership.test.ts, '#902 - the dedicated fixture client reads the POPULATED pack'), so it proves scoping but nothing about contract fidelity.",
+      "required_fix": "Re-shape POPULATED_WORK_PACK's rows onto 0214's field names (work_id/purpose/status/memo/attempts/current_run_status/retrying/created_at, plus committed_at/receipt_id/entry_id for recent_success) with statuses from 0178's roster (e.g. running / completed), and assert on the HYDRATED pack (hydrateClientWorkPack) as well as the raw constant so the fixture cannot drift from the door again."
+    },
+    {
+      "id": "L01-SPEC-02",
+      "ticket": 863,
+      "kind": "partial",
+      "severity": "major",
+      "title": "The opener was widened only across === / !== spellings; a measured in-tree dispatch spelling claiming six verbs is still invisible",
+      "evidence": "Ticket: 'The opener pattern recognises every dispatch spelling measured across the current lane mocks plus the historical rpc === spelling', and the current-behaviour line 'A lane mock whose dispatch variable is spelled any way other than the three recognised shapes is invisible to the census; an undeclared shared verb in such a file passes silently.' The lane's measurement (final report, #863 row) was grep -noE '\\b[a-zA-Z_]+ === \"[a-z0-9_]+\"', which by construction can only find === spellings. apps/web/e2e/home-board-mock.mjs:185-192 declares EMPTY_RPCS and :331 dispatches `if (request.method === \"POST\" && EMPTY_RPCS.includes(path))` - six RPC verbs claimed by a spelling RPC_VERB_OPENER still cannot see (verified by re-running the widened regex over that file: none of list_agent_act_receipts, list_bank_account_proposals, list_bank_accounts, list_bank_statements, list_fiscal_years, list_uncoded_filings is in its match set). FIVE of those six have a second claimant in another lane mock, each using a spelling the census DOES see: bank-close-registers-mock.mjs:225 (list_fiscal_years), :243 (list_agent_act_receipts); bank-match-mock.mjs:306 (list_bank_accounts), :312 (list_bank_statements); documents-viewer-mock.mjs:582 (list_uncoded_filings). So real multi-claimant verbs exist today that the widened census still reports as single-owner - the exact failure mode the ticket names. (The array-membership limit is acknowledged in prose in the home-board declaration comment, but that predates #863 and is not a gate.) The report's claim that the measurement 'found exactly one MORE real spelling in use' is therefore not supported.",
+      "required_fix": "Either widen the census to the array-membership spelling (an array literal of /rest/v1/rpc/<verb> strings consumed by .includes(path)), or add a cell that names those six verbs as a declared, reasoned exception so the claim is a gate rather than a comment. And state the measurement method honestly: a grep for '=== \"' cannot find non-=== dispatch."
+    },
+    {
+      "id": "L01-SPEC-03",
+      "ticket": 862,
+      "kind": "partial",
+      "severity": "minor",
+      "title": "The body-reader census matches two literal names plus request.on, so the drain shape every real violator used evades it under any other name",
+      "evidence": "Ticket: 'A census cell ... scans every *-mock.mjs source and fails if any defines its own request-body-reading function (a local request.on(\"data\")/\"end\" pair, or a local readJson/readBody not imported from the shared module).' In apps/web/e2e/e2e-fixture-ownership.test.ts, PRIVATE_BODY_READER_FUNCTION only matches `function readJson(` / `function readBody(`, and PRIVATE_BODY_READER_STREAM only matches request.on(\"data\"|\"end\"). All seven real violators drained with `for await (const chunk of request)` - a shape the census never tests for, so a rename to drainBody would have passed. A live instance already sits inside LANE_MOCKS and passes the new census: apps/web/e2e/documents-intake-mock.mjs:172-174 `async function drain(request) { for await (const chunk of request) void chunk; }`, used at :478 for /rest/v1/rpc/list_unassigned_documents (answered unconditionally) and at :646 - an UNCACHED consumption of the very stream readCachedJson caches. The arrow form (`const readJson = async (request) => ...`) is also uncovered.",
+      "required_fix": "Add `for await (... of request)` and the arrow-assigned readJson/readBody form to the census's violation shapes, then decide documents-intake-mock.mjs's drain: repoint it onto readCachedJson, or declare it with a stated reason the way the file's sibling declarations do."
+    },
+    {
+      "id": "L01-SPEC-04",
+      "ticket": 863,
+      "kind": "partial",
+      "severity": "minor",
+      "title": "AC1's GREEN-after-correction half is not built",
+      "evidence": "Ticket AC1: 'A cell feeds the census a synthetic mock source ... that uses a non-standard dispatch spelling and an undeclared shared verb; the census is RED before the widening and GREEN after the synthetic source is corrected.' The fix round's cell ('RPC-opener census - a synthetic rpc === claimant and a synthetic path !== claimant of the SAME undeclared verb are BOTH extracted AND flagged as a collision') carries the RED half all the way to verbCollisions, but no cell shows the same synthetic pair going GREEN once corrected (one claimant, or the pair added to a declared share). Without that half, a verbCollisions that flagged everything would still pass this cell.",
+      "required_fix": "Add the counter-half: the same two synthetic sources with the collision removed (single claimant, or both names on a declared share) must produce zero problems."
+    },
+    {
+      "id": "L01-SPEC-05",
+      "ticket": 848,
+      "kind": "partial",
+      "severity": "minor",
+      "title": "AC3 is met by arming the refusal, not by owner-only dispatch or a forced lower rank",
+      "evidence": "Ticket AC3: 'The mock enforces owner-only dispatch, or the door refusal renders when a lower rank is forced.' apps/web/e2e/journal-work-mock.mjs:977-981 adds control op egress_reactivate_answer, and the handler answers CLR04 'insufficient role' purely because state was armed (:1487-1490) - it never inspects the caller, and every cell in journal-work-walk.spec.ts signs in as the same owner persona. The walk cell (apps/web/e2e/journal-work-walk.spec.ts:914) records this openly as a RECORDED SUBSTITUTION, so the report is honest, but the cell proves the rendering path, not the floor: it would stay green if the door's owner floor disappeared. Branch (a) is reachable in principle - serve-built.mjs:579-593 already derives rank from the sign-in email prefix (owner@/bookkeeper@/viewer@) - but only through serve-built.mjs, a shared file the work order's rule 7 tells lanes to keep minimal.",
+      "required_fix": "Either accept the substitution explicitly at integration (record it on the ticket rather than only in a code comment), or expose the signed-in persona's rank to lane mocks once in serve-built.mjs and let the mock DERIVE the CLR04 answer instead of being told it."
+    },
+    {
+      "id": "L01-SPEC-06",
+      "ticket": 853,
+      "kind": "implemented-but-wrong",
+      "severity": "minor",
+      "title": "The p_work filter is applied AFTER the page is assembled and silently disables pagination - the one shape 0202 says it avoids",
+      "evidence": "Ticket: 'When p_work is present, the mock returns only rows whose work_id matches it, mirroring migration 0202's server-side predicate (p_work is null or work_id = p_work).' apps/web/e2e/activity-mock.mjs:318-328 filters the already-assembled PAGE_1 and then forces next_cursor: null, truncated: false whenever p_work is present. 0202 applies the predicate INSIDE each union arm before the limit and says why (packages/db/migrations/0202_list_activity_p_work.sql:54-61 and :394-403, 'a p_work test applied to the unioned page would reproduce server-side the exact defect'; :435-440 skips the ar arm entirely). With a 16-row fixture nothing is observable today and the absent-p_work shape is byte-identical (verified: the new '#853 - every existing shape' cell, plus activity-feed-walk 17/17 re-run here), but the ticket's own named successor - a Work Activity walk - would be asserting against a mock that pages differently from the door. The next_cursor/truncated change is also behaviour the brief did not ask for.",
+      "required_fix": "Filter the fixture BEFORE the page/limit is taken (or state in the handler's comment that the mock models one page only, and why), and keep cursor/truncated semantics a filtered page would really carry."
+    },
+    {
+      "id": "L01-SPEC-07",
+      "ticket": 862,
+      "kind": "unsupported-claim",
+      "severity": "note",
+      "title": "'No behavioural change to any lane's responses' is stronger than what was proven",
+      "evidence": "The report's #862 section says 'every repoint is a pure plumbing swap'. It is not purely mechanical in principle: the four uncached readers (accrual, counterparty-identity, knowledge, operator-support) returned {} whenever a sibling had already drained the stream through readCachedJson (apps/web/e2e/serve-built.mjs:397 aliases readCachedJson as readJson and reads bodies itself at :453-545, :657, :1018, :1093), so a handler that previously fell through on an empty body can now match and answer. That IS the fix, but it is a behavioural change in those lanes' dispatch, not a no-op. The evidence for 'no harm' is the walks, and those are green (re-run here: accrual-walk 14/14, home-board-walk 27/27, plus the lane's own seven others).",
+      "required_fix": "Re-word as 'the only behavioural change is that these handlers now see the real body where they could previously see {}; every lane walk stays green', rather than 'no behavioural change'."
+    },
+    {
+      "id": "L01-SPEC-08",
+      "ticket": 862,
+      "kind": "report-drift",
+      "severity": "note",
+      "title": "Gate count in the final report is stale (33 vs 34)",
+      "evidence": "The final report's gate table says e2e-fixture-ownership.test.ts is '33 tests, 33 pass'. On HEAD (f4c8f554, after the fix round added the #863 collision cell) the file runs 34 tests, 34 pass - re-run here. No defect; the report predates its own fix round.",
+      "required_fix": "Refresh the gate line to 34/34 when the lane's report is folded into the wave record."
+    }
+  ],
+  "requirements_met_and_re_verified": [
+    "#862 AC1/AC2/AC3: the private readers are gone from all seven files; the census is RED against origin/main's sources and GREEN on HEAD (re-derived here); positive controls (private readJson, raw request.on) and the negative control are present; fixed-asset-acquisition-walk's mock was already clean on main.",
+    "#863 AC2: no new false positives - the whole census file is green (34/34) and get_intake_batch now censuses as single-owner intake-batch-mock.mjs.",
+    "#865 AC1/AC2: apps/web/playwright.config.ts:45-50 names pnpm --filter @clara/web e2e and states the command does not build; apps/web/e2e/serve-built.mjs:1237-1259 logs BUILD_ID + age, observed live in my own run.",
+    "#902 AC2/AC3: home-board-walk 27/27 re-run here; the LANE_DECLARATIONS row stays DEBT with a rewritten, accurate reason, and the handler never falls through.",
+    "#853 AC1/AC2/AC3: two p_work values return disjoint, correctly scoped pages; the no-p_work shape is byte-identical; activity-feed-walk 17/17 re-run here (the label/object-id collision fix in 9855331b is real - the second row's purpose periodic_stock_adjustment has a label in apps/web/messages/en.json Activity.workPurposes).",
+    "#848 AC1/AC2/AC4: all three new cells green in my own re-run (journal-work-walk 23/23, incl. the re-read assertion); the mock's answers match migration 0211 verbatim - 'op_key is required' (0211:255), 'only the DERIVED egress purpose is re-activated through this door' with reason purpose_not_reactivatable (0211:262-264), 'no live typed egress consent for this client and purpose' (0211:274-275), 'nothing was deactivated for this client and purpose' (0211:284-285), CLR04 'insufficient role' (0004_governed_fns.sql:307), and the success shape {activation_id, consent_id, purpose, status:'active'} matches the delegate (0195:646-648)."
+  ],
+  "smaller_notes": [
+    "#848 ordering: the real door calls clara._human_ctx FIRST (0211:252) and only then checks op_key/purpose; the mock checks client scope, op_key and purpose before its armed CLR04, so the mock comment 'matching the door's own order' is inaccurate for a below-owner caller with a missing op key. No cell depends on it.",
+    "#848: the mock pushes the op key onto state.egressReactivateOpKeys BEFORE answering CLR04; the real door reserves no op on a refusal at the floor.",
+    "firm-navigation-walk.spec.ts remains unrun (the lane says so). It imports only ACTIVITY_CLIENTS, which #853 does not touch, so residual risk is low but the claim stays unverified."
+  ]
+}

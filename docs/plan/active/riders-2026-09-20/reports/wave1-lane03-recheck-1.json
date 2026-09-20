@@ -1,0 +1,66 @@
+{
+  "lens": "RECHECK",
+  "lane": "wave1-lane03",
+  "branch": "riders/w1-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "head_reviewed": "efdea055",
+  "source_review": "docs/plan/active/riders-2026-09-20/reports/wave1-lane03-review-spec.json (verdict: accept-with-fixes, 5 findings + 2 notes)",
+  "source_fixround": "docs/plan/active/riders-2026-09-20/reports/wave1-lane03-fixround-1.md",
+  "verdict": "accept",
+  "method": "Independently re-derived and re-ran every claim in the fix-round report against head efdea055, without ever setting CLARA_RIG_ALLOW_RESET or CLARA_RIG_ALLOW_ROLE_SWEEP on clara_l03 (127.0.0.1:55743). Diffed 6219a61c..efdea055 file by file and matched each hunk to the finding it claims to fix. Re-ran the exact stripped-source regex logic and the EPHEMERAL_DB pattern in throwaway Node scripts against literal and adversarial strings (never against the live guard module by trust alone). Re-ran the touched db test files, the two no-reset-flag gates, the frozen-workflows check, pnpm lint, and pnpm typecheck from the worktree root.",
+  "findings_recheck": [
+    {
+      "id": "L03-S1",
+      "ticket": 845,
+      "original_severity": "major",
+      "status": "FIXED, confirmed",
+      "evidence": "git diff 6219a61c..1ea21b05 -- packages/db/tests/reset-gate-routing.test.mjs shows the acceptance-2 spy is now `const wrapped = async () => { spy.entered += 1; };` with no call to realReset; realReset is still fetched only to assert `typeof realReset === \"function\"`. Re-ran tests/reset-gate-routing.test.mjs (full $GATES chain, clara_l03): 5 tests, 5 pass, 0 fail, 0 skip."
+    },
+    {
+      "id": "L03-S2",
+      "ticket": 845,
+      "original_severity": "major",
+      "status": "FIXED, confirmed",
+      "evidence": "Extracted the file's own stripCommentsAndStrings() + UNWRAPPED_RESET_CALL_RE and ran them in an isolated Node script against the three adversarial shapes the original review demonstrated escaped the old ^\\s*await reset\\( regex: `const r = await reset({...})` -> true (caught), `return reset({...})` -> true (caught), `await  reset({...})` (extra space) -> true (caught). Also confirmed no false positives: `await guardedReset(reset, {...})` -> false, `const { reset } = await import(...)` -> false, a comment mentioning `reset()` -> false, a string literal containing `reset(` -> false. Suite re-run 5/5 pass (same run as L03-S1)."
+    },
+    {
+      "id": "L03-S3",
+      "ticket": 845,
+      "original_severity": "major",
+      "status": "FIXED, confirmed",
+      "evidence": "Header recipes for checkout-convergence-upgrade.test.mjs, wave-a-upgrade.test.mjs, rig-runtime-upgrade.test.mjs (previously undocumented) and wave-b/wb-0020-upgrade.test.mjs now name clara_0186_upgrade_ci / clara_waveA_upgrade_ci / clara_runtime_upgrade_ci / clara_wb20_upgrade_ci. Independently ran the live EPHEMERAL_DB regex from packages/db/lib/guard.mjs (/(^|[._-])(ci|test|tmp|temp|scratch|ephemeral)$/i) against all 4 new names (all true) and the 3 old names they replace (all false). Re-ran all four files without CLARA_RIG_ALLOW_RESET on clara_l03: checkout-convergence-upgrade 0 pass/1 skip, wave-a-upgrade 0 pass/4 skip, rig-runtime-upgrade 0 pass/1 skip, wave-b/wb-0020-upgrade 0 pass/4 skip -- no import-time crash, matching the report exactly. Independently re-ran `grep -rln 'checkout-convergence-upgrade|rig-runtime-upgrade|wave-a-upgrade' .github/` (no hits) and `grep -rn CLARA_RIG_ALLOW_RESET .github/` (only closed-wave-upgrade-drills/action.yml and frontier-leg/action.yml, neither naming the 3 files) -- confirms the CI-coverage gap for those 3 files is real and correctly disclosed, not silently claimed as covered, in both the fix-round report and the README diff."
+    },
+    {
+      "id": "L03-S4",
+      "ticket": 844,
+      "original_severity": "minor",
+      "status": "FIXED, confirmed",
+      "evidence": "The colliding cell is renumbered os.15 -> os.19 (fixture tag \"os15\"->\"os19\", both in-body \"#844 os.15 superseded\" strings updated) in operator-support.test.mjs. `grep -noE \"os\\.[0-9]+\" tests/operator-support.test.mjs | sort -t. -k2 -n -u` in the current tree confirms os.01 through os.19 are each used exactly once, no collision, no gap. Re-ran tests/operator-support.test.mjs: 20 tests, 20 pass, 0 fail, 0 skip (same count as before, a rename not an added/removed cell)."
+    },
+    {
+      "id": "L03-S5",
+      "ticket": 884,
+      "original_severity": "minor",
+      "status": "FIXED, confirmed",
+      "evidence": "p639.birth.opening_excluded in fixed-asset-acquisition.test.mjs now does `const detail = JSON.parse(err.detail); assert.equal(detail.account_code, COST, ...)`, replacing the old detail-or-message substring blob check. Re-ran tests/fixed-asset-acquisition.test.mjs: 23 tests, 23 pass, 0 fail, 0 skip (same count, an assertion tightened not a cell added)."
+    }
+  ],
+  "gates_rerun_this_recheck": [
+    "packages/db tests/reset-gate-routing.test.mjs (full $GATES chain, clara_l03, no reset flags) -> 5 tests, 5 pass, 0 fail, 0 skip",
+    "packages/db tests/operator-support.test.mjs (full $GATES chain) -> 20 tests, 20 pass, 0 fail, 0 skip",
+    "packages/db tests/fixed-asset-acquisition.test.mjs (full $GATES chain) -> 23 tests, 23 pass, 0 fail, 0 skip",
+    "packages/db tests/operation-census.test.mjs + tests/rig-isolation.test.mjs (no reset flags) -> 31 tests, 30 pass, 0 fail, 1 skip (T19's own gate, correctly never run with CLARA_RIG_ALLOW_RESET on this rig)",
+    "packages/db tests/checkout-convergence-upgrade.test.mjs (no reset flag) -> 0 pass, 1 skip, no import-time crash",
+    "packages/db tests/wave-a-upgrade.test.mjs (no reset flag) -> 0 pass, 4 skip, no import-time crash",
+    "packages/db tests/rig-runtime-upgrade.test.mjs (no reset flag) -> 0 pass, 1 skip, no import-time crash",
+    "packages/db tests/wave-b/wb-0020-upgrade.test.mjs (no reset flag) -> 0 pass, 4 skip, no import-time crash",
+    "node scripts/check-frozen-workflows.mjs (worktree root) -> exit 0, 312 frozen files verified, no manifest diff, 55 \"use workflow\" modules frozen+registered, 3 retired entries recorded",
+    "pnpm lint (worktree root) -> exit 0",
+    "pnpm typecheck (worktree root) -> exit 0 (apps/web + packages/runtime); NOT re-run by the original review, now confirmed clean"
+  ],
+  "never_run_per_rig_rules": "CLARA_RIG_ALLOW_RESET and CLARA_RIG_ALLOW_ROLE_SWEEP were never set in this recheck. None of the 14 reset()-gated upgrade-drill suites' destructive bodies were executed on clara_l03 or any other database. What only CI can run: the actual 0001-to-frontier replay-then-drop under CLARA_RIG_ALLOW_RESET=1 for all 14 files; 11 of the 14 have a CI leg today (closed-wave-upgrade-drills/action.yml: hrd-a-recut-guard, hrd-b-upgrade-kit, rig-docs-upgrade, rig-events-upgrade, s6-upgrade, wave-b/wb-0020-upgrade, x37/x40/x41-upgrade; frontier-leg/action.yml: x42-split-upgrade-kit; T19 runs unwrapped-but-gated in the ordinary battery). checkout-convergence-upgrade.test.mjs, rig-runtime-upgrade.test.mjs and wave-a-upgrade.test.mjs have no CI leg at all -- this recheck confirms that gap is disclosed accurately (not closed, not misrepresented as closed) and is correctly out of scope for a wave-1 lane fix round.",
+  "newly_broken": [],
+  "still_open": [],
+  "findings": [],
+  "summary": "Every finding from the original review (L03-S1 through L03-S5, all major/minor) is genuinely fixed on head efdea055, independently re-derived and re-run rather than taken on the fix-round report's word: the reset-gate-routing.test.mjs spy no longer delegates to the real destructive reset(), its acceptance-1 regex now catches all three adversarial call shapes the review demonstrated while producing zero false positives on guardedReset/import-destructure/comment/string text, the four upgrade-drill header recipes now name EPHEMERAL_DB-matching database names (verified against the live regex) while honestly disclosing that 3 of the 14 files still have no CI leg, the colliding os.15 cell id is renumbered to the actually-free os.19, and the fixed-asset detail-or-message laxness is tightened to a direct JSON.parse(err.detail).account_code assertion. Every touched test file re-runs at the same pass/skip counts the fix-round report claims (reset-gate-routing 5/5, operator-support 20/20, fixed-asset-acquisition 23/23, operation-census+rig-isolation 30 pass/1 skip, the four upgrade-drill headers 0 pass/N skip with no import-time crash). Nothing is broken: frozen-workflows check is still clean at 312 files, pnpm lint exits 0, and pnpm typecheck (not re-run by the original review) now also exits 0 clean across apps/web and packages/runtime. CLARA_RIG_ALLOW_RESET was never set on this rig throughout the recheck, matching the ticket's own instruction. Worktree is clean at efdea055, nothing pushed, no GitHub write, no other worktree touched. Nothing above minor remains open. Verdict: accept."
+}

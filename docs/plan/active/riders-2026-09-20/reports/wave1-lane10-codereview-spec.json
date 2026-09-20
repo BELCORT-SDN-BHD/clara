@@ -1,0 +1,104 @@
+{
+  "lane": 10,
+  "axis": "spec",
+  "branch": "riders/w1-lane10",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\660",
+  "fixed_point": "origin/main (e7f0a10a)",
+  "head": "01e74503",
+  "commits": [
+    "01e74503 test(runtime): #980 the ask_question script asks about ONE client's Work, and leg 7 stops deleting a shared directory",
+    "7b47fb42 fix(runtime,web): #981 the carrier on every door, and the two wires that pinned the old body",
+    "1b219f03 test(runtime): #980 the harness's ask_question shape, and the trade invoice's park and cancel",
+    "14b67ddf fix(runtime): #981 the refusal carrier, measured over the real HTTP wire",
+    "eb542765 feat(runtime,web): #981 one structured-detail carrier, and the folds it retires",
+    "ba4071de test(runtime,web): #981 the generic structured-detail carrier, red first"
+  ],
+  "spec_sources": [
+    "gh issue 981 (BELCORT-SDN-BHD/clara) - body Agent Brief, 0 comments, no owner ruling",
+    "gh issue 980 (BELCORT-SDN-BHD/clara) - body Agent Brief, 0 comments, no owner ruling"
+  ],
+  "verdict": "accept-with-fixes",
+  "reruns_performed": [
+    "packages/runtime: node --test tests/work-routes-unit.test.mjs -> 28 tests, 28 pass / 0 fail",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test lib/work/api.test.ts -> 27 tests, 27 pass / 0 fail",
+    "packages/runtime (PGPORT 55750 / clara_l10): node tests/trade-invoice-e2e.mjs -> PASS all 7 legs; legs 6 and 7 green",
+    "packages/runtime (PGPORT 55750 / clara_l10): node tests/work-journal-e2e.mjs -> PASS all 8 legs; leg 4 (narrate) green",
+    "apps/web scratch probe (deleted after the run) driving submitJournalWork / restateWork through a mocked fetch, to measure the two arms in L10S-1"
+  ],
+  "ticket_status_checks": {
+    "981": "Genuinely still live on origin/main: `git show origin/main:packages/runtime/src/workRoutes.ts` still carries `const folds = reason === \"invalid_basis\" || ...` at :915 and the bespoke `if (reasonOf(err) === \"party_ambiguous\")` catch at :1368-1387. Lane's claim confirmed.",
+    "980": "Genuinely still live on origin/main: `git show origin/main:packages/runtime/tests/work-journal-serve.mjs` header says 'TWO SCRIPTS' and contains no `ask_question`; `git show origin/main:packages/runtime/tests/trade-invoice-e2e.mjs` has one incidental match for 'cancel' and no cancel leg. Lane's claim confirmed.",
+    "nothing_claimed_already_satisfied_or_stopped": "The lane declared both tickets DONE; no ticket was reported 'already satisfied' or 'stopped', so there is no such claim to re-test."
+  },
+  "findings": [
+    {
+      "id": "L10S-1",
+      "ticket": 981,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "The generic carrier never reaches two web result arms - `source_conflict` and `not_restatable` still drop the door's typed detail",
+      "spec_quote": "**Desired behavior:** A refusal's structured detail travels from the database to the browser through one generic carrier on the refusal body, so a new refusal carrying structured detail becomes visible without a new fold or result-type arm.",
+      "evidence": "The runtime side is complete: `workErrorResponse` puts `detail` on the `source_already_posted` 409 and on the `not_restatable`/`already_superseded` 409, and `work-routes-unit.test.mjs`'s LEGACY_BODIES table pins both (rows 'the document already backing a posted entry' and 'a restatement the successor already closed'), asserted by '981.route: the door's typed detail rides back VERBATIM under one key'. The WEB side stops short. In `apps/web/lib/work/api.ts` the `carrier(body)` spread is applied to `invalid_basis`, `conflict`, `not_retryable`, cancel's `conflict`/`invalid`, and take-over's `not_takeable`/`confirm_basis`/`invalid` - but NOT to `source_conflict` (lines 299, 362, 448, 516) and NOT to `not_restatable` (line 922). Measured, not reasoned: a scratch cell driving `submitJournalWork` against a 409 body {error:'source_already_posted', entry_id:'e1', document_id:'d1', detail:{reason:'source_already_posted', entry_id:'e1', posted_at:'2026-09-01'}} returned {\"kind\":\"source_conflict\",\"entryId\":\"e1\",\"documentId\":\"d1\"}, and `restateWork` against {error:'not_restatable', reason:'not_restatable', status:'posted', detail:{reason:'not_restatable', status:'posted', entry_id:'e9'}} returned {\"kind\":\"not_restatable\",\"reason\":\"not_restatable\",\"status\":\"posted\"}. In both cases the door's typed object arrived at this edge and was discarded, so a later migration adding a structured key to either refusal STILL needs a new result-type arm here - the exact cost the ticket set out to retire. It also makes the lane's own cell title overstated: '981.web: EVERY durable-Work door reads the carrier - retry, cancel and take-over too' is true per door but false per arm, and its comment ('The runtime carries the door's typed detail on EVERY 400 and 409 `workErrorResponse` builds') does not name the two arms it leaves bare.",
+      "required_fix": "Add `...carrier(body)` to the four `source_conflict` returns and the `not_restatable` return, with `detail?: RefusalDetail` on `SubmitJournalWorkResult`'s `source_conflict` arm and `RestateWorkResult`'s `not_restatable` arm, and extend the existing cell (or add one) to assert both - red first. If either arm is deliberately left bare, say so in the arm's own comment with the reason, the way `transient` does, and correct the cell title."
+    },
+    {
+      "id": "L10S-2",
+      "ticket": 981,
+      "severity": "minor",
+      "kind": "false-in-code-claim",
+      "title": "`work-journal-e2e.mjs` claims to be 'the only leg in the estate' that measures the carrier over HTTP - the same commit series made it three",
+      "spec_quote": "**Key interfaces:** ... The stale in-code rationale (wire.ts \"discards every other detail key\") goes with the folds it justified, in the route layer and in the form comment repeating it.",
+      "evidence": "`packages/runtime/tests/work-journal-e2e.mjs:569-572` reads: '#981 - THE CARRIER, OVER THE REAL WIRE. ... this is the only leg in the estate that reads that body off an actual HTTP response rather than from `workErrorResponse` directly'. Commit 7b47fb42 then added byte-parallel over-the-wire carrier assertions at `packages/runtime/tests/periodic-adjustment-e2e.mjs:557-566` and `packages/runtime/tests/staff-expense-claim-e2e.mjs:570-579`, each with its own comment saying 'measured here off an actual HTTP response'. `packages/runtime/README.md` was updated to 'The carrier is measured over the real wire in three World e2es, not one'; the comment was not. This is the same defect class the lane itself filed and fixed as L10-A4 (a file header asserting something the code does not do), left in a file this change already rewrote, and the ticket's own Key-interfaces line is about retiring stale in-code rationale rather than minting new ones.",
+      "required_fix": "Re-word `work-journal-e2e.mjs:569-572` to name the three legs, or drop the exclusivity claim. Comment-only; under work-order rule 8 it obliges one re-run of that file (44-86s)."
+    },
+    {
+      "id": "L10S-3",
+      "ticket": 980,
+      "severity": "minor",
+      "kind": "requirement-deviation",
+      "title": "The third script is NOT 'selectable the same way' - it needs a second, mandatory env var or the harness throws at module load",
+      "spec_quote": "- [ ] The shared harness supports a clarifying-question conversation shape alongside `post` and `narrate`. ... **Key interfaces:** The shared World harness's scripted-model selector (`post` | `narrate` today) gains a clarifying-question shape, selectable the same way.",
+      "evidence": "`packages/runtime/tests/work-journal-serve.mjs:63-70`: `CLARA_WORK_ASK_ONLY_CLIENT` is read at module scope and `if (SCRIPT === \"ask_question\" && !ASK_ONLY_CLIENT) throw new Error(...)`. So `CLARA_WORK_TEST_SCRIPT=ask_question` alone - which is how `post` and `narrate` are selected, and how a sibling lane will copy it - is a hard child crash, not a park. The scope gate itself is sound and is the right answer to review finding L10-A3 (one supervisor serves every queued Work on the database; three `awaiting_input` rows were stranded on clara_l10 by the unscoped arm), and fail-closed is the right direction. The finding is that the delivered interface is two knobs where the AC asked for one, and neither the ticket nor an owner ruling widened it. Verified green as shipped: `node tests/trade-invoice-e2e.mjs` on PGPORT 55750 / clara_l10 -> '6 OK - parked on a question, replayed into the window, answered, ONE of everything; a foreign Work was never asked'.",
+      "required_fix": "No code change is required if the orchestrator accepts the deviation - but it must be accepted explicitly rather than inherited. If accepted, record it in the lane report and in the harness header so the next lane reading 'selectable the same way' in #980 does not file it as a bug. If not, derive the scope from the leg (for example the client of the first envelope this process sees) rather than from a required env var."
+    },
+    {
+      "id": "L10S-4",
+      "ticket": 980,
+      "severity": "minor",
+      "kind": "acceptance-unverified",
+      "title": "AC4 'on every lane' is measured on 4 of the 11+ drivers of the shared harness",
+      "spec_quote": "- [ ] Every existing `post`/`narrate` World test, on every lane, still passes unchanged.",
+      "evidence": "Re-run and confirmed for the two that matter most: `node tests/work-journal-e2e.mjs` (the estate's only `narrate` driver) -> PASS all 8 legs including 'PASS 4: a no-effect run settles failed/recoverable', and `node tests/trade-invoice-e2e.mjs` -> PASS all 7 legs; the fix round adds `periodic-adjustment-e2e.mjs` and `staff-expense-claim-e2e.mjs`. Seven further spawners of `work-journal-serve.mjs` (accrual, plan-occurrence, prepayment-occurrence, fixed-asset-acquisition, work-egress, work-cancel, work-question, plus the chat-turn serve drivers) still carry `ALLOWED_DB = /^clara_(rt_test|wave_b_ci)$/` and cannot run on a lane rig, so they were not run. Residual risk is genuinely low - the new branch is guarded by `SCRIPT === \"ask_question\"`, a value no existing caller sets, and the `narrate` branch returns before it - so this is verification debt rather than a defect, and the lane declares it under 'Unverified'.",
+      "required_fix": "Orchestrator or CI runs the remaining spawners on a database their gate admits before this lands, OR records AC4 as accepted on the branch-guard argument plus the four measured files. Do not let a wave-1 lane widen seven more gates to close it."
+    },
+    {
+      "id": "L10S-5",
+      "ticket": 981,
+      "severity": "note",
+      "kind": "scope-creep",
+      "title": "Four World e2e database gates and two `.gitignore` lines are in the diff; neither ticket asked for them",
+      "spec_quote": "#981 **Out of scope:** Changing any refusal's `reason` token vocabulary or CLR code. / Adding structured detail to a refusal that does not already carry it. / The PostgREST door lane's own refusal surfacing - none of which covers test-harness database gates; #980's Key interfaces name only the harness selector and the trade-invoice suite.",
+      "evidence": "`ALLOWED_DB` (and, in three files, a second parsed-DSN regex) widened to admit `clara_l<NN>` in `packages/runtime/tests/trade-invoice-e2e.mjs:93`, `work-journal-e2e.mjs:84`, `periodic-adjustment-e2e.mjs:74` and `staff-expense-claim-e2e.mjs:76`; `.gitignore` gains `packages/runtime/tests/.trade-invoice-gates/` and `.work-cancel-gates/`. All six hunks are defensible - without the gate widening the lane could not MEASURE the carrier over the wire at all, which is how L10-A1 was caught, and the gates stay loopback-only, parsed-DSN-equality and fail-closed; the ignore lines stop a watchdog exit dirtying a worktree. They are reported plainly by the lane under 'Two gate widenings, stated plainly'. Flagged only because it is behaviour in the diff neither ticket asked for, and because it leaves the estate inconsistent: four of eleven-plus spawners now admit the lane shape and seven do not. The lane files the right follow-up (one shared `tests/local-db-gate.mjs`).",
+      "required_fix": "None at lane level. Orchestrator decides whether to carry the four hunks as-is (recommended) and whether to file the shared-gate follow-up before wave 2, when nine more lanes hit the same wall."
+    }
+  ],
+  "requirements_met": {
+    "981": {
+      "AC1 field-scoped constraint-token refusal still readable by every reason-keyed caller": "met - '981.route: the carrier is ADDITIVE' drives a 12-row LEGACY_BODIES table asserting each promoted key's value AND that the key set is exactly the old set plus `detail`; re-run 28/28 green. The fold predicate is logically identical to main's (`CONSTRAINT_FOLD_REASONS.has(reason) && constraint !== null` vs `folds && constraint !== null`). Swept the repo for other exact-body assertions on these routes: only the three World e2es the lane already fixed.",
+      "AC2 trade-invoice candidate list still renders inline, read through the carrier": "met - route: '981.route: party_ambiguous rides the SHARED responder, candidates and all' (same error/field/reason, `detail.candidates` verbatim, the field default is a default not an override, `party_unresolved` still answers `basis`). Web: '981.web: the trade invoice's candidates are the SAME carrier, typed once'. Checked the one behaviour difference - main's arm used raw `fieldOf(err)` while HEAD routes through `toWireField`, which is the identity function for the `invoice.` prefix, so the wire field is unchanged; and main's `detail:{candidates:[]}` default collapses to the same `[]` at the web edge.",
+      "AC3 a never-seen detail key reaches a web caller with no new route-layer fold": "met - '981.route: a detail key never seen before reaches the wire with NO new fold' (`clarified_by` appears nowhere in workRoutes.ts; `max`/`length` are numbers `detailField` could never have read) and '981.web: a detail key this file has never heard of reaches the caller', plus the non-object-detail arms. Both re-run green. Caveat: L10S-1 - two web arms still need one.",
+      "AC4 the three constraint folds and the trade-invoice candidate fold gone or reduced": "met - the trade-invoice fold is deleted (the route is now one `sendAdmissionError(..., { fieldDefaults: TRADE_INVOICE_FIELD_DEFAULTS })` call); the three constraint folds are reduced to a named data set plus one row of per-lane field-default DATA, which is what 'reduced to the minimum typing layered on the generic carrier' permits. Keeping the tokens is required by the ticket's own 'Out of scope: changing any refusal's reason token vocabulary'."
+    },
+    "980": {
+      "AC1 harness supports a clarifying-question shape": "met with a deviation - see L10S-3.",
+      "AC2 replay landing while parked converges to one outcome once answered": "met - trade-invoice-e2e leg 6, re-run green on clara_l10. Pins `awaiting_input`, ledger [\"admitted\"], zero entries while parked; the parked replay as `replayed:true` on the same work_id and invoice_id with one task, one invoice, one question; then completed with 1 entry / 1 receipt / 1 invoice / 1 open item / ledger [\"admitted\",\"posted\"]; then a post-answer replay still naming the same Work. The bystander Work (second client, same engine, same window) is asserted never-asked and settles on its own.",
+      "AC3 explicit commit-window cancel, cancelled with no journal effect": "met - leg 7, re-run green: `running` inside the hold, cancel 200 {cancelled:true,status:'stopping'}, `stopping` over the real route, terminal `cancelled` with `error.reason === 'cancelled'`, then 0 entries / 0 receipts / 0 open items and no `posted` ledger row, with the admitted invoice row deliberately surviving.",
+      "AC4 every existing post/narrate World test still passes unchanged": "partially measured - see L10S-4."
+    }
+  },
+  "out_of_scope_respected": {
+    "981": "Yes. No refusal reason token or CLR code moved (`invalid_adjustment` was deliberately NOT folded, and the header's old false claim about it was corrected rather than acted on); no refusal gained structured detail it did not already raise; the PostgREST lane (`apps/web/lib/wire.ts`, `lib/work/evidence.ts` and the surfaces reading them, e.g. `components/work/attach-evidence-dialog.tsx`) was not touched.",
+    "980": "Yes. No production door changed for #980 - the whole ticket lands in `packages/runtime/tests/`. The chat-arm entrance was not touched. The new script is driven only from `trade-invoice-e2e.mjs`; no other lane's suite selects it."
+  },
+  "summary": "Both tickets were genuinely live on main and both are substantially delivered, with every acceptance criterion carrying a cell I re-ran rather than read. One real gap: the #981 carrier is complete at the runtime but stops one arm short at the web edge - `source_conflict` (four call sites) and `not_restatable` still discard the door's typed detail, which I measured by driving the two functions, so a refusal gaining a structured key on either still costs a new result-type arm: the exact cost the ticket exists to retire. Beside it, one stale in-code exclusivity claim in `work-journal-e2e.mjs`, an #980 harness interface that needs a second mandatory env var where the AC said 'selectable the same way', AC4 measured on 4 of 11+ harness drivers, and four unrequested but well-argued and plainly declared test database-gate widenings."
+}

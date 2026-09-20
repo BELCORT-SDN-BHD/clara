@@ -1,0 +1,114 @@
+{
+  "lane": "Wave 1 · Lane 01 (riders/w1-lane01)",
+  "lens": "RECHECK",
+  "reviewed_at": "2026-09-20",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "head_expected": "f4c8f554",
+  "head_verified": "f4c8f554995e66b2ab83caebb820f3e040820cab",
+  "prior_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane01-review-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane01-fixround-1.md"
+  ],
+  "verdict": "accept",
+  "gates_rerun_by_reviewer": [
+    { "command": "node --import ./test/bootstrap.mjs --import tsx --test e2e/e2e-fixture-ownership.test.ts (from apps/web)", "result": "34 tests, 34 pass, 0 fail" },
+    { "command": "CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3500 CLARA_E2E_NEXT_PORT=3501 CLARA_E2E_RUNTIME_PORT=3502 pnpm --filter @clara/web e2e journal-work-walk", "result": "23 passed, 0 failed" },
+    { "command": "pnpm typecheck (worktree root)", "result": "exit 0 (apps/web + packages/runtime, \"Done\")" },
+    { "command": "pnpm lint (worktree root, whole chain)", "result": "exit 0, all selftests PASS" },
+    { "command": "node scripts/check-frozen-workflows.mjs", "result": "OK — 312 frozen files verified, no manifest diff, exit 0" },
+    { "command": "node scripts/run-tests.mjs (from apps/web, whole unit suite)", "result": "4647 tests, 4645 pass, 0 fail, 2 skip, 80.1s — matches the fix-round report's clean-run count exactly" },
+    { "command": "git status (worktree, after all runs)", "result": "clean, nothing to commit" }
+  ],
+  "findings_disposition": [
+    {
+      "id": "L01-S1",
+      "ticket": 848,
+      "severity": "major",
+      "claimed_disposition": "fixed",
+      "verified": true,
+      "evidence": "git diff 726bcfdd..f4c8f554 -- apps/web/e2e/journal-work-walk.spec.ts adds a page.on(\"request\") listener matching GET .../rest/v1/accounting_work?id=eq.<egressRefusedWorkId> and an expect.poll asserting exactly one more read after the press. Traced the real wire path independently (not just re-running the shipped cell): EgressReactivateAction.press() calls onReactivated() only on result.kind===\"active\" (egress-reactivate-action.tsx:60) -> work-detail.tsx:547 onConverge wires state.reload() (useWorkDetail) -> loadWorkDetail -> getAccountingWork -> getRows(\"accounting_work\", {filters:{id:eq.<workId>,...}}) (lib/work/reads.ts:50-62), which is exactly the GET the listener matches, confirming the assertion is not accidentally satisfiable by an unrelated request. Also confirmed no polling interference: the egressRefusedWorkId fixture's status is \"refused\" (journal-work-mock.mjs:919), which is in TERMINAL_WORK_STATUSES (types.ts:40-46), so useWorkDetail's own 3s poll and visibilitychange listener both no-op once terminal is observed — the assertion cannot be made flaky by a background poll tick. journal-work-walk.spec.ts re-run: 23/23 pass."
+    },
+    {
+      "id": "L01-S2",
+      "ticket": 848,
+      "severity": "minor",
+      "claimed_disposition": "recorded (not code-fixed) — the review's own second offered option",
+      "verified": true,
+      "evidence": "git diff shows the cell renamed from a literal-enforcement claim to \"#848: a forced denial renders the database's own CLR04 owner-floor refusal\", with a header comment stating plainly which OR-branch is unreachable (forcing a lower rank — the UI itself owner-gates the button, work-detail.tsx canReactivateEgress={ownerHere}) and which was achievable but out of scope (deriving the answer from the signed-in persona would need cross-module plumbing into serve-built.mjs, a file rule 7 names as edited by nine other lanes concurrently). This is exactly the second alternative the original finding's required_fix offered (\"or record on #848 that AC3 was met by simulating the wire answer\"). No behavioural change; the assertions are unchanged and pass in the 23/23 re-run above."
+    },
+    {
+      "id": "L01-S3",
+      "ticket": 863,
+      "severity": "minor",
+      "claimed_disposition": "fixed",
+      "verified": true,
+      "evidence": "New cell at e2e-fixture-ownership.test.ts:1558 extracts two synthetic sources (rpc === \"list_entry_links\" and path !== \"/rest/v1/rpc/list_entry_links\") via the shipped verbsInSource(), inverts into a verb->files map, and runs it through the real verbCollisions() against SHARED_RPC_VERBS. Confirmed list_entry_links is genuinely the real declared share (three real claimant files at line 1295), and the two synthetic filenames are not among them, so this reproduces a real-regression shape rather than a verb no gate would see — closing the AC1 gap the original finding named (four cells stopped at verbsInSource extraction and never reached verbCollisions). e2e-fixture-ownership.test.ts re-run: 34/34 pass (33 -> 34, matching the +1 new cell claim)."
+    },
+    {
+      "id": "L01-S4",
+      "ticket": 862,
+      "severity": "minor",
+      "claimed_disposition": "refuted (proposed fix rejected with evidence), deferred as a follow-up — one of the review's own two sanctioned outcomes (\"or file it as an issue\")",
+      "verified": true,
+      "evidence": "Independently re-ran `grep -rln \"for await\" apps/web/e2e/*-mock.mjs`: exactly six files, matching the fix-round report's list precisely (chat-parity-mock.mjs, documents-intake-mock.mjs, periodic-adjustment-mock.mjs, staff-expense-claim-mock.mjs, trade-invoice-mock.mjs, work-list-mock.mjs). Per-file inspection confirms the report's distinction: chat-parity-mock.mjs:207 and documents-intake-mock.mjs:173 are real code (`for await (const chunk of request) void chunk;`); the other four occurrences are inside `*`-prefixed block-comment lines describing the shared reader's mechanism, not executable code. A widened PRIVATE_BODY_READER_STREAM would therefore need a second named exception (chat-parity-mock.mjs) the original finding's required_fix did not name, and would newly false-positive on four clean files unless made comment-aware — confirming the refusal is sound and not a rationalization to skip work. No code changed for this finding, matching the disposition."
+    },
+    {
+      "id": "L01-S5",
+      "ticket": 865,
+      "severity": "minor",
+      "claimed_disposition": "fixed",
+      "verified": true,
+      "evidence": "git diff 726bcfdd..f4c8f554 -- apps/web/e2e/README.md adds one sentence to the run section naming the npx-playwright-serves-stale-build trap (citing #648 by name, same measurement as the two file headers) and the correct invocation, plus a pointer to the BUILD_ID/age log line. Matches the required_fix's first option exactly."
+    },
+    {
+      "id": "L01-S6",
+      "ticket": 865,
+      "severity": "note",
+      "claimed_disposition": "no action required (original finding said \"None required by the criterion\")",
+      "verified": true,
+      "evidence": "Untouched by the fix round, correctly — the original finding itself required no fix."
+    },
+    {
+      "id": "L01-S7",
+      "ticket": 902,
+      "severity": "note",
+      "claimed_disposition": "not addressed by the fix round",
+      "verified": true,
+      "evidence": "Confirmed via git diff 726bcfdd..f4c8f554: apps/web/e2e/e2e-fixture-ownership.test.ts's diff is only the L01-S3 cell; the #902 cell title flagged by L01-S7 is unchanged. This is a 'note' severity finding whose required_fix was optional (\"Either narrow the title... or scan...\"); leaving a note unaddressed does not block acceptance under the work order's own bar (\"accept only if nothing above minor remains\")."
+    },
+    {
+      "id": "L01-S8",
+      "ticket": 865,
+      "severity": "note",
+      "claimed_disposition": "no action required (integration note for the orchestrator only)",
+      "verified": true,
+      "evidence": "Original finding explicitly required nothing from the lane."
+    },
+    {
+      "id": "L01-S9",
+      "ticket": 862,
+      "severity": "note",
+      "claimed_disposition": "no action required (note about the work order's own premise, not the lane's work)",
+      "verified": true,
+      "evidence": "Independently re-ran `gh api repos/BELCORT-SDN-BHD/clara/issues/862/comments --jq '.[].created_at'`: returns exactly 2026-09-17T16:57:39Z and 2026-09-19T16:21:37Z, confirming no 2026-09-20 comment exists on #862 (this recheck's own task text repeated the same mistaken premise). Consistent with the original finding; no lane action was ever required."
+    },
+    {
+      "id": "L01-S10",
+      "ticket": 0,
+      "severity": "note",
+      "claimed_disposition": "no action required (integration guidance only)",
+      "verified": true,
+      "evidence": "Not a lane defect; git status confirms the worktree is clean and the true lane diff (dd3f8f1d..HEAD) remains scoped to apps/web/e2e/* plus playwright.config.ts."
+    }
+  ],
+  "new_breakage_check": {
+    "files_touched_by_fix_round": [
+      "apps/web/e2e/journal-work-walk.spec.ts",
+      "apps/web/e2e/e2e-fixture-ownership.test.ts",
+      "apps/web/e2e/README.md"
+    ],
+    "result": "None found. e2e-fixture-ownership.test.ts 34/34, journal-work-walk.spec.ts 23/23, whole apps/web unit suite 4645/4647 pass + 2 skip + 0 fail (matches the fix-round report's own clean-run count exactly, no repeat of the thread-live-clarify.test.tsx flake on this run), pnpm typecheck exit 0, pnpm lint exit 0, check-frozen-workflows.mjs OK (312 files, no diff), git status clean throughout."
+  },
+  "findings": [],
+  "summary": "All five findings the fix round claims to have resolved (L01-S1 through L01-S5) were independently re-verified, not merely re-read: L01-S1's request-listener/expect.poll fix was traced through the real component/hook/read chain (EgressReactivateAction -> onConverge -> useWorkDetail.reload -> getAccountingWork -> the exact GET the listener matches) and confirmed non-flaky (the fixture's terminal 'refused' status stops the poll from interfering); L01-S3's new collision cell was confirmed to thread a synthetic non-standard-spelling source all the way through the real verbCollisions() gate against the real declared share; L01-S4's refusal of the proposed widening was independently reproduced (the exact six-file 'for await' grep, with the code/comment-only split confirmed per-file) rather than taken on the report's word; L01-S5's README sentence and L01-S2's honest test rename were confirmed by diff. All five dispositions match one of the original review's own sanctioned outcomes (fix, or record/defer with reasoning). The four note-severity findings (L01-S6 through L01-S10) required no action and none was taken. Every gate was re-run fresh on head f4c8f554 rather than trusted from the fix-round report: e2e-fixture-ownership.test.ts 34/34, journal-work-walk.spec.ts 23/23 on the lane's own Playwright triple, pnpm typecheck exit 0, pnpm lint exit 0, check-frozen-workflows.mjs clean, and the whole apps/web unit suite at 4645/4647 pass + 2 skip + 0 fail — an exact match to the fix round's own clean-run count, with no regression introduced by the three touched files. Nothing above minor remains open, and no minor remains unresolved by either a real fix or an honestly recorded, review-sanctioned substitution. Verdict: accept."
+}

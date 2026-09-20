@@ -1,0 +1,278 @@
+{
+  "lane": "wave1-lane05",
+  "axis": "SPEC",
+  "reviewer": "/code-review spec reviewer (read-only)",
+  "branch": "riders/w1-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "head": "ab6683c0",
+  "fixed_point": "origin/main",
+  "origin_main_at_review": "e7f0a10a",
+  "merge_base": "dd3f8f1d",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits": [
+    "ab6683c0 docs(web): #969 fix round - record the strip-after-write window explicitly",
+    "509b22d7 test(db): #957 fix round - prove redo refuses on a non-rig target",
+    "b39240c8 fix(scripts): #849 fix round - retire's missing-path fall-through, denominator, canary exclusion",
+    "a4db0de2 fix(web): #969 ui:add guard drops the bogus cn dependency the pinned CLI adds",
+    "247dfc89 fix(lint): #994 NO_RAW_COLOR_VALUES message names the ticket-reference case",
+    "e488a57b fix(scripts): #959 maskComments no longer swallows the rest of the input on an unterminated quote/dollar tag",
+    "0d906477 feat(db): #957 guarded migration redo mode",
+    "10b603a4 fix(ops): #917 dsn-pipe.mjs --child-os wsl CA respelling",
+    "f01b4d34 feat(scripts): #849 --print-closure reverse index and --retire command"
+  ],
+  "spec_source": "GitHub issues #849, #917, #957, #959, #994, #969 (gh api repos/BELCORT-SDN-BHD/clara/issues/<n> and /comments). #849 and #917 carry their newest Agent Brief in a 2026-09-17 triage comment; #957/#959/#994/#969 carry it in the issue body and have NO comments. No owner-ruling comment dated 2026-09-20 exists on any of the six.",
+  "verdict": "accept-with-fixes",
+  "summary": "Every acceptance criterion of all six tickets is delivered, and I re-ran every cell that carries a claim rather than reading the lane report: check-frozen-workflows.selftest.mjs (all cases, incl. the 8 #849 cells), the targeted --print-closure against the real tree (6 of 299), dsn-pipe.selftest.mjs (50 PASS, 10 of them #917), migrate-redo.test.mjs through the real $GATES chain against clara_l05 (8/8), check-wiki-dynamic-sql.selftest.mjs (5 #959 cells) plus my OWN independent whole-tree equivalence harness importing origin/main's and HEAD's wiki-lint-checks.mjs side by side over all 229 migrations (identical: 1410 functions, 212 patches, 0 findings, 0 of 229 files differing in internal classification), eslint-config.selftest.mjs (6), check-ui-add-guard.selftest.mjs (25, 8 of them #969), and root pnpm lint (exit 0). The lane called NO ticket 'already satisfied' or 'stopped'; that is true - every fix adds behaviour provably absent on origin/main, and origin/main has advanced past the merge-base only by four docs files, none touching this lane's subjects. Seven findings, all minor or note. The heaviest two are real AC edges, not style: under --child-os wsl the DSN never actually crosses into WSL, so the DSN-level pin's exclusivity the ticket says is 'unchanged' does not hold for the WSL-side node client (#917); and ui:add's cn strip is skipped entirely, with no warning, when the pinned CLI exits non-zero - and that CLI installs dependencies BEFORE it writes files, so exactly the hand-revert #969 exists to abolish survives that path. No blocker.",
+  "acceptance_by_ticket": {
+    "849": {
+      "status": "done",
+      "criteria": [
+        {
+          "ac": "A targeted form of --print-closure prints only the entry files whose closure includes a given module.",
+          "state": "done",
+          "evidence": "REVIEWER RE-RAN: node scripts/check-frozen-workflows.mjs --print-closure packages/runtime/lib/work-trace.mjs -> 'locked by 6 of 299 @frozen entry file(s)', the six claraWork.v3/v4/v5 x .ts/.impl.ts entries, exit 0. A non-existent module -> '0 of 299' plus '(no @frozen entry's closure reaches this module)', exit 0 - never a silent full report. Code: scripts/freeze-lint-closure.mjs formatClosureReport(closure, moduleFilter)."
+        },
+        {
+          "ac": "--retire <path> --ruling <ref> moves the path from workflows to retired with its last frozen sha256 and the ruling, and a subsequent verify run reports no RETIRED-* violation for it.",
+          "state": "done-with-evidence-gap",
+          "evidence": "scripts/freeze-lint-retire.mjs retireFrozenEntry; its selftest cells pass. REVIEWER hand-checked the CLI write path: frozen-workflows.json's top-level keys are exactly ['version','workflows','retired'] and JSON.stringify({version,workflows,retired},null,2)+newline round-trips the real file BYTE-IDENTICALLY (101902 == 101902), so the write loses nothing. See finding L05B-S04 for the verify-coverage gap."
+        },
+        {
+          "ac": "--retire refuses, with no manifest write, when the target file is still present in the tree or has no current manifest entry.",
+          "state": "done",
+          "evidence": "Two selftest cells pass (file-present, no-current-entry), plus the two fix-round cells that spawn the real check-frozen-workflows.mjs and read frozen-workflows.json before/after."
+        },
+        {
+          "ac": "A cell covers each of the three behaviours above.",
+          "state": "done",
+          "evidence": "REVIEWER RE-RAN node scripts/check-frozen-workflows.selftest.mjs -> 'freeze-lint selftest: OK - all cases passed', exit 0; the #849 section shows 8 cells covering the filter (2), retire success, verify-clean, and four refusals."
+        }
+      ]
+    },
+    "917": {
+      "status": "done",
+      "criteria": [
+        {
+          "ac": "<dsn> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- wsl -u root -- bash -c '... node scripts/backup.mjs --profile full' succeeds from Git Bash with no wrapper script.",
+          "state": "partial",
+          "evidence": "The lane evidenced it to the env boundary only (an echo of PGHOST/PGDATABASE/PGSSLROOTCERT plus CERT_OK), never through backup.mjs --profile full; a real run needs a hosted DSN and pg_dump 17, which I did not have either. REVIEWER CONFIRMED the mechanism is sound for pg_dump: packages/db/lib/pg.mjs connConfig() returns {} with no URL var, so PG* passthrough works. See L05B-S01 and L05B-S02 for two things that path does NOT carry."
+        },
+        {
+          "ac": "The Windows-side fingerprint refusal for a swapped CA still fires under --child-os wsl.",
+          "state": "done",
+          "evidence": "REVIEWER RE-RAN node scripts/ops/dsn-pipe.selftest.mjs -> 50 PASS, exit 0, including '(#917 AC2) the Windows-side fingerprint refusal for a SWAPPED CA still fires under --child-os wsl, before the child ever starts'. Code: main() computes caPath only AFTER validateCa has already read the untouched DEFAULT_CA_PATH."
+        },
+        {
+          "ac": "A unit cell: given a Windows CA path and --child-os wsl, the pinned DSN's sslrootcert carries the /mnt/c/... spelling and nothing else about the DSN changes.",
+          "state": "done",
+          "evidence": "Cell '(#917 AC3) ... NOTHING ELSE about the DSN changes' passes (withVerifyFull before/after, sslrootcert deleted from both, remaining URLs compared equal). Note: operationally inert for the WSL child - see L05B-S01."
+        },
+        {
+          "ac": "packages/db/README.md's backup paragraph and both release runbooks' step-3f invocation are updated to the new flag.",
+          "state": "done",
+          "evidence": "packages/db/README.md 'Backup and recovery' gained the --child-os wsl paragraph and command block; RELEASE-RUNBOOK-0199-0224.md's pre-flight bullet and RELEASE-RUNBOOK-0225-0233.md's step 3f each gained an 'Update (#917)' block naming the next ceremony's invocation, with each ceremony's already-run RESULTS left as history. One sentence in the README is inaccurate - see L05B-S01."
+        }
+      ]
+    },
+    "957": {
+      "status": "done",
+      "criteria": [
+        {
+          "ac": "Redoing the highest applied version after editing its file succeeds, and an immediately following normal run reports nothing pending and no drift.",
+          "state": "done",
+          "evidence": "REVIEWER RE-RAN from packages/db with the exact $GATES list from package.json's test script, PGHOST=127.0.0.1 PGPORT=55745 PGUSER=postgres PGDATABASE=clara_l05 CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1: tests/migrate-redo.test.mjs -> 8 tests / 8 pass / 0 fail. The AC1 cell is green."
+        },
+        {
+          "ac": "Redo refuses when the destructive guard is not satisfied, and changes nothing.",
+          "state": "done",
+          "evidence": "migrate.mjs calls assertDestructiveAllowed({action: 'redo migration <v>'}) BEFORE any connection opens - reused, not reinvented, exactly as the ticket's Key interfaces instruct ('Reuse it; do not invent a second gate'). The AC2 cell and the fix-round non-ephemeral-target cell (a throwing clientFactory proves no connection opens) are both green."
+        },
+        {
+          "ac": "Redo refuses a version that is not the highest applied version, and changes nothing.",
+          "state": "done",
+          "evidence": "migrate.mjs's highestApplied reduce, thrown after the drift throw and the late-insertion check, so byVersion.get() is always defined there. AC3 cell green."
+        },
+        {
+          "ac": "A redo that fails mid-apply leaves the ledger row either intact or absent, never a state the next normal run cannot describe, and the failure names the version.",
+          "state": "done",
+          "evidence": "The ledger DELETE is issued on the migration client inside the SAME transaction as the body, so a failure rolls it back with the body. The AC4 cell - which also asserts the failure is NOT the ordinary drift message and that a subsequent normal migrate() describes the resulting state - is green."
+        },
+        {
+          "ac": "The ordinary apply path still aborts on checksum drift with its existing immutability message; a test covers that this did not regress.",
+          "state": "done",
+          "evidence": "The AC5 cell asserts the exact pre-existing message with no redo option in play; green. REVIEWER READ the diff: the drift loop is untouched except for one 'if (version === redo) continue;', and every other redo behaviour sits behind 'redo !== null'."
+        }
+      ]
+    },
+    "959": {
+      "status": "done",
+      "criteria": [
+        {
+          "ac": "A selftest case with an apostrophe inside a -- comment: every later comment in that input is still masked.",
+          "state": "done-as-control",
+          "evidence": "'[#959 control]' cell green. The lane states honestly that this shape was never actually broken (a -- comment blanks blindly to end-of-line without invoking the quote skip) and keeps the cell as a positive control, which matches the ticket's own 'worth a selftest case' framing."
+        },
+        {
+          "ac": "A selftest case with an unterminated dollar-quote tag: later comments are still masked, or the input is reported as unparseable, and the chosen behaviour is asserted.",
+          "state": "done",
+          "evidence": "Chosen: BOUNDED, stated at length in skipQuoted's own contract note. skipQuoted returns i+1 (was s.length); skipDollar returns i (was s.length). Cells for both the unterminated dollar tag and the unterminated single quote are green."
+        },
+        {
+          "ac": "A regression case reproduces the measured failure: an assertion-only do block whose preceding comment contains pg_get_functiondef is not classified as a change-of-record patch.",
+          "state": "done",
+          "evidence": "'[#959 regression]' cell drives the real production entry point parseCoRPatches, not a re-implementation; green."
+        },
+        {
+          "ac": "The inverse case is covered: a genuine dynamic-SQL patch is still flagged when an earlier comment contains a token that could make it read as benign.",
+          "state": "done",
+          "evidence": "'[#959 inverse]' cell green (scanSources still reports exactly one finding naming wiki_pages)."
+        },
+        {
+          "ac": "Running the wiki lint over every file in the migrations directory yields the same verdicts as before the change.",
+          "state": "done",
+          "evidence": "REVIEWER'S OWN INDEPENDENT HARNESS (not the lane's stash-and-rerun): wrote 'git show origin/main:scripts/wiki-lint-checks.mjs' and the HEAD copy side by side into the scratchpad, imported BOTH, ran scanSources over all 229 packages/db/migrations/*.sql. MAIN {functions:1410, patches:212}, 0 findings, 1410 identities; HEAD identical; findings arrays byte-equal; identity sets byte-equal; per-file parseFunctions+parseCoRPatches detail (kind, line, targets, whitelisted, fragment count, censusOnly, censusReads) differing on 0 of 229 files. Also re-ran node scripts/check-wiki-dynamic-sql.mjs -> OK, 1410/212, the same 13 named waivers."
+        }
+      ]
+    },
+    "994": {
+      "status": "done",
+      "criteria": [
+        {
+          "ac": "The message ESLint prints for this rule names the ticket-reference case (# followed by digits) and states the recommended fix, rewording the string.",
+          "state": "done-but-partial-vs-desired-behaviour",
+          "evidence": "eslint.config.mjs's NO_RAW_COLOR_VALUES.message gains a NOTE naming #658 and 'REWORD the string'. The AC checkbox is met. The ticket's Desired-behaviour paragraph asks for more than the checkbox - see L05B-S05."
+        },
+        {
+          "ac": "The rule's selector is unchanged: no real colour literal banned today becomes allowed, and no non-colour token allowed today becomes banned.",
+          "state": "done",
+          "evidence": "REVIEWER READ the diff: the selector string is byte-untouched; exactly one property (message) changed. REVIEWER RE-RAN node scripts/eslint-config.selftest.mjs -> 6/6, exit 0, including the three-cell selector-regression battery (still-banned real colours, still-allowed spelled-out text, and a bare ticket number still firing)."
+        },
+        {
+          "ac": "pnpm lint at the repo root still exits 0 on current code.",
+          "state": "done",
+          "evidence": "REVIEWER RE-RAN pnpm lint at the worktree root -> exit 0 (full chain including the newly wired scripts/eslint-config.selftest.mjs, apps/web's own lint and packages/reporting-render)."
+        }
+      ]
+    },
+    "969": {
+      "status": "done",
+      "criteria": [
+        {
+          "ac": "Running ui:add for an item whose resolution names cn leaves no cn entry in any package.json or in the lockfile, with no manual revert.",
+          "state": "done-on-the-success-path",
+          "evidence": "ui-add.mjs main(): spawnAdd, then stripLocalDependencies(['cn']) via pnpm remove. The [AC1] cell is green and the lane recorded a live 'pnpm ui:add avatar' rehearsal. FAILS on the CLI-non-zero path - see L05B-S03."
+        },
+        {
+          "ac": "The guard reports what it did about cn, so a caller is never silently deprived of a dependency.",
+          "state": "done",
+          "evidence": "'[ui-add] dropped N bogus local dependency stand-in(s) ...' on success; a loud WARNING naming cn on a failed strip, with its own cell green."
+        },
+        {
+          "ac": "A dry run names the dependencies the item would add, including the one classified as local.",
+          "state": "done",
+          "evidence": "'[ui-add] dependencies ... would add: cn (local - this repo's own, see lib/utils.ts; never installed as a real npm package).' The [AC3] cell is green and asserts no strip is called for a dry run."
+        },
+        {
+          "ac": "Protected-file refusal, the override knob and installs of items that do not touch cn behave exactly as they do today, with the guard's own selftest green.",
+          "state": "done",
+          "evidence": "REVIEWER RE-RAN apps/web/scripts/check-ui-add-guard.selftest.mjs -> 25 PASS, exit 0: 17 pre-existing cells unchanged plus 8 #969 cells, including '[AC4] a PROTECTED payload that also resolves cn is still refused on the protected file FIRST - dependencies are never even resolved'."
+        }
+      ]
+    }
+  },
+  "already_satisfied_or_stopped_claims": {
+    "lane_claim": "The lane claimed NO ticket was already satisfied and NO ticket was stopped; all six were built.",
+    "reviewer_verdict": "TRUE.",
+    "evidence": "Each fix adds behaviour demonstrably absent on origin/main: freeze-lint-closure.mjs's formatClosureReport took no moduleFilter and freeze-lint-retire.mjs did not exist; dsn-pipe.mjs's splitArgv rejected any token before '--'; migrate() had no redo option; skipQuoted/skipDollar returned s.length; NO_RAW_COLOR_VALUES.message had no ticket-reference note; ui-add.mjs read only resolved.files. The diff against origin/main is itself the evidence for each. Also checked that origin/main (e7f0a10a) has advanced past the merge-base (dd3f8f1d) only by docs/PROGRESS.md, a RELEASE-AS-RUN.md, a ceremony reads-0234.mjs and GRILL-2026-09-20.md - nothing that could have satisfied any of the six in the meantime."
+  },
+  "findings": [
+    {
+      "id": "L05B-S01",
+      "ticket": 917,
+      "severity": "minor",
+      "kind": "requirement-implemented-but-looks-wrong",
+      "title": "Under --child-os wsl the DSN never crosses into WSL, so the DSN-level pin's exclusivity - which the ticket says is 'unchanged' - does not hold for the WSL-side node client, and AC3's respelled DSN reaches nothing",
+      "evidence": "Ticket line (Desired behavior): \"`sslmode=verify-full` and the DSN-level pin's exclusivity are unchanged.\" And AC3: \"the pinned DSN's `sslrootcert` carries the `/mnt/c/...` spelling\". WHAT SHIPS: scripts/ops/dsn-pipe.mjs's WSL_ENV_LIST = 'PGHOST:PGPORT:PGUSER:PGPASSWORD:PGDATABASE:PGSSLMODE:PGSSLROOTCERT:NODE_EXTRA_CA_CERTS' - DATABASE_URL is deliberately absent, and nothing unnamed in WSLENV crosses the Windows/WSL boundary. So the respelled DSN lives only in the direct wsl.exe process and dies there. On the WSL side packages/db/lib/pg.mjs connConfig() finds no URL var and returns {}, so node-postgres builds TLS from the environment: node_modules/.pnpm/pg@8.20.0/node_modules/pg/lib/connection-parameters.js readSSLConfigFromEnvironment() maps PGSSLMODE='verify-full' to plain `true` - no `ca` - i.e. the global trust store augmented by NODE_EXTRA_CA_CERTS (ADDITIVE), not the exclusive DSN pin the module's own header calls the whole point ('a DSN-level pin is what makes node-postgres treat the CA as EXCLUSIVE rather than merely additional'). packages/db/scripts/backup.mjs:140 DOES open such a client on the --profile full path AC1 names. libpq (pg_dump) is unaffected - PGSSLROOTCERT is exclusive for it. NOT A REGRESSION: the hand wrapper this replaces also omitted DATABASE_URL (RELEASE-RUNBOOK-0225-0233.md:213), but it is now shipped behaviour rather than a one-off. packages/db/README.md's new paragraph justifies the omission with 'only the WSL-side client tools need the PG* vars' - inaccurate, since a node pg client connects there too.",
+      "required_fix": "Say it where an operator reads it: one sentence in packages/db/README.md's #917 paragraph (and in dsn-pipe.mjs's WSL_ENV_LIST header) recording that under --child-os wsl the WSL side authenticates TLS from PGSSLMODE + PGSSLROOTCERT (exclusive for libpq) and NODE_EXTRA_CA_CERTS (additive for Node), NOT from the DSN's own sslrootcert pin, and that backup.mjs's node client on that side is in the additive case. If end-to-end exclusivity is actually wanted, that is a successor contract (cross a DSN, or have the WSL side rebuild one from PG* + PGSSLROOTCERT), not a doc fix."
+    },
+    {
+      "id": "L05B-S02",
+      "ticket": 917,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "WSL_ENV_LIST drops CLARA_BACKUP_DIR, which the wrapper it replaces carried - and the runbook now tells the next ceremony there is no wrapper",
+      "evidence": "Ticket AC4: \"both release runbooks' step-3f invocation are updated to the new flag\", and AC1 asks the documented command to succeed \"with no wrapper script\". The wrapper being retired set `export WSLENV='PGHOST:PGPORT:PGUSER:PGPASSWORD:PGDATABASE:PGSSLMODE:PGSSLROOTCERT/p:CLARA_BACKUP_DIR/p'` (docs/plan/active/refresh-wave-2026-09-18/RELEASE-RUNBOOK-0225-0233.md:213, quoted verbatim in the diff's own kept-as-history paragraph). The shipped WSL_ENV_LIST has the six PG vars plus the two CA vars and NO CLARA_BACKUP_DIR. packages/db/scripts/backup.mjs:54 reads `process.env.CLARA_BACKUP_DIR || join(PKG_ROOT, 'backups')`, so an operator who sets CLARA_BACKUP_DIR on the Windows side and follows the runbook's new wrapper-free invocation silently gets the default directory instead. The dump still succeeds (the default resolves to a WSL-visible /mnt path) - it just does not land where the operator asked.",
+      "required_fix": "Either add CLARA_BACKUP_DIR to WSL_ENV_LIST with the /p translation flag (it is NOT pre-respelled by dsn-pipe, unlike the two CA vars), or state in the runbook's Update (#917) block and packages/db/README.md that CLARA_BACKUP_DIR does not cross and the artefact lands under packages/db/backups on the WSL side."
+    },
+    {
+      "id": "L05B-S03",
+      "ticket": 969,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "The cn strip is skipped silently when the pinned CLI exits non-zero - and that CLI installs dependencies BEFORE it writes files, so exactly the hand-revert #969 abolishes survives that path",
+      "evidence": "Ticket AC1: \"Running `ui:add` for an item whose resolution names `cn` leaves no `cn` entry in any `package.json` or in the lockfile, with no manual revert.\" apps/web/scripts/ui-add.mjs main(): `const code = spawnAdd(argv); if (code !== 0) return code;` - returns before stripLocalDependencies with no message at all, in contrast with the failed-strip path two lines below which logs a loud WARNING naming cn. ORDERING MEASURED, NOT ASSUMED: in the pinned shadcn 4.19.0 bundle apps/web/node_modules/shadcn/dist/chunk-CDOZT3OO.js the add flow `yh()` runs `await on(s.dependencies, s.devDependencies, t, ...)` - the function whose spinner reads 'Installing dependencies.' - FIRST, and only then Br (tailwind config), cn (env vars), un (fonts) and the file writer. So a failure in the file-writing half of an add leaves cn already in package.json and pnpm-lock.yaml. No cell covers this branch (the 8 #969 cells cover success, dry-run, override, non-cn, protected-first and failed-strip). apps/web/components/ui/README.md's new window paragraph names 'a killed process, a crashed machine' but not an ordinary non-zero CLI exit.",
+      "required_fix": "Strip (or at minimum warn, in the same loud shape as the failed-strip path) when spawnAdd returns non-zero and local dependencies were classified, and add the cell: spawnAdd -> 1 with cn in the resolution asserts either the strip call or the WARNING. Cite the measured CLI ordering in the code comment so the next reader need not re-derive it from the bundle."
+    },
+    {
+      "id": "L05B-S04",
+      "ticket": 849,
+      "severity": "minor",
+      "kind": "evidence-does-not-cover-the-requirement",
+      "title": "AC2's 'a subsequent verify reports no RETIRED-* violation' is evidenced against a verifier that cannot emit three of the four invariants the ticket names, and no cell drives a successful --retire through the CLI at all",
+      "evidence": "Ticket body: \"the invariants (`RETIRED-DUPLICATE`, `RETIRED-NO-HASH`, `RETIRED-NO-RULING`, `RETIRED-PRESENT`) enforced only after the fact\"; AC2: \"a subsequent verify run reports no `RETIRED-*` violation for it\". The cell carrying that claim (scripts/check-frozen-workflows.selftest.mjs:589, '#849 retireFrozenEntry's output leaves a subsequent verify (compareFrozenManifestText) clean') runs compareFrozenManifestText from scripts/frozen-manifest-compare.mjs, whose retired-record violations are RETIRED-HASH-MISMATCH, RETIRED-NO-RULING, UNRETIRED-ENTRY and RETIRED-REHASHED only. The four the ticket names live in a DIFFERENT verifier - check-frozen-workflows.mjs's own verify path at lines 424 (RETIRED-DUPLICATE), 428 (RETIRED-NO-HASH), 432 (RETIRED-NO-RULING) and 437 (RETIRED-PRESENT). Three of the four are therefore unexercised by the cell that claims them. Separately, the two CLI-spawning cells cover only REFUSALS; the successful --retire write path (the writeFileSync(MANIFEST_PATH, ...) block in main()) has no cell. The implementation itself looks correct - I hand-checked that the write cannot lose data: frozen-workflows.json's top-level keys are exactly ['version','workflows','retired'] and JSON.stringify({version,workflows,retired},null,2)+newline round-trips the real file byte-identically (101902 bytes) - but that is my check, not a committed one.",
+      "required_fix": "Point the AC2 cell at the verifier the ticket names: feed retireFrozenEntry's output manifest through check-frozen-workflows.mjs's own retired-record checks (extract them, or spawn the real CLI against a temp manifest) and assert zero RETIRED-DUPLICATE / RETIRED-NO-HASH / RETIRED-NO-RULING / RETIRED-PRESENT. Add one success-path CLI cell against a temp manifest so the write itself is covered."
+    },
+    {
+      "id": "L05B-S05",
+      "ticket": 994,
+      "severity": "minor",
+      "kind": "requirement-partial-and-report-overclaim",
+      "title": "The new lint message never states the 3/4/6/8-hex-character trip condition the ticket's Desired behaviour asks for, and the lane report claims it does",
+      "evidence": "Ticket Desired behavior: \"The rule's message explicitly states that any `#` immediately followed by 3, 4, 6 or 8 hex-looking characters trips this selector, including a ticket reference such as `#658`\". SHIPPED TEXT (eslint.config.mjs): 'NOTE: this selector cannot tell a real colour from any other short hex-looking token after `#` - a plain ticket reference like `#658` trips it too (#994). If that is your case, the fix is to REWORD the string (e.g. spell it out as \"ticket 658\"), never to weaken this rule.' - 'short hex-looking token', never 3/4/6/8. The lane's own report asserts the opposite: 'states any `#` + 3/4/6/8 hex-looking chars trips the selector'. The omission is substantive, not cosmetic: without the counts a developer cannot tell why #658 and #1013 fire while #12345 does not, which is precisely the diagnosis round-trip the ticket exists to abolish. The AC checkbox ('names the ticket-reference case (# followed by digits) and states the recommended fix') IS met, so this is partial, not missing.",
+      "required_fix": "Add the counts to the message - e.g. '... any `#` immediately followed by 3, 4, 6 or 8 hex-looking characters ...' - and correct the claim in the lane report."
+    },
+    {
+      "id": "L05B-S06",
+      "ticket": 959,
+      "severity": "note",
+      "kind": "documented-divergence-from-key-interfaces",
+      "title": "The chosen contract is silent bounded recovery; the ticket's Key-interfaces line asked for a reported condition",
+      "evidence": "Ticket Key interfaces: \"The quoted-string and dollar-quote skip helpers: their no-closing-token result must be a reported condition rather than a silent jump to end of input.\" Delivered: skipQuoted returns i+1 and skipDollar returns i, with nothing reported to any caller. The ticket's own AC2 offers the alternative explicitly ('later comments are still masked, OR the input is reported as unparseable, and the chosen behaviour is asserted'), the choice is stated at length in skipQuoted's contract note, and a cell asserts it - so the AC governs and this is a documented divergence, not a failure. Recorded only so a future author reading the Key-interfaces line is not surprised. The direction of the change is fail-CLOSED (an unterminated literal's interior is now scanned as SQL rather than skipped), which respects the ticket's out-of-scope 'weakening or relaxing the fail-closed classification'.",
+      "required_fix": "None. Optionally one line in the contract note saying which of the ticket's two offered shapes was taken and why the other was not."
+    },
+    {
+      "id": "L05B-S07",
+      "ticket": 957,
+      "severity": "note",
+      "kind": "scope",
+      "title": "redo splits migrate()'s return contract in two ({redone, checksum} vs {applied, total}); no caller breaks today",
+      "evidence": "The ticket's Key interfaces name only 'The migration runner's programmatic entry point and its options object'; the return shape is not mentioned. packages/db/scripts/migrate.mjs now returns {redone, checksum} when redo is set and {applied, total} otherwise. REVIEWER CHECKED every caller outside tests: the only one is migrate.mjs:632's own `if (isMain(...))` block, which ignores the value, so nothing breaks. Noted for the record alongside a small asymmetry: redo defaults to `process.env.CLARA_MIGRATION_REDO || null` in the destructuring, so an explicit `redo: null` suppresses the env var, while dir uses `dir || process.env.CLARA_MIGRATIONS_DIR`. No behavioural consequence found.",
+      "required_fix": "None. The README's 'Redo (#957)' paragraph could name the return shape."
+    }
+  ],
+  "scope_creep_assessed": [
+    "#917 - WSLENV handling (WSL_ENV_LIST) is beyond the ticket's Key interfaces, which name only the argv splitter and the DSN/env builders. NOT creep: without it the AC1 command cannot work at all, since nothing crosses the Windows/WSL boundary unnamed. The lane declares it openly as 'Beyond the stated AC'.",
+    "#849 - the '--retire is REFUSED under CI' branch is in no AC. Not creep in substance: it mirrors --update and --lock-deployed's existing shape for a command that writes the manifest, and the ticket asks it to 'reuse the existing manifest read/write ... helpers'.",
+    "#994 - a new file, scripts/eslint-config.selftest.mjs, wired into root package.json's lint script. Beyond the ticket's Key interfaces (the message string alone), but required by work-order rule 4 (a cell per ticket) and placed by that script's own convention (every other config-adjacent selftest is already in the chain). Root package.json is not a rule-7 shared file and the hunk is one token in one string. Accepted.",
+    "#969 - defaultResolveDependencies makes a SECOND resolveRegistryItems call rather than widening defaultResolveFiles. Deliberate and documented (it keeps every existing resolveFiles fixture working) at the cost of one extra registry resolution per run. Within scope; flagged for the Standards axis, not this one.",
+    "No ticket touched docs/PRD.md, docs/ARCHITECTURE.md, an applied migration or a frozen workflow body; the unfiltered freeze-lint verify still reports the identical '312 frozen file(s) ... 3 retired entr(ies)' (re-run as part of pnpm lint)."
+  ],
+  "gates_rerun_by_reviewer": [
+    "node scripts/check-frozen-workflows.selftest.mjs -> 'freeze-lint selftest: OK - all cases passed', exit 0; 8 #849 cells named",
+    "node scripts/check-frozen-workflows.mjs --print-closure packages/runtime/lib/work-trace.mjs -> 6 of 299, exit 0; same flag with a non-existent module -> 0 of 299 plus an explicit 'no entry reaches this module', exit 0",
+    "node scripts/ops/dsn-pipe.selftest.mjs -> 50 PASS, exit 0; 10 cells in the (#917) section (the lane's final report still says 11 - uncorrected from the earlier review's L05-S06)",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/migrate-redo.test.mjs against clara_l05 @127.0.0.1:55745 -> 8 tests / 8 pass / 0 fail (the lane's final report still says 7; fix round 1 added the eighth)",
+    "node scripts/check-wiki-dynamic-sql.selftest.mjs -> exit 0, 5 #959 cells named; node scripts/check-wiki-dynamic-sql.mjs -> OK, 1410 functions / 212 patches / 13 named waivers",
+    "REVIEWER'S OWN whole-tree equivalence harness (scratchpad): origin/main's and HEAD's wiki-lint-checks.mjs imported side by side, scanSources over all 229 migrations -> findings identical (0), scanned identical {1410, 212}, identity sets identical, per-file parseFunctions/parseCoRPatches detail identical on all 229",
+    "node scripts/eslint-config.selftest.mjs -> 6/6, exit 0",
+    "apps/web: node scripts/check-ui-add-guard.selftest.mjs -> 25 PASS, exit 0",
+    "pnpm lint (worktree root) -> exit 0",
+    "Manifest write-path hand check: frozen-workflows.json top-level keys ['version','workflows','retired']; JSON.stringify(...,2)+newline round-trips byte-identically (101902 bytes)",
+    "git fetch origin; origin/main e7f0a10a; merge-base dd3f8f1d; main-ahead diff = 4 docs files only"
+  ],
+  "not_rerun": [
+    "The whole apps/web unit suite (node scripts/run-tests.mjs, ~4633 tests) - not an acceptance criterion of any of the six tickets, and the earlier review already recorded it as flaky at that size across two runs. pnpm lint (which runs apps/web's own lint including the ui:add guard selftest) was run instead.",
+    "pnpm typecheck - no ticket AC names it; the earlier review and its recheck both re-ran it green on this head.",
+    "#917 AC1 end to end through backup.mjs --profile full - it needs a hosted DSN and pg_dump 17; neither the lane nor I ran it. The first ceremony using --child-os wsl is its proof."
+  ]
+}

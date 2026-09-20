@@ -1,0 +1,67 @@
+{
+  "lane": "wave1-lane06",
+  "branch": "riders/w1-lane06",
+  "head": "de3b251a23acbbc4264aefa92ac86b81deab4640",
+  "fork_point": "dd3f8f1d202b6eade2211f33c34f263d033768f1",
+  "fixed_point": "e7f0a10af4a1f69f3a01548d2324aa58d0a6231f (origin/main)",
+  "diff_command": "git diff origin/main...HEAD",
+  "commit_log_command": "git log origin/main..HEAD --oneline",
+  "lens": "STANDARDS (separate axis; not merged with SPEC)",
+  "reviewed_at": "2026-09-20",
+  "verdict": "accept-with-fixes",
+  "summary": "Two-axis STANDARDS-only review of the five-commit diff for tickets #850, #967, #963 (queue-drain.mjs/.test.mjs new, two-build-cutover-e2e.mjs, two module READMEs, and a shared CI action.yml comment). No hard violation of the tdd/mocking rules: the new unit tests inject a fake at the database boundary only (mocking.md's endorsed 'sometimes - prefer test DB' case), run the real census functions from lib/rollback-preflight.mjs unmocked, assert through the one public seam (waitForQueueDrain), use independently-authored expected values, and the fix-round cells were verified with a stated mutation/vacuity control per WORK-ORDER rule 4. The one clear, checkable hard violation is procedural: commit de3b251a bundles fixes for two different tickets (#967 and #850) into one commit, against WORK-ORDER.md rule 2's explicit 'One ticket = its own commits'. A second, lower-severity item: the shared .github/actions/db-live-gates/action.yml hunk grows by roughly 90 comment lines across two unrelated blocks in one commit, in tension with WORK-ORDER rule 7's 'keep your hunk minimal' for files nine other lanes touch concurrently -- not a rule break on its own (the content is what AC1 requires), but a merge-conflict risk worth naming.",
+  "findings": [
+    {
+      "id": "L06-STD-1",
+      "tickets": [967, 850],
+      "ticket": 967,
+      "category": "documented-standard",
+      "kind": "hard-violation",
+      "severity": "major",
+      "file": "N/A (commit-level; touches .github/actions/db-live-gates/action.yml, packages/runtime/README.md, packages/runtime/tests/queue-drain.mjs, packages/runtime/tests/queue-drain.test.mjs, packages/runtime/tests/two-build-cutover-e2e.mjs)",
+      "title": "One commit bundles fix-round work for two different tickets (#967 and #850), against WORK-ORDER.md rule 2",
+      "standard": "docs/plan/active/riders-2026-09-20/WORK-ORDER.md rule 2: \"One ticket = its own commits, whose messages name it (`fix(web): #896 …`).\"",
+      "evidence": "Commit de3b251a's subject is literally \"fix(runtime): #967 + #850 fix round 1 — a real drained failure, a masked error, two mislabels\" (git log origin/main..HEAD --oneline). Its body documents three #967 items (L06-967-B major, L06-967-A partial, L06-967-C minor) and three #850 items (L06-850-A major, L06-850-B major, L06-850-C major) in one commit touching all five changed source/doc files at once. The rule's own example shows a single ticket number per commit message; this message joins two with '+'. Contrast with the lane's other four commits (ebbaa2ee #850 only, c00fc8d4 #967 only, 7f956c6b #963 only, b89671ce #963 only), each of which is single-ticket and compliant.",
+      "required_fix": "Going forward, split a fix round that spans two tickets into two commits, one per ticket, even when the same review pass discovered both sets of findings and even when they touch overlapping files (e.g. action.yml's #967 block and #850 block are already textually separable). Not practically undoable for this already-made commit without a history rewrite the lane is not authorized to do; flagged for the orchestrator's integration decision."
+    },
+    {
+      "id": "L06-STD-2",
+      "tickets": [850, 967],
+      "ticket": 850,
+      "category": "smell",
+      "kind": "judgement-call",
+      "severity": "minor",
+      "file": ".github/actions/db-live-gates/action.yml",
+      "title": "Possible Divergent Change / oversized hunk in a nine-lane shared file",
+      "standard": "docs/plan/active/riders-2026-09-20/WORK-ORDER.md rule 7: \"Shared files (… .github/actions/db-live-gates/action.yml …): nine other lanes edit them at the same time. Keep your hunk minimal, at the sorted position, and put logic in your own new modules.\"",
+      "evidence": "git diff origin/main...HEAD -- .github/actions/db-live-gates/action.yml shows +94/-8 across two independent comment blocks: a ~30-line #967 block inserted above the 'Slice-5 intake transport e2e' step, and a ~60-line #850 block (added across ebbaa2ee and revised again in de3b251a, e.g. 'AC1 MEASUREMENT (fix round 1, L06-967-A): this lane's rig cannot reproduce a truly FRESH ephemeral clara_intake_ci a second time …' and '#850 — THE 78.0s / 124s FIGURES BELOW PREDATE #794's SECOND LEG …') beside the two-build-cutover step. Both blocks are pure prose (no step/logic changed), so 'put logic in your own new modules' is satisfied, but 'keep your hunk minimal' is in real tension with two unrelated tickets each growing the same shared comment substantially in the same file.",
+      "required_fix": "No functional fix required — the AC explicitly asks for the cost comment to be updated. Worth the orchestrator's deliberate attention when integrating this file against the other nine lanes' edits to it; the #967 block and the #850 block are textually independent and can be taken/merged separately if a conflict arises."
+    },
+    {
+      "id": "L06-STD-3",
+      "tickets": [967],
+      "ticket": 967,
+      "category": "test-quality",
+      "kind": "clean-sweep",
+      "severity": "note",
+      "file": "packages/runtime/tests/queue-drain.test.mjs",
+      "title": "TDD/mocking discipline check: no violation found",
+      "standard": ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+      "evidence": "The six cells in queue-drain.test.mjs exercise only the exported public seam (`waitForQueueDrain(rig, opts)`), never an internal collaborator or private function. The fake `rig.rootQuery` stands in for the database (mocking.md's own endorsed boundary: 'Databases (sometimes - prefer test DB)'); the repo's own `censusNonTerminalRuns` and `censusUnboundTasks` (lib/rollback-preflight.mjs) run unmocked against that fake, so the module the repo controls is not what's being doubled. Expected values (`result.polls === 1`, error messages naming `poisoned`/`run-poisoned`/`old-failure`) are independently authored fixture literals, not the production code's own computation echoed back, so none is tautological. WORK-ORDER rule 4's vacuity-control requirement is explicitly satisfied and named in both commit messages: c00fc8d4 ('an AND-vs-OR mutation on the two censuses' combination was verified to fail two of the three cells for the right reason, then reverted byte for byte') and de3b251a ('a mutation check (disabling the throw fails exactly the new cell), and a byte-for-byte revert back to green'). No horizontal slicing is evidenced: both commits that touch this file add implementation and its own tests together as one vertical slice per ticket (not a separate all-red-tests commit followed later by implementation).",
+      "required_fix": "None."
+    },
+    {
+      "id": "L06-STD-4",
+      "tickets": [967],
+      "ticket": 967,
+      "category": "smell",
+      "kind": "judgement-call",
+      "severity": "note",
+      "file": "packages/runtime/tests/queue-drain.test.mjs",
+      "title": "Possible Mysterious/fragile pattern: order-dependent regex routing in the test fake, self-documented",
+      "standard": "Fowler smell baseline (code-review skill) — closest match is Mysterious Name / fragile test-double design; not a documented repo standard, so this is a judgement call only",
+      "evidence": "fakeRig's rootQuery dispatches on regex over raw SQL text with an explicit ordering dependency: `/status = 'failed'/` MUST be checked before `/workflow_runs/` because both queries read the same table, and the file says so in its own comment ('MUST be checked before the plain workflow_runs match below'). Verified against lib/rollback-preflight.mjs that the two production queries do share the substring 'workflow_runs' (censusFailedRuns's own query in queue-drain.mjs also selects from workflow.workflow_runs), so the ordering constraint is real, not hypothetical, and is already load-bearing.",
+      "required_fix": "None required — the risk is self-documented and low (four fixed query shapes, not an open-ended set); a small helper (`classifyQuery(sql)`) would remove the ordering dependency from the reader's attention if this fake grows more query kinds later."
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "lane": "wave1-lane04",
+  "axis": "SPEC",
+  "skill": ".claude/skills/code-review/SKILL.md (two-axis review; Standards runs as a SEPARATE reviewer and is NOT merged here)",
+  "branch": "riders/w1-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "head": "0b592123901cfb0612ca53742c2016ce49bf234a",
+  "fixed_point": "origin/main (e7f0a10af4a1f69f3a01548d2324aa58d0a6231f); merge-base dd3f8f1d202b6eade2211f33c34f263d033768f1",
+  "diff_command": "git diff origin/main...HEAD (three-dot, against the merge-base)",
+  "commits": [
+    "0b592123 fix(scripts): #857 fix-round — main()'s exit code, structural region_idx exclusion (L04-S09, L04-S10)",
+    "0866aeba docs+test(db): #854 fix-round — pin refusal shape, honest doc claims (L04-S05, L04-S06, L04-S07)",
+    "6dea8f7a fix(db): #867 fix-round — arithmetic bug, README drop order, unverified claim (L04-S02, L04-S13, L04-S14)",
+    "4c4a5db9 fix(db): #866 fix-round — pin AC2 with a real leak cell (L04-S01, L04-S12)",
+    "9e3a8c1e feat(scripts,db): #857 lint gate refuses a raw document_regions.field_path outside the canonical grammar",
+    "d3224a44 test(db): #854 opening-balance evidence wall gains real two-session races",
+    "130ff25e docs(db): #867 durable fresh-cluster rule + role-census-reset script",
+    "d331cc59 fix(db): #866 T10b names World contamination instead of guessing"
+  ],
+  "spec_source": "GitHub issues #866, #867, #854, #857 — the triage 'Agent Brief' comment of 2026-09-17 is the newest brief on each and wins over the older issue body. No owner ruling comment dated 2026-09-20 exists on any of the four.",
+  "files_changed": 12,
+  "verdict": "accept-with-fixes",
+  "ticket_status_as_reviewed": {
+    "866": "done — AC1 (named skip arm) and AC2 (two pinning cells) both land and both re-run green. One minor: the new AC2 guard cell reds on exactly the World-contaminated rig AC1 exists to make skip.",
+    "867": "partial — the deliverable (durable README recipe + role-census-reset.mjs + 8 cells) is real and re-runs green, but AC1's literal 'record the run' was never performed and the lane says so. Ticket must stay OPEN on that residual.",
+    "854": "done-with-a-defect — all five ACs are addressed except AC2's 'exactly one', which the cells deliberately do not assert because one arrival order MEASURED a real double posting. The brief's own consequence ('that is a new defect for its own ticket') is NOT discharged: no issue exists.",
+    "857": "partial by the brief's own 'Either or both' framing — the lint arm (AC1) is done, registered in the root lint chain and self-tested; the CHECK arm (AC2) is correctly stopped for want of a migration. Residual unfiled."
+  },
+  "already_satisfied_and_stopped_claims_checked_against_main": [
+    {
+      "claim": "#857 AC2 (table CHECK on document_regions.field_path) is STOPPED because it needs a new migration",
+      "verdict": "TRUE",
+      "evidence": "Live rig clara_l04: pg_constraint on clara.document_regions carries only ck_document_regions_opening_fact_0017, document_regions_engine_confidence_check, document_regions_locator_check, document_regions_locator_kind_check — none over field_path in general. pg_proc in schema clara matching '%field_path%' returns exactly one name, _assert_field_path — no boolean sibling exists. So a new migration is genuinely required, and WORK-ORDER rule 5 forbids one in a wave-1 lane."
+    },
+    {
+      "claim": "the lane declared NO ticket 'already satisfied'",
+      "verdict": "TRUE and correct",
+      "evidence": "git show origin/main:packages/db/tests/rig-meta.mjs has no worldSchemaPresent/WORLD_SCHEMAS (#866 live); origin/main packages/db/README.md has no from-scratch/reused-cluster section and packages/db/scripts/role-census-reset.mjs does not exist (#867 live); origin/main opening-balance-evidence-link.test.mjs has three cells and no obw.race.* (#854 live); scripts/check-document-region-field-paths.mjs does not exist on main and the root lint script does not reference it (#857 live). gh issue view: all four still OPEN, labelled ready-for-agent."
+    },
+    {
+      "claim": "#866 AC2 was not already covered by main's existing T17b canary",
+      "verdict": "TRUE",
+      "evidence": "origin/main rig-isolation.test.mjs:551 'T17b PUBLIC-lockdown mechanism' creates its canary INSIDE schema clara and proves the blanket REVOKE closes it — it says nothing about a function OUTSIDE clara, which is the only thing T10b/agentReachableOutsideClara() looks at. The new AC2 leak cell is genuinely new coverage."
+    }
+  ],
+  "cells_rerun_by_this_reviewer": {
+    "env": "PGHOST=127.0.0.1 PGPORT=55744 PGUSER=postgres PGDATABASE=clara_l04 CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1; full $GATES --import chain from packages/db/package.json's test script",
+    "rig-isolation.test.mjs + role-census-reset.test.mjs + opening-balance-evidence-link.test.mjs (one process)": "36 tests, 35 pass, 1 skip (T19, reset-flag guarded), 0 fail",
+    "rig-isolation.test.mjs + opening-balance-evidence-link.test.mjs": "28 tests, 27 pass, 1 skip — obw.race.opening_then_evidence (ok 4) and obw.race.evidence_then_opening (ok 5) both pass; T10b (ok 11) runs its ASSERTION arm, T10b-AC2 cells are ok 12 and ok 13",
+    "coding-lane-evidence-link.test.mjs + wave-b/wb-k-approval.test.mjs + operation-census.test.mjs": "32 tests, 32 pass, 0 fail — the three pre-existing cle.race.* cells survive the shared driver's commitOrCapture change",
+    "node scripts/check-document-region-field-paths.mjs": "exit 0 — clean, 927 files scanned",
+    "node scripts/check-document-region-field-paths.selftest.mjs": "exit 0 — 21/21 PASS, worktree left clean (git status --porcelain empty after the subprocess cases that stage a decoy)",
+    "independent extraction probe (imported the script's own exported extractFieldPathLiterals over all 927 tracked .mjs under the two scan roots)": "141 literal field_path hits, 27 distinct values, 37 files; 0 violations against the grammar read from 0191 (maxLength 128, namespaces invoice|statement|myinvois|opening_tb|prior_gl|pages|tables|rows|sheets|paragraphs)",
+    "independent insert census": "69 `insert into clara.document_regions(` sites the script's own regex reaches, 68 of which name a field_path column; my own grep finds 72 textual occurrences repo-wide in the two trees, the extra 3 being a README line, a comment in f-a1-pr3a-testkit.mjs and a string inside an assertion — i.e. the script misses none",
+    "live pg_shdepend / pg_roles / pg_namespace audit of clara_l04": "18 clara% roles present and intact; no leftover x866_ac2_leak_probe or spike866 schema; only databases clara_l04/postgres/template0/template1 (the #866 sibling clone is gone); pg_shdepend has 0 rows with dbid=0",
+    "migration 0037 lock-order claim": "confirmed — clara._approve_opening_entry body reads `select * into e from clara.journal_entries where id=p_entry for update;` before any document lock, exactly as the #854 lock-order paragraph states"
+  },
+  "findings": [
+    {
+      "id": "L04B-SPEC-01",
+      "ticket": 854,
+      "severity": "blocker",
+      "kind": "requirement_not_discharged",
+      "title": "#854's brief says a both-sides-commit outcome 'is a new defect for its own ticket'; no such ticket exists",
+      "evidence": "Ticket line (Agent Brief, Desired behavior): \"If both sides can commit, that is a new defect for its own ticket.\" obw.race.evidence_then_opening now MEASURES exactly that and asserts it as the current outcome: `assert.equal(out.b.ok, true, ...)` and `assert.equal(standing.length, s.drafts.all.length + 1, 'DOUBLE POSTING — the host entry (via its evidence link) AND every opening item all stand on the ONE tie document')`. I re-ran the cell: it passes (ok 5). `gh issue list --state all --search \"opening-balance double posting evidence_then_opening\"` returns nothing. packages/db/tests/README.md and the test file header both now carry a placeholder — \"Whoever integrates this branch should file the issue before merge and replace this sentence with its number.\" So migration 0213's opening-lane evidence wall has a reproducible hole, the suite is GREEN over it, and the only record is two untracked lane reports.",
+      "required_fix": "Before this branch merges: file the residual issue (title shape: 'opening-balance evidence wall: a concurrent evidence attachment and opening approval can both commit, double-posting the tie document'; repro = obw.race.evidence_then_opening verbatim; candidate repairs = re-read entry_evidence_links under the document lock, or an explicit SELECT ... FOR UPDATE on entry_evidence_links so the second-updater rule can engage on the row that actually changes), then replace the placeholder sentence in packages/db/tests/README.md and in opening-balance-evidence-link.test.mjs's §4 header with its number. The lane and any fix round are barred from GitHub by WORK-ORDER rule 2, so this is an integrator action, not a lane fix. Do not close #854 until it is filed."
+    },
+    {
+      "id": "L04B-SPEC-02",
+      "ticket": 867,
+      "severity": "major",
+      "kind": "requirement_missing",
+      "title": "#867 AC1's 'record the run' was never performed — the recipe is documented and arithmetically checked, never proven end to end",
+      "evidence": "Ticket line (AC1): \"A from-scratch chain re-applied into a fresh database on a cluster that already ran the chain either passes the census or the documented recipe is proven to make it pass (record the run).\" No such run exists. packages/db/README.md now says so in its own words — \"**Not yet verified end to end**: an actual from-scratch chain reapplied after this recipe, on a cluster that already ran the chain once, has not been run\" — which is honest, and the fallback deliverable the brief's Desired behavior offers (\"a durable doc (the db package README) states that a from-scratch re-apply needs a fresh cluster or the four post-0154 roles dropped first, with the exact drop statements\") IS delivered: the four exact drop statements are listed and rcr.mint against the REAL migrations directory pins their order (re-run: ok 32). What is unmet is the recorded run that AC1 names, so the recipe's 18 - 4 = 14 arithmetic is the only proof it works.",
+      "required_fix": "Leave #867 OPEN on this residual when the branch merges, and carry the lane's own follow-up 3 forward: a lane with a disposable cluster runs `CLARA_ALLOW_DESTRUCTIVE=1 node packages/db/scripts/role-census-reset.mjs --apply` followed by a real from-scratch 0001->frontier chain, and records the result in packages/db/README.md's #867 section. Do not close #867 on the documentation half alone."
+    },
+    {
+      "id": "L04B-SPEC-03",
+      "ticket": 866,
+      "severity": "minor",
+      "kind": "implementation_defeats_its_own_requirement",
+      "title": "The new AC2 guard cell reds on exactly the World-contaminated rig that AC1 exists to make skip",
+      "evidence": "Ticket line (AC1): \"On a rig database with a bootstrapped world, T10b skips with a reason naming world contamination, or the documented recipe is proven to prevent the contamination.\" T10b itself now does skip. But the sibling cell added for AC2 — packages/db/tests/rig-isolation.test.mjs, `test(\"T10b-AC2 worldSchemaPresent() reads false on a no-World rig (the skip arm cannot become universal)\")` — is guarded only by `if (unready(t)) return;` and then runs `assert.equal(await worldSchemaPresent(), false, ...)`. On a database with a bootstrapped World that assertion FAILS, so rig-isolation.test.mjs goes red on the very rig configuration #866 set out to stop going red. The failure message does name the cause, so triage is quick, but the battery's behaviour on a contaminated rig is 'one red' rather than 'one named skip'.",
+      "required_fix": "Give that cell the same named skip arm T10b has: `if (await worldSchemaPresent()) { t.skip(\"World contamination (#866): ...\"); return; }` before the assertion — the guard's purpose (catching a skip arm that silently became universal on a CLEAN rig) is preserved, and the contaminated rig gets the skip AC1 promises. Cheap, one hunk, no behaviour change on the lane rigs."
+    },
+    {
+      "id": "L04B-SPEC-04",
+      "ticket": 854,
+      "severity": "minor",
+      "kind": "requirement_partial",
+      "title": "#854 AC2's 'asserts exactly one' is met by neither cell",
+      "evidence": "Ticket line (AC2): \"Each reads standing postings off committed rows and asserts exactly one.\" obw.race.opening_then_evidence asserts `assert.equal(standing.length, s.drafts.all.length, ...)`, and s.drafts.all.length is >= 3 by the seed's own design (obw.siblings_ok asserts `s.drafts.all.length >= 3` as mandatory setup). obw.race.evidence_then_opening asserts `s.drafts.all.length + 1`. Both DO read off committed rows via postedEntriesOnDocument (the AC's real substance), and the multi-item deviation is defensible — #821's whole carve-out is that many opening items legitimately share one tie document — but the AC's literal count is not what either cell pins, and in the second arrival order the count is the defect itself.",
+      "required_fix": "No code change needed for the first arrival order; record in the ticket's closing note that AC2 was reinterpreted as 'exactly the seed's own item count and nothing else' because a single-item opening seed is not a shape this battery can build, and that the second order's count is the measured defect tracked by L04B-SPEC-01."
+    },
+    {
+      "id": "L04B-SPEC-05",
+      "ticket": 867,
+      "severity": "minor",
+      "kind": "implementation_looks_wrong",
+      "title": "sharedDependents() inner-joins pg_database, so a SHARED-object dependency (dbid = 0) is invisible — and apply() would then partially drop",
+      "evidence": "packages/db/scripts/role-census-reset.mjs: `from pg_shdepend sd join pg_database d on d.oid = sd.dbid join pg_authid a on a.oid = sd.refobjid`. pg_shdepend records dbid = 0 for a dependency on a SHARED object (a database-level or tablespace-level ACL, or ownership of a database). The inner join drops every such row, so check() reports 'exists, no shared dependents -- safe to drop' for a role that DROP ROLE will in fact refuse. apply()'s contract — its own header says it 'REFUSES outright ... never a partial drop' — is then broken: it iterates result.minted in order, so it would drop clara_stripe_webhook and clara_stripe_webhook_login successfully and only then throw on clara_auth_wall, leaving the cluster half-reset. Latent, not live: I queried clara_l04 directly and pg_shdepend has 0 rows with dbid = 0 today (all clara% rows sit at dbid 16384, deptypes a/o/r).",
+      "required_fix": "Use a LEFT JOIN and coalesce the label (`coalesce(d.datname, '<shared object>')`), or count rows straight off pg_shdepend without the pg_database join, so a dbid = 0 dependency is reported and blocks apply() like any other."
+    },
+    {
+      "id": "L04B-SPEC-06",
+      "ticket": 857,
+      "severity": "minor",
+      "kind": "requirement_partial",
+      "title": "The lint only sees git-TRACKED files, so the commit that introduces a malformed fixture is the one commit it cannot catch",
+      "evidence": "Ticket line (AC1): \"The check runs from the lint chain and exits non-zero on a seeded malformed path (self-test proves it), naming file and path.\" scanTargetFiles() is `execFileSync(\"git\", [\"ls-files\", ...roots])`. A brand-new fixture file that has not been `git add`ed is not listed, so a local `pnpm lint` before the first add passes over it. The self-test works around this by staging a decoy (I confirmed the worktree is left clean afterwards), which is exactly the tell. Pre-commit/CI runs see the file once it is staged, so the exposure is 'the author's own pre-add lint', not CI — but AC1's promise reads as unconditional. This finding was raised in the first review as L04-S11 and was explicitly left unfixed; it does not appear in the lane's own final report.",
+      "required_fix": "Either add `--cached --others --exclude-standard` to the ls-files call so untracked, non-ignored files are scanned too, or state the tracked-files limitation in the script header and in packages/db/tests/README.md's #857 section so nobody reads the lint as stronger than it is."
+    },
+    {
+      "id": "L04B-SPEC-07",
+      "ticket": 854,
+      "severity": "minor",
+      "kind": "requirement_partial",
+      "title": "approve_opening_correction — named in the brief beside approve_opening_seed as one of 'the contending doors' — is never driven",
+      "evidence": "Ticket line (Key interfaces): \"`approve_opening_seed` / `approve_opening_correction`: the contending doors (isolation-pinned).\" Both race cells call approveOpeningSeedOn only; `grep -n approve_opening_correction packages/db/tests/opening-balance-evidence-link.test.mjs` returns nothing. AC1 asks for 'two new cells, one per arrival order', which the lane satisfies with the seed door alone, so this is under-coverage against the named interface rather than a missed AC.",
+      "required_fix": "Record in the closing note that only the seed door was raced, and whether the correction door shares clara._lock_document_binding on the same path (it should be a one-line check) — if it does, the measured hole in L04B-SPEC-01 very likely reaches it too, and the residual ticket should say so."
+    },
+    {
+      "id": "L04B-SPEC-08",
+      "ticket": 854,
+      "severity": "note",
+      "kind": "scope_creep",
+      "title": "commitOrCapture is an unrequested behaviour change to a driver three other cells already depend on",
+      "evidence": "Ticket line (Key interfaces): \"`humanHoldThenContend`: gains an isolation option per side.\" The diff adds that, and also replaces both `await c1.query(\"commit\").catch(() => c1.query(\"rollback\")...)` calls with commitOrCapture(), which folds a commit-time failure into out.a / out.b instead of swallowing it. It is arguably necessary — a SERIALIZABLE side can only lose at COMMIT — but it changes how a commit failure surfaces for the three pre-existing cle.race.* cells that were not part of this ticket. Regression-checked, not merely asserted: I re-ran coding-lane-evidence-link.test.mjs, 8/8 pass (ok 1..ok 8), and wave-b/wb-k-approval.test.mjs 14/14.",
+      "required_fix": "None — keep it, but name the driver change in #854's closing note so the next reader of cle.race.* knows the swallow is gone."
+    },
+    {
+      "id": "L04B-SPEC-09",
+      "ticket": 866,
+      "severity": "note",
+      "kind": "docs",
+      "title": "The new #866 README section carries a broken, and dead, citation",
+      "evidence": "packages/db/tests/README.md:126 reads `(\\`pnpm --filter @clara/runtime exec bootstrap\\`, [runtime README §engine-bootstrap]` and the destination `(../../runtime/README.md)` sits on the NEXT line — CommonMark allows no whitespace between the link text and the opening paren, so GitHub renders this as literal `[runtime README §engine-bootstrap] (../../runtime/README.md)`. Separately, `grep -n -i bootstrap packages/runtime/README.md` shows no heading named engine-bootstrap anywhere in that 93KB file (the command itself is real — the same invocation appears at runtime README lines 270 and 1275), so the cited section does not exist. The repo's own check-dead-citations.mjs passes, i.e. it does not police this citation shape.",
+      "required_fix": "Put the link back on one line and point it at a heading that exists in packages/runtime/README.md, or drop the §anchor and cite the file plus the command only."
+    },
+    {
+      "id": "L04B-SPEC-10",
+      "ticket": 867,
+      "severity": "note",
+      "kind": "implementation_looks_wrong",
+      "title": "depLabel() models a deptype DROP ROLE never refuses on, and leaves the one that actually occurs unlabelled",
+      "evidence": "packages/db/scripts/role-census-reset.mjs: `const kind = row.deptype === \"a\" ? \"privilege\" : row.deptype === \"o\" ? \"ownership\" : row.deptype === \"m\" ? \"membership\" : row.deptype;`. pg_shdepend does not record role membership — that lives in pg_auth_members — so the \"m\" branch is unreachable, and DROP ROLE does not refuse on membership at all (which is precisely the surprise the lane's own #867 incident note records: dropping the two _login roles succeeded despite their memberships). Meanwhile deptype 'r' (RLS policy) DOES occur on this cluster — 51 rows for clara_agent_ro, 199 for clara_authenticated, 291 for clara_fn_owner, measured just now — and falls through to the bare letter.",
+      "required_fix": "Drop the \"m\" branch and label \"r\" as 'RLS policy'; the operator reading a BLOCKED verdict should not have to look up a catalog letter."
+    },
+    {
+      "id": "L04B-SPEC-11",
+      "ticket": 857,
+      "severity": "note",
+      "kind": "requirement_partial",
+      "title": "The issue body asked for 'every literal or templated field_path'; only literals are checked, and the 8 templated sites are not recorded anywhere",
+      "evidence": "Issue body: \"A small script asserting that every literal or templated `field_path` under `packages/{db,runtime}/tests` conforms to the grammar...\". The newest Agent Brief narrows this to \"scanning the two test trees for field-path literals\", and the brief wins under WORK-ORDER rule 2, so the implementation is compliant — extractFieldPathLiterals deliberately skips backtick forms and `${...}` interpolation, and the self-test pins that as intended behaviour. But `grep -rnoE \"field_path\\s*:\\s*\\\\\\`\" packages/db/tests packages/runtime/tests` finds 8 templated sites, and neither the script header, the README section nor the lane report says how many sites the lint is blind to.",
+      "required_fix": "Add the count (8 templated sites today) to packages/db/tests/README.md's #857 section so the lint's blind spot is a measured number rather than a category."
+    },
+    {
+      "id": "L04B-SPEC-12",
+      "ticket": 857,
+      "severity": "note",
+      "kind": "requirement_not_discharged",
+      "title": "#857's CHECK-arm residual is unfiled, and the ticket must not close on the lint alone without it",
+      "evidence": "Ticket line (AC2): \"Under the CHECK arm: a raw insert of an unregistered-namespace path is refused with the grammar's typed code; a NULL path inserts; a forty-row trial balance at the plural literal inserts in full.\" The brief's 'Either or both' framing makes the CHECK optional, so 'STOPPED' is a legitimate disposition — and I confirmed on the live rig that the CHECK and the boolean sibling genuinely do not exist, so a new migration really is required and WORK-ORDER rule 5 forbids it here. But the triage comment states the structural preference plainly (\"a table CHECK on a boolean sibling of the grammar function catches every raw writer structurally\"), and `gh issue list --state all --search \"document_regions field_path CHECK\"` returns only #857 itself and the closed #778 — nothing tracks the residual.",
+      "required_fix": "File the residual ('document_regions.field_path CHECK constraint, #857 residual' — a new migration adding a boolean sibling of clara._assert_field_path plus a CHECK admitting NULL and leaving opening_tb.line / prior_gl.line untouched; AC2 above is its acceptance test), or leave #857 open with the lint half recorded as landed. Do not close #857 silently on the lint."
+    }
+  ],
+  "summary": "Spec axis, four tickets, 12 findings: 1 blocker, 1 major, 4 minor, 6 notes. Every count the lane reports reproduced on the lane rig (36/35/1-skip across the three claim-carrying db files, 32/32 on the three regression consumers, lint exit 0 and selftest 21/21 with a clean worktree), and every 'stopped' or 'live on main' claim I could check is true — I verified #857's CHECK arm is genuinely absent from the live catalog, that main carries none of the four deliverables, that main's T17b canary does not already cover #866 AC2, that migration 0037's entry-row-lock-first claim is real, and that the cluster is clean after the lane's #866 sibling clone and its self-disclosed #867 drop/restore incident (18 clara roles, no stray schemas, no stray databases). The one blocker is not a code defect: #854's brief says in so many words that a both-sides-commit outcome 'is a new defect for its own ticket', the cells MEASURE exactly that (a real double posting on migration 0213's opening-lane evidence wall), the suite is green over it, and no issue exists — the lane and any fix round are barred from GitHub, so the integrator must file it before merge. The major is #867 AC1's unperformed run: the documented-recipe fallback IS delivered, but 'record the run' is not, so the ticket stays open. The minors worth fixing in code are small and cheap: #866's new AC2 guard cell reds on exactly the World-contaminated rig AC1 exists to make skip (give it the same named skip arm), and role-census-reset's sharedDependents() inner-joins pg_database so a shared-object dependency (dbid = 0) goes unseen, which would make apply() partially drop in breach of its own 'never a partial drop' contract (latent today — 0 such rows on this cluster).",
+  "reviewer_notes": [
+    "Read-only review: no tracked file was edited, nothing was committed, no process was killed, no other worktree touched. The only writes were this report and three throwaway probe scripts in the session scratchpad.",
+    "`git diff origin/main..HEAD` (two-dot, as the task worded it) additionally shows main's own later commits as spurious deletions of docs/PROGRESS.md and three riders/refresh-wave files. I used the three-dot form the skill specifies; the lane deleted nothing.",
+    "The whole packages/db suite was never run by the lane or by me — WORK-ORDER rule 8 asks only for touched files plus operation-census and rig-isolation, which is satisfied. #857 AC3's 'the db and runtime suites are unchanged' is therefore inferred from the touched-file set, not measured.",
+    "The Standards axis runs separately and is not represented here."
+  ]
+}

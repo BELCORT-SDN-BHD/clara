@@ -1,0 +1,123 @@
+{
+  "lane": 10,
+  "axis": "recheck",
+  "branch": "riders/w1-lane10",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\660",
+  "fixed_point": "origin/main",
+  "head_at_recheck": "97dc52b296cb81547b2a78e8e8c2571576d0e918",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave1-lane10-codereview-fix.md",
+  "inputs_verified": [
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane10-codereview-spec.json (L10S-1..5)",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane10-codereview-standards.json (STD-1..3)"
+  ],
+  "github_check": {
+    "981": "gh issue view 981 --comments -> 0 comments, no owner ruling since the spec review; nothing new to bind against",
+    "980": "gh issue view 980 --comments -> 0 comments, no owner ruling since the spec review; nothing new to bind against"
+  },
+  "reruns_performed": [
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test lib/work/api.test.ts -> 30 tests, 30 pass / 0 fail / 0 skip",
+    "packages/runtime: node --test $GATES tests/work-routes-unit.test.mjs -> 28 tests, 28 pass / 0 fail / 0 skip",
+    "packages/runtime (PGPORT 55750 / clara_l10, WORKFLOW_POSTGRES_URL set): node tests/work-journal-e2e.mjs -> PASS all 8 legs (leg 4 narrate green)",
+    "packages/runtime (PGPORT 55750 / clara_l10): node tests/trade-invoice-e2e.mjs -> PASS all 7 legs (leg 6 ask_question, leg 7 cancel, both green)",
+    "apps/web: node scripts/run-tests.mjs (whole unit suite) -> 4641 tests, 135 suites, 4639 pass / 0 fail / 2 skip",
+    "pnpm typecheck -> exit 0 (apps/web + packages/runtime)",
+    "pnpm lint -> exit 0",
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files, no manifest diff, 55 use-workflow modules frozen+registered",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, reader is a superset of emittable",
+    "git status --porcelain (worktree) -> empty; working tree clean at 97dc52b2"
+  ],
+  "finding_status": [
+    {
+      "id": "L10S-1",
+      "ticket": 981,
+      "reported_severity": "major",
+      "status": "fixed-confirmed",
+      "evidence": "apps/web/lib/work/api.ts now spreads ...carrier(body) at all four source_conflict call sites (lines 302, 365, 451, 519) and at restateWork's not_restatable arm (line 927), with detail?: RefusalDetail on both result-type arms (lines 82, 874). New cells 981.web: source_conflict carries the door's typed detail too, the three SIBLING admission doors ..., and restateWork's 409 carries the carrier -- superseded_by and all are present and green (30/30 in lib/work/api.test.ts, re-run)."
+    },
+    {
+      "id": "L10S-2",
+      "ticket": 981,
+      "reported_severity": "minor",
+      "status": "fixed-confirmed",
+      "evidence": "work-journal-e2e.mjs:569-572 now reads 'THREE legs in the estate measure it that way ... here, periodic-adjustment-e2e.mjs and staff-expense-claim-e2e.mjs'; the sibling files' own comments never claimed exclusivity (confirmed by reading both), so only this file needed the reword. Comment-only edit's rule-8 re-run performed: node tests/work-journal-e2e.mjs -> PASS all 8 legs."
+    },
+    {
+      "id": "L10S-3",
+      "ticket": 980,
+      "reported_severity": "minor",
+      "status": "not-open-against-lane",
+      "evidence": "Code unchanged, deliberately -- the fix report's argument (deriving scope from the first envelope reopens the exact stranded-awaiting_input failure the gate exists to prevent, finding L10-A3) holds and is not refuted by anything found this recheck. The lane did what its own required_fix offered as the accept branch: work-journal-serve.mjs's header gained the 'TWO KNOBS FOR THE THIRD SCRIPT, AND #980 ASKED FOR ONE' paragraph (confirmed present) and packages/runtime/README.md's #980 section is marked 'This is a deviation from #980's own wording' (confirmed present, around line 1373). What remains is the orchestrator's explicit accept-or-reject of the deviation, which is beyond a lane worker's remit per the fix report's own closing note -- not a defect in the lane's work."
+    },
+    {
+      "id": "L10S-4",
+      "ticket": 980,
+      "reported_severity": "minor",
+      "status": "not-open-against-lane",
+      "evidence": "No gate was widened (correctly -- the review forbade a wave-1 lane widening seven more). packages/runtime/README.md now carries the repo-wide CLARA_WORK_TEST_SCRIPT census the fix report describes, turning the prior bare assertion into a checkable one. Re-measured: work-journal-e2e.mjs (the only narrate driver) and trade-invoice-e2e.mjs (the only ask_question driver) both PASS. The seven remaining spawners stay unrun and are declared under 'Unverified' in both the final report and the fix report, matching the required_fix's second (accepted) branch."
+    },
+    {
+      "id": "L10S-5",
+      "ticket": 981,
+      "reported_severity": "note",
+      "status": "not-open-against-lane",
+      "evidence": "required_fix was 'None at lane level; orchestrator decides.' No lane-level action was owed and none was taken. The four DB-gate widenings and two .gitignore lines are unchanged from the build round and still loopback-only, parsed-DSN-equality, fail-closed, as originally reported."
+    },
+    {
+      "id": "STD-1",
+      "ticket": 981,
+      "reported_severity": "major",
+      "status": "not-open-against-lane",
+      "evidence": "History cannot be rewritten and the required_fix said so ('no retroactive fix needed on the resulting code ... process finding rather than a functional defect'). The fix report's mitigation is a per-cell mutation/sensitivity table (13 mutations across the 15 cells from ba4071de, each with the mutated file's sha256 restored byte-for-byte) claiming every cell reds under its targeted mutation. This recheck did not re-run all 13 mutations (that would require editing tracked files, which this read-only axis forbids), but the affected suites were re-run clean (work-routes-unit.test.mjs 28/28, lib/work/api.test.ts 30/30) confirming the cells still pass on the real subject, and the specific claims (file names, line-anchored cell titles, exact reported failure text) are checkable by a later reviewer against the same commits if doubted. Nothing found this recheck contradicts the mitigation."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 981,
+      "reported_severity": "minor",
+      "status": "fixed-confirmed",
+      "evidence": "apps/web/README.md's #981 section now names source_conflict and not_restatable explicitly, says why those two most needed the carrier, and cites 'review findings L10S-1 and STD-2' as the source. The runtime README's 'every 400 and 409' claim was already true and is unchanged. Underlying code fix verified under L10S-1 above."
+    },
+    {
+      "id": "STD-3",
+      "ticket": 981,
+      "reported_severity": "note",
+      "status": "still-open",
+      "evidence": "docs/plan/active/riders-2026-09-20/reports/wave1-lane10-final.md still has no 'Seams' heading or line (grep -in seam over that file: no match). The fix report added a 'Seams under test' section to ITSELF and says explicitly 'the lane's own wave1-lane10-final.md is the orchestrator's to amend' -- i.e. the substance is answered but the specific artifact the finding named is unchanged. Note severity; does not affect the accept verdict, listed for completeness since the finding's own named artifact was not touched."
+    }
+  ],
+  "nothing_else_broken": {
+    "touched_test_files_rerun": [
+      "apps/web/lib/work/api.test.ts",
+      "packages/runtime/tests/work-routes-unit.test.mjs",
+      "packages/runtime/tests/work-journal-e2e.mjs",
+      "packages/runtime/tests/trade-invoice-e2e.mjs",
+      "apps/web whole unit suite (scripts/run-tests.mjs), covering periodic-adjustment/staff-expense-claim/trade-invoice-form unit files too"
+    ],
+    "typecheck": "pnpm typecheck exit 0",
+    "lint": "pnpm lint exit 0",
+    "frozen_workflows": "node scripts/check-frozen-workflows.mjs OK, no manifest diff",
+    "parts_parity": "node packages/runtime/scripts/check-parts-parity.mjs OK",
+    "git_status": "clean at 97dc52b2, nothing to commit"
+  },
+  "verdict": "accept",
+  "findings": [
+    {
+      "id": "L10R-1",
+      "ticket": 981,
+      "severity": "note",
+      "kind": "process-followup",
+      "title": "wave1-lane10-final.md still has no Seams section (STD-3's named artifact untouched)",
+      "evidence": "STD-3 asked for a Seams line 'near the top of the final report'. The fix round wrote a Seams section into wave1-lane10-codereview-fix.md instead and said the final report is the orchestrator's to amend. grep -in seam docs/plan/active/riders-2026-09-20/reports/wave1-lane10-final.md returns nothing.",
+      "required_fix": "Orchestrator-level housekeeping only: copy the fix report's 'Seams under test' section (or an equivalent) into wave1-lane10-final.md, or accept the fix report as the record of record. Not a functional defect and does not block acceptance."
+    },
+    {
+      "id": "L10R-2",
+      "ticket": 980,
+      "severity": "note",
+      "kind": "orchestrator-decision-pending",
+      "title": "L10S-3's deviation (ask_question needs a second mandatory env var) is documented but not yet explicitly accepted or rejected by the orchestrator",
+      "evidence": "work-journal-serve.mjs header and packages/runtime/README.md both record the deviation plainly, per the fix report's own closing note ('accepting a ticket deviation is not a lane worker's to grant'). No GitHub write is needed for this -- it is an orchestrator sign-off within this wave's own process, not a comment to post -- so it is listed here as a note rather than an open defect.",
+      "required_fix": "Orchestrator states, once, whether the two-knob interface is accepted for #980 or whether a follow-up should fold it to a single selector value. No lane-level code change is required either way."
+    }
+  ],
+  "summary": "All code-review findings assigned to the fix round (L10S-1..4, STD-1, STD-2) were re-verified on the lane's current head (97dc52b2, working tree clean, no push/PR/GitHub write). L10S-1 and STD-2 (the two-armed carrier gap) and L10S-2 (the stale exclusivity comment) are fixed in code/docs and confirmed by re-running the exact suites: lib/work/api.test.ts 30/30, work-routes-unit.test.mjs 28/28, work-journal-e2e.mjs all 8 legs, trade-invoice-e2e.mjs all 7 legs (legs 6 and 7 specifically green). STD-1 is a historical process finding the fix report correctly could not undo; its mutation-sensitivity mitigation is internally consistent with the passing suites and was not contradicted by anything found here. L10S-3, L10S-4 and L10S-5 stand exactly as the fix report argued -- each with a reasoned, documented staying-open that matches its own required_fix's accepted branch -- so none are open defects against the lane. Beyond the assigned findings, nothing broke: the whole apps/web unit suite (4641 tests, 4639 pass / 2 skip, unchanged skip count), typecheck, lint, check-frozen-workflows.mjs and check-parts-parity.mjs are all clean, and git status is empty. One purely cosmetic gap remains (STD-3's named artifact, wave1-lane10-final.md, still lacks its own Seams line) and one orchestrator sign-off is pending (L10S-3's deviation) -- both notes, neither blocking. Accept."
+}

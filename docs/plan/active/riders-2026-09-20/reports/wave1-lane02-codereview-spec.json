@@ -1,0 +1,70 @@
+{
+  "lane": "wave1-lane02",
+  "axis": "SPEC",
+  "branch": "riders/w1-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "reviewed_head": "71722f5b",
+  "fixed_point": "origin/main e7f0a10a (merge-base dd3f8f1d)",
+  "tickets": [851, 858],
+  "verdict": "accept-with-fixes",
+  "summary": "Both tickets are live on origin/main (verified: e7f0a10a's run.mjs has no --no-build, documents-viewer-walk.spec.ts has no cellBudgetMs, sign-in-census.test.ts does not exist), so nothing in this lane was already satisfied and nothing was stopped. #851 AC1 and AC3 and #858 AC1 and AC2 are genuinely delivered, and every claim I could re-run I re-ran: run-args.test.ts 5/5, sign-in-census.test.ts 4/4, `pnpm --filter @clara/web e2e -- --no-build --list intake-batch-walk` printed the reuse banner and listed 13 tests with the flag never reaching Playwright, and all FOURTEEN migrated walks in one run on the lane triple gave 142 passed / 0 failed (3.8m) -- better than the report's own 141/1. I also reproduced the RED-first claim independently by applying the census's own two regex literals to every spec file at dd3f8f1d: 16 files matched, of which 14 are the genuine offenders the fold retired. One real defect: the census's detector is file-scoped, so entry-faces-walk.spec.ts matches only because it fills the SIGNUP password (lines 87, 240) and separately holds a non-clicking 'Sign in' button locator (line 125) -- it does not drive the login form at all, yet the FORM_EXCEPTIONS reason, the README table and cell 3 all now assert that it does. #858 AC3 (three consecutive FULL-SUITE runs) is partial and correctly self-reported as a deviation. Two smaller accuracy defects: the census's stated spec-file count (42) is wrong (48 at dd3f8f1d and at HEAD), which leaves its anti-vacuity floor 8 files loose; and the report's 'one measurement deliberately given up' omits counterparty-identity-walk's 60s post-login wait, which this diff also drops to the helper's 20s. No scope creep found: every hunk is inside one of the two briefs, #858's 'any other cell in the file' was respected, and no shared file was widened beyond two sorted manifest lines.",
+  "findings": [
+    {
+      "id": "S1",
+      "ticket": 851,
+      "kind": "implemented-but-wrong",
+      "severity": "major",
+      "title": "The census's FORM_EXCEPTIONS entry for entry-faces-walk.spec.ts is a false positive: that file never drives the login form",
+      "evidence": "Ticket line (#851 AC2): 'No spec file under the e2e directory defines a local sign-in outside the named exception list; the census cell proves it and fails RED against a synthetic offender.' The detector in apps/web/e2e/sign-in-census.test.ts:65-67 ANDs two FILE-SCOPED regexes, so the two halves need not sit in the same cell or even the same form. Applying the census's own PASSWORD_FILL and SIGN_IN_SUBMIT literals to apps/web/e2e/entry-faces-walk.spec.ts (script run this session) matches exactly three lines: PASSWORD_FILL at line 87 (await page.getByLabel(\"Password\").fill(\"Clara-e2e-password-1!\")) and line 240 (await page.getByLabel(\"Password\").fill(\"SomePassword1!\")) -- both on /signup (line 84 page.goto(\"/signup\"), line 88 getByRole(\"button\", { name: \"Create account\" }).click(); lines 229-241 are the signup refusal cell) -- and SIGN_IN_SUBMIT at line 125 (const signInButton = page.getByRole(\"button\", { name: \"Sign in\" })), a focus-only locator in the login keyboard cell that is never clicked and never preceded by a password fill. The file has NO login-form password fill anywhere; its only real sign-in already calls the shared signInTo (line 149). So the entry's recorded reason -- 'the login face is the subject under test (tab order, focus ring)' (sign-in-census.test.ts:110) -- and the README row this lane added ('driving the login form itself -- one because that face is its subject', apps/web/e2e/README.md) both state something the file does not do. The census's own vacuity control contradicts it: it asserts of the signup shape 'the signup form is a different form and is not this gate's business' (lines 226-232), yet on the real file the signup form IS what trips the gate. Consequence: one spec file is blanket-exempt from the AC's census on a false premise (a genuine local login sign-in added to entry-faces-walk.spec.ts would never be seen), cell 3 ('both exception lists are LIVE') now PINS the false positive so it cannot be removed without the gate going red, and any future spec that fills a signup password and also references a 'Sign in' button will be wrongly flagged and pushed into the same bogus list.",
+      "required_fix": "Tighten the detector so the two halves must belong to the same sign-in: scope the match to a window (same function body / N-line proximity) or require the 'Sign in' submit to be acted on (.click()/.press( on that expression or on a variable bound to it, which also keeps the variable-then-click shape the header argues for). Then entry-faces-walk.spec.ts stops matching, its FORM_EXCEPTIONS entry and the README table row must be deleted (cell 3 will demand it), and the exception list shrinks to the one file #804 actually named out of scope, reports-download-walk.spec.ts. Re-run e2e/sign-in-census.test.ts and re-confirm the 14 real offenders at dd3f8f1d still match."
+    },
+    {
+      "id": "S2",
+      "ticket": 858,
+      "kind": "missing-or-partial",
+      "severity": "minor",
+      "title": "#858 AC3 is partial: three consecutive runs of the FILE, not three full-suite runs",
+      "evidence": "Ticket line (#858 AC3): 'The file passes three consecutive full-suite runs on the same host (record the runs).' The lane recorded three consecutive runs of documents-viewer-walk.spec.ts alone (22 passed in 59.7s / 44.8s / 42.8s) and marks AC3 'partial, recorded as a deviation', grounding the deviation in apps/web/e2e/README.md's own 'One worker, one host (#706)' rule because nine other lanes were live on this host. I re-ran the file on the lane triple (its 22 cells inside a 49-passed three-file run, 1.6m) and it was green, so nothing contradicts the report -- but the AC as written is not met and the ticket cannot be closed on this evidence alone.",
+      "required_fix": "Before #858 is closed, run the whole browser suite three consecutive times on an otherwise idle host and record the three results, or get an owner ruling that a three-run file-level pass plus the two vacuity controls discharges this AC."
+    },
+    {
+      "id": "S3",
+      "ticket": 851,
+      "kind": "implemented-but-wrong",
+      "severity": "minor",
+      "title": "The census's stated spec-file count is wrong (42 vs 48), leaving its anti-vacuity floor 8 files loose",
+      "evidence": "apps/web/e2e/sign-in-census.test.ts:141-142: 'This is the floor, measured: the suite carried 42 spec files when this cell was written.' followed by assert.ok(files.length >= 40, ...). Counted this session: ls -1 apps/web/e2e/*.spec.ts | wc -l = 48 at HEAD, and git ls-tree -r --name-only dd3f8f1d apps/web/e2e filtered to .spec.ts = 48 at the cut point too, so 42 was never the number. The same wrong figure is repeated in the lane report's follow-up 1 ('35 of 42 spec files run AxeBuilder.analyze()'). The floor is therefore 8 files below the real suite rather than the 2 the comment implies: eight spec files could be deleted or renamed out of the census's reach and the cell would still pass.",
+      "required_fix": "Correct the comment to 48 and raise the floor to a value actually derived from that count (e.g. >= 46); correct the '35 of 42' figure in the follow-up before it is filed as a ticket."
+    },
+    {
+      "id": "S4",
+      "ticket": 851,
+      "kind": "report-accuracy",
+      "severity": "note",
+      "title": "The report's 'one measurement deliberately given up' misses counterparty-identity-walk's 60s post-login wait",
+      "evidence": "The report names only staff-expense-claim-walk (and, in the commit message, trade-invoice-walk) as retired copies whose 30s wait is surrendered to the shared helper's 20s. The diff also retires apps/web/e2e/counterparty-identity-walk.spec.ts's local signInTo, whose post-login wait was { timeout: 60_000 } -- a larger reduction than either file the report discusses -- and knowledge-firm-walk.spec.ts's copy, which had no explicit timeout at all (Playwright's 5s default) and is strictly improved by the fold. Ticket line: 'several with a hard-coded 30 s wait instead of CELL_BUDGET.signIn', so the fold is what was asked for; only the record of what was surrendered is incomplete. All fourteen walks were green in my own single re-run (142 passed / 0 failed), so nothing is broken today.",
+      "required_fix": "Add counterparty-identity-walk's 60s figure to the report's 'measurement deliberately given up' paragraph and to follow-up 2 (the CELL_BUDGET.signIn question), so the owner sees the full span the helper's 20s now has to absorb."
+    },
+    {
+      "id": "S5",
+      "ticket": 858,
+      "kind": "missing-or-partial",
+      "severity": "note",
+      "title": "The polygon cell's PRE-state read is still a second, unguarded read -- deliberately, and within the AC's wording",
+      "evidence": "Ticket line (#858 AC1): 'The polygon-layer cell's post-resize assertions read from the poll's resolved snapshot, not a fresh widths() call.' The fix is applied to the post-resize half only; const before = await widths() after the pre-state poll remains a separate read (documents-viewer-walk.spec.ts, unchanged hunk), and the report discloses this under 'Deliberately left'. The AC says post-resize, so this is not a miss -- recorded only so the next reader does not mistake the asymmetry for an oversight. If it ever does race it fails loudly on expect(before).not.toBeNull() rather than dereferencing null.",
+      "required_fix": "None. If the pre-state read ever flakes, apply the same capture shape there in a follow-up rather than widening #858."
+    }
+  ],
+  "verified_this_session": [
+    "gh issue view 851/858 --comments: both OPEN, ready-for-agent, newest Agent Brief dated 2026-09-17; no owner ruling comment dated 2026-09-20 on either.",
+    "Neither ticket already satisfied on origin/main e7f0a10a: run.mjs has 0 occurrences of 'no-build', documents-viewer-walk.spec.ts has 0 of 'cellBudgetMs', sign-in-census.test.ts absent from the tree.",
+    "node --import ./test/bootstrap.mjs --import tsx --test e2e/run-args.test.ts -> 5 pass / 0 fail.",
+    "node --import ./test/bootstrap.mjs --import tsx --test e2e/sign-in-census.test.ts -> 4 pass / 0 fail.",
+    "RED-first corroborated independently: the census's own PASSWORD_FILL/SIGN_IN_SUBMIT literals applied to all 48 spec files at dd3f8f1d match 16 files; 14 are genuine local login forms (the 11 the brief named plus depreciation, trade-invoice, intake-batch), 2 are the exception entries.",
+    "pnpm --filter @clara/web e2e -- --no-build --list intake-batch-walk -> '[e2e] --no-build: reusing the existing .next build, NOT rebuilding @clara/web', 'Total: 13 tests in 1 file'; no build ran and Playwright never saw the flag.",
+    "All fourteen migrated walks in one invocation on the lane-02 triple (3510/3511/3512) through --no-build -> 142 passed, 0 failed, 3.8m.",
+    "documents-viewer-walk + intake-batch-walk + knowledge-firm-walk on the same triple -> 49 passed, 1.6m.",
+    "Scope: git show --stat per commit touches only apps/web/e2e/* and apps/web/test/manifest.txt; #858's diff touches only the polygon cell and THE LADDER; the manifest gains exactly two lines at the sorted position.",
+    "intake-batch-walk's retired idempotency short-circuit is safe: signIn is called once, from beforeEach (line 43), and Playwright gives each cell a fresh context."
+  ]
+}

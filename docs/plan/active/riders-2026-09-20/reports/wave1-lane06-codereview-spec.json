@@ -1,0 +1,130 @@
+{
+  "axis": "spec",
+  "lane": "wave1-lane06",
+  "branch": "riders/w1-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\656",
+  "fixed_point": "origin/main (e7f0a10a; merge-base with HEAD = dd3f8f1d)",
+  "head": "de3b251a",
+  "commits": [
+    "de3b251a fix(runtime): #967 + #850 fix round 1 - a real drained failure, a masked error, two mislabels",
+    "b89671ce docs(db): #963 fix round 1 - restore the migration-number qualifier, note 0214's earlier wording",
+    "7f956c6b docs(db): #963 name the cross-migration body-pin convention 0233 relies on",
+    "c00fc8d4 fix(runtime): #967 drain each intake CI leg's queue before it exits",
+    "ebbaa2ee perf(runtime): #850 overlap the two-build drill's two scratch builds"
+  ],
+  "spec_sources": [
+    "gh issue view 850 --repo BELCORT-SDN-BHD/clara --comments (body + 1 triage Agent Brief comment; newest brief used)",
+    "gh issue view 963 --repo BELCORT-SDN-BHD/clara --comments (body only, 0 comments)",
+    "gh issue view 967 --repo BELCORT-SDN-BHD/clara --comments (body only, 0 comments)"
+  ],
+  "liveness_check": {
+    "claimed_already_satisfied_or_stopped": "none - the lane claimed no ticket as already satisfied or stopped",
+    "verified_live_on_main": [
+      "#967: `git show origin/main:packages/runtime/tests/queue-drain.mjs` -> fatal: path does not exist in 'origin/main'; neither intake leg calls any drain on main",
+      "#963: `git show origin/main:packages/db/README.md | grep -c 'Pinning another function'` -> 0",
+      "#850: origin/main's two-build-cutover-e2e.mjs has no chatBuildPromise; both scratch builds are sequential"
+    ]
+  },
+  "reruns_performed": [
+    "node --test tests/queue-drain.test.mjs (packages/runtime) -> 6/6 pass, 0 fail (confirms the fix-round claim; supersedes final.md's stale '3/3')",
+    "node --check on all five changed .mjs files -> OK",
+    "git status --short in the worktree -> clean (no stray zz-pre967-*.mjs)",
+    "grep census of the 'has DRIFTED ...' wordings across packages/db/migrations (see L06-SPEC-R2-05 evidence)",
+    "read packages/db/migrations/0233 lines 163-190 and 698-714, 0234:191-211/478/940-943, 0214:221, 0231:239-293, 0222:314-344 to check #963's factual claims",
+    "read .github/actions/db-live-gates/action.yml step sequence (lines 25-129) to confirm nothing runs on clara_intake_ci after leg 3"
+  ],
+  "findings": [
+    {
+      "id": "L06-SPEC-R2-01",
+      "ticket": 967,
+      "severity": "blocker",
+      "kind": "implementation-unverified",
+      "title": "#967 - the drain's semantics changed in fix round 1 and NEITHER modified CI leg was run afterwards; the lane's own earlier evidence is the exact input the new gate now throws on",
+      "evidence": "Ticket AC2: \"The three legs still prove the same cross-leg chain they prove today; no assertion is weakened to make this pass.\" Commit de3b251a added censusFailedRuns to packages/runtime/tests/queue-drain.mjs plus a throw on any run id present in failedNow but absent from the poll-1 failedBaseline. The fix-round gate list (wave1-lane06-fixround-1.md, 'Gates re-run, with counts') records ONLY queue-drain.test.mjs 6/6 and two-build-cutover-e2e runs - intake-e2e.mjs and intake-admission-e2e.mjs, the two files this ticket actually changes, were never executed after the semantics change. The lane's own final.md records the shape the new check fires on as an ORDINARY observed run: \"leg 2 - which left a genuine straggler behind once (a FatalError'd workflow run, storage_error) - drained in 2008ms (10 polls)\" (non-terminal on poll 1, terminal later). wave1-lane06-fixround-1.md confirms that reading: \"The lane's own prior evidence (wave1-lane06-final.md) is an instance of exactly this: leg 2's FatalError'd storage_error run 'drained' in 2008ms/10 polls\". Under de3b251a that same run now throws from waitForQueueDrain, and main().catch(...) exits 1 (intake-admission-e2e.mjs tail), failing the '#633 intake admission e2e' step (.github/actions/db-live-gates/action.yml:95). The change most likely to turn a green CI job red therefore has zero end-to-end evidence behind it.",
+      "required_fix": "Run intake-e2e.mjs then intake-admission-e2e.mjs in CI order once, on a world resembling a fresh ephemeral clara_intake_ci, with HEAD's queue-drain.mjs, and record both results. If leg 2 goes red on the FatalError/storage_error shape, get an explicit orchestrator/owner decision that this red is the intended AC3 behaviour before it lands - the ticket asks for less noise on a PASSING run, not a new red."
+    },
+    {
+      "id": "L06-SPEC-R2-02",
+      "ticket": 850,
+      "severity": "major",
+      "kind": "requirement-missing",
+      "title": "#850 - AC1 not met: the db-live-gates step was never measured before/after, and the action's recorded cost comment still carries the stale pre-#794 figure rather than a current one",
+      "evidence": "Ticket AC1: \"The db-live-gates step that runs the drill is measured (wall clock, both legs) before and after, and the action's recorded cost comment is updated to the current figure.\" What landed in .github/actions/db-live-gates/action.yml keeps the original pair verbatim - \"78.0s for the scratch build and 124s for the whole file - Windows-host measurements ... BEFORE #794's second leg\" - and adds local Windows-host numbers instead (\"sequential (pre-#850) 36.6s-42.5s ... overlapped (post-#850) 32.3s-34.8s\"), together with \"NO CI SCRATCH-BUILD COST HAS EVER BEEN RECORDED\" and \"The next CI run of this step is what proves the CI wall clock (both legs) that AC1 asks for\". The step's recorded cost comment is annotated as stale, not updated to the current figure; no figure for the step as it stands today (two legs) exists in the file at all. wave1-lane06-final.md nevertheless reports #850 as 'Status: done' with AC1 treated as satisfied.",
+      "required_fix": "Downgrade #850 to partial in the lane's report, or produce the step-level figure. The honest close is either (a) hold the ticket open until the first CI run of the Wave-B fault-gate step supplies both-legs wall clock before and after, or (b) take AC3's own escape hatch and close it with the measured numbers recorded - but pick one, rather than landing the change and calling AC1 done."
+    },
+    {
+      "id": "L06-SPEC-R2-03",
+      "ticket": 850,
+      "severity": "major",
+      "kind": "implementation-wrong",
+      "title": "#850 - the chosen mechanism neither shares nor streamlines the builds; it raises peak CPU on a 2-4 core target, and the lane's own only contention measurement shows that shape FAILING the drill",
+      "evidence": "Ticket title: \"Cut the two-build drill's two scratch builds to one.\" Brief, Desired behavior: \"The drill's CI wall clock drops materially (one staged copy built twice through a lighter second pass, or a shared scratch tree keyed by class)\". AC3: \"CI cost for the drill's scratch-build steps decreases, or the ticket is closed as not worth it with the measured numbers recorded.\" Delivered (two-build-cutover-e2e.mjs:578-580): `const chatBuildPromise = chatSupported ? buildPreviousVersionImage({ name: \"previous-chat\", className: \"chatTurn\", ... }) : null;` - still two full cpSync + nitro build passes; packages/runtime/tests/scratch-image.mjs is untouched, so total compute is unchanged and only the wall clock overlaps. The lane's own text in action.yml states the consequence: \"GitHub-hosted runners have 2-4 cores ... host idle, the overlapped build took 5.1s; with one concurrent pnpm typecheck running it took 36.9s - 7x - and that run FAILED with a pollTask timeout inside the claraWork leg\", and \"No guard is added here\". On the one platform AC3 is about, the change is unmeasured and its only measurement under contention is a drill FAILURE, not a saving. Neither branch of AC3 is satisfied.",
+      "required_fix": "Either measure the step on a 2-4 core runner before this counts as a decrease, or implement the mechanism the brief names (one staged tree built twice, or a shared scratch tree keyed by class) so the saving is in compute and does not depend on spare cores. If the overlap is kept, the os.availableParallelism() guard the lane raised and declined needs an explicit recorded decision - leaving it in a CI comment is not a decision."
+    },
+    {
+      "id": "L06-SPEC-R2-04",
+      "ticket": 967,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "#967 - AC1's order-of-magnitude log-volume reduction is unmeasured; no post-fix line count exists in any condition",
+      "evidence": "Ticket AC1: \"A normal passing run of the three intake legs produces a log volume not dominated by concurrency-limit or retry noise inherited from an earlier leg (an order-of-magnitude reduction from the measured roughly 1.27 million lines).\" The only numbers produced are PRE-fix and from a partially-loaded rig (action.yml: \"leg 1 = 238 lines, leg 2 = 1,109 lines, leg 3 ... = 11,309 lines ... nowhere near the ~1.27M-line shape\"). wave1-lane06-fixround-1.md: \"No clean POST-967 number on the same world\" - the one post-fix attempt timed out on out-of-order residue. There is therefore no measurement of the quantity AC1 names, in either condition, at the scale the ticket cites. The lane reports #967 as 'Status: done' in final.md.",
+      "required_fix": "Report #967 as partial, not done, until the first CI run of the three-leg sequence supplies a with/without line count; or record explicitly on the ticket that the mechanism argument is accepted in place of AC1's number."
+    },
+    {
+      "id": "L06-SPEC-R2-05",
+      "ticket": 963,
+      "severity": "minor",
+      "kind": "implementation-wrong",
+      "title": "#963 - the new README paragraph's claims about when the quoted DRIFTED wording applies, and about 0214 being the first instance, are both false against the migrations",
+      "evidence": "Ticket AC3: \"It quotes the 'has DRIFTED from its pinned body' failure wording and explains what it means.\" The quote and explanation are present, but the framing added around them in b89671ce is wrong. packages/db/README.md now says: \"quoted verbatim because it is what an author actually sees from 0221 onward\" and \"The FIRST instance, 0214 below, predates that exact wording\". Checked: `grep -rhon 'has DRIFTED from [^(]*' packages/db/migrations/` gives 'has DRIFTED from its measured live body' x13 (the most common form in the estate), 'has DRIFTED from its pinned body' x11, 'has DRIFTED from the pinned 0193 body' x6, and 20+ other variants. 0222_accrual_adjustments.sql - AFTER 0221 - uses the older form in all six of its non-regression pins (lines 314/320/326/332/338/344), and 0231_firm_portfolio_pack.sql mixes both (4 x 'its pinned body', 1 x 'the pinned 0189 body' at line 289). 0214 is also not the first instance: 0178, 0182, 0183, 0184, 0189, 0194, 0195, 0197, 0202, 0203, 0204, 0209, 0212, 0213, 0215 and 0216 all carry a pre-image body pin with a DRIFT raise at a number below 0214. An author who hits the most common wording ('its measured live body') and greps this README for it finds nothing - the outcome AC3 exists to prevent.",
+      "required_fix": "Replace 'from 0221 onward' and 'The FIRST instance, 0214' with what the migrations show: several raise wordings coexist ('has DRIFTED from its pinned body', 'from the pinned NNNN body', 'from its measured live body'); the common invariant is the phrase 'has DRIFTED'; 0222 and 0231 are live counter-examples to any 'settled from 0221' claim."
+    },
+    {
+      "id": "L06-SPEC-R2-06",
+      "ticket": 967,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#967 - AC3 is delivered only for failures occurring strictly inside the drain wait; a failure already recorded when poll 1 runs is baselined away, including one landing inside poll 1's own concurrent queries",
+      "evidence": "Ticket AC3: \"A genuine failure left behind by an earlier leg's queued work surfaces as a failure, rather than being silently drained away\" - with no restriction to a time window. queue-drain.mjs sets failedBaseline = failedNow on poll 1 and throws only on ids absent from it. Two gaps follow. (1) A run reaching 'failed' after the leg's own assertions finish but before waitForQueueDrain is called is in the baseline and never reported - the lane names this itself (fixround-1.md, Follow-ups #3). (2) Poll 1 issues censusNonTerminalRuns, censusUnboundTasks and censusFailedRuns inside one Promise.all, so they are three separate snapshots: a run that fails between the runs query and the failed query is counted BOTH as non-terminal (so the call does not resolve early) and as baseline-failed (so poll 2 never flags it), and the wait then resolves cleanly on exactly the failure AC3 names. Neither gap is covered by any cell in queue-drain.test.mjs (6/6 re-run, verified).",
+      "required_fix": "Either state the window limitation in queue-drain.mjs's header as a named residual against AC3, or take the failed-runs baseline from the same statement as the run census (one query returning status) so the two snapshots cannot disagree."
+    },
+    {
+      "id": "L06-SPEC-R2-07",
+      "ticket": 850,
+      "severity": "minor",
+      "kind": "scope-creep",
+      "title": "#850 - the ticket asked for the action's cost comment updated to a figure; what landed is ~100 lines of wave narrative in a shared CI file, including a citation to a temporary riders-wave report path",
+      "evidence": "Ticket AC1 asks only that \"the action's recorded cost comment is updated to the current figure\". `git diff origin/main...HEAD --stat` shows '.github/actions/db-live-gates/action.yml | 108 ++++++++++++++++--', all of it comment prose across two blocks. One paragraph cites a wave-local artifact from a permanent CI file: \"The lane's own review measured this directly (docs/plan/active/riders-2026-09-20/reports/wave1-lane06-review-spec.json, finding L06-850-C)\" - a docs/plan/active/ path that does not outlive the wave, plus finding ids (L06-850-A/B/C, L06-967-A/C) that mean nothing outside this lane's own reports. WORK-ORDER.md rule 7 names this file as one nine other lanes edit concurrently and asks for minimal hunks.",
+      "required_fix": "Keep the durable facts (the step now runs two scratch builds; the 78.0s/124s pair predates the second leg; the overlap's contention risk and what to read on the first CI run) and drop the wave-local finding ids and the docs/plan/active/ citation, or restate that measurement inline so the comment stands on its own after the wave folder is archived."
+    },
+    {
+      "id": "L06-SPEC-R2-08",
+      "ticket": 963,
+      "severity": "minor",
+      "kind": "implementation-wrong",
+      "title": "#963 - 'Every migration below that pins a function it does not itself change is ... findable by searching this file for the pinned function's name' is false as a completeness claim",
+      "evidence": "Ticket AC4 asks only that 0233's three pinned bodies be named and findable, and the new text satisfies that (grep confirms clara.get_current_legal_documents, clara.accept_legal_document(text,integer,text,text) and clara._accounting_work_egress_live(uuid,uuid) all hit the new paragraph). But the same section makes a wider claim the README does not support: \"Every migration below that pins a function it does not itself change is a live instance of this rule, findable by searching this file for the pinned function's name\". Checked with grep -c in packages/db/README.md: '0183' -> 0 occurrences, '0204' -> 0 occurrences, while both carry pre-image body pins. Nineteen migration files carry the older pin wording alone; only 0214, 0231's five and 0233's three are actually named in this README.",
+      "required_fix": "Soften to what is true - 'the instances documented below are findable by the pinned function's name; the authoritative list is the migrations themselves (grep -rn \"has DRIFTED\" packages/db/migrations/)' - or name the remaining pinning migrations."
+    },
+    {
+      "id": "L06-SPEC-R2-09",
+      "ticket": 967,
+      "severity": "note",
+      "kind": "deviation",
+      "title": "#967 - the drain is placed at the END of the producing leg, not at the START of the next one as the brief words it; well argued, but it leaves no gate when a leg dies before reaching its own drain",
+      "evidence": "Ticket Desired behavior: \"Either each leg waits for the previous leg's Workflow queue on that database to drain to empty before starting, or the legs run against separate, hermetic databases and worlds.\" Delivered: waitForQueueDrain(rig, ...) immediately before process.exit(0) in intake-e2e.mjs:270 and intake-admission-e2e.mjs:761. The reason given (queue-drain.mjs header: \"the calling leg's own process is the only one with an ENGINE ACTUALLY RUNNING against the database ... so it is the only place that can DRIVE the queue to empty rather than merely observe it stuck\") is correct and is a better reading of the ticket than its literal wording. Residual: a leg that fails or is cancelled before its drain leaves the queue dirty with nothing downstream to notice - moot while every step uses 'shell: bash -e {0}' and a failing leg fails the job, but it is the one thing the brief's own placement would have covered.",
+      "required_fix": "None required. Record the deviation and its reason on the ticket so the next author does not read the brief and 'fix' the placement back."
+    },
+    {
+      "id": "L06-SPEC-R2-10",
+      "ticket": 850,
+      "severity": "note",
+      "kind": "scope-creep",
+      "title": "#850 - the chatTurn support probe was hoisted above the file's try/finally, so a failure in it now skips rig.endPool() and removeScratchTree()",
+      "evidence": "The probe moved from inside the chatTurn block (within the try that opens at two-build-cutover-e2e.mjs:628) to main() body scope at ~line 413: 'const chatProbe = await rig.rootQuery(...)'. The finally at :1182 that calls rig.endPool() and removeScratchTree() no longer covers it. Impact is low - nothing is spawned and no scratch tree exists at that point, only the pool - and the hoist is a direct enabler of the overlap rather than gratuitous. Noted because the ticket asked for a build change, not a control-flow change to the file's skip probe.",
+      "required_fix": "None required. Flagged so the orchestrator reads the hoist deliberately rather than as noise in the perf commit."
+    }
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "Three tickets, all three genuinely live on main before the lane built them (verified; the lane claimed no ticket as already satisfied or stopped). #963 meets all four acceptance criteria and its 0233/0234 facts check out against the migration files, but two claims added around the quoted failure wording are false (the 'from 0221 onward' claim, contradicted by 0222 and 0231; and 0214 as 'the FIRST instance', contradicted by sixteen earlier pinning migrations). #850 is reported done but AC1 is unmet (the step's recorded cost comment is annotated as stale, never updated to a current figure) and AC3 is unproven in both of its branches, with the lane's own only contention measurement showing the overlapped drill FAILING on a pollTask timeout - on the 2-4 core class of runner the ticket targets. #967 is well designed and its unit cells re-run 6/6, but fix round 1 changed the gate's semantics and neither of the two CI legs it modifies was run afterwards, while the lane's own earlier local evidence is exactly the input the new gate throws on - that is the one finding worth blocking on."
+}

@@ -1,0 +1,89 @@
+{
+  "lane": "Wave 1 · Lane 01 (riders/w1-lane01)",
+  "lens": "STANDARDS",
+  "reviewer": "code-review skill, STANDARDS axis (run as a separate reviewer from SPEC, never merged)",
+  "reviewed_at": "2026-09-20",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "head": "f4c8f554995e66b2ab83caebb820f3e040820cab",
+  "base": "origin/main (e7f0a10a…), merge-base dd3f8f1d202b6eade2211f33c34f263d033768f1",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits_reviewed": [
+    "c35d8199 fix(web): #862 repoint every lane mock's private body reader onto the shared cache",
+    "c9a3f284 fix(web): #863 widen the RPC verb-opener census past three dispatch spellings",
+    "3ae738e0 feat(web): #902 scope the client-work-pack e2e mock by p_client",
+    "e8cdc6d4 fix(web): #853 activity-mock.mjs honours p_work, mirroring migration 0202",
+    "9855331b fix(web): #853 the second Work fixture must not collide on label or object id",
+    "162b9a98 fix(web): #865 make the build-then-test path impossible to miss",
+    "726bcfdd feat(web): #848 walk arm proving Reactivate reaches migration 0211's door",
+    "f4c8f554 fix(web): wave1-lane01 fix round — #848 onReactivated re-read evidence, #863 collision cell, #865 README warning"
+  ],
+  "standards_sources_consulted": [
+    "AGENTS.md (repo root)",
+    "CONTEXT.md (repo root)",
+    "apps/web/README.md",
+    "apps/web/e2e/README.md (current worktree content, post-diff)",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "apps/web/e2e/mock-dispatch.mjs (read to verify the #862 repoint is faithful to the shared contract)",
+    "packages/db/README.md, packages/db/tests/README.md, packages/runtime/README.md — consulted but not applicable: this diff touches only apps/web/e2e/* and apps/web/playwright.config.ts, no packages/db or packages/runtime file"
+  ],
+  "note_on_prior_reviews": "docs/plan/active/riders-2026-09-20/reports/wave1-lane01-review-spec.json (lens 'SPEC + STANDARDS'), wave1-lane01-fixround-1.md and wave1-lane01-recheck-1.json (verdict: accept) already ran a combined SPEC+STANDARDS pass and a fix round on this same diff. This report is a dedicated, independent STANDARDS-axis pass (documented repo standards + the Fowler smell baseline + /tdd test quality) per this task's own instruction that the two axes run separately and are never merged. Findings below are net-new from this angle except where explicitly cross-referenced to an already-disposed prior finding.",
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 848,
+      "severity": "major",
+      "kind": "hard_violation",
+      "title": "apps/web/e2e/README.md still claims the mock 'enforces' the owner floor, a claim the lane's own fix round established as false",
+      "file": "apps/web/e2e/README.md",
+      "line": 96,
+      "evidence": "The `journal-work-walk.spec.ts` coverage row reads: '…and #848: an owner presses Reactivate on the `egress_not_authorized` face and reaches migration 0211's door end to end (the banner converges to active and the press re-reads), a governed `no_consent` refusal rendered verbatim, and the mock's own owner-floor enforcement answering the database's CLR04'. This sentence was added in commit 726bcfdd and the README was touched again in the fix-round commit f4c8f554 (for an unrelated L01-S5 sentence) without correcting this line. But the fix round's own L01-S2 finding (docs/plan/active/riders-2026-09-20/reports/wave1-lane01-fixround-1.md) reproduces and confirms: 'the mock answers CLR04 purely on `state.egressReactivateAnswer === \"denied\"` (an armed flag), never inspecting a caller' — i.e. there is no enforcement at all, only a simulated wire answer — and the fix round's own remedy was to RENAME the test from a literal-enforcement claim to 'a forced denial renders the database's own CLR04 owner-floor refusal' specifically to stop asserting enforcement. The independent recheck (wave1-lane01-recheck-1.json, L01-S2) verified this rename and the absence of any actual enforcement logic in journal-work-mock.mjs. The README is therefore a documented false claim about the state of the code, left uncorrected through two commits that touched the same file.",
+      "rule_violated": "AGENTS.md working-protocol rule 6, 'Claims need evidence': 'Any statement about the state of the world … must be backed by a checkable source … If you cannot point to a source, say \"unverified\" instead of asserting. No evidence, no claim.' Also WORK-ORDER.md rule 9 ('Docs in the same commits: the module README your change affects') — the README was edited twice in this lane without ever being made to match what the code actually does.",
+      "required_fix": "Reword the #848 clause in the coverage row to match the test's own corrected title/comment, e.g. '…and a forced denial rendering the database's own CLR04 owner-floor refusal (simulated at the wire — every cell in this spec signs in as the owner persona, so the mock is armed rather than driven by an actual rank check)', mirroring journal-work-walk.spec.ts's own post-fix-round header comment exactly."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 848,
+      "severity": "minor",
+      "kind": "smell",
+      "title": "possible Duplicated Code: control() and controlRead() in journal-work-walk.spec.ts share the same page.evaluate/fetch body verbatim",
+      "file": "apps/web/e2e/journal-work-walk.spec.ts",
+      "line": 51,
+      "evidence": "```js\nasync function control(page: Page, body: Record<string, unknown>): Promise<void> {\n  const status = await page.evaluate(\n    async (call: { path: string; payload: Record<string, unknown> }) => {\n      const res = await fetch(call.path, {\n        method: \"POST\",\n        headers: { \"content-type\": \"application/json\" },\n        body: JSON.stringify(call.payload),\n      });\n      return res.status;\n    },\n    { path: `${JOURNAL_WORK.controlPath}?client=${encodeURIComponent(CLIENT)}`, payload: body },\n  );\n  expect(status, `the fixture control endpoint answered ${status}`).toBe(200);\n}\n\n/** #848 — the same shape as `control` above, but returning the JSON body rather than only the\n *  status … */\nasync function controlRead(page: Page, body: Record<string, unknown>): Promise<Record<string, unknown>> {\n  return page.evaluate(\n    async (call: { path: string; payload: Record<string, unknown> }) => {\n      const res = await fetch(call.path, {\n        method: \"POST\",\n        headers: { \"content-type\": \"application/json\" },\n        body: JSON.stringify(call.payload),\n      });\n      return res.json() as Promise<Record<string, unknown>>;\n    },\n    { path: `${JOURNAL_WORK.controlPath}?client=${encodeURIComponent(CLIENT)}`, payload: body },\n  );\n}\n```\nThe two functions' `page.evaluate` bodies are identical except for the final `return res.status` vs `return res.json()`. The new function's own comment ('the same shape as `control` above') acknowledges the duplication rather than removing it.",
+      "required_fix": "Extract one shared page.evaluate helper that returns `{ status, json }` (or have `control` call `controlRead` internally and assert on the status it also returns), so the fetch/evaluate construction exists once."
+    },
+    {
+      "id": "STD-3",
+      "ticket": 902,
+      "severity": "minor",
+      "kind": "hard_violation",
+      "title": "A new census cell's own title claims more than its body checks, another instance of AGENTS.md rule 6",
+      "file": "apps/web/e2e/e2e-fixture-ownership.test.ts",
+      "line": 1531,
+      "evidence": "```js\ntest(\"#902 · HOME_WORK_PACK_CLIENT is not HOME_ONBOARDING_CLIENT and mints no id any other lane owns\", () => {\n  // A POSITIVE CONTROL on the fixture itself: the two client ids `home-board-mock.mjs` mints\n  // must differ, or #902's own scoping would resolve to the SAME row #650's onboarding cell reads.\n  const homeBoard = readFileSync(join(E2E_DIR, \"home-board-mock.mjs\"), \"utf8\");\n  const onboardingMatch = /HOME_ONBOARDING_CLIENT = \\{\\s*id: \"([0-9a-f-]+)\"/.exec(homeBoard);\n  assert.ok(onboardingMatch, \"home-board-mock.mjs must still declare HOME_ONBOARDING_CLIENT's id in this shape\");\n  assert.notEqual(HOME_WORK_PACK_CLIENT.id, onboardingMatch![1]);\n});\n```\nThe title says '…and mints no id any other lane owns', but the body only compares against ONE other id, `HOME_ONBOARDING_CLIENT`, inside the SAME file (`home-board-mock.mjs`). Nothing here scans any other lane's mock. This is the same finding the SPEC axis already recorded as L01-S7 (note severity, no action required); it is re-surfaced here specifically as a documented-standards matter because AGENTS.md rule 6 ('claims need evidence … no evidence, no claim') applies to a test's own name exactly as it applies to prose: a reader trusting this title would believe a cross-lane id collision is guarded against here, and it is not — a future lane minting the same id in a different `*-mock.mjs` would not red this cell.",
+      "required_fix": "Either narrow the title to 'HOME_WORK_PACK_CLIENT is not HOME_ONBOARDING_CLIENT' (what is actually asserted), or extend the body to grep every LANE_MOCKS file for the literal id, the way bodyReaderCensus/rpcVerbCensus already scan LANE_MOCKS for their own properties."
+    },
+    {
+      "id": "STD-4",
+      "ticket": 0,
+      "severity": "note",
+      "kind": "hard_violation",
+      "title": "The fix-round commit's trailer does not match WORK-ORDER.md rule 2's literal convention",
+      "file": "(git commit f4c8f554, no source file)",
+      "evidence": "WORK-ORDER.md rule 2: 'Every commit message ends with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.' Commit f4c8f554 ('fix(web): wave1-lane01 fix round …') instead ends with `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>` and an added `Claude-Session: …` line — the reviewing/fixing session's own attribution reminder, not the lane-worker trailer the work order specifies. The seven original lane-worker commits (c35d8199…726bcfdd) all carry the work order's exact trailer.",
+      "required_fix": "None required of this lane's own work (the divergent trailer reflects which session produced the fix-round commit, not a defect in the change itself). Flagged only so the orchestrator is aware the work order's rule 2 trailer is not literally uniform across this branch's full history."
+    }
+  ],
+  "checked_and_clean": [
+    "No horizontal slicing: `git log origin/main..HEAD --stat --reverse` shows every ticket's test cell(s) and implementation change landing in the SAME commit (c35d8199, c9a3f284, 3ae738e0, e8cdc6d4, 726bcfdd each bundle their *-mock.mjs and e2e-fixture-ownership.test.ts / *-walk.spec.ts edits together) — no commit adds a battery of red tests ahead of any implementation.",
+    "#862's repoint is faithful: apps/web/e2e/mock-dispatch.mjs's readCachedJson matches (functionally identical parse-once-and-cache-on-request contract to) every one of the seven removed local readJson implementations; verified by reading the shared implementation directly.",
+    "Structural census cells (bodyReaderCensus, rpcVerbCensus/verbsInSource, the #902/#853 direct-handler-call cells) are the WORK-ORDER's own named exception ('a catalog census, a prestate pin, a tail assertion') and are not flagged as reaching a private seam, per this task's own instruction that a documented repo standard overrides the /tdd preference here.",
+    "Import block in e2e-fixture-ownership.test.ts (activity-mock.mjs / home-board-mock.mjs imports added) stays alphabetically sorted, honouring WORK-ORDER.md rule 7's 'keep your hunk minimal, at the sorted position' for this shared file.",
+    "The new #848 refusal-building shape in journal-work-mock.mjs (inline `sendJson(response, 400, {code, message, details, hint}, cors)` per branch) matches the file's own pre-existing convention verbatim (e.g. the unrelated, untouched `get_work_execution_trace` handler a few lines above uses the identical shape) — not a new duplication introduced by this diff, so not flagged as Duplicated Code.",
+    "CONTEXT.md correctly left untouched: 'egress' vocabulary is already documented (CONTEXT.md lines 424, 487, 669); no new domain term is introduced by this diff (it adds test coverage for already-shipped #812 application behaviour, not new product vocabulary).",
+    "No packages/db, packages/runtime, migration, or frozen-workflow file touched; the module README this task also names for those packages does not apply to this diff."
+  ],
+  "summary": "One major finding: apps/web/e2e/README.md's #848 coverage row still asserts the mock 'enforces' the owner floor, a literal claim the lane's own fix round (L01-S2) established as false and corrected in the test's own title and comment — the README was edited again in the same fix-round commit for an unrelated sentence but this false clause was never fixed, violating AGENTS.md rule 6 (claims need evidence). Two minor findings: a clean Duplicated-Code instance (control/controlRead in journal-work-walk.spec.ts share an identical fetch body) and a test title in e2e-fixture-ownership.test.ts that claims a cross-lane guarantee its body does not check (also an AGENTS.md rule-6 instance, previously noted by the SPEC axis as a non-blocking note). One process-level note: the fix-round commit's trailer doesn't match WORK-ORDER.md rule 2's literal convention, attributable to a different session authoring that commit. No hard violations of TDD practice were found: every commit bundles its test and implementation together (no horizontal slicing), the #862 repoint is verified faithful to the shared mock-dispatch.mjs contract, and the structural census cells this diff adds or extends are exactly the kind of catalog-census/prestate-pin structural test WORK-ORDER.md and this task's own brief say override the /tdd public-seam preference."
+}

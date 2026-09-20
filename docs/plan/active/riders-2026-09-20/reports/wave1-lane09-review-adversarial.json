@@ -1,0 +1,96 @@
+{
+  "lane": "wave1-lane09",
+  "branch": "riders/w1-lane09",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\659",
+  "lens": "adversarial",
+  "verdict": "accept-with-fixes",
+  "commits": [
+    "52601ff4 feat(runtime): #852 fold the chat-clarify belt into the sweep receipt",
+    "887ae5ac fix(runtime): #966 the intake recovery belt can no longer fail a live intake"
+  ],
+  "gates_reverified_by_reviewer": {
+    "node scripts/check-frozen-workflows.mjs": "OK - 312 frozen files, no manifest diff",
+    "check-frozen-workflows.mjs --print-closure, grepped for the lane's subjects": "no match (100 packages/runtime/lib/* modules are frozen by closure; none of reconciler*.mjs, control.mjs, leader.mjs, spool.mjs, intake.mjs, hook-resume.mjs)",
+    "node packages/runtime/scripts/check-parts-parity.mjs": "OK",
+    "node --test tests/chat-clarify-sweep-wiring.test.mjs": "8 tests, 8 pass",
+    "node --test tests/intake-sidecar-race.test.mjs": "10 tests, 10 pass",
+    "node --test tests/intake-db.test.mjs (clara_l09)": "12 tests, 12 pass",
+    "node --test unit + control-work-question + control-chat-clarify + intake-unit + intake-recovery-unit + intake-recovery-db + intake-batch-unit + intake-reconcile": "93 tests, 92 pass, 1 fail = the documented #693 EICAR/Defender red only",
+    "node --test reconcile-belt-isolation-unit + reconcile-adjustments-unit + reconcile-sst-unit + reconcile-fa-unit + reconcile-autodraft-settle-unit": "76 tests, 76 pass",
+    "node --test tests/leader-state.test.mjs": "4 skipped (no pg_dump on PATH, documented)",
+    "pnpm lint": "exit 0",
+    "pnpm typecheck": "exit 0",
+    "vacuity control re-run: CLARA_SPOOL_RENAME_RETRY_MS=0": "p966.race reds - the writer half is load-bearing and that cell is not vacuous"
+  },
+  "findings": [
+    {
+      "id": "L09-A",
+      "ticket": 966,
+      "severity": "major",
+      "title": "The ten-slot recovery budget is now spent on sidecars the old code filtered out first, so ten unreadable or id-less sidecars blind the belt entirely",
+      "evidence": "origin/main's intake.mjs:436-437 filtered BEFORE the slice: `const rows = (await listIntakeMetas()).filter((row) => row && !row.corrupt && row.intakeId); for (const meta of rows.slice(0, 10))`. HEAD's intake.mjs:479-481 slices FIRST and filters inside the loop: `const settled = (await listEntries()).filter(...); for (const entry of settled.slice(0, RECOVERY_BATCH)) { const meta = await entry.read(); if (!meta || meta.corrupt || !meta.intakeId) continue; ... }`. A {corrupt} marker, a null (ENOENT between listing and read) and a body with no intakeId each consume one of the ten slots. PROVEN read-only on this rig against the built modules: with 12 unparseable intake-<uuid>.json sidecars sorting ahead of one genuinely recoverable sidecar (all mtimes aged 10 minutes), recoverPendingDocumentIntakes returned {\"recovered\":0,\"deferred\":0,\"expired\":0} - the recoverable intake was never opened; the pre-#966 loop head run against the SAME directory reached it (OLD belt would reach: [\"ffffffff-0000-4000-8000-000000000001\"]). Starvation is PERMANENT when the junk sidecars do not match sweepSpoolTtl's strict name regex ^intake-[0-9a-f-]{36}\\.(?:bin|json)$ (spool.mjs:430): with ten files named intake-00junk-N.json, listIntakeMetaEntries() listed 11 entries, the belt returned all zeroes, and sweepSpoolTtl() removed only the legitimate uuid-named sidecar (spoolRemoved: 1, still listed: 10). Even with uuid-shaped names the blind window is the spool TTL - minimum 15 minutes, 60 by default (spoolConfig). No cell covers it: p966.budget and 'p966.quiet ... BUDGET' both fill the budget with status:\"uploading\" bodies, i.e. entries that ARE read successfully, so they exercise the budget but never the corrupt/null arm.",
+      "user_impact": "A crashed mid-flight intake is never resumed - the human's uploaded document silently never appears - for as long as ten unreadable sidecars sit ahead of it in readdir order, and nothing is logged. packages/runtime/README.md's claim that 'a spool full of live uploads cannot starve the belt of the crashed intake behind them' is true only for live uploads.",
+      "required_fix": "Take RECOVERY_BATCH from ACTIONABLE metas, not from raw entries: keep reading settled entries until ten usable metas have been handled, under a separate larger cap on opens (e.g. 3x), or restore the pre-slice filter over a bounded read window. Add a cell: >=10 corrupt/id-less entries ahead of one recoverable entry, assert it is still reached. Consider logging a corrupt sidecar once instead of skipping it silently, and/or widening sweepSpoolTtl's regex so unparseable intake-*.json files are reaped."
+    },
+    {
+      "id": "L09-B",
+      "ticket": 966,
+      "severity": "minor",
+      "title": "p966.expire passes only because under five seconds elapse since p966.race - the cells share one spool directory and the race cell never cleans up",
+      "evidence": "intake-sidecar-race.test.mjs sets ONE CLARA_SPOOL_DIR for the whole file (before hook, ~line 41) and p966.race leaves intake-<id>.json behind with status \"spooled\" and expiresAt now+15min - i.e. actionable. p966.expire (line 219) uses the DEFAULT listEntries, i.e. the real directory, and asserts assert.equal(calls.length, 1). That holds only while the race fixture's mtime is still inside the 5 s quiet window. Proven by shortening the window, which does not touch p966.expire's own subject (that cell ages its own sidecar 60 s with utimes, so the guard is irrelevant to it): `CLARA_INTAKE_SIDECAR_QUIET_MS=1 node --test tests/intake-sidecar-race.test.mjs` -> `not ok 7 - p966.expire ... Expected values to be strictly equal: 2 !== 1`, with the stray side effect printed: `[clara-runtime] intake FAILED intake=be2a3770-... code=internal canonicalReached=false detail=canonical intake metadata is incomplete`. Baseline (no env) is 10/10 only because cells 4-6 are pure in-memory doubles that finish in ~20 ms. Any stall over five seconds between p966.race and p966.expire - a loaded ten-lane rig, a slower CI box, the whole-runtime-suite run - reds a gate cell for a reason unrelated to the code under test.",
+      "required_fix": "Give the filesystem cells their own spool directory (mkdtemp per cell, or set CLARA_SPOOL_DIR inside each cell), or have p966.race remove its sidecar (removeIntakeSpool) in a t.after. Do not let the quiet window double as cell isolation.",
+      "note": "intake-db.test.mjs's p966 cell also reds under CLARA_INTAKE_SIDECAR_QUIET_MS=1, but that is the lane's own declared vacuity control (its `live` sweep asserts the guard), not this defect; the other eleven db cells stayed green."
+    },
+    {
+      "id": "L09-C",
+      "ticket": 966,
+      "severity": "minor",
+      "title": "renameIntoPlace converts a persistent EPERM into a two-second stall on every sidecar write, on the latency-sensitive intake path, with no cell",
+      "evidence": "spool.mjs:57-59 sets RENAME_RETRY_MS = 2000 and the loop at :81-92 retries EPERM/EACCES/EBUSY until the deadline. MEASURED read-only on this rig: with one open(meta,'r') handle deliberately held (a stuck AV/backup/indexer handle - and #693 already shows Defender holding files on this host), writeIntakeMeta returned `EPERM after 2003 ms` instead of failing immediately. Every intake status transition goes through atomicJson, so a stuck handle costs ~2 s per transition per intake, multiplied across a 100-child batch - the exact workload #636/#966 were measured on. No cell asserts the give-up path, its latency, or the knob; the suite's only timing assertion (p966.race) exercises the SUCCEEDING retry. The repo's own intake-e2e.mjs:254 cell is a latency assertion on this path.",
+      "required_fix": "Either lower the default deadline to the order of the contended window (e.g. 250 ms, still ~100x a reader's handle) or make it caller-supplied so a live request keeps a short budget while the belt keeps a long one. Add a cell pinning the give-up: a held handle -> the ORIGINAL EPERM is thrown, the temp file is gone, and it happens within the deadline."
+    },
+    {
+      "id": "L09-D",
+      "ticket": 852,
+      "severity": "note",
+      "title": "The chat-clarify belt no longer runs when the heartbeat fails - an untested behaviour change",
+      "evidence": "Before: leader.mjs called reconcileChatClarifies in its own try/catch BEFORE runReconcilerSweep, so a heartbeat failure did not stop it. Now reconciler.mjs:737-744 returns {heartbeatOk:false, beltErrors:[\"heartbeat\"]} before reaching the belt at :755. The lane states the rationale in its report and in the module comment ('nothing that breaks that single-row upsert would spare a belt on the same connection'), which is reasonable, and the ticket's criterion ('the belt still runs before the rest of the sweep') is satisfied - but it is an untested change of behaviour on a belt whose whole job is settling conversations a crash left parked.",
+      "required_fix": "None required. If kept, say it in the README's Order paragraph (it currently says only 'immediately after the heartbeat') so the next reader does not rediscover it during an incident."
+    },
+    {
+      "id": "L09-E",
+      "ticket": 852,
+      "severity": "note",
+      "title": "The operator log string for a chat-clarify belt failure changed, while the wrapper's comment claims pre-existing names are preserved verbatim",
+      "evidence": "Old (leader.mjs, removed): `[reconcile] chat clarify belt error: <msg>`. New (reconciler.mjs:709, via belt(\"chat clarify reconcile\")): `[reconcile] chat clarify reconcile error: <msg>`. The belt wrapper's comment at reconciler.mjs:706-707 says the idiom and 'the three pre-existing names' are preserved 'so an operator's existing log greps keep matching' - that guarantee does not extend to this fourth name. chat-clarify-sweep-wiring.test.mjs pins the NEW string, so the change is deliberate and covered; only hosted greps and alerts are not.",
+      "required_fix": "Orchestrator: check whether any hosted alert or saved search matches 'chat clarify belt error' before release. No code change needed."
+    },
+    {
+      "id": "L09-F",
+      "ticket": 852,
+      "severity": "note",
+      "title": "'the counters are positive evidence that the belt ran' overstates the receipt, and the counter cell exercises only the dormant path",
+      "evidence": "packages/runtime/README.md (#852 section): 'a FAILED belt contributes no counters at all, so \"chatClarifyResumed\" in swept is positive evidence that the belt ran.' reconciler-chat-clarify.mjs:191-203 returns the ZEROED counter bag and issues no statement at all when resumeHook is not a function, and again when hasDeliveryColumns() is false - so the five keys appear on the receipt in both dormant cases. chat-clarify-sweep-wiring.test.mjs's '#852 receipt: ... all FIVE chat-clarify counters' uses sweepClient() with the default deliveryColumns = 0, i.e. it asserts the spread over exactly that dormant early return; no sweep cell drives a resting row through the belt (that coverage lives in control-chat-clarify.test.mjs, against the belt directly).",
+      "required_fix": "Soften the README sentence to 'the belt was reached and did not throw', or add a sweep cell with deliveryColumns=3 and one resting row so the counters come from a real pass."
+    },
+    {
+      "id": "L09-G",
+      "ticket": 966,
+      "severity": "note",
+      "title": "The reader half only shields sidecars quiet for under five seconds; the guarantee for a real upload rests entirely on the writer-half retry, and task sidecars did not get the reader half",
+      "evidence": "The quiet window is 5 s (SIDECAR_QUIET_MS) while a 20 MB upload takes longer, and mid-upload states ('uploading'/'receiving') are not in RECOVERABLE_STATES - so such a sidecar is still OPENED on every sweep and then skipped, which is the original race, mitigated only by renameIntoPlace. Separately, listTaskMetas() still bulk-opens every task-*.json on each call: health.mjs:59 (every health probe) and reconciler-documents.mjs:282 (the document-task fallback), with mergeTaskMeta writing through the same atomicJson. Those inherit the writer-half retry (correct) but not the metadata-first reader. Consistent with the ticket's scope ('the spool sidecar listing the belt uses'), so recorded rather than charged.",
+      "required_fix": "None for this ticket. Worth a follow-up: give listTaskMetas' callers the same lazy-entry shape, and consider expressing the quiet window against the capability lifetime rather than a flat five seconds."
+    }
+  ],
+  "checked_and_clean": [
+    "No frozen workflow body or frozen-closure module is touched: check-frozen-workflows.mjs reports no manifest diff, and the --print-closure listing (100 packages/runtime/lib/* modules) contains none of the lane's subjects.",
+    "No migration, no packages/db change, no apps/web change - git diff --stat origin/main...HEAD is 13 files, all under packages/runtime, so the lane's 'the db gate chain and the web suites do not apply' is correct.",
+    "The new edge reconciler.mjs -> reconciler-chat-clarify.mjs closes no cycle: hook-resume.mjs has an empty first-party import list, the belt's closure reaches neither reconciler.mjs nor control.mjs, and the only cycle in the package is the pre-existing reconciler <-> reconciler-wake one, pinned by name in cell 3 rather than tolerated by a weakened global check.",
+    "control.mjs re-exports isHookNotFound/resumePayloadFor by name; unit.test.mjs and control-work-question.test.mjs resolve and pass unchanged.",
+    "No second caller of reconcileChatClarifies survives (leader.mjs neither imports nor calls it); runReconcilerSweep has exactly one production caller, leader.mjs:226, which forwards the same deps object, so resumeHook (startWorld.ts:399) still reaches the belt and deps.onlyFirm still scopes it.",
+    "The parts-parity re-fingerprint follows the documented #640/#636 precedent (the sha is of the whole normalised return statement); check-parts-parity.mjs is green and the '...deps' tuple, which belongs to a different statement, is correctly left alone.",
+    "renameIntoPlace does not swallow: only the three contention codes retry, the original error is rethrown past the deadline, and the temp file is removed before the throw so a transient write failure cannot grow the spool.",
+    "listIntakeMetas/listTaskMetas keep the {corrupt,file} marker and the ENOENT-is-not-an-event contract, expressed over the lazy shape (p966.listing, re-run green).",
+    "The one red in the lane's runtime run is #693 (EICAR quarantined by Defender) - reproduced here, and git diff over scan.mjs / intake-unit.test.mjs is empty, so it is not this lane's."
+  ]
+}
