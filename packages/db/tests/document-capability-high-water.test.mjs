@@ -48,7 +48,7 @@ const CAPABILITY_COLUMNS =
 /** The count WITH 0244 applied. The `after` hook asserts it, so a cell that silently stops
  *  running — the way a mis-gated cell does — fails the whole battery rather than passing by
  *  absence. */
-const EXPECTED_CELLS = 2;
+const EXPECTED_CELLS = 4;
 
 let live = false;
 let executed = 0;
@@ -67,7 +67,17 @@ async function cohortApplied() {
       exists (select 1 from pg_trigger t
                where t.tgrelid = 'clara.document_capabilities'::regclass
                  and t.tgname = 't_document_capabilities_high_water_record'
-                 and not t.tgisinternal)                                              as g2`);
+                 and not t.tgisinternal)                                              as g2,
+      to_regprocedure('clara._tf_document_capability_high_water_monotone()')          is not null as f3,
+      to_regprocedure('clara._tf_document_capabilities_version_uniform()')            is not null as f4,
+      exists (select 1 from pg_trigger t
+               where t.tgrelid = 'clara.document_capability_version_high_water'::regclass
+                 and t.tgname = 't_document_capability_high_water_monotone'
+                 and not t.tgisinternal)                                              as g3,
+      exists (select 1 from pg_constraint c
+               where c.conname = 't_document_capabilities_version_uniform'
+                 and c.connamespace = 'clara'::regnamespace
+                 and c.condeferrable and c.condeferred)                               as g4`);
   const flags = Object.entries(r.rows[0]);
   const present = flags.filter(([, v]) => v).length;
   if (present !== 0 && present !== flags.length) {
@@ -206,4 +216,74 @@ cell("the high-water mark itself is append-only: DELETE is refused, a lowering U
   assert.equal(JSON.parse(seen.lower.detail ?? "{}").reason, "registry_version_high_water_append_only");
 
   assert.equal(seen.raised, seen.mark + 1, "raising the high-water mark must still succeed");
+});
+
+// ---------------------------------------------------------------------------------------------
+// #779's SECOND RESIDUAL — "every row published together carries the same integer" was a
+// CONVENTION: a table-wide observation in the sibling battery, which a uniform BACKWARDS
+// republish would satisfy anyway, and which nothing enforced at write time. The wall is DEFERRED
+// on purpose: every multi-statement republish passes through a non-uniform intermediate state,
+// so the transaction is judged on what it LEAVES, never on what it passed through.
+// ---------------------------------------------------------------------------------------------
+
+// THE ONE CELL THAT REALLY COMMITS, and the only honest way to prove a verdict reached AT
+// COMMIT. Its safety rests on the gate above: `cohortApplied()` has already read the deferred
+// constraint trigger out of pg_constraint, so the wall is PROVEN present before the transaction
+// is opened and the COMMIT can only be refused. Measured while writing this file: with the wall
+// absent the same transaction COMMITS and leaves the registry publishing two versions — which is
+// exactly the defect, and exactly why no other probe in this battery commits anything.
+cell("a transaction that ends with TWO distinct registry_versions is refused AT COMMIT, and the registry is untouched", async () => {
+  const before = (await rootQuery(
+    `select count(distinct registry_version)::int as versions, min(registry_version)::int as v
+       from clara.document_capabilities`)).rows[0];
+
+  const err = await asRoot(async (c) => {
+    await c.query("begin");
+    // Raising ONE pair is the whole hazard: the INSERT wall and 0207's UPDATE wall both admit it
+    // (a raise for that pair is monotone), and until this cell's wall existed the registry simply
+    // ended up publishing two versions at once.
+    await c.query(`update clara.document_capabilities set registry_version = registry_version + 1 ${PDF_INVOICE}`);
+    const caughtHere = await caught(() => c.query("commit"));
+    // A refused COMMIT has already ended the transaction; this is belt-and-braces so a green
+    // path can never leave the pooled connection inside one.
+    await c.query("rollback").catch(() => {});
+    return caughtHere;
+  });
+
+  assert.ok(err, "a transaction leaving TWO distinct registry_versions COMMITTED — cross-row uniformity is still only a convention");
+  assert.equal(err.code, CLR08, `expected ${CLR08} at commit, got ${err.code}`);
+  const detail = JSON.parse(err.detail ?? "{}");
+  assert.equal(detail.reason, "registry_version_uniform",
+    "the refusal must name the wall that fired, so a caller tells it apart from the per-pair walls");
+  assert.equal(detail.column, "registry_version");
+  assert.deepEqual(detail.versions, [before.v, before.v + 1],
+    "the refusal names the distinct versions it found, in order");
+
+  const after = (await rootQuery(
+    `select count(distinct registry_version)::int as versions, min(registry_version)::int as v
+       from clara.document_capabilities`)).rows[0];
+  assert.deepEqual(after, before, "the refused COMMIT wrote NOTHING: the registry is exactly as it was");
+});
+
+cell("a UNIFORM publish passes the same wall: every row raised together is admitted", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const published = (await c.query("select min(registry_version)::int as v from clara.document_capabilities"))
+      .rows[0].v;
+    const moved = (await c.query(
+      "update clara.document_capabilities set registry_version = registry_version + 1")).rowCount;
+    // The wall is DEFERRED, so nothing has judged this transaction yet. `set constraints … immediate`
+    // fires it NOW, which is the same verdict COMMIT would reach — proven by the cell above, whose
+    // refusal came from a real COMMIT. Forcing it here is what lets this cell roll back afterwards
+    // instead of republishing the live registry.
+    await c.query("set constraints clara.t_document_capabilities_version_uniform immediate");
+    const state = (await c.query(
+      `select count(distinct registry_version)::int as versions, min(registry_version)::int as v
+         from clara.document_capabilities`)).rows[0];
+    return { published, moved, state };
+  });
+
+  assert.equal(seen.state.versions, 1, "a uniform publish leaves exactly one version on the table");
+  assert.equal(seen.state.v, seen.published + 1, "…and it is the raised one");
+  assert.ok(seen.moved >= 240,
+    `the probe raised the WHOLE registry (12 formats x 20 kinds = 240 rows at authoring); it moved ${seen.moved}`);
 });

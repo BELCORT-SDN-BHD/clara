@@ -317,6 +317,62 @@ create trigger t_document_capability_high_water_monotone
 reset role;
 
 -- =====================================================================================
+-- §B.4  CROSS-ROW UNIFORMITY, #779's SECOND RESIDUAL. "Every row published together carries the
+-- same integer" is 0191's own promise, and until this file it was enforced NOWHERE: the sibling
+-- battery observes it at test time, which a uniform BACKWARDS republish would satisfy anyway,
+-- and no writer was ever refused for leaving two integers on the table.
+--
+-- WHY DEFERRED, AND WHY THAT IS THE WHOLE DESIGN. Every republication the registry has ever had
+-- moves 240 rows, and a check that ran at the end of each STATEMENT would refuse the first one —
+-- a republish is non-uniform in the middle by construction. A transaction must therefore be
+-- judged on what it LEAVES, which is what DEFERRABLE INITIALLY DEFERRED means: the check runs at
+-- COMMIT (or at an explicit `set constraints … immediate`, which is the same verdict reached
+-- early). An in-flight statement is never the subject.
+--
+-- ZERO ROWS IS UNIFORM. `count(distinct …) = 0` on an empty table is not two versions, and a
+-- registry emptied on purpose — every pair retired — is a state this wall has no opinion about.
+-- The refusal is for MORE THAN ONE, spelled as such rather than as `<> 1`.
+--
+-- THE COST IS BOUNDED AND MEASURED. A deferred AFTER ROW trigger fires once per changed row at
+-- commit, so a 240-row republish runs this body 240 times over a 240-row table. That is the
+-- price of the only shape PostgreSQL offers (see this file's header on FOR EACH STATEMENT) and
+-- it is paid by migrations, which is the only writer this table has ever had.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._tf_document_capabilities_version_uniform() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare v_versions int[];
+begin
+  select coalesce(array_agg(distinct registry_version order by registry_version), array[]::int[])
+    into v_versions
+    from clara.document_capabilities;
+
+  if coalesce(array_length(v_versions, 1), 0) > 1 then
+    raise exception 'the capability registry would publish % versions at once (%)',
+      array_length(v_versions, 1), v_versions
+      using errcode = 'CLR08',
+        detail = jsonb_build_object(
+          'reason', 'registry_version_uniform',
+          'column', 'registry_version',
+          'versions', to_jsonb(v_versions))::text;
+  end if;
+  return null;   -- AFTER trigger: the return value is ignored.
+end
+$fn$;
+revoke all on function clara._tf_document_capabilities_version_uniform() from public;
+comment on function clara._tf_document_capabilities_version_uniform() is
+  'DEFERRED constraint-trigger body on clara.document_capabilities (#846): a transaction may not LEAVE more than one distinct registry_version on the registry. 0191 promises "every row published together carries the same integer"; this is the refusal behind that promise. Deferred on purpose -- every republication is non-uniform in the middle, so the verdict is about what the transaction leaves, never about an in-flight statement. An EMPTY registry is uniform. Raises CLR08 with detail.reason = registry_version_uniform and detail.versions, the sorted distinct versions it found.';
+
+drop trigger if exists t_document_capabilities_version_uniform on clara.document_capabilities;
+create constraint trigger t_document_capabilities_version_uniform
+  after insert or update or delete on clara.document_capabilities
+  deferrable initially deferred
+  for each row execute function clara._tf_document_capabilities_version_uniform();
+
+reset role;
+
+-- =====================================================================================
 -- §C  THE BACKFILL. Every pair the registry publishes TODAY has published that version, so the
 -- mark starts where the registry is. Without this the walls above would treat the entire live
 -- registry as never-published and the hole would stay open for every existing pair -- which is
@@ -399,7 +455,8 @@ begin
   foreach v_def in array array[
     'clara._tf_document_capabilities_version_high_water()',
     'clara._tf_document_capabilities_high_water_record()',
-    'clara._tf_document_capability_high_water_monotone()'] loop
+    'clara._tf_document_capability_high_water_monotone()',
+    'clara._tf_document_capabilities_version_uniform()'] loop
     if to_regprocedure(v_def) is null then
       raise exception '#846 tail: % was not installed', v_def using errcode = 'CLR10';
     end if;
@@ -445,6 +502,25 @@ begin
      and t.tgname = 't_document_capability_high_water_monotone' and not t.tgisinternal;
   if v_def is null or v_def !~* 'BEFORE DELETE OR UPDATE' or v_def !~* 'FOR EACH ROW' or v_def ~* '\mWHEN\M' then
     raise exception '#846 tail: the mark''s append-only wall is not an unconditional BEFORE UPDATE OR DELETE FOR EACH ROW trigger -- got %', coalesce(v_def, '<none>')
+      using errcode = 'CLR10';
+  end if;
+
+  -- The uniformity wall is a CONSTRAINT trigger, so it is asserted from pg_constraint as well:
+  -- the deferral is the whole design, and a trigger created without it would pass a pg_trigger-
+  -- only check while refusing every republication's first statement.
+  select pg_get_triggerdef(t.oid) into v_def from pg_trigger t
+   where t.tgrelid = 'clara.document_capabilities'::regclass
+     and t.tgname = 't_document_capabilities_version_uniform' and not t.tgisinternal;
+  if v_def is null or v_def !~* 'AFTER INSERT OR DELETE OR UPDATE' or v_def !~* 'FOR EACH ROW'
+     or v_def ~* '\mWHEN\M' then
+    raise exception '#846 tail: the uniformity wall is not an unconditional AFTER INSERT OR DELETE OR UPDATE FOR EACH ROW trigger -- got %', coalesce(v_def, '<none>')
+      using errcode = 'CLR10';
+  end if;
+  if not exists (select 1 from pg_constraint c
+                  where c.conname = 't_document_capabilities_version_uniform'
+                    and c.connamespace = 'clara'::regnamespace
+                    and c.condeferrable and c.condeferred) then
+    raise exception '#846 tail: the uniformity wall is not a DEFERRABLE INITIALLY DEFERRED constraint trigger -- it would refuse the first statement of every republication'
       using errcode = 'CLR10';
   end if;
 
@@ -555,6 +631,39 @@ begin
   exception when sqlstate 'ZA244' then null;
   end;
 
+  -- (6d) THE UNIFORMITY WALL ACTUALLY REFUSES, and admits a uniform publish. `set constraints …
+  -- immediate` reaches the SAME verdict COMMIT would, early enough that this probe can be rolled
+  -- back instead of republishing the live registry.
+  begin
+    update clara.document_capabilities set registry_version = registry_version + 1
+     where format = 'pdf' and document_kind = 'invoice';
+    begin
+      set constraints clara.t_document_capabilities_version_uniform immediate;
+      raise exception '#846 tail: a registry left with TWO distinct versions was ACCEPTED -- the uniformity wall is installed but does not enforce'
+        using errcode = 'CLR10';
+    exception when sqlstate 'CLR08' then
+      get stacked diagnostics v_detail = pg_exception_detail;
+      v_reason := nullif(v_detail, '')::jsonb;
+      if coalesce(v_reason ->> 'reason', '') <> 'registry_version_uniform'
+         or jsonb_array_length(coalesce(v_reason -> 'versions', '[]'::jsonb)) <> 2 then
+        raise exception '#846 tail: the uniformity refusal carries no machine-readable reason with both versions (detail %)', coalesce(v_detail, '<null>')
+          using errcode = 'CLR10';
+      end if;
+    end;
+    -- …and the same wall ADMITS the whole-registry raise, which is the only shape a republication
+    -- has ever taken (0228 is the precedent).
+    update clara.document_capabilities set registry_version = v_published + 1
+     where registry_version <> v_published + 1;
+    set constraints clara.t_document_capabilities_version_uniform immediate;
+    select count(distinct registry_version)::int into v_n from clara.document_capabilities;
+    if v_n <> 1 then
+      raise exception '#846 tail: the uniform republish probe did not leave one version (got %)', v_n
+        using errcode = 'CLR10';
+    end if;
+    raise exception '#846 uniformity probe rollback' using errcode = 'ZA245';
+  exception when sqlstate 'ZA245' then null;
+  end;
+
   -- (7) THE PROBE LEFT NOTHING BEHIND, in either table.
   select count(distinct registry_version)::int into v_n from clara.document_capabilities;
   if v_n <> 1 then
@@ -566,7 +675,7 @@ begin
     raise exception '#846 tail: the probe leaked -- % high-water row(s) sit off the published version', v_n using errcode = 'CLR10';
   end if;
 
-  raise notice '#846 tail: OK -- clara.document_capability_version_high_water holds the highest registry_version every (format, document_kind) has ever published (backfilled TOTAL over the live registry at version %), clara._tf_document_capabilities_version_high_water refuses an INSERT below that mark with CLR08 / detail.reason = registry_version_high_water, and clara._tf_document_capabilities_high_water_record raises the mark on every INSERT or UPDATE without ever lowering it. Proven behaviourally against the live table and rolled back whole: #846''s reproducer (delete pdf x invoice at %, re-insert at %) was REFUSED with the typed code and the named reason, and re-inserting AT the published version was ACCEPTED. 0191''s positivity CHECK, its two policies, the absent application write grant and the agent lane''s door-only access are re-read unchanged, and 0207''s wall body still hashes to its pinned pre-image. Neither 0191 nor 0207 is edited by this file.',
+  raise notice '#846 tail: OK -- clara.document_capability_version_high_water holds the highest registry_version every (format, document_kind) has ever published (backfilled TOTAL over the live registry at version %), clara._tf_document_capabilities_version_high_water refuses an INSERT below that mark with CLR08 / detail.reason = registry_version_high_water, and clara._tf_document_capabilities_high_water_record raises the mark on every INSERT or UPDATE without ever lowering it. Proven behaviourally against the live table and rolled back whole: #846''s reproducer (delete pdf x invoice at %, re-insert at %) was REFUSED with the typed code and the named reason, and re-inserting AT the published version was ACCEPTED. 0191''s positivity CHECK, its two policies, the absent application write grant and the agent lane''s door-only access are re-read unchanged, and 0207''s wall body still hashes to its pinned pre-image. clara._tf_document_capability_high_water_monotone refuses a DELETE of the mark and any lowering or re-keying of it; clara._tf_document_capabilities_version_uniform, a DEFERRABLE INITIALLY DEFERRED constraint trigger, refuses a transaction that LEAVES more than one distinct registry_version and admits the whole-registry raise -- both proven in this tail and rolled back whole. Neither 0191 nor 0207 is edited by this file.',
     v_published, v_published, v_published - 1;
 end
 $w846_tail$;
