@@ -388,3 +388,208 @@ test("cr.3 the door itself is IN that census, on the right side of it, with one 
   assert.equal(src.split("pg_advisory_xact_lock(203005002").length - 1, 1,
     "the FIRM rung is still taken exactly once -- no rung was added or renumbered");
 });
+
+// ===========================================================================
+// AC3 -- the source client row lock is still the serializer against PUBLICATION, and the source
+// filing is still retired while the door holds it. `clara.record_wiki_source_ingest` (0017:2228,
+// granted to clara_runtime only) is the deterministic publication path: it delegates to
+// `clara._publish_wiki_page_version_core`, whose FIRST row lock is the `clara.clients` row of the
+// client it publishes for -- so a block there is unambiguously a block on that row, not on a
+// wiki relation.
+// ===========================================================================
+
+const WIKI_SQL =
+  "select clara.record_wiki_source_ingest(p_client => $1, p_document => $2, p_note => $3,"
+  + " p_op_key => $4) as r";
+
+const GUARD = "set local statement_timeout = '30s'";
+
+// `p_note` is NULL in every publication call below, on purpose: a later migration made the
+// deterministic ingest path refuse a caller-supplied note (CLR10 `source_note_not_permitted`), so
+// the page's content is derived from the document alone. Measured, not assumed -- the first
+// version of this cell passed a note, and the call refused BEFORE it ever reached the client row,
+// which would have made the block it proves vacuous.
+
+/**
+ * The door holds its transaction open; a publication on `client` for `document` is fired and
+ * must block. While it is blocked we read ITS OWN lock set out of `pg_locks`, so the claim is
+ * "blocked ON the clara.clients row", not merely "blocked on something the door holds" -- the
+ * door also holds a `clara.documents` row, and a publication that cited the same document would
+ * queue there instead, which would prove nothing about the client row.
+ */
+async function doorHoldsThenPublish({ jwtSub, correction, planHash, client, document }) {
+  const pool = getPool();
+  const cDoor = await pool.connect();
+  const cPub = await pool.connect();
+  const out = { door: null, publisher: null, provedBlocked: false, waitLocks: [] };
+  try {
+    const doorPid = (await cDoor.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await cDoor.query(`set role ${ROLES.authenticated}`);
+    await cDoor.query("begin");
+    await cDoor.query(GUARD);
+    await cDoor.query("select set_config('request.jwt.claims', $1, true)",
+      [JSON.stringify({ sub: jwtSub, role: "authenticated" })]);
+    out.door = { ok: true, receipt: (await cDoor.query(DOOR_SQL,
+      [correction, planHash, "#914 rig attest", opk("c914w")])).rows[0].r };
+
+    const pubPid = (await cPub.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await cPub.query(`set role ${ROLES.runtime}`);
+    await cPub.query("begin");
+    await cPub.query(GUARD);
+    const pPub = Promise.resolve()
+      .then(() => cPub.query(WIKI_SQL, [client, document, null, opk("c914wiki")]))
+      .then((r) => { out.publisher = { ok: true, receipt: r.rows[0].r }; })
+      .catch((e) => { out.publisher = { ok: false, code: e.code, message: e.message }; });
+
+    out.provedBlocked = await waitBlockedBy(pubPid, doorPid);
+    if (out.provedBlocked) {
+      out.waitLocks = (await rootQuery(
+        `select l.locktype, coalesce(l.relation::regclass::text,'-') as rel, l.mode, l.granted
+           from pg_locks l where l.pid = $1 order by l.granted, l.locktype`, [pubPid])).rows;
+    }
+    await cDoor.query("commit").catch(() => cDoor.query("rollback").catch(() => {}));
+    await pPub;
+    await cPub.query("commit").catch(() => cPub.query("rollback").catch(() => {}));
+  } finally {
+    await release([cDoor, cPub]);
+  }
+  return out;
+}
+
+/**
+ * The reverse order, and the one that can tell the DELIBERATE serializer from an incidental one.
+ *
+ * A publication holds the source client's row; the door is fired and must block. It blocks either
+ * way -- even with no `clara.clients ... for update` at all, the door's own inserts carry foreign
+ * keys to `clara.clients` and would take FOR KEY SHARE on that row, which conflicts with the
+ * publisher's FOR UPDATE. What distinguishes the two is WHERE it stops: with 0019 SS1's row lock
+ * in place the door is stopped BEFORE its item loop writes anything, so it holds no
+ * RowExclusiveLock on `clara.journal_entries`; without it, the door has already inserted the
+ * reversal mirror by the time an FK lock stops it, and that write lock is held. So the cell reads
+ * the BLOCKED door's own lock modes.
+ */
+async function publishHoldsThenDoor({ jwtSub, correction, planHash, client, document }) {
+  const pool = getPool();
+  const cPub = await pool.connect();
+  const cDoor = await pool.connect();
+  const out = { publisher: null, door: null, provedBlocked: false, doorLocks: [] };
+  try {
+    const pubPid = (await cPub.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await cPub.query(`set role ${ROLES.runtime}`);
+    await cPub.query("begin");
+    await cPub.query(GUARD);
+    out.publisher = { ok: true, receipt: (await cPub.query(WIKI_SQL,
+      [client, document, null, opk("c914wiki2")])).rows[0].r };
+
+    const doorPid = (await cDoor.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await cDoor.query(`set role ${ROLES.authenticated}`);
+    await cDoor.query("begin");
+    await cDoor.query(GUARD);
+    await cDoor.query("select set_config('request.jwt.claims', $1, true)",
+      [JSON.stringify({ sub: jwtSub, role: "authenticated" })]);
+    const pDoor = Promise.resolve()
+      .then(() => cDoor.query(DOOR_SQL, [correction, planHash, "#914 rig attest", opk("c914w2")]))
+      .then((r) => { out.door = { ok: true, receipt: r.rows[0].r }; })
+      .catch((e) => { out.door = { ok: false, code: e.code, message: e.message }; });
+
+    out.provedBlocked = await waitBlockedBy(doorPid, pubPid);
+    if (out.provedBlocked) {
+      out.doorLocks = (await rootQuery(
+        `select l.mode, l.granted from pg_locks l
+          where l.pid = $1 and l.relation = 'clara.journal_entries'::regclass
+          order by l.mode`, [doorPid])).rows;
+    }
+    await cPub.query("commit").catch(() => cPub.query("rollback").catch(() => {}));
+    await pDoor;
+    await cDoor.query("commit").catch(() => cDoor.query("rollback").catch(() => {}));
+  } finally {
+    await release([cPub, cDoor]);
+  }
+  return out;
+}
+
+test("cr.4 the door still serialises against publication on the SOURCE client, in both directions, and retires the source filing while holding that row", async (t) => {
+  if (unready(t)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.A1);
+  // A SECOND document, filed to the SAME source client, with NO entry on it and no part in the
+  // correction. Publishing THIS one shares exactly one object with the correction -- the source
+  // client -- so a block cannot be blamed on the `clara.documents` row the door also locks.
+  const sideDoc = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  const sideDoc2 = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+
+  // Leg A -- the DOOR holds the source client's row; publication on that client BLOCKS, and the
+  // lock it is queued behind is a clara.clients lock, read out of pg_locks while it waits.
+  const planA = await proposeOne();
+  const legA = await doorHoldsThenPublish({
+    jwtSub: users.bob, correction: planA.correction, planHash: planA.planHash,
+    client: clients.A1, document: sideDoc.documentId,
+  });
+  assert.ok(legA.provedBlocked,
+    "wiki publication on the SOURCE client must BLOCK on the row the correction holds "
+    + "(pg_blocking_pids) -- that row lock is the 0019 SS1 serializer, and 0238 moved it, it did "
+    + `not drop it. publication outcome: ${JSON.stringify(legA.publisher)}`);
+  assert.ok(legA.waitLocks.some((l) => l.rel === "clara.clients"),
+    "the blocked publisher must be queued on a clara.clients lock specifically -- its whole "
+    + `overlap with the correction is that one client. pg_locks for the waiter: `
+    + JSON.stringify(legA.waitLocks));
+  assert.notEqual(legA.publisher?.code, "40P01", "no deadlock in the door-first schedule");
+  assert.equal(legA.door.receipt.status, "completed", "the door returned its ordinary receipt");
+  assert.equal(legA.publisher.ok, true,
+    `publication then committed once the correction released the row: ${legA.publisher.message ?? ""}`);
+
+  // ... and the retirement it made is the one the waiting publisher was waiting behind.
+  const filing = (await rootQuery(
+    `select retired_at, correction_id from clara.document_filings
+      where document_id=$1 and client_id=$2 order by filed_at limit 1`,
+    [planA.document, clients.A1],
+  )).rows[0];
+  assert.ok(filing.retired_at !== null,
+    "the SOURCE filing is retired by the transaction that held the source client's row");
+  assert.equal(filing.correction_id, planA.correction,
+    "the retirement names this correction");
+
+  // Leg B -- the reverse order: publication on the SIDE document holds the source client's row,
+  // and the correction BLOCKS on it. Neither direction deadlocks, because publication takes no
+  // advisory rung at all (measured: it is not among the rung-bearing bodies of cr.2's census),
+  // so the pair meets only on the client row.
+  const planB = await proposeOne();
+  const legB = await publishHoldsThenDoor({
+    jwtSub: users.bob, correction: planB.correction, planHash: planB.planHash,
+    client: clients.A1, document: sideDoc2.documentId,
+  });
+  assert.ok(legB.provedBlocked,
+    "the correction must BLOCK on the client row a publication holds -- the serialization is "
+    + "symmetric, which is what makes it a serializer rather than a coincidence");
+  assert.ok(legB.doorLocks.some((l) => l.mode === "RowShareLock"),
+    "while blocked, the correction must already hold its `for update of je` RowShareLock on "
+    + `clara.journal_entries. Measured locks: ${JSON.stringify(legB.doorLocks)}`);
+  assert.ok(!legB.doorLocks.some((l) => l.mode === "RowExclusiveLock"),
+    "while blocked, the correction must hold NO RowExclusiveLock on clara.journal_entries -- it "
+    + "is stopped by 0019 SS1's deliberate `clara.clients ... for update` BEFORE its item loop "
+    + "writes anything. A RowExclusiveLock means the reversal mirror was already inserted and "
+    + "the door was stopped later by an incidental foreign-key lock instead, which is exactly "
+    + "what happens when that deliberate lock is gone. Measured locks: "
+    + JSON.stringify(legB.doorLocks));
+  assert.notEqual(legB.door?.code, "40P01", "no deadlock in the publication-first schedule");
+  assert.equal(legB.door.ok, true, `the correction then completed: ${legB.door.message ?? ""}`);
+  assert.equal(legB.door.receipt.status, "completed", "and returned its ordinary receipt");
+  noteLane("cr.4 both directions blocked and committed; source filing retired under the row lock");
+});
+
+test("cr.5 the source client's row lock is taken BEFORE the source filing is retired, in the live body", async (t) => {
+  if (unready(t)) return;
+  const src = (await rootQuery(
+    "select prosrc from pg_proc where oid = 'clara.approve_wrong_client_correction(uuid,text,text,text)'::regprocedure",
+  )).rows[0].prosrc;
+  // `ladder()` finds a client-row ACQUISITION -- the statement must carry a locking clause, so an
+  // unlocked read of clara.clients at the same place does not satisfy this cell.
+  const { rowAt } = ladder(src);
+  const retireAt = src.indexOf("update clara.document_filings set retired_at=now()");
+  assert.ok(rowAt >= 0, "the source client's row LOCK is still in the body");
+  assert.ok(retireAt >= 0, "the source filing retirement is still in the body");
+  assert.ok(rowAt < retireAt,
+    `the client row lock (@${rowAt}) must be acquired before the source filing is retired `
+    + `(@${retireAt}); a row lock is held to commit, so this order is what "retired under that `
+    + 'lock" means');
+});
