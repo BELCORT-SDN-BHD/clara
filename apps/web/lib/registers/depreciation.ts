@@ -12,24 +12,32 @@ import type { SessionTokenAccessor } from "@/lib/session";
 
 export type FaDepreciationAuthority = {
   id: string;
-  /** F6 (independent review, fix-required, 2026-08-28): NARROWED to the two
-   *  values get_depreciation_authority's own live query can actually return
-   *  — it selects `where status in ('live','proposed') order by (live
-   *  first) limit 1`, so a client whose ONLY authority is retired gets
-   *  `authority: null` back, never a retired row. `retired` genuinely
-   *  exists on `clara.fa_depreciation_authorities` (the table this read
-   *  projects from), but this READ never surfaces it — a `retired` arm here
-   *  was dead code the live body can never trigger. */
-  status: "proposed" | "live";
+  /** #979 (0251): WIDENED to the three values `clara.fa_depreciation_authorities.status` admits.
+   *  Before 0251, `get_depreciation_authority`'s own live query selected only
+   *  `where status in ('live','proposed')`, so a client whose ONLY authority was retired got
+   *  `authority: null` back — indistinguishable from a client that never proposed one. 0251 adds
+   *  a fallback to the client's most recent RETIRED authority when neither exists, so `retired`
+   *  is a value this field can now actually carry. */
+  status: "proposed" | "live" | "retired";
   cadence: "monthly" | "annual";
   proposed_by: string;
   signed_by: string | null;
   retired_by: string | null;
   created_at: string;
+  /** #979 (0251) — the retirement's own reason, REQUIRED at retire time (CLR10 blank) and
+   *  present on this object ONLY when `status` is `retired` — a live or a proposed authority
+   *  carries no such key at all. */
+  retired_reason?: string | null;
+  /** #979 (0251) — when the retirement happened, present ONLY when `status` is `retired`. */
+  retired_at?: string | null;
   /** #651 [0227] — THE AUTHORITY WINDOW'S FLOOR: the first day of the month the authority was
    *  SIGNED, in the book's Asia/Kuala_Lumpur calendar, written once and frozen (D8). The due
    *  oracle never proposes a period starting before it, so a signature is not permission to charge
-   *  every past period. `null` on a proposed authority and on one signed before 0227. */
+   *  every past period. #979 (0251): present on this object ONLY when `status` is `retired` — a
+   *  live authority's window floor exists on the same row but this read does not surface it yet
+   *  (a different ticket's widening; `components/registers/fa-authority-ceremony.tsx` still
+   *  carries the dead code that expects it one day). `null` on a proposed authority.
+   *  `undefined` on a live one. */
   authority_from?: string | null;
   /** #651 [0227] — the row in THIS database that carries the firm's instruction. REQUIRED at sign
    *  time and RESOLVED against the same firm AND client; a Knowledge preference or a calculation
@@ -56,7 +64,10 @@ export type FaDepreciationAuthorityEnvelope = {
 
 /** clara.get_depreciation_authority(p_client) — viewer+. CLR11 if the client
  *  is not in your firm. `authority` is null when none has ever been
- *  proposed. */
+ *  proposed. #979 (0251): when the client's most recent authority is
+ *  retired and no live-or-proposed one exists, `authority` is THAT
+ *  retired row (never null) — see `FaDepreciationAuthority.status`'s own
+ *  comment. */
 export function getDepreciationAuthority(session: SessionTokenAccessor, clientId: string): Promise<FaDepreciationAuthorityEnvelope> {
   return callDoor<FaDepreciationAuthorityEnvelope>("get_depreciation_authority", { p_client: clientId }, { session });
 }

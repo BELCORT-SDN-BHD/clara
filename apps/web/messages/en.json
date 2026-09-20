@@ -4581,7 +4581,8 @@
       "none": "No depreciation authority has been proposed for this client yet.",
       "status": {
         "proposed": "Proposed",
-        "live": "Live"
+        "live": "Live",
+        "retired": "Retired"
       },
       "cadenceLabel": "Cadence",
       "cadence": {
@@ -4591,12 +4592,14 @@
       "rampEarned": "Autopost ramp earned — a reviewed run has posted under this authority.",
       "rampNotEarned": "Autopost ramp not yet earned — the next run posts as a draft.",
       "fyEndFallback": "No fiscal year end is on file for this client — defaulting to 31 December.",
+      "retiredReason": "Retired: {reason}",
       "proposeTrigger": "Propose authority",
       "proposeTitle": "Propose a depreciation authority",
       "proposeDescription": "An admin must sign this before any period can be run.",
       "signTrigger": "Sign",
       "signTitle": "Sign this depreciation authority",
       "windowFrom": "This authority reaches periods from {from} onward. Anything earlier needs an explicit catch-up run by a bookkeeper.",
+      "retiredWindowFrom": "Before it was retired, this authority reached periods from {from} onward.",
       "instructionKindLabel": "Where the instruction lives",
       "instructionKindHelp": "The Work or chat task in this client that carries the firm's instruction to depreciate.",
       "instructionKind": {
