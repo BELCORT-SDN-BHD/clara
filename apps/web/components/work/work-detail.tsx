@@ -608,8 +608,18 @@ export function WorkDetailView({
              admit and no posting date or memo to show. Rendering the journal table against that
              threw on `basis.lines.map`. The page says what is true and shows nothing it does not
              have, rather than a table of blanks or a lie about the basis being unreadable — it read
-             perfectly well, it is simply not journal lines. */
-          <p className="text-sm text-muted-foreground">{t("basisNoLines")}</p>
+             perfectly well, it is simply not journal lines.
+
+             THE SECOND SENTENCE BELONGS TO THE OPENING PURPOSE ALONE (fix round, ADV-L01-06). This
+             branch fires on any lineless basis, but "its entries were approved and posted before
+             the work itself was recorded" is a fact about an opening batch. No other purpose can
+             reach it today — `clara._assert_adjustment_basis` and `clara._admit_accounting_work_
+             core` demand a journal basis for the three model-served purposes before a Work exists
+             — so this is the shape a FIFTH purpose would inherit, and it would inherit a sentence
+             about somebody else's Work. Each purpose is told only what is true of it. */
+          <p className="text-sm text-muted-foreground">
+            {work.purpose === "opening_balance" ? t("basisNoLinesOpening") : t("basisNoLines")}
+          </p>
         ) : (
           <WorkBasisTable basis={work.basis} names={names} />
         )}
