@@ -157,9 +157,10 @@ cell("p895.seed.noop a second seed that adds zero items leaves revision/token/hi
   // FIRST SEED: the plan is empty (claim-path shape). #891: entity_type/turnover are both
   // unanswered, so mpers_eligibility/tin are both UNDETERMINED and stay unseeded; this inserts the
   // other ten catalogue rows -- still a real reconciliation, and it still bumps token, revision_n
-  // and history exactly as before.
+  // and history exactly as before. #935: plus the three education tips (no predicate at all):
+  // thirteen.
   const first = await seed(w.admin, opk("fspseed1"));
-  assert.equal(first.seeded, 10);
+  assert.equal(first.seeded, 13);
   const afterFirst = await planRow(w.plan);
   assert.equal(afterFirst.revision_n, 2, "a real reconciliation must still advance the revision");
   assert.notEqual(afterFirst.revision_token, before.revision_token);
@@ -180,14 +181,14 @@ cell("p895.seed.noop a second seed that adds zero items leaves revision/token/hi
   assert.equal(second.revision_token, afterFirst.revision_token);
   assert.equal(second.revision_n, 2);
   assert.equal(second.state, "open");
-  assert.equal(second.catalogue_total, 12);
+  assert.equal(second.catalogue_total, 15);
 
   // …but the act is STILL an act: the audit row and the domain event fire both times, the second
   // one carrying seeded=0, so "an admin reconciled and nothing was missing" stays a readable fact.
   assert.equal(await auditCount(w.firm, "seed_firm_setup_plan"), 2);
   const seededEvents = await events(w.firm, "firm_setup.seeded");
   assert.equal(seededEvents.length, 2);
-  assert.equal(seededEvents[0].seeded, 10);
+  assert.equal(seededEvents[0].seeded, 13);
   assert.equal(seededEvents[1].seeded, 0);
   assert.equal(seededEvents[0].revision_n, 2);
   assert.equal(seededEvents[1].revision_n, 2, "the no-op event still names the CURRENT (unmoved) revision");
@@ -207,8 +208,8 @@ cell("p895.read.honest_no_plan get_firm_setup reads an honest zero-over-zero cou
   assert.deepEqual(env.counter, { required_answered: 0, required_total: 0 },
     "a plan-less firm must read NO progress, not a fraction borrowed from the catalogue alone");
   // The catalogue's OWN size is untouched by this fix -- it is a constant about the vocabulary,
-  // not a claim about this firm's plan.
-  assert.equal(env.catalogue_total, 12);
+  // not a claim about this firm's plan. #935: fifteen now (the twelve plus the three tips).
+  assert.equal(env.catalogue_total, 15);
   assert.equal(env.confirmed_facts.length, 0);
 });
 

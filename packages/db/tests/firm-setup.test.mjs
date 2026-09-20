@@ -243,11 +243,13 @@ cell("p648.seed.reconcile a plan already carrying firmInterview_v3 items is reco
   const receipt = await seed(w.admin);
   assert.equal(receipt.plan_id, w.plan);
   // RED BEFORE THE DOOR EXISTED: a blind insert raises 23505 on uq_onboarding_plan_items_key.
-  assert.equal(receipt.catalogue_total, 12);
+  // #935: fifteen now -- the original twelve plus the three education tips.
+  assert.equal(receipt.catalogue_total, 15);
   // #891: of the nine catalogue rows still missing (legal_name/ssm/mia are already planted),
   // mpers_eligibility and tin are UNDETERMINED here -- entity_type and turnover are neither of
-  // them among the planted v3 items -- so neither is seeded yet; seven are.
-  assert.equal(receipt.seeded, 7, "the seed inserted something other than the seven MISSING, determinable catalogue rows");
+  // them among the planted v3 items -- so neither is seeded yet; seven are, plus #935's three
+  // tips, which carry no predicate at all and always seed: ten.
+  assert.equal(receipt.seeded, 10, "the seed inserted something other than the seven MISSING, determinable catalogue rows plus the three tips");
 
   for (const key of ["legal_name", "ssm", "mia"]) {
     const after = await itemRow(w.plan, key);
@@ -292,15 +294,16 @@ cell("p648.seed.empty a claimed firm's empty plan gains exactly the catalogue, a
   const first = await seed(w.admin, { opKey: key });
   // #891: entity_type and turnover are both unanswered on this brand-new plan, so
   // mpers_eligibility and tin are both UNDETERMINED and stay unseeded; the other ten rows seed.
-  assert.equal(first.seeded, 10);
-  assert.equal(first.catalogue_total, 12);
+  // #935: plus the three education tips, which carry no predicate at all: thirteen.
+  assert.equal(first.seeded, 13);
+  assert.equal(first.catalogue_total, 15);
 
   const rows = await rootQuery(
     `select i.item_key, i.state, i.required_for_commit, i.item_kind, k.required_for_commit as cat_required
        from clara.onboarding_plan_items i
        join clara.firm_setup_keys k on k.item_key = i.item_key
       where i.plan_id = $1 order by k.sort_order`, [w.plan]);
-  assert.equal(rows.rows.length, 10);
+  assert.equal(rows.rows.length, 13);
   for (const r of rows.rows) {
     assert.equal(r.state, "pending", `${r.item_key} was seeded in state ${r.state}`);
     assert.equal(r.required_for_commit, r.cat_required, `${r.item_key} lost its catalogue required flag`);
@@ -329,7 +332,9 @@ cell("p648.seed.excludes the catalogue carries neither bookkeeper_email (#625) n
     "legal_name", "ssm", "entity_type", "address", "mia",
     "turnover", "tin", "fye",
     "mpers_eligibility", "framework", "accounting_basis", "currency",
-  ], "the catalogue is not FIRM_SEGMENTS_V2 minus the two exclusions");
+    // #935: the three education tips, appended after the twelve FIRM_SEGMENTS_V2 rows.
+    "tip_invite_colleagues", "tip_knowledge_page", "tip_start_from_conversation",
+  ], "the catalogue is not FIRM_SEGMENTS_V2 minus the two exclusions, plus #935's three tips");
   assert.ok(!keys.includes("bookkeeper_email"), "bookkeeper_email is member provisioning (#625)");
   assert.ok(!keys.includes("first_client_onboarding"), "first_client_onboarding is #649's journey");
   // D8: exactly three rows are firm-defaultable.

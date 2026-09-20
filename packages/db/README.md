@@ -696,8 +696,8 @@ and a frontier that landed are different claims, and only the ledger states the 
 
 ### Firm setup (0218, journey A5)
 
-The firm's own `scope_kind='firm'` onboarding plan gained its first human doors at 0218. All five
-names are `clara_authenticated`-only, owned by `clara_fn_owner`, `SECURITY DEFINER` with
+The firm's own `scope_kind='firm'` onboarding plan gained its first human doors at 0218. All six
+names (five from 0218, plus `dismiss_firm_setup_tip` from #935/0259 below) are `clara_authenticated`-only, owned by `clara_fn_owner`, `SECURITY DEFINER` with
 `search_path` and `plan_cache_mode` pinned, and floored at **admin** inside their own bodies; no
 runtime, agent or wake role holds EXECUTE on any of them, and `clara.firm_setup_keys` grants SELECT
 to `clara_authenticated` alone.
@@ -709,6 +709,7 @@ to `clara_authenticated` alone.
 | `clara.defer_firm_setup_item(p_plan, p_expected_revision, p_item_key, p_reason, p_op_key)` | admin, then `min_role` | Skips an item that is NOT `required_for_commit`, parking the stated reason in the item's `answer` as `{"deferred_reason": …}` (`clara.onboarding_plan_items` has no `reason` column and its deferred CHECK arm constrains none). Refuses a required item and an already-answered one. |
 | `clara.commit_firm_setup(p_plan, p_expected_revision, p_op_key)` | admin | Commits the plan once every **catalogue** row that is `required_for_commit` is answered, resolved or deferred; otherwise `CLR10 required_items_outstanding`, naming them. It reads the catalogue, not the plan row's own flag, so a foreign plan item (`bookkeeper_email` → #625, `first_client_onboarding` → #649) cannot block this journey. |
 | `clara.get_firm_setup()` | admin | The journey's ONE production-facing read: plan identity and CAS token, every catalogue row with its plan state, the required-answered/required-total counter, the outstanding required keys, and the confirmed firm-scope facts with scope, source, actor and an authority verdict taken from the author's CURRENT membership rank. |
+| `clara.dismiss_firm_setup_tip(p_plan, p_item_key, p_action)` | admin, then `min_role` | #935 — the ONLY door that may settle an `item_kind='education'` row (`p_action` is `'acknowledged'` or `'deferred'`). No `p_op_key`, no `p_expected_revision`: it writes no audit row, emits no domain event, never rotates the plan's CAS token, and is idempotent by construction (a repeat call on an already-settled tip echoes its actual state rather than re-writing or erroring). Refuses a non-education item by name (`CLR10 firm_setup_item_not_a_tip`). |
 
 `clara.update_onboarding_plan` stays byte-identical and `clara_runtime`-only; `clara.commit_client_onboarding`
 still forces a client; `clara.promote_plan_answers_to_knowledge` is deliberately not used (its
@@ -784,6 +785,25 @@ still be reconciled into a plan is a NAMED RESIDUAL for whichever later ticket f
 retires something, exactly the shape #891 (0257) left for `commit_firm_setup`'s own gate. **#935**
 (the sibling education-tips ticket) depends on this file's retire column and lands after it in the
 same lane.
+
+**#935 (0259, three optional education tips)** adds `item_kind='education'` rows to
+`clara.firm_setup_keys` (`tip_invite_colleagues`, `tip_knowledge_page`,
+`tip_start_from_conversation`; `required_for_commit=false`, group `tips`, no `knowledge_key`) by a
+plain `insert` — brand-new rows, so the append-only trigger is never touched, unlike #934's
+backfill of twelve EXISTING ones. `clara.onboarding_plan_items.item_kind`'s CHECK is widened to
+admit `education` too, so `seed_firm_setup_plan`'s reconciliation carries the catalogue's own kind
+straight through instead of folding it onto `todo` (0218's own reason for that fold — "a fourth
+value would be a CHECK violation" — no longer holds once this file lands). `get_firm_setup` and
+`commit_firm_setup` are BOTH untouched (pinned pre-images, re-measured byte-identical at the tail):
+every counter/outstanding/gate arm already reads `required_for_commit` (or the two named
+conditional keys) alone, so a tip — never required, never one of those two — can neither inflate a
+counter nor block a commit, for free, from the catalogue data alone. `answer_firm_setup_item` and
+`defer_firm_setup_item` are each recut with one new guard refusing an `education` row by name
+(`CLR10 firm_setup_item_is_a_tip`) — a gap this file closes rather than one the Agent Brief named,
+because until this file no `education` row existed to expose it: without the guard, either generic
+door would happily record an AUDITED "accounting item" against a tip, which is exactly the
+invariant the ticket's two hard properties forbid. The new door itself,
+`clara.dismiss_firm_setup_tip`, is the table above's own row.
 
 At frontier 0222 the accrual lane adds four public names to that boundary:
 `create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on

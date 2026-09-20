@@ -153,7 +153,10 @@ const ACCOUNTANT_NOTES = {
 cell("p934.notes.accountant_text every one of the twelve catalogue items renders the owner-approved accountant sentence, never the engineer note", async () => {
   const w = await firmSetupWorld("t1");
   const env = await readSetup(w.admin);
-  assert.equal(env.items.length, 12, "the twelve-row catalogue, none retired");
+  // #935 landed three education tips beside the twelve accountant-note rows this cell is about;
+  // this cell's own subject is unaffected, so it only re-measures fifteen rather than pinning a
+  // second, unrelated invariant here.
+  assert.equal(env.items.length, 15, "the twelve accountant-note rows plus #935's three tips, none retired");
   for (const [key, note] of Object.entries(ACCOUNTANT_NOTES)) {
     const item = itemOf(env, key);
     assert.ok(item, `catalogue item ${key} is missing from get_firm_setup`);
