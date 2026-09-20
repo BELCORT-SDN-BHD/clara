@@ -1144,11 +1144,14 @@ nameCell("os.18 the name door's posture -- clara_fn_owner-owned SECURITY DEFINER
 timelineCell("os.20 every support act the console offers is readable on the OPERATOR firm's own "
   + "timeline -- a rejection, a capacity change and a problem resolution", async () => {
   const reg = await undecidedRegistration("os20");
+  const world = await openProblem(operator, "os20");
   const since = await dbNow();
 
   await rejectRegistration(operator.owner, reg.registration, "#843 os.20 out of scope");
   await setCapacity(operator.owner,
     { maxFirms: 4243, reason: "#843 os.20", opKey: opk("os20-cap") });
+  await resolveProblemWithKey(operator.owner, world.problem, "#843 os.20 refunded",
+    opk("os20-res"));
 
   const page = await firmActivity(operator.owner, { since });
   const byType = new Map(
@@ -1161,7 +1164,8 @@ timelineCell("os.20 every support act the console offers is readable on the OPER
     `os.20 control: the operator's timeline carries ${SUPPORT_EVENT.registrationRejected} `
     + `(saw ${[...byType.keys()].join(", ") || "no event rows at all"})`);
 
-  for (const type of [SUPPORT_EVENT.registrationRejected, SUPPORT_EVENT.capacitySet]) {
+  for (const type of [SUPPORT_EVENT.registrationRejected, SUPPORT_EVENT.capacitySet,
+    SUPPORT_EVENT.problemResolved]) {
     const row = byType.get(type);
     assert.ok(row, `the operator's timeline carries ${type}`);
     assert.equal(row.actor, operator.owner, `${type} is attributed to the deciding operator`);
@@ -1189,10 +1193,11 @@ timelineCell("os.20 every support act the console offers is readable on the OPER
        left join clara.trigger_taxonomy tt
          on tt.event_type = et.name and tt.version = (select version from clara.taxonomy_active)
       where et.name = any($1) order by et.name`,
-    [[SUPPORT_EVENT.capacitySet]]);
+    [[SUPPORT_EVENT.capacitySet, SUPPORT_EVENT.problemResolved]]);
   assert.deepEqual(taxonomy.rows, [
     { name: SUPPORT_EVENT.capacitySet, client_scoped: false, decision: "context_update" },
-  ], "the new event type is registered firm-level and routed context_update, 0145's own choice");
+    { name: SUPPORT_EVENT.problemResolved, client_scoped: false, decision: "context_update" },
+  ], "both new event types are registered firm-level and routed context_update, 0145's own choice");
 
   await setCapacity(operator.owner, { maxFirms: null, reason: "#843 os.20 release" });
 }, assertSupportTimelineCohortPresent);
