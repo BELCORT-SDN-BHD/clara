@@ -923,9 +923,12 @@ test("two forms on one page do not share a control id — Needs-you expands more
 // A question retired because its Work was REPLACED gets its own sentence. Before this, the
 // database's new `superseded` reason fell through `convergeKeyFor`'s default onto
 // "This Work is no longer waiting on this question." — true, and useless: it does not tell the
-// person that the source they were answering about was corrected, or that a replacement Work is
-// already running. Driven through the exported reducer the rendered card itself calls (line 381),
-// never through a copy of the switch.
+// person there IS a replacement to go to. Driven through the exported reducer the rendered card
+// itself calls (line 381), never through a copy of the switch.
+//
+// AND THE SENTENCE MAY NOT OVERCLAIM. The same reason is reached by a #721 restatement, so the
+// copy says what is true of every path — there is a newer Work carrying the same instruction — and
+// never asserts that a document was corrected (fix round, review finding L09-SPEC-01).
 test("885 a SUPERSEDED convergence gets its own sentence, and a plain cancellation keeps its own", () => {
   const cancelled = record({ status: "cancelled", work_status: "cancelled" });
   const converge = (reason: string, current: Record<string, unknown> | null = null): AnswerRefusal =>
@@ -939,8 +942,14 @@ test("885 a SUPERSEDED convergence gets its own sentence, and a plain cancellati
 
   const messageFor = (k: string): unknown =>
     (messages as unknown as { WorkQuestion: Record<string, unknown> }).WorkQuestion[k];
-  assert.equal(typeof messageFor(key), "string",
+  const sentence = messageFor(key);
+  assert.equal(typeof sentence, "string",
     "…and that key really resolves in en.json — an unresolved key renders as MISSING_MESSAGE");
+  // THE SENTENCE MAY NOT ASSERT A CAUSE (fix round, review finding L09-SPEC-01). The SAME reason is
+  // raised for a #721 restatement, where nothing was corrected at all, so copy that told the person
+  // their source had been corrected was simply false on that path.
+  assert.doesNotMatch(String(sentence), /correct/i,
+    "the superseded sentence claims no source correction: a plain #721 restatement reaches this exact reason");
 
   assert.equal(convergeKeyFor(converge("cancelled"), cancelled), "convergeCancelled",
     "a cancellation with no successor keeps the sentence it already had");

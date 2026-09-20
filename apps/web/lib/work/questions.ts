@@ -142,9 +142,11 @@ export const CONVERGE_REASONS = [
   "expired",
   "cancelled",
   // #885 — the narrower truth behind a `cancelled` question: the Work was REPLACED, not merely
-  // stopped. The database raises it when a source document the question was asked about is
-  // corrected (and for a #721 restatement, for the same reason), and `detail.current.superseded_by`
-  // names the Work that replaced this one.
+  // stopped, and `detail.current.superseded_by` names the Work that replaced it. TWO CAUSES REACH
+  // IT and the word distinguishes neither: a #721 restatement, and a source correction whose
+  // retired Work carried a `user_direct` basis. A source correction that could NOT carry the basis
+  // forward (a derived one) admits no successor and answers `cancelled` instead, so "superseded"
+  // means exactly "there is a newer Work carrying this instruction" and nothing about the cause.
   "superseded",
   "basis_changed",
   "state_changed",

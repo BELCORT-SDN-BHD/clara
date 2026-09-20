@@ -908,9 +908,13 @@ export function convergeKeyFor(refusal: AnswerRefusal | null, record: WorkQuesti
       return "convergeExpired";
     case "cancelled":
       return "convergeCancelled";
-    // #885 — narrower than `cancelled`, and it is the case a person most needs explained: the
-    // source this question was asked about was corrected, so the Work was retired and a
-    // replacement is already running on the corrected reading.
+    // #885 — narrower than `cancelled`: the Work was REPLACED, not merely stopped, and the person
+    // has somewhere to go. THE SENTENCE SAYS NOTHING ABOUT WHY (fix round, review finding
+    // L09-SPEC-01). The door sets this reason for a #721 restatement AND for a source correction,
+    // and the replacement carries the SAME admitted basis in both cases — a source correction that
+    // cannot carry the basis forward admits no successor at all and answers `cancelled`. Copy that
+    // asserted "a new Work is running on the corrected figures" was therefore false on the
+    // restatement path and misleading on the other.
     case "superseded":
       return "convergeSuperseded";
     case "basis_changed":
