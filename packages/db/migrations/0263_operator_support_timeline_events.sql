@@ -87,11 +87,43 @@
 -- re-issued for both doors — 0205's own discipline for this exact pair of bodies: "a reader of
 -- this file sees the whole door rather than a diff against a file they would have to go and find."
 --
--- THE CALL SITS IMMEDIATELY AFTER THE `clara._audit` CALL, which is `reject_firm_registration`'s
--- own order and is INSIDE the `_reserve_op`/`_finish_op` reservation. That placement is the whole
+-- BOTH CALLS SIT INSIDE THE `_reserve_op`/`_finish_op` RESERVATION, and that is the whole
 -- idempotence story: a lost-response retry under the same op_key returns at the `v_dedupe` guard,
 -- long before either write, so it appends no second line — exactly what os.13 already proves for
--- the audit row, and what this ticket's os.21 now proves for the event.
+-- the audit row, and what this ticket's os.21 now proves for the event. In
+-- `resolve_stripe_event_problem` (§3) the append sits immediately after that body's own
+-- `clara._audit` call, which is `reject_firm_registration`'s order. In `set_admission_capacity`
+-- (§2) it sits EARLIER — before the advisory lock — for a reason that is not cosmetic:
+--
+-- =====================================================================================
+-- LOCK ORDER: WHY THE CAPACITY DOOR APPENDS BEFORE IT TAKES THE ESTATE'S ADMISSION LOCK.
+--
+-- `clara._append_event` opens with `insert into clara.firm_event_seq (firm_id, n) … on conflict
+-- (firm_id) do update`, which holds a ROW LOCK on the acting firm's sequence row for the rest of
+-- the transaction. THREE peer operator acts take that same OPERATOR-firm row and take no advisory
+-- lock at all: `clara.reject_firm_registration` and `clara.approve_firm_registration` (0145 §D),
+-- and — from this very file — `clara.resolve_stripe_event_problem`. `set_admission_capacity` is
+-- the one body that takes BOTH, so it is the one that has to choose an order.
+--
+-- Appending AFTER `pg_advisory_xact_lock(hashtextextended('clara.admission-capacity', 0))` makes
+-- the estate's admission lock wait on an unrelated operator act: a concurrent rejection holding
+-- the operator firm's seq row stalls this call WHILE IT HOLDS the admission lock, and
+-- `clara.claim_paid_firm` — a paid applicant claiming their firm, which takes the same key —
+-- queues behind it. That is precisely what claim_paid_firm's own comment refuses for a settled
+-- retry: "no business queueing behind the estate's admission lock". Measured on the rig with three
+-- real connections before this file was corrected: S1 held the operator firm's
+-- `clara.firm_event_seq` row, S2 inside `set_admission_capacity` sat on a `Lock/transactionid`
+-- wait having already taken the advisory lock, and S3's `pg_try_advisory_xact_lock` on the
+-- admission key returned FALSE.
+--
+-- So the append goes FIRST — after the reservation and its replay guard, before the advisory lock
+-- — and the advisory lock's critical section holds what 0186 §C gave it and nothing else: the
+-- capacity UPDATE, the state read and the `clara._audit` insert, none of which waits on another
+-- session's row. NO CYCLE is created by taking the seq row first: the only other holder of that
+-- advisory key, `clara.claim_paid_firm`, appends (`firm.created`, `firm_registration.paid`)
+-- under the firm it is CREATING in the same transaction — never under the operator firm — so
+-- nothing anywhere takes the admission lock and then waits for the operator firm's seq row. §T
+-- pins the order in the committed body, so a later edit cannot drift back.
 --
 -- ROLLBACK is a NEW append-only migration. An applied migration is never edited or deleted
 -- (packages/db/README.md). A pre-merge fix-round edit of THIS file uses the supported redo path
@@ -393,8 +425,29 @@ begin
     return v_dedupe;                                  -- the ORIGINAL receipt, byte-identical
   end if;
 
+  -- #843 · THE ONE NEW STATEMENT, and it sits HERE — inside the reservation, before the advisory
+  -- lock — because of LOCK ORDER (see the header). clara._append_event's first statement takes a
+  -- row lock on this firm's event-sequence row and holds it to commit, and three peer operator
+  -- acts take that same operator-firm row with no advisory lock; appending below the lock would
+  -- let one of them stall this call while it holds the estate's admission lock, queueing a paid
+  -- applicant's clara.claim_paid_firm behind an unrelated operator act. The `v_dedupe` guard
+  -- above still returns first on a replay, so a lost-response retry appends no second line.
+  -- Positional, exactly as clara.reject_firm_registration (0145 §D) calls it: (firm, type, client,
+  -- actor, on_behalf_of, via_wake_kind, entry, document, resolution, payload). The OPERATOR firm,
+  -- because that is the firm this act belongs to and the only firm whose timeline may show it.
+  -- Client null (an admission act names no client, which is why the type is registered
+  -- client_scoped=false); on-behalf-of, wake kind and the three entity ids null — an operator
+  -- decides in their own name, on no entry, document or resolution.
+  -- EMPTY payload: clara.domain_events is read ESTATE-WIDE by clara_runtime, and max_firms /
+  -- firms_count are the business-confidential numbers #628's review round (S4) put behind the
+  -- operator wall. They stay in the firm-scoped audit row below. See the header.
+  perform clara._append_event(c.firm, 'admission.capacity_set', null, c.actor, null, null,
+    null, null, null, '{}'::jsonb);
+
   -- The SAME key clara.claim_paid_firm holds across its count-and-insert, so a capacity change
-  -- cannot land between a claim's count and its firm.
+  -- cannot land between a claim's count and its firm. Everything inside this critical section is
+  -- this transaction's own work: the append above already took this firm's sequence row, so the
+  -- lock is never held across a wait for another session.
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('clara.admission-capacity', 0));
   v_at := now();
@@ -411,18 +464,6 @@ begin
     jsonb_build_object('max_firms',p_max_firms,'reason',v_reason,
       'firms_count',v_state->'firms_count','full',v_state->'full'));
 
-  -- #843 · THE ONE NEW STATEMENT. Positional, exactly as clara.reject_firm_registration (0145 §D)
-  -- calls it: (firm, type, client, actor, on_behalf_of, via_wake_kind, entry, document,
-  -- resolution, payload). The OPERATOR firm, because that is the firm this act belongs to and the
-  -- only firm whose timeline may show it. Client null (an admission act names no client, which is
-  -- why the type is registered client_scoped=false); on-behalf-of, wake kind and the three entity
-  -- ids null — an operator decides in their own name, on no entry, document or resolution.
-  -- EMPTY payload: clara.domain_events is read ESTATE-WIDE by clara_runtime, and max_firms /
-  -- firms_count are the business-confidential numbers #628's review round (S4) put behind the
-  -- operator wall. They stay in the firm-scoped audit row one statement above. See the header.
-  perform clara._append_event(c.firm, 'admission.capacity_set', null, c.actor, null, null,
-    null, null, null, '{}'::jsonb);
-
   return clara._finish_op(c.firm, 'set_admission_capacity', p_op_key, jsonb_build_object(
     'status','set','max_firms',
     case when p_max_firms is null then null else to_jsonb(p_max_firms) end,
@@ -438,7 +479,11 @@ comment on function clara.set_admission_capacity(integer,text,text) is
   'unlimited). Owner of the OPERATOR firm only (the approve_firm_registration predicate, '
   're-derived at call time). op_receipts-idempotent; writes a clara._audit receipt AND appends '
   'ONE admission.capacity_set domain event under the operator firm -- both INSIDE the reservation, '
-  'so a lost-response retry replays the receipt and writes neither a second time. The event''s '
+  'so a lost-response retry replays the receipt and writes neither a second time. The event is '
+  'appended BEFORE the admission-capacity advisory lock is taken (lock order, #843): '
+  'clara._append_event holds this firm''s clara.firm_event_seq row to commit and three peer '
+  'operator acts take that same row, so appending inside the critical section would queue a paid '
+  'applicant''s clara.claim_paid_firm behind an unrelated operator act. The event''s '
   'payload is EMPTY on purpose: clara.domain_events is read estate-wide by clara_runtime and the '
   'capacity figures are operator-only (#628 S4); they stay on the firm-scoped audit row. '
   'Refusals carry detail.reason: invalid_op_key | invalid_capacity | reason_required | '
@@ -545,7 +590,8 @@ reset role;
 -- =====================================================================================
 do $w843_tail$
 declare v_src text; v_n int; v_posture text; v_append_count int; v_audit_count int;
-        v_pos_reserve int; v_pos_append int; v_pos_finish int; v_uncovered text;
+        v_pos_reserve int; v_pos_append int; v_pos_finish int; v_pos_advisory int;
+        v_uncovered text;
 begin
   -- 1 · still exactly ONE body, at the same signature.
   select count(*)::int into v_n from pg_proc p
@@ -600,6 +646,21 @@ begin
       using errcode='CLR10';
   end if;
 
+  -- 4b · …AND IT IS OUTSIDE THE ADMISSION-CAPACITY CRITICAL SECTION. The lock order the header
+  -- argues, measured rather than asserted. clara._append_event opens by taking THIS firm's
+  -- clara.firm_event_seq row and holds it to commit; three peer operator acts
+  -- (reject_firm_registration, approve_firm_registration, and §3's own recut of
+  -- resolve_stripe_event_problem) take that same operator-firm row and take NO advisory lock. If
+  -- the append drifted back below the advisory lock, one of those peers could stall this call
+  -- WHILE it holds the estate's admission lock, and a paid applicant's clara.claim_paid_firm --
+  -- which takes the same key and whose own comment refuses exactly this ("no business queueing
+  -- behind the estate's admission lock") -- would queue behind an unrelated operator act.
+  v_pos_advisory := position('pg_catalog.hashtextextended(''clara.admission-capacity'', 0)' in v_src);
+  if v_pos_advisory = 0 or not (v_pos_append < v_pos_advisory) then
+    raise exception '#843 tail: the append (at %) is NOT before the advisory lock (at %) -- the estate''s admission lock would wait on a peer operator act holding the operator firm''s clara.firm_event_seq row, and a paid applicant''s clara.claim_paid_firm would queue behind it', v_pos_append, v_pos_advisory
+      using errcode='CLR10';
+  end if;
+
   -- 5 · POSTURE, re-read rather than assumed: `create or replace` is trusted to preserve it and
   -- the revoke/grant pair is re-issued, so this compares the result against §0.6's measurement.
   select pg_get_userbyid(p.proowner) || ' | ' || p.prosecdef::text || ' | '
@@ -640,7 +701,7 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#843 tail (part 1/2): OK -- clara.set_admission_capacity exists exactly once at (integer,text,text), calls clara._audit exactly once and clara._append_event exactly once, the append names admission.capacity_set under the operator firm with a null client and an EMPTY payload, it sits strictly between _reserve_op and _finish_op so a replayed op_key writes no second line, the door''s posture (clara_fn_owner, SECURITY DEFINER, search_path=clara, pg_temp + plan_cache_mode=force_custom_plan, PUBLIC-revoked, EXECUTE to clara_authenticated only) is byte-identical to what §0.6 measured before the recut, and admission.capacity_set is registered exactly once as a firm-level type routed context_update at the active taxonomy version with no catalog row left unrouted.';
+  raise notice '#843 tail (part 1/2): OK -- clara.set_admission_capacity exists exactly once at (integer,text,text), calls clara._audit exactly once and clara._append_event exactly once, the append names admission.capacity_set under the operator firm with a null client and an EMPTY payload, it sits strictly between _reserve_op and _finish_op so a replayed op_key writes no second line AND strictly BEFORE the admission-capacity advisory lock so the estate''s admission lock is never held across a wait for a peer operator act''s firm_event_seq row, the door''s posture (clara_fn_owner, SECURITY DEFINER, search_path=clara, pg_temp + plan_cache_mode=force_custom_plan, PUBLIC-revoked, EXECUTE to clara_authenticated only) is byte-identical to what §0.6 measured before the recut, and admission.capacity_set is registered exactly once as a firm-level type routed context_update at the active taxonomy version with no catalog row left unrouted.';
 
   -- ===================================================================================
   -- PART 2 — the SAME census, over clara.resolve_stripe_event_problem. Written out rather than

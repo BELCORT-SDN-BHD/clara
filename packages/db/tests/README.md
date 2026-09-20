@@ -992,6 +992,24 @@ routing — which no cohort here enumerates; the estate's coverage law over the 
 `rig-events-structure.test.mjs` §7, and 0263's tail re-reads that anti-join for itself. A `#843` /
 `#843 END` bracketed note beside the cohort records it, the same shape #840's note carries.
 
+**Where the capacity act's append sits, and why it is not beside its audit row (fix round,
+ADV-L08-1).** `clara._append_event` opens by taking the acting firm's `clara.firm_event_seq` row
+and holds it to commit. Three peer operator acts take that same OPERATOR-firm row and take no
+advisory lock (`reject_firm_registration`, `approve_firm_registration`, and 0263's own recut of
+`resolve_stripe_event_problem`), while `clara.set_admission_capacity` also holds
+`pg_advisory_xact_lock(hashtextextended('clara.admission-capacity', 0))` — the key
+`clara.claim_paid_firm` takes for a paid applicant's firm claim. Appending INSIDE that critical
+section made the estate's admission lock wait on an unrelated operator act: measured with three
+connections on the rig, S1 holding the operator firm's seq row, S2 inside the capacity door on a
+`Lock/transactionid` wait with the advisory lock already taken, S3's `pg_try_advisory_xact_lock`
+returning FALSE — i.e. a firm claim queueing behind a support act, which `claim_paid_firm`'s own
+comment refuses ("no business queueing behind the estate's admission lock"). The append therefore
+runs BEFORE the advisory lock (still inside the reservation, so os.21's replay proof is unmoved),
+and 0263 §T pins the order in the committed body. No cycle is created by taking the seq row first:
+`claim_paid_firm`, the only other holder of that key, appends under the firm it is CREATING in the
+same transaction, never under the operator firm. `resolve_stripe_event_problem` takes no advisory
+lock, so its append stays beside its audit row.
+
 ## `activity-feed.test.mjs` `af.33`–`af.39b` — #861 / migration 0264
 
 Both activity doors computed a row's `kind` from a five-rung ladder — `sweep.run_completed`,
