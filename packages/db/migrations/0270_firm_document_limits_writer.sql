@@ -91,23 +91,34 @@ declare
   -- THE FRONTIER PINS, MEASURED ON THIS RIG NOW, never transcribed from an older file's text:
   -- a ticket earlier in this lane's chain could in principle have recut any of these, and as
   -- measured here none had. Every one of them is a body this file must NOT touch.
+  --
+  -- RE-MEASURED AT INTEGRATION (wave 2, 2026-09-20). Lane 10 measured these on a lane database
+  -- that carried no lane-05 migration. In merged chain order, 0252 (#964, the MYT ingest window)
+  -- runs BEFORE this file and recuts four of the nine bodies below -- _reserve_document_ingest,
+  -- _resize_document_reservation, _settle_document_reservation and settle_ingest_reservation --
+  -- so their lane-measured pre-images are not the state that is live here. The four were
+  -- re-measured on the integrated chain at 0269 and pinned to what 0252 leaves behind. Nothing
+  -- about this file's intent changed: it still touches none of them, and the claim above (each
+  -- keeps its coalesce(l.<cap>, <fallback>) reading off a LEFT JOIN on clara.firm_document_limits)
+  -- was re-verified against the post-0252 bodies before the pins moved. The other five are
+  -- untouched by any wave-2 migration and keep the pins lane 10 measured.
   v_pins text[][] := array[
     ['clara._tf_firm_document_limits_upsert()',
      'e07fabd4e475ae29ac8b5fa6a4f8477f72698df26110bfe8d4f3e456aa1f8eb2'],
     ['clara._reserve_document_ingest(uuid,uuid,integer,timestamp with time zone)',
-     '074c9b180729e3f2d8af8d9fecb38be158db9e2a74e4292b11ff7533a1ed9734'],
+     '32a42ca3de5c3f4de81971530430ceffe4f763eb9ed2b7e215941c8a94e70400'],
     ['clara._reserve_processing_call(uuid,integer)',
      'a713fa374a9069e08862a5a234ad0df6f5303a4223de3bdaaeafc99ae4358043'],
     ['clara._resize_document_reservation(uuid,uuid,integer)',
-     '41528b318065207775e48c4ac3f196f07d6cdf0511d108affc72b86c07114dbf'],
+     '865f01a0c1094caf82efe9b9fec8b3bc4d611d1266be26058a42e9d8b60cc622'],
     ['clara._settle_document_reservation(uuid,uuid,integer)',
-     'b72d83e70645d7bbce44a491002981576059e9d0db41a95ee07e6b87930ddee6'],
+     'c96f43c0d5e4acec8871012044f3c4763f7af13b139b91ba7f3cede26f4b7d00'],
     ['clara._settle_processing_call(uuid,integer)',
      'e8b50f0d10da45be4caf6e278248750a4b1e862148dc879fbe38e7a5b4a02408'],
     ['clara.claim_document_processing_task(uuid,text,boolean)',
      '01e517bf575806a01f93441bbc2459856e1f4f12624b312c3ba670ebf111b9a0'],
     ['clara.settle_ingest_reservation(uuid,integer,text)',
-     'a7b8d4eeed2c17bfaf252fe73e2185c78255ce4d1e10fac2b933619ff50a9aab'],
+     '0cb7be8fd77bc076c395d22cf282dc345a0636998c46a37787d51d015d18bb75'],
     ['clara.get_firm_commercial_state()',
      '347141ee22b52c125ff845451051f03354f1f0e9d57cc43d759253f3273ed19e']
   ];
@@ -400,19 +411,19 @@ declare
     ['clara._tf_firm_document_limits_upsert()',
      'e07fabd4e475ae29ac8b5fa6a4f8477f72698df26110bfe8d4f3e456aa1f8eb2'],
     ['clara._reserve_document_ingest(uuid,uuid,integer,timestamp with time zone)',
-     '074c9b180729e3f2d8af8d9fecb38be158db9e2a74e4292b11ff7533a1ed9734'],
+     '32a42ca3de5c3f4de81971530430ceffe4f763eb9ed2b7e215941c8a94e70400'],
     ['clara._reserve_processing_call(uuid,integer)',
      'a713fa374a9069e08862a5a234ad0df6f5303a4223de3bdaaeafc99ae4358043'],
     ['clara._resize_document_reservation(uuid,uuid,integer)',
-     '41528b318065207775e48c4ac3f196f07d6cdf0511d108affc72b86c07114dbf'],
+     '865f01a0c1094caf82efe9b9fec8b3bc4d611d1266be26058a42e9d8b60cc622'],
     ['clara._settle_document_reservation(uuid,uuid,integer)',
-     'b72d83e70645d7bbce44a491002981576059e9d0db41a95ee07e6b87930ddee6'],
+     'c96f43c0d5e4acec8871012044f3c4763f7af13b139b91ba7f3cede26f4b7d00'],
     ['clara._settle_processing_call(uuid,integer)',
      'e8b50f0d10da45be4caf6e278248750a4b1e862148dc879fbe38e7a5b4a02408'],
     ['clara.claim_document_processing_task(uuid,text,boolean)',
      '01e517bf575806a01f93441bbc2459856e1f4f12624b312c3ba670ebf111b9a0'],
     ['clara.settle_ingest_reservation(uuid,integer,text)',
-     'a7b8d4eeed2c17bfaf252fe73e2185c78255ce4d1e10fac2b933619ff50a9aab'],
+     '0cb7be8fd77bc076c395d22cf282dc345a0636998c46a37787d51d015d18bb75'],
     ['clara.get_firm_commercial_state()',
      '347141ee22b52c125ff845451051f03354f1f0e9d57cc43d759253f3273ed19e']
   ];
