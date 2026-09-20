@@ -292,11 +292,26 @@ test("A19g the HOW: approve_opening_seed is a harvested SPLICE (never a from-fil
   // shell-out: #707, the only Windows-red in an otherwise green suite). Same pattern, same
   // expected count (zero) as the grep it replaces.
   const migDir = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
+  // #984's ONE DECLARED EXCEPTION (0239_opening_balance_work.sql, riders wave 2). The rule this
+  // cell enforces is not "never write the body in a file" for its own sake -- it is "never lose
+  // an arm an intervening migration added". 0239 restates the whole body because
+  // `create or replace function` drops every SET clause it does not repeat and the door carries
+  // 0171's `default_transaction_isolation = serializable` pin, and it buys back the guarantee
+  // this cell exists for STRUCTURALLY: its prestate (SS A.5) pins the live `prosrc` sha256 of
+  // `clara.approve_opening_seed` at the exact body the file was generated from
+  // (f18f4c95e8d79c842c707207cfe4a4cc26418c503c33a9c8cce8c85a20791132, with a redo arm that
+  // accepts only #984's own result), so any intervening recut makes 0239 REFUSE to apply with
+  // CLR10 rather than silently overwrite it. 0239's tail then re-reads the live body for the
+  // per-entry approval, the tie assertion and the op receipt. Exactly this one file is admitted;
+  // any other hit is still the defect this cell was written for, and the three body assertions
+  // below (the pin tie and both 0018 guards) run unchanged against the live catalog either way.
+  const DECLARED_FROM_FILE_RECUTS = ["0239_opening_balance_work.sql"];
   const rewriteHits = readdirSync(migDir)
     .filter((f) => f.endsWith(".sql"))
     .filter((f) => readFileSync(join(migDir, f), "utf8").includes("create or replace function clara.approve_opening_seed"))
+    .filter((f) => !DECLARED_FROM_FILE_RECUTS.includes(f))
     .map((f) => join("packages/db/migrations", f));
-  assert.equal(rewriteHits.join("\n"), "", "no migration file contains a from-scratch CREATE OR REPLACE for approve_opening_seed -- its live body is 0017's text as spliced");
+  assert.equal(rewriteHits.join("\n"), "", "no migration file outside the declared list contains a from-scratch CREATE OR REPLACE for approve_opening_seed -- its live body is 0017's text as spliced, or #984's sha-pinned regeneration of it");
 
   const body = (await rootQuery(
     "select pg_get_functiondef('clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)'::regprocedure) as def",
