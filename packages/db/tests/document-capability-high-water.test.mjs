@@ -48,7 +48,7 @@ const CAPABILITY_COLUMNS =
 /** The count WITH 0244 applied. The `after` hook asserts it, so a cell that silently stops
  *  running — the way a mis-gated cell does — fails the whole battery rather than passing by
  *  absence. */
-const EXPECTED_CELLS = 1;
+const EXPECTED_CELLS = 2;
 
 let live = false;
 let executed = 0;
@@ -162,4 +162,48 @@ cell("a pair's published version survives DELETE: re-inserting BELOW it is refus
   assert.equal(detail.to, seen.published - 1, "the refusal names the version that was attempted");
   assert.equal(seen.present, 0,
     "the refused INSERT left nothing behind: the row is still deleted inside the probe transaction");
+});
+
+// ---------------------------------------------------------------------------------------------
+// "BY ANY ROUTE" — the mark is only worth what it costs to remove. An INSERT wall that reads a
+// relation anybody may delete from is a wall with a door beside it: delete the mark, re-insert
+// low, and the registry is back where #846 found it. So the relation is append-only in the
+// strong sense, and that is a REFUSAL rather than a habit.
+// ---------------------------------------------------------------------------------------------
+
+cell("the high-water mark itself is append-only: DELETE is refused, a lowering UPDATE is refused, a raise is admitted", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const mark = (await c.query(
+      `select * from clara.document_capability_version_high_water ${PDF_INVOICE}`)).rows[0];
+    assert.ok(mark, "the pair the probes use carries a high-water mark");
+
+    await c.query("savepoint probe_delete");
+    const del = await caught(() => c.query(
+      `delete from clara.document_capability_version_high_water ${PDF_INVOICE}`));
+    await c.query("rollback to savepoint probe_delete");
+
+    await c.query("savepoint probe_lower");
+    const lower = await caught(() => c.query(
+      `update clara.document_capability_version_high_water set registry_version = $1 ${PDF_INVOICE}`,
+      [mark.registry_version - 1]));
+    await c.query("rollback to savepoint probe_lower");
+
+    // A RAISE is the writer's own ordinary act and must still be admitted, or the mark could
+    // never follow a republication.
+    const raised = (await c.query(
+      `update clara.document_capability_version_high_water set registry_version = $1 ${PDF_INVOICE}
+         returning registry_version`, [mark.registry_version + 1])).rows[0].registry_version;
+
+    return { del, lower, raised, mark: mark.registry_version };
+  });
+
+  assert.ok(seen.del, "a DELETE of the high-water mark was ACCEPTED — the wall has a door beside it");
+  assert.equal(seen.del.code, CLR08, `expected ${CLR08} for the refused DELETE, got ${seen.del.code}`);
+  assert.equal(JSON.parse(seen.del.detail ?? "{}").reason, "registry_version_high_water_append_only");
+
+  assert.ok(seen.lower, "an UPDATE that LOWERS the high-water mark was ACCEPTED");
+  assert.equal(seen.lower.code, CLR08, `expected ${CLR08} for the refused lowering, got ${seen.lower.code}`);
+  assert.equal(JSON.parse(seen.lower.detail ?? "{}").reason, "registry_version_high_water_append_only");
+
+  assert.equal(seen.raised, seen.mark + 1, "raising the high-water mark must still succeed");
 });

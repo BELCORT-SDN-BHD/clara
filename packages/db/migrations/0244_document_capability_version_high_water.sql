@@ -252,6 +252,71 @@ create trigger t_document_capabilities_high_water_record
 reset role;
 
 -- =====================================================================================
+-- §B.3  THE MARK'S OWN WALL. An INSERT wall that reads a relation anybody may delete from is a
+-- wall with a door beside it: delete the mark, re-insert low, and the registry is back where
+-- #846 found it. "A version once published for a pair can never be undercut BY ANY ROUTE" is the
+-- brief's wording, so the relation is append-only as a REFUSAL rather than as a habit.
+--
+-- RE-KEYING IS A DELETE IN DISGUISE and is refused with it, for 0207's own stated reason: a body
+-- that only compared the version would leave an UPDATE of (format, document_kind) as a way to
+-- move a mark off the pair it belongs to, which is a hole opened for no live writer's benefit.
+-- `first_seen_at` is walled for the same reason: it is the pair's birth, and a birth does not
+-- move.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._tf_document_capability_high_water_monotone() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare v_what text;
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'a capability registry_version high-water mark is never deleted (% x %: %)',
+      old.format, old.document_kind, old.registry_version
+      using errcode = 'CLR08',
+        detail = jsonb_build_object(
+          'reason', 'registry_version_high_water_append_only',
+          'column', 'registry_version',
+          'operation', 'DELETE',
+          'format', old.format,
+          'document_kind', old.document_kind,
+          'from', old.registry_version,
+          'to', null)::text;
+  end if;
+
+  v_what := case
+    when new.format <> old.format or new.document_kind <> old.document_kind then 'key'
+    when new.first_seen_at <> old.first_seen_at then 'first_seen_at'
+    when new.registry_version < old.registry_version then 'registry_version'
+    else null end;
+
+  if v_what is not null then
+    raise exception 'a capability registry_version high-water mark only ever rises (% x %: % changed, % -> %)',
+      old.format, old.document_kind, v_what, old.registry_version, new.registry_version
+      using errcode = 'CLR08',
+        detail = jsonb_build_object(
+          'reason', 'registry_version_high_water_append_only',
+          'column', v_what,
+          'operation', 'UPDATE',
+          'format', old.format,
+          'document_kind', old.document_kind,
+          'from', old.registry_version,
+          'to', new.registry_version)::text;
+  end if;
+  return new;
+end
+$fn$;
+revoke all on function clara._tf_document_capability_high_water_monotone() from public;
+comment on function clara._tf_document_capability_high_water_monotone() is
+  'BEFORE UPDATE OR DELETE row wall on clara.document_capability_version_high_water (#846): the mark is append-only. A DELETE is refused outright, and an UPDATE is refused when it lowers registry_version, re-keys the row or moves first_seen_at; a RAISE is admitted, because that is the writer''s ordinary act. Raises CLR08 with detail.reason = registry_version_high_water_append_only plus the operation and the column that moved. Without this wall the INSERT-side wall would have a door beside it: delete the mark, re-insert low.';
+
+drop trigger if exists t_document_capability_high_water_monotone on clara.document_capability_version_high_water;
+create trigger t_document_capability_high_water_monotone
+  before update or delete on clara.document_capability_version_high_water
+  for each row execute function clara._tf_document_capability_high_water_monotone();
+
+reset role;
+
+-- =====================================================================================
 -- §C  THE BACKFILL. Every pair the registry publishes TODAY has published that version, so the
 -- mark starts where the registry is. Without this the walls above would treat the entire live
 -- registry as never-published and the hole would stay open for every existing pair -- which is
@@ -333,7 +398,8 @@ begin
   -- search_path, no EXECUTE for PUBLIC, commented. The house shape for clara._tf_*.
   foreach v_def in array array[
     'clara._tf_document_capabilities_version_high_water()',
-    'clara._tf_document_capabilities_high_water_record()'] loop
+    'clara._tf_document_capabilities_high_water_record()',
+    'clara._tf_document_capability_high_water_monotone()'] loop
     if to_regprocedure(v_def) is null then
       raise exception '#846 tail: % was not installed', v_def using errcode = 'CLR10';
     end if;
@@ -371,6 +437,14 @@ begin
      and t.tgname = 't_document_capabilities_high_water_record' and not t.tgisinternal;
   if v_def is null or v_def !~* 'AFTER INSERT OR UPDATE' or v_def !~* 'FOR EACH ROW' or v_def ~* '\mWHEN\M' then
     raise exception '#846 tail: the high-water writer is not an unconditional AFTER INSERT OR UPDATE FOR EACH ROW trigger -- got %', coalesce(v_def, '<none>')
+      using errcode = 'CLR10';
+  end if;
+
+  select pg_get_triggerdef(t.oid) into v_def from pg_trigger t
+   where t.tgrelid = 'clara.document_capability_version_high_water'::regclass
+     and t.tgname = 't_document_capability_high_water_monotone' and not t.tgisinternal;
+  if v_def is null or v_def !~* 'BEFORE DELETE OR UPDATE' or v_def !~* 'FOR EACH ROW' or v_def ~* '\mWHEN\M' then
+    raise exception '#846 tail: the mark''s append-only wall is not an unconditional BEFORE UPDATE OR DELETE FOR EACH ROW trigger -- got %', coalesce(v_def, '<none>')
       using errcode = 'CLR10';
   end if;
 
@@ -461,6 +535,21 @@ begin
       raise exception '#846 tail: re-inserting AT the published version did not restore it (stored %)', v_stored
         using errcode = 'CLR10';
     end if;
+
+    -- 6c — THE MARK ITSELF IS NOT A WAY AROUND THE WALL.
+    begin
+      delete from clara.document_capability_version_high_water
+       where format = 'pdf' and document_kind = 'invoice';
+      raise exception '#846 tail: the high-water mark was DELETED -- the INSERT wall has a door beside it'
+        using errcode = 'CLR10';
+    exception when sqlstate 'CLR08' then
+      get stacked diagnostics v_detail = pg_exception_detail;
+      v_reason := nullif(v_detail, '')::jsonb;
+      if coalesce(v_reason ->> 'reason', '') <> 'registry_version_high_water_append_only' then
+        raise exception '#846 tail: the mark''s DELETE refusal carries no machine-readable reason (detail %)', coalesce(v_detail, '<null>')
+          using errcode = 'CLR10';
+      end if;
+    end;
 
     raise exception '#846 high-water probe rollback' using errcode = 'ZA244';
   exception when sqlstate 'ZA244' then null;
