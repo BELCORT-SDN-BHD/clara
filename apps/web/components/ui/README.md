@@ -5,6 +5,12 @@ in several cases, hand-patched with an owner-ruled fix the generator does not kn
 offset focus ring and destructive-variant focus unification (see that file's own header), and
 `pagination.tsx`'s corrected `PaginationLink` semantics (#771, that file's own header).
 
+`attachment.tsx` and `message-scroller.tsx` (#970) are the native-chat family's last two
+installs — `message`, `bubble`, `marker` and `avatar` (#642) resolved cleanly and are not here
+because nothing consumes them yet. Both hand-adapt two small, mechanical things the pinned CLI
+gets wrong for THIS repo (a bare `cn` import, a generated `/50` ring instead of the declared
+`/70`) — see each file's own header, never repeated here.
+
 ## The install guard (#772)
 
 **Never run `shadcn add` (or `npx shadcn add`) directly against this workspace.** Use:
@@ -38,6 +44,16 @@ When a fix lands in a vendored `components/ui/*.tsx` file that a future `shadcn 
 `scripts/protected-components.json` in the SAME change that lands the fix. No other step is
 required — `scripts/ui-add.mjs` reads the file fresh on every run.
 
+**Not every hand edit earns a place on the list.** The `/50` → `/70` ring-alpha re-cut every fresh
+vendor install needs (`tests/focus-ring-contract.test.ts`'s own census — `tabs.tsx`, `switch.tsx`,
+`toggle.tsx`, `field.tsx`, `input.tsx`, `input-group.tsx`, `radio-group.tsx`, `select.tsx`,
+`textarea.tsx`, `toast.tsx` and `badge.tsx` all carry it, and none of them is on the allowlist) and
+the bare-`cn`-import fix (#969's own registry-authoring quirk) are routine INSTALL HYGIENE, applied
+the same way on every future add — not an owner ruling a regeneration would silently undo. Only a
+BEHAVIOURAL correction (an owner-ruled focus treatment, a corrected semantics) goes on the list.
+`attachment.tsx` and `message-scroller.tsx` (#970) carry the routine class only, so neither joined
+the allowlist.
+
 ### What makes an override legitimate
 
 `CLARA_UI_ADD_OVERWRITE=1 pnpm ui:add <component>` lets a deliberate, reviewed overwrite proceed —
@@ -46,6 +62,15 @@ it shows up in a terminal log or a pasted PR description. Set it only when a hum
 what would be overwritten (`pnpm ui:add <component> --dry-run` first, or `--diff` to see the exact
 change) and confirmed the protected file's owner-ruled fix is being deliberately superseded or
 re-applied afterward — never as a way to get past the abort without reading it.
+
+**#970 is this knob's first real use** (every mention of it before was descriptive; #642's own
+report recorded `attachment`/`message-scroller` refusing rather than forcing it). The owner ruled
+2026-09-20 that upstream's `button.tsx` wins the overwrite outright — settling the ticket's own
+"diff first, override only if reconcilable" question in advance — and `button.tsx`'s three
+owner-ruled behaviours (the offset ring, the `/90` hover, the destructive variant's ring
+unification) are re-applied on top of the fresh file in the SAME commit, with their reasoning
+carried over (that file's own header). `pnpm ui:add pagination --dry-run` still refuses afterward,
+naming both `button.tsx` and `pagination.tsx`, unchanged by this.
 
 ### The `cn` dependency stand-in (#969)
 
@@ -93,6 +118,28 @@ nothing at all regardless of its own exit code, and for the override, which want
 names the CLI's own exit code in what it logs either way. Only a genuine interrupt of the guard's
 own process between the two spawns — not a CLI failure the guard's own `main()` gets to run
 after — still needs the hand-revert above.
+
+### `message-scroller`'s runtime dependency, and the test harness it needed (#970)
+
+`message-scroller.tsx` is the first file here to import a REAL runtime package the registry
+declares (`@shadcn/react`, subpath `@shadcn/react/message-scroller`) rather than a dev-time-only
+one — #642 named costing it for the Workers bundle before merge, since it had never been
+installed. MEASURED (2026-09-20, this package's pinned `0.3.1`): the subpath's own two files —
+`dist/message-scroller/index.js` (18,862 bytes) and the shared `dist/chunk-HBS6WEDP.js` it imports
+(1,190 bytes) — are 20,052 bytes raw, 6,484 bytes gzipped, combined; nothing else in the package
+ships (`exports` in its own `package.json` scopes every other subpath, e.g. `./questionnaire`,
+away from this one). A real `next build` on this branch compiles and completes; its own client
+chunk carrying both new files (bundled together with `attachment.tsx`/`ComposerAttachmentControl`'s
+own code, so it is not an isolated figure) is 131,219 bytes raw / 35,616 gzipped. No bundle-size
+budget is declared anywhere in this repo to check either figure against.
+
+Rendering it in a `node:test` unit tree needed three small, ADDITIVE fixes to
+`apps/web/test/domInspect.ts` (`Element.toggleAttribute`, `window.{request,cancel}AnimationFrame`
++ the timer quartet mirrored onto the harness's own `window` stub, and an honest no-op
+`Element.scrollTo`) — see that file's own `#970` comments for exactly what broke and why each fix
+is structural, never the real-layout-geometry class of problem that file's header names as the
+wall axe-core hit. A future vendor install that reaches another modern scroll/observer-based
+primitive should expect the same class of gap, not a new one.
 
 ### Proof
 
