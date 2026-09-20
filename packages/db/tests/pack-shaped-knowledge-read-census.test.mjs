@@ -23,13 +23,24 @@
 // clara_agent_ro BY DESIGN (0005:1137) and is not a knowledge pack -- #991's own out-of-scope.
 // pkc.4/pkc.5 prove the exclusion is a curation choice, never the detector being blind to it.
 //
-// THE PROBE generalizes the hand-written one #783 first wrote: `executors()` reads EVERY
-// clara-custom role that holds EXECUTE on a signature straight off the catalog through
+// THE PROBE generalizes the hand-written one #783 first wrote: `executors()` reads every
+// CLARA-PREFIXED role that holds EXECUTE on a signature straight off the catalog through
 // `has_function_privilege` (the same instrument f-a2-grants.test.mjs's own `executors()` uses,
 // and the reason it is used rather than reading `proacl` alone -- `proacl` is NULL/empty under
-// the default PUBLIC grant, which would then read "nobody" when it means "everybody"). A role
-// this file has never heard of, born in a migration written after #991 landed, is caught exactly
-// like one of the eight the original hand list named.
+// the default PUBLIC grant, which would then read "nobody" when it means "everybody"). A
+// clara-prefixed role this file has never heard of, born in a migration written after #991
+// landed, is caught exactly like one of the eight the original hand list named -- and a grant to
+// PUBLIC is caught too, because has_function_privilege reports it for every one of them.
+//
+// WHAT THAT DOES NOT COVER, SAID PLAINLY (review ADV-08). The reach of this census is the
+// `clara%` NAMING CONVENTION, not "every role". Measured on clara_l02: 34 roles, of which 18 are
+// clara-prefixed and ZERO are non-superuser application roles outside that prefix (the rest are
+// superusers and `pg_*` built-ins), so the convention holds today across the whole estate. An
+// application role minted under some other name would need this filter widened with it. The
+// filter is kept rather than replaced by an exclusion list on purpose: an exclusion list would
+// have to name the managed roles of every environment this runs in (hosted Supabase carries more
+// than this rig does), and a census that goes red on a platform role is a census people learn to
+// ignore.
 //
 // Both directions are one measurement: clara_runtime must be among a function's executors, and
 // nothing else may be (`clara_fn_owner` excepted -- it owns every definer body by construction,
@@ -133,29 +144,40 @@ test("pkc.2 the census asserts POSITIVELY that clara_runtime holds EXECUTE, not 
   }
 });
 
-test("pkc.3 CONTROL: a real GRANT to a human role on an enumerated function is caught, naming the function and the role -- rolled back, never committed", async (t) => {
+test("pkc.3 CONTROL: a real GRANT to a human, an agent-read or a wake role on an enumerated function is caught, naming the function and the role -- rolled back, never committed", async (t) => {
   if (unready(t)) return;
-  const target = PACK_SHAPED_KNOWLEDGE_READS[0];
-  const client = await getPool().connect();
-  try {
-    await client.query("reset role");
-    await client.query("begin");
-    await client.query(`grant execute on function ${target} to ${ROLES.authenticated}`);
-    const scopedQuery = (sql, params) => client.query(sql, params);
-    const findings = await packShapedReadFindings({ query: scopedQuery });
-    const hit = findings.find((f) => f.label === "unexpected_grantee"
-      && f.function === target && f.role === ROLES.authenticated);
-    assert.ok(hit,
-      `expected the leaked grant on ${target} to ${ROLES.authenticated} to be reported, got ${JSON.stringify(findings)}`);
-  } finally {
-    await client.query("rollback").catch(() => {});
-    await client.query("reset all").catch(() => {});
-    client.release();
+  // THE CRITERION'S OWN WORDS are "any enumerated function to a human, agent-read or wake role",
+  // so the control walks that matrix rather than one corner of it (review SPEC-L02-06). The
+  // detector's logic is uniform -- it reads the catalog, it does not know these names -- but a
+  // control that exercised one role on one function was arguing from that uniformity instead of
+  // measuring it. Two different enumerated functions, so the finding's `function` field is
+  // proved to follow the leak rather than being a constant.
+  const LEAKS = [
+    { role: ROLES.authenticated, target: PACK_SHAPED_KNOWLEDGE_READS[0], lane: "human" },
+    { role: ROLES.agentRo, target: PACK_SHAPED_KNOWLEDGE_READS[1], lane: "agent-read" },
+    { role: ROLES.wakeInteractive, target: PACK_SHAPED_KNOWLEDGE_READS[1], lane: "wake" },
+  ];
+  for (const { role, target, lane } of LEAKS) {
+    const client = await getPool().connect();
+    try {
+      await client.query("reset role");
+      await client.query("begin");
+      await client.query(`grant execute on function ${target} to ${role}`);
+      const scopedQuery = (sql, params) => client.query(sql, params);
+      const findings = await packShapedReadFindings({ query: scopedQuery });
+      const hit = findings.find((f) => f.label === "unexpected_grantee"
+        && f.function === target && f.role === role);
+      assert.ok(hit,
+        `expected the leaked ${lane} grant on ${target} to ${role} to be reported, got ${JSON.stringify(findings)}`);
+    } finally {
+      await client.query("rollback").catch(() => {});
+      await client.query("reset all").catch(() => {});
+      client.release();
+    }
   }
-  // The rollback actually cleared it -- read OUTSIDE the transaction, on the root pool.
-  assert.deepEqual(await packShapedReadFindings(), [], "the control's GRANT survived its own rollback");
+  // Every rollback actually cleared it -- read OUTSIDE the transactions, on the root pool.
+  assert.deepEqual(await packShapedReadFindings(), [], "a control's GRANT survived its own rollback");
 });
-
 test("pkc.4 a fifth, correctly runtime-only entry is a DATA change only; get_context_pack, run through the same detector, proves the exclusion is curation not blindness", async (t) => {
   if (unready(t)) return;
   // clara.work_knowledge_drift_for is clara_runtime-only on main (#658 tail) but is NOT a member
