@@ -4,15 +4,26 @@
 // idiom this lane has already used three times.
 //
 // THE SHAPE THE OWNER RULED (issue #912, ruling comment 2026-09-18): the AUDIT-ROW shape, not a
-// membership-history relation. `clara._audit` -- the ONE writer of `clara.audit_log` -- resolves
-// the actor's role at write time; `clara.audit_log` carries it; `clara.list_firm_knowledge`'s
-// promotion block cites it beside the promoter's CURRENT role; a row written before the column
-// existed reads as unknown, and NOTHING is back-dated.
+// membership-history relation. The role is resolved at write time; `clara.audit_log` carries it;
+// `clara.list_firm_knowledge`'s promotion block cites it beside the promoter's CURRENT role; a row
+// written before the column existed reads as unknown, and NOTHING is back-dated.
+//
+// WHERE IT IS RESOLVED. The ruling names `clara._audit`, the sole writer of the table. That body
+// CANNOT be recut -- it is ordinal 10 of the frozen `metric_input_snapshot` v1 producer closure
+// (`clara.metric_input_producer_version_members` pins its `pg_get_functiondef` sha,
+// `clara.verify_metric_input_producer_freeze()` raises on drift, and scripts/migrate.mjs's
+// FREEZE_GUARDS refuse any migration that moves it). 0243 therefore stamps the column from a
+// BEFORE INSERT row trigger on `clara.audit_log` itself, which is WIDER than the recut would have
+// been: the stamp is on the table's write path, so every writer inherits it, not only one
+// function. See 0243's own header and packages/db/README.md's "#912" section.
 //
 // THE SEAMS. Every cell addresses a PUBLIC interface:
-//   · a governed door (`clara.capture_knowledge`) -> the committed `clara.audit_log` row it
-//     leaves behind, read back with `rootQuery` (the rig's "READ BACK a table" idiom, never as
-//     the caller of the act);
+//   · a governed door (`clara.capture_knowledge`, `clara.create_client`) -> the committed
+//     `clara.audit_log` row it leaves behind, read back with `rootQuery` (the rig's "READ BACK a
+//     table" idiom, never as the caller of the act);
+//   · `clara.audit_log`'s own write path, for the two claims that are ABOUT that path rather
+//     than about any door: history being re-loaded is not an act (ar.02), and an actor with no
+//     active membership is 'none' rather than unknown (ar.05);
 //   · `clara.list_firm_knowledge()` -- the firm register read -- through `humanQuery` at the
 //     least privilege that should succeed;
 //   · the catalog itself, for the census #912's ruling asks for ("every governed door inherits
