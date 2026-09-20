@@ -69,7 +69,16 @@ refusal, the authz-before-lifecycle ordering, the replay contract and a two-sess
 byte-identical no-oracle refusal, the three non-pending effective statuses, the grant posture, and
 the six non-regression `prosrc` pins that prove 0224 recut nothing. Its gate is
 `preview-invite-preintegration-gate.mjs`; a focused run leaves `CLARA_ALLOW_MISSING_PREVIEW_INVITE`
-unset and must count zero skips.
+unset and must count zero skips. The SAME file also drives #872's fifth, read-time-only effective
+status, `issuer_lapsed` (migration 0269): a demoted or removed issuer makes a still-pending invite
+read `issuer_lapsed` on BOTH `clara.preview_invite` and `clara.firm_invites_visible` (one shared
+CASE expression, so the two cannot disagree), reversibly, with `clara.accept_invite`'s own
+issuer-rank wall left unchanged — an `issuer_lapsed` invite still accepts whenever the invited
+role does not outrank the issuer's current rank. Its OWN gate,
+`invite-issuer-lapsed-preintegration-gate.mjs`, is detected off a `clara.schema_migrations` row
+matching `'^0269_'` rather than a function's existence, because 0269 recuts two EXISTING bodies
+and adds no new catalog object; a focused run leaves `CLARA_ALLOW_MISSING_ISSUER_LAPSED` unset and
+must also count zero skips.
 
 `subledger-hook-caller-roster.test.mjs` reads `clara._subledger_on_approve`'s catalog comment
 (0236, #868): all six live callers named with the migration each arrived in, the historical

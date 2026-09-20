@@ -1068,6 +1068,121 @@ test("p625.web.preview_blocks: an INDEFINITE preview DEGRADES — the password f
   });
 });
 
+// ---------------------------------------------------------------------------
+// #872 — issuer_lapsed is a NOTICE, never a block
+// ---------------------------------------------------------------------------
+
+test("p872.web.preview_issuer_lapsed: does NOT block -- the password form renders WITH the preview and its one-line notice, and acceptance still succeeds", async () => {
+  const { state, impl } = fakeEstate({
+    preview: async () => jsonResponse({ ...PREVIEW_ROW, status: "issuer_lapsed" }),
+  });
+  await withMockedEnv(impl, async () => {
+    const { h } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToPassword(h);
+      const text = textOf(h.container as never);
+      // NOT the blocked face: the preview block itself renders, exactly as it does for `pending`.
+      assert.match(text, /ROME PROPERTIES/, "the preview block still renders -- this is not a blocked face");
+      assert.match(text, /Bookkeeper/);
+      assert.ok(
+        findIn(h.container as never, byLabelledInput(/Password/)),
+        "issuer_lapsed must still offer the password form -- the owner ruling on ticket 872 keeps acceptance open",
+      );
+      // THE ONE-LINE NOTICE, and nothing that reads as a block.
+      assert.match(text, /no longer an admin or owner/i, "the owner ruling's own notice, rendered");
+      assert.equal(state.acceptCalls.length, 0, "nothing is submitted yet");
+
+      // …and the journey really does complete: #872 does not touch accept_invite at all.
+      await fillAndSubmit(h, "Issuer Lapsed Web", { enter: false });
+      assert.equal(state.acceptCalls.length, 1, "acceptance was called exactly once");
+      assert.equal(state.membership, true, "…and it really minted the membership");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p872.web.preview_issuer_lapsed: an issuer_lapsed preview never reaches BlockedInvitationFace's raw status render", async () => {
+  const { impl } = fakeEstate({
+    preview: async () => jsonResponse({ ...PREVIEW_ROW, status: "issuer_lapsed" }),
+  });
+  await withMockedEnv(impl, async () => {
+    const { h } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToPassword(h);
+      const text = textOf(h.container as never);
+      assert.doesNotMatch(text, /was revoked/);
+      assert.doesNotMatch(text, /invitation has expired/);
+      assert.doesNotMatch(text, /already accepted/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p872.web.issuer_lapsed_removed: the notice promises NOTHING the accept door does not keep -- a REMOVED issuer refuses at every role", async () => {
+  // THE DEFECT THIS CELL EXISTS FOR (adversarial review ADV-L10-02, 2026-09-20, proven live on
+  // clara_l10 through the real doors). `issuer_lapsed` is true exactly when the issuer's current
+  // active rank is BELOW admin (role_rank('admin') = 2); `clara.accept_invite` refuses CLR04 when
+  // role_rank(invite.role) > coalesce(issuer_rank, -1). Those two conditions OVERLAP:
+  //
+  //   [demoted-viewer]    preview issuer_lapsed, accept ACCEPTED   (viewer 0 <= bookkeeper 1)
+  //   [demoted-adminrole] preview issuer_lapsed, accept REFUSED    (admin 2 > bookkeeper 1)
+  //   [removed-viewer]    preview issuer_lapsed, accept REFUSED    at the LOWEST role there is,
+  //                       because coalesce(NULL, -1) = -1 and role_rank('viewer') = 0 > -1
+  //
+  // So a REMOVED issuer makes EVERY invite unacceptable, and the shipped notice told the invitee
+  // "accepting is unaffected". The harm is not only a wrong sentence: handleSetPassword runs
+  // `supabase.auth.updateUser({ password })` and only THEN calls acceptInvite, so the person
+  // commits an irreversible account change on the strength of the promise and is then handed the
+  // door's own refusal with no membership. The preview door cannot tell the two apart -- 0224
+  // returns {firm_name, role, status, masked_email} and no issuer rank -- so the honest surface
+  // is one that CLAIMS nothing and says the firm re-checks, which is exactly the register
+  // `preview.indefiniteNote` already uses for the other case this surface cannot decide.
+  const { state, impl } = fakeEstate({
+    preview: async () => jsonResponse({ ...PREVIEW_ROW, status: "issuer_lapsed" }),
+    acceptRefusal: { code: "CLR04", message: "invite exceeds the issuer's rank -- re-issue by an owner" },
+  });
+  await withMockedEnv(impl, async () => {
+    const { h } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToPassword(h);
+      const notice = textOf(h.container as never);
+      // The one fact the preview really does know stays.
+      assert.match(notice, /no longer an admin or owner/i, "the status itself is still stated");
+      // …and the promise the accept door does not keep is gone.
+      assert.doesNotMatch(notice, /unaffected/i,
+        "the surface must not promise acceptance is unaffected: for a REMOVED issuer it is refused at every role");
+      assert.match(notice, /re-checks/i,
+        "…it says instead what is true for every issuer_lapsed invite: the firm re-checks when you finish");
+
+      // And the journey really does end at the door's own answer, not at the notice's.
+      await fillAndSubmit(h, "Removed Issuer Web", { enter: false });
+      assert.equal(state.acceptCalls.length, 1, "the door is what decides, and it was reached");
+      assert.equal(state.membership, false, "…and it refused, so there is no membership");
+      assert.match(textOf(h.container as never), /invite exceeds the issuer's rank/,
+        "the DB's own sentence is rendered verbatim, never re-worded here");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("p625.web.joined: the firm name and the accepted role are in the document BEFORE any navigation fires", async () => {
   const { state, impl } = fakeEstate();
   await withMockedEnv(impl, async () => {

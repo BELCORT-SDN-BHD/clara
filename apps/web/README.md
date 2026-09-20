@@ -382,15 +382,20 @@ Pre-authentication preview is a NAMED RESIDUAL: `clara.preview_invite` is grante
 `clara_authenticated` only and this estate declares no `anon` role, so showing an invitation to a
 signed-out visitor needs a server route holding a service key, which is a separate ticket.
 
-A SECOND NAMED RESIDUAL, in the other direction: the preview reproduces two of `clara.accept_invite`'s
-three walls, not three. The acceptance door also re-checks the ISSUER's *current* rank, so an
-invitation whose issuer has since been demoted — or who has left the firm at all — previews as
-pending, the password form renders, and the refusal arrives at the last step in the database's own
-words ("re-issue by an owner"), relayed verbatim. The admin roster is blind in exactly the same
-place, because `clara.firm_invites_visible` does not carry the issuer's rank either; closing it means
-a fifth effective status on both, which is a ticket of its own. See `packages/db/README.md`'s 0224
-note; the divergence is pinned by `packages/db/tests/preview-invite.test.mjs`
-(`p625.preview.issuer_rank`).
+CLOSED (ticket 872, migration 0269): a fifth, READ-TIME-ONLY effective status, `issuer_lapsed`,
+now covers exactly the gap the paragraph below used to describe. When a still-`pending`
+invitation's issuer no longer holds an active admin-or-above membership (demoted, or gone from
+the firm entirely), BOTH `clara.preview_invite` and the admin roster (`clara.firm_invites_visible`)
+report `issuer_lapsed` — one shared expression, so the two agree by construction — and the preview
+surface renders it as a NOTICE, not a block: `INVITE_PREVIEW_NON_BLOCKING_STATUSES`
+(`lib/firm/invite-preview.ts`) keeps the password form open, because `clara.accept_invite`'s own
+issuer-rank wall is what still decides acceptance, unchanged. Original text, for the record: the
+preview used to reproduce two of `clara.accept_invite`'s three walls, not three — the acceptance
+door also re-checks the ISSUER's *current* rank, so an invitation whose issuer had since been
+demoted previewed as plain `pending` with no signal at all, and the refusal arrived only at the
+last step, in the database's own words ("re-issue by an owner"). See `packages/db/README.md`'s
+0269 note; `packages/db/tests/preview-invite.test.mjs`'s `p625.preview.issuer_rank` cell was
+rewritten to assert the new, agreeing behaviour.
 
 ## #879 — the staffAdvances register tab gets its first browser coverage
 
@@ -1074,10 +1079,61 @@ web surface yet.
 no price while `billing_plans.amounts_ruled` is false (the flag is the render condition, so an
 owner ruling shows a figure with no code change); no "Manage billing" control at any rank (nothing
 in this estate can change a firm's commercial arrangement — `billing_plans` has no door, and
-`firm_registration_payments` is written only by the Stripe webhook lane); no editor for the
-processing caps (`clara.firm_document_limits` has no human writer at all, 0196:36-40); no seat
+`firm_registration_payments` is written only by the Stripe webhook lane); no seat
 count; no chart; and no firm identity fact — the registered name, registration number and address
 live on `/settings/setup`, which this page links to and owns none of.
+
+**The processing caps ARE editable, by the firm's own owner or admin (#960, migration 0270).**
+The owner ruled on 2026-09-20 that the firm sets all four of its document-processing caps
+itself, with no operator gate: `clara.set_firm_document_limits` is that door, and
+`lib/firm/capacity-doors.ts` wraps it. Three properties are worth knowing at the surface. ONLY
+WHAT CHANGED IS SENT — the four fields are an overlay on the read, a field nobody touched
+contributes no argument, and 0196's column-preserving trigger leaves that cap alone (re-sending
+all four would re-assert values another admin may have moved since this page read them);
+CLEARING a field means "leave this cap alone", because no door can unset a cap. THE CONTROL
+RIDES THE SAME ADMIN-FLOORED READ as the figures rather than a rank this component guessed, and
+`clara.set_firm_document_limits` re-derives that floor for itself, so the wall is the database's.
+THE ESTATE'S OWN CEILING (10,000 documents and 100,000 pages a day, 16 of each concurrency) lives
+in `clara._firm_document_limit_ceiling`, granted to nobody; a value above it is refused with a
+sentence that NAMES the number, and this build renders that sentence verbatim because it is the
+only place it learns it. A firm with no stored row still renders as a named zero, and its fields
+start empty.
+
+WHAT THAT CEILING ACTUALLY BOUNDS IS **ONE FIRM**, NOT THE ESTATE (adversarial review ADV-L10-07,
+2026-09-20). 0270's §A header justifies the two concurrency numbers by the estate running one
+always-on `clara-runtime` machine, but the enforcement it bounds is per-firm:
+`clara.claim_document_processing_task` counts this firm's own running `ocr`/`invoice_facts`/
+`statement_facts` tasks against this firm's own `ocr_concurrency`, and there is no estate-wide
+counter anywhere in that body. Before #960 every firm sat at the 2/2 fallback because the relation
+had no human writer at all; after it, N firms at 16 give 16N concurrent tasks against the one
+machine with no backstop. Nothing in #960's acceptance criteria is broken by that — a firm still
+cannot exceed its own ceiling, which is what the door promises — but the estate-wide backstop the
+justification implies does not exist, and is a follow-up for the owner to rule on rather than
+something this door can carry. The per-firm number stays where it is meanwhile.
+
+THE UPPER BOUND ON WHAT A FIELD WILL SEND IS THE DOOR'S ARGUMENT TYPE, NOT THAT CEILING
+(adversarial review ADV-L10-05). `clara.set_firm_document_limits` declares `int` parameters, so a
+value above INT4_MAX dies in the cast before the body's ceiling check can answer, as a raw `22003`
+that `lib/wire.ts` cannot classify as a governed refusal — the card then said "could not be sent,
+so nothing was saved", which is false on both halves. `ProcessingCapacityCard` now refuses to send
+such a value and NAMES the largest number the field will carry (`2,147,483,647`) — a message
+stating only "a whole number above zero" would refuse a value that satisfies it. NAMED RESIDUAL: a caller reaching the RPC directly
+still meets that raw 22003; closing it needs the four parameters widened to `bigint` so the body's
+own `v_asked > ceiling` check answers every number a caller can send.
+
+WHY THAT RESIDUAL IS NOT CLOSED ON THIS LANE, MEASURED RATHER THAN ASSUMED (fix round, second
+pass, 2026-09-20). Widening the parameters means editing migration 0270 and re-applying it, and
+#957's supported redo path takes the HIGHEST applied version only. Run on `clara_l10` with
+`CLARA_MIGRATION_REDO=0270_firm_document_limits_writer`:
+
+    migrate: FAIL — redo refused: 0270_firm_document_limits_writer is not the highest applied
+    version (0271_retire_create_account_set_v1 is) — redoing anything below the frontier would
+    silently invalidate whatever was applied on top of it.
+
+So an edited 0270 could be neither applied nor re-measured here, and shipping an unverified
+migration edit is worse than a named residual. The widening belongs to a follow-up ticket that
+owns its own migration number, where the prestate pins can be measured on a chain that carries
+it.
 
 **Revocation is focus-driven, not push-driven, and not a poll.** `FirmSettingsPanel` re-issues both
 governed reads on `visibilitychange`→visible and on window `focus`, and a CLR04 REPLACES the view:

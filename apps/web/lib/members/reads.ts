@@ -80,8 +80,11 @@
 //     note): `accept_invite` deliberately never persists a pending→expired
 //     transition, because a write immediately before a refusal's RAISE would roll
 //     back with it. So a dead invite reads `expired` here even though no row ever
-//     transitioned, and the four values a reader can see are pending / expired /
-//     accepted / revoked.
+//     transitioned. A FIFTH value, `issuer_lapsed` (#872, migration 0269), is ALSO
+//     computed live — off the issuer's CURRENT `clara.firm_memberships` rank, never
+//     written to `firm_invites.status` — when a still-pending invite's issuer no
+//     longer holds an active admin-or-above membership; see
+//     `INVITE_EFFECTIVE_STATUSES` below, which is the wider, read-time-only set.
 
 import { getRows } from "../read";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -273,6 +276,22 @@ export type KnownInviteStatus = (typeof INVITE_STATUSES)[number];
 
 export function isKnownInviteStatus(status: string): status is KnownInviteStatus {
   return (INVITE_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * THE WIDER, READ-TIME-ONLY domain `clara.firm_invites_visible`'s EFFECTIVE `status` can publish
+ * (#872, migration 0269) — `INVITE_STATUSES` above stays tied to `firm_invites.status`'s own
+ * CHECK (`lib/members/members-doors.test.ts` derives it from that constraint byte for byte, so it
+ * must never grow past the four values the BASE COLUMN admits) and `issuer_lapsed` is deliberately
+ * NOT one of them: it is synthesised live, off the invite's issuer's CURRENT
+ * `clara.firm_memberships` rank, and never written to `firm_invites.status` at all. This wider set
+ * is what `components/admin/members-tables.tsx`'s `InvitesTable` renders against.
+ */
+export const INVITE_EFFECTIVE_STATUSES = [...INVITE_STATUSES, "issuer_lapsed"] as const;
+export type KnownInviteEffectiveStatus = (typeof INVITE_EFFECTIVE_STATUSES)[number];
+
+export function isKnownInviteEffectiveStatus(status: string): status is KnownInviteEffectiveStatus {
+  return (INVITE_EFFECTIVE_STATUSES as readonly string[]).includes(status);
 }
 
 /** `firm_memberships.status`'s own two values (`0002:216`'s CHECK). Same closed-

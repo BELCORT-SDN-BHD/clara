@@ -418,6 +418,22 @@ shape for three different facts (unknown token, real token / wrong signed-in add
 no verified address), because distinguishing them would rebuild the existence oracle
 [0141_p4_tranche1_invite_rbac.sql](migrations/0141_p4_tranche1_invite_rbac.sql) §B closed.
 
+[0269_invite_issuer_lapsed_status.sql](migrations/0269_invite_issuer_lapsed_status.sql) (#872, riders
+wave 2 lane 10) RECUTS TWO bodies above rather than creating a new one: `clara.firm_invites_visible`
+(0141 §H) and `clara.preview_invite` (0224 §A) each gain ONE new `WHEN` arm in the status `CASE`
+expression they already shared, so a still-`pending` invite whose issuer's CURRENT active
+`clara.firm_memberships` rank is below `clara.role_rank('admin')` reads `issuer_lapsed` on BOTH
+reads instead of `pending` — reversibly, with no write anywhere. `clara.accept_invite`'s own
+issuer-rank wall is untouched and re-pinned byte-for-byte at the tail, the same layered-pin
+discipline 0234 uses for a body it does not itself recut. No new function and no new grant: the
+shared arm is a correlated subquery against `clara.firm_memberships`, not a standalone helper —
+MEASURED on this rig that a view referencing a `SECURITY DEFINER` function still needs the querying
+role's own `EXECUTE` grant (Postgres checks it against the invoker, never the view owner, for every
+function a view's body names), so a bare `(firm_id, user_id) -> rank` helper granted to
+`clara_authenticated` would have been a cross-tenant membership oracle, the exact class
+`clara.shares_my_firm_human`/`_wake` (0002:453-465) exist to avoid. See the "CLOSED by #872" note
+above for R1's supersession.
+
 [0225_trade_invoices.sql](migrations/0225_trade_invoices.sql) adds the trade-invoice lane (#655):
 `clara.trade_invoices` (the typed business object — one counterparty, the document's own date, the
 due date **and the basis it was decided on**, an exact positive total in sen, opaque tax facts) and
@@ -513,17 +529,37 @@ copies in this file): the `clara.open_items` WRITER set is now **TWO** (`_subled
 names neither the hook nor the classifier; and the approve-path census is re-asserted to include
 `_record_journal_entry_core`, superseding 0037:3774-3782's stale four.
 
-**Named residual — the preview reproduces two of `accept_invite`'s three walls.** The acceptance
-door also re-checks the ISSUER's *current* rank (`clara.role_rank(inv.role) > coalesce(v_issuer_rank,
+**CLOSED by #872 (migration 0269, 2026-09-20) — the residual below is HISTORICAL.** R1 (wave
+2026-09-15, `docs/plan/active/refresh-wave-2026-09-15/DECISIONS.md` §3.0) ruled the divergence this
+paragraph describes IN — "do not add a fifth status, keep the two reads agreeing on four". The
+owner's 2026-09-18 ruling on #872 reverses that: a fifth, READ-TIME-ONLY effective status,
+`issuer_lapsed`, is now computed by ONE CASE expression `clara.firm_invites_visible` (0141 §H) and
+`clara.preview_invite` (0224 §A) both carry verbatim — a still-`pending` invite whose issuer's
+CURRENT active `clara.firm_memberships` rank is below `clara.role_rank('admin')` (demoted, or no
+active membership at all) reads `issuer_lapsed` on BOTH surfaces, reversibly (re-promoting the
+issuer restores `pending` on the very next read, no write anywhere). `clara.accept_invite`'s OWN
+issuer-rank wall (quoted below) is UNTOUCHED — 0269's own tail re-measures its `prosrc` byte for
+byte — so an `issuer_lapsed` invite still accepts whenever the invited role's rank does not exceed
+the issuer's (lapsed but not erased) current rank; only a FULLY REMOVED issuer refuses every role,
+which is what `coalesce(…, -1)` already did before this ticket. 0269 adds NO new function and NO
+new grant: the shared expression is a correlated subquery against `clara.firm_memberships` inside
+each body, not a standalone helper, because a bare two-argument `(firm_id, user_id) -> rank` door
+granted to `clara_authenticated` would be exactly the cross-tenant membership oracle
+`clara.shares_my_firm_human`/`_wake` were split apart to avoid (see 0269's own header for the
+scratch probe that measured why). Original text, for the historical record:
+
+The acceptance door also re-checks the ISSUER's *current* rank (`clara.role_rank(inv.role) > coalesce(v_issuer_rank,
 -1)` → `CLR04 'invite exceeds the issuer''s rank -- re-issue by an owner'`), a fact that lives in
 `clara.firm_memberships` and that `clara.firm_invites_visible` does not carry either. So an
 invitation whose issuer has since been demoted — or who has left the firm at all, which the
 `coalesce(…, -1)` refuses for every role — still reads `pending` in BOTH the preview and the admin
 roster, and the acceptance door is what refuses it, at the last step, in its own words. Closing it
 means a fifth effective status in the view *and* in the door (the invite-outcome face set is fixed at
-four for this delivery), so it is a ticket of its own. The divergence is pinned meanwhile by
-`packages/db/tests/preview-invite.test.mjs` → `p625.preview.issuer_rank`, which fails if either side
-of it moves.
+four for this delivery), so it is a ticket of its own. The divergence was pinned meanwhile by
+`packages/db/tests/preview-invite.test.mjs` → `p625.preview.issuer_rank`, which has itself been
+REWRITTEN by #872 to assert the new, agreeing behaviour (it now demotes an issuer, asserts
+`issuer_lapsed` on both reads, and shows `accept_invite` still refusing CLR04 for an invited role
+that outranks the issuer's now-lower current rank — the wall, not the read, is what still refuses).
 
 ## The `interactive_client` wake kind
 
@@ -2561,6 +2597,126 @@ opposite facts. It now returns its own `awaiting_confirmation` verdict where the
 differ (nothing coded, nothing posted, no statement), with its own message key, its own tone and a
 sentence saying why nothing is booked; once a person has acted, a confirmed proposal reads `coded`
 or `posted` like any other entry.
+
+## 0270 — the firm's own document-processing caps (#960)
+
+`clara.set_firm_document_limits(p_docs_per_day, p_pages_per_day, p_ocr_concurrency,
+p_llm_witness_concurrency, p_op_key)` is the FIRST human writer `clara.firm_document_limits` has
+ever had. The owner ruled on 2026-09-20 that the firm's own owner or admin sets all four caps with
+no operator gate, so the door takes NO `p_firm` argument — it always acts on
+`clara._human_ctx(clara.role_rank('admin'))`'s own firm — rides 0196's column-preserving trigger
+rather than re-implementing "preserve what the caller did not name", is receipted through
+`clara.op_receipts` and writes a `clara.audit_log` row carrying the before AND after value of every
+cap that actually moved. `clara._firm_document_limit_ceiling` (owned by `clara_fn_owner`, granted
+to NOBODY) carries the maximum. The full reasoning is in
+[0270's own header](migrations/0270_firm_document_limits_writer.sql); the two paragraphs below are
+CORRECTIONS TO THAT HEADER, which is applied and therefore immutable, recorded here because this is
+the nearest editable home a db-side reader will find.
+
+**WHAT THE CEILING BOUNDS IS ONE FIRM, NOT THE ESTATE** (adversarial review ADV-L10-07, fix round
+2026-09-20). §A justifies `ocr_concurrency`/`llm_witness_concurrency` = 16 by the estate running one
+always-on `clara-runtime` machine, but the body that ENFORCES those two numbers,
+`clara.claim_document_processing_task`, counts only THIS firm's running `ocr`/`invoice_facts`/
+`statement_facts` tasks against THIS firm's own `ocr_concurrency`; there is no estate-wide counter
+anywhere in it. Before #960 every firm sat at the 2/2 fallback because the relation had no human
+writer at all, so the gap was unreachable; after it, N firms at 16 give 16N concurrent tasks against
+the one machine with no backstop. Nothing in #960's acceptance is broken — a firm still cannot
+exceed its own ceiling, which is all the door promises — but the header's sentence is stronger than
+the code, and the estate-wide backstop is a follow-up for the owner to rule on, not something this
+door can carry. The per-firm numbers stay where they are meanwhile.
+
+**NAMED RESIDUAL — THE FOUR PARAMETERS ARE `int`, SO A VALUE ABOVE INT4_MAX DIES IN THE CAST**
+(adversarial review ADV-L10-05, fix round 2026-09-20). Re-measured on the lane rig, through the
+cast PostgREST actually performs — it binds each JSON body value and casts it to the parameter's
+declared type, so `p_docs_per_day => ($1)::integer` with `'2147483648'` raises a bare
+`22003 value "2147483648" is out of range for type integer` with NO `detail`, BEFORE the body's
+`v_asked > ceiling` check can answer with its own typed `CLR10 cap_above_ceiling` sentence. (A bare
+SQL literal `2147483648` does not even get that far: it is a `bigint` to the parser, so overload
+resolution refuses it `42883`. The 22003 is the shape the web caller can actually produce, which is
+why it is the one that matters.)
+`ProcessingCapacityCard` now refuses to send such a number (`apps/web/README.md` records the
+surface half), but a caller reaching the RPC directly still meets the raw cast error. Closing it
+properly means declaring the four parameters `bigint` and leaving the in-body ceiling check to
+answer every number a caller can send — which means EDITING 0270, and #957's supported redo path
+(`CLARA_MIGRATION_REDO`, "Redo (#957)" above) takes the HIGHEST applied version only. Measured on
+`clara_l10` during the fix round:
+
+```
+migrate: FAIL — redo refused: 0270_firm_document_limits_writer is not the highest applied version
+(0271_retire_create_account_set_v1 is) — redoing anything below the frontier would silently
+invalidate whatever was applied on top of it.
+```
+
+So an edited 0270 could be neither applied nor re-measured on the lane that wrote it, and shipping
+an unverified migration edit is worse than a named residual. The widening belongs to a follow-up
+ticket that owns its own migration number, where the prestate pins can be measured on a chain that
+carries it.
+
+## 0271 — retiring the human account-set writer (#1003)
+
+The owner ruled on 2026-09-20 to retire `clara.create_account_set_v1` (0058): two independently
+measured censuses (the T9 rung-0 sweep, 2026-08-28, and #660's re-confirmation) found zero callers
+in `apps/web` or `apps/dashboard` history, and its capability was already covered by the live
+agent-lane sibling `clara._agent_create_account_set_core` / `clara.wake_create_account_set`,
+DERIVED from this same body at 0113 and standing on its own since. 0271 `drop function`s it
+outright rather than only revoking its grant — the owner's own Option A reasoning: "removes a
+decoy a future UI could be wired to instead of the newer door, and one more body every security
+census has to re-confirm as dead."
+
+**NOTHING ELSE MOVES.** No table, column, trigger or policy changes; the agent core and its wake
+door are pinned in 0271's prestate and tail and are byte-identical before and after. Historical
+`clara.op_receipts` rows under `fn='create_account_set_v1'`, if any are ever found on a real
+estate database, are untouched — out of scope by the ticket's own ruling.
+
+**FOUR LIVE TEST-SIDE FILES NAMED THE RETIRING SIGNATURE AND ARE UPDATED IN THE SAME CHANGE**,
+not inside 0271 itself (they are source, not DDL):
+- `packages/db/tests/rig-meta.mjs` — `METRICS_0058_HUMAN_FNS`/`_COHORT` drop the name (ten
+  members now, not eleven); left in place it would read `cohortFailures()` as a PARTIAL cohort.
+  It is NOT dropped from `ALLOWED`: see the retirement window below.
+- `packages/db/tests/client-financial-pack.test.mjs` — `p660.census.pins_unmoved` drops the
+  now-meaningless pin (a `::regprocedure` cast on a dropped function raises, it does not fail an
+  assertion) and asserts the retirement directly instead, frontier-gated on 0271's own stem.
+- `packages/db/tests/delta-fixtures.mjs` — `DELTA_ENTRYPOINTS`/`DELTA_ARGUMENT_NAMES` drop the
+  entry (the readiness roster no longer requires it), and `createAccountSet()` — the delta suite's
+  one remaining caller of the retiring door — now mints through `clara.wake_create_account_set`
+  under a cached per-firm interactive wake credential, the SAME agent-lane path the runtime uses,
+  never a copy of its validation logic. The op-reservation `fn` key for account-set creation is
+  therefore `agent_create_account_set` from this point on, not `create_account_set_v1` (0113's own
+  derivation renamed it); the two delta phase files that asserted zero leftover receipts under the
+  old key (`delta-algebra-phase.mjs`, `delta-account-set-acceptance-phase.mjs`) now check the new
+  one.
+- `packages/db/tests/f-a5-reporting-agency-pr2-cores.test.mjs` is untouched and stays the wake
+  door's own direct battery — the delta suite's retarget exercises the same door end to end but is
+  not a substitute for it.
+
+### 0271's retirement window — the removal-shaped mirror of a bimodal cohort
+
+Added in the 2026-09-20 review fix round (standards L10-STD-02, spec S-1003-1, adversarial
+ADV-L10-03), which all three reported the same gap: 0271 shipped without the wave-2 work order's
+migration triad (a preintegration gate with a stable stem, a rig-meta cohort, the gate-chain entry
+in migration order).
+
+**An ADDITION needs no frontier arm; a REMOVAL does.** Both consumers of `rig-meta.mjs`'s `ALLOWED`
+iterate the LIVE catalog — `grantMatrixFailures()` compares each live body's grants against it, and
+`scripts/operation-census/findings.mjs`'s `unattributed` label attributes each live PUBLIC door
+against it flattened. A name added to `ALLOWED` before its migration lands is simply never reached
+on an earlier frontier. A name REMOVED from it is the opposite: below 0271 the body is still live
+and still granted, so both consumers hard-FAIL rather than skip. Measured on `clara_l10` inside a
+transaction that was rolled back and verified rolled back: with the pre-0271 catalog state
+recreated, the grant sweep reported `clara_authenticated EXECUTE clara.create_account_set_v1:
+expected false, got true` and the census reported the name `unattributed` — and with the arm in
+place both passed.
+
+The three artefacts:
+- `RETIRED_0271_HUMAN_FNS` in `tests/rig-meta.mjs`, spread into `ALLOWED[clara_authenticated]` and
+  deliberately NOT a `cohortFailures()` cohort (above the frontier this name is SUPPOSED to be
+  absent from the catalog while its exemption survives, which is the one shape that instrument
+  reports). **Scheduled for deletion** once every rig and frontier leg this package runs against
+  carries 0271.
+- `tests/retire-create-account-set-preintegration-gate.mjs`, keyed on the stem
+  `retire_create_account_set_v1$` — never a migration NUMBER (claimed at merge) and never the
+  function's ABSENCE (a chain below 0059 is absent too, because the body was never created there).
+- its `--import` token in `package.json`'s test script, in migration order after 0270's.
 
 ## 0272 — the routes 0244 left open, and #782's column comment (fix round)
 

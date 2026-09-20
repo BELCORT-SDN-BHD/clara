@@ -283,6 +283,18 @@ _Avoid_: Resending the same invitation; a pending invitation shown as a member; 
 creation of a new firm as a synonym for joining one; a per-firm seat count as a reason to refuse
 one (see **Admission capacity**).
 
+**Issuer lapsed**:
+The fifth effective status a still-`pending` invitation can read, computed at READ TIME by one
+expression the invitee's preview and the admin roster BOTH carry, when the invitation's issuer no
+longer holds an ACTIVE membership at admin rank or above (demoted, or removed from the firm
+entirely). It is reversible — re-promoting the issuer restores `pending` on the very next read, no
+write anywhere — and it does not by itself refuse acceptance: `clara.accept_invite`'s own,
+unrelated wall (the invited role must not outrank the issuer's CURRENT rank) is what may still
+refuse, so an issuer-lapsed invitation for a low-enough role accepts normally.
+_Avoid_: A sixth stored value on `firm_invites.status` (it is never written there); a synonym for
+`revoked` or `expired`, which are settled outcomes this status never overrides; assuming the
+invitation itself is unusable — only accept_invite's own rank wall decides that.
+
 **Membership / Roster**:
 The firm's live list of who holds access and at what role, read at two different floors: the
 roster from bookkeeper upward, and the invitations from admin upward. It is the authority a
@@ -870,3 +882,8 @@ _Avoid_: A timestamp (two transactions with the same clock reading can be on eit
 **Definition version / 定义版本**:
 The named rule a published figure was computed under, carried on the figure itself so a number and the definition behind it travel together. A change of rule is a new version rather than a silent recomputation of old answers.
 _Avoid_: Metric definition version — that belongs to the delta-metric lane and is a different object; a schema or migration number; an API version.
+
+<!-- #960 -->
+**Processing cap / 处理上限**:
+One of the four per-firm document-processing limits a firm sets for itself — documents per day, pages per day, documents processed at once, model readings at once. The firm's own owner or admin sets each one independently, receipted and audited; a cap nobody has set is ABSENT rather than zero, and the enforcing doors fall back to their own built-in figures until the firm's first write. The estate's own ceiling sits above whatever a firm sets and no firm can raise it.
+_Avoid_: A quota a firm has bought; an operator-granted allowance (the operator sets no firm's caps); treating an unset cap as zero, or as the value a first write would land.

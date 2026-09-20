@@ -30,7 +30,7 @@ import {
 import { EmptyState, LoadingState } from "@/components/common/state";
 import { businessDate } from "@/lib/business-date";
 import {
-  isKnownInviteStatus,
+  isKnownInviteEffectiveStatus,
   isKnownMembershipStatus,
   type FirmInviteRow,
   type FirmMemberRow,
@@ -67,6 +67,8 @@ const INVITE_STATUS_KEY = {
   expired: "statusExpired",
   accepted: "statusAccepted",
   revoked: "statusRevoked",
+  // #872 (migration 0269) — read-time only, never a value `firm_invites.status` itself admits.
+  issuer_lapsed: "statusIssuerLapsed",
 } as const;
 
 export function RosterTable({
@@ -242,8 +244,14 @@ export function InvitesTable({
                         closed set renders raw rather than being mapped to a label
                         this app invented. */}
                     <Badge variant={row.status === "pending" ? "secondary" : "outline"}>
-                      {isKnownInviteStatus(row.status) ? t(INVITE_STATUS_KEY[row.status]) : row.status}
+                      {isKnownInviteEffectiveStatus(row.status) ? t(INVITE_STATUS_KEY[row.status]) : row.status}
                     </Badge>
+                    {/* #872 — a ONE-LINE NOTICE, never a block: the row is still `pending`
+                        underneath (Revoke stays offered on it, same as `expired`) and
+                        `accept_invite`'s own wall is what may or may not still refuse it. */}
+                    {row.status === "issuer_lapsed" ? (
+                      <span className="ml-2 text-xs text-muted-foreground">{t("issuerLapsedNote")}</span>
+                    ) : null}
                   </TableCell>
                   <TableCell className="text-muted-foreground">{day(row.created_at)}</TableCell>
                   <TableCell className="text-muted-foreground">{day(row.expires_at)}</TableCell>

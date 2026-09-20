@@ -108,14 +108,21 @@ test("§3.6 firm_document_limits carries docs_per_day / pages_per_day / ocr_conc
 // same claim before and after, and is worth keeping precisely because it is what made the hazard
 // latent rather than live for as long as it stood.
 //
-// WHY THERE IS NOTHING TO FIX AT THE OPERATION BOUNDARY, and this cell is the proof rather
-// than the claim: there is no public writer to reach the trigger through. `clara.firm_document_limits`
-// carries SELECT for clara_authenticated and clara_runtime (0007:810/818 policies) and NOTHING
-// else for any application role, and no granted routine writes it — the ONLY routine in the
-// whole schema that does is the trigger function itself, which is granted to nobody. So the
-// hazard is reachable only by an owner-level or superuser hand (the operator ceremony, and this
-// rig's own root fixture). Both halves are asserted here, from the live catalog and from a live
-// refusal, so a future migration that opens a writer or a table grant reds THIS cell.
+// THE OPERATION BOUNDARY, as of #960 (migration 0270). `clara.firm_document_limits` carries
+// SELECT for clara_authenticated and clara_runtime (0007:810/818 policies) and NOTHING else for
+// any application role — the TABLE is still unwritable from outside, and that half of this cell
+// has not moved. What DID move is the routine census: until 0270 the only routine in the whole
+// schema that wrote the relation was the trigger function itself, granted to nobody, and this
+// cell's roster said so. The owner's 2026-09-20 ruling on #960 opened exactly ONE governed
+// writer — `clara.set_firm_document_limits`, a SECURITY DEFINER door granted to
+// clara_authenticated alone, whose own body floors the caller at the FIRM's admin rank and
+// whose write rides the SAME column-preserving trigger. So the roster below is now two names
+// with their reachability spelled out, and the 0090 partial-update hazard is still unreachable:
+// a caller cannot hand that door a partial row the trigger would not preserve, which is what
+// packages/db/tests/firm-document-limits-writer.test.mjs owns end to end.
+//
+// Both halves are asserted here, from the live catalog and from a live refusal, so a future
+// migration that opens a SECOND writer or a table grant reds THIS cell.
 //
 // THE SECOND HALF is the fixture's own discipline: `setDocLimits` always names all three limit
 // columns (its parameter defaults fill any the caller omits), so a rig cell can never
@@ -146,8 +153,10 @@ test("C-26 §3.6 no application role can write firm_document_limits, and the roo
   const owner = await rootQuery("select has_table_privilege('clara_fn_owner', 'clara.firm_document_limits', 'INSERT') as ok");
   assert.equal(owner.rows[0].ok, true, "clara_fn_owner must hold INSERT — otherwise the probe above proves nothing");
 
-  // (b) NO GRANTED ROUTINE WRITES IT. The only writer in the schema is the trigger function,
-  //     and it is EXECUTE-granted to nobody.
+  // (b) THE WRITER CENSUS, with each writer's reachability. The trigger is EXECUTE-granted to
+  //     nobody; #960's governed door is reachable by exactly ONE application role
+  //     (clara_authenticated) and floors the caller at the firm's admin rank in its own body.
+  //     A THIRD name here, or either of these two changing its reachability, is the finding.
   const writersInCatalog = await rootQuery(
     `select p.proname,
             (select count(*)::int from pg_roles r
@@ -160,8 +169,11 @@ test("C-26 §3.6 no application role can write firm_document_limits, and the roo
   );
   assert.deepEqual(
     writersInCatalog.rows.map((r) => `${r.proname} (reachable by ${r.granted_to} app role(s))`),
-    ["_tf_firm_document_limits_upsert (reachable by 0 app role(s))"],
-    "something other than the BEFORE-INSERT trigger writes firm_document_limits, or the trigger became app-callable",
+    [
+      "_tf_firm_document_limits_upsert (reachable by 0 app role(s))",
+      "set_firm_document_limits (reachable by 1 app role(s))",
+    ],
+    "something other than the BEFORE-INSERT trigger and #960's governed door writes firm_document_limits, or one of the two changed its reachability",
   );
 
   // (c) A LIVE REFUSAL, not only a catalog reading.

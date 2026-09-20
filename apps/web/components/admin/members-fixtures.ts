@@ -12,6 +12,13 @@
 // with an email and one WITHOUT (the floored/absent column), one REMOVED
 // membership (no verbs), one `pending` invite and one whose status the view
 // computed as `expired` while the row is still pending.
+//
+// #872's `issuer_lapsed` row is deliberately NOT added here: `members-single-fire.test.tsx`
+// and `members-keyboard.test.tsx` both hard-count "two invite rows carry Revoke" against this
+// SAME shared array, so a third row here would be a silent, unrelated regression in files this
+// ticket never touches. `components/admin/members-tables.test.tsx` covers the new status against
+// `InvitesTable` directly instead — the seam this ticket's own brief names ("both surfaces
+// render it with its label and a one-line notice"), with its own, non-shared fixture row.
 
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";

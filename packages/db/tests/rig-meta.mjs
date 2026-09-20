@@ -119,18 +119,32 @@ const REGISTRY_0057_HUMAN_FNS = [
 // default is "no role may execute anything unlisted", so cohortFailures() catches a name
 // that silently VANISHES from the catalog while its exemption lives on here.
 const REGISTRY_0057_COHORT = [...REGISTRY_0057_HUMAN_FNS];
-// 0058-0061 [Wave E lane delta]: the metric algebra + evaluator. ELEVEN names on
+// 0058-0061 [Wave E lane delta]: the metric algebra + evaluator. TEN names on
 // clara_authenticated and NOTHING anywhere else — the agent, both wake roles, clara_runtime and
 // both non-inheriting login shells gain ZERO EXECUTE across all four files, which delta's own
 // security tail asserts in-migration (its v_entrypoints loop refuses if any of them holds EXECUTE)
 // and which this roster is the second, independent instrument for.
 //
-// WHAT EACH GROUP IS, because "eleven granted verbs" is not self-explaining: four are the metric
-// definition LIFECYCLE (propose is a draft; approve carries the admin floor AND PRD §2's
+// #1003 (2026-09-20) RETIRED THE ELEVENTH. create_account_set_v1 held EXECUTE here from 0059
+// until 0271 dropped the function outright: two independently measured censuses (T9's rung-0
+// sweep and #660's re-confirmation) found zero product callers, and its capability was already
+// covered by the live agent-lane sibling (clara._agent_create_account_set_core /
+// clara.wake_create_account_set, DERIVED from this body at 0113 and standing on its own since).
+// Its name is removed from THIS array (the ten-member cohort) rather than left in it, because
+// cohortFailures() below would read it as a PARTIAL cohort — this is a single planned removal
+// from a group that otherwise still ships whole, never the whole group's own retirement. It is
+// NOT removed from ALLOWED: while a frontier below 0271 can still carry the live, granted body,
+// removing the exemption makes the grant-matrix sweep and the census's attribution roster
+// hard-FAIL instead of skip. That arm is `RETIRED_0271_HUMAN_FNS` below, with the whole
+// reasoning and its scheduled deletion beside it.
+//
+// WHAT EACH REMAINING GROUP IS, because "ten granted verbs" is not self-explaining: four are the
+// metric definition LIFECYCLE (propose is a draft; approve carries the admin floor AND PRD §2's
 // approver-≠-proposer segregation; reject and supersede are owner-floored) — every floor is
-// body-enforced, so the grant is a door, never the authority. create_account_set_v1 and
-// mint_metric_input_snapshot_v1 mint the two frozen inputs an evaluation reads. evaluate_metric_v1
-// and evaluate_fs_pack_v1 are the evaluator itself; assess_metric_cell_independent_v1 is the
+// body-enforced, so the grant is a door, never the authority. mint_metric_input_snapshot_v1
+// mints the frozen input an evaluation reads (account sets, the algebra's OTHER frozen input,
+// now mint only through the agent-lane wake door named above). evaluate_metric_v1 and
+// evaluate_fs_pack_v1 are the evaluator itself; assess_metric_cell_independent_v1 is the
 // INDEPENDENT re-check (E6), a separate frozen closure that reads only immutable facts.
 // verify_evaluator_freeze is a VERIFIER, not a writer — it is granted because a human needs to be
 // able to ask whether the deployed closure still matches its registration, and it writes nothing.
@@ -141,7 +155,7 @@ const REGISTRY_0057_COHORT = [...REGISTRY_0057_HUMAN_FNS];
 // ruling keeps evaluation authenticated-human-only; lane eta's wake wrappers reach these bodies as
 // internal ungranted calls under clara_fn_owner and never by a grant of their own.
 const METRICS_0058_HUMAN_FNS = [
-  "create_account_set_v1", "mint_metric_input_snapshot_v1",
+  "mint_metric_input_snapshot_v1",
   "propose_metric_definition", "approve_metric_definition",
   "reject_metric_definition", "supersede_metric_definition",
   "evaluate_metric_v1", "evaluate_fs_pack_v1",
@@ -155,10 +169,42 @@ const METRICS_0058_HUMAN_FNS = [
 // together across 0059/0060 and must live or die together — v2 ships in a different migration and
 // would make that cohort read PARTIAL on every pre-card-1 chain.
 const CARD1_SEAM_HUMAN_FNS = ["evaluate_metric_v2"];
-// A COHORT for the same closed-set reason as 0057's: these eleven ship together across 0059/0060
+// A COHORT for the same closed-set reason as 0057's: these ten ship together across 0059/0060
 // and must live or die together, so a name that silently vanishes while its exemption survives
-// here is a finding rather than a quiet pass.
+// here is a finding rather than a quiet pass. create_account_set_v1 is deliberately not one of
+// the ten any more (#1003 retired it alone, above) — it is removed from the cohort rather than
+// left in it to go "PARTIAL".
 const METRICS_0058_COHORT = [...METRICS_0058_HUMAN_FNS];
+// #1003 [0271] THE RETIREMENT WINDOW — the REMOVAL-SHAPED MIRROR of the bimodal cohorts the
+// additions below use (0234's, 0270's), added in the 2026-09-20 fix round for standards
+// L10-STD-02, spec S-1003-1 and adversarial ADV-L10-03.
+//
+// WHY AN ADDITION NEEDS NO ARM AND A REMOVAL DOES. Both of this file's consumers iterate the LIVE
+// catalog: `grantMatrixFailures()` below compares each live body's grants against ALLOWED, and
+// `scripts/operation-census/findings.mjs`'s `unattributed` label attributes each live PUBLIC door
+// against ALLOWED flattened. So a name ADDED to ALLOWED before its migration lands is simply never
+// reached on an earlier frontier — which is why `set_firm_document_limits` needs no condition and
+// its cohort's bimodal guard exists only for the dead-exemption check. A name REMOVED from ALLOWED
+// is the opposite: below the retiring migration's frontier the body is STILL LIVE and STILL
+// granted, so removing the exemption makes both consumers hard-FAIL rather than skip —
+// `clara_authenticated EXECUTE clara.create_account_set_v1: expected false, got true` (T17,
+// opcen.1) and an `unattributed` finding (opcen.7's own HARD label). Measured on clara_l10 inside
+// a rolled-back transaction: with the pre-0271 catalog state recreated, both fired.
+//
+// SO THE EXEMPTION STAYS WHILE THE BODY CAN STILL BE LIVE, and it is deliberately NOT a cohort:
+// `cohortFailures()` is the dead-exemption instrument, and above 0271's frontier this name is
+// SUPPOSED to be absent from the catalog while its exemption survives here — the one shape that
+// instrument reports. The retirement itself is asserted from the other side, by
+// `client-financial-pack.test.mjs`'s `p660.census.pins_unmoved` (frontier-gated on the
+// `retire_create_account_set_v1$` stem), and by 0271's own tail.
+//
+// SCHEDULED REMOVAL, not a permanent carve-out: drop this roster and its spread below once every
+// rig and every frontier leg this package runs against carries 0271 (i.e. after the riders wave-2
+// integration lands and the frontier matrix's legs are re-cut above it). F-A3 PR-3's own
+// retirements (propose_bank_rule and the twelve names beside it, TIEOUT_0040_* above) were
+// removed outright with no window because they merged long before any frontier leg could stand
+// between their creation and their drop; this one cannot, because 0271 is unmerged.
+const RETIRED_0271_HUMAN_FNS = ["create_account_set_v1"];
 // 0064 [Wave E lane theta]: the close-plan-as-document read. ONE name on
 // clara_authenticated -- the /close consumer (closeApi.ts's getClosePlan, called
 // from close/page.tsx). Originally authored with clara_agent_ro granted too (the
@@ -2762,6 +2808,26 @@ const LEGAL_ENFORCEMENT_0234_HUMAN_FNS = [
 ];
 export const LEGAL_ENFORCEMENT_0234_COHORT = [...LEGAL_ENFORCEMENT_0234_HUMAN_FNS];
 // #1008 END
+// #960 [0270, the firm's OWN document-processing caps] — its own cohort, bimodal like 0234's:
+// wholly present once 0270 applies, wholly absent before it, because the `db-slice-frontiers`
+// matrix runs this package against earlier frontiers.
+//
+//   ONE NEW HUMAN DOOR, clara_authenticated ONLY, floored on the FIRM's OWN admin rank in its own
+//   body (`clara._human_ctx(clara.role_rank('admin'))`, so an owner passes too) — the owner's
+//   2026-09-20 ruling on #960 is option C: the firm sets its own four caps, with no operator gate.
+//   `set_firm_document_limits(int,int,int,int,text)` is the FIRST human writer
+//   `clara.firm_document_limits` has ever had; it is op_receipts-idempotent and leaves a
+//   `clara._audit` row naming the before and after of every changed cap. clara_runtime, both
+//   agent read roles and all four wake lanes gain ZERO: the body is `_human_ctx`-gated, so a lane
+//   carrying no JWT claims could not execute it even if it held the grant.
+//
+//   0270's ONE internal, `clara._firm_document_limit_ceiling`, is granted to NOBODY — it is the
+//   estate's own ceiling above whatever a firm sets, reached only from the door's DEFINER body,
+//   and is therefore expected-false for every role in the live sweep rather than listed here.
+//   That is the same disposition 0234's `clara._legal_enforcement_mode` carries.
+const FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS = ["set_firm_document_limits"];
+export const FIRM_DOCUMENT_LIMITS_0270_COHORT = [...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS];
+// #960 END
 
 // #1014 [0235, the document binding claim] — ONE relation and NO function name: 0235 recuts
 // clara._lock_document_binding in place (a `create or replace`, so no catalog entry enters or
@@ -2880,6 +2946,10 @@ export const ALLOWED = {
     // lifecycle verbs, the two frozen-input minters, the evaluator pair, the independent E6
     // re-check, the A30b attempt-receipt writer and the freeze verifier — clara_authenticated
     // ONLY, every floor body-enforced; agent/wake/runtime gain ZERO (see the block above)
+    ...RETIRED_0271_HUMAN_FNS, // #1003 [0271] the RETIREMENT WINDOW's own arm —
+    // create_account_set_v1, held here only while a frontier below 0271 can still carry the live,
+    // granted body. See the block where the roster is declared for why a removal needs an arm and
+    // an addition does not, and for when this line is deleted.
     ...CARD1_SEAM_HUMAN_FNS, // [Wave-F Track A, F-A5b card 1] clara.evaluate_metric_v2, on
     // evaluate_metric_v1's own terms — clara_authenticated ONLY; agent/wake/runtime gain ZERO
     ...CLOSE_PLAN_0064_HUMAN_FNS, // 0064 [Wave E lane θ] the close-plan-as-document read —
@@ -3075,6 +3145,11 @@ export const ALLOWED = {
     // #935 [0259] the education-tip dismissal door — see the block above. clara_authenticated
     // ONLY; clara_runtime, both agent read roles and all four wake lanes gain ZERO.
     ...FIRM_SETUP_TIP_0259_HUMAN_FNS,
+    // #960 [0270] the firm's own four document-processing caps — the firm-admin write door, see
+    // the block above. clara_authenticated ONLY; clara_runtime, both agent read roles and all
+    // four wake lanes gain ZERO, and the ungranted ceiling clara._firm_document_limit_ceiling
+    // holds no role at all.
+    ...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3592,6 +3667,12 @@ export async function grantMatrixFailures() {
   if (highWaterLive.length !== 0) {
     failures.push(...cohortFailures("#846 0244 capability registry version high-water mark",
       DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT, liveNames));
+  }
+  // #960 [0270] — bimodal, same reasoning as 0234's above.
+  const capWriterLive = FIRM_DOCUMENT_LIMITS_0270_COHORT.filter((n) => liveNames.has(n));
+  if (capWriterLive.length !== 0) {
+    failures.push(...cohortFailures("#960 0270 firm document-limits writer",
+      FIRM_DOCUMENT_LIMITS_0270_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
