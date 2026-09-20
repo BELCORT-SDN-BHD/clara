@@ -1718,6 +1718,60 @@ it immediately, but it writes NO `clara._audit` row, NO `updated_by` and no rece
 becomes invisible to the estate's own record. Prefer creating the operator-firm precondition over
 using it.
 
+## 0270 — the firm's own document-processing caps (#960)
+
+`clara.set_firm_document_limits(p_docs_per_day, p_pages_per_day, p_ocr_concurrency,
+p_llm_witness_concurrency, p_op_key)` is the FIRST human writer `clara.firm_document_limits` has
+ever had. The owner ruled on 2026-09-20 that the firm's own owner or admin sets all four caps with
+no operator gate, so the door takes NO `p_firm` argument — it always acts on
+`clara._human_ctx(clara.role_rank('admin'))`'s own firm — rides 0196's column-preserving trigger
+rather than re-implementing "preserve what the caller did not name", is receipted through
+`clara.op_receipts` and writes a `clara.audit_log` row carrying the before AND after value of every
+cap that actually moved. `clara._firm_document_limit_ceiling` (owned by `clara_fn_owner`, granted
+to NOBODY) carries the maximum. The full reasoning is in
+[0270's own header](migrations/0270_firm_document_limits_writer.sql); the two paragraphs below are
+CORRECTIONS TO THAT HEADER, which is applied and therefore immutable, recorded here because this is
+the nearest editable home a db-side reader will find.
+
+**WHAT THE CEILING BOUNDS IS ONE FIRM, NOT THE ESTATE** (adversarial review ADV-L10-07, fix round
+2026-09-20). §A justifies `ocr_concurrency`/`llm_witness_concurrency` = 16 by the estate running one
+always-on `clara-runtime` machine, but the body that ENFORCES those two numbers,
+`clara.claim_document_processing_task`, counts only THIS firm's running `ocr`/`invoice_facts`/
+`statement_facts` tasks against THIS firm's own `ocr_concurrency`; there is no estate-wide counter
+anywhere in it. Before #960 every firm sat at the 2/2 fallback because the relation had no human
+writer at all, so the gap was unreachable; after it, N firms at 16 give 16N concurrent tasks against
+the one machine with no backstop. Nothing in #960's acceptance is broken — a firm still cannot
+exceed its own ceiling, which is all the door promises — but the header's sentence is stronger than
+the code, and the estate-wide backstop is a follow-up for the owner to rule on, not something this
+door can carry. The per-firm numbers stay where they are meanwhile.
+
+**NAMED RESIDUAL — THE FOUR PARAMETERS ARE `int`, SO A VALUE ABOVE INT4_MAX DIES IN THE CAST**
+(adversarial review ADV-L10-05, fix round 2026-09-20). Re-measured on the lane rig, through the
+cast PostgREST actually performs — it binds each JSON body value and casts it to the parameter's
+declared type, so `p_docs_per_day => ($1)::integer` with `'2147483648'` raises a bare
+`22003 value "2147483648" is out of range for type integer` with NO `detail`, BEFORE the body's
+`v_asked > ceiling` check can answer with its own typed `CLR10 cap_above_ceiling` sentence. (A bare
+SQL literal `2147483648` does not even get that far: it is a `bigint` to the parser, so overload
+resolution refuses it `42883`. The 22003 is the shape the web caller can actually produce, which is
+why it is the one that matters.)
+`ProcessingCapacityCard` now refuses to send such a number (`apps/web/README.md` records the
+surface half), but a caller reaching the RPC directly still meets the raw cast error. Closing it
+properly means declaring the four parameters `bigint` and leaving the in-body ceiling check to
+answer every number a caller can send — which means EDITING 0270, and #957's supported redo path
+(`CLARA_MIGRATION_REDO`, "Redo (#957)" above) takes the HIGHEST applied version only. Measured on
+`clara_l10` during the fix round:
+
+```
+migrate: FAIL — redo refused: 0270_firm_document_limits_writer is not the highest applied version
+(0271_retire_create_account_set_v1 is) — redoing anything below the frontier would silently
+invalidate whatever was applied on top of it.
+```
+
+So an edited 0270 could be neither applied nor re-measured on the lane that wrote it, and shipping
+an unverified migration edit is worse than a named residual. The widening belongs to a follow-up
+ticket that owns its own migration number, where the prestate pins can be measured on a chain that
+carries it.
+
 ## 0271 — retiring the human account-set writer (#1003)
 
 The owner ruled on 2026-09-20 to retire `clara.create_account_set_v1` (0058): two independently
