@@ -2590,6 +2590,26 @@ const LEGAL_ENFORCEMENT_0234_HUMAN_FNS = [
 ];
 export const LEGAL_ENFORCEMENT_0234_COHORT = [...LEGAL_ENFORCEMENT_0234_HUMAN_FNS];
 // #1008 END
+// #960 [0270, the firm's OWN document-processing caps] — its own cohort, bimodal like 0234's:
+// wholly present once 0270 applies, wholly absent before it, because the `db-slice-frontiers`
+// matrix runs this package against earlier frontiers.
+//
+//   ONE NEW HUMAN DOOR, clara_authenticated ONLY, floored on the FIRM's OWN admin rank in its own
+//   body (`clara._human_ctx(clara.role_rank('admin'))`, so an owner passes too) — the owner's
+//   2026-09-20 ruling on #960 is option C: the firm sets its own four caps, with no operator gate.
+//   `set_firm_document_limits(int,int,int,int,text)` is the FIRST human writer
+//   `clara.firm_document_limits` has ever had; it is op_receipts-idempotent and leaves a
+//   `clara._audit` row naming the before and after of every changed cap. clara_runtime, both
+//   agent read roles and all four wake lanes gain ZERO: the body is `_human_ctx`-gated, so a lane
+//   carrying no JWT claims could not execute it even if it held the grant.
+//
+//   0270's ONE internal, `clara._firm_document_limit_ceiling`, is granted to NOBODY — it is the
+//   estate's own ceiling above whatever a firm sets, reached only from the door's DEFINER body,
+//   and is therefore expected-false for every role in the live sweep rather than listed here.
+//   That is the same disposition 0234's `clara._legal_enforcement_mode` carries.
+const FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS = ["set_firm_document_limits"];
+export const FIRM_DOCUMENT_LIMITS_0270_COHORT = [...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS];
+// #960 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -2841,6 +2861,11 @@ export const ALLOWED = {
     // agent read roles and all four wake lanes gain ZERO, and the ungranted predicate
     // clara._legal_enforcement_mode holds no role at all.
     ...LEGAL_ENFORCEMENT_0234_HUMAN_FNS,
+    // #960 [0270] the firm's own four document-processing caps — the firm-admin write door, see
+    // the block above. clara_authenticated ONLY; clara_runtime, both agent read roles and all
+    // four wake lanes gain ZERO, and the ungranted ceiling clara._firm_document_limit_ceiling
+    // holds no role at all.
+    ...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3330,6 +3355,12 @@ export async function grantMatrixFailures() {
   if (enforcementLive.length !== 0) {
     failures.push(...cohortFailures("#1008 0234 platform legal enforcement mode",
       LEGAL_ENFORCEMENT_0234_COHORT, liveNames));
+  }
+  // #960 [0270] — bimodal, same reasoning as 0234's above.
+  const capWriterLive = FIRM_DOCUMENT_LIMITS_0270_COHORT.filter((n) => liveNames.has(n));
+  if (capWriterLive.length !== 0) {
+    failures.push(...cohortFailures("#960 0270 firm document-limits writer",
+      FIRM_DOCUMENT_LIMITS_0270_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
