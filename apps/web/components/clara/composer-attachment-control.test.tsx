@@ -18,9 +18,40 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { renderComponent } from "../../test/hookHarness";
-import { ComposerAttachmentControl, COMPOSER_IN_FLIGHT_STATES, type ComposerAttachmentState } from "./ComposerAttachmentControl";
+import {
+  ComposerAttachmentControl,
+  COMPOSER_IN_FLIGHT_STATES,
+  attachmentDisplayState,
+  type ComposerAttachmentState,
+} from "./ComposerAttachmentControl";
+import type { QueueState } from "../../lib/documents/useUploadQueue";
 import type { SessionTokenAccessor } from "../../lib/session";
 import messages from "../../messages/en.json";
+
+// #970 — THE TRAY ROW'S DISPLAY STATE, PINNED AGAINST THE LIVE EXPORT. `Attachment`
+// (components/ui/attachment.tsx) only knows five states ("idle" | "uploading" |
+// "processing" | "error" | "done"); `QueueState` has nine. `attachmentDisplayState` is
+// the one place that narrows one to the other, exported so this is testable against
+// THIS SOURCE rather than a copy of it — the same discipline `COMPOSER_IN_FLIGHT_STATES`
+// above already follows. Every member of `QueueState` gets its own row, so adding a
+// tenth state without extending this table reds here rather than falling through to a
+// guessed default silently.
+test("[970] attachmentDisplayState maps every QueueState to one of Attachment's five states", () => {
+  const table: Record<QueueState, ReturnType<typeof attachmentDisplayState>> = {
+    queued: "idle",
+    starting: "idle",
+    uploading: "uploading",
+    verifying: "processing",
+    filing: "processing",
+    ready: "done",
+    error: "error",
+    failed: "error",
+    stopped: "idle",
+  };
+  for (const [state, expected] of Object.entries(table) as [QueueState, ReturnType<typeof attachmentDisplayState>][]) {
+    assert.equal(attachmentDisplayState(state), expected, state);
+  }
+});
 
 const CLIENT = "c1111111-1111-4111-8111-111111111111";
 const THREAD = "t1111111-1111-4111-8111-111111111111";
