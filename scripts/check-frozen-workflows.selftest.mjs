@@ -13,9 +13,10 @@
 //
 // No dependencies — Node built-ins only.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   checkManifestPaths,
@@ -26,7 +27,7 @@ import {
 } from "./freeze-lint-checks.mjs";
 import { computeFrozenClosures, formatClosureReport, scannedSourceFiles } from "./freeze-lint-closure.mjs";
 import { compareFrozenManifestText } from "./frozen-manifest-compare.mjs";
-import { retireFrozenEntry } from "./freeze-lint-retire.mjs";
+import { retireFrozenEntry, checkRetiredRecords } from "./freeze-lint-retire.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..");
@@ -595,6 +596,27 @@ testCase("#849 retireFrozenEntry's output leaves a subsequent verify (compareFro
   expectClean(compareFrozenManifestText(baseText, currentText, "base", "current").violations);
 });
 
+testCase("#849 fix round (L05B-S04): retireFrozenEntry's output is clean against check-frozen-workflows.mjs's OWN four retired-record invariants — RETIRED-DUPLICATE / RETIRED-NO-HASH / RETIRED-NO-RULING / RETIRED-PRESENT, not just compareFrozenManifestText's append-only comparison", () => {
+  const result = retireFrozenEntry(manifestWithOneEntry(), RETIRE_PATH_849, RETIRE_RULING_849, false);
+  if (!result.ok) throw new Error(`expected ok:true, got error: ${result.error}`);
+  // fileExistsInTree: false for every path — mirrors the refusal-checked precondition
+  // (retireFrozenEntry already refused if the file were still present at retire time).
+  expectClean(checkRetiredRecords(result.manifest, () => false));
+});
+
+testCase("#849 fix round (L05B-S04): checkRetiredRecords DOES fire all four codes on a deliberately broken retired record — the AC2 cell above is not vacuously clean", () => {
+  const broken = {
+    workflows: { [RETIRE_PATH_849]: { sha256: RETIRE_SHA_849 } }, // RETIRED-DUPLICATE: also still in workflows
+    retired: { [RETIRE_PATH_849]: { sha256: "not-a-hash", ruling: "" } }, // RETIRED-NO-HASH + RETIRED-NO-RULING
+  };
+  expectCodes(checkRetiredRecords(broken, () => true /* RETIRED-PRESENT */), [
+    "RETIRED-DUPLICATE",
+    "RETIRED-NO-HASH",
+    "RETIRED-NO-RULING",
+    "RETIRED-PRESENT",
+  ]);
+});
+
 testCase("#849 retireFrozenEntry refuses, with NO manifest write, when the target file is still present in the tree", () => {
   const manifest = manifestWithOneEntry();
   const result = retireFrozenEntry(manifest, RETIRE_PATH_849, RETIRE_RULING_849, /* fileExistsInTree */ true);
@@ -638,6 +660,50 @@ testCase("#849 `--retire` with NO path argument REFUSES (exit 1) instead of sile
   }
 });
 
+testCase("#849 fix round (L05B-S04): a SUCCESSFUL --retire, through the REAL CLI against a temp manifest, actually writes — not just the refusal paths above", () => {
+  // Every other #849 CLI cell in this file drives only a REFUSAL against the real repo tree
+  // (safe: a refusal never writes). A successful --retire DOES write, so it needs its own
+  // throwaway repo: a fresh temp dir, `git init`'d so REPO_ROOT (`git rev-parse --show-toplevel`)
+  // resolves there, with its own frozen-workflows.json and no "packages" dir at all — the
+  // closure/scanned-files walk above the --retire branch then trivially finds nothing, and
+  // never touches this repo's own real manifest.
+  const root = mkdtempSync(join(tmpdir(), "freeze-lint-retire-cli-"));
+  try {
+    const initGit = spawnSync("git", ["init", "-q"], { cwd: root, encoding: "utf8" });
+    if (initGit.status !== 0) throw new Error(`git init failed in ${root}: ${initGit.stderr}`);
+    const beforeManifest = { version: 1, workflows: { [RETIRE_PATH_849]: { sha256: RETIRE_SHA_849, note: "" } }, retired: {} };
+    const manifestPath = join(root, "frozen-workflows.json");
+    writeFileSync(manifestPath, JSON.stringify(beforeManifest, null, 2) + "\n", "utf8");
+    const result = spawnSync(
+      process.execPath,
+      [join(HERE, "check-frozen-workflows.mjs"), "--retire", RETIRE_PATH_849, "--ruling", RETIRE_RULING_849],
+      { cwd: root, encoding: "utf8", env: { ...process.env, CI: "", GITHUB_ACTIONS: "" } },
+    );
+    if (result.status !== 0) {
+      throw new Error(`expected exit 0 for a successful --retire; got ${result.status}, stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    if (!result.stdout.includes(`retired "${RETIRE_PATH_849}"`)) {
+      throw new Error(`expected the retire success message naming the path; got stdout:\n${result.stdout}`);
+    }
+    const afterText = readFileSync(manifestPath, "utf8");
+    const after = JSON.parse(afterText);
+    if (Object.hasOwn(after.workflows, RETIRE_PATH_849)) throw new Error("the written manifest must no longer carry the entry under workflows");
+    const record = after.retired?.[RETIRE_PATH_849];
+    if (!record || record.sha256 !== RETIRE_SHA_849 || record.ruling !== RETIRE_RULING_849) {
+      throw new Error(`the written manifest's retired record is wrong: ${JSON.stringify(after.retired)}`);
+    }
+    // The write itself must be exactly what retireFrozenEntry (already unit-tested above) would
+    // produce, byte for byte — proving the CLI's writeFileSync call did not reshape it.
+    const expected = JSON.stringify({ version: 1, workflows: {}, retired: { [RETIRE_PATH_849]: { sha256: RETIRE_SHA_849, ruling: RETIRE_RULING_849 } } }, null, 2) + "\n";
+    if (afterText !== expected) throw new Error(`written manifest text does not byte-match the expected retireFrozenEntry output:\nexpected:\n${expected}\ngot:\n${afterText}`);
+    // And it must pass the SAME retired-record verifier AC2 names (the retired file was never
+    // created in this throwaway repo, so fileExistsInTree is always false here).
+    expectClean(checkRetiredRecords(after, () => false));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 testCase("#849 `--retire --ruling <ref>` (the path slot holding the NEXT flag, not a path) also REFUSES rather than treating \"--ruling\" as the path", () => {
   const manifestPath = join(REPO_ROOT, "frozen-workflows.json");
   const before = readFileSync(manifestPath, "utf8");
@@ -649,6 +715,25 @@ testCase("#849 `--retire --ruling <ref>` (the path slot holding the NEXT flag, n
   if (after !== before) throw new Error("--retire with a flag (not a path) in the path slot must not write the manifest");
   if (result.status === 0) {
     throw new Error(`--retire with no real path must REFUSE (exit 1); got exit 0 with stdout:\n${result.stdout}`);
+  }
+});
+
+testCase("(L05-STD-02 fix round) `--ruling` followed by another flag (not a ruling citation) is treated as NO ruling given, the same guard --print-closure's module and --retire's path already apply — not swallowed as the literal ruling text", () => {
+  const manifestPath = join(REPO_ROOT, "frozen-workflows.json");
+  const before = readFileSync(manifestPath, "utf8");
+  // A path that does not even exist in the real manifest — safe, because the missing-ruling
+  // refusal must fire BEFORE retireFrozenEntry ever looks the path up (see its own ruling-first
+  // check), so this cell never depends on the real repo's manifest contents.
+  const result = spawnSync(
+    process.execPath,
+    [join(HERE, "check-frozen-workflows.mjs"), "--retire", "packages/runtime/workflows/does-not-exist-in-manifest.ts", "--ruling", "--child-os"],
+    { cwd: REPO_ROOT, encoding: "utf8" },
+  );
+  const after = readFileSync(manifestPath, "utf8");
+  if (after !== before) throw new Error("must not write the manifest when --ruling's value is actually another flag");
+  if (result.status === 0) throw new Error(`expected a refusal (exit 1); got exit 0 with stdout:\n${result.stdout}`);
+  if (!/requires --ruling/i.test(result.stderr)) {
+    throw new Error(`expected the MISSING-RULING refusal specifically (proving "--child-os" was not accepted as the ruling text); got stderr:\n${result.stderr}`);
   }
 });
 

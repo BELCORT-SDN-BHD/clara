@@ -55,3 +55,42 @@ export function retireFrozenEntry(manifest, path, ruling, fileExistsInTree) {
     message: `retired "${path}" (last hash ${entry.sha256}) under "${ruling}".`,
   };
 }
+
+/**
+ * The four retired-record invariants #810 defined and check-frozen-workflows.mjs's own verify
+ * path enforces on `manifest.retired` (RETIRED-DUPLICATE, RETIRED-NO-HASH, RETIRED-NO-RULING,
+ * RETIRED-PRESENT) — pulled out here, beside `retireFrozenEntry` (the write side), so a selftest
+ * can drive the EXACT verifier AC2 names ("a subsequent verify run reports no `RETIRED-*`
+ * violation") without spawning the real CLI against the real manifest and repo tree every time
+ * (L05B-S04). check-frozen-workflows.mjs's own "2c. RETIREMENT INTEGRITY" section calls this same
+ * function, so there is exactly one place these four rules live — a selftest cell that imports it
+ * is exercising production code, not a re-implementation of it.
+ *
+ * @param {{ workflows?: Record<string, unknown>, retired?: Record<string, {sha256?: string, ruling?: string}> }} manifest
+ * @param {(path: string) => boolean} fileExistsInTree
+ * @returns {string[]} violation lines, in the same wording check-frozen-workflows.mjs prints; empty when the retired record is clean
+ */
+export function checkRetiredRecords(manifest, fileExistsInTree) {
+  const violations = [];
+  for (const [rel, record] of Object.entries(manifest.retired ?? {})) {
+    if (manifest.workflows?.[rel]) {
+      violations.push(
+        `RETIRED-DUPLICATE  ${rel}  (present in BOTH \`workflows\` and \`retired\` — an entry MOVES to the retired record, it is never copied).`,
+      );
+    }
+    if (!/^[0-9a-f]{64}$/.test(String(record?.sha256 ?? ""))) {
+      violations.push(`RETIRED-NO-HASH   ${rel}  (a retired record must quote the entry's LAST frozen sha256).`);
+    }
+    if (!String(record?.ruling ?? "").trim()) {
+      violations.push(
+        `RETIRED-NO-RULING ${rel}  (a retired record must cite the ruling that authorised the removal, e.g. "#810 owner ruling 2026-09-15").`,
+      );
+    }
+    if (fileExistsInTree(rel)) {
+      violations.push(
+        `RETIRED-PRESENT   ${rel}  (recorded as retired but STILL IN THE TREE — a retirement is a removal from the tree, never a silent un-freeze; delete the file or restore its \`workflows\` entry).`,
+      );
+    }
+  }
+  return violations;
+}
