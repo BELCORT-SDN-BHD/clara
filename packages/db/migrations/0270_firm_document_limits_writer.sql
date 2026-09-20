@@ -2,7 +2,7 @@
 -- ADMIN SETS ITS FOUR DOCUMENT-PROCESSING CAPS.
 -- =====================================================================================
 -- Spec of record: ticket #960's Agent Brief, ready-for-agent after the owner's ruling below.
--- (round 3 — the audit row carries both sides of every changed cap)
+-- (round 5 — the floor mirror and the no-cap-named refusal)
 -- =====================================================================================
 
 do $w960_pre$
@@ -39,6 +39,38 @@ $w960_pre$;
 set role clara_fn_owner;
 
 -- =================================================================================================
+-- §A -- clara._firm_document_limit_ceiling(text). THE ESTATE'S OWN MAXIMUM per cap, and the one
+-- place it is written down. Granted to NOBODY: it is reached only from §B's SECURITY DEFINER
+-- body, exactly the disposition 0234's clara._legal_enforcement_mode and 0186's
+-- clara._admission_capacity_state carry. A firm cannot raise a number it cannot reach.
+--
+-- WHY THESE FOUR NUMBERS. The estate runs ONE always-on `clara-runtime` machine
+-- (docs/ARCHITECTURE.md's own deployment table: `min_machines_running = 1`,
+-- `auto_stop_machines = false`, and the paragraph immediately under it that says in as many
+-- words that this is deliberately NOT high availability). A per-firm concurrency ceiling of 16
+-- is therefore already far above anything this deployment will actually run in parallel: it is
+-- there so that a firm cannot write a number that would queue unbounded vendor calls against a
+-- shared machine, not to promise throughput. The two daily ceilings are 100x the relation's own
+-- first-insert values (0196's trigger: 100 / 1000) -- 10,000 documents and 100,000 pages in one
+-- UTC day is past what any Malaysian accounting firm ingests in a day, and short of a number
+-- that would let one firm's backlog exhaust the shared ingest lane.
+--
+-- THIS IS NOT A COLUMN CHECK, deliberately. A CHECK constraint would be the estate telling every
+-- EXISTING row it is illegal, and this relation is written today only by the operator ceremony
+-- and this rig's own root hand; the ticket's scope is a DOOR, and "the door carries it" is the
+-- brief's own sentence. Nothing in this file touches the relation's constraint set.
+-- =================================================================================================
+create or replace function clara._firm_document_limit_ceiling(p_cap text) returns int
+  language sql immutable set search_path = clara, pg_temp as $$
+  select case p_cap
+    when 'docs_per_day'            then 10000
+    when 'pages_per_day'           then 100000
+    when 'ocr_concurrency'         then 16
+    when 'llm_witness_concurrency' then 16
+    else null end;
+$$;
+
+-- =================================================================================================
 -- §B -- clara.set_firm_document_limits. The firm's OWN owner or admin, its OWN firm, always.
 -- =================================================================================================
 create or replace function clara.set_firm_document_limits(
@@ -58,11 +90,47 @@ declare
   v_previous jsonb;
   v_changes jsonb := '{}'::jsonb;
   v_cap text;
+  v_asked int;
 begin
   c := clara._human_ctx(clara.role_rank('admin'));
   if nullif(btrim(coalesce(p_op_key,'')),'') is null then
     raise exception 'op_key is required' using errcode='CLR10', detail='{"reason":"invalid_op_key"}';
   end if;
+
+  -- A CALL THAT NAMES NO CAP IS REFUSED, never ridden through. Every cap argument is optional
+  -- (that is what makes them individually settable), so this call is reachable -- and riding it
+  -- through would mint a receipt and an audit row for a change that did not happen, in a trail
+  -- the estate means to bill from.
+  if p_docs_per_day is null and p_pages_per_day is null and p_ocr_concurrency is null
+     and p_llm_witness_concurrency is null then
+    raise exception 'name at least one cap to set' using errcode='CLR10',
+      detail='{"reason":"no_cap_named"}';
+  end if;
+
+  -- BOTH BOUNDS, CHECKED BEFORE ANYTHING IS RESERVED OR WRITTEN.
+  --  · the floor MIRRORS the relation's own CHECKs (`> 0` on three columns, `null or > 0` on the
+  --    fourth) and refuses first, so a caller gets a Clara refusal it can render instead of a
+  --    raw 23514 -- the same reasoning clara.set_firm_high_stakes_threshold states for its own
+  --    mirror of `high_stakes_amount_cents > 0`;
+  --  · the ceiling is the ESTATE's, and the refusal names the cap AND the number, because a
+  --    bound a caller cannot see is a bound they cannot work with.
+  foreach v_cap in array array['docs_per_day','pages_per_day','ocr_concurrency','llm_witness_concurrency'] loop
+    v_asked := case v_cap
+      when 'docs_per_day' then p_docs_per_day
+      when 'pages_per_day' then p_pages_per_day
+      when 'ocr_concurrency' then p_ocr_concurrency
+      else p_llm_witness_concurrency end;
+    if v_asked is null then continue; end if;
+    if v_asked <= 0 then
+      raise exception '% must be a positive whole number', v_cap
+        using errcode='CLR10', detail='{"reason":"invalid_cap"}';
+    end if;
+    if v_asked > clara._firm_document_limit_ceiling(v_cap) then
+      raise exception '% may not exceed the estate ceiling of %', v_cap,
+        clara._firm_document_limit_ceiling(v_cap)
+        using errcode='CLR10', detail='{"reason":"cap_above_ceiling"}';
+    end if;
+  end loop;
 
   v_dedupe := clara._reserve_op(c.firm, 'set_firm_document_limits', p_op_key,
     clara._hash(jsonb_build_object(
@@ -141,6 +209,8 @@ end $$;
 
 reset role;
 
+revoke all on function clara._firm_document_limit_ceiling(text) from public;
+revoke all on function clara.set_firm_document_limits(int,int,int,int,text) from public;
 grant execute on function clara.set_firm_document_limits(int,int,int,int,text) to clara_authenticated;
 
 do $w960_tail$

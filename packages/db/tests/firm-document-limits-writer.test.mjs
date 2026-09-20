@@ -20,8 +20,10 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, endPool } from "./rig-fixtures.mjs";
-import { auditRows, CAPS, FIRST_INSERT, firmScene, setLimits, storedRow } from "./firm-document-limits-writer-fixtures.mjs";
+import { assertRaises, rootQuery, endPool } from "./rig-fixtures.mjs";
+import {
+  auditRows, CAPS, CEILINGS, FIRST_INSERT, firmScene, setLimits, storedRow,
+} from "./firm-document-limits-writer-fixtures.mjs";
 
 /** The migration's STABLE STEM, probed against clara.schema_migrations — never a file listing,
  *  and never a migration NUMBER (numbers are claimed at merge). */
@@ -29,7 +31,7 @@ const STEM = "firm_document_limits_writer$";
 
 let live = false;
 let executed = 0;
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 5;
 
 before(async () => {
   try {
@@ -160,5 +162,85 @@ test("#960 cell 3 · the audit row names the actor, the firm, and both sides of 
   assert.deepEqual(latest.args.caps, {
     docs_per_day: 11, pages_per_day: 77, ocr_concurrency: 3, llm_witness_concurrency: 9,
   }, "the resulting four caps ride the audit row too");
+  executed += 1;
+});
+
+// ===========================================================================
+// CELL 4 — THE ESTATE'S CEILING STANDS ABOVE WHATEVER A FIRM SETS, and the refusal names it.
+//
+// The owner's ruling: the firm sets its own caps freely, and "the estate's own safety limits
+// stay the absolute ceiling above whatever a firm sets". No such maximum was expressed anywhere
+// before this ticket (the four columns carry only `> 0`), so the door carries it.
+//
+// THE FOUR NUMBERS ARE THE SPEC, not a reading of the code: they are written here as literals,
+// and `CEILINGS` in the fixtures module carries the same four with the reasoning. The cell
+// drives BOTH SIDES of each boundary — the ceiling value itself is ACCEPTED and one more is
+// REFUSED — so a green here cannot mean "the door refuses everything" or "the door refuses
+// nothing".
+// ===========================================================================
+test("#960 cell 4 · the ceiling value is accepted, one above it is refused, and the refusal names the ceiling", async (t) => {
+  if (gate(t)) return;
+  const scene = await firmScene("ceiling");
+
+  // The ceiling itself: accepted, all four at once.
+  const receipt = await setLimits(scene.owner, CEILINGS);
+  assert.deepEqual(receipt.caps, CEILINGS, "every cap may be set AT the estate ceiling");
+
+  for (const cap of CAPS) {
+    const err = await assertRaises("CLR10",
+      () => setLimits(scene.owner, { [cap]: CEILINGS[cap] + 1 }), `${cap} above the ceiling`);
+    assert.equal(JSON.parse(err.detail ?? "{}").reason, "cap_above_ceiling",
+      `${cap}: the refusal is typed, not a bare CLR10`);
+    assert.ok(err.message.includes(String(CEILINGS[cap])),
+      `${cap}: the refusal must name the ceiling — got ${JSON.stringify(err.message)}`);
+    assert.ok(err.message.includes(cap),
+      `${cap}: the refusal must name the cap — got ${JSON.stringify(err.message)}`);
+  }
+
+  // NOT A SILENT NO-OP AND NOT A PARTIAL WRITE: the stored row is exactly what the accepted
+  // call left, after four refusals.
+  const row = await storedRow(scene.firm);
+  for (const cap of CAPS) assert.equal(row[cap], CEILINGS[cap], `${cap}: unchanged by the refusals`);
+  executed += 1;
+});
+
+// ===========================================================================
+// CELL 5 — THE TWO MALFORMED CALLS ARE TYPED REFUSALS, never a raw constraint violation and
+// never a silent no-op.
+//
+// (a) A cap at zero or below. The relation's own CHECKs say `> 0` (and the fourth column's says
+//     `null or > 0`), so a bare insert would die on 23514 — a Postgres error string no surface
+//     can render. The door mirrors the CHECK and refuses FIRST, exactly as
+//     `clara.set_firm_high_stakes_threshold` does for the same reason (0022 §B's own comment).
+//
+// (b) A call that names NO cap at all. Every argument is optional, so this is reachable, and
+//     riding it through would write an audit row and a receipt for a change that did not
+//     happen — evidence of a thing that never occurred, in a trail that is billing evidence.
+// ===========================================================================
+test("#960 cell 5 · a non-positive cap and a call naming no cap at all are typed refusals", async (t) => {
+  if (gate(t)) return;
+  const scene = await firmScene("malformed");
+  await setLimits(scene.owner, { docs_per_day: 11, pages_per_day: 22, ocr_concurrency: 3, llm_witness_concurrency: 4 });
+
+  for (const cap of CAPS) {
+    for (const bad of [0, -1]) {
+      const err = await assertRaises("CLR10",
+        () => setLimits(scene.owner, { [cap]: bad }), `${cap} = ${bad}`);
+      assert.equal(JSON.parse(err.detail ?? "{}").reason, "invalid_cap",
+        `${cap} = ${bad}: the refusal is typed`);
+      assert.ok(err.message.includes(cap), `${cap} = ${bad}: the refusal names the cap`);
+    }
+  }
+
+  const empty = await assertRaises("CLR10", () => setLimits(scene.owner, {}), "no cap named");
+  assert.equal(JSON.parse(empty.detail ?? "{}").reason, "no_cap_named");
+
+  const row = await storedRow(scene.firm);
+  assert.deepEqual(
+    { docs_per_day: row.docs_per_day, pages_per_day: row.pages_per_day,
+      ocr_concurrency: row.ocr_concurrency, llm_witness_concurrency: row.llm_witness_concurrency },
+    { docs_per_day: 11, pages_per_day: 22, ocr_concurrency: 3, llm_witness_concurrency: 4 },
+    "nine refusals later the stored row is exactly what the one accepted call left");
+  assert.equal((await auditRows(scene.firm)).length, 1, "a refused call writes no audit row");
   executed += 1;
 });

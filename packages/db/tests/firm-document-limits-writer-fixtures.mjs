@@ -25,6 +25,23 @@ export const FIRST_INSERT = {
   docs_per_day: 100, pages_per_day: 1000, ocr_concurrency: 2, llm_witness_concurrency: 2,
 };
 
+/** THE ESTATE'S CEILING, per cap — the spec's own four numbers, not a reading of the door.
+ *
+ *  WHY THESE FOUR. The estate runs ONE always-on `clara-runtime` machine (docs/ARCHITECTURE.md
+ *  §"clara-runtime": `min_machines_running = 1`, explicitly not high availability), so a
+ *  per-firm concurrency cap of 16 is already far above anything this deployment will actually
+ *  run in parallel — it exists so that a firm cannot write a number that would queue unbounded
+ *  vendor calls against a shared machine, not to express a throughput promise. The two daily
+ *  caps are 100x the relation's own first-insert values: 10,000 documents and 100,000 pages in
+ *  one UTC day is past what any Malaysian accounting firm ingests in a day and short of a
+ *  number that would let one firm's backlog exhaust the shared ingest lane.
+ *
+ *  A FIRM CANNOT RAISE THEM: they live in a `clara_fn_owner`-owned function granted to nobody,
+ *  reached only from the door's own SECURITY DEFINER body. */
+export const CEILINGS = {
+  docs_per_day: 10000, pages_per_day: 100000, ocr_concurrency: 16, llm_witness_concurrency: 16,
+};
+
 /** A firm of its own, with an owner and whichever extra ranks the cell asks for. A FRESH firm
  *  per cell, because `clara.firm_document_limits` is keyed on the FIRM: two cells sharing one
  *  would each be reading the other's arrangement. */
