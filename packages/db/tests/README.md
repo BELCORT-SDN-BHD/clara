@@ -734,3 +734,139 @@ later file in the same sweep does not inherit this one's arrangement.
 
 `legal-enforcement-mode-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
 does not preload it and fails loudly on a database without 0234, because a skip is not evidence.
+
+## `operator-support.test.mjs` `os.19` — #844
+
+os.14 (#774) pins the arm-1 lateral's SECOND ordering key (a money-carrying intent status beats a
+bare `opened_at desc`), but every world it or any other cell in the file builds gives a
+registration at most one intent pair with distinct `opened_at` values — so migration 0188's THIRD
+key (`i.id desc`) was provable only by reading the migration's own text. os.19 builds the one
+world in which it is observable at all: three checkout intents on one registration, two forced to
+the exact same `opened_at` instant, none of the three carrying the money.
+
+(Numbered os.19, not os.15: the file's own section-7 series already runs os.15 through os.18 —
+the new cell originally shipped as a second, colliding "os.15" and was renumbered in fix-round 1.)
+
+**Minting three intents without ever landing one in `session_created` or `processing`.**
+`clara.open_checkout_intent` (0186 §G) reuses only an unstamped, still-`open` intent, and
+separately refuses CLR09 `checkout_in_progress` outright while ANY intent sits in
+`session_created` or `processing` — so os.14's own "stamp then pay" idiom would BLOCK the next
+open rather than merely fail to be reused. os.19 instead force-transitions each intended
+predecessor straight `open -> cancelled` (the transition table's first lawful row, no session
+stamp needed) between opens.
+
+**`forceOpenedAt` (local to this file)** disables and re-arms
+`t_checkout_intents_session_stamp` around a bare `opened_at` UPDATE — the one identity column the
+0186 trigger's FIRST check otherwise freezes unconditionally — mirroring
+`checkout-convergence-fixtures.mjs`'s own `backdateStatus` idiom for `status_at`.
+
+**The winner is read from `get_operator_support_case`, never inferred from status content.**
+`list_operator_support_queue` deliberately projects only its twenty declared columns and drops
+`extra` (0188 §1's own comment); the tied intent's id is exposed only through
+`get_operator_support_case`'s merged `extra.intent_id`. The queue is still asserted for arm
+membership and the reported status/reason/timestamp, corroborated against the intent read as
+root.
+
+**Acceptance #3 ("the cell fails if the id key is removed") is checked two ways, since one alone
+does not cover the criterion (code review L03-CRS1).** Half one checks the key's DIRECTION: os.19
+runs a companion `SELECT` — the identical predicate from 0188's arm-1 lateral, never the deployed
+function or the migration body — with `i.id desc` reversed to `i.id asc`, and reads that it
+deterministically names the OTHER (loser) intent; a second companion run with the shipped
+direction is asserted to agree with the door, confirming the companion query is faithful. THIS
+HALF ALONE DOES NOT PROVE REMOVAL: a hand-written copy of the predicate still compares on id
+either way, so it cannot go red for a recut that drops the clause outright — measured on this rig,
+doing exactly that to a copy of the predicate named the SAME row as the shipped predicate in 6 of
+10 three-intent/two-instant worlds. Half two closes that gap with a STRUCTURAL pin against the
+ACTUAL deployed function body (`normalizedBody(SHARED_SIG)`, this file's own os.11 census idiom):
+it asserts the live, lower-cased, whitespace-stripped `clara._operator_support_cases` source still
+contains the exact ORDER BY clause ending `i.iddesc`, which is present in the real body and absent
+from both a simulated id-removed variant and a simulated id-reversed variant (checked directly
+against the live catalog and against string variants of it, not merely reasoned about).
+
+`EXPECTED_CELLS` (this file's own `os.VACUITY CONTROL`) is 19, one more than before this ticket.
+
+## `reset-gate-routing.test.mjs` — #845
+
+Every `reset()`-gated upgrade-drill suite (checkout-convergence, hrd-a/hrd-b, rig-docs,
+rig-events, rig-runtime, s6, wave-a, wave-b, x37/x40/x41 and the x42 split kit — 13 files) now
+obtains the destructive `reset` from `../scripts/reset.mjs` and calls it as
+`guardedReset(reset, options)`, the same `rig-reset-guard.mjs` wrapper T19 in
+`rig-isolation.test.mjs` has used since #773. Before this ticket only T19 was wrapped; the shared
+gate in `lib/guard.mjs` admits any loopback host regardless of database name, so any of those 13
+files could still drop a named, in-use rig database under `CLARA_RIG_ALLOW_RESET=1` +
+`CLARA_ALLOW_DESTRUCTIVE=1`.
+
+`reset-gate-routing.test.mjs` does not hand-list the files it checks (beyond one cross-check
+constant): it WALKS `packages/db/tests` for every module whose source imports
+`<path>/scripts/reset.mjs`, either dynamically (`import("…")`) or via a static
+`import … from "…"` (widened by code review L03-CRS2 — the dynamic-only spelling this suite
+shipped with let a static-import caller with a bare `reset()` keep the whole suite green;
+demonstrated with a temporary probe module, removed before commit), asserts that set is a
+SUPERSET of the audited 14 (T19's own file plus the 13 this ticket fixed) — a missing known file
+fails, an extra file is logged, not failed (code review L03-CRS4 — an exact match went red for a
+correctly-wrapped FUTURE file, a false red a later lane could misread as its own regression; the
+hard bar for an extra file's call sites is the next cell, which needs no list). It then blanks out
+comments and string/template literals and asserts none of the discovered files has an unwrapped
+`reset(` call token left (not only the `await reset(` spelling — `const r = await reset(...)`,
+`return reset(...)` and an extra space before the paren are all caught the same way), and that
+each imports `guardedReset` at least as many times as it imports the raw `reset`. A file added
+later that imports the destructive `reset` unwrapped, dynamically or statically, is caught by this
+suite without anyone maintaining a list. One behavioural cell imports the ACTUAL
+`scripts/reset.mjs` export — the identical module object every one of the 14 files resolves — to
+prove it is a real, callable export, then proves `guardedReset` refuses a non-disposable name
+(`clara_631`) before a spy that never delegates to that export is entered; because the structural
+cells already show every drill funnels through this same `guardedReset`, that one proof
+generalises to all 14 call sites.
+
+**Acceptance #3 ("every affected drill still passes its ordinary run") is PARTIAL, not done (code
+review L03-CRS3).** What runs here is only "no import-time crash from the added import" — a skip
+is not the drill's ordinary run — and, as the next paragraph says plainly, 3 of the 14 files have
+no CI leg anywhere to run the real thing. The fix-round report states this criterion's status as
+PARTIAL rather than folding it into the ticket's overall DONE.
+
+**This suite never sets `CLARA_RIG_ALLOW_RESET`.** The 14 drills' own destructive paths are meant
+to be CI's job, one file at a time, on an isolated database — but as of this ticket only 11 of the
+14 actually have a CI leg: `.github/actions/closed-wave-upgrade-drills/action.yml` runs
+hrd-a-recut-guard, hrd-b-upgrade-kit, rig-docs-upgrade, rig-events-upgrade, s6-upgrade,
+wave-b/wb-0020-upgrade, x37/x40/x41-upgrade, and `.github/actions/frontier-leg/action.yml` runs
+x42-split-upgrade-kit; T19 (`rig-isolation.test.mjs`) runs in the ordinary battery and skips
+without the flag. `checkout-convergence-upgrade.test.mjs`, `rig-runtime-upgrade.test.mjs` and
+`wave-a-upgrade.test.mjs` have **no CI leg at all** — their destructive path has never run
+anywhere but a worker's own machine, by hand, per that file's own header recipe (a gap tracked as
+a follow-up, not closed by this ticket). What this suite proves locally, safely, and on a shared
+rig is the ROUTING: the name check runs before any of those 14 paths could reach a real `reset()`
+— never that the destructive body itself has been exercised for the 3 files with no CI leg.
+
+## `fixed-asset-acquisition.test.mjs` `p639.birth.opening_excluded` / `p639.birth.opening_admitted` — #884
+
+`p639.birth.exclusions`'s own comment used to name the wrong arm and the wrong code for the
+fixed-asset K-family opening-balance exclusion: it said the arm was proven only by a `prosrc`
+string search because "no opening-seed fixture exists anywhere in packages/db/tests", and it
+implied the birth trigger (`clara._tf_fa_acquisition_birth`) itself raised the refusal. Both were
+wrong. A fixture already existed — `kSeededFaClient` (`x41-fa-world.mjs`), a thin wrapper over the
+wave-b opening-seed doors (`wb.onboardingClient`, `wb.createOpeningSeed`, `wb.seedFixedAsset`,
+`wb.draftOpeningItem`, `wb.approveOpeningSeed`) that `x41.b2`'s door-(e) sub-case, K8/K9
+(`wave-b/wb-k-supersede-fa.test.mjs`) and several depreciation batteries already reuse — and the
+refusal for a gl-balance leg on an ENROLLED fixed-asset account is raised by the BELT
+(`clara._tf_fa_movement_belt`, migration 0041's arm (e)), SQLSTATE CLR40, reason
+`fa_k_gl_balance_on_enrolled`, not the birth trigger and not CLR38.
+
+`p639.birth.opening_excluded` builds a fresh onboarding client via `freshEnrolledFaClient`
+(`x41-fa-world.mjs` — the enrol-and-chart prefix `kSeededFaClient` also composes, factored out to
+one place rather than duplicated across the two, code review STD-1), which explicitly ENROLS
+COST/ACCUM/EXPENSE (`upsert_fa_account_profile` is a deliberate act, never automatic — the belt
+only sees an account as enrolled once this door has run for it). The cell then drafts a plain
+`gl_balance` opening item naming the enrolled COST account directly (never itemised as
+`item_kind='fixed_asset'`) plus a second, ordinary item on SHARE so the set's net OBE ties to zero
+ahead of the belt, and asserts the approval refuses CLR40 `fa_k_gl_balance_on_enrolled` naming the
+account code, with the register row count PINNED TO THE LITERAL ZERO the criterion names both
+before and after the refused approval (code review L03-CRS5 — a before/after delta alone would
+stay green on a fixture that already carried a register row) and both entries still `draft` — the
+belt is a DEFERRED constraint trigger, so its exception unwinds the WHOLE approval, not just the
+register write.
+
+`p639.birth.opening_admitted` drives `kSeededFaClient` and asserts EXACTLY ONE `clara.fixed_assets`
+row ties to the opening entry (`acquisition_entry_id`), and it is the SAME id `seed_fixed_asset`'s
+own receipt named — the behavioural proof that `_tf_fa_acquisition_birth`'s
+`if new.is_opening_balance then return null; end if;` guard actually prevented a second birth,
+rather than a `prosrc` string match proving only that the guard's TEXT exists.

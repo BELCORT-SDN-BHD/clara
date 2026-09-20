@@ -90,6 +90,7 @@ export function skipUnlessReset(t) {
  *  chain and destroys the premise the drill exists to establish. */
 export async function freshDb() {
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
   const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
   // Cluster-wide role survival, TWICE in this one function (review-518-r2 F1): the
@@ -102,11 +103,11 @@ export async function freshDb() {
   // placed directly after an existing reset() moves no migrate. Requires
   // CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step; see
   // tests/rig-cluster-reset.mjs's header).
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   await x41EnsureReady();
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPre0042(), log: () => {} });
   return { migrate };

@@ -62,8 +62,9 @@ function exportBaseline() {
  *  needs every already-applied file present on disk, every subsequent call). */
 async function freshBaseline() {
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   const dir = exportBaseline();
   await migrate({ dir, log: () => {} });
   return { migrate, dir };

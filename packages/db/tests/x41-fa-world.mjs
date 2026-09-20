@@ -352,6 +352,23 @@ export async function earnRamp(client, period, opts = {}) {
   return out;
 }
 
+/** A fresh onboarding client, its OWN chart, and COST/ACCUM/EXPENSE explicitly ENROLLED through
+ *  `upsert_fa_account_profile` — a deliberate act, never automatic; `clara._tf_fa_movement_belt`
+ *  only sees an account as enrolled once this door has run for it. `label` is used verbatim as the
+ *  onboarding client's name (callers that need uniqueness across a shared rig, like
+ *  `kSeededFaClient` below, add their own suffix before calling this). Shared by `kSeededFaClient`
+ *  and `fixed-asset-acquisition.test.mjs`'s `p639.birth.opening_excluded` (#884 code review
+ *  STD-1) so "what does an enrolled FA onboarding client look like" has exactly one source of
+ *  truth. */
+export async function freshEnrolledFaClient(label) {
+  const w = await faWorld();
+  const o = await wb.onboardingClient(w.users.hana, label);
+  await wb.seedOpeningCoa(w.users.alice, o.client);
+  await buildFaChart(w.users.alice, o.client);
+  await upsertFaProfile(w.users.alice, { client: o.client, assetAccount: COST, accumAccount: ACCUM, expenseAccount: EXPENSE });
+  return { w, o };
+}
+
 // ---------------------------------------------------------------------------
 // A K-seeded (carry-down) FA client — the ONLY pre-D-a writer of the register.
 // Built entirely through the audited K-family verbs, with the FA account ENROLLED
@@ -367,11 +384,7 @@ export async function kSeededFaClient(label, {
   // pre-existing caller keeps the approved-seed behaviour byte for byte.
   approveSeed = true,
 } = {}) {
-  const w = await faWorld();
-  const o = await wb.onboardingClient(w.users.hana, `x41k_${label}_${uniqTag()}`);
-  await wb.seedOpeningCoa(w.users.alice, o.client);
-  await buildFaChart(w.users.alice, o.client);
-  await upsertFaProfile(w.users.alice, { client: o.client, assetAccount: COST, accumAccount: ACCUM, expenseAccount: EXPENSE });
+  const { w, o } = await freshEnrolledFaClient(`x41k_${label}_${uniqTag()}`);
 
   const doc = await wb.openingDoc(w.users.alice, { firm: w.firms.A, client: o.client });
   const asOf = mon(-6).end; // the carry-down baseline — DB-clock derived, never a literal
