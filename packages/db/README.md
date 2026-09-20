@@ -61,6 +61,89 @@ checksum. Filenames must be `NNNN_name.sql`; the runner rejects late insertion b
 frontier. Files with no leading digit, including `UNNUMBERED_*.sql`, are silently skipped.
 `CLARA_MIGRATIONS_DIR` selects an alternate chain and must be set correctly for a split test rig.
 
+### From-scratch reapply on a reused cluster (#867)
+
+Cluster roles (created by `create role`) are cluster-global, not per-database — `drop database`
+never removes them. Migration
+[0154_binding_proposal_pr_1.sql](migrations/0154_binding_proposal_pr_1.sql)'s tail pins the
+cluster-wide `clara%` role count at the literal `14`, a measured proof that 0154 itself mints no
+role. `0154` is applied and immutable; this section documents the hazard around it, it does not
+change it. Two migrations after 0154 mint four more roles:
+[0160_checkout_gate_c2_stripe_events.sql](migrations/0160_checkout_gate_c2_stripe_events.sql)
+(`clara_stripe_webhook`, `clara_stripe_webhook_login`) and
+[0163_checkout_gate_c3_folded_door.sql](migrations/0163_checkout_gate_c3_folded_door.sql)
+(`clara_auth_wall`, `clara_auth_wall_login`), each guarded by `if not exists` so a normal single
+from-scratch chain only creates them once.
+
+Re-applying the WHOLE chain from scratch into a **fresh database on a cluster that already ran the
+chain once** hits those four leftover roles before it reaches 0154 again: the count already reads
+`18`, not `14`, and 0154 raises `CLR10` — a cluster-reuse hazard, not a migration defect.
+
+**Preferred:** one from-scratch chain per cluster (a fresh disposable Postgres cluster, or a fresh
+container/instance). [tests/README.md](tests/README.md) states the same rule for the test rig.
+
+**If a cluster must be reused** (the same single working database is being wiped and re-migrated,
+so nothing else on the cluster still depends on the four roles once the old database is gone):
+[scripts/role-census-reset.mjs](scripts/role-census-reset.mjs) automates it —
+
+```sh
+node scripts/role-census-reset.mjs           # --check (default, read-only): reports whether a
+                                              # from-scratch reapply would pass 0154 today, and
+                                              # names anything on the cluster still depending on
+                                              # one of the four roles (pg_shdepend, cluster-wide)
+CLARA_ALLOW_DESTRUCTIVE=1 node scripts/role-census-reset.mjs --apply   # drops exactly those four
+                                              # roles, and ONLY if none of them has a live
+                                              # dependent anywhere on the cluster; otherwise it
+                                              # refuses outright (never a partial drop) and names
+                                              # what to `drop owned by <role>` first
+```
+
+The exact statements it runs, for the record (base role before its `_login` twin — the order
+`rolesMintedAfterPin()` reads off the migration files, `apply()` iterates, and
+`role-census-reset.test.mjs`'s "rcr.mint against the REAL migrations directory" cell pins):
+`drop role clara_stripe_webhook; drop role clara_stripe_webhook_login; drop role
+clara_auth_wall; drop role clara_auth_wall_login;` — after which a from-scratch chain is
+**expected** to pass 0154's census (14) and let migrations 0160/0163 recreate the four roles
+fresh partway through the same chain (back to 18). **Verified end to end (2026-09-20)**: a
+genuinely separate, disposable PostgreSQL 17 cluster was provisioned for this proof alone —
+`sudo pg_createcluster 17 l04chk --port=55799`, `pg_hba.conf` edited to the same trust lines this
+rig's own lane clusters carry — never RIG.md's shared lane cluster at 55744, so its "never run a
+second from-scratch chain on your cluster" rule was not touched. First pass:
+`createdb clara_scratch1` then `node scripts/migrate.mjs` — 229/229 applied, target
+`0234_legal_enforcement_mode`, clara% role count 18. `clara_scratch1` was then dropped
+(`drop database clara_scratch1`) so nothing on the cluster still depended on the four roles —
+this recipe's own stated precondition ("the same single working database is being wiped ...
+so nothing else on the cluster still depends on the four roles once the old database is gone"),
+confirmed with `node scripts/role-census-reset.mjs` (read-only): both base roles read "no shared
+dependents" once the old database was gone. `CLARA_ALLOW_DESTRUCTIVE=1 node
+scripts/role-census-reset.mjs --apply` then dropped exactly the four roles, cluster at clara% = 14
+(0154's pin, exact match). A fresh `createdb clara_scratch2` plus a second
+`node scripts/migrate.mjs` — the from-scratch reapply on a cluster that already ran the chain
+once, which is exactly what AC1 asks for — completed 229/229 with no CLR10 and no other error,
+`clara.schema_migrations` reading `count=229, max=0234_legal_enforcement_mode`, and the live
+clara% role count back at 18 exactly as this recipe predicts. `clara_scratch2` was dropped and the
+whole disposable cluster removed (`pg_dropcluster --stop 17 l04chk`) immediately after; this lane's
+own `clara_l04` was never touched by any step above (`schema_migrations` read `count=229,
+max=0234` before and after, unmoved) and RIG.md's ten lane clusters stayed online throughout.
+**#867's AC1 is closed on this record**: the recipe was correct all along; what earlier rounds
+lacked was a cluster with the chain to spare, not a working fix, and `pg_createcluster`/
+`pg_dropcluster` (from this host's already-installed `postgresql-common` package) supplies
+exactly that without needing a second physical machine. The script reads 0154's pinned literal and the
+post-0154 role manifest from the migration files themselves (never a hand-kept copy), so a future
+migration minting another role is picked up automatically. Verified on this package's own rig
+(`packages/db/tests/role-census-reset.test.mjs`): the live cluster's count (18) minus its four
+minted roles matches 0154's pin (14) exactly, and dropping/recreating the two `_login` roles
+(no direct grants, membership only) round-trips cleanly with the checkout-gate-c2 (18/18) and
+checkout-gate-c3 (69/69) batteries re-run green afterward. The two base roles
+(`clara_stripe_webhook`, `clara_auth_wall`) stay blocked on any rig that still has a live
+checkout-gate lane, by design — that lane's own table grants are the dependents `DROP ROLE`
+correctly refuses on, and the script reports that refusal by name rather than guessing past it.
+The dependent-check (`sharedDependents()`) sees a SHARED-object dependency (a grant directly on a
+database or tablespace, `pg_shdepend.dbid = 0`) as well as a per-database one, so `apply()`'s
+"never a partial drop" contract holds even for that shape (L04B-SPEC-05; latent on today's rig —
+`role-census-reset.test.mjs` proves it against a planted `GRANT ... ON DATABASE`, not a live
+dependency this cluster happens to carry).
+
 Read the repository frontier from `migrations/` and the target frontier from:
 
 ```sql

@@ -29,7 +29,9 @@ node --test --test-concurrency=1 $GATES tests/accrual-adjustments.test.mjs
 
 The package test command includes the preintegration gates and serializes files within this package.
 Some fixtures create sibling databases or cluster roles; they need a disposable **cluster**, not
-merely an empty schema. Do not run the suite against the production project.
+merely an empty schema. Do not run the suite against the production project. A from-scratch chain
+re-applied into a fresh database on a cluster that already ran it once reds migration 0154's role
+census — see [../README.md#from-scratch-reapply-on-a-reused-cluster-867](../README.md#from-scratch-reapply-on-a-reused-cluster-867).
 
 Use matching PostgreSQL 17 client binaries for clone/dump tests; `PG_DUMP` and `PSQL` override PATH.
 The migration helper's `cloneAmbientDatabase` enforces the destructive guard against its source
@@ -93,6 +95,146 @@ A new feature battery ships three things together: the battery itself, its own g
 it, and a cohort row in [rig-meta.mjs](rig-meta.mjs) that names every object the migration adds so
 the rig census stays wholly-present-or-wholly-absent. `counterparty-identity.test.mjs` +
 `counterparty-identity-preintegration-gate.mjs` (migration `0215`, #647) is the current example.
+
+## document_regions.field_path literals, kept honest (#857)
+
+`clara._assert_field_path` (migration 0191) is enforced at `clara.persist_document_extraction`
+alone — the table accepts anything written to it directly, and both `packages/db/tests/` and
+`packages/runtime/tests/` do write it directly (71 raw `insert into clara.document_regions`
+statements across 35 files, at last count — the ONLY two trees that ever bypass the audited
+door). `scripts/check-document-region-field-paths.mjs` (repo root, chained into the root `lint`
+script beside `check-dead-citations.mjs`) scans exactly those two trees for a literal
+`field_path` value — an inline SQL string literal positioned at the column's own slot in a raw
+insert, or a `field_path: "…"` object-literal property one step removed from it — and refuses one
+that does not conform to 0191's grammar, read from 0191's own source text rather than duplicated
+by hand. A `$N` placeholder, a variable or a `${…}`-interpolated template literal carries no
+literal to check statically and is skipped; an evidence-CITATION object
+(`{ region_idx, quote, field_path }`, the chat/prompt-tool shape, unrelated to this table) is
+excluded by its own `region_idx` marker. `scripts/check-document-region-field-paths.selftest.mjs`
+proves the detector against seeded fixtures and re-verifies the real two trees are clean today.
+
+**Scans untracked files too (L04B-SPEC-06):** `scanTargetFiles()` lists both git's INDEX
+(`--cached`) and any untracked-but-not-`.gitignore`d file (`--others --exclude-standard`), not the
+INDEX alone — the gap a tracked-only listing left was exactly the one commit AC1's "exits non-zero
+on a seeded malformed path" cares most about, the one that INTRODUCES a malformed fixture, before
+its author has ever run `git add`. Proven both ways: a real subprocess run against an unstaged
+decoy now exits 1 and names it, and a staged one still does too.
+
+This is the LINT half of #857 only. The ticket's other half — a `clara.document_regions` table
+`CHECK` built on a boolean sibling of `clara._assert_field_path` — needs a new migration, which a
+wave-1 lane may not cut (docs/plan/active/riders-2026-09-20/WORK-ORDER.md rule 5); left to a
+follow-up. The lint is preventive on its own (every literal conforms today) but structural only
+once the `CHECK` lands — see this ticket's final report.
+
+## World contamination and T10b (#866)
+
+`rig-isolation.test.mjs`'s T10b asserts that `clara_agent_ro` and the two wake roles can
+`EXECUTE` nothing outside `pg_catalog`/`clara`. Once a Workflow/WDK **World** is bootstrapped
+on a database (`pnpm --filter @clara/runtime exec bootstrap`, [runtime README §engine-bootstrap]
+(../../runtime/README.md)), that stops being true for a reason that has nothing to do with clara's
+RBAC: PostgreSQL grants `EXECUTE` on a newly-created function to `PUBLIC` by default, and
+`graphile-worker`'s own bootstrap never revokes it on `workflow`/`workflow_drizzle`/
+`graphile_worker`. Every role — including the two clara roles T10b checks — can then reach
+`graphile_worker.add_job` and friends. That is upstream default-grant behaviour on schemas T10b
+was never scoped to police, not a leak in the grant matrix this package owns.
+
+`worldSchemaPresent()` (`rig-meta.mjs`) checks for those three schema names and T10b skips with a
+named reason (`World contamination (#866): …`, distinct from the `unready` pre-integration skip)
+the moment any of them exist, so the cell never has to guess. On a database with **no** World
+bootstrapped it runs unchanged and still reds on a genuine RBAC leak — nothing about what the
+read/wake roles are actually granted changed. Two AC2 cells in `rig-isolation.test.mjs` pin
+exactly that: `T10b-AC2 worldSchemaPresent() reads false on a no-World rig` guards the skip arm
+from ever becoming universal by accident, and `T10b-AC2 a genuine PUBLIC-executable leak outside
+clara is named by agentReachableOutsideClara()` plants a real PUBLIC-executable function in a
+throwaway schema and asserts the enumeration names it (vacuity-controlled against a
+deliberately-neutered `agentReachableOutsideClara()`). The first of those two ALSO carries a
+named skip arm (L04B-SPEC-03): its own job is to guard T10b's skip arm from becoming universal on
+a CLEAN rig, which has nothing to say about a genuinely World-contaminated one — without the
+guard's own skip, it reds on exactly the rig shape T10b's skip exists to make pass, defeating its
+own requirement. Reproduced on a cloned sibling database with only a bare `create schema
+workflow` (no full bootstrap needed — `worldSchemaPresent()` checks namespace existence alone):
+red before the fix, skip after, T10b itself unaffected either way.
+
+**Recipe:** if your session needs both a bootstrapped World (for `WORKFLOW_POSTGRES_URL`-driven
+runtime work) and a clean T10b run, keep them on separate databases rather than relying on the
+skip — clone a sibling first (`create database <sibling> template <source>`, no active connections
+on the source) and bootstrap the World only on the sibling. `RIG.md` in an active wave plan
+restates this per-lane; this section is the durable copy.
+
+## The opening-balance evidence-link race, and a measured gap (#854)
+
+`coding-lane-evidence-link.test.mjs`'s `cle.race.*` cells and `opening-balance-evidence-link.test.mjs`'s
+`obw.race.*` cells share ONE two-session driver, `humanHoldThenContend`
+(`coding-lane-evidence-link-fixtures.mjs`): side `a` runs and holds a transaction open, side `b`
+fires and must be PROVEN blocked (`wait_event_type = 'Lock'` and `pg_blocking_pids` naming `a`'s
+backend — a schedule that never blocked proves nothing about a race) before `a` commits and `b`
+resolves against `a`'s committed state.
+
+`clara.approve_opening_seed` / `clara.approve_opening_correction` refuse `CLR31 not_serializable`
+outside a genuinely SERIALIZABLE transaction, so driving the opening lane through this helper needs
+`side.isolation = "serializable"` — the ONLY level it accepts. A SERIALIZABLE side can also lose at
+**commit** rather than at the statement its `run()` awaited (PostgreSQL defers a `40001`
+serialization failure discovery to `COMMIT` in this shape); `commitOrCapture` folds that outcome
+into the same `out.a`/`out.b` shape a statement-level refusal already uses, so a cell asserts one
+shape regardless of where Postgres actually raised it.
+
+**What `obw.race.evidence_then_opening` measured, twice, reproducibly:** `clara.documents` is
+locked `FOR UPDATE` by both the coding lane and the opening lane purely for serialization
+(`clara._lock_document_binding`) — neither lane's body ever changes a column on that row. When
+`attach_entry_evidence` (plain, holds first) commits a document it only locked, the blocked
+`approve_opening_seed` (SERIALIZABLE, contends) is granted the SAME, byte-identical row, sees no
+reason to abort, and evaluates its own conflict probe against a snapshot taken BEFORE the
+attachment committed — which never saw the live link. **Both sides commit.** The reverse arrival
+order (`obw.race.opening_then_evidence`) does not have this hole: the contender there
+(`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads fresh per statement once
+unblocked.
+
+**Mechanism — this lane's own reading, not a cited fact (L04-S07):** a plausible account is that
+PostgreSQL's SERIALIZABLE "second updater" protection fires only when the row a transaction waited
+on was actually **updated or deleted** by the transaction that held the lock, never when it was
+merely locked and released, which would explain why a lock-only commit does not force the waiter
+to re-evaluate. An at-least-equally-plausible alternative this lane did not rule out: SSI aborts a
+transaction only at the PIVOT of a dangerous structure (an incoming AND an outgoing
+rw-antidependency — PostgreSQL docs, "Serializable Isolation Level"), and a single rw-conflict here
+may simply not be the shape SSI polices, which has nothing to do with the second-updater rule.
+Either mechanism is consistent with the measurement; neither is confirmed against the PostgreSQL
+source or a core committer. A successor fix should verify the actual mechanism before assuming
+either account, since the two point at different repairs.
+
+This is a genuine double-posting gap in migration 0213's opening-lane wall, MEASURED by the two
+`obw.race.*` cells and left UNREPAIRED here — #854's own brief puts "repair either wall, either
+approver or the document lock helper" and "any repair if both sides can commit" explicitly out of
+scope, since fixing it needs either a new migration (a wave-1 lane may not cut one) or a change to
+`clara._lock_document_binding`/`clara.approve_opening_seed`, both named out of scope in the ticket.
+`obw.race.evidence_then_opening` asserts the CURRENT (double-posting) outcome as a regression
+sentinel; a future repair updates that one assertion, deliberately, rather than the test going red
+by surprise. **Filed as GitHub issue #1014** ("Opening-balance evidence wall: a concurrent evidence
+attachment and opening approval can both commit", state OPEN, labels `bug` + `ready-for-agent`):
+recorded as a follow-up in
+`docs/plan/active/riders-2026-09-20/reports/wave1-lane04-final.md` and
+`docs/plan/active/riders-2026-09-20/reports/wave1-lane04-fixround-1.md`; repro is
+`obw.race.evidence_then_opening` verbatim, and the issue body also names the correction door's
+shared exposure (L04B-SPEC-07, below).
+
+**AC2's "exactly one", reinterpreted (L04B-SPEC-04):** the brief's literal wording is "asserts
+exactly one". Neither race cell pins a bare `1` — `obw.race.opening_then_evidence` asserts
+`s.drafts.all.length` (the seed's own item count, `>= 3` by `obw.siblings_ok`'s mandatory
+multi-item setup) and `obw.race.evidence_then_opening` asserts `s.drafts.all.length + 1`. This is
+deliberate: #821's carve-out is that many opening items legitimately share one tie document, so a
+single-item seed is not a shape available to pin a literal `1` against without weakening the
+multi-item coverage the ticket also requires. "Exactly one" is read as "exactly the seed's own item
+count and nothing else"; the second order's `+ 1` count IS the measured defect above, not a looser
+reading of the AC.
+
+**`approve_opening_correction` is never driven (L04B-SPEC-07):** the brief names it beside
+`approve_opening_seed` as one of "the contending doors", but both race cells drive the seed door
+only. It shares the exact lock path: `clara.approve_opening_correction` (0017:4162) and
+`clara.approve_opening_seed` (0017:3784) both call `clara._approve_opening_entry` per draft entry
+(0017:4241 and 0017:3962 respectively) — the same helper, whose `UPDATE` into `journal_entries`
+fires `t_source_binding_wall_upd` (0213), which takes `clara._lock_document_binding` first
+regardless of which approver's `UPDATE` tripped it. So the double-posting hole measured above is
+architecturally reachable from the correction door too, untested by this ticket — the residual
+issue (above) should name both doors, not only the seed one.
 
 ## Owner-level fixture DML, where it is unavoidable
 

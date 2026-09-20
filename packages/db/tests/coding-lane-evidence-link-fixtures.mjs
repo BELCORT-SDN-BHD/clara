@@ -199,12 +199,27 @@ export async function wallCatalog() {
 // blocked (`wait_event_type = 'Lock'` AND `pg_blocking_pids` naming `a`'s backend) before `a`
 // commits. A schedule that never blocked proves nothing about a race, so `provedBlocked` is
 // asserted by every cell that uses this.
+//
+// #854: `side.isolation` (only `"serializable"` is accepted) opens that side's transaction at
+// that isolation level instead of the bare `begin` above. `clara.approve_opening_seed` /
+// `clara.approve_opening_correction` refuse CLR31 `not_serializable` outside a genuinely
+// SERIALIZABLE transaction (0171), so the opening lane cannot be driven through this helper at
+// all without it. A SERIALIZABLE side can also lose only at COMMIT (Postgres defers the
+// conflict to `40001` there, not to the statement that read the stale snapshot) rather than at
+// the statement `b.run()` awaits — `commitOrCapture` below makes that failure visible on the
+// SAME `out.a`/`out.b` shape a statement-level refusal already uses, so a cell asserts one
+// shape regardless of WHERE Postgres actually raised it.
 // ===========================================================================================
+
+const ISOLATION_LEVELS = new Set(["serializable"]);
 
 async function enter(client, side) {
   const pid = (await client.query("select pg_backend_pid() as pid")).rows[0].pid;
   await client.query(`set role ${side.role ?? ROLES.authenticated}`);
-  await client.query("begin");
+  if (side.isolation != null && !ISOLATION_LEVELS.has(side.isolation)) {
+    throw new Error(`humanHoldThenContend: unsupported isolation "${side.isolation}"`);
+  }
+  await client.query(side.isolation ? `begin isolation level ${side.isolation}` : "begin");
   if (side.jwtSub != null) {
     await client.query("select set_config('request.jwt.claims', $1, true)",
       [JSON.stringify({ sub: side.jwtSub, role: "authenticated" })]);
@@ -236,6 +251,23 @@ const settle = (e) => ({
   message: e.message,
 });
 
+/** Commits `key`'s side unless it already lost at the statement `run()` awaited; a SERIALIZABLE
+ *  side can still fail HERE (Postgres's `40001` is a commit-time discovery, not a statement-time
+ *  one), so that failure is folded into the SAME `out[key]` shape a statement-level refusal
+ *  already uses — #854, so a cell asserts one shape regardless of where Postgres raised it. */
+async function commitOrCapture(client, out, key) {
+  if (out[key]?.ok === false) {
+    await client.query("rollback").catch(() => {});
+    return;
+  }
+  try {
+    await client.query("commit");
+  } catch (e) {
+    out[key] = settle(e);
+    await client.query("rollback").catch(() => {});
+  }
+}
+
 /** Side `a` runs and holds; side `b` must block on it, then resolve against `a`'s COMMITTED
  *  state. Returns `{ a, b, provedBlocked, waitEventType, waitEvent }`. */
 export async function humanHoldThenContend({ a, b }) {
@@ -260,9 +292,9 @@ export async function humanHoldThenContend({ a, b }) {
     out.provedBlocked = seen.blocked;
     out.waitEventType = seen.waitEventType;
     out.waitEvent = seen.waitEvent;
-    await c1.query("commit").catch(() => c1.query("rollback").catch(() => {}));
+    await commitOrCapture(c1, out, "a");
     await p2;
-    await c2.query("commit").catch(() => c2.query("rollback").catch(() => {}));
+    await commitOrCapture(c2, out, "b");
   } finally {
     for (const c of [c1, c2]) {
       await c.query("rollback").catch(() => {});

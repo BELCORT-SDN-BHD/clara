@@ -275,6 +275,20 @@ const APPROVE_SQL =
      p_tie_document_sha256 => $3, p_entry_revisions => $4::jsonb, p_attestation => $5,
      p_op_key => $6) as r`;
 
+/** `approve_opening_seed` on a CALLER-SUPPLIED client and transaction (#854) — the
+ *  race sides own their own transaction, exactly like `attachEntryEvidenceOn` /
+ *  `approveCodedEntryOn` in coding-lane-evidence-link-fixtures.mjs. The caller is
+ *  responsible for BEGINning the transaction (isolation level included — this fn
+ *  is called from inside `humanHoldThenContend`'s `enter()`, which now takes an
+ *  `isolation` option per side for exactly this door). */
+export async function approveOpeningSeedOn(client, {
+  seed, planRevision: rev, tieSha256 = null, entryRevisions, attestation = null, opKey,
+}) {
+  const r = await client.query(APPROVE_SQL,
+    [seed, rev, tieSha256, jtxt(entryRevisions), attestation, opKey]);
+  return r.rows[0].r;
+}
+
 export async function approveOpeningSeed(sub, {
   seed, planRevision: rev, tieSha256 = null, entryRevisions, attestation = null,
   opKey = null, serializable = true,
