@@ -1927,3 +1927,33 @@ test("af.35 a counterparty-identity event lands on kind=counterparties in BOTH d
     assert.equal(detail.kind, "counterparties", `af.35 get_activity_event agrees for ${row.event_type}`);
   }
 });
+
+test("af.36 a client-facet event and a knowledge event BOTH land on kind=clients in both doors, and that filter reaches them", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const cli = world.clients.A1;
+  // The ruling puts TWO prefixes on one rung — client.* and knowledge.* — so this cell needs one
+  // of each to prove the `or` and not merely the first half of it.
+  //
+  // BOTH are appended directly rather than read off the world, and the reason is a finding: the
+  // FIRST cut of this cell looked for a real `client.created` row, because `clara.create_client`
+  // is what `buildWorld` calls — and it failed. `client.created` is a REGISTERED but UNEMITTED
+  // event type on this estate (measured: clara.domain_events carries client.activated,
+  // client.onboarding_started and client.resolved, and not one client.created), so reading one
+  // would have been a test waiting forever for a row no door writes.
+  const activated = await mkEvent({ firm: FIRM_A(), type: "client.activated", client: cli, actor: ALICE() });
+  const captured = await mkEvent({ firm: FIRM_A(), type: "knowledge.captured", client: cli, actor: ALICE() });
+
+  const page = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["clients"], limit: 100 }));
+  assert.ok(page.every((r) => r.kind === "clients"), "af.36 the clients filter returns ONLY clients rows");
+
+  const clientRow = page.find((r) => r.id === activated.eventId);
+  assert.ok(clientRow, "af.36 a client.activated row is reachable under kinds=['clients']");
+  const knowledgeRow = page.find((r) => r.id === captured.eventId);
+  assert.ok(knowledgeRow, "af.36 a knowledge.captured row is reachable under the SAME kind");
+
+  for (const row of [clientRow, knowledgeRow]) {
+    assert.equal(row.kind, "clients", `af.36 list_activity files ${row.event_type} under clients`);
+    const detail = await getActivityEvent(BOB(), "event", row.id);
+    assert.equal(detail.kind, "clients", `af.36 get_activity_event agrees for ${row.event_type}`);
+  }
+});
