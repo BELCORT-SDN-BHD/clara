@@ -1340,10 +1340,17 @@ receipt.
 **The capacity wall is a WAITING state, not a raised limit.** #636 changes no default and touches
 none of the three reservation bodies. Measured on a migrated rig: 100 ≤1MB PDFs are admitted and
 the 101st is refused CLR18 on the DOCS guard with both ceilings flush (docs 100 / pages 1000); 100
-images refuse on docs; 20 ≤5MB PDFs refuse on PAGES. The daily window is
-`date_trunc('day', now() at time zone 'utc')` (0007:1644), i.e. **08:00 Asia/Kuala_Lumpur** — the
-read reports that in its `capacity` block so the surface can say 08:00 rather than "midnight".
-Moving the window to MYT is #635's ticket.
+images refuse on docs; 20 ≤5MB PDFs refuse on PAGES. The daily window WAS
+`date_trunc('day', now() at time zone 'utc')` (0007:1644), i.e. 08:00 Asia/Kuala_Lumpur, until
+**#964** (migration 0252) moved all three reservation bodies — `_reserve_document_ingest`,
+`_resize_document_reservation`, `_settle_document_reservation` — to
+`date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur')`, i.e. **MYT MIDNIGHT**. The three move
+together, byte-identically, because a mixed state would let one instant pass one check and fail
+another; `get_intake_batch`'s `capacity` block reports `window: 'myt_day'`,
+`resets_at_local: '00:00'` accordingly. Default quotas and the five-rung page ladder are
+unchanged. See `document-ingest-window-myt.test.mjs` for the mechanism proof (0234's own
+anchored-splice / reverse-substitution discipline, applied to a small internal-function recut with
+no time-travelling public door to observe through).
 ## #660 — the client home's money band (0232)
 
 TWO RELATIONS and THREE DOORS, all `clara_authenticated` only. No agent twin, no wake wrapper, no
