@@ -214,7 +214,15 @@ export function ClientFinancialSummary({
             </div>
           </div>
 
-          <ClientCashTrend points={pack.cashPoints} cashSet={pack.cashSet} loading={loading} />
+          <ClientCashTrend
+            clientId={clientId}
+            points={pack.cashPoints}
+            cashSet={pack.cashSet}
+            composition={pack.cash.composition}
+            compositionTotal={pack.cash.compositionTotal}
+            compositionTruncated={pack.cash.compositionTruncated}
+            loading={loading}
+          />
           <ClientIncomeExpenseChart
             clientId={clientId}
             series={pack.series}

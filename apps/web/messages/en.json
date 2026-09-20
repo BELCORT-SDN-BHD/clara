@@ -883,6 +883,21 @@
         "truncated": "Showing {shown} of {total} entries.",
         "accountsTruncated": "Showing {shown} of {total} accounts, largest first."
       },
+      "cashDrilldown": {
+        "heading": "What book cash is made of",
+        "tableLabel": "Cash accounts behind this balance, with their entries",
+        "colAccount": "Account",
+        "colBalance": "Balance",
+        "colMovement": "Movement this period",
+        "colReason": "Why this is cash",
+        "colEntries": "Entries",
+        "truncated": "Showing {shown} of {total} entries.",
+        "accountsTruncated": "Showing {shown} of {total} accounts, largest first.",
+        "reasonBankRegistry": "Registered bank account",
+        "reasonDeclaredCash": "Declared cash on hand",
+        "reasonDeclaredPettyCash": "Declared petty cash",
+        "reasonGeneric": "Marked as a cash account"
+      },
       "cashSet": {
         "missingTitle": "Nobody has said which accounts count as cash",
         "missingBody": "Book cash cannot be worked out until somebody chooses the cash and bank accounts for this client. This is not a figure of zero.",

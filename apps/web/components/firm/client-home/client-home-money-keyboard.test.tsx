@@ -33,6 +33,10 @@ enableDomInspection();
 const CLIENT = "c1c1c1c1-0000-4000-8000-000000000001";
 const ENTRY = "e1e1e1e1-0000-4000-8000-000000000002";
 const ACCOUNT = "a1a1a1a1-0000-4000-8000-000000000003";
+// #1001 — a distinct entry/account for the CASH arm's own composition table, so a cell can name
+// its href without ambiguity against the profit arm's.
+const CASH_ENTRY = "e2e2e2e2-0000-4000-8000-000000000006";
+const CASH_ACCOUNT = "a2a2a2a2-0000-4000-8000-000000000007";
 const PERIOD = { start: "2026-09-01", end: "2026-09-30", asOf: "2026-09-18", timezone: "Asia/Kuala_Lumpur" };
 
 function group(overrides: Partial<FigureGroup> = {}): FigureGroup {
@@ -52,7 +56,16 @@ function pack(): ClientFinancialPack {
     computedAt: "2026-09-18T02:00:00.000Z",
     period: { ...PERIOD, month: "2026-09-01", isMtd: true },
     coverageFloor: "2026-01-07",
-    cash: group(),
+    cash: group({
+      composition: [{
+        accountId: CASH_ACCOUNT, accountCode: "1010", name: "Maybank Current",
+        memberReason: "bank_registry", accountType: null,
+        openingCents: 17_000_000, movementCents: 1_234_055, closingCents: 18_234_055,
+        entries: [{ entryId: CASH_ENTRY, postingDate: "2026-09-10", memo: "Client payment", amountCents: 1_234_055 }],
+        entriesTotal: 1, entriesTruncated: false,
+      }],
+      compositionTotal: 1,
+    }),
     profit: group({
       valueCents: -123_456,
       composition: [{
@@ -133,6 +146,12 @@ test("the period control and the drilldown are both reachable, and the drilldown
     assert.ok(
       links.includes(`/clients/${CLIENT}/journals?tab=posted&entry=${ENTRY}`),
       `the drilldown is not keyboard-reachable: ${links.join(" | ")}`,
+    );
+    // #1001 — the CASH arm's own drilldown link is a SEPARATE row in a separate table; asserted
+    // by its own entry id so this cell cannot pass on the profit link alone.
+    assert.ok(
+      links.includes(`/clients/${CLIENT}/journals?tab=posted&entry=${CASH_ENTRY}`),
+      `the cash drilldown is not keyboard-reachable: ${links.join(" | ")}`,
     );
   } finally { await h.unmount(); }
 });

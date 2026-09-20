@@ -1012,6 +1012,28 @@ most every 30 seconds while the tab is open, and here is the last successful rea
 "delayed" rule is IMPORTED from `lib/work/use-work-detail.ts` (C77.12: one contract, one owner,
 extended by reference rather than copied), and a source-reading cell refuses a second literal.
 
+**#1001 — the CASH arm renders `cash.composition` too, headlined by the CLOSING balance.** Both
+`cash.composition` and `profit.composition` shipped on every read from 0232 onward, but only
+`profit.composition` had a consumer (`client-income-expense-chart.tsx`) until #1001: the owner's
+ruling of 2026-09-20 built the cash side now, mirroring the profit side's readable-table-with-
+per-row-journal-links pattern rather than leaving the client home permanently asymmetric.
+`client-cash-trend.tsx` is that consumer — the cash arm's own chart-and-drilldown home, exactly as
+`client-income-expense-chart.tsx` is the profit arm's — with ONE deliberate difference: **the
+row's headline is `closingCents`, never `movementCents`.** Book cash is a BALANCE cumulative from
+inception (0232's `q.closing`, summed with no lower bound); the profit table's movement headline
+is right THERE because profit is itself a movement over the period, but a cash table built the
+same way would not sum to the figure above it. `movementCents` is still shown, beside the balance,
+never in place of it. Each row's `memberReason` (`bank_registry` / `declared_cash` /
+`declared_petty_cash`) is rendered through a new CLOSED lookup,
+`lib/dashboard/financial-display.ts`'s `memberReasonKey` — the same discipline
+`coverageReasonKey` already holds for coverage reasons, so a raw machine token never reaches the
+screen. NO NEW CASE FOR "no published cash account set" WAS WRITTEN: 0232 returns
+`composition: []` on the same `v_set_id is null` branch that leaves `points: []`, so
+`client-cash-trend.tsx`'s existing `if (points.length === 0) return null` already withdraws the
+composition table with it, and `client-cash-summary.tsx`'s own unpublished-set banner stays the
+only face for that state. The read (`clara.get_client_financial_pack`, migration 0232) is
+UNCHANGED — this is rendering only.
+
 ### Recharts, and the table that is never a fallback
 
 `recharts@3.8.0` and `components/ui/chart.tsx` arrived through `pnpm --filter @clara/web ui:add

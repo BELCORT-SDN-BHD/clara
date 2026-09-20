@@ -24,7 +24,28 @@
 // REDUCED MOTION IS HONOURED AT THE SOURCE. `isAnimationActive` is off whenever
 // `prefers-reduced-motion: reduce` is set, so the animation is never started rather than started
 // and overridden.
+//
+// #1001 — THE CASH ARM'S OWN COMPOSITION TABLE lives here, under the trend, on the SAME
+// readable-table-with-per-row-journal-links pattern `client-income-expense-chart.tsx` already
+// established for profit — this file is the cash arm's own chart-and-drilldown home exactly as
+// that one is the profit arm's. `entryHref` is imported rather than re-spelled, per that file's
+// own header: "Built here once so the chart's table and any later caller cannot spell the same
+// drilldown two ways."
+//
+// THE HEADLINE IS THE CLOSING BALANCE, NEVER THE MOVEMENT. Book cash is a BALANCE cumulative from
+// inception (`financial-pack.ts`'s own `closingCents` — 0232's `q.closing`, summed over every
+// approved line up to and including the as-of, no lower bound); the profit table's `movementCents`
+// is the right headline THERE because profit is itself a movement over the period. A cash table
+// built the same way would not sum to the figure above it (the owner's ruling, 2026-09-20). Period
+// movement is shown BESIDE the balance, never instead of it.
+//
+// AND NO SPECIAL CASE FOR "NO PUBLISHED CASH SET" IS WRITTEN HERE. 0232 returns `composition: []`
+// on the SAME `v_set_id is null` branch that leaves `points: []` (migration 0232:891,910,1062-
+// 1065), so this component's existing `if (points.length === 0) return null` already withdraws the
+// composition table with it — the cash tile's own unpublished-set banner
+// (`client-cash-summary.tsx`) stays the only face for that state, exactly as the brief requires.
 
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
@@ -36,21 +57,32 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { DataTableCard } from "@/components/common/data-table-card";
 import { SectionHeader } from "@/components/common/section-header";
 import { CENTS_UNAVAILABLE, fmtCents } from "@/lib/registers/money";
-import { usePrefersReducedMotion } from "@/lib/dashboard/financial-display";
-import type { CashPoint, CashSetRef } from "@/lib/dashboard/financial-pack";
+import { memberReasonKey, usePrefersReducedMotion } from "@/lib/dashboard/financial-display";
+import type { CashPoint, CashSetRef, CompositionRow } from "@/lib/dashboard/financial-pack";
 import { formatDay } from "./client-financial-figure";
+import { entryHref } from "./client-income-expense-chart";
 
 const CHART_CONFIG = {
   cash: { label: "Book cash", color: "var(--chart-1)" },
 } satisfies ChartConfig;
 
 export function ClientCashTrend({
+  clientId,
   points,
   cashSet,
+  composition,
+  compositionTotal,
+  compositionTruncated,
   loading,
 }: {
+  clientId: string;
   points: CashPoint[];
   cashSet: CashSetRef | null;
+  /** The per-account BALANCE composition behind book cash — the drilldown's own population. */
+  composition: CompositionRow[];
+  /** How many cash accounts there are BEFORE the door's 50-row cap, and whether it bit. */
+  compositionTotal: number | null;
+  compositionTruncated: boolean;
   loading: boolean;
 }) {
   const t = useTranslations("ClientFinancial");
@@ -131,6 +163,86 @@ export function ClientCashTrend({
           ))}
         </TableBody>
       </DataTableCard>
+
+      {/* #1001 — THE CASH COMPOSITION. Each row is one member account, headlined by its CLOSING
+          balance at the as-of (never the period's movement — see the file header), with the
+          entries behind that movement — capped in the door (20 per account, 50 accounts per
+          group) and saying so, exactly as the profit table does. */}
+      {composition.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <SectionHeader level={4}>{t("cashDrilldown.heading")}</SectionHeader>
+          <DataTableCard label={t("cashDrilldown.tableLabel")}>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("cashDrilldown.colAccount")}</TableHead>
+                <TableHead className="text-right">{t("cashDrilldown.colBalance")}</TableHead>
+                <TableHead className="text-right">{t("cashDrilldown.colMovement")}</TableHead>
+                <TableHead>{t("cashDrilldown.colReason")}</TableHead>
+                <TableHead>{t("cashDrilldown.colEntries")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {composition.map((row) => (
+                <TableRow key={row.accountId}>
+                  <TableCell>
+                    <span className="font-medium">{row.accountCode}</span>{" "}
+                    <span className="text-muted-foreground">{row.name}</span>
+                  </TableCell>
+                  {/* THE HEADLINE. `closingCents` is the cumulative balance book cash itself is
+                      computed on — see the file header for why this is never `movementCents`. */}
+                  <TableCell
+                    className="text-right tabular-nums"
+                    data-testid="client-cash-drilldown-balance"
+                  >
+                    {row.closingCents === null
+                      ? CENTS_UNAVAILABLE
+                      : fmtCents(row.closingCents, tc("centsUnsafe"))}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.movementCents === null
+                      ? CENTS_UNAVAILABLE
+                      : fmtCents(row.movementCents, tc("centsUnsafe"))}
+                  </TableCell>
+                  <TableCell>{t(memberReasonKey(row.memberReason))}</TableCell>
+                  <TableCell>
+                    <ul className="flex flex-col gap-1">
+                      {row.entries.map((e) => (
+                        <li key={e.entryId}>
+                          <Link
+                            href={entryHref(clientId, e.entryId)}
+                            className="text-primary underline-offset-4 hover:underline"
+                          >
+                            {formatDay(e.postingDate)}
+                            {" · "}
+                            {e.amountCents === null
+                              ? CENTS_UNAVAILABLE
+                              : fmtCents(e.amountCents, tc("centsUnsafe"))}
+                            {e.memo ? ` · ${e.memo}` : ""}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                    {row.entriesTruncated ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t("cashDrilldown.truncated", {
+                          shown: row.entries.length, total: row.entriesTotal ?? 0,
+                        })}
+                      </p>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </DataTableCard>
+          {compositionTruncated ? (
+            <p className="text-xs text-muted-foreground" data-testid="client-cash-accounts-truncated">
+              {t("cashDrilldown.accountsTruncated", {
+                shown: composition.length, total: compositionTotal ?? composition.length,
+              })}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

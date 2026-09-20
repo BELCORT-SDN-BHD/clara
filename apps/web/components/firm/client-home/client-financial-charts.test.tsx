@@ -17,7 +17,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 
-import { renderComponent } from "../../../test/hookHarness";
+import { renderComponent, textOf } from "../../../test/hookHarness";
 import { enableDomInspection } from "../../../test/domInspect";
 import messages from "../../../messages/en.json";
 import { ClientFinancialSummary } from "./client-financial-summary";
@@ -385,6 +385,125 @@ test("a composition row links ONE journal entry to the EXISTING journals address
       `the drilldown does not address the existing journals page: ${links.join(" | ")}`,
     );
     assert.match(text(h), /September rent/);
+  } finally { await h.unmount(); }
+});
+
+// ===========================================================================================
+// #1001 — the CASH arm's own composition table, mirroring the profit arm's pattern above but
+// headlined by the CLOSING balance (the cumulative basis book cash itself is computed on) rather
+// than the period's movement, and carrying each row's member reason.
+
+test("ticket 1001 — the cash arm renders its composition, headlined by the CLOSING balance — never the period's movement", async () => {
+  const h = await mount({
+    load: async () => pack({
+      cash: group({
+        composition: [{
+          accountId: ACCOUNT, accountCode: "1010", name: "Maybank Current",
+          memberReason: "bank_registry", accountType: null,
+          openingCents: 17_000_000, movementCents: 1_234_055, closingCents: 18_234_055,
+          entries: [{ entryId: ENTRY, postingDate: "2026-09-10", memo: "Client payment", amountCents: 1_234_055 }],
+          entriesTotal: 1, entriesTruncated: false,
+        }],
+        compositionTotal: 1,
+      }),
+    }),
+  });
+  try {
+    const body = text(h);
+    assert.match(body, /Client payment/, "the cash drilldown row never reached the screen");
+    assert.ok(
+      hrefs(h).includes(`/clients/${CLIENT}/journals?tab=posted&entry=${ENTRY}`),
+      "the cash drilldown row does not address the existing journals page",
+    );
+    // THE HEADLINE IS THE CLOSING BALANCE, NOT THE MOVEMENT. Opening 170,000.00 + movement
+    // 12,340.55 = closing 182,340.55 — three DIFFERENT numbers, so a swap cannot hide behind two
+    // fields sharing a value. The row's own balance cell is asserted directly by its testid,
+    // rather than by string presence, because RM 182,340.55 also happens to be this fixture's
+    // book-cash headline above it and a body-wide match would pass even if the row itself were
+    // wrong.
+    const balanceCell = h.find((n) => (n as unknown as { getAttribute?: (k: string) => string | null })
+      .getAttribute?.("data-testid") === "client-cash-drilldown-balance");
+    assert.ok(balanceCell, "the composition row's balance cell is not queryable");
+    const balanceText = textOf(balanceCell as never).replace(/\s+/g, " ").trim();
+    assert.equal(balanceText, "RM 182,340.55", `the row's headline is not the closing balance: "${balanceText}"`);
+    assert.notEqual(balanceText, "RM 12,340.55", "the row presented the period's MOVEMENT as its balance");
+  } finally { await h.unmount(); }
+});
+
+test("ticket 1001 — each cash row says WHY it is cash, through a closed lookup — never the raw member_reason token", async () => {
+  const h = await mount({
+    load: async () => pack({
+      cash: group({
+        composition: [
+          {
+            accountId: ACCOUNT, accountCode: "1010", name: "Maybank Current",
+            memberReason: "bank_registry", accountType: null,
+            openingCents: 0, movementCents: 0, closingCents: 100_000,
+            entries: [], entriesTotal: 0, entriesTruncated: false,
+          },
+          {
+            accountId: "a2a2a2a2-0000-4000-8000-000000000005", accountCode: "1050", name: "Petty Cash Tin",
+            memberReason: "declared_petty_cash", accountType: null,
+            openingCents: 0, movementCents: 0, closingCents: 5_000,
+            entries: [], entriesTotal: 0, entriesTruncated: false,
+          },
+        ],
+        compositionTotal: 2,
+      }),
+    }),
+  });
+  try {
+    const body = text(h);
+    assert.match(body, /Registered bank account/, "the bank-registry row does not say why it is cash");
+    assert.match(body, /Declared petty cash/, "the declared-petty-cash row does not say why it is cash");
+    assert.equal(/bank_registry/.test(body), false, "the raw member_reason token reached the screen");
+    assert.equal(/declared_petty_cash/.test(body), false, "the raw member_reason token reached the screen");
+  } finally { await h.unmount(); }
+});
+
+test("ticket 1001 — both truncation disclosures appear on the cash arm when they apply", async () => {
+  const h = await mount({
+    load: async () => pack({
+      cash: group({
+        composition: [{
+          accountId: ACCOUNT, accountCode: "1010", name: "Maybank Current",
+          memberReason: "bank_registry", accountType: null,
+          openingCents: 0, movementCents: 500_000, closingCents: 500_000,
+          entries: [{ entryId: ENTRY, postingDate: "2026-09-03", memo: "One of many", amountCents: 10_000 }],
+          entriesTotal: 41, entriesTruncated: true,
+        }],
+        compositionTotal: 63,
+        compositionTruncated: true,
+      }),
+    }),
+  });
+  try {
+    const body = text(h);
+    assert.match(body, /Showing 1 of 41 entries/, "the entry-level cap on the cash arm said nothing about it");
+    assert.match(body, /Showing 1 of 63 accounts/, "the account-level cap on the cash arm said nothing about it");
+  } finally { await h.unmount(); }
+});
+
+test("ticket 1001 — with NO published cash account set, the cash arm keeps its empty state and renders NO composition table", async () => {
+  const h = await mount({
+    load: async () => pack({
+      cash: group({
+        valueCents: null, status: "unknown", coverage: "unknown", coverageReason: "cash_set_unpublished",
+        composition: [], compositionTotal: 0, compositionTruncated: false,
+      }),
+      cashPoints: [],
+      cashSet: null,
+    }),
+  });
+  try {
+    const body = text(h);
+    assert.match(body, /Nobody has said which accounts count as cash/, "the existing empty-state entrance regressed");
+    assert.equal(
+      h.find((n) => (n as unknown as { getAttribute?: (k: string) => string | null })
+        .getAttribute?.("data-testid") === "client-cash-drilldown-balance"),
+      null,
+      "a composition table rendered for an unpublished cash set",
+    );
   } finally { await h.unmount(); }
 });
 
