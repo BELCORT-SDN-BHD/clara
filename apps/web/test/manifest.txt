@@ -155,6 +155,7 @@ components/entry/signup-legal-stage.test.tsx
 components/firm-admin/accept-legal-dialog.test.tsx
 components/firm-admin/ai-usage-card.test.tsx
 components/firm-admin/commercial-state-card.test.tsx
+components/firm-admin/compliance-register-panel.test.tsx
 components/firm-admin/firm-admin-a11y.test.tsx
 components/firm-admin/firm-admin-keyboard.test.tsx
 components/firm-admin/firm-admin-pages-a11y.test.tsx

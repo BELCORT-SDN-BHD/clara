@@ -5661,6 +5661,7 @@
       "loading": "Loading the compliance register…",
       "empty": "No open compliance watches for this firm.",
       "clientNamesUnavailable": "Client names could not be loaded — the client column below shows raw ids",
+      "dispositionsFloored": "Your role can read this register, but not a watch's acknowledgement, snooze or resolution history — that needs bookkeeper access or higher.",
       "state": {
         "monitored": "Monitored",
         "early_warning": "Early warning",
