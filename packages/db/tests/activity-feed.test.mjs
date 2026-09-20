@@ -1957,3 +1957,39 @@ test("af.36 a client-facet event and a knowledge event BOTH land on kind=clients
     assert.equal(detail.kind, "clients", `af.36 get_activity_event agrees for ${row.event_type}`);
   }
 });
+
+test("af.37 firm.created lands on kind=firm, and the two LOOK-ALIKE families (firm_registration.*, firm_setup.*) stay on the stated default", async (t) => {
+  if (await gateKindLadder(t)) return;
+
+  // The firm row is REAL: `buildWorld` minted firm A through clara.create_firm, which appended
+  // firm.created under the firm it was creating.
+  //
+  // THE NEGATIVE IS THE POINT OF THIS CELL. In SQL LIKE, `_` is a single-character wildcard, so a
+  // ladder arm written `firm_%` would swallow `firm_registration.*` (three types) and
+  // `firm_setup.*` (four) as well — two families the owner's ruling does not name, and one of
+  // which #843's os.20 pins on the door's stated default on this same branch. Both are appended
+  // here under firm A so the assertion is about THIS ladder, not about another firm's rows.
+  const registration = await mkEvent({ firm: FIRM_A(), type: "firm_registration.rejected", actor: ALICE() });
+  const setup = await mkEvent({ firm: FIRM_A(), type: "firm_setup.seeded", actor: ALICE() });
+
+  const page = rowsOf(await listActivity(BOB(), { kinds: ["firm"], limit: 100 }));
+  assert.ok(page.every((r) => r.kind === "firm"), "af.37 the firm filter returns ONLY firm rows");
+  const firmRow = page.find((r) => r.event_type === "firm.created");
+  assert.ok(firmRow, "af.37 a real firm.created row is reachable under kinds=['firm']");
+  assert.equal(firmRow.kind, "firm", "af.37 list_activity files firm.created under firm");
+  assert.equal((await getActivityEvent(BOB(), "event", firmRow.id)).kind, "firm",
+    "af.37 get_activity_event agrees");
+
+  for (const ev of [registration, setup]) {
+    assert.equal(page.find((r) => r.id === ev.eventId), undefined,
+      "af.37 a firm_* look-alike is NOT on the firm rung");
+  }
+  const defaulted = rowsOf(await listActivity(BOB(), { kinds: ["documents"], limit: 100 }));
+  for (const ev of [registration, setup]) {
+    const row = defaulted.find((r) => r.id === ev.eventId);
+    assert.ok(row, "af.37 a firm_* look-alike is still reachable on the stated default");
+    assert.equal(row.kind, "documents", `af.37 ${row.event_type} rides the stated default`);
+    assert.equal((await getActivityEvent(BOB(), "event", row.id)).kind, "documents",
+      `af.37 get_activity_event agrees for ${row.event_type}`);
+  }
+});

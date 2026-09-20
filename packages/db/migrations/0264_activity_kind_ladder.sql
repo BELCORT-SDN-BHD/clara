@@ -18,7 +18,7 @@
 -- that sentence go.
 --
 -- WHAT THIS FILE CHANGES, IN ONE SENTENCE. `clara.list_activity` and `clara.get_activity_event`
--- gain the SAME ladder rungs (member.%, invite.% -> people; asset.% -> assets; counterparty.% -> counterparties; client.%, knowledge.% -> clients), and `clara.list_activity`'s closed `p_kinds` roster
+-- gain the SAME ladder rungs (member.%, invite.% -> people; asset.% -> assets; counterparty.% -> counterparties; client.%, knowledge.% -> clients; firm.% -> firm), and `clara.list_activity`'s closed `p_kinds` roster
 -- gains the same values, so every kind the ladder can produce is a kind the filter admits.
 --
 -- =====================================================================================
@@ -300,7 +300,7 @@ begin
       -- reason #861's brief gives: a kind the ladder can produce but the filter refuses is a
       -- row no one can reach, and a kind the filter admits but the ladder never produces is an
       -- empty page with no explanation.
-      if v_kind not in ('documents', 'journal', 'close', 'report', 'agent', 'work', 'people', 'assets', 'counterparties', 'clients') then
+      if v_kind not in ('documents', 'journal', 'close', 'report', 'agent', 'work', 'people', 'assets', 'counterparties', 'clients', 'firm') then
         raise exception 'unknown activity kind %', v_kind using errcode = 'CLR10',
           detail = jsonb_build_object('reason', 'invalid_kind', 'kind', v_kind)::text;
       end if;
@@ -445,6 +445,7 @@ begin
         when v.event_type like 'asset.%' then 'assets'
         when v.event_type like 'counterparty.%' then 'counterparties'
         when v.event_type like 'client.%' or v.event_type like 'knowledge.%' then 'clients'
+        when v.event_type like 'firm.%' then 'firm'
         else 'documents'
       end                                                                 as kind
     from clara.firm_timeline_visible v
@@ -626,7 +627,7 @@ comment on function clara.list_activity(text, int, uuid, text[], timestamptz, ti
   'keyset-paged union of clara.firm_timeline_visible (domain events), clara.agent_receipts_visible '
   '(agent act receipts) and clara.operation_receipts (#623 committed operation receipts), newest '
   'first over (occurred_at desc, id desc). SECURITY INVOKER over three already-granted sources; '
-  'refuses CLR04 below bookkeeper before running. p_kinds is the closed set {documents,journal,close,report,agent,work,people,assets,counterparties,clients}, refused '
+  'refuses CLR04 below bookkeeper before running. p_kinds is the closed set {documents,journal,close,report,agent,work,people,assets,counterparties,clients,firm}, refused '
   'CLR10 invalid_kind otherwise. p_limit clamps 1..100. p_cursor is an opaque base64 pair minted '
   'by a previous page''s next_cursor; a malformed one refuses CLR10 invalid_cursor. #728: a '
   'sweep.run_completed event with no drafted effect is excluded entirely; one that drafted '
@@ -636,7 +637,7 @@ comment on function clara.list_activity(text, int, uuid, text[], timestamptz, ti
   'payload so the row deep-links to the Work it is about. #770: p_work narrows the feed to ONE '
   'Work IN SQL, inside each union arm''s own WHERE. #840: an ADDITIVE successor_work_id, jsonb/SQL '
   'null on every row except a work.cancelled row whose payload named a successor (#721''s '
-  'restatement). #861: the domain-event ladder files member.%, invite.% -> people; asset.% -> assets; counterparty.% -> counterparties; client.%, knowledge.% -> clients, per the owner''s ruling of '
+  'restatement). #861: the domain-event ladder files member.%, invite.% -> people; asset.% -> assets; counterparty.% -> counterparties; client.%, knowledge.% -> clients; firm.% -> firm, per the owner''s ruling of '
   '2026-09-18; the firm arm is `firm.%` WITH THE DOT, so firm_registration.* and firm_setup.* are '
   'NOT caught by LIKE''s `_` wildcard. Every unrecognised prefix still lands on the STATED DEFAULT, '
   'documents. The kind is computed at READ TIME, so no historical row needed rewriting. PINS '
@@ -738,6 +739,7 @@ begin
           when v.event_type like 'asset.%' then 'assets'
           when v.event_type like 'counterparty.%' then 'counterparties'
           when v.event_type like 'client.%' or v.event_type like 'knowledge.%' then 'clients'
+          when v.event_type like 'firm.%' then 'firm'
           else 'documents'
         end,
         'client_name', cl.name
@@ -862,7 +864,7 @@ comment on function clara.get_activity_event(text, text) is
   'same human as responsible, under 0181''s original key, kept so no reader breaks). #840: an '
   'ADDITIVE successor_work_id, jsonb/SQL null on every row except a work.cancelled event whose '
   'payload named a successor (#721''s restatement). #861: the SAME new rungs as '
-  'clara.list_activity''s ev_base (member.%, invite.% -> people; asset.% -> assets; counterparty.% -> counterparties; client.%, knowledge.% -> clients), so the two ladders answer identically for every '
+  'clara.list_activity''s ev_base (member.%, invite.% -> people; asset.% -> assets; counterparty.% -> counterparties; client.%, knowledge.% -> clients; firm.% -> firm), so the two ladders answer identically for every '
   'event type -- the acceptance criterion the ticket names, pinned rung-for-rung by section T '
   'below and by activity-feed.test.mjs af.39a/af.39b. p_id is TEXT -- see this function''s header '
   'comment for why. Pins plan_cache_mode = force_custom_plan for symmetry with clara.list_activity '
@@ -908,7 +910,8 @@ begin
     array['people', 'member.%', 'invite.%'],
     array['assets', 'asset.%', null],
     array['counterparties', 'counterparty.%', null],
-    array['clients', 'client.%', 'knowledge.%']
+    array['clients', 'client.%', 'knowledge.%'],
+    array['firm', 'firm.%', null]
   ];
   for v_i in 1 .. array_length(v_rungs, 1) loop
     v_pred := '';
@@ -943,8 +946,8 @@ begin
     raise exception '#861 tail: clara.list_activity tests p_kinds against a roster % time(s) (expected exactly 1)', v_n
       using errcode='CLR10';
   end if;
-  if position('if v_kind not in (''documents'', ''journal'', ''close'', ''report'', ''agent'', ''work'', ''people'', ''assets'', ''counterparties'', ''clients'') then' in v_list) = 0 then
-    raise exception '#861 tail: clara.list_activity''s p_kinds roster is not the expected closed set {documents,journal,close,report,agent,work,people,assets,counterparties,clients}'
+  if position('if v_kind not in (''documents'', ''journal'', ''close'', ''report'', ''agent'', ''work'', ''people'', ''assets'', ''counterparties'', ''clients'', ''firm'') then' in v_list) = 0 then
+    raise exception '#861 tail: clara.list_activity''s p_kinds roster is not the expected closed set {documents,journal,close,report,agent,work,people,assets,counterparties,clients,firm}'
       using errcode='CLR10';
   end if;
 
@@ -1032,6 +1035,6 @@ begin
     raise exception '#861 tail: clara.get_activity_event''s comment does not name #861' using errcode='CLR10';
   end if;
 
-  raise notice '#861 tail: OK -- clara.list_activity and clara.get_activity_event each still resolve EXACTLY ONCE at their pre-existing signatures, with a CHANGED body and an UNCHANGED posture (owner clara_fn_owner, SECURITY INVOKER, search_path=clara, pg_temp + plan_cache_mode=force_custom_plan, PUBLIC-revoked, EXECUTE to clara_authenticated only). Both ladders carry the 4 new rung(s) (member.%%, invite.%% -> people; asset.%% -> assets; counterparty.%% -> counterparties; client.%%, knowledge.%% -> clients) exactly once each, with identical predicate text rebuilt from the (kind, prefixes) pairs; the closed p_kinds roster is exactly {documents,journal,close,report,agent,work,people,assets,counterparties,clients} and admits every kind the ladder can produce; the stated default (else documents) and every arm 0181/0183/0184/0202/0262 shipped survive, re-measured against the committed text. Both comments name #861.';
+  raise notice '#861 tail: OK -- clara.list_activity and clara.get_activity_event each still resolve EXACTLY ONCE at their pre-existing signatures, with a CHANGED body and an UNCHANGED posture (owner clara_fn_owner, SECURITY INVOKER, search_path=clara, pg_temp + plan_cache_mode=force_custom_plan, PUBLIC-revoked, EXECUTE to clara_authenticated only). Both ladders carry the 5 new rung(s) (member.%%, invite.%% -> people; asset.%% -> assets; counterparty.%% -> counterparties; client.%%, knowledge.%% -> clients; firm.%% -> firm) exactly once each, with identical predicate text rebuilt from the (kind, prefixes) pairs; the closed p_kinds roster is exactly {documents,journal,close,report,agent,work,people,assets,counterparties,clients,firm} and admits every kind the ladder can produce; the stated default (else documents) and every arm 0181/0183/0184/0202/0262 shipped survive, re-measured against the committed text. Both comments name #861.';
 end
 $w861_tail$;
