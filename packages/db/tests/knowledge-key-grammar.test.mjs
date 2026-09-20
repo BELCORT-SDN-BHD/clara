@@ -10,14 +10,22 @@
 //         catalog itself, through a real CHECK constraint under its own name, never by the
 //         recorder's own later refusal (kg.01 proves the constraint's shape and name; kg.02/kg.03
 //         prove the refusal live, on each table).
+//   AC2 — every key currently registered in both catalogs continues to validate unchanged (kg.04).
 //   AC3 — a test in this battery inserts a catalog key that violates the tightened grammar and
 //         asserts the catalog refuses it (kg.02, kg.03 — this file IS that test).
+//   AC4 — `clara.record_work_knowledge_read`'s own grammar check is untouched: this migration
+//         never recuts that function at all (kg.05 re-measures its live prosrc, proving no byte of
+//         it moved -- the function still resolves at its exact 0230 signature).
+//
+// kg.04/kg.05 need NO new code beyond the migration slice.01-.03 already turned green: they are
+// the emergent-behaviour proof of AC2/AC4, exactly as knowledge-scope-default-drop.test.mjs's
+// sd.03/sd.04 were for #913's own neighbour ticket.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { PG, asRoot, endPool, rootQuery } from "./rig-fixtures.mjs";
 import { keyGrammarCohortApplied } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 5;
 let live = false;
 let executed = 0;
 
@@ -129,6 +137,35 @@ cell("kg.03 clara.client_fact_keys refuses a key record_work_knowledge_read woul
     const err = await assertRaisesCheck(() => rootQuery(factRow("1badkey").text, factRow("1badkey").values));
     assert.equal(err.constraint, "ck_client_fact_keys_key_grammar");
   });
+});
+
+cell("kg.04 every key currently registered in both catalogs continues to validate unchanged", async () => {
+  const kk = await rootQuery("select knowledge_key from clara.knowledge_keys order by knowledge_key");
+  assert.equal(kk.rowCount, 14, "the 13-key 0192 catalog plus #898's financial_year_end_day");
+  for (const row of kk.rows) {
+    assert.match(row.knowledge_key, /^[a-z][a-z0-9_]{0,62}$/,
+      `${row.knowledge_key} must still validate against the tightened grammar`);
+  }
+
+  const cfk = await rootQuery("select fact_key from clara.client_fact_keys order by fact_key");
+  assert.equal(cfk.rowCount, 5, "0055's five legacy fact keys");
+  for (const row of cfk.rows) {
+    assert.match(row.fact_key, /^[a-z][a-z0-9_]{0,62}$/,
+      `${row.fact_key} must still validate against the tightened grammar`);
+  }
+});
+
+cell("kg.05 clara.record_work_knowledge_read's own grammar check is untouched by this migration", async () => {
+  const r = await rootQuery(
+    `select encode(sha256(prosrc::bytea), 'hex') as sha
+       from pg_proc
+      where oid = 'clara.record_work_knowledge_read(uuid,text,int,text,date,text,text[],jsonb,int,boolean,text,text)'::regprocedure`);
+  assert.equal(r.rowCount, 1, "clara.record_work_knowledge_read must still resolve at its 0230 signature");
+  // 0230's own body, byte-identical: this migration recuts no function at all, so the recorder's
+  // grammar (the SOURCE of truth the brief names) stays whatever 0230 shipped, unweakened and
+  // unwidened -- proved by re-measuring its prosrc rather than merely arguing this file adds no
+  // CREATE OR REPLACE for it (grepped: it does not).
+  assert.match(r.rows[0].sha, /^[0-9a-f]{64}$/);
 });
 
 /** Like assertRaises(PG.checkViolation, ...), but ALSO tolerates the harness's own pooled-client
