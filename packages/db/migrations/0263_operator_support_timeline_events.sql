@@ -591,7 +591,7 @@ reset role;
 do $w843_tail$
 declare v_src text; v_n int; v_posture text; v_append_count int; v_audit_count int;
         v_pos_reserve int; v_pos_append int; v_pos_finish int; v_pos_advisory int;
-        v_uncovered text;
+        v_desc text; v_uncovered text;
 begin
   -- 1 · still exactly ONE body, at the same signature.
   select count(*)::int into v_n from pg_proc p
@@ -683,6 +683,18 @@ begin
     raise exception '#843 tail: admission.capacity_set is not registered exactly once as a firm-level (client_scoped=false) type'
       using errcode='CLR10';
   end if;
+  -- …CARRYING THIS FILE'S OWN SENTENCE, not somebody else's. §1 registers with "on conflict (name)
+  -- do nothing", which is what makes a redo idempotent and also what would silently KEEP a
+  -- colliding registration's row. The description is not decoration: clara.firm_timeline_visible
+  -- projects clara.event_types.description as event_description and clara.list_activity /
+  -- clara.get_activity_event return it, so it IS the line the operator reads on the timeline this
+  -- ticket exists to fill. Pinned here so a collision refuses the migration instead of shipping a
+  -- stranger's sentence onto the operator's own timeline.
+  select et.description into v_desc from clara.event_types et where et.name = 'admission.capacity_set';
+  if v_desc is distinct from 'An operator changed the estate''s admission capacity (clara.set_admission_capacity)' then
+    raise exception '#843 tail: admission.capacity_set is registered with a description this file did not write -- got {%} -- a colliding registration was kept by "on conflict do nothing" and would ship its own sentence onto the operator''s timeline', v_desc
+      using errcode='CLR10';
+  end if;
   select count(*)::int into v_n from clara.trigger_taxonomy tt
    where tt.version = (select version from clara.taxonomy_active)
      and tt.event_type = 'admission.capacity_set' and tt.decision = 'context_update';
@@ -701,7 +713,7 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#843 tail (part 1/2): OK -- clara.set_admission_capacity exists exactly once at (integer,text,text), calls clara._audit exactly once and clara._append_event exactly once, the append names admission.capacity_set under the operator firm with a null client and an EMPTY payload, it sits strictly between _reserve_op and _finish_op so a replayed op_key writes no second line AND strictly BEFORE the admission-capacity advisory lock so the estate''s admission lock is never held across a wait for a peer operator act''s firm_event_seq row, the door''s posture (clara_fn_owner, SECURITY DEFINER, search_path=clara, pg_temp + plan_cache_mode=force_custom_plan, PUBLIC-revoked, EXECUTE to clara_authenticated only) is byte-identical to what §0.6 measured before the recut, and admission.capacity_set is registered exactly once as a firm-level type routed context_update at the active taxonomy version with no catalog row left unrouted.';
+  raise notice '#843 tail (part 1/2): OK -- clara.set_admission_capacity exists exactly once at (integer,text,text), calls clara._audit exactly once and clara._append_event exactly once, the append names admission.capacity_set under the operator firm with a null client and an EMPTY payload, it sits strictly between _reserve_op and _finish_op so a replayed op_key writes no second line AND strictly BEFORE the admission-capacity advisory lock so the estate''s admission lock is never held across a wait for a peer operator act''s firm_event_seq row, the door''s posture (clara_fn_owner, SECURITY DEFINER, search_path=clara, pg_temp + plan_cache_mode=force_custom_plan, PUBLIC-revoked, EXECUTE to clara_authenticated only) is byte-identical to what §0.6 measured before the recut, and admission.capacity_set is registered exactly once as a firm-level type carrying THIS file''s own description and routed context_update at the active taxonomy version with no catalog row left unrouted.';
 
   -- ===================================================================================
   -- PART 2 — the SAME census, over clara.resolve_stripe_event_problem. Written out rather than
@@ -780,6 +792,12 @@ begin
     raise exception '#843 tail: stripe_event.problem_resolved is not registered exactly once as a firm-level (client_scoped=false) type'
       using errcode='CLR10';
   end if;
+  -- …and its sentence, for the reason part 1 gives above.
+  select et.description into v_desc from clara.event_types et where et.name = 'stripe_event.problem_resolved';
+  if v_desc is distinct from 'An operator resolved a Stripe event problem (clara.resolve_stripe_event_problem)' then
+    raise exception '#843 tail: stripe_event.problem_resolved is registered with a description this file did not write -- got {%} -- a colliding registration was kept by "on conflict do nothing" and would ship its own sentence onto the operator''s timeline', v_desc
+      using errcode='CLR10';
+  end if;
   select count(*)::int into v_n from clara.trigger_taxonomy tt
    where tt.version = (select version from clara.taxonomy_active)
      and tt.event_type = 'stripe_event.problem_resolved' and tt.decision = 'context_update';
@@ -813,6 +831,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#843 tail (part 2/2): OK -- clara.resolve_stripe_event_problem exists exactly once at (uuid,text,text), calls clara._audit exactly once (0205''s row survives) and clara._append_event exactly once, the append names stripe_event.problem_resolved under the operator firm with a null client and EXACTLY the id-shaped {problem} payload (no resolution text reaches the estate-wide log), it sits strictly between _reserve_op and _finish_op, the door''s posture (clara_fn_owner, SECURITY DEFINER, search_path=clara, pg_temp with NO plan_cache_mode pin, PUBLIC-revoked, EXECUTE to clara_authenticated only) is byte-identical to what §0.6 measured, stripe_event.problem_resolved is registered exactly once as a firm-level type routed context_update at the active taxonomy version with no catalog row left unrouted, and the third support act (clara.reject_firm_registration -> firm_registration.rejected, 0145) still appends its own event.';
+  raise notice '#843 tail (part 2/2): OK -- clara.resolve_stripe_event_problem exists exactly once at (uuid,text,text), calls clara._audit exactly once (0205''s row survives) and clara._append_event exactly once, the append names stripe_event.problem_resolved under the operator firm with a null client and EXACTLY the id-shaped {problem} payload (no resolution text reaches the estate-wide log), it sits strictly between _reserve_op and _finish_op, the door''s posture (clara_fn_owner, SECURITY DEFINER, search_path=clara, pg_temp with NO plan_cache_mode pin, PUBLIC-revoked, EXECUTE to clara_authenticated only) is byte-identical to what §0.6 measured, stripe_event.problem_resolved is registered exactly once as a firm-level type carrying THIS file''s own description and routed context_update at the active taxonomy version with no catalog row left unrouted, and the third support act (clara.reject_firm_registration -> firm_registration.rejected, 0145) still appends its own event.';
 end
 $w843_tail$;

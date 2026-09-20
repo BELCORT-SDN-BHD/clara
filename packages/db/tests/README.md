@@ -1010,6 +1010,17 @@ and 0263 §T pins the order in the committed body. No cycle is created by taking
 same transaction, never under the operator firm. `resolve_stripe_event_problem` takes no advisory
 lock, so its append stays beside its audit row.
 
+**The registered sentence is pinned, not just the name (fix round, ADV-L08-2).** §1 registers both
+types with `on conflict (name) do nothing` — which is what makes a redo idempotent, and also what
+would silently KEEP a colliding registration written by someone else. `clara.firm_timeline_visible`
+projects `clara.event_types.description` as `event_description` and both activity doors return it,
+so that column IS the line the operator reads. 0263 §T now asserts the exact text of both
+descriptions alongside `client_scoped` and the taxonomy routing, so a collision refuses the
+migration instead of being left to a human glance at integration time. Control: with the
+append-only guard (`t_event_types_append_only`) suspended inside a rolled-back transaction, each
+description was replaced in turn and §T refused with CLR10 naming the foreign sentence; the
+subject was restored byte for byte.
+
 ## `activity-feed.test.mjs` `af.33`–`af.39b` — #861 / migration 0264
 
 Both activity doors computed a row's `kind` from a five-rung ladder — `sweep.run_completed`,
