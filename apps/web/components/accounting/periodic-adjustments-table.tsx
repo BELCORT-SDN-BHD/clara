@@ -153,6 +153,20 @@ export function PeriodicAdjustmentsTable({
 // function's `jsonb_build_object` calls, not re-guessed from a key's spelling — a future
 // cents-typed particular joins this Set because the migration says so, not because it "looks like
 // cents".
+//
+// CRS-07-08 (code-review fix round) — A DECLARED, EVIDENCE-BASED OVERRIDE of #842's own
+// out-of-scope line ("Any other basis particular (none is cents-typed today)"). That line's
+// premise does not hold: `_adjustment_basis_canonical` builds ALL FIVE keys above — not only
+// `settled_cents` — through the same `clara._adjustment_cents_value(p_adjustment, <key>)`
+// (0212_payroll_settled_cents.sql:290-332, unchanged from 0194_periodic_adjustments.sql:715+),
+// which returns `bigint` or null (0194:470-475) — every one of them is integer-cents today, not
+// only the one the ticket named. Rendering `amount_cents`/`opening_cents`/`closing_cents`/
+// `adjustment_cents` through `String(value)` while `settled_cents` alone went through `Money`
+// would have been the exact defect #842 was opened to fix, repeated four more times in the same
+// disclosure. This widening is therefore kept on purpose, verified against the migration rather
+// than assumed, and the four extra keys were NOT in #842's own acceptance criteria — flagged
+// here, in the commit message, and in the lane's fix report for the owner to rule on, rather
+// than closing #842 against a criterion (the out-of-scope line) it no longer literally matches.
 const CENTS_PARTICULARS = new Set<string>([
   "amount_cents",
   "opening_cents",
