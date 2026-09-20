@@ -552,8 +552,15 @@ test("637.pf: B3 — two sources sharing one task_kind count the task ONCE, and 
   // therefore MULTIPLIES the task row by its registered sources and picks an arbitrary class —
   // the ambiguity reconciler-wake.mjs's own resolveSource already settled with an ORDER BY. This
   // cell is the reproduction: one disabled predecessor, one enabled replacement, one task.
+  //
+  // #1015 — THIS is the exact cell wave-1/wave-2 integration gates caught failing on a database
+  // carrying leftover queued `document_processing_tasks` rows (19, then 18, unrelated, from
+  // earlier e2e work): `censusUnboundTasks(query, { taskIds: [taskId] })` returned 20/19 rows
+  // instead of 1, because the document lane ran unscoped. Seeding the SAME shape of noise here,
+  // deterministically, makes this cell prove the fix rather than merely happen not to trip it.
   const { firm, client, owner } = await rig.buildFirm("pf-fanout");
   const taskId = await plantQueuedClosePrepTask({ firm, client });
+  const noise = await plantNoiseDocumentTasks(4);
   try {
     await registerSource({
       sourceKey: `g1_test_pf_old_${randomUUID().slice(0, 8)}`, carrier: "direct_queue", taskKind: "close_prep",
@@ -564,7 +571,10 @@ test("637.pf: B3 — two sources sharing one task_kind count the task ONCE, and 
       wakeKind: "close_prep", workflowExport: "closePrep", enabled: true, actor: owner,
     });
     const out = await censusUnboundTasks(query, { taskIds: [taskId] });
-    assert.equal(out.tasks.length, 1, `ONE row for ONE task, whatever the source count; got ${JSON.stringify(out.tasks)}`);
+    assert.equal(
+      out.tasks.length, 1,
+      `ONE row for ONE task, whatever the source count, even with ${noise.length} unrelated document-processing tasks live; got ${JSON.stringify(out.tasks)}`,
+    );
     assert.equal(out.tasks[0].kind, "close_prep");
     assert.equal(out.tasks[0].workflowClass, "closePrep", "the ENABLED source answers — reconciler-wake.mjs's own ordering, verbatim");
 
@@ -575,6 +585,7 @@ test("637.pf: B3 — two sources sharing one task_kind count the task ONCE, and 
     assert.equal(allowed.scoped.verdict, "allowed");
   } finally {
     await rig.rootQuery("update clara.agent_tasks set status = 'cancelled' where id = $1", [taskId]);
+    await retireNoiseDocumentTasks(noise);
   }
 });
 
