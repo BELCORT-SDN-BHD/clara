@@ -1010,7 +1010,7 @@ test("885 the source-corrected sentence names the exit that actually works on ea
   assert.equal(convergeKeyFor(converge("source_corrected"), retired), "convergeSourceCorrected");
   const sentenceA = String(messageFor("convergeSourceCorrected"));
   assert.match(sentenceA, /given again on the corrected document/i,
-    "the retired arm is told to state the instruction again, which is what #721's door admits");
+    "the retired arm is told to state the instruction again, which is what ticket-721's door admits");
 
   // ARM B · the CARVE-OUT: the Work is untouched, still awaiting_input, and has already posted.
   const posted = record({ source_corrected_at: CORRECTED, work_posted: true } as never);
