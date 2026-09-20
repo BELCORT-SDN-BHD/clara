@@ -259,6 +259,26 @@ begin
     return jsonb_build_object('counterparty_id', v_tin_row.id, 'counterparty_kind', v_tin_row.kind,
       'name', v_tin_row.name, 'payment_terms_days', v_tin_row.payment_terms_days);
   end if;
+  if v_tin_hits > 1 then
+    -- #982 AC2. Nothing constrains a TIN to one party, so a TIN several live parties hold is a
+    -- data-entry fact a PERSON settles. The candidate list is carried VERBATIM, exactly as D12(a)
+    -- does for an ambiguous name, and in the SAME shape, so every reader of this lane's refusals
+    -- renders one candidate one way.
+    select jsonb_agg(jsonb_build_object('counterparty_id', c.id, 'name', c.name,
+             'registration_no', c.registration_no, 'tin', c.tin) order by c.name, c.id)
+      into v_candidates
+      from (select cp.id, cp.name, cp.registration_no, cp.tin
+              from clara.counterparties cp
+             where cp.client_id = p_client and cp.kind = v_want
+               and cp.merged_into is null and cp.retired_at is null
+               and cp.tin is not null
+               and lower(regexp_replace(cp.tin,'[^a-zA-Z0-9]','','g')) = v_tin_n) c;
+    raise exception '% %s of this client hold the tax identification number %; say which one',
+      v_tin_hits, v_want, v_tin
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','party_ambiguous','tin',v_tin,'matched_on','tin',
+          'expected_counterparty_kind',v_want,'candidates',v_candidates)::text;
+  end if;
 
   -- THE CANDIDATE SET, by normalised name OR a live alias. `distinct` because a party can carry
   -- several aliases that all normalise to the submitted name.

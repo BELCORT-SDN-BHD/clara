@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import {
   gateTiTin, vendor, billParticulars, billBasis, admitTradeInvoiceWork, invoiceRow,
   ensureTiChart, buildWorkWorld, freshWorkClient, endPool,
+  TI_REASON, invoiceCount, entryCount, committedReceiptCount, assertPair, rootQuery,
 } from "./trade-invoice-fixtures.mjs";
 import { printLaneNotes, printSkipCount } from "./wave-a-helpers.mjs";
 
@@ -48,6 +49,25 @@ async function tiClient(tag) {
  *  company; nothing in this lane validates it, and #982 keeps format explicitly out of scope. */
 const newTin = () => `C${randomUUID().replace(/[^0-9]/g, "").padEnd(11, "0").slice(0, 11)}`;
 
+/** A refusal leaves NOTHING behind: no Work, no trade invoice, no entry, no committed receipt —
+ *  `trade-invoice.test.mjs`'s own discipline, restated here because this file admits through the
+ *  same door and a refusal that wrote a row would be a worse finding than the wrong reason. */
+async function refusesTi(client, code, reason, fn, label) {
+  const works = (await rootQuery(
+    "select count(*)::int n from clara.accounting_work where client_id=$1", [client])).rows[0].n;
+  const invoices = await invoiceCount(client);
+  const entries = await entryCount(client);
+  const receipts = await committedReceiptCount(client);
+  const out = await assertPair(code, reason, fn, label);
+  assert.equal((await rootQuery(
+    "select count(*)::int n from clara.accounting_work where client_id=$1", [client])).rows[0].n,
+  works, `${label}: no accounting_work row was written`);
+  assert.equal(await invoiceCount(client), invoices, `${label}: no clara.trade_invoices row`);
+  assert.equal(await entryCount(client), entries, `${label}: no journal row was written`);
+  assert.equal(await committedReceiptCount(client), receipts, `${label}: no committed receipt`);
+  return out;
+}
+
 test("p982.tin.resolves a submission whose ONLY identifier is a TIN resolves to the one live party of the wanted kind that holds it", async (t) => {
   if (await gateTiTin(t)) return;
   const client = await tiClient("tin-one");
@@ -63,4 +83,28 @@ test("p982.tin.resolves a submission whose ONLY identifier is a TIN resolves to 
   });
   assert.equal((await invoiceRow(ok.invoice_id)).counterparty_id, held,
     "p982.tin.resolves: the TIN printed on the document resolved the party the books already hold");
+});
+
+test("p982.tin.ambiguous a TIN held by TWO live parties of the wanted kind refuses with BOTH candidates, never a pick", async (t) => {
+  if (await gateTiTin(t)) return;
+  const client = await tiClient("tin-many");
+  const tin = newTin();
+  // Nothing in the estate constrains a TIN to one party (uq_counterparties_client_registration
+  // constrains the REGISTRATION number and there is no TIN twin), so two live vendors may hold
+  // one TIN — a data-entry fact a person has to settle, not one Clara may settle for them.
+  const one = await vendor(ALICE(), { client, tin });
+  const two = await vendor(ALICE(), { client, tin });
+
+  const amb = await refusesTi(client, "CLR10", TI_REASON.partyAmbiguous,
+    () => admitTradeInvoiceWork({
+      client, author: ALICE(),
+      particulars: billParticulars({ counterparty: null, tin }),
+      basis: billBasis(),
+    }),
+    "p982.tin.ambiguous: two vendors hold one TIN");
+  assert.equal(amb.detail.candidates.length, 2,
+    "p982.tin.ambiguous: the candidate list is CARRIED, so the person picks from what the books hold");
+  assert.deepEqual(new Set(amb.detail.candidates.map((c) => c.counterparty_id)), new Set([one, two]));
+  assert.ok(amb.detail.candidates.every((c) => c.tin === tin),
+    "p982.tin.ambiguous: …each candidate carrying the identifier that was matched on");
 });
