@@ -46,6 +46,21 @@
 // `intake-batch-e2e.mjs` (leg 3) runs strictly after both callers, so it can never be the source
 // of a run this baseline mistakes for pre-existing.
 //
+// NAMED RESIDUAL AGAINST AC3 (L06-SPEC-R2-06, fix round 2): the baseline is taken at POLL 1, not at
+// the moment this leg's own assertions finish, so two narrow windows are NOT covered. (1) A run
+// that reaches `failed` after this leg's assertions finish but BEFORE `waitForQueueDrain` is even
+// called is already in the baseline and never reported. (2) Poll 1's own three censuses
+// (`censusNonTerminalRuns`, `censusUnboundTasks`, `censusFailedRuns`) are three SEPARATE statements
+// inside one `Promise.all`, not one snapshot; a run that fails BETWEEN the non-terminal read and the
+// failed read is counted as non-terminal (so the call keeps polling) AND as baseline-failed (so a
+// later poll never flags it) — the one failure this file exists to catch, missed on the same poll
+// that first baselines it. Both windows are believed narrow (each leg's own assertions already wait
+// out their own admitted work before reaching this call, and the three queries are cheap, unindexed
+// full-table-ish scans on a small table, not a slow join), and closing them fully would mean reading
+// non-terminal AND failed status from ONE statement instead of `censusNonTerminalRuns`'s own
+// (shared, independently used) query — deferred rather than done here, to avoid changing a
+// library function other callers (the two-build drill's own preflight) also rely on.
+//
 // BOUNDED, NEVER A FIXED SLEEP (#967's own ask, "reuse a readiness check... instead of a fixed
 // sleep"). Each leg's own assertions already poll everything THEY admit to a terminal status before
 // reaching this call, so a clean leg drains in well under a second; a genuine straggler gets the

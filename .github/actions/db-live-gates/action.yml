@@ -43,27 +43,26 @@ runs:
     # each leg's own process is the only one with an engine running to drive the drain) — nothing
     # in this action's own step sequence changed.
     #
-    # AC1 MEASUREMENT (fix round 1, L06-967-A): this lane's rig cannot reproduce a truly FRESH
-    # ephemeral `clara_intake_ci` a second time (migration 0154 pins a cluster-wide `clara` role
-    # count; a second from-scratch migration chain on the same cluster fails it — reproduced,
-    # rolled back, see the lane's fix-round report), so this is NOT the controlled before/after
-    # pair AC1 asks for. What WAS measured, on this rig's own already-used world (`clara_intake_ci`,
-    # pre-dd3f8f1d copies of the two leg files, no drain): leg 1 = 238 lines, leg 2 = 1,109 lines,
-    # leg 3 (`intake-batch-e2e.mjs`, unchanged either way, piped through `wc -l`) = 11,309 lines,
-    # all three passing — real, but nowhere near the ~1.27M-line shape, because this rig's world
-    # was only moderately loaded, not loaded the way a long-lived shared runner producing the
-    # original measurement was. THE MECHANISM DID REPRODUCE QUALITATIVELY: leg 2's own log filled
-    # with the SAME leftover-task reconciliation line, once per stale row, that #967 names as the
-    # dominant noise source. No local run produced a clean POST-967 (WITH drain) number on the same
-    # world: once orphaned, permanently-undispatchable `ocr` tasks accumulate (0051 §2's own
-    # transport-less guard; see `reconciler-documents.mjs:396-413`), `waitForQueueDrain` correctly
-    # refuses to call the queue drained and TIMES OUT — a real behavior, but produced by running
-    # leg 1 a SECOND time on a world `intake-batch-e2e.mjs` (leg 3, which nothing follows in a real
-    # CI job) had already left residue on, an ordering no real CI run produces. THE FIRST CI RUN OF
-    # THIS STEP SEQUENCE is what proves AC1's actual number: a genuinely fresh ephemeral database,
-    # the real leg order, once. Update this comment with that run's line counts (with vs without
-    # the fix, from two separate job runs, since a single job never runs a leg twice) once they
-    # exist.
+    # AC1 MEASUREMENT (fix round 2): a cluster-wide role-count invariant (migration 0154) blocks a
+    # SECOND from-scratch migration chain on this lane's own rig cluster, so a genuinely fresh
+    # `clara_intake_ci` cannot be MIGRATED twice here — but it CAN be built by a TEMPLATE COPY of
+    # this lane's own already-migrated-and-seeded database (`create database clara_intake_ci
+    # template clara_l06`, then the same `bootstrap` this step runs), which mints no role and so
+    # does not collide. On three such genuinely fresh, single-pass, real-CI-order runs of HEAD's two
+    # modified legs (`intake-e2e.mjs` then `intake-admission-e2e.mjs`, both WITH the #967 drain),
+    # two completed clean end to end (leg 1: 38/40 lines, leg 2: 97/98 lines — small, not
+    # concurrency/retry-noise-dominated) and one hit a pre-existing, already-documented Windows-only
+    # EPERM/rename race in the spool (packages/runtime/README.md's "#693 family") inside leg 2's OWN
+    # first assertion, before the drain is ever reached. Reproducing that SAME race, on the SAME
+    # fresh-template rig, against a pre-967 (no-drain) copy of the two leg files 3-for-3 confirms it
+    # is NOT caused by, or specific to, this change. THE NEW "newly-failed" THROW never fired across
+    # any of these runs — the specific worst case fix round 1's own earlier report recorded (a
+    # straggler reaching `failed` mid-wait) did not reproduce despite one run deliberately loaded
+    # with a concurrent `pnpm typecheck`. This is real end-to-end evidence the unit cells alone
+    # cannot give, but it is still local-rig evidence, at a scale far short of the ~1.27M-line
+    # figure a long-lived shared CI runner produced. THE FIRST CI RUN OF THIS STEP SEQUENCE is what
+    # proves AC1's actual number at that scale; update this comment with that run's line counts
+    # once they exist.
     - name: Slice-5 intake transport e2e (isolated DB + world bootstrap)
       shell: bash -e {0}
       run: |
