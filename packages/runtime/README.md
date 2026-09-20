@@ -1427,6 +1427,67 @@ live children left and the belt settles it — correctly. A leg slow enough to s
 "firm P's is honestly still stopping" or on the refusal deadline with the census showing P's
 children already `failed`. That is a different defect from the two above and is not addressed here.
 
+## #1026 — the live gates' heap budget
+
+**The defect.** Every `db-live-gates` step that boots a durable World ran its leg at the host's
+default V8 ceiling (~4144 MB on the runner and on this rig), and nothing declared otherwise. A leg
+that boots the bundle, the Workflow world, the leader, the engine and a hundred concurrent document
+ingests in ONE process has no reason to collect its churn until that ceiling, so peak memory for a
+single run of ONE leg varied between 2.0 GB and 4.4 GB on identical code, and twice the job simply
+died: job 105215992382 (2026-09-17, Wave-B fault gates) and job 106048901216 (2026-09-20, the #636
+intake batch leg), both `FATAL ERROR: Reached heap limit`, both exit 134.
+
+**The budget, and where it lives.** `scripts/ci/world-gate.mjs` — ONE place,
+`HEAP_BUDGET_MB = 2048`. Every leg in `.github/actions/db-live-gates/action.yml` is launched through
+it (`node "$GITHUB_WORKSPACE/scripts/ci/world-gate.mjs" tests/<leg>.mjs`), so the budget reaches the
+leg AND every process it spawns, through `NODE_OPTIONS` — appended to whatever the caller already
+set, never replacing it. One step that has been measured to need a different ceiling states it with
+`CLARA_GATE_HEAP_MB` on that step, with its measurement recorded beside it. A leg that dies by the
+budget is attributable: the launcher prints the step (`CLARA_GATE_STEP`), the command, the pid and
+the budget as a GitHub `::error::` annotation. An ordinary red (exit 1) is never blamed on memory —
+`scripts/ci/world-gate.selftest.mjs` holds that as a cell, and runs in `pnpm lint`.
+
+**The measurement method.** A throwaway database cloned with `createdb -T` from a migrated template,
+one leg per run under `/usr/bin/time -v` (peak RSS) with `--trace-gc` parsed for peak heap occupancy
+(WSL 2, Node v22.23.2, 24 GB host shared with ten other workers). Reproduce with the same two
+figures on both sides of any change to the budget.
+
+| Leg | Budget | Peak RSS | Peak heap occupancy | Wall clock | Result |
+|---|---|---|---|---|---|
+| `intake-batch-e2e.mjs` | host default (4144) | 2.22-4.21 GiB over 17 runs | up to ~4.1 GB | 1:02-3:11 | passed here; aborted twice in CI |
+| `intake-batch-e2e.mjs` | 2048, no in-process bound | 1.97 / 2.11 GiB | 1832 / 1969 MB | 0:56 / 1:14 | pass |
+| `intake-batch-e2e.mjs` | 2048 + heap bound | **0.82 / 0.88 / 1.06 GiB** | 696 / 734 / 926 MB | 2:35 / 2:46 / 3:22 | **3 consecutive passes** |
+| `intake-batch-e2e.mjs`, THROUGH the launcher | 2048 + heap bound | **0.79 / 0.91 / 0.93 GiB** | bound peak 657 / 717 / 795 MB | 2:00 / 2:17 / 2:51 | **3 consecutive passes, final code** |
+| `intake-admission-e2e.mjs` | 2048 (through the launcher) | 1.15 GiB | — | 0:46 | pass |
+| `accrual-e2e.mjs` | 2048 (through the launcher) | 0.43 GiB | — | 2:07 | pass |
+
+**Why the budget alone is not the whole fix.** V8 grows to whatever ceiling it is given: at 2048
+without an in-process bound, occupancy runs right up to the ceiling before every collection
+(1832-1969 MB of 2048), so no budget can ever be "25 % above the measured peak" while the peak is
+defined by the budget. What the leg actually RETAINS is ~140-210 MB — the post-collection floor in
+its own GC trace, consistent with `tests/heap-bound.mjs`'s independently measured 119 MB live set.
+So `intake-batch-e2e.mjs` now also arms `startHeapBound()` (the helper `interview-e2e.mjs` has used
+since the 2026-09-17 abort), which forces a full collection whenever the heap passes 512 MB. It cost
+8 to 30 forced collections per run and brought peak RSS to 0.79-1.06 GiB — about half the budget,
+which is the margin the budget is supposed to have. Wall clock is NOT better here (2:35-3:22 against
+0:56-3:11 at the default ceiling), but the runs are not comparable on time: this host carried ten
+other workers throughout, and the bound itself only ever ran 8-30 collections.
+
+**The two historical aborts, re-checked.** Job 105215992382 died in `interview-e2e.mjs`, which
+already arms `startHeapBound()` (added in response to that very abort) and now also runs under the
+2048 MB budget — a process that holds a flat 119 MB live set cannot reach a 2 GB ceiling, so that
+signature is closed on both axes. Job 106048901216 died in `intake-batch-e2e.mjs` at 4018 MB of a
+4144 MB ceiling; the same leg on this rig now peaks at 1.06 GiB of a 2048 MB (2 GiB) ceiling across three
+consecutive passes, with the retained set two orders of magnitude below the budget. Neither can be
+re-run against the new budget on its own runner from here, so this is a re-check by measurement of
+the same legs, not a replay of those two jobs.
+
+**Not covered.** The `nitro build` children the #637 two-build drill spawns inherit the budget
+through `NODE_OPTIONS`; a full runtime build was measured to succeed under it, with the control that
+the same build at `--max-old-space-size=48` dies with exit status 134, so the flag is provably in
+effect. The other legs' peaks are recorded above only where they were measured — a leg that turns
+out to need more says so with `CLARA_GATE_HEAP_MB` and its own figure.
+
 ## #852 — the chat-clarify belt inside the sweep receipt
 
 **What moved.** `reconcileChatClarifies` used to run from `lib/leader.mjs`, in its own try/catch,

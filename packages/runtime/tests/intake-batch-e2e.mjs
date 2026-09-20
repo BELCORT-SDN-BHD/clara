@@ -46,6 +46,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { startHeapBound, MiB } from "./heap-bound.mjs";
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
 const ALLOWED_DB = /^clara_(rt_test|intake_ci|\d{3})(_world)?$/;
@@ -189,6 +190,20 @@ async function main() {
 
   await import("../.output/server/index.mjs");
   await waitHealthy();
+  // #1026 — THE HEAP BOUND, armed as soon as the engine is up, on `tests/interview-e2e.mjs`'s
+  // precedent and through the same tested helper. THIS process runs the bundle, the world, the
+  // leader, the engine and a hundred document ingests at once, and V8 has no reason to collect any
+  // of the churn until its ceiling — which is how job 106048901216 died at 4018 MB. The step now
+  // also carries an explicit ceiling from `scripts/ci/world-gate.mjs`; the two are different
+  // safeguards and the leg keeps both. MEASURED on a throwaway clone of a migrated database: at
+  // `--max-old-space-size=2048` WITHOUT this bound the leg peaks at 1.97-2.11 GiB RSS and its
+  // occupancy runs right up to the ceiling before every collection; WITH it the peak is far
+  // lower (the figures are in packages/runtime/README.md's #1026 section). Best-effort and
+  // unref'd: it can neither fail a passing run nor hold one open.
+  const heap = startHeapBound();
+  if (!heap.stats().available) {
+    console.warn("[p636] heap bound UNAVAILABLE (no in-process inspector) — this leg runs on whatever ceiling it was given");
+  }
   // …and the leader's FIRST sweep still runs at boot whatever the cadence is. It opens every
   // spool sidecar (`listIntakeMetas`), which is the handle that makes the next `rename()` EPERM on
   // Windows. Let it finish before the first upload rather than racing it.
@@ -754,6 +769,10 @@ async function main() {
   void pChildren;
   await Promise.all(faultWork);
 
+  const h = heap.stats();
+  heap.stop();
+  console.log(`[p636] heap bound: peak ${Math.round(h.peakBytes / MiB)} MB over ${h.ticks} ticks, `
+    + `${h.collections} collection(s), ${h.failures} refusal(s)`);
   console.log("[p636] intake-batch-e2e: ALL LEGS PASSED");
   await rig.endPool?.().catch?.(() => {});
   process.exit(0);
