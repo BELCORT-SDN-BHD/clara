@@ -384,7 +384,7 @@ test("a staff expense claim row shows its claimant label on the compact line, ne
 // purpose-specific labels for any other purpose out of scope, so the desktop line of an ordinary
 // journal Work gains nothing.
 // ===========================================================================================
-test("#880 the claim label reaches the DESKTOP sub-line too, and a plain row's desktop line is untouched", async () => {
+test("880 the claim label reaches the DESKTOP sub-line too, and a plain row's desktop line is untouched", async () => {
   await withMockedEnv(async () => {
     const h = await renderComponent(App({
       load: async () => ({

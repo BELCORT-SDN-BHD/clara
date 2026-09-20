@@ -349,7 +349,7 @@ export function WorkQuestionCard({ part }: { part: WorkQuestionPart }) {
       accounts: await accountsForQuestion(record),
     };
   }, [part.question_id]);
-  const { data, loading, reload } = useHydratedPart(sessionTokenAccessor, load);
+  const { data, loading } = useHydratedPart(sessionTokenAccessor, load);
 
   return (
     <PartSummaryCard

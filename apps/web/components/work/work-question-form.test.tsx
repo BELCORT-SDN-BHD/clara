@@ -949,7 +949,7 @@ test("885 a SUPERSEDED convergence gets its own sentence, and a plain cancellati
   // raised for a #721 restatement, where nothing was corrected at all, so copy that told the person
   // their source had been corrected was simply false on that path.
   assert.doesNotMatch(String(sentence), /correct/i,
-    "the superseded sentence claims no source correction: a plain #721 restatement reaches this exact reason");
+    "the superseded sentence claims no source correction: a plain ticket-721 restatement reaches this exact reason");
 
   assert.equal(convergeKeyFor(converge("cancelled"), cancelled), "convergeCancelled",
     "a cancellation with no successor keeps the sentence it already had");
