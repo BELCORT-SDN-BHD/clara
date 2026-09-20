@@ -443,13 +443,402 @@ begin
   end if;
 end $abfn$;
 
+-- =====================================================================================
+-- §C  THE VOCABULARY ITSELF, widened in the four places the columns close it.
+--
+-- `drop constraint if exists` before `add constraint` is the redo rule (#957): re-running this
+-- file over its own effects must be safe, and a CHECK is validated against every existing row as
+-- it is added, so each of these is also a live proof that nothing already stored violates it.
+--
+-- THE THREE EXISTING VALUES ARE UNTOUCHED in every one of them: each list below is the old list
+-- with ONE value appended, and §Z re-reads all four and refuses a text that lost one.
+-- =====================================================================================
+
+-- 1 · `clara.accounting_work.purpose` — 0178's column, 0194's three values, plus one.
+alter table clara.accounting_work drop constraint if exists accounting_work_purpose_check;
+alter table clara.accounting_work add constraint accounting_work_purpose_check
+  check (purpose = any (array['journal_entry'::text, 'periodic_stock_adjustment'::text,
+                             'payroll_obligation'::text, 'opening_balance'::text]));
+
+-- 2 · `clara.operation_receipts.purpose` — the same vocabulary, asserted independently, so it is
+--     widened in the same transaction. A receipt whose purpose its Work could not carry (or the
+--     reverse) is the drift both CHECKs exist to make impossible.
+alter table clara.operation_receipts drop constraint if exists operation_receipts_purpose_check;
+alter table clara.operation_receipts add constraint operation_receipts_purpose_check
+  check (purpose = any (array['journal_entry'::text, 'periodic_stock_adjustment'::text,
+                             'payroll_obligation'::text, 'opening_balance'::text]));
+
+-- 3 · THE TYPED-PARTICULARS SHAPE. 0194 wrote this as "journal_entry means none, anything else
+--     means some". An opening Work is the second purpose that carries none, so the rule becomes a
+--     two-value list on the NONE side and the complement on the other — the periodic-adjustment
+--     and payroll arms are byte-for-byte what they were.
+alter table clara.accounting_work drop constraint if exists ck_accounting_work_adjustment_basis;
+alter table clara.accounting_work add constraint ck_accounting_work_adjustment_basis
+  check (
+    (purpose in ('journal_entry', 'opening_balance') and adjustment_basis is null)
+    or (purpose not in ('journal_entry', 'opening_balance')
+        and adjustment_basis is not null and jsonb_typeof(adjustment_basis) = 'object')
+  );
+
+-- 4 · THE RECEIPT'S OUTCOME SHAPE. A committed receipt must name what it did. For the three
+--     model-served purposes that is the ONE entry the posting core wrote, and that arm is
+--     unchanged. An opening batch commits N entries and owns none of them singly, so its arm
+--     names the SEED — the object the batch is, and the key `effects` actually carries.
+alter table clara.operation_receipts drop constraint if exists ck_operation_receipts_outcome_shape;
+alter table clara.operation_receipts add constraint ck_operation_receipts_outcome_shape
+  check (
+    (outcome = 'committed' and refusal is null and (
+       (purpose = 'opening_balance'
+          and nullif(btrim(coalesce(effects ->> 'seed_id', '')), '') is not null)
+       or (purpose <> 'opening_balance'
+          and nullif(btrim(coalesce(effects ->> 'entry_id', '')), '') is not null)))
+    or (outcome = 'refused' and refusal is not null)
+  );
+
+-- 5 · THE RUN THE OPENING LANE DOES NOT HAVE. `task_id` was NOT NULL with an FK to
+--     `clara.agent_tasks`; an opening approval owns no run, so the column becomes nullable AND a
+--     purpose-keyed CHECK makes that EXACT rather than merely permitted. The three model-served
+--     purposes still REQUIRE their task — the invariant is tightened here, not loosened: before
+--     this file "every receipt has a task" was a column property, and it is now a stated rule
+--     with one named exception.
+alter table clara.operation_receipts alter column task_id drop not null;
+alter table clara.operation_receipts drop constraint if exists ck_operation_receipts_task_by_purpose;
+alter table clara.operation_receipts add constraint ck_operation_receipts_task_by_purpose
+  check (
+    (purpose = 'opening_balance' and task_id is null)
+    or (purpose <> 'opening_balance' and task_id is not null)
+  );
+
+-- =====================================================================================
+-- §D  THE SIBLING ADMISSION PATH. Everything `clara._admit_accounting_work_core` does that an
+-- opening approval needs, and nothing it does that an opening approval must not have.
+--
+-- WHY NOT THE CORE. `clara._admit_accounting_work_core` (a) holds its own closed three-value
+-- purpose list, (b) demands a non-blank MODEL NAME, (c) inserts a `clara.agent_tasks` row and
+-- points `current_task_id` at it, (d) asserts a JOURNAL BASIS (`clara._assert_journal_basis`:
+-- posting date, memo, balanced lines) and (e) asserts the payload's relationship to those lines.
+-- An opening approval has no model, no run, and no journal basis that is not already POSTED — its
+-- lines are the opening items' own, approved by `clara._approve_opening_entry` before this
+-- function is reached, and their tie-out is `clara._assert_opening_tie`'s. Widening that core
+-- would mean either fabricating a model name and a synthetic basis to get past its gates, or
+-- carving four branches through a body whose whole job is to admit model-served work. The Agent
+-- Brief leaves the choice to the implementer "subject to the criteria"; those criteria are what
+-- rules the core out.
+--
+-- WHAT IT IS NOT. It is not a door: granted to nobody, reachable only from the two SECURITY
+-- DEFINER opening approvers, which have already taken `clara._human_ctx(role_rank('admin'))`, the
+-- registry row lock, the client advisory rung and the whole tie assertion before they call it.
+-- It re-derives no authority and asks no question they have not already answered — except the
+-- one thing it CAN check cheaply and must: that the approver is still a member of this firm.
+-- =====================================================================================
+create or replace function clara._admit_opening_work(
+    p_firm uuid, p_client uuid, p_actor uuid, p_seed uuid, p_batch integer,
+    p_entries jsonb, p_op_key text, p_tie_document uuid, p_batch_kind text)
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp as $aowfn$
+declare
+  v_work uuid; v_receipt uuid; v_logical text; v_role text; v_digest text;
+  v_basis jsonb; v_effects jsonb; v_intent text; v_count int;
+begin
+  if p_batch_kind is null or p_batch_kind not in ('seed','correction') then
+    raise exception 'unknown opening batch kind %', p_batch_kind using errcode='CLR10',
+      detail='{"reason":"invalid_request","field":"batch_kind","constraint":"closed_set"}';
+  end if;
+  if p_op_key is null or p_op_key ~ '^\s*$' then
+    -- The receipt's `run_id` is this key and the column refuses a blank one with an untyped
+    -- 23514. Both doors already refuse a blank op key by name; this says so again where the
+    -- value is USED, so a future caller cannot reach the constraint instead of the refusal.
+    raise exception 'an opening work receipt requires the operation key it was taken under'
+      using errcode='CLR10', detail='{"reason":"invalid_intent_key","constraint":"nonempty"}';
+  end if;
+  select m.role into v_role from clara.firm_memberships m
+   where m.user_id = p_actor and m.firm_id = p_firm
+   order by (m.status = 'active') desc, m.created_at desc limit 1;
+  if v_role is null then
+    raise exception 'the approver is not a member of this firm' using errcode='CLR04',
+      detail='{"reason":"actor_not_active"}';
+  end if;
+
+  v_count := coalesce(jsonb_array_length(p_entries), 0);
+  -- THE BASIS IS WHAT WAS APPROVED, not a journal basis. There are no lines here on purpose: the
+  -- lines belong to the entries, which are already posted and already tied out. `tie_document_id`
+  -- is recorded as a FACT; it is deliberately NOT a `source_refs` entry, because a source ref is
+  -- the journal lane's evidence CLAIM and stamping one would enrol the tie document in
+  -- `clara._tf_intake_batch_member_work_stamp`'s open-batch hand-off.
+  v_basis := jsonb_build_object(
+    'kind', 'opening_balance', 'batch', p_batch_kind, 'seed_id', p_seed, 'batch_n', p_batch,
+    'entry_count', v_count, 'entries', coalesce(p_entries, '[]'::jsonb),
+    'tie_document_id', p_tie_document);
+  v_digest := encode(clara._hash(v_basis), 'hex');
+  -- THE VOCABULARY GATE, ASKED HERE TOO. §B taught it the opening purpose; asking it from the one
+  -- body that mints an opening Work is what keeps that arm live rather than decorative — the day
+  -- an opening Work grows typed particulars, it is refused in the same place every other purpose
+  -- is refused.
+  perform clara._assert_adjustment_basis('opening_balance', null);
+
+  -- IDEMPOTENT ON (firm, client, intent_key), like every other Work. The key is derived from the
+  -- seed and the BATCH NUMBER, which the registry increments on every approval, so a correction
+  -- batch is a second Work rather than a conflict — and a replayed approval never reaches here at
+  -- all, because `clara._reserve_op` answers the stored receipt first.
+  v_intent := 'opening:' || p_batch_kind || ':' || p_seed::text || ':' || p_batch::text;
+  v_work := gen_random_uuid();
+  v_logical := 'work:' || v_work::text || ':opening_balance:1';
+  insert into clara.accounting_work(id, firm_id, client_id, purpose, status, initiator,
+      initiator_role, intent_key, logical_op_id, basis, basis_digest, basis_origin, source_refs,
+      adjustment_basis, current_task_id, result)
+    values (v_work, p_firm, p_client, 'opening_balance', 'completed', p_actor, v_role, v_intent,
+      v_logical, v_basis, v_digest, 'user_direct', '[]'::jsonb, null, null,
+      jsonb_build_object('seed_id', p_seed, 'batch_n', p_batch, 'entry_count', v_count,
+        'entries', coalesce(p_entries, '[]'::jsonb)));
+
+  -- THE RECEIPT. `acting_actor` is the HUMAN, not `clara.agent_user_id()`: nothing acted on
+  -- anyone's behalf here, and `on_behalf_of` is the same person for the same reason. `task_id` is
+  -- null, which §C's purpose-keyed CHECK now requires for this purpose and refuses for the other
+  -- three. `run_id` is the operation key the door was called under — the only run identity a
+  -- human door has. `effects` names the SEED and the batch, never an entry (see §C item 4).
+  v_effects := jsonb_build_object('seed_id', p_seed, 'batch_n', p_batch, 'entry_count', v_count,
+    'batch_kind', p_batch_kind, 'entries', coalesce(p_entries, '[]'::jsonb));
+  insert into clara.operation_receipts(firm_id, client_id, work_id, purpose, logical_op_id,
+      payload_digest, acting_actor, on_behalf_of, via_wake_kind, bundle_digest, run_id, task_id,
+      outcome, effects)
+    values (p_firm, p_client, v_work, 'opening_balance', v_logical, v_digest,
+      p_actor, p_actor, 'opening_approval', v_digest, p_op_key, null, 'committed', v_effects)
+    returning id into v_receipt;
+
+  return jsonb_build_object('work_id', v_work, 'receipt_id', v_receipt,
+    'logical_op_id', v_logical, 'intent_key', v_intent);
+end $aowfn$;
+revoke all on function clara._admit_opening_work(uuid,uuid,uuid,uuid,integer,jsonb,text,uuid,text) from public;
+comment on function clara._admit_opening_work(uuid,uuid,uuid,uuid,integer,jsonb,text,uuid,text) is
+  '#984: mints the ONE clara.accounting_work row and the ONE clara.operation_receipts row an '
+  'approved opening batch (seed or correction) now carries, under the opening_balance purpose. '
+  'The SIBLING of clara._admit_accounting_work_core, not a widening of it: no agent task, no '
+  'model name, no journal basis and no posting — the entries are already approved by '
+  'clara._approve_opening_entry and tied out by clara._assert_opening_tie before this is called. '
+  'Granted to nobody: reachable only from clara.approve_opening_seed and '
+  'clara.approve_opening_correction, which have already taken the admin floor, the registry lock '
+  'and the client rung.';
+
+-- =====================================================================================
+-- §E  THE HUMAN DOORS, RECUT. One statement each, in the same position: after the registry is
+-- finalized and before the audit row, so the audit names the Work and the receipt it minted.
+-- Everything else in both bodies is byte-identical to what the rig carried before this file —
+-- both statements were generated FROM those bodies rather than retyped, and §A pinned the shas
+-- they were generated from.
+--
+-- 0171's `default_transaction_isolation = serializable` and the pinned `search_path` are RESTATED
+-- here because `create or replace function` drops every SET clause it does not repeat. §Z counts
+-- the isolation-pinned bodies in the whole database and refuses any answer but these two.
+-- =====================================================================================
+create or replace function clara.approve_opening_seed(p_seed uuid, p_expected_plan_revision uuid,
+    p_tie_document_sha256 text, p_entry_revisions jsonb, p_attestation text, p_op_key text)
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp
+  set default_transaction_isolation = serializable as $aosfn$
+declare
+  c record; s record; p record; e record; q record; v_dedupe jsonb;
+  v_batch int; v_entries jsonb:='[]'::jsonb; v_result jsonb; v_seq bigint;
+  v_work jsonb;                                                            -- #984
+begin
+  c:=clara._human_ctx(clara.role_rank('admin'));
+  if current_setting('transaction_isolation')<>'serializable' then
+    raise exception 'opening batch approval requires serializable isolation'
+      using errcode='CLR31',detail='{"reason":"not_serializable"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  select firm_id into s from clara.opening_seed_registry where id=p_seed;
+  if s.firm_id is null or s.firm_id<>c.firm then
+    raise exception 'opening seed not in your firm' using errcode='CLR11';
+  end if;
+  v_dedupe:=clara._reserve_op(c.firm,'approve_opening_seed',p_op_key,
+    clara._hash(jsonb_build_object('seed',p_seed,
+      'plan_revision',p_expected_plan_revision,
+      'tie_sha256',p_tie_document_sha256,
+      'entry_revisions',p_entry_revisions,'attestation',p_attestation)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  select * into s from clara.opening_seed_registry where id=p_seed for update;
+  if s.state<>'open' then
+    raise exception 'opening registry is not open'
+      using errcode='CLR31',detail='{"reason":"registry_not_open"}';
+  end if;
+  perform pg_advisory_xact_lock(203005004,hashtext(s.client_id::text));
+  select * into p from clara.onboarding_plans where id=s.plan_id for update;
+  if p.revision_token is distinct from p_expected_plan_revision then
+    raise exception 'stale onboarding plan revision'
+      using errcode='CLR31',detail='{"reason":"stale_plan"}';
+  end if;
+  if s.tie_document_id is not null then
+    if p_tie_document_sha256 is distinct from s.tie_document_sha256 then
+      raise exception 'tie document hash changed'
+        using errcode='CLR31',detail='{"reason":"tie_mismatch"}';
+    end if;
+    perform clara._active_document_filing(
+      s.tie_document_id,s.tie_document_sha256,s.client_id,true);
+    -- [R1-F2] A tied registry is wholly document-primary. Every target must
+    -- carry the exact tie identity/hash and resolve to stored extraction rows.
+    if exists(select 1 from clara.opening_tb_targets t
+        where t.seed_id=s.id and t.firm_id=s.firm_id
+          and t.client_id=s.client_id and (
+          t.provenance_kind<>'document'
+          or t.document_id is distinct from s.tie_document_id
+          or t.source_sha256 is distinct from s.tie_document_sha256
+          or t.extraction_ref is null)) then
+      raise exception 'every opening target must bind to the tie document'
+        using errcode='CLR31',detail='{"reason":"tie_mismatch"}';
+    end if;
+    -- [R2-F1] K5 re-runs the field-level fact comparison so a stale extraction
+    -- or any target mutation cannot be laundered between parse and approval.
+    for q in select extraction_ref,account_code,debit_cents,credit_cents
+        from clara.opening_tb_targets t
+        where t.seed_id=s.id and t.firm_id=s.firm_id
+          and t.client_id=s.client_id
+          and t.document_id=s.tie_document_id loop
+      perform clara._assert_opening_target_fact(
+        s.firm_id,s.tie_document_id,q.extraction_ref,
+        q.account_code,q.debit_cents,q.credit_cents);
+    end loop;
+  elsif exists(select 1 from clara.opening_tb_targets t
+      where t.seed_id=s.id and t.firm_id=s.firm_id
+        and t.client_id=s.client_id and (
+        t.provenance_kind<>'keyed' or t.entered_by is null
+        or t.document_id is not null or t.source_sha256 is not null
+        or t.extraction_ref is not null
+        or not exists(select 1 from clara.firm_memberships m
+          where m.firm_id=s.firm_id and m.user_id=t.entered_by
+            and m.status='active'
+            and clara.role_rank(m.role)>=clara.role_rank('bookkeeper')))) then
+    -- [R1-F2] The no-document fallback is wholly keyed and attributable to a
+    -- currently eligible firm professional.
+    raise exception 'keyed fallback requires every target to be attributed'
+      using errcode='CLR31',detail='{"reason":"tie_mismatch"}';
+  end if;
+  if not exists(select 1 from clara.opening_items oi
+      join clara.journal_entries je on je.id=oi.entry_id
+      where oi.seed_id=p_seed and je.status='draft') then
+    raise exception 'opening seed has no draft entries'
+      using errcode='CLR31',detail='{"reason":"revision_mismatch"}';
+  end if;
+  for e in select je.* from clara.opening_items oi
+      join clara.journal_entries je on je.id=oi.entry_id
+      where oi.seed_id=p_seed and je.status='draft' order by oi.item_key loop
+    -- [R1-F2] Revalidate each draft's active filing and immutable content hash
+    -- at K5, rather than trusting evidence captured when K3 drafted it.
+    if s.tie_document_id is not null then
+      if e.document_id is distinct from s.tie_document_id
+         or e.source_doc_sha256 is distinct from s.tie_document_sha256 then
+        raise exception 'opening entry no longer binds to the tie document'
+          using errcode='CLR31',detail='{"reason":"tie_mismatch"}';
+      end if;
+      perform clara._active_document_filing(
+        e.document_id,e.source_doc_sha256,s.client_id,true);
+    elsif e.document_id is not null or e.filing_id is not null
+       or e.source_doc_sha256 is not null then
+      raise exception 'keyed opening fallback cannot contain a document entry'
+        using errcode='CLR31',detail='{"reason":"tie_mismatch"}';
+    end if;
+    if not clara._opening_revision_matches(
+        p_entry_revisions,e.id,e.revision_token) then
+      raise exception 'opening entry revision mismatch'
+        using errcode='CLR31',detail=jsonb_build_object(
+          'reason','revision_mismatch','entry_id',e.id)::text;
+    end if;
+    -- K5 step order (battery DEF-1): the checker separation is verified HERE, with
+    -- the revisions, BEFORE the tie assert. _approve_opening_entry re-checks as
+    -- defense-in-depth (same CLR05 semantics).
+    if e.last_human_editor=c.actor then
+      if clara.eligible_checker_count(c.firm)>=2 then
+        raise exception 'opening entry needs a distinct checker'
+          using errcode='CLR05',detail='{"reason":"distinct_checker"}';
+      elsif nullif(btrim(p_attestation),'') is null then
+        raise exception 'solo opening approval requires an attestation'
+          using errcode='CLR05',detail='{"reason":"self_attestation"}';
+      end if;
+    end if;
+  end loop;
+  select * into q from clara._open_question_blocks(s.client_id,null,null) limit 1;
+  if found then
+    raise exception 'an open question blocks the opening batch'
+      using errcode='CLR26',detail=jsonb_build_object(
+        'question_id',q.question_id,'scope',q.scope_kind)::text;
+  end if;
+  if exists(select 1 from clara._opening_seed_draft_class(p_seed) where is_correction) then raise exception 'a correction draft blocks the opening batch' using errcode='CLR31',detail='{"reason":"correction_draft_present"}'; end if; perform clara._assert_opening_tie(p_seed);
+  -- 0056 (Wave E lane beta, skeleton 2.6 item 2 / matrix A19g): the seed-approval arm
+  -- of opening(n+1) = closing(n), asserted against the PRIOR receipt's PINNED position.
+  perform clara._assert_seed_matches_prior_pin(p_seed);
+  perform clara._assert_fa_baseline(p_seed);
+  v_batch:=s.batch_n+1;
+  for e in select je.* from clara.opening_items oi
+      join clara.journal_entries je on je.id=oi.entry_id
+      where oi.seed_id=p_seed and je.status='draft' order by oi.item_key loop
+    v_entries:=v_entries||clara._approve_opening_entry(
+      p_seed,e.id,c.actor,p_attestation,v_batch);
+  end loop;
+  -- [R3-F4] K5 publishes initial register rows only after every linked
+  -- acquisition entry has approved in this same transaction. Correction
+  -- replacements remain K6-only because they carry supersedes_asset_id.
+  update clara.fixed_assets fa set status='active',updated_at=now()
+  from clara.opening_items oi,clara.journal_entries je
+  where oi.seed_id=p_seed and oi.item_kind='fixed_asset'
+    and oi.state='active' and oi.supersedes_item_id is null
+    and oi.firm_id=s.firm_id and oi.client_id=s.client_id
+    and fa.id=oi.fixed_asset_id and fa.firm_id=oi.firm_id
+    and fa.client_id=oi.client_id and fa.status='pending'
+    and fa.supersedes_asset_id is null
+    and je.id=oi.entry_id and je.firm_id=oi.firm_id
+    and je.client_id=oi.client_id and je.status='approved';
+  perform clara._assert_fa_baseline(p_seed);
+  update clara.onboarding_plan_items set state='resolved',
+    answer=coalesce(answer,jsonb_build_object('source','opening_seed',
+      'seed_id',p_seed)),answered_by=coalesce(answered_by,c.actor),
+    answered_at=coalesce(answered_at,now()),updated_at=now()
+    where plan_id=s.plan_id and item_kind='capture'
+      and state in ('pending','answered');
+  -- [R3-F3] Conservative checker policy: checking a K5 set influences that
+  -- plan, so the checker is recorded through the same contributor effect used
+  -- at every other material boundary.
+  perform clara._record_onboarding_contributor(s.plan_id,c.actor);
+  select coalesce(max(seq),0) into v_seq from clara.domain_events
+    where firm_id=c.firm;
+  update clara.opening_seed_registry set state='finalized',batch_n=v_batch,
+    finalized_at=now(),finalized_by=c.actor,tie_asserted_at=now(),
+    through_event_seq=v_seq where id=p_seed;
+  -- #984 · THE WORK AND ITS RECEIPT. One `clara.accounting_work` row and one
+  -- `clara.operation_receipts` row under the `opening_balance` purpose, minted by the SIBLING
+  -- admission path (`clara._admit_opening_work`) rather than by `clara._admit_accounting_work_core`:
+  -- that core inserts an `agent_tasks` row for a model run, and this approval is deterministic and
+  -- human-made. The dedicated `clara.opening_seed_approvals` receipt above is untouched.
+  v_work:=clara._admit_opening_work(c.firm,s.client_id,c.actor,p_seed,v_batch,v_entries,
+    p_op_key,s.tie_document_id,'seed');
+  perform clara._audit(c.firm,c.actor,null,null,'approve_opening_seed',null,
+    jsonb_build_object('seed',p_seed,'batch_n',v_batch,
+      'entries',v_entries,'op_key',p_op_key,
+      'work',v_work->>'work_id','receipt',v_work->>'receipt_id',
+      'purpose','opening_balance'));
+  for e in select je.* from clara.opening_seed_approvals a
+      join clara.journal_entries je on je.id=a.entry_id
+      where a.seed_id=p_seed and a.batch_n=v_batch order by a.id loop
+    perform clara._append_event(c.firm,'entry.approved',s.client_id,c.actor,
+      null,null,e.id,e.document_id,null,
+      jsonb_build_object('opening_seed_id',p_seed,'batch_n',v_batch));
+  end loop;
+  perform clara._append_event(c.firm,'opening_seed.batch_approved',s.client_id,
+    c.actor,null,null,null,s.tie_document_id,null,
+    jsonb_build_object('seed_id',p_seed,'batch_n',v_batch,
+      'entry_count',jsonb_array_length(v_entries)));
+  v_result:=jsonb_build_object('seed_id',p_seed,'status','finalized',
+    'batch_n',v_batch,'entry_count',jsonb_array_length(v_entries),'entries',v_entries);
+  return clara._finish_op(c.firm,'approve_opening_seed',p_op_key,v_result);
+end $aosfn$;
+
 reset role;
 
 -- =====================================================================================
 -- §Z  TAIL CENSUS. Everything above, re-read from the catalog.
 -- =====================================================================================
 do $w984_tail$
-declare v_src text; v_sha text; v_def text; v_n int; v_role text;
+declare v_src text; v_sha text; v_def text; v_n int; v_role text; v_sig text;
 begin
   -- 1 · THE VOCABULARY GATE knows the fourth value and still closes on a fifth.
   select p.prosrc into v_src from pg_proc p
@@ -468,21 +857,157 @@ begin
   end if;
   select count(*)::int into v_n from pg_proc p join pg_roles r on r.oid=p.proowner
    where p.oid='clara._assert_adjustment_basis(text,jsonb)'::regprocedure
-     and r.rolname='clara_fn_owner' and p.prosecdef and p.proisstrict is not null
+     and r.rolname='clara_fn_owner' and p.prosecdef
      and p.provolatile='i' and p.proconfig @> array['search_path=clara, pg_temp'];
   if v_n <> 1 then
     raise exception '#984 tail: clara._assert_adjustment_basis lost its owner, IMMUTABLE volatility, SECURITY DEFINER flag or pinned search_path'
       using errcode='CLR10';
   end if;
+
+  -- 2 · THE FOUR CHECKS. Each is re-read from the catalog, each must name the fourth value, and
+  --     each must still name all THREE it had before. A widening that dropped one would pass a
+  --     test that only looked for the new token.
+  foreach v_sig in array array['clara.accounting_work|accounting_work_purpose_check',
+                               'clara.operation_receipts|operation_receipts_purpose_check'] loop
+    select pg_get_constraintdef(oid) into v_def from pg_constraint
+     where conrelid = split_part(v_sig,'|',1)::regclass and conname = split_part(v_sig,'|',2);
+    if v_def is null then
+      raise exception '#984 tail: % is absent', v_sig using errcode='CLR10';
+    end if;
+    foreach v_role in array array['journal_entry','periodic_stock_adjustment','payroll_obligation',
+                                  'opening_balance'] loop
+      if position('''' || v_role || '''' in v_def) = 0 then
+        raise exception '#984 tail: % no longer admits % -- the vocabulary is FOUR values, the three prior ones untouched', v_sig, v_role
+          using errcode='CLR10';
+      end if;
+    end loop;
+    select count(*)::int into v_n from regexp_matches(v_def, '''[a-z_]+''::text', 'g');
+    if v_n <> 4 then
+      raise exception '#984 tail: % lists % values, not 4', v_sig, v_n using errcode='CLR10';
+    end if;
+  end loop;
+  select pg_get_constraintdef(oid) into v_def from pg_constraint
+   where conrelid='clara.accounting_work'::regclass and conname='ck_accounting_work_adjustment_basis';
+  if position('opening_balance' in v_def) = 0 or position('journal_entry' in v_def) = 0 then
+    raise exception '#984 tail: ck_accounting_work_adjustment_basis does not carry both no-particulars purposes -- it reads %', v_def
+      using errcode='CLR10';
+  end if;
+  select pg_get_constraintdef(oid) into v_def from pg_constraint
+   where conrelid='clara.operation_receipts'::regclass and conname='ck_operation_receipts_outcome_shape';
+  if position('seed_id' in v_def) = 0 or position('entry_id' in v_def) = 0 then
+    raise exception '#984 tail: ck_operation_receipts_outcome_shape lost an arm -- the three prior purposes still name an ENTRY and opening names its SEED; it reads %', v_def
+      using errcode='CLR10';
+  end if;
+  select pg_get_constraintdef(oid) into v_def from pg_constraint
+   where conrelid='clara.operation_receipts'::regclass and conname='ck_operation_receipts_task_by_purpose';
+  if v_def is null then
+    raise exception '#984 tail: ck_operation_receipts_task_by_purpose is absent -- dropping the NOT NULL without it would let ANY receipt lose its run'
+      using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from pg_attribute
+   where attrelid='clara.operation_receipts'::regclass and attname='task_id' and attnotnull;
+  if v_n <> 0 then
+    raise exception '#984 tail: clara.operation_receipts.task_id is still NOT NULL -- an opening receipt owns no run'
+      using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid='clara.operation_receipts'::regclass
+                   and conname='operation_receipts_task_id_fkey' and contype='f') then
+    raise exception '#984 tail: the task FK is gone -- nullable is not unbound'
+      using errcode='CLR10';
+  end if;
+
+  -- 3 · THE SIBLING ADMISSION PATH: owned, definer, pinned, and granted to NOBODY.
+  if to_regprocedure('clara._admit_opening_work(uuid,uuid,uuid,uuid,integer,jsonb,text,uuid,text)') is null then
+    raise exception '#984 tail: clara._admit_opening_work is absent' using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from pg_proc p join pg_roles r on r.oid=p.proowner
+   where p.oid='clara._admit_opening_work(uuid,uuid,uuid,uuid,integer,jsonb,text,uuid,text)'::regprocedure
+     and r.rolname='clara_fn_owner' and p.prosecdef
+     and p.proconfig @> array['search_path=clara, pg_temp'];
+  if v_n <> 1 then
+    raise exception '#984 tail: clara._admit_opening_work is not a clara_fn_owner SECURITY DEFINER with a pinned search_path'
+      using errcode='CLR10';
+  end if;
   foreach v_role in array array['public','clara_authenticated','clara_runtime','clara_agent_ro'] loop
     if to_regrole(v_role) is not null
-       and has_function_privilege(v_role, 'clara._assert_adjustment_basis(text,jsonb)'::regprocedure, 'execute') then
-      raise exception '#984 tail: % is EXECUTE-reachable on clara._assert_adjustment_basis -- it is an internal', v_role
+       and has_function_privilege(v_role,
+             'clara._admit_opening_work(uuid,uuid,uuid,uuid,integer,jsonb,text,uuid,text)'::regprocedure,
+             'execute') then
+      raise exception '#984 tail: % is EXECUTE-reachable on clara._admit_opening_work -- it is reachable only from the two opening doors', v_role
         using errcode='CLR10';
     end if;
   end loop;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._admit_opening_work(uuid,uuid,uuid,uuid,integer,jsonb,text,uuid,text)'::regprocedure;
+  if position('agent_tasks' in v_src) > 0 then
+    raise exception '#984 tail: clara._admit_opening_work names clara.agent_tasks -- an opening Work acquires no model run (AC3)'
+      using errcode='CLR10';
+  end if;
+  if position('model' in v_src) > 0 then
+    raise exception '#984 tail: clara._admit_opening_work names a model -- nothing served this act but a person'
+      using errcode='CLR10';
+  end if;
+  if position('clara._assert_adjustment_basis' in v_src) = 0 then
+    raise exception '#984 tail: clara._admit_opening_work does not ask the vocabulary gate -- §B''s new arm would be decorative'
+      using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='clara' and p.proname='_admit_opening_work';
+  if v_n <> 1 then
+    raise exception '#984 tail: % bodies answer to clara._admit_opening_work, not 1', v_n using errcode='CLR10';
+  end if;
 
-  -- 2 · THE TWO BODIES THIS FILE MUST NOT HAVE MOVED.
+  -- 4 · THE HUMAN DOORS: recut to call the sibling, and unmoved in every other respect that can
+  --     be read from the catalog. `create or replace` preserves owner and ACL; the SET clauses it
+  --     does NOT preserve are restated in §E and re-read here.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)'::regprocedure;
+  if position('clara._admit_opening_work' in v_src) = 0 then
+    raise exception '#984 tail: clara.approve_opening_seed does not mint the Work' using errcode='CLR10';
+  end if;
+  if position('clara._approve_opening_entry' in v_src) = 0
+     or position('clara._assert_opening_tie' in v_src) = 0
+     or position('clara._finish_op' in v_src) = 0 then
+    raise exception '#984 tail: clara.approve_opening_seed lost the per-entry approval, the tie assertion or the op receipt -- this file adds one statement and removes none'
+      using errcode='CLR10';
+  end if;
+  if position('clara._admit_opening_work' in v_src) < position('clara._assert_opening_tie' in v_src) then
+    raise exception '#984 tail: the seed door mints its Work BEFORE it ties out -- the Work records an act that has already happened'
+      using errcode='CLR10';
+  end if;
+  foreach v_sig in array array['clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)',
+                               'clara.approve_opening_correction(uuid,jsonb,text,text)'] loop
+    select count(*)::int into v_n from pg_proc p join pg_roles r on r.oid=p.proowner
+     where p.oid = v_sig::regprocedure and r.rolname='clara_fn_owner' and p.prosecdef
+       and p.proconfig @> array['search_path=clara, pg_temp']
+       and p.proconfig::text like '%default_transaction_isolation=serializable%';
+    if v_n <> 1 then
+      raise exception '#984 tail: % lost its owner, SECURITY DEFINER flag, pinned search_path or 0171 SERIALIZABLE pin', v_sig
+        using errcode='CLR10';
+    end if;
+    if not has_function_privilege('clara_authenticated', v_sig::regprocedure, 'execute') then
+      raise exception '#984 tail: clara_authenticated can no longer execute % -- the human door narrowed', v_sig
+        using errcode='CLR10';
+    end if;
+    foreach v_role in array array['public','clara_runtime','clara_agent_ro'] loop
+      if to_regrole(v_role) is not null
+         and has_function_privilege(v_role, v_sig::regprocedure, 'execute') then
+        raise exception '#984 tail: % gained EXECUTE on % -- the human door widened', v_role, v_sig
+          using errcode='CLR10';
+      end if;
+    end loop;
+  end loop;
+  -- ...and the isolation pin is still carried by EXACTLY these two bodies and no other, which is
+  -- 0235's own tail assertion restated: this file rewrote both of them and is the one place that
+  -- pin could have been dropped.
+  select count(*)::int into v_n from pg_proc p
+   where p.proconfig::text like '%default_transaction_isolation=serializable%';
+  if v_n <> 2 then
+    raise exception '#984 tail: % bodies pin a transaction isolation level, not 2', v_n using errcode='CLR10';
+  end if;
+
+  -- 5 · THE TWO BODIES THIS FILE MUST NOT HAVE MOVED, and the posting core's closed lookup, which
+  --     AC5 asks to be proven by RE-READING the body rather than by reasoning about it.
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
    where p.oid='clara._admit_accounting_work_core(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)'::regprocedure;
   if v_sha is distinct from '10b89677d342a424d5959ded8ad2c8c974c4ff9bdc26f5c0dd6c773a15af2612' then
@@ -495,7 +1020,17 @@ begin
     raise exception '#984 tail: clara._record_journal_entry_core moved during this migration (sha %) -- AC5 asks exactly that it did not', v_sha
       using errcode='CLR10';
   end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure;
+  if position('''journal_entry'',''periodic_stock_adjustment'',''payroll_obligation''' in v_src) = 0 then
+    raise exception '#984 tail: the posting core''s purpose IN-list is no longer the 0195 three'
+      using errcode='CLR10';
+  end if;
+  if position('opening_balance' in v_src) > 0 then
+    raise exception '#984 tail: the posting core NAMES the opening purpose -- an opening Work must never reach it (its entries are posted before the Work exists)'
+      using errcode='CLR10';
+  end if;
 
-  raise notice '#984 tail: OK -- clara._assert_adjustment_basis admits the opening purpose with null particulars, refuses typed ones by name, still answers invalid_purpose outside the vocabulary, and keeps its owner, IMMUTABLE volatility, SECURITY DEFINER flag, pinned search_path and empty EXECUTE audience. clara._admit_accounting_work_core and clara._record_journal_entry_core are re-read at their pinned shas, unmoved.';
+  raise notice '#984 tail: OK -- the purpose vocabulary is FOUR values on both column CHECKs with the three prior ones untouched; ck_accounting_work_adjustment_basis now lists both no-particulars purposes; ck_operation_receipts_outcome_shape keeps the entry_id arm for the three model-served purposes and names the SEED for an opening batch; clara.operation_receipts.task_id is nullable but purpose-keyed, so the three still REQUIRE a run and opening REFUSES one, with the agent_tasks FK intact. clara._assert_adjustment_basis admits the opening purpose with null particulars and still answers invalid_purpose outside the vocabulary. clara._admit_opening_work is a clara_fn_owner SECURITY DEFINER with a pinned search_path, granted to NOBODY, naming neither clara.agent_tasks nor a model, and asking the vocabulary gate itself. clara.approve_opening_seed mints the Work AFTER its tie assertion and keeps its owner, SECURITY DEFINER flag, pinned search_path, 0171 SERIALIZABLE pin and its clara_authenticated-only EXECUTE audience; exactly two bodies in the database pin an isolation level and both are the opening doors. clara._admit_accounting_work_core and clara._record_journal_entry_core are re-read at their pinned shas, unmoved, and the posting core still looks a Work up through its closed three-value IN-list and does not name the opening purpose.';
 end
 $w984_tail$;

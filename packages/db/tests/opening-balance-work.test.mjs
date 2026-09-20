@@ -41,8 +41,9 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, endPool, assertRaises, printLaneNotes, noteLane,
-  wbEnsureReady,
+  rootQuery, endPool, opk, assertRaises, printLaneNotes, noteLane,
+  wbEnsureReady, buildWaveBWorld, onboardingClient, seedOpeningCoa, stageBeeSet,
+  planRevision, approveOpeningSeed, openingApprovalRows, seedRegRow,
 } from "./wave-b/wb-fixtures.mjs";
 
 /** The migration whose effects this file describes, and the stem its gate module keys on. */
@@ -54,6 +55,7 @@ const OPENING = "opening_balance";
 const PRIOR = ["journal_entry", "periodic_stock_adjustment", "payroll_obligation"];
 
 let ready = false;
+let w = null;
 
 before(async () => {
   ready = await wbEnsureReady();
@@ -71,6 +73,7 @@ before(async () => {
     ready = false;
     return;
   }
+  w = await buildWaveBWorld();
 });
 
 after(async () => {
@@ -130,4 +133,111 @@ test("obw984.basis.vocabulary: the opening purpose is admitted with NULL particu
   assert.equal(JSON.parse(unknown.detail ?? "{}").reason, "invalid_purpose",
     "the gate still answers invalid_purpose outside the vocabulary -- widened, not opened");
   noteLane(`obw984: clara._assert_adjustment_basis admits ${PRIOR.length + 1} purposes and no more`);
+});
+
+/** A freshly onboarded client of firm A with a staged three-item opening seed on a tie document. */
+async function stagedSeed() {
+  const onb = await onboardingClient(w.users.hana);
+  await seedOpeningCoa(w.users.alice, onb.client);
+  const st = await stageBeeSet(w.users.bob, { firm: w.firms.A, client: onb.client, plan: onb.plan });
+  return { onb, ...st };
+}
+
+/** Every `clara.accounting_work` row of ONE client, oldest first. */
+const workRows = async (client) => (await rootQuery(
+  "select * from clara.accounting_work where client_id = $1 order by created_at, id", [client])).rows;
+
+/** Every `clara.operation_receipts` row of ONE client, oldest first. */
+const receiptRows = async (client) => (await rootQuery(
+  "select * from clara.operation_receipts where client_id = $1 order by created_at, id", [client])).rows;
+
+/** Every `clara.agent_tasks` row of ONE client. */
+const taskRows = async (client) => (await rootQuery(
+  "select * from clara.agent_tasks where client_id = $1", [client])).rows;
+
+/** The rows `clara.agent_tasks` holds against ONE Work — the FK an opening Work must never own. */
+const tasksForWork = async (work) => (await rootQuery(
+  "select * from clara.agent_tasks where work_id = $1", [work])).rows;
+
+// =============================================================================================
+// 2 - obw984.seed.work -- approving an opening SEED mints exactly one Work and one receipt.
+//
+// The Agent Brief's AC2 and AC3, at the human door. The counts are CLIENT-SCOPED because every
+// cell here stages its own client: a firm-scoped census would be moved by any sibling file in an
+// estate sweep (the lesson `p646.horn_a.no_work` carries in its own header). The scoping is not
+// vacuous -- the very same predicate is what SEES the one Work this approval mints.
+// =============================================================================================
+test("obw984.seed.work: approving an opening seed mints exactly ONE accounting_work and ONE operation_receipt of the opening purpose, with no agent task and no model name, and opening's own receipt relation is unchanged", async (t) => {
+  if (unready(t)) return;
+  const s = await stagedSeed();
+
+  // PRESTATE, MEASURED: an opening client has no Work of any kind before it is approved. That is
+  // the defect this ticket repairs, pinned as the starting point rather than assumed.
+  assert.deepEqual(await workRows(s.onb.client), [], "no accounting_work before the approval");
+  assert.deepEqual(await receiptRows(s.onb.client), [], "no operation_receipt before the approval");
+  assert.deepEqual(await taskRows(s.onb.client), [], "no agent_task before the approval");
+
+  const opKey = opk("obw984-seed");
+  const receipt = await approveOpeningSeed(w.users.hana, {
+    seed: s.seed, planRevision: await planRevision(s.onb.plan), tieSha256: s.doc.sha256,
+    entryRevisions: s.revMap, opKey,
+  });
+  assert.equal(receipt.status, "finalized", "mandatory setup: the batch really approved");
+
+  // --- THE WORK -------------------------------------------------------------------------------
+  const works = await workRows(s.onb.client);
+  assert.equal(works.length, 1, "exactly ONE accounting_work row for the whole batch");
+  const work = works[0];
+  assert.equal(work.purpose, OPENING, "under the new opening purpose");
+  assert.equal(work.status, "completed",
+    "already finished: the entries are approved and the registry finalized before the row is written");
+  assert.equal(work.basis_origin, "user_direct", "a person approved it");
+  assert.equal(work.adjustment_basis, null, "an opening Work carries no typed particulars");
+  assert.equal(work.current_task_id, null, "and names no run");
+  assert.deepEqual(work.source_refs, [], "documentless: the tie is a fact on the basis, not an evidence claim");
+  assert.equal(work.initiator, w.users.hana, "the approver is the initiator");
+  assert.equal(work.initiated_by, w.users.hana);
+  assert.equal(work.initiator_role, "admin", "at the rank the door floors on");
+  assert.equal(work.basis.seed_id, s.seed, "the basis names the seed it came from");
+  assert.equal(work.basis.batch_n, 1, "and the batch");
+  assert.equal(work.basis.entry_count, s.drafts.all.length, "and how many entries it carried");
+  assert.equal(work.basis.tie_document_id, s.doc.documentId, "and the tie document, as a fact");
+  assert.equal(work.basis.batch, "seed", "and which door approved it");
+  assert.equal(work.logical_op_id, `work:${work.id}:${OPENING}:1`,
+    "the logical operation identity is the house shape, purpose included");
+
+  // --- THE RECEIPT ----------------------------------------------------------------------------
+  const receipts = await receiptRows(s.onb.client);
+  assert.equal(receipts.length, 1, "exactly ONE operation_receipt");
+  const r = receipts[0];
+  assert.equal(r.purpose, OPENING);
+  assert.equal(r.work_id, work.id, "naming the Work it belongs to");
+  assert.equal(r.outcome, "committed");
+  assert.equal(r.refusal, null);
+  assert.equal(r.task_id, null,
+    "NO run: the receipt's task is null, which 0239's own purpose-keyed CHECK now requires here");
+  assert.equal(r.acting_actor, w.users.hana, "the human acted");
+  assert.equal(r.on_behalf_of, w.users.hana, "for themselves; no agent stood in");
+  assert.equal(r.via_wake_kind, "opening_approval", "through the opening door, not a wake");
+  assert.equal(r.run_id, opKey, "the run id is the operation key the door was called with");
+  assert.equal(r.effects.seed_id, s.seed, "the effects name the seed");
+  assert.equal(r.effects.batch_n, 1);
+  assert.equal(r.effects.entry_count, s.drafts.all.length);
+  assert.equal(Object.prototype.hasOwnProperty.call(r.effects, "entry_id"), false,
+    "and NAME NO ENTRY: a batch has N, and clara._tf_assert_agent_post_receipt counts receipts that name one");
+  assert.match(r.payload_digest, /^[0-9a-f]{64}$/);
+
+  // --- WHAT DID NOT HAPPEN --------------------------------------------------------------------
+  assert.deepEqual(await taskRows(s.onb.client), [],
+    "AC3: no agent_task was created for this client - an opening approval is deterministic and human-made");
+  assert.deepEqual(await tasksForWork(work.id), [],
+    "and none points at this Work, which is the FK a model run would have to take");
+
+  // --- AND OPENING'S OWN RECEIPT RELATION IS UNTOUCHED -----------------------------------------
+  const approvals = await openingApprovalRows(s.seed);
+  assert.equal(approvals.length, s.drafts.all.length,
+    "the dedicated per-entry receipt relation still carries one row per entry, unchanged");
+  assert.equal((await seedRegRow(s.seed)).state, "finalized",
+    "and the registry finalized exactly as before");
+  noteLane(`obw984: an approved opening seed now carries work ${work.id} and receipt ${r.id}`);
 });
