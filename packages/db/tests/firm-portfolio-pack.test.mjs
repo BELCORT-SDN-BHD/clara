@@ -711,11 +711,36 @@ test("p659.portfolio.cursor_stability — a register that gains, renames and arc
 // ===========================================================================================
 // p659.portfolio.no_recut — the five prestate pins are still byte-identical after 0231.
 // ===========================================================================================
+async function migrationApplied(pattern) {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [pattern]);
+  return r.rows[0].n > 0;
+}
+
 test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_client_work_pack, _work_run_attempts and list_activity are untouched", async (t) => {
   if (await gate(t)) return;
+  // TWO OF THE FIVE ARE PINNED IN BOTH GENERATIONS (wave 2, 2026-09-20). This cell's claim is
+  // "0231 recuts nothing", and that claim is still exactly what it asserts — but two of the five
+  // bodies were LATER recut, in scope, by tickets of their own, and a pin that named only the
+  // pre-image would turn their verified work into a false red here:
+  //   · clara.list_review_queue — #974 (0260) splices one `authority_rows` CTE, one union arm
+  //     and one `authority_id` json-builder gate for the `depreciation_authority_pending` row
+  //     kind. 0260's own postcheck proves the ten pre-existing row kinds survive at their exact
+  //     pre-splice marker counts; that recut's proof lives in
+  //     depreciation-authority-pending-rowkind.test.mjs, not here.
+  //   · clara.list_activity — #840 (0262) projects `successor_work_id`, then #861 (0264) rebuilds
+  //     the kind ladder with five new rungs. Both are create-or-replace recuts that 0262/0264's
+  //     own tails re-measure; activity-feed.test.mjs carries their behavioural proof.
+  // So each of the two carries its pre-image AND its post-image, selected on whether the
+  // recutting migration is applied — the shape intake-batch.test.mjs uses for #964's window
+  // recut, for the same reason. The other three are unmoved in either world.
+  const reviewQueueRecut = await migrationApplied("^0260_");
+  const activityRecut = await migrationApplied("^0264_");
   const PINS = {
     "clara.list_review_queue(jsonb,jsonb,int)":
-      "29deb82d1609441d40a5be6131ffac12dc6b0ee8f1d37645dd9de986ce3eaf40",
+      reviewQueueRecut
+        ? "1641f99f4d295400bd39bd7b2cee3ac4cac2c34e7478078014e7305d99d9b570"
+        : "29deb82d1609441d40a5be6131ffac12dc6b0ee8f1d37645dd9de986ce3eaf40",
     "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)":
       "61bd9184fe271e081af426647c4081155c6d086368411478d1f2be88a1f4ca5a",
     "clara.get_client_work_pack(uuid,int)":
@@ -723,13 +748,17 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
     "clara._work_run_attempts(uuid[])":
       "3da8d655d78cac6eede8444321492fc4a1b5797a4f8a826fb878e26081cfa69e",
     "clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz,uuid)":
-      "dec4bc22c7d01ca67e651168aa18718f05e47b9c9aba2ec84288981992e9f870",
+      activityRecut
+        ? "02a7f720a936dc434013047835e4cda1661c2576ff0dcbc86636d6a0cbf8f869"
+        : "dec4bc22c7d01ca67e651168aa18718f05e47b9c9aba2ec84288981992e9f870",
   };
   for (const [sig, sha] of Object.entries(PINS)) {
     const r = await rootQuery(
       "select encode(sha256(convert_to(prosrc, 'UTF8')), 'hex') as sha "
       + `from pg_proc where oid = '${sig}'::regprocedure`);
-    assert.equal(r.rows[0].sha, sha, `${sig} DRIFTED — 0231 recuts nothing`);
+    assert.equal(r.rows[0].sha, sha,
+      `${sig} DRIFTED — 0231 recuts nothing, and only #974's (0260) and #840/#861's (0262/0264) `
+      + "own named recuts are tolerated");
   }
   const secdef = await rootQuery(
     "select (select prosecdef from pg_proc where oid = 'clara.list_review_queue(jsonb,jsonb,int)'::regprocedure) as q, "
