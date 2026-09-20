@@ -29,7 +29,9 @@
 --      registry's only BEFORE UPDATE wall (0207's) compares nothing but the version. Measured:
 --      publish a never-seen pair at version 1 (admitted — it has no mark), then
 --      `update … set format='pdf', document_kind='invoice'`; the pair read version 1 while its
---      mark still read 3, and the deferred uniformity wall passed it. (§B.2)
+--      mark still read 3, and the deferred uniformity wall passed it. (§B.2, which also records
+--      why the wall is a SECOND trigger with a key-change WHEN clause rather than a wider event
+--      list on 0244's.)
 --   3. `recorded_at` on the mark. 0244 comments the column "Moves only upward with
 --      registry_version" and walls first_seen_at, the key and the version — but not this column.
 --      Measured: rewritten to 1999-01-01 with no refusal. A column comment is a claim; this file
@@ -64,8 +66,10 @@
 -- `registry_version` on any row (it stays where 0245 published it), 0191's two policies and its
 -- grants, 0207's wall body, and the output of `clara._document_capability(text,text)` /
 -- `clara.get_document_state(uuid,uuid)`. No application role gains anything: this file installs
--- one trigger on an ungranted ledger, recuts one ungranted trigger body, re-arms one trigger's
--- event list and re-issues one column comment. It mints NO new name, so no rig-meta cohort moves.
+-- two triggers (one on an ungranted ledger, one on the registry, both on bodies that already
+-- exist), recuts one ungranted trigger body and re-issues two comments. It mints NO new FUNCTION,
+-- so no rig-meta cohort moves: `cohortFailures` rosters names, and every name here is already in
+-- #846's own cohort or in 0003's.
 -- =====================================================================================
 
 set local statement_timeout = '5min';   -- runner rule: statement_timeout is the first executable statement
@@ -177,11 +181,70 @@ create trigger t_document_capability_high_water_no_truncate
 reset role;
 
 -- =====================================================================================
+-- §B.2  ROUTE 2 — A RE-KEYING UPDATE. The high-water wall was armed BEFORE INSERT only, on the
+-- reasoning that "a deleted-then-reinserted row is a first publication to the database". So it
+-- is — but so is a row whose (format, document_kind) is UPDATED onto another pair's key, and
+-- that route never passes through an INSERT. The registry's only BEFORE UPDATE wall is 0207's,
+-- whose body compares nothing but the version (`new.registry_version < old.registry_version`)
+-- and never the key, so a row born lawfully at a low version under a never-seen key can be moved
+-- onto a published pair and land BELOW that pair's mark.
+--
+-- 0244 SAW THE SHAPE AND WALLED THE WRONG TABLE. Its §B.3 reasons that "RE-KEYING IS A DELETE IN
+-- DISGUISE" and refuses a re-key of the MARK; the registry's own key was left unguarded.
+--
+-- A SECOND TRIGGER ON THE SAME BODY, NOT A WIDER EVENT LIST ON THE FIRST. The obvious cut —
+-- re-arm `t_document_capabilities_version_high_water` as BEFORE INSERT OR UPDATE — was written,
+-- applied and MEASURED to be wrong: PostgreSQL fires BEFORE ROW triggers in trigger-NAME order,
+-- `…_version_high_water` sorts before `…_version_monotone`, and an ordinary in-place LOWERING
+-- update then came back as CLR08 / `registry_version_high_water` instead of 0207's
+-- `registry_version_monotone`. document-capability-registry.test.mjs caught it on the next run.
+-- Re-labelling a refusal a caller already classifies is a breaking change this fix round has no
+-- mandate for, so the widening is confined to the case that is actually new:
+--
+--   `when (new.format is distinct from old.format or new.document_kind is distinct from
+--    old.document_kind)` — a genuine RE-KEY, and nothing else. An in-place UPDATE never reaches
+--   this wall and 0207 keeps its whole subject. (The WHEN clause has to live on its own trigger:
+--   a combined INSERT OR UPDATE trigger may not reference OLD at all.)
+--
+-- THE BODY IS BYTE-UNCHANGED. `clara._tf_document_capabilities_version_high_water` already reads
+-- the mark for `new.format` / `new.document_kind` and has no opinion about `old`, so on a re-key
+-- it asks exactly the right question of exactly the right key — the destination. Its sha is
+-- pinned in §A and re-read in the tail; only its comment moves, to say it is now armed twice.
+--
+-- WHAT THIS DOES NOT REFUSE, deliberately: an ordinary raise or an unchanged version (the WHEN
+-- clause is false), and a re-key ONTO a never-published pair, which is a first publication and
+-- mints its own mark through the AFTER writer. A lowering UPDATE in place was, and stays, 0207's.
+-- =====================================================================================
+set role clara_fn_owner;
+
+comment on function clara._tf_document_capabilities_version_high_water() is
+  'BEFORE row wall on clara.document_capabilities (#846), armed TWICE since 0272: on INSERT (t_document_capabilities_version_high_water, 0244) and on a key-changing UPDATE (t_document_capabilities_version_high_water_rekey, 0272). A row may not LAND below the high-water mark clara.document_capability_version_high_water holds for the (format, document_kind) it is landing ON. The body reads `new` and has no opinion about `old`, so one body answers both halves: an INSERT after a DELETE (0207''s first residual) and an UPDATE that RE-KEYS a row onto another pair (the route 0244 walled on the mark table but not on the registry). A pair with no mark has never been published and is admitted. An in-place UPDATE is NOT this wall''s subject -- it stays clara._tf_document_capabilities_version_monotone''s (0207). Raises CLR08 with detail.reason = registry_version_high_water, the same code family and detail shape clara._tf_document_capabilities_version_monotone (0207) and clara._tf_accounting_plans_immutable (0193) raise.';
+
+-- REDO REPAIR, and a no-op on a first apply. An earlier cut of this file re-armed 0244's own
+-- trigger as BEFORE INSERT OR UPDATE; a database that already carries that cut must come back to
+-- the shape 0244 declares, or the tail below (rightly) refuses. `drop … if exists` + `create`
+-- with 0244's exact spelling is idempotent from either starting point.
+drop trigger if exists t_document_capabilities_version_high_water on clara.document_capabilities;
+create trigger t_document_capabilities_version_high_water
+  before insert on clara.document_capabilities
+  for each row execute function clara._tf_document_capabilities_version_high_water();
+
+drop trigger if exists t_document_capabilities_version_high_water_rekey on clara.document_capabilities;
+create trigger t_document_capabilities_version_high_water_rekey
+  before update on clara.document_capabilities
+  for each row
+  when (new.format is distinct from old.format or new.document_kind is distinct from old.document_kind)
+  execute function clara._tf_document_capabilities_version_high_water();
+
+reset role;
+
+-- =====================================================================================
 -- §D  TAIL. The wall is present, it is at the right timing, and it actually refuses.
 -- =====================================================================================
 do $w846fix_tail$
 declare
-  v_n int; v_def text; v_marks int;
+  v_n int; v_def text; v_marks int; v_detail text; v_reason jsonb; v_published int;
+  r clara.document_capabilities%rowtype;
 begin
   -- (1) THE TRIGGER, at the ONE timing that sees a TRUNCATE.
   select pg_get_triggerdef(t.oid) into v_def from pg_trigger t
@@ -211,13 +274,121 @@ begin
   exception when sqlstate 'ZA272' then null;
   end;
 
-  -- (3) THE PROBE LEFT NOTHING BEHIND.
-  select count(*)::int into v_n from clara.document_capability_version_high_water;
-  if v_n <> v_marks then
-    raise exception '#846 fix tail: the truncate probe leaked -- % marks, was %', v_n, v_marks using errcode = 'CLR10';
+  -- (3) THE HIGH-WATER WALL IS NOW ARMED TWICE, its body did not move to get there, and 0244's
+  -- own INSERT arming is untouched.
+  select pg_get_triggerdef(t.oid) into v_def from pg_trigger t
+   where t.tgrelid = 'clara.document_capabilities'::regclass
+     and t.tgname = 't_document_capabilities_version_high_water' and not t.tgisinternal;
+  if v_def is null or v_def !~* 'BEFORE INSERT' or v_def ~* 'UPDATE' or v_def !~* 'FOR EACH ROW'
+     or v_def ~* '\mWHEN\M' then
+    raise exception '#846 fix tail: 0244''s INSERT arming is no longer an unconditional BEFORE INSERT FOR EACH ROW trigger -- got %', coalesce(v_def, '<none>')
+      using errcode = 'CLR10';
+  end if;
+  select pg_get_triggerdef(t.oid) into v_def from pg_trigger t
+   where t.tgrelid = 'clara.document_capabilities'::regclass
+     and t.tgname = 't_document_capabilities_version_high_water_rekey' and not t.tgisinternal;
+  if v_def is null or v_def !~* 'BEFORE UPDATE' or v_def !~* 'FOR EACH ROW'
+     or v_def !~* 'WHEN' or v_def !~* 'format' or v_def !~* 'document_kind'
+     or v_def !~* '_tf_document_capabilities_version_high_water' then
+    raise exception '#846 fix tail: the re-key wall is not a BEFORE UPDATE FOR EACH ROW trigger gated on a change of (format, document_kind) -- got %', coalesce(v_def, '<none>')
+      using errcode = 'CLR10';
+  end if;
+  if encode(sha256(convert_to((select p.prosrc from pg_proc p
+       where p.oid = 'clara._tf_document_capabilities_version_high_water()'::regprocedure), 'UTF8')), 'hex')
+     <> 'b40906871b7e7e43bff50799c187d7ae38d13d30f61f7a1ab99547d6de8618c9' then
+    raise exception '#846 fix tail: the high-water wall''s BODY was modified -- this file arms it a second time, it does not recut it'
+      using errcode = 'CLR10';
   end if;
 
-  raise notice '#846 fix tail: OK -- clara.document_capability_version_high_water refuses TRUNCATE with CLR08 through 0003''s clara._tf_no_truncate, proven behaviourally against the live ledger (% marks) and rolled back whole.',
-    v_marks;
+  -- (4) IT ACTUALLY REFUSES A RE-KEY. The probe reproduces the exact route measured before this
+  -- file was written, against the live registry, and is rolled back whole.
+  select min(registry_version)::int into v_published from clara.document_capabilities;
+  if v_published < 2 then
+    raise exception '#846 fix tail: the registry publishes version %, too low for a probe that stays above the positivity CHECK', v_published
+      using errcode = 'CLR10';
+  end if;
+  begin
+    select * into r from clara.document_capabilities where format = 'pdf' and document_kind = 'invoice';
+    if r.format is null then
+      raise exception '#846 fix tail: the probe pair pdf x invoice is not in the registry' using errcode = 'CLR10';
+    end if;
+    delete from clara.document_capabilities where format = 'pdf' and document_kind = 'invoice';
+    insert into clara.document_capabilities
+      (format, document_kind, mime_type, custody, byte_extraction, typed_facts,
+       business_operation, engine_id, engine_byte, registry_version, basis, limits)
+    values ('probe846rekey', 'probe_kind', r.mime_type, r.custody, r.byte_extraction, r.typed_facts,
+            r.business_operation, r.engine_id, r.engine_byte, r.registry_version - 1, r.basis, r.limits);
+    begin
+      update clara.document_capabilities set format = 'pdf', document_kind = 'invoice'
+       where format = 'probe846rekey';
+      raise exception '#846 fix tail: a RE-KEYING update republished pdf x invoice below its mark -- the wall is installed but does not see UPDATE'
+        using errcode = 'CLR10';
+    exception when sqlstate 'CLR08' then
+      get stacked diagnostics v_detail = pg_exception_detail;
+      v_reason := nullif(v_detail, '')::jsonb;
+      if coalesce(v_reason ->> 'reason', '') <> 'registry_version_high_water'
+         or coalesce(v_reason ->> 'format', '') <> 'pdf'
+         or coalesce(v_reason ->> 'document_kind', '') <> 'invoice'
+         or coalesce((v_reason ->> 'from')::int, -1) <> r.registry_version then
+        raise exception '#846 fix tail: the re-key refusal does not name the DESTINATION key and its mark (detail %)', coalesce(v_detail, '<null>')
+          using errcode = 'CLR10';
+      end if;
+    end;
+    raise exception '#846 fix rekey probe rollback' using errcode = 'ZA273';
+  exception when sqlstate 'ZA273' then null;
+  end;
+
+  -- (5) …AND IT STILL ADMITS THE ONLY SHAPE A REPUBLICATION HAS EVER TAKEN. A wall that refused
+  -- every UPDATE would pass (4) and break 0245's own raise, silently, on the next republish.
+  begin
+    update clara.document_capabilities set registry_version = registry_version + 1;
+    select count(distinct registry_version)::int into v_n from clara.document_capabilities;
+    if v_n <> 1 then
+      raise exception '#846 fix tail: the whole-registry raise did not leave one version (got %)', v_n
+        using errcode = 'CLR10';
+    end if;
+    raise exception '#846 fix raise probe rollback' using errcode = 'ZA274';
+  exception when sqlstate 'ZA274' then null;
+  end;
+
+  -- (5b) 0207 KEEPS ITS OWN SUBJECT. An IN-PLACE lowering must still come back under 0207's
+  -- reason, not under this file's: a caller that classifies by detail.reason would otherwise be
+  -- broken by a fix round it never asked for. This is the regression the first cut of §B.2
+  -- actually caused, so it is pinned here rather than left to the battery alone.
+  begin
+    begin
+      update clara.document_capabilities set registry_version = registry_version - 1
+       where format = 'pdf' and document_kind = 'invoice';
+      raise exception '#846 fix tail: an in-place LOWERING update was ACCEPTED -- 0207''s wall no longer fires'
+        using errcode = 'CLR10';
+    exception when sqlstate 'CLR08' then
+      get stacked diagnostics v_detail = pg_exception_detail;
+      v_reason := nullif(v_detail, '')::jsonb;
+      if coalesce(v_reason ->> 'reason', '') <> 'registry_version_monotone' then
+        raise exception '#846 fix tail: an in-place lowering now refuses under reason "%" rather than 0207''s registry_version_monotone -- this file re-labelled a refusal a caller already classifies', coalesce(v_reason ->> 'reason', '<none>')
+          using errcode = 'CLR10';
+      end if;
+    end;
+    raise exception '#846 fix monotone probe rollback' using errcode = 'ZA275';
+  exception when sqlstate 'ZA275' then null;
+  end;
+
+  -- (6) THE PROBES LEFT NOTHING BEHIND, in either table.
+  select count(*)::int into v_n from clara.document_capability_version_high_water;
+  if v_n <> v_marks then
+    raise exception '#846 fix tail: a probe leaked -- % marks, was %', v_n, v_marks using errcode = 'CLR10';
+  end if;
+  select count(distinct registry_version)::int into v_n from clara.document_capabilities;
+  if v_n <> 1 then
+    raise exception '#846 fix tail: a probe leaked -- the registry publishes % distinct versions', v_n using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capability_version_high_water
+   where registry_version <> v_published;
+  if v_n <> 0 then
+    raise exception '#846 fix tail: a probe leaked -- % mark(s) sit off the published version', v_n using errcode = 'CLR10';
+  end if;
+
+  raise notice '#846 fix tail: OK -- clara.document_capability_version_high_water refuses TRUNCATE with CLR08 through 0003''s clara._tf_no_truncate, and clara._tf_document_capabilities_version_high_water (body byte-unchanged at its pinned pre-image) is now armed a SECOND time as t_document_capabilities_version_high_water_rekey, a BEFORE UPDATE trigger gated on a change of (format, document_kind), so a re-key onto a published pair is refused with CLR08 / detail.reason = registry_version_high_water naming the DESTINATION key. All proven behaviourally against the live tables (% marks, registry at version %) and rolled back whole; the whole-registry raise is still admitted and an in-place lowering still refuses under 0207''s registry_version_monotone.',
+    v_marks, v_published;
 end
 $w846fix_tail$;

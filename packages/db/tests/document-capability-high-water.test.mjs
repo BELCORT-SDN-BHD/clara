@@ -48,13 +48,13 @@ const CAPABILITY_COLUMNS =
 /** The count WITH 0244 applied. The `after` hook asserts it, so a cell that silently stops
  *  running — the way a mis-gated cell does — fails the whole battery rather than passing by
  *  absence. */
-const EXPECTED_CELLS = 8;
+const EXPECTED_CELLS = 9;
 
 let live = false;
 let executed = 0;
 
 /** #846's whole closure, read from the LIVE CATALOG: 0244's five objects plus the three routes
- *  0272 closed in the SAME pull request (`g5` stands for all three — 0272 installs them in one
+ *  0272 closed in the SAME pull request (`g5` and `g6` are 0272's own — it installs all three routes in one
  *  file, so its truncate trigger is that file's frontier the way the five-value CHECK is 0246's
  *  in the sibling battery). Wholly present or wholly absent; anything between the two is a
  *  half-applied migration and is reported as such. There is no shipped chain between 0244 and
@@ -85,7 +85,11 @@ async function cohortApplied() {
       exists (select 1 from pg_trigger t
                where t.tgrelid = 'clara.document_capability_version_high_water'::regclass
                  and t.tgname = 't_document_capability_high_water_no_truncate'
-                 and not t.tgisinternal)                                              as g5`);
+                 and not t.tgisinternal)                                              as g5,
+      exists (select 1 from pg_trigger t
+               where t.tgrelid = 'clara.document_capabilities'::regclass
+                 and t.tgname = 't_document_capabilities_version_high_water_rekey'
+                 and not t.tgisinternal)                                              as g6`);
   const flags = Object.entries(r.rows[0]);
   const present = flags.filter(([, v]) => v).length;
   if (present !== 0 && present !== flags.length) {
@@ -253,6 +257,52 @@ cell("TRUNCATE of the high-water mark is refused: a row trigger does not fire on
     "the refusal names the relation, the way clara._tf_no_truncate has named every other "
     + "append-only relation since 0003");
   assert.equal(seen.after, seen.before, "the refused TRUNCATE left every mark in place");
+});
+
+cell("a RE-KEYING update cannot republish a pair below its mark: the wall reads the key the row is moving TO", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const row = await capturePdfInvoice(c);
+    const mark = (await c.query(
+      `select registry_version from clara.document_capability_version_high_water ${PDF_INVOICE}`))
+      .rows[0].registry_version;
+    assert.equal(mark, row.registry_version, "the pair starts with its mark at the version it publishes");
+
+    // The registry's primary key is (format, document_kind), so the pair has to be retired before
+    // anything can be re-keyed ONTO it. Retiring is legitimate and stays legitimate — that is
+    // #846's own "while retiring a row stays possible".
+    await c.query(`delete from clara.document_capabilities ${PDF_INVOICE}`);
+
+    // A never-seen pair has no mark, so its first publication is admitted AT ANY VERSION. This is
+    // the door the re-key walks through: the row is lawful where it is born and unlawful where it
+    // is moved to. (The registry is non-uniform here; the uniformity wall is DEFERRED and judges
+    // only what a transaction LEAVES, and this one leaves nothing.)
+    const probe = { ...row, format: "probe846rekey", document_kind: "probe_kind" };
+    await reinsert(c, probe, row.registry_version - 1);
+
+    await c.query("savepoint probe_rekey");
+    const err = await caught(() => c.query(
+      "update clara.document_capabilities set format = 'pdf', document_kind = 'invoice' "
+      + "where format = 'probe846rekey'"));
+    await c.query("rollback to savepoint probe_rekey");
+
+    const republished = (await c.query(
+      `select registry_version from clara.document_capabilities ${PDF_INVOICE}`)).rows[0] ?? null;
+    return { err, mark, published: row.registry_version, republished };
+  });
+
+  assert.ok(seen.err,
+    "a re-keying UPDATE republished pdf x invoice BELOW its high-water mark — the wall is "
+    + "INSERT-side only and a re-key is a DELETE-then-INSERT in disguise");
+  assert.equal(seen.err.code, CLR08, `expected ${CLR08} for the refused re-key, got ${seen.err.code}`);
+  const detail = JSON.parse(seen.err.detail ?? "{}");
+  assert.equal(detail.reason, "registry_version_high_water",
+    "the re-key is refused by the HIGH-WATER wall, under the reason a caller already classifies");
+  assert.equal(detail.format, "pdf", "the refusal names the key the row was moving TO, never the one it left");
+  assert.equal(detail.document_kind, "invoice");
+  assert.equal(detail.from, seen.mark, "…measured against that key's mark");
+  assert.equal(detail.to, seen.published - 1);
+  assert.equal(seen.republished, null,
+    "the refused re-key left the retired pair retired: nothing was republished under it");
 });
 
 // ---------------------------------------------------------------------------------------------
