@@ -1021,6 +1021,17 @@ append-only guard (`t_event_types_append_only`) suspended inside a rolled-back t
 description was replaced in turn and §T refused with CLR10 naming the foreign sentence; the
 subject was restored byte for byte.
 
+**Why #840's and #861's door recuts landed in TWO migrations and not one.** #840's triage comment
+and #861's owner ruling each asked for ONE migration if both were in flight together. They were —
+in this lane — but the wave-2 work-order addendum (`docs/plan/active/riders-2026-09-20`) overrides
+it: one implementer per ticket, and "a ticket that needs a schema or function change writes EXACTLY
+ONE new migration file at the number reserved for it". So 0262 (#840) and 0264 (#861) each recut
+`clara.list_activity` and `clara.get_activity_event` in turn, and they compose because 0264's
+prestate pins 0262's OUTPUT shas rather than 0202/0184's and its body was rebuilt from 0262's
+committed text. A chain that applies 0262 then 0264 therefore reaches the same body a single
+migration would have written; the two files are never applied out of order because migration
+numbers are a total order.
+
 ## `activity-feed.test.mjs` `af.33`–`af.39b` — #861 / migration 0264
 
 Both activity doors computed a row's `kind` from a five-rung ladder — `sweep.run_completed`,
