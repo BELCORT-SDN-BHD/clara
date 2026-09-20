@@ -1884,3 +1884,24 @@ test("af.33 a membership event and an invitation event land on kind=people in BO
       `af.33 get_activity_event files ${row.event_type} under the SAME kind`);
   }
 });
+
+test("af.34 a fixed-asset event lands on kind=assets in BOTH doors, and the assets filter reaches it", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const cli = world.clients.A1;
+  const acquired = await mkEvent({ firm: FIRM_A(), type: "asset.acquired", client: cli, actor: ALICE() });
+
+  const page = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["assets"], limit: 100 }));
+  assert.ok(page.every((r) => r.kind === "assets"), "af.34 the assets filter returns ONLY assets rows");
+
+  const row = page.find((r) => r.id === acquired.eventId);
+  assert.ok(row, "af.34 the acquisition is reachable under kinds=['assets']");
+  assert.equal(row.kind, "assets", "af.34 list_activity files asset.acquired under assets");
+  const detail = await getActivityEvent(BOB(), "event", row.id);
+  assert.equal(detail.kind, "assets", "af.34 get_activity_event files it under the SAME kind");
+
+  // …and it is no longer on the documents rung it used to fall through to, which is the whole
+  // point: the documents filter is a filter on document acts again.
+  const docs = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["documents"], limit: 100 }));
+  assert.equal(docs.find((r) => r.id === acquired.eventId), undefined,
+    "af.34 the acquisition has LEFT the documents rung");
+});
