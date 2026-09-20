@@ -31,7 +31,7 @@ const BASE: ReviewQueueRow = {
   rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
   question_text: null, created_at: "2026-04-01T00:00:00Z", id: "e1",
   coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
-  client_name: null, batch_ids: null, open_proposal_count: null,
+  client_name: null, batch_ids: null, open_proposal_count: null, authority_id: null,
 };
 
 const row = (patch: Partial<ReviewQueueRow>): ReviewQueueRow => ({ ...BASE, ...patch });

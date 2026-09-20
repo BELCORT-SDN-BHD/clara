@@ -186,10 +186,10 @@ extracted from the client register so both pages mount the same one): its whole 
 React state, and a control hung off the empty branch would be remounted — and silently emptied — by
 the first of those four re-reads that returns a row.
 
-Recent activity on this page reads `clara.list_activity` (not `clara.list_firm_timeline`) so it can
-render WHO did each thing through the one shared actor cell. Both doors floor at bookkeeper, so the
-swap moves no permission. `clara.list_activity`'s kind ladder misfiles several event families under
-`documents` (#861); that is named on the surface and is not corrected in the browser.
+Recent activity on this page reads `clara.list_activity` so it can render WHO did each thing
+through the one shared actor cell (#659 moved it off the now-retired `clara.list_firm_timeline`,
+#998). `clara.list_activity`'s kind ladder misfiles several event families under `documents`
+(#861); that is named on the surface and is not corrected in the browser.
 
 ## The document detail's three routed views (#646)
 

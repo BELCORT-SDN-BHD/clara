@@ -56,6 +56,7 @@ import { AddClientControl } from "../add-client-control";
 import { DataState, ErrorMessage } from "../data-state";
 import { SweepStatusPanel } from "../sweep-status-panel";
 import { ClaraWorkingTile } from "./clara-working-tile";
+import { FirmLegalStandingTile } from "./firm-legal-standing-tile";
 import { FirmPortfolioSection } from "./firm-portfolio-section";
 import { FirmRecentActivity } from "./firm-recent-activity";
 import { FirmSetupTile } from "./firm-setup-tile";
@@ -69,7 +70,6 @@ const TRIAGE_ROWS = 5;
 
 export function FirmHomeBoard() {
   const t = useTranslations("FirmHome");
-  const tcr = useTranslations("ClientsRegister");
   // The roster's own role vocabulary — one catalog for the four values, shared with
   // `components/admin/members-panel.tsx` rather than copied into a second list here.
   const tm = useTranslations("Members");
@@ -152,6 +152,14 @@ export function FirmHomeBoard() {
           and still renders. It is shown, never swallowed: a page that quietly forgot the firm's
           name would look identical to one that never had it. */}
       {caller.error ? <ErrorMessage error={caller.error} /> : null}
+      {/* #995's fix round — AND THE SAME RULE FOR THE REGISTER READ. Retiring the status tally
+          took with it the page's only DataState over `register`, which is what turned a failed
+          client-register read into a silent fall back to the role-only sentence. No ticket line
+          asked for that loss, and the rule one line above is the page's own: a failed read
+          degrades what it feeds and is SAID. It is a banner here, not a restored section —
+          `register` feeds the header's client count and the client-name map the triage list and
+          recent activity read through, all of which sit ABOVE where the section stood. */}
+      {register.error ? <ErrorMessage error={register.error} /> : null}
 
       {/* The orientation sentence. OMITTED ENTIRELY while the envelope is unread — a sentence
           with a blank where a count belongs is worse than no sentence, and this one is the first
@@ -226,6 +234,13 @@ export function FirmHomeBoard() {
           </div>
 
           <div className="flex min-w-0 flex-col gap-6">
+            {/* #1009 — THE LEGAL-STANDING PROMPT, ahead of "Finish firm setup" in this column.
+                Both are the same shape of thing (a firm-altitude fact with its own dedicated
+                read, gating nothing), and this one is ordered first: an agreement that stops
+                being current is a platform-wide compliance fact, ahead of a firm's own onboarding
+                progress. It renders NOTHING while standing is current — see its own header. */}
+            <FirmLegalStandingTile />
+
             {/* #648 (journey A5): AC4's authorised next step. It renders for admin+ only, and only
                 while required firm facts remain; it GATES NOTHING — see firm-setup-tile.tsx. */}
             <FirmSetupTile />
@@ -236,32 +251,17 @@ export function FirmHomeBoard() {
                 page already read, and returns null when the envelope carries none. */}
             <SweepStatusPanel sweep={queue.sweep} />
 
-            <section aria-labelledby="firm-home-clients" className="flex flex-col gap-2">
-              <SectionHeader level={2}>
-                <span id="firm-home-clients">{tcr("heading")}</span>
-              </SectionHeader>
-              <DataState
-                loading={register.loading}
-                error={register.error}
-                isEmpty={clients.length === 0}
-                emptyMessage={t("clientsEmpty")}
-              >
-                <p className="enter-content text-sm">
-                  <Link href="/clients" className="text-primary underline-offset-4 hover:underline">
-                    {t("clientsLine", {
-                      active: tally.active,
-                      onboarding: tally.onboarding,
-                      archived: tally.archived,
-                    })}
-                  </Link>
-                </p>
-                {/* A status the CHECK constraint does not admit today would otherwise vanish from
-                    a line that claims to cover the register. It is named, never folded in. */}
-                {tally.other > 0 ? (
-                  <p className="text-xs text-muted-foreground">{t("clientsOther", { count: tally.other })}</p>
-                ) : null}
-              </DataState>
-            </section>
+            {/* #995 — THE OLDER STATUS TALLY IS RETIRED. The portfolio table above is Firm Home's
+                ONE client-population summary now; an active/onboarding/archived breakdown reading
+                the SAME register beside it was a second summary of the same population, and the
+                owner's ruling keeps Option A: one table, not two counts of it. A caller BELOW the
+                portfolio's bookkeeper floor does not lose the population entirely — the header's
+                `roleAndClients` sentence above already renders `tally.total` for every role off
+                this same `loadClientRegister` read, so that sentence is the kept fallback rather
+                than a second computed count. What the section ALSO carried — the one DataState
+                over `register`, and so the only place a failed register read was said out loud —
+                is kept too, as the page-level banner beside the caller read's own (fix round,
+                SPEC-L07-03); losing it was a silent degradation no ticket line asked for. */}
 
             <NotBuiltNote className="text-xs">{t("notBuilt")}</NotBuiltNote>
           </div>

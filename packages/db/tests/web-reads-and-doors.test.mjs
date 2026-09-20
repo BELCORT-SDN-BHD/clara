@@ -34,14 +34,17 @@ let live = false;
 let stmtLive = false;
 let world = null;
 let firmA = null;
-let firmB = null;
 
-/** Every object the cohort installs, probed as a set. A partial presence is a defect. */
+/** Every object the cohort installs, probed as a set. A partial presence is a defect.
+ *
+ * `list_firm_timeline` is DELIBERATELY NOT HERE (#998, 0261 retires it — zero production
+ * callers since #659's Firm Home swap onto `clara.list_activity`). It was one of nine members
+ * when this cohort was minted; the other eight are unaffected by its retirement and the "wholly
+ * present or wholly absent" rule below still holds over them. */
 async function cohortApplied() {
   const r = await rootQuery(`select
       to_regprocedure('clara.get_own_dpa_signature()')                                is not null as d1,
       to_regprocedure('clara.client_egress_state(uuid)')                              is not null as d2,
-      to_regprocedure('clara.list_firm_timeline(bigint,integer)')                     is not null as d3,
       to_regprocedure('clara.archive_chat_session(uuid,text)')                        is not null as d4,
       to_regprocedure('clara.set_counterparty_identifiers(uuid,uuid,text,text,text)') is not null as d5,
       to_regprocedure('clara.build_frontier()')                                       is not null as d6,
@@ -70,7 +73,6 @@ before(async () => {
   if (live) {
     world = await buildWorld();
     firmA = world.firms.A;
-    firmB = world.firms.B;
   }
 });
 after(async () => { await endPool(); });
@@ -371,52 +373,10 @@ cell("wr.9 the timeline view is firm-scoped and floored: a viewer reads zero row
     "wr.9 the viewer's zero came from the view's floor, not from an empty firm -- raw domain_events is still readable to them");
 });
 
-cell("wr.10 list_firm_timeline refuses below bookkeeper, clamps its page, and pages strictly OLDER than the cursor", async () => {
-  await expectCode(CLR04,
-    () => humanQuery(world.users.carol, "select * from clara.list_firm_timeline(null, 10)"),
-    "wr.10 viewer");
-
-  const page = await humanQuery(world.users.bob,
-    "select * from clara.list_firm_timeline(null, 3)");
-  assert.equal(page.rowCount, 3, "wr.10 the first page honours the limit");
-  assert.deepEqual(Object.keys(page.rows[0]),
-    ["seq", "event_type", "event_description", "client_id", "actor", "on_behalf_of", "via_wake_kind", "created_at"],
-    "wr.10 the door returns exactly the eight contracted columns, in order");
-  const seqs = page.rows.map((x) => Number(x.seq));
-  assert.deepEqual(seqs, [...seqs].sort((a, b) => b - a), "wr.10 reading order is newest first");
-  assert.ok(page.rows[0].event_description,
-    "wr.10 event_description is joined from clara.event_types, not left null");
-
-  const next = await humanQuery(world.users.bob,
-    "select * from clara.list_firm_timeline($1, 3)", [seqs[2]]);
-  const nextSeqs = next.rows.map((x) => Number(x.seq));
-  assert.ok(nextSeqs.every((s) => s < seqs[2]),
-    `wr.10 the next page is STRICTLY older than the cursor (cursor ${seqs[2]}, got ${nextSeqs.join(",")})`);
-  assert.equal(nextSeqs.filter((s) => seqs.includes(s)).length, 0, "wr.10 no row is served twice");
-
-  // The clamp is the DB's and the caller cannot raise it.
-  const huge = await humanQuery(world.users.bob, "select count(*)::int as n from clara.list_firm_timeline(null, 100000)");
-  assert.ok(huge.rows[0].n <= 200, `wr.10 the page ceiling is 200 (got ${huge.rows[0].n})`);
-  const zero = await humanQuery(world.users.bob, "select count(*)::int as n from clara.list_firm_timeline(null, 0)");
-  assert.equal(zero.rows[0].n, 1, "wr.10 a non-positive limit clamps to 1 rather than refusing");
-
-  // AND IT IS SECURITY INVOKER, alone among this cohort's doors. The view is granted and scopes
-  // itself, so the door borrows no privilege it does not need; asserting the mode here is what
-  // stops a later recut from silently promoting it and bypassing the view's own predicate.
-  const mode = await rootQuery(
-    "select prosecdef from pg_proc where oid='clara.list_firm_timeline(bigint,integer)'::regprocedure");
-  assert.equal(mode.rows[0].prosecdef, false,
-    "wr.10 list_firm_timeline is SECURITY INVOKER — the view's predicate binds, it is not re-implemented");
-});
-
-cell("wr.11 the timeline never crosses a firm boundary", async () => {
-  const a = await humanQuery(world.users.bob, "select seq from clara.list_firm_timeline(null, 200)");
-  const b = await humanQuery(world.users.dave, "select seq from clara.list_firm_timeline(null, 200)");
-  assert.ok(a.rowCount > 0 && b.rowCount > 0, "wr.11 both firms have a timeline (the YES)");
-  const aIds = await humanQuery(world.users.bob,
-    "select count(*)::int as n from clara.firm_timeline_visible where firm_id = $1", [firmB]);
-  assert.equal(aIds.rows[0].n, 0, "wr.11 firm A's bookkeeper sees no row of firm B");
-});
+// wr.10 and wr.11 (list_firm_timeline: role floor/clamp/paging, and the cross-firm boundary)
+// RETIRED with the function (#998, 0261). wr.9 above already proves the SAME cross-firm and
+// rank-floor properties directly over clara.firm_timeline_visible, the view the function only
+// ever paged — so no coverage is lost, only the redundant RPC-shaped restatement of it.
 
 cell("wr.12 the f_a4 receipt shim reaches clara.agent_act_receipts and still conforms", async () => {
   const src = await rootQuery(

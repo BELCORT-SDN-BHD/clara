@@ -1236,3 +1236,66 @@ test("p660.money.disclosures — the ACCOUNT cap and the SIX-MONTH history are s
   // different populations and the face keeps them apart.
   await expect(board.getByTestId("client-money-profit-partial")).toHaveCount(0);
 });
+
+// =================================================================================================
+// #1009 — THE LEGAL-STANDING PROMPT ON FIRM HOME.
+//
+// `home-board-mock.mjs` answers nothing for this door — `serve-built.mjs`'s own CORE default
+// (`standing_live: true`, `enforcement_mode: "prompt"`) is what every walk ABOVE this section runs
+// against, so those cells are already the negative proof at scale: the prompt renders nothing
+// once a firm's agreements are current. This section covers what nothing above does — the OWNER
+// path when standing is NOT current (the unit cells in `firm-legal-standing-tile.test.tsx` cover
+// the non-owner and failed-read faces; the brief asks a browser walk for the owner path only).
+// =================================================================================================
+
+test("p1009.home.legal_prompt — an owner sees the outstanding agreement named with its version, and the link lands on the accept control", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
+  await seed(page);
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_legal_standing", (route) => json(route, {
+    documents: [
+      { kind: "terms", version: 2, status: "published", title: "Terms of Service (Clara beta)",
+        effective_from: "2026-09-12T16:00:00.000Z", published_at: "2026-09-18T13:46:54.777Z",
+        firm_accepted: false, accepted_at: null, accepted_by: null, accepted_by_name: null,
+        my_accepted_version: 1, my_accepted_at: "2026-08-01T00:00:00.000Z" },
+      { kind: "dpa", version: 1, status: "published", title: "Data processing agreement",
+        effective_from: "2026-08-30T16:00:00.000Z", published_at: "2026-09-18T13:46:54.777Z",
+        firm_accepted: true, accepted_at: "2026-09-18T14:00:00.000Z",
+        accepted_by: ACTIVITY_MEMBER, accepted_by_name: "Tao Belcort",
+        my_accepted_version: 1, my_accepted_at: "2026-09-18T14:00:00.000Z" },
+    ],
+    standing_live: false,
+    can_accept_for_firm: true,
+    masked: false,
+    enforcement_mode: "prompt",
+  }));
+  // signInTo's own default persona is owner@example.test — no email argument needed.
+  await signInTo(page, "/");
+  await settled(page);
+  const board = workbench(page);
+
+  await expect(board.getByRole("heading", { name: "Legal standing", level: 2 })).toBeVisible();
+  await expect(board.getByText(/Terms of Service.*version 2/)).toBeVisible();
+  // The mocked mode is `prompt` — the beta copy, never the enforce sentence.
+  await expect(board.getByText(/does not stop Clara working/i)).toBeVisible();
+  await expect(board.getByText(/Clara cannot use a model/i)).toHaveCount(0);
+  // The already-accepted kind is not offered as something still to accept.
+  await expect(board.getByText("Data processing agreement")).toHaveCount(0);
+
+  // THE SCAN MOVED AHEAD OF THE CLICK (fix round). It ran after the navigation, so it was
+  // scanning /settings/firm under a label that claimed Firm Home — the one surface this cell is
+  // about was never actually scanned.
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "Firm Home with the legal-standing prompt on screen").toEqual([]);
+
+  // AC1 ASKS FOR THE CONTROL, NOT THE ROUTE (fix round, SPEC-L07-05): "its link lands on the
+  // accept control". The URL alone would stay green if `/settings/firm` stopped mounting
+  // LegalStandingCard, or mounted it without an accept affordance for this caller. The mocked
+  // standing is the same one this whole cell runs on — terms v2 published and unaccepted by this
+  // owner, `can_accept_for_firm: true` — so the card offers exactly one accept control, for the
+  // terms kind; the DPA is current at version 1 and offers none.
+  await board.getByRole("link", { name: "Accept on firm settings" }).click();
+  await expect(page).toHaveURL(/\/settings\/firm$/);
+  await expect(page.getByRole("heading", { name: "Legal standing", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Accept for this firm" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Accept for this firm" })).toBeVisible();
+});

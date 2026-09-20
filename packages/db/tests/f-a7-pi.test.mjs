@@ -80,10 +80,19 @@ async function praLanded() {
  *  to_regprocedure on a door the SAME migration creates, never the shim itself: probing the shim
  *  would be self-referential (the thing under assertion deciding whether to assert it), the trap
  *  pi-E1's own comment names. The file ships UNNUMBERED and claims its number at merge, so a
- *  number-keyed gate would go vacuous the day it is renumbered (review law 3). */
+ *  number-keyed gate would go vacuous the day it is renumbered (review law 3).
+ *
+ *  RE-POINTED off `clara.list_firm_timeline` onto `clara.archive_chat_session(uuid,text)` (#998,
+ *  0261): both were minted by the SAME migration (0174/CB-AE2E-018), so the witness value is
+ *  unchanged on every chain this file has ever run against — but `list_firm_timeline` itself is
+ *  RETIRED by 0261 (zero production callers since #659's Firm Home swap), which would otherwise
+ *  turn this witness into a PERMANENT false negative: 0174 stays landed, the f_a4 shim stays
+ *  really wired to clara.agent_act_receipts (0261 never touches it), yet `wr` would read false
+ *  forever and this cell would wrongly expect f_a4 UNWIRED. `archive_chat_session` carries no
+ *  such retirement plan. */
 async function webReadsLanded() {
   const r = await rootQuery(
-    "select to_regprocedure('clara.list_firm_timeline(bigint,integer)') is not null as ok");
+    "select to_regprocedure('clara.archive_chat_session(uuid,text)') is not null as ok");
   return r.rows[0].ok;
 }
 

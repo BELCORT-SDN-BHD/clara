@@ -1267,7 +1267,7 @@ export const CHECKOUT_GATE_C6_COHORT = [...CHECKOUT_GATE_C6_HUMAN_FNS];
 // 裁-190 web reads and small doors (`0174_web_reads_and_small_doors.sql` +
 // `0175_stmt_witness_totals_and_institution_code.sql` — numbers claimed at merge prep):
 // the seven backend gaps the repair-session web lanes are blocked on, plus the statement lane's
-// institution resolver. Every one of the five human doors exists for the SAME reason: the
+// institution resolver. Every one of the four human doors exists for the SAME reason: the
 // relation that owns the fact is `force row level security` with a single clara_fn_owner policy
 // and no application-role grant, so a door is the only lawful read path and a table grant would
 // be the wrong fix.
@@ -1275,16 +1275,18 @@ export const CHECKOUT_GATE_C6_COHORT = [...CHECKOUT_GATE_C6_HUMAN_FNS];
 //     parameterised (a p_user argument would be a consent oracle on a pre-firm surface).
 //   client_egress_state          — one row per ratified typed egress purpose plus the legacy
 //     blanket consent; bookkeeper+ READ only. The four WRITE doors stay owner-floored.
-//   list_firm_timeline           — the keyset page of clara.firm_timeline_visible; bookkeeper+,
-//     matching /activity's own minimumRole and audit_log's floor.
 //   archive_chat_session         — author-only, one-way, audited; modelled on share_chat_session,
 //     the only other lawful mutation this table has.
 //   set_counterparty_identifiers — admin floor; the first and only writer of registration/tin on
 //     an EXISTING counterparty (create_counterparty's INSERT was the sole producer).
 // NO WAKE OR AGENT SIBLING FOR ANY OF THEM, and that is the design rather than an omission:
 // nothing here is an agent act. The runtime lane gains exactly two, both below.
+// list_firm_timeline RETIRED (#998, 0261): zero production callers since #659's Firm Home swap
+// onto clara.list_activity — see 0261's own header for the full census. The view it paged,
+// clara.firm_timeline_visible, is NOT retired and carries no cohort entry of its own (untyped by
+// EXECUTE grant — it is a table-privilege SELECT, not a routine).
 const WEB_READS_DOORS_HUMAN_FNS = [
-  "get_own_dpa_signature", "client_egress_state", "list_firm_timeline",
+  "get_own_dpa_signature", "client_egress_state",
   "archive_chat_session", "set_counterparty_identifiers",
 ];
 // clara_runtime ONLY, and both are underscore-free-by-intent EXCEPT _stmt_institution_code,

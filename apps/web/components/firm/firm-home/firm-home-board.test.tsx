@@ -71,6 +71,29 @@ const MEMBERS = [{
   created_at: "2026-01-01T00:00:00Z", removed_at: null,
 }];
 
+// #1009 — the board's fourth read, `clara.get_firm_legal_standing`. LIVE by default, exactly like
+// `serve-built.mjs`'s own generic default for this door: every OTHER cell in this file is about a
+// different read, and a fabricated failure here would paint every one of them with a banner they
+// are not about. The one cell about this read overrides it below.
+const LEGAL_STANDING_LIVE = {
+  documents: [
+    { kind: "terms", version: 1, status: "published", title: "Terms of Service (Clara beta)",
+      effective_from: "2026-09-12T16:00:00Z", published_at: "2026-09-18T13:46:54Z",
+      firm_accepted: true, accepted_at: "2026-09-18T14:00:00Z",
+      accepted_by: "11111111-1111-4111-8111-111111111111", accepted_by_name: "Tao",
+      my_accepted_version: 1, my_accepted_at: "2026-09-18T14:00:00Z" },
+    { kind: "dpa", version: 1, status: "published", title: "Data processing agreement",
+      effective_from: "2026-08-30T16:00:00Z", published_at: "2026-09-18T13:46:54Z",
+      firm_accepted: true, accepted_at: "2026-09-18T14:00:00Z",
+      accepted_by: "11111111-1111-4111-8111-111111111111", accepted_by_name: "Tao",
+      my_accepted_version: 1, my_accepted_at: "2026-09-18T14:00:00Z" },
+  ],
+  standing_live: true,
+  can_accept_for_firm: true,
+  masked: false,
+  enforcement_mode: "prompt",
+};
+
 // #659 — the portfolio pack. TWO clients, one of them archived, so the board's own disclosure and
 // its count links are exercised by the happy path rather than only by the portfolio's own cells.
 const PORTFOLIO = {
@@ -138,6 +161,7 @@ function wire(overrides: Record<string, () => Response> = {}): typeof fetch {
     if (url.includes("/rpc/list_activity")) return jsonResponse(ACTIVITY);
     if (url.includes("/rpc/get_firm_portfolio_pack")) return jsonResponse(PORTFOLIO);
     if (url.includes("/rest/v1/firm_members_visible")) return jsonResponse(MEMBERS);
+    if (url.includes("/rpc/get_firm_legal_standing")) return jsonResponse(LEGAL_STANDING_LIVE);
     throw new Error(`unexpected fetch: ${url}`);
   };
 }
@@ -303,12 +327,49 @@ test("Firm Home: ONE failed read does not blank the others — a dead client reg
       try {
         assert.match(h.text(), /Needs you: 3/, "the queue section still renders its real numbers");
         assert.match(h.text(), /An entry was posted\./, "and so does recent activity");
-        assert.match(h.text(), /Something went wrong/, "while the failed section shows its own failure");
-        // The register failing must not fabricate a client mix.
-        assert.doesNotMatch(h.text(), /active · .* onboarding/);
+        // #995 retired the tally section, which used to carry the register read's own
+        // "Something went wrong". Its fix round put that failure back as a page-level banner
+        // (its own cell below measures it); what THIS cell is about is the header's fallback
+        // (`roleAndClients` -> `roleOnly` once `register.error` is set): the role alone, never a
+        // stale or fabricated client count.
+        assert.match(h.text(), /BELCORT SDN BHDOwner/, "the header falls back to role-only");
+        assert.doesNotMatch(h.text(), /Owner · \d+ clients/, "a failed register read must not fabricate a client count");
       } finally { await h.unmount(); }
     },
   );
+});
+
+test("Firm Home (ticket 995, SPEC-L07-03): a failed client-register read is still SAID, not swallowed", async () => {
+  // THE FACE #995 NEARLY TOOK WITH THE TALLY. The retired `firm-home-clients` section carried the
+  // page's ONLY DataState over `register`, so removing it left a failed register read degrading
+  // silently to the header's role-only sentence — a page that quietly forgot the client
+  // population looking identical to one that never had it. No ticket line asked for that, and
+  // firm-home-board.tsx already states the opposite rule one read above ("A failed caller read
+  // degrades the HEADING only ... It is shown, never swallowed"). The register now answers to the
+  // same rule, as a banner beside the header rather than a restored section.
+  await withMockedEnv(
+    wire({ "/rest/v1/clients": () => jsonResponse({ message: "boom" }, 500) }),
+    async () => {
+      const h = await mount();
+      try {
+        assert.match(h.text(), /Something went wrong/,
+          "the failed register read is named through the shared classifier, exactly as a failed caller read is");
+        // ...and it is still only a DEGRADED heading: everything else on the page stands.
+        assert.match(h.text(), /Needs you: 3/, "the queue section is untouched by the register's failure");
+        assert.match(h.text(), /Client portfolio/, "and so is the portfolio, which reads its own door");
+        assert.doesNotMatch(h.text(), /Owner · \d+ clients/,
+          "a failed register read must not fabricate a client count");
+      } finally { await h.unmount(); }
+    },
+  );
+  // AND THE BANNER IS NOT ALWAYS-ON: a register read that RESOLVES leaves no failure text behind.
+  await withMockedEnv(wire(), async () => {
+    const h = await mount();
+    try {
+      assert.match(h.text(), /Owner · 2 clients/);
+      assert.doesNotMatch(h.text(), /Something went wrong/);
+    } finally { await h.unmount(); }
+  });
 });
 
 test("Firm Home: the two-column grid reflows on a CONTAINER query, not a viewport one", async () => {
@@ -327,6 +388,105 @@ test("Firm Home: the two-column grid reflows on a CONTAINER query, not a viewpor
       assert.doesNotMatch(cls, /\blg:grid-cols-|\bmd:grid-cols-|\bxl:grid-cols-/, "no viewport breakpoint may drive this grid");
     } finally { await h.unmount(); }
   });
+});
+
+test("Firm Home (ticket 995): the portfolio table is the ONE client-population summary — the older active/onboarding/archived tally is gone", async () => {
+  await withMockedEnv(wire(), async () => {
+    const h = await mount();
+    try {
+      // The portfolio (#659) is the summary that stays.
+      assert.match(h.text(), /Client portfolio/);
+      // The status tally this ticket retires. CLIENTS is one active + one onboarding, so the old
+      // sentence would have read exactly this — its absence is the discriminator, not a guess at
+      // wording.
+      assert.doesNotMatch(h.text(), /1 active · 1 onboarding · 0 archived/,
+        "the older status tally must not render beside the portfolio — ticket 995");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("Firm Home (ticket 995): a caller below the bookkeeper floor still sees a client count, from the header sentence the register read already feeds", async () => {
+  const VIEWER = [{
+    user_id: "u2", firm_id: "f1", firm_name: "BELCORT SDN BHD", role: "viewer",
+    role_rank: 0, is_operator: false,
+  }];
+  await withMockedEnv(
+    wire({
+      "/rest/v1/caller_context": () => jsonResponse(VIEWER),
+      // The portfolio door floors at bookkeeper (firm-portfolio-section.tsx's own header) — a
+      // viewer's own read comes back denied, exactly as it does against the live door.
+      "/rpc/get_firm_portfolio_pack": () => jsonResponse({ message: "forbidden" }, 403),
+    }),
+    async () => {
+      const h = await mount();
+      try {
+        // The plain count — sourced from the SAME register read the removed tally used
+        // (`/rest/v1/clients`, wired to the same two-client CLIENTS fixture above).
+        assert.match(h.text(), /Viewer · 2 clients/);
+        // No per-client breakdown: the portfolio's own honest floor sentence stands instead.
+        assert.match(h.text(), /Work records need a bookkeeper role/);
+        assert.doesNotMatch(h.text(), /1 active · 1 onboarding · 0 archived/,
+          "a viewer must not see the retired per-status breakdown either");
+      } finally { await h.unmount(); }
+    },
+  );
+});
+
+test("Firm Home (ticket 995): a client status outside active/onboarding/archived is still counted in what a caller sees", async () => {
+  const CLIENTS_WITH_OTHER = [
+    ...CLIENTS,
+    { id: "c3", name: "Odd Co", status: "suspended", created_at: "2026-03-01T00:00:00Z" },
+  ];
+  await withMockedEnv(
+    wire({ "/rest/v1/clients": () => jsonResponse(CLIENTS_WITH_OTHER) }),
+    async () => {
+      const h = await mount();
+      try {
+        // Three clients total, including the one whose status the CHECK constraint does not
+        // admit today — the count a caller sees must include it, never silently drop it.
+        assert.match(h.text(), /Owner · 3 clients/);
+      } finally { await h.unmount(); }
+    },
+  );
+});
+
+test("Firm Home (ticket 1009): a current legal standing keeps the prompt off the board", async () => {
+  await withMockedEnv(wire(), async () => {
+    const h = await mount();
+    try {
+      assert.doesNotMatch(h.text(), /Legal standing/,
+        "the default fixture's standing is live, so the prompt has nothing to ask");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("Firm Home (ticket 1009): a non-current standing surfaces the prompt beside Finish firm setup, naming the agreement and linking the owner to the accept control", async () => {
+  await withMockedEnv(
+    wire({
+      "/rpc/get_firm_legal_standing": () => jsonResponse({
+        ...LEGAL_STANDING_LIVE,
+        documents: [
+          { ...LEGAL_STANDING_LIVE.documents[0], version: 2, firm_accepted: false, accepted_at: null, accepted_by: null, accepted_by_name: null },
+          LEGAL_STANDING_LIVE.documents[1],
+        ],
+        standing_live: false,
+      }),
+    }),
+    async () => {
+      const h = await mount();
+      try {
+        const text = h.text();
+        assert.match(text, /Legal standing/, "the prompt's own heading is on the board");
+        assert.match(text, /Terms of Service.*version 2/, "the outstanding agreement, named with its version");
+        assert.match(text, /does not stop Clara working/i, "the default fixture's mode is prompt, so the beta copy renders");
+        const link = h.find((n) => (n as { tagName?: string }).tagName === "A"
+          && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href")) === "/settings/firm");
+        assert.ok(link, "and the link lands on the existing accept control");
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
+      } finally { await h.unmount(); }
+    },
+  );
 });
 
 test("Firm Home: zero a11y violations, with one h1 and no skipped heading level", async () => {

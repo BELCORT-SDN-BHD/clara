@@ -52,6 +52,11 @@ const FULL_ROW_KEYS = [
   "question_text", "created_at", "id", "coding_kind", "watch_id", "tier",
   "finding_id", "asset_id", "advance_id", "autodraft",
   "client_name", "batch_ids", "open_proposal_count",
+  // #974 (0260): authority_id, gated exactly like asset_id/advance_id (derived from the
+  // shared `id` at json-build time) — present, usually null, on EVERY row. #629 must not
+  // have moved this roster either, so it is restated here rather than imported (this file's
+  // own header comment).
+  "authority_id",
 ].sort();
 
 // ===========================================================================================
@@ -168,7 +173,7 @@ test("w629.inbox.row list_review_queue offers the pending work question in needs
   // carries the exact 30-key shape the ninth row kind pinned.
   for (const r of env.rows) {
     assert.deepEqual([...Object.keys(r)].sort(), FULL_ROW_KEYS,
-      `inbox.row: row_kind='${r.row_kind}' carries a DIFFERENT key set than the pinned 30-key shape`);
+      `inbox.row: row_kind='${r.row_kind}' carries a DIFFERENT key set than the pinned shape (now 31 keys, #974/0260 added authority_id)`);
   }
 });
 

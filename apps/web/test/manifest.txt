@@ -190,6 +190,7 @@ components/firm/compliance-watch-receipt.test.tsx
 components/firm/documents/unassigned-sources.test.tsx
 components/firm/firm-home/firm-home-board.test.tsx
 components/firm/firm-home/firm-home-states.test.tsx
+components/firm/firm-home/firm-legal-standing-tile.test.tsx
 components/firm/firm-home/firm-portfolio.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
@@ -394,7 +395,6 @@ lib/firm/portfolio-focus-return.test.ts
 lib/firm/portfolio-url-state.test.ts
 lib/firm/reads.test.ts
 lib/firm/receipt-kinds.test.ts
-lib/firm/timeline.test.ts
 lib/firm/usage-csv.test.ts
 lib/firm/usage-period.test.ts
 lib/firm/use-async-read.test.ts
