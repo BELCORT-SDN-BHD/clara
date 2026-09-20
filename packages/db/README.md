@@ -418,6 +418,22 @@ shape for three different facts (unknown token, real token / wrong signed-in add
 no verified address), because distinguishing them would rebuild the existence oracle
 [0141_p4_tranche1_invite_rbac.sql](migrations/0141_p4_tranche1_invite_rbac.sql) §B closed.
 
+[0269_invite_issuer_lapsed_status.sql](migrations/0269_invite_issuer_lapsed_status.sql) (#872, riders
+wave 2 lane 10) RECUTS TWO bodies above rather than creating a new one: `clara.firm_invites_visible`
+(0141 §H) and `clara.preview_invite` (0224 §A) each gain ONE new `WHEN` arm in the status `CASE`
+expression they already shared, so a still-`pending` invite whose issuer's CURRENT active
+`clara.firm_memberships` rank is below `clara.role_rank('admin')` reads `issuer_lapsed` on BOTH
+reads instead of `pending` — reversibly, with no write anywhere. `clara.accept_invite`'s own
+issuer-rank wall is untouched and re-pinned byte-for-byte at the tail, the same layered-pin
+discipline 0234 uses for a body it does not itself recut. No new function and no new grant: the
+shared arm is a correlated subquery against `clara.firm_memberships`, not a standalone helper —
+MEASURED on this rig that a view referencing a `SECURITY DEFINER` function still needs the querying
+role's own `EXECUTE` grant (Postgres checks it against the invoker, never the view owner, for every
+function a view's body names), so a bare `(firm_id, user_id) -> rank` helper granted to
+`clara_authenticated` would have been a cross-tenant membership oracle, the exact class
+`clara.shares_my_firm_human`/`_wake` (0002:453-465) exist to avoid. See the "CLOSED by #872" note
+above for R1's supersession.
+
 [0225_trade_invoices.sql](migrations/0225_trade_invoices.sql) adds the trade-invoice lane (#655):
 `clara.trade_invoices` (the typed business object — one counterparty, the document's own date, the
 due date **and the basis it was decided on**, an exact positive total in sen, opaque tax facts) and
@@ -513,17 +529,37 @@ copies in this file): the `clara.open_items` WRITER set is now **TWO** (`_subled
 names neither the hook nor the classifier; and the approve-path census is re-asserted to include
 `_record_journal_entry_core`, superseding 0037:3774-3782's stale four.
 
-**Named residual — the preview reproduces two of `accept_invite`'s three walls.** The acceptance
-door also re-checks the ISSUER's *current* rank (`clara.role_rank(inv.role) > coalesce(v_issuer_rank,
+**CLOSED by #872 (migration 0269, 2026-09-20) — the residual below is HISTORICAL.** R1 (wave
+2026-09-15, `docs/plan/active/refresh-wave-2026-09-15/DECISIONS.md` §3.0) ruled the divergence this
+paragraph describes IN — "do not add a fifth status, keep the two reads agreeing on four". The
+owner's 2026-09-18 ruling on #872 reverses that: a fifth, READ-TIME-ONLY effective status,
+`issuer_lapsed`, is now computed by ONE CASE expression `clara.firm_invites_visible` (0141 §H) and
+`clara.preview_invite` (0224 §A) both carry verbatim — a still-`pending` invite whose issuer's
+CURRENT active `clara.firm_memberships` rank is below `clara.role_rank('admin')` (demoted, or no
+active membership at all) reads `issuer_lapsed` on BOTH surfaces, reversibly (re-promoting the
+issuer restores `pending` on the very next read, no write anywhere). `clara.accept_invite`'s OWN
+issuer-rank wall (quoted below) is UNTOUCHED — 0269's own tail re-measures its `prosrc` byte for
+byte — so an `issuer_lapsed` invite still accepts whenever the invited role's rank does not exceed
+the issuer's (lapsed but not erased) current rank; only a FULLY REMOVED issuer refuses every role,
+which is what `coalesce(…, -1)` already did before this ticket. 0269 adds NO new function and NO
+new grant: the shared expression is a correlated subquery against `clara.firm_memberships` inside
+each body, not a standalone helper, because a bare two-argument `(firm_id, user_id) -> rank` door
+granted to `clara_authenticated` would be exactly the cross-tenant membership oracle
+`clara.shares_my_firm_human`/`_wake` were split apart to avoid (see 0269's own header for the
+scratch probe that measured why). Original text, for the historical record:
+
+The acceptance door also re-checks the ISSUER's *current* rank (`clara.role_rank(inv.role) > coalesce(v_issuer_rank,
 -1)` → `CLR04 'invite exceeds the issuer''s rank -- re-issue by an owner'`), a fact that lives in
 `clara.firm_memberships` and that `clara.firm_invites_visible` does not carry either. So an
 invitation whose issuer has since been demoted — or who has left the firm at all, which the
 `coalesce(…, -1)` refuses for every role — still reads `pending` in BOTH the preview and the admin
 roster, and the acceptance door is what refuses it, at the last step, in its own words. Closing it
 means a fifth effective status in the view *and* in the door (the invite-outcome face set is fixed at
-four for this delivery), so it is a ticket of its own. The divergence is pinned meanwhile by
-`packages/db/tests/preview-invite.test.mjs` → `p625.preview.issuer_rank`, which fails if either side
-of it moves.
+four for this delivery), so it is a ticket of its own. The divergence was pinned meanwhile by
+`packages/db/tests/preview-invite.test.mjs` → `p625.preview.issuer_rank`, which has itself been
+REWRITTEN by #872 to assert the new, agreeing behaviour (it now demotes an issuer, asserts
+`issuer_lapsed` on both reads, and shows `accept_invite` still refusing CLR04 for an invited role
+that outranks the issuer's now-lower current rank — the wall, not the read, is what still refuses).
 
 ## The `interactive_client` wake kind
 

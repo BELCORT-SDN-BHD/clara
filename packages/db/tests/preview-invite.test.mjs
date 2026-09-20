@@ -19,18 +19,29 @@
 // …plus (5) a NON-REGRESSION pin: 0224 recuts no body, so the five member doors and
 // `_jwt_email()` must hash exactly as they did before it applied, and `accept_invite`'s
 // JWT-email wall must still sit BEFORE `_reserve_op` in its own stripped source.
+// …plus (6) #872 (migration 0269): a FIFTH, READ-TIME-ONLY effective status, `issuer_lapsed`,
+// computed by the ONE expression this door and `clara.firm_invites_visible` now share -- see the
+// section below headed "#872" for the owner ruling that superseded R1.
 
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   CLR, PG, assertRaises, opk, rootQuery, insertUser, createFirm, seedAdmission,
-  humanQuery, ensureReady, endPool, membershipId, setMemberRole,
+  humanQuery, ensureReady, endPool, membershipId, setMemberRole, addMember, removeMember,
 } from "./rig-fixtures.mjs";
 import { inviteMember, revokeInvite, acceptInvite, expireInvite, freshPersona, humanEmailQuery } from "./p4t1-fixtures.mjs";
 
 const PREVIEW_DOOR = "clara.preview_invite(text)";
 const PREVIEW_MIGRATION = "0224_preview_invite.sql";
+// #872 -- the fifth, READ-TIME-ONLY effective status. Migration 0269 widens the ONE shared
+// status expression `clara.firm_invites_visible` and `clara.preview_invite` both carry, so a
+// chain that has 0224 but not yet 0269 must still run every cell above unmodified (gated by
+// `ready`/`unready` above) while skipping ONLY the cells this file adds for #872 -- detected off
+// `clara.schema_migrations`, never off a function's existence, because this migration recuts two
+// EXISTING bodies and adds no new catalog object (packages/db/tests/a21-helpers.mjs's own
+// convention: "the clara.schema_migrations row, never the migration file on disk").
+const ISSUER_LAPSED_MIGRATION = "0269_invite_issuer_lapsed_status.sql";
 
 /** The SIX bodies 0224 must leave untouched, with the sha256 of their `prosrc` MEASURED on this
  *  rig at 193 migrations (0001→0198) before 0224 existed — never transcribed from a creating
@@ -48,6 +59,7 @@ const DOOR_PINS = [
 ];
 
 let ready = false;
+let ready872 = false;
 
 before(async () => {
   ready = await ensureReady();
@@ -63,6 +75,18 @@ before(async () => {
       );
     }
     ready = false;
+    return;
+  }
+
+  const ledger = await rootQuery("select 1 from clara.schema_migrations where version ~ '^0269_'");
+  ready872 = ledger.rowCount > 0;
+  if (!ready872 && process.env.CLARA_ALLOW_MISSING_ISSUER_LAPSED !== "1") {
+    throw new Error(
+      `#872 premise ${ISSUER_LAPSED_MIGRATION} is not applied (no clara.schema_migrations row matching ` +
+        "'^0269_') and CLARA_ALLOW_MISSING_ISSUER_LAPSED is unset -- this is a FOCUSED run and must fail " +
+        "loudly, not skip. Preload ./tests/invite-issuer-lapsed-preintegration-gate.mjs for an estate " +
+        "sweep against a pre-PR chain.",
+    );
   }
 });
 
@@ -71,6 +95,17 @@ after(async () => { await endPool(); });
 function unready(t) {
   if (!ready) {
     t.skip(`rig not ready: ensureReady() found no draft_entry, or ${PREVIEW_MIGRATION} is not applied`);
+    return true;
+  }
+  return false;
+}
+
+/** #872's own gate: the cells this predicate guards need 0269 (the shared status expression's
+ *  fifth arm), not merely 0224. A chain with 0224 but not 0269 still runs `unready`'s cells. */
+function unready872(t) {
+  if (unready(t)) return true;
+  if (!ready872) {
+    t.skip(`rig not ready for #872: no clara.schema_migrations row matching '^0269_' (${ISSUER_LAPSED_MIGRATION} not applied)`);
     return true;
   }
   return false;
@@ -348,29 +383,133 @@ test("p625.doors.nonregression: accept_invite's JWT-email wall still precedes _r
 });
 
 // ---------------------------------------------------------------------------
-// 6 — the THIRD wall accept_invite carries and this door does NOT
+// 6 — #872: the fifth effective status, `issuer_lapsed` (owner ruling 2026-09-18, superseding
+//     R1 / DECISIONS §3.0 2026-09-15's "do not add a fifth status")
 // ---------------------------------------------------------------------------
 //
-// A NAMED DIVERGENCE, PINNED SO IT CANNOT WIDEN SILENTLY. `clara.accept_invite` walls on THREE
-// facts, not two: sha256(token), `_jwt_email()` — and, since 0157's F2 fix, the ISSUER'S CURRENT
-// RANK (`if clara.role_rank(inv.role) > coalesce(v_issuer_rank, -1) then raise ... CLR04`). That
-// third wall reads `clara.firm_memberships` for the person who ISSUED the invitation, which is a
-// fact `clara.firm_invites_visible` does not carry either — so the admin roster and this preview
-// agree with each other and BOTH are blind to it. The consequence is real and is written down
-// rather than implied: an invitation issued by someone who has since been demoted, or who has
-// left the firm at all (`coalesce(..., -1)` refuses every role for a non-member issuer), still
-// previews as `pending`, the password form renders, the password is really set, and only the
-// acceptance door refuses — with its own actionable sentence, rendered verbatim.
+// R1 (wave 2026-09-15) ruled the divergence below IN, on the ground that a fifth status would
+// make the preview and the roster "each say a different thing" (DECISIONS §3.0). The owner's
+// 2026-09-18 ruling on THIS ticket reverses that: `issuer_lapsed` is computed by ONE expression
+// `clara.firm_invites_visible` and `clara.preview_invite` BOTH carry (migration 0269), so the two
+// can never disagree about the same row — the fifth value widens both reads TOGETHER, which is
+// exactly the thing R1 was refusing to do to only one of them.
 //
-// WHY THIS DOOR IS NOT WIDENED TO MATCH. Reporting it would need a FIFTH effective status, and
-// the invite-outcome face set is fixed at four by the wave's own ruling (DECISIONS §2 #625) while
-// the effective-status expression is bound to `firm_invites_visible`'s (brief-625 §3) — a fifth
-// value would put the preview and the roster into disagreement about the same row. Closing it
-// properly is a product decision plus a matching widening of the VIEW, i.e. its own ticket.
-// Until then, this cell is the record: preview says `pending`, accept says CLR04.
+// WHAT THE STATUS MEANS, AND WHAT IT DOES NOT CHANGE. A still-`pending` invite whose issuer's
+// CURRENT active membership no longer carries admin standing (`clara.role_rank(role) <
+// clara.role_rank('admin')`, or no active membership at all) reads `issuer_lapsed` instead of
+// `pending` on BOTH surfaces. It is READ-TIME ONLY — the base row's own `status` column never
+// changes — and REVERSIBLE: re-promoting the issuer to admin+ (or re-adding them at admin+ after
+// a removal) makes the SAME row read `pending` again on the very next read, no write anywhere.
+// `clara.accept_invite`'s OWN wall (0157 F2: `if clara.role_rank(inv.role) > coalesce(v_issuer_rank,
+// -1) then raise CLR04`) is UNTOUCHED by this migration and is compared against separately below:
+// it refuses by the INVITED ROLE's rank against the issuer's CURRENT rank, which is a stricter
+// question than "does the issuer still hold admin standing at all" — so an `issuer_lapsed` invite
+// can still be accepted whenever the invited role's own rank does not exceed the issuer's
+// (lapsed-but-not-erased) current rank, which is the owner ruling's own "can still be accepted".
 
-test("p625.preview.issuer_rank: an invitation whose ISSUER was demoted still previews as `pending` and is then REFUSED by accept_invite -- the one wall this door does not reproduce, pinned", async (t) => {
-  if (unready(t)) return;
+test("p872.status.demoted: an issuer demoted BELOW admin standing makes a still-pending invite read `issuer_lapsed` on BOTH reads, and `pending` again once re-promoted", async (t) => {
+  if (unready872(t)) return;
+  const sc = await scene("issuer_demoted");
+  const invitee = freshPersona("issuer_demoted");
+  const issued = await inviteMember(sc.admin, { email: invitee.email, role: "admin", opKey: opk("isd_i") });
+  const adminMembership = await membershipId(sc.firm, sc.admin);
+
+  await setMemberRole(sc.owner, { membership: adminMembership, role: "bookkeeper", opKey: opk("isd_d") });
+
+  const shown = await preview(invitee.sub, invitee.email, issued.token);
+  assert.equal(shown.status, "issuer_lapsed", "the issuer no longer holds admin standing -- read-time only");
+  assert.equal(shown.role, "admin", "…the invite's OWN role is untouched");
+  assert.equal(shown.firm_name, sc.firmName);
+  const seen = await humanEmailQuery(
+    sc.owner, null,
+    "select status from clara.firm_invites_visible where id = $1",
+    [issued.invite_id],
+  );
+  assert.equal(seen.rows[0].status, "issuer_lapsed", "the admin roster AGREES with the preview -- one shared expression");
+  const row = await rootQuery("select status from clara.firm_invites where id = $1", [issued.invite_id]);
+  assert.equal(row.rows[0].status, "pending", "the STORED status never moves -- this is a read-time fact only");
+
+  // REVERSIBLE. Re-promoting the SAME person clears it on the very next read, no write to the
+  // invite row at all.
+  await setMemberRole(sc.owner, { membership: adminMembership, role: "admin", opKey: opk("isd_p") });
+  const restored = await preview(invitee.sub, invitee.email, issued.token);
+  assert.equal(restored.status, "pending", "re-promoting the issuer restores `pending` -- reversible, no write");
+  const seenAfter = await humanEmailQuery(
+    sc.owner, null,
+    "select status from clara.firm_invites_visible where id = $1",
+    [issued.invite_id],
+  );
+  assert.equal(seenAfter.rows[0].status, "pending", "…on the roster too");
+});
+
+test("p872.status.removed: an issuer who has LEFT the firm entirely also reads `issuer_lapsed` on both reads -- coalesce(-1) is the same fail-closed floor accept_invite already uses", async (t) => {
+  if (unready872(t)) return;
+  const sc = await scene("issuer_removed");
+  const invitee = freshPersona("issuer_removed");
+  // The LOWEST role on purpose: proves the lapsed read fires on the issuer's OWN standing, never
+  // on a comparison against the invited role (that comparison is accept_invite's separate wall,
+  // asserted below).
+  const issued = await inviteMember(sc.admin, { email: invitee.email, role: "viewer", opKey: opk("isr2_i") });
+  const adminMembership = await membershipId(sc.firm, sc.admin);
+  await removeMember(sc.owner, { membership: adminMembership, opKey: opk("isr2_rm") });
+
+  const shown = await preview(invitee.sub, invitee.email, issued.token);
+  assert.equal(shown.status, "issuer_lapsed", "an issuer with NO active membership at all reads the same fifth status");
+  const seen = await humanEmailQuery(
+    sc.owner, null,
+    "select status from clara.firm_invites_visible where id = $1",
+    [issued.invite_id],
+  );
+  assert.equal(seen.rows[0].status, "issuer_lapsed", "…and the roster agrees");
+
+  // NAMED, MEASURED: a fully removed issuer refuses acceptance for EVERY role, including the
+  // lowest one, because `coalesce(v_issuer_rank, -1)` is below every rank on the ladder --
+  // accept_invite's own wall (0157 F2) is UNCHANGED by this migration; this is what it already
+  // did, made explicit rather than left to be inferred.
+  const refusal = await refusalOf(() => acceptInvite(invitee.sub, invitee.email, {
+    token: issued.token, displayName: "Issuer Removed", opKey: opk("isr2_a"),
+  }));
+  assert.ok(refusal, "a removed issuer's invite is refused regardless of the invited role's rank");
+  assert.equal(refusal.code, CLR.authz);
+  assert.match(refusal.message, /invite exceeds the issuer's rank/);
+
+  // REVERSIBLE by re-adding the issuer at admin+ -- a fresh active membership, not an undo verb.
+  await addMember(sc.owner, { firm: sc.firm, user: sc.admin, role: "admin", opKey: opk("isr2_readd") });
+  const restored = await preview(invitee.sub, invitee.email, issued.token);
+  assert.equal(restored.status, "pending", "re-adding the issuer at admin+ restores `pending`");
+});
+
+test("p872.accept.lapsed_but_compatible: acceptance is UNCHANGED by this migration -- an issuer_lapsed invite still succeeds whenever the invited role does not outrank the issuer's CURRENT rank", async (t) => {
+  if (unready872(t)) return;
+  const sc = await scene("issuer_compatible");
+  const invitee = freshPersona("issuer_compatible");
+  // The admin issues at VIEWER (rank 0) …
+  const issued = await inviteMember(sc.admin, { email: invitee.email, role: "viewer", opKey: opk("islc_i") });
+  const adminMembership = await membershipId(sc.firm, sc.admin);
+  // … and is then demoted to BOOKKEEPER (rank 1): admin standing is lost (rank 1 < role_rank
+  // 'admin' = 2, so the read is `issuer_lapsed`), but rank 1 still exceeds the invited VIEWER
+  // role's rank 0, so accept_invite's own wall (`role_rank(inv.role) > coalesce(v_issuer_rank,
+  // -1)`, i.e. 0 > 1) does not fire.
+  await setMemberRole(sc.owner, { membership: adminMembership, role: "bookkeeper", opKey: opk("islc_d") });
+
+  const shown = await preview(invitee.sub, invitee.email, issued.token);
+  assert.equal(shown.status, "issuer_lapsed", "control: the read-time status IS lapsed going in");
+
+  const receipt = await acceptInvite(invitee.sub, invitee.email, {
+    token: issued.token, displayName: "Issuer Lapsed Compatible", opKey: opk("islc_a"),
+  });
+  assert.ok(receipt, "the owner ruling's own words: an issuer_lapsed invite can still be accepted");
+  const m = await rootQuery(
+    "select role from clara.firm_memberships where user_id = $1 and firm_id = $2 and status = 'active'",
+    [invitee.sub, sc.firm],
+  );
+  assert.equal(m.rows[0]?.role, "viewer", "the membership was really minted, at the invited role");
+  const row = await rootQuery("select status from clara.firm_invites where id = $1", [issued.invite_id]);
+  assert.equal(row.rows[0].status, "accepted", "the invite is consumed exactly as an ordinary acceptance would consume it");
+});
+
+test("p625.preview.issuer_rank: an invitation whose issuer was demoted reads `issuer_lapsed` (not `pending`) and is STILL refused by accept_invite when the invited role outranks the issuer's current rank", async (t) => {
+  if (unready872(t)) return;
   const sc = await scene("issuer");
   const invitee = freshPersona("issuer_rank");
   // The admin issues at its own ceiling …
@@ -381,20 +520,19 @@ test("p625.preview.issuer_rank: an invitation whose ISSUER was demoted still pre
   await setMemberRole(sc.owner, { membership: adminMembership, role: "bookkeeper", opKey: opk("isr_d") });
 
   const shown = await preview(invitee.sub, invitee.email, issued.token);
-  assert.equal(shown.status, "pending", "the ROW is untouched, so the effective status is still pending");
+  assert.equal(shown.status, "issuer_lapsed", "#872 -- REWRITTEN from `pending`: the fifth status now reports this, on both reads");
   assert.equal(shown.role, "admin", "…and it still advertises the role it was minted with");
   assert.equal(shown.firm_name, sc.firmName);
 
-  // THE DIVERGENCE ITSELF. If this ever stops refusing — or starts refusing with a different
-  // code or sentence — the preview door's documented blind spot has moved and this file, the
-  // 0224 header, `apps/web/lib/firm/invite-preview.ts` and `packages/db/README.md`'s residual
-  // must move with it.
+  // ACCEPT_INVITE'S OWN WALL IS UNCHANGED. It refuses an invited role (admin, rank 2) that
+  // outranks the issuer's CURRENT rank (bookkeeper, rank 1) — the same CLR04, same sentence, same
+  // code, as before this migration. #872 only widened the two READS; it did not touch this door.
   const refusal = await refusalOf(() => acceptInvite(invitee.sub, invitee.email, {
     token: issued.token, displayName: "Issuer Rank", opKey: opk("isr_a"),
   }));
   assert.ok(refusal, "accept_invite must refuse an invitation that outranks its issuer's CURRENT rank");
   assert.equal(refusal.code, CLR.authz, "CLR04 -- an authority refusal, not a lifecycle one");
-  assert.match(refusal.message, /invite exceeds the issuer's rank/, "0157 F2's own sentence, verbatim");
+  assert.match(refusal.message, /invite exceeds the issuer's rank/, "0157 F2's own sentence, verbatim, untouched by #872");
 
   // The refusal is total: nothing was minted on the way to it.
   const m = await rootQuery("select count(*)::int as n from clara.firm_memberships where user_id = $1", [invitee.sub]);
@@ -402,12 +540,12 @@ test("p625.preview.issuer_rank: an invitation whose ISSUER was demoted still pre
   const row = await rootQuery("select status from clara.firm_invites where id = $1", [issued.invite_id]);
   assert.equal(row.rows[0].status, "pending", "…and leaves the invitation exactly where it was");
 
-  // AND THE ROSTER IS BLIND IN THE SAME PLACE, which is why the preview is not the outlier: the
-  // admin who lists invitations sees `pending` too.
+  // AND THE ROSTER AGREES WITH THE PREVIEW, which is the whole point of one shared expression:
+  // the admin who lists invitations sees `issuer_lapsed` too, not `pending`.
   const seen = await humanEmailQuery(
     sc.owner, null,
     "select status from clara.firm_invites_visible where id = $1",
     [issued.invite_id],
   );
-  assert.equal(seen.rows[0].status, "pending", "clara.firm_invites_visible does not carry the issuer's rank either");
+  assert.equal(seen.rows[0].status, "issuer_lapsed", "clara.firm_invites_visible now carries the same read the preview does");
 });

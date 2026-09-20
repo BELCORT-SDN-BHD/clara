@@ -250,6 +250,18 @@ _Avoid_: Resending the same invitation; a pending invitation shown as a member; 
 creation of a new firm as a synonym for joining one; a per-firm seat count as a reason to refuse
 one (see **Admission capacity**).
 
+**Issuer lapsed**:
+The fifth effective status a still-`pending` invitation can read, computed at READ TIME by one
+expression the invitee's preview and the admin roster BOTH carry, when the invitation's issuer no
+longer holds an ACTIVE membership at admin rank or above (demoted, or removed from the firm
+entirely). It is reversible — re-promoting the issuer restores `pending` on the very next read, no
+write anywhere — and it does not by itself refuse acceptance: `clara.accept_invite`'s own,
+unrelated wall (the invited role must not outrank the issuer's CURRENT rank) is what may still
+refuse, so an issuer-lapsed invitation for a low-enough role accepts normally.
+_Avoid_: A sixth stored value on `firm_invites.status` (it is never written there); a synonym for
+`revoked` or `expired`, which are settled outcomes this status never overrides; assuming the
+invitation itself is unusable — only accept_invite's own rank wall decides that.
+
 **Membership / Roster**:
 The firm's live list of who holds access and at what role, read at two different floors: the
 roster from bookkeeper upward, and the invitations from admin upward. It is the authority a
