@@ -877,6 +877,39 @@ later file in the same sweep does not inherit this one's arrangement.
 `legal-enforcement-mode-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
 does not preload it and fails loudly on a database without 0234, because a skip is not evidence.
 
+## `document-capability-high-water.test.mjs` — #846 / migration 0244
+
+Seven cells over `clara.document_capabilities` and its new high-water relation. Gated on the LIVE
+CATALOG (the relation, the four trigger bodies, the three triggers and the deferred `pg_constraint`
+row), never on a migration number; a PARTIAL cohort THROWS. Its gate module is
+`document-capability-high-water-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_DOCUMENT_CAPABILITY_HIGH_WATER`), and the focused run with that variable
+UNSET is the acceptance shape — zero skips.
+
+- **The two refusals**: a pair's published version survives DELETE (re-inserting below it raises
+  `CLR08` / `registry_version_high_water` carrying the mark and the attempted version), and the
+  mark itself is append-only (DELETE and any lowering raise `CLR08` /
+  `registry_version_high_water_append_only`, a raise is admitted).
+- **The uniformity wall**, from both sides: a transaction raising ONE pair is refused **at a real
+  COMMIT**, and the registry is re-read afterwards to prove nothing was written; a whole-registry
+  raise passes the same wall, forced early with `set constraints
+  clara.t_document_capabilities_version_uniform immediate` so the probe can roll back instead of
+  republishing the live registry. **The commit cell is the only cell in this file that commits**,
+  and its safety rests on the gate: the deferred constraint trigger is proven present before the
+  transaction opens. With the wall absent the same transaction commits and leaves the registry
+  publishing two versions — measured while writing it.
+- **The three positive controls** — re-publishing a retired pair at and above its mark, the first
+  publication of a never-seen pair (which mints its mark in the same statement), and rollback
+  hygiene over both tables — exist because a refusal that refuses everything would pass the two
+  cells above and fail the estate. Proven non-vacuous: with
+  `clara._tf_document_capabilities_version_high_water` recut to refuse every insert, cells 1, 5 and
+  6 go red; the body is restored byte for byte through the redo path and re-measured by
+  `sha256(prosrc)`.
+
+`document-capability-registry.test.mjs` (0191/0207's own battery) is untouched by 0244 and stays at
+19/19 — every probe in the new file is rolled back, which is what keeps that file's registry-wide
+invariants true.
+
 ## `operator-support.test.mjs` `os.19` — #844
 
 os.14 (#774) pins the arm-1 lateral's SECOND ordering key (a money-carrying intent status beats a

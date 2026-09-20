@@ -1558,6 +1558,49 @@ a different thing: a pre-image of the body 0233 itself recuts, not a non-regress
 function it leaves alone.)
 
 
+## 0244 — the capability registry's version high-water mark (#846)
+
+`0207_document_capabilities_version_monotone.sql` made `registry_version` monotonicity a database
+refusal for **UPDATE transitions** and named two residuals in its own header rather than closing
+them. `0244_document_capability_version_high_water.sql` closes both. Measured on a lane rig before
+the change: `pdf × invoice` published `2`, deleting the row and re-inserting it at `1` was
+ACCEPTED and the table then read `1`.
+
+| object | what it is |
+|---|---|
+| `clara.document_capability_version_high_water` | one row per `(format, document_kind)` carrying the highest `registry_version` that pair has ever published, backfilled TOTAL over the live registry. FORCE RLS, one `clara_fn_owner` policy, **ZERO application-role privilege** — it is an integrity ledger, not a read surface |
+| `clara._tf_document_capabilities_version_high_water()` | BEFORE INSERT wall: an INSERT below the mark is refused with `CLR08` / `detail.reason = registry_version_high_water`. A pair with no mark has never been published and is admitted |
+| `clara._tf_document_capabilities_high_water_record()` | AFTER INSERT OR UPDATE writer: raises the mark, never lowers it (`where excluded.registry_version > h.registry_version`) |
+| `clara._tf_document_capability_high_water_monotone()` | BEFORE UPDATE OR DELETE on the mark: DELETE refused outright; UPDATE refused when it lowers the version, re-keys the row or moves `first_seen_at`. `CLR08` / `registry_version_high_water_append_only` |
+| `clara._tf_document_capabilities_version_uniform()` | DEFERRABLE INITIALLY DEFERRED **constraint trigger** body: a transaction may not LEAVE more than one distinct `registry_version` on the registry. `CLR08` / `registry_version_uniform`, with `detail.versions` |
+
+**RETIRING A ROW STAYS POSSIBLE, which is why the mark is a separate relation.** Refusing DELETE on
+the registry would have closed the hole too, and #846 rules it out in its own words: 0191 publishes
+one row per pair for the LIVE vocabulary, so a kind or a format that leaves that vocabulary must be
+able to leave the registry with it. A mark keeps the memory of what was published without keeping
+the publication. A column on the registry could not — it would be deleted with the row it is meant
+to outlive, which is the defect restated.
+
+**WHY THE UNIFORMITY WALL IS DEFERRED, and why it is not statement-level.** Every republication the
+registry has had moves all 240 rows (`0228` is the precedent), so a check at the end of each
+STATEMENT would refuse the first one — a republish is non-uniform in the middle by construction. A
+transaction is therefore judged on what it LEAVES. PostgreSQL has no statement-level constraint
+trigger: `create constraint trigger … for each statement` is a syntax error (42601) and `create or
+replace constraint trigger` is unsupported (0A000), both measured on PG 17.11, and the upstream
+grammar hard-codes `FOR EACH ROW`. The wall is therefore an AFTER ROW constraint trigger with a
+table-wide body, and 0244 drops before it creates. An EMPTY registry is uniform — the refusal is
+for MORE THAN ONE version, spelled as such.
+
+**The cost, stated.** A deferred AFTER ROW trigger fires once per changed row at commit, so a
+240-row republication runs the uniformity body 240 times over a 240-row table. Migrations are the
+only writer this table has ever had.
+
+**Redo-safe by construction** (wave-2 rule; "Redo (#957)" above): `create table if not exists`,
+`create or replace function`, `drop trigger if exists` before each `create trigger`, `drop policy if
+exists` before the policy, and a backfill that is an `on conflict … do update` which only ever
+raises. The prestate reports FIRST or REDO instead of refusing on its own objects; it still pins
+0207's body by `sha256(prosrc)` and refuses a registry that already publishes two versions.
+
 ## 0234 — the platform's legal enforcement mode (#1008)
 
 The owner ruled on 2026-09-20 that during the beta **the state of a firm's agreements must never

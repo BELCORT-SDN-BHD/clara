@@ -1933,6 +1933,33 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
 // ungranted ACL on every run, at every frontier, without being told it exists. 0207 changes no
 // existing name, signature or grant.
 // #779 END
+// #846 [0244, the capability registry's version high-water mark] — its own cohort, unlike 0207's,
+// and the difference is the number of names rather than a change of mind. 0207 minted ONE
+// ungranted trigger body, so a roster of one would only have asserted a name's presence that the
+// trigger's own attachment already proved. 0244 mints FOUR bodies and a relation, and
+// `cohortFailures()` fails a PARTIAL cohort — which is exactly the shape a half-applied 0244
+// would leave, and the shape packages/db/tests/README.md's "Preintegration gates" section asks a
+// new feature battery to declare beside its gate module.
+//
+//   ALL FOUR ARE UNGRANTED INTERNALS, granted to NOBODY — revoked from PUBLIC, no role grant at
+//   all. They are trigger bodies: nothing calls them by name, and the only lane that can write
+//   `clara.document_capabilities` at all is the owner/migration role (0191's ruling, which 0207's
+//   header restates). Listed here so a grant APPEARING on one fails the main sweep, and so a
+//   half-applied 0244 is reported as that rather than as a silently narrower boundary.
+//
+//   THE RELATION `clara.document_capability_version_high_water` needs NO roster entry of its own:
+//   `governedRlsFailures()`'s derive branch (b) sweeps every clara base table that is neither
+//   GOVERNED_TABLES nor RLS_EXEMPT and fails one that is not RLS-enabled AND forced, so the new
+//   table is checked on every run without being told it exists. A gated table cohort in the
+//   0037/C-2 shape buys nothing for a SINGLE table — "partial" is not a state one table can be in.
+const DOCUMENT_CAPABILITY_HIGH_WATER_0244_UNGRANTED_FNS = [
+  "_tf_document_capabilities_version_high_water", "_tf_document_capabilities_high_water_record",
+  "_tf_document_capability_high_water_monotone", "_tf_document_capabilities_version_uniform",
+];
+export const DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT = [
+  ...DOCUMENT_CAPABILITY_HIGH_WATER_0244_UNGRANTED_FNS,
+];
+// #846 END
 // #639 [0216, fixed-asset acquisition] — the ACQUISITION lane, its own cohort for the same
 // "wholly present or wholly absent" reason every roster above carries: folding these names into
 // 0041's FA cohort would red every database between the two frontiers, and `cohortFailures()`
@@ -3330,6 +3357,13 @@ export async function grantMatrixFailures() {
   if (enforcementLive.length !== 0) {
     failures.push(...cohortFailures("#1008 0234 platform legal enforcement mode",
       LEGAL_ENFORCEMENT_0234_COHORT, liveNames));
+  }
+  // #846 [0244] — bimodal for the same reason: wholly present once 0244 applies, wholly absent
+  // before it, because the db-slice-frontiers matrix runs this package against earlier frontiers.
+  const highWaterLive = DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT.filter((n) => liveNames.has(n));
+  if (highWaterLive.length !== 0) {
+    failures.push(...cohortFailures("#846 0244 capability registry version high-water mark",
+      DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

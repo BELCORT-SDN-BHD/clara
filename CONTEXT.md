@@ -486,6 +486,12 @@ _Avoid_: Every sweep run; a refusal or a skip counted as "effect".
 What Clara can actually do with an admitted upload, stated per (file format × document type) on four independent levels: custody (the bytes are sealed and retrievable), byte extraction (a reader turned them into stored, inspectable content), typed facts (a lane can persist typed values with their source regions) and business operation (the pair can drive an accounting operation). Each level is `supported`, `stored_only`, `unsupported` or `planned`, and a level is published with the reason for it.
 _Avoid_: "Supported" as one word about a file type; a promise inferred from a filename or an extension; permission — an egress consent gate remains the authority over whether a read may happen at all.
 
+<!-- #846 -->
+**Capability registry version**:
+The one integer the whole document-capability registry publishes at a time, so a surface can say WHICH registry it rendered. It only ever rises: a pair's version can never be undercut, not by an update and not by retiring the row and publishing it again, because the highest version each (format × document type) pair has ever carried is remembered separately and outlives the row. A publish is all-or-nothing across the table — a change that would leave two versions on the registry at once is refused.
+_Avoid_: A per-row version; a version that identifies a document's own revision; a re-publication at a lower number described as a correction.
+<!-- #846 -->
+
 **Typed fact**:
 A value Clara read out of a document and persisted with its exact source: the document's own version, the page/region it was read from, the field path naming it, and the engine and model version that produced it. A typed fact is a reading of a source, never a confirmed fact about the client. Client Knowledge LINKS to a typed fact — by extraction, region and field path — and never copies it: a document fact becomes a client fact only through Knowledge's own confirmation, with its own actor, scope and status.
 _Avoid_: Client Knowledge; a duplicated copy of an extraction value living in Knowledge; a value shown without its source version and region; a fact that failed or skipped its arithmetic check presented as validated.
