@@ -36,8 +36,14 @@ export const DELTA_RELATIONS = Object.freeze([
 ]);
 // Exact public interface. A renamed argument, stale overload, or missing lifecycle
 // door is a readiness failure, not a fixture adaptation opportunity.
+//
+// #1003 (2026-09-20) retired clara.create_account_set_v1 (0271 dropped it outright — zero
+// product callers, its capability already covered by the live agent-lane sibling). It is
+// removed from this roster rather than left in it: `deltaReadiness()` below treats every
+// name here as REQUIRED, and a dropped signature would report `missingEntrypoints` forever.
+// `createAccountSet()` below now mints account sets through `clara.wake_create_account_set`
+// (0115), the door this suite's own fixture never needed to route around before.
 export const DELTA_ENTRYPOINTS = Object.freeze([
-  ["create_account_set_v1", "clara.create_account_set_v1(uuid,text,text,jsonb,boolean,date,text)"],
   ["propose_metric_definition", "clara.propose_metric_definition(uuid,text,text,text,text,smallint,jsonb,boolean,date,date,text)"],
   ["approve_metric_definition", "clara.approve_metric_definition(uuid,bytea,text,text,text)"],
   ["reject_metric_definition", "clara.reject_metric_definition(uuid,text,text)"],
@@ -49,7 +55,6 @@ export const DELTA_ENTRYPOINTS = Object.freeze([
 ]);
 export const DELTA_ENTRYPOINT_NAMES = Object.freeze(DELTA_ENTRYPOINTS.map(([name]) => name));
 export const DELTA_ARGUMENT_NAMES = Object.freeze({
-  create_account_set_v1: ["p_client", "p_set_key", "p_title", "p_selector", "p_zero_when_no_rows", "p_effective_from", "p_op_key"],
   propose_metric_definition: ["p_client", "p_key", "p_title", "p_unit", "p_temporality", "p_result_scale", "p_ast", "p_allow_negative", "p_applies_from", "p_applies_to", "p_op_key"],
   approve_metric_definition: ["p_definition_version_id", "p_expected_formula_sha256", "p_reason", "p_self_approval_attestation", "p_op_key"],
   reject_metric_definition: ["p_definition_version_id", "p_reason", "p_op_key"],
@@ -146,20 +151,51 @@ export async function callHuman(sub, signature, args, casts = {}) {
   const sqlArgs = args.map(([name], index) => `${name} => $${index + 1}${casts[name] ? `::${casts[name]}` : ""}`);
   return (await humanQuery(sub, `select clara.${fn}(${sqlArgs.join(", ")}) as r`, args.map(([, value]) => value))).rows[0].r;
 }
+/** Named lookup into DELTA_ENTRYPOINTS, so a removed member (#1003 dropped index 0 outright)
+ *  cannot silently shift every OTHER numeric-index call site onto the wrong signature. */
+function entrypointSignature(name) {
+  const found = DELTA_ENTRYPOINTS.find(([candidate]) => candidate === name);
+  assert.ok(found, `delta-fixtures: DELTA_ENTRYPOINTS names ${name}`);
+  return found[1];
+}
+const ACCOUNT_SET_WAKE_SIG = "clara.wake_create_account_set(uuid,text,text,jsonb,boolean,date,text,jsonb,text)";
+const ACCOUNT_SET_WAKE_RATIONALE = "delta contract battery account-set fixture";
+const ACCOUNT_SET_WAKE_MODEL = { model: "delta-fixture", model_version: "test" };
+/** One interactive wake credential per firm, minted lazily and reused: #1003 retargets this
+ *  fixture off the retired human door (clara.create_account_set_v1, dropped by 0271) onto
+ *  clara.wake_create_account_set (0115) -- the SAME agent-lane door the runtime uses, so this
+ *  suite now exercises the account-set-creation path that actually survives the retirement,
+ *  never a copy of its logic. Keyed by firm because a wake credential is firm-scoped, not
+ *  client-scoped (clara.mint_wake_credential's own p_firm argument). */
+const accountSetWakeCredentials = new Map();
+async function accountSetWakeCredential(firm, onBehalfOf) {
+  if (!accountSetWakeCredentials.has(firm)) accountSetWakeCredentials.set(firm, mintInteractive(firm, onBehalfOf));
+  return accountSetWakeCredentials.get(firm);
+}
+export async function callWake(secret, signature, args, casts = {}) {
+  const fn = signature.slice("clara.".length, signature.indexOf("("));
+  const sqlArgs = args.map(([name], index) => `${name} => $${index + 1}${casts[name] ? `::${casts[name]}` : ""}`);
+  return (await wakeQuery(ROLES.wakeInteractive, secret, `select clara.${fn}(${sqlArgs.join(", ")}) as r`,
+    args.map(([, value]) => value))).rows[0].r;
+}
 export async function createAccountSet(owner, {
   client, key, title = key, selector, zeroWhenNoRows = false, effectiveFrom = "2020-01-01", opKey = opk("delta-set"),
 }) {
-  return callHuman(owner, DELTA_ENTRYPOINTS[0][1], [
+  const { firm_id: firm } = (await rootQuery("select firm_id from clara.clients where id=$1", [client])).rows[0];
+  const cred = await accountSetWakeCredential(firm, owner);
+  return callWake(cred.secret, ACCOUNT_SET_WAKE_SIG, [
     ["p_client", client], ["p_set_key", key], ["p_title", title],
     ["p_selector", JSON.stringify(selector)], ["p_zero_when_no_rows", zeroWhenNoRows],
-    ["p_effective_from", effectiveFrom], ["p_op_key", opKey],
-  ], { p_selector: "jsonb", p_effective_from: "date" });
+    ["p_effective_from", effectiveFrom],
+    ["p_rationale", ACCOUNT_SET_WAKE_RATIONALE], ["p_model", JSON.stringify(ACCOUNT_SET_WAKE_MODEL)],
+    ["p_op_key", opKey],
+  ], { p_selector: "jsonb", p_effective_from: "date", p_model: "jsonb" });
 }
 export async function proposeMetricDefinition(owner, {
   client, key, title = key, unit = "ratio", temporality = "flow", resultScale = 4,
   ast, allowNegative = false, appliesFrom = "2020-01-01", appliesTo = null, opKey = opk("delta-propose"),
 }) {
-  const receipt = await callHuman(owner, DELTA_ENTRYPOINTS[1][1], [
+  const receipt = await callHuman(owner, entrypointSignature("propose_metric_definition"), [
     ["p_client", client], ["p_key", key], ["p_title", title], ["p_unit", unit],
     ["p_temporality", temporality], ["p_result_scale", resultScale],
     ["p_ast", JSON.stringify(ast)], ["p_allow_negative", allowNegative],
@@ -178,7 +214,7 @@ export async function approveMetricDefinition(owner, versionId, {
     [versionId],
   )).rows[0];
   assert.ok(stored, "the proposed definition version exists before approval");
-  return callHuman(owner, DELTA_ENTRYPOINTS[2][1], [
+  return callHuman(owner, entrypointSignature("approve_metric_definition"), [
     ["p_definition_version_id", versionId], ["p_expected_formula_sha256", expectedHash ?? stored.hash],
     ["p_reason", "delta contract battery approval"],
     ["p_self_approval_attestation", attestation],
@@ -186,13 +222,13 @@ export async function approveMetricDefinition(owner, versionId, {
   ], { p_expected_formula_sha256: "bytea" });
 }
 export async function rejectMetricDefinition(owner, versionId) {
-  return callHuman(owner, DELTA_ENTRYPOINTS[3][1], [
+  return callHuman(owner, entrypointSignature("reject_metric_definition"), [
     ["p_definition_version_id", versionId], ["p_reason", "delta contract battery rejection"],
     ["p_op_key", opk("delta-reject")],
   ]);
 }
 export async function supersedeMetricDefinition(owner, { predecessor, successor }) {
-  return callHuman(owner, DELTA_ENTRYPOINTS[4][1], [
+  return callHuman(owner, entrypointSignature("supersede_metric_definition"), [
     ["p_definition_version_id", predecessor], ["p_successor_version_id", successor],
     ["p_reason", "delta contract battery supersession"], ["p_op_key", opk("delta-supersede")],
   ]);
@@ -398,7 +434,7 @@ export async function assertSnapshotForgeryRefusals(owner) {
     await attempt({ headerOverrides: { [field]: value }, code: "CLR10", pattern: /header does not reconstruct from captured facts/i });
 }
 export async function mintMetricInput(owner, { client, periodIds }) {
-  const receipt = await callHuman(owner, DELTA_ENTRYPOINTS[5][1], [
+  const receipt = await callHuman(owner, entrypointSignature("mint_metric_input_snapshot_v1"), [
     ["p_client", client], ["p_period_ids", periodIds], ["p_op_key", opk("delta-source")],
   ], { p_period_ids: "uuid[]" });
   const snapshotId = receipt.snapshot_id ?? receipt.id;
@@ -408,17 +444,17 @@ export async function mintMetricInput(owner, { client, periodIds }) {
 export async function evaluateMetricHuman(owner, {
   client, definitionVersion, periodIds, snapshotId, runId = randomUUID(),
 }) {
-  return callHuman(owner, DELTA_ENTRYPOINTS[6][1], [
+  return callHuman(owner, entrypointSignature("evaluate_metric_v1"), [
     ["p_client", client], ["p_definition_version_id", definitionVersion],
     ["p_period_ids", periodIds], ["p_snapshot_id", snapshotId], ["p_run_id", runId],
   ], { p_period_ids: "uuid[]" });
 }
-export async function evaluateFsPackHuman(owner, { client, definitionVersions, periodIds, snapshotId, runId = randomUUID() }) { return callHuman(owner, DELTA_ENTRYPOINTS[7][1], [["p_client", client], ["p_definition_version_ids", definitionVersions], ["p_period_ids", periodIds], ["p_snapshot_id", snapshotId], ["p_run_id", runId]], { p_definition_version_ids: "uuid[]", p_period_ids: "uuid[]" }); }
+export async function evaluateFsPackHuman(owner, { client, definitionVersions, periodIds, snapshotId, runId = randomUUID() }) { return callHuman(owner, entrypointSignature("evaluate_fs_pack_v1"), [["p_client", client], ["p_definition_version_ids", definitionVersions], ["p_period_ids", periodIds], ["p_snapshot_id", snapshotId], ["p_run_id", runId]], { p_definition_version_ids: "uuid[]", p_period_ids: "uuid[]" }); }
 /** A30b: record an evaluation-attempt receipt AFTER the failed attempt's transaction rolled back. The cap numbers are never passed in -- the entrypoint measures them. */
-export async function recordMetricAttempt(owner, { client, runId, outcomeClass, entrypoint = "clara.evaluate_fs_pack_v1(uuid,uuid[],uuid[],uuid,uuid)", definitionVersions = null, attemptKey, configuredTimeout = null, diagnostics = {} }) { return callHuman(owner, DELTA_ENTRYPOINTS[9][1], [["p_client", client], ["p_run_id", runId], ["p_outcome_class", outcomeClass], ["p_entrypoint", entrypoint], ["p_definition_version_ids", definitionVersions], ["p_attempt_key", attemptKey], ["p_configured_statement_timeout", configuredTimeout], ["p_diagnostics", JSON.stringify(diagnostics)]], { p_definition_version_ids: "uuid[]", p_diagnostics: "jsonb" }); }
+export async function recordMetricAttempt(owner, { client, runId, outcomeClass, entrypoint = "clara.evaluate_fs_pack_v1(uuid,uuid[],uuid[],uuid,uuid)", definitionVersions = null, attemptKey, configuredTimeout = null, diagnostics = {} }) { return callHuman(owner, entrypointSignature("record_metric_evaluation_attempt_v1"), [["p_client", client], ["p_run_id", runId], ["p_outcome_class", outcomeClass], ["p_entrypoint", entrypoint], ["p_definition_version_ids", definitionVersions], ["p_attempt_key", attemptKey], ["p_configured_statement_timeout", configuredTimeout], ["p_diagnostics", JSON.stringify(diagnostics)]], { p_definition_version_ids: "uuid[]", p_diagnostics: "jsonb" }); }
 export async function attemptReceiptRows(client, runId) { return (await rootQuery("select * from clara.metric_evaluation_attempt_receipts where client_id=$1 and run_id=$2 order by recorded_at,id", [client, runId])).rows; }
 export async function assessMetricIndependentHuman(owner, { cell, expectedCell = cell }) {
-  return callHuman(owner, DELTA_ENTRYPOINTS[8][1], [["p_cell_id", cell], ["p_expected_cell_id", expectedCell], ["p_op_key", opk("delta-assess")]]);
+  return callHuman(owner, entrypointSignature("assess_metric_cell_independent_v1"), [["p_cell_id", cell], ["p_expected_cell_id", expectedCell], ["p_op_key", opk("delta-assess")]]);
 }
 export async function pastMonthStart(n) {
   const [year, month] = (await bookToday()).split("-").map(Number);
