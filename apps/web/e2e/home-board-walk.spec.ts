@@ -1236,3 +1236,54 @@ test("p660.money.disclosures — the ACCOUNT cap and the SIX-MONTH history are s
   // different populations and the face keeps them apart.
   await expect(board.getByTestId("client-money-profit-partial")).toHaveCount(0);
 });
+
+// =================================================================================================
+// #1009 — THE LEGAL-STANDING PROMPT ON FIRM HOME.
+//
+// `home-board-mock.mjs` answers nothing for this door — `serve-built.mjs`'s own CORE default
+// (`standing_live: true`, `enforcement_mode: "prompt"`) is what every walk ABOVE this section runs
+// against, so those cells are already the negative proof at scale: the prompt renders nothing
+// once a firm's agreements are current. This section covers what nothing above does — the OWNER
+// path when standing is NOT current (the unit cells in `firm-legal-standing-tile.test.tsx` cover
+// the non-owner and failed-read faces; the brief asks a browser walk for the owner path only).
+// =================================================================================================
+
+test("p1009.home.legal_prompt — an owner sees the outstanding agreement named with its version, and the link lands on the accept control", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
+  await seed(page);
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_legal_standing", (route) => json(route, {
+    documents: [
+      { kind: "terms", version: 2, status: "published", title: "Terms of Service (Clara beta)",
+        effective_from: "2026-09-12T16:00:00.000Z", published_at: "2026-09-18T13:46:54.777Z",
+        firm_accepted: false, accepted_at: null, accepted_by: null, accepted_by_name: null,
+        my_accepted_version: 1, my_accepted_at: "2026-08-01T00:00:00.000Z" },
+      { kind: "dpa", version: 1, status: "published", title: "Data processing agreement",
+        effective_from: "2026-08-30T16:00:00.000Z", published_at: "2026-09-18T13:46:54.777Z",
+        firm_accepted: true, accepted_at: "2026-09-18T14:00:00.000Z",
+        accepted_by: ACTIVITY_MEMBER, accepted_by_name: "Tao Belcort",
+        my_accepted_version: 1, my_accepted_at: "2026-09-18T14:00:00.000Z" },
+    ],
+    standing_live: false,
+    can_accept_for_firm: true,
+    masked: false,
+    enforcement_mode: "prompt",
+  }));
+  // signInTo's own default persona is owner@example.test — no email argument needed.
+  await signInTo(page, "/");
+  await settled(page);
+  const board = workbench(page);
+
+  await expect(board.getByRole("heading", { name: "Legal standing", level: 2 })).toBeVisible();
+  await expect(board.getByText(/Terms of Service.*version 2/)).toBeVisible();
+  // The mocked mode is `prompt` — the beta copy, never the enforce sentence.
+  await expect(board.getByText(/does not stop Clara working/i)).toBeVisible();
+  await expect(board.getByText(/Clara cannot use a model/i)).toHaveCount(0);
+  // The already-accepted kind is not offered as something still to accept.
+  await expect(board.getByText("Data processing agreement")).toHaveCount(0);
+
+  await board.getByRole("link", { name: "Accept on firm settings" }).click();
+  await expect(page).toHaveURL(/\/settings\/firm$/);
+
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "Firm Home with the legal-standing prompt on screen").toEqual([]);
+});

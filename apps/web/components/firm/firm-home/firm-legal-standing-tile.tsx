@@ -39,7 +39,7 @@ export type FirmLegalStandingTileProps = {
 
 const TESTID = "firm-home-legal-standing-tile";
 
-export function FirmLegalStandingTile({ loader = () => loadFirmLegalStanding() }: FirmLegalStandingTileProps = {}) {
+export function FirmLegalStandingTile({ loader = () => loadFirmLegalStanding() }: FirmLegalStandingTileProps) {
   const t = useTranslations("FirmHome");
   const tLegal = useTranslations("FirmSettings");
   const standing = useAsyncRead(loader);
