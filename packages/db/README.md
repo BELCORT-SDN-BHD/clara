@@ -122,13 +122,19 @@ one of 0233's three non-regression pins named below, but 0233 is applied and une
 its own pre-image of that function instead (0234's "THE SIX PINS", four of them its own recut
 pre-images) and 0233's pin stands, describing 0233's own moment, not 0234's.
 
-The failure this coupling exists to produce, quoted verbatim because it is what an author actually
-sees from 0221 onward: **`<name> has DRIFTED from its pinned body`** (each pinning migration
-appends its own reason after the em dash — 0233's three non-regression pins below read
-`-- re-measure on a migrated rig before applying`). The FIRST instance, 0214 below, predates that
-exact wording and reads `has DRIFTED from the pinned 0189 body` instead — both forms are grep-able
-from this file. Either way it means the LIVE function no longer hashes to the sha the pinning
-migration recorded. Two readings, and the pinning migration cannot tell them apart on its own:
+The failure this coupling exists to produce is quoted here in its most common shape, but several
+raise wordings coexist across the estate and NONE of them settled the phrasing once and for all —
+`0233`'s three non-regression pins below read **`<name> has DRIFTED from its pinned body -- <reason>`**,
+while `0222` (right after `0221`) raises **`<name> has DRIFTED from the pinned NNNN body`** on all
+six of its own pins, and `0228` raises **`<name> has DRIFTED from its measured live body`** on all
+thirteen of its own. `0231` carries BOTH shapes in one file (four `its pinned body`, one `the pinned
+0189 body`), so "settled from 0221 onward" is not a claim this file can make. The one invariant
+across every wording is the phrase **`has DRIFTED`**: `grep -rn "has DRIFTED"
+packages/db/migrations/` finds every instance regardless of which noun follows it. 0214 below reads
+`has DRIFTED from the pinned 0189 body` — a numbered form, like several others, not a "first"
+anything; migrations as early as 0107 already raise on a drifted pin. Either way it means the LIVE
+function no longer hashes to the sha the pinning migration recorded. Two readings, and the pinning
+migration cannot tell them apart on its own:
 either an intervening migration recut the pinned function and never re-derived this argument
 against the new body (the pin did its job — go re-measure it, in the recutting migration's own
 commit, before this one can be trusted again), or the pin was wrong from the start. Either way the
@@ -136,12 +142,15 @@ check fires from the PRESTATE, before the migration changes anything, and fails 
 pin blocks the migration rather than letting it apply against a body its own stated reasoning no
 longer describes.
 
-Every migration below that pins a function it does not itself change is a live instance of this
-rule, findable by searching this file for the pinned function's name — for example
+The instances DOCUMENTED below are findable by the pinned function's name — for example
 `clara._work_run_attempts` (0214, immediately below, and again in 0231's five pins) and
 `clara.list_review_queue` / `clara.list_accounting_work` / `clara.get_client_work_pack` /
 `clara.list_activity` (0231). 0233's own three non-regression pins are named where 0233 is
-documented, further down this file.
+documented, further down this file. This is NOT a complete index of every migration that pins a
+function it does not itself change — 0178, 0182, 0183, 0184, 0189, 0194, 0195, 0197, 0202, 0203,
+0204, 0209, 0212, 0213, 0215, 0216 and others carry the same convention and are not named here. The
+authoritative, complete list is the migrations themselves:
+`grep -rn "has DRIFTED" packages/db/migrations/`.
 
 [0214_client_work_pack.sql](migrations/0214_client_work_pack.sql) owes **no** consumer-first
 obligation either, for a narrower reason: it adds exactly one SECURITY INVOKER read door,
