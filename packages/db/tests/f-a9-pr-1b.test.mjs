@@ -425,8 +425,30 @@ test("[gate 7] the surviving pages_per_day readers are EXACTLY gate 6's KEPT fam
   // CLR18 and writes nothing, so it is NOT a live usage gate and gate 6's KEPT family is
   // unchanged — which is exactly the classification this closed-world census exists to force a
   // new name to state out loud.
+  // WIDENED AGAIN BY #960 (0270_firm_document_limits_writer.sql), on the same terms and with the
+  // classification beside each name, because that is what this closed-world census exists to
+  // force a new name to state out loud:
+  //   · `clara.set_firm_document_limits` is the firm-admin DOOR that WRITES the four stored caps
+  //     (SECURITY DEFINER, admin-floored, op-receipted, audited). It reads `pages_per_day` as a
+  //     COLUMN IT SETS and as a previous value it reports back on the receipt. It refuses nothing
+  //     on consumption, raises no CLR18 against a day's usage, and no ingest path calls it.
+  //   · `clara._firm_document_limit_ceiling(text)` answers the ESTATE's maximum for a cap NAME
+  //     (10000/100000/16/16) and is granted to NOBODY. It bounds what a firm may SET, never what
+  //     a firm may CONSUME, and it never reads a firm's stored row or a day's reservations.
+  // Neither is a live usage gate, so gate 6's KEPT family is unchanged. Both are pinned in the
+  // post-0270 generation only, so this census stays true on a chain below 0270 as well.
+  const writerLive = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^0270_"])).rows[0].n > 0;
+  const KEPT = "_reserve_document_ingest, _resize_document_reservation, "
+    + "_settle_document_reservation, _tf_firm_document_limits_upsert, get_firm_commercial_state, "
+    + "settle_ingest_reservation";
   assert.equal(r.rows[0].n,
-    "_reserve_document_ingest, _resize_document_reservation, _settle_document_reservation, _tf_firm_document_limits_upsert, get_firm_commercial_state, settle_ingest_reservation",
+    writerLive
+      ? "_firm_document_limit_ceiling, _reserve_document_ingest, _resize_document_reservation, "
+        + "_settle_document_reservation, _tf_firm_document_limits_upsert, "
+        + "get_firm_commercial_state, set_firm_document_limits, settle_ingest_reservation"
+      : KEPT,
     `the pages_per_day readers moved: ${r.rows[0].n}. A NEW name here is an unclassified live usage gate; a MISSING one is a KEPT bound that was removed by accident`);
 });
 
