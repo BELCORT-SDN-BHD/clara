@@ -37,7 +37,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ROLES, roleQuery, rootQuery, namedCall, opk, endPool, printSkipCount,
+  ROLES, roleQuery, rootQuery, humanQuery, namedCall, opk, endPool, printSkipCount,
   acceptPublishedLegal,
 } from "./work-journal-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
@@ -232,4 +232,84 @@ test("p965.refusal.pages_ceiling_is_named_apart_from_the_docs_ceiling", async (t
     "…and it is the database's own sentence that says so");
   assert.equal(refused.failure_code, "limit",
     "both ceilings land at the ONE existing failure reason; `ceiling` is the detail, not a second vocabulary");
+});
+
+// ===========================================================================================
+// SLICE 3 — a refused file uploaded into an OPEN batch reaches the batch read as a capacity
+// WAIT. The batch read never shows a silent absence.
+//
+// THE GOVERNED PATH, exactly as the runtime drives it (`beginIntakeInBatch` ->
+// `commitRefusedMember`, packages/runtime/lib/intake-batches.mjs): attach through
+// `clara.attach_intake_to_batch`, then declare the wait through
+// `clara.set_intake_batch_member_dependency` carrying the database's OWN refusal sentence. 0229's
+// trigger belt cannot do it — arm (b) fires on an UPDATE that moves `failure_code` to 'limit' on
+// an intake that ALREADY has a member, and a file refused at CREATION has no member yet.
+// ===========================================================================================
+
+const runtimeCall = (sql, params) =>
+  roleQuery(ROLES.runtime, sql, params).then((r) => r.rows[0].result);
+
+const openBatch = (actor, label) => runtimeCall(namedCall("open_intake_batch", [
+  { name: "p_actor", cast: "uuid" }, { name: "p_origin", cast: "text" },
+  { name: "p_label", cast: "text" }, { name: "p_session", cast: "uuid" },
+  { name: "p_op_key", cast: "text" },
+]), [actor, "documents_tab", label, null, opk("p965-open")]);
+
+const attach = (actor, batch, intake) => runtimeCall(namedCall("attach_intake_to_batch", [
+  { name: "p_actor", cast: "uuid" }, { name: "p_batch", cast: "uuid" },
+  { name: "p_intake", cast: "uuid" }, { name: "p_op_key", cast: "text" },
+]), [actor, batch, intake, opk("p965-attach")]);
+
+const setDependency = (actor, intake, dependency, reason) =>
+  runtimeCall(namedCall("set_intake_batch_member_dependency", [
+    { name: "p_actor", cast: "uuid" }, { name: "p_intake", cast: "uuid" },
+    { name: "p_dependency", cast: "text" }, { name: "p_reason", cast: "text" },
+    { name: "p_op_key", cast: "text" },
+  ]), [actor, intake, dependency, reason, opk("p965-dep")]);
+
+const getBatch = (sub, batch) => humanQuery(
+  sub, "select clara.get_intake_batch(p_batch => $1::uuid) as result", [batch],
+).then((r) => r.rows[0].result);
+
+test("p965.refusal.batch_read_shows_a_capacity_wait_never_a_silent_absence", async (t) => {
+  if (await gate(t)) return;
+  const { owner, firm } = await firmWithCeiling("batch", { docsPerDay: 1, pagesPerDay: 1000 });
+  const batch = await openBatch(owner, "p965 refusal batch");
+
+  const admitted = await createIntake(owner, { filename: "p965-batch-admitted.pdf" });
+  await attach(owner, batch.batch_id, admitted.intake_id);
+
+  const refused = await createIntake(owner, { filename: "p965-batch-refused.pdf" });
+  assert.equal(refused.refused, true, "the second file is refused by the firm's docs ceiling");
+
+  // The governed path. `attach_intake_to_batch` never inspects the intake's STATUS — it checks
+  // the firm and the batch's openness — so a record born refused is as attachable as any other.
+  const member = await attach(owner, batch.batch_id, refused.intake_id);
+  assert.ok(member.member_id, "a refused file IS a member of the batch it was uploaded into");
+  const waited = await setDependency(owner, refused.intake_id, "awaiting_capacity", refused.reason);
+  assert.equal(waited.dependency, "awaiting_capacity");
+
+  const read = await getBatch(owner, batch.batch_id);
+  const waiting = read.facets.waiting;
+  const row = waiting.rows.find((x) => x.intake_id === refused.intake_id);
+  assert.ok(row, "the refused file is PRESENT in the batch read — never a silent absence");
+  assert.equal(row.filename, "p965-batch-refused.pdf", "…by the name the accountant uploaded");
+  assert.equal(row.intake_status, "failed");
+  assert.equal(row.intake_failure_code, "limit");
+  assert.equal(row.dependency, "awaiting_capacity", "…as an explicit capacity WAIT");
+  assert.match(String(row.dependency_reason), /document daily limit reached/,
+    "…carrying the database's own sentence, which is the operator remedy the card renders");
+
+  assert.equal(read.waiting_basis.by_dependency.awaiting_capacity, 1,
+    "the wait is counted on the dependency basis");
+  assert.equal(read.waiting_basis.by_capacity_failure, 1,
+    "…and independently on the intake's own failure code, the belt 0229 built for this");
+  assert.equal(read.facets.failed.count, 0,
+    "a quota block is WAITING, not dead (0229's D4) — the refused file is never reported failed");
+  assert.equal(waiting.count, 1, "exactly one member is waiting: the refused one");
+
+  // And the ADMITTED sibling is untouched by any of this.
+  const admittedRow = await intakeRow(admitted.intake_id);
+  assert.equal(admittedRow.status, "uploading");
+  assert.equal(admittedRow.firm_id, firm);
 });
