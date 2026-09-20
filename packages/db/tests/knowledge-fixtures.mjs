@@ -1,4 +1,4 @@
-// #644 — the shared world for the two knowledge batteries (NOT a test file: the name does not end
+// #644 — the shared world for the knowledge batteries (NOT a test file: the name does not end
 // in `.test.mjs`). Minted through the ROOT connection on purpose: the subject of these cells is
 // the knowledge SUBSTRATE and its doors, so going through create_firm / begin_client_onboarding
 // would only add ways to fail for reasons that are not the subject. Every door call a cell makes
@@ -38,6 +38,100 @@ export async function knowledgeCohortApplied() {
   const present = flags.filter(Boolean).length;
   if (present !== 0 && present !== flags.length) {
     throw new Error(`#644 knowledge cohort is PARTIAL: ${JSON.stringify(row)}`);
+  }
+  return present === flags.length;
+}
+
+/** True iff #898's fye-day vocabulary (0240_financial_year_end_day.sql) is applied: the
+ *  `financial_year_end_day` catalog row AND the `fye_day` map row naming it. Same "wholly present
+ *  or wholly absent" law as `knowledgeCohortApplied` above — this cohort adds no relation and no
+ *  function, so its two rows are the whole of it. */
+export async function fyeDayCohortApplied() {
+  const r = await rootQuery(
+    `select
+       exists (select 1 from clara.knowledge_keys where knowledge_key = 'financial_year_end_day')
+         as key_row,
+       exists (select 1 from clara.knowledge_plan_item_map
+                where item_key = 'fye_day' and knowledge_key = 'financial_year_end_day')
+         as map_row`,
+  );
+  const row = r.rows[0];
+  const flags = Object.values(row);
+  const present = flags.filter(Boolean).length;
+  if (present !== 0 && present !== flags.length) {
+    throw new Error(`#898 fye-day cohort is PARTIAL: ${JSON.stringify(row)}`);
+  }
+  return present === flags.length;
+}
+
+/** True iff #913's column drop (0241_knowledge_scope_default_drop.sql) is applied:
+ *  `clara.knowledge_keys` no longer carries `scope_default`. Unlike the two cohorts above there
+ *  is exactly one thing to lose, not several to land together, so there is no PARTIAL state a
+ *  multi-flag count could catch — a single boolean is the whole check. */
+export async function scopeDefaultDroppedCohortApplied() {
+  const r = await rootQuery(
+    `select not exists (
+       select 1 from information_schema.columns
+        where table_schema = 'clara' and table_name = 'knowledge_keys' and column_name = 'scope_default'
+     ) as dropped`,
+  );
+  return r.rows[0].dropped;
+}
+
+/** True iff #993's tightened catalog-key grammar (0242_knowledge_key_grammar.sql) is applied:
+ *  BOTH `clara.knowledge_keys.knowledge_key` and `clara.client_fact_keys.fact_key` carry the
+ *  `ck_..._key_grammar` CHECK enforcing `^[a-z][a-z0-9_]{0,62}$` -- the exact grammar
+ *  `clara.record_work_knowledge_read` already enforces at read-record time (0230:682) -- in place
+ *  of each catalog's former `btrim(...) <> ''` CHECK. Same "wholly present or wholly absent" law
+ *  as the two cohorts above: one migration mints both constraints together, so a chain that
+ *  landed only one of them is a defect to surface, not a frontier to skip past silently. */
+export async function keyGrammarCohortApplied() {
+  const r = await rootQuery(
+    `select
+       exists (select 1 from pg_constraint
+                where conrelid = 'clara.knowledge_keys'::regclass
+                  and conname = 'ck_knowledge_keys_key_grammar') as knowledge_keys_grammar,
+       exists (select 1 from pg_constraint
+                where conrelid = 'clara.client_fact_keys'::regclass
+                  and conname = 'ck_client_fact_keys_key_grammar') as client_fact_keys_grammar`,
+  );
+  const row = r.rows[0];
+  const flags = Object.values(row);
+  const present = flags.filter(Boolean).length;
+  if (present !== 0 && present !== flags.length) {
+    throw new Error(`#993 key-grammar cohort is PARTIAL: ${JSON.stringify(row)}`);
+  }
+  return present === flags.length;
+}
+
+/** True iff #912's audit actor-role cohort (0243_audit_actor_role.sql) is applied: the
+ *  `clara.audit_log.actor_role` column AND its own CHECK AND the `t_audit_actor_role` stamp that
+ *  fills it AND the recut `clara.list_firm_knowledge` that cites it. Same "wholly present or
+ *  wholly absent" law as the cohorts above: one migration lands the column, its stamp and its one
+ *  reader together, so a chain carrying only some of them is a defect to surface rather than a
+ *  frontier to skip. The register probe looks for the migration's OWN marker in the live body
+ *  (`prosrc`) rather than for the function's existence -- `clara.list_firm_knowledge` has existed
+ *  since 0220, so a bare `to_regprocedure` would report this cohort applied estate-wide. */
+export async function auditActorRoleCohortApplied() {
+  const r = await rootQuery(
+    `select
+       exists (select 1 from information_schema.columns
+                where table_schema = 'clara' and table_name = 'audit_log'
+                  and column_name = 'actor_role')                          as role_column,
+       exists (select 1 from pg_constraint
+                where conrelid = 'clara.audit_log'::regclass
+                  and conname = 'ck_audit_log_actor_role')                 as role_check,
+       exists (select 1 from pg_trigger
+                where tgrelid = 'clara.audit_log'::regclass
+                  and not tgisinternal and tgname = 't_audit_actor_role')  as stamp_trigger,
+       (select position('promoter_role_at_act' in p.prosrc) > 0 from pg_proc p
+         where p.oid = 'clara.list_firm_knowledge()'::regprocedure)        as register_recut`,
+  );
+  const row = r.rows[0];
+  const flags = Object.values(row);
+  const present = flags.filter(Boolean).length;
+  if (present !== 0 && present !== flags.length) {
+    throw new Error(`#912 audit actor-role cohort is PARTIAL: ${JSON.stringify(row)}`);
   }
   return present === flags.length;
 }

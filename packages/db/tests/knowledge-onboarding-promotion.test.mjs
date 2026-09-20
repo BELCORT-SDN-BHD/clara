@@ -94,6 +94,7 @@ const EXPECTED_MAP = {
   msic: "msic",
   turnover: "turnover_band",
   fye: "financial_year_end_month",
+  fye_day: "financial_year_end_day", // #898 -- v4/v5 CLIENT interview only, mapped by 0240
   currency: "default_currency",
   sst_regime: "sst_regime",
   mpers_eligibility: "mpers_eligibility",
@@ -102,7 +103,14 @@ const EXPECTED_MAP = {
   coa_seed_decision: "coa_seed_decision",
 };
 
-cell("kp.01 the map is exactly the ten item keys the live interview produces, each naming a real knowledge key", async () => {
+// #898: `fye_day` is a v4/v5-only interview item (D7's FYE_DAY_SEGMENT_V4) -- `v2ClientAnswers`
+// below answers the v2 inventory alone and never names it, so a promotion of a v2 plan promotes
+// EXPECTED_MAP minus that one row. The two constants diverge on purpose; kp.01 below still reads
+// the FULL map (all eleven rows, whatever interview version answers them).
+const EXPECTED_MAP_V2 = Object.fromEntries(
+  Object.entries(EXPECTED_MAP).filter(([itemKey]) => itemKey !== "fye_day"));
+
+cell("kp.01 the map is exactly the eleven item keys the live interview produces, each naming a real knowledge key", async () => {
   const r = await rootQuery(
     `select m.item_key, m.knowledge_key, k.kind from clara.knowledge_plan_item_map m
        join clara.knowledge_keys k on k.knowledge_key = m.knowledge_key order by m.item_key`);
@@ -133,7 +141,7 @@ cell("kp.03 promotion writes ONE asserted/interview record per MAPPED item, attr
   assert.equal(r.skipped.length, 0);
   assert.equal(r.withheld.length, 0, JSON.stringify(r.withheld));
   assert.deepEqual(
-    Object.fromEntries(r.promoted.map((p) => [p.item_key, p.knowledge_key])), EXPECTED_MAP);
+    Object.fromEntries(r.promoted.map((p) => [p.item_key, p.knowledge_key])), EXPECTED_MAP_V2);
   const rows = await rootQuery(
     `select knowledge_key, source_kind, trust, revision_kind, revision_n, state, asserted_by,
             recorded_via, basis
