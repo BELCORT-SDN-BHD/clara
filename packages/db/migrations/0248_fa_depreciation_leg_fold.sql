@@ -39,6 +39,14 @@
 -- insert its `journal_lines`, one row per leg, in the SAME order with the SAME two description
 -- strings — its signature, its posting behaviour and its floor/authority/sequencing checks are
 -- untouched; only the aggregation's HOME moved. Neither caller's caller set, grant, or ACL moves.
+-- `_fa_run_period_core` also keeps BOTH of the SPLICES already live in its body — neither is a
+-- `create or replace` in its own migration file, so neither shows up in a plain grep of the
+-- migrations directory, and a hand recut against 0041's ORIGINAL file text alone (never re-reading
+-- the live, already-spliced body) drops both silently: 0042 §S5.15d's re-run admission gate
+-- (`clara._wdb_rerun_breach`, immediately before the arithmetic) and 0227 §E's locked-period wall
+-- (`clara._fa_assert_period_open`, between the zero-charge noop arm and the first write). §T
+-- (T.8, T.9) re-prove both are there, phrased identically, and in the same relative order each
+-- splice's own postcheck already established.
 --
 -- 0227's tail assertion T.13 is NOT edited (an applied migration is immutable, and T.13 is not
 -- this file's to touch): it still passes at its own point in a from-scratch chain, because it
@@ -57,10 +65,16 @@
 
 do $p973_pre$
 declare
-  v_sha text; v_pin record;
+  v_sha text; v_pin record; v_redo boolean := false; v_live_poster text;
   -- The live pre-images of the TWO bodies this file recuts, measured off pg_proc.prosrc on the
   -- lane-04 rig (clara_l04, PG 17, chain 0001..0234 + 0247 + wave-2 lane-04 commits through #972)
-  -- — never transcribed from file text.
+  -- — never transcribed from file text. The poster's pre-image is 0041's ORIGINAL body PLUS
+  -- 0227's own SPLICE (§E: a runtime `pg_get_functiondef` + string-replace that installs
+  -- `perform clara._fa_assert_period_open(p_client, v_pe);` before the draft insert) — 0227 never
+  -- re-declares `clara._fa_run_period_core` with `create or replace`, so that splice is otherwise
+  -- invisible to a `grep` of the migrations directory and easy to lose in a hand recut. This
+  -- file's own §B keeps it, in the same position, so the locked-period wall #651 (0227, D9) added
+  -- survives the fold.
   c_poster_pre constant text :=
     '8a69c2355559e700f060c94c7a97950366e9743dd6794d810985fcbc74237681';
   c_preview_pre constant text :=
@@ -74,13 +88,34 @@ begin
     raise exception '#973 prestate: clara.preview_depreciation_run is absent -- 0227 must apply first'
       using errcode='CLR10';
   end if;
-  if to_regprocedure('clara._fa_depreciation_leg_pairing(jsonb)') is not null then
-    raise exception '#973 prestate: clara._fa_depreciation_leg_pairing already exists -- this file mints it'
+  if to_regprocedure('clara._fa_assert_period_open(uuid,date)') is null then
+    raise exception '#973 prestate: clara._fa_assert_period_open is absent -- 0227 must apply first'
+      using errcode='CLR10';
+  end if;
+  if to_regprocedure('clara._wdb_rerun_breach(uuid,text,text[],date,date)') is null then
+    raise exception '#973 prestate: clara._wdb_rerun_breach is absent -- 0042 must apply first'
       using errcode='CLR10';
   end if;
 
-  -- PRE-IMAGE sha256(prosrc) PINS, EVERY ONE MEASURED ON THE LANE-04 RIG off pg_proc.prosrc. Both
-  -- are RECUT by this file; §T re-reads them afterwards to confirm the fold actually moved them.
+  -- IS THIS A REDO OF THIS VERY FILE? (#957: a rig may re-apply the highest applied, unmerged
+  -- migration after an edit.) `create or replace` is safe over its own old effects, but a prestate
+  -- pinned to the PRE-fold image would refuse the redo outright. Admitted LOUDLY, and only on the
+  -- one signal that means it: the live poster already calls this file's own new core.
+  if to_regprocedure('clara._fa_depreciation_leg_pairing(jsonb)') is not null then
+    select p.prosrc into v_live_poster from pg_proc p
+     where p.oid = 'clara._fa_run_period_core(uuid,date,date,text,uuid,uuid,text)'::regprocedure;
+    if position('clara._fa_depreciation_leg_pairing(' in v_live_poster) > 0 then
+      v_redo := true;
+      raise notice '#973 prestate: the live poster ALREADY calls clara._fa_depreciation_leg_pairing -- treating this as a #957 REDO of 0248 itself. The recut is create-or-replace and the tail below re-proves the whole post-state from scratch.';
+    else
+      raise exception '#973 prestate: clara._fa_depreciation_leg_pairing already exists but the poster does not call it -- re-derive this file against the live catalog before applying'
+        using errcode='CLR10';
+    end if;
+  end if;
+
+  -- PRE-IMAGE sha256(prosrc) PINS, EVERY ONE MEASURED ON THE LANE-04 RIG off pg_proc.prosrc. The
+  -- two RECUT entries are skipped on a redo (their pre-image is this file's OWN prior effect, not
+  -- the pin below); §T re-reads all seven afterwards to confirm the final state either way.
   for v_pin in select * from (values
       ('clara._fa_run_period_core(uuid,date,date,text,uuid,uuid,text)', c_poster_pre, 'recut'),
       ('clara.preview_depreciation_run(uuid)', c_preview_pre, 'recut'),
@@ -96,6 +131,7 @@ begin
       ('clara._agent_depreciation_catchup_core(jsonb,uuid,date,text,jsonb,text)',
        'c354db4e234e58ac5213a81751522f256562b9b484153b8e7570f33a3bf9d1fc', 'unmoved')
     ) as t(sig, sha, kind) loop
+    if v_redo and v_pin.kind = 'recut' then continue; end if;
     select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
       from pg_proc p where p.oid = v_pin.sig::regprocedure;
     if v_sha is distinct from v_pin.sha then
@@ -105,30 +141,34 @@ begin
   end loop;
 
   -- THE FRAGMENT T.13 BINDS IS STILL LIVE, IN BOTH BODIES, EXACTLY ONCE EACH — the pre-condition
-  -- for calling this a FOLD rather than an independent rewrite. Normalized the same way T.13 is:
-  -- lowercased, comments stripped, whitespace collapsed.
-  declare
-    v_a text; v_b text; v_n int;
-    v_frag constant text := 'from jsonb_array_elements(v_res -> ''charges'') x join clara.fixed_assets f on f.id = '
-      || '(x ->> ''asset_id'')::uuid group by 1, 2 order by 1, 2';
-  begin
-    select lower(regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
-      into v_a from pg_proc p where p.oid = 'clara._fa_run_period_core(uuid,date,date,text,uuid,uuid,text)'::regprocedure;
-    select lower(regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
-      into v_b from pg_proc p where p.oid = 'clara.preview_depreciation_run(uuid)'::regprocedure;
-    v_n := (length(v_a) - length(replace(v_a, v_frag, ''))) / length(v_frag);
-    if v_n <> 1 then
-      raise exception '#973 prestate: the poster carries the leg-aggregation fragment % time(s), expected exactly 1 -- this file is a FOLD of an existing duplication, not an independent rewrite', v_n
-        using errcode='CLR10';
-    end if;
-    v_n := (length(v_b) - length(replace(v_b, v_frag, ''))) / length(v_frag);
-    if v_n <> 1 then
-      raise exception '#973 prestate: the preview carries the leg-aggregation fragment % time(s), expected exactly 1', v_n
-        using errcode='CLR10';
-    end if;
-  end;
+  -- for calling this a FOLD rather than an independent rewrite. Meaningless on a redo (the live
+  -- bodies are already this file's OWN post-fold effect, which carries no such inline fragment at
+  -- all — see T.3/T.4 below, which re-prove that unconditionally). Normalized the same way T.13
+  -- is: lowercased, comments stripped, whitespace collapsed.
+  if not v_redo then
+    declare
+      v_a text; v_b text; v_n int;
+      v_frag constant text := 'from jsonb_array_elements(v_res -> ''charges'') x join clara.fixed_assets f on f.id = '
+        || '(x ->> ''asset_id'')::uuid group by 1, 2 order by 1, 2';
+    begin
+      select lower(regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
+        into v_a from pg_proc p where p.oid = 'clara._fa_run_period_core(uuid,date,date,text,uuid,uuid,text)'::regprocedure;
+      select lower(regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
+        into v_b from pg_proc p where p.oid = 'clara.preview_depreciation_run(uuid)'::regprocedure;
+      v_n := (length(v_a) - length(replace(v_a, v_frag, ''))) / length(v_frag);
+      if v_n <> 1 then
+        raise exception '#973 prestate: the poster carries the leg-aggregation fragment % time(s), expected exactly 1 -- this file is a FOLD of an existing duplication, not an independent rewrite', v_n
+          using errcode='CLR10';
+      end if;
+      v_n := (length(v_b) - length(replace(v_b, v_frag, ''))) / length(v_frag);
+      if v_n <> 1 then
+        raise exception '#973 prestate: the preview carries the leg-aggregation fragment % time(s), expected exactly 1', v_n
+          using errcode='CLR10';
+      end if;
+    end;
+  end if;
 
-  raise notice '#973 prestate: clean -- clara._fa_run_period_core and clara.preview_depreciation_run are both at their measured pre-images, clara._fa_depreciation_leg_pairing does not exist yet, the five non-regression bodies are unmoved, and the duplicated leg-aggregation fragment is live in both bodies exactly once each.';
+  raise notice '#973 prestate: clean -- clara._fa_run_period_core and clara.preview_depreciation_run are both at their measured pre-images (or, on a redo, this file''s own prior effect), clara._fa_assert_period_open is live, the five non-regression bodies are unmoved, and (pre-redo) the duplicated leg-aggregation fragment is live in both bodies exactly once each.';
 end
 $p973_pre$;
 
@@ -139,7 +179,7 @@ set role clara_fn_owner;
 --     fragment 0227's T.13 already pins in both bodies — so the fold changes WHERE the arithmetic
 --     lives, never WHAT it computes.
 -- =====================================================================================
-create function clara._fa_depreciation_leg_pairing(p_charges jsonb) returns jsonb
+create or replace function clara._fa_depreciation_leg_pairing(p_charges jsonb) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare v_legs jsonb := '[]'::jsonb; r record;
 begin
@@ -177,7 +217,7 @@ create or replace function clara._fa_run_period_core(p_client uuid, p_period_sta
 declare
   v_dedupe jsonb; v_approve_key text; au record; v_due jsonb; v_res jsonb;
   v_ps date; v_pe date; v_entry uuid; v_rev uuid; v_line int := 0; v_leg jsonb;
-  v_actor uuid; v_ramp boolean; v_status text; v_dr bigint; v_cr bigint;
+  v_actor uuid; v_ramp boolean; v_status text; v_dr bigint; v_cr bigint; v_breach jsonb;
 begin
   if p_op_key is null or btrim(p_op_key) = '' then
     raise exception 'op_key is required' using errcode = 'CLR10';
@@ -243,6 +283,25 @@ begin
           'period_start', v_due ->> 'period_start', 'period_end', v_due ->> 'period_end')::text;
   end if;
 
+  -- 0042 (as-built ladder round 6): THE ONE RE-RUN ADMISSION QUESTION, ASKED WHERE THE MONEY IS
+  -- WRITTEN. The sequencing arms above read the due oracle, but only for its draft freeze and its
+  -- earlier-unmet bound -- a caller naming a period directly is admitted past both. This asks the
+  -- client's own charge rows whether anything already charged into range was unwound at a date
+  -- other than the one it was charged at; if so, the month still holds money the coverage probe
+  -- can no longer see, and charging it again puts the figure in twice. Measured before the fix at
+  -- exactly double, posted unattended, with clara.fa_register_tie reporting accum_diff_cents = 0
+  -- because register and ledger were made wrong together. Reasoning, and the identical question
+  -- the adjustment lane asks: clara._wdb_rerun_breach.
+  v_breach := clara._wdb_rerun_breach(p_client, 'depreciation_charges', null::text[], v_ps, v_pe);
+  if v_breach is not null then
+    raise exception 'this client has a depreciation charge (asset %, % .. %) booked at % whose reversal is dated %, so that period never cleared and charging again would leave the figure standing twice. Finish it by hand; retire the depreciation authority (clara.retire_depreciation_authority) to stop the period being proposed.',
+      v_breach ->> 'asset_id', v_breach ->> 'period_start', v_breach ->> 'period_end',
+      v_breach ->> 'posting_date', v_breach ->> 'correction_posting_date'
+      using errcode = 'CLR38',
+        detail = (jsonb_build_object('reason', 'period_correction_unsound',
+          'period_start', v_ps, 'period_end', v_pe,
+          'remedy', 'retire_depreciation_authority') || v_breach)::text;
+  end if;
   v_res := clara._fa_compute_charges(p_client, v_ps, v_pe);
   if jsonb_array_length(v_res -> 'charges') = 0 then
     -- NOTHING DUE PERSISTS NOTHING (design SS1.5). No entry, no receipt, no ledger row --
@@ -253,6 +312,13 @@ begin
         'period_start', v_ps, 'period_end', v_pe, 'skipped', v_res -> 'skipped'));
   end if;
 
+  -- 0227 (#651, D9): THE LOCKED-PERIOD WALL, AT THE RUNNING DOOR. It sits AFTER the
+  -- zero-charge noop arm (a closed period with nothing to charge is still a lawful noop, and a
+  -- refusal there would turn a no-op into an error for every sweep) and BEFORE the first write,
+  -- so a refused run leaves nothing behind. The posting date this draft would carry is v_pe, which
+  -- is exactly the date 0056's own walls would judge -- so the two can never disagree about WHICH
+  -- fiscal year is in question, only about WHEN the refusal arrives.
+  perform clara._fa_assert_period_open(p_client, v_pe);
   insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
       maker_actor, last_human_editor, flags)
     values (p_client, 'draft', v_pe,
@@ -530,6 +596,48 @@ begin
     end if;
   end loop;
 
-  raise notice '#973 tail OK: clara._fa_depreciation_leg_pairing exists, stable, definer-owned by clara_fn_owner and ungranted; clara._fa_run_period_core and clara.preview_depreciation_run both call it and no longer carry the raw fragment, which now lives in exactly that one function; the poster''s caller set is unchanged at four; and clara._fa_compute_charges, run_depreciation_period, run_depreciation_manual, run_depreciation_period_for and _agent_depreciation_catchup_core are byte-for-byte unmoved.';
+  -- T.8 0227's OWN §E SPLICE SURVIVED THE FOLD. `_fa_run_period_core` is never re-declared by
+  -- 0227 with `create or replace` — the locked-period wall was installed at RUNTIME by a
+  -- `pg_get_functiondef` + string-replace, so a hand recut against the 0041 file text ALONE (never
+  -- re-reading the live, already-spliced body) drops it silently. This is exactly that mistake,
+  -- caught: the wall must still be there, phrased identically to 0227's own splice, and still
+  -- between the arithmetic and the first write.
+  v_n := (length(v_a) - length(replace(v_a, 'perform clara._fa_assert_period_open(p_client, v_pe);', '')))
+    / length('perform clara._fa_assert_period_open(p_client, v_pe);');
+  if v_n <> 1 then
+    raise exception '#973 tail T.8: clara._fa_run_period_core carries the locked-period wall (0227 §E) % time(s), expected exactly 1 -- the fold must not drop 0227''s own splice', v_n
+      using errcode='CLR10';
+  end if;
+  if not (position('clara._fa_compute_charges(p_client, v_ps, v_pe)' in v_a)
+            < position('clara._fa_assert_period_open(p_client, v_pe)' in v_a)
+          and position('clara._fa_assert_period_open(p_client, v_pe)' in v_a)
+            < position('insert into clara.journal_entries(client_id, status, posting_date' in v_a)
+          and position('insert into clara.journal_entries(client_id, status, posting_date' in v_a)
+            < position('clara._approve_entry_core(' in v_a)) then
+    raise exception '#973 tail T.8b: the locked-period wall is no longer between the arithmetic and the first write'
+      using errcode='CLR10';
+  end if;
+
+  -- T.9 0042 §S5.15d's OWN SPLICE ALSO SURVIVED THE FOLD — the re-run admission gate, asked
+  -- immediately before the arithmetic. `p651.census.rerun_gate` (depreciation-history.test.mjs)
+  -- reads this off the catalog independently; this is the migration's OWN proof of the same fact,
+  -- at apply time, on a from-scratch chain, before that test ever runs.
+  v_n := (length(v_a) - length(replace(v_a, 'clara._wdb_rerun_breach(p_client', '')))
+    / length('clara._wdb_rerun_breach(p_client');
+  if v_n <> 1 then
+    raise exception '#973 tail T.9: clara._fa_run_period_core carries the 0042 re-run admission gate % time(s), expected exactly 1 -- the fold must not drop 0042''s own splice', v_n
+      using errcode='CLR10';
+  end if;
+  if not (position('clara._fa_oldest_unmet_period(p_client)' in v_a)
+            < position('clara._wdb_rerun_breach(p_client' in v_a)
+          and position('clara._wdb_rerun_breach(p_client' in v_a)
+            < position('clara._fa_compute_charges(p_client, v_ps, v_pe)' in v_a)
+          and position('clara._fa_compute_charges(p_client, v_ps, v_pe)' in v_a)
+            < position('clara._approve_entry_core(' in v_a)) then
+    raise exception '#973 tail T.9b: the re-run admission gate is no longer between the sequencing block and the arithmetic'
+      using errcode='CLR10';
+  end if;
+
+  raise notice '#973 tail OK: clara._fa_depreciation_leg_pairing exists, stable, definer-owned by clara_fn_owner and ungranted; clara._fa_run_period_core and clara.preview_depreciation_run both call it and no longer carry the raw fragment, which now lives in exactly that one function; the poster''s caller set is unchanged at four; both of 0042''s and 0227''s own splices (the re-run gate and the locked-period wall) survive the fold, each still in place; and clara._fa_compute_charges, run_depreciation_period, run_depreciation_manual, run_depreciation_period_for and _agent_depreciation_catchup_core are byte-for-byte unmoved.';
 end
 $p973_tail$;

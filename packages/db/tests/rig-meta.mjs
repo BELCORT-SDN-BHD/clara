@@ -1979,6 +1979,17 @@ export const FA_DEPRECIATION_0227_COHORT = [
   ...FA_DEPRECIATION_0227_UNGRANTED_FNS,
 ];
 
+// #973 [0248, fold preview_depreciation_run's duplicated leg-pairing aggregation into
+// clara._fa_run_period_core] — its own cohort for the same "wholly present or wholly absent"
+// reason FA_DEPRECIATION_0227_COHORT carries: folding this ONE name into 0227's own cohort would
+// red every database between the two frontiers, and `cohortFailures()` fails a PARTIAL cohort by
+// design. `_fa_depreciation_leg_pairing` is UNGRANTED like `_fa_assert_period_open` above: the
+// main sweep fails the moment a grant appears on it, this cohort fails if it ever DISAPPEARS.
+const FA_DEPRECIATION_LEG_FOLD_0248_UNGRANTED_FNS = ["_fa_depreciation_leg_pairing"];
+export const FA_DEPRECIATION_LEG_FOLD_0248_COHORT = [
+  ...FA_DEPRECIATION_LEG_FOLD_0248_UNGRANTED_FNS,
+];
+
 // #638 [0221, staff expense claims / employee payables / advance settlement] — its own cohort for
 // the same "wholly present or wholly absent" reason 0178's and 0194's carry.
 //
@@ -3309,6 +3320,11 @@ export async function grantMatrixFailures() {
   const depHistoryLive = FA_DEPRECIATION_0227_COHORT.filter((n) => liveNames.has(n));
   if (depHistoryLive.length !== 0) {
     failures.push(...cohortFailures("#651 0227 depreciation-history lane", FA_DEPRECIATION_0227_COHORT, liveNames));
+  }
+  // #973 [0248] — bimodal like 0227's: wholly present once 0248 applies, wholly absent before it.
+  const legFoldLive = FA_DEPRECIATION_LEG_FOLD_0248_COHORT.filter((n) => liveNames.has(n));
+  if (legFoldLive.length !== 0) {
+    failures.push(...cohortFailures("#973 0248 depreciation leg-pairing fold", FA_DEPRECIATION_LEG_FOLD_0248_COHORT, liveNames));
   }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.

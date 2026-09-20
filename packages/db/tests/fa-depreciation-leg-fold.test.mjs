@@ -101,3 +101,141 @@ test("p973.core.shape clara._fa_depreciation_leg_pairing(jsonb) exists, is owned
     assert.equal(has.rows[0].ok, false, `${role} does NOT hold EXECUTE on the new core`);
   }
 });
+
+// ===========================================================================================
+// 2 · THE ROUTINE'S OWN ARITHMETIC, CALLED DIRECTLY (root — it is ungranted; there is no
+//     persona-level door onto it).
+// ===========================================================================================
+
+test("p973.core.pairs TWO different (expense, accumulated) pairs in one charge set come back as FOUR legs, grouped by the PAIR and not by either account alone, in (expense, accumulated) order", async (t) => {
+  if (await gate(t)) return;
+
+  const client = await p651Client("973_pairs");
+  await upsertFaProfile((await faWorld()).users.alice,
+    { client, assetAccount: COST2, accumAccount: ACCUM2, expenseAccount: EXPENSE2 });
+  const start = mon(-3);
+  const a = await buyAsset({ client, cents: 100_000, postingDate: dayIn(start, 1) });
+  const b = await buyAsset({ client, cents: 500_000, postingDate: dayIn(start, 2), account: COST2 });
+
+  // A HAND-COMPUTED expectation, independent of anything the routine itself derives: asset `a`
+  // charges land on the COST/ACCUM/EXPENSE pair (2 charges, summed), asset `b` on the
+  // COST2/ACCUM2/EXPENSE2 pair (1 charge) — two DISTINCT pairs, never merged by either account
+  // alone even though nothing here shares an account code across the two.
+  const charges = JSON.stringify([
+    { asset_id: a.asset.id, amount_cents: 1_000 },
+    { asset_id: a.asset.id, amount_cents: 2_000 },
+    { asset_id: b.asset.id, amount_cents: 7_000 },
+  ]);
+  const r = await rootQuery(
+    "select clara._fa_depreciation_leg_pairing($1::jsonb) as legs", [charges]);
+  const legs = r.rows[0].legs;
+
+  const expenseOf = a.asset.depr_expense_account_code < b.asset.depr_expense_account_code
+    ? [a, b] : [b, a];
+  assert.deepEqual(legs, [
+    { account_code: expenseOf[0].asset.depr_expense_account_code,
+      debit_cents: expenseOf[0] === a ? 3_000 : 7_000, credit_cents: 0 },
+    { account_code: expenseOf[0].asset.accum_depr_account_code,
+      debit_cents: 0, credit_cents: expenseOf[0] === a ? 3_000 : 7_000 },
+    { account_code: expenseOf[1].asset.depr_expense_account_code,
+      debit_cents: expenseOf[1] === a ? 3_000 : 7_000, credit_cents: 0 },
+    { account_code: expenseOf[1].asset.accum_depr_account_code,
+      debit_cents: 0, credit_cents: expenseOf[1] === a ? 3_000 : 7_000 },
+  ], `two charges on one pair summed to 3,000 and one charge on the other pair at 7,000, four legs ordered by (expense, accumulated) code (got ${JSON.stringify(legs)})`);
+});
+
+// ===========================================================================================
+// 3 · BOTH RECUT BODIES, OFF THE CATALOG — the VACUITY check that this is a FOLD, not an
+//     "add a call and keep the old copy too" patch.
+// ===========================================================================================
+
+test("p973.callers.recut both clara._fa_run_period_core and clara.preview_depreciation_run now CALL clara._fa_depreciation_leg_pairing, and neither still carries the raw duplicated fragment #651's own tail (0227 T.13) bound", async (t) => {
+  if (await gate(t)) return;
+
+  const poster = await rootQuery(
+    "select p.prosrc as src from pg_proc p where p.oid = "
+    + "'clara._fa_run_period_core(uuid,date,date,text,uuid,uuid,text)'::regprocedure");
+  const preview = await rootQuery(
+    "select p.prosrc as src from pg_proc p where p.oid = "
+    + "'clara.preview_depreciation_run(uuid)'::regprocedure");
+  assert.equal(poster.rows.length, 1);
+  assert.equal(preview.rows.length, 1);
+
+  // Normalized the SAME way the migration's own tail normalizes prosrc before comparing: line
+  // comments stripped, lowercased, whitespace runs collapsed to one space.
+  const normalize = (src) => src.replace(/--[^\n]*/g, "").toLowerCase().replace(/\s+/g, " ");
+
+  for (const [name, src] of [["clara._fa_run_period_core", poster.rows[0].src],
+    ["clara.preview_depreciation_run", preview.rows[0].src]]) {
+    assert.ok(src.includes(LEG_PAIRING_CALL),
+      `${name} calls ${LEG_PAIRING_CALL} (its body does not)`);
+    assert.ok(!normalize(src).includes(LEG_AGGREGATION_FRAGMENT),
+      `${name} no longer carries the raw duplicated fragment inline`);
+  }
+
+  // …and the fragment survives EXACTLY ONCE across the whole schema — inside the new core.
+  const carriers = await rootQuery(
+    `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara'
+        and position($1 in lower(regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '\\s+', ' ', 'g'))) <> 0`,
+    ["join clara.fixed_assets f on f.id = (x ->> 'asset_id')::uuid group by 1, 2 order by 1, 2"]);
+  assert.deepEqual(carriers.rows.map((r) => r.proname), ["_fa_depreciation_leg_pairing"],
+    `exactly one clara function carries the leg-pairing fragment now (got ${JSON.stringify(carriers.rows)})`);
+});
+
+// ===========================================================================================
+// 4 · THE BEHAVIOURAL PROOF, at the public seam — TWO account pairs, which #651's OWN
+//     `p651.preview.matches_run` never exercises (it uses a single pair throughout, so it cannot
+//     tell "grouped by the PAIR" from "grouped by the expense account alone").
+// ===========================================================================================
+
+test("p973.behaviour.two_pairs a client with TWO chargeable assets under TWO different account pairs: the preview shows FOUR legs, hand-computed, and the run that follows posts the identical four", async (t) => {
+  if (await gate(t)) return;
+  const w = await faWorld();
+  const client = await p651Client("973_behaviour");
+  await upsertFaProfile(w.users.alice,
+    { client, assetAccount: COST2, accumAccount: ACCUM2, expenseAccount: EXPENSE2 });
+  const start = mon(-3);
+
+  // Asset A on the COST/ACCUM/EXPENSE pair: 360,000 / 36 months = 10,000/month.
+  const a = await buyAsset({ client, cents: 360_000, postingDate: dayIn(start, 1) });
+  await completeSL(client, a.asset.id, { life: 36, start: start.start, description: "p973 pair-a" });
+  // Asset B on the COST2/ACCUM2/EXPENSE2 pair: 60,000 / 12 months = 5,000/month — a DIFFERENT
+  // pair AND a different amount, so a mis-pairing (e.g. grouping by expense account alone,
+  // which would still be correct here since the two never share one) or a mis-sum both show up
+  // as a wrong account code or a wrong amount rather than accidentally cancelling out.
+  const b = await buyAsset({ client, cents: 60_000, postingDate: dayIn(start, 2), account: COST2 });
+  await completeSL(client, b.asset.id, { life: 12, start: start.start, description: "p973 pair-b" });
+
+  const au = await liveAuthorityWithRef(client);
+  await backdateAuthorityFloor(au.id, mon(-12).start);
+
+  const pv = await previewRun(w.users.carol, client);
+  assert.equal(pv.due, true, `the preview says a period is due (got ${JSON.stringify(pv)})`);
+  assert.equal(pv.period_start, start.start, "…the period the two assets' own SL schedules start in");
+  assert.equal(pv.charged_cents, 15_000, "10,000 (pair A) + 5,000 (pair B)");
+
+  const HAND_COMPUTED = [
+    { account_code: a.asset.depr_expense_account_code, debit_cents: 10_000, credit_cents: 0 },
+    { account_code: a.asset.accum_depr_account_code, debit_cents: 0, credit_cents: 10_000 },
+    { account_code: b.asset.depr_expense_account_code, debit_cents: 5_000, credit_cents: 0 },
+    { account_code: b.asset.accum_depr_account_code, debit_cents: 0, credit_cents: 5_000 },
+  ];
+  assert.deepEqual(pv.legs, HAND_COMPUTED,
+    `four legs, one debit/credit pair per asset's own account pair, NEVER merged across pairs (got ${JSON.stringify(pv.legs)})`);
+
+  const receipt = await runManual(w.users.bob,
+    { client, periodStart: pv.period_start, periodEnd: pv.period_end, opKey: opk("p973run") });
+  assert.equal(receipt.charged_cents, pv.charged_cents,
+    "the RUN charges exactly what the preview showed");
+  const e = await entryRowOf(receipt.entry_id);
+  if (e.status === "draft") {
+    await approveEntry(w.users.alice,
+      { entry: receipt.entry_id, expectedRevision: e.revision_token, opKey: opk("p973apr2") });
+  }
+  const lines = await entryLinesOf(receipt.entry_id);
+  assert.deepEqual(
+    lines.map((l) => ({ account_code: l.account_code, debit_cents: Number(l.debit_cents), credit_cents: Number(l.credit_cents) })),
+    HAND_COMPUTED,
+    "…and the posted entry's own lines are the SAME four, in the same order, to the sen — the two-pair case #651's single-pair regression cannot see");
+});
