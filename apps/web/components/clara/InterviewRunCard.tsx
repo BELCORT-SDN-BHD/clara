@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
@@ -62,6 +63,11 @@ export function InterviewRunCard({
   const [startError, setStartError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [cancelReason, setCancelReason] = useState("");
+  // #900 — the ONE genuinely field-shaped part of this card: htmlFor/id wiring for the answer
+  // textarea's new visible `FieldLabel` (owner ruling, 2026-09-18: only this control recomposes
+  // onto Field; the run chrome below keeps its own markup).
+  const answerId = useId();
+  const answerDescriptionId = `${answerId}-description`;
   const syncedTerminalRef = useRef<string | null>(null);
   // H-28 — the last park index this card has already told the checklist about. `null` is "no
   // park observed yet on this run", which is a DIFFERENT fact from park 0 and is why the very
@@ -206,6 +212,12 @@ export function InterviewRunCard({
   }
 
   const state = run.state;
+  // CRS-07-07 — AC1 asks for the same "label, help AND ERROR behaviour" the sibling surfaces
+  // show. `run.error` conflates three sources (a background /state read, `submitAnswer`, and
+  // the cancel dialog's own actions); only `errorHeldAtPark !== null` names an answer-submission
+  // refusal, so ONLY that one renders inside the answer Field. Everything else (a read failure,
+  // a cancel-dialog refusal) stays in the card's chrome banner below, unchanged.
+  const answerFieldError = run.errorHeldAtPark !== null ? run.error : null;
   const terminalMessage = state?.terminal
     ? state.terminal.outcome === "interview_complete"
       ? t("terminal.interview_complete")
@@ -240,7 +252,10 @@ export function InterviewRunCard({
 
       <CardContent className="flex flex-col gap-3">
         {startError ? <StateBanner tone="error">{startError}</StateBanner> : null}
-        {run.error ? <StateBanner tone="error">{run.error}</StateBanner> : null}
+        {/* CRS-07-07 — an answer-submission refusal (`answerFieldError`) renders beside the
+            control it belongs to, inside the answer Field below, not here — showing it in BOTH
+            places would be the "half-state" this fix round exists to close. */}
+        {run.error && !answerFieldError ? <StateBanner tone="error">{run.error}</StateBanner> : null}
 
         {!runId ? (
           <Button type="button" size="sm" onClick={() => void startOrContinue()} disabled={starting}>
@@ -280,19 +295,48 @@ export function InterviewRunCard({
           {state ? (
             state.pendingPark ? (
               <form className="flex flex-col gap-2" onSubmit={(e) => void submit(e)}>
-                <Textarea
-                  aria-label={t("answer.label")}
-                  placeholder={state.pendingPark.phase === "c" ? t("answer.confirmPlaceholder") : t("answer.placeholder")}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void submit();
-                    }
-                  }}
-                  disabled={run.busy}
-                />
+                {/* #900 — the answer input, and ONLY the answer input, recomposed onto `Field`
+                    (appendix D #28, the `work-question-form.tsx:70` / `OnboardingItemRow.tsx`
+                    precedent this card had not yet followed). `aria-label` stays alongside the
+                    new visible `FieldLabel` — redundant, and deliberately so: two existing cells
+                    (`interview-run-keyboard.test.tsx`, `onboarding-progress-sync.test.tsx`)
+                    already key off it, and this ticket recomposes labelling, not the control's
+                    existing accessible name. */}
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor={answerId}>{t("answer.label")}</FieldLabel>
+                    <Textarea
+                      id={answerId}
+                      aria-label={t("answer.label")}
+                      aria-describedby={answerDescriptionId}
+                      aria-invalid={answerFieldError ? true : undefined}
+                      placeholder={state.pendingPark.phase === "c" ? t("answer.confirmPlaceholder") : t("answer.placeholder")}
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          void submit();
+                        }
+                      }}
+                      disabled={run.busy}
+                    />
+                    {/* L07-A05 (fix round) — an explicit id + aria-describedby, matching
+                        work-question-form.tsx's own association idiom: FieldDescription is a bare
+                        <p> with no id of its own (components/ui/field.tsx), and it renders as a
+                        SIBLING of the Textarea here (not nested inside FieldLabel the way
+                        work-question-form.tsx's note field nests it), so nothing associates the
+                        two without this. Without it the help text was visible-only — never
+                        announced to a screen reader. */}
+                    <FieldDescription id={answerDescriptionId}>{t("answer.fieldDescription")}</FieldDescription>
+                    {/* CRS-07-07 (code-review fix round) — AC1's still-missing "error placement"
+                        leg: `run.error` from a FAILED `submitAnswer` is this field's own failure
+                        (`answerFieldError` above), so it renders here, beside the control, the
+                        same composition trade-invoice-form.tsx / invite-dialog.tsx /
+                        matching-candidates.tsx use — not only in the card's chrome banner. */}
+                    {answerFieldError ? <FieldError>{answerFieldError}</FieldError> : null}
+                  </Field>
+                </FieldGroup>
                 <div className="flex flex-wrap gap-2">
                   <Button type="submit" size="sm" disabled={run.busy || draft.trim().length === 0}>
                     {run.busy ? t("answer.sending") : t("answer.send")}

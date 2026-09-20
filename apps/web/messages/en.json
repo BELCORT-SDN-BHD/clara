@@ -2580,6 +2580,7 @@
     },
     "extractionTasksHeading": "Extraction tasks",
     "extractionTasksEmpty": "No processing tasks yet.",
+    "extractionTasksExhausted": "Clara stopped checking for updates automatically. Refresh to check again.",
     "taskStatus": {
       "queued": "Extraction queued",
       "held_egress": "Awaiting egress approval",
@@ -4177,6 +4178,8 @@
       "reopenDescription": "Reopens a finalized seed for a further batch of items.",
       "reasonLabel": "Reason",
       "notSerializableHint": "Approval must run in a serializable transaction — the deploy ceremony sets this in the DB.",
+      "closedPeriodRefusal": "This opening basis is dated into a fiscal year that is now closed, so it cannot be changed here. Date it into an open fiscal year, or have that year reopened, before trying again.",
+      "closingPeriodRefusal": "This opening basis is dated into a fiscal year whose close is currently in progress, so it cannot be changed here while that close run stands. Date it into an open fiscal year, or wait for that close run to finish or be abandoned, before trying again.",
       "asOfHint": "The date the opening balances are stated as at — normally the day before the first period you will keep.",
       "asOfRequired": "An as-at date is required.",
       "source": {
@@ -5977,6 +5980,7 @@
       "label": "Your answer",
       "placeholder": "Type your answer",
       "confirmPlaceholder": "Confirm or correct this answer",
+      "fieldDescription": "Sent to Clara as your answer to the open question above.",
       "send": "Send",
       "sending": "Sending..."
     },

@@ -43,6 +43,7 @@
 import { getRows } from "@/lib/read";
 import { callDoor } from "@/lib/doors";
 import { loadCallerContext } from "@/lib/firm/caller-context";
+import { listActiveFilingsForDocuments } from "./reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { DocumentRow, IntakeRow, IntakeStatus } from "./types";
@@ -166,12 +167,8 @@ export async function loadIntakeReceipts(
   clientId: string,
   opts: Opts & { limit?: number } = {},
 ): Promise<IntakeReceiptsLoad> {
-  const [intakes, filings, unassigned, caller] = await Promise.all([
+  const [intakes, unassigned, caller] = await Promise.all([
     listIntakeReceipts(opts),
-    getRows<{ document_id: string }>(
-      `document_filings?client_id=eq.${encodeURIComponent(clientId)}&retired_at=is.null&select=document_id`,
-      opts,
-    ),
     listUnassignedDocuments(opts.limit ?? 50, opts),
     // EXACTLY ONE active membership is a DB guarantee (`uq_membership_active_user`),
     // and `loadCallerContext` deliberately does not collapse 0/1/>1 — so a surprising
@@ -179,6 +176,24 @@ export async function loadIntakeReceipts(
     // picking whichever row arrived first.
     loadCallerContext(opts.session ?? sessionTokenAccessor, opts.signal).catch(() => []),
   ]);
+
+  // #876 — filing state for EXACTLY the documents THESE intake rows name, never the client's
+  // whole active-filing set. Sequenced after `intakes` on purpose: the bounded set cannot be
+  // known before the intake rows are read.
+  //
+  // `document_filings` is RLS-scoped to the FIRM, not the client (0007_document_pipeline.sql:
+  // 780-781 — see `listActiveFilingsForClient`'s own header), so `listActiveFilingsForDocuments`
+  // (reads.ts) — a general bounded-set read with no client opinion, reusable by callers with
+  // DIFFERENT scopes — can legitimately return a document filed to a DIFFERENT client than this
+  // one. Rule (a) below means "filed to THIS client" (module header), not "filed to any client",
+  // so the `client_id === clientId` filter stays HERE, client-side, on the bounded result — the
+  // one piece of the original query's meaning `listActiveFilingsForDocuments` itself does not
+  // (and, being a generic bounded-set read, should not) carry.
+  const intakeDocumentIds = intakes
+    .map((row) => row.document_id)
+    .filter((id): id is string => typeof id === "string");
+  const filings = (await listActiveFilingsForDocuments(intakeDocumentIds, opts))
+    .filter((f) => f.client_id === clientId);
 
   const filedHere = new Set(filings.map((f) => f.document_id));
   const unassignedById = new Map(unassigned.map((u) => [u.id, u]));

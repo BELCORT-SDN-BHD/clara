@@ -191,6 +191,18 @@ function laneDocumentIds() {
   ];
 }
 
+/** STD-01 (code-review fix round) — the SAME `in.(…)` parse `document-correction-mock.mjs` and
+ *  `documents-viewer-mock.mjs` already export under this exact name (both edited in the SAME
+ *  #876 fix-round commit as this file): `null` when the param is absent or not `in.(...)` shaped,
+ *  else the decoded, trimmed id list. This file used to reimplement the same parse inline as
+ *  `namedLaneDocumentsIn`, folding the lane-ownership filter into it; the lane filter is now a
+ *  separate `.filter(laneDocumentIds().includes(...))` step below, matching the sibling files. */
+function inParam(url, key) {
+  const raw = url.searchParams.get(key);
+  if (!raw?.startsWith("in.(")) return null;
+  return raw.slice(4, -1).split(",").map((v) => decodeURIComponent(v.trim()));
+}
+
 /** The ONE extraction this lane publishes, for the settled document. */
 const EXTRACTION_ID = "e0e0e0e0-e0e0-4e0e-8e0e-e0e0e0e0e001";
 
@@ -357,6 +369,43 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
     const id = raw !== null && raw.startsWith("eq.") ? raw.slice(3) : null;
     return id !== null && laneDocumentIds().includes(id) ? id : null;
   };
+
+  /** #876 — `<param>=in.(<uuid>,<uuid>,…)`, filtered down to THIS lane's ids. `reads.ts`'s
+   *  `listActiveFilingsForDocuments` (the bounded, multi-document sibling of the single-document
+   *  `eq.` read this file already answers below) issues exactly this shape. Empty array, never
+   *  null, when the param is present but shaped wrong or names none of this lane's documents —
+   *  the caller distinguishes "answered, nothing matched" from "not this route" by whether this
+   *  function returns rows at all, same as `namedLaneDocument`'s null.
+   *
+   *  STD-01 — the PARSE is `inParam` (module scope, shared shape with `document-correction-mock
+   *  .mjs` / `documents-viewer-mock.mjs`); the lane-ownership filter stays its own step here,
+   *  same as those two files do it. */
+  const namedLaneDocumentsIn = (key) => (inParam(url, key) ?? []).filter((id) => laneDocumentIds().includes(id));
+
+  // THE RECEIPTS PREDICATE'S BOUNDED FILINGS READ (#876). `documents-workbench.tsx`'s intake
+  // receipts card asks, for exactly the intake queue's own document ids, which of them already
+  // hold an active filing — the multi-document counterpart of the single-document `eq.` branch
+  // below. Answered from the SAME fixture map that branch uses, so the two routes can never
+  // disagree about which of this lane's documents are filed.
+  if (request.method === "GET" && path === "/rest/v1/document_filings"
+      && (params.get("document_id") ?? "").startsWith("in.(")) {
+    const ids = namedLaneDocumentsIn("document_id");
+    if (ids.length === 0) return false; // another lane's documents — its own handler answers
+    const known = {
+      [DOCS_INTAKE.settledDocumentId]: { id: "f0000000-0000-4000-8000-000000000001", at: iso(1) },
+      [DOCS_INTAKE.movingDocumentId]: { id: "f0000000-0000-4000-8000-000000000002", at: iso(2) },
+    };
+    const rows = ids.flatMap((doc) => {
+      const f = known[doc];
+      return f ? [{
+        id: f.id, document_id: doc, client_id: DOCS_INTAKE.clientId,
+        filed_at: f.at, filed_by: DOCS_INTAKE.userId, basis: "human",
+        retired_at: null, retirement_reason: null, revision_token: `rev-633-${doc.slice(0, 4)}`,
+      }] : [];
+    });
+    sendJson(response, 200, rows, cors);
+    return true;
+  }
 
   if (request.method === "GET" && path === "/rest/v1/document_filings" && params.get("document_id") !== null) {
     const doc = namedLaneDocument("document_id");

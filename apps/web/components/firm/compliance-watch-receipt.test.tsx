@@ -60,7 +60,6 @@ function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<vo
 
 function envelope(): ReviewQueueEnvelope {
   return {
-    watermark: "w1",
     counts: { ready: 0, needs_review: 0, needs_you: 1, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 1, lint_findings: 0 },
     sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
     rows: [{

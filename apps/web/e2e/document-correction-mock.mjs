@@ -250,6 +250,15 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
   }
 
   if (request.method === "GET" && path === "/rest/v1/document_filings") {
+    // #876 — the receipts predicate's bounded, multi-document read (`reads.ts`'s
+    // `listActiveFilingsForDocuments`): `document_id=in.(…)`, scoped by this lane's own id prefix
+    // the same way the single-document `eq.` arm below is.
+    const documentIds = inParam(url, "document_id");
+    if (documentIds !== null) {
+      const ids = documentIds.filter((id) => id.startsWith(LANE_PREFIX));
+      if (ids.length === 0) return false;
+      return json(sendJson, response, FILINGS.filter((f) => f.retired_at === null && ids.includes(f.document_id)), cors);
+    }
     const client = eqParam(url, "client_id");
     const document = eqParam(url, "document_id");
     if (client === CORR.clientId) {

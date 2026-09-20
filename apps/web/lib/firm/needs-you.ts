@@ -240,9 +240,21 @@ export type ReviewQueueSweep = {
 export type ReviewQueueCursor = { tuple: string[] };
 
 export type ReviewQueueEnvelope = {
-  watermark: string;
   counts: ReviewQueueCounts;
   sweep: ReviewQueueSweep;
+  // CRS-07-03 (code-review fix round) — `watermark` is DELETED here, not restored as a named,
+  // present-but-unread field the way `compliance`/`lint` below are. #903's brief forbids the
+  // half-state ("no half-state where it is typed but dropped") and its out-of-scope line rules out
+  // the other fork explicitly: "a new freshness indicator for the review queue" is exactly what
+  // rendering `watermark` would be. `clara.list_review_queue` genuinely emits the field
+  // (0011_daily_loop.sql:3861; 0036_wave_c0_deferred_belts.sql:1737-1744 pins it as a
+  // must-not-be-lost output) and CONTEXT.md names the underlying concept ("Attention source
+  // freshness" / "Source watermark") as real — but that is an argument for a FUTURE ticket to wire
+  // a real consumer, not for this type to keep a field this build has never read and #903 asks to
+  // resolve one way or the other. The `compliance`/`lint` precedent below predates #903 and was
+  // never put to the owner as an answer to its AC2, so it does not carry this field along with it.
+  // use-review-queue.test.ts's "903" cell greps both this type and the hook for zero remaining
+  // reference.
   /** 0016+: per-client SST-registration figures + a staleness flag. Present on
    *  the wire; NOT rendered by this build (named gap, not a silent drop —
    *  components/firm's Needs-you inbox surfaces only `counts.compliance_watches`

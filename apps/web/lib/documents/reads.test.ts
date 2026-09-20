@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  listDocumentsByIds, listActiveFilingsForClient, listFilingsForDocument,
+  listDocumentsByIds, listActiveFilingsForClient, listActiveFilingsForDocuments, listFilingsForDocument,
   listOpenCandidatesForClient, listAttemptsByIds, listExtractionsForDocument,
   listRegionsForExtractionIds, listEntriesForDocument, listFirmClients, readCorrectionPreview,
   getDocumentExtract,
@@ -82,6 +82,46 @@ test("listActiveFilingsForClient: filters by client_id and retired_at=is.null", 
     async () => { await listActiveFilingsForClient("client-1", { session: session() }); },
   );
   assert.match(seenUrl, /document_filings\?client_id=eq\.client-1&retired_at=is\.null/);
+});
+
+// #876 — the bounded-set sibling: filing state for EXACTLY the documents a caller already
+// knows about, never the client's whole active-filing set.
+
+test("listActiveFilingsForDocuments([]) resolves [] WITHOUT calling fetch", async () => {
+  let called = false;
+  await withMockedFetch(
+    async () => { called = true; return okJson([]); },
+    async () => {
+      const rows = await listActiveFilingsForDocuments([], { session: session() });
+      assert.deepEqual(rows, []);
+    },
+  );
+  assert.equal(called, false);
+});
+
+test("listActiveFilingsForDocuments: dedupes ids, builds an in.() filter on document_id, and filters retired_at=is.null", async () => {
+  let seenUrl = "";
+  await withMockedFetch(
+    async (url) => { seenUrl = String(url); return okJson([]); },
+    async () => { await listActiveFilingsForDocuments(["doc-1", "doc-2", "doc-1"], { session: session() }); },
+  );
+  assert.match(seenUrl, /\/rest\/v1\/document_filings\?document_id=in\.\(doc-1,doc-2\)&retired_at=is\.null/);
+});
+
+test("listActiveFilingsForDocuments: projects the SAME columns as listActiveFilingsForClient — one shape, two scopes", async () => {
+  let clientScopedUrl = "";
+  let documentScopedUrl = "";
+  await withMockedFetch(
+    async (url) => { clientScopedUrl = String(url); return okJson([]); },
+    async () => { await listActiveFilingsForClient("client-1", { session: session() }); },
+  );
+  await withMockedFetch(
+    async (url) => { documentScopedUrl = String(url); return okJson([]); },
+    async () => { await listActiveFilingsForDocuments(["doc-1"], { session: session() }); },
+  );
+  const selectOf = (url: string) => /select=([^&]+)/.exec(url)?.[1];
+  assert.ok(selectOf(clientScopedUrl), "control: the client-scoped read must carry a select= projection");
+  assert.equal(selectOf(documentScopedUrl), selectOf(clientScopedUrl));
 });
 
 test("listFilingsForDocument: filters by document_id, no retired_at filter (full history)", async () => {

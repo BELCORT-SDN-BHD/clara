@@ -8,6 +8,9 @@ import { useReadErrKind } from "@/lib/parts/read-err-kind";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadDocumentDetail } from "@/lib/documents/loaders";
 import { readSourceDependents, readSourceRevisions, type CorrectionPreview } from "@/lib/documents/reads";
+import { listProcessingTasksForDocument } from "@/lib/documents/intake";
+import { useSettlePoll, type SettlePollOptions } from "@/lib/documents/use-settle-poll";
+import type { ProcessingStatus, ProcessingTaskRow } from "@/lib/documents/types";
 import { findEntryForDocument, type DocumentClaim } from "@/lib/work/evidence";
 import {
   applyDocumentTabParam, documentUrl, parseDocumentTabParam, type DocumentTab,
@@ -73,8 +76,12 @@ import { EmptyState, LoadingState } from "@/components/common/state";
  */
 export const DOCUMENT_HEADING_ID = "document-detail-heading";
 
+/** #904 — the `ProcessingStatus` values a task can still move FROM. Module-scoped: a fresh Set
+ *  every render would be harmless but pointless churn for a lookup this cheap. */
+const NON_TERMINAL_TASK_STATUS: ReadonlySet<ProcessingStatus> = new Set(["queued", "held_egress", "running"]);
+
 export function DocumentDetail({
-  documentId, clientId, clients, clientsErr, clientsClr, onFiledChanged, onNotFound,
+  documentId, clientId, clients, clientsErr, clientsClr, onFiledChanged, onNotFound, settlePoll,
 }: {
   documentId: string;
   clientId: string;
@@ -88,6 +95,14 @@ export function DocumentDetail({
    *  URL change plus a standing "not available in this client" state, and neither belongs to a
    *  panel that is about to unmount. Called once per settled read, never while one is in flight. */
   onNotFound?: () => void;
+  /** #904 — timing override for the processing-tasks settle poll below, the SAME shape
+   *  `documents-workbench.tsx` already accepts for its own intake-receipts poll and forwards to
+   *  `useIntakeBatch`. Unset in production (the hook's own defaults apply); a test passes a
+   *  zero-delay budget so a bounded poll can be observed without waiting out its real backoff.
+   *  STD-03 (code-review fix round) — PICKED from `use-settle-poll.ts`'s own exported
+   *  `SettlePollOptions`, not hand-copied a third time, so a future field added there (or a rename)
+   *  is a one-place change. */
+  settlePoll?: Pick<SettlePollOptions, "maxTicks" | "baseDelayMs" | "maxDelayMs">;
 }) {
   const t = useTranslations("ClientDocuments");
   const router = useRouter();
@@ -103,6 +118,58 @@ export function DocumentDetail({
     sessionTokenAccessor,
     () => readKind.wrap(() => loadDocumentDetail(documentId, clientId, t)),
   );
+
+  /** #904 — THE PROCESSING TASKS REFRESH LIVE, bounded, while any of them is still moving.
+   *
+   *  BEFORE THIS, a task that moved `running` -> `done` (or `failed`) while the panel stayed open
+   *  was invisible until a manual reload — #650's final report named this the workbench's own gap
+   *  (the intake-receipts settle poll below covers the PRE-FILING queue, not a filed document's own
+   *  extraction/OCR tasks). This reuses the SAME bounded, backed-off, hidden-tab-paused idiom
+   *  `documents-workbench.tsx` already runs for the receipts list (`lib/documents/use-settle-poll.ts`)
+   *  rather than inventing a second one.
+   *
+   *  L07-02 (fix round) — an INTERMEDIATE tick (still at least one non-terminal task afterward) is
+   *  `listProcessingTasksForDocument` ALONE, ONE read, matching `use-settle-poll.ts`'s own onTick
+   *  contract ("One read.") and the sibling receipts poll's law (README.md, "A tick costs ONE
+   *  read"). `taskOverride` carries that freshest narrow read; cleared whenever `data` itself
+   *  changes (a real `reload()`, from a mount, an act, or the manual Refresh below) so a stale
+   *  override can never shadow a fresher full bundle.
+   *
+   *  CRS-07-02 (code-review fix round) — the SETTLING tick (the one where the LAST non-terminal
+   *  task turns terminal) is different: it is the one moment this panel KNOWS its mount-time `data`
+   *  is now stale, and narrowing that tick too left the extraction badge (`documentBadges(doc)`,
+   *  document-metadata.tsx, driven by `data.document.extraction_status`) and the Facts view
+   *  (`data.regions`) frozen at their mount values with no Refresh offered (the manual one below is
+   *  gated on the OPPOSITE case: exhausted with a task still non-terminal). This tick therefore pays
+   *  the full `reload()` exactly once — the SAME settled-tick law `documents-workbench.tsx` already
+   *  runs for the receipts poll (`narrowRef.current = false; // settled: pay the other three reads
+   *  once, then stop`) — and `reload()`'s own `loadDocumentDetail` already reads
+   *  `listProcessingTasksForDocument` as one of its five parallel reads (lib/documents/loaders.ts),
+   *  so the tasks strip is covered by that same read; `taskOverride` needs no explicit reset here
+   *  because the `data`-keyed effect above clears it the moment `reload()` lands.
+   *
+   *  `resetKey: documentId` restarts the budget on a different document even though this component
+   *  is already React-`key`ed by it at the workbench (documents-workbench.tsx's own consumer
+   *  contract) — belt, matching `use-settle-poll.ts`'s own stated reason for the option existing. */
+  const [taskOverride, setTaskOverride] = useState<ProcessingTaskRow[] | null>(null);
+  useEffect(() => { setTaskOverride(null); }, [data]);
+  const tasks = taskOverride ?? data?.processingTasks ?? [];
+  const hasNonTerminalTask = tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status));
+  const tasksPoll = useSettlePoll({
+    enabled: hasNonTerminalTask,
+    onTick: async () => {
+      const next = await listProcessingTasksForDocument(documentId);
+      if (next.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status))) {
+        setTaskOverride(next);
+        return;
+      }
+      // Settling tick: every task this read reports is now terminal. Pay the full bundle once so
+      // the extraction badge, Facts view and state panel catch up alongside the tasks strip.
+      await reload();
+    },
+    resetKey: documentId,
+    ...settlePoll,
+  });
 
   /** #646 — the source lineage, its OWN hydrated cell. It is a different read at a different floor
    *  (`clara.list_source_revisions` is bookkeeper+, while the detail bundle is a set of viewer-level
@@ -208,10 +275,12 @@ export function DocumentDetail({
     <div className="flex flex-col gap-4">
       <DocumentMetadata
         document={data.document}
-        tasks={data.processingTasks}
+        tasks={tasks}
         clientId={clientId}
         headingId={DOCUMENT_HEADING_ID}
         onShowExtraction={() => setExtractOpen(true)}
+        tasksExhausted={tasksPoll.exhausted && hasNonTerminalTask}
+        onRefreshTasks={() => void reload()}
       />
 
       {/* #646 — the correction band stands ABOVE the tab strip so both of its sentences are
