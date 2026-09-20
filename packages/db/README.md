@@ -1019,7 +1019,11 @@ which this file's header recorded as a hazard for the next key-minting migration
 and `clara.client_fact_keys.fact_key` to the SAME grammar under their own
 `ck_..._key_grammar` CHECK constraints, so a key either catalog accepts and a key this recorder can
 record are now the same set by construction — this function's own check stays the source of truth
-and was not touched) and a 400-key cap; `tiers` is a closed
+and was not touched, which `tests/knowledge-key-grammar.test.mjs` kg.05 proves by pinning the
+recorder's `prosrc` sha256 against the value 0230 produces and re-asserting that the recorder
+still runs that same grammar literal; 0242's own tail asserts only that the recorder still
+RESOLVES at its 0230 signature and prints the sha as as-run evidence, so kg.05 is the pin) and a
+400-key cap; `tiers` is a closed
 vocabulary `{core, requested, remainder}` of non-negative integers; `as_of` must be a **finite**
 date (`infinity` is a real date value, and this relation can never delete a row); and
 `payload_digest` records the facts the row carries. The reason is the file's own: the read-set must

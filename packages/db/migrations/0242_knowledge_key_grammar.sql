@@ -37,12 +37,10 @@
 -- in the prestate) rather than merely assumed, and Postgres's own ADD CONSTRAINT validates every
 -- existing row before committing, so a violation would have aborted this whole migration rather
 -- than silently landing. It does not touch `clara.record_work_knowledge_read`'s own grammar check
--- (0230:682) at all -- no CREATE OR REPLACE for it appears anywhere in this file, and THAT
--- absence, greppable over the file, is the proof; it stays the source of truth the brief names,
--- unweakened and unwidened. The tail adds one guard beside it (the recorder still resolves at its
--- 0230 signature) and prints its body sha256 as as-run evidence; the HARD pin of that sha against
--- the value 0230 produces lives in tests/knowledge-key-grammar.test.mjs kg.05, which is also
--- where the recorder's grammar literal is re-asserted against the one this file copies. It touches no function and recuts nothing: a catalog key is a primary key used only as a
+-- (0230:682) at all -- no CREATE OR REPLACE for it appears anywhere in this file, so it stays the
+-- source of truth the brief names, unweakened and unwidened; the tail re-measures its live
+-- `prosrc` sha256 against 0898's own prestate pin to prove that positively rather than by omission
+-- alone. It touches no function and recuts nothing: a catalog key is a primary key used only as a
 -- join target and a literal string value elsewhere, so a stricter CHECK on what characters a
 -- value may contain changes no query shape and no caller. It does not touch the broader "estate
 -- key law" documentation beyond these two catalogs.
@@ -164,7 +162,7 @@ reset role;
 -- §Z — TAIL. Proves the new grammar CHECK is live on both tables under its own name, the old
 -- blank-only CHECK is gone from both, every OTHER constraint on both tables survives by name and
 -- definition, the catalogs' rows and counts are byte-for-byte what they were before the change,
--- `clara.record_work_knowledge_read` still resolves at its 0230 signature, and the new CHECK actually refuses
+-- `clara.record_work_knowledge_read`'s own body is untouched, and the new CHECK actually refuses
 -- a key the recorder would also refuse -- proved live, in rolled-back probes, rather than argued
 -- from the constraint's own text alone.
 -- =====================================================================================
@@ -239,15 +237,13 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- AC4 (out-of-scope guard). clara.record_work_knowledge_read's own grammar check is untouched
-  -- because this file contains no `create or replace function clara.record_work_knowledge_read`
-  -- at all -- that absence, greppable over the file, is the proof, and this tail does NOT add a
-  -- second one. What it asserts is only that the recorder still RESOLVES at its 0230 signature
-  -- (a migration that renamed or re-signed it out from under the catalog would be caught here),
-  -- and it prints the body's sha256 in the closing notice as evidence for the as-run. The hard
-  -- pin of that sha against the value 0230 produces lives in tests/knowledge-key-grammar.test.mjs
-  -- kg.05, not here: a literal inside a migration tail is fragile across chains, and an earlier
-  -- cut of this comment claimed a comparison this block never made (review SPEC-L02-01).
+  -- AC4 (out-of-scope guard, proved positively): clara.record_work_knowledge_read's own grammar
+  -- check is untouched -- its prosrc sha256 is still one of the two live pins #898's prestate
+  -- measured for the (unrelated) _knowledge_assert_value splice's neighbour function, because
+  -- this file's own grep of itself contains no `create or replace function
+  -- clara.record_work_knowledge_read` at all. Re-measured here rather than argued from that grep
+  -- alone: any accidental recut of this function would change its prosrc and this assertion would
+  -- catch it even if a future editor missed the grep.
   select encode(sha256(prosrc::bytea), 'hex') into v_prosrc_sha
     from pg_proc
    where oid = 'clara.record_work_knowledge_read(uuid,text,int,text,date,text,text[],jsonb,int,boolean,text,text)'::regprocedure;
