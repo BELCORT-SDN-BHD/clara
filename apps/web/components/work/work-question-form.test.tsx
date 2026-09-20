@@ -956,3 +956,35 @@ test("885 a SUPERSEDED convergence gets its own sentence, and a plain cancellati
   assert.equal(convergeKeyFor(null, cancelled), "convergeCancelled",
     "…and so does a form mounted straight onto a settled cancelled record, with no refusal to read");
 });
+
+// #885 (second fix round, recheck finding L09-RC-03) ------------------------------------------
+//
+// A question whose SOURCE was corrected after it was asked is not answerable, whatever state its
+// Work is in. The door refuses it (CLR13 source_corrected) even while the question is still
+// PENDING -- that is how the #676 carve-out, which leaves a POSTED Work exactly where it is, and
+// the ruling's absolute sentence can both hold. This surface must not ask a person to type an
+// answer it already knows will be refused, so the record carries the fact too
+// (`source_corrected_at`, migration 0268) and the form opens CONVERGED on it.
+test("885 a question whose source was corrected is not asked again: the sentence, not the form", () => {
+  const converge = (reason: string, current: Record<string, unknown> | null = null): AnswerRefusal =>
+    ({ kind: "converge", reason, current, message: "refused" });
+  const corrected = record({ source_corrected_at: "2026-09-20T02:00:00.000Z" } as never);
+
+  assert.equal(convergeKeyFor(converge("source_corrected", { source_corrected_at: "2026-09-20T02:00:00.000Z" }), corrected),
+    "convergeSourceCorrected", "the door's own reason maps to its OWN copy key");
+  assert.equal(convergeKeyFor(null, corrected), "convergeSourceCorrected",
+    "…and so does a form mounted on a PENDING record that already carries the correction instant, with no refusal to read: the person is told BEFORE they type");
+  assert.equal(convergeKeyFor(null, record({})), "convergeStateChanged",
+    "…while an ordinary pending record is untouched by the new arm");
+  assert.equal(convergeKeyFor(null, record({ status: "answered", source_corrected_at: "2026-09-20T02:00:00.000Z" } as never)),
+    "convergeAnswered",
+    "…and a question that was ALREADY ANSWERED still says so: a later correction does not rewrite what happened");
+
+  const messageFor = (k: string): unknown =>
+    (messages as unknown as { WorkQuestion: Record<string, unknown> }).WorkQuestion[k];
+  const sentence = String(messageFor("convergeSourceCorrected"));
+  assert.match(sentence, /corrected/i, "the sentence names what changed — the source, not the Work's state");
+  assert.match(sentence, /again/i, "…and says what the person has to do next");
+  assert.doesNotMatch(sentence, /replacement|new Work is (already )?running/i,
+    "…and promises no successor, because no arm admits one");
+});

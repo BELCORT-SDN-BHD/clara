@@ -86,6 +86,15 @@ export type WorkQuestionRecord = {
    *  every question read from a 0265-or-later database, because `accounting_work.basis` is itself
    *  `not null` there. */
   basis?: WorkBasis | null;
+  /**
+   * #885 (migration 0268) — WHEN the source this question stands on was corrected, if it was
+   * corrected AFTER the question was asked; null otherwise. `clara.answer_work_question` refuses
+   * such a question outright (CLR13 `source_corrected`), even while it is still PENDING and even
+   * where the Work itself is carved out of the retirement rule by a committed receipt (#676) —
+   * so a surface that asked for an answer would be asking for one the door has already decided
+   * to refuse. OPTIONAL: a database below the 0268 frontier carries no such key.
+   */
+  source_corrected_at?: string | null;
 };
 
 /** The value a human typed for one field, before it is sent. `null` means "left blank", which is

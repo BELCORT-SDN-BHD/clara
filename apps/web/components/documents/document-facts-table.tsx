@@ -97,9 +97,15 @@ function factValue(region: EvidenceRegion, t: (key: string) => string): string {
  * (review finding L09-ADV-01). That is work nobody is doing any more, and the person who corrected
  * the figure is the only one present at the moment it happens.
  *
+ * SECOND FIX ROUND (recheck finding L09-RC-02): there is no longer a split to report. NO arm of
+ * the correcting door admits a successor -- a basis nobody re-derived from the corrected document
+ * is not the corrected facts, whoever first stated it -- so every retired Work needs the same one
+ * thing said about it, and saying it once is more honest than a per-reason sentence that was
+ * wrong for one of the three arms it covered.
+ *
  * IT COUNTS, IT DOES NOT NAME. The Work ids are on the receipt and every one of them is a row on
  * the Work list under this client; repeating them here would be a second, drifting index of the
- * same rows. The number, the split and the REASON are what change what a person does next.
+ * same rows. The number and what to do next are what change what a person does.
  *
  * NOTHING RETIRED, NOTHING SAID — including against a database below the 0268 frontier, whose
  * receipt carries no `superseded_work` key at all.
@@ -108,13 +114,10 @@ export function SourceRevisionWorkEffect({ result }: { result: SourceRevisionRes
   const t = useTranslations("ClientDocuments");
   const retired = result?.superseded_work ?? [];
   if (retired.length === 0) return null;
-  const replaced = retired.filter((w) => w.replaced === true).length;
-  const notReplaced = retired.length - replaced;
   return (
     <StateBanner tone="info" data-testid="facts-revision-work-effect">
       <p>{t("factsRevisionWorkStopped", { count: retired.length })}</p>
-      {replaced > 0 ? <p>{t("factsRevisionWorkReplaced", { count: replaced })}</p> : null}
-      {notReplaced > 0 ? <p>{t("factsRevisionWorkNotReplaced", { count: notReplaced })}</p> : null}
+      <p>{t("factsRevisionWorkRestate")}</p>
     </StateBanner>
   );
 }

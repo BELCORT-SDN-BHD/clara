@@ -356,28 +356,30 @@ function revisionReceipt(superseded: readonly unknown[] | undefined): SourceRevi
   } as SourceRevisionResult;
 }
 
-const REPLACED = {
-  work_id: "w-1", new_work_id: "w-2", reason: "source_corrected",
-  replaced: true, not_replaced_reason: null, revision_id: "rev-1",
+// SECOND FIX ROUND: there is no `replaced: true` entry any more -- no arm of the correcting door
+// admits a successor (recheck finding L09-RC-02). The two reasons are the two ways a basis can
+// fail to survive a correction of the document it stands on.
+const PREDATES = {
+  work_id: "w-1", new_work_id: null, reason: "source_corrected",
+  replaced: false, not_replaced_reason: "basis_predates_correction", revision_id: "rev-1",
 };
 const NOT_REPLACED = {
   work_id: "w-3", new_work_id: null, reason: "source_corrected",
   replaced: false, not_replaced_reason: "interpreted_basis", revision_id: "rev-1",
 };
 
-test("885 · a correction that retired work SAYS SO, and separates what carried on from what needs stating again", async () => {
+test("885 · a correction that retired work SAYS SO, and says the instruction must be given again", async () => {
   const h = await renderComponent(App(createElement(SourceRevisionWorkEffect, {
-    result: revisionReceipt([REPLACED, NOT_REPLACED, NOT_REPLACED]),
+    result: revisionReceipt([NOT_REPLACED, NOT_REPLACED, PREDATES]),
   })));
   try {
     const text = h.text();
     assert.match(text, /3 pieces of accounting work that were waiting/,
       "the total is what the door retired, plural-agreed");
-    assert.match(text, /One continued as new work carrying the same instruction/,
-      "the replaced half, in words rather than a bare digit");
-    assert.match(text, /2 were not replaced/, "and the half a person now has to state again");
-    assert.match(text, /read from the value you just corrected/,
-      "…with the REASON, which is the whole point of telling them");
+    assert.match(text, /the instruction has to be given again on the corrected document/,
+      "…and the ONE thing that is true of every retired Work: nothing was started in its place");
+    assert.doesNotMatch(text, /continued as new work/,
+      "…and nothing claims a replacement: the second fix round removed the last arm that admitted one");
   } finally {
     await h.unmount();
   }
@@ -403,9 +405,9 @@ test("885 · ONE Work, and every sentence agrees with itself", async () => {
   })));
   try {
     const text = h.text();
-    assert.match(text, /one piece of accounting work that was waiting/, "singular, never “1 pieces”");
-    assert.match(text, /One was not replaced/, "…and the same in the second sentence");
-    assert.doesNotMatch(text, /continued as new work/, "nothing carried on, so nothing claims to have");
+    assert.match(text, /one piece of accounting work that was waiting/, "singular, never \u201c1 pieces\u201d");
+    assert.match(text, /the instruction has to be given again/,
+      "…and the same instruction sentence, whatever the count");
   } finally {
     await h.unmount();
   }

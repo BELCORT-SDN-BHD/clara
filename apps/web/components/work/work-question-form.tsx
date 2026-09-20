@@ -164,7 +164,11 @@ export function WorkQuestionForm({
   const [draft, setDraft] = useState<WorkAnswerDraft>(() => readWorkAnswerDraft(draftKey) ?? {});
   const [note, setNote] = useState<string>(() => String(readWorkAnswerDraft(draftKey)?.note ?? ""));
   const [step, setStep] = useState(0);
-  const [phase, setPhase] = useState<Phase>(record.status === "pending" ? "editing" : "converged");
+  // #885 (second fix round) — A CORRECTED SOURCE OPENS CONVERGED. Asking a person to fill in a
+  // form whose door has already decided to refuse it is the same defect as showing a control
+  // that would 403: the answer is not available, so the sentence is what this card is for.
+  const [phase, setPhase] = useState<Phase>(
+    record.status === "pending" && !record.source_corrected_at ? "editing" : "converged");
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [refusal, setRefusal] = useState<AnswerRefusal | null>(null);
   /** A field the SERVER named, to be focused once the step carrying it has actually rendered. A
@@ -897,7 +901,15 @@ export function sourceRefText(source: Record<string, unknown> | null | undefined
  *  refusal to read. Both paths land on a CHECKED key — an unknown reason falls back rather than
  *  throwing a MISSING_MESSAGE. */
 export function convergeKeyFor(refusal: AnswerRefusal | null, record: WorkQuestionRecord): string {
-  const reason = refusal?.kind === "converge" ? refusal.reason : record.status;
+  // #885 (second fix round) — A STILL-PENDING QUESTION CAN ALREADY BE UNANSWERABLE. The door
+  // refuses one whose source was corrected after it was asked (CLR13 `source_corrected`), and
+  // the record carries the same instant, so the sentence is reachable with NO refusal to read —
+  // which is the whole point: the person is told before they type, not after they submit. A
+  // question that was already ANSWERED keeps its own sentence; a later correction does not
+  // rewrite what happened.
+  const reason = refusal?.kind === "converge" ? refusal.reason
+    : record.status === "pending" && record.source_corrected_at ? "source_corrected"
+    : record.status;
   switch (reason) {
     case "already_answered":
     case "answered":
@@ -917,6 +929,12 @@ export function convergeKeyFor(refusal: AnswerRefusal | null, record: WorkQuesti
     // restatement path and misleading on the other.
     case "superseded":
       return "convergeSuperseded";
+    // #885 (second fix round) — the SOURCE moved, which is a fact about the document rather than
+    // about the Work's state, and it is true on every path that reaches this word: the Work the
+    // correction retired, and the Work it deliberately left alone (#676's committed-receipt
+    // carve-out) whose question it nevertheless refuses.
+    case "source_corrected":
+      return "convergeSourceCorrected";
     case "basis_changed":
       return "convergeBasisChanged";
     case "state_changed":
