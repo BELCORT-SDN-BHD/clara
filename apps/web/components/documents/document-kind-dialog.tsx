@@ -92,7 +92,13 @@ export function DocumentKindDialog({
           <SelectTrigger aria-label={t("kindHeading")} size="sm">
             <SelectValue
               placeholder={t("kindPlaceholder")}
-              items={DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}
+              // Pre-existing defect found while unblocking this ticket's own build (unrelated to
+              // #840): `DOCUMENT_KINDS` is not imported here at all (a `next build` type-check
+              // failure, ReferenceError at runtime) and, even fixed to resolve, would have offered
+              // the UNFILTERED roster in the trigger's own placeholder items while `SelectContent`
+              // right below already renders the #878-filtered `CLASSIFIABLE_DOCUMENT_KINDS` — the
+              // same "guaranteed, avoidable CLR28 refusal" that comment already names. ONE roster.
+              items={CLASSIFIABLE_DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}
             />
           </SelectTrigger>
           <SelectContent>
