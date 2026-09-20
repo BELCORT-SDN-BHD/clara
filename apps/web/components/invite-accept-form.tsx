@@ -24,7 +24,7 @@ import {
 import {
   readInvitePreview,
   INVITE_PREVIEW_ROLES,
-  INVITE_PREVIEW_NON_BLOCKING_STATUSES,
+  isNonBlockingPreviewStatus,
   type InvitePreviewOutcome,
   type InvitePreviewRole,
   type InvitePreviewRow,
@@ -532,7 +532,7 @@ export function InviteAcceptForm({
     // direction — absence is not evidence either way.
     if (
       outcome.ok
-        ? !(INVITE_PREVIEW_NON_BLOCKING_STATUSES as readonly string[]).includes(outcome.preview.status)
+        ? !isNonBlockingPreviewStatus(outcome.preview.status)
         : outcome.kind === "refused"
     ) {
       setStage("blocked");
@@ -756,7 +756,7 @@ export function InviteAcceptForm({
   if (stage === "blocked") {
     if (
       preview?.ok
-      && !(INVITE_PREVIEW_NON_BLOCKING_STATUSES as readonly string[]).includes(preview.preview.status)
+      && !isNonBlockingPreviewStatus(preview.preview.status)
     ) {
       return (
         <BlockedInvitationFace
@@ -848,7 +848,7 @@ export function InviteAcceptForm({
             authority: `clara.accept_invite` re-checks every one of these facts inside its own
             transaction, which is why an INDEFINITE read degrades to one honest line rather than
             blocking a journey the door is still perfectly able to complete. */}
-        {preview?.ok && (INVITE_PREVIEW_NON_BLOCKING_STATUSES as readonly string[]).includes(preview.preview.status) ? (
+        {preview?.ok && isNonBlockingPreviewStatus(preview.preview.status) ? (
           <section
             aria-labelledby="invite-preview-heading"
             className="rounded-lg border border-border bg-muted/40 p-4"

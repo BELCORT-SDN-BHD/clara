@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import {
   INVITE_PREVIEW_STATUSES,
   INVITE_PREVIEW_NON_BLOCKING_STATUSES,
+  isNonBlockingPreviewStatus,
   isInvitePreviewRow,
   readInvitePreview,
   PREVIEW_INVITE_DOOR,
@@ -95,6 +96,21 @@ test("p872.lib.non_blocking: exactly `pending` and `issuer_lapsed` do not block 
   for (const s of INVITE_PREVIEW_NON_BLOCKING_STATUSES) {
     assert.ok((INVITE_PREVIEW_STATUSES as readonly string[]).includes(s), `${s} must still be an admitted status`);
   }
+});
+
+test("p872.lib.non_blocking: the PREDICATE answers for every admitted status, and for a value outside the domain", () => {
+  // Standards review L10-STD-03 (2026-09-20) extracted this out of three repeated casts in
+  // `invite-accept-form.tsx`. The expected answers come from the spec, not from the constant:
+  // #625's four faces are DEFINITE negatives, and #872's owner ruling keeps `issuer_lapsed` open.
+  assert.equal(isNonBlockingPreviewStatus("pending"), true);
+  assert.equal(isNonBlockingPreviewStatus("issuer_lapsed"), true);
+  assert.equal(isNonBlockingPreviewStatus("accepted"), false);
+  assert.equal(isNonBlockingPreviewStatus("revoked"), false);
+  assert.equal(isNonBlockingPreviewStatus("expired"), false);
+  // A value this app does not understand is not non-blocking. It cannot arrive through
+  // `isInvitePreviewRow` (which denies a sixth status outright), so this is the predicate's own
+  // fail-closed answer rather than a reachable path.
+  assert.equal(isNonBlockingPreviewStatus("some_future_status"), false);
 });
 
 // ---------------------------------------------------------------------------

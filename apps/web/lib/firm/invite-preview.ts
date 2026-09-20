@@ -83,6 +83,16 @@ export type InvitePreviewStatus = (typeof INVITE_PREVIEW_STATUSES)[number];
  *  nothing about acceptance. */
 export const INVITE_PREVIEW_NON_BLOCKING_STATUSES = ["pending", "issuer_lapsed"] as const;
 
+/** THE PREDICATE, written once (standards review L10-STD-03, 2026-09-20). `invite-accept-form.tsx`
+ *  asked the same question at three places — the stage transition, the blocked face's own gate and
+ *  the preview section's — each repeating the same `as readonly string[]` cast, which is the cast
+ *  that exists only because `INVITE_PREVIEW_NON_BLOCKING_STATUSES` is a two-member tuple and the
+ *  value being tested is the five-member union. A caller should ask the question, not re-derive
+ *  how to ask it. */
+export function isNonBlockingPreviewStatus(status: InvitePreviewStatus | string): boolean {
+  return (INVITE_PREVIEW_NON_BLOCKING_STATUSES as readonly string[]).includes(status);
+}
+
 /** The four roles `clara.firm_invites.role` admits (`0141:179`, the same CHECK
  *  `clara.firm_memberships.role` carries at `0002:215`), in ladder order. A role outside it is
  *  refused rather than rendered: `lib/firm/capabilities.ts` cannot rank it, so no surface could
