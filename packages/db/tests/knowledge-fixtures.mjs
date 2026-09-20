@@ -1,4 +1,4 @@
-// #644 — the shared world for the two knowledge batteries (NOT a test file: the name does not end
+// #644 — the shared world for the knowledge batteries (NOT a test file: the name does not end
 // in `.test.mjs`). Minted through the ROOT connection on purpose: the subject of these cells is
 // the knowledge SUBSTRATE and its doors, so going through create_firm / begin_client_onboarding
 // would only add ways to fail for reasons that are not the subject. Every door call a cell makes
@@ -38,6 +38,28 @@ export async function knowledgeCohortApplied() {
   const present = flags.filter(Boolean).length;
   if (present !== 0 && present !== flags.length) {
     throw new Error(`#644 knowledge cohort is PARTIAL: ${JSON.stringify(row)}`);
+  }
+  return present === flags.length;
+}
+
+/** True iff #898's fye-day vocabulary (0240_financial_year_end_day.sql) is applied: the
+ *  `financial_year_end_day` catalog row AND the `fye_day` map row naming it. Same "wholly present
+ *  or wholly absent" law as `knowledgeCohortApplied` above — this cohort adds no relation and no
+ *  function, so its two rows are the whole of it. */
+export async function fyeDayCohortApplied() {
+  const r = await rootQuery(
+    `select
+       exists (select 1 from clara.knowledge_keys where knowledge_key = 'financial_year_end_day')
+         as key_row,
+       exists (select 1 from clara.knowledge_plan_item_map
+                where item_key = 'fye_day' and knowledge_key = 'financial_year_end_day')
+         as map_row`,
+  );
+  const row = r.rows[0];
+  const flags = Object.values(row);
+  const present = flags.filter(Boolean).length;
+  if (present !== 0 && present !== flags.length) {
+    throw new Error(`#898 fye-day cohort is PARTIAL: ${JSON.stringify(row)}`);
   }
   return present === flags.length;
 }
