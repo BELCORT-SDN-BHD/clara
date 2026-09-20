@@ -52,6 +52,7 @@ import {
   grantMatrixFailures,
   definerHygieneFailures,
   governedRlsFailures,
+  worldSchemaPresent,
 } from "./rig-meta.mjs";
 import { raceProactiveNotification, truncateGuardError } from "./rig-txn.mjs";
 
@@ -262,8 +263,77 @@ test("T10a posted entries are immutable / append-only (raw superuser DML → CLR
 
 test("T10b agent_ro can EXECUTE nothing outside pg_catalog + clara", async (t) => {
   if (unready(t)) return;
+  // #866: a bootstrapped Workflow/WDK World (packages/runtime's `bootstrap` bin)
+  // creates graphile_worker functions PUBLIC-EXECUTE by upstream default, which
+  // every role (agent_ro and the wake roles included) can then reach. That is
+  // World contamination, not a clara RBAC regression — named and skipped here
+  // (distinct from the `unready` pre-integration skip above) rather than folded
+  // silently into a passing assertion, so a genuine future leak still reds this
+  // cell on any rig database with no World bootstrapped (RIG.md's "clone a
+  // sibling database first if you need both" recipe keeps the two apart).
+  if (await worldSchemaPresent()) {
+    t.skip("World contamination (#866): a Workflow/WDK World is bootstrapped on this database "
+      + "(workflow/workflow_drizzle/graphile_worker schema present) — PUBLIC-EXECUTE on its "
+      + "functions is upstream default behaviour, not a clara RBAC leak; run T10b on a database "
+      + "with no World bootstrapped instead (RIG.md)");
+    return;
+  }
   const leaked = await agentReachableOutsideClara();
   assert.deepEqual(leaked, [], `agent_ro reaches functions outside pg_catalog/clara: ${leaked.join(", ")}`);
+});
+
+// #866 AC2 — the review's L04-S01 finding: the skip arm above can only ever pass or
+// skip, so nothing in the repository pinned that a genuine RBAC leak (one that has
+// nothing to do with a World bootstrap) still reds. These two cells close that gap
+// at the two seams the brief and worldSchemaPresent()'s own contract name: the
+// predicate must read false on an uncontaminated rig (so the skip arm cannot
+// silently swallow every run), and a PUBLIC-executable function planted outside
+// clara must be named by agentReachableOutsideClara() (the exact function T10b
+// calls). A throwaway schema is created and dropped in a finally, mirroring
+// x42-r8-tails.test.mjs's SCRATCH pattern, so a failed run never leaks a decoy
+// into the shared lane database.
+const T866_LEAK_SCHEMA = "x866_ac2_leak_probe";
+
+test("T10b-AC2 worldSchemaPresent() reads false on a no-World rig (the skip arm cannot become universal)", async (t) => {
+  if (unready(t)) return;
+  // L04B-SPEC-03: this guard exists to catch T10b's own skip arm silently becoming
+  // universal on a CLEAN rig — it has nothing to say about a rig that genuinely IS
+  // World-contaminated, which is exactly the configuration AC1 (T10b itself, above)
+  // exists to make skip. Without this arm, the guard cell reds on precisely the rig
+  // shape #866 set out to stop reddening, which defeats its own requirement.
+  if (await worldSchemaPresent()) {
+    t.skip("World contamination (#866): a Workflow/WDK World is bootstrapped on this database "
+      + "(workflow/workflow_drizzle/graphile_worker schema present) — the guard this cell exists "
+      + "to prove (the skip arm cannot become universal) is moot on a rig where the skip arm is "
+      + "the CORRECT outcome; run this cell on a database with no World bootstrapped instead "
+      + "(RIG.md)");
+    return;
+  }
+  assert.equal(await worldSchemaPresent(), false,
+    "this rig has no workflow/workflow_drizzle/graphile_worker schema bootstrapped — " +
+    "if this ever reads true here, T10b's assertion arm below is not the one running");
+});
+
+test("T10b-AC2 a genuine PUBLIC-executable leak outside clara is named by agentReachableOutsideClara()", async (t) => {
+  if (unready(t)) return;
+  await rootQuery(`drop schema if exists ${T866_LEAK_SCHEMA} cascade`);
+  await rootQuery(`create schema ${T866_LEAK_SCHEMA}`);
+  try {
+    // No GRANT/REVOKE follows: PostgreSQL's own default is EXECUTE-to-PUBLIC on a
+    // freshly created function (the exact upstream behaviour #866's comment on
+    // WORLD_SCHEMAS names) — so agent_ro reaches this without any RBAC mistake
+    // beyond "the schema exists and nobody revoked the default".
+    await rootQuery(
+      `create function ${T866_LEAK_SCHEMA}.probe_leak() returns int language sql as $$ select 1 $$`,
+    );
+    const leaked = await agentReachableOutsideClara();
+    assert.ok(
+      leaked.some((l) => l.endsWith(`${T866_LEAK_SCHEMA}.probe_leak`)),
+      `expected agentReachableOutsideClara() to name ${T866_LEAK_SCHEMA}.probe_leak; got: ${leaked.join(", ") || "(nothing)"}`,
+    );
+  } finally {
+    await rootQuery(`drop schema if exists ${T866_LEAK_SCHEMA} cascade`);
+  }
 });
 
 // ===========================================================================

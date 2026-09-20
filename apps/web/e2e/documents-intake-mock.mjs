@@ -167,11 +167,17 @@ function documentRow(id, over = {}) {
 // every field is `undefined`, which a permissive guard accepts just well enough for the
 // failure to be silent. `readCachedJson` parses once and re-serves the SAME object to every
 // caller in any order, so declining after reading costs nobody anything.
+//
+// NO SECOND, PRIVATE `drain(request)` EITHER (#862's L01-SPEC-03 fix). This lane used to carry
+// its own `for await (const chunk of request) void chunk;` loop for the two callers below that
+// never need the parsed body — a raw `PUT .../bytes` upload, and `list_unassigned_documents`,
+// which answers unconditionally. Both are `readCachedJson` callers that discard the result:
+// an unparsable body (the raw upload bytes) resolves to `{}`, exactly what `drain` used to
+// leave behind, and reusing the ONE shared implementation is what
+// `e2e-fixture-ownership.test.ts`'s body-reader census now measures — a bespoke stream-drain
+// under any function name is the same hazard the census exists to catch, whether or not it
+// parses what it reads.
 const readJson = readCachedJson;
-
-async function drain(request) {
-  for await (const chunk of request) void chunk;
-}
 
 /** Every document id this lane speaks for: the two client-tab fixtures, the firm leaf's own
  *  subject, and anything uploaded during a walk. A read naming any other document is not this
@@ -183,6 +189,18 @@ function laneDocumentIds() {
     DOCS_INTAKE.unassignedDocumentId,
     ...[...state.uploads.values()].map((u) => u.documentId),
   ];
+}
+
+/** STD-01 (code-review fix round) — the SAME `in.(…)` parse `document-correction-mock.mjs` and
+ *  `documents-viewer-mock.mjs` already export under this exact name (both edited in the SAME
+ *  #876 fix-round commit as this file): `null` when the param is absent or not `in.(...)` shaped,
+ *  else the decoded, trimmed id list. This file used to reimplement the same parse inline as
+ *  `namedLaneDocumentsIn`, folding the lane-ownership filter into it; the lane filter is now a
+ *  separate `.filter(laneDocumentIds().includes(...))` step below, matching the sibling files. */
+function inParam(url, key) {
+  const raw = url.searchParams.get(key);
+  if (!raw?.startsWith("in.(")) return null;
+  return raw.slice(4, -1).split(",").map((v) => decodeURIComponent(v.trim()));
 }
 
 /** The ONE extraction this lane publishes, for the settled document. */
@@ -352,6 +370,43 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
     return id !== null && laneDocumentIds().includes(id) ? id : null;
   };
 
+  /** #876 — `<param>=in.(<uuid>,<uuid>,…)`, filtered down to THIS lane's ids. `reads.ts`'s
+   *  `listActiveFilingsForDocuments` (the bounded, multi-document sibling of the single-document
+   *  `eq.` read this file already answers below) issues exactly this shape. Empty array, never
+   *  null, when the param is present but shaped wrong or names none of this lane's documents —
+   *  the caller distinguishes "answered, nothing matched" from "not this route" by whether this
+   *  function returns rows at all, same as `namedLaneDocument`'s null.
+   *
+   *  STD-01 — the PARSE is `inParam` (module scope, shared shape with `document-correction-mock
+   *  .mjs` / `documents-viewer-mock.mjs`); the lane-ownership filter stays its own step here,
+   *  same as those two files do it. */
+  const namedLaneDocumentsIn = (key) => (inParam(url, key) ?? []).filter((id) => laneDocumentIds().includes(id));
+
+  // THE RECEIPTS PREDICATE'S BOUNDED FILINGS READ (#876). `documents-workbench.tsx`'s intake
+  // receipts card asks, for exactly the intake queue's own document ids, which of them already
+  // hold an active filing — the multi-document counterpart of the single-document `eq.` branch
+  // below. Answered from the SAME fixture map that branch uses, so the two routes can never
+  // disagree about which of this lane's documents are filed.
+  if (request.method === "GET" && path === "/rest/v1/document_filings"
+      && (params.get("document_id") ?? "").startsWith("in.(")) {
+    const ids = namedLaneDocumentsIn("document_id");
+    if (ids.length === 0) return false; // another lane's documents — its own handler answers
+    const known = {
+      [DOCS_INTAKE.settledDocumentId]: { id: "f0000000-0000-4000-8000-000000000001", at: iso(1) },
+      [DOCS_INTAKE.movingDocumentId]: { id: "f0000000-0000-4000-8000-000000000002", at: iso(2) },
+    };
+    const rows = ids.flatMap((doc) => {
+      const f = known[doc];
+      return f ? [{
+        id: f.id, document_id: doc, client_id: DOCS_INTAKE.clientId,
+        filed_at: f.at, filed_by: DOCS_INTAKE.userId, basis: "human",
+        retired_at: null, retirement_reason: null, revision_token: `rev-633-${doc.slice(0, 4)}`,
+      }] : [];
+    });
+    sendJson(response, 200, rows, cors);
+    return true;
+  }
+
   if (request.method === "GET" && path === "/rest/v1/document_filings" && params.get("document_id") !== null) {
     const doc = namedLaneDocument("document_id");
     if (doc === null) return false; // another lane's document — its own handler answers
@@ -475,7 +530,7 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/list_unassigned_documents") {
-    await drain(request);
+    await readJson(request);
     // ASK ONCE: once attributed, the document LEAVES the population — the DB's own
     // predicate stops matching it, and the leaf must stop offering the question.
     sendJson(response, 200, state.attributed ? [] : [{
@@ -643,7 +698,7 @@ export async function handleDocumentsIntakeRuntime(request, response, url) {
   if (leg && state.uploads.has(leg[1])) {
     const issued = state.uploads.get(leg[1]);
     if (request.method === "PUT" && leg[2] === "bytes") {
-      await drain(request);
+      await readJson(request);
       response.writeHead(204);
       response.end();
       return true;

@@ -1,0 +1,113 @@
+{
+  "lane": "wave1-lane04",
+  "lens": "RECHECK",
+  "branch": "riders/w1-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "head_checked": "8c4c9a2c124dfad0ae8c9d857b88b75ea19e711b",
+  "head_confirmed_by": "git rev-parse HEAD in the worktree matches exactly; git status --porcelain clean before and after every re-run in this recheck",
+  "source_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane04-codereview-spec.json (SPEC axis, verdict accept-with-fixes, findings L04B-SPEC-01..12, reviewed at 0b592123)",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane04-codereview-standards.json (STANDARDS axis, verdict accept-with-fixes, findings L04-STD-01..04, reviewed at 0b592123)",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane04-codereview-fix.md (fix round 2, claiming L04B-SPEC-03/05/06 and L04-STD-02 FIXED; L04B-SPEC-01/02 REFUTED/left open; L04B-SPEC-04/07 RECORDED doc-only; L04-STD-01 LEFT ALONE per its own required_fix; L04B-SPEC-08..12 and L04-STD-03/04 not in this round's assignment)"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "Independently re-ran every gate the fix round claims and every claim reproduced exactly on the current head (8c4c9a2c): rig-isolation.test.mjs 23 tests/22 pass/1 known skip (T19) including the new AC2 skip-arm cell; role-census-reset.test.mjs 9/9 (was 8, +1 sharedDependents cell); opening-balance-evidence-link.test.mjs 5/5; the 8-file combined regression (rig-isolation+operation-census+role-census-reset+opening-balance-evidence-link+coding-lane-evidence-link+checkout-gate-c2+checkout-gate-c3+wave-b/wb-k-approval) 156/155/1-skip/0-fail; check-document-region-field-paths.selftest.mjs 23/23 (was 21, +2) with the worktree left clean; the real script 927 files/0 violations, same count as before; pnpm typecheck exit 0; pnpm lint exit 0 with check-frozen-workflows.mjs OK (312 files, no manifest diff) and check-document-region-field-paths[.selftest] confirmed running inside the chain; eslint clean on every file touched this round. Read every diff hunk against its finding's required_fix rather than trusting the report's prose: sharedDependents() is now a LEFT JOIN with a coalesced label (L04B-SPEC-05), isClaraRole() is now derived from one CLARA_ROLE_LIKE literal via likeToRegExp() shared with clusterClaraRoleCount()'s parameterized query (L04-STD-02), the T10b-AC2 guard cell now carries the same named skip arm T10b itself has (L04B-SPEC-03), and scanTargetFiles() now unions --cached with --others --exclude-standard (L04B-SPEC-06). Independently verified the two factual claims behind the doc-only findings by reading migration source directly: migration 0017 shows approve_opening_correction (0017:4162) and approve_opening_seed (0017:3962) both call clara._approve_opening_entry per item, and migration 0213's t_source_binding_wall_upd trigger calls clara._lock_document_binding before either approver's UPDATE proceeds — L04B-SPEC-07's 'yes, the correction door shares the lock path' claim holds. Diff from 0b592123 to HEAD touches exactly the 8 files the fix report lists (confirmed by git diff --stat), no migration, no docs/PRD.md or docs/ARCHITECTURE.md, no shared file beyond the already-reviewed rig-meta.mjs hunk (unchanged this round). Two findings above minor remain genuinely unfixed at code level (L04B-SPEC-01, blocker, #854; L04B-SPEC-02, major, #867) but both are structural handoffs the lane and any fix round are categorically barred from performing under this wave's own binding rules (WORK-ORDER rule 2: 'never comment on or close a GitHub issue' blocks filing #854's follow-up issue; RIG.md: 'never run a second from-scratch chain on your cluster' blocks the from-scratch re-apply #867 AC1 needs), not code or test defects in the lane's own deliverable -- the same disposition round 1's recheck already accepted for the lineage predecessor of L04B-SPEC-01 (L04-S04). Both residuals are honestly and completely recorded in packages/db/README.md, packages/db/tests/README.md and the affected test files' own headers, unchanged in substance from the prior round, so their refutations still hold. Nothing new broke: no test file outside the 8 touched shows a regression, typecheck and lint are both green, and the worktree is clean.",
+  "gates_rerun": {
+    "env": "PGHOST=127.0.0.1 PGPORT=55744 PGUSER=postgres PGDATABASE=clara_l04 CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1; full $GATES --import chain read live from packages/db/package.json's test script",
+    "packages/db/tests/rig-isolation.test.mjs (standalone)": "23 tests, 22 pass, 1 known skip (T19) -- unchanged from fix report's claim",
+    "packages/db/tests/role-census-reset.test.mjs (standalone)": "9 pass / 0 fail (was 8; +1, rcr.sharedDependents sees a SHARED-object dependency) -- matches claim exactly",
+    "packages/db/tests/opening-balance-evidence-link.test.mjs (standalone)": "5 pass / 0 fail, obw.race.evidence_then_opening (ok 5) still passes as the designed regression sentinel",
+    "combined re-run (rig-isolation + operation-census + role-census-reset + opening-balance-evidence-link + coding-lane-evidence-link + checkout-gate-c2 + checkout-gate-c3 + wave-b/wb-k-approval, one process)": "156 tests, 155 pass, 1 skip, 0 fail -- matches fix report exactly (was 155/154/1-skip before this round's +1 test)",
+    "node scripts/check-document-region-field-paths.selftest.mjs (standalone)": "23/23 pass (was 21; +2, both L04B-SPEC-06 cases); git status --porcelain empty before and after",
+    "node scripts/check-document-region-field-paths.mjs (real repo)": "clean, 927 files scanned, 0 violations -- same count as before the fix, confirming no false positive introduced",
+    "pnpm typecheck (worktree root)": "exit 0 (apps/web, packages/runtime both Done)",
+    "pnpm lint (worktree root, full chain)": "exit 0; check-document-region-field-paths.mjs and its selftest both ran inside the chain and reported clean/OK; check-frozen-workflows.mjs reported OK -- 312 frozen files verified, no manifest diff, 55 workflow modules",
+    "eslint on every file touched this round (role-census-reset.mjs, role-census-reset.test.mjs, rig-isolation.test.mjs, opening-balance-evidence-link.test.mjs, check-document-region-field-paths.mjs, check-document-region-field-paths.selftest.mjs)": "exit 0, no findings",
+    "git diff 0b592123..HEAD --stat": "exactly the 8 files the fix report lists (packages/db/README.md, packages/db/scripts/role-census-reset.mjs, packages/db/tests/README.md, packages/db/tests/opening-balance-evidence-link.test.mjs, packages/db/tests/rig-isolation.test.mjs, packages/db/tests/role-census-reset.test.mjs, scripts/check-document-region-field-paths.mjs, scripts/check-document-region-field-paths.selftest.mjs), 217 insertions(+), 19 deletions(-)",
+    "git diff 0b592123..HEAD -- packages/db/migrations docs/PRD.md docs/ARCHITECTURE.md": "empty -- nothing touched",
+    "git diff origin/main...HEAD --stat -- <WORK-ORDER rule 7 shared-file list>": "only packages/db/tests/rig-meta.mjs, +20/-0 -- unchanged from prior rounds, not touched again this round",
+    "migration 0017 read directly (approve_opening_correction vs approve_opening_seed)": "confirmed: both call clara._approve_opening_entry(p_seed, e.id, c.actor, p_attestation, v_batch) per draft entry (0017:4241 and 0017:3962) -- L04B-SPEC-07's factual claim holds",
+    "migration 0213 read directly (t_source_binding_wall_upd)": "confirmed: the before-update trigger on clara.journal_entries calls clara._lock_document_binding(new.document_id) before either approver's UPDATE completes, regardless of which one tripped it -- L04B-SPEC-07's factual claim holds",
+    "code diff read against required_fix, per finding": "sharedDependents() join pg_database -> left join pg_database with coalesce(d.datname, '<shared object>') in both select and group by (L04B-SPEC-05, exact required_fix); isClaraRole() now CLARA_ROLE_PATTERN.test(name) derived from one CLARA_ROLE_LIKE=\"clara%\" literal shared with clusterClaraRoleCount()'s parameterized query via a new likeToRegExp() (L04-STD-02, exact required_fix); T10b-AC2 guard cell gains `if (await worldSchemaPresent()) { t.skip(...); return; }` before its assertion, same shape as T10b's own skip arm (L04B-SPEC-03, exact required_fix); scanTargetFiles() now `git ls-files [\"--cached\", \"--others\", \"--exclude-standard\", \"--\", ...roots]` (L04B-SPEC-06, exact required_fix)"
+  },
+  "findings": [
+    {
+      "id": "L04B-SPEC-01",
+      "ticket": 854,
+      "severity": "blocker",
+      "status": "still open (structural handoff, not a code defect)",
+      "title": "The #854 brief's own 'a new defect for its own ticket' follow-up issue is still not filed",
+      "evidence": "obw.race.evidence_then_opening still MEASURES the double posting and asserts it as the current outcome (re-ran: ok 5, passes). packages/db/tests/README.md and the test file's own header now name the exact repro and candidate repairs and explicitly flag the placeholder sentence for the integrator to replace with the issue number, but no GitHub issue exists for this defect as of this recheck.",
+      "why_refutation_holds": "WORK-ORDER rule 2 (read directly in this recheck) binds every lane worker to 'never comment on or close a GitHub issue'; the fix round is bound by the same rule and correctly declines to file. This is the same structural gap round 1's recheck already accepted for this finding's lineage predecessor (L04-S04), unchanged in substance, now carried forward and re-verified rather than re-litigated.",
+      "required_action": "Before this branch merges: file the residual issue (repro = obw.race.evidence_then_opening verbatim; candidate repairs = re-read entry_evidence_links under the document lock, or an explicit SELECT ... FOR UPDATE on entry_evidence_links; per L04B-SPEC-07, name both the seed and correction doors) and replace the placeholder sentence in packages/db/tests/README.md and opening-balance-evidence-link.test.mjs's header with its number. This is an orchestrator/integrator action, not a lane fix."
+    },
+    {
+      "id": "L04B-SPEC-02",
+      "ticket": 867,
+      "severity": "major",
+      "status": "still open (structural handoff, not a code defect)",
+      "title": "#867 AC1's 'record the run' (a real from-scratch chain re-applied on a cluster that already ran it) was never performed",
+      "evidence": "packages/db/README.md still reads '**Not yet verified end to end**' in its own words for the recorded run; the documented-recipe fallback the brief itself sanctions (the four exact drop statements, pinned against the real migrations by rcr.mint, re-verified: ok 32) is delivered, but no actual from-scratch 0001->frontier chain re-apply exists on any cluster in this recheck.",
+      "why_refutation_holds": "RIG.md (read directly in this recheck) states plainly: 'never run a second from-scratch chain on your cluster (migration 0154 pins the cluster-wide role count)'. This worktree's one provisioned resource is the shared cluster at port 55744; no second Postgres instance, initdb, or pg_ctl was provisioned to this lane between rounds (confirmed: no new tooling appears in the diff or in this recheck's own environment). Provisioning a genuinely disposable cluster is outside what a wave-1 lane worker was given.",
+      "required_action": "Leave #867 open on this residual. A lane or integrator step with a disposable cluster runs `CLARA_ALLOW_DESTRUCTIVE=1 node packages/db/scripts/role-census-reset.mjs --apply` followed by a real from-scratch chain re-apply and records the result in packages/db/README.md's #867 section. Do not close #867 on the documentation half alone."
+    }
+  ],
+  "confirmed_fixed": [
+    {
+      "id": "L04B-SPEC-03",
+      "ticket": 866,
+      "severity": "minor",
+      "verification": "The T10b-AC2 'worldSchemaPresent() reads false on a no-World rig' cell now carries the same named skip arm T10b itself has (`if (await worldSchemaPresent()) { t.skip(\"World contamination (#866): ...\"); return; }`) before its assertion. rig-isolation.test.mjs re-run: 23 tests, 22 pass, 1 known skip -- unchanged shape, and the fix report's own clone-based repro (bare `create schema workflow` on a sibling clone reddening pre-fix, skipping post-fix) is consistent with the code read directly."
+    },
+    {
+      "id": "L04B-SPEC-05",
+      "ticket": 867,
+      "severity": "minor",
+      "verification": "sharedDependents()'s `join pg_database` is now `left join pg_database` with `coalesce(d.datname, '<shared object>')` in both the select list and group by -- exactly the finding's required_fix. New cell `rcr.sharedDependents sees a SHARED-object dependency (dbid = 0)...` passes; full role-census-reset.test.mjs re-run 9/9 (was 8/8, +1). packages/db/README.md's #867 section names the fix and its latent-not-live status, matching a direct query of clara_l04's live pg_shdepend (0 rows with dbid=0 outside the test's own throwaway probe)."
+    },
+    {
+      "id": "L04B-SPEC-06",
+      "ticket": 857,
+      "severity": "minor",
+      "verification": "scanTargetFiles() now calls `git ls-files [\"--cached\", \"--others\", \"--exclude-standard\", \"--\", ...roots]` instead of a bare `[\"ls-files\", ...roots]` -- exactly the finding's required_fix. Two new selftest cases (an untracked malformed fixture caught by a real subprocess run; scanTargetFiles() called directly against a freshly-written untracked file) both pass; full selftest re-run 23/23 (was 21/21, +2); worktree confirmed clean before and after; real script against the real repo stays at 927 files / 0 violations, same count as before -- no false positive introduced."
+    },
+    {
+      "id": "L04-STD-02",
+      "ticket": 867,
+      "severity": "minor",
+      "verification": "isClaraRole() no longer hand-restates `startsWith(\"clara\")`; it now tests a `CLARA_ROLE_PATTERN` RegExp compiled once (via a new `likeToRegExp()`) from the same `CLARA_ROLE_LIKE = \"clara%\"` literal that `clusterClaraRoleCount()`'s SQL query now takes as a bound parameter (`where rolname like $1`) instead of an inline string -- exactly the finding's required_fix (one shared literal, translated once into both SQL and JS). role-census-reset.test.mjs re-run 9/9 pass, including the L04-S14 decoy-role regression cell, confirming no behavior change."
+    }
+  ],
+  "recorded_not_code_fix": [
+    {
+      "id": "L04B-SPEC-04",
+      "ticket": 854,
+      "severity": "minor",
+      "verification": "The finding's own required_fix asked only for a closing note, not a new assertion. Confirmed: opening-balance-evidence-link.test.mjs's header and packages/db/tests/README.md's #854 section both now explain the 'exactly one' reinterpretation ('exactly the seed's own item count and nothing else') and point to L04B-SPEC-01 as the measured defect in the losing order. No assertion was touched; re-run 5/5 pass, unchanged."
+    },
+    {
+      "id": "L04B-SPEC-07",
+      "ticket": 854,
+      "severity": "minor",
+      "verification": "The finding's own required_fix asked for a one-line check and a closing note, not a new test. Confirmed by reading migration 0017 and 0213 directly (see gates_rerun above): approve_opening_correction and approve_opening_seed both call clara._approve_opening_entry per item, whose UPDATE fires t_source_binding_wall_upd, which locks the document first regardless of approver -- the 'yes, the correction door shares the exact lock path' claim recorded in the test header and packages/db/tests/README.md is factually correct, independently verified against migration source rather than trusted from the report's prose."
+    }
+  ],
+  "left_alone_as_instructed": [
+    {"id": "L04B-SPEC-08", "severity": "note", "reason": "not in this round's assignment (scope-creep note re: commitOrCapture); unchanged, still a valid note."},
+    {"id": "L04B-SPEC-09", "severity": "note", "reason": "not in this round's assignment (dead #866 README citation); unchanged, still a valid note -- not re-verified this round since it was not assigned."},
+    {"id": "L04B-SPEC-10", "severity": "note", "reason": "not in this round's assignment (depLabel()'s unreachable 'm' branch, unlabelled 'r'); unchanged, still a valid note. Same underlying function this round touched for L04B-SPEC-05/L04-STD-02, but depLabel() itself was not part of either fix and was not edited (confirmed: the diff for role-census-reset.mjs above shows no change to depLabel())."},
+    {"id": "L04B-SPEC-11", "severity": "note", "reason": "not in this round's assignment (templated field_path sites uncounted); unchanged, still a valid note."},
+    {"id": "L04B-SPEC-12", "severity": "note", "reason": "not in this round's assignment (#857 CHECK-arm residual unfiled); unchanged, still a valid note, same disposition as L04B-SPEC-01/02 but at note severity."},
+    {"id": "L04-STD-01", "severity": "minor", "reason": "the reviewer's own required_fix explicitly says 'Not required for this wave'; the fix report assessed extraction (rather than deferring by default) and found it would cross a package boundary for only two call sites, correctly declining per WORK-ORDER rule 5's scope discipline. Left unfixed by design, not by omission."},
+    {"id": "L04-STD-03", "severity": "note", "reason": "not in this round's assignment (depLabel()'s primitive obsession); unchanged, still a valid note, confirmed depLabel() itself untouched this round."},
+    {"id": "L04-STD-04", "severity": "note", "reason": "not in this round's assignment (main()-exit-code selftest's git-index side effect); unchanged, still a valid note -- the file it lives in (check-document-region-field-paths.selftest.mjs) WAS touched this round for L04B-SPEC-06, but the specific case this note names (staging/unstaging a decoy for the main()-exit-code check) was not altered by that fix, confirmed by reading the diff (the new cases are additions, not edits to the existing one)."}
+  ],
+  "newly_broken": [],
+  "typecheck_lint_status": "both green, re-run independently at the worktree root: pnpm typecheck exit 0 (apps/web, packages/runtime both Done); pnpm lint exit 0 including check-frozen-workflows.mjs OK (312 files, no manifest diff) and eslint clean on every file touched this round",
+  "notes": [
+    "This lane's cluster (clara_l04) was never re-migrated from scratch during this recheck; no destructive or reset flag was set; CLARA_RIG_ALLOW_RESET/CLARA_RIG_ALLOW_ROLE_SWEEP were never touched.",
+    "No file outside this report was written or modified in the worktree or the main checkout during this recheck; no push, no PR, no GitHub write, no other worktree touched, no subagent spawned, no process killed that this session did not start.",
+    "Verdict is accept-with-fixes rather than accept because two findings above minor (L04B-SPEC-01 blocker, L04B-SPEC-02 major) remain open, but both are structural handoffs this wave's own binding rules (WORK-ORDER rule 2's GitHub restriction; RIG.md's ban on a second from-scratch chain) categorically bar the lane and any fix round from performing -- not code or test defects in the lane's own deliverable. Nothing above minor remains that this lane could have fixed and did not; both residuals are honestly and completely recorded for the integrator, consistent with the disposition round 1's recheck already accepted for this same lineage (L04-S04).",
+    "The Standards axis (L04-STD-01..04) contributed no code-level residual above minor: L04-STD-01 is a deliberately-deferred smell with the reviewer's own 'not required' framing, and L04-STD-02 is fixed. L04-STD-03/04 are notes, unassigned this round, unchanged."
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "lane": "wave1-lane05",
+  "axis": "RECHECK (second round)",
+  "reviewer": "/code-review recheck reviewer (read-only)",
+  "branch": "riders/w1-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "head": "a7973b02",
+  "fixed_point": "origin/main",
+  "origin_main_at_recheck": "e7f0a10a",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits": [
+    "a7973b02 refactor(db): #957 second fix round — one shared per-migration body, and AC1's checksums come from an independent source",
+    "86c0ec28 fix(lint): #994 second fix round — NO_RAW_COLOR_VALUES states the actual trip condition, not \"a short hex-looking token\"",
+    "e8eb79ba fix(scripts): #849 second fix round — the retired-record verifier is testable, and one argv helper replaces three drifting copies",
+    "e303d6b1 fix(web): #969 second fix round — a failed `shadcn add` still had cn installed, so the guard still strips it",
+    "e2403227 fix(ops): #917 second fix round — WSLENV carries CLARA_BACKUP_DIR/p, and the WSL-side TLS guarantee is written down",
+    "ab6683c0 docs(web): #969 fix round — record the strip-after-write window explicitly",
+    "509b22d7 test(db): #957 fix round — prove redo refuses on a non-rig target",
+    "b39240c8 fix(scripts): #849 fix round — retire's missing-path fall-through, denominator, canary exclusion",
+    "a4db0de2 fix(web): #969 ui:add guard drops the bogus cn dependency the pinned CLI adds",
+    "247dfc89 fix(lint): #994 NO_RAW_COLOR_VALUES message names the ticket-reference case",
+    "e488a57b fix(scripts): #959 maskComments no longer swallows the rest of the input on an unterminated quote/dollar tag",
+    "0d906477 feat(db): #957 guarded migration redo mode",
+    "10b603a4 fix(ops): #917 dsn-pipe.mjs --child-os wsl CA respelling",
+    "f01b4d34 feat(scripts): #849 --print-closure reverse index and --retire command"
+  ],
+  "inputs_read": {
+    "fix_report_1": "docs/plan/active/riders-2026-09-20/reports/wave1-lane05-codereview-fix.md (narrates the 8 code-change findings, 5 commits, one per ticket)",
+    "fix_report_2": "docs/plan/active/riders-2026-09-20/reports/wave1-lane05-codereview-fix-2.md (answers the prior recheck's RC-01: commits the working-tree edits fix-round-1 had left uncommitted)",
+    "spec_report": "docs/plan/active/riders-2026-09-20/reports/wave1-lane05-codereview-spec.json (head ab6683c0, verdict accept-with-fixes, 7 findings L05B-S01..S07)",
+    "standards_report": "docs/plan/active/riders-2026-09-20/reports/wave1-lane05-codereview-standards.json (head ab6683c0, verdict accept-with-fixes, 4 findings L05-STD-01..04)",
+    "prior_recheck": "docs/plan/active/riders-2026-09-20/reports/wave1-lane05-codereview-recheck.json (RC-01, major: fixes existed only as uncommitted working-tree edits)"
+  },
+  "verdict": "accept",
+  "summary": "RC-01, the sole finding of the first recheck, is fixed: HEAD moved from ab6683c0 to a7973b02 across 5 new commits (one per ticket, each ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`), `wave1-lane05-codereview-fix.md` and `-fix-2.md` now narrate both fix rounds, and `git status --short` is clean. I re-verified, by reading the code (not the reports) and by re-running every gate myself against this head, that all 8 findings calling for a change (L05B-S01, S02, S03, S04, S05; L05-STD-02, S03, S04) are correctly fixed, and that the 3 findings needing no fix (L05B-S06, L05B-S07, L05-STD-01) still hold unchanged. Re-run and green: node scripts/check-frozen-workflows.selftest.mjs (all cases, incl. the L05B-S04/L05-STD-02 cells), node scripts/check-frozen-workflows.mjs direct (312 frozen, 3 retired, no manifest diff), node scripts/ops/dsn-pipe.selftest.mjs (ALL GREEN, 3 known Windows-only skips, incl. the L05B-S02 WSLENV/CLARA_BACKUP_DIR cell), node apps/web/scripts/check-ui-add-guard.selftest.mjs (all cases, incl. the 3 L05B-S03 cells), node scripts/eslint-config.selftest.mjs (all cases, incl. the L05B-S05 cell), packages/db tests/migrate-redo.test.mjs against clara_l05@127.0.0.1:55745 with the real $GATES chain (8/8), tests/operation-census.test.mjs (10/10), tests/rig-isolation.test.mjs (20/20, 1 known destructive skip), pnpm typecheck (both workspaces Done), pnpm lint (exit 0), and the whole apps/web unit suite (4633 tests, 4631 pass, 0 fail, 2 skipped — matching fix-2's own count exactly). Nothing regressed and nothing new is broken. Two independent, non-code checks: the two literal sha256 hashes the L05-STD-04 fix uses were recomputed from the exact migration bodies via coreutils `sha256sum`, byte-identical to what the test file hard-codes; and `migrationChecksum` itself is a plain `sha256(text with CRLF normalized)`, so the literals are a genuine independent source, not a restated computation. Nothing above minor remains open.",
+  "findings": [],
+  "notes": [
+    {
+      "id": "N1",
+      "kind": "acknowledged-non-blocking",
+      "title": "L05-STD-01 (attribution trailer on the three original fix-round commits) remains as recorded — informational only",
+      "detail": "b39240c8, 509b22d7 and ab6683c0 still end `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>` rather than WORK-ORDER rule 2's `Claude Fable 5.1`; both source reports and fix-2.md already treat this as unfixable without rewriting landed history, which is correctly not attempted. The 5 newer commits (e2403227, e8eb79ba, 86c0ec28, e303d6b1, a7973b02) all carry the correct trailer, verified with `git show -s --format=%B` on each. Not open against the lane."
+    },
+    {
+      "id": "N2",
+      "kind": "integration-fyi",
+      "title": "e2403227 edits another wave's runbook (docs/plan/active/refresh-wave-2026-09-18/RELEASE-RUNBOOK-0225-0233.md), as fix-2.md itself flags for the orchestrator",
+      "detail": "A four-line addition inside the existing #917 update block. Not a defect in this lane; carried here only because fix-2.md asked the orchestrator to take both edits if another lane touches the same block."
+    },
+    {
+      "id": "N3",
+      "kind": "not-rerun-unchanged",
+      "title": "#917 AC1 end-to-end through backup.mjs --profile full remains unverified on this rig",
+      "detail": "Needs a hosted DSN and pg_dump 17; neither the lane, the spec reviewer, nor this recheck had them. Unchanged from the spec report's own not_rerun list across both fix rounds — not a new gap, and no finding calls for a GitHub write on it."
+    }
+  ],
+  "gates_rerun_by_this_recheck": [
+    "git log -1 --format=%H -> a7973b02; git status --short -> 0 lines (clean); git diff --stat ab6683c0..HEAD -> 14 files, 326(+)/71(-), matches both fix reports",
+    "node scripts/check-frozen-workflows.selftest.mjs -> 'freeze-lint selftest: OK — all cases passed', exit 0",
+    "node scripts/check-frozen-workflows.mjs (direct) -> 'OK — 312 frozen file(s) ... 3 retired entr(ies)', exit 0, no manifest diff",
+    "node scripts/eslint-config.selftest.mjs -> 'OK — all cases passed', exit 0",
+    "node apps/web/scripts/check-ui-add-guard.selftest.mjs -> 'all cases passed', exit 0",
+    "node scripts/ops/dsn-pipe.selftest.mjs -> 'ALL GREEN (3 skipped)', exit 0",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/migrate-redo.test.mjs against clara_l05@127.0.0.1:55745 -> 8 pass / 0 fail",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/operation-census.test.mjs -> 10 pass / 0 fail",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/rig-isolation.test.mjs -> 20 pass / 0 fail / 1 known destructive skip (never with reset flags)",
+    "pnpm typecheck (worktree root) -> apps/web Done, packages/runtime Done, exit 0",
+    "pnpm lint (worktree root) -> exit 0",
+    "apps/web: node scripts/run-tests.mjs (whole unit suite) -> 4633 tests, 4631 pass, 0 fail, 2 skipped",
+    "grep-verified fix content directly in source for every one of the 8 code-change findings (WSL_ENV_LIST, README wording, ui-add.mjs strip-on-failure, checkRetiredRecords + its 4 codes + success-path CLI cell, eslint message wording, optionalArgAfterFlag, migrate.mjs shared targets loop, independent sha256 literals) rather than trusting the fix reports' prose alone",
+    "git show -s --format=%B on all 14 lane commits -> confirms the trailer split fix-2.md describes (6 original + ab6683c0/509b22d7/b39240c8 carry the session trailer that predates this round; the 5 fix-round-2 commits all carry Claude Fable 5.1)"
+  ],
+  "not_rerun": [
+    "#917 AC1 end to end through backup.mjs --profile full — needs a hosted DSN and pg_dump 17; unchanged from every prior report's own not_rerun list.",
+    "Browser/Playwright walks — no .spec.ts touched by either fix round."
+  ]
+}

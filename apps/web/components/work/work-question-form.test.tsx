@@ -20,7 +20,7 @@ import { renderComponent, clickButton, setFieldValue } from "../../test/hookHarn
 import { configureSessionTokenSource } from "../../lib/session-accessor";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { WorkQuestionForm } from "./work-question-form";
-import type { WorkQuestionRecord } from "../../lib/work/questions";
+import { workAnswerDraftKey, writeWorkAnswerDraft, type WorkQuestionRecord } from "../../lib/work/questions";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -249,6 +249,32 @@ test("an invalid value is refused LOCALLY, names its constraint, and FOCUSES the
     assert.equal(activeElement(), inputFor(h, "amount_cents"), "the first invalid control took focus");
     assert.equal(doors.calls.filter((c) => c.fn !== "work_knowledge_drift").length, 0,
       "and nothing was sent (the ticket-658 drift read is excluded by name — see the walking cell above)");
+  } finally {
+    await h.unmount();
+    doors.restore();
+    s.restore();
+  }
+});
+
+test("896 — an OPERATIONAL failure (not a governed refusal) renders a banner queryable by its own data-testid", async () => {
+  // `clara.answer_work_question` returning a non-CLR 500 classifies as a WireError (lib/wire.ts),
+  // which `answerWorkQuestion` maps to `refusal.kind: "failed"` — the one branch this form renders
+  // through `<StateBanner data-testid="work-question-failed">` (work-question-form.tsx). Before
+  // #896, StateBanner's closed prop type and non-spreading root silently dropped that attribute,
+  // so this exact node was never queryable by it — the defect #896 fixed, proved at its own call
+  // site rather than only at StateBanner's own unit cells (components/common/state.test.tsx).
+  const s = stubStorage();
+  const doors = stubDoors((call) =>
+    call.fn === "answer_work_question" ? { status: 500, body: { message: "boom" } } : { status: 200, body: null },
+  );
+  const h = await renderComponent(
+    App({ record: record({ fields: [{ key: "amount_cents", label: "Amount", kind: "money", required: true }] }) }),
+  );
+  try {
+    await h.fireEvent(inputFor(h, "amount_cents")!, "change", (n) => setFieldValue(n, "1200.00"));
+    await press(h, byTestId(h, "work-question-submit")!);
+    assert.ok(byTestId(h, "work-question-failed"), "the failed banner must be queryable by its own data-testid");
+    assert.match(h.text(), /We could not tell whether your answer was recorded/, "the failed state still says so in prose");
   } finally {
     await h.unmount();
     doors.restore();
@@ -690,6 +716,45 @@ test("an ACCOUNT field offers the client's chart when it has one, and a typed co
       "an unreadable chart degrades to a typed code, never to an empty picker");
   } finally {
     await withoutChart.unmount();
+    s.restore();
+  }
+});
+
+// fix-round SPEC-1005-1/ADV-9 — the account field's Select is the one #1005 call site in this
+// file. `test/hookHarness.ts` cannot open a Base UI Select's portalled popup, but this component
+// does not need it: a PRESET draft (the same mechanism `answer accepted ELSEWHERE converges onto
+// the authoritative record and KEEPS the draft` already relies on, per this file's own header)
+// puts the field in a SELECTED state before the first render, exactly like `select.test.tsx`'s own
+// preset-value cells.
+test("[1005]: a preset account-field draft shows the account's LABEL on first render, never the raw code", async () => {
+  const s = stubStorage();
+  const rec = record({ fields: [{ key: "account", label: "Which account?", kind: "account", required: true }] });
+  writeWorkAnswerDraft(
+    workAnswerDraftKey({ userId: USER, firmId: rec.firm_id, clientId: rec.client_id, questionId: rec.question_id, version: rec.question_version }),
+    { account: "6100" },
+  );
+  const h = await renderComponent(
+    createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages,
+      timeZone: "Asia/Kuala_Lumpur",
+      children: createElement(WorkQuestionForm, {
+        record: rec,
+        userId: USER,
+        accounts: [
+          { account_code: "6100", name: "Rent", is_active: true },
+          { account_code: "9999", name: "Retired", is_active: false },
+        ],
+      }),
+    }),
+  );
+  try {
+    const trigger = byTestId(h, "work-question-account-account");
+    assert.ok(trigger, "the account Select must be mounted");
+    const text = h.text();
+    assert.match(text, /6100 · Rent/, "the trigger must show the composed account label from the preset draft");
+  } finally {
+    await h.unmount();
     s.restore();
   }
 });

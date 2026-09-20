@@ -1,0 +1,87 @@
+{
+  "lane": "wave1-lane04",
+  "lens": "RECHECK",
+  "branch": "riders/w1-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "head_checked": "cf3a60dda62f64c471098894fb60999bb86e2233",
+  "head_confirmed_by": "git rev-parse HEAD in the worktree matches exactly; git status --porcelain clean before and after every re-run in this recheck",
+  "source_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane04-codereview-spec.json (SPEC axis, verdict accept-with-fixes, findings L04B-SPEC-01..12, reviewed at 0b592123)",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane04-codereview-standards.json (STANDARDS axis, verdict accept-with-fixes, findings L04-STD-01..04, reviewed at 0b592123)",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane04-codereview-fix.md (round 2 through round 3; round 2 claims L04B-SPEC-03/05/06 and L04-STD-02 FIXED, L04B-SPEC-04/07 RECORDED doc-only, L04B-SPEC-01/02 refuted/left open, L04-STD-01 LEFT ALONE per its own required_fix; round 3, appended after this recheck's own predecessor (wave1-lane04-codereview-recheck-0.json) accepted round 2, claims L04B-SPEC-01 resolved outside the lane via a real filed GitHub issue and L04B-SPEC-02 FIXED via an actual disposable-cluster from-scratch reapply)",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane04-codereview-recheck-0.json (this recheck's own immediate predecessor, at head 8c4c9a2c; accepted every round-2 disposition and left L04B-SPEC-01/02 open as structural handoffs -- this recheck re-verifies both against round 3's head)"
+  ],
+  "verdict": "accept",
+  "summary": "Re-ran every gate on the current head (cf3a60dd, round 3's commit) and confirmed round 3 closes both residuals the immediate predecessor recheck (recheck-0, at 8c4c9a2c) left open. L04B-SPEC-01 (#854, blocker): the orchestrator filed the residual as a real GitHub issue, independently confirmed live with `gh issue view 1014` -- state OPEN, labels bug + ready-for-agent, title matching the finding's own required_fix wording ('a concurrent evidence attachment and opening approval can both commit'), body naming the exact repro (obw.race.evidence_then_opening) and both candidate repairs. Filing an issue is a GitHub write this lane and any fix round are categorically barred from (WORK-ORDER rule 2), and it has now genuinely happened, so this is no longer open against the lane -- carried as a note below, not a finding, because one loose end remains: the required_fix's second half ('replace the placeholder sentence ... with its number') was not done -- packages/db/tests/README.md's #854 section and opening-balance-evidence-link.test.mjs's file header still read 'Not filed as a GitHub issue' / 'the residual issue this ticket's report asks the integrator to file', not '#1014'. The finding's own required_fix brackets this whole step (filing plus the doc update) as 'an integrator action, not a lane fix', so it is not counted as a lane defect, but it is not yet fully closed either -- flagged as a note for whoever integrates next. L04B-SPEC-02 (#867, major): re-verified as genuinely FIXED, not merely claimed. Read packages/db/README.md's #867 section directly: the placeholder 'Not yet verified end to end' language is gone, replaced with a dated, itemized record of a real disposable-cluster proof (WSL pg_createcluster at port 55799, never touching any of the ten rig lane clusters). Independently confirmed clara_l04's own schema_migrations is untouched (count=229, max=0234_legal_enforcement_mode, read directly via psql, matching the report's own before/after claim byte for byte) and that the disposable l04chk cluster is gone (pg_lsclusters lists only main/rigint/rigreh/rigrt/rl01..rl10, no l04chk, confirming teardown). git diff 8c4c9a2c..HEAD --stat shows exactly one file touched this round, packages/db/README.md (+25/-6), matching the fix report's own diff claim exactly -- no migration, no docs/PRD.md or docs/ARCHITECTURE.md, no WORK-ORDER rule 7 shared file. Independently re-ran every test file either round touched: rig-isolation.test.mjs 23 tests/22 pass/1 known skip (T19); role-census-reset.test.mjs 9/9; opening-balance-evidence-link.test.mjs 5/5 (obw.race.evidence_then_opening still measures and asserts the double-posting outcome as the designed regression sentinel, ok 5); check-document-region-field-paths.selftest.mjs all cases pass; the real script against the real repo stays at 927 files scanned / 0 violations, same count as before. pnpm typecheck exit 0 (apps/web, packages/runtime both Done); pnpm lint exit 0; node scripts/check-frozen-workflows.mjs run directly, OK -- 312 frozen files verified, no manifest diff, 55 workflow modules, 3 retired entries, matching round 2's own count with no drift. git status --porcelain empty throughout. Every other finding's disposition from round 2 (L04B-SPEC-03/05/06 fixed, L04-STD-02 fixed, L04B-SPEC-04/07 recorded doc-only, L04-STD-01 left alone by design, L04B-SPEC-08..12 and L04-STD-03/04 unassigned notes) is unchanged in substance -- confirmed unchanged rather than assumed, since the diff since 8c4c9a2c touches only packages/db/README.md, none of the files those findings live in. Nothing above minor remains open against the lane: the one genuinely still-open item (the placeholder-sentence cross-reference to #1014) is a documentation loose end explicitly framed by the finding's own required_fix as an integrator action, carried as a note, not a lane-blocking finding. Nothing else broke.",
+  "gates_rerun": {
+    "env": "PGHOST=127.0.0.1 PGPORT=55744 PGUSER=postgres PGDATABASE=clara_l04 CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1; full $GATES --import chain read live from packages/db/package.json's test script",
+    "git rev-parse HEAD": "cf3a60dda62f64c471098894fb60999bb86e2233 -- matches the fix report's claimed round-3 head exactly",
+    "git diff 8c4c9a2c..HEAD --stat": "packages/db/README.md | 31 +++++++++++++++++++++++++------ (1 file changed, 25 insertions(+), 6 deletions(-)) -- matches the fix report's own diff claim exactly, content read in full and matches the recorded run's prose verbatim",
+    "gh issue view 1014 --json state,labels,title": "state OPEN; labels bug, ready-for-agent; title 'Opening-balance evidence wall: a concurrent evidence attachment and opening approval can both commit' -- confirms L04B-SPEC-01's GitHub-write remedy genuinely happened, independently verified live, not trusted from the fix report's prose",
+    "clara_l04 schema_migrations (psql, direct read)": "count=229, max=0234_legal_enforcement_mode -- unmoved before and after round 3, confirming the disposable-cluster proof never touched this lane's own database",
+    "wsl pg_lsclusters": "main, rigint, rigreh, rigrt, rl01..rl10 online -- no l04chk entry, confirming the disposable proof cluster was torn down completely and no other lane's cluster was affected",
+    "packages/db/tests/rig-isolation.test.mjs (standalone)": "23 tests, 22 pass, 1 known skip (T19) -- unchanged from round 2's claim",
+    "packages/db/tests/role-census-reset.test.mjs (standalone)": "9 pass / 0 fail -- unchanged from round 2's claim",
+    "packages/db/tests/opening-balance-evidence-link.test.mjs (standalone)": "5 pass / 0 fail; obw.race.evidence_then_opening (ok 5) still measures and asserts the double-posting outcome as the designed regression sentinel, unchanged",
+    "node scripts/check-document-region-field-paths.selftest.mjs (standalone)": "all cases PASS, ending 'check-document-region-field-paths self-test: OK'; worktree confirmed clean before and after",
+    "node scripts/check-document-region-field-paths.mjs (real repo)": "clean, 927 files scanned, 0 violations -- same count as round 2's claim",
+    "pnpm typecheck (worktree root)": "exit 0 (apps/web, packages/runtime both Done)",
+    "pnpm lint (worktree root, full chain)": "exit 0; every workspace's own lint script (apps/web's full selftest battery, packages/runtime, packages/reporting-render eslint) reported clean in the tail of the run",
+    "node scripts/check-frozen-workflows.mjs (run directly, not only inside pnpm lint)": "OK -- 312 frozen file(s) verified against frozen-workflows.json (append-only vs origin/main), 55 'use workflow' module(s) all frozen+registered, 3 retired entries -- matches round 2's own count with no drift introduced by round 3",
+    "git status --porcelain": "empty, before and after every command in this recheck"
+  },
+  "findings": [],
+  "confirmed_fixed": [
+    {
+      "id": "L04B-SPEC-02",
+      "ticket": 867,
+      "severity": "major",
+      "verification": "packages/db/README.md's #867 section no longer reads 'Not yet verified end to end'; it now records a dated, itemized proof: a disposable PostgreSQL 17 cluster (pg_createcluster, port 55799, WSL) ran a from-scratch chain (229/229, clara% role count 18), had its one database dropped, ran the documented role-census-reset.mjs --apply recipe (drops the exact four roles, cluster at clara%=14, matching 0154's pin exactly), then ran a SECOND from-scratch chain into a fresh database on the same already-migrated-once cluster -- 229/229, no CLR10, no other error, schema_migrations reading count=229/max=0234, clara% role count back at 18 exactly as the recipe predicts -- which is precisely what AC1 asks for and what round 2 and the immediate predecessor recheck (recheck-0) correctly identified as missing. Independently re-verified this round: clara_l04's own schema_migrations is byte-for-byte unmoved (count=229, max=0234, read directly), the disposable l04chk cluster is confirmed gone from pg_lsclusters, and no other lane's cluster or database was touched. RIG.md's ban on a second from-scratch chain on THIS lane's shared cluster (55744) was never violated -- the proof cluster was a genuinely separate instance."
+    }
+  ],
+  "resolved_outside_lane": [
+    {
+      "id": "L04B-SPEC-01",
+      "ticket": 854,
+      "severity": "blocker",
+      "verification": "The finding's required GitHub write (file the residual issue) has genuinely happened: gh issue view 1014 confirms state OPEN, labels bug + ready-for-agent, and a title and body matching the finding's own required_fix (repro obw.race.evidence_then_opening, both candidate repairs, and per L04B-SPEC-07's addition, both the seed and correction doors named). WORK-ORDER rule 2 bars this lane and any fix round from making that write themselves, so this was correctly an orchestrator action, now confirmed done rather than merely claimed.",
+      "residual_note": "The required_fix's second half -- 'replace the placeholder sentence in packages/db/tests/README.md and in opening-balance-evidence-link.test.mjs's header with its number' -- was NOT done. Both locations still read the pre-filing placeholder ('Not filed as a GitHub issue... replace this sentence with its number' in packages/db/tests/README.md; 'the residual issue this ticket's report asks the integrator to file' in the test file's header), with no '#1014' anywhere in either file (grepped directly, zero matches). The finding's own required_fix frames this whole step as 'an integrator action, not a lane fix', so it is not counted as a code-level defect against the lane, and is carried in 'notes' below rather than as an open finding -- but it is a genuine loose end that should not be lost before this branch merges."
+    }
+  ],
+  "recorded_not_code_fix": [
+    {
+      "id": "L04B-SPEC-04",
+      "ticket": 854,
+      "severity": "minor",
+      "verification": "Unchanged since the immediate predecessor recheck (recheck-0): opening-balance-evidence-link.test.mjs's header and packages/db/tests/README.md's #854 section still explain the 'exactly one' reinterpretation and point to L04B-SPEC-01 (now resolved outside the lane, see above) as the measured defect. No assertion touched; re-run 5/5 pass, unchanged. Confirmed unchanged this round: the diff since 8c4c9a2c touches only packages/db/README.md, not this file."
+    },
+    {
+      "id": "L04B-SPEC-07",
+      "ticket": 854,
+      "severity": "minor",
+      "verification": "Unchanged since the immediate predecessor recheck. The 'yes, the correction door shares the exact lock path' claim, independently verified against migration 0017/0213 source in the predecessor recheck, still stands -- the file it lives in was not touched this round."
+    }
+  ],
+  "left_alone_as_instructed": [
+    {"id": "L04B-SPEC-03", "severity": "minor", "reason": "confirmed FIXED in the predecessor recheck (recheck-0) at head 8c4c9a2c; re-verified unchanged this round -- rig-isolation.test.mjs re-run 23/22/1-skip, same shape."},
+    {"id": "L04B-SPEC-05", "severity": "minor", "reason": "confirmed FIXED in the predecessor recheck; re-verified unchanged this round -- role-census-reset.test.mjs re-run 9/9, same shape."},
+    {"id": "L04B-SPEC-06", "severity": "minor", "reason": "confirmed FIXED in the predecessor recheck; re-verified unchanged this round -- check-document-region-field-paths.selftest.mjs and the real script both re-run clean, same counts."},
+    {"id": "L04-STD-02", "severity": "minor", "reason": "confirmed FIXED in the predecessor recheck; re-verified unchanged this round -- role-census-reset.test.mjs re-run 9/9 including the decoy-role regression cell."},
+    {"id": "L04B-SPEC-08", "severity": "note", "reason": "not in round 3's assignment (scope-creep note re: commitOrCapture); unchanged, still a valid note -- not re-touched this round."},
+    {"id": "L04B-SPEC-09", "severity": "note", "reason": "not in round 3's assignment (dead #866 README citation); unchanged, still a valid note."},
+    {"id": "L04B-SPEC-10", "severity": "note", "reason": "not in round 3's assignment (depLabel()'s unreachable 'm' branch, unlabelled 'r'); unchanged, still a valid note -- depLabel() itself was not touched this round (only packages/db/README.md changed)."},
+    {"id": "L04B-SPEC-11", "severity": "note", "reason": "not in round 3's assignment (templated field_path sites uncounted); unchanged, still a valid note."},
+    {"id": "L04B-SPEC-12", "severity": "note", "reason": "not in round 3's assignment (#857 CHECK-arm residual unfiled); unchanged, still a valid note, same disposition as L04B-SPEC-01's residual doc-note above but at note severity."},
+    {"id": "L04-STD-01", "severity": "minor", "reason": "the reviewer's own required_fix explicitly says 'Not required for this wave'; left unfixed by design, unchanged this round."},
+    {"id": "L04-STD-03", "severity": "note", "reason": "not in round 3's assignment (depLabel()'s primitive obsession); unchanged, still a valid note."},
+    {"id": "L04-STD-04", "severity": "note", "reason": "not in round 3's assignment (main()-exit-code selftest's git-index side effect); unchanged, still a valid note."}
+  ],
+  "newly_broken": [],
+  "typecheck_lint_status": "both green, re-run independently at the worktree root: pnpm typecheck exit 0 (apps/web, packages/runtime both Done); pnpm lint exit 0; node scripts/check-frozen-workflows.mjs run directly (not only inferred from inside the lint chain) reports OK, 312 frozen files, no manifest diff, 55 workflow modules, 3 retired entries",
+  "notes": [
+    "L04B-SPEC-01's required_fix has a loose end: the GitHub issue is genuinely filed (#1014, confirmed live), but the placeholder cross-reference sentence in packages/db/tests/README.md's #854 section and in opening-balance-evidence-link.test.mjs's file header was never updated to name '#1014' -- both still read their pre-filing placeholder wording. The finding's own required_fix brackets this update as part of the same 'integrator action, not a lane fix', so it is not treated as a code-level defect against this lane, but it should not be dropped before the branch merges -- see 'resolved_outside_lane' above for the exact grep evidence.",
+    "This lane's cluster (clara_l04) was never re-migrated from scratch during round 3 or this recheck; no destructive or reset flag was set on it; CLARA_RIG_ALLOW_RESET/CLARA_RIG_ALLOW_ROLE_SWEEP were never touched. Round 3's disposable proof cluster (WSL, port 55799) was provisioned and fully torn down by round 3 itself, confirmed gone in this recheck's own pg_lsclusters read.",
+    "No file outside this report was written or modified in the worktree or the main checkout during this recheck; no push, no PR, no GitHub write (this recheck only READ gh issue view 1014), no other worktree touched, no subagent spawned, no process killed that this session did not start.",
+    "Verdict is accept: nothing above minor remains open against the lane. The one residual above minor from the predecessor recheck (L04B-SPEC-02, major) is now confirmed fixed; the other (L04B-SPEC-01, blocker) is resolved outside the lane by a genuine GitHub write, independently confirmed, with only a note-level documentation cross-reference left outstanding, explicitly framed by its own required_fix as an integrator step rather than a lane defect."
+  ]
+}

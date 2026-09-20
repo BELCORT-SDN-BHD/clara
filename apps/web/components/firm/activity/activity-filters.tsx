@@ -18,7 +18,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Field, FieldContent, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, withUnmatchedFallback } from "@/components/ui/select";
 import { ACTIVITY_KINDS, applyActivityUrlState, type ActivityKind, type ActivityUrlState } from "@/lib/firm/activity";
 import type { ClientRow } from "@/lib/firm/reads";
 
@@ -58,7 +58,17 @@ export function ActivityFilters({
               onValueChange={(value) => apply({ client: value === "__all__" ? null : value })}
             >
               <SelectTrigger id="activity-filter-client" className="w-full">
-                <SelectValue placeholder={t("filterClientAll")} />
+                <SelectValue
+                  placeholder={t("filterClientAll")}
+                  items={withUnmatchedFallback(
+                    [
+                      { value: "__all__", label: t("filterClientAll") },
+                      ...clients.map((c) => ({ value: c.id, label: c.name })),
+                    ],
+                    state.client,
+                    t("filterClientUnknown")
+                  )}
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">{t("filterClientAll")}</SelectItem>

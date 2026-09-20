@@ -125,8 +125,9 @@ const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations"
  */
 async function resetForFullReplay() {
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await sweepChainMintedRoles({ log: () => {} });
 }
 

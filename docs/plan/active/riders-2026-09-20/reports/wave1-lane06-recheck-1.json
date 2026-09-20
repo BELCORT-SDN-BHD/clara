@@ -1,0 +1,147 @@
+{
+  "lane": "Wave 1 · Lane 06 (riders/w1-lane06)",
+  "lens": "RECHECK",
+  "reviewed_at": "2026-09-20",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\656",
+  "head_expected": "de3b251a",
+  "head_verified": "de3b251a23acbbc4264aefa92ac86b81deab4640",
+  "prior_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane06-review-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave1-lane06-fixround-1.md"
+  ],
+  "verdict": "accept",
+  "gates_rerun_by_reviewer": [
+    { "command": "node --test tests/queue-drain.test.mjs (packages/runtime)", "result": "6/6 pass" },
+    { "command": "mutation check: `if (newlyFailed.length > 0)` -> `if (false && newlyFailed.length > 0)` in queue-drain.mjs, re-run", "result": "5/5 pass, 1/6 fail — exactly cell 4 (the new newly-failed cell) failed for the right reason; reverted byte-for-byte, git diff empty" },
+    { "command": "node scripts/check-frozen-workflows.mjs (worktree root)", "result": "OK — 312 frozen files verified, 55 modules frozen+registered, 3 retired, no manifest diff" },
+    { "command": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "OK — reader superset-of emittable holds" },
+    { "command": "pnpm typecheck (worktree root)", "result": "exit 0 — apps/web and packages/runtime both \"Done\"" },
+    { "command": "pnpm lint (worktree root, whole chain)", "result": "exit 0 — includes apps/web's message-key/test-manifest/ui-add-guard selftests (all PASS) and packages/reporting-render's eslint" },
+    { "command": "node tests/two-build-cutover-e2e.mjs (packages/runtime, PGDATABASE=clara_rt_test, PGPORT=55746, RELAY_TEST_MODE=1, no injection)", "result": "exit 0, \"TWO-BUILD CUTOVER E2E: ALL PASS\", both legs (claraWork_v4->v5, chatTurn_v20->v21), no removeScratchTree error printed" },
+    { "command": "node tests/two-build-cutover-e2e.mjs with an injected `throw new Error(\"INJECTED-TEST-FAILURE-RECHECK\")` immediately inside the drill's main try block (before `await waitReady(imageA)`), i.e. before the file's own `await chatBuildPromise` — reproducing the L06-850-B review scenario independently rather than trusting the fix-round's own log", "result": "exit 1; the injected error surfaced cleanly (`Error: INJECTED-TEST-FAILURE-RECHECK` at main:629), 0 occurrences of EBUSY/EPERM in the output, 1 occurrence of the injected message — the finally's removeScratchTree() did not mask it. Injection reverted afterward: `diff` against the pre-injection backup empty, `git status --short` clean." },
+    { "command": "git diff dd3f8f1d..HEAD -- .github/actions/db-live-gates/action.yml | grep '^@@'", "result": "exactly 2 hunks (the pre-existing #967-block and #850-drill-step positions the fix round's own commits also used) — confirms L06-STD-A's \"no fix required\" holds after the fix round's own further edits to the same file" },
+    { "command": "select count(*) from pg_roles where rolname like 'clara%' (lane06 cluster, 127.0.0.1:55746)", "result": "18 (expected 14) — confirms the fix-round report's own disclosed residual-role incident (L06-967-A) is real and still present on this cluster, unresolved" },
+    { "command": "select count(*) from clara.clients (clara_l06)", "result": "3 — confirms clara_l06 itself is unaffected by the residual-role incident, matching the fix round's own verification" },
+    { "command": "git status --short (worktree, after every run above)", "result": "clean throughout, including after the mutation test and the fault-injection run" },
+    { "command": "gh issue view 850/967/963 --comments (fresh pull)", "result": "no comment or owner ruling dated after the review's own read; Agent Briefs and acceptance criteria unchanged from what wave1-lane06-review-spec.json already checked against" }
+  ],
+  "findings_disposition": [
+    {
+      "id": "L06-963-A",
+      "ticket": 963,
+      "severity": "major",
+      "claimed_disposition": "fixed",
+      "verified": true,
+      "evidence": "git show b89671ce -- packages/db/README.md confirms the qualifier is restored in both paragraphs: \"a later migration whose OWN NUMBER is BELOW the pinning migration's\" (general rule) and the mirrored 0233-specific sentence. A new paragraph states the higher-numbered case explicitly (the recut pins its own pre-image, the earlier pin stays historical, the applied migration is never edited) and names 0234_legal_enforcement_mode.sql as the worked example, cross-linked. Read packages/db/migrations/0234_legal_enforcement_mode.sql directly: line ~478 recuts clara._accounting_work_egress_live(uuid,uuid) (one of 0233's three pins), and 0234 does NOT re-measure 0233's pin — it pins its own pre-image (\"THE SIX PINS\") and asserts the recut applied, exactly the behavior the corrected text now describes as the higher-numbered case. No contradiction remains between the general rule and 0234."
+    },
+    {
+      "id": "L06-963-C",
+      "ticket": 963,
+      "severity": "minor",
+      "claimed_disposition": "fixed",
+      "verified": true,
+      "evidence": "git show b89671ce -- packages/db/README.md: the paragraph now reads \"quoted verbatim because it is what an author actually sees from 0221 onward\" and states the FIRST instance (0214) predates that wording, reading \"has DRIFTED from the pinned 0189 body\" instead — both forms now stated and both grep-able. Confirms against packages/db/migrations/0214_client_work_pack.sql's actual raise text."
+    },
+    {
+      "id": "L06-967-B",
+      "ticket": 967,
+      "severity": "major",
+      "claimed_disposition": "fixed, test-first",
+      "verified": true,
+      "evidence": "git show de3b251a -- packages/runtime/tests/queue-drain.mjs adds censusFailedRuns() (reads workflow.workflow_runs where status='failed', deliberately bypassing censusNonTerminalRuns which treats 'failed' as terminal) plus a per-call baseline in waitForQueueDrain: poll 1 snapshots current failed ids, a later poll throws only on an id not in that baseline. Independently re-ran node --test tests/queue-drain.test.mjs: 6/6 pass (3 pre-existing + 3 new: newly-failed-during-wait throws naming it, pre-existing-failure-at-call-time does not throw, ordinary drain with no failures still resolves). Independently re-ran the mutation the report describes (disabled the throw condition): exactly 1 of 6 cells failed (the new 'throws on newly-failed' cell), reverted byte-for-byte, git diff empty afterward — the fix is load-bearing, not vacuous."
+    },
+    {
+      "id": "L06-967-A",
+      "ticket": 967,
+      "severity": "major",
+      "claimed_disposition": "partial — addressed via the review's own sanctioned fallback (\"if the local run cannot reproduce the shape, say THAT with the two counts\"), remainder deferred to CI",
+      "verified": true,
+      "evidence": "The review's own required_fix explicitly sanctioned this exact fallback if a clean controlled pair could not be produced. The fix-round report documents a genuine, reproduced infrastructure hazard (migration 0154's cluster-wide clara-role-count invariant collides with a second from-scratch migration chain on the same cluster), rolled it back, and reports real (if unrepresentative) numbers from the rig's already-used clara_intake_ci: leg1=238, leg2=1109, leg3=11,309 lines, all passing, plus a documented, honestly-labeled failure to get a clean POST-967 number on the same world (residue from an earlier leg makes a second leg-1 run time out — an ordering no real CI job produces). This lane did not re-attempt the migration-chain reproduction during this recheck: RIG.md itself names \"never run a second from-scratch chain on your cluster\" as a hazard, and the fix round already reproduced the exact failure once; repeating it would risk further residual state for no verification value, since the report is already explicit that only a genuinely fresh CI-provisioned database proves AC1's number. Independently confirmed the disclosed residual effect is real and current: `select count(*) from pg_roles where rolname like 'clara%'` on this cluster returns 18 (report claims 18, expected 14), and confirmed clara_l06 itself is unaffected (`select count(*) from clara.clients` on clara_l06 returns 3, matching the report). This is the one item this recheck treats as still genuinely open pending CI, exactly as the fix round itself states — not a defect in the fix round's own work, and not something further local effort can close on this rig."
+    },
+    {
+      "id": "L06-967-C",
+      "ticket": 967,
+      "severity": "minor",
+      "claimed_disposition": "fixed",
+      "verified": true,
+      "evidence": "git show de3b251a -- .github/actions/db-live-gates/action.yml and packages/runtime/README.md both add a paragraph naming the release risk directly: the drain converts today's noisy-but-passing run red on exactly the #967 input (a capped classify task or a transport-less ocr task that can never drain), and the first CI run may expose it. Matches the required_fix's one-sentence ask in both places."
+    },
+    {
+      "id": "L06-850-A",
+      "ticket": 850,
+      "severity": "major",
+      "claimed_disposition": "fixed",
+      "verified": true,
+      "evidence": "git show de3b251a -- .github/actions/db-live-gates/action.yml: the paragraph that used to call the 78.0s/124s pair \"the 78.0s CI measurement\" now reads \"NO CI SCRATCH-BUILD COST HAS EVER BEEN RECORDED... the 78.0s/124s pair below is a WINDOWS-HOST measurement from the #637 fix round, not a CI one\", and explicitly names the prior mislabel as the defect being corrected. The contradiction with the retained \"Windows-host measurements\" paragraph three lines below is gone; both paragraphs now agree."
+    },
+    {
+      "id": "L06-850-B",
+      "ticket": 850,
+      "severity": "major",
+      "claimed_disposition": "fixed, reproduced both ways",
+      "verified": true,
+      "evidence": "git show de3b251a -- packages/runtime/tests/two-build-cutover-e2e.mjs: `if (chatBuildPromise) await chatBuildPromise.catch(() => {});` now runs immediately before `removeScratchTree()`, itself wrapped in its own try/catch that logs and continues. `chatBuildPromise` is declared `const` at the top of `main()` (line 574), in scope at the finally block (line ~1225), so the await is well-formed. Independently reproduced the fix (not just the report's log): injected a deterministic early throw inside the drill's main try block (before its own `await chatBuildPromise`), ran with the fixed code — exit 1, the injected error surfaced cleanly with 0 occurrences of EBUSY/EPERM in the output (vs the report's own pre-fix reproduction showing the opposite: EBUSY replacing the real error 3/3 times). Also independently ran the happy path twice-equivalent (one full clean run, exit 0, ALL PASS, both legs) to confirm no regression. Injection reverted; tree clean."
+    },
+    {
+      "id": "L06-850-C",
+      "ticket": 850,
+      "severity": "major",
+      "claimed_disposition": "fixed (documented; no code guard, reasoned)",
+      "verified": true,
+      "evidence": "git show de3b251a -- .github/actions/db-live-gates/action.yml and packages/runtime/README.md both add the reviewer's own idle-5.1s-vs-36.9s/7x measurement and the pollTask-timeout failure mode, with an explicit instruction to read the first CI run for both the step's wall clock and any new pollTask timeout. The decision not to add an os.availableParallelism() guard is argued (GitHub-hosted runners are exactly the 2-4-core case such a guard would treat as low-parallelism, disabling the fix on its own target platform) and left as an explicit orchestrator decision, matching the finding's own framing (\"a cheap guard IF the orchestrator wants one\")."
+    },
+    {
+      "id": "L06-STD-A",
+      "ticket": 850,
+      "severity": "minor",
+      "claimed_disposition": "no fix required — the review's own verdict",
+      "verified": true,
+      "evidence": "Independently confirmed via `git diff dd3f8f1d..HEAD -- .github/actions/db-live-gates/action.yml | grep '^@@'`: exactly 2 hunks across the WHOLE lane diff (not just the fix round), at the same two positions the original review already flagged (the #967 block near the top, the #850 block at the drill step). The fix round's own further edits to this shared file landed inside those same two hunks, introducing no new position — consistent with the finding's own required_fix (\"None required... the #967 block at the top and the #850 block at the drill step are independent and can be taken separately\")."
+    },
+    {
+      "id": "L06-NOTE-A",
+      "ticket": 967,
+      "severity": "note",
+      "claimed_disposition": "no action required (repo-wide norm, not this lane's doing)",
+      "verified": true,
+      "evidence": "Original finding required nothing from the lane; untouched by the fix round, correctly."
+    },
+    {
+      "id": "L06-NOTE-B",
+      "ticket": 850,
+      "severity": "note",
+      "claimed_disposition": "no action required (verification note only)",
+      "verified": true,
+      "evidence": "Original finding required nothing; the fix round's own gates section re-confirms the same measurements this recheck independently re-ran above."
+    },
+    {
+      "id": "L06-NOTE-C",
+      "ticket": 963,
+      "severity": "note",
+      "claimed_disposition": "no action required (standards sweep, all clean)",
+      "verified": true,
+      "evidence": "Original finding required nothing; this recheck's own fresh pnpm lint/typecheck/check-frozen-workflows/check-parts-parity runs (see gates_rerun_by_reviewer) reconfirm the same clean state after the fix round's further changes."
+    }
+  ],
+  "new_breakage_check": {
+    "files_touched_by_fix_round": [
+      ".github/actions/db-live-gates/action.yml",
+      "packages/runtime/README.md",
+      "packages/runtime/tests/queue-drain.mjs",
+      "packages/runtime/tests/queue-drain.test.mjs",
+      "packages/runtime/tests/two-build-cutover-e2e.mjs"
+    ],
+    "result": "None found. queue-drain.test.mjs 6/6 pass (and its own mutation control still reds exactly 1/6 for the right reason); two-build-cutover-e2e.mjs full clean run PASS (both legs, exit 0) and, under an independently-injected early failure, surfaces the real error cleanly with zero EBUSY/EPERM (confirming the fix and ruling out a regression to the pre-fix masking behavior); pnpm typecheck exit 0 (apps/web + packages/runtime); pnpm lint exit 0 (including apps/web's own selftest batteries and reporting-render's eslint); check-frozen-workflows.mjs OK, 312 files, no manifest diff; check-parts-parity.mjs OK. git status clean before, during (between runs) and after every command in this recheck. No packages/db/tests or apps/web file is in the fix round's diff, so operation-census.test.mjs, rig-isolation.test.mjs and the apps/web whole unit suite / e2e walks remain correctly out of scope per rule 8, exactly as both the review and the fix round stated."
+  },
+  "findings": [
+    {
+      "id": "L06-RECHECK-967-A-OPEN",
+      "ticket": 967,
+      "severity": "major",
+      "title": "#967 AC1's headline measurement (order-of-magnitude log-volume reduction from ~1.27M lines) still has no clean before/after number, and only a genuinely fresh CI-provisioned database can produce one",
+      "evidence": "Confirmed unchanged from the fix round's own honest accounting: the only local attempt collided with migration 0154's cluster-wide clara-role-count invariant (reproduced, rolled back), leaving lane 06's own cluster at 18 clara% roles instead of 14 (re-verified this session: still 18). The numbers that were measured (238/1,109/11,309 lines on an already-used clara_intake_ci) are real but not a controlled pair and nowhere near the ~1.27M shape. This is explicitly named as CI's own number to produce in both the action.yml comment and the fix-round report.",
+      "required_fix": "No further local action is safe or productive on this rig (repeating the migration-chain attempt would risk more residual cluster-role drift for no new evidence). Orchestrator-level: (1) read the first CI run of the Slice-5 step for the real before/after line counts and update the action.yml comment as it already asks; (2) decide whether lane 06's cluster (18 vs 14 clara% roles) needs a rebuild before further reuse, or is disposable per the beta-phase test-data ruling — this does not block accepting the lane's own code/doc changes, since clara_l06 itself is independently confirmed unaffected (3 clients, as both the fix round and this recheck verified)."
+    }
+  ],
+  "summary": "Every finding from wave1-lane06-review-spec.json was independently re-verified on head de3b251a by re-running the actual cells, not by reading the fix-round report's word: queue-drain.test.mjs re-run (6/6) plus an independently-authored mutation of the new throw condition (5/6, exactly the new cell failing, reverted byte-for-byte); two-build-cutover-e2e.mjs re-run clean (ALL PASS, both legs) and, separately, re-run under an independently-injected early failure to reproduce the L06-850-B masking scenario from scratch — the real error now surfaces with zero EBUSY/EPERM, confirming the await+try/catch fix rather than trusting the report's own prior log. The README.md and action.yml doc fixes for L06-963-A, L06-963-C, L06-967-C, L06-850-A and L06-850-C were read directly against the migrations and code they describe (0234_legal_enforcement_mode.sql, 0214_client_work_pack.sql) and match their required fixes exactly, with no new contradiction introduced. L06-STD-A's 'no fix required' verdict was reconfirmed against the WHOLE lane diff (still exactly 2 hunks in the shared action.yml, no new position). pnpm typecheck, pnpm lint, check-frozen-workflows.mjs and check-parts-parity.mjs were all re-run fresh and are green; git status was clean before, between and after every command in this session, including after two separate temporary code mutations (both reverted byte-for-byte and diffed empty). Fresh gh issue reads for #850/#967/#963 turned up no new owner ruling or Agent Brief revision since the original review. The one item still genuinely open is L06-967-A's headline measurement, which the fix round itself already reports honestly as unmeasurable on this rig for a real, reproduced infrastructural reason (a cluster-wide role-count invariant that forbids a second from-scratch migration chain) and explicitly defers to the first CI run — this recheck independently confirmed that reported hazard is real and unchanged (18 vs 14 clara% roles on lane 06's own cluster) and did not attempt to reproduce it a second time, since doing so would risk further residual drift for no new evidence and the review's own required_fix already sanctions exactly this documented-fallback outcome. No other finding remains open and nothing was found newly broken by the fix round. Verdict: accept."
+}

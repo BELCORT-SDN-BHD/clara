@@ -47,20 +47,39 @@ const DRAFT_KEY = `clara:journal-draft:11111111-1111-1111-1111-111111111111:3333
  * session, passes the real firm-scope guard and proves the proxy is reachable
  * for this lane at the same time. The alternative — an app-origin backdoor —
  * would have been a second mechanism to trust.
+ *
+ * ONE `page.evaluate` FETCH (review-round STD-2 fix), not two: `control` and `controlRead` used
+ * to carry an identical fetch/evaluate body, differing only in `res.status` vs `res.json()`.
+ * `controlFetch` returns the RAW text rather than a parsed body, deliberately — `control` never
+ * has to parse a body it does not read (and never risks throwing a JSON-parse error on a non-200
+ * response, which would replace its own clear `toBe(200)` failure message with an opaque parse
+ * error), while `controlRead` parses it exactly once, in Node rather than inside the page.
  */
-async function control(page: Page, body: Record<string, unknown>): Promise<void> {
-  const status = await page.evaluate(
+async function controlFetch(page: Page, body: Record<string, unknown>): Promise<{ status: number; text: string }> {
+  return page.evaluate(
     async (call: { path: string; payload: Record<string, unknown> }) => {
       const res = await fetch(call.path, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(call.payload),
       });
-      return res.status;
+      return { status: res.status, text: await res.text() };
     },
     { path: `${JOURNAL_WORK.controlPath}?client=${encodeURIComponent(CLIENT)}`, payload: body },
   );
+}
+
+async function control(page: Page, body: Record<string, unknown>): Promise<void> {
+  const { status } = await controlFetch(page, body);
   expect(status, `the fixture control endpoint answered ${status}`).toBe(200);
+}
+
+/** #848 — reads the JSON body `controlFetch` returned as text rather than only checking its
+ *  status: `egress_reactivate_keys` (and `cancel_keys` before it) answer WITH data a cell needs
+ *  to read, not only a side effect to trigger. */
+async function controlRead(page: Page, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const { text } = await controlFetch(page, body);
+  return JSON.parse(text) as Record<string, unknown>;
 }
 
 /**
@@ -802,6 +821,128 @@ test("#631 B3: an egress refusal names the AGREEMENT and no provider, and its tr
     const table = page.getByRole("region", { name: "Execution trace steps" });
     await expect(table.getByText("Model call")).toHaveCount(0);
     await expect(table.getByText("egress_not_authorized").first()).toBeVisible();
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
+
+test("#848: pressing Reactivate on the egress_not_authorized face reaches migration 0211's door and converges the banner to active", async ({ page }) => {
+  // #812's action is proven at the unit level (egress-reactivate-action.test.tsx) with a stubbed
+  // door; what only a browser can add is that the REAL wire round trip — the app's own
+  // `reactivateClientEgress` -> `callDoor` -> PostgREST -> this lane's mock — actually reaches the
+  // door and renders what it answers, owner-signed-in as this whole spec's shared persona is.
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+  try {
+    await control(page, { op: "egress_refused" });
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.egressRefusedWorkId}`);
+    await expect(page.getByText("CLR13 · egress_not_authorized")).toBeVisible();
+
+    // THE onReactivated CONTRACT'S RE-READ HALF (fix round, L01-S1). `egressReactivateOpKeys`
+    // below proves the PRESS reached the door; on its own it says nothing about whether the page
+    // asked again afterwards — that claim needs the actual wire GET `useWorkDetail`'s `reload()`
+    // issues (`getAccountingWork` -> `GET /rest/v1/accounting_work?id=eq.<workId>`), watched
+    // directly rather than inferred from the op-key push, which fires on the PRESS regardless of
+    // whether any re-read follows it.
+    const detailReads: string[] = [];
+    page.on("request", (r) => {
+      if (r.method() !== "GET") return;
+      const u = new URL(r.url());
+      // The mock server strips its own `supabasePrefix` (`/e2e-supabase` by default,
+      // `serve-built.mjs`'s own `path = url.pathname.slice(supabasePrefix.length)`) before
+      // matching routes, so the RAW pathname the browser actually requests carries that prefix —
+      // `endsWith` is what makes this listener agree with the mock's own routing.
+      if (u.pathname.endsWith("/rest/v1/accounting_work") && u.searchParams.get("id") === `eq.${JOURNAL_WORK.egressRefusedWorkId}`) {
+        detailReads.push(r.url());
+      }
+    });
+
+    const button = page.getByRole("button", { name: "Re-activate AI processing for this client" });
+    await expect(button, "owner-signed-in: the owner-only recovery action is offered").toBeVisible();
+    const readsBeforePress = detailReads.length;
+    await button.click();
+
+    // THE BANNER CONVERGES TO ACTIVE — the exact receipt copy, which also states what did NOT
+    // happen (this record stays refused; only future dispatches are unblocked).
+    await expect(page.getByText("AI processing is on again for this client.")).toBeVisible();
+    // …and the refused Work's own face is UNCHANGED by the press — recovery restores future
+    // dispatches only, so the record on screen still reads exactly as refused as it did before.
+    await expect(page.getByText("CLR13 · egress_not_authorized")).toBeVisible();
+
+    // THE RE-READ ITSELF: `egress-reactivate-action.tsx`'s `press()` calls `setOutcome(result)`
+    // (the banner above) BEFORE `await onReactivated?.()` resolves, so the reload this asserts is
+    // POLLED for rather than assumed already landed just because the banner is visible. Exactly
+    // one more GET of this Work must land — no more (a stray second poll tick would mean the
+    // Work's own terminal status stopped being read as terminal) and no fewer (onReactivated was
+    // never wired, or never awaited).
+    await expect.poll(() => detailReads.length, {
+      message: "state.reload() (onReactivated) must issue exactly one more GET of this Work after the press",
+    }).toBe(readsBeforePress + 1);
+
+    // THE onReactivated CONTRACT'S OTHER HALF: the press reached the runtime proxy exactly once
+    // with a REAL, non-empty op key — the same evidence `cancelKeys` proves for cancel elsewhere
+    // in this lane.
+    const after = await controlRead(page, { op: "egress_reactivate_keys" });
+    const keys = after.keys as unknown[];
+    expect(keys.length, "exactly one press reached the door").toBe(1);
+    expect(typeof keys[0], "a real op key, not a placeholder").toBe("string");
+    expect((keys[0] as string).length, "a real op key, not a placeholder").toBeGreaterThan(0);
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
+
+test("#848: a governed no_consent refusal renders VERBATIM, never paraphrased", async ({ page }) => {
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+  try {
+    await control(page, { op: "egress_refused" });
+    // #812 — nothing was ever DEACTIVATED for this client in the fixture's steady state, so
+    // `no_consent` (a REVOKE, reversed by `restore_client_egress_purpose` instead) is the door's
+    // own answer this cell arms — the SAME typed refusal `egress-reactivate-action.test.tsx`'s
+    // `w812.web.refused` cell proves at the component level, now proven over the real wire shape.
+    await control(page, { op: "egress_reactivate_answer", mode: "no_consent" });
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.egressRefusedWorkId}`);
+
+    await page.getByRole("button", { name: "Re-activate AI processing for this client" }).click();
+
+    // THE DATABASE'S OWN SENTENCE, verbatim — migration 0211's exact message, never re-worded.
+    await expect(page.getByText("no live typed egress consent for this client and purpose")).toBeVisible();
+    // …and NO success receipt is shown beside it: a refusal is not a paraphrase of success.
+    await expect(page.getByText("AI processing is on again for this client.")).toHaveCount(0);
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
+
+test("#848: a forced denial renders the database's own CLR04 owner-floor refusal", async ({ page }) => {
+  // RECORDED SUBSTITUTION (fix round, L01-S2): AC3 reads "the mock enforces owner-only dispatch,
+  // OR the door refusal renders when a lower rank is forced." Neither branch is delivered
+  // literally here. What this cell proves is narrower: the mock is ARMED (`egress_reactivate_
+  // answer: "denied"`) to answer the exact CLR04 shape `clara._human_ctx(clara.role_rank('owner'))`
+  // (migration 0211) gives a below-owner caller, and that shape renders verbatim with no success
+  // receipt — the same injected-refusal idiom `cancelAnswer`/`traceDenied` already use elsewhere
+  // in this lane, never a caller the mock actually inspected. Branch (b) (forcing a lower rank
+  // through the browser) is genuinely unreachable here: every cell in this whole spec signs in as
+  // the same owner persona, and the button itself is owner-gated in the UI
+  // (`work-detail.tsx`'s `canReactivateEgress={ownerHere}`), so a bookkeeper persona would never
+  // see it to press. Branch (a) (the mock deriving its CLR04 answer from the signed-in persona,
+  // the way `serve-built.mjs`'s own `/rest/v1/caller_context` derives `role_rank` from the
+  // sign-in email prefix) was reachable but is NOT what this cell does — wiring that derivation
+  // across `journal-work-mock.mjs` and the shared `serve-built.mjs` dispatch was judged out of
+  // this ticket's narrow scope (a walk arm, not a cross-module persona plumbing change to a file
+  // nine other lanes edit concurrently per the work order's rule 7). So: AC3 is met by simulating
+  // the wire answer, not by enforcement, and is recorded here as such rather than ticked as
+  // written.
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+  try {
+    await control(page, { op: "egress_refused" });
+    await control(page, { op: "egress_reactivate_answer", mode: "denied" });
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.egressRefusedWorkId}`);
+
+    await page.getByRole("button", { name: "Re-activate AI processing for this client" }).click();
+
+    // `_human_ctx`'s exact CLR04 message — the owner floor, verbatim.
+    await expect(page.getByText("insufficient role")).toBeVisible();
+    await expect(page.getByText("AI processing is on again for this client.")).toHaveCount(0);
   } finally {
     await control(page, { op: "reset" }).catch(() => {});
   }

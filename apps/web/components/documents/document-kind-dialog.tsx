@@ -32,11 +32,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { setDocumentKind } from "@/lib/documents/doors";
 import { DocumentsDoorDialog } from "./DocumentsDoorDialog";
 import type { DialogRefusal } from "@/components/common/dialog-refusal";
-import { DOCUMENT_KINDS } from "@/lib/documents/types";
+import { CLASSIFIABLE_DOCUMENT_KINDS } from "./document-kind-control";
 import { renderKindLabel } from "@/lib/documents/kind-label";
 
 export function DocumentKindDialog({
-  documentId, currentKind, busy, act, refusal, onChanged,
+  documentId, currentKind, busy, act, refusal, onChanged, initialKind,
 }: {
   documentId: string;
   /** The kind as the document carries it TODAY — shown inside the dialog so the decision is made
@@ -51,9 +51,14 @@ export function DocumentKindDialog({
    *  the human to change, rather than behind the modal backdrop. */
   refusal?: DialogRefusal;
   onChanged?: () => void;
+  /** fix-round SPEC-1005-1 — no production caller sets this; it exists so a test can mount this
+   *  dialog with the kind Select already SELECTED and assert its trigger's text on first render,
+   *  the way every other #1005 call site's own cell does, without a popup-opening seam this
+   *  repo's test harness does not have. */
+  initialKind?: string;
 }) {
   const t = useTranslations("ClientDocuments");
-  const [kind, setKind] = useState("");
+  const [kind, setKind] = useState(initialKind ?? "");
   const [reason, setReason] = useState("");
 
   return (
@@ -85,16 +90,23 @@ export function DocumentKindDialog({
         </p>
         <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
           <SelectTrigger aria-label={t("kindHeading")} size="sm">
-            <SelectValue placeholder={t("kindPlaceholder")} />
+            <SelectValue
+              placeholder={t("kindPlaceholder")}
+              items={CLASSIFIABLE_DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}
+            />
           </SelectTrigger>
           <SelectContent>
             {/* #633 AC2 — the option LABEL is a phrase; the option VALUE stays the DB enum,
-                because that value is exactly what `set_document_kind` is called with. The
-                ROSTER is deliberately the full one here: `document-kind-control.tsx` (#633's
-                list/receipt entrance) excludes `consent_evidence` because that door always
-                refuses it, and #633 recorded this detail surface's full roster as an
-                observation it would not change. */}
-            {DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{renderKindLabel(k, t)}</SelectItem>)}
+                because that value is exactly what `set_document_kind` is called with.
+                #878 — the ROSTER is the SAME filtered one `document-kind-control.tsx` (#633's
+                list/receipt entrance) exports: `clara.set_document_kind` refuses the
+                consent-evidence kind on either side of the change (CLR28) no matter which
+                control asked, so offering it here produced only a guaranteed, avoidable
+                refusal. Importing the sibling's own constant, instead of a second copy of the
+                filter, is what keeps there being exactly one roster to keep correct — see
+                CLASSIFIABLE_DOCUMENT_KINDS's own header in document-kind-control.tsx for the
+                excluded value's literal spelling. */}
+            {CLASSIFIABLE_DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{renderKindLabel(k, t)}</SelectItem>)}
           </SelectContent>
         </Select>
         <Textarea

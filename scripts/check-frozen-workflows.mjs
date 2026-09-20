@@ -57,12 +57,28 @@
 //   node scripts/check-frozen-workflows.mjs --compare-base <ref> # semantic additions-only proof
 //   node scripts/check-frozen-workflows.mjs --print-closure   # report, per @frozen entry file,
 //                                                             # the modules its own closure locks
+//   node scripts/check-frozen-workflows.mjs --print-closure <module-path>
+//                                                             # #849 — targeted: just the entry
+//                                                             # files whose closure reaches
+//                                                             # <module-path>
+//   node scripts/check-frozen-workflows.mjs --retire <path> --ruling <ref>
+//                                                             # #849 — move <path>'s current
+//                                                             # manifest entry to `retired`,
+//                                                             # citing <ref> as the ruling
 //
 // `--print-closure` (#815) is ADDITIVE REPORTING ONLY: it reads nothing but the tree, writes no
 // manifest, changes no hash, and exits 0. It answers the question the flat manifest cannot —
 // "which frozen version(s) lock this module?" — which is what an author needs BEFORE editing e.g.
 // lib/work-trace.mjs (reached from claraWork.v3.impl.ts only through a DYNAMIC import) or
-// lib/capability-registry.mjs (reached only TRANSITIVELY, through work-trace.mjs).
+// lib/capability-registry.mjs (reached only TRANSITIVELY, through work-trace.mjs). Giving it a
+// module path (#849) filters straight to that answer instead of grepping the full report by hand.
+//
+// `--retire <path> --ruling <ref>` (#849) is the write side of #810's manifest shape: it moves
+// `path`'s current entry from `workflows` to `retired`, carrying its last frozen sha256 forward
+// and citing the ruling, refusing (with no manifest write) unless the file is already gone from
+// the tree and the path has a current entry. Like --update and --lock-deployed, it is REFUSED
+// under CI — a deliberate local ceremony act, never a computed CI outcome. Before #849 the same
+// move was a hand edit of frozen-workflows.json (#810's own three retirements).
 //
 // `--update` is REFUSED under CI/GITHUB_ACTIONS — a re-baseline is a deliberate
 // local act, and CI's append-only-vs-base check is what actually gates a PR.
@@ -101,6 +117,10 @@ import { FROZEN_WORKFLOW_FAILURE_GUIDANCE } from "./frozen-workflow-guidance.mjs
 // The import-closure walk itself (#815) — shared with the selftest, which asserts the per-entry
 // attribution against the real tree without executing this CLI.
 import { FROZEN_MARKER, allImportsOf, computeFrozenClosures, formatClosureReport, scannedSourceFiles } from "./freeze-lint-closure.mjs";
+// #849 — the `--retire` command's pure logic, shared with the selftest the same way.
+// checkRetiredRecords (L05B-S04 fix round) is the same four-invariant verifier below's "2c.
+// RETIREMENT INTEGRITY" section calls — extracted so a selftest can drive it directly.
+import { retireFrozenEntry, checkRetiredRecords } from "./freeze-lint-retire.mjs";
 const COMPARE_BASE_INDEX = process.argv.indexOf("--compare-base");
 if (COMPARE_BASE_INDEX !== -1) process.exit(runFrozenManifestCompareCli(process.argv.slice(2)));
 // All git calls go through execFileSync with an argv array — never a shell string —
@@ -135,8 +155,44 @@ const BASE_REF = /^[A-Za-z0-9._/-]+$/.test(RAW_BASE_REF) ? RAW_BASE_REF : "origi
 const IN_CI = !!(process.env.CI || process.env.GITHUB_ACTIONS);
 const UPDATE = process.argv.includes("--update");
 const LOCK_DEPLOYED = process.argv.includes("--lock-deployed");
+
+/**
+ * The optional-value-immediately-after-a-flag shape shared by --print-closure's module argument,
+ * --retire's path argument and --ruling's value: the value is the very next argv token UNLESS
+ * that token is itself another recognised flag (starts with `--`), in which case there is no
+ * value — a next token starting with `--` is treated as "no value given", never swallowed as this
+ * flag's own text. One helper, not three near-identical inline copies (L05-STD-02, standards fix
+ * round): the three had already started to drift — RETIRE_RULING previously skipped this exact
+ * guard, so `--ruling` followed by an unrelated flag was accepted as the literal ruling text
+ * instead of refused as a missing ruling.
+ * @param {readonly string[]} argv
+ * @param {string} flag
+ * @returns {string|null}
+ */
+function optionalArgAfterFlag(argv, flag) {
+  const index = argv.indexOf(flag);
+  if (index === -1) return null;
+  const next = argv[index + 1];
+  return next && !next.startsWith("--") ? next : null;
+}
+
 // #815 — parsed HERE, after the --compare-base early exit above, so that path is undisturbed.
-const PRINT_CLOSURE = process.argv.includes("--print-closure");
+const PRINT_CLOSURE_INDEX = process.argv.indexOf("--print-closure");
+const PRINT_CLOSURE = PRINT_CLOSURE_INDEX !== -1;
+// #849 — an optional module path immediately after --print-closure targets the report to just
+// the entries that reach it; absent (or the next token is itself a flag), the report is the full,
+// unfiltered per-entry breakdown #815 always printed.
+const PRINT_CLOSURE_MODULE = PRINT_CLOSURE ? optionalArgAfterFlag(process.argv, "--print-closure") : null;
+// #849 — `--retire <path> --ruling <ref>`: moves one currently-registered entry to the `retired`
+// record. Parsed here, alongside --print-closure, for the same reason (after --compare-base).
+// L05-S02 (fix round) — RETIRE_FLAG is tracked separately from RETIRE_PATH so a bare `--retire`
+// (no path token following it, or the very next token belongs to another flag) is a REFUSAL
+// rather than a silent, un-flagged fall-through to an ordinary verify: every other malformed
+// invocation of this command already fails loud, and this one must too.
+const RETIRE_INDEX = process.argv.indexOf("--retire");
+const RETIRE_FLAG = RETIRE_INDEX !== -1;
+const RETIRE_PATH = RETIRE_FLAG ? optionalArgAfterFlag(process.argv, "--retire") : null;
+const RETIRE_RULING = optionalArgAfterFlag(process.argv, "--ruling");
 
 /** sha256 of file content, line-endings normalised to \n. */
 function hashText(text) {
@@ -236,7 +292,7 @@ function main() {
   const closure = computeFrozenClosures(REPO_ROOT, files);
   const { frozenRel } = closure;
   if (PRINT_CLOSURE) {
-    console.log(formatClosureReport(closure));
+    console.log(formatClosureReport(closure, PRINT_CLOSURE_MODULE));
     return 0;
   }
   const workflowFiles = files.filter((rel) => {
@@ -248,6 +304,34 @@ function main() {
   });
 
   const manifest = loadManifest();
+
+  if (RETIRE_FLAG && !RETIRE_PATH) {
+    // L05-S02 (fix round) — `--retire` with no path argument (or with another flag immediately
+    // after it) used to fall through the `if (RETIRE_PATH)` gate below into an ordinary verify,
+    // reporting success (exit 0) with no hint the command was ignored. Fail loud instead, the
+    // same fail-closed shape every other malformed `--retire` invocation already uses.
+    console.error("freeze-lint: --retire requires a path argument (usage: --retire <path> --ruling <ref>); no manifest write.");
+    return 1;
+  }
+
+  if (RETIRE_PATH) {
+    // A deliberate local ceremony act, exactly like --update and --lock-deployed: it writes the
+    // manifest by hand-authorised ruling, not by CI computation.
+    if (IN_CI) {
+      console.error("freeze-lint: --retire is REFUSED under CI — a deliberate local ceremony act, same as --update and --lock-deployed.");
+      return 1;
+    }
+    const result = retireFrozenEntry(manifest, RETIRE_PATH, RETIRE_RULING, existsSync(join(REPO_ROOT, RETIRE_PATH)));
+    if (!result.ok) {
+      console.error(`freeze-lint: ${result.error}`);
+      return 1;
+    }
+    // result.manifest.retired is never empty here (retireFrozenEntry just added to it), so it is
+    // always written — unlike withRetired's "omit when empty" default for the other CLI paths.
+    writeFileSync(MANIFEST_PATH, JSON.stringify(result.manifest, null, 2) + "\n", "utf8");
+    console.log(`freeze-lint: ${result.message}`);
+    return 0;
+  }
 
   if (UPDATE) {
     if (IN_CI) {
@@ -350,26 +434,9 @@ function main() {
   // is still in the tree is the inverse of a MISSING and just as much a finding: it would be
   // @frozen, unregistered and unhashed — a silent un-freeze. A path in BOTH ledgers is a
   // contradiction the append-only comparison below would read either way, so it fails closed here.
-  for (const [rel, record] of Object.entries(manifest.retired)) {
-    if (manifest.workflows[rel]) {
-      violations.push(
-        `RETIRED-DUPLICATE  ${rel}  (present in BOTH \`workflows\` and \`retired\` — an entry MOVES to the retired record, it is never copied).`,
-      );
-    }
-    if (!/^[0-9a-f]{64}$/.test(String(record?.sha256 ?? ""))) {
-      violations.push(`RETIRED-NO-HASH   ${rel}  (a retired record must quote the entry's LAST frozen sha256).`);
-    }
-    if (!String(record?.ruling ?? "").trim()) {
-      violations.push(
-        `RETIRED-NO-RULING ${rel}  (a retired record must cite the ruling that authorised the removal, e.g. "#810 owner ruling 2026-09-15").`,
-      );
-    }
-    if (existsSync(join(REPO_ROOT, rel))) {
-      violations.push(
-        `RETIRED-PRESENT   ${rel}  (recorded as retired but STILL IN THE TREE — a retirement is a removal from the tree, never a silent un-freeze; delete the file or restore its \`workflows\` entry).`,
-      );
-    }
-  }
+  // The four rules themselves live in checkRetiredRecords (freeze-lint-retire.mjs, L05B-S04 fix
+  // round) so a selftest can drive them directly, without spawning this whole CLI.
+  violations.push(...checkRetiredRecords(manifest, (rel) => existsSync(join(REPO_ROOT, rel))));
 
   // 2a. MANIFEST-KEY HYGIENE (C77.2, #637). Checks 1 and 2 both ask questions about the
   // FILES the manifest points at; this asks the one question about the KEYS themselves. It is

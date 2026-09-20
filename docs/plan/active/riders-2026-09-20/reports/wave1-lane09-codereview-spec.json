@@ -1,0 +1,96 @@
+{
+  "lane": "wave1-lane09",
+  "branch": "riders/w1-lane09",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\659",
+  "fixed_point": "origin/main e7f0a10af4a1f69f3a01548d2324aa58d0a6231f",
+  "merge_base": "dd3f8f1d202b6eade2211f33c34f263d033768f1",
+  "head": "3f6868714b761b65a0ea9473cff1d645937dda22",
+  "axis": "SPEC",
+  "skill": ".claude/skills/code-review/SKILL.md (Spec sub-agent brief, step 4)",
+  "spec_sources": [
+    "gh issue view 852 --comments (Agent Brief, belcorttao 2026-09-17T16:58:37Z - newest brief; no owner ruling comment dated 2026-09-20)",
+    "gh issue view 966 --comments (Agent Brief in the body; 0 comments)"
+  ],
+  "tickets": [852, 966],
+  "commits": [
+    "52601ff4 feat(runtime): #852 fold the chat-clarify belt into the sweep receipt",
+    "887ae5ac fix(runtime): #966 the intake recovery belt can no longer fail a live intake",
+    "3f686871 fix(runtime): #966 the recovery budget is ten ACTIONS, not ten reads"
+  ],
+  "verdict": "accept",
+  "summary": "Both tickets are DONE against the newest Agent Brief on each. Every acceptance criterion on both tickets has a cell, and I re-ran the cells rather than reading the report: chat-clarify-sweep-wiring.test.mjs 8/8; intake-sidecar-race.test.mjs 14/14; the six sweep-assembly suites that now run the new belt (reconcile-belt-isolation-unit + sst + fa + adjustments + autodraft-settle + wave-b-lint-belt) 84/84; intake-batch-unit + intake-recovery-unit + intake-reconcile + intake-egress 32 pass / 1 fail where the fail is only intake-recovery-retryset refusing to run without PG env; and intake-db + intake-recovery-db + intake-recovery-retryset + intake-unit + intake-authz-fixes + control-chat-clarify on clara_l09 (127.0.0.1:55749) = 53 tests / 52 pass, the single red being intake-unit's EICAR cell (#693, listed in RIG.md; git diff on scan.mjs and intake-unit.test.mjs vs origin/main is empty). node scripts/check-frozen-workflows.mjs OK (312 frozen files, no manifest diff) and node packages/runtime/scripts/check-parts-parity.mjs OK, so the sixteen re-fingerprinted sibling tuples are the gate's own numbers and not hand-written. Rule 3 check: the lane declared neither ticket 'already satisfied' nor 'stopped', and I confirmed both were genuinely LIVE on the CURRENT origin/main tip e7f0a10a and not only at the cut point - git show origin/main:packages/runtime/lib/leader.mjs still imports and calls reconcileChatClarifies (lines 48, 240) and the sweep's return statement at reconciler.mjs:770 carries no chatClarify key; git show origin/main:packages/runtime/lib/intake.mjs still does listIntakeMetas().filter(...).slice(0,10) with the age<5000 guard behind the parse. Out-of-scope lines are honoured: the only change to reconciler-chat-clarify.mjs is its import line plus header comments (#852's 'no change to the belt's own resume, probe or settle logic'), and no sidecar-format change, no move of intake status out of the filesystem, no document-processing concurrency limit and no CI queue-drain work appears anywhere (#966's out-of-scope). Nothing here blocks the lane. Eight findings, all minor or note: SPEC-1 and SPEC-3 are residuals against the ticket's own headline invariant that I would file as a follow-up ticket rather than re-open a fix round, and SPEC-5 is an evidence claim from the lane's fix round that does not reproduce on this host.",
+  "findings": [
+    {
+      "id": "SPEC-1",
+      "ticket": 966,
+      "severity": "minor",
+      "kind": "implementation-looks-wrong",
+      "title": "The belt still opens a LIVE intake's sidecar once that intake has been quiet 5 s - and the same branch cut the writer's retry deadline from 2000 ms to 250 ms, narrowing the only remaining guard",
+      "evidence": "Ticket line (Desired behavior): 'Reading a pending intake's sidecar must never make a concurrent write to it fail.' The mtime guard only covers an intake whose LAST status write was inside CLARA_INTAKE_SIDECAR_QUIET_MS (default 5000). packages/runtime/lib/intake.mjs:222 writes status='receiving', then spoolRequest() streams the whole body, then :224 writes status='spooled' - a 20 MB upload spends far more than 5 s between those two writes. Worse, intake.mjs:273-281 (the spooled->canonical leg) runs detectDocument + scanFile (an AV scan) + putCanonical + verifyCanonical between two writeIntakeMeta calls; a sidecar sitting in 'spooled' for that whole leg is >5 s quiet AND is in RECOVERABLE_STATES, so recoverPendingDocumentIntakes (intake.mjs:496-540) both OPENS it and drives finalizeDocumentIntake on it. The zero-EPERM guarantee for those two legs therefore rests entirely on spool.mjs's renameIntoPlace, whose deadline commit 3f686871 cut from 2000 ms to 250 ms (spool.mjs:55-69) for a latency reason the ticket never raises. #693 is standing proof that Defender on this host holds intake files, and the lane's own p966.giveup cell measured 'EPERM after 2003 ms' against a held handle. NOT a regression against origin/main - main opened EVERY sidecar every sweep and had no retry at all, so this branch is strictly better on every path - which is why this is minor and not a blocker.",
+      "required_fix": "None for landing. Worth an owner decision before the hosted release, and a follow-up ticket: either raise CLARA_SPOOL_RENAME_RETRY_MS on hosts that run an AV scanner, or let the belt skip a sidecar whose status it cannot act on without opening it (the status would have to reach directory metadata), so the receiving->spooled and spooled->canonical legs are never held open at all."
+    },
+    {
+      "id": "SPEC-2",
+      "ticket": 966,
+      "severity": "minor",
+      "kind": "scope-creep",
+      "title": "sweepSpoolTtl's ownership regex was widened from intake-<uuid>.(bin|json) to intake-*.(bin|json) - a change to a different belt that the ticket does not ask for",
+      "evidence": "packages/runtime/lib/spool.mjs:437-448 replaces /^intake-[0-9a-f-]{36}\\.(?:bin|json)$/i with SPOOL_REAPABLE = /^intake-.+\\.(?:bin|json)$/i. #966's Key interfaces name exactly three things - the sidecar listing, the atomic sidecar writer, and the belt's recency skip - and its acceptance criteria say nothing about the TTL reaper. The justification (bounding SPEC-3's residual) is real and is written into both the code and packages/runtime/README.md, and the risk is low because spoolConfig().dir is a dedicated directory (tmpdir()/clara-spool on win32, /data/spool otherwise) and atomicJson's temp files end in .tmp so they stay unmatched. The widened reaper does behave: tests/intake-sidecar-race.test.mjs's p966.reap cell, green on all three of my runs.",
+      "required_fix": "None. Record it as a deliberate widening in the release note so a later reader does not have to derive it: that belt now owns every intake-prefixed .bin/.json in the spool directory, not only uuid-named ones."
+    },
+    {
+      "id": "SPEC-3",
+      "ticket": 966,
+      "severity": "minor",
+      "kind": "claim-overstated",
+      "title": "'The budget is ten ACTIONS, not ten reads' is not quite what the code does: a sidecar in a non-actionable status still spends one of the ten, so the L09-A blinding shape survives for the most realistic junk - live uploads",
+      "evidence": "packages/runtime/lib/intake.mjs increments handled += 1 immediately after the usability test and BEFORE 'if (!RECOVERABLE_STATES.includes(meta.status)) continue;', so a sidecar in 'uploading' or 'receiving' consumes an action slot while no action is taken. The lane's own cell encodes this: tests/intake-sidecar-race.test.mjs 'p966.budget: a sweep opens at most the TEN sidecars it can act on' builds 25 entries all with status 'uploading' and asserts exactly 10 reads. Commit 3f686871's subject is 'the recovery budget is ten ACTIONS, not ten reads' and packages/runtime/README.md says 'The belt now reads until it has ACTED on ten'. In #636's own workload - a 100-child batch - ten children quiet for 5 s in receiving/uploading sitting ahead of a crashed intake in readdir order blind the belt exactly the way review finding L09-A described. This is byte-for-byte origin/main's behaviour (main's .slice(0, 10) also included non-actionable statuses), so it is a pre-existing residual and not a regression.",
+      "required_fix": "None for landing. Either move handled += 1 below the RECOVERABLE_STATES filter (one line, one cell) or soften the README and commit claim to 'ten sidecars that carry an intake'. A follow-up ticket is the honest place for the first option."
+    },
+    {
+      "id": "SPEC-4",
+      "ticket": 966,
+      "severity": "minor",
+      "kind": "behaviour-not-asked-for",
+      "title": "The recency guard now gates the EXPIRY arm too, which it did not before - an existing acceptance cell had to be edited to stay green",
+      "evidence": "Ticket lines: 'The belt's existing recency skip: move it ahead of the open, and keep it the only such guard' and criterion 'The belt still expires an intake whose upload capability has passed its 15-minute expiry, and still clears that intake's spool.' On origin/main the expiry arm ran BEFORE the recency guard (intake.mjs at origin/main: 'if (Date.parse(meta.expiresAt) <= Date.now())' first, then 'const age = ...; if (Number.isFinite(age) && age < 5000) continue;'), so a freshly-stamped-but-expired intake was expired on that same sweep. Now the quiet filter runs across the whole listing ahead of everything, so it is expired on a later sweep. The proof that this is a real behaviour change is in the diff: the PRE-EXISTING cell tests/intake-db.test.mjs 'reconciler expires abandoned sidecars through the DB writer before unlink' gained 'await ageSidecar(begun.intake_id);' to keep passing. The delay is bounded (about three leader cycles against a 15-minute capability) and is stated out loud in packages/runtime/README.md and the lane report.",
+      "required_fix": "None. Flagged so the orchestrator knows an existing acceptance cell's SETUP changed, not only its subject."
+    },
+    {
+      "id": "SPEC-5",
+      "ticket": 966,
+      "severity": "note",
+      "kind": "evidence-not-reproducible",
+      "title": "The lane's stated vacuity control for the quiet window does NOT reproduce on this host: CLARA_INTAKE_SIDECAR_QUIET_MS=1 leaves the suite fully green in 3 of 4 runs",
+      "evidence": "wave1-lane09-recheck-1.json claims 'CLARA_INTAKE_SIDECAR_QUIET_MS=1 node --test tests/intake-sidecar-race.test.mjs: 12 pass, 2 fail - only the two p966.quiet cells ... matching the fix round's claim exactly'. I ran exactly that four times from C:\\Users\\zhant\\Desktop\\clara-wt\\659\\packages\\runtime: 14 pass / 0 fail, 14/0, 14/0, then 13/1. The cause is timing, not the subject: entryDouble() stamps mtimeMs = Date.now() - ageMs at construction and recoverPendingDocumentIntakes then captures sweepStartedAt = Date.now(), so a 'fresh' fixture's measured age is 0-1 ms and a 1 ms window catches it only when the two Date.now() calls straddle a millisecond tick. CLARA_INTAKE_SIDECAR_QUIET_MS=0 is deterministic and reds exactly the two intended cells (12 pass, 2 fail: 'p966.quiet: a sidecar written inside the quiet window is NEVER opened during a sweep' and 'p966.quiet: the quiet window does not eat the BUDGET'). The shipped default of 5000 ms is nowhere near this margin, so the ACCEPTANCE cell for criterion (b) is sound; only the control is flaky. The retry control is fine and reproduced: CLARA_SPOOL_RENAME_RETRY_MS=0 gives 13 pass / 1 fail, the one red being p966.race.",
+      "required_fix": "If the lane report, the recheck or the release as-run repeats this control, state it as CLARA_INTAKE_SIDECAR_QUIET_MS=0, not =1."
+    },
+    {
+      "id": "SPEC-6",
+      "ticket": 852,
+      "severity": "note",
+      "kind": "requirement-partial",
+      "title": "The brief says leader.mjs drops its separate call AND log; the call is gone, the log line is not",
+      "evidence": "Agent Brief, Key interfaces: '`leader.mjs`: drops its separate call and log, reading counters off the sweep result.' packages/runtime/lib/leader.mjs:234-237 keeps log(`[reconcile] chat clarify: resumed=... expired=...`), now sourced from the receipt behind ?? 0 guards. The brief's own second clause ('reading counters off the sweep result') has no other purpose in that loop, so reading them in order to log them is the only coherent reading of the line as a whole - but the first clause is literally not met. None of the four acceptance checkboxes mentions the log, and all four are met and re-run green (chat-clarify-sweep-wiring.test.mjs, 8/8).",
+      "required_fix": "None. Called out only so the ticket is not closed against a line it did not literally satisfy."
+    },
+    {
+      "id": "SPEC-7",
+      "ticket": 852,
+      "severity": "note",
+      "kind": "behaviour-not-asked-for",
+      "title": "A failed heartbeat now skips the chat-clarify belt, where the leader's standalone call ran regardless",
+      "evidence": "Agent Brief: 'The belt still runs before the rest of the sweep.' On origin/main the belt ran in leader.mjs BEFORE runReconcilerSweep, i.e. ahead of the heartbeat. It is now registered at packages/runtime/lib/reconciler.mjs:751, after the heartbeat fail-fast at :731-738 which returns { heartbeatOk: false, beltErrors: ['heartbeat'] } and runs no belt at all. The lane argues the heartbeat is not a belt and that nothing breaking a single-row upsert would spare a belt on the same connection; that argument is the heartbeat's own comment in the same file and I accept it. It is stated explicitly in packages/runtime/README.md ('a sweep that cannot record its own beat now skips this belt too, where the leader's old standalone call ran regardless'), and the leader is safe against the missing keys via (swept.chatClarifyExpired ?? 0) at leader.mjs:235.",
+      "required_fix": "None."
+    },
+    {
+      "id": "SPEC-8",
+      "ticket": 966,
+      "severity": "note",
+      "kind": "evidence-gap",
+      "title": "Criterion (e)'s 'intake-batch suites' is evidenced by intake-batch-unit only; the leg that MEASURED the original symptom was not re-run",
+      "evidence": "Ticket criterion: 'The existing intake and intake-batch suites stay green.' packages/runtime/tests/intake-batch-unit.test.mjs is green (14/14, re-run by me). packages/runtime/tests/intake-batch-e2e.mjs - the leg whose header records 'one child in six at the default 2 s cadence' and the 500 at child 84 of 100 that the ticket's Context cites - is a standalone .mjs excluded from the tests/**/*.test.mjs glob and was not run. The lane says so itself under 'Unverified' (it needs a bootstrapped Workflow World, and bootstrapping one on clara_l09 would red rig-isolation.test.mjs T10b, #866). So the ticket's headline number is closed by a unit cell (p966.race: 500 writes, 0 failures, 428/500 before the fix) and never re-measured end to end.",
+      "required_fix": "None for this lane. Before #966 is closed on GitHub, the orchestrator or a later lane should re-run intake-batch-e2e.mjs on a database that can carry a bootstrapped World, or close the ticket naming the unit measurement as its evidence."
+    }
+  ]
+}

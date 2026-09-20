@@ -99,6 +99,30 @@ export function rewriteRegistryToPrevious(src, pair) {
   return out;
 }
 
+// #850 fix round 2 (L06-SPEC-R2-03) — WHETHER TO OVERLAP A SECOND SCRATCH BUILD WITH THE FIRST
+// LEG'S OWN EXERCISE, made in code rather than left as a declined guard in a CI comment. The
+// review's own contention measurement (packages/runtime/README.md's #850 note, action.yml's own
+// comment) found the overlapped build taking 7x longer (36.9s vs an idle 5.1s) under just ONE
+// concurrent `pnpm typecheck`, and that contended run FAILED — a real `pollTask` timeout inside the
+// claraWork leg it was meant to run alongside for free. GitHub-hosted standard runners report 2
+// cores; a background `nitro build` (its own multi-file esbuild/rollup pass) has no spare core to
+// run on there without starving the leg's own event loop and DB round trips. Below
+// `OVERLAP_MIN_CORES` this file falls back to the pre-#850 SEQUENTIAL build (proven safe, just
+// slower) instead of gambling the wall-clock win against a failed drill; AC3's own second branch
+// ("or the ticket is closed as not worth it, with the measured numbers recorded") is exactly this
+// outcome on a runner this thin, and the numbers are the ones already in the CI comment.
+export const OVERLAP_MIN_CORES = 4;
+
+/**
+ * @param {number} availableCores - typically `os.availableParallelism()`. A non-finite or
+ *   non-positive reading (a platform this file cannot read the core count on) is treated as "not
+ *   safe to overlap", never as unlimited headroom.
+ * @returns {boolean}
+ */
+export function shouldOverlapSecondBuild(availableCores) {
+  return Number.isFinite(availableCores) && availableCores >= OVERLAP_MIN_CORES;
+}
+
 /** One junction (a directory symlink on POSIX) so bare imports resolve from the copy. */
 function ensureNodeModulesLink() {
   const link = join(SCRATCH_ROOT, "node_modules");

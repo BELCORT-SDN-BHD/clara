@@ -1,0 +1,166 @@
+{
+  "lane": "wave1-lane06",
+  "branch": "riders/w1-lane06",
+  "head": "7f956c6b",
+  "fork_point": "dd3f8f1d",
+  "lens": "SPEC + STANDARDS",
+  "reviewed_at": "2026-09-20",
+  "verdict": "accept-with-fixes",
+  "summary": "Three tickets, three commits, all genuinely built (none was claimed 'already satisfied'; the diff is additive and none of the new prose or code existed at dd3f8f1d). Gates I re-ran are green: pnpm lint exit 0, pnpm typecheck exit 0, check-frozen-workflows OK (312 frozen files, no manifest diff), check-parts-parity OK, queue-drain.test.mjs 3/3. No migration added or edited, no PRD/ARCHITECTURE edit, no apps/web surface, commits name their tickets and carry the required trailer, tree clean. #850's headline local measurement REPRODUCES on my own re-run (drill exit 0 in 32s, builds 5.8s/5.1s; a pre-#850 control copy of the same file exits 0 in 35s) and its AC2 is verifiably unweakened. #967's vacuity control reproduces exactly (AND->OR mutation reds 2 of 3 cells). Three things need fixing before this lands: #963's new general rule drops the migration-number qualifier and is contradicted by 0234, which recuts one of the three pinned bodies; #967's headline AC1 (an order-of-magnitude log-volume reduction) has no measurement at all, though the control arm was one git command away; and #850's updated action comment mislabels a Windows-host figure as a CI figure and builds its 'order of magnitude' argument on that mislabel.",
+  "acceptance_criteria": {
+    "850": [
+      {
+        "ac": "AC1 - the db-live-gates step is measured (wall clock, both legs) before and after and the action's recorded cost comment is updated to the current figure",
+        "status": "partial",
+        "evidence": "action.yml keeps the pre-#794 78.0s/124s pair as the 'recorded cost' and adds this rig's local figures beside it, explicitly marked as not the CI number. The local before/after WAS measured and I reproduced it: post-#850 drill exit 0, 32s wall, builds 5.8s+5.1s (clara_rt_test on 127.0.0.1:55746); pre-#850 control (git show dd3f8f1d:packages/runtime/tests/two-build-cutover-e2e.mjs, run as an untracked copy, since deleted) exit 0, 35s, builds 5.1s+4.8s. The figure AC1 names - the CI step's own wall clock - is still not in the file."
+      },
+      {
+        "ac": "AC2 - both legs' build-A images remain independently verified to lack the successor body",
+        "status": "done",
+        "evidence": "buildPreviousVersionImage untouched (git diff dd3f8f1d..HEAD -- packages/runtime/tests/scratch-image.mjs is empty). bodiesA assertions intact at two-build-cutover-e2e.mjs:602-613, bodiesA2 at :1047-1053, both still asserting 'differ by EXACTLY one body'. My clean re-run printed 'A carries 54 bodies (no claraWork_v5), B carries 55' and the A2 equivalent."
+      },
+      {
+        "ac": "AC3 - CI cost for the drill's scratch-build steps decreases, or the ticket is closed with the measured numbers",
+        "status": "partial",
+        "evidence": "Neither closed nor proven. The local gain I measured is ~3s (35s -> 32s), smaller than the '~5s freed' the comment implies, and this rig has 24 cores (nproc), where a background build is nearly free. See findings L06-850-A and L06-850-C."
+      }
+    ],
+    "967": [
+      {
+        "ac": "AC1 - a normal passing run's log volume is not dominated by inherited noise (order-of-magnitude reduction from ~1.27M lines)",
+        "status": "missing",
+        "evidence": "No line count was taken, before or after, on any rig. The report's reason ('I did not keep a parallel copy of the unpatched code path') is not a real obstacle in a git worktree; see L06-967-A."
+      },
+      {
+        "ac": "AC2 - the three legs still prove the same cross-leg chain, no assertion weakened",
+        "status": "done",
+        "evidence": "git show c00fc8d4 -- packages/runtime/tests/intake-e2e.mjs packages/runtime/tests/intake-admission-e2e.mjs: each file gains exactly one dynamic import plus one await before its own process.exit(0); no existing scenario, assertion or ordering changed. The 'done' marker at intake-admission-e2e.mjs:755 has no external consumer (grep across tests/ and .github/), so writing it before the drain changes nothing."
+      },
+      {
+        "ac": "AC3 - a genuine failure left behind by an earlier leg's queued work surfaces as a failure rather than being silently drained away",
+        "status": "partial",
+        "evidence": "TERMINAL_RUN_STATUSES = completed|failed|cancelled (packages/runtime/lib/rollback-preflight.mjs:85), so a FAILED run counts as drained. See L06-967-B."
+      }
+    ],
+    "963": [
+      {
+        "ac": "AC1 - the pin pattern is stated as a general convention, not one migration's anecdote",
+        "status": "done",
+        "evidence": "packages/db/README.md gains a paragraph opening 'Pinning another function's body hash is a named convention in this file, not one migration's habit', placed immediately before the 0214 anecdote it generalises."
+      },
+      {
+        "ac": "AC2 - it states that recutting requires finding and re-measuring every existing pin, in the same commit as the recut",
+        "status": "partial",
+        "evidence": "Stated, but stated incorrectly - the qualifier that makes it true ('at a number below 0233', the ticket's own words) was dropped, and 0234 contradicts it. See L06-963-A."
+      },
+      {
+        "ac": "AC3 - it quotes the 'has DRIFTED from its pinned body' wording and explains it",
+        "status": "done",
+        "evidence": "Quoted verbatim; matches 0233_firm_commercial_settings.sql:185 exactly, and the wording occurs in 0221/0224/0229/0231/0232/0233/0234 (grep -rln). One imprecision recorded as L06-963-C."
+      },
+      {
+        "ac": "AC4 - 0233's three pinned bodies are named and findable by searching for any one of the three names",
+        "status": "done",
+        "evidence": "README.md:1389-1391 names clara.get_current_legal_documents(), clara.accept_legal_document(text,integer,text,text) and clara._accounting_work_egress_live(uuid,uuid). Verified against 0233:172-176 (prestate, four pins) and 0233:702-707 (tail, the same three); the fourth pin (get_llm_usage_summary, a pre-image of the body 0233 itself recuts) is correctly distinguished. grep for any of the three hits the new paragraph."
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "L06-963-A",
+      "ticket": 963,
+      "severity": "major",
+      "title": "#963's new general rule drops the migration-number qualifier and is contradicted by 0234, which recuts one of the three pinned bodies",
+      "evidence": "The ticket's own context states the hazard precisely: 'if a later migration legitimately recuts one of those three AT A NUMBER BELOW 0233'. packages/db/README.md's new paragraph drops the qualifier: 'a later migration that recuts the pinned function must locate every existing pin on that function and re-measure each one against the function's NEW body, in the SAME COMMIT as the recut', and the new 0233 paragraph repeats it ('A later migration that recuts any one of these three must find this pin ... and re-measure it against the new body in the SAME commit as the recut'). packages/db/migrations/0234_legal_enforcement_mode.sql:478 recuts clara._accounting_work_egress_live(uuid,uuid) - one of the three - and does NOT re-measure 0233's pins; it pins its own pre-image instead (0234:191, raise at 0234:211) and asserts the recut applied at 0234:940-943. It could not do otherwise: 0233 is an applied migration and the work order (rule 5) bars editing one. As written the documentation tells the next author to do the one thing the house forbids, and the counter-example is the migration documented in the very next section of the same README.",
+      "required_fix": "Restore the qualifier in both new paragraphs: the obligation binds a migration whose NUMBER is below the pinning migration's (the wave case where numbers are assigned per lane in advance and land out of chronological order). For a higher-numbered recut, say what 0234 actually did - the pin is historical, the recutting migration pins its own pre-image, and the applied pinning migration is never edited. Cite 0234 as the worked example."
+    },
+    {
+      "id": "L06-967-A",
+      "ticket": 967,
+      "severity": "major",
+      "title": "#967's headline acceptance criterion (an order-of-magnitude log-volume reduction) has no measurement at all, and the control arm was one git command away",
+      "evidence": "AC1 is quantitative: 'a log volume not dominated by concurrency-limit or retry noise inherited from an earlier leg (an order-of-magnitude reduction from the measured roughly 1.27 million lines)'. The final report and the commit message give timings for the drain itself (21ms/330ms/446ms/2008ms) but no line count, before or after, on any rig. The stated obstacle - 'that would need the UNPATCHED code path on my rig, which I did not keep a parallel copy of' - does not hold in a git worktree: `git show dd3f8f1d:packages/runtime/tests/intake-e2e.mjs > tests/zz-pre967.mjs` reconstructs the pre-patch leg in one command. I used exactly that technique in this review to build a pre-#850 control arm for the two-build drill (run, then deleted). The lane already had clara_intake_ci bootstrapped (it still exists on 127.0.0.1:55746, 54 MB) and had run all three legs twice, so `node tests/intake-batch-e2e.mjs 2>&1 | wc -l` on a patched and an unpatched chain was within reach on the same rig.",
+      "required_fix": "Measure it: on a fresh clara_intake_ci run leg1 -> leg2 -> leg3 with the pre-dd3f8f1d copies of the two leg files, piping leg 3 through `wc -l`; repeat with HEAD's copies; record both counts in the report and in the action.yml comment. If the local run cannot reproduce the 1.27M shape at all, say THAT with the two counts rather than leaving AC1 with no number."
+    },
+    {
+      "id": "L06-967-B",
+      "ticket": 967,
+      "severity": "major",
+      "title": "waitForQueueDrain treats a FAILED run as drained, so AC3's 'genuine failure surfaces as a failure' is not met - and the lane's own evidence is an instance of it being drained away",
+      "evidence": "waitForQueueDrain resolves when censusNonTerminalRuns returns empty; TERMINAL_RUN_STATUSES = ['completed','failed','cancelled'] (packages/runtime/lib/rollback-preflight.mjs:85). A workflow run an earlier leg left FatalError'd therefore counts as drained and the leg exits 0. The final report cites precisely that as its proof of liveness: 'leg 2 - which left a genuine straggler behind once (a FatalError'd workflow run, storage_error) - drained in 2008ms (10 polls)'. That was a genuine failure left behind by an earlier leg's queued work, and the gate drained it silently, which is the outcome AC3 names as the thing not to do. The only failure the gate surfaces is work that stays NON-terminal for 30s.",
+      "required_fix": "Either census terminal-but-failed runs and fail (or explicitly allow) on them - the leg's own scope decides which of its lanes may legitimately end failed - or state in queue-drain.mjs's header and in the report that AC3 is met only for STUCK work and not for terminally-failed work, and let the orchestrator decide whether that closes the ticket."
+    },
+    {
+      "id": "L06-850-A",
+      "ticket": 850,
+      "severity": "major",
+      "title": "The updated action.yml comment calls the 78.0s baseline a 'CI measurement' while the same comment block, three paragraphs later, still calls it a Windows-host measurement - and the 'order of magnitude' argument rests on that mislabel",
+      "evidence": "New text: 'this rig's scratch build (5-6s) is over an order of magnitude faster than the 78.0s CI measurement below, so the ABSOLUTE seconds saved on a GitHub-hosted runner do not transfer'. The retained paragraph it points to reads: '78.0s for the scratch build and 124s for the whole file - Windows-host measurements, re-measured at the #637 fix-round closure review'. Same file, same comment block, contradictory; the final report repeats the mislabel ('CI's own recorded 78.0s'). I measured the scratch build on this Windows rig myself: 11.6s cold, then 6.3s and 6.5s warm (buildPreviousVersionImage, name 'review-probe', CLARA_TWO_BUILD_REUSE unset, reused=false each time). The 12x gap is therefore between two WINDOWS HOSTS, not between this rig and CI, and nothing in the repo records what a scratch build costs on a GitHub-hosted runner. AC1's deliverable is exactly this comment, so the error sits on the criterion.",
+      "required_fix": "Correct the label: the 78.0s/124s pair is a Windows-host measurement from the #637 fix round, not a CI figure. State that no CI scratch-build cost has ever been recorded, so neither the absolute seconds nor the ratio can be reasoned about until a CI run produces one. Keep the 'unverified' marking."
+    },
+    {
+      "id": "L06-850-B",
+      "ticket": 850,
+      "severity": "major",
+      "title": "The background chatTurn build is never awaited or cancelled on the failure path, so the outer finally's removeScratchTree() can now delete the tree under a running nitro build and mask the original error",
+      "evidence": "two-build-cutover-e2e.mjs:577-579 starts chatBuildPromise and attaches only a throwaway .catch on a separate branch. Every failure from there on falls through the catch at :1168 into the finally at :1182, which ends with removeScratchTree() at :1214 - rmSync(<repo>/.scratch/two-build, {recursive:true, force:true}) (scratch-image.mjs:172-174) - while that nitro build may still be writing into .scratch/two-build/previous-chat. On Windows an open handle makes that rmSync throw EPERM/EBUSY, and a throw from a finally REPLACES the assertion error the catch at :1168 exists specifically to preserve ('A drill whose failure cannot be read is a drill someone will re-run rather than diagnose', its own comment). The spawned nitro child also outlives process.exit(1), leaving a build running after the drill reports FAIL. Before #850 this could not happen: the second build started only inside the chatTurn section, after every claraWork assertion had passed. I did not reproduce the EPERM itself; my one failed run (L06-850-C) failed inside the claraWork leg's pollTask, i.e. exactly the window where the background build is live.",
+      "required_fix": "Settle the background build before touching the scratch tree: `if (chatBuildPromise) await chatBuildPromise.catch(() => {});` (or track and kill the child) immediately before removeScratchTree(), and wrap removeScratchTree in its own try/catch so a cleanup failure can never replace the drill's real error."
+    },
+    {
+      "id": "L06-850-C",
+      "ticket": 850,
+      "severity": "major",
+      "title": "AC3 ('CI cost decreases') is argued from a 24-core host; under contention the overlapped build cost 7x more and the drill failed in the claraWork leg",
+      "evidence": "This rig reports 24 cores (nproc), so a background nitro build is close to free here, which is why the mechanism looks clean locally. CI runs on GitHub-hosted runners (2-4 cores), where the background build competes directly with the claraWork leg's two spawned runtime images, its engine and its timing-sensitive polls (FETCH_TIMEOUT_MS = 15000, two-build-cutover-e2e.mjs:163). Direct measurement from my own runs: host idle, the overlapped 'previous-chat' build took 5.1s; with a concurrent `pnpm typecheck` running it took 36.9s - 7x - and that run FAILED: 'Error: pollTask timeout (W1 settles inside build B)', W1 stuck at awaiting_input, 184s elapsed, exit 1 (two-build-cutover-e2e.mjs:507 via :792). The load was mine, so this is NOT an isolated attribution of the failure to #850; it does show the CPU-bound work the change moves INTO the claraWork leg's window, which pre-#850 could not start until that window had closed. Meanwhile the local gain AC3 rests on (35s control -> 32s treatment, both measured by me) is at the edge of run-to-run noise and was produced on the machine least able to expose the risk.",
+      "required_fix": "State the risk where the change lives: one line in the action.yml comment and the runtime README that the overlap trades CPU concurrency for wall clock and is unmeasured on a 2-core runner, and that the first CI run should be read for BOTH the step's wall clock and any new pollTask timeout in the claraWork leg. A cheap guard if the orchestrator wants one: start the second build in the background only when os.availableParallelism() is comfortably above the number of images the leg spawns."
+    },
+    {
+      "id": "L06-967-C",
+      "ticket": 967,
+      "severity": "minor",
+      "title": "The drain turns today's noisy-but-passing CI run red whenever the #967 shape actually occurs, and the report does not name that as a release risk",
+      "evidence": "The noise #967 measured is attributed to a task 'some earlier run left queued forever, by design' (queue-drain.mjs header, citing lib/classify.mjs's MAX_ATTEMPTS backstop). Such a row is a live document_processing_task with no workflow run, so censusUnboundTasks never empties, waitForQueueDrain throws at the 30s deadline and the LEG fails - before its own PASS line in intake-e2e.mjs / intake-admission-e2e.mjs. That is defensible under AC3, but it converts a currently-green gate into a red one on exactly the input the ticket was filed about, and the final report presents the drain only as a noise reduction.",
+      "required_fix": "One sentence in the report and in the action.yml comment: if a capped classify task is genuinely left behind, leg 1 or leg 2 now FAILS at the 30s deadline rather than leg 3 running noisily - intended, and the first CI run may expose it."
+    },
+    {
+      "id": "L06-963-C",
+      "ticket": 963,
+      "severity": "minor",
+      "title": "The quoted DRIFTED wording is presented as 'what an author actually sees', but the 0214 instance the same paragraph cites uses a different string",
+      "evidence": "New README text: 'The failure this coupling exists to produce, quoted verbatim because it is what an author actually sees: `<name> has DRIFTED from its pinned body`', and two paragraphs later 'for example clara._work_run_attempts (0214, immediately below, and again in 0231's five pins)'. 0214_client_work_pack.sql:221 actually raises 'client_work_pack prestate: clara._work_run_attempts has DRIFTED from the pinned 0189 body (sha %)'. Only 0221/0224/0229/0231/0232/0233/0234 carry the quoted form (grep -rln 'DRIFTED from its pinned body' packages/db/migrations/). An author who greps the quoted string after hitting 0214's message finds nothing.",
+      "required_fix": "Add half a sentence: the wording settled into 'has DRIFTED from its pinned body' from 0221 onward; 0214, the first instance, reads 'has DRIFTED from the pinned 0189 body'. Both forms are then greppable from the README."
+    },
+    {
+      "id": "L06-STD-A",
+      "ticket": 850,
+      "severity": "minor",
+      "title": "Wide hunk in a nine-lane shared file (.github/actions/db-live-gates/action.yml)",
+      "evidence": "Work order rule 7 lists .github/actions/db-live-gates/action.yml among the shared files to touch minimally. This lane replaces a 10-line comment with ~45 lines of new prose (#850) and inserts an 8-line block above the Slice-5 step (#967): 64 changed lines in a comment-only diff. AC1 does require the cost comment to change, so this is not a rule break, but it is a merge-conflict magnet if another lane also annotates this action.",
+      "required_fix": "None required. Flagged so the orchestrator integrates this file deliberately; the #967 block at the top and the #850 block at the drill step are independent and can be taken separately."
+    },
+    {
+      "id": "L06-NOTE-A",
+      "ticket": 967,
+      "severity": "note",
+      "title": "queue-drain.test.mjs is not executed by any CI job (repo-wide norm, not this lane's doing)",
+      "evidence": "packages/runtime/package.json's test script is `node --test --test-concurrency=1 \"tests/**/*.test.mjs\"`, but no workflow or composite action invokes it: .github/workflows/ci.yml runs only packages/reporting-render's battery (ci.yml:158) and the composite actions wire runtime files one by one. Of 229 packages/runtime/tests/*.test.mjs files, exactly 3 are named anywhere under .github/ (body-census-guard-db, ready, worker-path). The CI-visible part of #967 is therefore the two leg files alone; the unit cells run locally only.",
+      "required_fix": "None for this lane. Worth an orchestrator decision, or a follow-up ticket, about whether the runtime unit battery should run in CI at all."
+    },
+    {
+      "id": "L06-NOTE-B",
+      "ticket": 850,
+      "severity": "note",
+      "title": "Verified: the lane's local measurements and its vacuity controls reproduce",
+      "evidence": "Two-build drill, this rig, host otherwise idle: `node tests/two-build-cutover-e2e.mjs` (PGDATABASE=clara_rt_test, PGPORT=55746, RELAY_TEST_MODE=1, WORKFLOW_POSTGRES_URL set) -> exit 0, 32s, 'TWO-BUILD CUTOVER E2E: ALL PASS', builds 5.8s and 5.1s, inside the lane's claimed 32.3-34.8s and 5.0-6.2s. Pre-#850 control (dd3f8f1d copy of the same file, run as an untracked tests/zz-pre850.mjs, deleted afterwards) -> exit 0, 35s, builds 5.1s and 4.8s. #967 vacuity: an untracked mutant copy of queue-drain.mjs with the resolve condition changed from && to || failed 2 of 3 cells (test 1 resolved a step early, test 2 never rejected) while the unmutated file passes 3/3 - the lane's claim, reproduced. Both mutant files deleted; `git status --short` clean afterwards.",
+      "required_fix": "None."
+    },
+    {
+      "id": "L06-NOTE-C",
+      "ticket": 963,
+      "severity": "note",
+      "title": "Standards sweep, all clean",
+      "evidence": "pnpm lint (worktree root) exit 0. pnpm typecheck exit 0 (packages/runtime and apps/web both Done). node scripts/check-frozen-workflows.mjs: OK, 312 frozen files verified, 55 'use workflow' modules frozen+registered, 3 retired - no manifest diff. node packages/runtime/scripts/check-parts-parity.mjs: OK. node --test tests/queue-drain.test.mjs: 3/3 pass. git diff dd3f8f1d..HEAD --stat: 8 files, +365/-19; no migration added or edited, no docs/PRD.md or docs/ARCHITECTURE.md, no apps/web file (so no message-key, web test-manifest or e2e-fixture-census obligation arises). All three commits name their ticket in the subject (ebbaa2ee #850, c00fc8d4 #967, 7f956c6b #963) and each carries 'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>'. Working tree clean; no ticket was claimed 'already satisfied'.",
+      "required_fix": "None."
+    }
+  ]
+}

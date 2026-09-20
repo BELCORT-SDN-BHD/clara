@@ -18,10 +18,14 @@
 // EVERY REFUSAL BODY BELOW IS THE REAL ONE, TRANSCRIBED FROM THE ROUTE — never a shape invented to
 // make a cell go green:
 //
-//   400 `{ "error": "invalid_basis", "field": "invoice.<snake_key>", "reason": <token> }` — the
-//   route emits every trade-invoice path under the single `invoice.` prefix (`toDbTradeInvoice`),
-//   and `apps/web/lib/work/trade-invoice.ts`'s `fieldForServerPath` is the ONE mapper onto a
-//   control. A mock that made up a field name would let a broken mapper pass a browser walk.
+//   400 `{ "error": "invalid_basis", "field": "invoice.<snake_key>", "reason": <token>,
+//   "detail": <the door's whole typed object> }` — the route emits every trade-invoice path under
+//   the single `invoice.` prefix (`toDbTradeInvoice`), and `apps/web/lib/work/trade-invoice.ts`'s
+//   `fieldForServerPath` is the ONE mapper onto a control. A mock that made up a field name would
+//   let a broken mapper pass a browser walk. Since #981 `detail` is the GENERIC carrier: the
+//   route no longer unfolds `party_ambiguous` in a catch of its own, so the walk's control body
+//   hands over the door's whole object (`reason`, `name`, `expected_counterparty_kind`,
+//   `candidates`) and this handler passes it through untouched.
 //
 //   409 `{ "error": "intent_payload_conflict", "work_id" }` — the id of the Work that intent key
 //   ALREADY names, which is what lets the form offer a route to it instead of an apology.
@@ -37,6 +41,8 @@
 // way that a handler claiming a SHARED endpoint replaces everyone else's fixture). This lane claims
 // no unfiltered register, no shared session list and no firm-wide read, and it answers NEITHER
 // `list_accounting_work` NOR `list_entry_links`: both are read by surfaces other lanes drive.
+import { readCachedJson } from "./mock-dispatch.mjs";
+
 
 export const TI = {
   clientId: "65565565-6556-4655-8655-655655655655",
@@ -232,18 +238,6 @@ const state = {
 /** THE PARSE IS CACHED ON THE REQUEST — `periodic-adjustment-mock.mjs`'s own measured note applies
  *  verbatim: `for await (const chunk of request)` drains the stream exactly once, so an uncached
  *  re-read after a sibling hook has already read it sees `{}` and falls through silently. */
-async function readJson(request) {
-  if (request.__e2eParsedBody !== undefined) return request.__e2eParsedBody;
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  let parsed = {};
-  if (chunks.length > 0) {
-    try { parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { parsed = {}; }
-  }
-  request.__e2eParsedBody = parsed;
-  return parsed;
-}
-
 function send(response, status, body) {
   const text = JSON.stringify(body);
   response.writeHead(status, {
@@ -332,7 +326,7 @@ export async function handleTradeInvoiceSupabase(request, response, path, url, s
 
   // THE ONE READ THIS LANE OWNS EXCLUSIVELY. It answers ONLY for the Work this module minted.
   if (verb === "get_trade_invoice") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_work !== TI.workId) return false;
     sendJson(response, 200, POSTED_INVOICE, cors);
     return true;
@@ -346,7 +340,7 @@ export async function handleTradeInvoiceRuntime(request, response, url) {
   const path = url.pathname;
 
   if (request.method === "POST" && path === "/api/e2e-trade-invoice/control") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     // SCOPED LIKE EVERY OTHER HANDLER HERE: a control endpoint that mutates shared fixture state
     // for ANY body is a lane claiming a shared endpoint.
     if (body?.client !== TI.clientId) return false;
@@ -382,7 +376,7 @@ export async function handleTradeInvoiceRuntime(request, response, url) {
   }
 
   if (request.method === "POST" && path === "/api/work/trade-invoice") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     // SCOPED BY THE REQUEST'S OWN CLIENT — another lane's admission falls through to the shared
     // fallback rather than being answered with this lane's Work.
     if (body?.clientId !== TI.clientId) return false;

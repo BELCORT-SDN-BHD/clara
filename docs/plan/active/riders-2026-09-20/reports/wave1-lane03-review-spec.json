@@ -1,0 +1,122 @@
+{
+  "lens": "SPEC + STANDARDS",
+  "lane": "wave1-lane03",
+  "branch": "riders/w1-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "head": "6219a61c",
+  "merge_base": "dd3f8f1d",
+  "reviewed_diff": "git diff dd3f8f1d..HEAD - 17 files, 576+/30-, all under packages/db/tests (README.md + 16 .mjs). NOTE: `git diff origin/main..HEAD` in this worktree is misleading - origin/main has advanced to e7f0a10a, so it shows 4 unrelated deletions (docs/PROGRESS.md, refresh-wave RELEASE-AS-RUN.md, ceremony/reads-0234.mjs, GRILL-2026-09-20.md) that are NOT this lane's. The merge-base diff is the lane.",
+  "verdict": "accept-with-fixes",
+  "per_ticket": {
+    "845": {
+      "state_on_main": "live, not already satisfied - verified: at dd3f8f1d `git grep guardedReset -- packages/db/tests` outside the guard module returns exactly one hit (rig-isolation.test.mjs:666, T19); 13 other files carry 22 bare `await reset(` calls (checkout-convergence 1, hrd-a 1, hrd-b-kit 1, rig-docs 1, rig-events 1, rig-runtime 1, s6 4, wave-a 5, wb-0020 4, x37 1, x40 1, x41 1, x42-kit 2). Ticket OPEN, ready-for-agent.",
+      "ac1_no_unwrapped_reset": "DONE in the tree, PARTIAL as a guard. All 22 call sites converted (re-read: 22 `await guardedReset(reset, ...)` across the 13 files + T19). But the cell that is supposed to hold the line is narrower than the criterion - see finding L03-S2.",
+      "ac2_non_disposable_refuses": "DONE - reset-gate-routing.test.mjs cell 4 re-run green (5/5 on clara_l03). Structurally sound (cells 1+3 generalise the one behavioural proof to all 14 call sites). But the spy in that cell delegates to the real reset - see finding L03-S1.",
+      "ac3_every_drill_still_passes": "PARTIAL / NOT PROVEN. Re-ran 10 of the 14 files without CLARA_RIG_ALLOW_RESET: checkout-convergence-upgrade 1 skip, hrd-a-recut-guard 2, rig-docs-upgrade 4, rig-events-upgrade 1, rig-runtime-upgrade 1, s6-upgrade 4, wave-a-upgrade 4, x37 2, x40 3, x41 1 - 0 pass / 0 fail / 23 skip. A skip is not evidence (base work order rule 7). The report is honest that the destructive body is CI's job, but that hand-off is only true for 10 of the 14 - see finding L03-S3.",
+      "non_vacuous": "cells 1/3/5 yes; cell 2 partially (see L03-S2); cell 4 yes but unsafe (L03-S1)."
+    },
+    "844": {
+      "state_on_main": "live, not already satisfied - at dd3f8f1d operator-support.test.mjs has cells os.01-os.14 only and no opened_at tie anywhere. Ticket OPEN, ready-for-agent.",
+      "ac1_three_intent_world_with_root_read_tie": "DONE - os.15 forces first/second to 2026-01-01T00:00:00Z and third to an hour earlier via forceOpenedAt(), then reads all three opened_at values as root and asserts equality/strict-earlier. forceOpenedAt mirrors the house idiom byte-for-byte (checkout-convergence-fixtures.mjs:253 backdateStatus - disable / try / update / finally enable on t_checkout_intents_session_stamp). Verified by reading both.",
+      "ac2_still_arm1": "DONE - paymentsFor(registration).length === 0 and registrationRow(registration).status === 'open', plus row.payment_recorded_at === null read off the queue. Same idiom os.14 uses.",
+      "ac3_fails_if_id_key_removed": "DONE WITH A STATED SUBSTITUTION. The cell proves direction (i.id desc vs i.id asc), not presence, and says so in the code, the README and the report; removal is genuinely non-deterministic under Postgres so it could not be a reproducible check. The load-bearing assertion is detail.intent_id === winner against the deployed get_operator_support_case; winner is chosen by Postgres's own `$1::uuid > $2::uuid`, so it is a real ~50/50 coin the door must call correctly. I verified the companion SELECT is a faithful copy of the shipped predicate: migration 0188 line 280 reads `order by (i.status in ('paid','consumed')) desc, i.opened_at desc, i.id desc` with no status filter, matching the cell's asShipped query exactly. Non-vacuous.",
+      "ac4_battery_green": "DONE - re-ran operator-support.test.mjs with the full gate chain: 20 tests, 20 pass, 0 fail, 0 skip. EXPECTED_CELLS 18->19 is correct bookkeeping (both cell() and nameCell() increment `executed`). One naming defect - see L03-S4."
+    },
+    "884": {
+      "state_on_main": "live, not already satisfied - at dd3f8f1d p639.birth.exclusions is a prosrc string search whose comment claims no opening-seed fixture exists. Ticket OPEN, ready-for-agent. The lane's correction of the arm/code is right: I read migration 0041 lines 2711-2720, the refusal is raised by clara._tf_fa_movement_belt arm (e), errcode CLR40, detail reason fa_k_gl_balance_on_enrolled - not the birth trigger, not CLR38.",
+      "ac1_gl_balance_leg_refused": "DONE (one lax assertion). Re-ran fixed-asset-acquisition.test.mjs: 23 tests, 23 pass, 0 fail, 0 skip; p639.birth.opening_excluded green. CLR40 + reason token + assetCountOf unmoved + both entries still 'draft' all asserted. The account-code half is laxer than the criterion - see L03-S5.",
+      "ac2_itemised_item_admitted_one_row": "DONE and independently confirmed non-vacuous. The report's own control (expect 2 instead of 1) only proves the assertion is reached. I checked the subject: migration 0216 line 320 inserts with `on conflict (acquisition_line_id) do nothing`, which would have made the cell vacuous IF the opening lane wrote the same acquisition_line_id - it does not. The opening-lane insert at migration 0017 line 3450 omits acquisition_line_id entirely (NULL, and NULLs do not collide in a unique index), so deleting the guard at 0216:298 (`if new.is_opening_balance then return null; end if;`) would produce a SECOND row and turn rowCount===1 red. The cell really does pin the guard.",
+      "ac3_least_privileged_personas": "DONE - every act runs through w.users.alice / bob / hana via the humanQuery-backed wrappers (wb.draftOpeningItem, wb.approveOpeningSeed, wb.seedFixedAsset, upsertFaProfile); root appears only in the readbacks and in fixture setup. wb.recordParsedTargets is a fixture-side call, used the same way wave-b/wb-0018-lane-guards.test.mjs:101 already uses it - house shape, not a persona bypass.",
+      "ac4_stale_comment_corrected": "DONE - p639.birth.exclusions' comment now names the belt, CLR40 and the two new cells by name; verified in the diff."
+    }
+  },
+  "house_standards": {
+    "no_applied_migration_edited": "PASS - diff touches no file under packages/db/migrations.",
+    "no_new_migration_in_a_wave1_lane": "PASS - no migrations/ entry in the diff.",
+    "frozen_manifest": "PASS - re-ran `node scripts/check-frozen-workflows.mjs` in the worktree: exit 0, 312 frozen files verified, no manifest diff, 55 'use workflow' modules frozen+registered.",
+    "no_prd_or_architecture_edit": "PASS - neither appears in the merge-base diff.",
+    "shared_files_touched_minimally": "PASS - the lane touched NONE of the nine shared files (messages/en.json, test/manifest.txt, serve-built.mjs, e2e-fixture-ownership.test.ts, navigation/tree.ts, rig-meta.mjs, packages/db/package.json, db-live-gates/action.yml, CONTEXT.md).",
+    "new_db_test_file_is_actually_run": "PASS - packages/db's `test` script globs tests/**/*.test.mjs, so reset-gate-routing.test.mjs is picked up with no registry edit; it is pure-filesystem and needs no database or frontier gate.",
+    "message_keys": "N/A - no new user-facing strings.",
+    "web_test_manifest_and_fixture_ownership_census": "N/A - nothing under apps/web changed.",
+    "docs_updated_where_behaviour_moved": "PARTIAL - packages/db/tests/README.md gains three good sections in the same commits as their tickets, and CONTEXT.md is correctly left alone (no new vocabulary). But the in-file header recipes for three drills were not updated - see L03-S3.",
+    "lint": "PASS - re-ran `pnpm lint` from the worktree root: exit 0 (apps/web, packages/reporting-render, db eslint).",
+    "typecheck": "NOT RE-RUN by this review (~4 min, and the lane touches no TypeScript). The lane's own PASS claim is plausible but unverified here.",
+    "commits_name_their_ticket": "PASS - fd141984 `test(db): #845 ...`, fc81a0fa `test(db): #844 ...`, 6219a61c `test(db): #884 ...`; each body ends with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`. Worktree clean, nothing pushed, no GitHub write."
+  },
+  "gates_rerun_by_this_review": [
+    "packages/db tests/reset-gate-routing.test.mjs (full gate chain) -> 5 tests, 5 pass, 0 fail, 0 skip",
+    "packages/db tests/operator-support.test.mjs -> 20 tests, 20 pass, 0 fail, 0 skip",
+    "packages/db tests/fixed-asset-acquisition.test.mjs -> 23 tests, 23 pass, 0 fail, 0 skip",
+    "packages/db tests/operation-census.test.mjs + tests/rig-isolation.test.mjs (no reset flags) -> 31 tests, 30 pass, 0 fail, 1 skip (T19's own gate)",
+    "10 reset-gated drill files individually without CLARA_RIG_ALLOW_RESET -> 0 pass, 0 fail, 23 skip",
+    "pnpm lint (worktree root) -> exit 0",
+    "node scripts/check-frozen-workflows.mjs -> exit 0, 312 files, no manifest diff"
+  ],
+  "findings": [
+    {
+      "id": "L03-S1",
+      "ticket": 845,
+      "severity": "major",
+      "title": "The 'non-delegating' spy in reset-gate-routing.test.mjs cell 4 actually delegates to the real destructive reset()",
+      "evidence": "packages/db/tests/reset-gate-routing.test.mjs, acceptance-2 cell: the comment reads 'Wraps but NEVER DELEGATES to realReset - this cell proves the refusal happens before reset() would run without ever issuing the DROP SCHEMA realReset performs', and the report repeats it ('wraps it in a non-delegating counting spy'). The code immediately below is `const wrapped = async (...args) => { spy.entered += 1; return realReset(...args); };` - it does delegate. The same cell sets process.env.CLARA_ALLOW_DESTRUCTIVE='1' and process.env.CLARA_RIG_ALLOW_RESET='1' itself. The house shape it cites does not do this: rig-reset-guard.test.mjs:76 passes `async () => { spy.entered += 1; }` with no delegation.",
+      "required_fix": "Drop the delegation: `const wrapped = async () => { spy.entered += 1; };`. The cell's assertions (assert.rejects + spy.entered === 0) do not need a return value, so nothing else changes.",
+      "failure_scenario": "A future regression in guardedReset/assertResetTargetDisposable (exactly what this cell exists to catch) makes the guard return instead of throwing. The cell then calls the real scripts/reset.mjs export with both destructive flags set and PGDATABASE forced to clara_631 - a real rig name from the 2026-09-14 wave, per the cell's own comment. On any machine where that database exists, the auditor cell performs the DROP SCHEMA it was written to prevent. The assert.rejects failure would be reported after the damage, not before it."
+    },
+    {
+      "id": "L03-S2",
+      "ticket": 845,
+      "severity": "major",
+      "title": "Acceptance 1's regression guard is far narrower than the criterion it claims to satisfy",
+      "evidence": "The criterion is 'A grep for reset( under the db package's tests finds no unwrapped call behind the rig-reset gate.' The implemented cell greps only /^\\s*await reset\\(/m. I ran the file's own two regexes against candidate shapes (node -e, exact source regexes copied from the file): `const r = await reset({ log: () => {} });` -> cell2-green, cell3-green; `return reset({ log: () => {} });` -> cell2-green, cell3-green; `await  reset({...})` (two spaces) -> cell2-green, cell3-green. Only the exact `await reset(` at line start is caught. Cell 3 catches an aliased import (`const { reset: nuke } = ...`) but not any of the three above, because both imports are present in each.",
+      "required_fix": "Widen the cell-2 predicate to the criterion's own shape - match any reset( call token that is not guardedReset( and is not the import destructure, e.g. strip the `const { reset } = await import(...)` lines then assert /(?<![A-Za-z])reset\\s*\\(/ finds nothing - or count call expressions rather than line-anchored text. Keep the message naming the offending file.",
+      "failure_scenario": "A later lane adds a reset-gated drill (or edits an existing one) written as `const outcome = await reset({ log });` instead of `await reset({...});`. reset-gate-routing.test.mjs stays fully green, the file ships with an unwrapped destructive call behind the rig-reset gate, and the exact loss #773 and #845 were filed about (three workers' rigs) can recur."
+    },
+    {
+      "id": "L03-S3",
+      "ticket": 845,
+      "severity": "major",
+      "title": "Acceptance 3 is handed to a CI leg that does not exist for three of the fourteen files, and their documented manual recipes now refuse",
+      "evidence": "`grep -rln 'checkout-convergence-upgrade|rig-runtime-upgrade|wave-a-upgrade' .github/` returns NOTHING. `grep -rn CLARA_RIG_ALLOW_RESET` across the repo shows the flag set only in .github/actions/closed-wave-upgrade-drills/action.yml (10 databases: clara_upgrade_ci, clara_docs_upgrade_ci, clara_s6_upgrade_ci, clara_wb20_upgrade_ci, clara_x37/x40/x41_upgrade_ci, clara_x42_split_upgrade_ci, clara_hrd_a_recut_ci, clara_hrd_b_upgrade_ci) and .github/actions/frontier-leg/action.yml:253. So checkout-convergence-upgrade.test.mjs, rig-runtime-upgrade.test.mjs and wave-a-upgrade.test.mjs have no CI leg at all. Their only run recipe is the one in their own headers - checkout-convergence-upgrade.test.mjs:16 PGDATABASE=clara_0186_upgrade, wave-a-upgrade.test.mjs:8 PGDATABASE=clara_waveA_upgrade, wave-b/wb-0020-upgrade.test.mjs:37 PGDATABASE=clara_wb20_upgrade - and none of those names matches EPHEMERAL_DB (/(^|[._-])(ci|test|tmp|temp|scratch|ephemeral)$/i, packages/db/lib/guard.mjs:32). I checked each with node: all three REFUSED. The lane's new README section points readers straight at them ('see each file's own header for its PGDATABASE=... CLARA_RIG_ALLOW_RESET=1 invocation'), and the report claims the destructive body 'remains CI's job (.github/actions/db-live-gates, closed-wave-upgrade-drills/action.yml)'.",
+      "required_fix": "In the same commit, update the three header recipes to disposable names (e.g. clara_0186_upgrade_ci, clara_waveA_upgrade_ci, clara_wb20_upgrade_ci) so the documented invocation still works under the new guard; and correct the report + README to say which files CI actually covers and that checkout-convergence-upgrade, rig-runtime-upgrade and wave-a-upgrade have no CI leg (file a follow-up for that gap rather than claiming coverage).",
+      "failure_scenario": "An operator follows checkout-convergence-upgrade.test.mjs's own header verbatim, gets 'T19 reset REFUSED for 127.0.0.1:5432/clara_0186_upgrade: the database name does not look disposable', and reads it as a regression in the drill. Meanwhile the guarded path in those three files has never been executed anywhere - not locally (the lane could not), not in CI (no leg exists) - so acceptance criterion 3 is unproven for them and a typo inside the three converted call sites would surface only the next time someone runs the drill by hand."
+    },
+    {
+      "id": "L03-S4",
+      "ticket": 844,
+      "severity": "minor",
+      "title": "The new cell reuses a cell id that is already taken: two tests now answer to 'os.15'",
+      "evidence": "packages/db/tests/operator-support.test.mjs:790 `cell(\"os.15 arm 1 id tie-break -- ...\")` (new) and :927 `nameCell(\"os.15 the applicant's name resolves on ALL THREE arms -- ...\")` (pre-existing; at dd3f8f1d it sits at line 792, followed by os.16). The battery run I re-ran prints both: `ok 15 - os.15 arm 1 id tie-break ...` and `ok 16 - os.15 the applicant's name resolves ...`. The file's section-7 series already runs os.15/os.16, so the new cell collided with it rather than continuing the section-6 series.",
+      "required_fix": "Renumber the new cell to the next free id in the file (os.17), or to os.14b if it is meant to read as os.14's companion. Update the three '#844 os.15' strings inside the cell body, the README section heading '## operator-support.test.mjs os.15 - #844', and the final report's references.",
+      "failure_scenario": "A ticket, a release as-run or a future reviewer cites 'os.15 is green' as evidence for the id tie-break. The label is ambiguous - it also names the applicant-name cell - so the citation cannot be resolved without opening the file, and a future edit that deletes or renames one of the two silently changes what the evidence pointer means."
+    },
+    {
+      "id": "L03-S5",
+      "ticket": 884,
+      "severity": "minor",
+      "title": "opening_excluded asserts the account code against detail OR message, but the criterion says 'on the detail'",
+      "evidence": "packages/db/tests/fixed-asset-acquisition.test.mjs, p639.birth.opening_excluded: `const blob = ${err.detail ?? \"\"} ${err.message ?? \"\"}; assert.ok(blob.includes(COST), ...)`. Migration 0041:2717-2720 puts the account code in BOTH places - the message is 'account % is enrolled for the fixed-asset register...', r.account_code and the detail is jsonb_build_object('reason','fa_k_gl_balance_on_enrolled','entry_id',new.id,'account_code',r.account_code,'role',r.role). So the assertion passes on the message alone.",
+      "required_fix": "Assert the structured field the criterion names: `assert.equal(JSON.parse(err.detail).account_code, COST)` (the same detail is already being relied on for the reason token via refuses(..., ACQ.kGlBalance, ...)).",
+      "failure_scenario": "A later recut of the belt drops account_code from the detail JSON while keeping it interpolated into the prose message. Every machine consumer of the refusal (the web door mapping, a future Work-lane refusal renderer) loses the field, and p639.birth.opening_excluded stays green - the exact regression the criterion was written to catch."
+    },
+    {
+      "id": "L03-S6",
+      "ticket": 845,
+      "severity": "note",
+      "title": "Discovery is exact-match and literal-specifier-only, so it both over-fires and can be walked around",
+      "evidence": "Cell 1 does assert.deepEqual(found, EXPECTED_GATED_FILES). A correctly-wrapped NEW drill reds this cell until the constant is edited - the lane flags this itself as a follow-up. Separately, RESET_IMPORT_RE = /import\\([\"'][^\"']*scripts\\/reset\\.mjs[\"']\\)/ only matches a literal specifier, so `const p = \"../scripts/reset.mjs\"; const { reset } = await import(p);` is never discovered and therefore never checked by cells 2 or 3.",
+      "required_fix": "Optional. Make cell 1 a superset check (every EXPECTED file must be found) and let cells 2/3 carry the exact-set duty, or keep deepEqual but say so in the failure message (it already does). The computed-specifier hole is worth one sentence in the file header rather than code.",
+      "failure_scenario": "Next wave's lane adds a drill, writes it correctly, and reads the red deepEqual as its own regression - costing a debugging round for a cell that is working as designed."
+    },
+    {
+      "id": "L03-S7",
+      "ticket": 844,
+      "severity": "note",
+      "title": "The two companion SELECTs in os.15 are hand-written copies, so only the door assertion is load-bearing - and that is fine",
+      "evidence": "The reversed/asShipped queries are typed into the test, not read from pg_get_functiondef, so on their own they prove nothing about the deployed function. I verified the copy is faithful (migration 0188:280 `order by (i.status in ('paid','consumed')) desc, i.opened_at desc, i.id desc`, no status filter, same base relation), and the genuinely load-bearing assertion is detail.intent_id === winner against the deployed get_operator_support_case with winner chosen by Postgres's own uuid comparison. No change required; recorded so a future reader does not mistake the companions for the proof.",
+      "required_fix": "None.",
+      "failure_scenario": "A future recut of 0188 changes the arm-1 lateral's key order. The door assertion catches it; the companion SELECTs would silently stop matching the real predicate and could be read as corroboration when they are not."
+    }
+  ],
+  "summary": "All three tickets were genuinely live on main (verified at dd3f8f1d, all three OPEN/ready-for-agent), none was wrongly claimed 'already satisfied', and all three deliverables re-run green on the lane rig: reset-gate-routing 5/5, operator-support 20/20, fixed-asset-acquisition 23/23, operation-census + rig-isolation 30 pass / 1 skip, lint exit 0, frozen manifest clean at 312 files. Standards are clean on every hard rule - no migration added or edited, no PRD/ARCHITECTURE edit, no shared file touched, README updated in the same commits, commits name their ticket and carry the co-author line, worktree clean and nothing pushed. Non-vacuity holds where it matters, and in one place is stronger than the lane proved: #884's opening_admitted really does pin the birth trigger's is_opening_balance guard, because the opening lane (migration 0017:3450) leaves acquisition_line_id NULL, so 0216's on-conflict-do-nothing would not mask a second birth. Three fixes should land before merge. (1) #845's acceptance-2 spy is documented and reported as non-delegating but calls the real scripts/reset.mjs - in the exact regression it audits, with both destructive flags it sets itself, the auditor becomes the accident. (2) #845's acceptance-1 cell greps only ^\\s*await reset(, so `const r = await reset(...)` and `return reset(...)` walk straight past it; the criterion asked for a grep for reset(. (3) Acceptance 3 is handed to 'CI' that does not exist for checkout-convergence-upgrade, rig-runtime-upgrade and wave-a-upgrade, and the three in-file manual recipes those files document (clara_0186_upgrade, clara_waveA_upgrade, clara_wb20_upgrade) are names the new guard refuses - a behaviour change the same commit should have carried into the headers. Two minors: the new #844 cell reuses the already-taken id os.15, and #884's account-code assertion reads detail OR message where the criterion says detail."
+}

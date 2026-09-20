@@ -456,6 +456,73 @@ test("an addressed-row read FAILURE is distinct from not-found, and offers Retry
   });
 });
 
+test("[1005]: the client, purpose and initiator filter triggers show their LABELS, never a row id or the ALL sentinel", async () => {
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({
+      search: `client=${CLIENT}&purpose=journal_entry&initiator=${USER}`,
+      load: emptyPage,
+    }));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.match(text, /Rome Properties/, "the client trigger must show the client's name, not its row id");
+      assert.doesNotMatch(text, new RegExp(CLIENT), "the client row id must never render as trigger text");
+      assert.match(text, /Journal entry/, "the purpose trigger must show the translated purpose label");
+      assert.match(text, /E2E Owner/, "the initiator trigger must show the member's display name, not their user id");
+      assert.doesNotMatch(text, new RegExp(USER), "the initiator's user id must never render as trigger text");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("[1005]: with no filter chosen, all three triggers show their ALL-sentinel labels, never the raw sentinel", async () => {
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({ load: emptyPage }));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.match(text, /All clients/);
+      // WorkList.filterPurposeAll and filterInitiatorAll both happen to read "All kinds"/"Anyone" —
+      // asserted from en.json directly above rather than restated here.
+      assert.match(text, /Anyone/);
+      // The sentinel is `const ALL = "__all__"` in this component (case-sensitive check — several
+      // legitimate words in this view contain "all", e.g. "All clients").
+      assert.doesNotMatch(text, /__all__/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// fix-round ADV-2: a well-formed but unresolvable filter value (a client id no longer in the
+// roster, a purpose newer than KNOWN_PURPOSES, a former member's id) used to fall back to the
+// SAME "All …"/"Anyone" label the trigger shows when nothing is filtered at all — a real, applied
+// filter read as unfiltered. All three must read as filtered-but-unresolvable instead.
+test("[ADV-2]: a client/purpose/initiator value absent from its roster reads as filtered, never as 'All …'", async () => {
+  const MISSING_CLIENT = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const MISSING_INITIATOR = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({
+      search: `client=${MISSING_CLIENT}&purpose=vendor_bill_stub&initiator=${MISSING_INITIATOR}`,
+      load: emptyPage,
+    }));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.doesNotMatch(text, /All clients/, "an applied client filter must not read as 'All clients'");
+      assert.doesNotMatch(text, /All kinds/, "an applied purpose filter must not read as 'All kinds'");
+      assert.doesNotMatch(text, /\bAnyone\b/, "an applied initiator filter must not read as 'Anyone'");
+      assert.doesNotMatch(text, new RegExp(MISSING_CLIENT), "the raw client id must never render as trigger text");
+      assert.doesNotMatch(text, new RegExp(MISSING_INITIATOR), "the raw initiator id must never render as trigger text");
+      assert.doesNotMatch(text, /vendor_bill_stub/, "the raw purpose value must never render as trigger text");
+      assert.match(text, /not in this list/i, "each unresolved trigger must say the value is filtered but unresolvable");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("a DENIED list asks the addressed-row door nothing — one banner, not two", async () => {
   await withMockedEnv(async () => {
     let rowReads = 0;

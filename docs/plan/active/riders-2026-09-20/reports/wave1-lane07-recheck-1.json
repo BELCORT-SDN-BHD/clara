@@ -1,0 +1,56 @@
+{
+  "lane": "wave1-lane07",
+  "lens": "RECHECK",
+  "branch": "riders/w1-lane07",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "head_reviewed": "278f07958a1253c7a7f1b4c5438aa120149052eb",
+  "head_confirmed_in_worktree": "278f07958a1253c7a7f1b4c5438aa120149052eb",
+  "merge_base": "dd3f8f1d202b6eade2211f33c34f263d033768f1",
+  "origin_main_at_recheck": "e7f0a10af4a1f69f3a01548d2324aa58d0a6231f",
+  "note_on_diff_command": "git diff origin/main..HEAD now mixes in origin/main's own advance past the lane's merge-base (dd3f8f1d -> e7f0a10a: PR #1013/#1011 etc.), showing docs/PROGRESS.md, RELEASE-AS-RUN.md, ceremony/reads-0234.mjs and GRILL-2026-09-20.md as deletions that are not this lane's work. Reviewed against git diff dd3f8f1d..HEAD instead (34 files, +1603/-70, apps/web only) to avoid attributing origin/main's own churn to lane 07.",
+  "verdict": "accept",
+  "gates_rerun": {
+    "pnpm typecheck": "clean - apps/web Done, packages/runtime Done, 0 errors",
+    "pnpm lint": "exit 0 - eslint, check-token-contrast, check-test-manifest(+selftest), check-message-keys(+selftest), check-ui-add-guard(+selftest) all pass",
+    "apps/web full unit suite (node scripts/run-tests.mjs)": "4666 tests, 4664 pass, 0 fail, 2 skipped, 0 todo - exact match to fixround-1.md's own count",
+    "e2e documents-intake-walk (lane triple 3560/3561/3562)": "12 passed - matches fixround-1.md",
+    "e2e documents-viewer-walk (lane triple)": "22 passed - matches fixround-1.md",
+    "e2e document-correction-walk (lane triple)": "14 passed, 1 failed - matches fixround-1.md's disclosed count; failure independently re-verified as the same order-dependent axe color-contrast flake (passes standalone with -g \"each of the three routed views\"); see finding RC-02 for a description-accuracy nuance",
+    "packages/db and packages/runtime diff (dd3f8f1d..HEAD)": "empty - confirms lane made no db/runtime changes, as claimed",
+    "worktree state": "git status clean at HEAD 278f0795...; no push, no PR artifacts found"
+  },
+  "findings_from_review_reports_verified": [
+    {"id": "L07-01", "ticket": 842, "status": "confirmed fixed", "evidence": "CENTS_PARTICULARS now contains amount_cents, opening_cents, closing_cents, adjustment_cents, settled_cents (periodic-adjustments-table.tsx:156-162); periodic-adjustments-table.test.tsx re-run green as part of full suite"},
+    {"id": "L07-02", "ticket": 904, "status": "confirmed fixed", "evidence": "document-detail.tsx:142-144 onTick is now listProcessingTasksForDocument(documentId) alone (one read), replacing the whole-bundle reload()"},
+    {"id": "L07-03", "ticket": 876, "status": "confirmed fixed", "evidence": "apps/web/README.md:486-514 rewrites the 'Three regions on the client tab' bullet for the two-phase mount and adds the #904 settle-poll paragraph"},
+    {"id": "L07-04 / L07-A07", "ticket": 987, "status": "confirmed fixed", "evidence": "apps/web/messages/en.json closedPeriodRefusal now sits at 6-space indent matching reasonLabel/notSerializableHint/asOfHint siblings"},
+    {"id": "L07-05 / L07-A04", "ticket": 987, "status": "confirmed fixed", "evidence": "message reworded to door-neutral 'cannot be changed here'; opening-refusal-and-staleness.test.tsx carries a 987.L07-05 cell driving the same CLR19 refusal out of Supersede (a non-draft door)"},
+    {"id": "L07-06", "ticket": 903, "status": "confirmed fixed (report correction)", "evidence": "independently re-ran grep -rn '^\\s*watermark: ' apps/web --include=*.ts --include=*.tsx: 14 hits in exactly the 9 files the fix round names"},
+    {"id": "L07-07", "ticket": 904, "status": "confirmed fixed", "evidence": "document-detail-live-refresh.test.tsx has a 904.L07-07 cell seeding a live, non-terminal intake row so both polls are genuinely live"},
+    {"id": "L07-08", "ticket": 842, "status": "confirmed fixed", "evidence": "842.absent cell now asserts assert.match(text, /obligation_kind/) before the negative assertion"},
+    {"id": "L07-A01", "ticket": 876, "severity_was": "blocker", "status": "confirmed fixed", "evidence": "independently re-ran documents-intake-walk (12 passed), documents-viewer-walk (22 passed), document-correction-walk (14 passed/1 failed, the disclosed pre-existing flake) on the lane's own triple - all match fixround-1.md exactly"},
+    {"id": "L07-A02", "ticket": 904, "status": "confirmed fixed", "evidence": "document-detail.tsx:257 wires tasksExhausted into DocumentMetadata; document-metadata.tsx renders extraction-tasks-exhausted text plus an extraction-tasks-refresh button gated on exhausted && a non-terminal task"},
+    {"id": "L07-A03", "ticket": 903, "severity_was": "minor", "status": "PARTIALLY OPEN - see RC-01 below", "evidence": "field restored on ReviewQueueEnvelope with an honest comment (matches the review's ask to stop misrepresenting CONTEXT.md), but see RC-01: this leaves #903's own Agent Brief AC2 unmet"},
+    {"id": "L07-A05", "ticket": 900, "status": "confirmed fixed", "evidence": "InterviewRunCard.tsx:70,302,321 wires answerDescriptionId as both the Textarea's aria-describedby and the FieldDescription's id"},
+    {"id": "L07-A06", "ticket": 896, "status": "confirmed fixed", "evidence": "client-financial-charts.test.tsx has a 896.L07-A06 cell driving client-financial-summary.tsx's staleness path and asserting client-money-delayed resolves on the rendered StateBanner"}
+  ],
+  "findings": [
+    {
+      "id": "RC-01",
+      "ticket": 903,
+      "severity": "minor",
+      "title": "The L07-A03 fix leaves #903's own Agent Brief AC2 unmet: watermark is now a documented half-state, which the brief explicitly forbids",
+      "evidence": "#903's newest Agent Brief (gh issue view 903, 2026-09-17T17:00:15Z comment) states AC2 verbatim: 'watermark is either fully wired to a renderer or fully absent from the types; a grep proves no dangling reference' and Desired behavior: '...unless the implementer finds a real consumer, in which case it is threaded through the hook to that consumer; no half-state where it is typed but dropped.' The original build (6f62346e) satisfied this literally by deleting the field (fully absent). The fix round's L07-A03 response restores watermark?: unknown on ReviewQueueEnvelope (apps/web/lib/firm/needs-you.ts:245-254) but confirms via its own new test cell (use-review-queue.test.ts:98-104, assert.doesNotMatch(hookSource, /\\.watermark\\b/)) that use-review-queue.ts still never reads it - i.e. no consumer was found or wired. That is precisely the state the brief calls a forbidden half-state ('typed but dropped'), just now a NAMED one instead of a silent one. L07-A03's own required_fix offered two forks ('restore the field and render it' OR 'keep the deletion and document the honesty gap'); the fix round took neither literally - it restored without rendering. This does mirror the pre-existing compliance?: unknown / lint?: unknown siblings in the same type (a real, older house pattern for this exact envelope), which is a reasonable engineering tradeoff, but it is not what ticket #903's own binding brief asks for, and neither fixround-1.md nor the type's own comment says so.",
+      "required_fix": "Either thread watermark through use-review-queue.ts to a real consumer (satisfying 'fully wired to a renderer'), or revert to full deletion and instead record the CONTEXT.md/estate-concept honesty gap as prose in apps/web/README.md or a code comment near the deletion site (satisfying 'fully absent from the types' while fixing L07-A03's complaint about the false justification) - not both partially. If the compliance/lint precedent is judged to make the half-state acceptable going forward, that judgement should be stated against #903's AC2 explicitly, not left implicit."
+    },
+    {
+      "id": "RC-02",
+      "ticket": 876,
+      "severity": "minor",
+      "title": "fixround-1.md's description of the confirmed-pre-existing axe flake undercounts it: it is 4 nodes across two UI regions with two different ratios, not one node at one ratio",
+      "evidence": "Independently re-ran document-correction-walk twice (full file and standalone with -g). The full-file run reproduces the exact 14 passed / 1 failed count fixround-1.md reports, and the failure is confirmed order-dependent (passes standalone), matching the report's overall verdict of 'confirmed pre-existing flake, not a regression.' However the actual axe violation object carries 4 nodes: two on the selected revision-table row (bgColor #f5f6f4, fgColor #6c7575, ratio 4.36, on the 'done' status chip and the 'filed by a human' date cell) and two on the Facts card's field-name labels (bgColor #ffffff, fgColor #727a7a, ratio 4.39, on 'invoice.total' and 'invoice.vendor_name'). fixround-1.md's L07-A01 section describes it as singular: 'a color-contrast axe violation (text-muted-foreground on bg-muted, 4.49 vs the 4.5 AA threshold, on a selected revision-table row in the Facts tab).' Neither the exact ratio (4.49) nor the bg-muted background nor the single-node count matches what a fresh run actually produces. This does not change the verdict (still pre-existing, still order-dependent, still outside this lane's diff - neither the Facts-card labels file nor the revision-table file appears in git diff dd3f8f1d..HEAD), but the follow-up ticket the report recommends filing should be filed against the real shape (2 locations, 2 ratios), not the narrower one described.",
+      "required_fix": "When filing the recommended follow-up ticket for this contrast debt, correct the reproduction data (4 nodes, 2 locations, ratios 4.36 and 4.39) rather than copying fixround-1.md's description verbatim."
+    }
+  ],
+  "summary": "Recheck confirms every one of the 15 review findings (8 spec-lens, 7 adversarial-lens, excluding notes) that fixround-1.md claims fixed is fixed, verified independently by source inspection plus re-running: pnpm typecheck (clean), pnpm lint (exit 0), the full apps/web unit suite (4664/4666 pass, 2 pre-existing skips - exact match), and all three named e2e walks on the lane's own Playwright triple (12/22/14+1 passed - exact match, including independently re-confirming the one document-correction-walk axe failure is the same order-dependent, pre-existing flake via a standalone -g run). Nothing the fix round touched broke anything else. Two minor items remain open, neither blocking: (1) #903's own Agent Brief AC2 ('fully wired to a renderer or fully absent from the types; no half-state') is not literally satisfied by the L07-A03 fix, which restored watermark as a typed-but-unread field - a documented half-state that mirrors the file's own compliance/lint precedent but is not one of the two forks that finding's own required_fix offered, and the brief's own wording forbids it; (2) fixround-1.md's description of the disclosed pre-existing axe flake (single node, 4.49, bg-muted) undercounts what a fresh run actually shows (4 nodes across two UI regions, ratios 4.36 and 4.39) - the verdict (pre-existing, order-dependent, out of this lane's diff) still holds, but the reproduction data quoted for a future follow-up ticket is not accurate. Verdict: accept (nothing above minor remains)."
+}

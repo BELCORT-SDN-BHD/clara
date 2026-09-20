@@ -358,8 +358,16 @@ Other configuration groups:
 - Models/auth: `OPENAI_API_KEY`; `SUPABASE_JWT_ISSUER`, `SUPABASE_JWT_AUD`, and either
   `SUPABASE_JWT_JWKS_URL` or `SUPABASE_JWT_SECRET`.
 - Intake: `CLARA_INTAKE_CORS_ORIGINS` (exact origins), `CLARA_SPOOL_DIR`,
-  `CLARA_SPOOL_QUOTA_MB`, `CLARA_SPOOL_TTL_MIN`, `CLARA_CLAMD_SOCKET`,
-  `CLARA_CLAMD_MANAGED`. The Fly volume mounts at `/data`.
+  `CLARA_SPOOL_QUOTA_MB`, `CLARA_SPOOL_TTL_MIN` (its reaper owns EVERY `intake-*.(bin|json)` in
+  `CLARA_SPOOL_DIR` since #966, not only uuid-named ones — point `CLARA_SPOOL_DIR` at a directory
+  nothing else writes), `CLARA_CLAMD_SOCKET`,
+  `CLARA_CLAMD_MANAGED`, `CLARA_INTAKE_SIDECAR_QUIET_MS` (default 5000) and
+  `CLARA_SPOOL_RENAME_RETRY_MS` (default 250). The Fly volume mounts at `/data`.
+  The last two are the two halves of the #966 intake/sweep race; raise
+  `CLARA_SPOOL_RENAME_RETRY_MS` on a host whose AV scanner or indexer holds spool files open for
+  longer than a reader does (the failure it buys time for is a live intake failed with an untyped
+  `internal`). Both are explained under "#966 — the intake recovery belt can no longer fail a live
+  intake".
 - Storage: `CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE`, `CLARA_STORAGE_ROLE_JWT`.
   Runtime custody requires the dedicated insert/read role; browser requests receive neither
   this credential nor a signed Storage URL. `realConfig()` refuses `anon`, `authenticated`
@@ -705,6 +713,22 @@ frozen file. The same rule holds for every other module the closure report attri
 entry. The ruling is recorded here; no hardening is implemented by it.
 <!-- /#815 -->
 
+<!-- #849 -->
+The question an author actually asks is the INVERSE of the full report above — "which entries lock
+*this* module" — and until #849 that meant grepping the whole report by hand. Give
+`--print-closure` a module path and it filters straight to the answer:
+
+```sh
+node scripts/check-frozen-workflows.mjs --print-closure packages/runtime/lib/work-trace.mjs
+# freeze-lint closure report — module "packages/runtime/lib/work-trace.mjs" is locked by 6 of
+# 299 @frozen entry file(s):
+#   packages/runtime/workflows/claraWork.v3.impl.ts
+#   ...
+```
+
+An unreached module lists nothing (and says so) rather than silently printing the full report.
+<!-- /#849 -->
+
 <!-- #810 -->
 A RETIRED body does not vanish from the ledger: its manifest entry moves to the top-level `retired`
 record in `frozen-workflows.json` (path → the entry's last frozen `sha256` + the ruling that
@@ -712,6 +736,18 @@ authorised it), which is the only absence `MISSING` and `REMOVED-VS-BASE` accept
 path still present in the tree is its own finding, `RETIRED-PRESENT`. The first such retirement is
 `chatTurn_v1`'s three-file closure (#810, owner ruling 2026-09-15; beta only, runs parked on the
 body cancelled in the hosted cleanup first).
+
+**#849** gave that move a command instead of a hand edit of `frozen-workflows.json`:
+
+```sh
+node scripts/check-frozen-workflows.mjs --retire packages/runtime/workflows/chatTurn.v1.ts \
+  --ruling "#810 owner ruling 2026-09-15"
+```
+
+It refuses — writing nothing — unless the path currently has a manifest entry and its file is
+already gone from the tree (retiring a file still in the tree would silently un-freeze it), and it
+requires `--ruling`, since the ruling is the retired record's whole authority for leaving the
+ledger. Like `--update` and `--lock-deployed`, it is a deliberate local act and is refused under CI.
 <!-- /#810 -->
 
 ### The rollback preflight is a command, and it is a required step
@@ -817,6 +853,51 @@ exit path — and the leg has its own skip probe over `clara.open_interruption` 
 `clara.answer_interruption`. Local evidence 2026-09-15: both legs green in one run; hosted evidence
 pending.
 <!-- /#794 -->
+<!-- #850 -->
+**Since #850 the two legs' scratch builds OVERLAP instead of running back to back.** The
+`clara.open_interruption` / `clara.answer_interruption` probe that decides whether the chatTurn leg
+runs at all is now read at the TOP of the file, once, so the file knows before doing anything else
+whether it will need a second scratch image. The chatTurn scratch build is then started (not
+awaited) the moment the claraWork scratch build finishes — a DIFFERENT scratch directory
+(`previous-chat`), a DIFFERENT class rewrite (`chatTurn`, never `claraWork`) — so its `nitro build`
+child process runs in the BACKGROUND while the claraWork leg does its own work: spawn, admit, stop,
+spawn again, resume, preflight, all HTTP/DB round trips rather than CPU work. The chatTurn leg later
+`await`s that already-in-flight promise instead of starting a fresh build, so on any run where the
+claraWork leg's own exercise takes longer than one scratch build, the file pays close to ONE scratch
+build's wall clock for two, rather than two in sequence. Neither leg's proof moved: each image is
+still staged, rewritten and built exactly as `buildPreviousVersionImage` always did it, and each is
+still independently scanned against build B's roster for the "differs by exactly one body"
+invariant before anything is spawned — verified by deliberately colliding the two builds' scratch
+directory names (the plausible mistake this change invites) and watching the file fail loudly
+(`ENOENT` on the claraWork build's own artifact, ripped out from under it mid-flight) before
+reverting to the distinct names. Local evidence 2026-09-20 (Windows host, both legs green, same
+assertions): sequential 36.6s–42.5s whole-file wall clock across two runs before this change,
+32.3s–34.8s across two runs after, each scratch build 5–6s on this rig. The CI wall-clock figure
+(this rig has no CI runner) is in `.github/actions/db-live-gates/action.yml`'s own comment beside
+the step, marked unverified until the next CI run measures it.
+
+**THE FAILURE MODE THIS FIX ALSO CLEANED UP (L06-850-B, fix round 1).** The background
+`chatBuildPromise` used to be neither awaited nor guarded before the outer `finally`'s
+`removeScratchTree()` — a failure early in the claraWork leg (before this file's own `await
+chatBuildPromise`) could reach that `finally` while the background `nitro build` was still writing
+into `.scratch/two-build/previous-chat`, and `rmSync`ing that directory out from under it threw
+`EBUSY` on this rig, reproduced deterministically 3/3 times by an injected early failure. A throw
+from a `finally` REPLACES whatever the `catch` above it already threw, so the drill's real error
+(here, the injection itself) never appeared in the output at all — only the `EBUSY` stack. Fixed by
+awaiting the background build (swallowing its own outcome — cleanup is not a second verdict on it)
+immediately before `removeScratchTree()`, itself now wrapped so a cleanup failure can never mask a
+result either. Re-run with the same injected failure: the real error surfaces cleanly and the
+scratch tree is removed without error.
+
+**A CONCURRENCY RISK NAMED, NOT SOLVED (L06-850-C, fix round 1).** Every number above came from a
+24-core rig, where a background nitro build is nearly free. GitHub-hosted runners have 2-4 cores,
+where that build competes with the claraWork leg's own two spawned images and its
+`FETCH_TIMEOUT_MS = 15000` polls. Measured directly on this rig: the same overlapped build took 5.1s
+idle and 36.9s (7x) with one concurrent `pnpm typecheck` running, and that run FAILED on a
+`pollTask` timeout inside the claraWork leg — the CPU-bound work #850 moves INTO that leg's own
+window. See `.github/actions/db-live-gates/action.yml`'s own comment for the full measurement and
+why no guard is added here.
+<!-- /#850 -->
 
 ### #623 — the accounting-Work lane (`claraWork_v1`, `chatTurn_v18`)
 
@@ -977,6 +1058,36 @@ actually publishes.
 Standalone, like `intake-e2e.mjs` — not collected by `node --test`. Wired in
 `.github/actions/db-live-gates/action.yml` as its own step, reusing the same throwaway
 database and bootstrapped world the Slice-5 step just built.
+
+<!-- #967 -->
+**Drains its own queue before exiting.** Sharing one database and world across three CI legs
+proves a real cross-leg chain (this leg starts where `intake-e2e.mjs` stops), but nothing used to
+drain the Workflow queue between them: each leg's engine dies with its process, so anything it left
+non-terminal sat inert until the NEXT leg's fresh engine booted its own consumers and found it —
+measured at roughly 1.27 million log lines of leftover concurrency-limit/retry churn, dominated by
+`lib/classify.mjs`'s own capped-task line, before a normal passing run's THIRD leg finished. Both
+`intake-e2e.mjs` and this file now call `tests/queue-drain.mjs`'s `waitForQueueDrain` right before
+their own `process.exit(0)` — the same two censuses `lib/rollback-preflight.mjs` already exposes
+(`censusNonTerminalRuns`, `censusUnboundTasks`), plus a third the two of them deliberately exclude
+(a run left QUEUED by an earlier leg that FAILS while THIS leg's own engine drives it — L06-967-B,
+fix round 1: `tests/queue-drain.mjs`'s own header explains why that needs a baseline rather than a
+blanket "any failed row" rule), bounded (30s default), never a fixed sleep, and each leg's own
+assertions already poll everything they admit to a terminal status first, so a clean run drains in
+well under a second. `tests/intake-batch-e2e.mjs` deliberately does NOT call it: it is the last leg
+on this database in the CI job and its own §5 scope ends with live rows on purpose (a declared-fact
+wait, a quota wait, an unassigned failed upload) that nothing downstream needs drained.
+
+**RELEASE RISK, NAMED RATHER THAN DISCOVERED LATER (L06-967-C, fix round 1):** the drain converts
+today's noisy-but-passing CI run into a RED one on exactly the input #967 was filed about. A capped
+`classify` task some earlier run left `queued` forever (by design — `lib/classify.mjs`'s own
+`MAX_ATTEMPTS` backstop) or a permanently-undispatchable `ocr`/`structured_parse`/`none` task with
+no transport metadata in its sidecar (0051 §2's own guard, `lib/reconciler-documents.mjs:396-413`)
+can never drain, so leg 1 or leg 2 now FAILS at the 30s deadline instead of leg 3 running noisily —
+intended, and the first CI run of this fix may expose it for the first time. A local reproduction
+against this rig's own reused `clara_intake_ci` hit exactly this: once such orphaned rows
+accumulated from an earlier, out-of-order local run, `waitForQueueDrain` correctly refused to call
+the queue drained and timed out (see the action.yml comment above this step).
+<!-- /#967 -->
 
 NAMED RESIDUAL: leg 5 proves the LOST-FINALIZE-RESPONSE convergence, not a SIGKILL
 between finalize and checkpoint. This file boots the runtime in-process (as
@@ -1275,7 +1386,11 @@ so the route's honest 429 never becomes a 500.
 needs the world bootstrapped first (`pnpm --filter @clara/runtime exec bootstrap`). Its N is
 MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one UTC day. It records,
 rather than hides, children lost to a Windows-only EPERM race between the reconciler's sidecar
-reads and `writeIntakeMeta`'s `rename` (the #693 family).
+reads and `writeIntakeMeta`'s `rename` (the #693 family). Runs THIRD on the same shared
+`clara_intake_ci` database and world `intake-e2e.mjs` and `intake-admission-e2e.mjs` build (#967) —
+it does NOT call `tests/queue-drain.mjs` itself (nothing in the CI job follows it on this database),
+but it is the leg that inherits a clean queue from the two before it now draining their own before
+they exit.
 
 **THE BELT'S COUNTERS DISTINGUISH A REFUSAL FROM A DEAD END.** `reconciler-batches.mjs` returns
 `batchCancelFailed` for refusals and `batchCancelBlocked` for a parent whose EVERY child refused
@@ -1283,3 +1398,355 @@ CLR04 — which means its stored canceller has lost authority and no future swee
 because the fan-out cannot substitute an identity (`clara._work_door_ctx` hashes `{work, author}`).
 The blocked parent is logged by name and `clara.get_intake_batch` reports the same condition to the
 human as `cancel_blocked`.
+
+**#1027 — LEG 4 CONVERGES BEFORE IT JUDGES.** The cross-firm poison leg used to make two
+single-shot observations (one sweep, one read, twice) of facts the World produces asynchronously,
+and it discarded its own settle failures. Both observations reddened CI at random, on `main` and on
+a feature branch (jobs 105954490814 and 106051996127). Both are now bounded polls in
+`tests/queue-drain.mjs`'s shape — re-run the sweep, re-read the state — each with ITS OWN measured
+deadline: `CLARA_P636_LEG4_P_DEADLINE_MS` 5 s for the refusal count (3.3x the worst lateness ever
+measured, and deliberately under the ~8 s in which the World drives firm P's own children terminal,
+past which no amount of waiting can help) and `CLARA_P636_LEG4_Q_DEADLINE_MS` 8 s for firm Q's
+terminal state (2.9x its worst, larger because the engine rather than this fixture produces it);
+poll 500 ms. Nothing is weakened: the refusal count is cumulative over the polled sweeps and must
+still reach at least one, it must now ALSO be ATTRIBUTED to firm P (`batchCancelBlocked`, which the
+belt raises only for a parent whose every child refused CLR04, plus `clara.get_intake_batch`'s own
+per-parent `cancel_blocked` verdict observed inside the same loop), firm Q must still reach
+`cancelled`, `batchCancelOk` is asserted on EVERY sweep rather than one, and a settle that cannot be
+performed is retried inside the deadline and then named with its task id and last error instead of
+being swallowed. A deadline prints both firms, both parents, both states, every child's Work status,
+the refusal and blocked counts, both `cancel_blocked` verdicts and the last receipt, so a red is
+diagnosable from the job log alone.
+
+Measured on throwaway clones of a migrated database (WSL, Node 22): unperturbed, both polls converge
+on the FIRST sweep in 8-40 ms, so the happy path costs nothing. Under
+`CLARA_P636_LEG4_FAULT=slow_settle` (firm Q's children held running with every settle held back) the
+leg's own settles never land and firm Q's parent still converges — 6 sweeps over 2774 ms, driven by
+the World — where the single-shot read failed at once. Under `CLARA_P636_LEG4_FAULT=late_poison` (the
+poisoned parent's decision lands 1.5 s late) the refusal is counted after 4 sweeps in 1554-1673 ms,
+where the single-shot read failed at once; that run is also the standing proof that the per-parent
+`cancel_blocked` verdict is not a constant, because the loop polls through three sweeps of `null`
+before it flips. With the belt deliberately broken so a refusal is recorded as a success, the polled
+block still reds — at its deadline, 11 sweeps in 5560 ms, with the census.
+
+**What #1027 did NOT fix, and how to recognise it.** Firm P's children are ordinary admitted Work,
+so the World can drive them terminal on its own within seconds; when it does, the parent has no live
+children left and the belt settles it — correctly. A leg slow enough to see that reds on "firm P's is
+honestly still stopping", or on the refusal deadline. THE CENSUS IS WHAT TELLS THAT APART FROM A REAL
+BELT REGRESSION, and firm P's children reading `failed` is not by itself the discriminator: the same
+census appears when the belt stops counting refusals at all. Read the counters instead.
+`blocked >= 1` (and `cancel_blocked=canceller_not_active` at the moment of the red) means the belt
+DID refuse firm P's children, so a terminal parent means the World terminalised them first: the
+separate, unfixed defect. `refusals=0 blocked=0` means the belt is not counting firm P's refusals at
+all: a regression, and exactly what this leg's vacuity control produces (measured: a `fanOutCancel`
+that records a CLR04 refusal as a success reds the P loop at its deadline after 11 sweeps in 5560 ms
+with `refusals=0 blocked=0`, throwaway clara_814).
+
+## #1026 — the live gates' heap budget
+
+**The defect.** Every `db-live-gates` step that boots a durable World ran its leg at the host's
+default V8 ceiling (~4144 MB on the runner and on this rig), and nothing declared otherwise. A leg
+that boots the bundle, the Workflow world, the leader, the engine and a hundred concurrent document
+ingests in ONE process has no reason to collect its churn until that ceiling, so peak memory for a
+single run of ONE leg varied between 2.0 GB and 4.4 GB on identical code, and twice the job simply
+died: job 105215992382 (2026-09-17, Wave-B fault gates) and job 106048901216 (2026-09-20, the #636
+intake batch leg), both `FATAL ERROR: Reached heap limit`, both exit 134.
+
+**The budget, and where it lives.** `scripts/ci/world-gate.mjs` — ONE place,
+`HEAP_BUDGET_MB = 2048`. Every leg in `.github/actions/db-live-gates/action.yml` is launched through
+it (`node "$GITHUB_WORKSPACE/scripts/ci/world-gate.mjs" tests/<leg>.mjs`), so the budget reaches the
+leg AND every process it spawns, through `NODE_OPTIONS` — appended to whatever the caller already
+set, never replacing it. One step that has been measured to need a different ceiling states it with
+`CLARA_GATE_HEAP_MB` on that step, with its measurement recorded beside it. A leg that dies by the
+budget is attributable: the launcher prints the step (`CLARA_GATE_STEP`), the command, the pid and
+the budget as a GitHub `::error::` annotation. An ordinary red (exit 1) is never blamed on memory —
+`scripts/ci/world-gate.selftest.mjs` holds that as a cell, and runs in `pnpm lint`.
+
+**The measurement method, and where the figures live now.** The table below was measured by hand on
+a throwaway database cloned with `createdb -T` from a migrated template, one leg per run under
+`/usr/bin/time -v` (peak RSS) with `--trace-gc` parsed for peak heap occupancy (WSL 2, Node
+v22.23.2, 24 GB host shared with ten other workers). Reproduce with the same two figures on both
+sides of any change to the budget.
+
+That is a one-off, and a one-off only ever covers the legs somebody had time to run. So the
+measurement is now CONTINUOUS: on Linux the launcher samples the child's own `/proc/<pid>/status`
+VmHWM and prints one line per leg,
+
+```
+[world-gate] peak <step> | node <leg> | budget 2048 MB | peak RSS <N> MB (<p>% of budget) | exit 0
+```
+
+so every CI run of `db-live-gates` records all 24 legs by itself. Read them out of a job log with
+`grep '\[world-gate\] peak'` (`gh api repos/<owner>/<repo>/actions/jobs/<id>/logs`). It is
+best-effort by construction — off Linux the line says the figure is unavailable, a read that throws
+is counted and ignored, and nothing about it can turn a green leg red.
+
+| Leg | Budget | Peak RSS | Peak heap occupancy | Wall clock | Result |
+|---|---|---|---|---|---|
+| `intake-batch-e2e.mjs` | host default (4144) | 2.22-4.21 GiB over 17 runs | up to ~4.1 GB | 1:02-3:11 | passed here; aborted twice in CI |
+| `intake-batch-e2e.mjs` | 2048, no in-process bound | 1.97 / 2.11 GiB | 1832 / 1969 MB | 0:56 / 1:14 | pass |
+| `intake-batch-e2e.mjs` | 2048 + heap bound | **0.82 / 0.88 / 1.06 GiB** | 696 / 734 / 926 MB | 2:35 / 2:46 / 3:22 | **3 consecutive passes** |
+| `intake-batch-e2e.mjs`, THROUGH the launcher | 2048 + heap bound | **0.79 / 0.91 / 0.93 GiB** | bound peak 657 / 717 / 795 MB | 2:00 / 2:17 / 2:51 | **3 consecutive passes, final code** |
+| `intake-admission-e2e.mjs` | 2048 (through the launcher) | 1.15 GiB | — | 0:46 | pass |
+| `accrual-e2e.mjs` | 2048 (through the launcher) | 0.43 GiB | — | 2:07 | pass |
+
+**Why the budget alone is not the whole fix, and what the in-process bound costs.** V8 grows to
+whatever ceiling it is given: at 2048 without an in-process bound, occupancy runs right up to the
+ceiling before every collection (1832-1969 MB of 2048) and peak RSS lands at 98-105 % of the budget,
+so no budget can ever be "25 % above the measured peak" while the peak is defined by the budget.
+What the leg actually RETAINS is ~140-210 MB — the post-collection floor in its own GC trace,
+consistent with `tests/heap-bound.mjs`'s independently measured 119 MB live set. So
+`intake-batch-e2e.mjs` now also arms `startHeapBound()` (the helper `interview-e2e.mjs` has used
+since the 2026-09-17 abort), which forces a full collection whenever the heap passes 512 MB.
+**THE BOUND, NOT THE BUDGET, IS WHAT BUYS THE 25 % MARGIN**: it costs 8 to 30 forced collections per
+run and takes peak RSS from 1.97-2.11 GiB to 0.79-1.06 GiB, about half the budget.
+
+Its price, against the LIKE-FOR-LIKE baseline (the same rig, the same budget, the bound the only
+difference): **2048 without the bound ran 0:56 and 1:14; 2048 with it ran 2:00 to 3:22** — the bound
+roughly doubles this leg's wall clock here. (The step took 179 s on the runner itself in CI run
+35508993162, against 107-172 s historically at the default ceiling, so the doubling is a property of
+this loaded 24-core host, not of CI.) Two consequences worth keeping in mind:
+
+- The leg's post-change peaks are a property of the bound's 512 MB forced-collection threshold
+  (`tests/heap-bound.mjs`), not of the runtime. They are NOT comparable with any pre-change figure,
+  and any future review of the budget must hold the bound constant.
+- Whether the longer wall clock widens the window of LEG 4's third race (firm P's children being
+  driven terminal by the World) is **not** established. What IS measured is that LEG 4's own polls
+  are unaffected: with the bound armed, both converge on the first sweep in 8-40 ms across five
+  consecutive runs, the same as without it. The window opens on elapsed time inside LEG 4, and LEG 4
+  does not get slower; the rest of the leg does.
+
+**The two historical aborts, re-checked.** Job 105215992382 died in `interview-e2e.mjs`, which
+already arms `startHeapBound()` (added in response to that very abort) and now also runs under the
+2048 MB budget — a process that holds a flat 119 MB live set cannot reach a 2 GB ceiling, so that
+signature is closed on both axes. Job 106048901216 died in `intake-batch-e2e.mjs` at 4018 MB of a
+4144 MB ceiling; the same leg on this rig now peaks at 1.06 GiB of a 2048 MB (2 GiB) ceiling across three
+consecutive passes, with the retained set two orders of magnitude below the budget. Neither can be
+re-run against the new budget on its own runner from here, so this is a re-check by measurement of
+the same legs, not a replay of those two jobs.
+
+**All 24 legs, on the runner.** CI run 35508993162 (job 106073526212, `db-live-gates`, 21m29s) is
+green at this branch's head with every leg through the launcher at 2048 MB: the Slice-5 step 178 s,
+the #633 step 13 s, the #636 step 179 s, the Wave-B step (20 legs) 668 s, no `::error::` annotation
+and no `Reached heap limit` anywhere in the log. That establishes that every leg PASSES at the
+budget; the per-leg peak line above is what will record what each of them actually used, from the
+next run onwards.
+
+**Not covered.** The `nitro build` children the #637 two-build drill spawns inherit the budget
+through `NODE_OPTIONS`; a full runtime build was measured to succeed under it, with the control that
+the same build at `--max-old-space-size=48` dies with exit status 134, so the flag is provably in
+effect. The three `pnpm --filter @clara/runtime exec bootstrap` calls that PROVISION the World are
+deliberately outside the budget (short-lived DDL, not a World-booting process, and neither historical
+abort was in one) — the action's own comment says so. A leg that turns out to need more than the
+budget says so attributably and raises it with `CLARA_GATE_HEAP_MB` plus its own figure.
+
+## #852 — the chat-clarify belt inside the sweep receipt
+
+**What moved.** `reconcileChatClarifies` used to run from `lib/leader.mjs`, in its own try/catch,
+beside `runReconcilerSweep`. It is now the FIRST belt inside the sweep, registered exactly like
+every sibling. `leader.mjs` reads its counters off the sweep result and no longer imports it.
+
+**Why it was outside, and what the fix actually is.** The reason was IMPORT DIRECTION, not cadence:
+`lib/reconciler-chat-clarify.mjs` read `isHookNotFound` and `resumePayloadFor` from
+`lib/control.mjs`, and `control.mjs` imports `settleCancelledByKind` from `lib/reconciler.mjs` — so
+registering the belt inside the sweep closed `reconciler → chat-clarify → control → reconciler`.
+Both symbols now live in `lib/hook-resume.mjs`, a LEAF that imports nothing first-party; `control.mjs`
+re-exports them by name so every existing import site keeps resolving. The edge is removed rather
+than routed around.
+
+**What the receipt now carries.** The five `chatClarifyResumed / Expired / Landed / ProbeFailed /
+SettleFailed` counters ride `runReconcilerSweep`'s returned object, and a belt failure is named in
+`beltErrors` as `"chat clarify reconcile"` (logged with the estate's `[reconcile] <belt> error:`
+idiom) instead of being a log line only the leader could see. The estate law still holds: a FAILED
+belt contributes no counters at all, so `"chatClarifyResumed" in swept` is positive evidence that
+the belt was REACHED and did not throw — not that it did any work: the belt returns the same
+zeroed counter bag, and issues no statement at all, when `resumeHook` is absent or the delivery
+columns are not there yet.
+
+**Order.** The belt runs first of the belts and immediately after the heartbeat — the heartbeat is
+not a belt but the sweep's one deliberate fail-fast. Say the consequence out loud, because an
+incident is the wrong time to rediscover it: a sweep that cannot record its own beat now skips
+this belt too, where the leader's old standalone call ran regardless. That follows the heartbeat's
+own argument (nothing that breaks a single-row upsert would spare a belt on the same connection),
+and the next sweep is ~2 s away. The order is load-bearing: `reconcileTasks`'
+section C would mirror engine truth onto the same parked chat turn as `cancelled`/`engine_lost`,
+and only this belt writes the honest `expired` + `clarify_closed` terminal.
+
+**Evidence.** `tests/chat-clarify-sweep-wiring.test.mjs` (eight cells: the leaf's empty import list,
+the belt closure never reaching `reconciler.mjs`, the ONE pre-existing `reconciler ↔ reconciler-wake`
+cycle pinned by name, the five counters, the contained failure, the statement order, the leader's
+silence). `tests/control-chat-clarify.test.mjs`'s `chat.wiring` cell pins the registration.
+
+## #966 — the intake recovery belt can no longer fail a live intake
+
+**The defect, measured.** `recoverPendingDocumentIntakes` opened and parsed EVERY pending intake's
+spool sidecar on every leader sweep, though it acts on at most ten. A live intake writes its own
+sidecar atomically (temp file, then `rename()` into place) and on Windows a `rename()` over a
+destination another handle holds open fails `EPERM` — so a sweep landing between two
+`writeIntakeMeta` calls threw inside the intake, which was then failed with an untyped `internal`
+(a 500 on the byte PUT). #636 measured one child in six at the default 2 s cadence.
+
+**Both halves of the fix.**
+
+- **The writer.** `lib/spool.mjs`'s `atomicJson` now renames through `renameIntoPlace`, which
+  retries only `EPERM` / `EACCES` / `EBUSY` against a deadline (`CLARA_SPOOL_RENAME_RETRY_MS`,
+  default 250 ms) and surfaces every other failure immediately. A reader's handle lives for
+  microseconds, so the retry turns a hard failure into a sub-millisecond wait — the shape
+  `graceful-fs` has shipped for a decade. A rename that still fails takes its temp file with it.
+  The deadline is 250 ms rather than the 2000 ms of the first cut because a handle that is NEVER
+  released (a stuck indexer or AV scan) costs the full deadline once per status transition per
+  intake, on the intake path — measured at `EPERM after 2003 ms`. The answer is the same either
+  way; only the stall differs.
+- **The reader.** `listIntakeMetaEntries()` returns DIRECTORY METADATA — `{name, path, mtimeMs,
+  read()}` — and opens nothing. `stat()` does not hold a handle a rename can block; `open()` does.
+  The belt's recency guard (always there, always five seconds) now runs on `mtimeMs` BEFORE the
+  open rather than on the sidecar's `updatedAt` field after it. The quiet skip happens BEFORE any
+  budget is taken, so a spool full of live uploads cannot starve the belt of the crashed intake
+  behind them. `listIntakeMetas` / `listTaskMetas` keep their exact old contract, expressed over
+  the lazy shape so the two cannot drift. The knob is `CLARA_INTAKE_SIDECAR_QUIET_MS` (default
+  5000).
+- **The ten are ten sidecars that CARRY AN INTAKE** (fix round 1; wording corrected in fix round 2
+  after review finding SPEC-3). The first cut took its ten off the raw listing, so a sidecar
+  carrying no intake — the `{corrupt, file}` marker, a body with no `intakeId`, a file collected
+  between the listing and the read — spent one of the ten, and ten such files ahead of a crashed
+  intake blinded the belt silently. Before #966 that was impossible, because the filter ran before
+  the slice. The belt now reads past those without spending a slot (`RECOVERY_BATCH`), under a
+  separate, larger bound on opens (`RECOVERY_OPEN_BUDGET`, 3x), because an open is still the handle
+  a live rename collides with. **It is not ten actions in the wider sense, deliberately:** a
+  sidecar that carries a real intake in a status the belt cannot act on — `uploading`, `receiving`,
+  a large body still streaming, whose last status write is older than the quiet window — spends a
+  slot while nothing is done with it, exactly as it did before #966. Exempting those would let one
+  sweep open up to thirty live sidecars instead of ten, tripling the belt's handle-taking on the
+  very files this ticket exists to stop touching; and unlike `{corrupt}` junk, a live sidecar
+  clears itself, because it carries a 15-minute capability and the expiry arm is an action the belt
+  always takes. `tests/intake-sidecar-race.test.mjs`'s `p966.budget: a settled LIVE upload DOES
+  spend one of the ten` pins both halves. Unreadable sidecars are reported once
+  per sweep — `[reconcile] intake recovery skipped N unreadable sidecar(s) this sweep: …` — never
+  once per file. The residual is stated rather than hidden: more than thirty settled-but-unusable
+  sidecars ahead of a crashed one still delay it, and `sweepSpoolTtl` is what ends that — it now
+  reaps any `intake-*.(bin|json)` past the TTL, not only uuid-named ones, which is the one shape
+  no `removeIntakeSpool(id)` will ever be called for. (`atomicJson`'s `.tmp` files stay unmatched;
+  the writer that made them removes them.)
+
+**A consequence, stated.** An intake whose capability has already expired but whose sidecar was
+written in the last five seconds is expired on the NEXT sweep rather than this one. That is the
+guard doing its job: a sidecar written moments ago belongs to a request still in flight.
+
+**Evidence.** `tests/intake-sidecar-race.test.mjs` — the host property measured both ways (a held
+read handle IS `EPERM`; a `stat` is not), 500 writes against concurrent sweeps with zero failures
+(428 of 500 failed before the fix), the quiet-window sidecar never opened (counted double), the
+ten-action budget past twelve unusable sidecars, the thirty-open bound, the give-up deadline under
+a permanently held handle, the TTL reap of an unreadable sidecar, the expiry arm, and the listing
+contract. Every cell that touches the filesystem takes its own spool directory, so the suite's
+result never depends on the order its cells ran in or on how long the box took between them. `tests/intake-db.test.mjs` carries the
+end-to-end recovery cell (`p966 the belt still recovers a crashed mid-flight intake`) and the
+abandoned-sidecar expiry cell, both of which now age their fixture's mtime rather than sweeping
+against a file they wrote in the same millisecond.
+
+## #981 — one structured-detail carrier on a durable-Work refusal, instead of a fold per refusal
+
+`src/workRoutes.ts` turns one raised database error into one HTTP answer (`workErrorResponse`). It
+used to take the door's typed `detail` jsonb APART — a shared fold that overwrote `reason` with
+`detail.constraint` for three field-scoped reasons, and, inside the trade-invoice route's own
+catch, a second differently-shaped fold that lifted `detail.candidates` onto a body of its own.
+Every refusal that carried structured detail therefore needed a new fold here AND a new arm on
+`apps/web/lib/work/api.ts`; until both landed, the detail did not exist as far as a browser was
+concerned. The rationale in the code cited `apps/web/lib/wire.ts` "discarding every detail key but
+`reason`" — true when written, false since #629 added `parseRefusalDetail`, and never applicable
+to THESE bodies anyway, because the durable-Work client parses this JSON itself and never goes
+through wire.ts.
+
+**The door's typed detail now rides back whole, under `detail`, on every 400 and 409 this file
+builds.** `refusalDetail()` parses it once; `reasonOf` and `detailField` are views on that one
+object. The top-level keys are PROMOTIONS of what a caller keys on (`reason` focuses a control,
+`work_id` renders a link, `status` renders the state that made an act illegal) and every one of
+them is byte-for-byte what it was — `tests/work-routes-unit.test.mjs`'s `LEGACY_BODIES` is the
+twelve-row proof, driven in both directions.
+
+**What survives of the folds, and why.** The three constraint reasons (`invalid_basis`,
+`invalid_source_ref`, `invalid_claim`, now the named set `CONSTRAINT_FOLD_REASONS`) still answer
+the database's `constraint` token as the wire `reason`, because this route refuses the cheap cases
+ITSELF with a bare token and the two halves must not speak two vocabularies for one refusal. The
+raw token is on the carrier as well. It folds by NAME, never "whenever a constraint exists":
+`invalid_adjustment`, `stale_basis` and `adjustment_lines_mismatch` carry one too and have always
+ridden back under their own names. The trade-invoice fold is gone entirely; what is left of it is
+`TRADE_INVOICE_FIELD_DEFAULTS`, one row of DATA saying which control to focus when the door raises
+`party_ambiguous` with no `field` at all.
+
+**403 and 404 carry no carrier.** A 404 here answers both "no such Work" and "a Work that is not
+this firm's", and that identity is the point — no existence oracle across firms. A typed reason on
+it would loosen an access answer.
+
+**The carrier is measured over the real wire in three World e2es, not one.** `workErrorResponse` is
+driven as a pure function by `tests/work-routes-unit.test.mjs`; what an actual HTTP response
+carries is pinned by `tests/work-journal-e2e.mjs`, `tests/periodic-adjustment-e2e.mjs` and
+`tests/staff-expense-claim-e2e.mjs`, each of which reads the unfiled-document 400 off the socket,
+destructures `detail` out, asserts the promoted half is exactly what it was before #981, and
+asserts the door's own object beside it. All three carried the same pre-#981 literal
+`assert.deepEqual(body, {error, field, reason})`, and `node:assert/strict` deepEqual is
+deepStrictEqual — one additive key fails it. Any future change to the promoted half of a
+durable-Work refusal has to move those three lines together.
+
+## #980 — the shared World harness's third script, and the trade-invoice lane's park and cancel
+
+`tests/work-journal-serve.mjs` is the child bootstrap nine standalone World e2es spawn. It offered
+two scripted-model conversation shapes, `post` and `narrate`, so no lane spawning it could reach
+the ONE place a run blocks on a human. It now offers a third, `ask_question` (#980): read the
+chart, ask ONE typed clarifying question and stop, and record the admitted basis only once the
+answer comes back as a `tool-result` for `ask_question`. The branch is the shape
+`tests/work-question-serve.mjs` already drove for the journal lane, lifted into the shared file;
+`post` and `narrate` return before it and no existing caller sets the new value, which
+`tests/work-journal-e2e.mjs` — the estate's only `narrate` driver — confirms on the rig rather than
+by reading. The census behind "no existing caller" is one grep over `CLARA_WORK_TEST_SCRIPT`: all
+NINE spawners of this bootstrap `delete base.CLARA_WORK_TEST_SCRIPT` when they build the child env,
+so the `post` default applies; `accrual`, `plan-occurrence` and `prepayment-occurrence` re-set it to
+`"post"` explicitly on their crash legs; `work-journal-e2e.mjs` sets `"narrate"` on one leg; and
+only `trade-invoice-e2e.mjs:609` sets `"ask_question"`, with the scope var beside it. No other
+value is set anywhere in the repo.
+
+**The park IS the window, which is why one script serves both new legs.** While a run is parked
+the Work is live, the run holds the task and NOTHING has been admitted. `tests/work-cancel-serve.mjs`
+manufactures the same window with a gate file and a bound; the estate's own park holds it open
+until a human acts.
+
+**`tests/trade-invoice-e2e.mjs` gains legs 6 and 7.** Leg 6 drives a REPLAY into the parked
+window: the run asks, the Work reads `awaiting_input`, the SAME intent key is re-POSTed (one Work,
+one task, one invoice, ONE question — it does not re-ask, and it does not un-park), a human answers
+through `clara.answer_work_question`, and the whole thing converges on one entry, one receipt, one
+open item, with a further replay AFTER the answer still resolving to the same Work. Leg 7 spawns
+`tests/work-cancel-serve.mjs` UNCHANGED — borrowing that file's hold rather than copying it into the
+shared harness — holds the model before `record_journal_entry`, cancels there, and pins the whole
+absence of effect: `stopping` over the real route, `cancelled` as the terminal, zero entries, zero
+receipts, zero open items, and an invoice ledger that never reaches `posted`. The invoice ROW
+survives, because it was born inside the admission transaction and a cancel is not a retraction.
+
+**The `ask_question` script is scoped to ONE client, and the scope is mandatory.** One supervisor
+serves every queued accounting Work on the database — leftovers from earlier legs and from earlier
+crashed runs included — so an ask arm that fired on whatever the process picked up parked FOREIGN
+Work on a question nobody is holding, and `awaiting_input` is a state no leg polls out of: the next
+leg times out after 90s instead of measuring anything, and the row stays pending on the rig for
+good. `CLARA_WORK_ASK_ONLY_CLIENT` names the client whose Work may be asked; every other Work takes
+the `post` branch exactly as the default script would have taken it, and a caller that forgets the
+scope gets a loud child exit rather than a quiet park on a stranger's Work. Leg 6 admits a
+BYSTANDER Work for a second client in the same window and asserts it was never asked and settled on
+its own — the cell that says so. **This is a deviation from #980's own wording** and is recorded
+as one (reviewed finding L10S-3): the ticket says the third shape is "selectable the same way" as
+the other two, i.e. by `CLARA_WORK_TEST_SCRIPT` alone, and it takes two env vars instead. Deriving
+the scope from whatever envelope the process picked up first would put the choice back in the
+hands of queue order, which is the failure the gate exists to prevent; folding the two into one
+selector value (`ask_question:<client id>`) is open to a later lane.
+
+**Four World e2es' local gates now admit `clara_l<NN>`**, the per-lane database shape of the riders
+wave, beside `clara_rt_test` / `clara_wave_b_ci` / `clara_<ticket>`: `trade-invoice-e2e.mjs`,
+`work-journal-e2e.mjs`, `periodic-adjustment-e2e.mjs` and `staff-expense-claim-e2e.mjs`. Still
+loopback-only, still a parsed DSN equality check against the PG env, still fail-closed. The
+remaining spawners (`accrual`, `plan-occurrence`, `prepayment-occurrence`,
+`fixed-asset-acquisition`, `work-egress`, `work-cancel`, `work-question`) still carry the narrow
+literal and cannot be run on a lane rig; one shared `tests/local-db-gate.mjs` is the standing
+follow-up.
+
+**No World e2e removes its gate directory recursively.** `tests/trade-invoice-e2e.mjs`'s hold gate
+cleans up its own two files and leaves `.trade-invoice-gates/` alone: the directory is shared with
+every other gate on the rig, and `open()` — the one call that must never throw, because a held
+child waits on that file forever — now re-creates its parent first. Both gate directories are
+git-ignored, because a watchdog exit skips the `finally` that would have removed their files.

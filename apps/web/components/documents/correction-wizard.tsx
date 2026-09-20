@@ -26,7 +26,7 @@ type Step = "select" | "preview" | "proposed" | "done";
  */
 export function CorrectionWizard({
   open, suspended = false, document: doc, fromClient, clients, clientsErr, clientsClr,
-  onClose, onDone, onShowImpact,
+  onClose, onDone, onShowImpact, initialToClient,
 }: {
   open: boolean;
   /** #646 — the impact Sheet is open, so this Dialog steps aside WITHOUT resetting. Appendix C §4
@@ -49,10 +49,15 @@ export function CorrectionWizard({
   /** #646 — hand the blast radius to the Sheet that renders it (AC6). The caller suspends this
    *  Dialog while that Sheet is open. */
   onShowImpact?: (preview: CorrectionPreview, toClient: string) => void;
+  /** fix-round SPEC-1005-1 — no production caller sets this; it exists so a test can mount the
+   *  wizard with the destination Select already in a SELECTED state and assert its trigger's text
+   *  on first render, the same way every other #1005 call site's own cell does, without needing a
+   *  seam this repo's test harness does not have (opening a Base UI Select's portalled popup). */
+  initialToClient?: string;
 }) {
   const t = useTranslations("ClientDocuments");
   const [step, setStep] = useState<Step>("select");
-  const [toClient, setToClient] = useState("");
+  const [toClient, setToClient] = useState(initialToClient ?? "");
   const [preview, setPreview] = useState<CorrectionPreview | null>(null);
   const [proposal, setProposal] = useState<{ correction_id: string; plan_hash: string } | null>(null);
   const [attestation, setAttestation] = useState("");
@@ -61,6 +66,10 @@ export function CorrectionWizard({
   const [clr, setClr] = useState<PartClr>(null);
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name || id;
+  // #1005: the SAME filtered roster feeds the option list and the trigger's label
+  // lookup, so the two can never diverge into "the trigger shows an id its own list
+  // doesn't offer".
+  const toClientOptions = clients.filter((c) => c.id !== fromClient && c.status === "active");
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true); setErr(null); setClr(null);
@@ -102,9 +111,14 @@ export function CorrectionWizard({
           <div className="flex flex-col gap-2">
             <DoorFeedback err={clientsErr} clr={clientsClr} />
             <Select value={toClient} onValueChange={(v) => setToClient(v ?? "")}>
-              <SelectTrigger aria-label={t("correctionMoveTo")}><SelectValue placeholder={t("correctionMoveTo")} /></SelectTrigger>
+              <SelectTrigger aria-label={t("correctionMoveTo")}>
+                <SelectValue
+                  placeholder={t("correctionMoveTo")}
+                  items={toClientOptions.map((c) => ({ value: c.id, label: c.name ?? c.id }))}
+                />
+              </SelectTrigger>
               <SelectContent>
-                {clients.filter((c) => c.id !== fromClient && c.status === "active").map((c) => (
+                {toClientOptions.map((c) => (
                   <SelectItem key={c.id} value={c.id}>{c.name ?? c.id}</SelectItem>
                 ))}
               </SelectContent>

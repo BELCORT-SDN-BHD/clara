@@ -5,9 +5,11 @@
 // chips"). Every number here is the DB's own count — nothing summed client-side.
 //
 // FIX-4 (independent review, fix-required, 2026-08-27): the live envelope carries
-// EIGHT counts, not six — compliance_watches (0016_a21_compliance_watch.sql:4680)
+// NINE counts, not six — compliance_watches (0016_a21_compliance_watch.sql:4680)
 // and lint_findings (0017_wave_b.sql:618-624) were added by the same splices that
-// FIX-1 grounds the row_kind taxonomy against. Both are now chipped here.
+// FIX-1 grounds the row_kind taxonomy against, and #629 (0180+) later added
+// work_questions. All three are now chipped here (#903: this comment said EIGHT
+// while nine chips render — corrected to match the render, not the other way).
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/parts/PartBadge";

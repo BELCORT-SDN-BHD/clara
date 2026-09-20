@@ -74,7 +74,6 @@ function App(children: unknown, heading: string) {
 // --- 1. compliance_watch through the real needs-you inbox mount ------------
 
 const COMPLIANCE_ENVELOPE: ReviewQueueEnvelope = {
-  watermark: "w1",
   counts: { ready: 0, needs_review: 0, needs_you: 1, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 1, lint_findings: 0 },
   sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
   rows: [
@@ -144,7 +143,6 @@ test("needs-you inbox: the compliance_watch Resolve inline form (open, with its 
 // --- 2. the compliance register panel --------------------------------------
 
 const REGISTER_ENVELOPE = {
-  watermark: "w1",
   counts: { ready: 0, needs_review: 0, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 1, lint_findings: 0 },
   sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
   rows: [],
@@ -330,7 +328,6 @@ test("vendor-bindings panel: the Sign dialog (proposed row) and the Revoke dialo
 // --- F3(a) regression -------------------------------------------------------
 
 const REGISTER_ENVELOPE_FOR_FAILED_CLIENTS = {
-  watermark: "w1",
   counts: { ready: 0, needs_review: 0, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 1, lint_findings: 0 },
   sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
   rows: [],

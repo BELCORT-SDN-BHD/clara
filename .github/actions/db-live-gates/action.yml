@@ -26,6 +26,39 @@ runs:
       shell: bash -e {0}
       run: pnpm --filter @clara/runtime build
 
+    # #1026 — EVERY LEG BELOW THAT BOOTS A DURABLE WORLD RUNS UNDER AN EXPLICIT HEAP BUDGET, and it
+    # is declared in ONE place: `scripts/ci/world-gate.mjs` (`HEAP_BUDGET_MB`, currently 2048). A
+    # leg wired through that launcher cannot be added without a budget, and a leg that exceeds it
+    # dies attributably — the launcher prints the step, the command, the pid and the budget as a
+    # `::error::` annotation, instead of leaving a native abort trace as the only evidence.
+    #
+    # WHY, MEASURED. Before this, every one of these processes inherited the host default, which the
+    # runner reports as ~4144 MB, and V8 has no reason to collect churn until its ceiling: peak RSS
+    # for ONE run of the #636 leg ranged 2.22-4.21 GiB across seventeen local runs, and the job aborted
+    # with `Reached heap limit` + exit 134 twice (jobs 105215992382 and 106048901216). Under the
+    # committed budget (2048 MB = 2 GiB) the same leg peaks at 0.79-1.06 GiB RSS over three
+    # consecutive passes, the #633 leg at 1.15 GiB and the accrual leg at 0.43 GiB, and ALL 24 legs
+    # passed at it on the runner itself in CI run 35508993162 (this job, 21m29s, green). The figures,
+    # the method and what is NOT covered are in packages/runtime/README.md, "#1026 — the live gates'
+    # heap budget".
+    #
+    # `CLARA_GATE_STEP` below is only what the annotation calls the step; `CLARA_GATE_HEAP_MB` on a
+    # single step would raise the budget for that step alone, and must carry its own measurement.
+    #
+    # EVERY LEG RECORDS ITS OWN PEAK, so #1026's AC2 measurement is continuous instead of whatever a
+    # human had time to measure by hand: on Linux the launcher samples the child's own
+    # /proc/<pid>/status VmHWM and prints ONE line per leg —
+    # `[world-gate] peak <step> | node <leg> | budget <N> MB | peak RSS <M> MB (<p>% of budget) | exit 0`.
+    # Read them out of a job log with `grep '\[world-gate\] peak'`. It is best-effort: off Linux the
+    # line says so, a read that fails is ignored, and nothing about it can redden a passing leg.
+    #
+    # WHAT THE BUDGET DELIBERATELY DOES NOT COVER (review SPEC-1026-03): the three
+    # `pnpm --filter @clara/runtime exec bootstrap` calls that PROVISION the durable World below.
+    # They resolve to `@workflow/world-postgres`'s own setup bin, are short-lived DDL rather than a
+    # World-booting process, and neither historical abort (jobs 105215992382, 106048901216) was in
+    # one. Wrapping a pnpm bin shim in a node launcher would change how that bin resolves for no
+    # measured gain, so the budget stays on the legs — which is where the 2.0-4.2 GiB was measured.
+
     # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
     # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
     # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap
@@ -34,8 +67,39 @@ runs:
     # workflow/graphile_worker schemas first. Ephemeral clara_intake_ci only —
     # never the shared project; the URL omits the password (pg falls back to the
     # job-env PGPASSWORD for the throwaway service container).
+    # #967 — this step and the two below it deliberately SHARE one database and world to prove a
+    # real chain across upload, admission and batching. Neither of the first two used to drain the
+    # Workflow queue before exiting, so a normal run could carry roughly 1.27M lines of leftover
+    # concurrency-limit/retry noise into the third leg (packages/runtime/README.md's own #967 note,
+    # beside `tests/intake-admission-e2e.mjs`). The fix lives IN the two leg files (each now calls
+    # `tests/queue-drain.mjs`'s `waitForQueueDrain` right before its own `process.exit(0)`, since
+    # each leg's own process is the only one with an engine running to drive the drain) — nothing
+    # in this action's own step sequence changed.
+    #
+    # AC1 MEASUREMENT (fix round 2): a cluster-wide role-count invariant (migration 0154) blocks a
+    # SECOND from-scratch migration chain on this lane's own rig cluster, so a genuinely fresh
+    # `clara_intake_ci` cannot be MIGRATED twice here — but it CAN be built by a TEMPLATE COPY of
+    # this lane's own already-migrated-and-seeded database (`create database clara_intake_ci
+    # template clara_l06`, then the same `bootstrap` this step runs), which mints no role and so
+    # does not collide. On three such genuinely fresh, single-pass, real-CI-order runs of HEAD's two
+    # modified legs (`intake-e2e.mjs` then `intake-admission-e2e.mjs`, both WITH the #967 drain),
+    # two completed clean end to end (leg 1: 38/40 lines, leg 2: 97/98 lines — small, not
+    # concurrency/retry-noise-dominated) and one hit a pre-existing, already-documented Windows-only
+    # EPERM/rename race in the spool (packages/runtime/README.md's "#693 family") inside leg 2's OWN
+    # first assertion, before the drain is ever reached. Reproducing that SAME race, on the SAME
+    # fresh-template rig, against a pre-967 (no-drain) copy of the two leg files 3-for-3 confirms it
+    # is NOT caused by, or specific to, this change. THE NEW "newly-failed" THROW never fired across
+    # any of these runs — the specific worst case fix round 1's own earlier report recorded (a
+    # straggler reaching `failed` mid-wait) did not reproduce despite one run deliberately loaded
+    # with a concurrent `pnpm typecheck`. This is real end-to-end evidence the unit cells alone
+    # cannot give, but it is still local-rig evidence, at a scale far short of the ~1.27M-line
+    # figure a long-lived shared CI runner produced. THE FIRST CI RUN OF THIS STEP SEQUENCE is what
+    # proves AC1's actual number at that scale; update this comment with that run's line counts
+    # once they exist.
     - name: Slice-5 intake transport e2e (isolated DB + world bootstrap)
       shell: bash -e {0}
+      env:
+        CLARA_GATE_STEP: "Slice-5 intake transport e2e"
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_intake_ci'
         PGDATABASE=clara_intake_ci pnpm db:migrate
@@ -45,7 +109,7 @@ runs:
         cd packages/runtime
         PGDATABASE=clara_intake_ci \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
-          node tests/intake-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/intake-e2e.mjs
 
     # #633 intake ADMISSION e2e. Reuses the database the step above just built and
     # bootstrapped (same throwaway, same world) because it proves the chain that begins
@@ -64,11 +128,13 @@ runs:
     # is wired explicitly, exactly like the step above.
     - name: "#633 intake admission e2e (same isolated DB + world)"
       shell: bash -e {0}
+      env:
+        CLARA_GATE_STEP: "#633 intake admission e2e"
       run: |
         cd packages/runtime
         PGDATABASE=clara_intake_ci \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
-          node tests/intake-admission-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/intake-admission-e2e.mjs
 
     # #636 THE DURABLE INTAKE BATCH, on the same throwaway DB and the same bootstrapped world. Five
     # legs: the headline batch at the MEASURED N (100 <=1MB PDFs is exactly what a fresh firm admits
@@ -81,11 +147,13 @@ runs:
     # Standalone (not collected by `node --test`), so it is wired explicitly like the two above.
     - name: "#636 intake batch e2e (same isolated DB + world)"
       shell: bash -e {0}
+      env:
+        CLARA_GATE_STEP: "#636 intake batch e2e"
       run: |
         cd packages/runtime
         PGDATABASE=clara_intake_ci \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
-          node tests/intake-batch-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/intake-batch-e2e.mjs
 
     # Wave-B rig-confined fault gates (§4 of the contract): the four STANDALONE runtime e2es
     # (NOT collected by `node --test`, so wired explicitly like intake-e2e above). Gate 3 —
@@ -98,6 +166,8 @@ runs:
     # come from the job env. Each e2e owns its lifecycle and exits.
     - name: Wave-B rig-confined fault-gate e2es (Gate 3 + Gate 7 + #623 Work + #637 two-build cutover, isolated DB + world bootstrap)
       shell: bash -e {0}
+      env:
+        CLARA_GATE_STEP: "Wave-B rig-confined fault-gate e2es"
       run: |
         # 2026-09-02 CI-shape ruling: this step's own PRISTINE cluster (postgres_c/PGC_PORT),
         # never the primary — see the services block's own comment for the why.
@@ -133,15 +203,15 @@ runs:
         PGPORT=$PGC_PORT \
         PGDATABASE=clara_wave_b_ci \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/interview-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/interview-e2e.mjs
         PGPORT=$PGC_PORT \
         PGDATABASE=clara_wave_b_ci \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/interview-kill-resume-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/interview-kill-resume-e2e.mjs
         PGPORT=$PGC_PORT \
         PGDATABASE=clara_wave_b_ci \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/version-cutover-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/version-cutover-e2e.mjs
         # #623 — the accounting-Work e2e. STANDALONE like its three siblings above (NOT collected
         # by `node --test`), and wired HERE for the same reason: it needs a real Postgres World, a
         # built server it can SPAWN and KILL, and the ability to crash the engine between a
@@ -155,7 +225,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/work-journal-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/work-journal-e2e.mjs
         # #629 — the shared-work-question e2e, AFTER its #623 sibling and on the same rig. It asks
         # a typed question, answers it through the first-answer gate, and drives three durable
         # windows the unit cells cannot: a crash between the LEASE and the RESUME, a crash after
@@ -167,7 +237,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/work-question-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/work-question-e2e.mjs
         # #630 — the work-CANCELLATION e2e, AFTER its two siblings and on the same rig. It drives
         # the ordering boundary in the only place it is real: a cancel that arrives while a posting
         # transaction holds the Work row lock WAITS and then reports `already_completed`, a cancel
@@ -182,7 +252,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/work-cancel-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/work-cancel-e2e.mjs
         # WAVE-2 INTEGRATION ORDER — five steps, unchanged: #643, then #637's two-build cutover,
         # then #640, then #637's world guard LAST. What changed is WHY it holds. Ordering used to
         # BE the isolation argument for the drill ("placed after work-cancel-e2e, which settles its
@@ -210,7 +280,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/periodic-adjustment-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/periodic-adjustment-e2e.mjs
         # #639 — the FIXED-ASSET ACQUISITION e2e, immediately after #643's and on the same rig. It
         # drives the one window nothing else can: migration 0216's acquisition birth is a DEFERRED
         # constraint trigger, so the register row is written at COMMIT inside the posting
@@ -228,7 +298,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/fixed-asset-acquisition-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/fixed-asset-acquisition-e2e.mjs
         # #638 — the STAFF-EXPENSE-CLAIM e2e, immediately after its closest sibling and on the same
         # rig, for the same reasons: it admits and settles its own Work and leaves none live. It
         # drives the windows the unit and DB cells cannot. A claim Work runs through the UNCHANGED
@@ -245,7 +315,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/staff-expense-claim-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/staff-expense-claim-e2e.mjs
         # #655 — the TRADE-INVOICE World leg, on the same throwaway database and the same world.
         # It proves the thing no unit test and no in-transaction probe can: the signed AR/AP open
         # item is minted by a DEFERRED constraint trigger AT COMMIT, so the entry, the receipt,
@@ -259,7 +329,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/trade-invoice-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/trade-invoice-e2e.mjs
         # #631 — the WORK-EGRESS e2e, BEFORE the two builds below, because it is the only leg whose
         # subject is what happens BEFORE a model is called. It drives the three windows nothing
         # else reaches: an authorised run leaves a complete `dispatch -> model_call -> tool_call ->
@@ -276,7 +346,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/work-egress-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/work-egress-e2e.mjs
         # chatTurn_v19 (#643 + #644's shared successor) — the CHAT lane, after every Work-lane leg
         # above (#631's egress leg included) and still before the two builds and the world guard. It drives the one path no unit cell can reach: a
         # real HTTP chat session, a real HTTP turn, the FROZEN chatTurn_v19 body, its two new frozen
@@ -293,7 +363,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/chat-turn-v19-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/chat-turn-v19-e2e.mjs
         # chatTurn_v20 + claraWork_v4 (the WAVE 2026-09-15 integration cut) — immediately after its
         # v19 sibling, on the same rig, and still before the two builds and the world guard, for the
         # same reason: it admits and settles its own Work and leaves none live.
@@ -318,7 +388,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/chat-turn-v20-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/chat-turn-v20-e2e.mjs
         # #655 + #651 + #658 — the wave 2026-09-18 successor cut's own chat leg, immediately after
         # its v20 sibling and on the same rig, for the same reason: it admits and settles its own
         # Work and leaves none live. The two legs above it now run against a chatTurn_v21 /
@@ -349,19 +419,57 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/chat-turn-v21-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/chat-turn-v21-e2e.mjs
         # #637 — the TWO-BUILD cutover e2e, LAST on this rig because it is the only step here that
-        # BUILDS A SECOND IMAGE. It copies the runtime package to <repo>/.scratch/two-build/previous,
-        # rewrites that copy's registry to pin the PREDECESSOR claraWork body, deletes the successor
-        # body file, and runs `nitro build` there — then spawns that image, admits Work to it, stops
-        # it, spawns THIS tree's build, admits Work to the successor, and resumes the first Work on
-        # its original body inside the second image. That is the one thing the single-process
-        # version-cutover-e2e above cannot show.
+        # BUILDS A SECOND IMAGE (as of #794, TWO second images — see #850 below). It copies the
+        # runtime package to <repo>/.scratch/two-build/previous, rewrites that copy's registry to
+        # pin the PREDECESSOR claraWork body, deletes the successor body file, and runs `nitro
+        # build` there — then spawns that image, admits Work to it, stops it, spawns THIS tree's
+        # build, admits Work to the successor, and resumes the first Work on its original body
+        # inside the second image. That is the one thing the single-process version-cutover-e2e
+        # above cannot show.
         #
-        # MEASURED COST before wiring it (the orchestrator's condition): 78.0s for the scratch build
-        # and 124s for the whole file — Windows-host measurements, re-measured at the #637 fix-round
-        # closure review (superseding this comment's earlier 82.6s / 3m25s), against a ~6 minute
-        # budget. The copy MUST live outside packages/runtime — measured during the spike, a copy at
+        # #850 — THE 78.0s / 124s FIGURES BELOW PREDATE #794's SECOND LEG, so they understate the
+        # step's cost as it stands today: #794 added a chatTurn leg that stages and builds a SECOND
+        # scratch image (<repo>/.scratch/two-build/previous-chat) the same way, to prove the same
+        # cutover law on the lane that has no Work row to resume through — a second full
+        # stage-and-build, paid in full, IN ADDITION to the figures below.
+        #
+        # THE FIX, AND THE GUARD ON IT (tests/scratch-image.mjs `shouldOverlapSecondBuild`,
+        # `OVERLAP_MIN_CORES = 4`): the chatTurn scratch build starts in the BACKGROUND the moment
+        # the claraWork scratch build finishes, overlapped with the claraWork leg's own HTTP/DB-bound
+        # exercise (spawn, admit, stop, spawn again, resume, preflight) — but ONLY when
+        # `os.availableParallelism()` is at or above that threshold. Below it, the chatTurn build
+        # runs SEQUENTIALLY, after the claraWork leg finishes, exactly as it did before this ticket —
+        # slower, but never competing with that leg's own two spawned runtime images and its
+        # timing-sensitive polls (`FETCH_TIMEOUT_MS = 15000`, two-build-cutover-e2e.mjs:163) for a
+        # core neither can spare. The threshold exists because a contention test on this lane's own
+        # 24-core rig — one concurrent `pnpm typecheck`, standing in for a thin core budget — measured
+        # the OVERLAPPED build going from an idle 5.1s to 36.9s (7x) and once FAILING on a `pollTask`
+        # timeout inside the claraWork leg: the trade loses, not wins, once cores are scarce.
+        # GitHub-hosted standard runners report 2 cores, below the threshold, so this step is
+        # expected to take the SEQUENTIAL path there until measured otherwise — read the first CI
+        # run's own log line (`[tb-e2e] #850: availableParallelism()=…`) for which path it took, and
+        # the step's own wall clock either way. Neither leg's own proof moved: each scratch image is
+        # still staged, rewritten and built exactly as before, and each is still independently
+        # scanned against build B's roster for the "differs by exactly one body" invariant
+        # (tests/two-build-cutover-e2e.mjs `bodiesA` / `bodiesA2`) before anything is spawned.
+        #
+        # MEASURED LOCALLY (Windows host, packages/runtime/tests/two-build-cutover-e2e.mjs run
+        # standalone against a bootstrapped clara_rt_test, RELAY_TEST_MODE=1 — this rig has no CI
+        # runner access, so this is NOT the CI figure AC1 asks for): sequential (pre-#850)
+        # 36.6s–42.5s whole-file wall clock across two runs, each scratch build 5.0s–6.2s; overlapped
+        # (post-#850, on THIS 24-core rig, where the guard allows it) 32.3s–34.8s across two runs,
+        # same two scratch builds, same assertions, all passing. AC1 (the step's own before/after
+        # wall clock, measured on CI) REMAINS UNMET: the 78.0s/124s pair below is a Windows-host
+        # measurement from the #637 fix round, not a CI one, and no CI figure for this step — taking
+        # either path — has ever been recorded. Update this comment with the first CI run's own
+        # numbers once they exist.
+        #
+        # 78.0s for the scratch build and 124s for the whole file — Windows-host measurements,
+        # re-measured at the #637 fix-round closure review (superseding this comment's earlier
+        # 82.6s / 3m25s), against a ~6 minute budget, BEFORE #794's second leg (above). The copy
+        # MUST live outside packages/runtime — measured during the spike, a copy at
         # packages/runtime/.scratch made the MAIN nitro build compile 98 workflows instead of 49.
         # Its DATABASE costs the template copy above — a file-level clone, seconds — and not the
         # ~2m20s a from-scratch migrate+seed+bootstrap measures on this runner.
@@ -377,7 +485,7 @@ runs:
         PGDATABASE=clara_rt_test \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_rt_test" \
-          node tests/two-build-cutover-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/two-build-cutover-e2e.mjs
         # #640 — the accounting-PLAN occurrence e2e, AFTER its three siblings and on the same rig.
         # It drives the two things only a real world can show about a scheduled occurrence: two
         # belt passes issued CONCURRENTLY on two clara_runtime connections leave exactly one
@@ -393,7 +501,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/plan-occurrence-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/plan-occurrence-e2e.mjs
         # #652 — the ACCRUAL e2e, immediately after the plan leg it extends and on the same rig.
         # It drives the four things only a real world can show about an evidenced accrual:
         # configuring one writes plan + revision + accrual record + occurrence + Work in ONE commit
@@ -409,7 +517,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/accrual-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/accrual-e2e.mjs
         # #653 — the PREPAYMENT-AMORTISATION occurrence e2e, immediately after its #640 sibling and
         # on the same rig. It adds ONE fact that lane cannot show: a per-period amount survives the
         # frozen `.strict()` tool schema, the run's faithful echo and the digest comparison, so the
@@ -423,7 +531,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/prepayment-occurrence-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/prepayment-occurrence-e2e.mjs
         # #656 — THE OPENING LEDGER'S SOURCE, end to end. Every half of this journey was already
         # tested and the JOIN between them never was: the producer against synthetic geometry with no
         # database, the consumer against regions a fixture inserted by hand, the DB battery against
@@ -442,7 +550,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/opening-ledger-source-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/opening-ledger-source-e2e.mjs
         # #658 — THE KNOWLEDGE READ-SET RESUME PROPERTY, after the last standalone leg above.
         # It SPAWNS a child that writes one `clara.work_knowledge_reads` row as `clara_runtime` and
         # SIGKILLs it between the write and its acknowledgement, then respawns: the replayed step
@@ -457,7 +565,7 @@ runs:
         PGDATABASE=clara_wave_b_ci \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
-          node tests/work-knowledge-e2e.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/work-knowledge-e2e.mjs
         # #637 review S5 — the WORLD GUARD, HERE rather than in the unit suite, and the reason is a
         # false-green one: tests/body-census-guard-db.test.mjs SPAWNS the built image against a real
         # Postgres World, so in db-estate-suite (PGDATABASE=clara_ci, no `.output`) its own hard gate
@@ -475,7 +583,7 @@ runs:
         PGDATABASE=clara_rt_test \
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_rt_test" \
-          node --test tests/body-census-guard-db.test.mjs
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" --test tests/body-census-guard-db.test.mjs
 
     - name: DR backup/restore self-test (ephemeral postgres:17)
       shell: bash -e {0}

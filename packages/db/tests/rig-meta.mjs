@@ -3172,6 +3172,26 @@ export async function agentReachableOutsideClara() {
   return leaks;
 }
 
+// #866: the three schemas a bootstrapped Workflow/WDK "World" creates
+// (packages/runtime's `bootstrap` bin — README §engine-bootstrap). PostgreSQL
+// grants EXECUTE on a newly-created function to PUBLIC by default, and
+// `graphile-worker`'s own bootstrap never revokes it, so once a World exists on a
+// rig database EVERY role (clara_agent_ro and the two wake roles included) can
+// call `graphile_worker.add_job` etc. That is upstream default-grant behaviour,
+// not a clara RBAC leak — T10b has no business asserting either way about it.
+export const WORLD_SCHEMAS = ["workflow", "workflow_drizzle", "graphile_worker"];
+
+/** True once any World schema exists on this database (see WORLD_SCHEMAS). T10b
+ * uses this to tell "contaminated by a local World bootstrap" apart from a real
+ * clara RBAC regression — see the T10b test body in rig-isolation.test.mjs. */
+export async function worldSchemaPresent() {
+  const r = await rootQuery(
+    `select 1 from pg_namespace where nspname = any($1::text[]) limit 1`,
+    [WORLD_SCHEMAS],
+  );
+  return r.rows.length > 0;
+}
+
 /** Read-only context helpers referenced directly in an RLS policy expression. A
  * policy's USING/WITH CHECK runs as the QUERYING role, so any fn it calls MUST be
  * caller-EXECUTEable — that is legitimate, not an over-grant. We DERIVE this set

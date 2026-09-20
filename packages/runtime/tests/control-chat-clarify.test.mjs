@@ -320,14 +320,25 @@ test("chat.part: the clarification-closed part this belt writes is the one the d
   );
 });
 
-test("chat.wiring: the leader runs this belt BEFORE runReconcilerSweep, so the specific terminal beats the generic mirror", () => {
+test("chat.wiring: ONE caller drives this belt, and it is handed a real world resume", () => {
+  // #852 moved the call from leader.mjs into runReconcilerSweep (the import edge that forced it
+  // outside — chat-clarify -> control -> reconciler — was cut by lib/hook-resume.mjs). The ORDER
+  // this cell used to scan leader.mjs for is still load-bearing — reconcileTasks' section C would
+  // settle a parked chat turn with a lost run `cancelled`/engine_lost, so the chat-clarify arm has
+  // to decide first or #764's `expired` + clarify_closed terminal never happens — but it is now
+  // proven BEHAVIOURALLY, one file over: chat-clarify-sweep-wiring.test.mjs's `#852 order` drives a
+  // whole sweep against a scripted client and reads the real statement order off it. Repointing
+  // this cell's indexOf at `await belt("chat clarify reconcile"` in reconciler.mjs would have made
+  // it the /tdd "implementation-coupled" shape (review finding STD-09-2): folding the belt
+  // registrations into a config array iterated in order preserves the order exactly and would red
+  // a cell whose subject never regressed. Verified before removing it, by moving the registration
+  // below `task reconcile`: the behavioural cell reds on "the chat-clarify belt is the FIRST belt",
+  // and reconciler.mjs was restored byte for byte (`sha256sum -c`). What stays here is what that
+  // file does not cover twice — this belt's own no-double-caller law, and the production wiring.
   const leaderSrc = readFileSync(new URL("../lib/leader.mjs", import.meta.url), "utf8");
-  const arm = leaderSrc.indexOf("await reconcileChatClarifies(client");
-  const sweep = leaderSrc.indexOf("await runReconcilerSweep(client");
-  assert.ok(arm > 0 && sweep > 0, "wiring: both calls are in the leader loop");
-  assert.ok(arm < sweep,
-    "wiring: reconcileTasks' section C would settle a parked chat turn with a lost run `cancelled`/engine_lost; "
-    + "the chat-clarify arm has to decide first or #764's `expired` + clarify_closed terminal never happens");
+  assert.ok(!/reconcileChatClarifies/.test(leaderSrc),
+    "wiring: the leader no longer calls the belt itself — two callers a cycle would double-probe every resting row");
+
   const startWorldSrc = readFileSync(new URL("../plugins/startWorld.ts", import.meta.url), "utf8");
   assert.ok(/import \{ start, getRun, resumeHook \} from "workflow\/api";/.test(startWorldSrc)
     && /^\s*resumeHook,$/m.test(startWorldSrc),

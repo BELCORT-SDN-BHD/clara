@@ -117,11 +117,23 @@ export function PeriodicAdjustmentsTable({
                       )}
                       {/* THE PARTICULARS, VERBATIM. Every key the commit stored, rendered as it
                           was stored — this is the "exact fields and sources" half of AC4, and a
-                          re-worded summary would be a second account of the same figures. */}
+                          re-worded summary would be a second account of the same figures.
+                          "VERBATIM" STILL MEANS THE HOUSE MONEY COMPONENT for a cents-typed key
+                          (#842): CENTS_PARTICULARS below names every basis key migration 0212's
+                          `_adjustment_basis_canonical` types as minor units, so none of them
+                          renders through `String(value)` as the same figure a column already
+                          renders as money, told a second way, in the same disclosure. */}
                       {Object.entries(row.basis)
                         .filter(([, value]) => value !== null && value !== undefined && value !== "")
                         .map(([key, value]) => (
-                          <Fact key={key} label={key} value={String(value)} mono />
+                          <Fact
+                            key={key}
+                            label={key}
+                            value={CENTS_PARTICULARS.has(key) && typeof value === "number"
+                              ? <Money cents={value} />
+                              : String(value)}
+                            mono
+                          />
                         ))}
                     </dl>
                   </details>
@@ -134,6 +146,34 @@ export function PeriodicAdjustmentsTable({
     </DataState>
   );
 }
+
+// #842 — the basis particulars `clara._adjustment_basis_canonical` (migration 0212) types as
+// minor units: `amount_cents` (both purposes), `opening_cents`/`closing_cents`/`adjustment_cents`
+// (the stock branch) and `settled_cents` (#797, the payroll branch). Measured against that
+// function's `jsonb_build_object` calls, not re-guessed from a key's spelling — a future
+// cents-typed particular joins this Set because the migration says so, not because it "looks like
+// cents".
+//
+// CRS-07-08 (code-review fix round) — A DECLARED, EVIDENCE-BASED OVERRIDE of #842's own
+// out-of-scope line ("Any other basis particular (none is cents-typed today)"). That line's
+// premise does not hold: `_adjustment_basis_canonical` builds ALL FIVE keys above — not only
+// `settled_cents` — through the same `clara._adjustment_cents_value(p_adjustment, <key>)`
+// (0212_payroll_settled_cents.sql:290-332, unchanged from 0194_periodic_adjustments.sql:715+),
+// which returns `bigint` or null (0194:470-475) — every one of them is integer-cents today, not
+// only the one the ticket named. Rendering `amount_cents`/`opening_cents`/`closing_cents`/
+// `adjustment_cents` through `String(value)` while `settled_cents` alone went through `Money`
+// would have been the exact defect #842 was opened to fix, repeated four more times in the same
+// disclosure. This widening is therefore kept on purpose, verified against the migration rather
+// than assumed, and the four extra keys were NOT in #842's own acceptance criteria — flagged
+// here, in the commit message, and in the lane's fix report for the owner to rule on, rather
+// than closing #842 against a criterion (the out-of-scope line) it no longer literally matches.
+const CENTS_PARTICULARS = new Set<string>([
+  "amount_cents",
+  "opening_cents",
+  "closing_cents",
+  "adjustment_cents",
+  "settled_cents",
+]);
 
 function Fact({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (

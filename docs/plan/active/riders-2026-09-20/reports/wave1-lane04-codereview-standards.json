@@ -1,0 +1,82 @@
+{
+  "lane": "wave1-lane04",
+  "lens": "STANDARDS",
+  "branch": "riders/w1-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "head": "0b592123901cfb0612ca53742c2016ce49bf234a",
+  "origin_main_at_review": "e7f0a10af4a1f69f3a01548d2324aa58d0a6231f",
+  "merge_base": "dd3f8f1d202b6eade2211f33c34f263d033768f1",
+  "diff_reviewed": "git diff origin/main...HEAD (12 files, +1469/-7, 8 commits)",
+  "tickets": [866, 867, 854, 857],
+  "standards_sources_read": [
+    "AGENTS.md",
+    "CONTEXT.md (scanned; no touched vocabulary is in its accounting/product scope)",
+    "packages/db/README.md",
+    "packages/db/tests/README.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    ".claude/skills/tdd/SKILL.md",
+    ".claude/skills/tdd/tests.md",
+    ".claude/skills/tdd/mocking.md",
+    "apps/web/README.md and packages/runtime/README.md were checked to exist but are not touched by this diff (no apps/web or packages/runtime files appear in the diff), so no standards from them apply here"
+  ],
+  "verification_performed": [
+    "node scripts/check-document-region-field-paths.selftest.mjs -- 21/21 PASS, worktree left clean (git status --porcelain empty after)",
+    "node scripts/check-document-region-field-paths.mjs -- clean, 927 files scanned, 0 violations (matches claimed count)",
+    "npx eslint on every changed .mjs file in the diff -- exit 0, no findings",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/role-census-reset.test.mjs against the live rig (127.0.0.1:55744/clara_l04) -- 8/8 pass",
+    "packages/db: same, tests/rig-isolation.test.mjs -- 23 tests, 22 pass, 1 known skip (T19), including the two new T10b-AC2 cells passing for real",
+    "packages/db: same, tests/opening-balance-evidence-link.test.mjs -- 5/5 pass, both new race cells ran with real multi-hundred-ms durations consistent with a genuine lock wait, not a no-op"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "No hard violations of a documented standard were found in the final diff (origin/main...HEAD). WORK-ORDER rules 1, 5, 6, 7 and 9 all check out (no migration touched, no PRD/ARCHITECTURE edit, the one shared file touched -- packages/db/tests/rig-meta.mjs -- gets a minimal, concern-grouped +20-line addition, and every doc update rides in the same commit as its code). The fix-round already remediated the two AGENTS.md rule-6 (claims-need-evidence) problems a prior combined review found (L04-S02, L04-S07): both are now honestly hedged in the shipped docs, verified by reading the final file state, not the diff. Test quality is solid: every new cell drives a module's own exported public function or a real Postgres door under a real least-privileged role, matches the repo's own documented 'owner-level fixture DML, where it is unavoidable' and catalog-census idioms for the two RBAC/T10b cells (so those are not flagged despite touching test-helper internals -- WORK-ORDER's own carve-out for structural cells applies), and the one previously-tautological assertion (L04-S14) is confirmed fixed in the file as it stands today. What remains are three judgement-call smells (Fowler ch.3, none endorsed or forbidden by a documented repo standard) and one test-design note, all minor-or-below.",
+  "findings": [
+    {
+      "id": "L04-STD-01",
+      "ticket": 857,
+      "severity": "minor",
+      "kind": "smell:duplicated-code",
+      "title": "The 'read a migration by number, regex-extract its own pinned grammar, throw a matching never-edit-the-migration error' shape is written twice, 24 minutes apart, with no shared helper",
+      "evidence": "packages/db/scripts/role-census-reset.mjs's pinnedRoleCount() (commit 130ff25e, #867): `const stem = String(PIN_MIGRATION).padStart(4, \"0\") + \"_\"; const file = readdirSync(migrationsDir).find((f) => f.startsWith(stem)); ... const m = text.match(/rolname like 'clara%'\\)\\s*<>\\s*(\\d+)/); if (!m) { throw new Error(`${file} no longer carries the expected ... census assertion in the shape role-census-reset.mjs expects -- 0154 must never be edited; if this is a false alarm, update the regex here, never the migration.`); }`. scripts/check-document-region-field-paths.mjs's readFieldPathGrammar() (commit 9e3a8c1e, #857, written the same session immediately after): the identical shape -- locate a migration by numeric prefix, read its text, regex-extract several literals, and on mismatch `throw new Error(`${MIGRATION_REL} no longer carries clara._assert_field_path in the shape ... expects -- 0191 must never be edited; if this is a false alarm, update the three regexes here, never the migration.`)`. The second file's own header even names the first as its precedent (\"the same posture packages/db/scripts/role-census-reset.mjs (#867) takes with migration 0154's pinned literal\"), so the duplication is a conscious copy-adapt, not independent convergence.",
+      "failure_scenario": "A third ticket needing the same 'read one migration's own source as the single source of truth for a grammar, and fail loudly if that migration's shape ever moves' pattern will most likely paste a third copy rather than reach for a shared `readMigrationSource(number-or-stem)` + `assertShapeOrThrow(...)` helper -- and any future correction to this idiom (for example, tightening the not-found error to name the searched directory, which pinnedRoleCount already does and readFieldPathGrammar does not) has two call sites to update in step, with nothing to catch a lane that only updates one.",
+      "required_fix": "Not required for this wave; worth a follow-up extracting a small shared 'read a pinned migration by number and regex-extract its own asserted shape, or throw a standard never-edit-the-migration message' helper (e.g. in a small scripts-shared module) the next time a third check needs the same shape."
+    },
+    {
+      "id": "L04-STD-02",
+      "ticket": 867,
+      "severity": "minor",
+      "kind": "smell:duplicated-code",
+      "title": "isClaraRole() hand-restates, in JS, the exact 'clara%' predicate the SQL already encodes -- the one hand-kept copy in a file whose stated design principle is 'never a hand-kept copy'",
+      "evidence": "packages/db/scripts/role-census-reset.mjs: `export async function clusterClaraRoleCount(client) { const r = await client.query(\"select count(*)::int as n from pg_roles where rolname like 'clara%'\"); return r.rows[0].n; }` and, added in the fix round (commit 6dea8f7a) a few lines below, `function isClaraRole(name) { return name.startsWith(\"clara\"); }`, used in both check()'s subtraction and apply()'s drop loop specifically so they agree with clusterClaraRoleCount()'s own count. The file's own header and its pinnedRoleCount()/rolesMintedAfterPin() docstrings say three separate times that a value must be read from the migration source 'rather than duplicated by hand' / 'never a hand-kept copy' -- yet 'what counts as a clara role' is defined twice, once as SQL LIKE syntax and once as a JS startsWith, with nothing that would catch the two drifting apart (e.g. a future rename to a prefix the LIKE pattern would need escaping for but startsWith would not, such as a literal underscore).",
+      "failure_scenario": "A future change to the SQL predicate (say, escaping the LIKE pattern's own special characters, or narrowing it to `'clara\\_%' escape '\\\\'`) would silently stop matching what isClaraRole() still accepts, so check()'s subtraction and apply()'s drop loop would disagree with clusterClaraRoleCount()'s own count -- exactly the class of arithmetic drift the fix round's own L04-S14 finding was about, reintroduced through the one predicate this file did not derive from a single source.",
+      "required_fix": "Not required for this wave; worth deriving isClaraRole() from the same literal the SQL query uses (a shared `const CLARA_ROLE_LIKE = \"clara%\"` string, translated once into both the SQL LIKE clause and a JS-equivalent matcher) the next time this file is touched, so there is one definition instead of two hand-synchronized ones."
+    },
+    {
+      "id": "L04-STD-03",
+      "ticket": 867,
+      "severity": "note",
+      "kind": "smell:primitive-obsession",
+      "title": "depLabel()'s nested ternary maps raw pg_shdepend.deptype single-letter codes inline, with no named lookup",
+      "evidence": "packages/db/scripts/role-census-reset.mjs: `function depLabel(row) { const kind = row.deptype === \"a\" ? \"privilege\" : row.deptype === \"o\" ? \"ownership\" : row.deptype === \"m\" ? \"membership\" : row.deptype; return `${row.datname} (${row.n} ${kind} dep${row.n === 1 ? \"\" : \"s\"})`; }`. The three-letter meaning of Postgres's own pg_shdepend.deptype catalog column ('a'/'o'/'m') lives only in this one inline ternary chain, with no named constant or lookup table a reader (or a second call site) could reuse or extend.",
+      "failure_scenario": "Low -- depLabel() has exactly one call site today (the log line in check()'s own loop and apply()'s refusal message), so this is a pure readability/extensibility observation, not a live defect: a reader has to know Postgres's pg_shdepend deptype vocabulary to decode the ternary, and a second caller needing the same mapping would either duplicate it or reach into this private function.",
+      "required_fix": "Not required; a small `DEPTYPE_LABELS = { a: \"privilege\", o: \"ownership\", m: \"membership\" }` object would read the same and survive a second call site without duplication, if one is ever added."
+    },
+    {
+      "id": "L04-STD-04",
+      "ticket": 857,
+      "severity": "note",
+      "kind": "test-quality:side-channel-setup",
+      "title": "The L04-S09 main()-exit-code self-test case stages and unstages a decoy fixture in this worktree's real git index, rather than an isolated interface",
+      "evidence": "scripts/check-document-region-field-paths.selftest.mjs, the 'main(): a REAL subprocess run exits non-zero...' case (added in commit 0b592123): it writes a decoy file at `packages/db/tests/__check857_selftest_decoy.mjs` inside THIS worktree, runs `execFileSync(\"git\", [\"add\", \"--\", DECOY_REL], { cwd: SELFTEST_ROOT })` to stage it (because `scanTargetFiles()` reads `git ls-files`, which only sees the INDEX), spawns the real script as a subprocess, then in a `finally` runs `git reset --quiet HEAD -- <path>` and deletes the file. This is a legitimate way to exercise the tool's actual dependency (git ls-files) rather than mocking it, and I confirmed `git status --porcelain` is clean immediately after a real run of this file -- but it is a side effect on the lane's own shared git index rather than a fully self-contained interface, and a hard process kill between the `git add` and the `finally` (not caught by try/catch) would leave a staged decoy file in this worktree's real index for the next command to trip over.",
+      "failure_scenario": "An interrupted CI run or a killed node process landing between the `execFileSync(\"git\", [\"add\", ...])` call and the `finally` block would leave `packages/db/tests/__check857_selftest_decoy.mjs` staged (though never committed) in this lane's own worktree, surfacing as an unexplained `git status` entry the next person to touch this worktree has to notice and unstage by hand.",
+      "required_fix": "Not required -- the risk window is small (synchronous code between two adjacent statements) and self-contained to this lane's own worktree, never another lane's. If this pattern is copied to a second check script, consider whether the target repo state (staged-in-index) can be swapped for a disposable git working tree (`git worktree add` into a temp dir) so a kill mid-test cannot leave the lane's real index dirty."
+    }
+  ],
+  "not_findings": [
+    "CONTEXT.md's 'new vocabulary' rule (AGENTS.md, WORK-ORDER rule 9): 'World contamination' and 'role census' are new named concepts this diff introduces, but CONTEXT.md's own stated scope is 'shared accounting and product vocabulary' (AGENTS.md's harness menu) and neither term is accounting/product domain language -- both are engineering/test-infra concepts, correctly homed in packages/db/README.md and packages/db/tests/README.md instead. Not flagged as a violation.",
+    "The two RBAC/catalog cells in rig-isolation.test.mjs (T10b-AC2) call rig-meta.mjs helpers (worldSchemaPresent, agentReachableOutsideClara) and plant a function directly via rootQuery with no application-role door in between. This looks like reaching an internal collaborator under a naive /tdd reading, but packages/db/tests/README.md's own documented 'Owner-level fixture DML, where it is unavoidable' standard and this package's whole catalog-census idiom (operation-census.mjs, rig-meta.mjs's dozens of *_COHORT censuses) explicitly sanction exactly this shape for RBAC/grant-matrix assertions -- per this review's own brief, a documented repo standard for a structural cell overrides the /tdd preference here.",
+    "obw.race.evidence_then_opening (#854) asserts a measured DOUBLE-POSTING defect as its expected outcome (a 'regression sentinel'). This looks like 'a test that would still pass against a broken subject', but the ticket's own brief explicitly asks for this ('if both sides can commit, that is a new defect for its own ticket'; repair is out of scope), the test's name and file-header comments say so in full, and the docs (tests/README.md) disclose it as an open, unfiled residual rather than a silent pass. Not flagged.",
+    "role-census-reset.test.mjs's former tautology (`assert.equal(result.matchesPin, result.wouldReadAfterDrop === 14)`) was a live finding (L04-S14) against an earlier commit in this branch's history, but the final file state (verified by reading it directly, and by running it against the live rig: 8/8 pass) already asserts `result.wouldReadAfterDrop` and `result.matchesPin` directly. No live violation in the diff being reviewed.",
+    "The two attribution styles across this branch's 8 commits ('Claude Fable 5.1' on the four original commits, 'Claude Sonnet 5' + a Claude-Session line on the four fix-round commits) differ from WORK-ORDER rule 2's literal text, but each is what that commit's own operating session's attribution directive required at the time it was made; this is a harness/session attribution matter, not a code standards violation, and is out of this review's remit."
+  ]
+}

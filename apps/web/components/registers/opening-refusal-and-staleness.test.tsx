@@ -277,9 +277,209 @@ test("F6-2: a refused record_opening_target does NOT wipe the typed line key —
   });
 });
 
+test("987: drafting an opening item into a CLOSED fiscal year names the OPENING BASIS, never a raw journal-entry id", async () => {
+  // clara._tf_period_wall_lines (0056_wave_e_close_model.sql:746-749) refuses at the DRAFT with
+  // CLR19 write_into_closed_period, naming the ENTRY it would have created and the fiscal year's
+  // label — the estate's one generic period-wall message, correct for every OTHER lane (the
+  // person never typed a journal entry here; #656 residual R2). The code and reason token must
+  // still surface (AC1: same rule, same refusal code) — only the SENTENCE changes.
+  const ENTRY_ID = "e1111111-1111-4111-8111-111111111111";
+  const mock = (async (u: RequestInfo | URL) => {
+    const url = String(u);
+    if (url.includes("/rest/v1/rpc/get_opening_dryrun")) return jsonResponse(DRYRUN_EMPTY);
+    if (url.includes("/rest/v1/rpc/draft_opening_item")) {
+      return jsonResponse({
+        code: "CLR19",
+        message: `entry ${ENTRY_ID} sits in closed fiscal year FY2026; its lines may not change -- the formal reopen path is the one way back in`,
+        details: JSON.stringify({
+          reason: "write_into_closed_period", fiscal_year_id: "fy1", fy_status: "closed", entry_id: ENTRY_ID,
+        }),
+      }, 400);
+    }
+    if (url.includes("/rest/v1/opening_seed_registry")) return jsonResponse([SEED_OPEN_UNTIED]);
+    if (url.includes("/rest/v1/onboarding_plan_items")) return jsonResponse([]);
+    if (url.includes("/rest/v1/onboarding_plans")) return jsonResponse([{ id: "plan1", state: "open", revision_token: "rev1", created_at: "2026-01-01T00:00:00Z" }]);
+    if (url.includes("/rest/v1/coa_accounts")) return jsonResponse([{ account_code: "1000", name: "Cash", account_type: "asset", account_class: null, special_acc_type: null, is_active: true }]);
+    if (url.includes("/rest/v1/counterparties")) return jsonResponse([]);
+    if (url.includes("/rest/v1/opening_items")) return jsonResponse([]);
+    if (url.includes("/rest/v1/opening_tb_targets")) return jsonResponse([]);
+    if (url.includes("/rest/v1/client_resolutions")) return jsonResponse([{ id: "r1" }]);
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(mock, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Draft opening item"));
+      assert.ok(trigger);
+      await h.fireEvent(trigger as never, "click");
+      for (let i = 0; i < 4; i++) await h.settle();
+
+      const keyField = findIn(body as never, (n) => (n as unknown as { id?: string }).id === "opening-draft-key");
+      assert.ok(keyField);
+      await h.act(() => setFieldValue(keyField as never, "cash-mbb"));
+
+      const buttons = buttonsLabelled(body as never, "Draft opening item");
+      await h.act(() => clickButton(buttons[1] as never));
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      const text = textOf(body as never);
+      assert.match(text, /CLR19/, "AC1: the same governed code still surfaces");
+      assert.match(text, /write_into_closed_period/, "AC1: the same reason token still surfaces");
+      assert.doesNotMatch(text, new RegExp(ENTRY_ID), "the raw journal-entry id the person never created must never reach them");
+      assert.doesNotMatch(text, /sits in closed fiscal year/, "the raw entry-centric sentence must not render inside the opening-basis flow");
+      assert.match(text, /opening basis/i, "the message must speak in terms of the opening basis being worked on");
+
+      // CB-AE2E-004's own law, unaffected by this ticket: a refusal never closes the dialog nor
+      // wipes what the human typed.
+      const stillOpen = buttonsLabelled(body as never, "Draft opening item");
+      assert.equal(stillOpen.length, 2, "the dialog must still stay open on this refusal, exactly as on any other");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+test("CRS-07-01: drafting an opening item into a fiscal year still IN CLOSING never says the year is closed, and never points at reopen", async () => {
+  // `clara._tf_period_wall_lines` (0056_wave_e_close_model.sql:735/746-749) returns early only for
+  // `status in ('open','reopened')` — a year `status = 'closing'` (set by begin_close, and the wall's
+  // own lookup deliberately PREFERS it: `order by (fy.status in ('closing','closed')) desc`, 0056:733)
+  // fires the SAME CLR19 write_into_closed_period. The substituted sentence must not claim the year
+  // is "now closed" (it is mid-close, a reversible state a person can still abandon) and must not
+  // send the person at "reopen" (clara.reopen_fiscal_year is for a CLOSED year — CloseLifecycle.doors
+  // .reopen.title: "Reopen this closed fiscal year"; a year in closing goes back to open through
+  // clara.abandon_close, CloseLifecycle.doors.abandon.title: "Abandon this close run").
+  const ENTRY_ID = "e3333333-3333-4333-8333-333333333333";
+  const mock = (async (u: RequestInfo | URL) => {
+    const url = String(u);
+    if (url.includes("/rest/v1/rpc/get_opening_dryrun")) return jsonResponse(DRYRUN_EMPTY);
+    if (url.includes("/rest/v1/rpc/draft_opening_item")) {
+      return jsonResponse({
+        code: "CLR19",
+        message: `entry ${ENTRY_ID} sits in closing fiscal year FY2026; its lines may not change -- the formal reopen path is the one way back in`,
+        details: JSON.stringify({
+          reason: "write_into_closed_period", fiscal_year_id: "fy1", fy_status: "closing", entry_id: ENTRY_ID,
+        }),
+      }, 400);
+    }
+    if (url.includes("/rest/v1/opening_seed_registry")) return jsonResponse([SEED_OPEN_UNTIED]);
+    if (url.includes("/rest/v1/onboarding_plan_items")) return jsonResponse([]);
+    if (url.includes("/rest/v1/onboarding_plans")) return jsonResponse([{ id: "plan1", state: "open", revision_token: "rev1", created_at: "2026-01-01T00:00:00Z" }]);
+    if (url.includes("/rest/v1/coa_accounts")) return jsonResponse([{ account_code: "1000", name: "Cash", account_type: "asset", account_class: null, special_acc_type: null, is_active: true }]);
+    if (url.includes("/rest/v1/counterparties")) return jsonResponse([]);
+    if (url.includes("/rest/v1/opening_items")) return jsonResponse([]);
+    if (url.includes("/rest/v1/opening_tb_targets")) return jsonResponse([]);
+    if (url.includes("/rest/v1/client_resolutions")) return jsonResponse([{ id: "r1" }]);
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(mock, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Draft opening item"));
+      assert.ok(trigger);
+      await h.fireEvent(trigger as never, "click");
+      for (let i = 0; i < 4; i++) await h.settle();
+
+      const keyField = findIn(body as never, (n) => (n as unknown as { id?: string }).id === "opening-draft-key");
+      assert.ok(keyField);
+      await h.act(() => setFieldValue(keyField as never, "cash-mbb"));
+
+      const buttons = buttonsLabelled(body as never, "Draft opening item");
+      await h.act(() => clickButton(buttons[1] as never));
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      const text = textOf(body as never);
+      assert.match(text, /CLR19/, "the same governed code still surfaces");
+      assert.match(text, /write_into_closed_period/, "the same reason token still surfaces");
+      assert.doesNotMatch(text, new RegExp(ENTRY_ID), "the raw journal-entry id must never reach them");
+      assert.doesNotMatch(text, /sits in closing fiscal year/, "the raw entry-centric sentence must not render");
+      assert.match(text, /opening basis/i, "the message must speak in terms of the opening basis being worked on");
+      assert.doesNotMatch(text, /now closed/i, "a year still IN CLOSING must never be told it is already closed");
+      assert.doesNotMatch(text, /have that year reopened/i, "reopen is for a CLOSED year — a closing year is abandoned, not reopened");
+      assert.match(text, /close/i, "the sentence must still name the close run as what stands in the way");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
 const FINALIZED_SEED = { ...SEED_OPEN_UNTIED, state: "finalized", batch_n: 1, finalized_at: "2026-01-16T00:00:00Z", finalized_by: "u1" };
 const FA_ITEM = { id: "ifa", firm_id: "f1", client_id: "c1", seed_id: "s1", item_kind: "fixed_asset", item_key: "van-1", entry_id: "efa", counterparty_id: null, fixed_asset_id: "fa1", item_ref: null, item_date: null, amount_cents: 8000000, sst_portion_cents: null, sst_rate_bp: null, sst_basis: null, state: "active", superseded_by_item: null, supersedes_item_id: null, created_by: "u1", created_at: "2026-01-15T00:00:00Z" };
 const GL_ITEM = { id: "igl", firm_id: "f1", client_id: "c1", seed_id: "s1", item_kind: "gl_balance", item_key: "cash-1", entry_id: "egl", counterparty_id: null, fixed_asset_id: null, item_ref: null, item_date: null, amount_cents: 500000, sst_portion_cents: null, sst_rate_bp: null, sst_basis: null, state: "active", superseded_by_item: null, supersedes_item_id: null, created_by: "u1", created_at: "2026-01-15T00:00:00Z" };
+
+test("987.L07-05: the SAME period-wall substitution renders correctly out of Supersede, a NON-DRAFT door", async () => {
+  // L07-05 / L07-A04 — `openingClosedPeriodRefusal` is keyed on this workbench's ONE shared
+  // sticky `error`, set by the SAME `act()` every governed door shares (opening-seed-workbench.tsx).
+  // `clara.supersede_opening_item` inserts journal lines too (opening-item-doors.ts's own header),
+  // so the period wall can refuse a SUPERSEDE exactly as it refuses a draft. This cell proves the
+  // reworded, door-neutral sentence ("cannot be changed here") still fits when the refused act was
+  // never a draft at all.
+  const ENTRY_ID = "e2222222-2222-4222-8222-222222222222";
+  const mock = (async (u: RequestInfo | URL) => {
+    const url = String(u);
+    if (url.includes("/rest/v1/rpc/get_opening_dryrun")) return jsonResponse({ ...DRYRUN_EMPTY, state: "finalized" });
+    if (url.includes("/rest/v1/rpc/supersede_opening_item")) {
+      return jsonResponse({
+        code: "CLR19",
+        message: `entry ${ENTRY_ID} sits in closed fiscal year FY2026; its lines may not change -- the formal reopen path is the one way back in`,
+        details: JSON.stringify({
+          reason: "write_into_closed_period", fiscal_year_id: "fy1", fy_status: "closed", entry_id: ENTRY_ID,
+        }),
+      }, 400);
+    }
+    if (url.includes("/rest/v1/opening_seed_registry")) return jsonResponse([FINALIZED_SEED]);
+    if (url.includes("/rest/v1/onboarding_plan_items")) return jsonResponse([]);
+    if (url.includes("/rest/v1/onboarding_plans")) return jsonResponse([{ id: "plan1", state: "open", revision_token: "rev1", created_at: "2026-01-01T00:00:00Z" }]);
+    if (url.includes("/rest/v1/coa_accounts")) return jsonResponse([]);
+    if (url.includes("/rest/v1/counterparties")) return jsonResponse([]);
+    if (url.includes("/rest/v1/opening_items")) return jsonResponse([GL_ITEM]);
+    if (url.includes("/rest/v1/opening_tb_targets")) return jsonResponse([]);
+    if (url.includes("/rest/v1/client_resolutions")) return jsonResponse([{ id: "r1" }]);
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(mock, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      const trigger = buttonsLabelled(h.container as never, "Supersede")[0];
+      assert.ok(trigger, "the non-FA row's Supersede trigger must render");
+      await h.fireEvent(trigger as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const confirm = buttonsLabelled(body as never, "Supersede").find((b) => b !== trigger);
+      assert.ok(confirm, "the Supersede dialog's own Confirm must render");
+      await h.act(() => clickButton(confirm as never));
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      const text = textOf(body as never);
+      assert.match(text, /CLR19/, "the same governed code still surfaces out of a non-draft door");
+      assert.match(text, /write_into_closed_period/, "the same reason token still surfaces");
+      assert.doesNotMatch(text, new RegExp(ENTRY_ID), "the raw journal-entry id must never reach them");
+      assert.doesNotMatch(text, /sits in closed fiscal year/, "the raw entry-centric sentence must not render");
+      assert.match(text, /opening basis/i, "the message must still speak in terms of the opening basis");
+      // NOT a bare doesNotMatch(/drafted/i) — OpeningSupersedeDialog's OWN static copy legitimately
+      // says "drafts a reversal", so that check would fail on sibling UI text having nothing to do
+      // with the refusal. The refusal SENTENCE itself is what must stay door-neutral:
+      assert.match(text, /cannot be changed here/, "the door-neutral wording must be the one that renders");
+      assert.doesNotMatch(text, /cannot be drafted here/, "the old draft-specific wording must be gone");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
 
 test("F7: a fixed_asset row's Supersede Confirm is DISABLED with a visible reason; a non-FA row's is ENABLED", async () => {
   const mock = (async (u: RequestInfo | URL) => {

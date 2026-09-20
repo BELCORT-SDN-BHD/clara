@@ -34,6 +34,7 @@
 # §3.1's own reasoning for moving off the single line). FOLD (Codex round-3,
 components/accounting/journal-composer.test.tsx
 components/accounting/periodic-adjustment-form.test.tsx
+components/accounting/periodic-adjustments-table.test.tsx
 components/accounting/staff-expense-claim-form.test.tsx
 components/accounting/trade-invoice-form-a11y.test.tsx
 components/accounting/trade-invoice-form-keyboard.test.tsx
@@ -68,7 +69,9 @@ components/clara/composer-attachment-scope.test.tsx
 components/clara/composer-attachment.test.tsx
 components/clara/composer-field-wiring.test.tsx
 components/clara/composer-keyboard.test.tsx
+components/clara/interview-draft-persistence.test.tsx
 components/clara/interview-run-a11y.test.tsx
+components/clara/interview-run-field-composition.test.tsx
 components/clara/interview-run-keyboard.test.tsx
 components/clara/onboarding-amend-and-chart.test.tsx
 components/clara/onboarding-begin-keyboard.test.tsx
@@ -105,11 +108,16 @@ components/common/money-input.staff-advance.test.tsx
 components/common/money-input.test.tsx
 components/common/p6-3-a11y.test.tsx
 components/common/route-error.test.tsx
+components/common/state.test.tsx
 components/common/table-scroll-region.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/correction-impact-sheet.test.tsx
+components/documents/correction-wizard.test.tsx
+components/documents/document-detail-live-refresh.test.tsx
 components/documents/document-facts-table.test.tsx
+components/documents/document-kind-control.test.tsx
+components/documents/document-kind-dialog.test.tsx
 components/documents/document-kind-labels.test.tsx
 components/documents/document-metadata-viewer-gate.test.tsx
 components/documents/document-page-overlay.test.tsx
@@ -158,6 +166,7 @@ components/firm-setup/firm-setup-checklist.test.tsx
 components/firm-setup/firm-setup-keyboard.test.tsx
 components/firm/activity/activity-event-sheet.test.tsx
 components/firm/activity/activity-feed.test.tsx
+components/firm/activity/activity-filters.test.tsx
 components/firm/activity/activity-row.test.tsx
 components/firm/activity/use-activity-feed.test.ts
 components/firm/add-client-candidates.test.tsx
@@ -183,6 +192,7 @@ components/firm/firm-home/firm-home-states.test.tsx
 components/firm/firm-home/firm-portfolio.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
+components/firm/needs-you-counts.test.tsx
 components/firm/needs-you-gaps.test.tsx
 components/firm/needs-you-row-facts.test.tsx
 components/firm/onboarding-proposal.test.tsx
@@ -280,6 +290,7 @@ components/shell-responsive.test.tsx
 components/tax/tax-a11y.test.tsx
 components/tax/tax-boundary-states.test.tsx
 components/ui/pagination.test.tsx
+components/ui/select.test.tsx
 components/work/accounting-work-list.test.tsx
 components/work/attach-evidence-dialog.test.tsx
 components/work/egress-reactivate-action.test.tsx
@@ -297,6 +308,9 @@ components/work/work-restate.test.tsx
 components/work/work-saved-views.test.tsx
 e2e/e2e-fixture-ownership.test.ts
 e2e/mock-dispatch.test.ts
+e2e/run-args.test.ts
+e2e/sign-in-census.test.ts
+e2e/spec-discovery.test.ts
 lib/bank/agency-doors.test.ts
 lib/bank/doors.test.ts
 lib/bank/error-kind.test.ts
@@ -354,6 +368,7 @@ lib/documents/loaders.test.ts
 lib/documents/open-in-new-tab.test.ts
 lib/documents/pdf-worker-asset.test.ts
 lib/documents/reads.test.ts
+lib/documents/receipts.test.ts
 lib/documents/region-geometry.test.ts
 lib/documents/runtime-wire.test.ts
 lib/documents/useUploadQueue.test.ts
@@ -508,6 +523,7 @@ tests/response-state.test.ts
 tests/runtime-outbound.test.ts
 tests/safe-redirect.test.ts
 tests/same-origin.test.ts
+tests/select-value-label-census.test.ts
 tests/server-boundary.test.ts
 tests/source-oracle.test.ts
 tests/sql-oracle.test.ts

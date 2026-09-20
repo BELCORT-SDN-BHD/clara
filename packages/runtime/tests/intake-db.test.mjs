@@ -2,7 +2,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
@@ -203,6 +203,16 @@ test("corrupt header-only PDF fails pre-finalize and never reaches canonical Sto
   assert.equal(await localObjectExists(`firms/${firm}/docs/${sha}.pdf`), false);
 });
 
+/** THE FIXTURE IS ABANDONED, so its sidecar is OLD (#966). The recovery belt now decides what to
+ *  skip from the file's mtime, before it opens anything — so a cell that writes its fixture and
+ *  sweeps in the same millisecond is describing a LIVE upload, which the belt is right to leave
+ *  alone. Ageing the file is what makes the fixture mean what its name says; the alternative
+ *  (turning the quiet window off) would have proven the belt works with its guard disabled. */
+async function ageSidecar(intakeId, ms = 60_000) {
+  const when = new Date(Date.now() - ms);
+  await utimes(intakePaths(intakeId).meta, when, when);
+}
+
 test("reconciler expires abandoned sidecars through the DB writer before unlink", { skip }, async () => {
   const { owner, firm } = await rig.buildFirm("intake-expiry");
   const begun = await rig.asRuntime((client) =>
@@ -212,12 +222,45 @@ test("reconciler expires abandoned sidecars through the DB writer before unlink"
   );
   const meta = await readIntakeMeta(begun.intake_id);
   await writeIntakeMeta(begun.intake_id, { ...meta, expiresAt: new Date(Date.now() - 1000).toISOString() });
+  await ageSidecar(begun.intake_id);
   const out = await recoverPendingDocumentIntakes({ withRuntime, enqueue: async () => ({}) });
   assert.equal(out.expired, 1);
   const row = await rig.readDocumentIntake(begun.intake_id);
   assert.equal(row.status, "failed");
   assert.equal(row.failure_code, "expired");
   assert.equal(await readIntakeMeta(begun.intake_id), null);
+});
+
+test("p966 the belt still recovers a crashed mid-flight intake — bytes spooled, finalize never reached", { skip }, async () => {
+  // THE CRASH THIS BELT EXISTS FOR: the bytes arrived and the process died before the finalize.
+  // The sidecar is the only record, and it carries the capability HASH rather than the token.
+  const { owner, firm } = await rig.buildFirm("intake-p966-recover");
+  const bytes = Buffer.from("%PDF-1.7\n9 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF\n");
+  const begun = await rig.asRuntime((client) =>
+    beginDocumentIntake(client, { sub: owner, firmId: firm }, {
+      filename: "crashed.pdf", mime: "application/pdf", declared_bytes: bytes.length, origin: "documents_tab",
+    }),
+  );
+  await uploadDocumentBytes({ withRuntime, intakeId: begun.intake_id, token: begun.upload_token, readable: Readable.from([bytes]) });
+  assert.equal((await readIntakeMeta(begun.intake_id)).status, "spooled", "the fixture really is mid-flight");
+
+  // Inside the quiet window this intake is indistinguishable from a live upload, and the belt says so.
+  const live = await recoverPendingDocumentIntakes({ withRuntime, enqueue: async () => ({ runId: "never" }) });
+  assert.deepEqual(live, { recovered: 0, deferred: 0, expired: 0 },
+    "a sidecar written moments ago belongs to a request still in flight — the belt neither opens nor drives it");
+
+  await ageSidecar(begun.intake_id);
+  const starts = [];
+  const out = await recoverPendingDocumentIntakes({
+    withRuntime,
+    enqueue: async (taskId) => (starts.push(taskId), { runId: "fake-run" }),
+  });
+  assert.equal(out.recovered, 1, "…and past the guard it is finalized, exactly as before #966");
+  const intake = await rig.readDocumentIntake(begun.intake_id);
+  assert.equal(intake.status, "finalized");
+  assert.equal(starts.length, 1, "…and its ingest task is dispatched");
+  assert.equal((await rig.readDocumentTask(starts[0])).status, "queued");
+  assert.equal(await readIntakeMeta(begun.intake_id), null, "…and the spool is cleared behind it");
 });
 
 test("DB-first reconciler expires an intake and refunds its reservation without a sidecar", { skip }, async () => {

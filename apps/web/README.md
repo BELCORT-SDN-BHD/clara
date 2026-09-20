@@ -306,6 +306,53 @@ title so they are never mistaken for the database's words: `no_session`, `cross_
 something: the invitation exists and its link is unrecoverable, so the copy sends the admin to
 revoke it.
 
+**#874 — the mail endpoint alone has a test-only, FENCED seam.** `lib/members/invite-mail.ts`'s
+`InviteMailConfig.mailEndpoint` — resolved from `CLARA_E2E_INVITE_MAIL_ENDPOINT`
+(`INVITE_MAIL_ENDPOINT_ENV_NAME`), read by `inviteMailCapability` alongside the four required
+variables but never counted in `missing` — lets `productionInviteMailer`'s `send()` post
+somewhere other than `RESEND_ENDPOINT`. Owner ruling (2026-09-18): only the mail endpoint, never
+the Supabase admin calls (`canMintFor`/`mintSupabaseTokenHash` stay real everywhere). Unset (every
+real deployment), `send()` posts to `RESEND_ENDPOINT` exactly as before — pinned by
+`tests/invite-mail-transport.test.ts`'s `#874` suite.
+
+**fix-round ADV-1 — the fence, and why it is a VALUE check, not a build-mode check.** The original
+cut read the override unconditionally, in any environment, with no gate at all — a production-live
+egress override on the one call that carries the invite's plaintext token, reachable by anyone who
+could set an environment variable on the deployment (accidentally or not). `lib/checkout
+/stripe-session.ts`'s `STRIPE_API_BASE` note is this repo's own precedent for the identical class,
+and its fence (`NODE_ENV !== "production"`) was DELETED rather than kept, because `next start` —
+the exact shape a browser e2e walk runs against — sets `NODE_ENV=production`, neutralising it. This
+seam is fenced differently for exactly that reason: `inviteMailCapability` (via
+`isLoopbackMailEndpoint`) honours the override only when it parses as an http(s) URL whose host is
+loopback (`127.0.0.1`, `localhost`, `[::1]`); anything else — a real hostname, a bare path, a
+`javascript:` scheme — is silently treated exactly like an absent override. A variable set by
+mistake in production can therefore never redirect the mail off the machine it is running on. The
+name also now carries the `CLARA_E2E_` prefix every other harness-only flag in this app uses
+(`CLARA_E2E_MONEY_INPUT_HARNESS`).
+
+**AC2 (a Playwright walk substituting the endpoint) remains unmet, reconciled rather than built.**
+`e2e/members-lifecycle-mock.mjs`'s own header records that this harness sets no `RESEND_API_KEY`
+so the invite leg terminates at `mail_not_configured` before any admin call is attempted; reaching
+`send()` from a browser walk needs `canMintFor`/`mintSupabaseTokenHash` to succeed first, which
+needs the Supabase admin REST endpoints (`GoTrueAdminApi`'s `listUsers`/`generateLink`) mocked
+under `/e2e-supabase` — a second, larger seam this ticket's own "why human" note left as the
+owner's separate call, not decided here, and the fix-round review confirmed this blocker is real
+and independent of the fence above. Wiring `CLARA_E2E_INVITE_MAIL_ENDPOINT` into the e2e server's
+own env (`e2e/run.mjs`/`serve-built.mjs`) without that second seam would prove the variable is
+*read*, which the unit suite already pins, but not that a real invite flow ever *reaches* `send()`
+— the one thing AC2 actually asks for — so it was not built as a half-measure. The seam is proven
+at the unit level (`send()` posts to the override with the exact body a walk would need to assert
+on, and the fence rejects a non-loopback value); wiring a walk to reach it is a follow-up gated on
+the second seam, not a re-litigation of this ruling.
+
+**Re-verified, code-review fix round (SPEC-874-1): unchanged, third confirmation.** All 38
+`invite-mail-transport.test.ts` cells re-run green; `e2e/members-invite-walk.spec.ts`'s own header
+still states the harness sets no mail transport so the invite leg settles at `mail_not_configured`
+before any admin call; and a repo-wide search finds no `GoTrueAdminApi`/admin `generate_link`
+mock anywhere under `e2e/` — only the general `/e2e-supabase` REST prefix, which is not the admin
+API `canMintFor`/`mintSupabaseTokenHash` need. The tension is between AC2 as written and the
+owner's own 2026-09-18 ruling, not a lane shortfall; resolving it needs the owner, not more build.
+
 **There is no resend door, by design.** The plaintext token is never stored (裁-16a) so no link can
 be re-sent, and `clara.invite_member` refuses a second pending invitation for the same address
 (CLR10, `0147:399`). Revoke, then invite again — the old link stops working immediately, and the
@@ -344,6 +391,24 @@ place, because `clara.firm_invites_visible` does not carry the issuer's rank eit
 a fifth effective status on both, which is a ticket of its own. See `packages/db/README.md`'s 0224
 note; the divergence is pinned by `packages/db/tests/preview-invite.test.mjs`
 (`p625.preview.issuer_rank`).
+
+## #879 — the staffAdvances register tab gets its first browser coverage
+
+`?tab=staffAdvances` (`components/registers/staff-advances-register.tsx`) shipped with a full
+write surface — enrol, book application, complete particulars, retire — and zero Playwright
+coverage: `staffAdvancesHref` had a URL builder, the tab rendered from a unit mount, and no file
+under `e2e/` mentioned it. `e2e/staff-advances-register-mock.mjs` (a file-disjoint lane, the
+`staff-expense-claim-mock.mjs` shape) and `e2e/staff-advances-register-walk.spec.ts` close that:
+one enrolled account with one outstanding advance, one not-yet-enrolled candidate account. Three
+cells, in file order (`playwright.config.ts`'s `fullyParallel: false` / `workers: 1`, so the mock's
+in-memory state persists across them the way every stateful lane in this suite relies on): the tab
+renders with a real read; enrol → retire (the freshly-enrolled account has zero advances, so this
+never hits CLR10 `advance_outstanding_on_retire`) → book a 300.00 application → complete
+particulars, end to end, with the summary's outstanding figure and missing-particulars count both
+re-reading correctly afterward; the per-account statement panel then shows the booked application's
+row and the reduced closing balance. The lane owns `staff_advance_summary`/`staff_advance_tie`/
+`staff_advance_statement` exclusively for its own client — `staff-expense-claim-mock.mjs`'s own
+header records that it deliberately declines all three, leaving them to whichever lane needs them.
 
 ## Close and bank operating order
 
@@ -494,13 +559,44 @@ filing's own history, not on the queue.
   (`lib/documents/use-settle-poll.ts`) while any row can still change. The predicate
   is "filed to this client, or mine and unattributed" — never "my uploads", because
   `clara.document_intakes` has no client column. **A tick costs ONE read.** The mount
-  pays four (the masked intake view, this client's filings, the unassigned set and
-  `caller_context`) and keeps the last three as a derivation; each tick re-reads the
-  masked view alone through `refreshIntakeReceipts` and rebuilds the rows against that
-  derivation, and the full four are paid again exactly once, on the tick where the batch
-  settles. Until fix round 1 the tick re-ran the whole derivation — up to four reads a
-  tick under the caller's own JWT, the heaviest of them a SECURITY INVOKER RPC.
+  pays FOUR calls in two phases (`lib/documents/receipts.ts`'s `loadIntakeReceipts`,
+  #876): the masked intake view, the unassigned set and `caller_context` in one
+  `Promise.all`, then — sequenced AFTER it, because the bounded set cannot be known
+  before the intake rows are — a filings read BOUNDED to exactly those intake rows'
+  document ids (`document_filings?document_id=in.(…)`, `reads.ts`'s
+  `listActiveFilingsForDocuments`), never the client's whole active-filing set. That
+  fourth call replaced the pre-#876 shape (`document_filings?client_id=eq.<id>&select=
+  document_id` inside the same `Promise.all` — ONE column, the client's ENTIRE
+  active-filing set — to answer a question about a handful of intake rows); the
+  honest tradeoff is one extra serial round trip per mount and a nine-column
+  projection (`FILING_COLS`, same columns #876 asks for: "same projected columns"),
+  in exchange for a result bounded to the intake rows' own document ids instead of
+  the client's whole active-filing set — narrower in ROWS, wider in COLUMNS, not
+  simply "narrower". Each tick re-reads the masked
+  view alone through `refreshIntakeReceipts` and rebuilds the rows against the kept
+  derivation (filings included), and the full mount sequence is paid again exactly
+  once, on the tick where the batch settles. Until fix round 1 (#633) the tick re-ran
+  the whole derivation — up to four reads a tick under the caller's own JWT, the
+  heaviest of them a SECURITY INVOKER RPC.
 - *Filed to this client* — unchanged.
+
+**The document-detail panel's own settle poll (#904)** is a SECOND, independent
+`useSettlePoll` (`components/documents/document-detail.tsx`), covering a filed
+document's own extraction/OCR tasks rather than the pre-filing queue above: it runs
+while any `document_processing_tasks_visible` row for the open document is
+`queued`/`held_egress`/`running`. **A tick costs ONE read**, same law as the receipts
+poll above: `onTick` calls `listProcessingTasksForDocument` alone (`lib/documents/
+intake.ts`) and keeps the result as a local override until the panel's own full
+`reload()` runs again — NOT the panel's whole-bundle reload (fix round, L07-02; the
+first cut re-ran all five-or-six of `loadDocumentDetail`'s reads every tick, the exact
+per-tick cost fix round 1 removed from the sibling receipts poll). Bounded by the same
+`maxTicks`/backoff/hidden-tab pause as the receipts poll, and independent of it: the
+two settle polls never share a tick. When the tick ceiling is hit with a task still
+non-terminal, `DocumentMetadata`'s extraction-tasks section renders the same visible
+end the receipts list renders when IT exhausts (`extractionTasksExhausted` + a manual
+Refresh, wired to the panel's full `reload()`) — fix round, L07-A02; the first cut
+discarded `useSettlePoll`'s `exhausted` return value, so a long-running task's panel
+went stale with no signal at all after roughly 142s.
 
 **The firm's unassigned sources** live at `/documents`
 (`components/firm/documents/unassigned-sources.tsx`), over the already-granted
@@ -999,3 +1095,232 @@ does and the card prints them. The CSV is client-side only — no route, no door
 its first two lines carry the firm, that exact window and the currency, so a spreadsheet cannot lose
 the unit or the timezone the screen carried.
 
+## #1005 — `SelectValue` requires a label source, by construction
+
+**The defect.** Base UI's `<Select.Value>` renders the raw `value` unless it is given a label
+source (its "Formatting the value" doc: the `items` prop on `Select.Root`, or a function
+`children` on `Select.Value`). Eleven call sites built option lists by hand
+(`<SelectItem value={x}>{label}</SelectItem>`) without ever wiring either path, so every one of
+their triggers showed a row id or a sentinel (`__all`, `all`) on first render — found on hosted
+during the signed-in release walk of wave 2026-09-18.
+
+**The fix is in the wrapper, not at each call site.** `components/ui/select.tsx`'s `SelectValue`
+now takes a discriminated prop union: `items` (an array of `{ value, label }` or a `Record<string,
+ReactNode>`) XOR a function `children`, never neither. There is no third, label-less shape to fall
+into — a new call site that supplies neither fails `pnpm typecheck`. Internally, the `items` path
+still renders through a function `children` (so it can fall back to the `placeholder` on a value
+absent from `items`, never the raw value); the function-child path is passed through unchanged
+(`components/firm/client-home/client-period-selector.tsx` already used it, deliberately, for a
+value whose label needs the popup's own list, which is not mounted at first paint).
+
+**Choosing between the two paths.** Reach for `items` first — it is the shape every OTHER call
+site (matching-section.tsx, activity-filters.tsx, knowledge-panel.tsx, knowledge-firm-panel.tsx,
+work-list-filters.tsx, work-question-form.tsx, unassigned-sources.tsx, correction-wizard.tsx,
+document-kind-control.tsx, document-kind-dialog.tsx) now uses, including for a SENTINEL item
+(`{ value: "__all", label: t("periodAll") }`) and a label composed from several fields
+(`` `${a.bank_name_display} ${a.account_number} · ${a.coa_account_code}` ``). Reach for a function
+`children` only when the label genuinely cannot be built from the mounted item list at first paint
+— `client-period-selector.tsx`'s own header explains its one such case.
+
+**The backstop.** `apps/web/tests/select-value-label-census.test.ts` walks every `.ts`/`.tsx` file
+under `app/` and `components/` for a `<SelectValue>` with neither path (an AST check, independent
+of `tsc`, so an `as any` or a `@ts-expect-error` at a call site is still caught) and for any file
+importing `@base-ui/react/select` directly instead of through this wrapper.
+
+**Decision recorded (code-review ADV-2 / SPEC-1005-1): three new message keys need owner wording
+review before release.** `withUnmatchedFallback` (this file) plus
+`AccountingWork.filterClientUnknown` / `filterPurposeUnknown` / `filterInitiatorUnknown` and
+`Activity.filterClientUnknown` in `messages/en.json` synthesize a distinguishable label ("A client
+not in this list", "A kind not in this list", "Someone not in this list") for a well-formed filter
+value the mounted roster does not carry (an archived client, a purpose newer than the known list, a
+former member) — without it, that state rendered identically to "no filter applied", which is a
+real defect the fix genuinely closes. This is a THIRD display state the ticket's own brief did not
+specify. Flagged here for owner wording sign-off; no code change needed if the copy is accepted.
+
+**Decision recorded (code-review ADV-9 / SPEC-1005-2): four never-used props exist only to make a
+Base UI popup mountable in a unit cell.** `correction-wizard.tsx`'s `initialToClient`,
+`document-kind-control.tsx` and `document-kind-dialog.tsx`'s `initialKind`, and
+`unassigned-sources.tsx`'s `initialClientId` each carry a doc comment stating "no production caller
+sets this"; `unassigned-sources.tsx`'s `SourceRow`/`UnassignedRow` were also widened from
+module-private to exported for the same reason. The cause: these five Selects render inside a Base
+UI `Dialog`, which portals into `document.body`, and this repo's lightweight DOM harness
+(`test/hookHarness.ts`) has no seam for opening that portalled popup and selecting an option — so a
+real fixture-driven selection could not be reached the way the other five #1005 surfaces already
+had one to reuse. Filed as a follow-up rather than fixed here: build one shared harness helper that
+opens a portalled Select/Dialog popup and picks an option, then remove these five props. Do not add
+a sixth without the same note.
+
+## #956 — an abort now cancels a PENDING reconnect, not just the in-flight read
+
+**The defect.** `lib/clara/stream.ts`'s `runClaraTaskStream` reattaches after a backoff sleep on
+`detached` or an ungraceful close, and the loop only rechecks `signal.aborted` at the TOP of its
+next iteration — right before opening the next attach. A bare `await sleep(delayMs)` (real time in
+production: 1s → 2s → … → 30s cap) waits out the WHOLE delay first, so aborting a task while its
+loop is asleep between attaches only postpones that check, by up to the backoff, rather than
+stopping it. In the browser this is a stop button whose task keeps quietly reattaching in the
+background for up to 30s. In `use-clara-thread-stop.test.ts` it was worse: the "REFUSED ordinary
+stop re-attaches" cell retires its reattach with `claraThreadStore.abortStream(taskId)` in a
+`finally`, on the assumption that abort means "this task's reading is over" — the pending ~1s real
+timer outlived it, firing a stray `/stream` fetch into whichever mock the NEXT cell had installed
+by then. Passed 5/5 in isolation; failed under the loaded whole-suite run (#642's own reattach
+work named the mechanism while fixing something else in the same file; #956 is that defect, not a
+second one).
+
+**The fix, in two parts.** `stream.ts`'s `abortableSleep` races the backoff sleep against the
+signal's own `abort` event and resolves the instant either settles —
+`AbortController.abort()` dispatches `abort` SYNCHRONOUSLY, so the moment a caller aborts, the
+pending sleep resolves on its own next microtask and the loop's very next line (already
+`signal.aborted`-aware) returns before opening another attach. That alone is necessary but not
+sufficient: `withRunFetch`'s test stub returns an empty 200 for every `/stream` request, so EVERY
+cell that hydrates a "running" task opens a reattach loop that ends ungracefully and schedules a
+real backoff — whether or not that cell itself ever calls `abortStream`. Most didn't.
+`claraThreadStore.abortAllStreams()` (aborts every task this store still holds a handle for) run
+from a single file-level `test.afterEach` in `use-clara-thread-stop.test.ts` closes the rest: with
+both pieces, nothing a cell forgot to retire can survive past that cell's own boundary. Measured
+after the fix: 25/25 consecutive isolated runs, 5/5 whole-suite runs with no failure attributable
+to this file.
+
+**The regression.** `apps/web/tests/streamReattach.test.mjs` gained two cells proving the abort
+path directly against `runClaraTaskStream`: one that aborts mid-backoff against a `sleepImpl` that
+never resolves on its own (so the ONLY way the loop can end is the abort, and a `{ timeout: 2000 }`
+turns a regression back into a hang into a clear failure instead of a silent one), and one proving
+the already-aborted fast path never even starts the sleep.
+
+**fix-round ADV-4.** `abortableSleep`'s race left the OTHER arm unguarded: `sleepImpl(ms).then
+(finish)` (one argument) had no handler for a REJECTING `sleepImpl` — `void` discarded the
+promise, so a rejection became an unhandled rejection AND `finish` was never called, hanging the
+awaited `runClaraTaskStream` forever. `sleepImpl` never rejects in production (it is a plain
+timer), but the fix is the same two-argument shape this promise already uses for its abort
+listener: `.then(finish, finish)`, so a failing clock ends that backoff exactly like an elapsed
+one, never a hang. New cell in `streamReattach.test.mjs`, confirmed to fail (unhandled rejection
+at the exact pre-fix line) via `git stash`/`pop`, then restored byte-for-byte.
+
+**Decision recorded (code-review ADV-7 / SPEC-956-2): `abortAllStreams()` stays a documented
+test-support primitive with no production caller.** Its own doc comment says so; the only caller
+is `use-clara-thread-stop.test.ts`'s file-level `test.afterEach`. Both alternatives were checked
+and rejected: moving teardown into the test file over its own tracked task ids would need a large,
+risky refactor of a ~1300-line test file with no single choke point where every cell's task id is
+already recorded; giving it a real production caller (sign-out was the one plausible site) would
+directly contradict this same file's own documented decision that "a live tab keeps a task's read
+running across an ordinary sign-out, BY DESIGN." Leave it uncalled in production rather than treat
+it as dead code to delete.
+
+**Also recorded (SPEC-956-1): the absence cell's own reattach window is safe in practice, not by
+construction.** `use-clara-thread-stop.test.ts`'s "ALREADY FINISHED does not re-attach" cell spends
+a fixed 20-hop settle budget rather than proving impossibility. Re-verified this round, by reading
+`stopReply`'s own code and by an empirical run (600 settle hops, ~9s real time, `net.streams`
+stayed at 0 throughout): a `finished` cause is explicitly excluded from the reattach branch
+(`settled.cause !== "finished"` guards the only `openStream` call a refused stop can make), so this
+specific cell's flow never opens a stream at all — there is no pending backoff to race against,
+which is a STRONGER guarantee than the original finding assumed (impossible by the code's own
+branching, not merely unobserved within budget). No change made.
+
+## #875 — poll-bound test-budget audit (fix round, landing the deliverable)
+
+**#875's whole deliverable is this table** — the point, per its own brief, is that the NEXT
+poller a lane adds can be checked against it rather than re-litigated from scratch. Every row was
+read at its source, not assumed clean.
+
+| poller | delay constant | test file | non-vacuity mechanism |
+|---|---|---|---|
+| `useClaraThread` run poll | `CLARA_RUN_POLL_MS=4000` | `lib/clara/use-clara-thread-stop.test.ts` | captures `setInterval`, fires the tick manually — never time-based |
+| `useUploadQueue` | `DEFAULT_POLL_INTERVAL_MS=1000` | `lib/documents/useUploadQueue.test.ts` | injectable `pollIntervalMs`; the exhausted-poll cell passes `pollIntervalMs: 0` explicitly |
+| `useInterviewRun` | `POLL_MS=3000` | `lib/interview/useInterviewRun.test.ts` | captures `setInterval`, fires manually |
+| `useClientWorkPack` | `CLIENT_WORK_PACK_REFRESH_MS=30_000` | `lib/work/use-client-work-pack.test.ts` | captures `setInterval` (`withTimers`/`ctx.tick()`), fires manually; the stale-after check uses a fake clock |
+| `useWorkDetail` | `WORK_POLL_MS=3000` | `components/work/work-detail.test.tsx` | genuinely waits real `3_100`/`6_500` ms past the interval — slow, not vacuous |
+| `CheckoutWaitingRefresh` | `CHECKOUT_REFRESH_INTERVAL_MS=5000` / `CHECKOUT_REFRESH_BUDGET_MS=120000` | `components/entry/checkout-faces-a11y.test.tsx` | injects `intervalMs:20, budgetMs:400`, waits a real `600ms` (> budget) — a #643 bisection already tightened this once |
+| `components/firm/work-question-affordance.tsx` | — | — | no interval/`setTimeout`-driven poll in this file at all (only a `requestAnimationFrame`/`setTimeout(…, 0)` next-frame wait) — not a poller |
+| `WorkCards.tsx` (rail card) | `WORK_CARD_POLL_MS=3000` | `components/parts/work-cards.test.tsx` | captures `setInterval`, fires manually |
+
+**Conclusion.** None of the eight surfaces named in this ticket's brief exhibits the
+`documents-workbench-refresh.test.tsx` shape (a real-time assertion window that never advances
+past the poller's own first-tick delay): six avoid the whole class structurally
+(capture-and-manually-fire), two pay real wall-clock time deliberately and correctly.
+
+**Scope, stated rather than left implicit (fix-round SPEC-875-1).** The audit above covers
+exactly the eight pollers this ticket's brief names — it is not a claim that these are the only
+interval-driven pollers in `apps/web`. Three further ones exist and were checked separately, for
+the same reason: `lib/dashboard/use-financial-pack.ts`'s `FINANCIAL_PACK_REFRESH_MS` (pinned by
+`lib/dashboard/use-financial-pack.test.ts`, capture-and-manually-fire),
+`lib/firm/use-firm-portfolio.ts`'s `FIRM_PORTFOLIO_REFRESH_MS` (pinned by
+`lib/firm/use-firm-portfolio.test.ts`, the same shape), and `components/clara/TurnProgress.tsx`'s
+`TURN_PROGRESS_TICK_MS=1000` (pinned by `components/clara/thread-live-stream-stability.test.tsx`,
+which intercepts `setInterval` calls at that exact period and fires them manually — added on
+re-check, code-review SPEC-875-1, so the census is exhaustive over the whole app, not only the
+brief's eight). All three are structurally non-vacuous; no poller anywhere in the app was found
+with no budget cell at all.
+
+**A genuinely new, adjacent finding — not fixed here (scope discipline).** One whole-suite run
+(during #956's own verification) hit `documents-workbench-refresh.test.tsx`'s `"[633]: an
+UNSETTLED receipt keeps a bounded watch and says so; the poll's budget is finite"` cell — the
+same file #633's original vacuity defect was fixed in (`FAST_POLL = { baseDelayMs: 0, maxDelayMs:
+0 }`, `grew > 0` guard). This is a DIFFERENT failure mode: `baseDelayMs: 0` already advances past
+the first tick in principle, but 40 macrotask `h.settle()` hops are not always enough for the
+poll's own tick to land under host contention (1 failure in a 5-run sample). Follow-up: audit
+that cell's own settle budget specifically — out of #875's stated scope (auditing *other*
+pollers) and not the same instance #875 was asked to fix.
+
+## #897 — the full-screen onboarding altitude leg (code-review fix round; still open)
+
+**Not delivered.** #897's own AC1 asks for a mock-lane cell proving typed-but-unsubmitted
+interview answers and focus survive the rail-to-full-screen escalation; AC2/AC3 ask for the
+fixture and its ownership declaration. None of the three is built. This fix round did two things,
+neither of which counts as delivering the ticket:
+
+**Fixed (SPEC-897-2): the AC4 header note no longer asserts coverage that does not exist.**
+`e2e/interview-walk.spec.ts`'s header used to say the arm is "proven without docker in a real
+built-app Playwright walk exactly like every other mock-lane spec in this directory" — no such
+walk exists anywhere, so the note recreated exactly the false-coverage state #897 exists to
+remove. Reworded to say plainly that the arm is not proven anywhere today and to name #897 as
+the open ticket.
+
+**Reproduced (SPEC-897-1): the blocker is now backed by a runtime empirical result, not only a
+static trace.** `components/clara/interview-draft-persistence.test.tsx` (new) mounts a real
+`ClaraFullScreenThread` instance, types an unsubmitted answer, unmounts it without submitting,
+then mounts a second fresh instance against the identical server-side run and reads its answer
+field. Today it starts empty — confirming, by running the actual component rather than only
+reading its source, that `InterviewRunCard.tsx`'s `draft` (`useState("")`, two call sites total,
+no persistence) does not survive an unmount of the tree that held it. This is not #897's
+deliverable (it does not touch the rail, the route-group boundary or a mock fixture) and its own
+header says so; it is the cheapest empirical confirmation available before committing to the
+larger build, and it is the test whose assertion should flip once #897 lands real persistence.
+
+**Still needed, unchanged from the prior report:** an owner ruling on whether AC1's typed-data
+and focus-return criteria mean literal cross-route-group survival, and — if so — a new
+interview-runtime mock subsystem (an OPEN/unanswered park fixture plus
+`/api/runtime/interview/*` handlers reachable through the rail) that this lane scoped as a
+genuine multi-piece build, not a same-shape addition to an existing fixture.
+
+## #981 — the durable-Work refusal carrier, read once
+
+`lib/work/api.ts` is the only reader of the runtime's durable-Work refusal bodies (they never go
+through `lib/wire.ts`). Those bodies now carry the governed door's WHOLE typed detail under one
+key, so this module surfaces it in one helper, `carrier()`, on EVERY refusal arm a durable-Work
+door can answer with — and a new structured key reaches a form with no new arm here and no new
+fold in `packages/runtime/src/workRoutes.ts`.
+
+**Every door, and every ARM of every door.** The five admission doors (`submitJournalWork`,
+`submitPeriodicAdjustmentWork`, `submitStaffExpenseClaimWork`, `submitTradeInvoiceWork`,
+`restateWork`) read the carrier on their `invalid_basis` and `conflict` arms; the four that can
+refuse a document already backing a posted entry read it on `source_conflict` too, and
+`restateWork` on `not_restatable`; `retryWork` reads it on `not_retryable`, `cancelWork` on
+`conflict` and `invalid`, and `takeOverWork` on `not_takeable`, `confirm_basis` and `invalid`. The
+runtime carries the door's typed detail on every 400 and 409 it builds, so an edge that read it on
+some arms only would have gone on discarding it exactly where the ticket says it must not — which
+is what the first round of this ticket did on those five call sites, and what review findings
+L10S-1 and STD-2 caught. `source_conflict` and `not_restatable` are the two that most need it:
+the first is built by the same `answer()` as its `conflict` sibling, and the second is the only
+place the door names `superseded_by`, the successor a surface has to link to. The ONE refusal that
+deliberately carries nothing is `transient`: PostgreSQL broke a deadlock, the statement never ran,
+and there is no state to describe.
+
+**It is spread, not assigned, and that is the compatibility promise.** A body with no typed detail
+yields `{}`, so `{kind, field, reason}` stays exactly `{kind, field, reason}` for every caller and
+every existing cell. A `detail` that is not a JSON object (PostgreSQL's own errors carry plain
+text) yields `{}` too — never a wrapper around a string, which would be a guess.
+
+**The trade invoice keeps `candidates`, and it is the minimum typing layered on the carrier.**
+D12(a)'s list is read off `detail.candidates` and typed as a first-class field because
+`components/accounting/trade-invoice-form.tsx` RENDERS it inline as a choice; the rest of the
+door's sentence (the name it could not resolve, the counterparty kind it expected) is readable
+beside it now, where the route-specific fold used to throw it away.

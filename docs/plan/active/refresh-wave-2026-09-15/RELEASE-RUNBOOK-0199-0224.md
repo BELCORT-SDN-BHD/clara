@@ -120,7 +120,11 @@ Preflight read-relations probe shape (unchanged): `lib/rollback-preflight.mjs`'s
   runbooks: `backup.mjs --profile full` through the probe's DSN into WSL, WSLENV pipeline, ~90–160s
   observed historically for a full dump; if the window opens more than ~2h after the stamp,
   re-take it. A restore does not return Storage bytes, managed Auth config or engine state
-  (`packages/db/README.md`).
+  (`packages/db/README.md`). **Update (#917), for the invocation used from here on:**
+  `<probe dsn pipe> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- wsl -u root -- bash -c
+  'node packages/db/scripts/backup.mjs --profile full'` — `dsn-pipe.mjs` respells the CA path and
+  sets `WSLENV` itself now; the hand-rolled WSL wrapper this ceremony's own § RESULTS step 3f
+  recorded (below) is no longer needed.
 - **Web rollback lever** (one command, unchanged mechanism): `pnpm --dir apps/web exec wrangler
   versions list` → current active version `0290977b-74a4-4c4a-849f-ee60efd631bb` (100% since
   2026-09-14) → one-command rollback `pnpm --dir apps/web exec wrangler versions deploy

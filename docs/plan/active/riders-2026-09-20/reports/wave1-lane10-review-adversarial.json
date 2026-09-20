@@ -1,0 +1,91 @@
+{
+  "lane": 10,
+  "branch": "riders/w1-lane10",
+  "head": "1b219f03ea2b7fee4cb5c6ca211848a9c629615d",
+  "base": "dd3f8f1d (merge-base; origin/main has since moved to e7f0a10a)",
+  "lens": "adversarial",
+  "verdict": "accept-with-fixes",
+  "summary": "Both tickets are really delivered and the compatibility work on #981 is unusually careful, but the carrier is additive on the WIRE and the lane searched only one of the three files that pin that wire byte-for-byte: packages/runtime/tests/periodic-adjustment-e2e.mjs:557 and staff-expense-claim-e2e.mjs:570 carry the identical assert.deepEqual the lane fixed in work-journal-e2e.mjs, and both now fail (proven by running workErrorResponse on the exact raised error). Secondary: the web edge surfaces the carrier on five of eight durable-Work doors, and #980's ask_question arm is not scoped to the Work its leg admitted. Re-verified green here: work-routes-unit 28/28, four runtime unit files 79/79, apps/web lib/work/api.test.ts 26/26, trade-invoice-e2e all 7 legs, pnpm typecheck exit 0, check-frozen-workflows no manifest diff, check-parts-parity OK.",
+  "findings": [
+    {
+      "id": "L10-A1",
+      "ticket": 981,
+      "severity": "blocker",
+      "title": "Two sibling World e2es pin the exact 400 body over the real wire and now fail on the new `detail` key",
+      "evidence": "packages/runtime/tests/periodic-adjustment-e2e.mjs:557 and packages/runtime/tests/staff-expense-claim-e2e.mjs:570 both read the body off a real HTTP response and assert assert.deepEqual(unfiled.body, { error: \"invalid_basis\", field: \"sourceRefs[1]\", reason: \"not_filed\" }). node:assert/strict deepEqual is deepStrictEqual, so one extra own property fails. Proven, not reasoned: from packages/runtime, node --import tsx -e with workErrorResponse({code:\"CLR10\", detail: JSON.stringify({reason:\"invalid_source_ref\", field:\"source_refs[1]\", constraint:\"not_filed\"})}) prints body {\"error\":\"invalid_basis\",\"field\":\"sourceRefs[1]\",\"reason\":\"not_filed\",\"detail\":{\"reason\":\"invalid_source_ref\",\"field\":\"source_refs[1]\",\"constraint\":\"not_filed\"}} and the two siblings' literal assertion raises 'Expected values to be strictly deep-equal'. Both routes (/api/work/periodic-adjustment, /api/work/staff-expense-claim) reach this through the same sendAdmissionError -> workErrorResponse the lane changed, and both legs run whenever migration 0182 is present. The lane fixed the IDENTICAL line in work-journal-e2e.mjs:571-577 (destructuring detail out before the deepEqual), so the shape of the fix is already written; it was simply not searched for elsewhere. The report's 'unverified' section says these files were not run because of their database gate - but the lane widened exactly that gate in two other files.",
+      "required_fix": "Apply the work-journal-e2e.mjs:571-577 treatment to periodic-adjustment-e2e.mjs:557 and staff-expense-claim-e2e.mjs:570 on this branch, in the #981 commit's idiom (destructure detail out, assert the promoted half, pin the carrier). Before reporting again, grep the whole runtime test tree for any other exact-body assertion on a durable-Work 400/409: grep -rn 'not_filed' packages/runtime/tests finds all of them today."
+    },
+    {
+      "id": "L10-A2",
+      "ticket": 981,
+      "severity": "major",
+      "title": "The generic carrier stops at three of the eight durable-Work doors on the web edge, and AC3 is reported done without saying so",
+      "evidence": "apps/web/lib/work/api.ts gained ...carrier(body) on submitJournalWork, submitPeriodicAdjustmentWork, submitStaffExpenseClaimWork, submitTradeInvoiceWork and restateWork. It did NOT gain it on takeOverWork's 400 arms (api.ts:828-833, still {kind:\"invalid\", reason} / {kind:\"confirm_basis\", ...}), retryWork's 409 arm (api.ts:563, {kind:\"not_retryable\", status}) or cancelWork's 400/409 arms (api.ts:747-749). The runtime now carries the door's typed detail on EVERY 400 and 409 workErrorResponse builds, including the ones those three doors answer, so the detail arrives and is discarded at this edge. AC3 reads 'A refusal carrying a structured detail key not seen before reaches a web caller without a new route-layer fold', and the ticket's Key interfaces name 'the web durable-Work client's result types' without restriction; for take-over, retry and cancel a new key still needs a new arm here - the exact gap the ticket describes. The final report marks AC3 done citing only submitJournalWork cells and never names the three doors left behind.",
+      "required_fix": "Either spread carrier(body) into TakeOverWorkResult / RetryWorkResult / CancelWorkResult's refusal arms with one cell each, or state the limit explicitly in the report under 'what was deliberately left' and file it as a residual, so the next reader does not assume the edge is uniform."
+    },
+    {
+      "id": "L10-A3",
+      "ticket": 980,
+      "severity": "minor",
+      "title": "The shared harness's ask_question arm asks on ANY Work the supervisor picks up, and a parked foreign Work never terminalises",
+      "evidence": "packages/runtime/tests/work-journal-serve.mjs:244-270 branches on SCRIPT === \"ask_question\" alone; it never checks which Work it is serving. One supervisor serves every queued accounting Work on the database - the same lane's own leg-7 helper states this (trade-invoice-e2e.mjs:260-264: 'one supervisor serves every queued accounting Work, leftovers from earlier legs included, so a bare \"somebody is held\" marker lets a leg act on another leg's Work') and guards waitHeld by matching the Work id; the ask_question arm has no such guard. Observed on this rig: a post-script Work admitted by leg 4 (6f25cfb6-c943-4edd-b3e4-638b4b4538cc, purpose journal_entry) was parked with the harness's exact question text 'Which date should this be posted on, and for how much?' - clara.agent_interruptions row 7c91bdc3-bfd6-4fe4-a194-044e3a31ea03, still pending on clara_l10 - and leg 4 failed with 'pollWork timeout (leg 4 respawn)' after 90s instead of a fast assertion. CAVEAT stated plainly: my trigger was a second trade-invoice-e2e process running against clara_l10 at the same time (PID 44456, 20:43:21Z, worktree 660), which is outside the rig's one-worker-per-database contract; re-run in isolation the suite is green (all 7 legs, twice). The mechanism is still new and in-contract reachable: any Work left queued by an earlier crashed run on the same database is parked permanently by leg 6's engine, and awaiting_input is a state no leg polls out of, so the failure is a timeout rather than a measurement. Before #980 a stray engine could only post the entry, which converges idempotently.",
+      "required_fix": "Gate the ask_question arm on the Work under test the way waitHeld gates its marker - ask only when the admitted-basis envelope already parsed by admittedBasis names the intent key / Work id the leg admitted, and otherwise fall through to post."
+    },
+    {
+      "id": "L10-A4",
+      "ticket": 981,
+      "severity": "minor",
+      "title": "workRoutes.ts's header still claims a fold its own new cell pins as absent",
+      "evidence": "packages/runtime/src/workRoutes.ts:65-66 - inside the header block this lane rewrote at :31-40 - says 'Its reasons are the database's own: invalid_adjustment folds to its constraint exactly as invalid_basis does'. The lane's own new cell, work-routes-unit.test.mjs:609-614 ('981.route: the three constraint folds are the only typing left'), asserts the opposite for invalid_adjustment, stale_basis and adjustment_lines_mismatch ('does NOT fold'), and CONSTRAINT_FOLD_REASONS at workRoutes.ts:895-897 names only three tokens. The report discloses this as follow-up #1, but the contradicted sentence ships in a file this lane rewrote, a few hundred lines from the cell that disproves it.",
+      "required_fix": "Correct the header sentence at :65-66 to say what the code does, citing CONSTRAINT_FOLD_REASONS (the parallel claim for invalid_claim at :77-78 is true and should stay). Comment-only, in a file already touched. Keep follow-up #1 for the separate question of whether the TOKEN should move."
+    },
+    {
+      "id": "L10-A5",
+      "ticket": 980,
+      "severity": "minor",
+      "title": "Leg 7 deletes a shared gate directory recursively and its gate writer cannot survive a missing directory",
+      "evidence": "packages/runtime/tests/trade-invoice-e2e.mjs leg 7's finally calls gate.cleanup() - which already removes this gate's two files - and then rmSync(GATE_DIR, { recursive: true, force: true }), removing packages/runtime/tests/.trade-invoice-gates whole; makeGate's open: () => writeFileSync(gate, \"open\") does no mkdir. Observed on this rig: '[ti-e2e] FAILED: Error: ENOENT: no such file or directory, open ...\\\\.trade-invoice-gates\\\\ti-cancel-62514023.open' after legs 1-6 were green. Same concurrency caveat as L10-A3, but the code offers no defence and the recursive removal is redundant given cleanup(). Separately, GATE_DIR sits inside the tracked tree and git check-ignore packages/runtime/tests/.trade-invoice-gates/x.open exits 1 (NOT ignored), so a watchdog exit (WATCHDOG_MS = 10 min; process.exit skips finallys) leaves untracked files in the lane worktree. work-cancel-e2e.mjs carries the same two habits, so this is a copied shape rather than a new sin - but this lane is the one that copied it.",
+      "required_fix": "Drop the recursive rmSync(GATE_DIR, ...) (cleanup() suffices) or make open() mkdir its parent first; and add .trade-invoice-gates/ and .work-cancel-gates/ to .gitignore - neither is ignored today."
+    },
+    {
+      "id": "L10-A6",
+      "ticket": 981,
+      "severity": "minor",
+      "title": "The browser walk cited as AC2 evidence never exercises the new carrier - the e2e mock still emits the pre-#981 body",
+      "evidence": "The report cites pnpm --filter @clara/web e2e trade-invoice-walk (12 passed) as evidence that the candidate list 'still renders inline exactly as today, read through the generic carrier'. The walk's refusal body is synthesised by apps/web/e2e/trade-invoice-mock.mjs:352-358 (state.nextRefusal = { field, reason, detail: body.detail ?? null }) from what trade-invoice-walk.spec.ts:171-180 passes, which is { candidates: [...] } alone - the pre-#981 shape. The runtime's real body now also carries reason, name and expected_counterparty_kind inside detail. The walk therefore proves only that the web component still reads detail.candidates; it is not evidence about the runtime change, and the mock has drifted from the door it stands in for. The genuine AC2 evidence is apps/web/lib/work/api.test.ts:531-556 ('981.web: the trade invoice's candidates are the SAME carrier, typed once'), which I re-ran: 26 tests, 26 pass.",
+      "required_fix": "Either widen the walk's control body to the real detail object (one line in trade-invoice-walk.spec.ts) so the mock keeps standing in for the door, or re-word the report so the walk is cited for what it proves (the component) and api.test.ts for the carrier."
+    },
+    {
+      "id": "L10-A7",
+      "ticket": 981,
+      "severity": "note",
+      "title": "The unnamed-409 fallback now carries the door's own reason token, and the cell that used to guard that was narrowed",
+      "evidence": "workErrorResponse's last 409 arm is now answer(409, { error: \"conflict\" }), so tokens the map deliberately refuses to name - run_already_terminal, source_conflict, operation_in_flight - reach the browser under detail.reason. The lane's own cell pins this (work-routes-unit.test.mjs:571-575, 'the door's typed detail rides back VERBATIM', driven over LEGACY_BODIES which includes run_already_terminal). The pre-existing guard at :459-464 was rewritten to run through promoted(...), so its stated claim - 'the token is not in the map: an unreachable refusal gets no name of its own' - is now true only of the promoted half while its comment still reads as if it covered the whole body. This is within AC3 by design, not a defect; it is the one place where 'additive' runs in a direction somebody could have been relying on for opacity. 403/404 opacity is correctly preserved and pinned at :660-668, and the transient arm still answers with no carrier at all (verified).",
+      "required_fix": "Re-word the :459-464 cell's comment so it claims what it now measures (the token gets no PROMOTED name), or add one line asserting where the token does now appear."
+    },
+    {
+      "id": "L10-A8",
+      "ticket": 980,
+      "severity": "note",
+      "title": "AC4 is carried by a file this lane changed, and nine of eleven harness spawners were not run",
+      "evidence": "Eleven files spawn packages/runtime/tests/work-journal-serve.mjs: accrual-e2e, chat-turn-v19-serve, chat-turn-v20-serve, fixed-asset-acquisition-e2e, periodic-adjustment-e2e, plan-occurrence-e2e, prepayment-occurrence-e2e, staff-expense-claim-e2e, trade-invoice-e2e, work-egress-e2e, work-journal-e2e, plus work-cancel-serve and work-question-serve. The lane ran two, and the one that carries the narrate claim - work-journal-e2e.mjs - is itself modified by this lane (gate regex :78-91, assertion :565-577), so 'still passes unchanged' is literally false for the only file that could prove it. The report discloses the nine as unverified; L10-A1 shows two of those nine are in fact broken, which is what makes this note worth keeping rather than accepting the branch-guard argument ('SCRIPT === ask_question is a value no existing caller sets') at face value: the risk in this diff was never the harness branch, it was the wire.",
+      "required_fix": "None beyond L10-A1. When the orchestrator runs the runtime World suite, run all eleven before closing #980 and record which databases they needed."
+    }
+  ],
+  "verified_here": [
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files, no manifest diff, 55 'use workflow' modules frozen+registered (rule 5 respected: nothing in a frozen closure was touched)",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK",
+    "node --test tests/work-routes-unit.test.mjs -> 28 tests, 28 pass, 0 fail",
+    "node --test work-routes-unit + staff-expense-claim-unit + periodic-adjustment-unit + trade-invoice-unit -> 79 tests, 79 pass, 0 fail, 0 skip",
+    "node --import ./test/bootstrap.mjs --import tsx --test lib/work/api.test.ts -> 26 tests, 26 pass, 0 fail",
+    "node tests/trade-invoice-e2e.mjs on PGPORT 55750 / clara_l10 -> all 7 legs green (3m09s, then a second clean run). Leg 7 is NOT vacuous: work-cancel-serve.mjs writes its held marker only on the path where admittedBasis(text) !== null, so waitHeld succeeding proves the model was poised to call record_journal_entry when the cancel landed",
+    "pnpm typecheck -> exit 0 (apps/web and packages/runtime)",
+    "git diff origin/main..HEAD shows four extra docs paths (docs/PROGRESS.md, RELEASE-AS-RUN.md, ceremony/reads-0234.mjs, GRILL-2026-09-20.md) purely because origin/main moved to e7f0a10a after the cut; the merge-base diff dd3f8f1d..HEAD is the reported 14 files / +1049 / -205, working tree clean, nothing pushed, no GitHub write"
+  ],
+  "not_verified_here": [
+    "pnpm lint (report claims exit 0; not re-run)",
+    "the whole apps/web unit suite (report claims 4637 tests / 4635 pass / 2 skip; not re-run)",
+    "pnpm --filter @clara/web e2e trade-invoice-walk (see L10-A6 for what it would and would not prove)",
+    "the lane's three #980 vacuity controls (A/B/C): I am read-only and would have had to break a tracked file. Leg 7's non-vacuity is established independently above; leg 6's rests on the lane's control A"
+  ]
+}

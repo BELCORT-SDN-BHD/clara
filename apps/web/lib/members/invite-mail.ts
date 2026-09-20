@@ -49,11 +49,62 @@ export const INVITE_MAIL_ENV_NAMES = {
   from: "INVITE_MAIL_FROM",
 } as const;
 
+/** #874 — a TEST-ONLY seam on the mail endpoint alone (owner ruling, 2026-09-18: "only the mail
+ *  endpoint becomes overridable... the Supabase admin calls stay real"). Named alongside
+ *  `INVITE_MAIL_ENV_NAMES` so every environment variable this transport reads is findable in one
+ *  place, but deliberately NOT one of them: it is OPTIONAL and `inviteMailCapability` below never
+ *  adds it to `missing` — its absence is the entire production posture (every real deployment),
+ *  not a misconfiguration a `mail_not_configured` refusal should ever name. Set, it substitutes
+ *  where `productionInviteMailer`'s `send()` posts the mail; a Playwright walk that sets it to a
+ *  local URL can assert on the posted body — recipient, subject, the invite link — with no
+ *  outbound network call, while `canMintFor`/`mintSupabaseTokenHash` still call the real Supabase
+ *  admin API untouched.
+ *
+ *  fix-round ADV-1 — FENCED, after review: the ORIGINAL cut read this unconditionally, in every
+ *  environment, with no NODE_ENV gate, no loopback allowlist and no `CLARA_E2E_` naming — an
+ *  unfenced, production-live override of the ONE outbound call in this app that carries the
+ *  invite's plaintext token. `lib/checkout/stripe-session.ts`'s `STRIPE_API_BASE` is this repo's
+ *  own recorded precedent for the identical class, but its fence (a `NODE_ENV !== "production"`
+ *  dev/loopback carve-out) was DELETED rather than kept, because `next start` sets
+ *  `NODE_ENV=production` — the exact deployment shape a browser e2e walk runs against — so that
+ *  fence was neutralised by the one build it needed to survive. The fence below is a DIFFERENT
+ *  shape for that reason: not a build-mode check (useless once the e2e server explicitly sets
+ *  this variable, which `next start` does not touch), but a check on the VALUE itself — the
+ *  override is honoured only when it parses as an http(s) URL whose host is loopback. Even a
+ *  variable set by mistake in a real deployment could then only ever redirect the invite mail to
+ *  something already running on that SAME machine, never exfiltrate it to an attacker's server —
+ *  the actual harm ADV-1 named. The `CLARA_E2E_` name matches every other harness-only flag in
+ *  this app (`CLARA_E2E_MONEY_INPUT_HARNESS`, `require-firm-scope.ts`/`proxy.ts`) so a future
+ *  census over that prefix finds it too. */
+export const INVITE_MAIL_ENDPOINT_ENV_NAME = "CLARA_E2E_INVITE_MAIL_ENDPOINT";
+
+/** True for an http(s) URL whose host is loopback — the only shape
+ * `INVITE_MAIL_ENDPOINT_ENV_NAME` is ever honoured for (fix-round ADV-1). A relative path, a
+ * non-http(s) scheme, or a real hostname (however plausible-looking) all fail this and the
+ * override is then treated exactly like absence — never thrown, never logged with the value, the
+ * same fail-quiet posture `inviteMailCapability` already gives a blank override. */
+function isLoopbackMailEndpoint(candidate: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  return url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+}
+
 export type InviteMailConfig = {
   supabaseUrl: string;
   serviceRoleKey: string;
   resendApiKey: string;
   from: string;
+  /** #874 — resolved from `INVITE_MAIL_ENDPOINT_ENV_NAME` by `inviteMailCapability`; `undefined`
+   *  whenever that variable is unset or blank, which `productionInviteMailer`'s `send()` reads as
+   *  "use `RESEND_ENDPOINT`" — the same default a config built with no such field at all gets. A
+   *  test literal that omits this field (every one that existed before this ticket) is therefore
+   *  still exactly production behaviour, unpinned by construction rather than by discipline. */
+  mailEndpoint?: string;
 };
 
 export type InviteMailCapability =
@@ -90,7 +141,21 @@ export function inviteMailCapability(env: Record<string, string | undefined>): I
   const resendApiKey = read(INVITE_MAIL_ENV_NAMES.resendApiKey);
   const from = read(INVITE_MAIL_ENV_NAMES.from);
   if (missing.length > 0) return { ok: false, missing };
-  return { ok: true, config: { supabaseUrl, serviceRoleKey, resendApiKey, from } };
+  // #874 — OPTIONAL and read LAST, after the `missing` gate above: an unset or blank override
+  // must never contribute to `missing` (it names no environment variable a real deployment is
+  // expected to set), and a blank string is treated exactly like absence rather than as a
+  // request to post to the empty string.
+  //
+  // fix-round ADV-1 — a NON-LOOPBACK value is ALSO treated exactly like absence, never thrown
+  // and never logged with the value: this function's contract is "resolve the capability", not
+  // "validate the harness's own configuration", and the fail-quiet arm is the one that cannot
+  // leak the rejected value anywhere. See `isLoopbackMailEndpoint`'s own header for why a value
+  // check is the fence here rather than a build-mode check.
+  const endpointOverride = env[INVITE_MAIL_ENDPOINT_ENV_NAME];
+  const trimmedOverride = typeof endpointOverride === "string" ? endpointOverride.trim() : "";
+  const mailEndpoint =
+    trimmedOverride !== "" && isLoopbackMailEndpoint(trimmedOverride) ? trimmedOverride : undefined;
+  return { ok: true, config: { supabaseUrl, serviceRoleKey, resendApiKey, from, mailEndpoint } };
 }
 
 /**
@@ -514,8 +579,13 @@ export function productionInviteMailer(
     },
     async send(message): Promise<void> {
       let res: Response;
+      // #874 — `config.mailEndpoint` is set ONLY by `inviteMailCapability` reading a positively
+      // present, non-blank `INVITE_MAIL_ENDPOINT_ENV_NAME` (or by a test building the config
+      // literal directly); every other caller — every real deployment — leaves it `undefined`
+      // and posts to the one production endpoint below, unchanged.
+      const endpoint = config.mailEndpoint ?? RESEND_ENDPOINT;
       try {
-        res = await doFetch(RESEND_ENDPOINT, {
+        res = await doFetch(endpoint, {
           method: "POST",
           headers: {
             "content-type": "application/json",

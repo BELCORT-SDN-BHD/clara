@@ -27,6 +27,8 @@
 //                           something else settled it while the operator was looking at it).
 //   OPERATOR.settledProblem — already resolved: no act, and a readable support receipt.
 //   OPERATOR.deniedCase   — always CLR11, for the no-existence-oracle deep link.
+import { readCachedJson } from "./mock-dispatch.mjs";
+
 
 export const OPERATOR = {
   registration: "0f615a00-1111-4777-8777-0f615a000001",
@@ -48,17 +50,6 @@ export const OPERATOR = {
   // strict-mode violation rather than an assertion.
   settledFirmName: "Johor Ledger Partners",
 };
-
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
-}
 
 /** A governed refusal framed exactly as PostgREST frames one, so `lib/wire.ts` classifies it into
  *  a real `RefusalError` with its code and `detail.reason` rather than a generic wire failure. */
@@ -206,7 +197,7 @@ export async function handleOperatorSupportSupabase(request, response, path, url
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/list_operator_support_queue") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     // The BOOKKEEPER persona meets the door's own CLR04, not a fixture that hands over the estate.
     if (isBookkeeper(request)) {
       sendJson(response, 400, clr("CLR04", "insufficient role", "not_operator_firm"), cors);
@@ -221,7 +212,7 @@ export async function handleOperatorSupportSupabase(request, response, path, url
   // ABSENT from the answer rather than present with a null name — the shape 0206 §1 ships and the
   // one that makes the console's fallback a real state in the walk rather than dead code.
   if (request.method === "POST" && path === "/rest/v1/rpc/resolve_operator_support_applicants") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const asked = Array.isArray(body.p_applicants) ? body.p_applicants : [];
     if (!asked.some((id) => id === OPERATOR.applicant || id === OPERATOR.unresolvableApplicant)) {
       return false;
@@ -239,7 +230,7 @@ export async function handleOperatorSupportSupabase(request, response, path, url
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/get_operator_support_case") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     // ID-SCOPED: a case id this lane did not mint belongs to nobody here, so the request falls
     // through rather than being answered on this lane's behalf. `OPERATOR.deniedCase` IS one of
     // this lane's own ids, which is what lets the no-oracle cell drive a real CLR11.
@@ -259,7 +250,7 @@ export async function handleOperatorSupportSupabase(request, response, path, url
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/approve_firm_registration") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body.p_request !== OPERATOR.registration) return false;
     if (state.decided) {
       sendJson(response, 400, clr("CLR09", `this request is no longer open (status: ${state.decided.status})`), cors);
@@ -275,7 +266,7 @@ export async function handleOperatorSupportSupabase(request, response, path, url
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/reject_firm_registration") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body.p_request !== OPERATOR.registration) return false;
     if (state.decided) {
       sendJson(response, 400, clr("CLR09", `this request is no longer open (status: ${state.decided.status})`), cors);
@@ -288,7 +279,7 @@ export async function handleOperatorSupportSupabase(request, response, path, url
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/resolve_stripe_event_problem") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body.p_problem !== OPERATOR.problem) return false;
     state.resolveAttempts += 1;
     // THE CONCURRENT PROVIDER EVENT, at the UI seam: the FIRST resolution lands; a SECOND one
@@ -316,7 +307,7 @@ export async function handleOperatorSupportSupabase(request, response, path, url
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/set_admission_capacity") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (isBookkeeper(request)) {
       sendJson(response, 400, clr("CLR04", "insufficient role", "not_operator_firm"), cors);
       return true;

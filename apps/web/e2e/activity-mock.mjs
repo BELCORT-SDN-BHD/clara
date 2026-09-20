@@ -44,6 +44,13 @@ export const ACTIVITY = {
   documentId: "a2a2a2a2-2222-4777-8777-a2a2a2a20102",
   workReceiptId: "a2a2a2a2-2222-4777-8777-a2a2a2a20103",
   workId: "a2a2a2a2-2222-4777-8777-a2a2a2a20104",
+  // #853 — a SECOND Work id, so a `p_work` filter cell can prove two values return different,
+  // correctly scoped pages rather than the same one twice. `secondWorkReceiptId`/
+  // `secondWorkEntryId` are this Work's own receipt row, the same shape `workId`'s row takes —
+  // its OWN entry id, never `entryOriginalId`/`entryReplacementId` (the correction pair's own).
+  secondWorkId: "a2a2a2a2-2222-4777-8777-a2a2a2a20114",
+  secondWorkReceiptId: "a2a2a2a2-2222-4777-8777-a2a2a2a20115",
+  secondWorkEntryId: "a2a2a2a2-2222-4777-8777-a2a2a2a20116",
   entryOriginalId: "a2a2a2a2-2222-4777-8777-a2a2a2a20105",
   entryReplacementId: "a2a2a2a2-2222-4777-8777-a2a2a2a20106",
   correctionOriginalEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20107",
@@ -118,6 +125,24 @@ const WORK_ROW = eventRow({
   occurred_at: "2026-09-01T02:00:00.000Z",
   object_kind: "entry", object_id: ACTIVITY.entryOriginalId,
   work_id: ACTIVITY.workId, receipt_id: ACTIVITY.workReceiptId,
+  status: "approved", kind: "work",
+});
+
+// #853 — the SECOND Work's own receipt row, so a `p_work` filter cell has two DIFFERENT,
+// non-null `work_id`s to distinguish. `event_type` is DELIBERATELY a different registered
+// purpose (never `journal_entry`, WORK_ROW's own) — `lib/firm/activity.ts`'s label for an
+// `operation_receipt` row is `workPurposes.<purpose ?? event_type>`, which knows no `object_id`,
+// so two `journal_entry` rows would render the IDENTICAL "Recorded a journal entry" sentence and
+// break every existing cell that locates that text by `getByText` (strict-mode: two matches).
+// `entryId` is its OWN, never `entryOriginalId`/`entryReplacementId` — the correction pair's own,
+// which the feed's two-sided link logic keys on.
+const SECOND_WORK_ROW = eventRow({
+  id: ACTIVITY.secondWorkReceiptId,
+  source: "operation_receipt",
+  event_type: "periodic_stock_adjustment",
+  occurred_at: "2026-09-01T02:30:00.000Z",
+  object_kind: "entry", object_id: ACTIVITY.secondWorkEntryId,
+  work_id: ACTIVITY.secondWorkId, receipt_id: ACTIVITY.secondWorkReceiptId,
   status: "approved", kind: "work",
 });
 
@@ -244,8 +269,8 @@ const PIPELINE_HUMAN_ROW = eventRow({
 
 const PAGE_1 = [
   REPORT_ROW, AGENT_RECEIPT_ROW, CONVERSATION_MAINTENANCE_ROW, CLOSE_ROW,
-  CORRECTION_REPLACEMENT_ROW, CORRECTION_ORIGINAL_ROW, WORK_ROW, SWEEP_ROW, DOCUMENT_ROW,
-  ...PIPELINE_MACHINE_ROWS, PIPELINE_HUMAN_ROW,
+  CORRECTION_REPLACEMENT_ROW, CORRECTION_ORIGINAL_ROW, WORK_ROW, SECOND_WORK_ROW, SWEEP_ROW,
+  DOCUMENT_ROW, ...PIPELINE_MACHINE_ROWS, PIPELINE_HUMAN_ROW,
 ].sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
 
 const PAGE_2_NEW_ROW = eventRow({
@@ -260,6 +285,25 @@ const PAGE_2_NEW_ROW = eventRow({
 // PAGE 2 carries the new row AND a DUPLICATE of page 1's document row — the load-more
 // dedupe-by-(source,id) cell.
 const PAGE_2 = [PAGE_2_NEW_ROW, DOCUMENT_ROW];
+
+/**
+ * #853 REVIEW-ROUND (L01-SPEC-06) — whether a `p_work`-filtered page-1 read still has a matching
+ * row waiting on page 2, decided from PAGE_2's OWN membership rather than a blanket "p_work
+ * disables paging" flag. Migration 0202 applies its `p_work` predicate INSIDE each union arm
+ * BEFORE the limit (`0202_list_activity_p_work.sql:54-61`); this mock cannot run a live
+ * LIMIT/OFFSET query — its "pages" are two hand-authored arrays — so the most faithful thing it
+ * can do is compute truncation from the SAME population the door's predicate would see, not
+ * override it because a filter happened to be present. Exported so a unit cell can drive it on a
+ * synthetic page-2 population directly, without needing a page-2 fixture row for either of
+ * today's two Work ids (neither has one, so this still resolves to `false` for both — the SAME
+ * value the prior blanket rule gave, but because nothing further matches, not because `p_work`
+ * was merely present). A future Work-Activity walk (this ticket's own named successor, out of
+ * scope here) that seeds a page-2 row for its own Work pages correctly against this mock without
+ * a second change here.
+ */
+export function pageHasWork(work, page2 = PAGE_2) {
+  return page2.some((r) => r.work_id === work);
+}
 
 let flipCallCount = 0;
 
@@ -290,8 +334,19 @@ export async function handleActivitySupabase(request, response, path, url, sendJ
         return true;
       }
       const kinds = Array.isArray(body.p_kinds) ? body.p_kinds : null;
-      const rows = kinds ? PAGE_1.filter((r) => kinds.includes(r.kind)) : PAGE_1;
-      sendJson(response, 200, { rows, next_cursor: kinds ? null : PAGE_2_CURSOR, truncated: !kinds }, cors);
+      let rows = kinds ? PAGE_1.filter((r) => kinds.includes(r.kind)) : PAGE_1;
+      // #853 — mirrors migration 0202's own predicate, `p_work is null or work_id = p_work`:
+      // ABSENT (the shape every current spec sends), nothing is filtered by Work at all, so this
+      // branch changes NOTHING about today's behaviour. PRESENT, only rows minted for that exact
+      // Work survive — never rows with a null `work_id` — which is why the fixture needed a
+      // SECOND Work (`SECOND_WORK_ROW`) to prove two `p_work` values scope to different pages
+      // rather than the same one twice.
+      const work = typeof body.p_work === "string" ? body.p_work : null;
+      if (work !== null) rows = rows.filter((r) => r.work_id === work);
+      // `pageHasWork` (above) decides truncation for a work-filtered read; an un-filtered read
+      // keeps its pre-#853 rule (paginated unless kinds narrowed it).
+      const paginated = work !== null ? pageHasWork(work) : !kinds;
+      sendJson(response, 200, { rows, next_cursor: paginated ? PAGE_2_CURSOR : null, truncated: paginated }, cors);
       return true;
     }
     return false;

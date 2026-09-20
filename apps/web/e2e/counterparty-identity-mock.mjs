@@ -23,6 +23,8 @@
 //   denied    — `list_counterparty_identity` answers 403 (an RLS/grant refusal, not "no data").
 //   vendorOnly — one VENDOR and nothing else, so the walk can prove that filtering to Customers
 //               is a different sentence from an empty register.
+import { readCachedJson } from "./mock-dispatch.mjs";
+
 
 export const CI = {
   clientOk: "647aa647-1111-4777-8777-647aa6470001",
@@ -54,17 +56,6 @@ const AS_OF = "2026-09-16T10:30:00";
 
 function clientRow(id) {
   return { id, name: CLIENT_NAMES[id], status: "active", created_at: "2026-01-01T00:00:00.000Z" };
-}
-
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
 }
 
 const NO_SOURCE = { document_id: null, extraction_id: null, region_id: null, field_path: null };
@@ -390,7 +381,7 @@ export async function handleCounterpartyIdentitySupabase(request, response, path
   const verb = path.slice("/rest/v1/rpc/".length);
   // THE BODY IS READ INSIDE EACH VERB'S OWN MATCH, NEVER ONCE UP FRONT — serve-built.mjs's hook
   // comment states the rule and this lane learned it the expensive way. A single `await
-  // readJson(request)` before the verb switch drains the request stream of EVERY /rest/v1/rpc/*
+  // readCachedJson(request)` before the verb switch drains the request stream of EVERY /rest/v1/rpc/*
   // POST, including `list_client_knowledge`, which belongs to another handler further down the
   // chain: that handler then awaits a body that will never arrive, its socket never answers, and
   // after a few page loads Chromium's per-origin connection budget is exhausted and the NEXT
@@ -399,7 +390,7 @@ export async function handleCounterpartyIdentitySupabase(request, response, path
   // touches the Knowledge page passed in under ten seconds.
 
   if (verb === "list_counterparty_identity") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const client = body?.p_client ?? null;
     if (client === CI.clientDenied) {
       sendJson(response, 403, { message: "permission denied for function list_counterparty_identity" }, cors);
@@ -413,7 +404,7 @@ export async function handleCounterpartyIdentitySupabase(request, response, path
   }
 
   if (verb === "list_counterparty_merge_corrections") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const client = body?.p_client ?? null;
     if (client === CI.clientDenied) {
       sendJson(response, 403, { message: "permission denied for function list_counterparty_merge_corrections" }, cors);
@@ -427,7 +418,7 @@ export async function handleCounterpartyIdentitySupabase(request, response, path
   }
 
   if (verb === "get_counterparty_identity") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const found = identityFor(body?.p_counterparty ?? null);
     if (!found) return false;
     sendJson(response, 200, found, cors);
@@ -435,7 +426,7 @@ export async function handleCounterpartyIdentitySupabase(request, response, path
   }
 
   if (verb === "set_counterparty_identifiers") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_counterparty !== CI.cpAcme) return false;
     const reg = body?.p_registration_no ?? null;
     if (reg === "999999999999") {
@@ -466,7 +457,7 @@ export async function handleCounterpartyIdentitySupabase(request, response, path
   }
 
   if (verb === "retire_counterparty_alias") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const id = body?.p_alias ?? null;
     if (!liveAliases().some((a) => a.id === id)) return false;
     state.retiredAliases.add(id);
@@ -483,7 +474,7 @@ export async function handleCounterpartyIdentitySupabase(request, response, path
   }
 
   if (verb === "add_counterparty_alias") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_counterparty !== CI.cpAcme) return false;
     const display = String(body?.p_alias ?? "");
     const id = `647cc647-3333-4777-8777-647cc647${String(9000 + state.extraAliases.length)}`;
@@ -497,7 +488,7 @@ export async function handleCounterpartyIdentitySupabase(request, response, path
   }
 
   if (verb === "add_client_identifier") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const client = body?.p_client ?? null;
     if (!client || !Object.prototype.hasOwnProperty.call(CLIENT_NAMES, client)) return false;
     const value = String(body?.p_value_normalized ?? "").toLowerCase().replace(/\s+/g, "");

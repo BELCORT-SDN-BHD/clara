@@ -1,0 +1,69 @@
+{
+  "lane": "wave 1, lane 09",
+  "branch": "riders/w1-lane09",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\659",
+  "fixed_point": "origin/main",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits_command": "git log origin/main..HEAD --oneline",
+  "head": "3f686871",
+  "axis": "STANDARDS (never merged with SPEC/ADVERSARIAL)",
+  "reviewer_mode": "read-only (no tracked file edited, no commit, no push; independently re-ran node scripts/check-frozen-workflows.mjs, node packages/runtime/scripts/check-parts-parity.mjs, pnpm --filter @clara/runtime lint, pnpm --filter @clara/runtime typecheck, and node --test tests/chat-clarify-sweep-wiring.test.mjs tests/intake-sidecar-race.test.mjs — all green, matching the lane's own and the prior recheck's claims)",
+  "standards_sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "packages/runtime/README.md (the diff's only touched module README; packages/db/README.md, packages/db/tests/README.md and apps/web/README.md read and confirmed not applicable — the diff is 13 files, all under packages/runtime, no packages/db or apps/web hunk)",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/runtime/tests/g1-wake-callsites.test.mjs and other pre-existing readFileSync/source-scanning tests, consulted as precedent for this repo's own convention of mechanical structural gates alongside behavioural tests"
+  ],
+  "commits_reviewed": [
+    "52601ff4 feat(runtime): #852 fold the chat-clarify belt into the sweep receipt",
+    "887ae5ac fix(runtime): #966 the intake recovery belt can no longer fail a live intake",
+    "3f686871 fix(runtime): #966 the recovery budget is ten ACTIONS, not ten reads"
+  ],
+  "verdict": "accept",
+  "summary": "No hard violation of a documented repo standard found across the three-commit, 13-file, runtime-only diff (1192 insertions / 121 deletions). The import-cycle fix for #852 (lib/hook-resume.mjs as a first-party-import-free leaf, control.mjs re-exporting by name, the belt moved from leader.mjs into runReconcilerSweep) is a coherent, gathered change rather than Shotgun Surgery, and every touched file changes for the one stated reason. The #966 budget/retry/reaper work in intake.mjs and spool.mjs is well-named (RECOVERY_BATCH, RECOVERY_OPEN_BUDGET, SIDECAR_QUIET_MS, RENAME_RETRY_MS, SPOOL_REAPABLE), uses dependency injection at the documented seams (listEntries, quietMs on recoverPendingDocumentIntakes) exactly as mocking.md prescribes, and the parts-parity re-fingerprint follows the ledger's own established #640/#636 precedent byte for byte. No test found that mocks an internal collaborator the repo controls, no tautological expected value (every literal in the new cells — 10, 30, 0, 500 — is an independent number tied to a named constant or a measured host property, never re-derived from the code under test), and no evidence of horizontal slicing (each commit lands its tests and the implementation that makes them pass together; the per-commit file stats show test and lib files changing side by side in every commit, never a tests-only commit ahead of the fix it proves). The import-graph-shape cells in chat-clarify-sweep-wiring.test.mjs answer the ticket's own acceptance criterion ('isHookNotFound / resumePayloadFor live where reconciler.mjs can import them without a cycle'), which is a structural claim about the module graph, not a runtime behaviour — the WORK-ORDER.md rule-4 carve-out for a structural cell applies, and this repo already has the identical convention (g1-wake-callsites.test.mjs and others) predating this lane. Independently re-ran the frozen-workflow freeze-lint, the parts-parity gate, lint, typecheck and both new test files against this worktree; all green, matching the lane's own report and the prior recheck. Three note/minor judgement calls are recorded below; none blocks acceptance.",
+  "findings": [
+    {
+      "id": "STD-09-1",
+      "ticket": 966,
+      "severity": "minor",
+      "category": "documentation",
+      "title": "The two new operator knobs (CLARA_INTAKE_SIDECAR_QUIET_MS, CLARA_SPOOL_RENAME_RETRY_MS) are documented only in the #966 narrative, not added to packages/runtime/README.md's own canonical env-var catalog",
+      "evidence": "packages/runtime/README.md:360-361 ('Other configuration groups' > 'Intake:') is the README's own established, at-a-glance list of every intake/spool env var: `CLARA_INTAKE_CORS_ORIGINS`, `CLARA_SPOOL_DIR`, `CLARA_SPOOL_QUOTA_MB`, `CLARA_SPOOL_TTL_MIN`, `CLARA_CLAMD_SOCKET`, `CLARA_CLAMD_MANAGED`. The diff's own new knobs — `CLARA_SPOOL_RENAME_RETRY_MS` (README.md:1336, spool.mjs's RENAME_RETRY_MS) and `CLARA_INTAKE_SIDECAR_QUIET_MS` (README.md:1350, intake.mjs's SIDECAR_QUIET_MS) — are named only inside the long #966 prose section near the bottom of the file, never added to this list. An operator reading the canonical config-group list while provisioning or diagnosing a deploy (the README's own 'Recovery checklist' section models exactly this workflow) would not learn either knob exists there.",
+      "required_fix": "Add both to the 'Intake:' bullet in 'Other configuration groups' (e.g. '... `CLARA_CLAMD_MANAGED`, `CLARA_INTAKE_SIDECAR_QUIET_MS` (default 5000), `CLARA_SPOOL_RENAME_RETRY_MS` (default 250)'), or a one-line cross-reference from that bullet to the #966 section. WORK-ORDER.md rule 9 ('the module README your change affects') is satisfied in spirit — two whole sections were added — but the catalog a later reader actually consults for 'what can I configure' was not kept in sync."
+    },
+    {
+      "id": "STD-09-2",
+      "ticket": 852,
+      "severity": "minor",
+      "category": "test-quality",
+      "title": "possible Implementation-coupled test (/tdd anti-pattern): control-chat-clarify.test.mjs's repointed 'chat.wiring' cell now duplicates, via source-text scanning, a fact chat-clarify-sweep-wiring.test.mjs already proves behaviourally",
+      "evidence": "control-chat-clarify.test.mjs's 'chat.wiring' cell was repointed from indexOf-scanning leader.mjs's two call sites to indexOf-scanning reconciler.mjs's three belt(...) call-site strings ('await belt(\"chat clarify reconcile\"' vs '...\"clarify expiry\"' / '...\"task reconcile\"') to assert ordering. chat-clarify-sweep-wiring.test.mjs's own '#852 order: the belt runs FIRST of the belts...' cell (same commit, same PR) already proves the identical fact — the belt runs immediately after the heartbeat and ahead of clarify-expiry and the task mirror — by driving a REAL sweep against a scripted client and reading the actual SQL statement order off it, which is the seam (runReconcilerSweep) both cells care about. The source-scanning form is the /tdd 'Implementation-coupled' tell: 'the test breaks when you refactor but behavior hasn't changed' — e.g. folding the belt registrations into a config array iterated in order would preserve ordering exactly but change the literal text `await belt(\"...\"` this cell indexOf's for, redding a cell whose subject (order) never regressed.",
+      "required_fix": "Not required to block — this file's PRIOR version already used the identical readFileSync/indexOf technique for the same ordering fact against leader.mjs, so the diff continues an existing local convention rather than introducing it, and this repo has other mechanical source-scanning gates by design (g1-wake-callsites.test.mjs). Worth considering, if this file is touched again: drop the now-redundant source-scan half of 'chat.wiring' (keep only its 'the leader no longer calls the belt' assertion, which chat-clarify-sweep-wiring.test.mjs does not cover) and let the behavioural cell in chat-clarify-sweep-wiring.test.mjs be the single source of truth for ordering."
+    },
+    {
+      "id": "STD-09-3",
+      "ticket": 852,
+      "severity": "note",
+      "category": "duplicated-code",
+      "title": "possible Duplicated Code: chat-clarify-sweep-wiring.test.mjs writes its own bespoke relative-import closure walker rather than reusing an existing one",
+      "evidence": "chat-clarify-sweep-wiring.test.mjs:38-63 (relativeImportsOf/closureOf) reimplements a transitive first-party-relative-import closure walk with cycle detection. scripts/check-frozen-workflows.mjs already computes an analogous transitive relative-import closure per frozen entry (exposed via its own `--print-closure` flag), which the lane's own report and this review both used to verify none of this lane's subject modules is frozen. The two are not drop-in interchangeable (check-frozen-workflows.mjs's closure is scoped to frozen @entry files and their hash-locking semantics, and is not exported as an importable module for a test to call), so writing a small local walker for this one narrow 'does this edge close a cycle' question is a defensible, low-severity judgement call rather than a clear violation.",
+      "required_fix": "None required. If a third test ever needs the same closure-walking shape, extracting relativeImportsOf/closureOf into a shared test helper (or exporting check-frozen-workflows.mjs's own walker) would remove the duplication; one occurrence today does not justify it."
+    }
+  ],
+  "checked_and_found_sound": [
+    "The import-cycle removal (lib/hook-resume.mjs as a first-party-import-free leaf; control.mjs re-exporting isHookNotFound/resumePayloadFor by name; reconciler-chat-clarify.mjs and control.mjs both reading the leaf) is a single, gathered change for one stated reason across six files — the opposite of Shotgun Surgery, not an instance of it. Independently confirmed via chat-clarify-sweep-wiring.test.mjs's own closure walk and by reading every touched file's diff.",
+    "recoverPendingDocumentIntakes exposes listEntries and quietMs as injectable seams with documented defaults (production passes neither), matching mocking.md's dependency-injection guidance exactly; no test reaches into spool.mjs's internals (readJsonAt, listJsonEntries) directly.",
+    "No mock of an internal collaborator the repo controls: intake-sidecar-race.test.mjs's entryDouble substitutes the whole injected listEntries() dependency (a documented public seam), and every filesystem-touching cell (ownSpool) uses a REAL temp directory and real fs calls, never a stubbed fs module.",
+    "No tautological expectations: every new assertion's expected value (10, 30, 0, 1, ATTEMPTS=500, elapsed<1000, spoolRemoved>=1) is an independent literal tied to a named constant (RECOVERY_BATCH, RECOVERY_OPEN_BUDGET) or a measured host property (p966.host, p966.race's 500-write loop), never the formula the implementation itself uses to compute it.",
+    "No horizontal slicing: git log --stat over the three commits shows lib and test files changing together in every commit (e.g. 52601ff4 touches control.mjs/hook-resume.mjs/leader.mjs/reconciler.mjs/reconciler-chat-clarify.mjs/parts-parity-exemptions.mjs alongside chat-clarify-sweep-wiring.test.mjs and control-chat-clarify.test.mjs in the same commit) — no commit adds only red tests ahead of the implementation that turns them green.",
+    "parts-parity-exemptions.mjs's re-fingerprint of all sixteen sibling `runReconcilerSweep` spread tuples to one new sha follows the ledger's own documented #640/#636 precedent (the fingerprint is the sha of the whole normalised return statement, so a new spread invalidates every sibling tuple) rather than inventing a new convention; independently re-ran node packages/runtime/scripts/check-parts-parity.mjs — OK.",
+    "CONTEXT.md correctly left untouched: the diff's new vocabulary ('sweep receipt', 'belt', 'quiet window', 'recovery budget') is runtime-mechanics language that belongs in packages/runtime/README.md (where it was added), not the accounting/product vocabulary CONTEXT.md's own header scopes it to.",
+    "No shared file from WORK-ORDER.md rule 7's list (apps/web/messages/en.json, apps/web/test/manifest.txt, packages/db/tests/rig-meta.mjs, packages/db/package.json, .github/actions/db-live-gates/action.yml, CONTEXT.md) is touched by this diff.",
+    "No migration, no packages/db file, no apps/web file, and no frozen-workflow body or frozen-closure module is touched — independently re-ran node scripts/check-frozen-workflows.mjs (OK, 312 frozen files, no manifest diff) and confirmed via git diff --stat that all 13 changed files sit under packages/runtime.",
+    "Commit messages follow the house `type(runtime): #NNN ...` shape and every commit carries the work-order's required Co-Authored-By trailer.",
+    "Independently re-ran pnpm --filter @clara/runtime lint and pnpm --filter @clara/runtime typecheck from this worktree: both exit clean with no output, so nothing in this finding set duplicates what tooling already enforces."
+  ]
+}

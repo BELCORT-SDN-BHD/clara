@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget } from "./helpers";
+import { CELL_BUDGET, grantCellBudget, signInTo } from "./helpers";
 import { TI } from "./trade-invoice-mock.mjs";
 
 // #655 — "完整记录发票、账单及对应应收应付".
@@ -29,22 +29,6 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const CLIENT = TI.clientId;
 const FORM_URL = `/clients/${CLIENT}/accounting/invoices/new`;
 const HUB_URL = `/clients/${CLIENT}/accounting`;
-
-async function signInTo(page: Page, destination: string): Promise<void> {
-  // #706 — the flat 30 s Playwright gives a cell is the whole budget for a real round trip through
-  // the mock auth server plus the destination's own server render. The grant lives here rather than
-  // on each cell so a cell that signs in twice gets twice the headroom.
-  grantCellBudget(CELL_BUDGET.signIn);
-
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(
-    new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
-    { timeout: CELL_BUDGET.base },
-  );
-}
 
 /** Drive the fixture through the app's OWN proxy — the same instrument the sibling walks use, and
  *  for the same reason: it carries the real session through the real firm-scope guard. Every call
@@ -169,11 +153,20 @@ test("compose a bill → 202 → the Work page shows the persistent outcome, and
 });
 
 test("a refused party renders its candidates INLINE and preserves the draft", async ({ page }) => {
+  // THE CONTROL BODY IS THE DOOR'S WHOLE DETAIL, not just the key this page renders — reviewed
+  // finding L10-A6. Since #981 the runtime carries `clara._trade_invoice_resolve_party`'s typed
+  // object back verbatim under `detail`, and `candidates` is one key of it. A control body that
+  // sent only `candidates` left the mock standing in for a door that no longer exists, so this
+  // walk proved the component reads `detail.candidates` without ever exercising the carrier the
+  // real body arrives in.
   await control(page, {
     op: "refuse_next",
     field: "invoice.counterparty",
     reason: "party_ambiguous",
     detail: {
+      reason: "party_ambiguous",
+      name: TI.vendorName,
+      expected_counterparty_kind: "vendor",
       candidates: [
         { counterparty_id: TI.vendorId, name: TI.vendorName, registration_no: "200101065565" },
         { counterparty_id: TI.vendorTwinId, name: TI.vendorTwinName, registration_no: "200101065566" },

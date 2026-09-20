@@ -14,7 +14,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { settleForScan, watchReactFaults } from "./helpers";
+import { settleForScan, signIn, watchReactFaults } from "./helpers";
 
 const CLIENT_ID = "1e1e1e1e-1e1e-4e1e-8e1e-1e1e1e1e1e1e";
 const BATCH_ID = "b6360000-6360-4360-8360-b63600000001";
@@ -33,15 +33,6 @@ async function scan(page: Page, what: string): Promise<void> {
   await settleForScan(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.violations, `${what}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([]);
-}
-
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/login");
-  if (!page.url().includes("/login")) return; // already signed in
-  await page.getByLabel(/email/i).fill("owner@example.test");
-  await page.getByLabel(/password/i).fill("password");
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 30_000 });
 }
 
 const card = (page: Page) => page.getByRole("region", { name: /Source batch/i });

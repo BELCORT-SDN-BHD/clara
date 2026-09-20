@@ -1,0 +1,109 @@
+{
+  "lane": "wave1-lane07",
+  "branch": "riders/w1-lane07",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "head": "8d10ba83",
+  "merge_base": "dd3f8f1d",
+  "lens": "adversarial",
+  "reviewed_at": "2026-09-20",
+  "verdict": "reject",
+  "summary": "Eight tickets, 14 commits, 28 files (three-dot diff; the two-dot diff's PROGRESS.md / ceremony deletions are origin/main moving on to e7f0a10a, not this lane). Re-ran every new and touched unit file (48 + 27 tests, all green), pnpm typecheck (clean), pnpm lint (exit 0), worktree clean. One BLOCKER: #876's switched intake-receipts filings read changes the wire shape from client_id=eq. to document_id=in.(), and every e2e mock in the repo keys that relation on eq. only -- running documents-intake-walk on this branch gives 5 failed / 7 passed, with the captured page snapshot reading 'Clara could not read this client's upload receipts.' and 'alert: unmatched_e2e_route'. The lane ran zero walks and booked that as a residual; the residual was hiding a real break. Beyond it: #904's new poll discards `exhausted` and so stops silently after about 2.4 minutes, against the house law every other useSettlePoll call site follows; #987's substitution is keyed on the workbench-wide sticky error rather than on the door that failed; #903's deletion rests on a check that is factually wrong; #900's FieldDescription is never announced.",
+  "gates_rerun": {
+    "unit_batch_1": "from apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/accounting/periodic-adjustments-table.test.tsx components/common/state.test.tsx components/documents/document-kind-labels.test.tsx components/firm/needs-you-counts.test.tsx components/registers/opening-refusal-and-staleness.test.tsx components/clara/interview-run-field-composition.test.tsx lib/documents/reads.test.ts lib/documents/receipts.test.ts lib/firm/use-review-queue.test.ts -> 48 pass, 0 fail, 0 skipped",
+    "unit_batch_2": "same runner: components/documents/document-detail-live-refresh.test.tsx components/work/work-question-form.test.tsx -> 27 pass, 0 fail",
+    "typecheck": "pnpm typecheck (worktree root) -> apps/web Done, packages/runtime Done, 0 errors",
+    "lint": "pnpm lint (worktree root) -> exit 0",
+    "e2e": "CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3560 CLARA_E2E_NEXT_PORT=3561 CLARA_E2E_RUNTIME_PORT=3562 pnpm --filter @clara/web e2e documents-intake-walk -> 5 FAILED, 7 passed (2.8m)",
+    "worktree": "git status --porcelain -> clean"
+  },
+  "findings": [
+    {
+      "id": "L07-A01",
+      "ticket": 876,
+      "severity": "blocker",
+      "title": "The switched intake-receipts filings read is a wire-shape change no e2e mock answers: five browser walks go red",
+      "evidence": "apps/web/lib/documents/receipts.ts:170-195 replaces `document_filings?client_id=eq.<clientId>&retired_at=is.null&select=document_id` with `listActiveFilingsForDocuments` (apps/web/lib/documents/reads.ts:63-70), which issues `document_filings?document_id=in.(<ids>)&retired_at=is.null&select=<FILING_COLS>&order=filed_at.desc`. Every e2e mock that answers that relation keys on `eq.` only: documents-intake-mock.mjs:355 (namedLaneDocument requires raw.startsWith(\"eq.\")) and :436 (params.get(\"client_id\") must equal eq.<clientId>); documents-viewer-mock.mjs:390-403 and document-correction-mock.mjs:252-262 (both eqParam, both return false otherwise); journal-work-mock.mjs:1316, accrual-mock.mjs:401, periodic-adjustment-mock.mjs:299-300, work-knowledge-mock.mjs:313, opening-ledger-source-mock.mjs:211 likewise. An unmatched route is answered by apps/web/e2e/serve-built.mjs:976 with 404 {code:\"unmatched_e2e_route\"}. PROVED TWICE. (a) Direct probe of the mock handler (scratchpad/probe876.mjs importing handleDocumentsIntakeSupabase): OLD url -> handled=true, 200 with the two lane filings; NEW url -> handled=false, nothing sent. (b) Ran the walk on this branch on lane 07's own triple: 5 failed / 7 passed (2.8m); failures at documents-intake-walk.spec.ts:78, :95, :105, :192, :222. The captured page snapshot (apps/web/e2e/.artifacts/documents-intake-walk-the--163c8-ueue-and-populated-receipts-chromium/error-context.md:135-136) reads '- paragraph: Clara could not read this client's upload receipts.' / '- alert: unmatched_e2e_route'. The lane's report says 'Browser walks (Playwright): none run' and books it as a residual; rule 8's 'each browser walk you touched' was read as 'each .spec.ts file I edited', which is exactly the reading that let a wire-shape change through.",
+      "required_fix": "Teach every e2e mock whose walk mounts DocumentsWorkbench to answer document_filings?document_id=in.(...) -- an inParam-shaped branch beside the existing eqParam ones, returning the lane's filings filtered to the named ids (documents-intake-mock.mjs first, then documents-viewer-mock.mjs and document-correction-mock.mjs; check journal-work / accrual / periodic-adjustment / work-knowledge / opening-ledger-source for walks that reach the workbench). Then re-run documents-intake-walk, documents-viewer-walk and document-correction-walk on the lane triple and report the counts. Declare the read in apps/web/e2e/e2e-fixture-ownership.test.ts if its census needs it."
+    },
+    {
+      "id": "L07-A02",
+      "ticket": 904,
+      "severity": "major",
+      "title": "The new processing-tasks poll throws away `exhausted`, so it stops silently after about 2.4 minutes",
+      "evidence": "apps/web/components/documents/document-detail.tsx:131-136 calls useSettlePoll({...}) and discards the return value. The hook's own contract (apps/web/lib/documents/use-settle-poll.ts:14-17, bound 3) is that maxTicks ends the poll 'even if rows never settle, and `exhausted` says so, so the surface can offer a manual Refresh instead of spinning forever'. Every other call site honours it: documents-workbench.tsx:314 forwards exhausted={settlePoll.exhausted} to intake-receipts.tsx:52,103 which renders the manual Refresh; lib/documents/use-intake-batch.ts:113 returns pollExhausted; useUploadQueue.test.ts:741-780 pins 'an exhausted poll must NEVER be dressed as success'. The house law is stated as a test at documents-workbench-refresh.test.tsx:357 -- 'an unsettled list must offer a manual Refresh, so an exhausted poll is a visible end and not a silent one'. With shipped defaults (use-settle-poll.ts:60-62: maxTicks 12, base 1500ms, max 15000ms) the budget runs out after roughly 1.5+3+6+12+15*8 = about 142s, after which a still-running extraction reverts to stale-until-reload with no signal at all. No cell covers the arm: document-detail-live-refresh.test.tsx:78 pins FAST_POLL = { baseDelayMs: 0, maxDelayMs: 0, maxTicks: 500 }, chosen precisely so exhaustion never happens.",
+      "required_fix": "Keep the hook's return in document-detail.tsx and, when exhausted is true with a non-terminal task still present, render the same visible end the receipts list already renders (a short line plus a manual Refresh that calls reload()). Add one cell that drives a small maxTicks with a permanently running task and asserts the panel says so rather than falling silent."
+    },
+    {
+      "id": "L07-A03",
+      "ticket": 903,
+      "severity": "minor",
+      "title": "The grounds given for deleting ReviewQueueEnvelope.watermark are wrong: the DB emits it, a migration pins it, and CONTEXT.md names it",
+      "evidence": "The lane's report argues CONTEXT.md's 'Attention source freshness' mention of 'the review queue's mutation watermark' is 'a hardcoded sources.review_queue.signal = watermark freshness-KIND label, unrelated to the dead front-end field'. It is not unrelated. clara.list_review_queue builds its envelope with 'watermark', coalesce((select max(de.seq)::text from clara.domain_events de ...),'0') -- packages/db/migrations/0011_daily_loop.sql:3861, recut at 0016_a21_compliance_watch.sql:4691. That key is pinned as a must-not-be-lost output by packages/db/migrations/0036_wave_c0_deferred_belts.sql:1737-1744, whose tail raises 'list_review_queue lost a pre-existing row key or its paging machinery -- section C must be additive only' if 'watermark' is absent from the body. CONTEXT.md:163-168 defines the term ('the review queue's mutation watermark ... Reads of different ages are dated separately') and CONTEXT.md:774-775 defines 'Source watermark' as exactly this ('The database snapshot a read actually saw ... Every figure produced by one read shares one watermark'). The DB still sends the key, so nothing breaks at runtime -- but the AC's fork ('fully wired to a renderer or fully absent from the types') was resolved toward deletion on a check that does not hold, and nothing in CONTEXT.md, apps/web/README.md or lib/firm/needs-you.ts records that apps/web now deliberately discards the estate's own mutation watermark for this envelope. The cleanup is also inconsistent: watermark survives in components/tax/tax-a11y.test.tsx:46, components/tax/tax-boundary-states.test.tsx:167,218,248,275, components/firm-admin/firm-admin-pages-a11y.test.tsx:154, components/firm/client-workspace-overview.test.tsx:48, components/firm/firm-home/firm-home-board.test.tsx:45 and e2e/firm-navigation-walk.spec.ts:211,338 -- the new source-pin cell (lib/firm/use-review-queue.test.ts:93-101) only pins needs-you.ts and use-review-queue.ts, so those stale fixtures are invisible to it.",
+      "required_fix": "Either restore the field and take the other fork (render it where the firm home dates the review-queue number), or keep the deletion and record it honestly: one line beside the type in lib/firm/needs-you.ts saying apps/web discards list_review_queue's mutation watermark and why, citing 0011:3861 and 0036:1742; and either clean or explicitly leave the eight surviving fixtures. Correct the report's CONTEXT.md claim either way."
+    },
+    {
+      "id": "L07-A04",
+      "ticket": 987,
+      "severity": "minor",
+      "title": "The period-wall substitution is keyed on the workbench-wide sticky error, not on the door that failed, so a superseded item is told it 'cannot be drafted'",
+      "evidence": "apps/web/components/registers/opening-seed-workbench.tsx:106-108 computes openingClosedPeriodRefusal from useAsyncRead's single `error`, which is set by the shared act() at :91-96 that wraps EVERY governed door on this workbench (draft item, record target, keyed resolution, supersede, fixed asset, approve seed, approve correction, cancel, reopen). clara._tf_period_wall_lines is a row trigger on clara.journal_lines for insert OR update OR delete (packages/db/migrations/0056_wave_e_close_model.sql:755-756), so it fires for any of those that touches lines -- and clara.supersede_opening_item inserts journal lines (packages/db/migrations/0017_wave_b.sql:4081-4094, reached from apps/web/lib/registers/opening-item-doors.ts:118). A supersede refused by the period wall would render 'This opening basis is dated into a fiscal year that is now closed, so it cannot be drafted here. Date it into an open fiscal year, or have that year reopened, before trying again.' -- naming an act that was not the one refused and prescribing a re-dating the person cannot perform. The new cell (components/registers/opening-refusal-and-staleness.test.tsx:280-345) exercises only draft_opening_item; no cell pins what the sibling doors render. The typed detail is NOT lost: DialogRefusal is only {err, clr} (components/common/dialog-refusal.tsx:33-38), the hand-built object at :117-119 preserves clr exactly, and the attestation reveal keys on CLR05/self_attestation (components/registers/opening-approve-dialogs.tsx:64-65), so that path is unaffected.",
+      "required_fix": "Narrow the substitution to the act it describes -- carry the failing door's identity alongside the sticky error, or word the sentence door-neutrally ('... so it cannot be changed here') -- and add one cell that drives the same CLR19 / write_into_closed_period out of a non-draft door on this workbench and asserts the sentence still fits."
+    },
+    {
+      "id": "L07-A05",
+      "ticket": 900,
+      "severity": "minor",
+      "title": "The new FieldDescription is visible-only: no id, no aria-describedby, so the help text is never announced",
+      "evidence": "apps/web/components/clara/InterviewRunCard.tsx:305-312 renders <FieldDescription>{t(\"answer.fieldDescription\")}</FieldDescription> beside a <Textarea id={answerId} aria-label=... /> with no aria-describedby. FieldDescription is a bare <p data-slot=\"field-description\"> with no id and no context wiring (apps/web/components/ui/field.tsx:131-143), so nothing associates it with the control. The precedent the commit cites for this composition wires it explicitly: apps/web/components/work/work-question-form.tsx sets aria-describedby={describedBy} on every control (:620, :648, :675, :697, :709, :724) and aria-describedby={...}-error at :485. The ticket's AC asks for 'the same label, help and error behaviour the sibling surfaces show'; the help half reaches sighted users only. The new cell (components/clara/interview-run-field-composition.test.tsx) asserts the label association and that the description text renders, never that it is announced, and axe does not require a description, so interview-run-a11y.test.tsx stays green.",
+      "required_fix": "Give the description an id derived from answerId and set aria-describedby on the Textarea, matching work-question-form.tsx's own wiring; extend the 900 cell to assert the control's aria-describedby resolves to the description node."
+    },
+    {
+      "id": "L07-A06",
+      "ticket": 896,
+      "severity": "minor",
+      "title": "The blast radius is under-counted by one: a second call site's data-testid newly lands in the DOM, untested",
+      "evidence": "The report states work-question-form.tsx's banner 'was the one call site directly passing the (previously dropped) attribute to StateBanner'. apps/web/components/firm/client-home/client-financial-summary.tsx:190 also passes it directly: <StateBanner tone=\"warning\" title={t(\"delayed.title\")} data-testid=\"client-money-delayed\">. Before this change the attribute was dropped; after it, client-money-delayed appears in the rendered DOM of the client-home money summary. grep -rn \"client-money-delayed\" apps/ returns that definition line and nothing else -- no unit cell, no walk, no locator consumes it -- so the change is harmless today but is a rendered-output change the 896.no-drift cell (components/common/state.test.tsx:64-95, one synthetic render) does not reach. The fix itself is sound: {...rest} is spread ahead of the computed role/className/tabIndex/ref (components/common/state.tsx:150-152), and Omit<..., keyof StateBannerOwnProps> correctly keeps native title/className/children out of the rest.",
+      "required_fix": "Correct the count in the report, and either cover client-money-delayed with a cell in the client-home money suite or state that it is deliberately left unconsumed."
+    },
+    {
+      "id": "L07-A07",
+      "ticket": 987,
+      "severity": "minor",
+      "title": "The new message key is mis-indented in a shared file nine other lanes are editing",
+      "evidence": "apps/web/messages/en.json:4180 -- \"closedPeriodRefusal\" sits at 2 spaces of indent where every sibling key in the same OpeningCarryDown.seed object uses 6 (verified with sed -n '4172,4184p' apps/web/messages/en.json | cat -A). JSON stays valid and check-message-keys.mjs passes, so pnpm lint is exit 0 and nothing catches it. Riders WORK-ORDER rule 7 names apps/web/messages/en.json as one of the nine concurrently-edited shared files and asks for a minimal hunk at the sorted position; a mis-indented line is gratuitous conflict surface for the integrator. The sibling key the same lane added, Interview.answer.fieldDescription at :5981, is correctly indented.",
+      "required_fix": "Re-indent the line to 6 spaces to match its siblings, in its own commit or folded into the #987 fix round."
+    },
+    {
+      "id": "L07-A08",
+      "ticket": 904,
+      "severity": "note",
+      "title": "The 904 fixture builds a task row the masked view cannot produce",
+      "evidence": "apps/web/components/documents/document-detail-live-refresh.test.tsx:31-39 builds rows with lane: \"extraction\". ProcessingLane is \"ocr\" | \"structured_parse\" | \"none\" (apps/web/lib/documents/types.ts:147); \"extraction\" is not a member. The mock returns raw JSON so nothing type-checks it, and apps/web/components/documents/document-metadata.tsx:108 renders {task.lane} verbatim without branching, so nothing depends on it today -- but the four cells prove the poll's behaviour against a row shape clara.document_processing_tasks_visible cannot emit. The status set the fix keys on IS correct and exhaustive: NON_TERMINAL_TASK_STATUS (document-detail.tsx:79) is queued/held_egress/running against ProcessingStatus = queued|held_egress|running|done|failed (types.ts:148).",
+      "required_fix": "Use a real ProcessingLane value in the fixture."
+    },
+    {
+      "id": "L07-A09",
+      "ticket": 904,
+      "severity": "note",
+      "title": "The 'intake-receipts poll is unaffected' cell cannot fail for the reason it names",
+      "evidence": "components/documents/document-detail-live-refresh.test.tsx:176-196 asserts document_intakes_visible does not grow while the tasks poll ticks. The fixture's makeFetch (:44-70) answers document_intakes_visible from the default [] branch, so loadIntakeReceipts returns unsettled: 0, isSettled is true, and documents-workbench.tsx:100's enabled is false from mount -- the receipts poll never runs in this cell regardless of what the tasks poll does. The cell's own comment concedes it ('An empty receipts queue means document_intakes_visible only reads on mount'). It is a real guard against the tasks poll issuing the wrong relation, but not against the two polls interfering, which is what its title claims.",
+      "required_fix": "Either give the fixture an unsettled intake row so both polls are live and the independence claim is discriminating, or retitle the cell to what it actually proves."
+    },
+    {
+      "id": "L07-A10",
+      "ticket": 876,
+      "severity": "note",
+      "title": "The filings read left the mount-time Promise.all, adding a serial round trip to every Client Documents mount",
+      "evidence": "apps/web/lib/documents/receipts.ts:170-195: loadIntakeReceipts used to fetch intakes, filings, unassigned and caller in one Promise.all; the filings read is now awaited AFTER that block because the bounded id set is not known earlier. That is a correct consequence of the design, but it is an unremarked change to the mount profile -- one extra serialised network round trip on every open of the workbench, on a surface whose whole #633 lineage is about how many reads a mount issues. A two-phase shape (intakes first, then filings in parallel with unassigned and caller) would keep the id-set dependency and the concurrency.",
+      "required_fix": "None strictly required; note it in the ticket evidence, or restructure to two phases so the extra latency is not paid."
+    },
+    {
+      "id": "L07-A11",
+      "ticket": 876,
+      "severity": "note",
+      "title": "The read is no longer client-scoped on the wire: sibling clients' filing rows now reach a client-scoped page",
+      "evidence": "The old query carried client_id=eq.<clientId> server-side. listActiveFilingsForDocuments (apps/web/lib/documents/reads.ts:63-70) carries no client opinion, and document_filings is RLS-scoped to the FIRM, not the client (packages/db/migrations/0007_document_pipeline.sql:780-781, cited by the lane itself at receipts.ts:180-187). The intake list it is built from is not client-scoped either (listIntakeReceipts, receipts.ts:104-109, reads document_intakes_visible with no client filter), so a document filed to a DIFFERENT client of the same firm can be in the id set -- and its full FILING_COLS projection (id, client_id, filed_at, filed_by, basis, retired_at, retirement_reason, revision_token) now travels to a page scoped to another client before being dropped in the browser at receipts.ts:194. No access control is loosened (RLS already permits the read) and the lane correctly found and fixed the CORRECTNESS half. The hygiene half -- that the filter moved from the server to the client -- is unremarked.",
+      "required_fix": "None if accepted; say so in the ticket evidence. Otherwise keep client_id=eq.<clientId> on the new read alongside the document_id=in.(...) filter for this caller, so the narrowing stays server-side."
+    }
+  ]
+}

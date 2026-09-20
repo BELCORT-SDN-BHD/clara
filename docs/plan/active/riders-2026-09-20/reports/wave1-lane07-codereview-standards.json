@@ -1,0 +1,111 @@
+{
+  "lane": "wave1-lane07",
+  "lens": "code-review / STANDARDS axis (separate from SPEC; not merged or reranked against it)",
+  "branch": "riders/w1-lane07",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "fixed_point": "origin/main",
+  "diff_command": "git diff origin/main...HEAD",
+  "commits_command": "git log origin/main..HEAD --oneline",
+  "head_reviewed": "278f07958a1253c7a7f1b4c5438aa120149052eb",
+  "merge_base": "dd3f8f1d202b6eade2211f33c34f263d033768f1",
+  "tickets": [842, 878, 896, 900, 903, 904, 876, 987],
+  "standards_sources_read": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "apps/web/README.md (the sections the diff's own commits touch or reference: documents surfaces #633/#876/#904, the accounting/adjustments and opening sections)",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md (rig/gate commands only, not a coding standard)"
+  ],
+  "note": "packages/db/README.md, packages/db/tests/README.md and packages/runtime/README.md were read for context but the diff (dd3f8f1d..HEAD / origin/main...HEAD) touches only apps/web — 34 files, +1603/-70, confirmed via git diff --stat and the lane's own recheck-1.json's independent 'packages/db and packages/runtime diff: empty' finding. No packages/db or packages/runtime standard is engaged by this diff.",
+  "prior_review_context": "This lane already ran a SPEC-lens review (wave1-lane07-review-spec.json) and an adversarial/quality-lens review (wave1-lane07-review-adversarial.json), both fixed in wave1-lane07-fixround-1.md and independently re-verified accept in wave1-lane07-recheck-1.json. This report is a FRESH, independent STANDARDS-axis pass over the current HEAD (278f0795) per the code-review skill's two-axis contract — it does not re-litigate spec correctness (AC coverage, whether a fix is behaviourally right) and does not re-report items recheck-1.json already confirmed fixed. Two items recheck-1.json left open (RC-01 on #903's AC2, RC-02 on a flake description) are SPEC-axis / evidence-accuracy findings, not standards findings, and are intentionally not repeated here.",
+  "hard_violations": [],
+  "findings": [
+    {
+      "id": "STD-01",
+      "ticket": 876,
+      "severity": "minor",
+      "kind": "smell",
+      "category": "Duplicated Code (possible)",
+      "title": "documents-intake-mock.mjs reinvents in.(...) query-param parsing instead of adding/reusing the inParam helper the SAME commit already relies on in its two sibling files",
+      "file": "apps/web/e2e/documents-intake-mock.mjs",
+      "evidence": "Commit cceaa0ba (#876 fix round) edits three e2e mocks in one hunk to answer the new `document_filings?document_id=in.(...)` shape. Two of them reuse each file's own pre-existing `inParam(url, key)` helper (already present in document-correction-mock.mjs:234-237 and documents-viewer-mock.mjs:366-369, each: `raw.slice(4, -1).split(\",\").map((v) => decodeURIComponent(v.trim()))`) — document-correction-mock.mjs's new branch is `const documentIds = inParam(url, \"document_id\");` and documents-viewer-mock.mjs's is the same call. documents-intake-mock.mjs has no such helper and the same commit instead writes a NEW, one-off function inline: `const namedLaneDocumentsIn = (key) => { const raw = params.get(key); if (raw === null || !raw.startsWith(\"in.(\") || !raw.endsWith(\")\")) return []; const ids = raw.slice(4, -1).split(\",\").map((v) => decodeURIComponent(v)); return ids.filter((id) => laneDocumentIds().includes(id)); };` — the same in.(...)-parsing shape (startsWith/slice/split/decodeURIComponent), reimplemented a third time with a subtly different contract (folds the lane-ownership filter in and returns `[]` instead of `null` on a non-matching shape) rather than the file gaining its own `inParam` and the lane filter staying a separate step, which is how the other two files in this exact commit did it.",
+      "required_fix": "Judgement call, not blocking: for consistency with the other two files this same commit touches, either give documents-intake-mock.mjs its own `inParam` helper and keep the lane-ownership filter as a separate `.filter(...)` step (matching document-correction-mock.mjs / documents-viewer-mock.mjs), or, if a shared helper across all three mock files is wanted, extract one into a common e2e mock util — but that is a larger change than this finding asks for."
+    },
+    {
+      "id": "STD-02",
+      "ticket": 904,
+      "severity": "minor",
+      "kind": "smell",
+      "category": "Duplicated Code",
+      "title": "The same non-terminal-task predicate is computed twice in one function instead of once",
+      "file": "apps/web/components/documents/document-detail.tsx",
+      "evidence": "Inside `DocumentDetail`, `tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status))` is written out twice: once as `useSettlePoll`'s `enabled:` (`enabled: tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status))`) and again ~110 lines later as half of `tasksExhausted`'s value (`tasksExhausted={tasksPoll.exhausted && tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status))}`). Both read the same `tasks` array computed a few lines above (`const tasks = taskOverride ?? data?.processingTasks ?? [];`), in the same render, so the two calls always agree — there is no reason for the expression to be written twice.",
+      "required_fix": "Bind `const hasNonTerminalTask = tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status));` once and reuse it in both `enabled` and `tasksExhausted`. Not blocking — the duplication is a single boolean expression evaluated over the same array, not a correctness risk, but it is the kind of copy that drifts silently if one call site is later edited (e.g. to add a status) and the other is not."
+    },
+    {
+      "id": "STD-03",
+      "ticket": 904,
+      "severity": "minor",
+      "kind": "smell",
+      "category": "Data Clumps",
+      "title": "A third hand-written copy of { maxTicks?, baseDelayMs?, maxDelayMs? } where the hook already exports the type to pick from",
+      "file": "apps/web/components/documents/document-detail.tsx",
+      "evidence": "`lib/documents/use-settle-poll.ts` already exports `export type SettlePollOptions = { enabled: ...; onTick: ...; resetKey?: ...; maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number; }` (use-settle-poll.ts:38-47). `documents-workbench.tsx` (pre-existing, unchanged by this diff) already hand-copies the three timing fields into its own prop type: `settlePoll?: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number };`. This diff adds a THIRD hand-written copy of the identical three-field object type onto `DocumentDetail`'s own props: `settlePoll?: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number };` (document-detail.tsx, new `settlePoll` prop). The same three fields now travel together, spelled out by hand, in three places.",
+      "required_fix": "Derive the prop type from the hook's own exported type, e.g. `settlePoll?: Pick<SettlePollOptions, \"maxTicks\" | \"baseDelayMs\" | \"maxDelayMs\">`, in both `documents-workbench.tsx` and the new `document-detail.tsx` prop — so a future field added to `SettlePollOptions` (or a rename) is a one-place change rather than a three-place one. Not blocking: the current three copies are byte-identical today, so nothing is wrong yet, only fragile."
+    },
+    {
+      "id": "STD-04",
+      "ticket": 903,
+      "severity": "minor",
+      "kind": "test-quality",
+      "category": "/tdd anti-pattern (side channel), judgement call",
+      "title": "A test cell asserts on the literal wording of a source-code COMMENT via readFileSync + regex, which is not a documented structural-cell exception and cannot observe behaviour",
+      "file": "apps/web/components/firm/needs-you-counts.test.tsx",
+      "evidence": "`needs-you-counts.test.tsx`'s `903.comment` cell does: `const source = readFileSync(join(dir, \"needs-you-counts.tsx\"), \"utf8\"); assert.doesNotMatch(source, /EIGHT counts, not six/i, ...); assert.match(source, /NINE counts/i, ...);`. This is a pure prose assertion on a header comment, not on anything the component renders or returns — /tdd's own anti-pattern list names exactly this shape (\"verifies through a side channel ... instead of the public seam\"; \"the tell: the test breaks when you refactor but behavior hasn't changed\" — here a comment rewording alone flips this test, with zero behavioural change either way). It is a DIFFERENT thing from the sibling `903.chips` cell in the same file, which does render `NeedsYouCounts` and count real DOM badges — that cell is the actual behavioural regression guard; `903.comment` adds nothing `903.chips` doesn't already prove about the component's real output, only about a comment's wording.",
+      "required_fix": "Judgement call, not blocking, and it mirrors an already-accepted precedent elsewhere in this same lane (document-kind-labels.test.tsx's [878] cell source-pins which module a Select imports, justified there by a stated, specific constraint: Base UI's Select popup mounts lazily and no test in this repo drives one open, so there is no DOM-level way to enumerate the live option roster — WORK-ORDER rule 4's own carve-out for a structural cell a documented standard needs). `903.comment` has no equivalent constraint: the chip count and the render ARE observable through the DOM, and `903.chips` already observes them. If a documentation-drift guard is wanted, it should be labelled as exactly that (not counted as coverage of #903's behaviour) or dropped in favour of relying on `903.chips` alone."
+    },
+    {
+      "id": "STD-05",
+      "ticket": 878,
+      "severity": "minor",
+      "kind": "test-quality",
+      "category": "/tdd anti-pattern (side channel), judgement call",
+      "title": "One assertion inside an otherwise-justified source-pin cell checks a retired comment's exact prose rather than the roster/import it is meant to pin",
+      "file": "apps/web/components/documents/document-kind-labels.test.tsx",
+      "evidence": "The `[878]` cell's first three assertions (import statement present, `.map(` call present, full `DOCUMENT_KINDS.map(` absent) are the justified structural pin — the cell's own comment states the reason (Base UI's Select popup mounts lazily, no test in this repo drives one open, so the source import is the only observable proxy for \"which roster backs this Select\"). A fourth assertion in the SAME test then does: `assert.doesNotMatch(dialogSource, /observation it would not change/, \"the dialog's own comment must no longer claim the full roster is permanent here\");` — this checks that an unrelated prose phrase was edited out of a comment, which has no bearing on which roster the Select actually maps and is not covered by the popup-mounts-lazily justification the rest of the cell relies on.",
+      "required_fix": "Judgement call, not blocking. Drop the fourth assertion (or move it to its own clearly-labelled \"comment hygiene\" cell, not bundled into the cell whose name and header claim it is proving #878's behaviour) so the structural-pin cell's scope matches its own stated justification exactly."
+    },
+    {
+      "id": "STD-06",
+      "ticket": 904,
+      "severity": "note",
+      "kind": "smell",
+      "category": "Mysterious Name (borderline)",
+      "title": "The new extraction-tasks Refresh button is labelled through a message key named for a different feature",
+      "file": "apps/web/components/documents/document-metadata.tsx",
+      "evidence": "`document-metadata.tsx`'s new manual-refresh button reads `{t(\"receiptsRefresh\")}` (messages/en.json: `\"receiptsRefresh\": \"Refresh\"`), the SAME key `intake-receipts.tsx` uses for its own, unrelated receipts-poll refresh control (apps/web/components/documents/intake-receipts.tsx:106). The rendered string (\"Refresh\") is generic enough that nothing is user-visibly wrong, but the key's name says RECEIPTS specifically, and it is now also the label for a tasks-poll control in a different section of the same panel; a future copy change scoped to \"the receipts refresh button\" would silently reword this unrelated button too.",
+      "required_fix": "Not blocking. A generic `refresh` key already exists elsewhere in messages/en.json (the same English string, \"Refresh\", at a different namespace) — if a copy change is ever made for either surface, give the extraction-tasks control its own key (e.g. `extractionTasksRefresh`) rather than continuing to share `receiptsRefresh`'s name for a control it does not describe."
+    }
+  ],
+  "smell_baseline_checked_with_no_finding": [
+    "Mysterious Name — CENTS_PARTICULARS, NON_TERMINAL_TASK_STATUS, INTAKE_NON_TERMINAL (precedent), listActiveFilingsForDocuments, openingClosedPeriodRefusal, StateBannerOwnProps/StateBannerProps: all read as what they hold.",
+    "Feature Envy — none observed; each new function stays on the module/component that owns the data it reads.",
+    "Primitive Obsession — CENTS_PARTICULARS and NON_TERMINAL_TASK_STATUS are typed Sets keyed off a real DB-typed union (ProcessingStatus) or a documented migration, not bare strings standing in for a concept.",
+    "Repeated Switches — none introduced.",
+    "Shotgun Surgery — each ticket's change is contained to its own 1-3 files plus its test and (where applicable) messages/en.json and README.md; no ticket in this lane forced edits scattered across many unrelated modules.",
+    "Divergent Change — no file in this diff is edited for more than one ticket's reason (document-detail.tsx and periodic-adjustments-table.tsx each carry exactly one ticket's concern across all commits touching them).",
+    "Speculative Generality — the settlePoll prop threading (STD-03 aside) is used immediately by the tests exercising it, not spec-less scaffolding; no unused hooks or params found.",
+    "Message Chains — none introduced; the diff's own chains (openingClosedPeriodRefusal.code/.reason) are one level of property access on a typed DoorRefusal, not a walk.",
+    "Middle Man — none of the new wrapper functions (listActiveFilingsForDocuments, the DocumentKindDialog's import swap) merely delegate onward with no added behaviour; each does real, distinct work (a bounded query, a filtered roster).",
+    "Refused Bequest — not applicable; no new inheritance in this diff."
+  ],
+  "test_quality_checked_with_no_finding": [
+    "Mocking: every new/edited test mocks only at a system boundary — globalThis.fetch (network) in receipts.test.ts, reads.test.ts, document-detail-live-refresh.test.tsx; globalThis.setInterval/clearInterval (time) in client-financial-charts.test.tsx, matching the existing use-financial-pack.test.ts idiom named in its own comment. No test mocks an internal collaborator or a module this repo owns.",
+    "Tautology: expected values throughout are independent literals (e.g. 150050 cents asserted as \"RM 1,500.50\", not recomputed via the same formatting the component calls) or the DB-shaped fixture data a real caller would receive, never a value re-derived the way the code under test derives it.",
+    "Horizontal slicing: git log --stat over every commit in this lane shows test and implementation changes landing together per commit, per ticket (e.g. 189890b6, 6bf3597f, ed85beea each pair a new/edited test file with the matching source-file hunk in the same commit) — no commit adds a battery of red tests with no accompanying implementation.",
+    "Public-seam testing: the substantive new test files (receipts.test.ts, reads.test.ts, document-detail-live-refresh.test.tsx, periodic-adjustments-table.test.tsx, interview-run-field-composition.test.tsx, state.test.tsx, opening-refusal-and-staleness.test.tsx) all render the real component tree or call the real exported function and assert on rendered DOM text/attributes or the function's return value plus request counts by relation name — never a private function or an internal field. The two source-pin exceptions are STD-04/STD-05 above."
+  ],
+  "summary": "Independent STANDARDS-axis pass over the full lane diff (origin/main...HEAD, 34 files, +1603/-70, apps/web only) against AGENTS.md, CONTEXT.md, apps/web/README.md, the wave's WORK-ORDER.md, and .claude/skills/tdd (SKILL.md/tests.md/mocking.md), plus the Fowler smell baseline. No hard violation of a documented repo standard was found in the current HEAD (278f0795) — shared-file discipline (messages/en.json indentation, test/manifest.txt sorted position) is correct, every commit carries the required Co-Authored-By line and a ticket-named message, mocking stays at system boundaries throughout, and no horizontal-slicing pattern appears in the commit history. Six judgement-call findings: two small Duplicated-Code smells (an e2e mock reinventing a parsing helper its two sibling files in the same commit already had; one duplicated boolean expression within a single function), one Data-Clumps smell (a settle-poll options shape now hand-copied a third time instead of picked from its own exported type), two /tdd test-quality judgement calls (two source/comment-text assertions that are side-channel rather than public-seam, one of them bundled inside an otherwise well-justified structural-pin cell), and one minor naming note (a reused message key named for a different feature). None are blocking; all are additive polish a reviewer would ask for, not defects that change behaviour.",
+  "verdict": "accept"
+}

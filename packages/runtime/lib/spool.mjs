@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const PREFIX_BYTES = 8192;
@@ -50,11 +51,72 @@ export async function ensureSpoolDir() {
   return dir;
 }
 
+/** The Windows locking codes a `rename()` over a destination ANOTHER HANDLE HOLDS OPEN raises. */
+const RENAME_CONTENDED = new Set(["EPERM", "EACCES", "EBUSY"]);
+/**
+ * How long `renameIntoPlace` may keep retrying before it surfaces the failure.
+ *
+ * 250 ms, not the 2000 ms this shipped with in its first cut (#966, fix round 1). The deadline is
+ * a budget for a CONTENDED window, and the contention this exists for is a reader's handle, which
+ * lives for microseconds — 250 ms is already a thousand times that. What the deadline also buys is
+ * the cost of a handle that is never released (a stuck indexer or AV scan): every intake status
+ * transition goes through `atomicJson`, so a stuck handle costs the FULL deadline once per
+ * transition per intake, on the intake path, across a hundred-child batch. Measured on this rig at
+ * two seconds: `EPERM after 2003 ms`. The failure is the same either way; only the stall differs,
+ * and `tests/intake-sidecar-race.test.mjs`'s `p966.giveup` pins it. `CLARA_SPOOL_RENAME_RETRY_MS`
+ * remains the knob for an operator who knows their host holds files for longer.
+ */
+const RENAME_RETRY_MS = Math.max(0, Number(process.env.CLARA_SPOOL_RENAME_RETRY_MS || 250));
+
+/**
+ * `rename(from, to)` THAT A CONCURRENT READ CANNOT FAIL (#966).
+ *
+ * THE PROPERTY, MEASURED ON THE RIG, NOT ASSUMED: on Windows a `rename()` whose DESTINATION is
+ * held open by another handle fails `EPERM`, and `fs.open(path,'r')` — what a sidecar read takes —
+ * is exactly such a handle. Against a tight reader loop, 414 of 500 bare renames failed. The
+ * reconciler's intake-recovery belt opened every pending sidecar on every ~2 s sweep, so a live
+ * intake's own status write landed in that window often enough to be MEASURED: one child in six at
+ * the default cadence (`tests/intake-batch-e2e.mjs`'s header), surfacing as a 500 on the byte PUT
+ * and an intake failed with an untyped `internal`.
+ *
+ * The belt's half of the fix (skip from directory metadata, open at most ten) shrinks the window;
+ * this closes it. A reader's handle lives for microseconds, so a bounded retry converts a hard
+ * failure into a sub-millisecond wait. It is the shape `graceful-fs` has shipped for a decade
+ * (`node_modules/graceful-fs/polyfills.js`: "Windows. On some operations `EPERM` and `EACCESS` are
+ * thrown", retried against a deadline) — restated here rather than depended on, because this
+ * package takes no dependency for six lines and the deadline belongs to the caller's latency
+ * budget, not to a library's.
+ *
+ * NOT A SILENT SWALLOW: past the deadline the original error is thrown, unchanged, and the caller
+ * waits no longer than the deadline for that answer (`p966.giveup`). And ONLY the three contention
+ * codes retry — `ENOENT`, `ENOSPC` and every other failure surface immediately.
+ */
+async function renameIntoPlace(from, to) {
+  const deadline = Date.now() + RENAME_RETRY_MS;
+  let delay = 1;
+  for (;;) {
+    try {
+      return await rename(from, to);
+    } catch (err) {
+      if (!RENAME_CONTENDED.has(err?.code) || Date.now() >= deadline) throw err;
+      await sleep(delay);
+      delay = Math.min(delay * 2, 50);
+    }
+  }
+}
+
 async function atomicJson(path, value) {
   await ensureSpoolDir();
   const next = `${path}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(next, `${JSON.stringify(value)}\n`, { encoding: "utf8", mode: 0o600 });
-  await rename(next, path);
+  try {
+    await renameIntoPlace(next, path);
+  } catch (err) {
+    // The temp file is ours and nobody else will ever collect it. Leaving it behind would turn a
+    // transient write failure into unbounded spool growth (and a `.tmp` the TTL sweep ignores).
+    await rm(next, { force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 export async function writeIntakeMeta(id, value) {
@@ -168,26 +230,70 @@ export async function noteTerminalFailure(taskId, code, note) {
   return mergeTaskMeta(taskId, { status: "failed", lastError: code, ...(note ? { lastErrorNote: note } : {}) }, { requireExists: true });
 }
 
-async function listJson(prefix) {
-  const dir = await ensureSpoolDir();
-  const names = await readdir(dir);
-  const rows = [];
-  for (const name of names) {
-    if (!name.startsWith(prefix) || !name.endsWith(".json")) continue;
+/** Parse ONE sidecar. `null` when it is gone (a sweep racing a `removeIntakeSpool` is not an
+ *  event), the `{corrupt, file}` marker on anything else — the contract `listJson` has always had.
+ *  THE HANDLE LIVES ONLY INSIDE THIS FUNCTION, and on Windows it is what a concurrent rename over
+ *  the same path collides with; every caller should decide whether to call it BEFORE calling it. */
+async function readJsonAt(path, name) {
+  try {
+    const fh = await open(path, "r");
     try {
-      const fh = await open(join(dir, name), "r");
-      try {
-        rows.push(JSON.parse(await fh.readFile("utf8")));
-      } finally {
-        await fh.close();
-      }
-    } catch (err) {
-      if (err?.code !== "ENOENT") rows.push({ corrupt: true, file: name });
+      return JSON.parse(await fh.readFile("utf8"));
+    } finally {
+      await fh.close();
     }
+  } catch (err) {
+    return err?.code === "ENOENT" ? null : { corrupt: true, file: name };
+  }
+}
+
+/**
+ * THE SPOOL'S SIDECARS AS DIRECTORY METADATA — nothing is opened (#966).
+ *
+ * Each entry carries the file's `mtimeMs` and a LAZY `read()`. That shape exists so a caller can
+ * decide what to skip before taking a handle: `stat()` does not hold one a Windows `rename()` can
+ * block (measured in `tests/intake-sidecar-race.test.mjs`), while `open()` does. The recovery belt
+ * reads at most the ten sidecars it can act on, and never one a live upload is mid-write on.
+ *
+ * `mtimeMs` is the honest recency signal here, more so than the sidecar's own `updatedAt` field:
+ * every status transition goes through `atomicJson`, so the file's mtime moves with the field —
+ * and the RACE is a property of the file, not of anything inside it. A file whose metadata cannot
+ * be read is handed back with `mtimeMs: 0`, i.e. never "recently written", so it is never skipped
+ * on the strength of a read that did not land.
+ *
+ * @returns {Promise<Array<{name:string, path:string, mtimeMs:number, read:() => Promise<any>}>>}
+ */
+async function listJsonEntries(prefix) {
+  const dir = await ensureSpoolDir();
+  const entries = [];
+  for (const name of await readdir(dir)) {
+    if (!name.startsWith(prefix) || !name.endsWith(".json")) continue;
+    const path = join(dir, name);
+    let mtimeMs = 0;
+    try {
+      const info = await stat(path);
+      if (!info.isFile()) continue;
+      mtimeMs = info.mtimeMs;
+    } catch (err) {
+      if (err?.code === "ENOENT") continue; // collected between the readdir and the stat
+    }
+    entries.push({ name, path, mtimeMs, read: () => readJsonAt(path, name) });
+  }
+  return entries;
+}
+
+/** Every sidecar, PARSED — the eager shape, expressed over the lazy one so the two can never
+ *  drift. A caller that can skip work should take the entries instead. */
+async function listJson(prefix) {
+  const rows = [];
+  for (const entry of await listJsonEntries(prefix)) {
+    const row = await entry.read();
+    if (row !== null) rows.push(row);
   }
   return rows;
 }
 
+export const listIntakeMetaEntries = () => listJsonEntries("intake-");
 export const listIntakeMetas = () => listJson("intake-");
 export const listTaskMetas = () => listJson("task-");
 
@@ -328,12 +434,25 @@ export async function spoolHealth() {
   }
 }
 
+/**
+ * Which files in the spool this reaper owns.
+ *
+ * It used to demand a uuid (`intake-[0-9a-f-]{36}`), which meant the ONE shape nothing else can
+ * clean up — an intake file whose name is not a uuid, i.e. a foreign or malformed file no
+ * `removeIntakeSpool(id)` will ever be called for — was the one shape it left behind forever
+ * (#966, fix round 1: such a file also costs the recovery belt a read on every sweep). Nothing
+ * legitimate loses by the wider match: every path this package writes comes from `intakePaths()`,
+ * which enforces the uuid itself, and `atomicJson`'s temp files end in `.tmp` and are still not
+ * matched — they are removed by the writer that made them.
+ */
+const SPOOL_REAPABLE = /^intake-.+\.(?:bin|json)$/i;
+
 export async function sweepSpoolTtl(now = Date.now()) {
   const { dir, ttlMs } = spoolConfig();
   await ensureSpoolDir();
   let removed = 0;
   for (const name of await readdir(dir)) {
-    if (!/^intake-[0-9a-f-]{36}\.(?:bin|json)$/i.test(name)) continue;
+    if (!SPOOL_REAPABLE.test(name)) continue;
     const path = join(dir, name);
     try {
       const s = await stat(path);

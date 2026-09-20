@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, signInTo } from "./helpers";
 import { CLIENT_CREATE } from "./client-create-mock.mjs";
 
 /**
@@ -29,16 +29,6 @@ import { CLIENT_CREATE } from "./client-create-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const REGISTER_URL = "/clients";
-
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // A GENEROUS TIMEOUT, not the 5s default: this host runs several rigs at once and the
-  // post-sign-in navigation is a full server render.
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), { timeout: 30_000 });
-}
 
 async function settle(page: Page): Promise<void> {
   await page.mouse.move(0, 0);

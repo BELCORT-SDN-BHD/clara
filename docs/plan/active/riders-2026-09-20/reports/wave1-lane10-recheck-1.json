@@ -1,0 +1,48 @@
+{
+  "lane": 10,
+  "branch": "riders/w1-lane10",
+  "head": "01e745039d6b8385412b02045b4c62fdbb929b45",
+  "lens": "RECHECK",
+  "verdict": "accept",
+  "summary": "Independently re-ran every cell and file this lane's fix round (wave1-lane10-fixround-1.md, head 01e74503) cited as evidence, on the lane rig (PGPORT 55750, clara_l10, Playwright 3590/3591/3592), and re-read the code each finding named. All six review findings addressed in the fix round (L10-A1 through L10-A6) hold: periodic-adjustment-e2e.mjs (6 legs) and staff-expense-claim-e2e.mjs (7 legs) both pass solo with the destructured-detail assertion in place (L10-A1); apps/web/lib/work/api.ts spreads carrier(body) into retryWork, cancelWork and takeOverWork's refusal arms and lib/work/api.test.ts is 27/27 (L10-A2); the shared harness's ask_question arm is gated by CLARA_WORK_ASK_ONLY_CLIENT (REQUIRED, fail-closed) and trade-invoice-e2e.mjs leg 6 passes with its added bystander-Work assertion (L10-A3); workRoutes.ts's header now states the true CONSTRAINT_FOLD_REASONS set instead of the disproven claim (L10-A4); the gate-directory rmSync is gone, .gitignore carries both gate paths, and git status is clean after a full trade-invoice-e2e run (L10-A5); and the walk's control body now sends the whole typed refusal object, with trade-invoice-walk e2e still 12/12 (L10-A6). The spec-lens review's F1 (AC4/narrate-leg reproduction failure) is REFUTED on two more solo re-runs of work-journal-e2e.mjs, both all-8-legs-green including leg 4 (44.0s-class run twice more here), consistent with the fix round's cross-process-contention explanation rather than a lane defect; F2 (World-e2e rig contention) needed no code change and none was made, matching the review's own ask. Nothing broken: pnpm typecheck exit 0, pnpm lint exit 0, node scripts/check-frozen-workflows.mjs OK (312 frozen files, no manifest diff, confirming --print-closure stays clear of NON-FROZEN scope), packages/runtime/scripts/check-parts-parity.mjs OK, the four runtime unit files 79/79, and the whole apps/web unit suite reproduced EXACTLY the fix round's own counts (4638 tests, 135 suites, 4636 pass, 0 fail, 2 skip). Working tree is clean at every checkpoint; nothing was pushed, committed, or edited by this review. Two items the fix round itself flagged as deliberately not worked remain open, both at or below minor: L10-A7 (workRoutes.ts's unnamed-409 fallback comment near the answer(409,{error:\"conflict\"}) arm at :1053 still does not say the promoted/full-body distinction the review asked for) and L10-A8 (seven of the eleven work-journal-serve.mjs spawners are still not run on a lane rig, which the review itself said needed no fix beyond L10-A1 and is the orchestrator's job). Neither is new; both were disclosed as not-worked in the fix round's own 'Deliberately left' section. Verdict accept: nothing above minor remains open.",
+  "findings": [
+    {
+      "id": "R1",
+      "ticket": 981,
+      "severity": "minor",
+      "title": "L10-A7 (unnamed-409 fallback comment) is still open — not worked in the fix round, confirmed by re-reading the current file",
+      "evidence": "packages/runtime/src/workRoutes.ts:1053 still reads `return answer(409, { error: \"conflict\" });` with no comment nearby claiming what the code now measures. The prior guard comment the adversarial review quoted ('the token is not in the map: an unreachable refusal gets no name of its own') is gone from the file entirely (grep for that phrase and for 'unreachable refusal gets no name' finds nothing), so the review's specific mis-stated claim no longer exists to mislead a reader, but the fix round's own report lists L10-A7 explicitly under 'Deliberately left' ('L10-A7 and L10-A8 were not in this round's list and were not worked'). The finding's required_fix (re-word the comment or add one line saying where the token now appears) was not applied.",
+      "required_fix": "No action needed to accept this lane; carry as a follow-up. If picked up: add one line near workRoutes.ts:1053 stating that a 409 reason absent from the named arms above still reaches the browser under detail.reason via the generic carrier, distinct from the promoted (top-level) reason this arm withholds."
+    },
+    {
+      "id": "R2",
+      "ticket": 980,
+      "severity": "note",
+      "title": "L10-A8 (seven of eleven work-journal-serve.mjs spawners still unrun on a lane rig) remains true, exactly as the fix round disclosed",
+      "evidence": "grep -rl 'work-journal-serve' packages/runtime/tests confirms eleven spawners; this recheck (like the fix round) ran periodic-adjustment-e2e.mjs, staff-expense-claim-e2e.mjs, trade-invoice-e2e.mjs and work-journal-e2e.mjs, all green. accrual-e2e.mjs, plan-occurrence-e2e.mjs, prepayment-occurrence-e2e.mjs, fixed-asset-acquisition-e2e.mjs, work-egress-e2e.mjs, work-cancel-e2e.mjs, work-question-e2e.mjs and the chat-turn-v19/20/21 serve drivers were not run here either; the adversarial review's own required_fix for L10-A8 was 'None beyond L10-A1' plus an orchestrator-level ask to run all eleven before closing #980, which is not this lane's action.",
+      "required_fix": "No action needed to accept this lane. Orchestrator-level: run the remaining seven spawners (each needs its own ALLOWED_DB gate widened the same one line L10-A1 already modeled) before treating #980's AC4 as proven across the whole estate rather than the four files this lane could reach."
+    }
+  ],
+  "verified_here": [
+    "node scripts/check-frozen-workflows.mjs -> freeze-lint: OK, 312 frozen files verified (append-only vs origin/main), 55 \"use workflow\" modules all frozen+registered, 3 retired entries recorded",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK",
+    "node --test tests/work-routes-unit.test.mjs tests/staff-expense-claim-unit.test.mjs tests/periodic-adjustment-unit.test.mjs tests/trade-invoice-unit.test.mjs -> 79 tests, 79 pass, 0 fail",
+    "node --import ./test/bootstrap.mjs --import tsx --test lib/work/api.test.ts -> 27 tests, 27 pass, 0 fail (matches fix round's +1 new cell for L10-A2)",
+    "pnpm typecheck -> exit 0 (apps/web and packages/runtime both Done)",
+    "pnpm lint -> exit 0, all selftest batteries PASS (checkTestManifest, check-message-keys, check-ui-add-guard)",
+    "node tests/periodic-adjustment-e2e.mjs (solo, PGPORT 55750/clara_l10) -> PASS, 6 legs, leg 6's 'an unfiled one is a typed 400 on the chooser' (L10-A1's fix) green",
+    "node tests/staff-expense-claim-e2e.mjs (solo) -> PASS, 7 legs, leg 7's 'an unfiled one is a typed 400' (L10-A1's fix) green",
+    "node tests/trade-invoice-e2e.mjs (solo) -> PASS, all 7 legs, leg 6 'parked on a question, replayed into the window, answered, ONE of everything; a foreign Work was never asked' (L10-A3) and leg 7 'cancelled inside the commit window; no journal effect' both green; git status clean afterward (L10-A5's gitignore/no-recursive-rmSync fix holds)",
+    "node tests/work-journal-e2e.mjs (solo) x2 -> PASS, all 8 legs BOTH times, leg 4 (the narrate leg F1 disputed) green on every run here, refuting F1 a second and third time beyond the fix round's own two runs",
+    "pnpm --filter @clara/web e2e trade-invoice-walk (APP_ORIGIN 3590/NEXT 3591/RUNTIME 3592) -> 12 passed, control body now sends the full typed refusal object per L10-A6's fix (verified by reading trade-invoice-walk.spec.ts:171-198 and trade-invoice-mock.mjs:352-358)",
+    "whole apps/web unit suite (node scripts/run-tests.mjs) -> 4638 tests, 135 suites, 4636 pass, 0 fail, 2 skip, 79.2s -- exact count match to the fix round's own claim",
+    "apps/web/lib/work/api.ts read directly -> carrier(body) spread present on submitJournalWork/submitPeriodicAdjustmentWork/submitStaffExpenseClaimWork/submitTradeInvoiceWork/restateWork (pre-existing) AND on retryWork's not_retryable (line 565), cancelWork's conflict/invalid (lines 751-752), takeOverWork's not_takeable/confirm_basis/invalid (lines 831-841) -- all eight doors confirmed",
+    "packages/runtime/src/workRoutes.ts read directly -> header at :65-78 now states the true CONSTRAINT_FOLD_REASONS set (invalid_basis, invalid_source_ref, invalid_claim) and cites the pinning test, contradicting nothing; CONSTRAINT_FOLD_REASONS at :906 matches",
+    "git status --porcelain in the worktree -> clean before, during and after every re-run; git rev-parse HEAD -> 01e745039d6b8385412b02045b4c62fdbb929b45 matches the report's stated head"
+  ],
+  "not_verified_here": [
+    "The seven remaining work-journal-serve.mjs spawners (accrual, plan-occurrence, prepayment-occurrence, fixed-asset-acquisition, work-egress, work-cancel, work-question, chat-turn-v19/20/21) -- not run, per R2/L10-A8, same as both prior review rounds",
+    "A from-scratch database re-run of work-journal-e2e.mjs for F1 -- RIG.md forbids a second from-scratch migration chain on this cluster; this reviewer instead ran it solo twice more on the existing (more-populated) clara_l10, both green, consistent with the fix round's own confirmatory runs",
+    "packages/db tests -- not touched by this lane's diff, so none run, matching both prior reports"
+  ]
+}

@@ -141,12 +141,31 @@ export function computeFrozenClosures(repoRoot, files) {
  * The `--print-closure` report: one section per @frozen entry file, listing the modules that
  * entry's own closure hash-locks. A module reached by several entries appears under each — that
  * repetition is the point, since the question the report answers is "which frozen version(s)
- * does this module belong to". Grep it by module path to read it in that direction.
+ * does this module belong to". Grep it by module path to read it in that direction — or pass
+ * `moduleFilter` (#849) to get that answer directly: the report is then just the sorted list of
+ * entry files whose OWN closure reaches that module, with none of the other entries' sections.
  *
  * @param {{ frozenRel: string[], byEntry: Map<string, string[]> }} closure
+ * @param {string|null} [moduleFilter] a repo-relative module path to filter to (#849)
  * @returns {string}
  */
-export function formatClosureReport(closure) {
+export function formatClosureReport(closure, moduleFilter = null) {
+  if (moduleFilter) {
+    const entries = [...closure.byEntry.entries()]
+      .filter(([, mods]) => mods.includes(moduleFilter))
+      .map(([entry]) => entry)
+      .sort();
+    const lines = [
+      `freeze-lint closure report — module "${moduleFilter}" is locked by ${entries.length} of ${closure.byEntry.size} @frozen entry file(s):`,
+      "",
+    ];
+    if (entries.length === 0) {
+      lines.push(`  (no @frozen entry's closure reaches this module)`);
+    } else {
+      for (const entry of entries) lines.push(`  ${entry}`);
+    }
+    return lines.join("\n");
+  }
   const entries = [...closure.byEntry.keys()].sort();
   const lines = [
     `freeze-lint closure report — ${entries.length} @frozen entry file(s) locking ${closure.frozenRel.length} module(s) in total.`,

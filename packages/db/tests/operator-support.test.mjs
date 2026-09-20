@@ -34,8 +34,8 @@ import {
   operatorFirmBookkeeper, operatorSupportLaneReady, opk, ordinaryFirm, paidUnclaimed, paymentRow,
   problemRow, registrationRow, rejectRegistration, releaseCapacity, resolveProblemWithKey,
   roleQuery, rootQuery, setCapacity, supportCase, supportQueue, undecidedRegistration, insertUser,
-  forceStatus, intentState, intentsOf, openIntent, openedCheckout, paymentsFor, stampSession,
-  EVENT, deliver, gateApplicantNames, resolveApplicantNames, stripeSessionId,
+  forceOpenedAt, forceStatus, intentState, intentsOf, openIntent, openedCheckout, paymentsFor,
+  stampSession, EVENT, deliver, gateApplicantNames, resolveApplicantNames, stripeSessionId,
 } from "./operator-support-fixtures.mjs";
 
 const QUEUE_SIG = "clara.list_operator_support_queue(boolean)";
@@ -48,7 +48,7 @@ const SHARED_SIG = "clara._operator_support_cases(boolean,text,uuid)";
 
 let operator = null;
 let executed = 0;
-const EXPECTED_CELLS = 18;
+const EXPECTED_CELLS = 19;
 
 before(async () => {
   if (!(await operatorSupportLaneReady())) return;
@@ -771,6 +771,152 @@ cell("os.14 arm 1 tie-break -- a registration carrying a PAID intent and a LATER
   // are the same fact only while exactly these two intents exist.
   assert.notEqual(row.intent_status, laterState.status,
     "the later cancelled attempt's status is NOT what the operator reads");
+});
+
+// #844 — `forceOpenedAt` (imported above) forces the one identity column 0186's session-stamp
+// trigger otherwise freezes outright (its FIRST check, before either of the two admitted moves).
+// It is now shared with `backdateStatus` via `checkout-convergence-fixtures.mjs`'s own
+// `withSessionStampDisabled` (code review STD-2) rather than a private near-copy in this file.
+
+cell("os.19 arm 1 id tie-break -- two intents sharing one `opened_at` instant, neither carrying "
+  + "the money: the lateral's third key (`i.id desc`) is the only thing that can decide", async () => {
+  // #844 — os.14 (above) pins the SECOND key (the money-carrying status beats `opened_at desc`)
+  // but every world it and every other cell in this file builds gives a registration at most one
+  // intent PAIR with distinct `opened_at` values, so the THIRD key has been provable only by
+  // reading migration 0188's own text (verified at 65fde7f3). This cell builds the one world in
+  // which it is observable at all: three intents, two sharing the exact same `opened_at`.
+  const world = await openedCheckout(operator.owner, { tag: "os19" });
+
+  // THREE MINTED INTENTS, not one reused. `clara.open_checkout_intent` (0186 §G) reuses only an
+  // UNSTAMPED, STILL-`open` intent, and separately refuses CLR09 `checkout_in_progress` outright
+  // while ANY intent sits in `session_created` or `processing` -- so a stamped predecessor would
+  // BLOCK the next open rather than merely fail to be reused. `open -> cancelled` is lawful
+  // without a session stamp (the transition table's first row), so forcing each intended
+  // predecessor straight to `cancelled` is what clears the door for the next mint without ever
+  // putting it through the one state this cell must avoid.
+  const first = world.intent;
+  await forceStatus(first, "cancelled", "#844 os.19 superseded, to open the next intent");
+  const second = (await openIntent(world.sub, world.email, world.registration)).intent_id;
+  await forceStatus(second, "cancelled", "#844 os.19 superseded, to open the next intent");
+  const third = (await openIntent(world.sub, world.email, world.registration)).intent_id;
+  const intents = await intentsOf(world.registration);
+  assert.equal(intents.length, 3, "the registration carries exactly three checkout intents");
+  assert.deepEqual(new Set(intents.map((i) => i.id)), new Set([first, second, third]),
+    "the three rows are first, second and third, and no fourth exists");
+
+  // NEITHER TIED INTENT CARRIES THE MONEY, and neither does the third — the money-carrying key
+  // (os.14's own key) must tie at `false` for all three, or the third key would never be reached.
+  for (const id of [first, second, third]) {
+    const state = await intentState(id);
+    assert.ok(!["paid", "consumed"].includes(state.status),
+      `intent ${id} must not carry the money — the id key is only reached when it is not`);
+  }
+
+  // THE TIE, FORCED AND VERIFIED AS A FACT ABOUT THE FIXTURE, not a hope about timing (os.14's own
+  // standard). `first` and `second` share the exact same instant; `third` sits an hour earlier so
+  // it is never competitive on `opened_at desc` — a decoy that proves the lateral's LIMIT 1 still
+  // reaches across all three rows rather than happening to compare only a pair.
+  const tieInstant = "2026-01-01T00:00:00Z";
+  await forceOpenedAt(third, "2025-12-31T23:00:00Z");
+  await forceOpenedAt(first, tieInstant);
+  await forceOpenedAt(second, tieInstant);
+  const openedAt = await rootQuery(
+    "select id, opened_at from clara.checkout_intents where id = any($1::uuid[])",
+    [[first, second, third]]);
+  const openedOf = (id) => openedAt.rows.find((r) => r.id === id).opened_at.getTime();
+  assert.equal(openedOf(first), openedOf(second),
+    "first and second must carry the IDENTICAL opened_at instant — this is the tie the id key exists for");
+  assert.ok(openedOf(first) > openedOf(third) && openedOf(second) > openedOf(third),
+    "third must be strictly earlier, so it never competes on opened_at desc");
+
+  // THE TWO LOAD-BEARING PRECONDITIONS OF ARM 1, asserted exactly as os.14 asserts them.
+  assert.equal((await paymentsFor(world.registration)).length, 0,
+    "the registration carries NO clara.firm_registration_payments row");
+  assert.equal((await registrationRow(world.registration)).status, "open",
+    "the registration is still undecided");
+
+  // THE EXPECTED WINNER, computed from Postgres's OWN uuid comparison rather than assumed from
+  // JS string ordering — root-corroborated, os.14's own idiom ("never the migration body, never
+  // the shared body").
+  const cmp = await rootQuery("select ($1::uuid > $2::uuid) as first_wins", [first, second]);
+  const winner = cmp.rows[0].first_wins ? first : second;
+  const loser = cmp.rows[0].first_wins ? second : first;
+  const winnerState = await intentState(winner);
+
+  // THE DOOR'S OWN ANSWER — the QUEUE for arm membership and the reported state, the CASE for the
+  // unambiguous intent identity. `list_operator_support_queue` deliberately projects only its
+  // twenty declared columns and drops `extra` (0188 §1's own comment: "the queue door projects
+  // the twenty declared columns and drops it; the case door merges it into its answer"), so the
+  // intent id itself is read from `get_operator_support_case`, never inferred from status content
+  // the fixture happened to make distinguishable.
+  const rows = await supportQueue(operator.owner);
+  const row = caseOf(rows, CASE_KIND.registration, world.registration);
+  assert.ok(row, "the undecided, unpaid registration is an arm-1 registration case");
+  assert.equal(row.payment_recorded_at, null, "…and it is arm 1, not arm 2");
+  assert.deepEqual({
+    intent_status: row.intent_status,
+    intent_status_at: row.intent_status_at?.getTime() ?? null,
+    intent_status_reason: row.intent_status_reason,
+  }, {
+    intent_status: winnerState.status,
+    intent_status_at: winnerState.status_at?.getTime() ?? null,
+    intent_status_reason: winnerState.status_reason,
+  }, "the queue reports the GREATER-id intent's own state among the two tied on money and opened_at");
+
+  const detail = await supportCase(operator.owner, CASE_KIND.registration, world.registration);
+  assert.equal(detail.intent_id, winner,
+    "get_operator_support_case's merged extra.intent_id must name the GREATER-id tied intent");
+  assert.notEqual(detail.intent_id, loser,
+    "…and must NOT name the lesser-id tied intent");
+
+  // ACCEPTANCE #3, HALF ONE — the id key's DIRECTION is load-bearing, proven by running the
+  // IDENTICAL lateral predicate from migration 0188 with `i.id desc` REVERSED to `i.id asc` — a
+  // companion SELECT over the same base relation, never the deployed function or the migration
+  // body — and reading that it deterministically names the LOSER instead. Reversing rather than
+  // omitting the key is deliberate here: without ANY id clause, Postgres does not promise which of
+  // two `opened_at`-tied rows a bare LIMIT 1 returns, so that comparison would prove nothing
+  // reproducible; flipping the direction keeps the query fully deterministic while removing
+  // exactly the one fact (which direction) migration 0188 fixes. NOTE: this half proves the
+  // DIRECTION matters, not that the cell fails if the key is REMOVED outright — a hand-written
+  // copy of the predicate compares on id either way, so it cannot go red for a recut that drops
+  // the clause. Measured on this rig: doing exactly that to a copy of the predicate (id clause
+  // deleted, not reversed) still names the SAME row as the shipped predicate in 6 of 10
+  // three-intent/two-instant worlds — i.e. this half alone would leave the criterion's "removed"
+  // case green about 60% of the time. Acceptance #3 half two, below, closes that gap.
+  const reversed = await rootQuery(
+    `select i.id
+       from clara.checkout_intents i
+      where i.registration_id = $1
+      order by (i.status in ('paid', 'consumed')) desc, i.opened_at desc, i.id asc
+      limit 1`,
+    [world.registration]);
+  assert.equal(reversed.rows[0].id, loser,
+    "with the id key's direction reversed, the SAME data names the loser -- proving `i.id desc`, "
+    + "not merely an id clause, is what the migration's arm-1 lateral relies on");
+  const asShipped = await rootQuery(
+    `select i.id
+       from clara.checkout_intents i
+      where i.registration_id = $1
+      order by (i.status in ('paid', 'consumed')) desc, i.opened_at desc, i.id desc
+      limit 1`,
+    [world.registration]);
+  assert.equal(asShipped.rows[0].id, winner,
+    "the companion query, run with the SAME direction migration 0188 ships, agrees with the door -- "
+    + "confirming the companion query is a faithful copy of the real predicate");
+
+  // ACCEPTANCE #3, HALF TWO (code review L03-CRS1) — a STRUCTURAL pin against the ACTUAL deployed
+  // function body, never a hand-written copy, so a recut that REMOVES the id key (not merely
+  // reverses it) goes red here by construction. `normalizedBody` (this file's own os.11 census
+  // idiom, reused rather than re-invented) lower-cases, strips comments, and strips ALL whitespace
+  // from `clara._operator_support_cases`'s live `pg_proc.prosrc` — the needle below is that exact
+  // normalization of 0188's arm-1 `order by` clause, verified against the live catalog and against
+  // a simulated id-key-removed variant of the same source text (report has the transcript: the
+  // needle is present in the real body and absent from the id-removed AND id-reversed variants).
+  const sharedBody = await normalizedBody(SHARED_SIG);
+  assert.ok(sharedBody.includes(
+    "orderby(i.statusin('paid','consumed'))desc,i.opened_atdesc,i.iddesc"),
+    `${SHARED_SIG}'s deployed arm-1 lateral no longer orders by (i.status in ('paid','consumed')) `
+    + "desc, i.opened_at desc, i.id desc -- the id key was removed or reworded");
 });
 
 // ===========================================================================================

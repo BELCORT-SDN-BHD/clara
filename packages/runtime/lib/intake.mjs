@@ -5,7 +5,7 @@ import { analyzeDocument } from "./egress.mjs";
 import { detectDocument, IntakeScanError, scanFile } from "./scan.mjs";
 import {
   intakePaths,
-  listIntakeMetas,
+  listIntakeMetaEntries,
   mergeTaskMeta,
   noteTerminalFailure,
   noteTransientFailure,
@@ -430,11 +430,104 @@ export async function finalizeDocumentIntake(options) {
   }
 }
 
-/** Resume durable post-upload intakes after a crash. The sidecar carries only the capability HASH (the plaintext token is gone). */
-export async function recoverPendingDocumentIntakes({ withRuntime, enqueue, log = NOOP_LOG }) {
+/** How many sidecars ONE sweep may ACT on. Unchanged from the belt's first cut. */
+const RECOVERY_BATCH = 10;
+
+/**
+ * How many sidecars ONE sweep may OPEN while looking for those ten (#966, fix round 1).
+ *
+ * THE TEN ARE TEN SIDECARS THAT CARRY AN INTAKE. The first cut of this change took
+ * `RECOVERY_BATCH` off the raw listing, so a sidecar the belt CANNOT USE — the `{corrupt, file}`
+ * marker, a `null` from a sidecar collected between the listing and the read, a body whose
+ * `intakeId` never landed — spent one of the ten. Ten such files sitting ahead of a crashed intake
+ * in `readdir` order blinded the belt entirely and silently: the human's uploaded document simply
+ * never appeared. Before #966 that could not happen, because the filter ran BEFORE the slice
+ * (`listIntakeMetas().filter(row => row && !row.corrupt && row.intakeId).slice(0, 10)`); this
+ * restores that property while keeping the open bound the ticket exists for.
+ *
+ * The open bound is kept — and kept SEPARATE — because an open is the handle a live intake's next
+ * `rename()` collides with, so "read the whole directory until ten usable ones turn up" is the
+ * cost this ticket removed. 3x leaves room for the realistic junk count (zero, or one sidecar
+ * racing its own `removeIntakeSpool`) many times over. The residual is stated rather than hidden:
+ * more than thirty settled-but-unusable sidecars ahead of a crashed one still delay it, until
+ * `sweepSpoolTtl` reaps them — which it now does whatever they are named.
+ *
+ * IT IS NOT TEN ACTIONS IN THE WIDER SENSE, AND THAT IS DELIBERATE (review finding SPEC-3, fix
+ * round 2). A sidecar that carries a REAL intake in a status this belt cannot act on —
+ * `uploading`, `receiving`, a large body still streaming whose last status write is older than the
+ * quiet window — spends one of the ten while nothing is done with it. That is origin/main's
+ * behaviour byte for byte (its filter, `row && !row.corrupt && row.intakeId`, let a live status
+ * through into the ten too). Moving the increment below the `RECOVERABLE_STATES` gate would let
+ * one sweep open up to `RECOVERY_OPEN_BUDGET` live sidecars instead of `RECOVERY_BATCH`, tripling
+ * the handle-taking on exactly the files #966 exists to stop touching — and it buys little,
+ * because the two junks are not alike: a live sidecar carries a 15-minute capability and the
+ * expiry arm above is an action the belt always takes, so it clears ITSELF, where `{corrupt}` junk
+ * waits for `sweepSpoolTtl`. Pinned by `tests/intake-sidecar-race.test.mjs`'s `p966.budget: a
+ * settled LIVE upload DOES spend one of the ten`.
+ */
+const RECOVERY_OPEN_BUDGET = RECOVERY_BATCH * 3;
+
+/**
+ * How long a sidecar must have been QUIET before this belt may open it (#966).
+ *
+ * THE GUARD IS NOT NEW — THE PLACE IT RUNS IS. The belt has always skipped an intake whose sidecar
+ * was updated in the last few seconds, and the reason has always been the same: a stamp written
+ * moments ago belongs to a LIVE upload, and the belt has nothing to recover from a request that is
+ * still in flight. But it skipped on the sidecar's `updatedAt` FIELD, which it could only read by
+ * opening the file — so the guard ran BEHIND the open and could not prevent the thing it existed
+ * to avoid. On Windows the open is precisely what makes that intake's next atomic write fail
+ * `EPERM` (see `spool.mjs`'s `renameIntoPlace`), which failed the intake with an untyped
+ * `internal`: MEASURED at one child in six under load (#636 / #966).
+ *
+ * It now runs on the file's own mtime, from directory metadata, BEFORE any handle is taken. The
+ * two signals move together — every status transition rewrites the file through `atomicJson` — and
+ * mtime is the more faithful of the two here, because the race is a property of the FILE.
+ */
+const SIDECAR_QUIET_MS = Math.max(0, Number(process.env.CLARA_INTAKE_SIDECAR_QUIET_MS || 5000));
+
+/** The sidecar states this belt can carry forward. Anything else (`uploading`, `receiving`) belongs
+ *  to a request that has not handed the bytes over yet. */
+const RECOVERABLE_STATES = ["spooled", "canonical", "received", "verifying", "verified", "duplicate"];
+
+/**
+ * Resume durable post-upload intakes after a crash. The sidecar carries only the capability HASH
+ * (the plaintext token is gone).
+ *
+ * READS NOTHING IT COULD HAVE SKIPPED (#966). The sweep takes the spool's DIRECTORY METADATA,
+ * drops every sidecar inside the quiet window without opening it, and only then opens — enough of
+ * them to reach `RECOVERY_BATCH` sidecars THAT CARRY AN INTAKE, the same number it has always been
+ * willing to take, under a separate and larger bound on opens (`RECOVERY_OPEN_BUDGET`). The quiet skip happens BEFORE
+ * either budget is taken, so a spool full of live uploads cannot starve the belt of the crashed
+ * intake sitting behind them, and a sidecar that carries no intake costs a read but never one of
+ * the ten (see `RECOVERY_OPEN_BUDGET`'s own header for what the first cut of this got wrong).
+ *
+ * @param {{withRuntime:Function, enqueue:Function, log?:(m:string)=>void,
+ *          listEntries?:() => Promise<Array<{mtimeMs:number, read:() => Promise<any>}>>,
+ *          quietMs?:number}} deps  `listEntries` and `quietMs` are seams for the belt's own cells;
+ *          production passes neither.
+ */
+export async function recoverPendingDocumentIntakes({
+  withRuntime, enqueue, log = NOOP_LOG, listEntries = listIntakeMetaEntries, quietMs = SIDECAR_QUIET_MS,
+}) {
   const out = { recovered: 0, deferred: 0, expired: 0 };
-  const rows = (await listIntakeMetas()).filter((row) => row && !row.corrupt && row.intakeId);
-  for (const meta of rows.slice(0, 10)) {
+  const sweepStartedAt = Date.now();
+  const settled = (await listEntries()).filter((entry) => sweepStartedAt - entry.mtimeMs >= quietMs);
+  let opened = 0;
+  let handled = 0;
+  const unusable = [];
+  for (const entry of settled) {
+    if (handled >= RECOVERY_BATCH || opened >= RECOVERY_OPEN_BUDGET) break;
+    opened += 1;
+    const meta = await entry.read();
+    if (!meta || meta.corrupt || !meta.intakeId) {
+      // `null` is a sidecar collected between the listing and the read — a sweep racing a
+      // `removeIntakeSpool` is not an event and is not worth a line. The other two shapes are a
+      // file a human may have to go and look at, so they are counted and reported ONCE per sweep
+      // below: thirty lines every two seconds is how a real signal gets grepped past.
+      if (meta) unusable.push(entry.name ?? entry.path ?? "(unnamed)");
+      continue;
+    }
+    handled += 1;
     if (Date.parse(meta.expiresAt) <= Date.now()) {
       await withRuntime((client) =>
         callWriter(client, "select clara.fail_document_intake($1,$2,$3) as receipt", [
@@ -447,9 +540,7 @@ export async function recoverPendingDocumentIntakes({ withRuntime, enqueue, log 
       out.expired += 1;
       continue;
     }
-    if (!["spooled", "canonical", "received", "verifying", "verified", "duplicate"].includes(meta.status)) continue;
-    const age = Date.now() - Date.parse(meta.updatedAt || meta.createdAt || "");
-    if (Number.isFinite(age) && age < 5000) continue;
+    if (!RECOVERABLE_STATES.includes(meta.status)) continue;
     try {
       await finalizeDocumentIntake({ withRuntime, intakeId: meta.intakeId, tokenHash: meta.tokenHash, enqueue });
       out.recovered += 1;
@@ -457,6 +548,9 @@ export async function recoverPendingDocumentIntakes({ withRuntime, enqueue, log 
       out.deferred += 1;
       log(`[reconcile] intake recovery deferred intake=${meta.intakeId}: ${err?.message ?? err}`);
     }
+  }
+  if (unusable.length) {
+    log(`[reconcile] intake recovery skipped ${unusable.length} unreadable sidecar(s) this sweep: ${unusable.slice(0, 3).join(", ")}`);
   }
   return out;
 }

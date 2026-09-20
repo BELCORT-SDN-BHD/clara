@@ -39,7 +39,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 export const CLASSIFIABLE_DOCUMENT_KINDS = DOCUMENT_KINDS.filter((k) => k !== "consent_evidence");
 
 export function DocumentKindControl({
-  documentId, filename, busy, refusal, act, session,
+  documentId, filename, busy, refusal, act, session, initialKind,
 }: {
   documentId: string;
   filename: string;
@@ -49,9 +49,14 @@ export function DocumentKindControl({
    *  the door settles, so this component never paints a result of its own. */
   act: (fn: () => Promise<void>) => Promise<boolean>;
   session?: SessionTokenAccessor;
+  /** fix-round SPEC-1005-1 — no production caller sets this; it exists so a test can mount this
+   *  control with the kind Select already SELECTED and assert its trigger's text on first render,
+   *  the way every other #1005 call site's own cell does, without a popup-opening seam this
+   *  repo's test harness does not have. */
+  initialKind?: string;
 }) {
   const t = useTranslations("ClientDocuments");
-  const [kind, setKind] = useState("");
+  const [kind, setKind] = useState(initialKind ?? "");
   const [reason, setReason] = useState("");
 
   return (
@@ -72,7 +77,10 @@ export function DocumentKindControl({
       <div className="flex flex-col gap-2">
         <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
           <SelectTrigger aria-label={t("kindHeading")} size="sm">
-            <SelectValue placeholder={t("kindPlaceholder")} />
+            <SelectValue
+              placeholder={t("kindPlaceholder")}
+              items={CLASSIFIABLE_DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}
+            />
           </SelectTrigger>
           <SelectContent>
             {CLASSIFIABLE_DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{renderKindLabel(k, t)}</SelectItem>)}

@@ -31,7 +31,7 @@ import {
   COST, ACCUM2, EXPENSE2, BANK, LAND, AP1, SHARE,
   mon, dayIn, opk, rootQuery, humanQuery, namedCall,
   refuses, caught, reasonToken, noteLane, printLaneNotes, printSkipCount, endPool,
-  x41EnsureReady,
+  x41EnsureReady, kSeededFaClient, freshEnrolledFaClient, freshResolution, wb,
 } from "./fixed-asset-acquisition-fixtures.mjs";
 
 let live = false;
@@ -229,9 +229,118 @@ test("p639.birth.exclusions opening entries, reversal mirrors, disposals and sch
   // A STRING SEARCH IS A BELT, NOT THE PROOF (round-1 review, 639-A5). The `scheduled_run` arm is
   // proven BEHAVIOURALLY by `p639.depreciation.independent`, which runs a real depreciation period
   // through the production command on an enrolled client and asserts the register count is
-  // unmoved. The K-family opening arm remains belt-only and is named as such in the report: no
-  // opening-seed fixture exists anywhere in packages/db/tests, and 0041 arm 1's own CLR38 guard is
-  // the standing evidence.
+  // unmoved. The K-FAMILY OPENING arm (`is_opening_balance`, 0216 §B) is proven behaviourally
+  // below by `p639.birth.opening_excluded` and `p639.birth.opening_admitted`, reusing the wave-b
+  // opening-seed fixture helpers `kSeededFaClient` (x41-fa-world.mjs) already builds on — #884
+  // corrected two things this comment used to get wrong: the refusal a gl-balance leg on an
+  // enrolled account draws is raised by the BELT (`clara._tf_fa_movement_belt`, migration 0041's
+  // arm (e)), not by this birth trigger, and its code is CLR40 `fa_k_gl_balance_on_enrolled`, not
+  // CLR38. An opening-seed fixture already existed (kSeededFaClient) — this was a fixture to
+  // WRITE two behavioural cells against, not a harness to build.
+});
+
+test("p639.birth.opening_excluded a gl_balance opening leg on an ENROLLED fixed-asset account is refused CLR40 fa_k_gl_balance_on_enrolled naming the account, with NO register row and a full rollback", async (t) => {
+  if (await gate(t, { needAcq: false })) return;
+  // A FRESH onboarding client, its OWN chart, and COST/ACCUM/EXPENSE explicitly ENROLLED —
+  // `freshEnrolledFaClient` (x41-fa-world.mjs), the SAME enrol-and-chart helper `kSeededFaClient`
+  // (below) composes, so the two cells share one source of truth, not two independent copies of
+  // it (#884 code review STD-1).
+  const { w, o } = await freshEnrolledFaClient("884refuse");
+  const doc = await wb.openingDoc(w.users.alice, { firm: w.firms.A, client: o.client });
+  const sr = await wb.createOpeningSeed(w.users.bob, {
+    client: o.client, plan: o.plan, tieDocument: doc.documentId, tieSha256: doc.sha256 });
+  const seed = sr.seed_id ?? sr.id;
+  // Pinned to the LITERAL zero the criterion names (code review L03-CRS5), not merely captured as
+  // a before/after delta: a fixture that had already produced a register row before the refused
+  // approval would otherwise still read green below.
+  const beforeAssets = await assetCountOf(o.client);
+  assert.equal(beforeAssets, 0,
+    "opening_excluded: the fresh client must carry ZERO clara.fixed_assets rows before the refused approval");
+
+  // THE ONE FACT ARM (e) IS ABOUT: a gl_balance leg naming the enrolled COST account directly —
+  // never itemised as a fixed_asset opening item, which is exactly the shape 0041's own comment
+  // says "would escape fa_k_gl_balance_on_enrolled" if the belt's opening arm looked no further
+  // than "is this entry opening-dated". A SECOND, ordinary (un-enrolled) gl_balance item on SHARE
+  // offsets the first item's own OBE contra so the SET's net OBE ties to zero
+  // (`_opening_seed_obe_net`, checked by `_assert_opening_tie` ahead of the belt) — the K9 house
+  // shape, never a change to what arm (e) is actually about.
+  const cost884 = await wb.draftOpeningItem(w.users.bob, {
+    client: o.client, seed,
+    resolution: freshResolution(w.users.bob, o.client, { subjectKind: "document", subjectId: doc.documentId }),
+    document: doc.documentId, sha256: doc.sha256,
+    item: { item_kind: "gl_balance", item_key: `884:${COST}` },
+    lines: [{ account_code: COST, debit_cents: 500_000, credit_cents: 0 }],
+  });
+  const share884 = await wb.draftOpeningItem(w.users.bob, {
+    client: o.client, seed,
+    resolution: freshResolution(w.users.bob, o.client, { subjectKind: "document", subjectId: doc.documentId }),
+    document: doc.documentId, sha256: doc.sha256,
+    item: { item_kind: "gl_balance", item_key: "884:share" },
+    lines: [{ account_code: SHARE, debit_cents: 0, credit_cents: 500_000 }],
+  });
+  assert.equal((await entryRowOf(cost884.entry_id)).status, "draft",
+    "opening_excluded: the belt is deferred behind `when (status='approved')` — drafting alone must not trip it");
+
+  // `_assert_opening_tie` (the K5 approve-time gate ahead of the belt) requires the drafted set's
+  // NON-OBE accounts to match RECORDED target evidence exactly (`_opening_seed_deltas` excludes
+  // the OBE account from its own comparison by construction — recording an OBE target here would
+  // itself manufacture a mismatch, never the belt this cell is actually about) — so COST and
+  // SHARE are tied to the tie document, the same way K9 ties its own multi-line set.
+  await wb.recordParsedTargets({ firm: w.firms.A, seed, doc, lines: [
+    { line_key: "fa884", account_code: COST, source_label: "fa884", debit_cents: 500_000, credit_cents: 0 },
+    { line_key: "share884", account_code: SHARE, source_label: "share884", debit_cents: 0, credit_cents: 500_000 },
+  ] });
+
+  const err = await refuses(async () => wb.approveOpeningSeed(w.users.hana, {
+    seed, planRevision: await wb.planRevision(o.plan), tieSha256: doc.sha256,
+    entryRevisions: wb.revMapOf([cost884, share884]), opKey: opk("884approve"),
+  }), ACQ.kGlBalance, "opening_excluded: an opening gl_balance leg naming an ENROLLED fixed-asset account");
+  assert.equal(err.code, "CLR40", `opening_excluded: the belt's own SQLSTATE (got ${err.code})`);
+  // The criterion asks for the account code ON THE DETAIL (contract §4 pins DETAIL as the
+  // structured discriminant; the prose message is not a machine-readable contract and could
+  // drop the field while still mentioning it in English). detail is a jsonb_build_object(...)::text
+  // (migration 0041), so parse it and check the field itself rather than substring-searching a
+  // blob of message-or-detail — a later recut that drops account_code from the JSON while leaving
+  // it interpolated into the message would otherwise leave this cell green.
+  const detail = JSON.parse(err.detail);
+  assert.equal(detail.account_code, COST,
+    `opening_excluded: the refusal's DETAIL must name the account code ${COST} on account_code (got ${err.detail})`);
+
+  // NO REGISTER ROW, AND A FULL ROLLBACK: the belt is a DEFERRED constraint trigger firing at
+  // the approval statement's own commit, so its exception unwinds the whole approve — the entry
+  // itself must still read back exactly as drafted, never left 'approved' with the register
+  // write alone undone.
+  assert.equal(await assetCountOf(o.client), beforeAssets,
+    "opening_excluded: no clara.fixed_assets row was born by the refused approval");
+  assert.equal((await entryRowOf(cost884.entry_id)).status, "draft",
+    "opening_excluded: the COST opening entry is still 'draft' — the whole approval rolled back, not just the register write");
+  assert.equal((await entryRowOf(share884.entry_id)).status, "draft",
+    "opening_excluded: …and so is the SHARE entry in the same batch — the belt refuses the WHOLE approval, not one entry in it");
+});
+
+test("p639.birth.opening_admitted the itemised fixed_asset opening item is admitted; the birth trigger births NOTHING for it (the register row comes from the opening lane itself)", async (t) => {
+  if (await gate(t, { needAcq: false })) return;
+  const k = await kSeededFaClient("884admit");
+  const entry = await entryRowOf(k.faEntryId);
+  assert.equal(entry.status, "approved",
+    "opening_admitted: the K opening entry was admitted at approve on an ALREADY-enrolled account");
+  assert.equal(entry.is_opening_balance, true,
+    "opening_admitted: …and it is a genuine opening-balance entry — the exact guard condition "
+    + "clara._tf_fa_acquisition_birth's FIRST line tests");
+
+  // EXACTLY ONE REGISTER ROW, NOT BORN BY THE ACQUISITION TRIGGER. If the birth trigger's own
+  // `if new.is_opening_balance then return null; end if;` guard had NOT fired — or fired and
+  // still tried to insert — this entry's SINGLE cost-debit line would either duplicate the row
+  // the opening lane's own `_draft_opening_item_core` already inserted at draft time (0017 §…,
+  // the `insert into clara.fixed_assets(...)` this ticket's triage cites), or collide with the
+  // UNIQUE index on acquisition_line_id (x41.a4 pins that index exists). Neither happens: exactly
+  // one row exists, and it is the SAME id seed_fixed_asset's own receipt named.
+  const rows = await rootQuery(
+    "select id from clara.fixed_assets where acquisition_entry_id=$1", [entry.id]);
+  assert.equal(rows.rowCount, 1,
+    "opening_admitted: exactly one register row ties to this opening entry");
+  assert.equal(rows.rows[0].id, k.assetId,
+    "opening_admitted: …and it is the row seed_fixed_asset's own receipt named at draft time, not a second one from the birth trigger");
 });
 
 // ===========================================================================================

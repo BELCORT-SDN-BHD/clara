@@ -702,15 +702,23 @@ test("634.db: the recut verb's refusal carries the (code, reason, field) triple 
   assert.equal(bad.detail.field, "source_refs[1]", "the DATABASE's own 1-BASED path");
   assert.equal(bad.detail.constraint, "not_filed");
   // …and the route turns exactly that into a 400 the composer can place beside its control,
-  // with the DATABASE's `constraint` FOLDED INTO `reason` — reviewed finding. `lib/wire.ts`
-  // surfaces `detail.reason` and discards every other key of a governed refusal, so without the
-  // fold `not_filed` — the one arm only the database can reach, and the only one a preparer can
-  // act on — never reached the browser at all, and the route's OWN evidence refusals (which
-  // answer the bare constraint token) spoke a different vocabulary for the same refusal.
-  assert.deepEqual(
-    workErrorResponse(Object.assign(new Error("refused"), { code: bad.code, detail: JSON.stringify(bad.detail) })),
-    { status: 400, body: { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" } },
+  // with the DATABASE's `constraint` FOLDED INTO `reason` — reviewed finding. Without the fold,
+  // one refusal reached the browser under two vocabularies depending on which half caught it
+  // (the route's own evidence checks answer the bare constraint token), and `not_filed` — the
+  // arm only the database can reach, and the only one a preparer can act on — was spelled
+  // `invalid_source_ref` there.
+  //
+  // #981 · the raised detail also rides back WHOLE under `detail`, so the assertion is on the
+  // PROMOTED half: `reason` is the wire vocabulary, `detail.constraint` is the door's own token.
+  const answered = workErrorResponse(
+    Object.assign(new Error("refused"), { code: bad.code, detail: JSON.stringify(bad.detail) }),
   );
+  assert.equal(answered.status, 400);
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(answered.body).filter(([k]) => k !== "detail")),
+    { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" },
+  );
+  assert.deepEqual(answered.body.detail, bad.detail, "the door's typed detail, carried verbatim");
 
   // Nothing durable was written by the refusal.
   const works = await rig.rootQuery("select count(*)::int as n from clara.accounting_work where client_id=$1", [client]);

@@ -1,0 +1,170 @@
+{
+  "lane": "Wave 1 · Lane 01 (riders/w1-lane01)",
+  "lens": "SPEC + STANDARDS",
+  "reviewed_at": "2026-09-20",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "head": "726bcfdd",
+  "base": "dd3f8f1d",
+  "verdict": "accept-with-fixes",
+  "gates_rerun_by_reviewer": [
+    { "command": "node --import ./test/bootstrap.mjs --import tsx --test e2e/e2e-fixture-ownership.test.ts (from apps/web)", "result": "33 tests, 33 pass, 0 fail" },
+    { "command": "node scripts/run-tests.mjs (from apps/web, whole unit suite)", "result": "4646 tests, 4644 pass, 0 fail, 2 skip, 100.2s — matches the lane report exactly" },
+    { "command": "pnpm typecheck (worktree root)", "result": "exit 0 (apps/web + packages/runtime)" },
+    { "command": "pnpm lint (worktree root, whole chain)", "result": "exit 0" },
+    { "command": "node scripts/check-frozen-workflows.mjs", "result": "OK — 312 frozen files verified, no manifest diff, exit 0" },
+    { "command": "CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3500 CLARA_E2E_NEXT_PORT=3501 CLARA_E2E_RUNTIME_PORT=3502 pnpm --filter @clara/web e2e \"(journal-work-walk|activity-feed-walk|home-board-walk)\"", "result": "67 passed, 0 failed (2.8m), exit 0 — journal-work-walk 23, home-board-walk 27, activity-feed-walk 17" }
+  ],
+  "per_ticket": {
+    "862": {
+      "verdict": "done",
+      "criteria": [
+        { "ac": "the named mock's private body reader is gone (originally fixed-asset-mock.mjs)", "state": "done — already satisfied on main", "evidence": "git log -S readCachedJson -- apps/web/e2e/fixed-asset-mock.mjs => 907d6e4c (#651); git merge-base --is-ancestor 907d6e4c dd3f8f1d => YES; the file imports readCachedJson at line 39 and calls it at 405" },
+        { "ac": "the seven live holdouts named by the 2026-09-19 comment are repointed", "state": "done", "evidence": "git diff dd3f8f1d..HEAD over accrual / counterparty-identity / knowledge / operator-support / periodic-adjustment / staff-expense-claim / trade-invoice: pure plumbing — import added, local readJson deleted, every call site renamed. No RPC verb set and no fixture datum changed." },
+        { "ac": "census cell RED against a synthetic private reader, GREEN on the corrected tree", "state": "done — non-vacuity reproduced independently", "evidence": "reviewer probe applied the SHIPPED regexes to `git show dd3f8f1d:<each of the seven files>`: all seven trip PRIVATE_BODY_READER_FUNCTION (fn=readJson). The census is green on today's tree (33/33). Two synthetic positive controls plus one negative control are present." },
+        { "ac": "every existing mock passes with no other change; fixed-asset-walk stays green", "state": "done", "evidence": "bodyReaderCensus() runs over LANE_MOCKS, whose 31 entries equal all 31 *-mock.mjs on disk, and returns []; fixed-asset-mock.mjs is untouched by this lane" }
+      ],
+      "residual": ["L01-S4"]
+    },
+    "863": {
+      "verdict": "done with one substitution",
+      "criteria": [
+        { "ac": "a cell feeds the CENSUS a synthetic source with a non-standard spelling AND an undeclared shared verb, RED before / GREEN after", "state": "partial — substituted", "evidence": "four cells assert verbsInSource() extraction (three synthetic, one on the real intake-batch-mock.mjs); the collision half is never driven from a synthetic source. See L01-S3." },
+        { "ac": "all existing lane mocks still census cleanly (no new false positives)", "state": "done — verified independently", "evidence": "reviewer ran the OLD 3-shape opener and the NEW opener over all 31 mocks: the census grows 136 -> 137 verbs, the single addition is get_intake_batch (single owner), and NO existing verb's owner set changed. The old opener finds zero verbs in intake-batch-mock.mjs; the new one finds get_intake_batch — the blind spot was real and is closed." }
+      ],
+      "residual": ["L01-S3"]
+    },
+    "865": {
+      "verdict": "done",
+      "criteria": [
+        { "ac": "the webServer block's comment names the correct invocation and states a bare run does not build", "state": "done", "evidence": "apps/web/playwright.config.ts — a 6-line comment above webServer.command naming `pnpm --filter @clara/web e2e` and the #648 19-minute measurement" },
+        { "ac": "serve-built.mjs prints the BUILD_ID and its age at startup", "state": "done — reproduced by the reviewer", "evidence": "the reviewer's own run printed `[e2e] serving .next BUILD_ID BPcYsNAZBpNzVj4hC6IZp, built 0.0 min ago`. logBuildFreshness() reads .next/BUILD_ID's contents plus its mtime and catches a missing file instead of throwing." }
+      ],
+      "residual": ["L01-S5", "L01-S6"]
+    },
+    "902": {
+      "verdict": "done",
+      "criteria": [
+        { "ac": "a cell proves two client ids' responses differ (one populated, one empty)", "state": "done — non-vacuity reproduced independently", "evidence": "the reviewer drove the PRE-#902 handler (git show dd3f8f1d:home-board-mock.mjs) with p_client=HOME_WORK_PACK_CLIENT.id: it returns the empty envelope (active count 0, recent_success count 0), so the shipped cell would fail against the old subject. POPULATED_WORK_PACK != EMPTY_WORK_PACK confirmed." },
+        { "ac": "every existing walk landing on an arbitrary /clients/:id stays green", "state": "done", "evidence": "the handler still answers unconditionally (never `return false`); the unscoped default and p_client:null both read EMPTY_WORK_PACK; home-board-walk.spec.ts 27/27 on the reviewer's re-run" },
+        { "ac": "e2e-fixture-ownership.test.ts passes with the declaration updated honestly", "state": "done", "evidence": "the LANE_DECLARATIONS row stays as debt with its reason rewritten (the census's mechanical test for 'scoped' is a return-false fall-through, which this door still never takes); 33/33 green" }
+      ],
+      "residual": ["L01-S7"]
+    },
+    "853": {
+      "verdict": "done",
+      "criteria": [
+        { "ac": "two different p_work values return different, correctly scoped pages", "state": "done — non-vacuity reproduced independently", "evidence": "the reviewer drove the PRE-#853 handler with {p_client, p_work: workId}: it returns 14 rows (the whole page), so the shipped cell would fail against the old subject. The new handler mirrors migration 0202's `p_work is null or work_id = p_work`." },
+        { "ac": "every existing activity-feed-walk cell stays green", "state": "done", "evidence": "activity-feed-walk.spec.ts 17/17 on the reviewer's re-run. The pagination flag was widened to `!kinds && work === null`, so the no-p_work shape is byte-identical to before. SECOND_WORK_ROW carries eventRow's default actor (SUBJECT), so the 'Clara (system)' count-of-5 assertion at activity-feed-walk.spec.ts:263 is unaffected." },
+        { "ac": "ownership declaration unchanged or updated honestly", "state": "done", "evidence": "the activity-mock.mjs row is unchanged ({unscopeable: [], debt: []}) — nothing about ownership moved" }
+      ],
+      "note": "commit 9855331b is a same-session fix-up for a REAL defect the browser walk found (a label collision plus a reused object id in the new fixture row); disclosed in the lane report."
+    },
+    "848": {
+      "verdict": "partial",
+      "criteria": [
+        { "ac": "a named walk cell presses Reactivate on an egress_not_authorized fixture and asserts the banner reads active", "state": "done", "evidence": "apps/web/e2e/journal-work-walk.spec.ts:827, `ok 61` on the reviewer's re-run; asserts the receipt sentence and that the refused Work's own CLR13 face is unchanged" },
+        { "ac": "…and the detail re-reads (the onReactivated contract)", "state": "missing — claimed but not asserted", "evidence": "see L01-S1" },
+        { "ac": "a cell shows one verbatim refusal face from the door", "state": "done", "evidence": "apps/web/e2e/journal-work-walk.spec.ts:862, `ok 62`; asserts migration 0211's exact no_consent sentence and toHaveCount(0) on the success receipt" },
+        { "ac": "the mock enforces owner-only dispatch, or the door refusal renders for a forced lower rank", "state": "partial — simulated", "evidence": "see L01-S2" },
+        { "ac": "e2e-fixture-ownership.test.ts passes with the new verb declared", "state": "done", "evidence": "the new handler is scoped (`if (body?.p_client !== ours) return false;`) so handlerCensus picks it up with no manual declaration; 33/33 green" }
+      ],
+      "residual": ["L01-S1", "L01-S2"]
+    }
+  },
+  "house_standards": {
+    "no_applied_migration_edited": "PASS — no packages/db file touched",
+    "no_new_migration_in_a_wave_1_lane": "PASS",
+    "frozen_manifest_diff": "PASS — node scripts/check-frozen-workflows.mjs: OK, 312 frozen files, exit 0",
+    "no_edit_to_PRD_or_ARCHITECTURE": "PASS — the true lane diff (dd3f8f1d..HEAD) is 15 files, all apps/web/e2e/* plus apps/web/playwright.config.ts",
+    "shared_files_touched_minimally": "PASS with one caution — e2e-fixture-ownership.test.ts (+280, all appended at section ends) and serve-built.mjs (a header at line 1 plus one function). See L01-S8.",
+    "message_keys_for_new_strings": "PASS — no new UI string; both strings the walk asserts pre-exist in apps/web/messages/en.json (reactivate at line 2045, reactivated at line 2046). en.json is untouched.",
+    "web_test_manifest_updated": "PASS — no new test file; e2e/e2e-fixture-ownership.test.ts is already registered at apps/web/test/manifest.txt:298",
+    "fixture_ownership_census_updated": "PASS",
+    "docs_updated_where_behaviour_moved": "PARTIAL — apps/web/e2e/README.md's row updated for #848; nothing for #865. See L01-S5.",
+    "typecheck_and_lint_green": "PASS — both re-run by the reviewer, exit 0",
+    "commits_name_their_ticket": "PASS — all seven commits carry #<n> and the required Co-Authored-By: Claude Fable 5.1 trailer"
+  },
+  "findings": [
+    {
+      "id": "L01-S1",
+      "ticket": 848,
+      "severity": "major",
+      "title": "#848: the onReactivated re-read is claimed as proven, but the evidence measures the press",
+      "evidence": "The brief's desired behaviour reads 'asserts the banner converges to the active state AND the detail re-reads (the onReactivated contract)'. The wiring is apps/web/components/work/work-detail.tsx:1307 `onReactivated={onConverge}` and :547 `onConverge={() => state.reload()}`. The walk cell (apps/web/e2e/journal-work-walk.spec.ts:827-857) reads back `state.egressReactivateOpKeys` through the new `egress_reactivate_keys` control op — but that array is pushed inside the `reactivate_client_egress_purpose` handler itself (apps/web/e2e/journal-work-mock.mjs, `state.egressReactivateOpKeys.push(body.p_op_key)`), so it records the PRESS reaching the door, not any subsequent re-read. The spec's own comment at line 849 ('the press told the page to re-read, which reached the runtime proxy exactly once') and the lane report ('(the onReactivated contract) exactly one real, non-empty op key reached the door') both attribute the re-read to that evidence. journal-work-mock.mjs holds no read counter (a grep for a read/poll counter on `state.` returns nothing), so nothing in the suite observes the reload. The cell passes (ok 61 on the reviewer's re-run) — it is simply silent on this half.",
+      "required_fix": "Either add a read counter to journal-work-mock.mjs symmetric with `egress_reactivate_keys` (count the Work read the detail issues and assert it increments by one across the press), or strike the 'onReactivated contract' claim from journal-work-walk.spec.ts:849 and from the final report and record AC1's re-read half as not covered."
+    },
+    {
+      "id": "L01-S2",
+      "ticket": 848,
+      "severity": "minor",
+      "title": "#848 AC3: the owner floor is simulated at the wire, so neither branch of the OR is delivered literally",
+      "evidence": "AC3 reads 'The mock enforces owner-only dispatch, OR the door refusal renders when a lower rank is forced.' What is delivered: the cell arms `state.egressReactivateAnswer = 'denied'` through the control endpoint (apps/web/e2e/journal-work-walk.spec.ts:884) and the mock returns CLR04 on that flag alone, never inspecting the caller (apps/web/e2e/journal-work-mock.mjs). No lower rank is forced. Branch (b) is genuinely unreachable through the browser: the control is owner-gated in the UI (work-detail.tsx:543 `canReactivateEgress={ownerHere}`, :1306 `egressRefused && canReactivateEgress`), so a bookkeeper persona would never see the button. Branch (a) WAS achievable: the harness already derives a lower rank from the sign-in email (apps/web/e2e/serve-built.mjs:598-599 and :611-612 — a `bookkeeper@` prefix gives role_rank 1), so the mock could have read the same persona and answered CLR04 for a non-owner. The lane states the substitution honestly in its report.",
+      "required_fix": "Either derive the CLR04 answer from the signed-in persona in journal-work-mock.mjs (mirroring serve-built.mjs's own email-prefix rank), or record on #848 that AC3 was met by simulating the wire answer rather than by enforcement, so the criterion is not ticked as written."
+    },
+    {
+      "id": "L01-S3",
+      "ticket": 863,
+      "severity": "minor",
+      "title": "#863 AC1: the synthetic source is never carried through to a collision, only to verb extraction",
+      "evidence": "AC1 asks for a cell that feeds the census a synthetic mock source using a non-standard dispatch spelling AND an undeclared shared verb, red before the widening and green after. The four cells delivered (apps/web/e2e/e2e-fixture-ownership.test.ts, the 'RPC-opener census · …' group) all assert that `verbsInSource(synthetic)` returns the expected verb list; none reaches `verbCollisions`. That composition was cheap: `verbCollisions(census, declared)` already takes a plain Map, and the same file's existing 'verb-ownership census POSITIVE CONTROL' cell builds one by hand. The substance was verified independently by the reviewer: under the old three-shape opener intake-batch-mock.mjs yields zero verbs, under the new one it yields get_intake_batch, and across all 31 mocks the census grows 136 -> 137 with no owner-set change anywhere. So the blind spot IS closed; only the literal AC-1 cell shape is missing.",
+      "required_fix": "Add one cell that builds a census from two synthetic sources spelled `rpc === \"list_entry_links\"` and `path !== \"/rest/v1/rpc/list_entry_links\"` and asserts verbCollisions flags the undeclared pair, or record the substitution on #863."
+    },
+    {
+      "id": "L01-S4",
+      "ticket": 862,
+      "severity": "minor",
+      "title": "#862: the body-reader census cannot see this repo's own stream-drain idiom",
+      "evidence": "PRIVATE_BODY_READER_STREAM only matches `request.on(\"data\"|\"end\")` — a shape NO lane mock in this repo uses (a reviewer grep over all 31 *-mock.mjs plus mock-dispatch.mjs returns zero hits for `request.on(`). Every real private reader, including all seven this ticket repointed, used `for await (const chunk of request)`, which is caught only incidentally by the function-name half (`function readJson|readBody(`). A new mock writing `async function parseBody(request) { for await (const chunk of request) … }` would pass the census clean. apps/web/e2e/documents-intake-mock.mjs:172-174 already carries an unguarded `for await (const chunk of request) void chunk;` inside `drain()` that the census does not see — deliberate and harmless there, but it is the blind spot standing in the tree. The ticket brief names exactly the two shapes implemented, so this is a literal-AC pass with a known residual hole.",
+      "required_fix": "Follow-up rather than a blocker: widen the stream pattern to `for await (const chunk of request)` outside mock-dispatch.mjs, with a named exception for documents-intake-mock.mjs's deliberate drain, or file it as an issue against the census."
+    },
+    {
+      "id": "L01-S5",
+      "ticket": 865,
+      "severity": "minor",
+      "title": "#865: the README a human reads before either file still carries no stale-build warning",
+      "evidence": "Both named acceptance criteria are done and the log line was reproduced by the reviewer. But apps/web/e2e/README.md's opening 'Run the default browser suite' section (lines 3-11) is the house entry point for this suite and says nothing about `npx playwright test` serving a stale build; a grep of that README for BUILD_ID or 'npx playwright' returns nothing. Work-order rule 9 requires 'the module README your change affects' in the same commit, and the lane did update that README for #848 (commit 726bcfdd), so the omission is specific to #865 (commit 162b9a98).",
+      "required_fix": "Add one sentence to apps/web/e2e/README.md's run section naming the trap and the correct invocation, or record why the two file headers are judged sufficient."
+    },
+    {
+      "id": "L01-S6",
+      "ticket": 865,
+      "severity": "note",
+      "title": "#865's startup log has no regression guard",
+      "evidence": "logBuildFreshness() in apps/web/e2e/serve-built.mjs is a module-level side effect with no unit cell; its only evidence is a recorded run, which the acceptance criterion's own OR permits. Deleting the call would red nothing in any suite.",
+      "required_fix": "None required by the criterion. If the wave wants the line held, a one-line unit cell over an exported helper would do it."
+    },
+    {
+      "id": "L01-S7",
+      "ticket": 902,
+      "severity": "note",
+      "title": "#902: a cell title claims more than the cell asserts",
+      "evidence": "The cell '#902 · HOME_WORK_PACK_CLIENT is not HOME_ONBOARDING_CLIENT and mints no id any other lane owns' (apps/web/e2e/e2e-fixture-ownership.test.ts) asserts only the first clause — nothing in its body looks at any other lane. The claim itself is true: a reviewer grep for `90290290` across apps/web (*.mjs, *.ts) returns only home-board-mock.mjs:94, :109 and :117. But a future lane minting the same id would not red this cell.",
+      "required_fix": "Either narrow the title to what is asserted, or scan the other lane mocks for the id the way bodyReaderCensus scans LANE_MOCKS."
+    },
+    {
+      "id": "L01-S8",
+      "ticket": 865,
+      "severity": "note",
+      "title": "serve-built.mjs's new comment sits at line 1 — the highest-conflict position in a ten-lane shared file",
+      "evidence": "Work-order rule 7 names apps/web/e2e/serve-built.mjs as a shared file nine other lanes edit concurrently. This lane's #865 hunk adds a ten-line block starting at line 1, above the first import, plus logBuildFreshness() near the bottom. Both are minimal and required by the criterion; the top-of-file position is simply where merges collide.",
+      "required_fix": "None. Integration note for the orchestrator only."
+    },
+    {
+      "id": "L01-S9",
+      "ticket": 862,
+      "severity": "note",
+      "title": "The work order's premise about #862 does not match the ticket; the lane followed the ticket, correctly",
+      "evidence": "The lane task text says to read 'the 2026-09-20 triage comment' on #862 and that 'only the structural census cell remains'. `gh api repos/BELCORT-SDN-BHD/clara/issues/862/comments` returns exactly two comments, 2026-09-17T16:57:39Z and 2026-09-19T16:21:37Z; there is no 2026-09-20 comment, and the newest one lists THREE remaining items (repoint four uncached readers, decide the three cached copies, add the census cell). No ticket in this lane carries a 2026-09-20 owner ruling. The lane built to the 2026-09-19 comment, which is what work-order rule 2 requires, and said so in its report.",
+      "required_fix": "None for the lane. The orchestrator should not close #862 against the narrower premise — all three items were needed and all three were delivered."
+    },
+    {
+      "id": "L01-S10",
+      "ticket": 0,
+      "severity": "note",
+      "title": "git diff origin/main..HEAD shows base drift that is not this lane's edit",
+      "evidence": "`git diff origin/main..HEAD --stat` shows docs/PROGRESS.md changed and three docs/plan/* files deleted. Those are main's own later commits (f94a5fcf, e7f0a10a) after this branch's dd3f8f1d cut point. The true lane diff, `git diff dd3f8f1d..HEAD --stat`, is 15 files: apps/web/e2e/* (14) plus apps/web/playwright.config.ts. No doc outside apps/web/e2e/README.md, no migration, no frozen file, nothing under packages/. The lane recorded this independently.",
+      "required_fix": "None. Integrate against the merge-base, not origin/main..HEAD."
+    }
+  ],
+  "summary": "Six tickets, seven commits, fifteen files, all inside apps/web/e2e plus playwright.config.ts. Five tickets (#862, #863, #865, #902, #853) are DONE against their newest Agent Brief; #848 is PARTIAL. Every claim carrying a ticket was re-run: the census file 33/33, the whole apps/web unit suite 4646 tests / 4644 pass / 0 fail / 2 skip (the lane's counts exactly), typecheck exit 0, lint exit 0, the frozen manifest clean, and the three walks that carry #848, #853 and #902 re-run on the lane's own Playwright triple — 67 passed, 0 failed, with #865's BUILD_ID line printed in that run's own output. Non-vacuity was reproduced independently rather than taken on the report's word, for all four structural tickets: the shipped #862 regexes flag all seven pre-#862 sources; the old three-shape opener finds zero verbs in intake-batch-mock.mjs where the new one finds get_intake_batch, and the widening changes no other owner set (136 -> 137 verbs, no false positives); the pre-#902 handler answers the dedicated client with the empty envelope; the pre-#853 handler returns fourteen rows where the cell demands one. House standards pass: no migration, no frozen-manifest diff, no PRD or ARCHITECTURE edit, no new message key needed (both asserted strings pre-exist in en.json), the manifest already registered, every commit naming its ticket with the required trailer. The one finding that should be settled before #848 is closed is L01-S1: the walk claims the onReactivated re-read, but the op-key read-back it cites records the press rather than the reload, and no read counter exists — either add the counter or drop the claim. L01-S2 (#848's owner floor is simulated at the wire, not enforced, though the UI gate makes the alternative branch unreachable) and L01-S3 (#863's synthetic source is never carried through to a collision) are honest substitutions that should be recorded on their tickets rather than ticked as written."
+}

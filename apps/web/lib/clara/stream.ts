@@ -416,6 +416,60 @@ async function defaultSleep(ms: number): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
+/** #956 — THE RECONNECT TIMER, MADE ABORT-AWARE.
+ *
+ *  A bare `await sleep(delayMs)` waits out the WHOLE backoff before the loop's own
+ *  `if (opts.signal.aborted) return` (below) ever runs again — so a caller that aborts
+ *  a task WHILE this loop is asleep between attaches (`threadStore.abortStream`, or a
+ *  genuine unmount-and-abort) does not stop the next reattach; it only postpones the
+ *  check that would have stopped it, by up to `policy.maxDelayMs`. In production this
+ *  is a stop button whose task keeps reattaching in the background for up to 30s. In
+ *  the test suite it is worse: `use-clara-thread-stop.test.ts`'s "REFUSED ordinary
+ *  stop re-attaches" cell retires its reattach with exactly this abort call in a
+ *  `finally`, on the belief that aborting a task means that task's reading is over —
+ *  but the pending ~1s backoff timer outlives both the abort and the unmount, and
+ *  fires a real `/stream` fetch into whichever `fetch` stub is installed by then. Under
+ *  a fast, isolated run the next cell's own settle passes usually outrun that timer;
+ *  under host contention (the whole-suite run, or CI) they don't, and the NEXT cell's
+ *  fetch-call count is off by however many stray reattaches landed inside its window —
+ *  a non-deterministic red with no code path in that next cell to blame.
+ *
+ *  THE FIX: race the real (or injected) sleep against the signal's own `abort` event,
+ *  and resolve the instant either settles. `AbortController.abort()` dispatches
+ *  `abort` SYNCHRONOUSLY (Node and browsers both), so the moment `abortStream` calls
+ *  it, this promise resolves on its own next microtask — no more waiting out the timer.
+ *  Never rejects: an abort during backoff is the caller ending the read on purpose,
+ *  not a transport fault, and the loop's very next line already reads `signal.aborted`
+ *  and returns before opening another attach.
+ *
+ *  fix-round ADV-4 — PROVED: `sleepImpl(ms).then(finish)` (one argument) leaves a REJECTING
+ *  `sleepImpl` with no handler on that branch at all. `void` discards the returned promise, so
+ *  the rejection became an unhandled rejection — visible in Node, invisible in a browser — AND
+ *  `finish` was never called, so this promise (and the `await` in `runClaraTaskStream` below)
+ *  hung forever: a stream that can never be aborted again, because the reattach loop never
+ *  reaches its own `signal.aborted` recheck. `sleepImpl` is a normal timer in production (it does
+ *  not reject), but the same two-argument form this promise ALREADY uses for its abort listener
+ *  (settle once, from whichever arm reaches `finish` first) is the correct shape for its OTHER
+ *  input too: a failing clock ends the backoff exactly the way an elapsed one does, never a hang. */
+function abortableSleep(
+  ms: number,
+  signal: AbortSignal,
+  sleepImpl: (ms: number) => Promise<void>,
+): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    signal.addEventListener("abort", finish, { once: true });
+    void sleepImpl(ms).then(finish, finish);
+  });
+}
+
 export interface RunClaraTaskStreamOptions extends OpenTaskStreamOptions {
   /** Fires once per (re)attach, right after the stream opens — before any event is
    *  read. Idempotent on the caller's side: fires again on every reattach. */
@@ -559,6 +613,6 @@ export async function runClaraTaskStream(opts: RunClaraTaskStreamOptions): Promi
     }
     const delayMs = backoffDelayMs(attempt, policy);
     opts.onReconnectAttempt?.({ attempt, delayMs });
-    await sleep(delayMs);
+    await abortableSleep(delayMs, opts.signal, sleep);
   }
 }

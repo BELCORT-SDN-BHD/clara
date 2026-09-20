@@ -5,8 +5,14 @@
 // runner's idempotent re-run + duplicate-version refusal; two independent bootstraps
 // reach an identical surface. Contract-blind. RESET-GATED (drops schema clara) → it
 // SKIPS unless CLARA_RIG_ALLOW_RESET=1 and MUST run ALONE on an ISOLATED DB:
-//   PGDATABASE=clara_waveA_upgrade CLARA_RIG_ALLOW_RESET=1 \
+//   PGDATABASE=clara_waveA_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \
 //     node --test packages/db/tests/wave-a-upgrade.test.mjs
+//
+// (#845: the name must look disposable to `rig-reset-guard.mjs`'s `guardedReset`, which this file
+// now routes its `reset()` through — ci/test/tmp/temp/scratch/ephemeral by whole name or final
+// `.`/`_`/`-` segment, or it refuses. No CI leg exists for this file yet — see
+// packages/db/tests/README.md's #845 section — so run this against a throwaway database, never a
+// shared rig.)
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -130,16 +136,17 @@ async function surfaceClean() {
 test("probe 26: 0011 compiles clean on FRESH and on a 0010-UPGRADE image, and the two catalogs are IDENTICAL (overloads/ACLs/policies/triggers/constraints/taxonomy)", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
   // FRESH: reset → migrate ALL (0001→0011).
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   if (!(await waveAReady())) { markSkip(); noteLane("0011 not on disk yet — fresh migrate reached 0010 only; parity probe skipped"); t.skip("0011 not yet built on disk"); return; }
   const freshBaseline = await taxonomyBaselineVersion(); // observed FIRST — see signature()'s taxonomy comment
   await surfaceClean();
   const sigFresh = await signature(freshBaseline);
   // UPGRADE: reset → migrate 0001→0010 → migrate ALL (applies only 0011).
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ dir: exportUpTo(10), log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   const upgradeBaseline = await taxonomyBaselineVersion();
@@ -162,8 +169,9 @@ test("probe 26: 0011 compiles clean on FRESH and on a 0010-UPGRADE image, and th
 test("probe 26: re-running migrate after 0011 applies ZERO new migrations (idempotent, checksum-verified); the surface is unchanged", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   if (!(await waveAReady())) { markSkip(); t.skip("0011 not yet built on disk"); return; }
   const again = await migrate({ dir: MIG_DIR, log: () => {} });
@@ -187,13 +195,14 @@ test("probe 26: the migration runner REFUSES a duplicate version number (the saf
 test("probe 26: two independent fresh bootstraps reach an IDENTICAL surface (deterministic DDL, no ordering nondeterminism)", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   if (!(await waveAReady())) { markSkip(); t.skip("0011 not yet built on disk"); return; }
   const baseline1 = await taxonomyBaselineVersion();
   const sig1 = await signature(baseline1);
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   const baseline2 = await taxonomyBaselineVersion();
   const sig2 = await signature(baseline2);

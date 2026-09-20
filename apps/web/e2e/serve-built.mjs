@@ -1,3 +1,13 @@
+// THIS SCRIPT DOES NOT BUILD (#865). It serves whatever `.next/` already holds via
+// `next start` — it never runs `next build`. Only `e2e/run.mjs` (the `pnpm --filter @clara/web
+// e2e` script) builds first. A bare `npx playwright test`, or an IDE's own Playwright runner,
+// invokes THIS file directly through `playwright.config.ts`'s `webServer.command` and skips the
+// build, so it silently serves a STALE `.next/` and produces plausible but meaningless
+// failures — measured on the #648 fix round: a 19-minute-stale build produced a false failure
+// with no other symptom. Always run the browser suite as `pnpm --filter @clara/web e2e` (root
+// `apps/web`), never `npx playwright test` directly. The BUILD_ID this process is about to
+// serve, and its age, are logged at startup below (`logBuildFreshness`) so a stale run is
+// visible in the output rather than silent.
 import { spawn, spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -5,6 +15,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,6 +88,11 @@ import { JOURNAL_WORK_SESSIONS, handleJournalWorkRpc, handleJournalWorkRuntime, 
 // is scoped too (it takes `client` and falls through otherwise — the sibling lane's shape, adopted
 // after a standards review found the declaration ahead of the code). See periodic-adjustment-mock.mjs.
 import { handlePeriodicAdjustmentRuntime, handlePeriodicAdjustmentSupabase } from "./periodic-adjustment-mock.mjs";
+// #879's own lane — the staff-advances REGISTER (`?tab=staffAdvances`): its enrolment read, its
+// four doors and its summary/tie/statement reads. Every branch names this lane's own client id
+// and falls through otherwise. No runtime hook — every write is a plain PostgREST RPC. See
+// staff-advances-register-mock.mjs.
+import { handleStaffAdvancesRegisterSupabase } from "./staff-advances-register-mock.mjs";
 // #638's own lane — the staff-expense-claim form, its enrolment read, its refusals and its
 // register. Scoped to its own client id in every branch (the control endpoint included) and
 // file-disjoint from every other lane. See staff-expense-claim-mock.mjs.
@@ -706,6 +722,12 @@ async function handleSupabase(request, response, url) {
   // hold nothing but their placeholder. Every branch here is scoped to this lane's own client and
   // falls through otherwise, so the honest empties still answer every other walk.
   if (await handlePeriodicAdjustmentSupabase(request, response, path, url, sendJson, cors)) return;
+  // #879 — ahead of the home board for the same reason its neighbour below states:
+  // `home-board-mock.mjs`'s EMPTY_RELATIONS answers `/rest/v1/coa_accounts` with an honest `[]`
+  // for every subject, so this register's account pickers (the enrol dialog, the lines editor)
+  // would hold nothing but their placeholder with this hook after it. Every branch is scoped to
+  // this lane's own client and falls through otherwise.
+  if (await handleStaffAdvancesRegisterSupabase(request, response, path, url, sendJson, cors)) return;
   // #638, beside its closest sibling and ahead of the home board for the identical reason:
   // `home-board-mock.mjs`'s EMPTY_RELATIONS answers `/rest/v1/coa_accounts` with an honest `[]`
   // for every subject, so with this hook after it the claim form's account pickers would hold
@@ -724,9 +746,10 @@ async function handleSupabase(request, response, url) {
   // returning []), so a bank lane dispatched BELOW handleHomeBoardSupabase silently receives []
   // for both and renders an empty account selector with no error anywhere. Every branch here is
   // scoped to this lane own client or line ids and falls through otherwise, so the honest
-  // empties still answer every other walk. Do NOT move this below the home board, and do NOT
-  // declare those two verbs in SHARED_RPC_VERBS: the ownership census cannot see an
-  // array-dispatched arm, so a declaration would fail its own 2+ claimant reverse check.
+  // empties still answer every other walk. Do NOT move this below the home board. UPDATE
+  // (review-round L01-SPEC-02): the ownership census WAS blind to this array-dispatched arm —
+  // that has been fixed (`e2e-fixture-ownership.test.ts`'s `arrayMembershipVerbs`), and both
+  // verbs are now declared, correctly, in `SHARED_RPC_VERBS`.
   if (await handleP657Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
@@ -1222,6 +1245,30 @@ const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, 
     sendJson, readJson, accessToken, signupCode: E2E_SIGNUP_CODE,
   });
 });
+
+/**
+ * Logs the `BUILD_ID` this process is about to serve and its age, so a stale build (this file's
+ * own header names the #648 measurement: a bare `npx playwright test` serving a 19-minute-stale
+ * build produced a false failure with no other symptom) is VISIBLE in the run's own output
+ * rather than silent. Reads `.next/BUILD_ID`'s mtime rather than its contents for the age — the
+ * id itself carries no timestamp. A missing or unreadable file (a `.next/` that was never built)
+ * logs that fact instead of throwing, because the readiness probe a few lines below already
+ * turns "nothing is listening" into Playwright's own clear timeout.
+ */
+function logBuildFreshness() {
+  const buildIdPath = join(webRoot, ".next", "BUILD_ID");
+  try {
+    const buildId = readFileSync(buildIdPath, "utf8").trim();
+    const ageMinutes = (Date.now() - statSync(buildIdPath).mtimeMs) / 60_000;
+    console.log(`[e2e] serving .next BUILD_ID ${buildId}, built ${ageMinutes.toFixed(1)} min ago`);
+  } catch (err) {
+    console.error(
+      `[e2e] could not read ${buildIdPath} (${err instanceof Error ? err.message : String(err)}) — ` +
+        "is @clara/web built? Run \"pnpm --filter @clara/web e2e\", not a bare Playwright invocation.",
+    );
+  }
+}
+logBuildFreshness();
 
 const nextBin = join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const next = spawn(

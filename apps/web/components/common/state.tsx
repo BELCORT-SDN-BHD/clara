@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from "react";
+import type { ComponentPropsWithoutRef, ReactNode, Ref } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -82,17 +82,22 @@ const TONE_CLASS: Record<BannerTone, string> = {
   error: "border-error/30 bg-error-muted text-error",
 };
 
-export function StateBanner({
-  tone,
-  title,
-  code,
-  action,
-  silent = false,
-  children,
-  className,
-  ref,
-  tabIndex,
-}: {
+/**
+ * #896 — EVERY OTHER NATIVE `<div>` ATTRIBUTE, TYPED AND FORWARDED.
+ *
+ * Before this, `StateBanner`'s prop type was closed and its root spread nothing: a caller
+ * writing `<StateBanner data-testid="…">` compiled clean (TypeScript does not excess-property-
+ * check `data-*`/`aria-*` attributes on JSX, even against a closed custom-component prop type)
+ * and the attribute then reached nowhere — three call sites hit exactly this (or a wrapping-
+ * element workaround for it) before the count was corrected during triage.
+ *
+ * `Omit<…, keyof StateBannerOwnProps>` is what keeps this additive rather than a second, competing
+ * definition of `title`/`className`/`tabIndex`: the NATIVE `title` (a tooltip string) and
+ * `className` stay excluded from the rest, so this component's OWN typed meaning for each keeps
+ * winning — a caller cannot silently repoint `title` from a heading `ReactNode` to a tooltip
+ * string by adding an attribute.
+ */
+type StateBannerOwnProps = {
   tone: BannerTone;
   /** An emphasised first line naming WHAT happened, when the domain draws a
    *  distinction the message text alone does not (bank's refusal-vs-
@@ -129,13 +134,32 @@ export function StateBanner({
    *  tab order — the standard treatment for a destination focus is sent to
    *  rather than tabbed to. */
   tabIndex?: number;
-}) {
+};
+
+type StateBannerProps = StateBannerOwnProps & Omit<ComponentPropsWithoutRef<"div">, keyof StateBannerOwnProps>;
+
+export function StateBanner({
+  tone,
+  title,
+  code,
+  action,
+  silent = false,
+  children,
+  className,
+  ref,
+  tabIndex,
+  ...rest
+}: StateBannerProps) {
   return (
     <div
+      {...rest}
       ref={ref}
       tabIndex={tabIndex}
       // A failure or a withheld capability interrupts; a plain state does not — unless the caller
       // owns an announcement boundary of its own, in which case this box says nothing on its own.
+      // `{...rest}` is spread FIRST: an extra native attribute (`data-testid`, `id`, `onClick`, …)
+      // passes through, but can never override role/className/tabIndex/ref, which this component
+      // computes and must keep the last word on.
       role={silent ? undefined : tone === "error" || tone === "warning" ? "alert" : "status"}
       className={cn(
         // `max-w-prose` on the BOX, not on the text inside it: measured in the

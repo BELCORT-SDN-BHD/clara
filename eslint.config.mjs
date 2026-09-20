@@ -66,7 +66,8 @@ const NO_RAW_COLOR_VALUES = {
   selector:
     ":matches(Literal[value=/(#([0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\\b|\\b(rgba?|hsla?|oklch|oklab|lch|lab)\\()/], TemplateElement[value.raw=/(#([0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\\b|\\b(rgba?|hsla?|oklch|oklab|lch|lab)\\()/])",
   message:
-    "Raw colour value in a page component (owner ruling Q4, 2026-08-27: \"raw color values in page components are lint-banned\"). Every colour comes from a semantic token declared in app/globals.css — `text-foreground`, `bg-card`, `border-error/30` — never a hex, rgb(), hsl() or oklch() literal and never a `bg-[#…]` arbitrary value. A raw colour also escapes scripts/check-token-contrast.mjs, which only reads globals.css, so it is invisible to the WCAG contrast gate.",
+    "Raw colour value in a page component (owner ruling Q4, 2026-08-27: \"raw color values in page components are lint-banned\"). Every colour comes from a semantic token declared in app/globals.css — `text-foreground`, `bg-card`, `border-error/30` — never a hex, rgb(), hsl() or oklch() literal and never a `bg-[#…]` arbitrary value. A raw colour also escapes scripts/check-token-contrast.mjs, which only reads globals.css, so it is invisible to the WCAG contrast gate."
+    + " NOTE: this selector cannot tell a real colour from any other token shaped like one — any `#` immediately followed by 3, 4, 6 or 8 hex-looking characters trips it, exactly like `rgba()`/`hsl()`/`oklch()` do — so a plain ticket reference like `#658` trips it too (#994). If that is your case, the fix is to REWORD the string (e.g. spell it out as \"ticket 658\"), never to weaken this rule.",
 };
 
 const NO_TAILWIND_DEFAULT_PALETTE = {

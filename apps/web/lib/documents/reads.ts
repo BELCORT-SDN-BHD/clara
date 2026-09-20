@@ -48,6 +48,27 @@ export async function listActiveFilingsForClient(clientId: string, opts: Opts = 
   );
 }
 
+/** #876 — ACTIVE filing state for EXACTLY the given document ids, the bounded-set
+ *  sibling of `listActiveFilingsForClient` (client-wide) and `listFilingsForDocument`
+ *  (one document, every filing including retired). Three callers — the filed-document
+ *  list, the Work evidence picker, the intake-receipts load — used to each read the
+ *  client's ENTIRE active-filing set to answer "is this bounded set of documents I
+ *  already know about filed?" and discard the rest; this is the read that lets a
+ *  caller who already knows its document ids ask that question directly. Same
+ *  projection as `listActiveFilingsForClient` (`FILING_COLS`) — one shape, two scopes.
+ *  Empty input short-circuits to `[]` WITHOUT a request, `listDocumentsByIds`'s own law
+ *  (an `in.()` filter is malformed, and a request the caller can prove is pointless
+ *  must never be sent — read.ts header, law 2's absence posture). */
+export async function listActiveFilingsForDocuments(documentIds: string[], opts: Opts = {}): Promise<FilingRow[]> {
+  const unique = Array.from(new Set(documentIds.filter(Boolean)));
+  if (unique.length === 0) return [];
+  const list = unique.map((i) => encodeURIComponent(i)).join(",");
+  return getRows<FilingRow>(
+    `document_filings?document_id=in.(${list})&retired_at=is.null&select=${FILING_COLS}&order=filed_at.desc`,
+    opts,
+  );
+}
+
 /** Every filing (active + retired) for one document — the detail panel's history,
  *  grounded on apps/dashboard/app/documents/api.ts:116-123's `filingsForDocument`. */
 export async function listFilingsForDocument(documentId: string, opts: Opts = {}): Promise<FilingRow[]> {

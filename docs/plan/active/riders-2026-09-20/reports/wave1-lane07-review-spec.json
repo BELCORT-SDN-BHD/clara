@@ -1,0 +1,177 @@
+{
+  "lane": "wave1-lane07",
+  "lens": "SPEC + STANDARDS",
+  "branch": "riders/w1-lane07",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "merge_base": "dd3f8f1d202b6eade2211f33c34f263d033768f1",
+  "origin_main_at_review": "e7f0a10af4a1f69f3a01548d2324aa58d0a6231f",
+  "reviewed_diff": "git diff origin/main...HEAD (28 files, +1170/-61, apps/web only)",
+  "verdict": "accept-with-fixes",
+  "gates_rerun_by_reviewer": {
+    "pnpm lint": "exit 0 (eslint, check-token-contrast, check-test-manifest, check-message-keys, check-ui-add-guard + selftests)",
+    "pnpm typecheck": "exit 0 (apps/web + packages/runtime both Done)",
+    "node scripts/check-frozen-workflows.mjs": "OK - 312 frozen files verified, no manifest diff",
+    "touched test files (batch 1)": "periodic-adjustments-table + document-kind-labels + state + work-question-form + needs-you-counts + use-review-queue = 42/42 pass, 0 fail, 0 skip",
+    "touched test files (batch 2)": "interview-run-field-composition + document-detail-live-refresh + reads + receipts + opening-refusal-and-staleness = 33/33 pass, 0 fail, 0 skip",
+    "migrations added": "none (git diff --name-only over packages/db/migrations is empty)",
+    "docs/PRD.md or docs/ARCHITECTURE.md": "untouched",
+    "commit hygiene": "14/14 commits name their ticket and carry Co-Authored-By: Claude Fable 5.1",
+    "apps/web/test/manifest.txt": "6 new files added at sorted positions, matching the 6 new test files",
+    "e2e-fixture-ownership census": "not applicable - no e2e spec or mock RPC verb touched",
+    "e2e browser walks": "none run by the lane (its own admitted residual); not re-run here"
+  },
+  "per_ticket": {
+    "842": {
+      "status": "done-with-residual",
+      "ac1_stated_settled_cents_renders_money": "done - 842.stated re-run green; asserts /RM\\s*1,500\\.50/ and never /\\b150050\\b/. Non-vacuous: on origin/main the loop is String(value) so the raw integer renders.",
+      "ac2_null_settled_cents_renders_nothing": "done-weak - 842.absent re-run green, but see L07-08 (no positive anchor).",
+      "already_satisfied_claim": "n/a - lane built it; triage's 'half already works' claim re-verified true (the null filter predates the change)."
+    },
+    "878": {
+      "status": "done",
+      "ac1_dialog_no_longer_offers_consent_evidence": "done via source pin - document-kind-dialog.tsx now imports and maps CLASSIFIABLE_DOCUMENT_KINDS; [878] cell re-run green. Structural, not behavioural (see L07-09).",
+      "ac2_sibling_control_unchanged": "done - document-kind-control.tsx not in the diff; the [633] fix-round cell still green.",
+      "ac3_comment_corrected": "done - the 'observation it would not change' claim is gone and the cell pins its absence."
+    },
+    "896": {
+      "status": "done",
+      "ac1_data_testid_queryable": "done - 896.testid re-run green; non-vacuous (origin/main's root spreads nothing).",
+      "ac2_three_call_sites_resolve": "done, verified independently - only work-question-form.tsx passed data-testid to StateBanner directly (new cell proves it resolves); prepayment-detail.tsx:386 and firm-setup-checklist.tsx:414/453/456/465/472 put their testids on wrapping elements, so they already resolved. Reviewer confirmed by grep.",
+      "ac3_no_other_output_changes": "done - 896.no-drift and 896.precedence green; rest-spread is placed before the computed role/className/tabIndex."
+    },
+    "900": {
+      "status": "done-partial",
+      "ac1_field_label_help_error": "partial - label and description done (real <label for> + FieldDescription, cell re-run green); no FieldError slot. See L07-10.",
+      "ac2_existing_cells_stay_green": "done - 'no drift' cell plus the lane's regression sweep; re-run green here.",
+      "ac3_no_transport_change": "done - useUploadQueue and intake modules are not in the diff.",
+      "owner_ruling_honoured": "yes - 2026-09-18 comment scopes the ticket to the answer input only; the chrome is untouched."
+    },
+    "903": {
+      "status": "done-with-residual",
+      "ac1_comment_matches_chip_count": "done - 903.chips (9 chips) and 903.comment (source pin) re-run green.",
+      "ac2_watermark_fully_absent_grep": "partial - fully removed from lib/firm/needs-you.ts and use-review-queue.ts and from every fixture typed `: ReviewQueueEnvelope`; 14 `watermark:` keys survive in 9 untyped mock bodies. See L07-06.",
+      "ac3_web_unit_suite_green": "accepted on the lane's evidence (4659 tests, 4657 pass / 2 pre-existing skips); reviewer re-ran the touched files only."
+    },
+    "904": {
+      "status": "done-with-standards-finding",
+      "ac1_running_to_done_without_reload": "done - cell 2 re-run green; non-vacuous (origin/main has no poll, so settleUntil would time out).",
+      "ac2_polling_stops_when_terminal": "done - cell 2 second half (read count frozen across 100 settles) and cell 3 (already-terminal never polled).",
+      "ac3_intake_receipts_poll_unaffected": "done-weak - cell 4 is only weakly discriminating (L07-07); the real guard is the untouched documents-workbench-refresh battery, re-run green by the lane.",
+      "standards": "the poll's onTick is a whole-bundle reload - see L07-02."
+    },
+    "876": {
+      "status": "done",
+      "ac1_bounded_read_names_exact_ids_and_short_circuits": "done - three reads.test.ts cells re-run green (empty set never calls fetch; dedupes; document_id=in.(doc-1,doc-2)&retired_at=is.null; same select= as the client-wide read).",
+      "ac2_no_client_wide_request_on_mount": "done - receipts.test.ts cell 1 re-run green; non-vacuous (origin/main's URL carries client_id=eq.).",
+      "ac3_settle_poll_refresh_issues_none_of_the_mount_reads": "done - the control cell re-run green.",
+      "ac4_documents_and_work_suites_green": "accepted on the lane's evidence (402 tests); reviewer re-ran reads + receipts.",
+      "extra_correctness": "the client-side `f.client_id === clientId` filter is a real catch (document_filings is firm-scoped at RLS) and is covered by its own cell."
+    },
+    "987": {
+      "status": "done",
+      "ac1_same_rule_code_and_firing_point": "done - no migration, no door change; the 987 cell asserts CLR19 and write_into_closed_period still surface.",
+      "ac2_message_names_the_opening_basis": "done - cell asserts the raw entry id and 'sits in closed fiscal year' never render and /opening basis/i does; non-vacuous (origin/main renders the door's message verbatim through ErrorMessage).",
+      "ac3_other_callers_unaffected": "done - the substitution is local to opening-seed-workbench.tsx; toDialogRefusal, ErrorMessage and StateBanner are untouched; prepayments/close/work suites re-run green by the lane.",
+      "ac4_no_period_guard_added_at_approval": "done - no migration, no new check in the diff."
+    }
+  },
+  "findings": [
+    {
+      "id": "L07-01",
+      "ticket": 842,
+      "severity": "major",
+      "title": "#842's CENTS_PARTICULARS misses four cents-typed basis keys, so money still renders as raw sen in the same disclosure",
+      "evidence": "periodic-adjustments-table.tsx's new `const CENTS_PARTICULARS = new Set<string>([\"settled_cents\"])` and its comment 'settled_cents (#797) is the only one today (see periodic-adjustment.ts's ADJUSTMENT_FIELDS comment)'. That claim is falsified by the two sources it cites. (a) The canonical basis builder, packages/db/migrations/0212_payroll_settled_cents.sql:294-330, stores `opening_cents`, `closing_cents`, `adjustment_cents` and `amount_cents` in the STOCK branch's basis and `amount_cents` + `settled_cents` in the PAYROLL branch's basis. (b) apps/web/lib/work/periodic-adjustment.ts:539-547's ADJUSTMENT_FIELDS lists five cents fields: openingCents, closingCents, adjustmentCents, amountCents, settledCents. The disclosure loops `Object.entries(row.basis)` for every purpose, so a real payroll row renders basis.amount_cents as a bare integer directly beside the column's Money-rendered amount_cents (the exact 'same figure told two different ways' the ticket names), and every stock row renders three raw minor-unit integers. The lane's own test fixture (`row({ obligation_kind, settled_cents })`) omits amount_cents from the basis, which is why no cell caught it. The ticket's Out-of-scope line ('none is cents-typed today') is the source of the error; work-order rule 6 asks for the assumption to be stated in the report when a brief turns out to be wrong - instead the false claim was committed into a source comment and the report is silent. Also violates the lane's own standing rule 'Money always renders as RM 1,060.00, never raw sen'.",
+      "required_fix": "Either extend CENTS_PARTICULARS to {settled_cents, amount_cents, opening_cents, closing_cents, adjustment_cents} with a cell per branch (a stock row and a payroll row whose basis carries amount_cents), or, if the wave will not widen #842, delete the false 'only one today' claim from the comment and record the residual in the report and as a follow-up ticket."
+    },
+    {
+      "id": "L07-02",
+      "ticket": 904,
+      "severity": "major",
+      "title": "#904's poll tick costs 5-6 reads, against use-settle-poll's own documented 'onTick: One read' contract and the FIX ROUND 1 that cut the sibling poll from four to one",
+      "evidence": "document-detail.tsx passes `onTick: () => void reload()`, where `reload` re-runs `loadDocumentDetail` - apps/web/lib/documents/loaders.ts:116-135 issues five parallel reads (documents, document_filings, document_extractions, journal_entries, document_processing_tasks_visible) plus a sixth (document_regions) whenever a current extraction exists. apps/web/lib/documents/use-settle-poll.ts:42 types onTick as '/** One read. Errors are the caller's to render; this hook only stops asking. */'. apps/web/README.md:495-503 records the sibling receipts poll's law in bold - 'A tick costs ONE read' - and says FIX ROUND 1 existed precisely because 'the tick re-ran the whole derivation - up to four reads a tick under the caller's own JWT, the heaviest of them a SECURITY INVOKER RPC'. #904 re-introduces a heavier version of the pattern that fix removed, on the same tab, and neither the code comment, the README nor the final report records the cost. Bounded at DEFAULT_MAX_TICKS=12, so a worst case of ~72 reads per open panel.",
+      "required_fix": "Either narrow onTick to a tasks-only re-read (listProcessingTasksForDocument + a setState for that slice) so the hook's one-read contract holds, or accept the whole-bundle reload explicitly: say so in document-detail.tsx's comment, amend use-settle-poll.ts's onTick doc, and record the read-cost tradeoff in the lane report and in apps/web/README.md's Documents section."
+    },
+    {
+      "id": "L07-03",
+      "ticket": 876,
+      "severity": "major",
+      "title": "apps/web/README.md's Documents section is stale after #876 and #904, and the report's 'no README needed' claim is falsified by it",
+      "evidence": "apps/web/README.md:492-503 documents the intake-receipts load literally: 'The mount pays four (the masked intake view, THIS CLIENT'S FILINGS, the unassigned set and caller_context) and keeps the last three as a derivation'. #876 changed exactly that read: receipts.ts's Promise.all now has three members and the filings read is a bounded `document_id=in.(...)` call sequenced AFTER the intakes read (receipts.ts, the #876 comment block). The same section is the only place the document tab's poll economy is written down, and #904 adds a SECOND settle poll to that tab which it does not mention. The lane report states 'No module README carried a section on any of these eight surfaces that needed correcting or extending; none was edited' - that is wrong, and work-order rule 9 ('Docs in the same commits: the module README your change affects') is the standard it misses.",
+      "required_fix": "Update apps/web/README.md's 'Three regions on the client tab' bullet for the new bounded, two-phase mount read (#876) and add the document-detail processing-task poll and its cost (#904), then correct the report's docs section."
+    },
+    {
+      "id": "L07-04",
+      "ticket": 987,
+      "severity": "minor",
+      "title": "the new message key is mis-indented in the shared apps/web/messages/en.json",
+      "evidence": "apps/web/messages/en.json:4180 - `  \"closedPeriodRefusal\": ...` sits at 2 spaces while every sibling key in the same object (4178 reasonLabel, 4179 notSerializableHint, 4181 asOfHint) sits at 6. JSON.parse succeeds and lint is green, so it is cosmetic - but rule 7 asks for a minimal hunk at the sorted position in a file nine other lanes are editing this wave, and a stray indent is the kind of thing that turns into a conflict or a whole-file reformat later.",
+      "required_fix": "Re-indent the line to 6 spaces. One-character-class edit, no behaviour."
+    },
+    {
+      "id": "L07-05",
+      "ticket": 987,
+      "severity": "minor",
+      "title": "#987's substitution is keyed off the workbench's single sticky error, so 'cannot be drafted here' also answers for sibling doors, and no cell covers them",
+      "evidence": "opening-seed-workbench.tsx computes `openingClosedPeriodRefusal` from the shared `error` state and feeds it into BOTH the page banner and the one `dialogRefusal` handed to CancelOpeningSeedDialog, ReopenOpeningSeedDialog, ApproveOpeningSeedDialog, ApproveOpeningCorrectionDialog and OpeningFixedAssetDialog (all visible in the same render block). Any of those doors that writes journal lines can raise the same CLR19 write_into_closed_period from clara._tf_period_wall_lines, and would then render 'This opening basis is dated into a fiscal year that is now closed, so it cannot be drafted here.' The brief's 'when this refusal surfaces ANYWHERE in the opening-basis flow' arguably licenses the breadth, but the wording is only exactly right for a draft, and the single new cell only exercises draft_opening_item.",
+      "required_fix": "Either add a cell for one non-draft door (the fixed-asset draft is the cheapest) confirming the substituted sentence still reads correctly there, or re-word the key so it does not assert which act was attempted."
+    },
+    {
+      "id": "L07-06",
+      "ticket": 903,
+      "severity": "minor",
+      "title": "#903's 'a grep proves no dangling reference' is evidenced for two files only; 14 watermark keys remain, and the report's enumeration of what was left is inaccurate",
+      "evidence": "The new cell in lib/firm/use-review-queue.test.ts greps only needs-you.ts and use-review-queue.ts. `grep -rn '^\\s*watermark: ' apps/web --include=*.ts --include=*.tsx` still returns 14 hits in 9 files: components/firm/client-workspace-overview.test.tsx:48, components/firm/firm-home/firm-home-board.test.tsx:45, components/firm-admin/firm-admin-pages-a11y.test.tsx:154, components/tax/tax-a11y.test.tsx:46, components/tax/tax-boundary-states.test.tsx:167/218/248/275, lib/firm-admin/compliance.test.ts:56, e2e/firm-navigation-walk.spec.ts:211/338, e2e/home-board-walk.spec.ts:40, e2e/shell-migration-walk.spec.ts:59/80. All are untyped raw-JSON mock bodies standing in for what the DB still sends, so they are defensible and they compile - but the report names only two files ('use-review-queue.test.ts ... needs-you.test.ts and client-workspace-overview.test.tsx'), understating the residual by 8 files, and lib/firm/needs-you.test.ts is not in fact one of them.",
+      "required_fix": "Correct the report's enumeration and state the rule being applied (an untyped wire fixture may keep a field the DB still emits); optionally widen the cell's grep to the two source modules plus a note that fixtures are out of scope."
+    },
+    {
+      "id": "L07-07",
+      "ticket": 904,
+      "severity": "minor",
+      "title": "the AC3 cell ('the intake-receipts settle poll is unaffected') is only weakly non-vacuous",
+      "evidence": "document-detail-live-refresh.test.tsx's fourth cell asserts `counts.document_intakes_visible` does not grow while the tasks poll ticks. That assertion also holds if the receipts poll were disabled or broken - and in this fixture the intake queue IS empty, so the receipts poll's own `enabled` predicate is false throughout. The cell therefore proves 'the tasks poll does not read the receipts relation', which is a weaker claim than the AC's. AC3 is nonetheless satisfied, by the untouched documents-workbench-refresh.test.tsx battery which the lane re-ran green (163/163, three times).",
+      "required_fix": "Either seed one non-terminal intake row so the receipts poll is genuinely live alongside the tasks poll, or say in the report that AC3 rests on the untouched sibling battery rather than on this cell."
+    },
+    {
+      "id": "L07-08",
+      "ticket": 842,
+      "severity": "minor",
+      "title": "842.absent has no positive anchor, so it would pass against a disclosure that rendered nothing at all",
+      "evidence": "The cell's only assertion is `assert.doesNotMatch(text, /settled_cents/)`. If the row, the <details> or the whole table failed to render, the assertion still passes. The fixture's basis also carries `obligation_kind`, which would make a one-line positive anchor free. The report calls this cell 'the vacuity control for the half that already worked', which is the one thing it cannot currently be.",
+      "required_fix": "Add `assert.match(text, /obligation_kind/)` (or an equivalent anchor proving the particulars loop ran) before the negative assertion."
+    },
+    {
+      "id": "L07-09",
+      "ticket": 878,
+      "severity": "note",
+      "title": "three of the lane's new cells are source-text greps rather than behavioural tests",
+      "evidence": "document-kind-labels.test.tsx's [878] cell, needs-you-counts.test.tsx's 903.comment cell and use-review-queue.test.ts's 903 cell all read a .tsx/.ts file with readFileSync and assert on its text. The work order's rule 4 permits a structural cell where the repo's own documented standard asks for one, and the report invokes the [633] fix-round precedent for the Select roster (Base UI mounts its popup lazily and no test in this repo drives one open - reviewer did not find a counterexample). Recorded so the wave knows what these cells can and cannot catch: a second inline copy of the filter elsewhere in the dialog, or a runtime roster override, would leave all three green.",
+      "required_fix": "None required. If the wave later gains an idiom for driving a Base UI Select open, #878's cell is the first candidate to upgrade."
+    },
+    {
+      "id": "L07-10",
+      "ticket": 900,
+      "severity": "note",
+      "title": "#900's AC1 names 'label, help AND error behaviour'; no FieldError slot was added",
+      "evidence": "InterviewRunCard.tsx now renders FieldGroup > Field > FieldLabel + Textarea + FieldDescription. No FieldError. The report's justification is checkable and holds: submitAnswer produces no field-scoped refusal today - every failure lands on the card's existing run.error banner, which the owner's 2026-09-18 ruling put out of scope as chrome. Also note the deliberate aria-label/FieldLabel redundancy, kept so interview-run-keyboard.test.tsx and onboarding-progress-sync.test.tsx keep resolving; the accessible name therefore still comes from aria-label, not the new label.",
+      "required_fix": "None required. Worth one line in the wave's ticket-closure note so 'AC1 done' is not read as 'error placement delivered'."
+    },
+    {
+      "id": "L07-11",
+      "ticket": 876,
+      "severity": "note",
+      "title": "#876 trades a parallel read for a serial round trip and widens the projection; neither tradeoff is in the report",
+      "evidence": "receipts.ts previously fetched the client-wide filings inside the same Promise.all as the intakes; it now awaits `listActiveFilingsForDocuments(intakeDocumentIds, opts)` after that batch resolves, so the mount costs one extra serial round trip. The projection also widened from `select=document_id` to reads.ts's full FILING_COLS plus `order=filed_at.desc` - which is what the brief asked for ('same projected columns') and what the client-side `client_id === clientId` filter now needs, but it is more bytes per row than before. Both are correct as built; they are simply absent from the report's tradeoff section.",
+      "required_fix": "None required. Record the mount-latency tradeoff in the report so the release note does not claim an unqualified read reduction."
+    },
+    {
+      "id": "L07-12",
+      "ticket": 904,
+      "severity": "note",
+      "title": "the new poll's `exhausted` state is not surfaced, so a long-running task ends in a silent stop",
+      "evidence": "use-settle-poll.ts's header, bound 3: 'A HARD TICK CEILING. maxTicks ends the poll even if rows never settle, and `exhausted` says so, SO THE SURFACE CAN OFFER A MANUAL REFRESH instead of spinning forever.' document-detail.tsx discards the hook's return value entirely. With the defaults (12 ticks, 1.5s base, 15s cap) the panel stops re-reading after roughly two minutes and shows no affordance and no statement that it stopped. Not an AC - AC2 only asks that polling stop when every task is terminal, which it does.",
+      "required_fix": "None required for this wave. A follow-up ticket to render the exhausted state (a Refresh control or a one-line note) would match the sibling receipts surface."
+    }
+  ],
+  "summary": "All eight tickets were really built and all their acceptance criteria are met on the evidence re-run here: 75 cells across the ten touched test files pass, pnpm lint exits 0, pnpm typecheck exits 0, check-frozen-workflows.mjs reports no manifest diff, no migration was added or edited, docs/PRD.md and docs/ARCHITECTURE.md are untouched, the test manifest gained exactly its six new files at sorted positions, both new strings have message keys, and all fourteen commits name their ticket and carry the Fable trailer. No ticket was claimed 'already satisfied', so no false satisfaction claim exists to disprove. Every new cell that carries a ticket's central claim is non-vacuous against origin/main by construction. Three findings are worth blocking a clean close on. #842's fix is under-scoped against its own stated rationale: the stored basis carries four more cents-typed keys (amount_cents on payroll rows, opening_cents/closing_cents/adjustment_cents on stock rows) that still render as raw sen in the very disclosure the ticket is about, and the lane committed a source comment asserting the opposite while citing the two artifacts that disprove it. #904 wires the new poll's onTick to a whole-bundle reload (5-6 reads per tick) against use-settle-poll.ts's own 'One read' contract and against the README-recorded fix that cut the sibling poll from four reads to one. And apps/web/README.md's Documents section now misdescribes the read #876 changed and says nothing about the poll #904 added, against work-order rule 9 and against the report's explicit claim that no README needed touching. The remaining findings are small: a mis-indented key in the shared en.json, #987's substitution reaching sibling doors untested, #903's grep evidence narrower than its AC and mis-enumerated in the report, and two weak cells (842.absent has no positive anchor, #904's AC3 cell does not exercise a live receipts poll). The lane's own admitted residual stands: no browser walk was run over the four surfaces it touched."
+}

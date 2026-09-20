@@ -59,6 +59,7 @@ test("§4.11 upgrade/cutover: 0001–0004 + data → 0005 lands one books.baseli
     return;
   }
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
   const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
 
@@ -70,7 +71,7 @@ test("§4.11 upgrade/cutover: 0001–0004 + data → 0005 lands one books.baseli
   //    reset+migrate robust regardless of what ran before it (review-518 D1/D2;
   //    see tests/rig-cluster-reset.mjs's header). Requires
   //    CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await sweepChainMintedRoles({ log: () => {} });
   const preDir = exportPre0005();
   await migrate({ dir: preDir, log: () => {} });

@@ -209,6 +209,13 @@ export function useInterviewRun(args: {
     thread,
     busy,
     error: error?.message ?? null,
+    // CRS-07-07 — the ONE signal a consumer needs to place a refusal beside the control it
+    // belongs to rather than in generic chrome: `submitAnswer` is the only caller that ever
+    // raises with a non-null `heldAtPark` (`setError`, used by cancellation, always passes
+    // `null`; a read failure always passes `null` too — see `raise`/`setError` above). So
+    // `errorHeldAtPark !== null` identifies an answer-submission refusal precisely, with no
+    // extra state to keep in sync.
+    errorHeldAtPark: error?.heldAtPark ?? null,
     setBusy,
     setError,
     refresh,

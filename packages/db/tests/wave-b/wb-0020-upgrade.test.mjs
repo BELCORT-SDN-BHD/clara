@@ -34,8 +34,11 @@
 // normal run — LOUDLY, on stdout, so a skip is never mistaken for a pass (ratchet R4 F2).
 // CI runs it FOR REAL in its own throwaway database ("Wave-B 0020 A7/A8 upgrade drill" in
 // .github/workflows/ci.yml), beside the C9 / document-pipeline / coding-floor drills.
-// Locally: PGDATABASE=clara_wb20_upgrade CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1
+// Locally: PGDATABASE=clara_wb20_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1
 //   CLARA_RIG_DB=1 node --test tests/wave-b/wb-0020-upgrade.test.mjs
+// (#845: matches the name CI itself creates in closed-wave-upgrade-drills/action.yml — this file's
+// `reset()` now routes through `rig-reset-guard.mjs`'s `guardedReset`, which refuses any database
+// name that doesn't look disposable, and the old `clara_wb20_upgrade` spelling no longer does.)
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -61,10 +64,11 @@ after(async () => { printLaneNotes("wb-0020-upgrade"); await endPool(); });
 test("[0020 A7/A8 upgrade]: both prose channels ABORT the apply; the audited preflight corrects the rows AND the spine; the index rebuilds CANONICAL from events alone", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../../scripts/reset.mjs");
+  const { guardedReset } = await import("../rig-reset-guard.mjs");
   const { migrate } = await import("../../scripts/migrate.mjs");
   const { seed } = await import("../../scripts/seed.mjs");
 
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ dir: exportPre0020(), log: () => {} });
   await seed({ log: () => {} });
 
@@ -252,6 +256,7 @@ test("[0020 A7/A8 upgrade]: both prose channels ABORT the apply; the audited pre
 test("[0020 A8 · ratchet R4 F1]: A7's ROWS-ONLY remediation is REFUSED — canonical rows over a stale reconstruction spine cannot apply", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../../scripts/reset.mjs");
+  const { guardedReset } = await import("../rig-reset-guard.mjs");
   const { migrate } = await import("../../scripts/migrate.mjs");
   const { seed } = await import("../../scripts/seed.mjs");
 
@@ -261,7 +266,7 @@ test("[0020 A8 · ratchet R4 F1]: A7's ROWS-ONLY remediation is REFUSED — cano
   // still carry the filename-bearing title, hash, key and size — so a projection REBUILT FROM
   // EVENTS (the W4/P17 invariant, and what a DR restore of the index does) would restore the
   // caller prose. Before amendment A8 the apply SUCCEEDED in exactly this state.
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ dir: exportPre0020(), log: () => {} });
   await seed({ log: () => {} });
   const { w, client, noted, named } = await buildPre0020Corpus();
@@ -338,6 +343,7 @@ test("[0020 A8 · ratchet R4 F1]: A7's ROWS-ONLY remediation is REFUSED — cano
 test("[0020 A7/A8 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes, plain filenames) applies with no remediation at all", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../../scripts/reset.mjs");
+  const { guardedReset } = await import("../rig-reset-guard.mjs");
   const { migrate } = await import("../../scripts/migrate.mjs");
   const { seed } = await import("../../scripts/seed.mjs");
 
@@ -345,7 +351,7 @@ test("[0020 A7/A8 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes
   // bad". A source page whose document had NO filename already reconstructs at 19 — the
   // canonical form is exactly 0017's own null-filename branch — so it upgrades untouched,
   // in its ROWS and in its SPINE.
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ dir: exportPre0020(), log: () => {} });
   await seed({ log: () => {} });
 
@@ -420,10 +426,11 @@ test("[0020 A7/A8 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes
 test("[0020 · ratchet R5]: the PROBE refuses an RLS-blinded read, reports ALL FIVE bridge directions, and makes the A8-R1 completeness gap visible", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../../scripts/reset.mjs");
+  const { guardedReset } = await import("../rig-reset-guard.mjs");
   const { migrate } = await import("../../scripts/migrate.mjs");
   const { seed } = await import("../../scripts/seed.mjs");
 
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ dir: exportPre0020(), log: () => {} });
   await seed({ log: () => {} });
 

@@ -1,0 +1,202 @@
+{
+  "lane": "wave1-lane05",
+  "branch": "riders/w1-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "head": "a4db0de2",
+  "merge_base": "dd3f8f1d",
+  "origin_main_at_review": "e7f0a10a",
+  "lens": "SPEC + STANDARDS",
+  "verdict": "accept-with-fixes",
+  "summary": "All six tickets (#849, #917, #957, #959, #994, #969) are genuinely delivered and every acceptance criterion is met; I re-ran every cell that carries a claim plus lint, typecheck, the whole apps/web unit suite twice, the db gate chain, operation-census and rig-isolation, and independently reproduced the #917 live WSL leg and the #959 whole-tree equivalence. No blockers. Twelve findings, all minor or note: a wrong denominator in the #849 README example, a fail-quiet '--retire' with no path, a partially self-defeating #849 canary assertion, a missing non-rig-target cell for #957 (the lane brief named it explicitly), #969 dropping 'cn' after the CLI writes it rather than before, and several evidence-precision notes.",
+  "acceptance_by_ticket": {
+    "849": {
+      "status": "done",
+      "criteria": [
+        {"ac": "targeted --print-closure prints only entries whose closure includes the module", "state": "done", "evidence": "node scripts/check-frozen-workflows.mjs --print-closure packages/runtime/lib/work-trace.mjs -> 'locked by 6 of 299 @frozen entry file(s)' listing claraWork.v3/v4/v5 x .ts/.impl.ts, exit 0 (re-run by reviewer)"},
+        {"ac": "--retire <path> --ruling <ref> moves the entry with its last sha256; a later verify is clean", "state": "done", "evidence": "scripts/freeze-lint-retire.mjs retireFrozenEntry; selftest cells '#849 retireFrozenEntry moves the entry...' and '...leaves a subsequent verify (compareFrozenManifestText) clean' both PASS in my run of scripts/check-frozen-workflows.selftest.mjs (exit 0). The write side is never exercised end-to-end at the CLI (it would mutate the tracked manifest); frozen-workflows.json's top-level keys are exactly version/workflows/retired, so the rewrite loses nothing."},
+        {"ac": "--retire refuses, no manifest write, when the file is present or has no current entry", "state": "done", "evidence": "reviewer ran all refusals live: no-entry -> exit 1; file-present -> exit 1; no --ruling -> exit 1; CI=1 -> exit 1. git status --porcelain empty after all four."},
+        {"ac": "a cell covers each of the three behaviours", "state": "done", "evidence": "8 new '#849' cells in scripts/check-frozen-workflows.selftest.mjs, all PASS (see finding L05-S03 on one of them)"}
+      ]
+    },
+    "917": {
+      "status": "done",
+      "criteria": [
+        {"ac": "dsn-pipe --child-os wsl -- wsl -u root -- bash -c '... backup.mjs --profile full' succeeds from Git Bash with no wrapper", "state": "partial", "evidence": "reviewer re-ran the live leg against the real wsl.exe: child reported host=127.0.0.1 db=d cert=/mnt/c/Users/zhant/Desktop/clara-wt/655/ops/tls/pooler-ca.crt, then CERT_OK, DATABASE_URL absent, exit 0. The literal AC command ending in backup.mjs --profile full was not run (needs a hosted DSN and pg_dump 17). Read-verified that backup.mjs -> childEnvForExternalTools() -> resolveTarget() falls back to PG* when DATABASE_URL is absent, so the recipe is sound."},
+        {"ac": "the Windows-side fingerprint refusal for a swapped CA still fires under --child-os wsl", "state": "done", "evidence": "validateCa(DEFAULT_CA_PATH) runs unconditionally at the top of main() before splitArgv (scripts/ops/dsn-pipe.mjs); selftest cell '(#917 AC2) the Windows-side fingerprint refusal for a SWAPPED CA still fires under --child-os wsl' PASS"},
+        {"ac": "unit cell: Windows CA path + --child-os wsl -> sslrootcert carries /mnt/c/..., nothing else about the DSN changes", "state": "done", "evidence": "'(#917 AC3) the unit cell: ...' PASS; it deletes sslrootcert from both URLs and compares the remainder for equality"},
+        {"ac": "packages/db/README.md backup paragraph and both release runbooks' step-3f updated", "state": "done", "evidence": "packages/db/README.md 'Backup and recovery'; docs/plan/active/refresh-wave-2026-09-15/RELEASE-RUNBOOK-0199-0224.md (+6); docs/plan/active/refresh-wave-2026-09-18/RELEASE-RUNBOOK-0225-0233.md (+27). Each ceremony's already-run RESULTS text is preserved as history."}
+      ]
+    },
+    "957": {
+      "status": "done",
+      "criteria": [
+        {"ac": "redo of the highest applied version after an edit succeeds; a following normal run reports nothing pending, no drift", "state": "done", "evidence": "packages/db/tests/migrate-redo.test.mjs AC1 PASS in the reviewer's run of the full $GATES chain against clara_l05 (7 tests / 7 pass / 0 fail)"},
+        {"ac": "redo refuses when the destructive guard is not satisfied; changes nothing", "state": "partial", "evidence": "AC2 cell PASS, but only the CLARA_ALLOW_DESTRUCTIVE-unset limb is exercised; see finding L05-S04"},
+        {"ac": "redo refuses a version that is not the highest applied version; changes nothing", "state": "done", "evidence": "AC3 cell PASS; ledger deep-equal before and after the refusal"},
+        {"ac": "a failed redo leaves the ledger describable and names the version", "state": "done", "evidence": "AC4 cell PASS; it asserts the real Postgres error (does_not_exist_at_all), explicitly doesNotMatch /checksum drift/, the original row byte-identical, then the next normal run giving the ordinary drift message. Reviewer read-verified the mechanism: the ledger DELETE runs inside the same per-migration transaction as the body and the re-INSERT (packages/db/scripts/migrate.mjs), so a mid-apply failure rolls it back."},
+        {"ac": "the ordinary apply path still aborts on checksum drift with its existing message; covered by a test", "state": "done", "evidence": "AC5 cell PASS, asserting the exact pre-existing message string with no redo option in play"}
+      ]
+    },
+    "959": {
+      "status": "done",
+      "criteria": [
+        {"ac": "apostrophe inside a -- comment: later comments still masked", "state": "done", "evidence": "[#959 control] PASS. Reviewer confirms the lane's own framing: it is a positive control, not a regression cell - it also passes against the pre-fix module."},
+        {"ac": "unterminated dollar-quote tag: later comments still masked, behaviour stated", "state": "done", "evidence": "[#959] PASS; genuinely red against the pre-fix module (reviewer ran both: OLD dollarTagCommentMasked=false, NEW=true). The chosen contract (BOUNDED, not reported) is stated in skipQuoted's own doc comment."},
+        {"ac": "regression: an assertion-only do block whose preceding comment names pg_get_functiondef is not a CoR patch", "state": "done", "evidence": "[#959 regression] PASS through the real parseCoRPatches. Reviewer reproduced red/green directly: OLD censusOnly=[false] censusReads=[], NEW censusOnly=[true] censusReads=[{line:5,variable:'v_n'}]"},
+        {"ac": "inverse: a genuine dynamic-SQL patch is still flagged", "state": "done", "evidence": "[#959 inverse] PASS, exactly 1 finding naming wiki_pages"},
+        {"ac": "the wiki lint over every migration yields the same verdicts as before", "state": "done", "evidence": "Reviewer's own old-vs-new harness over all 229 migrations: scanSources byte-identical (0 findings; scanned {functions:1410, patches:212} both sides); maskComments/parseFunctions/dynamicSqlFindings/executeExpressions identical on every file. CLI: 'wiki-dynamic-sql: OK - 1410 ... 212 ... 13 justified waiver(s)'. See finding L05-S09 for internal movement the lane report does not mention."}
+      ]
+    },
+    "994": {
+      "status": "done",
+      "criteria": [
+        {"ac": "the message names the ticket-reference case and the recommended fix", "state": "done", "evidence": "eslint.config.mjs NO_RAW_COLOR_VALUES.message gains a sentence naming #658 and 'REWORD the string'; scripts/eslint-config.selftest.mjs message cells PASS"},
+        {"ac": "the selector is unchanged", "state": "done", "evidence": "git diff of eslint.config.mjs shows exactly one string literal changed (the message); the new selftest runs the REAL extracted rule through ESLint's own Linter and pins 7 still-banned shapes, 4 still-allowed shapes, and that a bare '#658' still fires - proving the fix is the message, not a carve-out"},
+        {"ac": "pnpm lint at the repo root still exits 0", "state": "done", "evidence": "reviewer re-ran pnpm lint at the worktree root: exit 0, including the newly wired scripts/eslint-config.selftest.mjs"}
+      ]
+    },
+    "969": {
+      "status": "done",
+      "criteria": [
+        {"ac": "an install resolving cn leaves no cn entry anywhere, no manual revert", "state": "done", "evidence": "[AC1] selftest cell PASS; reviewer confirms no 'cn' in apps/web/package.json, pnpm-lock.yaml or root package.json, no apps/web/node_modules/cn, git status clean. The real-registry rehearsal exists only in the lane report. See finding L05-S07 on the strip-after-write ordering."},
+        {"ac": "the guard reports what it did about cn", "state": "done", "evidence": "[AC1] cell asserts /dropped/i and /\\bcn\\b/ in the captured log"},
+        {"ac": "a dry run names the dependencies including the local one", "state": "done", "evidence": "[AC3] cell PASS; also asserts no strip call happens on --dry-run"},
+        {"ac": "protected-file refusal, override knob and non-cn installs behave as today; selftest green", "state": "done", "evidence": "all 25 cells of apps/web/scripts/check-ui-add-guard.selftest.mjs PASS inside the reviewer's pnpm lint run, including the pre-existing protected-file battery, the button.tsx byte-identity control, and the new cell proving a protected payload that also resolves cn is refused before dependencies are ever resolved"}
+      ]
+    }
+  },
+  "house_standards": {
+    "no_applied_migration_edited": "PASS - git diff dd3f8f1d..HEAD touches no file under packages/db/migrations",
+    "no_new_migration_in_a_wave1_lane": "PASS - no new migration file",
+    "frozen_manifest_diff": "PASS - frozen-workflows.json untouched; node scripts/check-frozen-workflows.mjs re-run by reviewer: 'OK - 312 frozen file(s) ... 3 retired entr(ies)'",
+    "prd_architecture_untouched": "PASS - docs/PRD.md and docs/ARCHITECTURE.md are not in the diff",
+    "shared_files": "PASS - none of the rule-7 shared files touched (apps/web/messages/en.json, apps/web/test/manifest.txt, apps/web/e2e/serve-built.mjs, apps/web/e2e/e2e-fixture-ownership.test.ts, apps/web/lib/navigation/tree.ts, packages/db/tests/rig-meta.mjs, packages/db/package.json, .github/actions/db-live-gates/action.yml, CONTEXT.md). Root package.json's lint chain gained one entry at the sorted position among the other selftests; eslint.config.mjs changed exactly one string literal.",
+    "message_keys": "N/A - no new user-facing string; all six tickets are CLI/lint/ops tooling",
+    "web_test_manifest_and_fixture_census": "N/A - no apps/web unit or e2e test file added (the #969 cells live in apps/web/scripts/check-ui-add-guard.selftest.mjs, run from apps/web lint)",
+    "db_test_registration": "N/A - packages/db's test script globs tests/**/*.test.mjs; no census file needs a new row for migrate-redo.test.mjs",
+    "docs_updated": "PASS - packages/runtime/README.md (#849), packages/db/README.md (#917 and #957), apps/web/components/ui/README.md (#969), both release runbooks (#917). #959 documents its chosen contract in skipQuoted's own doc comment; #994's whole deliverable is the message. CONTEXT.md correctly untouched (no new domain vocabulary).",
+    "typecheck": "PASS - pnpm typecheck at the worktree root, exit 0 (reviewer re-ran)",
+    "lint": "PASS - pnpm lint at the worktree root, exit 0 (reviewer re-ran)",
+    "web_unit_suite": "PASS with a flake - reviewer ran node scripts/run-tests.mjs from apps/web twice: run 1 = 4633 tests / 4630 pass / 1 fail / 2 skipped; run 2 = 4633 / 4631 / 0 fail / 2 skipped, matching the lane report exactly. See finding L05-S10.",
+    "db_gates": "PASS - tests/migrate-redo.test.mjs 7/7 through the full $GATES chain; operation-census.test.mjs 10/10; rig-isolation.test.mjs 20 pass / 1 skip (T19, correctly gated on CLARA_RIG_ALLOW_RESET, never set)",
+    "commits_name_their_ticket": "PASS - six commits, one per ticket, each subject naming its ticket and each carrying 'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>'",
+    "already_satisfied_claims": "N/A - the lane marked nothing 'already satisfied'; reviewer independently confirmed each subject was genuinely absent at the merge-base (e.g. ran the pre-fix wiki-lint module and watched #959's defect reproduce)"
+  },
+  "findings": [
+    {
+      "id": "L05-S01",
+      "ticket": 849,
+      "severity": "minor",
+      "title": "packages/runtime/README.md's --print-closure example prints the wrong denominator (312 entries; the real count is 299)",
+      "evidence": "The README block added by f01b4d34 shows '# freeze-lint closure report - module \"packages/runtime/lib/work-trace.mjs\" is locked by 6 of / # 312 @frozen entry file(s):'. The real command prints '6 of 299 @frozen entry file(s)'. 312 is the number of frozen MODULES (the manifest's workflows count), not the number of @frozen ENTRY files (299). The lane's final report repeats the conflation for #849 ('none of the other 306'); the true figure is 293 other entries.",
+      "required_fix": "Correct the README example to '6 of 299 @frozen entry file(s)' (or elide the counts), and correct the same line in the lane report."
+    },
+    {
+      "id": "L05-S02",
+      "ticket": 849,
+      "severity": "minor",
+      "title": "--retire with no path argument silently falls through to an ordinary verify and exits 0",
+      "evidence": "Reviewer ran 'node scripts/check-frozen-workflows.mjs --retire' in the worktree: it printed 'freeze-lint: OK - 312 frozen file(s) verified ... 3 retired entr(ies) recorded.' and exited 0. RETIRE_PATH is process.argv[RETIRE_INDEX + 1] ?? null and the retire block is guarded by 'if (RETIRE_PATH)', so a mistyped or truncated retire reports success with no hint the command was ignored. Every other refusal in this command is loud and fail-closed, which makes this one inconsistent with its own design.",
+      "required_fix": "Refuse when --retire is present with no path (exit 1, usage message), in the same fail-closed shape the other three refusals already use."
+    },
+    {
+      "id": "L05-S03",
+      "ticket": 849,
+      "severity": "minor",
+      "title": "The '#849 REAL repo canary' cell would pass against a filter that is a complete no-op",
+      "evidence": "scripts/check-frozen-workflows.selftest.mjs: the cell named '#849 REAL repo canary: filtering the real closure to lib/work-trace.mjs matches the #815 unfiltered attribution exactly' only iterates reachedBy(module) asserting each expected entry appears in the filtered report. It never asserts the other 293 entries are absent, so an implementation of formatClosureReport(closure, filter) that ignored the filter and returned the full report would still pass it - the opposite of what its name claims. The exclusion direction is proven only by the synthetic cell above it.",
+      "required_fix": "Add the exclusion half to that cell (assert at least one non-reaching real entry is absent from the filtered report), or rename it so it no longer claims 'exactly'."
+    },
+    {
+      "id": "L05-S04",
+      "ticket": 957,
+      "severity": "minor",
+      "title": "No cell proves redo refuses on a non-rig (non-ephemeral) target, which the lane brief named explicitly",
+      "evidence": "The lane brief states 'the redo mode must be gated behind the destructive flag and refuse on a non-rig target'. packages/db/tests/migrate-redo.test.mjs AC2 covers only the first half: it deletes CLARA_ALLOW_DESTRUCTIVE and asserts /destructive|CLARA_ALLOW_DESTRUCTIVE/i. Every cell in the file connects to 127.0.0.1, which targetIsEphemeral() accepts, so the second limb of assertDestructiveAllowed (packages/db/lib/guard.mjs:81-86, 'REFUSED for non-ephemeral target ... set CLARA_DESTRUCTIVE_TARGET=\"user@host:port/db\"') is never reached on the redo path. The behaviour is correct by delegation - migrate.mjs calls the shared gate before opening any connection, reviewer read-verified - but the brief's named requirement is unproven for redo.",
+      "required_fix": "Add one connection-free cell: CLARA_ALLOW_DESTRUCTIVE=1, PGHOST at a non-ephemeral label, CLARA_DESTRUCTIVE_TARGET unset, redo set -> rejects with /REFUSED for non-ephemeral target/, with a clientFactory that throws to prove no connection opens."
+    },
+    {
+      "id": "L05-S05",
+      "ticket": 917,
+      "severity": "note",
+      "title": "AC1 is evidenced to the env boundary, not through backup.mjs --profile full",
+      "evidence": "Reviewer independently re-ran the live leg against this rig's real wsl.exe: '<dsn> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- wsl -u root -- bash -c ...' printed host=127.0.0.1 db=d cert=/mnt/c/Users/zhant/Desktop/clara-wt/655/ops/tls/pooler-ca.crt, then CERT_OK, exit 0, with DATABASE_URL correctly absent inside WSL. The AC's literal command ends in 'node scripts/backup.mjs --profile full', which neither the lane nor I ran (it needs a hosted DSN and pg_dump 17). Reviewer read-verified the remaining link: backup.mjs -> childEnvForExternalTools() -> resolveTarget() (packages/db/lib/pg.mjs:57-69) falls back to the PG* vars when DATABASE_URL is absent, and PGSSLMODE/PGSSLROOTCERT are both in WSL_ENV_LIST.",
+      "required_fix": "None before merge. Record in the release runbook that the first ceremony using --child-os wsl is the AC1 proof, and capture that transcript."
+    },
+    {
+      "id": "L05-S06",
+      "ticket": 917,
+      "severity": "note",
+      "title": "Case-count mismatch: the report and commit message say 11 new (#917) cells; the run prints 10",
+      "evidence": "node scripts/ops/dsn-pipe.selftest.mjs prints 10 PASS lines under the '(#917) --child-os wsl' header (toWslPath x2, resolveChildOs, splitArgv x3, AC3, buildChildEnv, the through-the-CLI cell, the AC2 swapped-CA cell). Commit 10b603a4's message and the lane report both say 11. Sibling batteries dsn-pipe.ca.selftest.mjs and dsn-pipe.pgpath.selftest.mjs re-run ALL GREEN as claimed.",
+      "required_fix": "Correct the count in the lane report (the commit message is already landed history)."
+    },
+    {
+      "id": "L05-S07",
+      "ticket": 969,
+      "severity": "minor",
+      "title": "cn is dropped AFTER the pinned CLI writes it, not before, leaving a window and lockfile churn the ticket's Desired behaviour set out to remove",
+      "evidence": "apps/web/scripts/ui-add.mjs main(): 'const code = spawnAdd(argv); ... stripLocalDependencies(local)' -> defaultStripLocalDependencies runs 'pnpm remove cn'. The ticket's Desired behaviour offers two shapes, 'Either the guard drops it before the CLI writes it, or it refuses and names it'; this is a third. The AC ('leaves no cn entry ... with no manual revert') is met, but between spawnAdd and the strip, package.json and pnpm-lock.yaml do carry cn - an interrupt there leaves exactly the hand-revert the ticket exists to abolish - and every such install now writes the lockfile twice. The lane's own rehearsal recorded incidental peer-annotation churn (a debug variant gaining/losing supports-color) from the add-then-remove cycle.",
+      "required_fix": "Record the ordering choice and its window explicitly in apps/web/components/ui/README.md (which currently reads as if nothing is ever written), or file a follow-up to pre-filter the dependency before the CLI's install step."
+    },
+    {
+      "id": "L05-S08",
+      "ticket": 969,
+      "severity": "note",
+      "title": "defaultStripLocalDependencies (the real 'pnpm remove' edge) has no committed cell",
+      "evidence": "Every #969 cell injects stripLocalDependencies through main()'s deps object; the real implementation is exercised only by the live rehearsal recorded in the lane report. This follows the file's own stated convention for defaultSpawnAdd/defaultResolveFiles, so it is house-consistent. The untested failure mode worth knowing: 'pnpm remove <name>' on a dependency that is not present exits non-zero (ERR_PNPM_CANNOT_REMOVE_MISSING_DEPS), and main() would then propagate that as the whole ui:add's exit code after an otherwise successful install.",
+      "required_fix": "None required. Optionally note the missing-dependency exit path in the guard's own header."
+    },
+    {
+      "id": "L05-S09",
+      "ticket": 959,
+      "severity": "note",
+      "title": "The whole-tree equivalence holds at the verdict level, but the change does move internal classification data on 6 migrations - not mentioned in the report",
+      "evidence": "Reviewer built an old-vs-new harness (pre-fix module from dd3f8f1d vs HEAD) over all 229 files in packages/db/migrations. scanSources is byte-identical (0 findings both sides; scanned {functions:1410, patches:212} both sides), and maskComments, parseFunctions, dynamicSqlFindings and executeExpressions are identical on EVERY file. parseCoRPatches differs on 6 files (0119_f_a3_pr1a_core_extractions, 0129_f_a3_pr3_retirement_parity_doors, 0134_f_a3_pr3_c1bis_receipt_identity, 0136_fix_freeform_basis_types, 0226_bank_match_evidence, 0234_legal_enforcement_mode) and quotedLiterals on 119 - but the movement is confined to the 'fragments' array; line, tag, kind, targets, censusOnly, censusReads and whitelisted are unchanged on every patch. AC5 therefore holds, and the change is if anything strictly more fail-closed (content previously swallowed to EOF is now scanned). The report's flat 'identical before and after' is true of the CLI verdict and understates the actual blast radius.",
+      "required_fix": "Add one sentence to the lane report recording the measured blast radius (fragments only; classification fields unchanged on all 229 files), so a future author knows what this change can and cannot move."
+    },
+    {
+      "id": "L05-S10",
+      "ticket": 969,
+      "severity": "note",
+      "title": "The whole apps/web suite is flaky at this size: one of two reviewer runs had 1 failure",
+      "evidence": "node scripts/run-tests.mjs from apps/web, run 1: '# tests 4633 / # pass 4630 / # fail 1 / # skipped 2'. Run 2 on the same tree: '# tests 4633 / # pass 4631 / # fail 0 / # skipped 2', exactly matching the lane report. The failing test's identity was not captured (run 1's stream was tail-truncated). RIG.md names a known whole-suite load flake in thread-live-clarify.test.tsx that this lane did not touch. The lane's '0 fail' claim is reproducible but is a one-run observation, not a stable property.",
+      "required_fix": "None for this lane. The orchestrator should not read a single green whole-suite run as proof, and should re-run before attributing a failure."
+    },
+    {
+      "id": "L05-S11",
+      "ticket": 849,
+      "severity": "note",
+      "title": "TDD slicing cannot be read off the branch: each ticket is one commit carrying its tests and its implementation together",
+      "evidence": "git log origin/main..HEAD shows exactly six commits, one per ticket, each adding 5-11 new cells plus the implementation, so the red -> green per slice that work-order rule 4 requires is not visible in history. The cells themselves are non-vacuous: reviewer proved red-before independently for #959 (ran the pre-fix module - dollar-tag and quote masking both false, censusOnly [false] / censusReads [] versus [true] / [{v_n}] after), and every other ticket's new cells import symbols that do not exist at the merge-base (retireFrozenEntry, toWslPath/resolveChildOs, classifyDependencies, the redo option, the reworded message). Only the ORDER rests on the lane report's word.",
+      "required_fix": "None. Noted so the orchestrator knows which half of rule 4 the branch evidences and which half is self-reported."
+    },
+    {
+      "id": "L05-S12",
+      "ticket": 849,
+      "severity": "note",
+      "title": "The branch is one merge behind origin/main, so 'git diff origin/main..HEAD' misreports four deletions that are not this lane's work",
+      "evidence": "merge-base = dd3f8f1d; origin/main = e7f0a10a (which landed docs/PROGRESS.md changes, RELEASE-AS-RUN.md, ceremony/reads-0234.mjs and GRILL-2026-09-20.md). 'git diff --stat origin/main..HEAD' shows those as deletions plus a 43-line PROGRESS.md change; 'git diff --stat dd3f8f1d..HEAD' shows the lane's true 20 files, 1383 insertions, 46 deletions. Nothing in the lane touches any of those four paths ('git log origin/main..HEAD -- <path>' is empty for each).",
+      "required_fix": "Review and integrate against the merge-base; rebase or merge main before the integration PR so the diff reads honestly."
+    }
+  ],
+  "gates_rerun_by_reviewer": [
+    "node scripts/check-frozen-workflows.selftest.mjs -> OK, all cases passed (incl. the 8 new #849 cells)",
+    "node scripts/check-frozen-workflows.mjs -> OK - 312 frozen file(s), 55 'use workflow' modules, 3 retired entries",
+    "node scripts/check-frozen-workflows.mjs --print-closure packages/runtime/lib/work-trace.mjs -> 6 of 299 entries, exit 0",
+    "--retire refusal paths x4 (no entry / file present / no ruling / CI=1) -> exit 1 each, git status clean after",
+    "node scripts/ops/dsn-pipe.selftest.mjs -> ALL GREEN (3 skipped: two Windows directory-symlink EPERM, one /proc-only)",
+    "node scripts/ops/dsn-pipe.ca.selftest.mjs -> ALL GREEN (0 skipped)",
+    "node scripts/ops/dsn-pipe.pgpath.selftest.mjs -> ALL GREEN (0 skipped)",
+    "live: <dsn> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- wsl -u root -- bash -c '...' -> CERT_OK, exit 0, DATABASE_URL absent in WSL",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/migrate-redo.test.mjs -> 7 tests / 7 pass / 0 fail",
+    "packages/db: operation-census.test.mjs -> 10/10 pass",
+    "packages/db: rig-isolation.test.mjs -> 21 tests / 20 pass / 0 fail / 1 skip (T19; reset flags never set)",
+    "node scripts/check-wiki-dynamic-sql.selftest.mjs -> OK (incl. the 5 new #959 cells)",
+    "node scripts/check-wiki-dynamic-sql.mjs -> OK - 1410 definitions, 212 CoR patches, 13 justified waivers",
+    "reviewer harness: old (dd3f8f1d) vs new wiki-lint-checks over all 229 migrations -> scanSources identical; red-before confirmed for all three #959 regression cells",
+    "pnpm lint (worktree root) -> exit 0",
+    "pnpm typecheck (worktree root) -> exit 0",
+    "apps/web: node scripts/run-tests.mjs x2 -> 4633/4630/1 fail (run 1, flake); 4633/4631/0 fail/2 skip (run 2)"
+  ]
+}

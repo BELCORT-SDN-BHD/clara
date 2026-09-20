@@ -61,6 +61,104 @@ checksum. Filenames must be `NNNN_name.sql`; the runner rejects late insertion b
 frontier. Files with no leading digit, including `UNNUMBERED_*.sql`, are silently skipped.
 `CLARA_MIGRATIONS_DIR` selects an alternate chain and must be set correctly for a split test rig.
 
+**Redo (#957).** Immutability is for *merged* history. A migration already applied to a rig but
+not yet merged sometimes needs one more fix-round edit, and the ordinary path above correctly
+refuses that on checksum drift. `redo`, passed to `migrate()` the same way `dir` is (or
+`CLARA_MIGRATION_REDO=<version>`), re-applies exactly one such version as a guarded, measured
+operation: it requires the same destructive guard `reset`/`restore`/`dr:selftest` already use
+(`CLARA_ALLOW_DESTRUCTIVE=1` and a disposable or explicitly-named target), refuses a version that
+is not currently applied or is not the *highest* applied version (so nothing built on top of it is
+silently invalidated), then deletes its ledger row and re-runs the edited file in the same
+transaction, under the same isolation/timeout/atomicity rules a normal apply uses. A failure
+anywhere in that transaction rolls the delete back with it, leaving the ledger exactly as it was.
+Write the redo target so re-running it against a database that already carries its OLD effects is
+safe — `create or replace function`/`procedure` and other naturally idempotent DDL, not a bare
+`create table`. This replaces the hand procedure (`SET ROLE clara_fn_owner`, re-run the body by
+hand, repair the ledger row by hand) six wave-2026-09-18 tickets independently reinvented.
+
+### From-scratch reapply on a reused cluster (#867)
+
+Cluster roles (created by `create role`) are cluster-global, not per-database — `drop database`
+never removes them. Migration
+[0154_binding_proposal_pr_1.sql](migrations/0154_binding_proposal_pr_1.sql)'s tail pins the
+cluster-wide `clara%` role count at the literal `14`, a measured proof that 0154 itself mints no
+role. `0154` is applied and immutable; this section documents the hazard around it, it does not
+change it. Two migrations after 0154 mint four more roles:
+[0160_checkout_gate_c2_stripe_events.sql](migrations/0160_checkout_gate_c2_stripe_events.sql)
+(`clara_stripe_webhook`, `clara_stripe_webhook_login`) and
+[0163_checkout_gate_c3_folded_door.sql](migrations/0163_checkout_gate_c3_folded_door.sql)
+(`clara_auth_wall`, `clara_auth_wall_login`), each guarded by `if not exists` so a normal single
+from-scratch chain only creates them once.
+
+Re-applying the WHOLE chain from scratch into a **fresh database on a cluster that already ran the
+chain once** hits those four leftover roles before it reaches 0154 again: the count already reads
+`18`, not `14`, and 0154 raises `CLR10` — a cluster-reuse hazard, not a migration defect.
+
+**Preferred:** one from-scratch chain per cluster (a fresh disposable Postgres cluster, or a fresh
+container/instance). [tests/README.md](tests/README.md) states the same rule for the test rig.
+
+**If a cluster must be reused** (the same single working database is being wiped and re-migrated,
+so nothing else on the cluster still depends on the four roles once the old database is gone):
+[scripts/role-census-reset.mjs](scripts/role-census-reset.mjs) automates it —
+
+```sh
+node scripts/role-census-reset.mjs           # --check (default, read-only): reports whether a
+                                              # from-scratch reapply would pass 0154 today, and
+                                              # names anything on the cluster still depending on
+                                              # one of the four roles (pg_shdepend, cluster-wide)
+CLARA_ALLOW_DESTRUCTIVE=1 node scripts/role-census-reset.mjs --apply   # drops exactly those four
+                                              # roles, and ONLY if none of them has a live
+                                              # dependent anywhere on the cluster; otherwise it
+                                              # refuses outright (never a partial drop) and names
+                                              # what to `drop owned by <role>` first
+```
+
+The exact statements it runs, for the record (base role before its `_login` twin — the order
+`rolesMintedAfterPin()` reads off the migration files, `apply()` iterates, and
+`role-census-reset.test.mjs`'s "rcr.mint against the REAL migrations directory" cell pins):
+`drop role clara_stripe_webhook; drop role clara_stripe_webhook_login; drop role
+clara_auth_wall; drop role clara_auth_wall_login;` — after which a from-scratch chain is
+**expected** to pass 0154's census (14) and let migrations 0160/0163 recreate the four roles
+fresh partway through the same chain (back to 18). **Verified end to end (2026-09-20)**: a
+genuinely separate, disposable PostgreSQL 17 cluster was provisioned for this proof alone —
+`sudo pg_createcluster 17 l04chk --port=55799`, `pg_hba.conf` edited to the same trust lines this
+rig's own lane clusters carry — never RIG.md's shared lane cluster at 55744, so its "never run a
+second from-scratch chain on your cluster" rule was not touched. First pass:
+`createdb clara_scratch1` then `node scripts/migrate.mjs` — 229/229 applied, target
+`0234_legal_enforcement_mode`, clara% role count 18. `clara_scratch1` was then dropped
+(`drop database clara_scratch1`) so nothing on the cluster still depended on the four roles —
+this recipe's own stated precondition ("the same single working database is being wiped ...
+so nothing else on the cluster still depends on the four roles once the old database is gone"),
+confirmed with `node scripts/role-census-reset.mjs` (read-only): both base roles read "no shared
+dependents" once the old database was gone. `CLARA_ALLOW_DESTRUCTIVE=1 node
+scripts/role-census-reset.mjs --apply` then dropped exactly the four roles, cluster at clara% = 14
+(0154's pin, exact match). A fresh `createdb clara_scratch2` plus a second
+`node scripts/migrate.mjs` — the from-scratch reapply on a cluster that already ran the chain
+once, which is exactly what AC1 asks for — completed 229/229 with no CLR10 and no other error,
+`clara.schema_migrations` reading `count=229, max=0234_legal_enforcement_mode`, and the live
+clara% role count back at 18 exactly as this recipe predicts. `clara_scratch2` was dropped and the
+whole disposable cluster removed (`pg_dropcluster --stop 17 l04chk`) immediately after; this lane's
+own `clara_l04` was never touched by any step above (`schema_migrations` read `count=229,
+max=0234` before and after, unmoved) and RIG.md's ten lane clusters stayed online throughout.
+**#867's AC1 is closed on this record**: the recipe was correct all along; what earlier rounds
+lacked was a cluster with the chain to spare, not a working fix, and `pg_createcluster`/
+`pg_dropcluster` (from this host's already-installed `postgresql-common` package) supplies
+exactly that without needing a second physical machine. The script reads 0154's pinned literal and the
+post-0154 role manifest from the migration files themselves (never a hand-kept copy), so a future
+migration minting another role is picked up automatically. Verified on this package's own rig
+(`packages/db/tests/role-census-reset.test.mjs`): the live cluster's count (18) minus its four
+minted roles matches 0154's pin (14) exactly, and dropping/recreating the two `_login` roles
+(no direct grants, membership only) round-trips cleanly with the checkout-gate-c2 (18/18) and
+checkout-gate-c3 (69/69) batteries re-run green afterward. The two base roles
+(`clara_stripe_webhook`, `clara_auth_wall`) stay blocked on any rig that still has a live
+checkout-gate lane, by design — that lane's own table grants are the dependents `DROP ROLE`
+correctly refuses on, and the script reports that refusal by name rather than guessing past it.
+The dependent-check (`sharedDependents()`) sees a SHARED-object dependency (a grant directly on a
+database or tablespace, `pg_shdepend.dbid = 0`) as well as a per-database one, so `apply()`'s
+"never a partial drop" contract holds even for that shape (L04B-SPEC-05; latent on today's rig —
+`role-census-reset.test.mjs` proves it against a planted `GRANT ... ON DATABASE`, not a live
+dependency this cluster happens to carry).
+
 Read the repository frontier from `migrations/` and the target frontier from:
 
 ```sql
@@ -91,6 +189,66 @@ during the cutover cannot be checkpointed as irrelevant and leave the document w
 refuses the cutover while any pre-cutover classify task is still claimable without a successful
 extraction, and its rollback is a new append-only recovery migration applied while that consumer
 stays live. The hosted rollout applied it in that consumer-first order inside the quiescence window.
+
+**Pinning another function's body hash is a named convention in this file, not one migration's
+habit — record it here rather than let each instance read as its own idea.** When a migration
+CALLS a function it does not itself recut, and some part of its own safety argument, its granted
+ACL, its returned shape or an excluded value depends on that function's CURRENT body, it pins a
+pre-image `sha256(prosrc)` of that body: measured on a migrated rig by reading `pg_proc.prosrc`
+through `to_regprocedure`, never transcribed from the creating migration's file text, and asserted
+again, unchanged, in its own prestate (before touching anything) and usually again in its tail
+(after). That pin is a durable COUPLING placed on a function this migration does not own. **The
+rule it creates: a later migration whose OWN NUMBER is BELOW the pinning migration's, and which
+recuts the pinned function, must locate every existing pin on that function and re-measure each
+one against the function's NEW body, in the SAME COMMIT as the recut** — the pin does not update
+itself, and only the migration that changes the body can know whether the pinning migration's
+argument still holds against the new one. The qualifier matters because this repo assigns
+migration numbers per lane in advance, so they can land out of chronological order: "a later
+migration" means one whose number is still below the pin's, not merely one applied after it in
+git history.
+
+A recut whose own number is ABOVE the pinning migration's is a different case, not this rule's
+obligation: the pinning migration is already APPLIED, and this house never edits an applied
+migration to make it re-measure a body that postdates it. Such a recut pins its OWN pre-image of
+the function instead (in its own prestate and tail, the same convention, argued from its own safety
+case) and leaves the earlier, lower-numbered pin exactly as it was — historical, not current, and
+never re-measured, because it was never wrong: it correctly pinned the body that existed at ITS
+number.
+[0234_legal_enforcement_mode.sql](migrations/0234_legal_enforcement_mode.sql), documented further
+down this file, is the worked example: it recuts `clara._accounting_work_egress_live(uuid,uuid)`,
+one of 0233's three non-regression pins named below, but 0233 is applied and unedited — 0234 pins
+its own pre-image of that function instead (0234's "THE SIX PINS", four of them its own recut
+pre-images) and 0233's pin stands, describing 0233's own moment, not 0234's.
+
+The failure this coupling exists to produce is quoted here in its most common shape, but several
+raise wordings coexist across the estate and NONE of them settled the phrasing once and for all —
+`0233`'s three non-regression pins below read **`<name> has DRIFTED from its pinned body -- <reason>`**,
+while `0222` (right after `0221`) raises **`<name> has DRIFTED from the pinned NNNN body`** on all
+six of its own pins, and `0228` raises **`<name> has DRIFTED from its measured live body`** on all
+thirteen of its own. `0231` carries BOTH shapes in one file (four `its pinned body`, one `the pinned
+0189 body`), so "settled from 0221 onward" is not a claim this file can make. The one invariant
+across every wording is the phrase **`has DRIFTED`**: `grep -rn "has DRIFTED"
+packages/db/migrations/` finds every instance regardless of which noun follows it. 0214 below reads
+`has DRIFTED from the pinned 0189 body` — a numbered form, like several others, not a "first"
+anything; migrations as early as 0107 already raise on a drifted pin. Either way it means the LIVE
+function no longer hashes to the sha the pinning migration recorded. Two readings, and the pinning
+migration cannot tell them apart on its own:
+either an intervening migration recut the pinned function and never re-derived this argument
+against the new body (the pin did its job — go re-measure it, in the recutting migration's own
+commit, before this one can be trusted again), or the pin was wrong from the start. Either way the
+check fires from the PRESTATE, before the migration changes anything, and fails CLOSED: a drifted
+pin blocks the migration rather than letting it apply against a body its own stated reasoning no
+longer describes.
+
+The instances DOCUMENTED below are findable by the pinned function's name — for example
+`clara._work_run_attempts` (0214, immediately below, and again in 0231's five pins) and
+`clara.list_review_queue` / `clara.list_accounting_work` / `clara.get_client_work_pack` /
+`clara.list_activity` (0231). 0233's own three non-regression pins are named where 0233 is
+documented, further down this file. This is NOT a complete index of every migration that pins a
+function it does not itself change — 0178, 0182, 0183, 0184, 0189, 0194, 0195, 0197, 0202, 0203,
+0204, 0209, 0212, 0213, 0215, 0216 and others carry the same convention and are not named here. The
+authoritative, complete list is the migrations themselves:
+`grep -rn "has DRIFTED" packages/db/migrations/`.
 
 [0214_client_work_pack.sql](migrations/0214_client_work_pack.sql) owes **no** consumer-first
 obligation either, for a narrower reason: it adds exactly one SECURITY INVOKER read door,
@@ -921,6 +1079,36 @@ owners/privileges. Do not start a restored diagnostic snapshot as an application
 `workflow_drizzle` and `graphile_worker`. Its globals dump is supporting evidence;
 [deploy/roles-bootstrap.sql](deploy/roles-bootstrap.sql) recreates custom roles on a fresh target.
 
+A hosted ceremony's full backup goes through `scripts/ops/dsn-pipe.mjs`, which pins the ceremony
+CA onto the DSN and never lets the DSN itself reach argv or disk. PostgreSQL 17 client tools live
+only in WSL on the Windows release rig, and the committed CA's path is written in the Windows
+spelling, which a WSL child cannot open — pass `--child-os wsl` (or simply invoke `wsl` as the
+child command; it is auto-detected too) and dsn-pipe respells the DSN's `sslrootcert` plus
+`PGSSLROOTCERT`/`NODE_EXTRA_CA_CERTS` to the `/mnt/<drive>/…` form, and sets `WSLENV` so those two
+vars, the six PG identity vars and `CLARA_BACKUP_DIR` (translated by WSL's own `/p` flag, since
+dsn-pipe never touches it directly) actually cross the Windows/WSL boundary (`DATABASE_URL` is
+deliberately never listed there — the DSN itself stays local to this process and its direct
+`wsl` child; only the individual PG\*/backup-dir vars cross):
+
+```sh
+<dsn> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- \
+  wsl -u root -- bash -c 'node packages/db/scripts/backup.mjs --profile full'
+```
+
+The CA fingerprint check always runs against the original Windows-spelled file; only the emitted
+values are respelled (#917).
+
+**TLS exclusivity on the WSL side is narrower than on the Windows side (#917, L05B-S01).** A bare
+`pg_dump`/`psql` on the WSL side reads `PGSSLMODE=verify-full` + `PGSSLROOTCERT` and still treats
+the pinned CA as EXCLUSIVE, same as any native invocation. But `backup.mjs --profile full` also
+opens a Node `pg` client, and on the WSL side that client sees no `DATABASE_URL` (it is
+deliberately not in `WSLENV`), so `packages/db/lib/pg.mjs`'s `connConfig()` returns `{}` and
+node-postgres falls back to reading TLS settings from the environment: `PGSSLMODE=verify-full`
+becomes a bare `ssl: true`, and `NODE_EXTRA_CA_CERTS` only AUGMENTS Node's global trust store
+rather than PINNING it the way an explicit DSN `sslrootcert` does on the Windows side. This is not
+a regression — the hand wrapper this flag replaces had the identical shape — but it means the
+DSN-level pin's exclusivity is unchanged for libpq tools only, not for a WSL-side Node client.
+
 `restore:full` runs role bootstrap before the transactional dump restore, then prints manual
 follow-ups. Complete those follow-ups against the current estate: private Storage bucket/policies
 and bytes, every configured login and credential, public-schema ACL baseline, and engine migration
@@ -1351,6 +1539,23 @@ NAMES `clara.users_visible` in the comment explaining why it does not use it.
 capacity numbers ride door 2 only so a settings card can render them beside the plan; that is an
 AFFORDANCE, not a wall. The residual stands: that relation still has NO human writer anywhere
 (`0196:36-40`).
+
+**THREE NON-REGRESSION PINS, an instance of the "Pinning another function's body hash" convention
+named above this file's "Migration and deployment behavior" section.** 0233 CALLS three functions
+it does not itself change and pins each one's pre-image `sha256(prosrc)` in both its prestate and
+its tail: `clara.get_current_legal_documents()` (the standing door's own text says its `body` and
+digest stay that function's, never a second copy), `clara.accept_legal_document(text,integer,text,text)`,
+and `clara._accounting_work_egress_live(uuid,uuid)` (the arity-0 argument above copies that door's
+own limb-(a) predicate, 0195:890-906). A later migration whose OWN NUMBER is below 0233's, and
+which recuts any one of these three, must find this pin — and 0231's and 0232's, if it is one of
+theirs too — and re-measure it against the new body in the SAME commit as the recut, or risk the
+exact `has DRIFTED from its pinned body` refusal this file's general note explains. A recut at a
+number ABOVE 0233 is not this obligation: 0233 is applied and this house never edits an applied
+migration, so the recutting migration pins its own pre-image instead and 0233's pin is left
+standing, historical rather than current — 0234 immediately below is exactly that case for
+`clara._accounting_work_egress_live`. (0233's FOURTH pin, on `clara.get_llm_usage_summary`, is
+a different thing: a pre-image of the body 0233 itself recuts, not a non-regression pin on a
+function it leaves alone.)
 
 
 ## 0234 — the platform's legal enforcement mode (#1008)

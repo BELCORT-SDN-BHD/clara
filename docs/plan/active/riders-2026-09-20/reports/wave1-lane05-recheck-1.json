@@ -1,0 +1,39 @@
+{
+  "lane": "wave1-lane05",
+  "branch": "riders/w1-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "head": "ab6683c0",
+  "review_source": "docs/plan/active/riders-2026-09-20/reports/wave1-lane05-review-spec.json",
+  "fixround_source": "docs/plan/active/riders-2026-09-20/reports/wave1-lane05-fixround-1.md",
+  "lens": "RECHECK",
+  "verdict": "accept",
+  "summary": "Independently re-ran every claim in fix round 1 on head ab6683c0. All five assigned findings (L05-S01, L05-S02, L05-S03, L05-S04, L05-S07) are genuinely fixed, each confirmed by a live re-run, not just re-reading the report: --print-closure now prints '6 of 299' matching the corrected README line; 'node scripts/check-frozen-workflows.mjs --retire' (no path) and '--retire --ruling <ref>' (flag swallowing the path slot) both now exit 1 with the stated usage message and leave frozen-workflows.json untouched; the strengthened '#849 REAL repo canary' cell genuinely asserts exclusion (read the added code, not just its pass); the new #957 non-ephemeral-target cell exists, asserts /REFUSED for non-ephemeral target/ with a throwing clientFactory, and the full migrate-redo.test.mjs file now runs 8/8 (was 7/8) through the real $GATES chain against clara_l05; the #969 README addition is documentation-only exactly as claimed, with check-ui-add-guard.selftest.mjs's 25 cases unchanged and still green. Nothing broke: pnpm typecheck exit 0, pnpm lint exit 0 (root, including apps/web and packages/reporting-render), operation-census.test.mjs 10/10, rig-isolation.test.mjs 20 pass/1 correctly-gated skip, node scripts/check-frozen-workflows.mjs unfiltered verify still 'OK - 312 frozen file(s) ... 3 retired', frozen-workflows.json byte-identical to dd3f8f1d, no migration file touched, git status clean. The three fix-round commits touch exactly the five files the report names (apps/web/components/ui/README.md, packages/db/tests/migrate-redo.test.mjs, packages/runtime/README.md, scripts/check-frozen-workflows.mjs, scripts/check-frozen-workflows.selftest.mjs) -- no scope creep. The seven note-severity findings (L05-S05, S06, S08, S09, S10, S11, S12) were not in this round's assigned list and remain open by design (informational, below minor); none of them regressed. Nothing above minor remains open and nothing is newly broken, so verdict is accept.",
+  "findings": [],
+  "note_severity_still_open_by_design": [
+    "L05-S05 (#917) - AC1 evidenced only to the env boundary, not through backup.mjs --profile full (needs a hosted DSN + pg_dump 17); unaffected by this fix round.",
+    "L05-S06 (#917) - lane report/commit message said 11 new selftest cases, the run prints 10; unaffected by this fix round, not corrected.",
+    "L05-S08 (#969) - defaultStripLocalDependencies (the real 'pnpm remove' edge) still has no committed cell, only the live rehearsal in the final report; unaffected.",
+    "L05-S09 (#959) - lane report's 'identical before and after' undersells the measured blast radius (fragments move on 6 files; classification fields unchanged on all 229); not amended.",
+    "L05-S10 (#969-adjacent) - apps/web whole-suite flake observed by the reviewer (1 run of 2 had 1 failure, unidentified); not re-litigated this round, no new evidence gathered.",
+    "L05-S11 (#849) - per-slice TDD red/green not visible in history (one commit per ticket); still true, informational only.",
+    "L05-S12 (#849) - branch is one merge behind origin/main (merge-base dd3f8f1d vs origin/main e7f0a10a); still true at ab6683c0, unresolved, to be handled at integration."
+  ],
+  "gates_rerun_by_recheck": [
+    "node scripts/check-frozen-workflows.mjs --print-closure packages/runtime/lib/work-trace.mjs -> 'locked by 6 of 299 @frozen entry file(s)', matches corrected README (L05-S01 fixed)",
+    "node scripts/check-frozen-workflows.mjs --retire (no path) -> exit 1, 'freeze-lint: --retire requires a path argument ...'; git status --porcelain frozen-workflows.json empty",
+    "node scripts/check-frozen-workflows.mjs --retire --ruling \"#1\" (flag as path slot) -> exit 1, same usage message; git status clean (L05-S02 fixed, both sub-cases)",
+    "node scripts/check-frozen-workflows.selftest.mjs -> OK, all cases pass, including the 2 new #849 CLI-wiring cells and the strengthened canary cell (read: now asserts exclusion over closure.byEntry.keys() minus reachedBy, with a fixture-broken guard) (L05-S03 fixed)",
+    "node scripts/check-frozen-workflows.mjs (unfiltered verify) -> OK - 312 frozen file(s), 55 use-workflow modules, 3 retired entr(ies); byte-identical to pre-fix-round",
+    "packages/db: PGHOST=127.0.0.1 PGPORT=55745 PGUSER=postgres PGDATABASE=clara_l05 CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1 node --test --test-concurrency=1 $GATES tests/migrate-redo.test.mjs -> 8 tests / 8 pass / 0 fail (new non-ephemeral cell present and green) (L05-S04 fixed)",
+    "packages/db: same $GATES chain, operation-census.test.mjs -> 10/10 pass",
+    "packages/db: same $GATES chain, rig-isolation.test.mjs -> 21 tests / 20 pass / 1 skip (T19, CLARA_RIG_ALLOW_RESET unset)",
+    "git diff a4db0de2..ab6683c0 -- apps/web/components/ui/README.md -> documentation-only addition, no code diff, matches fixround-1.md's claim (L05-S07 fixed as documentation)",
+    "apps/web: node scripts/check-ui-add-guard.selftest.mjs -> all cases pass, 25/25 including 8 #969 cells, unchanged",
+    "pnpm typecheck (worktree root) -> exit 0",
+    "pnpm lint (worktree root) -> exit 0 (root gates, apps/web incl. check-ui-add-guard.selftest.mjs, packages/reporting-render)",
+    "git diff --stat a4db0de2..ab6683c0 -> exactly the 5 files the fix round report names, 132 insertions / 3 deletions; no unrelated file touched",
+    "git diff --stat dd3f8f1d..ab6683c0 -- packages/db/migrations -> empty (no migration file touched)",
+    "git diff dd3f8f1d..ab6683c0 -- frozen-workflows.json -> empty (manifest untouched)",
+    "git status --porcelain (worktree) -> clean"
+  ]
+}
