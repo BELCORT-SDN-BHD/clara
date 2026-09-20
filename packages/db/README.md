@@ -1761,3 +1761,92 @@ set mode = 'enforce' where id;` as the superuser satisfies the relation's CHECK 
 it immediately, but it writes NO `clara._audit` row, NO `updated_by` and no receipt — the change
 becomes invisible to the estate's own record. Prefer creating the operator-firm precondition over
 using it.
+
+## 0265 — the shared question record carries the admitted basis (#839)
+
+`clara._work_question_record` (0180's "one record every surface renders") gains ONE key, `basis` —
+the Work's own `clara.accounting_work.basis`, transcribed verbatim — beside the
+`basis_digest`/`work_basis_digest` pair it already carried.
+
+**A BODY-ONLY RECUT OF THE UNGRANTED PROJECTION.** `_work_question_record` is `revoke all … from
+public` in 0180 and has never been granted to any role; `clara.get_work_question` and
+`clara.get_work_pending_question` are NOT recut at all, because both do nothing but delegate to it
+and return its jsonb unexamined. §T re-reads both doors' `pg_get_functiondef` and requires them
+byte-identical to their pre-images, so "additive, and to one body only" is a measurement.
+
+**WHY.** A surface that holds ONLY the shared record (Needs-you's row, the Clara rail's cards) had
+the question but not the figures, so it could not offer "Restate as a new instruction" the way the
+Work detail does — that page loads the full `AccountingWorkRow` (basis included) from a separate
+read. The key is what makes the admitted posting date, memo and lines reachable from the one record
+every surface already asks for.
+
+**NO NEW COHORT** in `packages/db/tests/rig-meta.mjs`, and that is a finding rather than an
+omission: the name is already on `WORK_QUESTIONS_0180_UNGRANTED_FNS` at the same arity and the same
+"granted to nobody" disposition, and `cohortFailures()` fails a HALF-present cohort, so a cohort of
+its own would red every database between the two frontiers. #720 (0198) recorded the identical
+shape. The frontier-gated battery is `tests/work-question-admitted-basis.test.mjs`, preloaded by
+`tests/work-question-admitted-basis-preintegration-gate.mjs`.
+
+**DEPLOY ORDER: none owed, in either direction.** An older web build ignores a jsonb key it never
+asks for; a newer build against a database below this frontier reads `record.basis` as `undefined`
+and gates its restate entry point on the key's PRESENCE, so it renders nothing rather than throwing.
+
+## 0266 — the Work list labels a staff expense claim without an N+1 read (#880)
+
+`clara.list_accounting_work` and `clara.get_accounting_work_row` each gain TWO projected fields,
+`claim_id` and `claimant_label`, LEFT JOINED from `clara.staff_expense_claims` by `work_id` — so a
+claim Work's list row (and its addressed row) carries its own label with ZERO additional round
+trips, rather than a per-row call to `clara.get_work_claim_origin`.
+
+**THE ADDITIVE PROJECTION IS 0203/#809'S OWN SHAPE**, which widened this same pair in the same
+lockstep; the brief allowed a batched door instead, and that would still have cost the browser one
+round trip and would have had to re-derive `get_work_claim_origin`'s firm scoping for an array of
+ids. `clara.get_work_claim_origin` is UNCHANGED, so the Work detail's existing single-Work read is
+untouched by construction.
+
+**THE JOIN CANNOT DUPLICATE A ROW.** `clara.staff_expense_claims` carries
+`uq_staff_expense_claims_work unique (work_id)` (0221) — at most one claim per Work, structurally —
+and `sec.firm_id = w.firm_id` is restated on the join condition, belt-and-braces over the composite
+FK, in the same explicit-correlation style 0189 uses for the `clara.clients` join beside it. Both
+doors stay SECURITY INVOKER: the claim rows are admitted by `p_staff_expense_claims_read`
+(`firm_id = clara.jwt_firm()`), the same RLS the list already leans on for its other sources.
+
+**A BODY-ONLY `CREATE OR REPLACE` AT THE EXISTING SIGNATURE** — both doors return a jsonb envelope,
+so a projection field changes neither signature nor return type. The replace restates
+`security invoker`, `search_path` and `plan_cache_mode`, and §T re-reads all three from `pg_proc`
+together with the owner and the literal ACL. NO roster change is owed in `rig-meta.mjs`: same
+names, same grants (see the note this migration adds beside `WORK_LIST_0189_HUMAN_FNS`). The
+frontier-gated cells are `wl.29` in `tests/work-list.test.mjs`, preloaded by
+`tests/work-list-claim-label-preintegration-gate.mjs`.
+
+## 0267 — the Work list gains a receipt-dated window (#905)
+
+`clara.list_accounting_work` gains TWO parameters, `p_receipt_since`/`p_receipt_until`, that fence a
+Work by its own COMMITTED receipt (`clara.operation_receipts`, `outcome='committed'`) instead of its
+admission instant — so the client home's recent-success tile, which has always COUNTED by receipt
+(0214), can LINK by receipt too and the two describe one population.
+`clara.get_accounting_work_row` is untouched (§T pins it byte-identical to its 0266 pre-image).
+
+**A DROP AND A CREATE, NOT A REPLACE** — `create or replace function` cannot ADD a parameter:
+PostgreSQL identifies a function by (schema, name, ARGUMENT TYPES), so a longer list is a DIFFERENT
+overload left resolvable beside the old one, and PostgREST would face two candidates for one name.
+The nine-argument signature is dropped and the eleven-argument one created in the same transaction,
+the 0202/#770 precedent the brief named. A drop takes five things with it that a replace would have
+kept — owner, SECURITY INVOKER, both pinned settings, the literal ACL and the comment — and all
+five are re-issued and then re-read from the catalog in §T. Every new parameter is DEFAULTED, so a
+nine-positional caller still resolves and exactly ONE `list_accounting_work` remains in the catalog.
+
+**THE RECEIPT JOIN IS A LATERAL WITH `limit 1`**, the same "at most one" idiom the pending-question
+join beside it uses, so even a violation of `uq_operation_receipts_committed` could not duplicate a
+list row. The window is half-open on both axes (`>= since`, `< until`) over the same
+Asia/Kuala_Lumpur calendar-day construction 0214's own pack window uses, and a Work with NO
+committed receipt is excluded by the NULL comparison rather than dated by something else.
+
+**WRITTEN SO A #957 REDO OVER ITS OWN EFFECTS IS SAFE**: §W is `drop function if exists` on the
+nine-argument signature followed by `create or replace` on the eleven-argument one, and §0's
+prestate recognises BOTH starting shapes. NO roster change is owed in `rig-meta.mjs`: a
+drop-and-create of the SAME name is not a new name (see the note this migration adds beside
+`WORK_LIST_0189_HUMAN_FNS`). The frontier-gated cells are `wl.30`–`wl.32` in
+`tests/work-list.test.mjs` and `p650.pack.recent_success_drilldown` in
+`tests/client-work-pack.test.mjs`, both preloaded by
+`tests/work-list-receipt-window-preintegration-gate.mjs`.
