@@ -113,6 +113,26 @@ async function gateReissue(t) {
   return true;
 }
 
+// #965 — the AT-CREATION ceiling refusal's committed record lives in its OWN migration (0254),
+// the same separate-frontier reason MYT_WINDOW_STEM and REISSUE_STEM exist above: a slice-frontier
+// leg can be pinned anywhere below 0254, where `clara.create_document_intake` still RAISES CLR18
+// and rolls its own intake row back. The two cells below branch on this rather than skip, because
+// both must stay true in BOTH generations.
+const REFUSAL_STEM = "intake_refusal_record$";
+let _refusalReady = null;
+async function refusalRecordReady() {
+  if (_refusalReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [REFUSAL_STEM]);
+      _refusalReady = r.rows[0].n > 0;
+    } catch {
+      _refusalReady = false;
+    }
+  }
+  return _refusalReady;
+}
+
 let world = null;
 before(async () => {
   // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud.
@@ -274,21 +294,38 @@ test("p636.batch.capacity_refusal — the shipped ceilings are FLUSH and the ref
     { name: "p_token_hash", cast: "text" }, { name: "p_expires_at", cast: "timestamptz" },
     { name: "p_op_key", cast: "text" },
   ]);
-  let admitted = 0; let err = null;
+  // #965 recut: the 101st call no longer RAISES. Since 0254 the creation door commits the refused
+  // intake at failed/limit and RETURNS a refusal outcome, so this cell reads the refusal off the
+  // receipt in that generation and off the raised CLR18 below it. Both arms assert the SAME two
+  // facts this cell has always been about — exactly 100 are admitted, and the DOCS guard is what
+  // refuses the 101st — so the shipped ceilings stay pinned in both worlds.
+  const refusalLive = await refusalRecordReady();
+  let admitted = 0; let err = null; let refusal = null;
   for (let i = 1; i <= 120; i++) {
     try {
-      await roleQuery(ROLES.runtime, create, [
+      const out = (await roleQuery(ROLES.runtime, create, [
         owner, "documents_tab", null, `cap${i}.pdf`, "application/pdf", 1048576,
         sha(`p636cap-${firm}-${i}`), new Date(Date.now() + 900_000).toISOString(),
-        opk(`p636cap${i}`)]);
+        opk(`p636cap${i}`)])).rows[0].result;
+      if (out?.refused === true) { refusal = out; break; }
       admitted += 1;
     } catch (e) { err = e; break; }
   }
   assert.equal(admitted, 100, "exactly 100 <=1MB PDFs are admitted on the shipped defaults");
-  assert.equal(err?.code, CLR18, "the 101st is refused CLR18");
-  assert.match(err.message, /docs/, "the refusal names the DOCS guard, not the pages guard");
-  assert.equal(err.detail ?? null, null,
-    "the 0007 capacity refusals carry NO detail.reason — the surface renders the message itself");
+  if (refusalLive) {
+    assert.equal(err, null, "#965: a ceiling refusal no longer leaves this door as an exception");
+    assert.ok(refusal, "the 101st comes back as a RETURNED refusal outcome");
+    assert.equal(refusal.failure_code, "limit", "…at the lane's existing limit failure reason");
+    assert.equal(refusal.ceiling, "documents",
+      "the refusal names the DOCS guard, not the pages guard");
+    assert.match(String(refusal.reason), /docs/,
+      "…and carries the database's own sentence, which is what the surface renders");
+  } else {
+    assert.equal(err?.code, CLR18, "the 101st is refused CLR18");
+    assert.match(err.message, /docs/, "the refusal names the DOCS guard, not the pages guard");
+    assert.equal(err.detail ?? null, null,
+      "the 0007 capacity refusals carry NO detail.reason — the surface renders the message itself");
+  }
   const used = await rootQuery(
     `select count(*)::int docs, coalesce(sum(pages_reserved),0)::int pages
        from clara.document_ingest_reservations
@@ -414,14 +451,22 @@ test("p636.census.no_recut — the twelve pinned bodies are byte-identical after
   // so it stays a true regression watch in both the pre- and post-#964 world rather than a false
   // red on a later ticket's IN-SCOPE, fully-verified recut (document-ingest-window-myt.test.mjs
   // carries that recut's own prestate/reverse-substitution proof).
+  // #965 (migration 0254) deliberately recuts a FOURTH of these twelve, for the same reason and
+  // under the same discipline: `clara.create_document_intake`'s one reservation call gains a
+  // CLR18 arm that commits the refused intake instead of letting the raise roll it back. Pinned
+  // in BOTH generations, selected by whether 0254 is live; the recut's own prestate and
+  // reverse-substitution proof live in migration 0254 and in intake-refusal-record.test.mjs.
   const mytLive = await mytWindowReady();
+  const refusalLive = await refusalRecordReady();
   const pins = [
     ["clara._tf_accounting_work_immutable()", "a1c4e0fc07dfe535433ee3061c54192ffeba640eae1375d8a2f529b3d1ff518e"],
     ["clara._assert_journal_source_refs(uuid,uuid,jsonb,boolean)", "f028c8ea70f7bcfde3cdd8ebaae045964ca763746010011a50d4c489bff232d2"],
     ["clara._admit_accounting_work_core(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)", "10b89677d342a424d5959ded8ad2c8c974c4ff9bdc26f5c0dd6c773a15af2612"],
     ["clara.cancel_accounting_work(uuid,uuid,text)", "27c7295b656c779aa80878e30e5113b3512ae773ce64ab64450f44c98eed871b"],
     ["clara._work_door_ctx(uuid,uuid,text,text,text,text)", "bd7bc3934fa919b2167b49f84b40f5205bcfcfc5207aaa31b94ce1c186ac2c7c"],
-    ["clara.create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamptz,text)", "09784b31f65ee230d2cf2e25426d43e6d529f1a5476468d96c4ef486a5c92e9d"],
+    ["clara.create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamptz,text)",
+      refusalLive ? "813b886a2015f32788ca509d7f89d8e9b5a5077d415ebaa95f8f8b0ec5291b8b"
+                  : "09784b31f65ee230d2cf2e25426d43e6d529f1a5476468d96c4ef486a5c92e9d"],
     ["clara.finalize_document_intake(uuid,text,text,jsonb,integer,text,uuid,uuid,text)", "8f9e0b1944c8910bcdef049d250ca834b74a4aa33084b38d97acc868b4a697d7"],
     ["clara._reserve_document_ingest(uuid,uuid,integer,timestamptz)",
       mytLive ? "32a42ca3de5c3f4de81971530430ceffe4f763eb9ed2b7e215941c8a94e70400"
