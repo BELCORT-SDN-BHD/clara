@@ -1054,10 +1054,25 @@ web surface yet.
 no price while `billing_plans.amounts_ruled` is false (the flag is the render condition, so an
 owner ruling shows a figure with no code change); no "Manage billing" control at any rank (nothing
 in this estate can change a firm's commercial arrangement — `billing_plans` has no door, and
-`firm_registration_payments` is written only by the Stripe webhook lane); no editor for the
-processing caps (`clara.firm_document_limits` has no human writer at all, 0196:36-40); no seat
+`firm_registration_payments` is written only by the Stripe webhook lane); no seat
 count; no chart; and no firm identity fact — the registered name, registration number and address
 live on `/settings/setup`, which this page links to and owns none of.
+
+**The processing caps ARE editable, by the firm's own owner or admin (#960, migration 0270).**
+The owner ruled on 2026-09-20 that the firm sets all four of its document-processing caps
+itself, with no operator gate: `clara.set_firm_document_limits` is that door, and
+`lib/firm/capacity-doors.ts` wraps it. Three properties are worth knowing at the surface. ONLY
+WHAT CHANGED IS SENT — the four fields are an overlay on the read, a field nobody touched
+contributes no argument, and 0196's column-preserving trigger leaves that cap alone (re-sending
+all four would re-assert values another admin may have moved since this page read them);
+CLEARING a field means "leave this cap alone", because no door can unset a cap. THE CONTROL
+RIDES THE SAME ADMIN-FLOORED READ as the figures rather than a rank this component guessed, and
+`clara.set_firm_document_limits` re-derives that floor for itself, so the wall is the database's.
+THE ESTATE'S OWN CEILING (10,000 documents and 100,000 pages a day, 16 of each concurrency) lives
+in `clara._firm_document_limit_ceiling`, granted to nobody; a value above it is refused with a
+sentence that NAMES the number, and this build renders that sentence verbatim because it is the
+only place it learns it. A firm with no stored row still renders as a named zero, and its fields
+start empty.
 
 **Revocation is focus-driven, not push-driven, and not a poll.** `FirmSettingsPanel` re-issues both
 governed reads on `visibilitychange`→visible and on window `focus`, and a CLR04 REPLACES the view:

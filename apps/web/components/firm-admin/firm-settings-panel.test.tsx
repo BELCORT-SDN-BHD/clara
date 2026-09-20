@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
-import { renderComponent } from "../../test/hookHarness";
+import { clickButton, renderComponent, setFieldValue, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { FirmScopeProvider } from "../firm-scope-provider";
 import { FirmSettingsPanelView, type FirmSettingsLoaders } from "./firm-settings-panel";
@@ -261,4 +261,59 @@ test("p635.web.usage_period_change a new window is never stamped on the previous
       "there is nothing to download until the new month answers: the CSV's provenance header would otherwise carry a window its rows did not come from",
     );
   } finally { await h.unmount(); }
+});
+
+// #960 — THE CAP WRITE IS THE PANEL'S, AND SO IS THE RE-READ THAT FOLLOWS IT.
+//
+// The card is presentational (`processing-capacity-card.test.tsx` owns its own contract); what
+// belongs here is the wiring: the panel hands the card a `save`, and whatever that save answers
+// — accepted, refused, or unavailable — the commercial state is RE-READ. Hydrate-never-trust
+// (`lib/doors.ts`'s own rule): the receipt is a report, and the figures on screen must come from
+// the door that owns them, never from the write's own answer.
+test("p960.web.save_rereads a cap save re-reads the commercial state, whatever the door answered", async () => {
+  for (const outcome of [
+    { kind: "set" as const, caps: { docsPerDay: 250, pagesPerDay: 3000, ocrConcurrency: 3, llmWitnessConcurrency: 4 },
+      previous: { docsPerDay: 250, pagesPerDay: 2500, ocrConcurrency: 3, llmWitnessConcurrency: 4 },
+      changed: ["pagesPerDay" as const], created: false },
+    { kind: "refused" as const, code: "CLR10", reason: "cap_above_ceiling",
+      message: "pages_per_day may not exceed the estate ceiling of 100000" },
+  ]) {
+    let commercialReads = 0;
+    const sent: unknown[] = [];
+    const h = await renderComponent(
+      createElement(NextIntlClientProvider, {
+        locale: "en",
+        messages,
+        timeZone: "Asia/Kuala_Lumpur",
+        children: createElement(FirmScopeProvider, {
+          scope: SCOPE,
+          children: createElement(FirmSettingsPanelView, {
+            loaders: {
+              legalStanding: async () => STANDING,
+              commercialState: async () => { commercialReads += 1; return COMMERCIAL; },
+              aiUsage: async () => ({ rows: USAGE, dropped: 0 }),
+            },
+            setCaps: async (edits: unknown) => { sent.push(edits); return outcome; },
+            now: NOW,
+            period: resolveUsagePeriod("2026-09", NOW),
+            months: recentUsageMonths(NOW),
+            onPeriodChange: () => {},
+          }),
+        }),
+      }),
+    );
+    for (let i = 0; i < 4; i += 1) await h.settle();
+    try {
+      assert.equal(commercialReads, 1, "one read on mount");
+      const field = h.find((n) => n.tagName === "INPUT" && n.id === "firm-capacity-pages-per-day");
+      assert.ok(field, "the owner sees the control");
+      await h.act(() => { setFieldValue(field as Record<string, unknown>, "3000"); });
+      const button = h.find((n) => n.tagName === "BUTTON" && /save processing caps/i.test(textOf(n)));
+      await clickButton(button as Record<string, unknown>);
+      for (let i = 0; i < 4; i += 1) await h.settle();
+
+      assert.deepEqual(sent, [{ pagesPerDay: 3000 }], "only the cap the person moved");
+      assert.equal(commercialReads, 2, `${outcome.kind}: the panel re-read the door that owns the figures`);
+    } finally { await h.unmount(); }
+  }
 });

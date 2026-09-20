@@ -50,6 +50,12 @@ import { ProcessingCapacityCard } from "@/components/firm-admin/processing-capac
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { isDoorRefusal } from "@/lib/doors";
 import {
+  processingCapsOpKey,
+  setFirmDocumentLimits,
+  type ProcessingCapEdits,
+  type SetProcessingCapsOutcome,
+} from "@/lib/firm/capacity-doors";
+import {
   loadFirmAiUsage,
   loadFirmCommercialState,
   loadFirmLegalStanding,
@@ -59,6 +65,11 @@ import {
 } from "@/lib/firm/commercial-reads";
 import { recentUsageMonths, resolveUsagePeriod, type UsagePeriod } from "@/lib/firm/usage-period";
 import { denied, failed, LOADING, ready, type FirmSettingsView } from "./firm-settings-view";
+
+/** #960 — the ONE governed WRITE this page owns. It is not a loader, so it is not in the bag
+ *  above: a loader is re-fired by the focus refresh, and re-firing a write would be a second
+ *  cap change nobody asked for. */
+export type SetFirmCaps = (edits: ProcessingCapEdits) => Promise<SetProcessingCapsOutcome>;
 
 export type FirmSettingsLoaders = {
   readonly legalStanding: () => Promise<FirmLegalStanding>;
@@ -84,6 +95,8 @@ function classify<T>(error: unknown): FirmSettingsView<T> {
 
 export type FirmSettingsPanelProps = {
   readonly loaders?: FirmSettingsLoaders;
+  /** #960: injected by the cells; production calls `clara.set_firm_document_limits` directly. */
+  readonly setCaps?: SetFirmCaps;
   /** Injected by the cells so "the current month" is not a moving target. */
   readonly now?: Date;
   readonly dialogProps?: React.ComponentProps<typeof LegalStandingCard>["dialogProps"];
@@ -122,6 +135,7 @@ export function FirmSettingsPanel(props: FirmSettingsPanelProps) {
 /** Exported for the structural/a11y/behaviour cells; production gets its period from the URL. */
 export function FirmSettingsPanelView({
   loaders = PRODUCTION_LOADERS,
+  setCaps,
   dialogProps,
   download,
   period,
@@ -215,6 +229,23 @@ export function FirmSettingsPanelView({
 
   const createdAt = commercial.status === "ready" ? commercial.data.firm.createdAt : null;
 
+  // #960 — THE CAP WRITE, and the re-read that always follows it. The op key is DETERMINISTIC in
+  // the caller and the exact edit (`lib/firm/capacity-doors.ts` says why), so a retry after a
+  // lost response replays the receipt the first call earned instead of re-entering the door.
+  // The re-read is unconditional — accepted, refused or unavailable — because the figures above
+  // the control belong to `clara.get_firm_commercial_state` and to nothing else, and because a
+  // refusal is exactly the moment the page's idea of the caps is most worth checking.
+  const saveCaps = useCallback(async (edits: ProcessingCapEdits): Promise<SetProcessingCapsOutcome> => {
+    const call = setCaps ?? ((e: ProcessingCapEdits) => setFirmDocumentLimits({
+      edits: e, opKey: processingCapsOpKey(scope.user_id ?? "", e),
+    }));
+    try {
+      return await call(edits);
+    } finally {
+      await readCommercial();
+    }
+  }, [setCaps, scope.user_id, readCommercial]);
+
   return (
     <div className="flex flex-col gap-4">
       <FirmIdentityCard createdAt={createdAt} />
@@ -234,7 +265,7 @@ export function FirmSettingsPanelView({
         onRetry={() => { void readUsage(period.month); }}
         download={download}
       />
-      <ProcessingCapacityCard view={commercial} />
+      <ProcessingCapacityCard view={commercial} save={saveCaps} />
       {/* The two legacy cards, rendered rather than re-typed — see this file's header. */}
       <SettingsPanel />
     </div>
