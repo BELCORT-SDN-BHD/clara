@@ -98,6 +98,12 @@ export type ActivityRow = {
   object_kind: "entry" | "document" | "resolution" | null;
   object_id: string | null;
   work_id: string | null;
+  /** #840 — the successor Work id for a `work.cancelled` row whose cancellation was a restatement
+   *  (#721); `null` for every other row, including an ordinary cancellation with no successor.
+   *  Additive: the door always projects the key, so this is never `undefined` on real data — a
+   *  test double that omits it renders identically to `null` (both are falsy to the link's own
+   *  `row.successor_work_id ?` check). */
+  successor_work_id: string | null;
   receipt_id: string | null;
   document_id: string | null;
   original_entry_id: string | null;

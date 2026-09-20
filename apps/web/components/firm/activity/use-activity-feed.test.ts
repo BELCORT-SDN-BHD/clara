@@ -50,6 +50,7 @@ function row(id: string, occurredAt: string, overrides: Partial<ActivityRow> = {
     id, source: "event", event_type: "document.filed", description: `row ${id}`,
     client_id: null, actor: "u1", on_behalf_of: null, via_wake_kind: null,
     occurred_at: occurredAt, object_kind: "document", object_id: id, work_id: null,
+    successor_work_id: null,
     receipt_id: null, document_id: id, original_entry_id: null, replacement_entry_id: null,
     status: null, kind: "documents",
     ...overrides,

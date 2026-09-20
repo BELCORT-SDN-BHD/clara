@@ -6200,6 +6200,7 @@
     "noClient": "No client",
     "linksToOriginal": "Links to the original entry it replaced.",
     "linksToReplacement": "Links to the entry that replaced it.",
+    "linksToSuccessor": "Links to the Work that superseded it.",
     "viewWork": "View Work",
     "viewObject": "View in books",
     "loading": "Loading activity…",
@@ -6226,6 +6227,7 @@
     "eventStatus": "Status",
     "eventOriginal": "Original",
     "eventReplacement": "Replacement",
+    "eventSuccessor": "Successor Work",
     "eventReceiptId": "Receipt",
     "eventBasisOrigin": "Basis origin"
   },

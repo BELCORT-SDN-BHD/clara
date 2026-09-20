@@ -23,6 +23,7 @@ import { Badge } from "@/components/parts/PartBadge";
 import { businessDateTime } from "@/lib/business-date";
 import {
   activityJournalsHref,
+  activityWorkHref,
   describeActivity,
   formatEventParam,
   isKnownActivityStatus,
@@ -136,6 +137,19 @@ export function ActivityRow({
           className="w-fit text-xs text-primary underline-offset-4 hover:underline"
         >
           {t("linksToReplacement")}
+        </Link>
+      ) : null}
+
+      {/* #840 — #721's ruling of 2026-09-12 (point 3): the successor Work links from a
+          `work.cancelled` row exactly as the correction pair above links between two entries. The
+          door projects `successor_work_id` additively (0262), null on every row that is not a
+          restated Work's own cancellation. */}
+      {row.client_id && row.successor_work_id ? (
+        <Link
+          href={activityWorkHref(row.client_id, row.successor_work_id)}
+          className="w-fit text-xs text-primary underline-offset-4 hover:underline"
+        >
+          {t("linksToSuccessor")}
         </Link>
       ) : null}
 
