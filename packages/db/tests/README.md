@@ -927,6 +927,71 @@ against the live catalog and against string variants of it, not merely reasoned 
 
 `EXPECTED_CELLS` (this file's own `os.VACUITY CONTROL`) is 19, one more than before this ticket.
 
+## `operator-support.test.mjs` `os.20` / `os.21` — #843 / migration 0263
+
+The operator console offers THREE support acts and, until this ticket, only one of them was
+readable anywhere: `clara.reject_firm_registration` has appended `firm_registration.rejected`
+since 0145 §D, while `clara.set_admission_capacity` and `clara.resolve_stripe_event_problem`
+stamped `clara.audit_log` and nothing else — and no door in the estate reads that table (os.13's
+firm-scoped SELECT is the only human reach). 0263 gives the two silent acts one
+`clara._append_event` each, registering `admission.capacity_set` and
+`stripe_event.problem_resolved` firm-level and routing both `context_update` at the active
+taxonomy version.
+
+**The read is `clara.list_activity`, not `clara.list_firm_timeline`.** #843's own 2026-09-20
+correction records that the latter (and `apps/web/lib/firm/timeline.ts`) retire under #998 and
+that #659 already swapped Firm Home's "Recent activity" band onto `clara.list_activity`. Both
+doors page the SAME `clara.firm_timeline_visible` view at the same bookkeeper floor, so only the
+read moved — the mechanism (one event under the operator firm, inside the reservation) is
+unaffected.
+
+**os.20** drives all three acts and reads them back by type, asserting actor, a null `client_id`,
+the registered description sentence and the KIND each lands on; then that another firm's owner
+reads none of the three; then that an operator-firm VIEWER meets CLR04 rather than an empty page.
+`firm_registration.rejected` is asserted FIRST as the control: it has been appended since 0145, so
+a page that cannot find it is a broken read rather than a missing event type.
+
+**The kind is the door's STATED DEFAULT (`documents`), decided rather than inherited.**
+`clara.list_activity`'s ladder (0202) recognises `sweep.run_completed`, `entry.%`, `document.%`,
+`close.%` and `work.%` and files everything else under `documents`. #843's correction asks the
+acceptance cell to settle this with #861 (the open recut of the same ladder) and say which: all
+three operator acts ride the default TOGETHER. The owner's #861 ruling fixes five new kinds —
+`people`, `assets`, `counterparties`, `clients`, `firm` (`firm.*`) — and none covers an admission
+act; `firm_registration.rejected` is not matched by `firm.%` either (its fifth character is `_`,
+and `.` is a literal in a LIKE pattern), so the already-visible act stays on the default after
+that recut too. A sixth kind would be new user-visible vocabulary, which is the owner's call. If
+#861 ever does give the operator acts a kind, os.20's `SUPPORT_EVENT_KIND` moves with it — the
+constant is spelled once, in `operator-support-fixtures.mjs`.
+
+**os.21** proves the replay half: the same op_key on both doors returns the original receipt and
+appends no second line, counted in `clara.domain_events` as root and then read back through the
+door. That is the reason both appends sit between `_reserve_op` and `_finish_op`, and 0263's tail
+asserts the POSITION (not merely the presence) of each one.
+
+**Frontier**: stem `operator_support_timeline_events$`, gate module
+`operator-support-timeline-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_OPERATOR_SUPPORT_TIMELINE=1`), wired into `package.json`'s `test` script in
+migration order after `activity-successor-link-preintegration-gate.mjs`. The FIRST #843 cell uses
+the LOUD discriminator (`assertSupportTimelineCohortPresent`) and the second the quiet
+`gateSupportTimeline`, the double-gate idiom `accrual-adjustments-fixtures.mjs` documents. Both
+cells ride 0188's stem as well, because every one of them builds its world through the #615
+fixtures.
+
+**`EXPECTED_CELLS` stays 19** and the two new cells are counted separately
+(`EXPECTED_TIMELINE_CELLS`), added to the expected total only when `supportTimelineLaneReady()` is
+true — so a database pinned between 0188 and 0263 reports a clean vacuity control instead of a
+false finding. (The four #776 name cells predate that shape and are still counted
+unconditionally; a database carrying 0188 and not 0206 would red the control. Untouched here,
+worth a follow-up.)
+
+**No new rig-meta cohort, and that is measured rather than omitted.** Both doors keep their
+existing cohorts (`CHECKOUT_CONVERGENCE_0186_COHORT`, `CHECKOUT_GATE_C2_HUMAN_FNS`): no new
+function name, no signature change, no grant change, each re-read by 0263's own §T. The file's
+other effect is reference data — two `clara.event_types` rows and their `clara.trigger_taxonomy`
+routing — which no cohort here enumerates; the estate's coverage law over the catalog lives in
+`rig-events-structure.test.mjs` §7, and 0263's tail re-reads that anti-join for itself. A `#843` /
+`#843 END` bracketed note beside the cohort records it, the same shape #840's note carries.
+
 ## `reset-gate-routing.test.mjs` — #845
 
 Every `reset()`-gated upgrade-drill suite (checkout-convergence, hrd-a/hrd-b, rig-docs,
