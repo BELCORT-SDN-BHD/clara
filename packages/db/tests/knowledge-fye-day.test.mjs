@@ -11,6 +11,11 @@
 //   AC3 — a firm-scope capture of the key is refused with the month key's typed reason (fd.04).
 //   AC4 — a committed onboarding plan with a day answer promotes to a knowledge value equal to
 //         the client row's day (fd.05).
+//   The ticket's "Desired behavior" also asks that a client's day on the client row and in
+//   Knowledge never disagree silently. That is NOT delivered (the setter and the client row's own
+//   check are the ticket's own out-of-scope); fd.06 measures exactly where the wall is -- the
+//   client row's door refuses an impossible pair -- and pins the disagreement that is left, so
+//   the owed follow-up has a cell to come back to.
 // AC5 (from-scratch apply with prestate and tail proof) is the migration's own prestate/tail
 // blocks, exercised by the single `pnpm db:migrate` apply this battery is gated on — RIG.md is
 // explicit that a lane never re-runs a second from-scratch chain on its own cluster.
@@ -20,7 +25,7 @@ import assert from "node:assert/strict";
 import { assertRaises, endPool, humanQuery, opk, rootQuery } from "./rig-fixtures.mjs";
 import { committedPlan, fyeDayCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 6;
 let live = false;
 let executed = 0;
 
@@ -182,4 +187,56 @@ cell("fd.05 a committed onboarding plan's day answer promotes to a knowledge val
     "the promoted month must equal the client row's own month");
   assert.equal(byKey.financial_year_end_day, client.rows[0].fy_end_day,
     "the promoted day must equal the client row's own day (AC4)");
+});
+
+cell("fd.06 an impossible month/day pair is a STATED fact in Knowledge, and is refused where the fact is AUTHORITATIVE -- so nothing in the estate can derive 31 February", async () => {
+  // WHY THIS CELL EXISTS. Review (ADV-03) drove the pair through the governed door and called it
+  // an accounting-correctness defect: clara.capture_knowledge accepts financial_year_end_day = 31
+  // for a client whose financial_year_end_month is 2, which clara.clients' own ck_clients_fy_end
+  // would refuse. 0240's header already says the catalog's bound is the coarse 1..31 on purpose
+  // (clara._knowledge_assert_value sees one key and one value; it has no sibling answer to read a
+  // month from) and delegates the calendar bound to the client row. Prose is not a wall, so this
+  // cell measures where the wall actually is -- and, at the end, measures the hole that is left,
+  // so that nobody reads the wall as closing it.
+  const w = await knowledgeWorld("fd6");
+
+  // (a) THE FINDING, REPRODUCED. Knowledge records what the firm SAID, and says it twice.
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 2, basis: "the client says their year ends in February" })).status, "captured");
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_day", client: w.clientA,
+    value: 31, basis: "the client says the 31st" })).status, "captured");
+
+  // (b) THE WALL, WHERE THE FACT BECOMES AUTHORITATIVE. clara.clients.fy_end_month/fy_end_day is
+  // what every fiscal-year read in this estate derives a date from, and its own door refuses the
+  // impossible pair with a typed refusal a person can act on -- not a raw constraint violation.
+  const refusal = await assertRaises("CLR37", () => setFyEnd(w.bookkeeper, w.clientA, 2, 31),
+    "setting the client row's financial year end to 31 February");
+  assert.equal(refusal.message,
+    "a financial-year end must be a real calendar day (month 1..12, day valid for that month)");
+
+  // (c) THE CONTROL, so (b) is about the PAIR and not about the door: the same caller, the same
+  // client, February's real last day, accepted.
+  const set = await setFyEnd(w.bookkeeper, w.clientA, 2, 28);
+  assert.equal(set.fy_end_month, 2);
+  assert.equal(set.fy_end_day, 28);
+
+  // (d) WHAT IS LEFT, MEASURED RATHER THAN ASSUMED, AND OWED. The two rows now disagree and
+  // nothing reconciles them: #898's own "Desired behavior" line ("a client's day on the client
+  // row and in Knowledge never disagree silently") is NOT delivered by this ticket, whose
+  // out-of-scope list holds the setter and the client row's check. The harm the review named --
+  // a read deriving an impossible date -- is not reachable today: nothing outside these
+  // migrations and their tests reads financial_year_end_day at all, and the interview refuses the
+  // pair at answer time (packages/runtime/workflows/interview.v4.questions.ts validateFyeDay is
+  // month-aware). When the follow-up lands -- a reconciliation across BOTH keys, or a read that
+  // shows the disagreement -- this assertion is what it has to come back and change.
+  const stated = (await rootQuery(
+    `select value from clara.knowledge_records
+      where client_id = $1 and knowledge_key = 'financial_year_end_day' and state = 'live'`,
+    [w.clientA])).rows[0].value;
+  const authoritative = (await rootQuery(
+    "select fy_end_day from clara.clients where id = $1", [w.clientA])).rows[0].fy_end_day;
+  assert.equal(stated, 31);
+  assert.equal(authoritative, 28);
+  assert.notEqual(stated, authoritative,
+    "#898's 'never disagree silently' clause is owed: Knowledge keeps the stated day and the client row keeps the lawful one, with nothing between them");
 });
