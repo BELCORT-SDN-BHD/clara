@@ -159,3 +159,37 @@ test("ticket 960 — an accepted save reports the resulting four caps; a refusal
     assert.match(refused.text(), /CLR10/, "and the code travels with it");
   } finally { await refused.unmount(); }
 });
+
+test("ticket 960 — a number the door's own argument type cannot carry is never sent", async () => {
+  // ADVERSARIAL REVIEW ADV-L10-05 (2026-09-20), MEASURED ON clara_l10: `2147483648` reaches
+  // `clara.set_firm_document_limits`'s `int` parameters and dies in the CAST, before the body's
+  // ceiling check can answer — a raw `22003 value ... is out of range for type integer` with no
+  // `detail.reason`, which `lib/wire.ts` cannot recognise as a governed refusal, so the card
+  // rendered `capacityUnavailable`: "That change could not be sent, so nothing was saved."
+  // That sentence is false on both halves (it WAS sent and it WAS refused) and invites a retry
+  // that can never succeed.
+  //
+  // WHAT THIS GUARD IS AND IS NOT. `2147483647` is the DOOR'S ARGUMENT TYPE — a wire fact this
+  // build legitimately knows — never the estate's ceiling, which stays where the header says it
+  // stays: in `clara._firm_document_limit_ceiling`, granted to nobody, learnt only from its own
+  // refusal sentence. So a number above the CEILING (10000) is still sent and still answered by
+  // the database, and only a number outside the ARGUMENT'S RANGE is stopped here.
+  const seen: ProcessingCapEdits[] = [];
+  const h = await mount({ status: "ready", data: STORED }, async (edits) => {
+    seen.push(edits);
+    return ACCEPTED;
+  });
+  try {
+    await h.act(() => { setFieldValue(fieldFor(h, "docs-per-day") as Stub, "2147483648"); });
+    assert.equal((saveButton(h) as { disabled?: boolean } | null)?.disabled, true,
+      "the control refuses to send it");
+    assert.match(h.text(), /whole number/i, "...and the field says what it will accept");
+
+    // THE OTHER SIDE OF THE BOUNDARY, so a green here cannot mean "the card refuses everything":
+    // the largest number the argument carries is sent, and the estate's own ceiling answers it.
+    await h.act(() => { setFieldValue(fieldFor(h, "docs-per-day") as Stub, "2147483647"); });
+    await clickButton(saveButton(h) as Stub);
+    await h.settle();
+    assert.deepEqual(seen, [{ docsPerDay: 2147483647 }]);
+  } finally { await h.unmount(); }
+});

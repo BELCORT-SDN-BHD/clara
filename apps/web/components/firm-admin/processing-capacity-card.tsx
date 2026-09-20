@@ -74,6 +74,10 @@ const FIELD: Record<ProcessingCap, { readonly id: string; readonly label: string
   llmWitnessConcurrency: { id: "firm-capacity-llm-witness-concurrency", label: "capacityWitnessConcurrency" },
 };
 
+/** INT4_MAX — the largest value `clara.set_firm_document_limits`'s `int` parameters carry. A
+ *  wire fact about the door's signature, never a policy number; see `submit`'s own note. */
+const DOOR_ARGUMENT_MAX = 2147483647;
+
 type Capacity = FirmCommercialState["capacity"];
 
 export function ProcessingCapacityCard({
@@ -103,13 +107,27 @@ export function ProcessingCapacityCard({
   // nothing (see the header: clearing is "leave this alone"); anything else must be a whole
   // number above zero, which mirrors the relation's own CHECKs — the door refuses the same
   // shapes with a typed CLR10, so this is a courtesy, never the wall.
+  //
+  // THE UPPER BOUND IS THE DOOR'S ARGUMENT TYPE, NOT THE ESTATE'S CEILING, and the difference is
+  // the whole of why it is here (adversarial review ADV-L10-05, 2026-09-20). A number above the
+  // CEILING is a question only `clara._firm_document_limit_ceiling` may answer — it is granted
+  // to nobody, its sentence is the only place this build learns the number, and re-stating it
+  // here would be a second copy of a policy free to drift. A number above INT4_MAX is a
+  // different kind of fact: `clara.set_firm_document_limits` declares `int` parameters, so such
+  // a value dies in the CAST before the body runs, as a raw `22003` with no `detail.reason` that
+  // `lib/wire.ts` cannot classify — and the card would report "could not be sent, so nothing was
+  // saved", which is false on both halves. This is the field saying what it can carry.
+  //
+  // NAMED RESIDUAL: a caller reaching the RPC directly still meets that raw 22003. Closing it
+  // needs the door's four parameters widened to `bigint` (the body's ceiling check then answers
+  // every number a caller can send with a typed CLR10) — see this ticket's fix report.
   let malformed = false;
   const edits: ProcessingCapEdits = {};
   for (const cap of PROCESSING_CAPS) {
     const raw = shown(cap).trim();
     if (raw === "") continue;
     const parsed = Number(raw);
-    if (!Number.isInteger(parsed) || parsed <= 0) { malformed = true; continue; }
+    if (!Number.isInteger(parsed) || parsed <= 0 || parsed > DOOR_ARGUMENT_MAX) { malformed = true; continue; }
     if (parsed !== stored(cap)) edits[cap] = parsed;
   }
   const pending = Object.keys(edits).length > 0;

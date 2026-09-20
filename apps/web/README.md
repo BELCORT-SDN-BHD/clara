@@ -1074,6 +1074,27 @@ sentence that NAMES the number, and this build renders that sentence verbatim be
 only place it learns it. A firm with no stored row still renders as a named zero, and its fields
 start empty.
 
+WHAT THAT CEILING ACTUALLY BOUNDS IS **ONE FIRM**, NOT THE ESTATE (adversarial review ADV-L10-07,
+2026-09-20). 0270's §A header justifies the two concurrency numbers by the estate running one
+always-on `clara-runtime` machine, but the enforcement it bounds is per-firm:
+`clara.claim_document_processing_task` counts this firm's own running `ocr`/`invoice_facts`/
+`statement_facts` tasks against this firm's own `ocr_concurrency`, and there is no estate-wide
+counter anywhere in that body. Before #960 every firm sat at the 2/2 fallback because the relation
+had no human writer at all; after it, N firms at 16 give 16N concurrent tasks against the one
+machine with no backstop. Nothing in #960's acceptance criteria is broken by that — a firm still
+cannot exceed its own ceiling, which is what the door promises — but the estate-wide backstop the
+justification implies does not exist, and is a follow-up for the owner to rule on rather than
+something this door can carry. The per-firm number stays where it is meanwhile.
+
+THE UPPER BOUND ON WHAT A FIELD WILL SEND IS THE DOOR'S ARGUMENT TYPE, NOT THAT CEILING
+(adversarial review ADV-L10-05). `clara.set_firm_document_limits` declares `int` parameters, so a
+value above INT4_MAX dies in the cast before the body's ceiling check can answer, as a raw `22003`
+that `lib/wire.ts` cannot classify as a governed refusal — the card then said "could not be sent,
+so nothing was saved", which is false on both halves. `ProcessingCapacityCard` now refuses to send
+such a value and says what the field accepts. NAMED RESIDUAL: a caller reaching the RPC directly
+still meets that raw 22003; closing it needs the four parameters widened to `bigint` so the body's
+own `v_asked > ceiling` check answers every number a caller can send.
+
 **Revocation is focus-driven, not push-driven, and not a poll.** `FirmSettingsPanel` re-issues both
 governed reads on `visibilitychange`→visible and on window `focus`, and a CLR04 REPLACES the view:
 the `denied` state has no `data` field, so a live demotion cannot leave a stale plan or payment
