@@ -1722,8 +1722,9 @@ export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 // present or wholly absent" reason 0178's list carries.
 //
 //   the TWO doors + the ONE helper — clara_authenticated ONLY. `list_accounting_work` and
-//   `get_accounting_work_row` are SECURITY INVOKER over three already-granted, firm-scoped
-//   sources (clara.accounting_work, clara.agent_interruptions, clara.clients) with their own
+//   `get_accounting_work_row` are SECURITY INVOKER over already-granted, firm-scoped sources
+//   (clara.accounting_work, clara.agent_interruptions, clara.clients and — since #880's
+//   claim_id/claimant_label widen, migration 0266 — clara.staff_expense_claims) with their own
 //   inline bookkeeper floor; `_work_run_attempts` is the SECURITY DEFINER helper they need
 //   because `clara.agent_tasks` carries NO clara_authenticated grant at all (humans read the
 //   masked `clara.agent_tasks_visible`, which does not republish `work_id`) — the SAME gap, and

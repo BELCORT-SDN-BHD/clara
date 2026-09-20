@@ -35,6 +35,12 @@ import {
   insertUser, addMember, deactivateMember, takeOverAccountingWork,
 } from "./work-cancel-fixtures.mjs";
 import { parkedWork } from "./work-question-fixtures.mjs";
+// #880 [0266] widens the SAME two doors a third time, with clara.staff_expense_claims's own claim
+// builders — imported directly rather than through staff-expense-claim.test.mjs's own larger
+// world, so this file's gate stays independent of that lane's own fixture surface. 0221 sits BELOW
+// 0266 on the chain (strict migration order), so `claimLabelReady()` alone is the honest frontier:
+// a database old enough to carry 0266 has already applied 0221.
+import { admitStaffExpenseClaimWork, claim, ensureSecChart } from "./staff-expense-claim-fixtures.mjs";
 
 const CLR04 = "CLR04";
 const CLR06 = "CLR06";
@@ -84,6 +90,31 @@ async function intentKeyReady() {
 async function gateIntentKey(t) {
   if (await intentKeyReady()) return false;
   t.skip(`#809 intent_key projection absent (no ${INTENT_KEY_STEM} migration applied)`);
+  return true;
+}
+
+// #880 — the claim_id/claimant_label widen lives in ITS OWN migration (0266), a separate frontier
+// again: a slice-frontier CI leg can be pinned at 0203 (or anywhere below 0266), before this widen
+// lands, and the cell below must skip cleanly there rather than red on fields that do not exist
+// yet.
+const CLAIM_LABEL_STEM = "work_list_claim_label$";
+let _claimLabelReady = null;
+async function claimLabelReady() {
+  if (_claimLabelReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [CLAIM_LABEL_STEM]);
+      _claimLabelReady = r.rows[0].n > 0;
+    } catch {
+      _claimLabelReady = false;
+    }
+  }
+  return _claimLabelReady;
+}
+
+async function gateClaimLabel(t) {
+  if (await claimLabelReady()) return false;
+  t.skip(`#880 claim_id/claimant_label projection absent (no ${CLAIM_LABEL_STEM} migration applied)`);
   return true;
 }
 
@@ -909,4 +940,65 @@ test("wl.28 every list row carries a non-empty intent_key, and the addressed-row
   // "a list of operations is not a ledger" stands.
   assert.equal("basis" in listed, false, "wl.28 no basis object joined the list row");
   assert.equal("basis" in addressed, false, "wl.28 …nor the addressed row");
+});
+
+// ===========================================================================================
+// wl.29 — #880: THE CLAIM LABEL, ON ONE PAGE, WITHOUT A SECOND ROUND TRIP.
+//
+// A staff expense claim posts under the plain `journal_entry` purpose (0221's own header: a
+// fourth purpose cannot post through the closed core), so before migration 0266 the list's own
+// projection could not tell one apart from an ordinary journal entry — the Work detail alone
+// could, through a SEPARATE per-Work call to `clara.get_work_claim_origin`. AC1 asks for "at most
+// one additional round trip" to resolve every claim label on a page; this cell proves the
+// STRONGER fact the additive-projection choice buys — ZERO additional round trips, because the
+// fields ride the SAME page `listWork` already fetched. AC2 asks that a non-claim row is
+// unchanged; this cell puts a plain journal Work on the SAME page as the claim, so one page proves
+// both ACs against the SAME query.
+// ===========================================================================================
+test("wl.29 a page carrying a claim resolves its label with NO extra round trip, and a plain row is unchanged", async (t) => {
+  if (await gate(t)) return;
+  if (await gateClaimLabel(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl29");
+  await ensureSecChart(ALICE(), client, "wl29");
+
+  const claimed = await admitStaffExpenseClaimWork({ client, author: ALICE(), claim: claim() });
+  const plain = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "wl29 plain" }) });
+
+  // --- AC1: the LIST page itself carries the label — no second call to any door. ------------
+  const page = await listWork(BOB(), { client, limit: 25 });
+  const claimRow = page.rows.find((r) => r.id === claimed.work_id);
+  assert.ok(claimRow, "wl.29 the claim Work is on the page");
+  assert.equal(claimRow.claim_id, claimed.claim_id,
+    "wl.29 the list row's claim_id IS the claim admission answered with — no re-derivation");
+  assert.equal(claimRow.claimant_label, "Farah binti Idris",
+    "wl.29 the list row carries the claimant label the door enrolled");
+  assert.equal(claimRow.purpose, "journal_entry",
+    "wl.29 the Work's own purpose is still the plain, unwidened journal_entry (0221's own rule) — "
+    + "claim_id is how the caller tells it apart, not a fourth purpose value");
+
+  // …AND THE ADDRESSED ROW AGREES (AC4's "the two Work projections still match", re-proved from
+  // the outside; migration 0266's own §T step 7 proves it from the catalog).
+  const claimAddressed = await getWorkRow(BOB(), claimed.work_id);
+  assert.equal(claimAddressed.claim_id, claimed.claim_id, "wl.29 the addressed row carries the SAME claim_id");
+  assert.equal(claimAddressed.claimant_label, "Farah binti Idris", "wl.29 …and the SAME claimant_label");
+
+  // --- AC2: the PLAIN row on the SAME page is unchanged — both new fields null, everything else
+  // exactly as wl.1–wl.28 already prove for a plain journal Work. --------------------------
+  const plainRow = page.rows.find((r) => r.id === plain.work_id);
+  assert.ok(plainRow, "wl.29 the plain Work is on the SAME page as the claim");
+  assert.equal(plainRow.claim_id, null, "wl.29 a plain journal Work has NO claim_id");
+  assert.equal(plainRow.claimant_label, null, "wl.29 …nor a claimant_label");
+  assert.equal(plainRow.memo, "wl29 plain", "wl.29 the plain row's own memo is untouched");
+
+  const plainAddressed = await getWorkRow(BOB(), plain.work_id);
+  assert.equal(plainAddressed.claim_id, null, "wl.29 the plain Work's addressed row agrees: no claim_id");
+  assert.equal(plainAddressed.claimant_label, null, "wl.29 …nor a claimant_label");
+
+  // AC3, restated as a machine fact rather than a promise: get_work_claim_origin (the Work
+  // detail's own existing read) is a SEPARATE function this migration never touches — its
+  // signature and body are exactly what 0221 shipped.
+  const origin = (await rootQuery(
+    "select encode(sha256(convert_to(prosrc,'UTF8')),'hex') as sha from pg_proc"
+    + " where oid = 'clara.get_work_claim_origin(uuid)'::regprocedure")).rows[0];
+  assert.ok(origin, "wl.29 clara.get_work_claim_origin still resolves, untouched by this migration");
 });
