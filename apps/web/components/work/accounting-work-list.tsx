@@ -189,6 +189,8 @@ export function AccountingWorkList({
     initiator: state.initiator,
     since: state.since,
     until: state.until,
+    receiptSince: state.receiptSince,
+    receiptUntil: state.receiptUntil,
     q: state.q,
   };
 

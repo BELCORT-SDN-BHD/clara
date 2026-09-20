@@ -256,11 +256,19 @@ export async function getClientWorkPack(
  *   active          `?status=queued,running` — the door's own pair. "Retrying" is NOT a member of
  *                   0189's status roster, so it cannot be a filter; the tile discloses the retry
  *                   subset on its preview rows instead.
- *   recent_success  `?status=completed` plus the pack's OWN window dates. `since`/`until` are
- *                   business-timezone calendar days, and the list turns them back into exactly
- *                   the half-open instant range the door used — so the drilldown is the same week
- *                   as the tile. A window this build could not read contributes no dates at all
- *                   rather than a guessed week.
+ *   recent_success  `?status=completed` plus the pack's OWN window dates, ON THE RECEIPT AXIS
+ *                   (`receiptSince`/`receiptUntil`, #905 — `clara.list_accounting_work`'s
+ *                   `p_receipt_since`/`p_receipt_until`, migration 0267) rather than `since`/
+ *                   `until`. The tile counts a COMMITTED RECEIPT inside the window (0214); before
+ *                   #905 the list could only fence admission, so the two populations diverged in
+ *                   two named ways (round-1 review, finding 650-B1,
+ *                   `p650.pack.recent_success_drilldown`). Routing the SAME two calendar dates
+ *                   through the receipt axis instead closes that gap: the drilldown is now the
+ *                   SAME WORKS the tile counted, not merely the same week over a different
+ *                   subject. `since`/`until` are business-timezone calendar days, and the list
+ *                   turns them back into exactly the half-open instant range the door used against
+ *                   the receipt. A window this build could not read contributes no dates at all
+ *                   rather than a guessed week (`workAttentionWindowDates`'s own null case).
  */
 export function workAttentionHref(
   kind: WorkAttentionFacetKind,
@@ -281,8 +289,8 @@ export function workAttentionHref(
   const dates = workAttentionWindowDates(pack);
   return `${base}?${applyWorkListUrlState(empty, {
     status: ["completed"],
-    since: dates?.from ?? null,
-    until: dates?.to ?? null,
+    receiptSince: dates?.from ?? null,
+    receiptUntil: dates?.to ?? null,
   }).toString()}`;
 }
 
@@ -290,11 +298,13 @@ export function workAttentionHref(
  * IS THE RECENT-SUCCESS DRILLDOWN DATED AT ALL, AND WITH WHICH TWO DAYS.
  *
  * ONE predicate with THREE readers — the href builder above, the instant rebuilder below, and the
- * board's own disclosure sentence (`client-work-attention.tsx`). The board has to ask because the
- * sentence it prints beside the count promises a seven-day narrowing, and on an unreadable window
- * the link carries no dates at all: that promise would be false on the one arm where the builder
- * deliberately drops them (round-2 review, 650-R2). Two spellings of this question is exactly how
- * a tile and the link under it drift apart, so there is one.
+ * board's own "dates unreadable" disclosure (`client-work-attention.tsx`). Before #905 the board
+ * also used this to choose a SECOND sentence — the admission-vs-receipt mismatch disclosure — but
+ * that sentence is retired now that the href routes through the receipt axis and the two
+ * populations agree (AC5); the ONE thing left worth disclosing is the round-2 case where a window
+ * this build could not read makes the link open every completed Work instead of the last seven
+ * days (650-R2), which this same predicate still decides. Two spellings of "is the window
+ * readable" is exactly how a tile and the link under it would drift apart, so there is one.
  */
 export function workAttentionWindowDates(
   pack: ClientWorkPack,

@@ -227,29 +227,35 @@ test("active → status=queued,running, and the two words are the door's own", (
   assert.equal(state.since, null, "an activity window is not part of 'what is running now'");
 });
 
-test("recent success → status=completed plus the pack's OWN window dates, which rebuild the same instants", () => {
+test("recent success → status=completed plus the pack's OWN window dates, ON THE RECEIPT AXIS — #905", () => {
   const pack = hydrateClientWorkPack(envelope());
   const href = workAttentionHref("recent_success", CLIENT, pack);
   const state = parse(href);
   assert.deepEqual(state.status, ["completed"]);
-  assert.equal(state.since, "2026-09-10");
-  assert.equal(state.until, "2026-09-16");
+  // #905: the receipt-dated axis, not the admission-dated `since`/`until` — the whole point of
+  // the fix is that this drilldown fences the SAME instant the tile counts by (a committed
+  // receipt), not when each Work was admitted.
+  assert.equal(state.receiptSince, "2026-09-10");
+  assert.equal(state.receiptUntil, "2026-09-16");
+  assert.equal(state.since, null, "the admission axis is not touched by this facet's link");
+  assert.equal(state.until, null);
 
   // THE PROPERTY THAT MAKES THE DRILLDOWN THE SAME WEEK AS THE TILE. The list converts these two
   // calendar days back into instants with the same business-day helpers, and those instants are
-  // the half-open range the door itself used.
-  assert.equal(businessDayStart(state.since!), "2026-09-10T00:00:00.000+08:00");
-  assert.equal(businessDayEnd(state.until!), "2026-09-17T00:00:00.000+08:00");
-  assert.equal(new Date(businessDayStart(state.since!)).toISOString(), pack.window!.from);
-  assert.equal(new Date(businessDayEnd(state.until!)).toISOString(), pack.window!.to);
+  // the half-open range the door itself used to count the tile — now against the receipt, not
+  // the admission instant.
+  assert.equal(businessDayStart(state.receiptSince!), "2026-09-10T00:00:00.000+08:00");
+  assert.equal(businessDayEnd(state.receiptUntil!), "2026-09-17T00:00:00.000+08:00");
+  assert.equal(new Date(businessDayStart(state.receiptSince!)).toISOString(), pack.window!.from);
+  assert.equal(new Date(businessDayEnd(state.receiptUntil!)).toISOString(), pack.window!.to);
 });
 
 test("an unreadable window drops the dates rather than guessing them — the status filter still stands", () => {
   const pack = hydrateClientWorkPack(envelope({ window: { timezone: "Asia/Kuala_Lumpur" } }));
   const state = parse(workAttentionHref("recent_success", CLIENT, pack));
   assert.deepEqual(state.status, ["completed"]);
-  assert.equal(state.since, null, "a date this build did not read is not invented");
-  assert.equal(state.until, null);
+  assert.equal(state.receiptSince, null, "a date this build did not read is not invented");
+  assert.equal(state.receiptUntil, null);
 });
 
 // ===========================================================================================

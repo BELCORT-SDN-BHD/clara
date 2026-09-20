@@ -99,7 +99,10 @@ export type WorkListPage = {
 };
 
 /** The filter axes the door takes. `since`/`until` are business-timezone CALENDAR DAYS here and
- *  are converted to the `[since, until)` instant range at the wire, exactly once. */
+ *  are converted to the `[since, until)` instant range at the wire, exactly once. `receiptSince`/
+ *  `receiptUntil` (#905, `p_receipt_since`/`p_receipt_until` — migration 0267) are the SAME
+ *  calendar-day shape, over the door's OTHER date bound: a Work's own committed receipt instead
+ *  of its admission instant. A Work with no committed receipt satisfies neither. */
 export type WorkListFilters = {
   client?: string | null;
   status?: readonly string[] | null;
@@ -107,6 +110,8 @@ export type WorkListFilters = {
   initiator?: string | null;
   since?: string | null;
   until?: string | null;
+  receiptSince?: string | null;
+  receiptUntil?: string | null;
   q?: string | null;
 };
 
@@ -128,6 +133,8 @@ export async function listAccountingWorkPage(
       p_purpose: filters.purpose && filters.purpose.length > 0 ? [...filters.purpose] : null,
       p_since: filters.since ? businessDayStart(filters.since) : null,
       p_until: filters.until ? businessDayEnd(filters.until) : null,
+      p_receipt_since: filters.receiptSince ? businessDayStart(filters.receiptSince) : null,
+      p_receipt_until: filters.receiptUntil ? businessDayEnd(filters.receiptUntil) : null,
       p_q: filters.q && filters.q.trim() !== "" ? filters.q.trim() : null,
       p_cursor: opts.cursor ?? null,
       p_limit: limit,

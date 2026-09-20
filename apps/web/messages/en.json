@@ -799,7 +799,6 @@
     "partialUndated": "{n, plural, one {# completed Work carries no receipt, so it cannot be dated and is not counted} other {# completed Works carry no receipt, so they cannot be dated and are not counted}}.",
     "partialGeneric": "Part of this answer is not being made.",
     "retryNotFilterable": "The list cannot filter by retrying — open a row to see its runs.",
-    "recentSuccessListBasis": "The list behind this number is dated by when each Work started, not when it posted — the same seven days, not always the same Works.",
     "recentSuccessListUndated": "The dates behind this number could not be read, so the link opens every completed Work for this client — not only the last seven days.",
     "needsYouSourceNote": "The same number is also chipped under Needs your attention below; it is read once, from the review queue.",
     "needsYouListFloor": "Opening the Work list needs a bookkeeper role, so this number may be all of it you can see.",

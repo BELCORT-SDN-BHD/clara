@@ -102,6 +102,9 @@ test("every filter axis reaches the door under its own parameter name", async ()
           initiator: USER,
           since: "2026-09-01",
           until: "2026-09-30",
+          // #905 — the door's OTHER date bound, over a Work's own committed receipt.
+          receiptSince: "2026-09-05",
+          receiptUntil: "2026-09-20",
           q: "rent",
         },
         { session, limit: 50, cursor: "page2" },
@@ -119,6 +122,9 @@ test("every filter axis reaches the door under its own parameter name", async ()
         // that day's last sub-millisecond — `created_at` carries microsecond precision.
         p_since: "2026-09-01T00:00:00.000+08:00",
         p_until: "2026-10-01T00:00:00.000+08:00",
+        // #905 — the SAME business-day conversion, applied to the receipt-dated bound.
+        p_receipt_since: "2026-09-05T00:00:00.000+08:00",
+        p_receipt_until: "2026-09-21T00:00:00.000+08:00",
         p_q: "rent",
         p_cursor: "page2",
         p_limit: 50,

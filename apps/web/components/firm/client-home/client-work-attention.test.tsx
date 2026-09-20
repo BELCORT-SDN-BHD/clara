@@ -145,7 +145,7 @@ test("the three tiles carry the three numbers, each a link into its OWN scoped l
     assert.ok(links.includes(`/clients/${CLIENT}/work?view=needs-you`), links.join(" | "));
     assert.ok(links.includes(`/clients/${CLIENT}/work?status=queued%2Crunning`), links.join(" | "));
     assert.ok(
-      links.includes(`/clients/${CLIENT}/work?status=completed&since=2026-09-10&until=2026-09-16`),
+      links.includes(`/clients/${CLIENT}/work?status=completed&receiptSince=2026-09-10&receiptUntil=2026-09-16`),
       links.join(" | "),
     );
     // And each preview row is a link to the Work's own address.
@@ -154,29 +154,30 @@ test("the three tiles carry the three numbers, each a link into its OWN scoped l
 });
 
 // ===========================================================================================
-// THE DRILLDOWN SAYS WHAT IT IS DATED BY (round-1 review, finding 650-B1).
+// THE DRILLDOWN NO LONGER NEEDS TO DISCLOSE A MISMATCH (round-1 review, finding 650-B1, closed
+// by #905/migration 0267).
 //
-// The recent-success tile counts a COMMITTED RECEIPT inside the seven Malaysian dates; the list
-// its number opens fences `clara.accounting_work.created_at` — when the Work was STARTED
-// (0189:427-428). There is no receipt-dated axis on that door, so the drilldown is the same week
-// over a different subject, and the divergence is measured, not assumed:
-// `packages/db/tests/client-work-pack.test.mjs` `p650.pack.recent_success_drilldown` builds both
-// classes on the rig. The board's obligation is therefore the same one it already carries for
-// "retrying": name the filter the list CAN express and disclose the part it cannot, rather than
-// let a number imply a page it does not open.
+// Before #905 the recent-success tile counted a COMMITTED RECEIPT inside the seven Malaysian
+// dates while the list its number opened fenced `clara.accounting_work.created_at` — when the
+// Work was STARTED — so the board had to say the two were the same week over different subjects.
+// `workAttentionHref` now sends the SAME two dates on the door's receipt-dated axis
+// (`receiptSince`/`receiptUntil`), so the drilldown opens the SAME Works the tile counted, and
+// `packages/db/tests/client-work-pack.test.mjs`'s `p650.pack.recent_success_drilldown` now
+// asserts agreement rather than divergence. The disclosure sentence this cell used to pin
+// (`recentSuccessListBasis`) is GONE — AC5's own line — and this cell is the negative proof: it
+// is not on screen for any tile, dated or not.
 // ===========================================================================================
-test("the recent-success count DISCLOSES what its list is dated by — the same week, not the same Works", async () => {
+test("the recent-success tile no longer discloses an admission-vs-receipt mismatch — the sentence is gone", async () => {
   const h = await mount();
   try {
     const text = h.text();
-    assert.match(text, /dated by when each Work started, not when it posted/,
-      "the tile says which instant its drilldown fences on");
-    // ONCE, and on the tile that owns it. "Running now" links to a status-only filter with no
-    // dates at all, so the sentence would be false there.
-    assert.equal(text.match(/dated by when each Work started/g)?.length, 1);
-    const beforeActive = text.split("Running now")[0] ?? "";
-    assert.ok(!beforeActive.includes("dated by when each Work started"),
-      "the disclosure belongs to the dated facet, not to the one with no window");
+    assert.ok(!text.includes("dated by when each Work started"),
+      "AC5: the tile's mismatch sentence is retired now that the drilldown is receipt-dated");
+    // The link itself is the positive proof: it carries the receipt axis, not the admission one.
+    assert.ok(hrefs(h).some((href) => href.includes("receiptSince=") && href.includes("receiptUntil=")),
+      hrefs(h).join(" | "));
+    assert.ok(!hrefs(h).some((href) => href.includes("/work?status=completed&since=")),
+      "the recent-success link must not fence admission — that would be the retired mismatch again");
   } finally { await h.unmount(); }
 });
 
@@ -187,24 +188,22 @@ test("with nothing to open, there is no drilldown and therefore nothing to discl
   try {
     assert.match(h.text(), /No Work finished for this client in the last seven days\./);
     assert.ok(!h.text().includes("dated by when each Work started"),
-      "an empty facet offers no link, so it makes no promise to qualify");
+      "an empty facet offers no link, and the sentence it would have qualified is retired anyway");
   } finally { await h.unmount(); }
 });
 
 // ===========================================================================================
-// AND THE ONE ARM WHERE THAT SENTENCE WOULD OVERSTATE (round-2 review, finding 650-R2).
+// THE ONE REMAINING DISCLOSURE (round-2 review, finding 650-R2) — unaffected by #905.
 //
-// `workAttentionHref` deliberately drops BOTH dates when the window is unreadable — a date this
-// build did not read is not invented (`lib/work/client-work-pack.ts`, pinned by
-// `client-work-pack.test.ts` "an unreadable window drops the dates rather than guessing them").
-// The link that comes out opens EVERY completed Work this client has ever had, so "the same
-// seven days" is false on exactly that link: the disclosure would be promising a narrowing the
-// URL does not carry. The honest move is not silence — a bare `?status=completed` link under a
-// seven-day count needs MORE explanation, not less — so the tile says the wider thing instead.
-// Defensive arm: the door always publishes a window, and nothing in the estate is known to
-// produce one without dates.
+// `workAttentionHref` deliberately drops BOTH dates, on EITHER axis, when the window is
+// unreadable — a date this build did not read is not invented (`lib/work/client-work-pack.ts`,
+// pinned by `client-work-pack.test.ts` "an unreadable window drops the dates rather than guessing
+// them"). The link that comes out opens EVERY completed Work this client has ever had, so the
+// honest move is not silence — a bare `?status=completed` link under a seven-day count needs MORE
+// explanation, not less — so the tile names the wider population. Defensive arm: the door always
+// publishes a window, and nothing in the estate is known to produce one without dates.
 // ===========================================================================================
-test("a window this build could not read makes the disclosure say the WIDER thing, not the false one", async () => {
+test("a window this build could not read makes the disclosure say the WIDER thing", async () => {
   const h = await mount({ load: async () => pack({
     window: {
       from: null, to: null, fromDate: null, toDate: null,
@@ -212,20 +211,20 @@ test("a window this build could not read makes the disclosure say the WIDER thin
     },
   }) });
   try {
-    // The link really is dateless — this cell is about the SENTENCE that sits beside it.
+    // The link really is dateless, on EITHER axis — this cell is about the SENTENCE beside it.
     assert.ok(hrefs(h).includes(`/clients/${CLIENT}/work?status=completed`), hrefs(h).join(" | "));
-    assert.ok(!h.text().includes("the same seven days"),
-      "a dateless link does not open the same seven days, so the tile must not say it does");
     assert.match(h.text(), /opens every completed Work for this client/,
       "the tile names the wider population the link actually carries");
   } finally { await h.unmount(); }
 });
 
-test("a readable window keeps the narrow disclosure — the wider sentence is not the default", async () => {
+test("a readable window carries NO undated-window disclosure — the wider sentence is not the default", async () => {
   const h = await mount();
   try {
-    assert.match(h.text(), /dated by when each Work started, not when it posted/);
-    assert.ok(!h.text().includes("opens every completed Work for this client"));
+    assert.ok(!h.text().includes("opens every completed Work for this client"),
+      "the round-2 fallback sentence belongs to the unreadable-window arm only");
+    assert.ok(hrefs(h).some((href) => href.includes("receiptSince=2026-09-10")),
+      "and the readable window's own dates are on the link, not merely implied");
   } finally { await h.unmount(); }
 });
 

@@ -172,19 +172,23 @@ const WORK_PACK = {
  * built from, rather than from a hard-coded empty page (round-1 review, finding 650-S1).
  *
  * An empty list passes every URL assertion no matter what the URL means, which is precisely how
- * finding 650-B1 shipped green through a db battery, 48 web cells and a nine-leg walk. These rows
- * are `clara.list_accounting_work`'s own projection shape (0189:445-470) and the handler below
- * applies the door's own fences: `p_status` against `status`, and `p_since`/`p_until` against
- * `created_at` — the ADMISSION instant, which is the whole point.
+ * finding 650-B1 shipped green through a db battery, 48 web cells and a nine-leg walk before
+ * #905/migration 0267 closed it. These rows are `clara.list_accounting_work`'s own projection
+ * shape (0189:445-470) and the handler below applies the door's own fences: `p_status` against
+ * `status`, `p_since`/`p_until` against `created_at` (the ADMISSION instant), and — since #905 —
+ * `p_receipt_since`/`p_receipt_until` against each row's own committed-receipt instant, held
+ * OFF the row payload in `RECEIPT_COMMITTED_AT` below exactly as the real door's LATERAL join
+ * does not project one either (#905 is a FILTER widen, never a projection widen).
  *
- * So the fixture carries the two divergence classes the rig measured
- * (`packages/db/tests/client-work-pack.test.mjs` `p650.pack.recent_success_drilldown`):
- *   · "Bank fee" is the recent-success tile's one row — a committed receipt on 2026-09-15 — and
- *     it was ADMITTED on 2026-08-20, before the window, so the list it links to drops it.
- *   · "Rates accrual" was admitted and completed inside the window with no receipt, so the list
- *     returns it and the tile never counted it.
- * A walk that asserted "the drilldown shows exactly the tile's Works" would be asserting a
- * falsehood; what it asserts instead is that the board SAID so before the person clicked.
+ * BEFORE #905 the fixture carried two divergence classes
+ * (`packages/db/tests/client-work-pack.test.mjs` `p650.pack.recent_success_drilldown`, its
+ * pre-#905 text preserved in git history): "Bank fee" was admitted before the admission-dated
+ * window and dropped by the list despite being the tile's own row; "Rates accrual" was admitted
+ * inside the window with no receipt and returned by the list despite the tile never counting it.
+ * NOW THE DRILLDOWN ROUTES THROUGH THE RECEIPT AXIS, so "Bank fee" (committed 2026-09-15, inside
+ * the window) is IN and "Rates accrual" (no committed receipt at all) is OUT of both — the tile
+ * and the list agree, and this walk is the browser-level proof of the SAME convergence
+ * `p650.pack.recent_success_drilldown` now asserts on the rig.
  */
 const LIST_ROW_BASE = {
   client_id: CLIENT_ACTIVE,
@@ -219,26 +223,54 @@ const LIST_ROWS = [
     memo: "Payroll run", purpose: "payroll_obligation", created_at: "2026-09-16T00:00:00.000Z" },
   { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999994", status: "queued",
     memo: "Depreciation posting", created_at: "2026-09-15T23:00:00.000Z" },
-  // CLASS 1 — in the tile, not in the list.
+  // ADMITTED LONG AGO, COMMITTED INSIDE THE WINDOW — the tile's own recent-success row. Before
+  // #905 the admission-dated list dropped this one; the receipt-dated axis is exactly what lets
+  // it appear now (`RECEIPT_COMMITTED_AT` below carries its committed instant).
   { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999993", status: "completed",
     memo: "Bank fee", receipt_id: "r1", entry_id: "e1", created_at: "2026-08-20T02:00:00.000Z" },
-  // CLASS 2 — in the list, not in the tile.
+  // ADMITTED INSIDE THE ADMISSION WINDOW, NO COMMITTED RECEIPT AT ALL — excluded from BOTH axes
+  // post-#905 (a receipt-dated bound never dates a Work by something else), where it used to
+  // leak into the admission-dated drilldown despite the tile never counting it.
   { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999995", status: "completed",
     memo: "Rates accrual", created_at: "2026-09-14T02:00:00.000Z" },
 ];
 
-/** `clara.list_accounting_work`'s own fences, applied to the fixture: status membership, and a
- *  HALF-OPEN `[p_since, p_until)` over `created_at` (0189:427-428). */
+/** Committed-receipt instants, held OFF the row payload — `clara.list_accounting_work` does not
+ *  project one (#905/migration 0267 is a FILTER widen, never a projection widen); this map is the
+ *  mock's own stand-in for the real door's LATERAL join to `clara.operation_receipts`. Only
+ *  "Bank fee" has one, matching `WORK_PACK`'s own `recent_success.rows[0].committed_at` above —
+ *  the SAME instant the tile counts by. */
+const RECEIPT_COMMITTED_AT: Record<string, string> = {
+  "99999999-9999-4999-8999-999999999993": "2026-09-15T02:00:00.000Z",
+};
+
+/** `clara.list_accounting_work`'s own fences, applied to the fixture: status membership, a
+ *  HALF-OPEN `[p_since, p_until)` over `created_at` (0189:427-428, admission), and — since #905 —
+ *  a HALF-OPEN `[p_receipt_since, p_receipt_until)` over each row's own committed-receipt
+ *  instant. A row with none satisfies neither half of the receipt-dated bound, exactly as the
+ *  real door's LATERAL join answers NULL for it. */
 function listWorkPage(body: unknown): { rows: unknown[]; next_cursor: null; truncated: false } {
-  const b = (body ?? {}) as { p_status?: string[] | null; p_since?: string | null; p_until?: string | null };
+  const b = (body ?? {}) as {
+    p_status?: string[] | null; p_since?: string | null; p_until?: string | null;
+    p_receipt_since?: string | null; p_receipt_until?: string | null;
+  };
   const status = Array.isArray(b.p_status) && b.p_status.length > 0 ? b.p_status : null;
   const since = typeof b.p_since === "string" ? Date.parse(b.p_since) : null;
   const until = typeof b.p_until === "string" ? Date.parse(b.p_until) : null;
+  const receiptSince = typeof b.p_receipt_since === "string" ? Date.parse(b.p_receipt_since) : null;
+  const receiptUntil = typeof b.p_receipt_until === "string" ? Date.parse(b.p_receipt_until) : null;
   const rows = LIST_ROWS.filter((r) => {
     const at = Date.parse(r.created_at);
     if (status !== null && !status.includes(r.status)) return false;
     if (since !== null && at < since) return false;
     if (until !== null && at >= until) return false;
+    if (receiptSince !== null || receiptUntil !== null) {
+      const committedRaw = RECEIPT_COMMITTED_AT[r.id];
+      if (committedRaw === undefined) return false;
+      const committed = Date.parse(committedRaw);
+      if (receiptSince !== null && committed < receiptSince) return false;
+      if (receiptUntil !== null && committed >= receiptUntil) return false;
+    }
     return true;
   });
   return { rows, next_cursor: null, truncated: false };
@@ -474,19 +506,20 @@ test("home.facets.drilldown — each count opens its OWN scoped list, and Back r
         await expect(table().getByRole("link", { name: "Depreciation posting" })).toBeVisible();
         await expect(table().getByRole("link", { name: "Bank fee" })).toHaveCount(0);
       }],
-    ["1 Work finished in the last 7 days", /\/work\?status=completed&since=2026-09-10&until=2026-09-16$/,
+    ["1 Work finished in the last 7 days", /\/work\?status=completed&receiptSince=2026-09-10&receiptUntil=2026-09-16$/,
       async () => {
-        // AND THE DISCLOSED CASE. The tile counted "Bank fee" (its receipt posted inside the
-        // window); the list is fenced on when a Work was STARTED, so it drops that row and
-        // returns "Rates accrual", which the tile never counted. The band said this on the home
-        // before the click — asserted below — and that sentence is the whole fix for 650-B1.
-        await expect(table().getByRole("link", { name: "Rates accrual" })).toBeVisible();
-        await expect(table().getByRole("link", { name: "Bank fee" })).toHaveCount(0);
+        // #905 CLOSED THE DIVERGENCE: the tile counted "Bank fee" by its committed receipt, and
+        // the drilldown now fences the SAME receipt instant — so "Bank fee" is on the page and
+        // "Rates accrual" (no committed receipt at all) is not, exactly agreeing with the tile.
+        await expect(table().getByRole("link", { name: "Bank fee" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Rates accrual" })).toHaveCount(0);
       }],
   ] as const;
 
-  // THE QUALIFICATION IS ON THE BOARD, beside the number, before anyone clicks it.
-  await expect(board.getByText(/dated by when each Work started, not when it posted/)).toBeVisible();
+  // #905: THERE IS NO MISMATCH LEFT TO DISCLOSE — the pre-#905 sentence naming an
+  // admission-vs-receipt divergence is retired (AC5), because the drilldown now agrees with the
+  // tile it sits under.
+  await expect(board.getByText(/dated by when each Work started, not when it posted/)).toHaveCount(0);
 
   for (const [name, expected, landed] of legs) {
     const link = board.getByRole("link", { name });
