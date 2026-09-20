@@ -130,21 +130,41 @@ const KNOWN_PURPOSE_LABELS = new Set(["journal_entry", "periodic_stock_adjustmen
 const KNOWN_ORIGIN_LABELS = new Set(["user_direct", "clara_interpreted"]);
 
 /**
- * #880 — the compact line's own label for what a Work IS: the claim label when the list door's
- * own projection says so (a non-null `claim_id`), falling back to the KNOWN purpose label, and
- * finally to the raw purpose token this build has not learned (the SAME degrade
- * `KNOWN_PURPOSE_LABELS` above already applies). A non-null `claim_id` with a null
- * `claimant_label` cannot happen on a live row (the claim relation's own `claimant_label` column
- * is NOT NULL, 0221) — the `?? ""` is a defensive fallback for a malformed wire answer, never a
- * shape the door produces, so it renders an empty claimant rather than throwing on one.
+ * #880 — THE CLAIM LABEL, or nothing. The one place that decides whether a list row is a staff
+ * expense claim, so the compact line and the always-visible desktop line cannot drift apart.
+ *
+ * WHAT COUNTS AS A CLAIM, defensively. `lib/work/work-list.ts` hands the door's rows through with
+ * no runtime validation, so `claim_id` can be ABSENT rather than null — from a door below the
+ * 0266 frontier during a deploy window, or from the malformed wire answer the `?? ""` below
+ * exists for. `undefined !== null` is true, so a strict null test labelled EVERY row a staff
+ * expense claim on exactly the answer it was written to survive (fix round, review finding
+ * L09-ADV-07). A claim is a NON-EMPTY string id and nothing else; anything else is not a claim.
+ *
+ * A claim id with a null `claimant_label` cannot happen on a live row (the claim relation's own
+ * `claimant_label` column is NOT NULL, 0221) — the `?? ""` renders an empty claimant rather than
+ * throwing on a malformed answer.
+ */
+export function workRowClaimLabel(
+  row: Pick<WorkListRow, "purpose" | "claim_id" | "claimant_label">,
+  t: (key: string, values?: Record<string, string>) => string,
+): string | null {
+  const claim = row.claim_id;
+  if (typeof claim !== "string" || claim === "") return null;
+  return t("claimLabel", { claimant: row.claimant_label ?? "" });
+}
+
+/**
+ * #880 — what a Work IS, for a line that labels every row: the claim label when the list door's
+ * own projection says so, falling back to the KNOWN purpose label, and finally to the raw purpose
+ * token this build has not learned (the SAME degrade `KNOWN_PURPOSE_LABELS` above already
+ * applies).
  */
 export function workRowKindLabel(
   row: Pick<WorkListRow, "purpose" | "claim_id" | "claimant_label">,
   t: (key: string, values?: Record<string, string>) => string,
 ): string {
-  if (row.claim_id !== null) {
-    return t("claimLabel", { claimant: row.claimant_label ?? "" });
-  }
+  const claim = workRowClaimLabel(row, t);
+  if (claim !== null) return claim;
   return KNOWN_PURPOSE_LABELS.has(row.purpose) ? t(`purposeLabels.${row.purpose}`) : row.purpose;
 }
 
@@ -468,7 +488,7 @@ function WorkRow({
           </Link>
           {/* THE COLUMNS THE NARROW TABLE WITHDRAWS, re-expressed here so nothing is clipped
               silently. Hidden at `md` and up, where they have their own columns. */}
-          <p className="text-xs text-muted-foreground md:hidden">
+          <p className="text-xs text-muted-foreground md:hidden" data-testid="work-row-compact-line">
             {[
               scope.kind === "firm" ? (row.client_name ?? t("unknownClient")) : null,
               workRowKindLabel(row, t),
@@ -477,8 +497,21 @@ function WorkRow({
               .filter((part): part is string => typeof part === "string" && part !== "")
               .join(" · ")}
           </p>
-          <p className="hidden text-xs text-muted-foreground md:block">
-            {row.posting_date ? t("postingDate", { date: row.posting_date }) : t("noPostingDate")}
+          {/* AND THE ALWAYS-VISIBLE LINE. The block above is `md:hidden`, so at desktop width it
+              renders nothing at all — and this table has no purpose or kind COLUMN, so before this
+              a wide reader saw no claim label anywhere and a staff expense claim was
+              indistinguishable from an ordinary journal entry (fix round, review finding
+              L09-SPEC-05). The CLAIM label joins the posting date here.
+              ONLY the claim label: AC2 is "non-claim rows are unchanged" and #880 puts
+              purpose-specific labels for any other purpose out of scope, so an ordinary journal
+              Work's wide line is byte-for-byte what it was. */}
+          <p className="hidden text-xs text-muted-foreground md:block" data-testid="work-row-wide-line">
+            {[
+              workRowClaimLabel(row, t),
+              row.posting_date ? t("postingDate", { date: row.posting_date }) : t("noPostingDate"),
+            ]
+              .filter((part): part is string => typeof part === "string" && part !== "")
+              .join(" · ")}
           </p>
         </div>
       </TableCell>

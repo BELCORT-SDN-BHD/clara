@@ -277,6 +277,71 @@ test("rows render the memo, the client, the state WORD and a link to the Work's 
       "Staff expense claim — ",
     );
   });
+
+  // THE DEGRADE MUST NOT INVENT A CLAIM (fix round, review finding L09-ADV-07). `lib/work/
+  // work-list.ts` passes the door's rows straight through with no runtime validation, so the KEY
+  // can be absent — from a door below the 0266 frontier during a deploy window, or from the
+  // malformed answer the `?? ""` above exists for. `undefined !== null` is TRUE, so a strict
+  // null test labelled EVERY row a staff expense claim on exactly the answer it was meant to
+  // survive. An absent or empty claim id is not a claim.
+  test("workRowKindLabel: a row whose wire answer OMITS claim_id is not a claim", () => {
+    assert.equal(
+      workRowKindLabel({ purpose: "journal_entry" } as unknown as Parameters<typeof workRowKindLabel>[0], t),
+      "Journal entry",
+    );
+    assert.equal(
+      workRowKindLabel({ purpose: "journal_entry", claim_id: "", claimant_label: null }, t),
+      "Journal entry",
+      "an empty claim id is not a claim either",
+    );
+  });
+}
+
+/** The first node carrying this `data-testid`, walked off the harness's stub tree — the same
+ *  technique `components/parts/work-cards.test.tsx` uses. */
+function byTestId(root: unknown, id: string): Record<string, unknown> | null {
+  let found: Record<string, unknown> | null = null;
+  const walk = (n: unknown): void => {
+    if (found !== null || n === null || typeof n !== "object") return;
+    const node = n as Record<string, unknown> & {
+      getAttribute?: (k: string) => string | null; childNodes?: unknown[];
+    };
+    if (typeof node.getAttribute === "function" && node.getAttribute("data-testid") === id) {
+      found = node;
+      return;
+    }
+    for (const c of node.childNodes ?? []) walk(c);
+  };
+  walk(root);
+  return found;
+}
+
+/** Every node carrying this `data-testid`, in document order. */
+function allByTestId(root: unknown, id: string): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const walk = (n: unknown): void => {
+    if (n === null || typeof n !== "object") return;
+    const node = n as Record<string, unknown> & {
+      getAttribute?: (k: string) => string | null; childNodes?: unknown[];
+    };
+    if (typeof node.getAttribute === "function" && node.getAttribute("data-testid") === id) out.push(node);
+    for (const c of node.childNodes ?? []) walk(c);
+  };
+  walk(root);
+  return out;
+}
+
+function textOfNode(n: Record<string, unknown> | null): string {
+  if (n === null) return "";
+  let out = "";
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== "object") return;
+    const stub = node as Record<string, unknown> & { nodeValue?: string; childNodes?: unknown[] };
+    if (typeof stub.nodeValue === "string") out += stub.nodeValue;
+    for (const c of stub.childNodes ?? []) walk(c);
+  };
+  walk(n);
+  return out;
 }
 
 test("a staff expense claim row shows its claimant label on the compact line, never 'Journal entry'", async () => {
@@ -299,6 +364,56 @@ test("a staff expense claim row shows its claimant label on the compact line, ne
       assert.match(text, /Staff expense claim — Farah binti Idris/, "the claim row carries its label");
       // The plain row on the SAME page is unchanged — the regression AC2 asks for.
       assert.match(text, /Journal entry/, "a plain journal Work on the same page still reads 'Journal entry'");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// ===========================================================================================
+// #880 — AND THE LABEL HAS TO REACH A DESKTOP READER (fix round, review finding L09-SPEC-05).
+//
+// The compact line above is `md:hidden`: it exists to re-express the columns the NARROW table
+// withdraws, and at `md` and up it is not rendered at all. Tailwind does nothing in this harness,
+// so a scan of the whole page's text could not tell the two lines apart — the claim label was
+// reaching only a phone. The always-visible desktop sub-line (the one that carries the posting
+// date) is where a wide reader looks, so the CLAIM label is rendered there too, addressed by
+// `data-testid` rather than by a text scan so the cell proves WHICH line carries it.
+//
+// AND ONLY THE CLAIM LABEL. AC2 is "non-claim rows are unchanged", and the ticket puts
+// purpose-specific labels for any other purpose out of scope, so the desktop line of an ordinary
+// journal Work gains nothing.
+// ===========================================================================================
+test("#880 the claim label reaches the DESKTOP sub-line too, and a plain row's desktop line is untouched", async () => {
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({
+      load: async () => ({
+        rows: [
+          row({ claim_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", claimant_label: "Farah binti Idris" }),
+          row({
+            id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", memo: "Bank fee", claim_id: null, claimant_label: null,
+          }),
+        ],
+        next_cursor: null,
+        truncated: false,
+      }),
+    }));
+    try {
+      await h.settle();
+      const desktop = allByTestId(h.container, "work-row-wide-line").map(textOfNode);
+      assert.equal(desktop.length, 2, "one always-visible sub-line per row");
+      assert.match(desktop[0]!, /Staff expense claim — Farah binti Idris/,
+        "the claim row's DESKTOP line carries the label, not only the md:hidden compact line");
+      assert.match(desktop[0]!, /2026-09-01/, "…beside the posting date that line already carried");
+      assert.doesNotMatch(desktop[1]!, /Journal entry/,
+        "a plain row's desktop line gains NO kind label — AC2's 'non-claim rows are unchanged'");
+      assert.match(desktop[1]!, /2026-09-01/, "…and still carries exactly what it carried before");
+
+      // The compact line is still the one that labels EVERY row, claim or not.
+      const compact = allByTestId(h.container, "work-row-compact-line").map(textOfNode);
+      assert.match(compact[0]!, /Staff expense claim — Farah binti Idris/);
+      assert.match(compact[1]!, /Journal entry/);
+      assert.ok(byTestId(h.container, "work-row-compact-line") !== null, "the compact line still exists");
     } finally {
       await h.unmount();
     }
