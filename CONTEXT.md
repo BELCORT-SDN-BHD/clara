@@ -17,11 +17,18 @@ _Avoid_: A mandatory file attachment; a claim that every user statement is indep
 The recorded instruction a governed act cites as its authority — an Accounting work, or one turn of
 a Clara conversation. It is admitted only when it is PROVED to come from a person rather than from a
 process: a Work is proof as it stands, because a Work can never exist without naming who initiated
-it; a conversation turn is proof only when it is a turn somebody typed and it names its author. A
-run the workspace started for itself — a wake, an autodraft, a close preparation, an agent run over
-a Work — is not an instruction, even when it names the person it was started for. "There is no such
-record here" and "that record is not a person's instruction" are two different refusals, and each
-says which it is.
+it; a conversation turn is proof only when it is a turn taken through the chat ingress AND that
+ingress named a firm member as its author. A run the workspace started for itself — a wake, an
+autodraft, a close preparation, an agent run over a Work — is not an instruction, even when it
+names the person it was started for. "There is no such record here" and "that record is not a
+person's instruction" are two different refusals, and each says which it is.
+
+What is proved is the AUTHOR the ingress recorded, not the keystroke: the rule reads the task's
+kind and its author, and the chat ingress admits an author only as an active member of the firm.
+It does not separately ask whether that member is a person rather than an agent account, which is
+a distinction the estate carries elsewhere. Today nothing can exploit the gap — no agent account
+holds an active firm membership — so this is a limit of the proof, stated, not a hole to route
+around.
 _Avoid_: A preference, a calculation policy or a repeated bank debit as a source of authority; an
 agent run, or the conversation turn a run was started from, as the instruction that authorises the
 run's own act; the record merely existing as proof that a person asked.

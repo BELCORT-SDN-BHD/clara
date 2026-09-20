@@ -183,6 +183,14 @@ create or replace function clara._fa_depreciation_leg_pairing(p_charges jsonb) r
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare v_legs jsonb := '[]'::jsonb; r record;
 begin
+  -- THE CALLER OWNS THE TENANT CHECK, and that is a contract, not an oversight. This join
+  -- resolves whatever asset ids it is handed, with no firm or client predicate -- faithful to the
+  -- two inline copies it replaces (0041:3521-3525 and 0227:1274-1278, both identical, including
+  -- `group by 1, 2 order by 1, 2`), each of which only ever ran INSIDE a door that had already
+  -- resolved the client and checked the firm. Lifting it into a standalone SECURITY DEFINER body
+  -- makes that assumption reachable in principle, which is why it is written down: the function
+  -- is UNGRANTED (this file's tail T.1b pins that), and if a later ticket ever grants or widens
+  -- it, the firm/client predicate has to arrive WITH the grant.
   for r in select f.depr_expense_account_code as exp_code, f.accum_depr_account_code as acc_code,
                   sum((x ->> 'amount_cents')::bigint) as amt
            from jsonb_array_elements(p_charges) x
@@ -203,7 +211,11 @@ comment on function clara._fa_depreciation_leg_pairing(jsonb) is
   'can share one and differ on the other. An UNGRANTED internal core: owned by clara_fn_owner, '
   'EXECUTE revoked from public, granted to no role -- reachable only from another SECURITY '
   'DEFINER body already running as the owner. Replaces the two independent copies 0227''s own '
-  'comment on preview_depreciation_run named as a residual (follow-up from 651-final.md).';
+  'comment on preview_depreciation_run named as a residual (follow-up from 651-final.md). '
+  'THE CALLER OWNS THE TENANT CHECK: it resolves whatever asset ids it is handed, with no firm '
+  'or client predicate -- faithful to the two inline copies it replaces, each of which only ran '
+  'inside a door that had already resolved the client and checked the firm. If a later ticket '
+  'grants or widens this function, the firm/client predicate has to arrive WITH the grant.';
 
 -- =====================================================================================
 -- §B  THE POSTER. `clara._fa_run_period_core` (0041:3422) — signature, posting behaviour, floor
