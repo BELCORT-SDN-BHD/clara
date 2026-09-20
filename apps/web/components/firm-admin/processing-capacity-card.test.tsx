@@ -78,7 +78,7 @@ const fieldFor = (h: { find: (p: (n: Stub) => boolean) => Stub | null }, cap: st
 const saveButton = (h: { find: (p: (n: Stub) => boolean) => Stub | null }) =>
   h.find((n) => n.tagName === "BUTTON" && /save processing caps/i.test(textOf(n)));
 
-test("#960 the card renders one field per cap, pre-filled from the stored numbers", async () => {
+test("ticket 960 — the card renders one field per cap, pre-filled from the stored numbers", async () => {
   const h = await mount({ status: "ready", data: STORED }, async () => ACCEPTED);
   try {
     assert.equal(fieldFor(h, "docs-per-day")?.value, "250");
@@ -89,7 +89,7 @@ test("#960 the card renders one field per cap, pre-filled from the stored number
   } finally { await h.unmount(); }
 });
 
-test("#960 a firm with no stored row keeps its NAMED ZERO and still gets empty fields to write into", async () => {
+test("ticket 960 — a firm with no stored row keeps its NAMED ZERO and still gets empty fields to write into", async () => {
   const h = await mount({ status: "ready", data: NO_ROW }, async () => ACCEPTED);
   try {
     // The named zero, unchanged by #960: the card never pre-fills the relation's first-insert
@@ -101,7 +101,7 @@ test("#960 a firm with no stored row keeps its NAMED ZERO and still gets empty f
   } finally { await h.unmount(); }
 });
 
-test("#960 a denied or still-loading read renders NO control at all", async () => {
+test("ticket 960 — a denied or still-loading read renders NO control at all", async () => {
   for (const view of [
     { status: "denied", message: "insufficient role" } as FirmSettingsView<FirmCommercialState>,
     { status: "loading" } as FirmSettingsView<FirmCommercialState>,
@@ -115,7 +115,7 @@ test("#960 a denied or still-loading read renders NO control at all", async () =
   }
 });
 
-test("#960 saving sends ONLY the caps the person actually changed", async () => {
+test("ticket 960 — saving sends ONLY the caps the person actually changed", async () => {
   const seen: ProcessingCapEdits[] = [];
   const h = await mount({ status: "ready", data: STORED }, async (edits) => {
     seen.push(edits);
@@ -131,7 +131,7 @@ test("#960 saving sends ONLY the caps the person actually changed", async () => 
   } finally { await h.unmount(); }
 });
 
-test("#960 an accepted save reports the resulting four caps; a refusal renders the database's own sentence", async () => {
+test("ticket 960 — an accepted save reports the resulting four caps; a refusal renders the database's own sentence", async () => {
   const h = await mount({ status: "ready", data: STORED }, async () => ACCEPTED);
   try {
     await h.act(() => { setFieldValue(fieldFor(h, "pages-per-day") as Stub, "3000"); });

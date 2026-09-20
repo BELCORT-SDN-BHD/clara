@@ -119,8 +119,12 @@ export function ProcessingCapacityCard({
     setBusy(true);
     setOutcome(null);
     try {
-      setOutcome(await save(edits));
-      setTyped({});
+      const answer = await save(edits);
+      setOutcome(answer);
+      // THE OVERLAY IS CLEARED ONLY BY AN ACCEPTED WRITE. After a refusal the person's own
+      // numbers stay in the fields — the refusal tells them what to change, and snapping the
+      // field back to the stored value would take away the thing they have to edit.
+      if (answer.kind === "set") setTyped({});
     } finally {
       setBusy(false);
     }

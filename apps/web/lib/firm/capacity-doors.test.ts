@@ -62,10 +62,11 @@ test("#960 the door is called by name, and a cap the person did not touch is OMI
       });
 
       assert.equal(calls.length, 1);
-      assert.ok(calls[0].url.endsWith(`/rpc/${SET_FIRM_DOCUMENT_LIMITS_DOOR}`), calls[0].url);
+      const call = calls[0] as Seen;
+      assert.ok(call.url.endsWith(`/rpc/${SET_FIRM_DOCUMENT_LIMITS_DOOR}`), call.url);
       // OMITTED, not null: the three caps this call says nothing about are absent from the body,
       // so the door's own defaults decide them and nothing in this app has to know what they are.
-      assert.deepEqual(calls[0].body, {
+      assert.deepEqual(call.body, {
         p_pages_per_day: 77,
         p_op_key: "op-caps-held-by-the-caller",
       });
