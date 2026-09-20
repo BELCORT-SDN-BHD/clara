@@ -22,9 +22,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runReconcilerSweep } from "../lib/reconciler.mjs";
+
+// THE RECEIPT CELLS BELOW RUN THE REAL `runReconcilerSweep`, which registers the LAST
+// unconditional belt as `sweepSpoolTtl()` (reconciler.mjs ~line 765) — and that belt's default
+// directory off Windows is `/data/spool` (spool.mjs's `spoolConfig`), a path this process cannot
+// CREATE on a runner that does not own `/`. Left alone, `beltErrors` would carry an environment
+// accident ("spool TTL sweep") that has nothing to do with #852, defeating the very assertions
+// these cells exist to make ("a clean cycle names no belt"). `reconcile-belt-isolation-unit.test
+// .mjs`, whose assembly cells these sit beside, already carries the house fix: point
+// `CLARA_SPOOL_DIR` at a fresh per-run temp directory before any cell calls the sweep, so the
+// belt always has somewhere writable to reap and never has anything to reap.
+process.env.CLARA_SPOOL_DIR = join(await mkdtemp(join(tmpdir(), "clara-clarify-sweep-")), "spool");
 
 const LIB = fileURLToPath(new URL("../lib/", import.meta.url));
 const PKG = fileURLToPath(new URL("../", import.meta.url));
