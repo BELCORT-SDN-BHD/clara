@@ -246,6 +246,7 @@ components/registers/adjustments-a11y.test.tsx
 components/registers/adjustments-keyboard.test.tsx
 components/registers/adjustments-render-states.test.tsx
 components/registers/client-identity-section.test.tsx
+components/registers/counterparty-door-dialogs-draft-rule.test.tsx
 components/registers/counterparty-hygiene-a11y.test.tsx
 components/registers/counterparty-hygiene-keyboard.test.tsx
 components/registers/counterparty-hygiene-kinds.test.tsx
