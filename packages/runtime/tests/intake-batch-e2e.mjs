@@ -30,8 +30,10 @@
 //   4. p636.poison.cross_firm — firm A's parent whose stored actor has been removed refuses on
 //      EVERY child, permanently; firm B's parent, swept in the SAME belt call, still settles.
 //   5. THE CAPACITY WALL, end to end on the real route — the (N+1)th upload is refused 429 with
-//      the database's own sentence, and the refused file never becomes a member (its intake does
-//      not exist, and a member's identity IS its intake).
+//      the database's own sentence, and (since #965 / migration 0254) the refused file leaves a
+//      COMMITTED intake at failed/limit that IS a member of the batch, carrying an explicit
+//      `awaiting_capacity` wait. Before #965 the raise rolled that intake back, so the file could
+//      not be a member and this leg asserted that absence as a named residual.
 //
 // WHAT IT DELIBERATELY DOES NOT DO. Leg 3 interrupts the fan-out by ABANDONING it after child 50
 // rather than by SIGKILLing a spawned engine. That is the same durable state a kill leaves
@@ -434,10 +436,26 @@ async function main() {
   });
   assert.equal(refused.status, 429, "the 101st file is refused at the measured daily ceiling");
   assert.equal((await refused.json()).error, "limit");
+  // #965 CLOSED THE NAMED RESIDUAL this assertion used to record. Until migration 0254 a file
+  // refused at creation had no intake — the raise rolled it back — so it could not be a member,
+  // and the leg asserted that absence. Now the refusal COMMITS its intake at failed/limit and the
+  // route's batch path gives it a member with an explicit `awaiting_capacity` wait, so the wall
+  // leaves exactly ONE member behind, which is what the batch card must show. The 429 above is
+  // byte-unchanged; only what survives it changed.
   const wallMembers = await rig.rootQuery(
-    "select count(*)::int n from clara.intake_batch_members where batch_id=$1", [wBatch]);
-  assert.equal(wallMembers.rows[0].n, 0,
-    "THE NAMED RESIDUAL, executed: a file refused BEFORE its intake exists never becomes a member — the member's identity IS its intake");
+    `select m.id, m.dependency, m.dependency_reason, i.status, i.failure_code
+       from clara.intake_batch_members m
+       join clara.document_intakes i on i.id = m.intake_id
+      where m.batch_id=$1`, [wBatch]);
+  assert.equal(wallMembers.rows.length, 1,
+    "#965: the file the ceiling refused IS a member — the batch read never shows a silent absence");
+  assert.equal(wallMembers.rows[0].status, "failed");
+  assert.equal(wallMembers.rows[0].failure_code, "limit",
+    "…recorded at the lane's existing failed/limit vocabulary");
+  assert.equal(wallMembers.rows[0].dependency, "awaiting_capacity",
+    "…and its wait is declared through the governed member-dependency door, not by the belt");
+  assert.match(String(wallMembers.rows[0].dependency_reason), /document daily limit reached/,
+    "…carrying the database's own sentence, the operator remedy the card renders");
 
   // =========================================================================================
   // LEG 2 — CANCEL-REMAINING keeps every committed receipt.
