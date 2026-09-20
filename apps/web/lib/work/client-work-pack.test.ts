@@ -227,11 +227,16 @@ test("active → status=queued,running, and the two words are the door's own", (
   assert.equal(state.since, null, "an activity window is not part of 'what is running now'");
 });
 
-test("recent success → status=completed plus the pack's OWN window dates, ON THE RECEIPT AXIS — #905", () => {
+test("recent success → the pack's OWN window dates ON THE RECEIPT AXIS, and NO status term — #905", () => {
   const pack = hydrateClientWorkPack(envelope());
   const href = workAttentionHref("recent_success", CLIENT, pack);
   const state = parse(href);
-  assert.deepEqual(state.status, ["completed"]);
+  // NO STATUS TERM (fix round, review finding L09-ADV-04). The tile's own facet counts a committed
+  // receipt inside the window and says NOTHING about status, so a Work that posted and is still
+  // running was counted by the number and dropped by a `status=completed` drilldown — the tile and
+  // its list disagreeing again, one axis over. The receipt window now carries the whole meaning.
+  assert.deepEqual(state.status, [],
+    "the receipt window IS the filter: adding a status term narrows the list below the tile's own count");
   // #905: the receipt-dated axis, not the admission-dated `since`/`until` — the whole point of
   // the fix is that this drilldown fences the SAME instant the tile counts by (a committed
   // receipt), not when each Work was admitted.
@@ -250,7 +255,11 @@ test("recent success → status=completed plus the pack's OWN window dates, ON T
   assert.equal(new Date(businessDayEnd(state.receiptUntil!)).toISOString(), pack.window!.to);
 });
 
-test("an unreadable window drops the dates rather than guessing them — the status filter still stands", () => {
+test("an unreadable window drops the dates rather than guessing them — and IS the one arm that still sends a status term", () => {
+  // THE ONE ARM WHERE A STATUS TERM IS STILL RIGHT. With no window to fence on, a link carrying no
+  // filter at all would open every Work this client has ever had — strictly worse than one that is
+  // slightly too narrow. `recentSuccessListUndated` is the sentence the board prints beside exactly
+  // this arm, and `workAttentionWindowDates` is the ONE predicate both the link and the board ask.
   const pack = hydrateClientWorkPack(envelope({ window: { timezone: "Asia/Kuala_Lumpur" } }));
   const state = parse(workAttentionHref("recent_success", CLIENT, pack));
   assert.deepEqual(state.status, ["completed"]);

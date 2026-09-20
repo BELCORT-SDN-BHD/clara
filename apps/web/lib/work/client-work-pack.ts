@@ -256,19 +256,31 @@ export async function getClientWorkPack(
  *   active          `?status=queued,running` — the door's own pair. "Retrying" is NOT a member of
  *                   0189's status roster, so it cannot be a filter; the tile discloses the retry
  *                   subset on its preview rows instead.
- *   recent_success  `?status=completed` plus the pack's OWN window dates, ON THE RECEIPT AXIS
- *                   (`receiptSince`/`receiptUntil`, #905 — `clara.list_accounting_work`'s
- *                   `p_receipt_since`/`p_receipt_until`, migration 0267) rather than `since`/
- *                   `until`. The tile counts a COMMITTED RECEIPT inside the window (0214); before
- *                   #905 the list could only fence admission, so the two populations diverged in
- *                   two named ways (round-1 review, finding 650-B1,
- *                   `p650.pack.recent_success_drilldown`). Routing the SAME two calendar dates
- *                   through the receipt axis instead closes that gap: the drilldown is now the
- *                   SAME WORKS the tile counted, not merely the same week over a different
- *                   subject. `since`/`until` are business-timezone calendar days, and the list
- *                   turns them back into exactly the half-open instant range the door used against
- *                   the receipt. A window this build could not read contributes no dates at all
- *                   rather than a guessed week (`workAttentionWindowDates`'s own null case).
+ *   recent_success  the pack's OWN window dates, ON THE RECEIPT AXIS (`receiptSince`/
+ *                   `receiptUntil`, #905 — `clara.list_accounting_work`'s `p_receipt_since`/
+ *                   `p_receipt_until`, migration 0267) and NOTHING ELSE. The tile counts a
+ *                   COMMITTED RECEIPT inside the window (0214); before #905 the list could only
+ *                   fence admission, so the two populations diverged in two named ways (round-1
+ *                   review, finding 650-B1, `p650.pack.recent_success_drilldown`). Routing the
+ *                   SAME two calendar dates through the receipt axis closes that gap: the
+ *                   drilldown is the SAME WORKS the tile counted, not merely the same week over a
+ *                   different subject. `since`/`until` are business-timezone calendar days, and
+ *                   the list turns them back into exactly the half-open instant range the door
+ *                   used against the receipt.
+ *
+ *                   AND NO `status=completed` (fix round, review finding L09-ADV-04). The tile's
+ *                   facet has no status term of its own — it counts `count(distinct work_id)` over
+ *                   committed receipts and stops — so a Work that POSTED and is still running (a
+ *                   reachable state: `p650.pack.no_sum` builds exactly one for the overlap
+ *                   criterion) was counted by the number and dropped by the list under it. The
+ *                   receipt window carries the whole meaning; adding a status term can only
+ *                   narrow the list BELOW the count it opened.
+ *
+ *                   THE ONE EXCEPTION IS THE DATELESS ARM. A window this build could not read
+ *                   contributes no dates at all rather than a guessed week
+ *                   (`workAttentionWindowDates`'s own null case) — and with no fence at all the
+ *                   link would open every completed Work this client has ever had, so THERE the
+ *                   status term stays and the board prints `recentSuccessListUndated` beside it.
  */
 export function workAttentionHref(
   kind: WorkAttentionFacetKind,
@@ -288,7 +300,9 @@ export function workAttentionHref(
   }
   const dates = workAttentionWindowDates(pack);
   return `${base}?${applyWorkListUrlState(empty, {
-    status: ["completed"],
+    // The receipt window IS the filter when there is one; the status term is the DATELESS arm's
+    // fallback fence and nothing else. See this function's own doc comment for the measurement.
+    status: dates === null ? ["completed"] : [],
     receiptSince: dates?.from ?? null,
     receiptUntil: dates?.to ?? null,
   }).toString()}`;
@@ -303,8 +317,9 @@ export function workAttentionHref(
  * that sentence is retired now that the href routes through the receipt axis and the two
  * populations agree (AC5); the ONE thing left worth disclosing is the round-2 case where a window
  * this build could not read makes the link open every completed Work instead of the last seven
- * days (650-R2), which this same predicate still decides. Two spellings of "is the window
- * readable" is exactly how a tile and the link under it would drift apart, so there is one.
+ * days (650-R2), which this same predicate still decides — and which is also the only arm where
+ * the href still sends `status=completed` at all. Two spellings of "is the window readable" is
+ * exactly how a tile and the link under it would drift apart, so there is one.
  */
 export function workAttentionWindowDates(
   pack: ClientWorkPack,

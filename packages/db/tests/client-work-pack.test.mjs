@@ -365,7 +365,8 @@ test("p650.pack.completed_no_receipt — a completed Work with no committed rece
 // window.from` and `p_receipt_until => window.to` are precisely what `businessDayStart(since)` /
 // `businessDayEnd(until)` rebuild from the two calendar dates the href now carries on the
 // `receiptSince`/`receiptUntil` keys — asserted instant-for-instant in
-// `apps/web/lib/work/client-work-pack.test.ts`.
+// `apps/web/lib/work/client-work-pack.test.ts` — and NO status term, because the tile's own facet
+// has none either (fix round, review finding L09-ADV-04).
 // ===========================================================================================
 test("p650.pack.recent_success_drilldown — the tile and its list now describe ONE population, dated by the same committed receipt", async (t) => {
   if (await gate(t)) return;
@@ -383,23 +384,41 @@ test("p650.pack.recent_success_drilldown — the tile and its list now describe 
   const undated = await completedWithoutReceipt(client, "no-receipt");
   // (c) THE ORDINARY CASE — admitted today, posted today. In both populations regardless of axis.
   const ordinary = await postedWork(client, { memo: "same-day" });
+  // (d) POSTED BUT NOT SETTLED — a committed receipt inside the window on a Work whose status is
+  //     still runnable. `p650.pack.no_sum` below builds the same shape for the overlap criterion,
+  //     so it is a REACHABLE state of this estate, not a contrivance. It is what the STATUS axis
+  //     used to drop: the tile counts a receipt and says nothing about status, so a drilldown that
+  //     also filtered `status=completed` returned fewer Works than the number it opened (fix round,
+  //     review finding L09-ADV-04).
+  const unsettled = await postedWork(client, { memo: "posted-not-settled", settle: null });
+  const unsettledRow = await workRow(unsettled.work_id);
+  assert.ok(["queued", "running"].includes(unsettledRow.status),
+    `mandatory setup: a posted-but-unsettled Work is still runnable; got ${unsettledRow.status}`);
 
   const p = await pack(BOB(), client);
-  assert.equal(successOf(p).count, 2, "two committed receipts landed inside the window");
+  assert.equal(successOf(p).count, 3, "three committed receipts landed inside the window");
   const tileIds = successOf(p).rows.map((r) => r.work_id).sort();
-  assert.deepEqual(tileIds, [old.work_id, ordinary.work_id].sort(),
-    "the tile is dated by the RECEIPT, so an old admission posted today is in it");
+  assert.deepEqual(tileIds, [old.work_id, ordinary.work_id, unsettled.work_id].sort(),
+    "the tile is dated by the RECEIPT alone, so an old admission posted today and a posted-but-unsettled Work are both in it");
 
-  // THE FIX, MEASURED: a receipt-dated list read over the pack's OWN window now returns EXACTLY
-  // the tile's own two ids — no divergence class left to name.
+  // THE FIX, MEASURED: a receipt-dated list read over the pack's OWN window — with NO status term,
+  // which is what `workAttentionHref` now sends — returns EXACTLY the tile's own ids.
   const page = await listWork(BOB(), {
-    client, status: ["completed"], receiptSince: p.window.from, receiptUntil: p.window.to,
+    client, receiptSince: p.window.from, receiptUntil: p.window.to,
   });
   const listIds = page.rows.map((r) => r.id).sort();
   assert.deepEqual(listIds, tileIds,
-    "the receipt-dated list agrees with the tile on the SAME two Works — old-but-posted is IN, undated is OUT");
+    "the receipt-dated list agrees with the tile on the SAME Works — old-but-posted is IN, posted-but-unsettled is IN, undated is OUT");
   assert.ok(!listIds.includes(undated.work_id),
     "the undated completion is excluded from the receipt-dated list, never dated by something else (AC2)");
+
+  // AND THE STATUS TERM IS WHAT USED TO BREAK IT, said out loud rather than left to a reader: the
+  // same window with `status=completed` drops the posted-but-unsettled Work the tile counted.
+  const statusFiltered = await listWork(BOB(), {
+    client, status: ["completed"], receiptSince: p.window.from, receiptUntil: p.window.to,
+  });
+  assert.ok(!statusFiltered.rows.map((r) => r.id).includes(unsettled.work_id),
+    "a `status=completed` drilldown would still drop it — which is why the link no longer sends one");
 
   // THE OLD (ADMISSION-DATED) READ IS STILL THERE, UNCHANGED, AND STILL DIVERGES — proving this
   // is a NEW axis added beside the old one, not a redefinition of `since`/`until`.

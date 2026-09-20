@@ -147,10 +147,13 @@ function WorkAttentionTile({
             Work was STARTED) — the same week over a different subject, measured by
             `p650.pack.recent_success_drilldown` (packages/db/tests/client-work-pack.test.mjs).
             `workAttentionHref` now sends the SAME two dates on the door's receipt-dated axis
-            (`receiptSince`/`receiptUntil`), so the drilldown opens the SAME Works this tile
-            counted — there is no mismatch left to disclose, and that db cell now asserts
-            agreement instead of divergence. The ONE thing still worth a sentence is the round-2
-            case below: a window this build could not read. */}
+            (`receiptSince`/`receiptUntil`) and NO status term — the facet behind this number has
+            none either, so a Work that posted and is still running is counted here and would have
+            been dropped by a `status=completed` list (fix round, review finding L09-ADV-04). The
+            drilldown therefore opens the SAME Works this tile counted, there is no mismatch left
+            to disclose, and that db cell now asserts agreement instead of divergence. The ONE
+            thing still worth a sentence is the round-2 case below: a window this build could not
+            read. */}
         {/* AND THE ONE ARM WHERE SILENCE WOULD MISLEAD (round-2 review, 650-R2): a window this
             build could not read makes the builder drop BOTH dates rather than guess them, so the
             link opens every completed Work this client has ever had. A bare `?status=completed`

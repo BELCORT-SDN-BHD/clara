@@ -506,11 +506,12 @@ test("home.facets.drilldown — each count opens its OWN scoped list, and Back r
         await expect(table().getByRole("link", { name: "Depreciation posting" })).toBeVisible();
         await expect(table().getByRole("link", { name: "Bank fee" })).toHaveCount(0);
       }],
-    ["1 Work finished in the last 7 days", /\/work\?status=completed&receiptSince=2026-09-10&receiptUntil=2026-09-16$/,
+    ["1 Work finished in the last 7 days", /\/work\?receiptSince=2026-09-10&receiptUntil=2026-09-16$/,
       async () => {
         // #905 CLOSED THE DIVERGENCE: the tile counted "Bank fee" by its committed receipt, and
-        // the drilldown now fences the SAME receipt instant — so "Bank fee" is on the page and
-        // "Rates accrual" (no committed receipt at all) is not, exactly agreeing with the tile.
+        // the drilldown now fences the SAME receipt instant — and ONLY that, with no status term
+        // (fix round, L09-ADV-04) — so "Bank fee" is on the page and "Rates accrual" (no
+        // committed receipt at all) is not, exactly agreeing with the tile.
         await expect(table().getByRole("link", { name: "Bank fee" })).toBeVisible();
         await expect(table().getByRole("link", { name: "Rates accrual" })).toHaveCount(0);
       }],

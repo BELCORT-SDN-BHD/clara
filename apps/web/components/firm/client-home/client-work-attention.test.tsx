@@ -144,8 +144,11 @@ test("the three tiles carry the three numbers, each a link into its OWN scoped l
     const links = hrefs(h);
     assert.ok(links.includes(`/clients/${CLIENT}/work?view=needs-you`), links.join(" | "));
     assert.ok(links.includes(`/clients/${CLIENT}/work?status=queued%2Crunning`), links.join(" | "));
+    // NO STATUS TERM on the recent-success link (fix round, review finding L09-ADV-04): the facet
+    // behind the number counts a committed receipt and nothing else, so a status term could only
+    // narrow the list below the count that opened it.
     assert.ok(
-      links.includes(`/clients/${CLIENT}/work?status=completed&receiptSince=2026-09-10&receiptUntil=2026-09-16`),
+      links.includes(`/clients/${CLIENT}/work?receiptSince=2026-09-10&receiptUntil=2026-09-16`),
       links.join(" | "),
     );
     // And each preview row is a link to the Work's own address.
