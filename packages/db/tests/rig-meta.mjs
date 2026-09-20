@@ -1990,6 +1990,18 @@ export const FA_DEPRECIATION_LEG_FOLD_0248_COHORT = [
   ...FA_DEPRECIATION_LEG_FOLD_0248_UNGRANTED_FNS,
 ];
 
+// #976 [0249, fold the fixed-asset particulars completion wall shared by
+// complete_fixed_asset_particulars and _fa_complete_particulars_core] — its own cohort for the
+// same "wholly present or wholly absent" reason FA_DEPRECIATION_LEG_FOLD_0248_COHORT carries:
+// folding this ONE name into 0216's own cohort would red every database between the two
+// frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+// `_fa_assert_particulars_completable` is UNGRANTED like `_fa_depreciation_leg_pairing` above:
+// the main sweep fails the moment a grant appears on it, this cohort fails if it ever DISAPPEARS.
+const FA_PARTICULARS_COMPLETION_FOLD_0249_UNGRANTED_FNS = ["_fa_assert_particulars_completable"];
+export const FA_PARTICULARS_COMPLETION_FOLD_0249_COHORT = [
+  ...FA_PARTICULARS_COMPLETION_FOLD_0249_UNGRANTED_FNS,
+];
+
 // #638 [0221, staff expense claims / employee payables / advance settlement] — its own cohort for
 // the same "wholly present or wholly absent" reason 0178's and 0194's carry.
 //
@@ -3325,6 +3337,11 @@ export async function grantMatrixFailures() {
   const legFoldLive = FA_DEPRECIATION_LEG_FOLD_0248_COHORT.filter((n) => liveNames.has(n));
   if (legFoldLive.length !== 0) {
     failures.push(...cohortFailures("#973 0248 depreciation leg-pairing fold", FA_DEPRECIATION_LEG_FOLD_0248_COHORT, liveNames));
+  }
+  // #976 [0249] — bimodal like 0248's: wholly present once 0249 applies, wholly absent before it.
+  const particularsFoldLive = FA_PARTICULARS_COMPLETION_FOLD_0249_COHORT.filter((n) => liveNames.has(n));
+  if (particularsFoldLive.length !== 0) {
+    failures.push(...cohortFailures("#976 0249 fixed-asset particulars completion wall fold", FA_PARTICULARS_COMPLETION_FOLD_0249_COHORT, liveNames));
   }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
