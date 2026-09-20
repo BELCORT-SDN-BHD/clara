@@ -9,7 +9,7 @@
 // that fails on its own terms), because the two things this launcher must never get wrong are
 // "the budget reached the process" and "a normal red is not blamed on memory".
 
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,10 +17,12 @@ import { spawnSync } from "node:child_process";
 
 import {
   HEAP_BUDGET_MB, budgetFrom, childEnv, isHeapDeath, attribution, isEntryPoint,
+  parseVmHwmKb, startPeakWatch, peakLine,
 } from "./world-gate.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LAUNCHER = join(HERE, "world-gate.mjs");
+const ACTION = join(HERE, "..", "..", ".github", "actions", "db-live-gates", "action.yml");
 
 let failures = 0;
 function testCase(name, fn) {
@@ -109,6 +111,115 @@ testCase("isEntryPoint is false without an argv1 and true for this launcher's ow
   eq(isEntryPoint(new URL("./world-gate.mjs", import.meta.url).href, LAUNCHER), true, "own path");
 });
 
+console.log("unit level -- the per-leg peak measurement (#1026 AC2, review SPEC-1026-01):");
+
+const PROC_STATUS = [
+  "Name:\tnode", "State:\tS (sleeping)", "VmPeak:\t 2103456 kB", "VmSize:\t 2003456 kB",
+  "VmHWM:\t 1113100 kB", "VmRSS:\t  903456 kB", "Threads:\t11",
+].join("\n") + "\n";
+
+testCase("VmHWM is read out of a real /proc/<pid>/status shape, and nothing else is mistaken for it", () => {
+  eq(parseVmHwmKb(PROC_STATUS), 1113100, "VmHWM");
+  eq(parseVmHwmKb("VmPeak:\t 2103456 kB\n"), null, "VmPeak is NOT the resident high-water mark");
+  eq(parseVmHwmKb(""), null, "empty");
+  eq(parseVmHwmKb(undefined), null, "absent");
+  eq(parseVmHwmKb("VmHWM: not-a-number kB"), null, "junk");
+});
+
+testCase("the watcher keeps the maximum, counts its samples, and is unref'd", () => {
+  const timer = { fn: null, cleared: false, unrefs: 0 };
+  let n = 0;
+  const readings = ["VmHWM:\t 100 kB\n", "VmHWM:\t 900 kB\n", "VmHWM:\t 400 kB\n"];
+  const watch = startPeakWatch(4242, {
+    enabled: true,
+    read: () => readings[Math.min(n++, readings.length - 1)],
+    setTimer: (fn) => { timer.fn = fn; return { unref: () => { timer.unrefs += 1; } }; },
+    clearTimer: () => { timer.cleared = true; },
+  });
+  timer.fn(); timer.fn();
+  watch.stop();
+  eq(watch.peakKb(), 900, "peak");
+  eq(timer.unrefs, 1, "the timer is unref'd so it can never hold the job open");
+  eq(timer.cleared, true, "stop() clears it");
+});
+
+testCase("A READ THAT THROWS CANNOT FAIL A LEG: it is counted and the line says unavailable", () => {
+  const watch = startPeakWatch(4242, {
+    enabled: true,
+    read: () => { throw new Error("ESRCH"); },
+    setTimer: () => ({ unref() {} }),
+    clearTimer: () => {},
+  });
+  watch.stop();
+  eq(watch.peakKb(), null, "no peak");
+  if (watch.failures() < 1) throw new Error("the failed read was not counted");
+  has(peakLine({ step: "s", argv: ["tests/x.mjs"], budgetMb: 2048, peakKb: null, code: 0, signal: null }),
+    "unavailable", "the line");
+});
+
+testCase("the peak line carries the step, the command, the budget, the figure and the percentage", () => {
+  const line = peakLine({
+    step: "#636 intake batch e2e", argv: ["tests/intake-batch-e2e.mjs"],
+    budgetMb: 2048, peakKb: 1113100, code: 0, signal: null,
+  });
+  has(line, "[world-gate] peak", "the grep anchor");
+  has(line, "#636 intake batch e2e", "step");
+  has(line, "tests/intake-batch-e2e.mjs", "command");
+  has(line, "budget 2048 MB", "budget");
+  has(line, "peak RSS 1087 MB", "the figure");
+  has(line, "(53% of budget)", "the percentage");
+});
+
+testCase("the watcher does nothing at all where there is no /proc — no reads, no cost", () => {
+  let reads = 0;
+  const watch = startPeakWatch(1, {
+    enabled: false,
+    read: () => { reads += 1; return PROC_STATUS; },
+    setTimer: () => { throw new Error("no timer must be armed off Linux"); },
+    clearTimer: () => {},
+  });
+  watch.stop();
+  eq(reads, 0, "reads");
+  eq(watch.peakKb(), null, "peak");
+});
+
+console.log("the wiring guard -- a new gate cannot be added without a budget (review SPEC-1026-04):");
+
+testCase("EVERY node invocation of a tests/ entry point in db-live-gates goes through this launcher", () => {
+  const yml = readFileSync(ACTION, "utf8");
+  const invocations = yml.split(/\r?\n/)
+    .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+    .filter(({ line }) => !line.startsWith("#"))
+    .filter(({ line }) => /(^|\s)node\s/.test(line) && /\btests\/\S+\.mjs/.test(line));
+  // The guard must never pass because it found nothing to check.
+  if (invocations.length < 20) {
+    throw new Error(`expected the live-gates action to carry its 20+ World legs, found ${invocations.length}`);
+  }
+  const unwired = invocations.filter(({ line }) => !line.includes("scripts/ci/world-gate.mjs"));
+  if (unwired.length > 0) {
+    throw new Error(
+      "these live-gates legs run node directly instead of through scripts/ci/world-gate.mjs, so they "
+      + "would inherit the host's default heap ceiling (#1026):\n"
+      + unwired.map(({ n, line }) => `  action.yml:${n}  ${line}`).join("\n"));
+  }
+});
+
+testCase("[inverse] the same guard REJECTS an unwired leg — it is not just counting lines", () => {
+  const fake = [
+    "    - name: a new gate",
+    "      run: |",
+    "        cd packages/runtime",
+    "        node tests/brand-new-leg.mjs",
+  ].join("\n");
+  const invocations = fake.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith("#"))
+    .filter((line) => /(^|\s)node\s/.test(line) && /\btests\/\S+\.mjs/.test(line));
+  eq(invocations.length, 1, "the fake leg is seen at all");
+  eq(invocations.filter((line) => !line.includes("scripts/ci/world-gate.mjs")).length, 1,
+    "…and it is classified as unwired");
+});
+
 console.log("end to end -- the launcher, spawned:");
 
 const scratch = mkdtempSync(join(tmpdir(), "world-gate-selftest-"));
@@ -129,7 +240,7 @@ try {
       + "console.log(JSON.stringify({ limit: v8.getHeapStatistics().heap_size_limit, opts: process.env.NODE_OPTIONS }));\n");
     const r = run([probe], { CLARA_GATE_HEAP_MB: "256" });
     eq(r.status, 0, `launcher exit (stderr: ${r.stderr})`);
-    const seen = JSON.parse(r.stdout.trim().split("\n").pop());
+    const seen = JSON.parse(r.stdout.split("\n").find((l) => l.trim().startsWith("{")) ?? "null");
     has(seen.opts, "--max-old-space-size=256", "the child's NODE_OPTIONS");
     const limitMb = seen.limit / (1024 * 1024);
     if (limitMb > 400) {
@@ -163,6 +274,36 @@ try {
     const r = run([talker]);
     eq(r.status, 0, "exit");
     has(r.stdout, "[p636] a line the job log must carry", "the leg's stdout");
+  });
+
+  testCase("EVERY leg prints its peak line, pass or fail — that is the AC2 measurement", () => {
+    // It HOLDS the memory for most of a second on purpose: the peak is SAMPLED from /proc, so a
+    // child that exits inside one sample interval can only ever report its first sample. Every leg
+    // this launcher wraps runs for minutes; this cell has to live long enough to be sampled twice.
+    const hungry = child("hungry.mjs",
+      "const held = [];\nfor (let i = 0; i < 40; i += 1) held.push(Buffer.alloc(4 * 1024 * 1024, 1));\n"
+      + "console.log('allocated', held.length * 4, 'MB');\n"
+      + "setTimeout(() => { if (held.length !== 40) throw new Error('held'); }, 800);\n");
+    const r = run([hungry], { CLARA_GATE_HEAP_MB: "512" });
+    eq(r.status, 0, `launcher exit (stderr: ${r.stderr})`);
+    const line = r.stdout.split("\n").find((l) => l.includes("[world-gate] peak"));
+    if (!line) throw new Error(`no peak line in:\n${r.stdout}`);
+    has(line, "budget 512 MB", "the budget");
+    has(line, "#636 intake batch e2e", "the step");
+    if (process.platform === "linux") {
+      const mb = Number(/peak RSS (\d+) MB/.exec(line)?.[1] ?? 0);
+      if (mb < 100) throw new Error(`a child that held 160 MB reported ${mb} MB: ${line}`);
+      has(line, "% of budget", "the percentage");
+    } else {
+      has(line, "unavailable", "off Linux the line is honest about having no figure");
+    }
+
+    // …and on a leg that FAILS on its own terms, too: a peak that only appears on green runs is
+    // useless exactly when someone is reading the log.
+    const failing = child("red2.mjs", "process.exit(1);\n");
+    const r2 = run([failing]);
+    eq(r2.status, 1, "the leg's own exit code still survives");
+    if (!r2.stdout.includes("[world-gate] peak")) throw new Error(`no peak line on a red leg:\n${r2.stdout}`);
   });
 
   testCase("no arguments is a refusal, not a silent success", () => {

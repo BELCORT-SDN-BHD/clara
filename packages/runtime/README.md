@@ -1462,10 +1462,24 @@ budget is attributable: the launcher prints the step (`CLARA_GATE_STEP`), the co
 the budget as a GitHub `::error::` annotation. An ordinary red (exit 1) is never blamed on memory —
 `scripts/ci/world-gate.selftest.mjs` holds that as a cell, and runs in `pnpm lint`.
 
-**The measurement method.** A throwaway database cloned with `createdb -T` from a migrated template,
-one leg per run under `/usr/bin/time -v` (peak RSS) with `--trace-gc` parsed for peak heap occupancy
-(WSL 2, Node v22.23.2, 24 GB host shared with ten other workers). Reproduce with the same two
-figures on both sides of any change to the budget.
+**The measurement method, and where the figures live now.** The table below was measured by hand on
+a throwaway database cloned with `createdb -T` from a migrated template, one leg per run under
+`/usr/bin/time -v` (peak RSS) with `--trace-gc` parsed for peak heap occupancy (WSL 2, Node
+v22.23.2, 24 GB host shared with ten other workers). Reproduce with the same two figures on both
+sides of any change to the budget.
+
+That is a one-off, and a one-off only ever covers the legs somebody had time to run. So the
+measurement is now CONTINUOUS: on Linux the launcher samples the child's own `/proc/<pid>/status`
+VmHWM and prints one line per leg,
+
+```
+[world-gate] peak <step> | node <leg> | budget 2048 MB | peak RSS <N> MB (<p>% of budget) | exit 0
+```
+
+so every CI run of `db-live-gates` records all 24 legs by itself. Read them out of a job log with
+`grep '\[world-gate\] peak'` (`gh api repos/<owner>/<repo>/actions/jobs/<id>/logs`). It is
+best-effort by construction — off Linux the line says the figure is unavailable, a read that throws
+is counted and ignored, and nothing about it can turn a green leg red.
 
 | Leg | Budget | Peak RSS | Peak heap occupancy | Wall clock | Result |
 |---|---|---|---|---|---|
@@ -1476,17 +1490,31 @@ figures on both sides of any change to the budget.
 | `intake-admission-e2e.mjs` | 2048 (through the launcher) | 1.15 GiB | — | 0:46 | pass |
 | `accrual-e2e.mjs` | 2048 (through the launcher) | 0.43 GiB | — | 2:07 | pass |
 
-**Why the budget alone is not the whole fix.** V8 grows to whatever ceiling it is given: at 2048
-without an in-process bound, occupancy runs right up to the ceiling before every collection
-(1832-1969 MB of 2048), so no budget can ever be "25 % above the measured peak" while the peak is
-defined by the budget. What the leg actually RETAINS is ~140-210 MB — the post-collection floor in
-its own GC trace, consistent with `tests/heap-bound.mjs`'s independently measured 119 MB live set.
-So `intake-batch-e2e.mjs` now also arms `startHeapBound()` (the helper `interview-e2e.mjs` has used
-since the 2026-09-17 abort), which forces a full collection whenever the heap passes 512 MB. It cost
-8 to 30 forced collections per run and brought peak RSS to 0.79-1.06 GiB — about half the budget,
-which is the margin the budget is supposed to have. Wall clock is NOT better here (2:35-3:22 against
-0:56-3:11 at the default ceiling), but the runs are not comparable on time: this host carried ten
-other workers throughout, and the bound itself only ever ran 8-30 collections.
+**Why the budget alone is not the whole fix, and what the in-process bound costs.** V8 grows to
+whatever ceiling it is given: at 2048 without an in-process bound, occupancy runs right up to the
+ceiling before every collection (1832-1969 MB of 2048) and peak RSS lands at 98-105 % of the budget,
+so no budget can ever be "25 % above the measured peak" while the peak is defined by the budget.
+What the leg actually RETAINS is ~140-210 MB — the post-collection floor in its own GC trace,
+consistent with `tests/heap-bound.mjs`'s independently measured 119 MB live set. So
+`intake-batch-e2e.mjs` now also arms `startHeapBound()` (the helper `interview-e2e.mjs` has used
+since the 2026-09-17 abort), which forces a full collection whenever the heap passes 512 MB.
+**THE BOUND, NOT THE BUDGET, IS WHAT BUYS THE 25 % MARGIN**: it costs 8 to 30 forced collections per
+run and takes peak RSS from 1.97-2.11 GiB to 0.79-1.06 GiB, about half the budget.
+
+Its price, against the LIKE-FOR-LIKE baseline (the same rig, the same budget, the bound the only
+difference): **2048 without the bound ran 0:56 and 1:14; 2048 with it ran 2:00 to 3:22** — the bound
+roughly doubles this leg's wall clock here. (The step took 179 s on the runner itself in CI run
+35508993162, against 107-172 s historically at the default ceiling, so the doubling is a property of
+this loaded 24-core host, not of CI.) Two consequences worth keeping in mind:
+
+- The leg's post-change peaks are a property of the bound's 512 MB forced-collection threshold
+  (`tests/heap-bound.mjs`), not of the runtime. They are NOT comparable with any pre-change figure,
+  and any future review of the budget must hold the bound constant.
+- Whether the longer wall clock widens the window of LEG 4's third race (firm P's children being
+  driven terminal by the World) is **not** established. What IS measured is that LEG 4's own polls
+  are unaffected: with the bound armed, both converge on the first sweep in 8-40 ms across five
+  consecutive runs, the same as without it. The window opens on elapsed time inside LEG 4, and LEG 4
+  does not get slower; the rest of the leg does.
 
 **The two historical aborts, re-checked.** Job 105215992382 died in `interview-e2e.mjs`, which
 already arms `startHeapBound()` (added in response to that very abort) and now also runs under the
@@ -1497,11 +1525,20 @@ consecutive passes, with the retained set two orders of magnitude below the budg
 re-run against the new budget on its own runner from here, so this is a re-check by measurement of
 the same legs, not a replay of those two jobs.
 
+**All 24 legs, on the runner.** CI run 35508993162 (job 106073526212, `db-live-gates`, 21m29s) is
+green at this branch's head with every leg through the launcher at 2048 MB: the Slice-5 step 178 s,
+the #633 step 13 s, the #636 step 179 s, the Wave-B step (20 legs) 668 s, no `::error::` annotation
+and no `Reached heap limit` anywhere in the log. That establishes that every leg PASSES at the
+budget; the per-leg peak line above is what will record what each of them actually used, from the
+next run onwards.
+
 **Not covered.** The `nitro build` children the #637 two-build drill spawns inherit the budget
 through `NODE_OPTIONS`; a full runtime build was measured to succeed under it, with the control that
 the same build at `--max-old-space-size=48` dies with exit status 134, so the flag is provably in
-effect. The other legs' peaks are recorded above only where they were measured — a leg that turns
-out to need more says so with `CLARA_GATE_HEAP_MB` and its own figure.
+effect. The three `pnpm --filter @clara/runtime exec bootstrap` calls that PROVISION the World are
+deliberately outside the budget (short-lived DDL, not a World-booting process, and neither historical
+abort was in one) — the action's own comment says so. A leg that turns out to need more than the
+budget says so attributably and raises it with `CLARA_GATE_HEAP_MB` plus its own figure.
 
 ## #852 — the chat-clarify belt inside the sweep receipt
 
