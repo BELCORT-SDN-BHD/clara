@@ -812,6 +812,19 @@ vocabularies are checked against the relations' own CHECK constraints by
 `tests/rollback-preflight.test.mjs`, so a migration that adds one reds a test instead of quietly
 falling outside a census that advertises itself as complete.
 
+**#1015 — the document lane's own scoping rule, because it shares no key with the agent lane.**
+`clara.document_processing_tasks` carries no `work_id`/`task_id` column, so a `censusUnboundTasks`
+caller who scopes by `workIds`/`taskIds` alone has named nothing the document half could
+legitimately filter by. `censusUnboundTasks` narrows that half to **NONE** in that case, not to
+every live row — the earlier defect, caught by wave-1/wave-2 integration gates on a database
+carrying leftover queued document work, was exactly the opposite: an absent filter is "no rows" in
+this module's own reading, but it is "no filter" in SQL, and the difference used to leak every
+firm's queued document work into a scope the caller never asked for. A caller that wants the
+document lane's own full, unscoped picture regardless asks by **naming** the `documentTaskIds` key
+at all — even as `null` — which is how `preflight()`'s GLOBAL census and `tests/queue-drain.mjs`'s
+drain check still see everything (they scope by nothing at all, which is the same ask from the
+other side).
+
 **A kind or lane this command cannot place fails CLOSED** — it counts as stranding. The case you
 will actually meet is a `held` wake task whose source row was deleted: it is already unrunnable (the
 reconciler logs it and waits), and the answer is to settle it or re-register its source, not to roll
