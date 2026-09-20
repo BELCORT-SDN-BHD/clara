@@ -60,6 +60,45 @@ async function gate(t) {
   return true;
 }
 
+// #905 — `clara.list_accounting_work` gains its receipt-dated bound in ITS OWN migration (0267),
+// a separate frontier from 0214's own: a slice-frontier CI leg can be pinned anywhere between
+// 0214 and 0267 and the ONE cell below that calls `listWork` with a receipt-dated bound must skip
+// cleanly there rather than red on a parameter that does not exist yet on that frontier.
+const RECEIPT_WINDOW_STEM = "work_list_receipt_window$";
+let _receiptWindowReady = null;
+async function receiptWindowReady() {
+  if (_receiptWindowReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [RECEIPT_WINDOW_STEM]);
+      _receiptWindowReady = r.rows[0].n > 0;
+    } catch {
+      _receiptWindowReady = false;
+    }
+  }
+  return _receiptWindowReady;
+}
+
+async function gateReceiptWindow(t) {
+  if (await receiptWindowReady()) return false;
+  // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud (review finding L09-ADV-08).
+  // The package-wide sweep preloads this widen’s OWN pre-integration gate module (named in
+  // the refusal below), which sets the flag below to declare "a database below this migration is an
+  // expected pre-integration state". A worker running this file directly preloads nothing, so
+  // an absent widen fails HERE rather than reporting a green run over a cell that quietly
+  // executed no assertion.
+  if (process.env.CLARA_ALLOW_MISSING_WORK_LIST_RECEIPT_WINDOW !== "1") {
+    throw new Error(
+      `#905 receipt-dated window absent (no ${RECEIPT_WINDOW_STEM} row in clara.schema_migrations)`
+      + " and CLARA_ALLOW_MISSING_WORK_LIST_RECEIPT_WINDOW is unset -- this is a FOCUSED run"
+      + " and must fail loudly, not skip. Preload ./tests/work-list-receipt-window-preintegration-gate.mjs"
+      + " for an estate sweep against a pre-PR chain.");
+  }
+  markSkip();
+  t.skip(`#905 receipt-dated window absent (no ${RECEIPT_WINDOW_STEM} migration applied)`);
+  return true;
+}
+
 let world = null;
 before(async () => {
   // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud. The package-wide sweep preloads
@@ -179,13 +218,18 @@ async function backdateWorkAdmission(workId, instantExpr) {
 }
 
 /** `clara.list_accounting_work` called with EXACTLY the arguments the browser sends for a facet
- *  drilldown (`apps/web/lib/work/work-list.ts:105-117`). Named arguments only. */
-async function listWork(sub, { client = null, status = null, since = null, until = null, limit = 100 } = {}) {
+ *  drilldown (`apps/web/lib/work/work-list.ts:105-117`; the recent-success facet sends
+ *  `receiptSince`/`receiptUntil`, not `since`/`until` — #905). Named arguments only. */
+async function listWork(sub, {
+  client = null, status = null, since = null, until = null, limit = 100,
+  receiptSince = null, receiptUntil = null,
+} = {}) {
   const r = await humanQuery(sub,
     "select clara.list_accounting_work(p_client => $1::uuid, p_status => $2::text[],"
     + " p_initiator => null, p_purpose => null, p_since => $3::timestamptz,"
-    + " p_until => $4::timestamptz, p_q => null, p_cursor => null, p_limit => $5::int) as result",
-    [client, status, since, until, limit]);
+    + " p_until => $4::timestamptz, p_q => null, p_cursor => null, p_limit => $5::int,"
+    + " p_receipt_since => $6::timestamptz, p_receipt_until => $7::timestamptz) as result",
+    [client, status, since, until, limit, receiptSince, receiptUntil]);
   return r.rows[0].result;
 }
 
@@ -316,69 +360,94 @@ test("p650.pack.completed_no_receipt — a completed Work with no committed rece
 });
 
 // ===========================================================================================
-// p650.pack.recent_success_drilldown — THE TILE AND THE LIST IT LINKS TO ARE DATED BY DIFFERENT
-// INSTANTS, and this cell is the measurement that makes the board say so instead of implying
-// otherwise. (Round-1 review, finding 650-B1.)
+// p650.pack.recent_success_drilldown — THE TILE AND THE LIST IT LINKS TO NOW AGREE. (Round-1
+// review, finding 650-B1, closed by #905/migration 0267.)
 //
-// The tile counts a COMMITTED RECEIPT inside the seven MYT dates — the estate's only durable
-// completion instant (0178:411-465, and `clara.accounting_work` carries none: 0178:324-325).
-// The list it links to is `clara.list_accounting_work`, whose `p_since`/`p_until` fence
-// `w.created_at` on `clara.accounting_work` — the ADMISSION instant (0189:427-428). There is no
-// receipt-dated axis on that door and this wave recuts nothing in 0189 (DECISIONS §1.3), so the
-// two populations are the same WEEK over two different SUBJECTS, and they diverge in exactly two
-// ways. This cell pins both, so no later change can widen the gap silently and no reader can
-// mistake the drilldown for the tile's own population.
+// UNTIL #905, the tile counted a COMMITTED RECEIPT inside the seven MYT dates — the estate's only
+// durable completion instant (0178:411-465, and `clara.accounting_work` carries none:
+// 0178:324-325) — while the list it links to fenced `w.created_at`, the ADMISSION instant
+// (0189:427-428), because `clara.list_accounting_work` had no receipt-dated axis at all. The two
+// populations were the same WEEK over two different SUBJECTS, and diverged in exactly two named
+// ways (this cell's own pre-#905 text, preserved in git history). #905 gave the list a
+// `p_receipt_since`/`p_receipt_until` pair that fences the SAME committed receipt the tile
+// already counts, and the web half (`workAttentionHref`, `lib/work/client-work-pack.ts`) now
+// drills down on THAT axis instead of `since`/`until` — so this cell now proves the two
+// populations are the SAME SET, not merely the same size.
 //
-// The arguments below are the ones the browser really sends: `p_since => window.from` and
-// `p_until => window.to` are precisely what `businessDayStart(since)` / `businessDayEnd(until)`
-// rebuild from the two calendar dates the href carries — asserted instant-for-instant in
-// `apps/web/lib/work/client-work-pack.test.ts` ("recent success → status=completed plus the
-// pack's OWN window dates, which rebuild the same instants").
+// The arguments below are the ones the browser really sends after #905: `p_receipt_since =>
+// window.from` and `p_receipt_until => window.to` are precisely what `businessDayStart(since)` /
+// `businessDayEnd(until)` rebuild from the two calendar dates the href now carries on the
+// `receiptSince`/`receiptUntil` keys — asserted instant-for-instant in
+// `apps/web/lib/work/client-work-pack.test.ts` — and NO status term, because the tile's own facet
+// has none either (fix round, review finding L09-ADV-04).
 // ===========================================================================================
-test("p650.pack.recent_success_drilldown — same week, different subject: the drilldown diverges in exactly two named ways", async (t) => {
+test("p650.pack.recent_success_drilldown — the tile and its list now describe ONE population, dated by the same committed receipt", async (t) => {
   if (await gate(t)) return;
+  if (await gateReceiptWindow(t)) return;
   const client = await freshWorkClient(ALICE(), "p650drill");
 
-  // (a) ADMITTED LONG AGO, POSTED TODAY — counted by the tile, dropped by the list.
+  // (a) ADMITTED LONG AGO, POSTED TODAY — before #905 this was counted by the tile and dropped by
+  //     the list; the receipt-dated axis is exactly what lets the list express it now.
   const old = await postedWork(client, { memo: "admitted-long-ago" });
   await backdateWorkAdmission(old.work_id, mytInstant(-30, "9 hours"));
-  // (b) ADMITTED AND COMPLETED TODAY WITH NO COMMITTED RECEIPT — returned by the list, and the
-  //     one the tile already names out loud through `uncounted_completions`.
+  // (b) ADMITTED AND COMPLETED TODAY WITH NO COMMITTED RECEIPT — the door cannot date this by
+  //     receipt at all (there is none), so it stays out of BOTH the tile and the receipt-dated
+  //     list, and the door still names it through `uncounted_completions` (AC2's own line: an
+  //     undated completion is excluded, never dated by something else).
   const undated = await completedWithoutReceipt(client, "no-receipt");
-  // (c) THE ORDINARY CASE — admitted today, posted today. In both, which is why this is a
-  //     disclosure obligation and not a board that is wrong about every row.
+  // (c) THE ORDINARY CASE — admitted today, posted today. In both populations regardless of axis.
   const ordinary = await postedWork(client, { memo: "same-day" });
+  // (d) POSTED BUT NOT SETTLED — a committed receipt inside the window on a Work whose status is
+  //     still runnable. `p650.pack.no_sum` below builds the same shape for the overlap criterion,
+  //     so it is a REACHABLE state of this estate, not a contrivance. It is what the STATUS axis
+  //     used to drop: the tile counts a receipt and says nothing about status, so a drilldown that
+  //     also filtered `status=completed` returned fewer Works than the number it opened (fix round,
+  //     review finding L09-ADV-04).
+  const unsettled = await postedWork(client, { memo: "posted-not-settled", settle: null });
+  const unsettledRow = await workRow(unsettled.work_id);
+  assert.ok(["queued", "running"].includes(unsettledRow.status),
+    `mandatory setup: a posted-but-unsettled Work is still runnable; got ${unsettledRow.status}`);
 
   const p = await pack(BOB(), client);
-  assert.equal(successOf(p).count, 2, "two committed receipts landed inside the window");
+  assert.equal(successOf(p).count, 3, "three committed receipts landed inside the window");
   const tileIds = successOf(p).rows.map((r) => r.work_id).sort();
-  assert.deepEqual(tileIds, [old.work_id, ordinary.work_id].sort(),
-    "the tile is dated by the RECEIPT, so an old admission posted today is in it");
+  assert.deepEqual(tileIds, [old.work_id, ordinary.work_id, unsettled.work_id].sort(),
+    "the tile is dated by the RECEIPT alone, so an old admission posted today and a posted-but-unsettled Work are both in it");
 
+  // THE FIX, MEASURED: a receipt-dated list read over the pack's OWN window — with NO status term,
+  // which is what `workAttentionHref` now sends — returns EXACTLY the tile's own ids.
   const page = await listWork(BOB(), {
-    client, status: ["completed"], since: p.window.from, until: p.window.to,
+    client, receiptSince: p.window.from, receiptUntil: p.window.to,
   });
   const listIds = page.rows.map((r) => r.id).sort();
-  assert.deepEqual(listIds, [undated.work_id, ordinary.work_id].sort(),
-    "the list is dated by the ADMISSION, so the same week holds a different set of Works");
+  assert.deepEqual(listIds, tileIds,
+    "the receipt-dated list agrees with the tile on the SAME Works — old-but-posted is IN, posted-but-unsettled is IN, undated is OUT");
+  assert.ok(!listIds.includes(undated.work_id),
+    "the undated completion is excluded from the receipt-dated list, never dated by something else (AC2)");
 
-  // THE TWO DIVERGENCE CLASSES, named rather than summarised.
-  const inTileOnly = tileIds.filter((id) => !listIds.includes(id));
-  const inListOnly = listIds.filter((id) => !tileIds.includes(id));
-  assert.deepEqual(inTileOnly, [old.work_id],
-    "class 1: posted inside the window, admitted before it — the list cannot express this");
-  assert.deepEqual(inListOnly, [undated.work_id],
-    "class 2: completed inside the window with no receipt — already disclosed as uncounted");
-  assert.deepEqual(tileIds.filter((id) => listIds.includes(id)), [ordinary.work_id],
-    "and the ordinary same-day Work is in both — the sets overlap, they are not disjoint");
+  // AND THE STATUS TERM IS WHAT USED TO BREAK IT, said out loud rather than left to a reader: the
+  // same window with `status=completed` drops the posted-but-unsettled Work the tile counted.
+  const statusFiltered = await listWork(BOB(), {
+    client, status: ["completed"], receiptSince: p.window.from, receiptUntil: p.window.to,
+  });
+  assert.ok(!statusFiltered.rows.map((r) => r.id).includes(unsettled.work_id),
+    "a `status=completed` drilldown would still drop it — which is why the link no longer sends one");
 
-  // CLASS 2 IS ALREADY SAID OUT LOUD BY THE DOOR. Class 1 is not expressible here at all, so it
-  // is disclosed by the BOARD: `ClientWorkAttention`'s recent-success tile renders
-  // `recentSuccessListBasis` ("The list … is dated by when each Work was started …"), pinned by
-  // `client-work-attention.test.tsx` and by the `home.facets.drilldown` walk leg.
+  // THE OLD (ADMISSION-DATED) READ IS STILL THERE, UNCHANGED, AND STILL DIVERGES — proving this
+  // is a NEW axis added beside the old one, not a redefinition of `since`/`until`.
+  const admissionPage = await listWork(BOB(), {
+    client, status: ["completed"], since: p.window.from, until: p.window.to,
+  });
+  const admissionIds = admissionPage.rows.map((r) => r.id).sort();
+  assert.deepEqual(admissionIds, [undated.work_id, ordinary.work_id].sort(),
+    "p_since/p_until still fence the ADMISSION instant exactly as before #905 — old-but-posted is excluded there");
+
+  // THE PACK'S OWN COVERAGE STATEMENT IS UNCHANGED: an undated completion still drives
+  // coverage='partial' on the FACET (a fact about what the receipt ledger can date), independent
+  // of which axis a caller drills down on.
   assert.equal(successOf(p).coverage, "partial");
   assert.equal(successOf(p).coverage_reason, "completions_without_receipt");
-  assert.equal(successOf(p).uncounted_completions, 1, "the door names class 2 by size");
+  assert.equal(successOf(p).uncounted_completions, 1, "the door still names the undated completion by size");
 });
 
 // ===========================================================================================

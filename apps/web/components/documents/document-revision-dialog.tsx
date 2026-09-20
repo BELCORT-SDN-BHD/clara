@@ -40,6 +40,7 @@ import { isDoorError, isDoorRefusal } from "@/lib/doors";
 import { DocumentsDoorDialog } from "./DocumentsDoorDialog";
 import { DoorFeedback } from "./door-feedback";
 import type { PartClr } from "@/lib/parts/hooks";
+import type { SourceRevisionResult } from "@/lib/documents/types";
 
 /** The field paths a human may revise. It is `clara._revisable_invoice_field`'s closed set
  *  (migration 0217), re-stated here for ONE purpose only: deciding which rows get a control. The
@@ -75,7 +76,11 @@ export function DocumentRevisionDialog({
    *  by the caller rather than guessing a number the door would refuse. */
   factsVersion: number;
   busy: boolean;
-  onRevised: () => void;
+  /** #885 — the door’s OWN receipt, handed on rather than discarded. Migration 0268 retires every
+   *  Work parked on a question about this document inside this same transaction, and says on the
+   *  receipt which ones it replaced and which it could not (`superseded_work`). The caller is the
+   *  surface that can say so; this dialog closes on success and cannot. */
+  onRevised: (result: SourceRevisionResult) => void;
 }) {
   const t = useTranslations("ClientDocuments");
   const [value, setValue] = useState(currentValue);
@@ -91,10 +96,10 @@ export function DocumentRevisionDialog({
     setErr(null);
     setClr(null);
     try {
-      await reviseDocumentFact(documentId, fieldPath, value.trim(), observed, reason.trim());
+      const result = await reviseDocumentFact(documentId, fieldPath, value.trim(), observed, reason.trim());
       setStale(null);
       setReason("");
-      onRevised();
+      onRevised(result);
       return true;
     } catch (e) {
       if (isDoorRefusal(e)) {

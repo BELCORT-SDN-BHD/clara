@@ -158,3 +158,42 @@ test("the addressed ?work= id is parsed, survives a filter change, and is never 
   // A saved view is a FILTER SET. A view that pointed at one record would be a bookmark.
   assert.equal(workListStateQuery(parse(`work=${WORK}&q=rent`)), "q=rent");
 });
+
+// #905 — `receiptSince`/`receiptUntil`: a real filter axis with NO visible control of its own
+// (the Work list filter bar never renders a picker for it; the client home's recent-success tile
+// is the only writer). Every cell below proves it behaves as an axis anyway — narrows, counts,
+// clears, saves — because a person arriving from that tile must see (and be able to clear) a
+// narrowed list, and a saved view built from that URL must not silently drop the bound.
+test("receiptSince/receiptUntil are real filter axes with no visible control — #905", () => {
+  const search = `client=${CLIENT}&status=completed&receiptSince=2026-09-10&receiptUntil=2026-09-16`;
+  const state = parse(search);
+  assert.equal(state.receiptSince, "2026-09-10");
+  assert.equal(state.receiptUntil, "2026-09-16");
+  // Shape-checked exactly like since/until: a non-calendar-date value is dropped, never forwarded.
+  assert.equal(parse("receiptSince=not-a-date").receiptSince, null);
+  assert.equal(parse("receiptUntil=2026-02-30").receiptUntil, null);
+
+  // It COUNTS as TWO axes, exactly the way since/until already do (each key is its own entry in
+  // WORK_LIST_FILTER_AXES): client + status + receiptSince + receiptUntil = four.
+  assert.equal(hasWorkListFilters(state), true);
+  assert.equal(countWorkListFilters(state), 4, "client, status, receiptSince and receiptUntil are four axes");
+  assert.equal(
+    countWorkListFilters(parse("receiptSince=2026-09-10")),
+    1,
+    "receiptSince alone is one axis, exactly like since alone",
+  );
+
+  // It round-trips through apply/parse exactly like since/until.
+  const rebuilt = applyWorkListUrlState(new URLSearchParams(), state);
+  assert.deepEqual(parseWorkListUrlState(rebuilt), { ...state, view: null });
+
+  // Clear filters (the ONE shared patch) clears it too — a person following the tile's link must
+  // be able to get back to an unfiltered list with the SAME button every other filter uses.
+  const cleared = applyWorkListUrlState(new URLSearchParams(search), EMPTY_WORK_LIST_FILTERS);
+  assert.equal(cleared.toString(), "", "Clear filters removes the receipt bound along with every other axis");
+
+  // And it is part of the canonical saved-view query, like any other axis — a saved view is a
+  // filter set, and this is a real filter.
+  assert.match(workListStateQuery(state), /receiptSince=2026-09-10/);
+  assert.match(workListStateQuery(state), /receiptUntil=2026-09-16/);
+});

@@ -28,6 +28,7 @@ import { renderComponent, textOf, setFieldValue, clickButton } from "../../test/
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { DocumentRevisionDialog, isRevisableFieldPath } from "./document-revision-dialog";
+import type { SourceRevisionResult } from "../../lib/documents/types";
 import messages from "../../messages/en.json";
 
 // The dialog mounts @base-ui/react primitives whose floating-ui internals feature-detect against
@@ -81,7 +82,7 @@ async function withDialog(
   run: (ctx: {
     h: Awaited<ReturnType<typeof renderComponent>>;
     b: Node_;
-    revised: { n: number };
+    revised: { n: number; last: SourceRevisionResult | null };
   }) => Promise<void>,
 ): Promise<void> {
   const originalFetch = globalThis.fetch;
@@ -89,7 +90,7 @@ async function withDialog(
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
   globalThis.fetch = fetchImpl;
   configureSessionTokenSource(async () => "tok");
-  const revised = { n: 0 };
+  const revised: { n: number; last: SourceRevisionResult | null } = { n: 0, last: null };
   const h = await renderComponent(App(createElement(DocumentRevisionDialog, {
     documentId: "11111111-1111-4111-8111-111111111111",
     fieldPath: "invoice.total",
@@ -97,7 +98,7 @@ async function withDialog(
     currentValue: "1050.00",
     factsVersion: 1,
     busy: false,
-    onRevised: () => { revised.n += 1; },
+    onRevised: (result: SourceRevisionResult) => { revised.n += 1; revised.last = result; },
   })));
   const b = body();
   (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
@@ -225,4 +226,49 @@ test("CLR19 stale_source_version states both versions and the attempted value, a
       assert.match(text, /Source version/, "and the dialog now states the version it will quote");
     },
   );
+});
+
+// #885 (fix round) — WHAT THE CORRECTION DID TO THE WORK QUEUE REACHES THE SURFACE THAT ASKED FOR
+// IT. Migration 0268 retires every Work parked on a question about the corrected document, and
+// since review finding L09-ADV-01 a Work whose basis was DERIVED from the reading that just moved
+// is retired with NO successor at all — nobody may re-admit a stale figure on a corrected document.
+// That arm is the one a person has to be told about: their correction succeeded AND something they
+// were waiting on now needs stating again. The door already says so on its receipt
+// (`superseded_work`, one entry per Work with `replaced` and `not_replaced_reason`); this dialog
+// used to await that receipt and throw it away.
+test("885 a confirmed revision hands its receipt to the caller, Work effects included", async () => {
+  const calls: Call[] = [];
+  const receipt = {
+    document_id: "11111111-1111-4111-8111-111111111111",
+    revision_id: "99999999-9999-4999-8999-999999999999",
+    field_path: "invoice.total",
+    prior_value: { text: "1050.00", cents: 105_000 },
+    new_value: { text: "1150.00", cents: 115_000 },
+    extraction_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    observed_extraction_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    observed_version: 1,
+    facts_version: 2,
+    carried_regions: 3,
+    superseded_work: [
+      {
+        work_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        new_work_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        reason: "source_corrected", replaced: true, not_replaced_reason: null,
+        revision_id: "99999999-9999-4999-8999-999999999999",
+      },
+      {
+        work_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        new_work_id: null,
+        reason: "source_corrected", replaced: false, not_replaced_reason: "interpreted_basis",
+        revision_id: "99999999-9999-4999-8999-999999999999",
+      },
+    ],
+  };
+  await withDialog(stubFetch(() => ({ status: 200, body: receipt }), calls), async (ctx) => {
+    await attempt(ctx, "1150.00", "the reader misread the printed total");
+    assert.equal(calls.length, 1, "exactly one governed call was made");
+    assert.equal(ctx.revised.n, 1, "the surface was told to re-read");
+    assert.deepEqual(ctx.revised.last, receipt,
+      "…and was handed the door’s own receipt, so it can say what the correction retired");
+  });
 });

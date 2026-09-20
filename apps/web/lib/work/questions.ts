@@ -30,6 +30,7 @@ import { listCoaAccounts } from "@/lib/journals/api";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { RefusalError } from "@/lib/wire";
 import type { SessionTokenAccessor } from "@/lib/session";
+import type { WorkBasis } from "@/lib/work/types";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
@@ -77,6 +78,31 @@ export type WorkQuestionRecord = {
   delivery_attempts: number;
   work_status: string;
   work_basis_digest: string | null;
+  /** #839 — migration 0265: the admitted Work's own basis, transcribed verbatim off
+   *  `clara.accounting_work.basis` beside the digest pair above. Optional for the same reason
+   *  `AccountingWorkRow.initiated_by` is (`apps/web/lib/work/types.ts`'s own header): a database
+   *  below the 0265 frontier has no such key on the jsonb this door returns, and a reader that
+   *  crashed on its absence would be asserting a schema it cannot see. Present and non-null on
+   *  every question read from a 0265-or-later database, because `accounting_work.basis` is itself
+   *  `not null` there. */
+  basis?: WorkBasis | null;
+  /**
+   * #885 (migration 0268) — WHEN the source this question stands on was corrected, if it was
+   * corrected AFTER the question was asked; null otherwise. `clara.answer_work_question` refuses
+   * such a question outright (CLR13 `source_corrected`), even while it is still PENDING and even
+   * where the Work itself is carved out of the retirement rule by a committed receipt (#676) —
+   * so a surface that asked for an answer would be asking for one the door has already decided
+   * to refuse. OPTIONAL: a database below the 0268 frontier carries no such key.
+   */
+  source_corrected_at?: string | null;
+  /**
+   * #885 (migration 0268) — does this Work already hold a committed receipt? It is #676's carve-out
+   * read off `clara._work_committed_receipt`, and the surface needs it to say something TRUE: such
+   * a Work reads as completed to `clara.restate_accounting_work`, which refuses it CLR13
+   * `not_restatable`. So the restate offer is withheld there and the source-corrected sentence
+   * names the exit the doors really allow. OPTIONAL: absent below the 0268 frontier.
+   */
+  work_posted?: boolean;
 };
 
 /** The value a human typed for one field, before it is sent. `null` means "left blank", which is
@@ -132,6 +158,13 @@ export const CONVERGE_REASONS = [
   "stale_question",
   "expired",
   "cancelled",
+  // #885 — the narrower truth behind a `cancelled` question: the Work was REPLACED, not merely
+  // stopped, and `detail.current.superseded_by` names the Work that replaced it. TWO CAUSES REACH
+  // IT and the word distinguishes neither: a #721 restatement, and a source correction whose
+  // retired Work carried a `user_direct` basis. A source correction that could NOT carry the basis
+  // forward (a derived one) admits no successor and answers `cancelled` instead, so "superseded"
+  // means exactly "there is a newer Work carrying this instruction" and nothing about the cause.
+  "superseded",
   "basis_changed",
   "state_changed",
 ] as const;

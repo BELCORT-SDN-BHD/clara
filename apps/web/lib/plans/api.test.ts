@@ -66,6 +66,8 @@ function row(n: number): WorkListRow {
     initiator_role: "bookkeeper",
     basis_origin: "user_direct",
     intent_key: `w623:journal_entry:${n}`,
+    claim_id: null,
+    claimant_label: null,
     memo: n % 2 === 0 ? `Office rent ${n}` : null,
     posting_date: "2026-09-01",
     currency: "MYR",

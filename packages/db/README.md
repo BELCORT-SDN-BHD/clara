@@ -1059,7 +1059,129 @@ posted-effect work should decide, not this ticket.
 0217 also recuts `clara.set_document_kind` — signature unchanged — so a kind change records the
 same observation and its own `'kind'` revision row. **D1 write-quiesce is owed** for that recut
 (see the Deploy contract above). #646 mints no `clara.accounting_work` row and widens no purpose
-CHECK; the posted-effect integration is #676.
+CHECK; the posted-effect integration is #676. What a correction does to the Work *waiting* on the
+document is migration 0268's, below.
+
+### A source correction retires the Work waiting on it (#885, migration 0268)
+
+Owner ruling, 2026-09-17 and re-confirmed 2026-09-20: **a person must never be able to answer a
+question asked against a reading that has been corrected.** 0268 makes that structural rather than
+advisory. #658's `WorkKnowledgeDriftBanner` does not discharge it — it is keyed on
+`clara.knowledge_records.knowledge_version`, and a fact revision writes nothing there (0217:53), so
+on this very case it never appears, and it only warns.
+
+`clara.revise_document_fact` now cancels and re-admits, **inside its own transaction** (the ruling's
+recorded preference, so no frozen document-ingest closure is touched and there is no window in which
+the corrected document and the still-answerable question coexist):
+
+| Object | What it is |
+|---|---|
+| `clara._source_corrected_work(uuid,uuid)` | The ONE rule: a Work of this firm that still has a PENDING question, names this document in its own `source_refs`, holds NO committed receipt, and is in `queued` / `running` / `awaiting_input`. The write-side twin of `list_source_dependents`' `work_questions` arm, narrowed by the last two terms. Ungranted. |
+| `clara._lock_source_corrected_work(uuid,uuid)` | Takes the `accounting_work → agent_tasks → agent_interruptions` rungs for that set and returns exactly the ids it locked. Ungranted. |
+| `clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid)` | Re-asks the rule under those locks and retires each Work through `clara.cancel_accounting_work`, admitting **no** successor on any arm. Ungranted. |
+| `clara._question_source_corrected(uuid)` | WHEN the source a question stands on was last corrected, if it was corrected **after** the question was asked AND that revision changed the value — the instant, or NULL. Same firm and `source_refs` terms as the rule above. Ungranted. |
+| `clara._fact_value_changed(jsonb,jsonb)` | Did a revision change the RECORDED value? Normalised cents when both sides carry them, else the trimmed text. The one notion the correcting door refuses a no-op with and the predicate above reads a revision row through. Ungranted. |
+
+**The retirement rides 0199's own door.** `clara.cancel_accounting_work` appends the single
+`work.cancelled` domain event; 0268 registers **no** new event type and **no** taxonomy row, and
+mints no `supersedes` / `superseded_by` of its own.
+
+**Every affected Work is retired, and NOTHING is re-admitted in its place.** The first cut
+re-admitted a successor when `basis_origin = 'user_direct'`, on the argument that a human's
+instruction survives a correction of the document it was read from. Measured end to end on the
+lane rig, that argument costs the ruling its second half: the successor's `basis_digest` is
+byte-identical to the retired Work's (it is fixed at admission), `clara._record_journal_entry_core`
+compares a posted basis against it, and nothing in the estate compares a posted AMOUNT against the
+document's facts — so posting the CORRECTED figure under the successor is refused CLR10
+`basis_mismatch` while posting the RETIRED one is ACCEPTED and evidence-linked to the corrected
+document. A person who typed the figure printed on the invoice typed the reading that has just
+moved. So no basis kind is carried forward: every affected Work is cancelled, `replaced` is always
+`false`, `new_work_id` is always null, and the receipt says WHY in one of two words —
+`interpreted_basis` (the figures were derived from the value that changed) or
+`basis_predates_correction` (a person stated them before it changed). Both mean *state it again*,
+through #721's own restatement door. `packages/db/tests/work-source-correction-supersede.test.mjs`
+`w885.no_stale_post` pins the property as an absence: after a correction from RM 640.00 to
+RM 999.00, no Work the door touched or created can put a 64000-cent line on the books against that
+document.
+
+**A KEYSTROKE IS NOT A CORRECTION.** `clara.revise_document_fact` refuses a revision that leaves
+the recorded value where it was: CLR10 `value_unchanged`, raised before anything is written — no
+extraction, no revision row, no `facts_version`, and above all no retirement and no question turned
+unanswerable. *Unchanged* means the STORED value, not the keystrokes: the normalised cents when both
+sides carry them (so `RM 880.00` typed over `880.00` is the same fact), otherwise the trimmed text; a
+fact the reader never persisted has no prior value, and anything is a change against nothing.
+`clara._fact_value_changed(jsonb,jsonb)` is that one notion, and BOTH the door and
+`clara._question_source_corrected` ask it — the predicate reads revision rows through it too, so a
+row written before this guard existed cannot make a question read as source-corrected either.
+Pinned by `w885.noop.refused`.
+
+**A question whose source was corrected is not answerable — even where the Work is carved out.**
+The retirement rule deliberately does not touch a Work holding a committed receipt (#676's
+territory), and before this round a person could still answer that Work's pending question after
+the document's reading had moved — measured ACCEPTED. `clara.answer_work_question` now asks
+`clara._question_source_corrected(question)` and refuses CLR13 `source_corrected` whenever the
+source moved after the question was asked, carrying the instant on `detail.current
+.source_corrected_at`; the same word replaces `cancelled` for a question the retirement closed, so
+the refusal says what changed rather than only that something did. The Work itself is still
+untouched: it is the ANSWER that is refused. `clara._work_question_record` projects
+`source_corrected_at` **and `work_posted`** beside 0180's own keys, so B3/B4/B6 render the sentence
+instead of an answer form — and render the RIGHT sentence: a retired Work is restated on the
+corrected document, while a Work that already posted cannot be restated at all
+(`clara.restate_accounting_work` refuses it CLR13 `not_restatable`), so its sentence names Cancel
+Work and the rail withholds the restate control there.
+
+**What is NOT delivered here, and who owes it.** "Re-admitted ON THE CORRECTED FACTS" needs
+somebody to re-read the corrected document and propose a basis from it. `journalBasisSchema`
+(`packages/runtime/workflows/claraWork.v1.tools.ts`) is posting date, memo, currency and lines of
+integer cents with NO back-link from a line to a document field path, so mapping a corrected
+`invoice.total` onto debit and credit lines is an interpretation act, not a projection — it cannot
+be constructed in SQL. That step belongs to the wave-4 shared cut (`claraWork_v6` /
+`chatTurn_v22`); until it lands, the honest mechanism is the one above: retire, tell the person,
+and let them restate.
+
+The REASON is durable on the cancellation's own op key, `source_corrected:<revision id>:<old work
+id>` on `clara.op_receipts`, plus the `superseded_work` array 0268 adds to the revision's receipt
+and audit row. It is a *derived key*, not a first-class cancellation
+reason: `clara.cancel_accounting_work(uuid,uuid,text)` takes no reason argument and its
+`work.cancelled` payload carries none, so a feed row recovers the cause by reading that key. Giving
+the cancellation a reason column or event key is a recut of 0199's door and belongs to the ticket
+that needs it (#840).
+
+**The lock order is why `clara.documents` is no longer this door's first lock.** The declared global
+order is `accounting_plans → accounting_work → agent_tasks → agent_interruptions` (0193:248). The
+journal lane already takes `clara.documents` *while holding* the `accounting_work` rung —
+`clara._lock_document_binding` (0197:329) fires from BEFORE ROW triggers on `clara.journal_entries`
+and `clara.entry_evidence_links`. A correcting transaction that took `clara.documents` first and then
+reached for a Work row would be the opposite direction of that same edge, i.e. an ABBA deadlock
+against any posting transaction. So `clara.revise_document_fact` takes the Work rungs first, through
+the lock helper, and 0217's own document lock — unmoved, not one line changed — now sits below them.
+0268's tail asserts that order positionally in the committed body text.
+
+**A bookkeeper's correction is never refused because of a Work they were not acting on.** The first
+cut called `restate_accounting_work`, whose typed refusals are about a *Work* rather than about the
+document — a non-journal purpose, a document that already backs a posted entry **of some other
+Work**, a client gone inactive — and let them propagate, which made a human door hostage to a Work
+the human was not acting on. Measured on the lane rig: a sibling Work's posting refused a bookkeeper's
+correction outright with CLR13 `source_already_posted`, naming an entry they never touched. The
+second cut removed the call altogether — no arm re-admits, so no refusal from that door can reach
+this one — and the property is now structural rather than caught: nothing in this path can raise a
+refusal about a sibling Work.
+
+**`clara.answer_work_question` gains two words and one arm.** Its existing CLR13 status refusal
+reads `detail.reason = 'source_corrected'` when the source moved after the question was asked, and
+`'superseded'` — instead of `cancelled` — when the question was closed by the cancel cascade *and*
+the Work carries `superseded_by` (a #721 restatement; a source correction no longer writes one), with
+`detail.current.superseded_by` naming the successor. The ARM is the new one: a question that is still
+PENDING is refused outright when its source was corrected, which is the only way #676's
+committed-receipt carve-out and the ruling's absolute sentence can both hold. Every other status keeps the exact word 0180 gave it, `already_answered` still wins, and a
+plain cancel (no successor) still answers `cancelled`. A #721 restatement reaches the same new word,
+which is correct: the reason the question was retired is the same in both cases.
+
+**D1 write-quiesce is owed** for both recut bodies (`clara.revise_document_fact`,
+`clara.answer_work_question`) — see the Deploy contract above. Not covered by 0268, deliberately:
+re-evaluating a *posted* result (#676) and re-assessing recorded experience (`docs/PRD.md:123`,
+#658/#663) both stay parked, and `clara.list_source_dependents` is NOT recut — its job is to show a
+human everything standing on the document, including the rows this rule leaves alone.
 
 ## Knowledge scope, firm defaults and exceptions
 
@@ -2597,6 +2719,95 @@ opposite facts. It now returns its own `awaiting_confirmation` verdict where the
 differ (nothing coded, nothing posted, no statement), with its own message key, its own tone and a
 sentence saying why nothing is booked; once a person has acted, a confirmed proposal reads `coded`
 or `posted` like any other entry.
+
+## 0265 — the shared question record carries the admitted basis (#839)
+
+`clara._work_question_record` (0180's "one record every surface renders") gains ONE key, `basis` —
+the Work's own `clara.accounting_work.basis`, transcribed verbatim — beside the
+`basis_digest`/`work_basis_digest` pair it already carried.
+
+**A BODY-ONLY RECUT OF THE UNGRANTED PROJECTION.** `_work_question_record` is `revoke all … from
+public` in 0180 and has never been granted to any role; `clara.get_work_question` and
+`clara.get_work_pending_question` are NOT recut at all, because both do nothing but delegate to it
+and return its jsonb unexamined. §T re-reads both doors' `pg_get_functiondef` and requires them
+byte-identical to their pre-images, so "additive, and to one body only" is a measurement.
+
+**WHY.** A surface that holds ONLY the shared record (Needs-you's row, the Clara rail's cards) had
+the question but not the figures, so it could not offer "Restate as a new instruction" the way the
+Work detail does — that page loads the full `AccountingWorkRow` (basis included) from a separate
+read. The key is what makes the admitted posting date, memo and lines reachable from the one record
+every surface already asks for.
+
+**NO NEW COHORT** in `packages/db/tests/rig-meta.mjs`, and that is a finding rather than an
+omission: the name is already on `WORK_QUESTIONS_0180_UNGRANTED_FNS` at the same arity and the same
+"granted to nobody" disposition, and `cohortFailures()` fails a HALF-present cohort, so a cohort of
+its own would red every database between the two frontiers. #720 (0198) recorded the identical
+shape. The frontier-gated battery is `tests/work-question-admitted-basis.test.mjs`, preloaded by
+`tests/work-question-admitted-basis-preintegration-gate.mjs`.
+
+**DEPLOY ORDER: none owed, in either direction.** An older web build ignores a jsonb key it never
+asks for; a newer build against a database below this frontier reads `record.basis` as `undefined`
+and gates its restate entry point on the key's PRESENCE, so it renders nothing rather than throwing.
+
+## 0266 — the Work list labels a staff expense claim without an N+1 read (#880)
+
+`clara.list_accounting_work` and `clara.get_accounting_work_row` each gain TWO projected fields,
+`claim_id` and `claimant_label`, LEFT JOINED from `clara.staff_expense_claims` by `work_id` — so a
+claim Work's list row (and its addressed row) carries its own label with ZERO additional round
+trips, rather than a per-row call to `clara.get_work_claim_origin`.
+
+**THE ADDITIVE PROJECTION IS 0203/#809'S OWN SHAPE**, which widened this same pair in the same
+lockstep; the brief allowed a batched door instead, and that would still have cost the browser one
+round trip and would have had to re-derive `get_work_claim_origin`'s firm scoping for an array of
+ids. `clara.get_work_claim_origin` is UNCHANGED, so the Work detail's existing single-Work read is
+untouched by construction.
+
+**THE JOIN CANNOT DUPLICATE A ROW.** `clara.staff_expense_claims` carries
+`uq_staff_expense_claims_work unique (work_id)` (0221) — at most one claim per Work, structurally —
+and `sec.firm_id = w.firm_id` is restated on the join condition, belt-and-braces over the composite
+FK, in the same explicit-correlation style 0189 uses for the `clara.clients` join beside it. Both
+doors stay SECURITY INVOKER: the claim rows are admitted by `p_staff_expense_claims_read`
+(`firm_id = clara.jwt_firm()`), the same RLS the list already leans on for its other sources.
+
+**A BODY-ONLY `CREATE OR REPLACE` AT THE EXISTING SIGNATURE** — both doors return a jsonb envelope,
+so a projection field changes neither signature nor return type. The replace restates
+`security invoker`, `search_path` and `plan_cache_mode`, and §T re-reads all three from `pg_proc`
+together with the owner and the literal ACL. NO roster change is owed in `rig-meta.mjs`: same
+names, same grants (see the note this migration adds beside `WORK_LIST_0189_HUMAN_FNS`). The
+frontier-gated cells are `wl.29` in `tests/work-list.test.mjs`, preloaded by
+`tests/work-list-claim-label-preintegration-gate.mjs`.
+
+## 0267 — the Work list gains a receipt-dated window (#905)
+
+`clara.list_accounting_work` gains TWO parameters, `p_receipt_since`/`p_receipt_until`, that fence a
+Work by its own COMMITTED receipt (`clara.operation_receipts`, `outcome='committed'`) instead of its
+admission instant — so the client home's recent-success tile, which has always COUNTED by receipt
+(0214), can LINK by receipt too and the two describe one population.
+`clara.get_accounting_work_row` is untouched (§T pins it byte-identical to its 0266 pre-image).
+
+**A DROP AND A CREATE, NOT A REPLACE** — `create or replace function` cannot ADD a parameter:
+PostgreSQL identifies a function by (schema, name, ARGUMENT TYPES), so a longer list is a DIFFERENT
+overload left resolvable beside the old one, and PostgREST would face two candidates for one name.
+The nine-argument signature is dropped and the eleven-argument one created in the same transaction,
+the 0202/#770 precedent the brief named. A drop takes five things with it that a replace would have
+kept — owner, SECURITY INVOKER, both pinned settings, the literal ACL and the comment — and all
+five are re-issued and then re-read from the catalog in §T. Every new parameter is DEFAULTED, so a
+nine-positional caller still resolves and exactly ONE `list_accounting_work` remains in the catalog.
+
+**THE RECEIPT JOIN IS A LATERAL WITH `limit 1`**, the same "at most one" idiom the pending-question
+join beside it uses, so even a violation of `uq_operation_receipts_committed` could not duplicate a
+list row. The window is half-open on both axes (`>= since`, `< until`) over the same
+Asia/Kuala_Lumpur calendar-day construction 0214's own pack window uses, and a Work with NO
+committed receipt is excluded by the NULL comparison rather than dated by something else.
+
+**WRITTEN SO A #957 REDO OVER ITS OWN EFFECTS IS SAFE**: §W is `drop function if exists` on the
+nine-argument signature followed by `create or replace` on the eleven-argument one, and §0's
+prestate recognises BOTH starting shapes. NO roster change is owed in `rig-meta.mjs`: a
+drop-and-create of the SAME name is not a new name (see the note this migration adds beside
+`WORK_LIST_0189_HUMAN_FNS`). The frontier-gated cells are `wl.30`–`wl.32` in
+`tests/work-list.test.mjs` and `p650.pack.recent_success_drilldown` in
+`tests/client-work-pack.test.mjs`, both preloaded by
+`tests/work-list-receipt-window-preintegration-gate.mjs`.
 
 ## 0270 — the firm's own document-processing caps (#960)
 

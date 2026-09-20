@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import {
   ROLES, roleQuery, rootQuery, humanQuery, buildWorkWorld, freshWorkClient, endPool, opk,
   assertRaises, admitJournalWork, retryAccountingWork, claimWorkRun, settleWorkRun, basis,
-  detailOf, printSkipCount, MODEL,
+  detailOf, printSkipCount, MODEL, workRow, mintClientObo, wakeRecordJournalEntry, receiptsForWork,
 } from "./work-journal-fixtures.mjs";
 // #630's lane exports the two world manipulations a TAKE-OVER needs (a throwaway member to
 // revoke, and the door that hands the Work on). Imported from there rather than restated here:
@@ -35,6 +35,12 @@ import {
   insertUser, addMember, deactivateMember, takeOverAccountingWork,
 } from "./work-cancel-fixtures.mjs";
 import { parkedWork } from "./work-question-fixtures.mjs";
+// #880 [0266] widens the SAME two doors a third time, with clara.staff_expense_claims's own claim
+// builders — imported directly rather than through staff-expense-claim.test.mjs's own larger
+// world, so this file's gate stays independent of that lane's own fixture surface. 0221 sits BELOW
+// 0266 on the chain (strict migration order), so `claimLabelReady()` alone is the honest frontier:
+// a database old enough to carry 0266 has already applied 0221.
+import { admitStaffExpenseClaimWork, claim, ensureSecChart } from "./staff-expense-claim-fixtures.mjs";
 
 const CLR04 = "CLR04";
 const CLR06 = "CLR06";
@@ -87,6 +93,81 @@ async function gateIntentKey(t) {
   return true;
 }
 
+// #880 — the claim_id/claimant_label widen lives in ITS OWN migration (0266), a separate frontier
+// again: a slice-frontier CI leg can be pinned at 0203 (or anywhere below 0266), before this widen
+// lands, and the cell below must skip cleanly there rather than red on fields that do not exist
+// yet.
+const CLAIM_LABEL_STEM = "work_list_claim_label$";
+let _claimLabelReady = null;
+async function claimLabelReady() {
+  if (_claimLabelReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [CLAIM_LABEL_STEM]);
+      _claimLabelReady = r.rows[0].n > 0;
+    } catch {
+      _claimLabelReady = false;
+    }
+  }
+  return _claimLabelReady;
+}
+
+async function gateClaimLabel(t) {
+  if (await claimLabelReady()) return false;
+  // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud (review finding L09-ADV-08).
+  // The package-wide sweep preloads this widen’s OWN pre-integration gate module (named in
+  // the refusal below), which sets the flag below to declare "a database below this migration is an
+  // expected pre-integration state". A worker running this file directly preloads nothing, so
+  // an absent widen fails HERE rather than reporting a green run over a cell that quietly
+  // executed no assertion.
+  if (process.env.CLARA_ALLOW_MISSING_WORK_LIST_CLAIM_LABEL !== "1") {
+    throw new Error(
+      `#880 claim_id/claimant_label projection absent (no ${CLAIM_LABEL_STEM} row in clara.schema_migrations)`
+      + " and CLARA_ALLOW_MISSING_WORK_LIST_CLAIM_LABEL is unset -- this is a FOCUSED run"
+      + " and must fail loudly, not skip. Preload ./tests/work-list-claim-label-preintegration-gate.mjs"
+      + " for an estate sweep against a pre-PR chain.");
+  }
+  t.skip(`#880 claim_id/claimant_label projection absent (no ${CLAIM_LABEL_STEM} migration applied)`);
+  return true;
+}
+
+// #905 — the receipt-dated window lives in ITS OWN migration (0267), a separate frontier again: a
+// slice-frontier CI leg can be pinned at 0266 (or anywhere below 0267), before this widen lands,
+// and the cells below must skip cleanly there rather than red on parameters that do not exist yet.
+const RECEIPT_WINDOW_STEM = "work_list_receipt_window$";
+let _receiptWindowReady = null;
+async function receiptWindowReady() {
+  if (_receiptWindowReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [RECEIPT_WINDOW_STEM]);
+      _receiptWindowReady = r.rows[0].n > 0;
+    } catch {
+      _receiptWindowReady = false;
+    }
+  }
+  return _receiptWindowReady;
+}
+
+async function gateReceiptWindow(t) {
+  if (await receiptWindowReady()) return false;
+  // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud (review finding L09-ADV-08).
+  // The package-wide sweep preloads this widen’s OWN pre-integration gate module (named in
+  // the refusal below), which sets the flag below to declare "a database below this migration is an
+  // expected pre-integration state". A worker running this file directly preloads nothing, so
+  // an absent widen fails HERE rather than reporting a green run over a cell that quietly
+  // executed no assertion.
+  if (process.env.CLARA_ALLOW_MISSING_WORK_LIST_RECEIPT_WINDOW !== "1") {
+    throw new Error(
+      `#905 receipt-dated window absent (no ${RECEIPT_WINDOW_STEM} row in clara.schema_migrations)`
+      + " and CLARA_ALLOW_MISSING_WORK_LIST_RECEIPT_WINDOW is unset -- this is a FOCUSED run"
+      + " and must fail loudly, not skip. Preload ./tests/work-list-receipt-window-preintegration-gate.mjs"
+      + " for an estate sweep against a pre-PR chain.");
+  }
+  t.skip(`#905 receipt-dated window absent (no ${RECEIPT_WINDOW_STEM} migration applied)`);
+  return true;
+}
+
 let world = null;
 before(async () => {
   world = await buildWorkWorld();
@@ -100,6 +181,7 @@ const ALICE = () => world.users.alice; // owner, firm A
 const BOB = () => world.users.bob;     // bookkeeper, firm A
 const CAROL = () => world.users.carol; // viewer, firm A
 const DAVE = () => world.users.dave;   // owner, firm B
+const FIRM_A = () => world.firms.A;
 const CLIENT_B1 = () => world.clients.B1;
 
 // ===========================================================================================
@@ -111,14 +193,18 @@ const LIST_CALL =
   "select clara.list_accounting_work("
   + "p_client => $1::uuid, p_status => $2::text[], p_initiator => $3::uuid, p_purpose => $4::text[],"
   + "p_since => $5::timestamptz, p_until => $6::timestamptz, p_q => $7::text,"
-  + "p_cursor => $8::text, p_limit => $9::int) as result";
+  + "p_cursor => $8::text, p_limit => $9::int,"
+  // #905: THE RECEIPT-DATED BOUND, LAST, matching the door's own append-at-the-end shape — an
+  // omitted pair (every caller above this ticket) reproduces the nine-argument door exactly.
+  + "p_receipt_since => $10::timestamptz, p_receipt_until => $11::timestamptz) as result";
 
 async function listWork(sub, {
   client = null, status = null, initiator = null, purpose = null,
   since = null, until = null, q = null, cursor = null, limit = 25,
+  receiptSince = null, receiptUntil = null,
 } = {}) {
   const r = await humanQuery(sub, LIST_CALL,
-    [client, status, initiator, purpose, since, until, q, cursor, limit]);
+    [client, status, initiator, purpose, since, until, q, cursor, limit, receiptSince, receiptUntil]);
   return r.rows[0].result;
 }
 
@@ -153,6 +239,73 @@ async function settledWork({ client, author = null, outcome, memo = "rent", erro
   await claimWorkRun({ task: admitted.task_id, runId: opk("w641-run") });
   await settleWorkRun({ task: admitted.task_id, outcome, errorCode, error });
   return admitted;
+}
+
+// ===========================================================================================
+// #905 fixtures. `postedWork`/`completedWithoutReceipt`/`backdateWorkAdmission` mirror
+// `packages/db/tests/client-work-pack.test.mjs`'s own fixtures of the same names byte-for-byte in
+// intent (they are private to each file, the same way `listWork` is): #650's file proves the
+// pack COUNTS by receipt; this file proves the LIST can now be BOUNDED by the same receipt.
+// ===========================================================================================
+
+/** Admit, claim, and POST through the wake verb, so a COMMITTED receipt exists — the only way the
+ *  estate mints one (`clara._record_journal_entry_core`, 0178:442-445). Settles `completed`
+ *  unless `settle` is null. */
+async function postedWork(client, { memo = "posted", settle = "completed" } = {}) {
+  const admitted = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo }) });
+  const w = await workRow(admitted.work_id);
+  await claimWorkRun({ task: admitted.task_id, runId: opk("w905-run") });
+  const obo = await mintClientObo({ firm: FIRM_A(), obo: ALICE(), client });
+  await wakeRecordJournalEntry(obo.secret, {
+    client, work: admitted.work_id, logicalOpId: w.logical_op_id, basis: w.basis,
+  });
+  if (settle !== null) await settleWorkRun({ task: admitted.task_id, outcome: settle });
+  const receipts = (await receiptsForWork(admitted.work_id)).filter((r) => r.outcome === "committed");
+  assert.equal(receipts.length, 1, "the fixture must have produced exactly one committed receipt");
+  return { ...admitted, receipt_id: receipts[0].id, committed_at: receipts[0].created_at };
+}
+
+/** Admit, claim, settle `completed` WITHOUT posting — a Work the estate cannot date by receipt at
+ *  all, because `clara.accounting_work` carries no completion instant of its own (0178:324-325). */
+async function completedWithoutReceipt(client, memo = "no receipt") {
+  const admitted = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo }) });
+  await claimWorkRun({ task: admitted.task_id, runId: opk("w905-run") });
+  await settleWorkRun({ task: admitted.task_id, outcome: "completed" });
+  assert.equal((await receiptsForWork(admitted.work_id)).length, 0, "no receipt was written");
+  return admitted;
+}
+
+/** OWNER-LEVEL FIXTURE DML, and it is labelled rather than hidden — the same shape
+ *  `client-work-pack.test.mjs`'s own `backdateWorkAdmission` uses. `clara.accounting_work` is
+ *  guarded by `clara._tf_accounting_work_immutable` (0178) and FORCE RLS, so `created_at` cannot
+ *  be restated through any verb; this is how a fixture builds the ordinary real-world Work that
+ *  was ADMITTED long ago and POSTED just now. */
+async function backdateWorkAdmission(workId, instantExpr) {
+  assert.match(workId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    "a fixture work id must be uuid-shaped before interpolation");
+  await rootQuery(
+    "set session_replication_role = replica; "
+    + `update clara.accounting_work set created_at = ${instantExpr} where id = '${workId}'; `
+    + "reset session_replication_role",
+  );
+}
+
+/** The same owner-level move for a RECEIPT's OWN commit instant — `client-work-pack.test.mjs`'s
+ *  own `backdateReceipt`, restated here because it is private to each file. */
+async function backdateReceipt(receiptId, instantExpr) {
+  assert.match(receiptId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    "a fixture receipt id must be uuid-shaped before interpolation");
+  await rootQuery(
+    "set session_replication_role = replica; "
+    + `update clara.operation_receipts set created_at = ${instantExpr} where id = '${receiptId}'; `
+    + "reset session_replication_role",
+  );
+}
+
+/** The DB's own `now()`, so a window is measured against the SAME clock the fixtures' SQL
+ *  `interval` expressions run against — never a JS `Date.now()` that could skew against it. */
+async function dbNow() {
+  return (await rootQuery("select now() as now")).rows[0].now;
 }
 
 // ===========================================================================================
@@ -909,4 +1062,182 @@ test("wl.28 every list row carries a non-empty intent_key, and the addressed-row
   // "a list of operations is not a ledger" stands.
   assert.equal("basis" in listed, false, "wl.28 no basis object joined the list row");
   assert.equal("basis" in addressed, false, "wl.28 …nor the addressed row");
+});
+
+// ===========================================================================================
+// wl.29 — #880: THE CLAIM LABEL, ON ONE PAGE, WITHOUT A SECOND ROUND TRIP.
+//
+// A staff expense claim posts under the plain `journal_entry` purpose (0221's own header: a
+// fourth purpose cannot post through the closed core), so before migration 0266 the list's own
+// projection could not tell one apart from an ordinary journal entry — the Work detail alone
+// could, through a SEPARATE per-Work call to `clara.get_work_claim_origin`. AC1 asks for "at most
+// one additional round trip" to resolve every claim label on a page; this cell proves the
+// STRONGER fact the additive-projection choice buys — ZERO additional round trips, because the
+// fields ride the SAME page `listWork` already fetched. AC2 asks that a non-claim row is
+// unchanged; this cell puts a plain journal Work on the SAME page as the claim, so one page proves
+// both ACs against the SAME query.
+// ===========================================================================================
+test("wl.29 a page carrying a claim resolves its label with NO extra round trip, and a plain row is unchanged", async (t) => {
+  if (await gate(t)) return;
+  if (await gateClaimLabel(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl29");
+  await ensureSecChart(ALICE(), client, "wl29");
+
+  const claimed = await admitStaffExpenseClaimWork({ client, author: ALICE(), claim: claim() });
+  const plain = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "wl29 plain" }) });
+
+  // --- AC1: the LIST page itself carries the label — no second call to any door. ------------
+  const page = await listWork(BOB(), { client, limit: 25 });
+  const claimRow = page.rows.find((r) => r.id === claimed.work_id);
+  assert.ok(claimRow, "wl.29 the claim Work is on the page");
+  assert.equal(claimRow.claim_id, claimed.claim_id,
+    "wl.29 the list row's claim_id IS the claim admission answered with — no re-derivation");
+  assert.equal(claimRow.claimant_label, "Farah binti Idris",
+    "wl.29 the list row carries the claimant label the door enrolled");
+  assert.equal(claimRow.purpose, "journal_entry",
+    "wl.29 the Work's own purpose is still the plain, unwidened journal_entry (0221's own rule) — "
+    + "claim_id is how the caller tells it apart, not a fourth purpose value");
+
+  // …AND THE ADDRESSED ROW AGREES (AC4's "the two Work projections still match", re-proved from
+  // the outside; migration 0266's own §T step 7 proves it from the catalog).
+  const claimAddressed = await getWorkRow(BOB(), claimed.work_id);
+  assert.equal(claimAddressed.claim_id, claimed.claim_id, "wl.29 the addressed row carries the SAME claim_id");
+  assert.equal(claimAddressed.claimant_label, "Farah binti Idris", "wl.29 …and the SAME claimant_label");
+
+  // --- AC2: the PLAIN row on the SAME page is unchanged — both new fields null, everything else
+  // exactly as wl.1–wl.28 already prove for a plain journal Work. --------------------------
+  const plainRow = page.rows.find((r) => r.id === plain.work_id);
+  assert.ok(plainRow, "wl.29 the plain Work is on the SAME page as the claim");
+  assert.equal(plainRow.claim_id, null, "wl.29 a plain journal Work has NO claim_id");
+  assert.equal(plainRow.claimant_label, null, "wl.29 …nor a claimant_label");
+  assert.equal(plainRow.memo, "wl29 plain", "wl.29 the plain row's own memo is untouched");
+
+  const plainAddressed = await getWorkRow(BOB(), plain.work_id);
+  assert.equal(plainAddressed.claim_id, null, "wl.29 the plain Work's addressed row agrees: no claim_id");
+  assert.equal(plainAddressed.claimant_label, null, "wl.29 …nor a claimant_label");
+
+  // AC3, restated as a machine fact rather than a promise: get_work_claim_origin (the Work
+  // detail's own existing read) is a SEPARATE function this migration never touches — its
+  // signature and body are exactly what 0221 shipped.
+  const origin = (await rootQuery(
+    "select encode(sha256(convert_to(prosrc,'UTF8')),'hex') as sha from pg_proc"
+    + " where oid = 'clara.get_work_claim_origin(uuid)'::regprocedure")).rows[0];
+  assert.ok(origin, "wl.29 clara.get_work_claim_origin still resolves, untouched by this migration");
+});
+
+// ===========================================================================================
+// wl.30 — #905 AC1: THE RECEIPT-DATED BOUND FENCES BY THE COMMITTED RECEIPT, NOT BY ADMISSION.
+// A Work admitted long before a window but posted (committed) inside it is the exact shape
+// `p650.pack.recent_success_drilldown` (packages/db/tests/client-work-pack.test.mjs) names as
+// "class 1: posted inside the window, admitted before it — the list cannot express this". This
+// cell is the fix: the list CAN now express it, on the receipt-dated axis.
+// ===========================================================================================
+test("wl.30 a receipt-dated bound fences by the COMMITTED RECEIPT — an old admission posted just now is IN it and OUT of the start-dated one", async (t) => {
+  if (await gateReceiptWindow(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl30");
+
+  const old = await postedWork(client, { memo: "admitted-long-ago" });
+  await backdateWorkAdmission(old.work_id, "now() - interval '30 days'");
+
+  const now = await dbNow();
+  const since = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const until = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+
+  const byAdmission = await listWork(BOB(), { client, since, until });
+  assert.ok(!ids(byAdmission).includes(old.work_id),
+    "wl.30 the start-dated bound fences w.created_at, and this Work was admitted 30 days ago");
+
+  const byReceipt = await listWork(BOB(), { client, receiptSince: since, receiptUntil: until });
+  assert.ok(ids(byReceipt).includes(old.work_id),
+    "wl.30 the receipt-dated bound fences the committed receipt, which landed inside the window");
+});
+
+// ===========================================================================================
+// wl.31 — #905 AC2: A COMPLETED WORK WITH NO COMMITTED RECEIPT IS EXCLUDED, NEVER DATED BY
+// SOMETHING ELSE. True whichever half of the pair is supplied, alone or together — and a control
+// proves the SAME Work is exactly where wl.1–wl.29 already put it when neither is supplied.
+// ===========================================================================================
+test("wl.31 a completed Work with no committed receipt appears in NEITHER half of a receipt-dated bound", async (t) => {
+  if (await gateReceiptWindow(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl31");
+  const undated = await completedWithoutReceipt(client, "no-receipt");
+
+  const now = await dbNow();
+  const since = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+  const until = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+
+  const withSinceOnly = await listWork(BOB(), { client, receiptSince: since });
+  assert.ok(!ids(withSinceOnly).includes(undated.work_id),
+    "wl.31 p_receipt_since alone excludes an undated completion");
+
+  const withUntilOnly = await listWork(BOB(), { client, receiptUntil: until });
+  assert.ok(!ids(withUntilOnly).includes(undated.work_id),
+    "wl.31 p_receipt_until alone excludes an undated completion");
+
+  const withBoth = await listWork(BOB(), { client, receiptSince: since, receiptUntil: until });
+  assert.ok(!ids(withBoth).includes(undated.work_id),
+    "wl.31 the combined receipt-dated bound excludes an undated completion");
+
+  const plain = await listWork(BOB(), { client, status: ["completed"] });
+  assert.ok(ids(plain).includes(undated.work_id),
+    "wl.31 …but the SAME Work is on the page when no receipt-dated bound is supplied at all");
+});
+
+// ===========================================================================================
+// wl.32 — #905 AC3: THE TWO BOUNDS COMBINE BY `and`, AND SUPPLYING NEITHER CHANGES NOTHING.
+// Three Works, three populations: one satisfies BOTH bounds, one satisfies the admission bound
+// alone, one satisfies the receipt bound alone — so a page filtered on both is the intersection,
+// not the union, and a page filtered on neither still shows all three (today's own behaviour,
+// unwidened).
+// ===========================================================================================
+test("wl.32 the admission-dated and receipt-dated bounds combine as an intersection, and supplying neither is today's page", async (t) => {
+  if (await gateReceiptWindow(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl32");
+
+  const now = await dbNow();
+  const admissionSince = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const admissionUntil = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const receiptSinceIso = new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000).toISOString();
+  const receiptUntilIso = new Date(now.getTime() - 20 * 24 * 60 * 60 * 1000).toISOString();
+
+  // (AB) admitted NOW (inside the admission window) and committed 30 days ago (inside the
+  // receipt window) — satisfies BOTH bounds.
+  const both = await postedWork(client, { memo: "wl32-both" });
+  await backdateReceipt(both.receipt_id, "now() - interval '30 days'");
+
+  // (A) admitted NOW, but committed 100 days ago — OUTSIDE the receipt window. Satisfies the
+  // admission bound alone.
+  const admissionOnly = await postedWork(client, { memo: "wl32-admission-only" });
+  await backdateReceipt(admissionOnly.receipt_id, "now() - interval '100 days'");
+
+  // (B) admitted 100 days ago — OUTSIDE the admission window — but committed 30 days ago, inside
+  // the receipt window. Satisfies the receipt bound alone.
+  const receiptOnly = await postedWork(client, { memo: "wl32-receipt-only" });
+  await backdateWorkAdmission(receiptOnly.work_id, "now() - interval '100 days'");
+  await backdateReceipt(receiptOnly.receipt_id, "now() - interval '30 days'");
+
+  const byAdmissionOnly = await listWork(BOB(), { client, since: admissionSince, until: admissionUntil });
+  assert.deepEqual(ids(byAdmissionOnly).sort(), [both.work_id, admissionOnly.work_id].sort(),
+    "wl.32 the admission bound alone admits AB and A, excludes B");
+
+  const byReceiptOnly = await listWork(BOB(), { client, receiptSince: receiptSinceIso, receiptUntil: receiptUntilIso });
+  assert.deepEqual(ids(byReceiptOnly).sort(), [both.work_id, receiptOnly.work_id].sort(),
+    "wl.32 the receipt bound alone admits AB and B, excludes A");
+
+  const byBoth = await listWork(BOB(), {
+    client,
+    since: admissionSince, until: admissionUntil,
+    receiptSince: receiptSinceIso, receiptUntil: receiptUntilIso,
+  });
+  assert.deepEqual(ids(byBoth), [both.work_id],
+    "wl.32 both bounds together are an INTERSECTION: only the Work satisfying both remains");
+
+  // AC3's OTHER HALF: supplying NEITHER bound changes nothing about who is on the page — every
+  // one of the three Works this cell built is still there, exactly as if #905 had never shipped.
+  const byNeither = await listWork(BOB(), { client });
+  assert.deepEqual(
+    ids(byNeither).sort(),
+    [both.work_id, admissionOnly.work_id, receiptOnly.work_id].sort(),
+    "wl.32 an omitted pair (on both axes) reproduces today's page — no Work is silently dropped",
+  );
 });

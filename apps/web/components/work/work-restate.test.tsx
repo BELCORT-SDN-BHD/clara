@@ -81,7 +81,10 @@ function workRow(over: Partial<AccountingWorkRow> = {}): AccountingWorkRow {
 }
 
 function App(props: {
-  work?: AccountingWorkRow;
+  // #839 — narrowed to what the component actually reads, matching the production prop type: the
+  // Work detail still passes a whole `AccountingWorkRow` (it satisfies this unprojected), and the
+  // rail's shared question record (below) passes only these two fields.
+  work?: Pick<AccountingWorkRow, "id" | "basis">;
   restate?: (auth: unknown, input: Record<string, unknown>) => Promise<RestateWorkResult>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
@@ -157,6 +160,36 @@ test("721 a refusal is rendered verbatim and nothing claims a restatement happen
     assert.match(h.text(), /This Work can no longer be restated/);
     assert.equal(/A new Work was recorded/.test(h.text()), false,
       "721 …and never an outcome the door did not report");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("839 the panel works from the NARROWED {id, basis} shape the rail's shared question record carries, not just a full AccountingWorkRow", async () => {
+  // #839 (migration 0265): `clara.get_work_question` hands the rail `work_id` and `basis` — never
+  // the whole row `work-detail.tsx` reads separately. This is the exact shape `WorkQuestionPanel`
+  // and `WorkCards.tsx`'s `WorkQuestionCard` now build and pass down; a Pick, not a cast.
+  const calls: Array<Record<string, unknown>> = [];
+  const narrow: Pick<AccountingWorkRow, "id" | "basis"> = { id: WORK, basis: workRow().basis! };
+  const h = await renderComponent(
+    App({
+      work: narrow,
+      restate: async (_a, input) => {
+        calls.push(input);
+        return { kind: "accepted", workId: NEW_WORK, taskId: "t", logicalOpId: "op", status: "queued", replayed: false, supersedes: WORK };
+      },
+    }),
+  );
+  try {
+    await h.settle();
+    const press = buttonLabelled(h, "Restate as a new instruction");
+    assert.ok(press, "839 the control mounts from the narrowed shape alone");
+    await clickButton(press!);
+    await h.settle();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.workId, WORK, "839 the id came from the narrowed object, not a full row");
+    assert.match(h.text(), /A new Work was recorded/,
+      "839 submitting from the rail's shape reaches the SAME door and the SAME accepted rendering");
   } finally {
     await h.unmount();
   }

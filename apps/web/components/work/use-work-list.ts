@@ -106,6 +106,8 @@ export function useWorkList(args: UseWorkListArgs): WorkListState {
     initiator: args.filters.initiator ?? null,
     since: args.filters.since ?? null,
     until: args.filters.until ?? null,
+    receiptSince: args.filters.receiptSince ?? null,
+    receiptUntil: args.filters.receiptUntil ?? null,
     q: args.filters.q ?? null,
     cursor: args.cursor ?? null,
     limit: limit ?? null,

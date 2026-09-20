@@ -209,6 +209,34 @@ function installDom(): void {
   doc.documentElement = mkNode("html", doc);
   doc.body = mkNode("body", doc);
   doc.activeElement = doc.body;
+  // A COOKIE JAR, BECAUSE A SIGNED-OUT BROWSER STILL HAS ONE. `@supabase/ssr`'s browser client
+  // reads `document.cookie` the moment it is constructed (`documentCookieGetAll` hands it to
+  // `cookie`'s `parseCookie`), and LEAVING THE FIELD UNDEFINED is not "no session": it throws
+  // `Cannot read properties of undefined (reading 'length')` out of auth-js's own background
+  // `_initialize`, as an unhandled rejection that fails the whole test file rather than the one
+  // read. An empty jar is the honest shape — no cookies, therefore no session — and it is what
+  // lets a cell drive a component whose hydrate reads the caller's identity (#839's rail card).
+  // Writes follow `document.cookie`'s real one-at-a-time semantics: assigning `a=1; Path=/` sets
+  // ONE cookie rather than replacing the jar, and an expiry in the past deletes it.
+  const cookieJar = new Map<string, string>();
+  Object.defineProperty(doc, "cookie", {
+    configurable: true,
+    get: () => [...cookieJar].map(([name, value]) => `${name}=${value}`).join("; "),
+    set: (raw: unknown) => {
+      const [pair = "", ...attributes] = String(raw).split(";");
+      const eq = pair.indexOf("=");
+      if (eq <= 0) return;
+      const name = pair.slice(0, eq).trim();
+      const expired = attributes.some((attribute) => {
+        const [key = "", value = ""] = attribute.split("=");
+        if (key.trim().toLowerCase() === "max-age") return Number(value) <= 0;
+        if (key.trim().toLowerCase() === "expires") return Date.parse(value.trim()) <= Date.now();
+        return false;
+      });
+      if (expired) cookieJar.delete(name);
+      else cookieJar.set(name, pair.slice(eq + 1).trim());
+    },
+  });
   const win: Stub = {
     document: doc, HTMLIFrameElement,
     addEventListener() {}, removeEventListener() {},

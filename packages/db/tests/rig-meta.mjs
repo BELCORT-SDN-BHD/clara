@@ -1738,6 +1738,18 @@ export const WORK_QUESTIONS_0180_COHORT = [
 // present on every database from 0180 onward regardless of whether 0198 has been applied.
 // #720 END
 
+// #839 [0265, the shared question record gains the admitted basis] — NO COHORT, NO NEW NAME, NO
+// GRANT CHANGE, the same shape #720 above records. 0265 creates no function: it RECUTS
+// `clara._work_question_record` to add one key (`basis`, off `clara.accounting_work.basis`) to the
+// jsonb it already built. The name is already on WORK_QUESTIONS_0180_UNGRANTED_FNS above and STAYS
+// there — same signature `(uuid)`, same owner, same SECURITY DEFINER, same pinned search_path, same
+// "granted to nobody" ACL (0265's §T re-reads it, grantor included). `clara.get_work_question` and
+// `clara.get_work_pending_question` are not recut at all — 0265's §T pins both byte-identical to
+// their pre-images — so WORK_QUESTIONS_0180_HUMAN_FNS is untouched too. A cohort of its own would be
+// WRONG here for the same reason #720's is: cohortFailures() fails a HALF-present cohort, and 0265
+// adds no name for one to be half of.
+// #839 END
+
 // #634 [0182, optional and LATE journal evidence] — the EVIDENCE lane, its own cohort for the
 // same "wholly present or wholly absent" reason 0178's carries: folding these names into 0178's
 // roster would red every database between the two frontiers, and `cohortFailures()` fails a
@@ -1798,9 +1810,11 @@ export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 // present or wholly absent" reason 0178's list carries.
 //
 //   the TWO doors + the ONE helper — clara_authenticated ONLY. `list_accounting_work` and
-//   `get_accounting_work_row` are SECURITY INVOKER over three already-granted, firm-scoped
-//   sources (clara.accounting_work, clara.agent_interruptions, clara.clients) with their own
-//   inline bookkeeper floor; `_work_run_attempts` is the SECURITY DEFINER helper they need
+//   `get_accounting_work_row` are SECURITY INVOKER over already-granted, firm-scoped sources
+//   (clara.accounting_work, clara.agent_interruptions, clara.clients, clara.staff_expense_claims
+//   — since #880's claim_id/claimant_label widen, migration 0266 — and, since #905's
+//   receipt-dated window, migration 0267, clara.operation_receipts) with their own inline
+//   bookkeeper floor; `_work_run_attempts` is the SECURITY DEFINER helper they need
 //   because `clara.agent_tasks` carries NO clara_authenticated grant at all (humans read the
 //   masked `clara.agent_tasks_visible`, which does not republish `work_id`) — the SAME gap, and
 //   the same remedy, 0183 recorded for `clara.sweep_runs`. It is GRANTED and therefore
@@ -1811,6 +1825,15 @@ export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 //   `clara.save_my_preferences` is 0179's SAME name at its SAME signature and grant
 //   (USER_PREFERENCES_0179_HUMAN_FNS above already covers it; 0189 only edits its BODY), so no
 //   roster change is owed for that name.
+//
+//   #905 [0267, the receipt-dated window] — NO COHORT CHANGE, NO NEW NAME, the same "still the
+//   SAME name and ACL" shape #839/0265's own note beside 0180's cohort records. `list_accounting_
+//   work` is a DROP-and-CREATE (a new parameter cannot be added by `create or replace`, the same
+//   reason 0202/#770 gives for `list_activity`/`p_work`), but a drop-and-create of the SAME name
+//   is not a new name: 0267's own tail re-reads owner clara_fn_owner, SECURITY INVOKER and the
+//   literal ACL {clara_fn_owner, clara_authenticated} unchanged after the recut, so this roster
+//   entry already covers the widened door. `get_accounting_work_row` is untouched (0267's own
+//   tail pins it byte-identical to its 0266 pre-image), so it needs no roster change either.
 const WORK_LIST_0189_HUMAN_FNS = [
   "list_accounting_work", "get_accounting_work_row", "_work_run_attempts",
 ];
@@ -2500,6 +2523,39 @@ export const DOCUMENT_SOURCE_REVISION_0217_COHORT = [
 // a MISSING-table failure that says nothing about RLS.
 export const DOCUMENT_SOURCE_REVISION_0217_TABLES = ["document_fact_revisions"];
 // #646 END
+
+// #885 [0268, a source correction cancels and re-admits the Work parked on a question about the
+// corrected document] — its OWN cohort, one frontier above 0217's, for the same "wholly present or
+// wholly absent" reason that roster carries: folding these names into 0217's would red every
+// database between the two frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   THE WHOLE COHORT IS UNGRANTED, and that is the boundary claim. All three bodies are reachable
+//   ONLY from inside `clara.revise_document_fact`, which is itself the one human door; a grant on
+//   any of them would be a second, unwalled way into the Work lane from the document lane. Listed
+//   here so an accidental grant FAILS instead of passing quietly, and so a half-applied 0268 is
+//   reported as one rather than as a silently narrower rule.
+//
+//   NOT LISTED, deliberately: `clara.revise_document_fact` and `clara.answer_work_question`. 0268
+//   recuts both BODIES and touches neither NAME, signature nor grant — the first is already on
+//   DOCUMENT_SOURCE_REVISION_0217_HUMAN_FNS and the second on WORK_QUESTIONS_0180_HUMAN_FNS — and a
+//   second listing of a name that exists at an EARLIER frontier would make this cohort resolve on
+//   databases 0268 has not touched, which is exactly the partial-cohort condition the gate exists
+//   to catch (#721's own block states the same rule for the same reason).
+//   THE FOURTH NAME (second fix round): `_question_source_corrected` answers "was this question
+//   asked against a reading that has since moved?" for `clara.answer_work_question` and for the
+//   shared question record. Ungranted for the same reason as the other three -- it reads
+//   clara.document_fact_revisions joined to clara.accounting_work across the Work lane, and the
+//   only callers that should ever ask it are SECURITY DEFINER doors that already hold a firm.
+//   THE FIFTH NAME (third fix round): `_fact_value_changed` is the ONE notion of "this revision
+//   changed the recorded value" that clara.revise_document_fact refuses a no-op with and
+//   clara._question_source_corrected reads a revision row through. Ungranted like its siblings: it
+//   is a predicate over document facts that only those two SECURITY DEFINER bodies should ask.
+const WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS = [
+  "_source_corrected_work", "_lock_source_corrected_work", "_supersede_source_corrected_work",
+  "_question_source_corrected", "_fact_value_changed",
+];
+export const WORK_SOURCE_CORRECTION_0268_COHORT = [...WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS];
+// #885 END
 
 // #648 [0218, firm setup] — the FIRM's own onboarding plan gains human doors. Its OWN cohort for
 // the same "wholly present or wholly absent" reason 0192's carries: folding these names into an
@@ -3702,6 +3758,13 @@ export async function grantMatrixFailures() {
   if (sourceRevisionLive.length !== 0) {
     failures.push(...cohortFailures("#646 0217 document source-revision lane", DOCUMENT_SOURCE_REVISION_0217_COHORT, liveNames));
   }
+  // #885 [0268] — the source-correction supersession closure. Bimodal for 0217's reason: wholly
+  // present once 0268 applies, wholly absent before it.
+  const sourceCorrectionLive = WORK_SOURCE_CORRECTION_0268_COHORT.filter((n) => liveNames.has(n));
+  if (sourceCorrectionLive.length !== 0) {
+    failures.push(...cohortFailures("#885 0268 source-correction supersession closure", WORK_SOURCE_CORRECTION_0268_COHORT, liveNames));
+  }
+  // #885 END
   // #718 END
   // #776
   failures.push(...cohortFailures("#776 0206 operator applicant-name read",

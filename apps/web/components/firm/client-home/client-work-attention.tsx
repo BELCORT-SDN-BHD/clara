@@ -141,28 +141,26 @@ function WorkAttentionTile({
         {kind === "active" ? (
           <p className="text-xs text-muted-foreground">{t("retryNotFilterable")}</p>
         ) : null}
-        {/* THE DRILLDOWN IS THE SAME WEEK OVER A DIFFERENT SUBJECT, and saying so is the same
-            obligation the line above discharges for "retrying". This tile counts a COMMITTED
-            RECEIPT inside the seven Malaysian dates — the estate's only durable completion
-            instant — while `clara.list_accounting_work` fences `accounting_work.created_at`,
-            when the Work was STARTED (0189:427-428). That door has no receipt-dated axis, so the
-            link carries the closest filter it can express and the sentence carries the rest. The
-            divergence is measured, not assumed: `p650.pack.recent_success_drilldown` builds both
-            classes on the rig (a Work admitted weeks ago and posted this week; a Work started and
-            completed this week with no receipt, which the door already names through
-            `uncounted_completions`). */}
-        {/* AND THE ONE ARM WHERE "the same seven days" WOULD OVERSTATE (round-2 review, 650-R2):
-            a window this build could not read makes the builder drop BOTH dates rather than guess
-            them, so the link opens every completed Work this client has ever had. Silence would
-            leave a bare `?status=completed` under a seven-day count with less explanation, not
-            more, so the tile names the wider population instead. Defensive: the door always
-            publishes a window. */}
-        {kind === "recent_success" ? (
-          <p className="text-xs text-muted-foreground">
-            {workAttentionWindowDates(pack) === null
-              ? t("recentSuccessListUndated")
-              : t("recentSuccessListBasis")}
-          </p>
+        {/* #905 CLOSED THE DIVERGENCE THIS BAND USED TO DISCLOSE HERE. Before migration 0267 this
+            tile counted a COMMITTED RECEIPT inside the seven Malaysian dates while
+            `clara.list_accounting_work` could only fence `accounting_work.created_at` (when the
+            Work was STARTED) — the same week over a different subject, measured by
+            `p650.pack.recent_success_drilldown` (packages/db/tests/client-work-pack.test.mjs).
+            `workAttentionHref` now sends the SAME two dates on the door's receipt-dated axis
+            (`receiptSince`/`receiptUntil`) and NO status term — the facet behind this number has
+            none either, so a Work that posted and is still running is counted here and would have
+            been dropped by a `status=completed` list (fix round, review finding L09-ADV-04). The
+            drilldown therefore opens the SAME Works this tile counted, there is no mismatch left
+            to disclose, and that db cell now asserts agreement instead of divergence. The ONE
+            thing still worth a sentence is the round-2 case below: a window this build could not
+            read. */}
+        {/* AND THE ONE ARM WHERE SILENCE WOULD MISLEAD (round-2 review, 650-R2): a window this
+            build could not read makes the builder drop BOTH dates rather than guess them, so the
+            link opens every completed Work this client has ever had. A bare `?status=completed`
+            under a seven-day count needs MORE explanation, not less, so the tile names the wider
+            population. Defensive: the door always publishes a window. */}
+        {kind === "recent_success" && workAttentionWindowDates(pack) === null ? (
+          <p className="text-xs text-muted-foreground">{t("recentSuccessListUndated")}</p>
         ) : null}
         {/* AND THE ONE LINK A DENIED CALLER IS STILL OFFERED. This number is viewer-floored; the
             list it opens is bookkeeper-floored (0189:344-347). A refused pack IS the evidence

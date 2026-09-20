@@ -164,7 +164,11 @@ export function WorkQuestionForm({
   const [draft, setDraft] = useState<WorkAnswerDraft>(() => readWorkAnswerDraft(draftKey) ?? {});
   const [note, setNote] = useState<string>(() => String(readWorkAnswerDraft(draftKey)?.note ?? ""));
   const [step, setStep] = useState(0);
-  const [phase, setPhase] = useState<Phase>(record.status === "pending" ? "editing" : "converged");
+  // #885 (second fix round) — A CORRECTED SOURCE OPENS CONVERGED. Asking a person to fill in a
+  // form whose door has already decided to refuse it is the same defect as showing a control
+  // that would 403: the answer is not available, so the sentence is what this card is for.
+  const [phase, setPhase] = useState<Phase>(
+    record.status === "pending" && !record.source_corrected_at ? "editing" : "converged");
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [refusal, setRefusal] = useState<AnswerRefusal | null>(null);
   /** A field the SERVER named, to be focused once the step carrying it has actually rendered. A
@@ -897,7 +901,21 @@ export function sourceRefText(source: Record<string, unknown> | null | undefined
  *  refusal to read. Both paths land on a CHECKED key — an unknown reason falls back rather than
  *  throwing a MISSING_MESSAGE. */
 export function convergeKeyFor(refusal: AnswerRefusal | null, record: WorkQuestionRecord): string {
-  const reason = refusal?.kind === "converge" ? refusal.reason : record.status;
+  // #885 (second fix round) — A STILL-PENDING QUESTION CAN ALREADY BE UNANSWERABLE. The door
+  // refuses one whose source was corrected after it was asked (CLR13 `source_corrected`), and
+  // the record carries the same instant, so the sentence is reachable with NO refusal to read —
+  // which is the whole point: the person is told before they type, not after they submit.
+  //
+  // THE TWO STATUSES MIRROR THE DOOR (third fix round). `clara.answer_work_question` says
+  // `source_corrected` for a question the retirement CANCELLED and refuses a PENDING one on the
+  // same ground, and says nothing of the sort for any other status — so a question that was
+  // already ANSWERED keeps its own sentence (a later correction does not rewrite what happened),
+  // and an EXPIRED one keeps the word 0180 gave it.
+  const corrected = Boolean(record.source_corrected_at)
+    && (record.status === "pending" || record.status === "cancelled");
+  const reason = refusal?.kind === "converge" ? refusal.reason
+    : corrected ? "source_corrected"
+    : record.status;
   switch (reason) {
     case "already_answered":
     case "answered":
@@ -908,6 +926,24 @@ export function convergeKeyFor(refusal: AnswerRefusal | null, record: WorkQuesti
       return "convergeExpired";
     case "cancelled":
       return "convergeCancelled";
+    // #885 — narrower than `cancelled`: the Work was REPLACED, not merely stopped, and the person
+    // has somewhere to go. THE SENTENCE SAYS NOTHING ABOUT WHY (fix round, review finding
+    // L09-SPEC-01). The door sets this reason for a #721 restatement AND for a source correction,
+    // and the replacement carries the SAME admitted basis in both cases — a source correction that
+    // cannot carry the basis forward admits no successor at all and answers `cancelled`. Copy that
+    // asserted "a new Work is running on the corrected figures" was therefore false on the
+    // restatement path and misleading on the other.
+    case "superseded":
+      return "convergeSuperseded";
+    // #885 (second fix round) — the SOURCE moved, which is a fact about the document rather than
+    // about the Work's state, and it is true on every path that reaches this word: the Work the
+    // correction retired, and the Work it deliberately left alone (#676's committed-receipt
+    // carve-out) whose question it nevertheless refuses.
+    case "source_corrected":
+      // #885 (third fix round) — ONE WORD, TWO ARMS, TWO EXITS. A RETIRED Work is restated on the
+      // corrected document; a Work that has already POSTED is carved out of the retirement (#676)
+      // and `clara.restate_accounting_work` refuses it, so its sentence names Cancel Work instead.
+      return record.work_posted ? "convergeSourceCorrectedPosted" : "convergeSourceCorrected";
     case "basis_changed":
       return "convergeBasisChanged";
     case "state_changed":
