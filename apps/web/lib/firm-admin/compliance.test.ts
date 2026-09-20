@@ -7,9 +7,16 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadComplianceRegister, ackComplianceWatch, snoozeComplianceWatch, resolveComplianceWatch } from "./compliance";
+import {
+  loadComplianceRegister,
+  ackComplianceWatch,
+  snoozeComplianceWatch,
+  resolveComplianceWatch,
+  complianceWatchIdsFromRows,
+} from "./compliance";
 import { isDoorRefusal } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
+import type { ReviewQueueRow } from "@/lib/firm/needs-you";
 
 function fakeSession(token: string | null = "tok"): SessionTokenAccessor {
   return { getAccessToken: async () => token };
@@ -155,4 +162,58 @@ test("a governed refusal (CLR04, the admin-only not_liable_documented conclusion
       },
     );
   });
+});
+
+// ===========================================================================
+// #996 — the register's own disposition read: `compliance.clients` deliberately
+// carries no watch id (this module's own header); `complianceWatchIdsFromRows`
+// is the pure extraction of THAT id from `list_review_queue`'s own
+// `row_kind==='compliance_watch'` rows, which the same door already returns.
+// ===========================================================================
+
+function makeRow(overrides: Partial<ReviewQueueRow>): ReviewQueueRow {
+  return {
+    row_kind: "compliance_watch",
+    section: "needs_review",
+    client_id: "c1",
+    counterparty_id: null,
+    filing_id: null,
+    entry_id: null,
+    question_id: null,
+    task_id: null,
+    document_id: null,
+    lane: null,
+    auto: false,
+    rule_backed: false,
+    high_stakes: false,
+    aged_since: "2026-07-01T00:00:00Z",
+    amount_cents: null,
+    period: "2026-07-31",
+    question_text: "SST registration threshold watch (digital_services)",
+    created_at: "2026-07-01T00:00:00Z",
+    id: "w1",
+    coding_kind: null,
+    watch_id: "w1",
+    tier: "crossed",
+    finding_id: null,
+    asset_id: null,
+    advance_id: null,
+    client_name: null,
+    batch_ids: null,
+    open_proposal_count: null,
+    ...overrides,
+  };
+}
+
+test("complianceWatchIdsFromRows: a compliance_watch row's watch_id is extracted; every other row_kind is ignored", () => {
+  const rows = [
+    makeRow({ row_kind: "draft", watch_id: null, id: "e1" }),
+    makeRow({ row_kind: "compliance_watch", watch_id: "w1", id: "w1" }),
+    makeRow({ row_kind: "compliance_watch", watch_id: "w2", id: "w2", client_id: "c2" }),
+  ];
+  assert.deepEqual(complianceWatchIdsFromRows(rows), ["w1", "w2"]);
+});
+
+test("complianceWatchIdsFromRows: no compliance_watch rows yields an empty list, not an error", () => {
+  assert.deepEqual(complianceWatchIdsFromRows([makeRow({ row_kind: "open_question", watch_id: null })]), []);
 });
