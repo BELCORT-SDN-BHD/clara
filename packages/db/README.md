@@ -1569,9 +1569,9 @@ ACCEPTED and the table then read `1`.
 | object | what it is |
 |---|---|
 | `clara.document_capability_version_high_water` | one row per `(format, document_kind)` carrying the highest `registry_version` that pair has ever published, backfilled TOTAL over the live registry. FORCE RLS, one `clara_fn_owner` policy, **ZERO application-role privilege** — it is an integrity ledger, not a read surface |
-| `clara._tf_document_capabilities_version_high_water()` | BEFORE INSERT wall: an INSERT below the mark is refused with `CLR08` / `detail.reason = registry_version_high_water`. A pair with no mark has never been published and is admitted |
+| `clara._tf_document_capabilities_version_high_water()` | BEFORE INSERT wall (and, since 0272, a BEFORE UPDATE wall on a key change too): a row may not LAND below the mark of the pair it lands on. `CLR08` / `detail.reason = registry_version_high_water`. A pair with no mark has never been published and is admitted |
 | `clara._tf_document_capabilities_high_water_record()` | AFTER INSERT OR UPDATE writer: raises the mark, never lowers it (`where excluded.registry_version > h.registry_version`) |
-| `clara._tf_document_capability_high_water_monotone()` | BEFORE UPDATE OR DELETE on the mark: DELETE refused outright; UPDATE refused when it lowers the version, re-keys the row or moves `first_seen_at`. `CLR08` / `registry_version_high_water_append_only` |
+| `clara._tf_document_capability_high_water_monotone()` | BEFORE UPDATE OR DELETE on the mark: DELETE refused outright; UPDATE refused when it lowers the version, re-keys the row, moves `first_seen_at` or (since 0272) moves `recorded_at` backwards. `CLR08` / `registry_version_high_water_append_only` |
 | `clara._tf_document_capabilities_version_uniform()` | DEFERRABLE INITIALLY DEFERRED **constraint trigger** body: a transaction may not LEAVE more than one distinct `registry_version` on the registry. `CLR08` / `registry_version_uniform`, with `detail.versions` |
 
 **RETIRING A ROW STAYS POSSIBLE, which is why the mark is a separate relation.** Refusing DELETE on
@@ -1600,6 +1600,53 @@ only writer this table has ever had.
 exists` before the policy, and a backfill that is an `on conflict … do update` which only ever
 raises. The prestate reports FIRST or REDO instead of refusing on its own objects; it still pins
 0207's body by `sha256(prosrc)` and refuses a registry that already publishes two versions.
+
+**What 0244 did NOT close, and 0272 does.** 0244's header states the invariant as an absolute —
+"a version once published for a pair can never be undercut BY ANY ROUTE". The adversarial lens
+then drove three routes to the opposite end, as `clara_fn_owner`, the role every migration runs as
+and the only writer either table has. See "0272" below; the sentence is true of those three only
+because 0272 exists.
+
+## 0272 — the routes 0244 left open, and #782's column comment (fix round)
+
+`0272_document_capability_wall_completion.sql` is the fix round after 0244/0245/0246's two-axis
+review plus the adversarial lens. It mints NO function and moves NO row.
+
+| route | measured before 0272 | what 0272 does |
+|---|---|---|
+| **TRUNCATE of the mark ledger** | `truncate clara.document_capability_version_high_water` took 240 marks to 0 with no refusal — no ROW trigger fires on TRUNCATE — after which #846's own reproducer (delete `pdf × invoice`, re-insert BELOW its version) was ADMITTED | arms 0003's `clara._tf_no_truncate` as `before truncate … for each statement`, the same body every other append-only relation in the estate uses. `CLR08`, and **no `detail.reason`** — the estate's single truncate guard carries none |
+| **A re-keying UPDATE** | a never-seen pair published at version 1 (admitted: no mark), then `update … set format='pdf', document_kind='invoice'` — the pair read 1 while its mark read 3, and the deferred uniformity wall passed it | arms the SAME high-water body a second time as `t_document_capabilities_version_high_water_rekey`, `before update … when (new.format is distinct from old.format or new.document_kind is distinct from old.document_kind)`. The body is byte-unchanged: it reads `new`, so on a re-key it already asks about the destination |
+| **`recorded_at` backwards** | rewritten to 1999-01-01 with no refusal, although 0244 comments the column "Moves only upward with `registry_version`" | one more case arm, LAST, in the append-only body, strictly `<` |
+| **#782's column comment** | `col_description(clara.document_capabilities.limits)` still carried 0191's "per-LINE facts are an accepted target with no table yet" after 0245 moved the data | re-issues the comment from a successor file (0191 unedited), the way 0246 already re-issued the `business_operation` one. The tail proves the comment and the rows agree: 28 rows at `accepted_limitation`, zero rows publishing a limit valued `planned` |
+
+**Why a second trigger and not a wider event list.** Re-arming 0244's own trigger as
+`BEFORE INSERT OR UPDATE` was written, applied and MEASURED to be wrong: BEFORE ROW triggers fire
+in trigger-NAME order, `…_version_high_water` sorts before `…_version_monotone`, and an ordinary
+in-place LOWERING update then came back as `registry_version_high_water` instead of 0207's
+`registry_version_monotone`. `document-capability-registry.test.mjs` caught it on the next run.
+Re-labelling a refusal a caller already classifies is a breaking change a fix round has no mandate
+for, so the widening is confined to a genuine re-key by a `when` clause — which has to live on its
+own trigger, because a combined INSERT OR UPDATE trigger may not reference `OLD` at all. 0272's
+tail pins that non-regression itself, and the file repairs the earlier arming on redo.
+
+**Why a new file rather than an edit of 0244.** Both 0244 and 0245 are unmerged and both *could*
+be edited under the wave-2 rule, but the supported re-apply path ("Redo (#957)" above) refuses any
+version that is not the HIGHEST applied one, and 0245/0246 sit on top of 0244 on every lane
+database. Editing 0244 in place would mean the hand procedure #957 exists to abolish. 0272's
+number is deliberately ABOVE the wave-2 reservation (0235…0271, each belonging to a named ticket
+in another lane); nothing depends on it, so renumbering at integration is free.
+
+**The honesty boundary, stated.** "By any route" means *by any route a writer of this estate has*.
+A superuser who sets `session_replication_role = replica` or drops a trigger disables every wall
+here, exactly as 0003's own truncate guard says of itself ("blocks truncate for everyone but a
+superuser who drops the trigger"). Measured: `clara_fn_owner` gets `42501` on
+`session_replication_role`, so that is an explicit act by a different actor, not a route.
+
+**Redo-safe by construction**: `drop trigger if exists` before each `create trigger` (including a
+re-creation of 0244's own trigger at 0244's spelling, so a database carrying the earlier wide cut
+comes back), `create or replace function`, and an idempotent `comment on`. The prestate reports
+FIRST or REDO, and its pin for the ONE body this file recuts is two-valued by construction —
+0244's pre-image or 0272's own post-image, both measured.
 
 ## #782 — the invoice family's line-item limit becomes an accepted limitation (0245)
 

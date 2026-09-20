@@ -1959,6 +1959,15 @@ const DOCUMENT_CAPABILITY_HIGH_WATER_0244_UNGRANTED_FNS = [
 export const DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT = [
   ...DOCUMENT_CAPABILITY_HIGH_WATER_0244_UNGRANTED_FNS,
 ];
+//
+//   0272 (THE FIX ROUND) ADDS NO NAME TO THIS ROSTER, deliberately. It mints no function: it arms
+//   0003's `clara._tf_no_truncate` on the mark ledger, arms the high-water body above a second
+//   time as a key-change BEFORE UPDATE trigger, recuts
+//   `_tf_document_capability_high_water_monotone` in place and re-issues two comments.
+//   `cohortFailures()` rosters NAMES, and every name 0272 touches is already listed here or in
+//   0003's own closure -- so a cohort entry would be a duplicate, not a wider proof. The trigger
+//   ATTACHMENTS 0272 adds are proven where attachments are proven: the migration's own tail and
+//   `document-capability-high-water.test.mjs`'s cohort gate, which reads all five triggers.
 // #846 END
 // #782 [0245, invoice line items become an accepted limitation] — COMMENT-ONLY, deliberately, and
 // the comment IS the cohort's content, the same reason #656's 0228 entry above carries none.
