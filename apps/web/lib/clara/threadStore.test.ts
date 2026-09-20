@@ -128,3 +128,89 @@ describe("claraThreadStore drafts (#614 A7)", () => {
     }
   });
 });
+
+describe("claraThreadStore interview drafts (#897)", () => {
+  it("a client that was never written reads back \"\" — the same honest default as getDraft", () => {
+    assert.equal(claraThreadStore.getInterviewDraft(CLIENT_A), "");
+  });
+
+  it("set then get round-trips, keyed by CLIENT ALONE — no threadId or runId in the key", () => {
+    claraThreadStore.setInterviewDraft(CLIENT_A, "Rome Advisory Sdn Bhd");
+    try {
+      assert.equal(claraThreadStore.getInterviewDraft(CLIENT_A), "Rome Advisory Sdn Bhd");
+    } finally {
+      claraThreadStore.clearInterviewDraft(CLIENT_A);
+    }
+  });
+
+  it("ISOLATION BY CLIENT: two clients' interview drafts never share a value", () => {
+    claraThreadStore.setInterviewDraft(CLIENT_A, "client A's typed answer");
+    claraThreadStore.setInterviewDraft(CLIENT_B, "client B's typed answer");
+    try {
+      assert.equal(claraThreadStore.getInterviewDraft(CLIENT_A), "client A's typed answer");
+      assert.equal(claraThreadStore.getInterviewDraft(CLIENT_B), "client B's typed answer");
+      claraThreadStore.clearInterviewDraft(CLIENT_A);
+      assert.equal(claraThreadStore.getInterviewDraft(CLIENT_A), "", "clearing A's draft must not touch B's");
+      assert.equal(claraThreadStore.getInterviewDraft(CLIENT_B), "client B's typed answer");
+    } finally {
+      claraThreadStore.clearInterviewDraft(CLIENT_A);
+      claraThreadStore.clearInterviewDraft(CLIENT_B);
+    }
+  });
+
+  it("setInterviewDraft notifies subscribers — a mounted card re-renders on a change made anywhere", () => {
+    let notifications = 0;
+    const unsubscribe = claraThreadStore.subscribe(() => { notifications += 1; });
+    try {
+      claraThreadStore.setInterviewDraft(CLIENT_A, "typed one character");
+      assert.equal(notifications, 1);
+    } finally {
+      unsubscribe();
+      claraThreadStore.clearInterviewDraft(CLIENT_A);
+    }
+  });
+
+  it("setInterviewDraft is a no-op (no emit) when the text has not actually changed", () => {
+    claraThreadStore.setInterviewDraft(CLIENT_A, "steady text");
+    try {
+      let notifications = 0;
+      const unsubscribe = claraThreadStore.subscribe(() => { notifications += 1; });
+      try {
+        claraThreadStore.setInterviewDraft(CLIENT_A, "steady text");
+        assert.equal(notifications, 0, "writing the same value again must not re-notify every mounted view");
+      } finally {
+        unsubscribe();
+      }
+    } finally {
+      claraThreadStore.clearInterviewDraft(CLIENT_A);
+    }
+  });
+
+  it("clearInterviewDraft notifies subscribers, but only when there was something to clear", () => {
+    claraThreadStore.setInterviewDraft(CLIENT_A, "something");
+    let notifications = 0;
+    const unsubscribe = claraThreadStore.subscribe(() => { notifications += 1; });
+    try {
+      claraThreadStore.clearInterviewDraft(CLIENT_A);
+      assert.equal(notifications, 1);
+      claraThreadStore.clearInterviewDraft(CLIENT_A); // already empty
+      assert.equal(notifications, 1, "clearing an already-empty draft must not notify a second time");
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("SURVIVES A REMOUNT WITH NO runId: the whole point of #897 — a fresh read before any run is re-attached still sees the earlier keystrokes", () => {
+    // `InterviewRunCard`'s own `runId` local state is `null` on every mount, including the
+    // remount the rail <-> full-screen altitude change causes. This cell proves the store
+    // needs no runId at all to hand the draft back — CLIENT_A alone is enough.
+    claraThreadStore.setInterviewDraft(CLIENT_A, "typed before the altitude change");
+    try {
+      // Simulates the next mount's very first read, before `startClientInterview` has
+      // resolved a runId for this fresh component instance.
+      assert.equal(claraThreadStore.getInterviewDraft(CLIENT_A), "typed before the altitude change");
+    } finally {
+      claraThreadStore.clearInterviewDraft(CLIENT_A);
+    }
+  });
+});
