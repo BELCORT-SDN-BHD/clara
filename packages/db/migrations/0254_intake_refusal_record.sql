@@ -63,8 +63,10 @@
 --   * NO change to the ceiling values, to the reservation check, or to its time window:
 --     `clara._reserve_document_ingest`, `clara._resize_document_reservation`,
 --     `clara._settle_document_reservation` and `clara.firm_document_limits` are not named by any
---     DDL in this file, and §T re-reads the reserve body to prove #964's own MYT window clause is
---     still exactly where 0252 left it.
+--     DDL in this file. §T re-reads the reserve body only for the TWO CLR18 sentences this
+--     file's exception arm parses; it deliberately does NOT assert #964's window, so this file
+--     carries no ordering dependency on 0252 and applies identically on a chain that has it and
+--     on one that does not (fix round, ADV-W2L05-05).
 --   * NO reconstruction of refusals from before this record existed.
 --   * NO firm-facing UI to browse refused files.
 --   * NO change to `clara.get_intake_batch`: its `waiting` facet ALREADY counts a member whose
@@ -263,14 +265,21 @@ begin
     raise exception '#965 tail: clara.create_document_intake''s ACL moved to %', v_acl using errcode='CLR10';
   end if;
 
-  -- (T4) THE CEILING CHECK ITSELF IS UNTOUCHED -- this ticket's own out-of-scope line. The reserve
-  -- helper still carries BOTH CLR18 raises and the Asia/Kuala_Lumpur window #964's 0252 put there.
+  -- (T4) THE CEILING CHECK ITSELF IS UNTOUCHED -- this ticket's own out-of-scope line. What this
+  -- file must not disturb is the pair of CLR18 sentences its exception arm READS with `get
+  -- stacked diagnostics` to name the ceiling; that, and only that, is asserted here.
+  --
+  -- FIX ROUND (ADV-W2L05-05): this assertion used to ALSO require the Asia/Kuala_Lumpur window
+  -- #964's 0252 installs, which made 0254 hard-fail on any chain carrying #965 without #964 --
+  -- a dependency BOTH tickets declare out of scope, and a failure whose message would read like
+  -- prestate drift on a body #965 promises never to touch. The window is #964's to assert (0252
+  -- §T, and document-ingest-window-myt.test.mjs); nothing in this file's behaviour depends on
+  -- WHICH day the helper counts, only on what it SAYS when it refuses.
   if not exists (select 1 from pg_proc p
                   where p.oid = 'clara._reserve_document_ingest(uuid,uuid,integer,timestamptz)'::regprocedure
                     and p.prosrc like '%document daily limit reached (docs)%'
-                    and p.prosrc like '%document daily limit reached (pages)%'
-                    and p.prosrc like '%date_trunc(''day'', now() at time zone ''Asia/Kuala_Lumpur'')%') then
-    raise exception '#965 tail: clara._reserve_document_ingest moved -- this file must not touch the reservation check or its window'
+                    and p.prosrc like '%document daily limit reached (pages)%') then
+    raise exception '#965 tail: clara._reserve_document_ingest no longer raises the two CLR18 sentences this file''s refusal arm reads -- the ceiling check moved under it'
       using errcode='CLR10';
   end if;
 

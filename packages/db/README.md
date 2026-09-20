@@ -1411,6 +1411,31 @@ the refused intake and declares `awaiting_capacity` through the governed
 membership and never the record. See `intake-refusal-record.test.mjs` for the door proof and
 `packages/runtime/tests/intake-refusal-unit.test.mjs` for the caller's.
 
+**WHICH ceiling turned a file away lives in `audit_log`, never on the intake row.** Say it plainly,
+because the intake relation is what a reader reaches for first: `document_intakes` carries
+`status='failed'` and `failure_code='limit'` and NOTHING that separates a docs refusal from a pages
+one — 0254 adds no column, by the ticket's own "no new vocabulary" rule. The durable home of the
+ceiling is the append-only `clara.audit_log` row the refusal writes (and, for the caller that made
+the attempt, the stored `op_receipts` result). The query that answers it:
+
+```sql
+select a.at, a.actor, a.args->>'ceiling' as ceiling, a.args->>'reason' as db_sentence,
+       i.original_filename, i.declared_mime, i.declared_bytes
+  from clara.audit_log a
+  join clara.document_intakes i on i.id = (a.args->>'intake')::uuid
+ where a.fn = 'create_document_intake' and (a.args->>'refused')::boolean
+   and a.firm_id = $1
+ order by a.at desc;
+```
+
+(The audit row carries `intake`, `op_key`, `origin`, `reason`, `ceiling` and `refused`; the file's
+own identity — filename, mime, bytes, moment — stays on the intake row it points at, which is the
+whole point of committing that row. MEASURED on the lane rig, 2026-09-20.)
+
+So a firm-facing "why was this file refused" surface reads `audit_log`, not `document_intakes`
+alone. (Owner check outstanding: whether `document_intakes` alone SHOULD be able to answer it —
+that would be a new column and a new ticket.)
+
 ## #660 — the client home's money band (0232)
 
 TWO RELATIONS and THREE DOORS, all `clara_authenticated` only. No agent twin, no wake wrapper, no
