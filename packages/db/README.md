@@ -3047,3 +3047,76 @@ after 0280, a well-shaped but non-yielding schedule submitted through the genera
 gets a correct but LATE refusal from the door rather than an early one beside the field. Filing a
 follow-up to add the mirror is recommended; #908's Agent Brief names only the SQL validator and its
 two doors as in scope.
+
+## 0281 — the plan-overlap advisory gains a sibling-plan arm (#909)
+
+**Context.** `clara._plan_overlap_warning` (0193:1155) has scanned `clara.adjustment_templates`
+since the plan lane's own birth — a plan created over a live 0045 template's accounts has always
+been warned — but it never scanned `clara.accounting_plans` itself. An accrual plan
+(`reversing_journal`) and an amortisation plan (`amortisation_schedule`) on the same account
+therefore warned about NEITHER each other NOR anything else: nothing on the plan side ever looked
+at a sibling plan at all. #909 was originally filed wider (a cross-lane, template-vs-plan
+direction, and a refuse-vs-advise question); the owner's 2026-09-18 ruling on #788 retires the
+whole 0045 lane in three tracer-bullet tickets (#927 → #928 → #929, "blueprint and vocabulary",
+which drops the template arm entirely when it closes) and re-scoped #909 to exactly the
+sibling-plan half, independent of that retirement.
+
+**What 0281 does.** `0281_plan_overlap_sibling_arm.sql` recuts `clara._plan_overlap_warning` with
+a second arm, `UNION ALL`ed with the existing (unchanged) template arm: every OTHER live (`active`
+or `paused` — an `ended` plan can never run again) `clara.accounting_plans` row of the same client
+whose CURRENT (unsuperseded) revision's basis lines intersect the basis being evaluated. Both arms
+are merged into the ONE `templates` list the three plan-creating doors and their web forms already
+render (`overlap_warning.templates.map((x) => x.name)`, which does not branch on `kind`), so none
+of them needs a single line changed — a sibling plan's entry reuses `name`/`cadence`/`accounts`
+from the template shape and adds its own honestly-named `plan_id` rather than borrowing
+`template_id`. `kind` keeps its literal `'adjustment_template_overlap'` value whenever any template
+row matches (byte-for-byte what `accounting-plans.test.mjs`'s own `p640.schedule.overlap` already
+asserts, unedited by this file) and reads `'accounting_plan_overlap'` only when the match set is
+purely sibling plans — a stated, transitional imprecision for the case where both match at once,
+accepted because a hosted census the same day found ZERO rows in `clara.adjustment_templates` and
+#929 deletes the template arm shortly regardless. No signature change, no new relation, no new
+door; `clara.create_accounting_plan`, `clara.revise_accounting_plan` and `clara._accrual_plan_core`
+keep byte-identical bodies and inherit the widened warning through the one function they already
+call.
+
+**Self-exclusion, by basis identity.** The function carries no plan id (the Agent Brief's own "Key
+interfaces" line names only this function for change, and "the three plan-creating doors ...
+unchanged"), so the plan being evaluated is excluded with `r.basis is distinct from p_basis`: every
+call site (`create_accounting_plan` 0193:1552, `revise_accounting_plan` 0193:1751,
+`_accrual_plan_core` 0222:1045 — all pinned as non-regression) already writes the row a call is FOR
+— inserting it, or superseding the live revision with a freshly-inserted one — strictly BEFORE
+reaching this function, always carrying `r.basis = p_basis` exactly. A genuinely different
+sibling's own basis is a different jsonb value and is never excluded. The accepted, stated
+limitation: two INDEPENDENT plans whose bases are byte-for-byte identical would hide each other
+from this advisory — judged acceptable because the advisory is advisory (a false negative here
+costs a missed warning, never a wrong refusal) and this estate has never produced that coincidence
+in practice. `tests/plan-overlap-sibling-arm.test.mjs`'s `p909.no-overlap` cell proves the ordinary
+case (a fresh plan's own basis never warns about itself) is unaffected.
+
+**Prestate/tail.** Pins (pre-image `sha256(prosrc)`, MEASURED on a 269-migration, `0001->0280` rig):
+`clara._plan_overlap_warning` (`f550d0b393f9…9a074`, the post-0193 body, unmoved through 0222/0223/
+0250/0280 since none of them recut it), and as non-regression `clara.create_accounting_plan`
+(`84b67058244b…8d6c4`), `clara.revise_accounting_plan` (`87c9f1e9bcf4…431f`) and
+`clara._accrual_plan_core` (`b3bd10065ed7…9da8`). The prestate is REDO-tolerant by construction
+(#957): it recognises either the measured pre-0281 pre-image or this file's own prior output (its
+new token, the existing arm's own token, the new tables it reaches and the self-exclusion guard,
+together), and refuses anything else rather than guessing. `create or replace function` on the
+unchanged signature converges to the same text either way, so §A itself carries no branch. The tail
+re-reads every pin, re-asserts the existing arm's own tokens are still present BY NAME (0281 adds,
+it does not rewrite), and re-confirms owner, `SECURITY DEFINER`, `search_path`, `STABLE` volatility
+and the owner-only ACL are unmoved. Measured: applied FIRST (the fresh-apply branch, confirmed by
+the prestate's own notice naming "measured pre-0281 pre-image"), then a temporary hand-swap back to
+the pre-#909 body proved every new cell in `plan-overlap-sibling-arm.test.mjs` red for the right
+reason except the one negative case both bodies happen to satisfy (`p909.no-overlap`), the body
+restored byte-for-byte from this file's own §A, and then genuinely re-applied via
+`CLARA_MIGRATION_REDO=0281_plan_overlap_sibling_arm`, which took the REDO branch ("own prior
+output") correctly.
+
+**What 0281 does not do (Agent Brief "Out of scope").** It does not touch the 0045-side advisory
+(`_wdb_period_overlap_advisory`) or add any refusal on top of either arm — still advisory, per the
+Agent Brief's own words. It does not recut `clara.create_accounting_plan`,
+`clara.revise_accounting_plan` or `clara._accrual_plan_core`. It does not widen this function's
+signature or edit any of the three plan-creating doors or their web forms — the section above
+states why that was unnecessary rather than merely deferred. The cross-lane direction and the
+refuse-vs-advise question #909 was originally filed with are #788's, closed as split into
+#927 → #928 → #929.
