@@ -85,6 +85,20 @@ function gate(t) {
   );
 }
 
+// #885 [0268] — this file's SECOND frontier. `p646.question.version` below asserts the OWNER'S
+// RULING when 0268 is applied and the pre-0268 measurement when it is not; both are true of the
+// chain they run against, and neither is a skip.
+const SUPERSEDE_STEM = "work_source_correction_supersede$";
+let _supersedeReady = null;
+async function supersedeLaneReady() {
+  if (_supersedeReady === null) {
+    const r = await rootQuery(
+      "select count(*)::int as n from clara.schema_migrations where version ~ $1", [SUPERSEDE_STEM]);
+    _supersedeReady = r.rows[0].n > 0;
+  }
+  return _supersedeReady;
+}
+
 const cell = (name, fn) => test(name, async (t) => { if (gate(t)) return; executed += 1; await fn(t); });
 
 const FIRM_A = () => world.firms.A;
@@ -681,6 +695,16 @@ cell("p646.replay.one_receipt: replaying either new door's op key returns the OR
 
 // =============================================================================================
 // p646.horn_a.no_work — THE MERGE GUARD.
+//
+// #885 NARROWED THE CLAIM, AND THE CELL SAYS SO RATHER THAN QUIETLY MEANING LESS. Migration 0268
+// gave `clara.revise_document_fact` exactly one path to the Work lane: a correction RESTATES every
+// Work of the firm that is still parked on a question about the corrected document (the owner's
+// 2026-09-17 ruling, re-confirmed 2026-09-20 on issue #885). This cell's fixture parks NOTHING on
+// its document, so every count below is unchanged and every assertion still holds — but what it
+// now proves is "these doors mint no Work of their own accord", not "#646 never reaches the Work
+// lane". The ruling's own path is measured in `tests/work-source-correction-supersede.test.mjs`
+// and in `p646.question.version` below, and 0268 still widens NO purpose CHECK, which is the part
+// of this guard the wave's 0221->0223 spine actually depends on.
 // =============================================================================================
 cell("p646.horn_a.no_work: after every door in this file, zero new accounting_work, zero new agent_tasks, zero correction-purpose operation_receipts, and both purpose CHECK texts byte-identical", async () => {
   // SCOPED TO THIS FIRM — the wave-2026-09-15 integration repair, and the claim is unchanged by it.
@@ -726,7 +750,9 @@ cell("p646.horn_a.no_work: after every door in this file, zero new accounting_wo
   await listDependents(KEEPER(), s.documentId);
 
   const after = await counts();
-  assert.equal(after.work, afterFixture.work, "no door in #646 mints accounting work (D6)");
+  assert.equal(after.work, afterFixture.work,
+    "no door in #646 mints accounting work of its own accord (D6). Since #885/0268 a correction DOES restate a Work parked on a question about the corrected document — this fixture parks none, "
+    + "so the count is unchanged; the ruling's own path is measured in work-source-correction-supersede.test.mjs");
   assert.equal(after.tasks, afterFixture.tasks, "…and therefore no agent task is minted either");
   assert.equal(after.receipts, afterFixture.receipts, "…and no operation receipt");
   assert.equal(after.interruptions, afterFixture.interruptions, "…and no work question");
@@ -800,7 +826,21 @@ cell("p646.dependents.projection: knowledge records standing on the superseded r
 });
 
 // =============================================================================================
-// p646.question.version — THE DISCRIMINATING CELL (preferred mechanism vs measured fallback).
+// p646.question.version — THE DISCRIMINATING CELL, REWRITTEN BY #885.
+//
+// WHAT CHANGED, AND WHY THE OTHER HORN SURVIVES. When this cell was written, #646 could not move
+// anything `clara.answer_work_question` compares, so it RECORDED that answering at the
+// pre-revision version succeeded and named the missing mechanism. The owner ruled on 2026-09-17
+// (re-confirmed 2026-09-20 on issue #885) that the mechanism must exist: a corrected source
+// CANCELS the Work waiting on it and admits a successor, so the stale question can never be
+// answered. Migration 0268 is that mechanism. The measured fallback is KEPT because a
+// `db-slice-frontiers` leg pinned between 0217 and 0268 really does have 0217's own behaviour,
+// and reporting that as a failure would say nothing about the chain under test — this cell has
+// always been written as the measurement rather than as a wish, and it still is.
+//
+// The deep assertions about the supersession itself live in
+// `tests/work-source-correction-supersede.test.mjs` (#885's own battery). What THIS cell owns is
+// the #646-side claim: after a fact revision, the parked question is no longer answerable.
 // =============================================================================================
 cell("p646.question.version: a changed source and an open Work question — measured, not assumed", async () => {
   const s = await invoiceWithFacts({ client: A1(), totalCents: 99000, tag: "qversion" });
@@ -819,37 +859,53 @@ cell("p646.question.version: a changed source and an open Work question — meas
   assert.equal(dependents.work_questions[0].id, opened.question_id);
   assert.equal(dependents.work_questions[0].question_version, 1);
 
-  await reviseFact(KEEPER(), {
+  const revision = await reviseFact(KEEPER(), {
     document: s.documentId, fieldPath: "invoice.total", value: "RM 1,010.00", observedVersion: 1 });
 
   const rowAfter = (await rootQuery(
-    `select i.question_version, i.basis_digest, w.basis_digest as work_digest
+    `select i.question_version, i.status, i.basis_digest, w.status as work_status,
+            w.basis_digest as work_digest, w.superseded_by
        from clara.agent_interruptions i join clara.accounting_work w on w.id = i.work_id
       where i.id = $1`, [opened.question_id])).rows[0];
   const answered = await caught(() => answerWorkQuestion(KEEPER(), {
     question: opened.question_id, version: 1, answer: twoFieldAnswer() }));
 
-  // THE MEASUREMENT, recorded verbatim rather than asserted one way in advance. #646 writes
-  // nothing on clara.accounting_work (D6), so neither the question version nor the Work's
-  // basis_digest can move when a document's reading changes — and clara.answer_work_question
-  // compares exactly those two things (0180:820, :836). The version bump a "changed source cannot
-  // silently continue" rule would need is a RUNTIME-lane capability (clara.open_work_question is
-  // granted to clara_runtime + a hook token, 0180:686) and widening that grant to manufacture one
-  // from a human door is not something this ticket may do.
-  noteLane(
-    `p646.question.version MEASURED: after a fact revision the Work question is still at version `
-    + `${rowAfter.question_version}, interruption basis_digest ${String(rowAfter.basis_digest).slice(0, 12)} `
-    + `vs work basis_digest ${String(rowAfter.work_digest).slice(0, 12)}; answering at the `
-    + `pre-revision version ${answered === null ? "SUCCEEDED (no refusal)" : `refused ${answered.code}/${reasonOf(answered)}`}.`);
+  if (await supersedeLaneReady()) {
+    // #885's HORN — the owner's ruling, on a chain that carries migration 0268.
+    noteLane(
+      `p646.question.version MEASURED (#885 lane live): the question is ${rowAfter.status} at version `
+      + `${rowAfter.question_version}, its Work is ${rowAfter.work_status} superseded by `
+      + `${String(rowAfter.superseded_by).slice(0, 12)}; answering at the pre-revision version `
+      + `${answered === null ? "SUCCEEDED (no refusal)" : `refused ${answered.code}/${reasonOf(answered)}`}.`);
 
-  assert.equal(rowAfter.question_version, 1,
-    "MEASURED: the question version does not move — #646 touches no accounting_work row (D6)");
-  assert.equal(answered, null,
-    "MEASURED: answering at the pre-revision version SUCCEEDS. AC3's Work half is therefore PARTIAL "
-    + "BY NAME: #646 ships the read-side projection above and the classification invalidation, and the "
-    + "version bump a changed source would need belongs to claraWork_v4's observedRevisions contract "
-    + "(#654) plus a runtime-lane re-ask. This assertion is the fallback horn of the brief's cell 10 "
-    + "and it is written as the measurement, not as a wish.");
+    assert.equal(revision.superseded_work.length, 1,
+      "the revision receipt names the ONE Work its correction retired");
+    assert.equal(revision.superseded_work[0].work_id, admitted.work_id);
+    assert.equal(revision.superseded_work[0].reason, "source_corrected");
+    assert.equal(rowAfter.superseded_by, revision.superseded_work[0].new_work_id,
+      "the Work points at the successor admitted on the corrected reading");
+    assert.equal(rowAfter.status, "cancelled", "…and its question is closed");
+    assert.ok(answered, "ANSWERING AT THE PRE-REVISION VERSION IS REFUSED — the ruling, measured");
+    assert.equal(answered.code, "CLR13", "…as a convergence");
+    assert.equal(reasonOf(answered), "superseded",
+      "…named `superseded`, the word a surface renders as \"the source changed\"");
+    assert.equal(detailOf(answered).current.superseded_by, revision.superseded_work[0].new_work_id,
+      "…and the refusal names the Work that replaced this one");
+  } else {
+    // THE MEASURED FALLBACK, unchanged: a chain between 0217 and 0268 has #646's own behaviour.
+    noteLane(
+      `p646.question.version MEASURED (#885 lane absent): after a fact revision the Work question is still at version `
+      + `${rowAfter.question_version}, interruption basis_digest ${String(rowAfter.basis_digest).slice(0, 12)} `
+      + `vs work basis_digest ${String(rowAfter.work_digest).slice(0, 12)}; answering at the `
+      + `pre-revision version ${answered === null ? "SUCCEEDED (no refusal)" : `refused ${answered.code}/${reasonOf(answered)}`}.`);
+
+    assert.equal(rowAfter.question_version, 1,
+      "MEASURED: the question version does not move — #646 touches no accounting_work row (D6)");
+    assert.equal(answered, null,
+      "MEASURED: below the #885 frontier, answering at the pre-revision version SUCCEEDS. That is "
+      + "what 0217 alone does, and it is the defect issue #885 was filed for — not a property this "
+      + "estate keeps.");
+  }
 });
 
 // =============================================================================================

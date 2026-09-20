@@ -24,7 +24,8 @@ import assert from "node:assert/strict";
 import { rootQuery, humanQuery, opk, endPool } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import {
-  buildWorkWorld, admitJournalWork, claimWorkRun, basis, workRow,
+  buildWorkWorld, admitJournalWork, claimWorkRun, basis, workRow, mintClientObo,
+  wakeRecordJournalEntry, receiptsForWork, settleWorkRun,
 } from "./work-journal-fixtures.mjs";
 import {
   openWorkQuestion, interruptionRow, answerWorkQuestion, twoFieldAnswer, cancelAgentTask,
@@ -33,9 +34,10 @@ import {
   filedDocument, ensureClientEgress, mintLegacyInvoiceFactsTask, claimTask,
   persistInvoiceFacts, factField, statedIdentityFields,
 } from "./s6-fixtures.mjs";
+import { timelineEvents } from "./work-cancel-fixtures.mjs";
 
 const STEM = "work_source_correction_supersede$";
-const EXPECTED_CELLS = 2;
+const EXPECTED_CELLS = 6;
 
 let live = false;
 let world = null;
@@ -109,6 +111,15 @@ async function reviseFact(sub, {
        p_observed_version => $4, p_reason => $5, p_op_key => $6) as r`,
     [document, fieldPath, JSON.stringify(value), observedVersion, reason, opKey ?? opk("w885-fact")]);
   return r.rows[0].r;
+}
+
+/** The firm's own Activity feed, through its human door (#770's `p_work` arity — this battery's
+ *  frontier is far above 0202). */
+async function listActivity(sub, { cursor = null, limit = 100, client = null, kinds = null } = {}) {
+  const r = await humanQuery(sub,
+    "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],null::timestamptz,null::timestamptz,null::uuid) as result",
+    [cursor, limit, client, kinds]);
+  return r.rows[0].result;
 }
 
 const extractionsOf = (document) => rootQuery(
@@ -234,4 +245,166 @@ cell("w885.answer.superseded: answering the retired question refuses CLR13 super
   assert.equal(d2.current.superseded_by, null, "…and there is no successor to name");
 
   noteLane(`w885.answer.superseded: refusal ${d.reason} -> ${String(d.current.superseded_by).slice(0, 8)}; plain cancel refusal ${d2.reason}`);
+});
+
+// =============================================================================================
+// w885.unrelated.untouched — THE NEGATIVE CONTROL THE BRIEF ASKS FOR BY NAME.
+// =============================================================================================
+cell("w885.unrelated.untouched: correcting a DIFFERENT document of the same client leaves the parked Work alone and its question answerable", async () => {
+  const cited = await invoiceWithFacts({ client: A1(), totalCents: 51000, tag: "cited" });
+  const other = await invoiceWithFacts({ client: A1(), totalCents: 52000, tag: "other" });
+  assert.notEqual(cited.documentId, other.documentId, "mandatory setup: two different documents");
+  const parked = await workParkedOnDocument({ client: A1(), document: cited.documentId });
+
+  const receipt = await reviseFact(KEEPER(), {
+    document: other.documentId, fieldPath: "invoice.total", value: "RM 555.00", observedVersion: 1,
+  });
+  assert.deepEqual(receipt.superseded_work, [],
+    "a correction to a document this Work never cited supersedes NOTHING");
+
+  const row = await workRow(parked.work_id);
+  assert.equal(row.status, "awaiting_input", "the Work is still parked");
+  assert.equal(row.superseded_by, null, "…with no successor");
+  assert.equal((await interruptionRow(parked.questionId)).status, "pending",
+    "…and its question is still open");
+
+  // THE STRONGEST FORM OF "UNTOUCHED": the question can still be ANSWERED. A cell that only read
+  // the rows would pass against a door that closed the question and left the statuses alone.
+  const answered = await answerWorkQuestion(KEEPER(), {
+    question: parked.questionId, version: 1, answer: twoFieldAnswer(),
+  });
+  assert.equal(answered.status, "answered",
+    "answering the untouched question still SUCCEEDS — the correction was somebody else's document");
+  assert.equal(answered.question_id, parked.questionId);
+});
+
+// =============================================================================================
+// w885.posted.untouched — #676'S CARVE-OUT, ASSERTED HERE RATHER THAN ASSUMED.
+// =============================================================================================
+cell("w885.posted.untouched: a Work that already holds a committed receipt is left alone by a correction of the document it posted from", async () => {
+  const s = await invoiceWithFacts({ client: A1(), totalCents: 64000, tag: "posted" });
+  const b = basis({ cents: 64000 });
+  const parked = await workParkedOnDocument({ client: A1(), document: s.documentId, b });
+
+  const cred = await mintClientObo({ firm: FIRM_A(), obo: KEEPER(), client: A1() });
+  const posted = await wakeRecordJournalEntry(cred.secret, {
+    client: A1(), work: parked.work_id, logicalOpId: parked.logical_op_id, basis: b,
+  });
+  assert.equal(posted.posted, true, "mandatory setup: the entry really is on the books");
+  const receiptsBefore = await receiptsForWork(parked.work_id);
+  assert.equal(receiptsBefore.length, 1, "mandatory setup: exactly one committed receipt");
+  const rowBefore = await workRow(parked.work_id);
+  noteLane(`w885.posted.untouched: after posting, work status ${rowBefore.status}, question ${(await interruptionRow(parked.questionId)).status}`);
+
+  const receipt = await reviseFact(KEEPER(), {
+    document: s.documentId, fieldPath: "invoice.total", value: "RM 645.00", observedVersion: 1,
+  });
+  assert.deepEqual(receipt.superseded_work, [],
+    "a Work holding a committed receipt is UNTOUCHED — correcting a posted result is #676's, and docs/PRD.md parks the automation");
+
+  const rowAfter = await workRow(parked.work_id);
+  assert.equal(rowAfter.status, rowBefore.status, "its status did not move");
+  assert.equal(rowAfter.superseded_by, null, "…nothing superseded it");
+  assert.deepEqual(await receiptsForWork(parked.work_id), receiptsBefore,
+    "…and its committed receipt is byte-unchanged");
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.accounting_work where supersedes = $1", [parked.work_id])).rows[0].n,
+  0, "…and no successor was admitted for it");
+
+  // …while the CORRECTION itself still happened. A door that refused the whole call would also
+  // leave the Work alone, and that is NOT what the brief asks for.
+  assert.ok(receipt.revision_id, "the correction itself was recorded");
+  assert.equal(receipt.facts_version, 2, "…and the document's reading really moved");
+});
+
+// =============================================================================================
+// w885.terminal_residue.ignored — A DEAD QUESTION ON A DEAD WORK MUST NOT BLOCK A CORRECTION.
+//
+// THE PAIR IS FORCED, AND SAID SO OUT LOUD. Every door that terminalises a Work also closes its
+// pending question (the S4-D6 cascade `clara.settle_work_run` and `clara.cancel_accounting_work`
+// both carry), so the estate has no door that produces "terminal Work + pending question". It is
+// still reachable CODE — a crash between two writes, an operator repair, a future door — and if
+// this file's rule did not exclude it, a professional's correction would be refused by
+// `clara.restate_accounting_work`'s own `not_restatable` arm for a row nobody is waiting on. So
+// the row is minted by the REAL verbs and only its `status` is forced back as root, which is the
+// same idiom (and the same statement of it) `work-cancel.test.mjs` wc.1 uses for the mirror pair.
+// =============================================================================================
+cell("w885.terminal_residue.ignored: a pending question left on a TERMINAL Work is not restated, and the correction still succeeds", async () => {
+  const s = await invoiceWithFacts({ client: A1(), totalCents: 33000, tag: "residue" });
+  const parked = await workParkedOnDocument({ client: A1(), document: s.documentId });
+  await settleWorkRun({ task: parked.task_id, outcome: "failed", errorCode: "internal",
+    error: { code: "internal", message: "#885 rig: forced terminal" } });
+  const dead = await workRow(parked.work_id);
+  assert.equal(dead.status, "failed", "mandatory setup: the Work is terminal");
+  // The settle cascade closed the real question, and `clara._tf_agent_interruption_*` refuses
+  // cancelled -> pending even to the superuser (MEASURED: "illegal interruption transition
+  // cancelled -> pending"), which is exactly why the residue has to be PLANTED as a fresh row
+  // rather than forced on the old one.
+  const planted = (await rootQuery(
+    `insert into clara.agent_interruptions(firm_id, client_id, task_id, work_id, hook_token,
+        question, fields, expires_at, question_version)
+     select i.firm_id, i.client_id, i.task_id, i.work_id, $2, i.question, i.fields,
+            now() + interval '7 days', i.question_version + 1
+       -- one version above the real one: uq_agent_interruptions_work_version is (work_id,
+       -- question_version) and the settled row still holds version 1.
+       from clara.agent_interruptions i where i.id = $1 returning id`,
+    [parked.questionId, opk("w885-residue")])).rows[0].id;
+  const residue = await interruptionRow(planted);
+  assert.equal(residue.status, "pending", "mandatory setup: the forced residue is in place");
+  assert.equal(residue.work_id, parked.work_id, "…and it really names the terminal Work");
+
+  const receipt = await reviseFact(KEEPER(), {
+    document: s.documentId, fieldPath: "invoice.total", value: "RM 335.00", observedVersion: 1,
+  });
+  assert.deepEqual(receipt.superseded_work, [],
+    "a terminal Work is not restated — the rule names the three statuses a restatement is offered from");
+  assert.ok(receipt.revision_id,
+    "…and the correction itself SUCCEEDS: residue on a dead Work never refuses a professional's correction");
+  assert.equal((await workRow(parked.work_id)).status, "failed", "the dead Work is unmoved");
+});
+
+// =============================================================================================
+// w885.feed.successor — THE CANCELLATION IS ON THE FEED, WITH ITS SUCCESSOR LINK (#840).
+// =============================================================================================
+cell("w885.feed.successor: the correction's cancellation appears on the Activity feed as one superseded row deep-linked to the Work, after the correction that caused it", async () => {
+  const s = await invoiceWithFacts({ client: A1(), totalCents: 88000, tag: "feed" });
+  const parked = await workParkedOnDocument({ client: A1(), document: s.documentId });
+  const before = await timelineEvents(FIRM_A(), "work.cancelled");
+
+  const receipt = await reviseFact(KEEPER(), {
+    document: s.documentId, fieldPath: "invoice.total", value: "RM 899.00", observedVersion: 1,
+  });
+  const successor = receipt.superseded_work[0].new_work_id;
+
+  // 1 · EXACTLY ONE EVENT, and it carries the link 0199 built the payload for.
+  const after = await timelineEvents(FIRM_A(), "work.cancelled");
+  const mine = after.filter((e) => e.payload?.work === parked.work_id);
+  assert.equal(mine.length, 1, "exactly one work.cancelled event for the retired Work");
+  assert.equal(after.length, before.length + 1, "…and exactly one new row in the firm");
+  assert.equal(mine[0].payload.outcome, "superseded",
+    "…whose outcome is SUPERSEDED, not a bare cancellation");
+  assert.equal(mine[0].payload.superseded_by, successor, "…naming the Work that replaced it");
+  assert.equal(mine[0].payload.from_status, "awaiting_input",
+    "…and the status the correction FOUND: the Work was waiting on the question");
+  assert.equal(mine[0].actor, KEEPER(), "…attributed to the human who made the correction");
+
+  // 2 · THE FEED'S OWN DOOR renders it under `work`, deep-linked to the retired Work.
+  const feed = await listActivity(KEEPER(), { kinds: ["work"], limit: 200 });
+  const row = feed.rows.filter((r) => r.event_type === "work.cancelled" && r.work_id === parked.work_id);
+  assert.equal(row.length, 1, "the cancellation lists under the `work` filter");
+  assert.equal(row[0].kind, "work");
+
+  // 3 · THE CAUSE COMES FIRST. The feed is ordered by seq, so a reader meets the correction and
+  // only then the Work it retired — never a Work retired for a reason not yet recorded.
+  const revised = (await rootQuery(
+    `select seq from clara.domain_events
+      where firm_id=$1 and event_type='document.fact_revised' and payload->>'revision_id'=$2`,
+    [FIRM_A(), receipt.revision_id])).rows;
+  assert.equal(revised.length, 1, "the correction appended exactly one document.fact_revised");
+  const cancelledSeq = (await rootQuery(
+    `select seq from clara.domain_events
+      where firm_id=$1 and event_type='work.cancelled' and payload->>'work'=$2`,
+    [FIRM_A(), parked.work_id])).rows[0];
+  assert.ok(Number(revised[0].seq) < Number(cancelledSeq.seq),
+    "the correction is appended BEFORE the cancellation it caused");
 });
