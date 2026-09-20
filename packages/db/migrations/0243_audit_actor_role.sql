@@ -19,7 +19,8 @@
 -- EVERY governed door reaches through `clara._audit`, the sole writer -- resolves the actor's
 -- live role in the act's own firm and stamps it on the row, so all 304 doors inherit the column
 -- with NO per-door change (the ruling's own acceptance criterion). (3) The firm register cites it
--- (§C) beside the promoter's CURRENT role, as two facts.
+-- (§C) beside the promoter's CURRENT role, as two facts, over one new index that keeps that
+-- citation from costing a sequential scan of the whole audit log.
 --
 -- WHY THE TRIGGER AND NOT A RECUT OF `clara._audit`, WHICH IS WHAT THE RULING NAMES. Because
 -- `clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb)` IS A FROZEN BODY and the estate refuses to
@@ -82,12 +83,15 @@
 -- earlier tickets may already have recut a shared body. #898 (0240) recut
 -- `clara._knowledge_assert_value`, NOT `clara._audit`; `clara._audit` still carries its original
 -- 0004 body (verified byte-identical to the migration text that created it), and this file's
--- whole design rests on it STAYING that body -- so the pin here is a single hard value, not a
--- pre/post pair.
+-- whole design rests on it STAYING that body -- so ITS pin is a single hard value rather than a
+-- pre/post pair. `clara.list_firm_knowledge`, which §C DOES recut, gets the ordinary pre/post
+-- pair; its live body was likewise verified byte-identical to 0220's own text before §C was
+-- built from that text.
 -- =====================================================================================
 do $prestate$
 declare
-  v_audit_sha text; v_col_type text; v_col_nullable text; v_col_default text; v_found boolean;
+  v_audit_sha text; v_register_sha text;
+  v_col_type text; v_col_nullable text; v_col_default text; v_found boolean;
   v_frozen_drift int;
 begin
   if to_regclass('clara.audit_log') is null or to_regclass('clara.firm_memberships') is null then
@@ -127,7 +131,18 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice '#912 prestate: clean -- clara.audit_log.actor_role is absent or already this file''s own column, clara._audit is byte-for-byte its 0004 body, and no frozen producer member drifts.';
+  -- THE REGISTER §C RECUTS. Either the pristine 0220 body (first apply) or the exact body §C
+  -- installs (a redo of this unedited file, whose `create or replace` is a no-op). Any third body
+  -- belongs to somebody else and would be silently overwritten by §C -- so it is refused instead.
+  select encode(sha256(prosrc::bytea), 'hex') into v_register_sha
+    from pg_proc where oid = 'clara.list_firm_knowledge()'::regprocedure;
+  if v_register_sha not in ('caea06da6e33a5c173a88ee7b5fe2327caa714d1df797ae148ed07c35a548797',
+                            'ad8aaed83a289679b16efb0668abfeafcaa7538e9a2baf8452e3c237406a9b31') then
+    raise exception '#912 prestate: clara.list_firm_knowledge carries prosrc sha256 %, neither the 0220 pin nor the post-recut pin this file was authored against -- re-author §C against the live body', v_register_sha
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice '#912 prestate: clean -- clara.audit_log.actor_role is absent or already this file''s own column, clara._audit is byte-for-byte its 0004 body, no frozen producer member drifts, and clara.list_firm_knowledge carries either the 0220 pin or this file''s own recut.';
 end
 $prestate$;
 
@@ -224,18 +239,139 @@ create trigger t_audit_actor_role
 reset role;
 
 -- =====================================================================================
+-- §C — THE REGISTER CITES IT. `clara.list_firm_knowledge`'s authority block gains ONE key beside
+-- the promoter's current role. Everything else in this body is 0220's, byte for byte: the recut
+-- is a full `create or replace` of the whole function (idempotent, so a #957 redo of this file is
+-- a no-op) whose text was taken from 0220 itself and verified byte-identical to the LIVE prosrc
+-- before the one key was spliced in. §0 pins both the pre- and the post-recut body.
+--
+-- THE INDEX IS NOT DECORATION. The new key is a correlated lookup into clara.audit_log, which on
+-- this rig alone already holds ~66.9k rows and grows with every governed act in the estate; the
+-- table carried exactly one index (its primary key) before this file. Without this one, each
+-- firm-scope rule on the register costs a sequential scan of the whole audit log. The predicate
+-- keeps the index to the knowledge-revision rows the register can actually match.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create index if not exists ix_audit_log_knowledge_revision
+  on clara.audit_log (firm_id, (args ->> 'revision_id'))
+  where args ->> 'revision_id' is not null;
+
+create or replace function clara.list_firm_knowledge() returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp
+  set plan_cache_mode = force_custom_plan as $read$
+declare c record; v_rows jsonb; v_version bigint; v_today date;
+begin
+  c := clara._human_ctx(clara.role_rank('viewer'));
+  v_today := (now() at time zone 'Asia/Kuala_Lumpur')::date;
+  -- THE WATERMARK SPANS EVERY FIRM-SCOPE REVISION, not the rows this read emits — a withdrawal
+  -- appends a revision and removes a live row, so a max over the emitted set would move the number
+  -- BACKWARDS across the one event most likely to matter (`list_client_knowledge`'s own reason,
+  -- 0192:1332-1338, applied to this register's scope).
+  select coalesce(max(r.knowledge_version), 0) into v_version
+    from clara.knowledge_records r
+   where r.firm_id = c.firm and r.scope_kind = 'firm';
+  select coalesce(jsonb_agg(j order by knowledge_key, recorded_at desc), '[]'::jsonb)
+    into v_rows
+    from (
+      select clara._knowledge_row_json(r)
+          || jsonb_build_object(
+               'asserted_by_name', u.display_name,
+               'key_description', kk.description,
+               'value_shape', kk.value_shape,
+               'validated_against', kk.validated_against,
+               'authority_bearing', kk.authority_bearing,
+               'firm_defaultable_reason', e.eligible_reason,
+               'in_effect_today', (r.state = 'live'
+                 and (r.effective_from is null or r.effective_from <= v_today)
+                 and (r.effective_to is null or r.effective_to >= v_today)),
+               'authority', jsonb_build_object(
+                 'promoter', r.asserted_by,
+                 'promoter_name', u.display_name,
+                 'recorded_via', r.recorded_via,
+                 'recorded_at', r.recorded_at,
+                 'reason', r.basis,
+                 'required_role', clara._knowledge_floor(r.knowledge_key, 'firm'),
+                 -- #912 — THE ROLE AT THE ACT, from the audit row the promotion itself wrote.
+                 -- `clara._knowledge_insert_revision` (0192:866) audits EVERY knowledge revision
+                 -- with that revision's own id in `args.revision_id`, so this join is exact: one
+                 -- revision, one row, no window to widen. `a.actor` is re-checked against
+                 -- `r.asserted_by` because the promotion lane audits each record under the
+                 -- ANSWERER (0192:1713-1725) -- reporting somebody else's role would be worse
+                 -- than reporting none. NULL means the act predates clara.audit_log.actor_role
+                 -- (0243) and is UNKNOWN, never a guess, and never `promoter_role_now` under
+                 -- another name: the two are separate facts and the surface renders them as two.
+                 'promoter_role_at_act', (select a.actor_role from clara.audit_log a
+                                           where a.firm_id = r.firm_id
+                                             and a.args ->> 'revision_id' = r.id::text
+                                             and a.actor is not distinct from r.asserted_by
+                                           order by a.id limit 1),
+                 'promoter_role_now', (select m.role from clara.firm_memberships m
+                                        where m.firm_id = r.firm_id and m.user_id = r.asserted_by
+                                        order by (m.status = 'active') desc, m.created_at desc
+                                        limit 1),
+                 'promoter_active', exists (select 1 from clara.firm_memberships m
+                                             where m.firm_id = r.firm_id and m.user_id = r.asserted_by
+                                               and m.status = 'active')),
+               'exception_count', (
+                 select count(*)::int from clara.knowledge_records o
+                  where o.firm_id = c.firm and o.scope_kind = 'client' and o.state = 'live'
+                    and o.knowledge_key = r.knowledge_key
+                    and o.applies_when_digest = r.applies_when_digest),
+               'exceptions', (
+                 select coalesce(jsonb_agg(jsonb_build_object(
+                          'client_id', o.client_id, 'client_name', cl.name,
+                          'record_id', o.record_id, 'value', o.value,
+                          'recorded_at', o.recorded_at) order by cl.name, o.recorded_at desc), '[]'::jsonb)
+                   from clara.knowledge_records o
+                   join clara.clients cl on cl.id = o.client_id
+                  where o.firm_id = c.firm and o.scope_kind = 'client' and o.state = 'live'
+                    and o.knowledge_key = r.knowledge_key
+                    and o.applies_when_digest = r.applies_when_digest),
+               'live_work', (
+                 select coalesce(jsonb_agg(jsonb_build_object(
+                          'work_id', w.id, 'client_id', w.client_id, 'purpose', w.purpose,
+                          'status', w.status) order by w.created_at desc), '[]'::jsonb)
+                   from clara.accounting_work w
+                  where w.firm_id = c.firm
+                    -- The TERMINAL set 0184 itself enumerates (0184:1284); anything else is a Work
+                    -- somebody may still be waiting on.
+                    and w.status not in ('completed','refused','failed','cancelled','expired')
+                    and exists (select 1 from clara.knowledge_records o
+                                 where o.firm_id = c.firm and o.state = 'live'
+                                   and o.knowledge_key = r.knowledge_key
+                                   and o.source_work_id = w.id))
+             ) as j,
+             r.knowledge_key as knowledge_key, r.recorded_at as recorded_at
+        from clara.knowledge_records r
+        left join clara.users u on u.id = r.asserted_by
+        left join clara.knowledge_keys kk on kk.knowledge_key = r.knowledge_key
+        left join clara.knowledge_key_firm_eligibility e on e.knowledge_key = r.knowledge_key
+       where r.firm_id = c.firm and r.scope_kind = 'firm' and r.superseded_at is null
+    ) k;
+  return jsonb_build_object('firm_id', c.firm, 'as_of', v_today,
+    'knowledge_version', coalesce(v_version, 0)::text, 'records', v_rows);
+end $read$;
+
+reset role;
+
+-- =====================================================================================
 -- §Z — TAIL. Proves the column and its CHECK are exactly what §A installed; that the stamp is
 -- attached by name with the posture the estate requires of a definer body; that the sole-writer
 -- census still reads ONE and that one is clara._audit; that `clara._audit` itself did NOT move
 -- and the metric-input-producer freeze it belongs to is still whole; that all 304 callers are
--- still callers; that the append-only triggers still stand; and that the new column is readable
--- by exactly the audience the old ones were, through the unchanged TABLE-level grant.
+-- still callers; that §C's register recut is byte-for-byte what this file installs and kept its
+-- own audience; that its index exists; that the append-only triggers still stand; and that the
+-- new column is readable by exactly the audience the old ones were, through the unchanged
+-- TABLE-level grant.
 -- =====================================================================================
 do $tail$
 declare
   v_def text; v_writers text[]; v_callers int; v_sha text;
   v_args text; v_secdef boolean; v_config text[]; v_owner text; v_acl text[];
   v_relacl text[]; v_attacl_n int; v_policy text; v_triggers text[]; v_tgdef text;
+  v_reg_sha text; v_reg_secdef boolean; v_reg_config text[]; v_reg_owner text; v_reg_acl text[];
+  v_indexdef text;
   v_tf_secdef boolean; v_tf_config text[]; v_tf_owner text; v_tf_acl text[];
   v_frozen_drift int;
 begin
@@ -317,6 +453,32 @@ begin
   end if;
   perform clara.verify_metric_input_producer_freeze();
 
+  -- §C LANDED, AND LANDED ALONE. The register carries this file's one new key and nothing else
+  -- moved: the whole body is pinned, so a stray edit anywhere in 0220's 5,060 characters would
+  -- fail here rather than ship.
+  select encode(sha256(p.prosrc::bytea), 'hex'), p.prosecdef, p.proconfig,
+         pg_get_userbyid(p.proowner), p.proacl::text[]
+    into v_reg_sha, v_reg_secdef, v_reg_config, v_reg_owner, v_reg_acl
+    from pg_proc p where p.oid = 'clara.list_firm_knowledge()'::regprocedure;
+  if v_reg_sha <> 'ad8aaed83a289679b16efb0668abfeafcaa7538e9a2baf8452e3c237406a9b31' then
+    raise exception '#912 tail: clara.list_firm_knowledge carries prosrc sha256 % after §C, not the body this file installs', v_reg_sha
+      using errcode = 'CLR10';
+  end if;
+  if not v_reg_secdef or v_reg_config is distinct from array['search_path=clara, pg_temp', 'plan_cache_mode=force_custom_plan']
+     or v_reg_owner <> 'clara_fn_owner'
+     or v_reg_acl is distinct from array['clara_fn_owner=X/clara_fn_owner', 'clara_authenticated=X/clara_fn_owner'] then
+    raise exception '#912 tail: clara.list_firm_knowledge''s posture moved (secdef=%, config=%, owner=%, acl=%) -- §C recuts the body, never the audience', v_reg_secdef, v_reg_config, v_reg_owner, v_reg_acl
+      using errcode = 'CLR10';
+  end if;
+
+  -- …and the citation has the index it needs. Without it every firm-scope rule on the register
+  -- costs a sequential scan of the whole audit log.
+  select indexdef into v_indexdef from pg_indexes
+   where schemaname = 'clara' and tablename = 'audit_log' and indexname = 'ix_audit_log_knowledge_revision';
+  if v_indexdef is null then
+    raise exception '#912 tail: ix_audit_log_knowledge_revision is absent -- the register''s audit lookup would scan the whole log' using errcode = 'CLR10';
+  end if;
+
   -- APPEND-ONLY STILL STANDS, by trigger name, beside the new stamp: the column can never be
   -- back-filled by a later UPDATE either.
   select coalesce(array_agg(tgname order by tgname), '{}') into v_triggers
@@ -342,6 +504,6 @@ begin
     raise exception '#912 tail: p_audit_log_human''s qual moved to % -- who may read an audit row is not this file''s to change', v_policy using errcode = 'CLR10';
   end if;
 
-  raise notice '#912 tail: OK -- clara.audit_log.actor_role is a nullable text column under ck_audit_log_actor_role, t_audit_actor_role stamps it BEFORE INSERT, clara._audit is still the SOLE writer and still byte-for-byte its frozen 0004 body, all 304 callers are unchanged, the metric-input-producer freeze is whole, the append-only triggers stand, and no grant or policy moved.';
+  raise notice '#912 tail: OK -- clara.audit_log.actor_role is a nullable text column under ck_audit_log_actor_role, t_audit_actor_role stamps it BEFORE INSERT, clara._audit is still the SOLE writer and still byte-for-byte its frozen 0004 body, all 304 callers are unchanged, the metric-input-producer freeze is whole, clara.list_firm_knowledge carries exactly this file''s recut over ix_audit_log_knowledge_revision, the append-only triggers stand, and no grant or policy moved.';
 end
 $tail$;

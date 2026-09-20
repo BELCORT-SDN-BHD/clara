@@ -19,10 +19,11 @@
 //     the column with NO per-door change").
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { ROLES, assertRaises, endPool, humanQuery, opk, roleQuery, rootQuery } from "./rig-fixtures.mjs";
 import { auditActorRoleCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 2;
+const EXPECTED_CELLS = 3;
 let live = false;
 let executed = 0;
 
@@ -64,6 +65,9 @@ function capture(sub, o) {
     o.scope ?? "client", o.client ?? null, o.sourceKind ?? "user_statement",
   ]).then((r) => r.rows[0].r);
 }
+
+const listFirmKnowledge = (sub) =>
+  humanQuery(sub, "select clara.list_firm_knowledge() as r", []).then((r) => r.rows[0].r);
 
 /** The committed audit row a door left behind, READ BACK (never the caller of the act). */
 function auditRowOf(firm, fn, actor) {
@@ -140,4 +144,51 @@ cell("ar.02 history is left alone -- the rows that predate the column still read
     "select actor_role from clara.audit_log where firm_id = $1 and fn = 'rig_912_act_now'",
     [w.firm])).rows[0];
   assert.equal(now.actor_role, "admin");
+});
+
+// =============================================================================================
+// SEAM 2 — THE FIRM REGISTER. `clara.list_firm_knowledge()`, through humanQuery at the least
+// privilege that should succeed (viewer, the read's own floor).
+// =============================================================================================
+
+cell("ar.03 a promotion keeps the authority it actually ran under -- the register reports the role at the act beside the promoter's new, lower role", async () => {
+  const w = await knowledgeWorld("p912a3");
+  // A SECOND owner, so the firm never loses its last one: clara._tf_guard_last_owner (0003:415)
+  // refuses to demote the last active non-agent owner, and the act under test is the DEMOTION.
+  const second = randomUUID();
+  await rootQuery(
+    "insert into clara.users(id, display_name, email, is_agent) values ($1,$2,$3,false)",
+    [second, "p912 second owner", `p912_second_${second.slice(0, 8)}@rig.test`]);
+  await rootQuery(
+    "insert into clara.firm_memberships(firm_id, user_id, role, status) values ($1,$2,'owner','active')",
+    [w.firm, second]);
+
+  // THE ACT, at the authority it really had: an OWNER promotes the firm default.
+  const promoted = await capture(w.owner, {
+    key: "default_currency", scope: "firm", client: null, value: "MYR",
+    basis: "Partner meeting 2026-09-20: ringgit presentation is the firm's default",
+  });
+  assert.equal(promoted.status, "captured");
+
+  // THE DEMOTION, through the real governed door, by the other owner.
+  const membership = (await rootQuery(
+    "select id from clara.firm_memberships where firm_id = $1 and user_id = $2 and status = 'active'",
+    [w.firm, w.owner])).rows[0].id;
+  await humanQuery(second,
+    "select clara.set_member_role(p_membership => $1, p_role => $2, p_op_key => $3) as r",
+    [membership, "bookkeeper", opk("p912demote")]);
+
+  const entry = (await listFirmKnowledge(w.viewer)).records
+    .find((x) => x.knowledge_key === "default_currency");
+  assert.ok(entry, "the firm register did not return the promoted rule");
+  // The three facts are three facts, and they disagree on purpose. Expected values come from the
+  // roster this cell minted and from the door it walked, never from re-reading the register.
+  assert.equal(entry.authority.promoter_role_at_act, "owner",
+    "the register must report the role the promoter ACTUALLY held when the rule was recorded");
+  assert.equal(entry.authority.promoter_role_now, "bookkeeper",
+    "…beside their CURRENT role, which the demotion moved below the floor the act required");
+  assert.equal(entry.authority.required_role, "admin",
+    "…and the authority the door verified at the time is unchanged by either");
+  assert.equal(entry.authority.promoter_active, true,
+    "a demoted member is still an active member -- that is a different fact again");
 });

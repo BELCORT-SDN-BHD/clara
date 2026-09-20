@@ -106,9 +106,12 @@ export async function keyGrammarCohortApplied() {
 
 /** True iff #912's audit actor-role cohort (0243_audit_actor_role.sql) is applied: the
  *  `clara.audit_log.actor_role` column AND its own CHECK AND the `t_audit_actor_role` stamp that
- *  fills it. Same "wholly present or wholly absent" law as the cohorts above: one migration lands
- *  the column and the stamp together, so a chain carrying only one of them is a defect to surface
- *  rather than a frontier to skip. */
+ *  fills it AND the recut `clara.list_firm_knowledge` that cites it. Same "wholly present or
+ *  wholly absent" law as the cohorts above: one migration lands the column, its stamp and its one
+ *  reader together, so a chain carrying only some of them is a defect to surface rather than a
+ *  frontier to skip. The register probe looks for the migration's OWN marker in the live body
+ *  (`prosrc`) rather than for the function's existence -- `clara.list_firm_knowledge` has existed
+ *  since 0220, so a bare `to_regprocedure` would report this cohort applied estate-wide. */
 export async function auditActorRoleCohortApplied() {
   const r = await rootQuery(
     `select
@@ -120,7 +123,9 @@ export async function auditActorRoleCohortApplied() {
                   and conname = 'ck_audit_log_actor_role')                 as role_check,
        exists (select 1 from pg_trigger
                 where tgrelid = 'clara.audit_log'::regclass
-                  and not tgisinternal and tgname = 't_audit_actor_role')  as stamp_trigger`,
+                  and not tgisinternal and tgname = 't_audit_actor_role')  as stamp_trigger,
+       (select position('promoter_role_at_act' in p.prosrc) > 0 from pg_proc p
+         where p.oid = 'clara.list_firm_knowledge()'::regprocedure)        as register_recut`,
   );
   const row = r.rows[0];
   const flags = Object.values(row);
