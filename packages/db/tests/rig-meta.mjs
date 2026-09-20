@@ -1960,6 +1960,28 @@ export const DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT = [
   ...DOCUMENT_CAPABILITY_HIGH_WATER_0244_UNGRANTED_FNS,
 ];
 // #846 END
+// #782 [0245, invoice line items become an accepted limitation] — COMMENT-ONLY, deliberately, and
+// the comment IS the cohort's content, the same reason #656's 0228 entry above carries none.
+//
+//   0245_invoice_line_items_accepted_limitation.sql INSTALLS NO FUNCTION, NO TABLE, NO TRIGGER
+//   AND RECUTS NONE. Its whole content is a republication of `clara.document_capabilities`: an
+//   UPDATE that moves the 28 invoice-family rows' `limits.invoice_line_items` from `planned` to
+//   `accepted_limitation` (with a sibling `invoice_line_items_reason`), then the registry-wide
+//   raise every prior republication has used (0228's precedent) — `registry_version` 2 -> 3,
+//   never DELETE-then-INSERT (#846). So there is no granted name to roster and no ungranted
+//   closure to pin: a cohort array would be empty and `cohortFailures` would compare it against
+//   nothing. The file's own tail re-hashes the FIVE #779/#846 wall bodies its raise rides
+//   (`_tf_document_capabilities_version_monotone`, `_tf_document_capabilities_version_high_water`,
+//   `_tf_document_capabilities_high_water_record`, `_tf_document_capability_high_water_monotone`,
+//   `_tf_document_capabilities_version_uniform`) at their measured pre-image shas and raises
+//   CLR10 if any moved, which is the same claim from the migration's side.
+//
+//   THE HIGH-WATER MARK NEEDS NO NEW ROSTER ENTRY EITHER: 0245's raise runs through the same
+//   AFTER INSERT OR UPDATE writer #846 installed, so every pair's mark rises to 3 in the same
+//   statement — proved in the migration's own tail (§C.5) and in
+//   `packages/db/tests/document-capability-high-water.test.mjs`'s rollback-hygiene cell, never by
+//   a new name here.
+// #782 END
 // #639 [0216, fixed-asset acquisition] — the ACQUISITION lane, its own cohort for the same
 // "wholly present or wholly absent" reason every roster above carries: folding these names into
 // 0041's FA cohort would red every database between the two frontiers, and `cohortFailures()`

@@ -1601,6 +1601,42 @@ exists` before the policy, and a backfill that is an `on conflict … do update`
 raises. The prestate reports FIRST or REDO instead of refusing on its own objects; it still pins
 0207's body by `sha256(prosrc)` and refuses a registry that already publishes two versions.
 
+## #782 — the invoice family's line-item limit becomes an accepted limitation (0245)
+
+`0245_invoice_line_items_accepted_limitation.sql` creates nothing and recuts nothing — the
+registry's THIRD publication, riding the same UPDATE idiom `0228` set and `0244`'s walls now
+enforce rather than merely convention. Owner ruling 2026-09-18: no invoice line items this round;
+the registry stops calling the gap `planned` (future tense) and names it what it is — a standing,
+accepted limitation.
+
+**The change, exactly.** The 28 invoice-family rows (the six OCR-family formats ×
+`invoice`/`credit_note`/`debit_note`/`receipt`, plus `xml` ×
+`invoice`/`credit_note`/`debit_note`/`e_invoice_xml`) move `limits.invoice_line_items` from
+`planned` to `accepted_limitation`, with a new sibling `invoice_line_items_reason` =
+`no_consumer_reads_line_facts` — the same two-key shape `limits` already carries for the OFX row
+(`opening_balance` + `reader`). Then the whole registry raises `registry_version` 2 → 3
+(`registry_version = registry_version + 1` over all 240 rows), never DELETE-then-INSERT. Neither
+`typed_facts`, `business_operation` nor `basis` moves on any row: Clara's read of invoice HEADER
+facts and the operation it drives are unchanged, which is the ticket's own "no reading, drafting or
+posting behaviour changes".
+
+**The reason is checkable, not asserted.** `packages/runtime/lib/trade-invoice-basis.ts`'s posting
+tool schemas are `.strict()` throughout and admit no `line_items` field — a model that invented one
+is refused by the schema, not silently dropped — and no reader anywhere in `packages/runtime`
+persists a per-line invoice fact. Header-only is therefore a structural fact about the schema
+Clara posts through, not a scheduling choice.
+
+**Why this migration's prestate re-pins #846's five wall bodies.** #846 is this same lane's own
+prior ticket; the wave-2 addendum's own rule is "an earlier ticket of this lane may already have
+recut a body you touch: pin what is live". 0245's raise rides `_tf_document_capabilities_version_
+monotone` (0207), `_tf_document_capabilities_version_high_water`, `_tf_document_capabilities_high_
+water_record`, `_tf_document_capability_high_water_monotone` and `_tf_document_capabilities_
+version_uniform` (all four 0244), so the prestate re-measures every one of the five by
+`sha256(prosrc)` rather than trusting 0244's own pins, which were taken a commit earlier on the
+same branch. The tail re-hashes all five again, and asserts the high-water mark rose to 3 for
+every pair via #846's ordinary AFTER-trigger writer path — never a first publication, never a
+partial raise.
+
 ## 0234 — the platform's legal enforcement mode (#1008)
 
 The owner ruled on 2026-09-20 that during the beta **the state of a firm's agreements must never

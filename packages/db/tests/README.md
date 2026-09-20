@@ -910,6 +910,16 @@ UNSET is the acceptance shape — zero skips.
 19/19 — every probe in the new file is rolled back, which is what keeps that file's registry-wide
 invariants true.
 
+**#782 (migration 0245)** edits that same battery in place rather than adding a cell: `PUBLISHED_
+REGISTRY_VERSION` re-bases 2 → 3 (its own doc comment says why, in the one place a future
+republication re-bases), and the invoice-shaped-PDF / monotone-probe / rollback-hygiene cells' pins
+move from `limits.invoice_line_items = "planned"` to `{ invoice_line_items: "accepted_limitation",
+invoice_line_items_reason: "no_consumer_reads_line_facts" }`. This file's own rollback-hygiene cell
+(above) pins the SAME row's limits and needed the identical edit — a reminder that a value pinned
+in two batteries over one table moves in both or the second one reds after the first migration
+that changes it. Still 19/19 and 7/7 respectively; see `packages/db/README.md`'s "#782" section for
+the migration itself.
+
 ## `operator-support.test.mjs` `os.19` — #844
 
 os.14 (#774) pins the arm-1 lateral's SECOND ordering key (a money-carrying intent status beats a

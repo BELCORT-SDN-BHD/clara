@@ -382,5 +382,12 @@ cell("ROLLBACK HYGIENE — after every probe the registry and its marks are byte
   // in a later one that never touched the registry.
   const pdf = (await rootQuery(`select registry_version, limits from clara.document_capabilities ${PDF_INVOICE}`)).rows[0];
   assert.equal(pdf.registry_version, registry.v, "the probed row's own version is back where it started");
-  assert.deepEqual(pdf.limits, { invoice_line_items: "planned" }, "the probed row's limits are back where they started");
+  assert.deepEqual(
+    pdf.limits,
+    // #782 (0245): the invoice family's line-item limit reads accepted_limitation with its
+    // reason since 2026-09-20, not planned. This cell only proves the probes above left the
+    // row's limits untouched, whatever they currently are.
+    { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
+    "the probed row's limits are back where they started",
+  );
 });

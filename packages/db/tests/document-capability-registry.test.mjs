@@ -69,10 +69,19 @@ const LEVELS = Object.freeze(["supported", "stored_only", "unsupported", "planne
  *  `opening_tb.line` producer in line at the OCR pass, and seven `prior_gl` rows' basis + a named
  *  `{"browser_entrance":"absent"}` limit.
  *
+ *  2 until #782's `0245_invoice_line_items_accepted_limitation.sql`, which republished the WHOLE
+ *  registry again at 3 (owner ruling 2026-09-18: no invoice line items this round) and changed
+ *  CONTENT on the 28 invoice-family rows only (pdf/png/jpeg/webp/tiff/heic x
+ *  invoice/credit_note/debit_note/receipt, plus xml x invoice/credit_note/debit_note/
+ *  e_invoice_xml): `limits.invoice_line_items` moves from `planned` to `accepted_limitation`,
+ *  with a sibling `invoice_line_items_reason` naming why — no consumer reads per-line facts
+ *  (`packages/runtime/lib/trade-invoice-basis.ts`'s `.strict()` schema admits no `line_items`
+ *  field), so header-only is a standing boundary rather than a future build.
+ *
  *  A future republication re-bases HERE, in one place, and says why beside the number — the
  *  precedent for editing this battery in the same commit as the migration is `af3b5955` (#779),
  *  which shipped 0207 and +147 lines of this file together. */
-const PUBLISHED_REGISTRY_VERSION = 2;
+const PUBLISHED_REGISTRY_VERSION = 3;
 
 let live = false;
 let executed = 0;
@@ -271,8 +280,11 @@ cell("an invoice-shaped PDF is facts-supported and records the line-item deferra
   assert.equal(row.typed_facts, "supported");
   assert.equal(row.business_operation, "supported");
   assert.equal(row.engine_id, "llm-openai:gpt-5.6-terra:v2", "the witness pair is the live facts engine for this pair");
-  assert.equal(row.limits?.invoice_line_items, "planned",
-    "invoice LINE ITEMS are deferred and the registry says so in machine-readable form");
+  assert.equal(row.limits?.invoice_line_items, "accepted_limitation",
+    "invoice LINE ITEMS are an accepted limitation, not a planned feature (#782 owner ruling 2026-09-18), "
+    + "and the registry says so in machine-readable form");
+  assert.equal(row.limits?.invoice_line_items_reason, "no_consumer_reads_line_facts",
+    "the limitation carries its own reason, not a bare verdict");
 });
 
 cell("a payroll_summary PDF is stored and byte-extracted but NEVER facts- or operation-executable (skipped_kind is not executable)", async () => {
@@ -454,14 +466,14 @@ monotoneCell("an UPDATE that RAISES registry_version, and one that leaves it UNC
          returning registry_version, limits`)).rows[0];
     return { raised, same: same.registry_version, limits: same.limits };
   });
-  // +1 from whatever the registry publishes: 2 before #656, 3 after 0228 republished at 2. The
-  // SUBJECT of this cell is the transition (a raise is admitted, an unchanged version beside
-  // another column's move is admitted), never the absolute number — so the number is derived
-  // from the one literal above and re-bases with it.
+  // +1 from whatever the registry publishes: 2 before #656, 3 after 0228 republished at 2, 4
+  // after 0245 republished at 3 (#782). The SUBJECT of this cell is the transition (a raise is
+  // admitted, an unchanged version beside another column's move is admitted), never the absolute
+  // number — so the number is derived from the one literal above and re-bases with it.
   assert.equal(seen.raised, PUBLISHED_REGISTRY_VERSION + 1, "raising registry_version must still succeed");
   assert.equal(seen.same, PUBLISHED_REGISTRY_VERSION + 1, "an UPDATE that does not touch registry_version leaves it where it was");
   assert.equal(seen.limits.probe_779, "transient", "the non-version column change was accepted");
-  assert.equal(seen.limits.invoice_line_items, "planned", "the existing named limit survived the probe write");
+  assert.equal(seen.limits.invoice_line_items, "accepted_limitation", "the existing named limit survived the probe write");
 });
 
 monotoneCell("ROLLBACK HYGIENE — after the probes the registry is byte-identical: one distinct version, the seeded verdicts and limits intact", async () => {
@@ -471,13 +483,18 @@ monotoneCell("ROLLBACK HYGIENE — after the probes the registry is byte-identic
             count(*) filter (where limits ? 'probe_779')::int as probe_limits
        from clara.document_capabilities`)).rows[0];
   assert.equal(r.versions, 1, "a probe write survived: the registry no longer publishes exactly one version");
-  // 1 until #656; 2 since 0228 republished the whole registry (see PUBLISHED_REGISTRY_VERSION).
-  // The claim is unchanged — the probes above left NOTHING behind — only the published number is.
+  // 1 until #656; 2 since 0228 republished the whole registry; 3 since 0245 republished it again
+  // (#782; see PUBLISHED_REGISTRY_VERSION). The claim is unchanged — the probes above left
+  // NOTHING behind — only the published number is.
   assert.equal(r.v, PUBLISHED_REGISTRY_VERSION, "a probe write survived: the published registry_version moved");
   assert.equal(r.probe_limits, 0, "a probe `limits` write survived on some row");
   const pdf = (await rootQuery(`select registry_version, limits from clara.document_capabilities ${PDF_INVOICE}`)).rows[0];
   assert.equal(pdf.registry_version, PUBLISHED_REGISTRY_VERSION, "the probed row's own version is back where it started");
-  assert.deepEqual(pdf.limits, { invoice_line_items: "planned" }, "the probed row's limits are back where they started");
+  assert.deepEqual(
+    pdf.limits,
+    { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
+    "the probed row's limits are back where they started",
+  );
   const ofx = (await rootQuery(
     "select byte_extraction, typed_facts from clara.document_capabilities where format='ofx' and document_kind='bank_statement'")).rows[0];
   assert.equal(ofx.byte_extraction, "stored_only");
