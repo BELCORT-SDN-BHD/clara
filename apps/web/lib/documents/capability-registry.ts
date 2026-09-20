@@ -29,7 +29,7 @@
 
 import { getRows } from "@/lib/read";
 import type { SessionTokenAccessor } from "@/lib/session";
-import type { CapabilityLevel } from "./document-state";
+import type { BusinessOperationLevel, CapabilityLevel } from "./document-state";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
@@ -45,7 +45,8 @@ export type CapabilityRegistryRow = {
   custody: CapabilityLevel;
   byte_extraction: CapabilityLevel;
   typed_facts: CapabilityLevel;
-  business_operation: CapabilityLevel;
+  /** WIDER than the other three by exactly one value, because its DB CHECK is (#988/0246). */
+  business_operation: BusinessOperationLevel;
   engine_id: string | null;
   engine_byte: string | null;
   registry_version: number | null;
@@ -104,7 +105,7 @@ export function buildCapabilityIndex(rows: readonly CapabilityRegistryRow[]): Ca
  *  * `unknown` — the mime resolved to no format, or the (format, kind) pair is not seeded.
  *    Nothing is claimed. */
 export type TierState =
-  | { state: "level"; level: CapabilityLevel; limits: Record<string, string> }
+  | { state: "level"; level: BusinessOperationLevel; limits: Record<string, string> }
   | { state: "needs_classification" }
   | { state: "unknown" };
 
@@ -125,7 +126,10 @@ export type ResolvedCapability = {
 const UNKNOWN: TierState = { state: "unknown" };
 const NEEDS_CLASSIFICATION: TierState = { state: "needs_classification" };
 
-const level = (value: CapabilityLevel, limits: Record<string, string> = {}): TierState =>
+/** `TierState` is the union over ALL FOUR axes, so its level is the WIDEST of the four sets —
+ *  `BusinessOperationLevel`. The three narrower axes pass values that are a subset of it, so
+ *  nothing is widened for them at the call sites below. */
+const level = (value: BusinessOperationLevel, limits: Record<string, string> = {}): TierState =>
   ({ state: "level", level: value, limits });
 
 const ALL_UNKNOWN: ResolvedCapability = {
@@ -197,5 +201,6 @@ export function tierStateKey(tier: TierState): string {
 
 export const TIER_STATE_KEYS: readonly string[] = [
   "capabilityTier.supported", "capabilityTier.stored_only", "capabilityTier.unsupported",
-  "capabilityTier.planned", "capabilityTier.needs_classification", "capabilityTier.unknown",
+  "capabilityTier.planned", "capabilityTier.proposal_only", "capabilityTier.needs_classification",
+  "capabilityTier.unknown",
 ];

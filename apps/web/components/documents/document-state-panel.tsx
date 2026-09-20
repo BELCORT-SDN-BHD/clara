@@ -40,9 +40,9 @@ import { getDocumentState } from "@/lib/documents/reads";
 import { activityJournalsHref } from "@/lib/firm/activity";
 import { businessDateTime } from "@/lib/business-date";
 import {
-  capabilityLimits, custodyVerdict, extractionTone, extractionVerdict, factsTone, factsVerdict,
-  failingChecks, landedFactsExtractions, operationVerdict, unmeasuredChecks,
-  type DocumentStateResult, type StateTone,
+  capabilityLimitLevelKey, capabilityLimits, custodyVerdict, extractionTone, extractionVerdict,
+  factsTone, factsVerdict, failingChecks, landedFactsExtractions, operationTone, operationVerdict,
+  unmeasuredChecks, type DocumentStateResult, type StateTone,
 } from "@/lib/documents/document-state";
 import { DoorFeedback } from "./door-feedback";
 import { DocumentWorkLinksPanel } from "./document-work-links";
@@ -84,6 +84,9 @@ const FACTS_KEY = {
 
 const OPERATION_KEY = {
   not_applicable: "stateOperation.notApplicable",
+  // #988 — the fifth business_operation level, where nothing is coded yet. Its own word, because
+  // "Not coded yet" is the store-only pair's sentence and means the opposite thing here.
+  awaiting_confirmation: "stateOperation.awaitingConfirmation",
   uncoded: "stateOperation.uncoded",
   coded: "stateOperation.coded",
   posted: "stateOperation.posted",
@@ -98,6 +101,9 @@ const CHECK_KEY: Record<string, string> = {
 
 const LIMIT_KEY: Record<string, string> = {
   invoice_line_items: "capabilityLimit.invoiceLineItems",
+  // #782: the invoice family's line-item limit carries a sibling reason key, the same two-key
+  // shape `opening_balance` + `reader` already uses for the OFX row.
+  invoice_line_items_reason: "capabilityLimit.invoiceLineItemsReason",
   opening_balance: "capabilityLimit.openingBalance",
   reader: "capabilityLimit.reader",
   router: "capabilityLimit.router",
@@ -282,10 +288,17 @@ function StateBody({ state, clientId, t }: { state: DocumentStateResult; clientI
       <StateRow
         label={t("stateOperationLabel")}
         state={t(OPERATION_KEY[operation])}
-        tone="neutral"
+        tone={operationTone(operation)}
       >
         {operation === "not_applicable" ? t("stateOperationNotApplicableDetail") : (
           <div className="flex flex-col gap-0.5">
+            {/* #988 — WHY nothing is coded, for the one level where the answer is not "nobody has
+                got to it yet". Clara has read the pair and has a proposal; the next move is a
+                person's. Rendered ABOVE the counts, which stay, because a professional still
+                needs to see that there are none. */}
+            {operation === "awaiting_confirmation"
+              ? <p>{t("stateOperationAwaitingConfirmationDetail")}</p>
+              : null}
             <p>{t("stateOperationDetail", {
               entries: state.operation.entries.length,
               statements: state.operation.statements.length,
@@ -320,11 +333,21 @@ function StateBody({ state, clientId, t }: { state: DocumentStateResult; clientI
         </p>
         {limits.length > 0 ? (
           <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-            {limits.map(([name, level]) => (
-              <li key={name}>
-                {LIMIT_KEY[name] ? t(LIMIT_KEY[name], { level }) : t("capabilityLimitUnknown", { name, level })}
-              </li>
-            ))}
+            {/* #782 — BOTH halves of a limit are machine tokens, and both are rendered through
+                their own message key: the NAME through capabilityLimit.*, the VALUE through
+                capabilityLimitLevel.*. An unpublished value falls back to the raw token, which
+                is honest; a rendered message key never would be. */}
+            {limits.map(([name, level]) => {
+              const levelKey = capabilityLimitLevelKey(level);
+              const levelText = levelKey ? t(levelKey) : level;
+              return (
+                <li key={name}>
+                  {LIMIT_KEY[name]
+                    ? t(LIMIT_KEY[name], { level: levelText })
+                    : t("capabilityLimitUnknown", { name, level: levelText })}
+                </li>
+              );
+            })}
           </ul>
         ) : null}
       </div>

@@ -513,8 +513,20 @@ A `sweep.run_completed` event whose run drafted or posted at least one item, and
 _Avoid_: Every sweep run; a refusal or a skip counted as "effect".
 
 **Document capability**:
-What Clara can actually do with an admitted upload, stated per (file format × document type) on four independent levels: custody (the bytes are sealed and retrievable), byte extraction (a reader turned them into stored, inspectable content), typed facts (a lane can persist typed values with their source regions) and business operation (the pair can drive an accounting operation). Each level is `supported`, `stored_only`, `unsupported` or `planned`, and a level is published with the reason for it.
-_Avoid_: "Supported" as one word about a file type; a promise inferred from a filename or an extension; permission — an egress consent gate remains the authority over whether a read may happen at all.
+What Clara can actually do with an admitted upload, stated per (file format × document type) on four independent axes: custody (the bytes are sealed and retrievable), byte extraction (a reader turned them into stored, inspectable content), typed facts (a lane can persist typed values with their source regions) and business operation (whether, and how, the pair can drive an accounting operation). Custody, byte extraction and typed facts each read `supported`, `stored_only`, `unsupported` or `planned`; business operation admits one more level besides, `proposal_only` (#988). A level is always published with the reason for it.
+_Avoid_: "Supported" as one word about a file type; a promise inferred from a filename or an extension; permission — an egress consent gate remains the authority over whether a read may happen at all; treating business operation's vocabulary as the same closed four as the other three axes.
+
+<!-- #846 -->
+**Capability registry version**:
+The one integer the whole document-capability registry publishes at a time, so a surface can say WHICH registry it rendered. It only ever rises: a pair's version cannot be undercut by an update, by re-keying a row onto that pair, or by retiring the row and publishing it again, because the highest version each (format × document type) pair has ever carried is remembered separately, outlives the row, and can itself be neither deleted, lowered, re-keyed nor truncated away. A publish is all-or-nothing across the table — a change that would leave two versions on the registry at once is refused. A change to the registry's VOCABULARY (widening an axis's allowed values) is not itself a publish and does not raise the version unless it also republishes a row's content (#988).
+_Avoid_: A per-row version; a version that identifies a document's own revision; a re-publication at a lower number described as a correction; assuming every migration that touches the registry raises this integer; reading "cannot be undercut" as a guarantee against a superuser who drops a trigger — that is the estate's standing honesty boundary, not a route.
+<!-- #846 -->
+
+<!-- #988 -->
+**Business operation: proposal-only**:
+A `business operation` level where Clara reads a document deterministically and derives a real proposal — the counterparty, account or date it would use — but never carries that proposal into a posted operation on its own authority; a person confirms it first. Distinct from `stored_only`, where Clara derives nothing at all, and from `supported`, where a posted operation follows without that confirmation step. No document kind is classified at this level until a migration explicitly names it: `prior_gl` fits the description but stays `stored_only` by owner ruling, pending the Client Knowledge Base's own prior-GL ingestion path.
+_Avoid_: Treating it as a synonym for `stored_only` ("Clara does nothing either way"); treating it as `supported` ("the proposal is already a posted fact"); assuming any row carries this level without checking — none does yet.
+<!-- #988 -->
 
 **Typed fact**:
 A value Clara read out of a document and persisted with its exact source: the document's own version, the page/region it was read from, the field path naming it, and the engine and model version that produced it. A typed fact is a reading of a source, never a confirmed fact about the client. Client Knowledge LINKS to a typed fact — by extraction, region and field path — and never copies it: a document fact becomes a client fact only through Knowledge's own confirmation, with its own actor, scope and status.

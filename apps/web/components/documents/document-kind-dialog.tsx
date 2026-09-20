@@ -90,6 +90,12 @@ export function DocumentKindDialog({
         </p>
         <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
           <SelectTrigger aria-label={t("kindHeading")} size="sm">
+            {/* [878] the SAME filtered roster the SelectContent options below map — never the
+                full, unfiltered sibling constant this file deliberately does not import.
+                document-kind-labels.test.tsx's own hardened CRS-07-09 assertion refuses the
+                door-refused kind, and a call here mapping the wider roster, anywhere in this
+                file's source: a trigger-label fallback to the unfiltered list would reintroduce
+                it into the one thing this dialog offers. */}
             <SelectValue
               placeholder={t("kindPlaceholder")}
               items={CLASSIFIABLE_DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}

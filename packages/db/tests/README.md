@@ -946,6 +946,78 @@ later file in the same sweep does not inherit this one's arrangement.
 `legal-enforcement-mode-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
 does not preload it and fails loudly on a database without 0234, because a skip is not evidence.
 
+## `document-capability-high-water.test.mjs` — #846 / migrations 0244 and 0272
+
+Ten cells over `clara.document_capabilities` and its new high-water relation. Gated on the LIVE
+CATALOG (the relation, the four trigger bodies, the five triggers and the deferred `pg_constraint`
+row), never on a migration number; a PARTIAL cohort THROWS. 0244 and 0272 are ONE cohort because
+they land in one pull request: no shipped chain sits between them, so a database carrying one and
+not the other is a half-applied migration, which is what the cohort reports. Its gate module is
+`document-capability-high-water-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_DOCUMENT_CAPABILITY_HIGH_WATER`), and the focused run with that variable
+UNSET is the acceptance shape — zero skips.
+
+- **The two refusals**: a pair's published version survives DELETE (re-inserting below it raises
+  `CLR08` / `registry_version_high_water` carrying the mark and the attempted version), and the
+  mark itself is append-only (DELETE and any lowering raise `CLR08` /
+  `registry_version_high_water_append_only`, a raise is admitted).
+- **The uniformity wall**, from both sides: a transaction raising ONE pair is refused **at a real
+  COMMIT**, and the registry is re-read afterwards to prove nothing was written; a whole-registry
+  raise passes the same wall, forced early with `set constraints
+  clara.t_document_capabilities_version_uniform immediate` so the probe can roll back instead of
+  republishing the live registry. **The commit cell is the only cell in this file that commits**,
+  and its safety rests on the gate: the deferred constraint trigger is proven present before the
+  transaction opens. With the wall absent the same transaction commits and leaves the registry
+  publishing two versions — measured while writing it.
+- **The three routes the first cut left open** (0272, the fix round after the adversarial lens
+  drove them as `clara_fn_owner` on the lane database): **TRUNCATE** of the mark ledger, which no
+  ROW trigger sees, refused by 0003's `clara._tf_no_truncate` armed `before truncate … for each
+  statement` (`CLR08`, and no `detail.reason` — the estate's single truncate guard carries none);
+  a **RE-KEYING UPDATE** of the registry onto a published pair's key, refused by the same
+  high-water body armed a second time as `t_document_capabilities_version_high_water_rekey`,
+  `before update … when` the key changes (`CLR08` / `registry_version_high_water`, naming the
+  DESTINATION); and a **backwards `recorded_at`** on the mark, refused by one more case arm in the
+  append-only body. Each cell FAILED against 0244 alone before 0272 closed it. The re-key wall is
+  a SECOND trigger with a `when` clause rather than a wider event list on 0244's, because BEFORE
+  ROW triggers fire in name order: the wide cut was applied and measured to re-label an ordinary
+  in-place lowering from 0207's `registry_version_monotone` to `registry_version_high_water`, and
+  `document-capability-registry.test.mjs` caught it.
+- **The three positive controls** — re-publishing a retired pair at and above its mark, the first
+  publication of a never-seen pair (which mints its mark in the same statement), and rollback
+  hygiene over both tables — exist because a refusal that refuses everything would pass the two
+  cells above and fail the estate. Proven non-vacuous: with
+  `clara._tf_document_capabilities_version_high_water` recut to refuse every insert, cells 1, 5 and
+  6 go red; the body is restored byte for byte through the redo path and re-measured by
+  `sha256(prosrc)`.
+
+`document-capability-registry.test.mjs` (0191/0207's own battery) is untouched by 0244 — every
+probe in the new file is rolled back, which is what keeps that file's registry-wide invariants
+true.
+
+**#782 (migration 0245)** edits that same battery in place rather than adding a cell: `PUBLISHED_
+REGISTRY_VERSION` re-bases 2 → 3 (its own doc comment says why, in the one place a future
+republication re-bases), and the invoice-shaped-PDF / monotone-probe / rollback-hygiene cells' pins
+move from `limits.invoice_line_items = "planned"` to `{ invoice_line_items: "accepted_limitation",
+invoice_line_items_reason: "no_consumer_reads_line_facts" }`. This file's own rollback-hygiene cell
+(above) pins the SAME row's limits and needed the identical edit — a reminder that a value pinned
+in two batteries over one table moves in both or the second one reds after the first migration
+that changes it. See `packages/db/README.md`'s "#782" section for the migration itself.
+
+**#988 (migration 0246)** adds three cells to the registry battery, behind their own catalog
+frontier (`proposalLevelApplied()` greps `pg_get_constraintdef` for the `proposal_only` token,
+never a migration number), with its own `EXPECTED_CELLS_PRE_988`.
+
+**The fix round (migration 0272)** adds three cells to the high-water battery and one to the
+registry battery — the registry's own `comment on column … limits` stops calling invoice line
+items planned (#782's AC2), behind `wallCompletionApplied()`, which reads 0272's truncate trigger
+rather than the comment it asserts.
+
+**Counts, measured on the lane database with the whole chain applied:** 10/10 for
+`document-capability-high-water.test.mjs` and 23/23 for `document-capability-registry.test.mjs`
+(17 below 0207, 20 below 0246, 22 below 0272 — each named by its own `EXPECTED_CELLS_*` constant,
+and the `after` hook asserts whichever the live frontier makes true, so forgetting to bump one
+reds the battery).
+
 ## `operator-support.test.mjs` `os.19` — #844
 
 os.14 (#774) pins the arm-1 lateral's SECOND ordering key (a money-carrying intent status beats a

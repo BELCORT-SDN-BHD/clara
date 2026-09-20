@@ -144,11 +144,11 @@ const INVALID_INVOICE: DocumentStateResult = {
     document_kind: "invoice", typed_facts: "supported", business_operation: "supported",
     engine_id: "llm-openai:gpt-5.6-terra:v2",
     basis: "Bytes are sealed at intake and read by azure-di:prebuilt-layout:2024-11-30. Typed facts are persisted with source regions by llm-openai:gpt-5.6-terra:v2. A filed document of this kind carries a business operation Clara can drive from those facts.",
-    limits: { invoice_line_items: "planned" },
+    limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
   },
   facts: {
     capability: "supported",
-    limits: { invoice_line_items: "planned" },
+    limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
     extractions: [{
       id: "ext-1", engine_kind: "llm_text_facts", engine_id: "llm-openai:gpt-5.6-terra:v2",
       version_n: 3, status: "done", superseded_by: null,
@@ -200,6 +200,15 @@ const POSTED_INVOICE: DocumentStateResult = {
     capability: "supported", codeable_kind: true, statements: [],
     entries: [{ entry_id: "11111111-2222-4333-8444-555555555555", status: "approved" }],
   },
+};
+
+/** #988 — the same document, at business_operation's FIFTH level. Clara reads the pair and
+ *  derives a real proposal, and stops there: a person confirms before anything is booked.
+ *  Nothing is coded yet, which is the ONE state where this level and the store-only level had
+ *  been telling a professional the same thing. */
+const PROPOSAL_ONLY: DocumentStateResult = {
+  ...PAYROLL,
+  operation: { capability: "proposal_only", codeable_kind: true, entries: [], statements: [] },
 };
 
 const SUCCESS_WORDS = /\bvalidated\b|\bverified facts\b|\bcomplete\b|\bsuccess\b/i;
@@ -293,8 +302,39 @@ test("a FAILED arithmetic check names the check, keeps the facts readable, and s
 
 test("a supported invoice still declares its LINE-ITEM limit — header facts are not per-line facts", async () => {
   await mount(INVALID_INVOICE, async (text) => {
-    assert.match(text(), /Per-line invoice facts are planned/,
+    const t = text();
+    assert.match(t, /Per-line invoice facts: an accepted limitation/,
       "the registry's named limit must reach the reader, or 'facts recorded' overstates what was read");
+    assert.doesNotMatch(t, /planned/i,
+      "ticket 782: invoice line items are a standing limitation, never described as coming");
+    assert.match(t, /Reason: nothing Clara posts through reads a per-line fact/,
+      "the limitation carries its own reason, not a bare verdict (ticket 782)");
+
+    // …AND THE REGISTRY'S MACHINE TOKENS DO NOT REACH THE ACCOUNTANT. `limits` is a
+    // machine-readable column; the panel renders each pair through its OWN message key, which is
+    // document-state.ts's stated reason for returning [name, level] pairs at all. Before this
+    // fix the sentence read "Per-line invoice facts: accepted_limitation." — a snake_case
+    // identifier is neither a sentence nor a reason a professional can act on.
+    assert.doesNotMatch(t, /accepted_limitation/,
+      "the limit's VALUE is rendered through its own message key, never interpolated raw");
+    assert.doesNotMatch(t, /no_consumer_reads_line_facts/,
+      "…and so is its reason");
+  });
+});
+
+test("an unpublished limit VALUE degrades to the raw token rather than to a wrong sentence", async () => {
+  const invented: DocumentStateResult = {
+    ...INVALID_INVOICE,
+    capability: { ...INVALID_INVOICE.capability, limits: { invoice_line_items: "some_future_value" } },
+    facts: { ...INVALID_INVOICE.facts, limits: { invoice_line_items: "some_future_value" } },
+  };
+  await mount(invented, async (text) => {
+    assert.match(text(), /Per-line invoice facts: some_future_value/,
+      "a value this app has no phrase for is shown as it is — an honest unknown, the same rule "
+      + "the panel already follows for an unnamed limit KEY, never a guessed sentence and never "
+      + "a rendered message key");
+    assert.doesNotMatch(text(), /capabilityLimitLevel/,
+      "…and never the key itself, which is what a dynamic t(`x.${value}`) cast would print");
   });
 });
 
@@ -306,6 +346,25 @@ test("an OFX bank statement is honestly stored: extraction NOT ATTEMPTED, facts 
     assert.match(t, /Cannot be read from this file/, "the facts state distinguishes 'no lane' from 'wrong kind'");
     assert.match(t, /no opening balance/, "the registry's measured reason is rendered verbatim");
     assert.doesNotMatch(t, /Failed/, "nothing failed — presenting this as a failure would be a different lie");
+  });
+});
+
+test("a proposal_only pairing reads DIFFERENTLY from a store-only one on the operation row (ticket 988)", async () => {
+  let storeOnly = "";
+  await mount(PAYROLL, async (text) => { storeOnly = text(); });
+  assert.match(storeOnly, /Not coded yet/,
+    "the store-only pairing is the control: Clara derives nothing, so nothing is coded");
+
+  await mount(PROPOSAL_ONLY, async (text) => {
+    const t = text();
+    assert.match(t, /Proposed, needs your confirmation/,
+      "the fifth level gets its own word on the one row a professional opens for a filed document");
+    assert.doesNotMatch(t, /Not coded yet/,
+      "…and it must NOT reuse the store-only sentence, which is ticket 988's whole complaint: "
+      + "'Clara derives nothing' and 'Clara has a proposal for you' are opposite facts");
+    assert.match(t, /never posts it on her own/,
+      "the row says WHY nothing is coded, so the state word is not the only thing a reader gets");
+    assert.doesNotMatch(t, SUCCESS_WORDS, "a proposal is not a success: nothing is booked yet");
   });
 });
 

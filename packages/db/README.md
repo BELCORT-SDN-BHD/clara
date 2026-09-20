@@ -2149,3 +2149,187 @@ audit row, not in a new membership-revision relation.
 
 Battery: `tests/audit-actor-role.test.mjs` (ar.01–ar.07), gated by
 `tests/audit-actor-role-preintegration-gate.mjs`.
+
+## 0244 — the capability registry's version high-water mark (#846)
+
+`0207_document_capabilities_version_monotone.sql` made `registry_version` monotonicity a database
+refusal for **UPDATE transitions** and named two residuals in its own header rather than closing
+them. `0244_document_capability_version_high_water.sql` closes both. Measured on a lane rig before
+the change: `pdf × invoice` published `2`, deleting the row and re-inserting it at `1` was
+ACCEPTED and the table then read `1`.
+
+| object | what it is |
+|---|---|
+| `clara.document_capability_version_high_water` | one row per `(format, document_kind)` carrying the highest `registry_version` that pair has ever published, backfilled TOTAL over the live registry. FORCE RLS, one `clara_fn_owner` policy, **ZERO application-role privilege** — it is an integrity ledger, not a read surface |
+| `clara._tf_document_capabilities_version_high_water()` | BEFORE INSERT wall (and, since 0272, a BEFORE UPDATE wall on a key change too): a row may not LAND below the mark of the pair it lands on. `CLR08` / `detail.reason = registry_version_high_water`. A pair with no mark has never been published and is admitted |
+| `clara._tf_document_capabilities_high_water_record()` | AFTER INSERT OR UPDATE writer: raises the mark, never lowers it (`where excluded.registry_version > h.registry_version`) |
+| `clara._tf_document_capability_high_water_monotone()` | BEFORE UPDATE OR DELETE on the mark: DELETE refused outright; UPDATE refused when it lowers the version, re-keys the row, moves `first_seen_at` or (since 0272) moves `recorded_at` backwards. `CLR08` / `registry_version_high_water_append_only` |
+| `clara._tf_document_capabilities_version_uniform()` | DEFERRABLE INITIALLY DEFERRED **constraint trigger** body: a transaction may not LEAVE more than one distinct `registry_version` on the registry. `CLR08` / `registry_version_uniform`, with `detail.versions` |
+
+**RETIRING A ROW STAYS POSSIBLE, which is why the mark is a separate relation.** Refusing DELETE on
+the registry would have closed the hole too, and #846 rules it out in its own words: 0191 publishes
+one row per pair for the LIVE vocabulary, so a kind or a format that leaves that vocabulary must be
+able to leave the registry with it. A mark keeps the memory of what was published without keeping
+the publication. A column on the registry could not — it would be deleted with the row it is meant
+to outlive, which is the defect restated.
+
+**WHY THE UNIFORMITY WALL IS DEFERRED, and why it is not statement-level.** Every republication the
+registry has had moves all 240 rows (`0228` is the precedent), so a check at the end of each
+STATEMENT would refuse the first one — a republish is non-uniform in the middle by construction. A
+transaction is therefore judged on what it LEAVES. PostgreSQL has no statement-level constraint
+trigger: `create constraint trigger … for each statement` is a syntax error (42601) and `create or
+replace constraint trigger` is unsupported (0A000), both measured on PG 17.11, and the upstream
+grammar hard-codes `FOR EACH ROW`. The wall is therefore an AFTER ROW constraint trigger with a
+table-wide body, and 0244 drops before it creates. An EMPTY registry is uniform — the refusal is
+for MORE THAN ONE version, spelled as such.
+
+**The cost, stated.** A deferred AFTER ROW trigger fires once per changed row at commit, so a
+240-row republication runs the uniformity body 240 times over a 240-row table. Migrations are the
+only writer this table has ever had.
+
+**Redo-safe by construction** (wave-2 rule; "Redo (#957)" above): `create table if not exists`,
+`create or replace function`, `drop trigger if exists` before each `create trigger`, `drop policy if
+exists` before the policy, and a backfill that is an `on conflict … do update` which only ever
+raises. The prestate reports FIRST or REDO instead of refusing on its own objects; it still pins
+0207's body by `sha256(prosrc)` and refuses a registry that already publishes two versions.
+
+**What 0244 did NOT close, and 0272 does.** 0244's header states the invariant as an absolute —
+"a version once published for a pair can never be undercut BY ANY ROUTE". The adversarial lens
+then drove three routes to the opposite end, as `clara_fn_owner`, the role every migration runs as
+and the only writer either table has. See "0272" below; the sentence is true of those three only
+because 0272 exists.
+
+## #782 — the invoice family's line-item limit becomes an accepted limitation (0245)
+
+`0245_invoice_line_items_accepted_limitation.sql` creates nothing and recuts nothing — the
+registry's THIRD publication, riding the same UPDATE idiom `0228` set and `0244`'s walls now
+enforce rather than merely convention. Owner ruling 2026-09-18: no invoice line items this round;
+the registry stops calling the gap `planned` (future tense) and names it what it is — a standing,
+accepted limitation.
+
+**The change, exactly.** The 28 invoice-family rows (the six OCR-family formats ×
+`invoice`/`credit_note`/`debit_note`/`receipt`, plus `xml` ×
+`invoice`/`credit_note`/`debit_note`/`e_invoice_xml`) move `limits.invoice_line_items` from
+`planned` to `accepted_limitation`, with a new sibling `invoice_line_items_reason` =
+`no_consumer_reads_line_facts` — the same two-key shape `limits` already carries for the OFX row
+(`opening_balance` + `reader`). Then the whole registry raises `registry_version` 2 → 3
+(`registry_version = registry_version + 1` over all 240 rows), never DELETE-then-INSERT. Neither
+`typed_facts`, `business_operation` nor `basis` moves on any row: Clara's read of invoice HEADER
+facts and the operation it drives are unchanged, which is the ticket's own "no reading, drafting or
+posting behaviour changes".
+
+**The reason is checkable, not asserted.** `packages/runtime/lib/trade-invoice-basis.ts`'s posting
+tool schemas are `.strict()` throughout and admit no `line_items` field — a model that invented one
+is refused by the schema, not silently dropped — and no reader anywhere in `packages/runtime`
+persists a per-line invoice fact. Header-only is therefore a structural fact about the schema
+Clara posts through, not a scheduling choice.
+
+**Why this migration's prestate re-pins #846's five wall bodies.** #846 is this same lane's own
+prior ticket; the wave-2 addendum's own rule is "an earlier ticket of this lane may already have
+recut a body you touch: pin what is live". 0245's raise rides `_tf_document_capabilities_version_
+monotone` (0207), `_tf_document_capabilities_version_high_water`, `_tf_document_capabilities_high_
+water_record`, `_tf_document_capability_high_water_monotone` and `_tf_document_capabilities_
+version_uniform` (all four 0244), so the prestate re-measures every one of the five by
+`sha256(prosrc)` rather than trusting 0244's own pins, which were taken a commit earlier on the
+same branch. The tail re-hashes all five again, and asserts the high-water mark rose to 3 for
+every pair via #846's ordinary AFTER-trigger writer path — never a first publication, never a
+partial raise.
+
+## #988 — a fifth business_operation level, proposal_only (0246)
+
+`0246_business_operation_proposal_only.sql` widens ONE column CHECK — nothing else.
+`business_operation` now admits a fifth value, `proposal_only` ("Clara proposes, a person
+confirms": Clara reads the pair deterministically and derives a real proposal, but never carries
+it into a posted operation on its own authority), alongside the four `custody`, `byte_extraction`
+and `typed_facts` keep unchanged (`supported`/`stored_only`/`unsupported`/`planned`) — those three
+are out of scope for #988 and the tail proves them byte-identical.
+
+**No row moves.** Owner ruling 2026-09-20 names no row for reclassification here: `prior_gl` —
+the pairing #656 measured as fitting the new level's own description — stays `stored_only`,
+because the SAME session's #983 ruling retires the prior-GL seeding lane outright (the Client KB,
+not a hand-registered pairing, is the intended ingestion path for it going forward, #1012). Since
+zero rows' data changes, `registry_version` does NOT move. The direct precedent is this lane's own
+#846 (0244): it minted a whole new relation and two new walls, touched zero registry rows, and
+left `registry_version` exactly where 0228 published it (2) until 0245 (#782) separately raised it
+for an actual content correction. `0246` follows that shape — it changes VOCABULARY, not DATA —
+and its tail proves the registry is still uniformly at 3 (0245's own publish) after it runs.
+
+**The honesty invariant is a test cell, matching the one it sits beside.** `business_operation`
+never claiming `supported` where `typed_facts` is not has ALWAYS lived only in
+`document-capability-registry.test.mjs`'s repeatable battery, never in a table CHECK (0191's own
+one-time apply-tail is the only other place it was ever stated, and that runs once, at migration
+time, never again). `proposal_only`'s own rule — never claiming the level where `typed_facts` is
+not `supported` either, since a proposal with no facts to propose from is the identical
+over-claim — is added the same way, beside it, and PROVEN discriminating: the migration's own tail
+(§C.4) sets up one honest row and one dishonest one inside a rolled-back probe, and the repeatable
+test file's own new cell reads the same shape live.
+
+**What that costs, said plainly (a knowingly-accepted residual).** Because the rule lives in a
+test and not in a CHECK, **nothing refuses it at write time**. Measured on the lane database
+inside a rolled-back transaction: `update clara.document_capabilities set
+business_operation='proposal_only' where format='ofx' and document_kind='bank_statement'` — a row
+whose `typed_facts` is `unsupported` — was ACCEPTED, and `set constraints all immediate` passed it
+too. The only thing that fails is a later test run. This is accepted rather than closed because
+the pre-existing `supported`-over-unsupported-facts rule has always lived in exactly the same
+place, and splitting the pair across a CHECK and a test would make the weaker half look stronger.
+The cross-column CHECK `business_operation not in ('supported','proposal_only') or typed_facts =
+'supported'` validates clean against the live 240 rows today and is the shape a later ticket would
+add — together with pinning 0246's `SELECT INTO` by `conname`, since that CHECK would itself name
+`business_operation` and 0246's unordered `ilike` probe would then be a coin flip on a redo.
+
+**Web.** `BusinessOperationLevel` (`apps/web/lib/documents/document-state.ts`) is this axis's OWN
+union — the shared `CapabilityLevel` stays at the four values custody, byte extraction and typed
+facts still carry in their own CHECKs — and the readers keyed off it (`capability-tiers.tsx`'s
+tone map, now keyed by that closed set so the compiler enforces it; `capabilityTier.*` in
+`en.json`) render it distinctly from `stored_only`. `resolveCapability`/`tierStateKey`
+(`capability-registry.ts`) pass any level through generically.
+
+The DETAIL panel's own reader needed a real change, and did not get one in 0246's own round:
+`operationVerdict()` branched on the level exactly once (`=== 'unsupported'` → `not_applicable`)
+and sent `proposal_only` down the same ladder as `stored_only`, so the one surface a professional
+opens for a filed document rendered the two identically — "Not coded yet" for both, which are
+opposite facts. It now returns its own `awaiting_confirmation` verdict where the two levels really
+differ (nothing coded, nothing posted, no statement), with its own message key, its own tone and a
+sentence saying why nothing is booked; once a person has acted, a confirmed proposal reads `coded`
+or `posted` like any other entry.
+
+## 0272 — the routes 0244 left open, and #782's column comment (fix round)
+
+`0272_document_capability_wall_completion.sql` is the fix round after 0244/0245/0246's two-axis
+review plus the adversarial lens. It mints NO function and moves NO row.
+
+| route | measured before 0272 | what 0272 does |
+|---|---|---|
+| **TRUNCATE of the mark ledger** | `truncate clara.document_capability_version_high_water` took 240 marks to 0 with no refusal — no ROW trigger fires on TRUNCATE — after which #846's own reproducer (delete `pdf × invoice`, re-insert BELOW its version) was ADMITTED | arms 0003's `clara._tf_no_truncate` as `before truncate … for each statement`, the same body every other append-only relation in the estate uses. `CLR08`, and **no `detail.reason`** — the estate's single truncate guard carries none |
+| **A re-keying UPDATE** | a never-seen pair published at version 1 (admitted: no mark), then `update … set format='pdf', document_kind='invoice'` — the pair read 1 while its mark read 3, and the deferred uniformity wall passed it | arms the SAME high-water body a second time as `t_document_capabilities_version_high_water_rekey`, `before update … when (new.format is distinct from old.format or new.document_kind is distinct from old.document_kind)`. The body is byte-unchanged: it reads `new`, so on a re-key it already asks about the destination |
+| **`recorded_at` backwards** | rewritten to 1999-01-01 with no refusal, although 0244 comments the column "Moves only upward with `registry_version`" | one more case arm, LAST, in the append-only body, strictly `<` |
+| **#782's column comment** | `col_description(clara.document_capabilities.limits)` still carried 0191's "per-LINE facts are an accepted target with no table yet" after 0245 moved the data | re-issues the comment from a successor file (0191 unedited), the way 0246 already re-issued the `business_operation` one. The tail proves the comment and the rows agree: 28 rows at `accepted_limitation`, zero rows publishing a limit valued `planned` |
+
+**Why a second trigger and not a wider event list.** Re-arming 0244's own trigger as
+`BEFORE INSERT OR UPDATE` was written, applied and MEASURED to be wrong: BEFORE ROW triggers fire
+in trigger-NAME order, `…_version_high_water` sorts before `…_version_monotone`, and an ordinary
+in-place LOWERING update then came back as `registry_version_high_water` instead of 0207's
+`registry_version_monotone`. `document-capability-registry.test.mjs` caught it on the next run.
+Re-labelling a refusal a caller already classifies is a breaking change a fix round has no mandate
+for, so the widening is confined to a genuine re-key by a `when` clause — which has to live on its
+own trigger, because a combined INSERT OR UPDATE trigger may not reference `OLD` at all. 0272's
+tail pins that non-regression itself, and the file repairs the earlier arming on redo.
+
+**Why a new file rather than an edit of 0244.** Both 0244 and 0245 are unmerged and both *could*
+be edited under the wave-2 rule, but the supported re-apply path ("Redo (#957)" above) refuses any
+version that is not the HIGHEST applied one, and 0245/0246 sit on top of 0244 on every lane
+database. Editing 0244 in place would mean the hand procedure #957 exists to abolish. 0272's
+number is deliberately ABOVE the wave-2 reservation (0235…0271, each belonging to a named ticket
+in another lane); nothing depends on it, so renumbering at integration is free.
+
+**The honesty boundary, stated.** "By any route" means *by any route a writer of this estate has*.
+A superuser who sets `session_replication_role = replica` or drops a trigger disables every wall
+here, exactly as 0003's own truncate guard says of itself ("blocks truncate for everyone but a
+superuser who drops the trigger"). Measured: `clara_fn_owner` gets `42501` on
+`session_replication_role`, so that is an explicit act by a different actor, not a route.
+
+**Redo-safe by construction**: `drop trigger if exists` before each `create trigger` (including a
+re-creation of 0244's own trigger at 0244's spelling, so a database carrying the earlier wide cut
+comes back), `create or replace function`, and an idempotent `comment on`. The prestate reports
+FIRST or REDO, and its pin for the ONE body this file recuts is two-valued by construction —
+0244's pre-image or 0272's own post-image, both measured.

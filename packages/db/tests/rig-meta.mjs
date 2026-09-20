@@ -1933,6 +1933,85 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
 // ungranted ACL on every run, at every frontier, without being told it exists. 0207 changes no
 // existing name, signature or grant.
 // #779 END
+// #846 [0244, the capability registry's version high-water mark] — its own cohort, unlike 0207's,
+// and the difference is the number of names rather than a change of mind. 0207 minted ONE
+// ungranted trigger body, so a roster of one would only have asserted a name's presence that the
+// trigger's own attachment already proved. 0244 mints FOUR bodies and a relation, and
+// `cohortFailures()` fails a PARTIAL cohort — which is exactly the shape a half-applied 0244
+// would leave, and the shape packages/db/tests/README.md's "Preintegration gates" section asks a
+// new feature battery to declare beside its gate module.
+//
+//   ALL FOUR ARE UNGRANTED INTERNALS, granted to NOBODY — revoked from PUBLIC, no role grant at
+//   all. They are trigger bodies: nothing calls them by name, and the only lane that can write
+//   `clara.document_capabilities` at all is the owner/migration role (0191's ruling, which 0207's
+//   header restates). Listed here so a grant APPEARING on one fails the main sweep, and so a
+//   half-applied 0244 is reported as that rather than as a silently narrower boundary.
+//
+//   THE RELATION `clara.document_capability_version_high_water` needs NO roster entry of its own:
+//   `governedRlsFailures()`'s derive branch (b) sweeps every clara base table that is neither
+//   GOVERNED_TABLES nor RLS_EXEMPT and fails one that is not RLS-enabled AND forced, so the new
+//   table is checked on every run without being told it exists. A gated table cohort in the
+//   0037/C-2 shape buys nothing for a SINGLE table — "partial" is not a state one table can be in.
+const DOCUMENT_CAPABILITY_HIGH_WATER_0244_UNGRANTED_FNS = [
+  "_tf_document_capabilities_version_high_water", "_tf_document_capabilities_high_water_record",
+  "_tf_document_capability_high_water_monotone", "_tf_document_capabilities_version_uniform",
+];
+export const DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT = [
+  ...DOCUMENT_CAPABILITY_HIGH_WATER_0244_UNGRANTED_FNS,
+];
+//
+//   0272 (THE FIX ROUND) ADDS NO NAME TO THIS ROSTER, deliberately. It mints no function: it arms
+//   0003's `clara._tf_no_truncate` on the mark ledger, arms the high-water body above a second
+//   time as a key-change BEFORE UPDATE trigger, recuts
+//   `_tf_document_capability_high_water_monotone` in place and re-issues two comments.
+//   `cohortFailures()` rosters NAMES, and every name 0272 touches is already listed here or in
+//   0003's own closure -- so a cohort entry would be a duplicate, not a wider proof. The trigger
+//   ATTACHMENTS 0272 adds are proven where attachments are proven: the migration's own tail and
+//   `document-capability-high-water.test.mjs`'s cohort gate, which reads all five triggers.
+// #846 END
+// #782 [0245, invoice line items become an accepted limitation] — COMMENT-ONLY, deliberately, and
+// the comment IS the cohort's content, the same reason #656's 0228 entry above carries none.
+//
+//   0245_invoice_line_items_accepted_limitation.sql INSTALLS NO FUNCTION, NO TABLE, NO TRIGGER
+//   AND RECUTS NONE. Its whole content is a republication of `clara.document_capabilities`: an
+//   UPDATE that moves the 28 invoice-family rows' `limits.invoice_line_items` from `planned` to
+//   `accepted_limitation` (with a sibling `invoice_line_items_reason`), then the registry-wide
+//   raise every prior republication has used (0228's precedent) — `registry_version` 2 -> 3,
+//   never DELETE-then-INSERT (#846). So there is no granted name to roster and no ungranted
+//   closure to pin: a cohort array would be empty and `cohortFailures` would compare it against
+//   nothing. The file's own tail re-hashes the FIVE #779/#846 wall bodies its raise rides
+//   (`_tf_document_capabilities_version_monotone`, `_tf_document_capabilities_version_high_water`,
+//   `_tf_document_capabilities_high_water_record`, `_tf_document_capability_high_water_monotone`,
+//   `_tf_document_capabilities_version_uniform`) at their measured pre-image shas and raises
+//   CLR10 if any moved, which is the same claim from the migration's side.
+//
+//   THE HIGH-WATER MARK NEEDS NO NEW ROSTER ENTRY EITHER: 0245's raise runs through the same
+//   AFTER INSERT OR UPDATE writer #846 installed, so every pair's mark rises to 3 in the same
+//   statement — proved in the migration's own tail (§C.5) and in
+//   `packages/db/tests/document-capability-high-water.test.mjs`'s rollback-hygiene cell, never by
+//   a new name here.
+// #782 END
+// #988 [0246, business_operation's fifth level, proposal_only] — COMMENT-ONLY, deliberately, and
+// for the SAME reason #782's entry above carries none.
+//
+//   0246_business_operation_proposal_only.sql INSTALLS NO FUNCTION, NO TABLE AND NO TRIGGER, AND
+//   RECUTS NONE. Its whole content is DROP + ADD on `document_capabilities_business_operation_
+//   check` (the SAME auto-generated name, widened from four values to five) plus a column comment
+//   update — no row of `clara.document_capabilities` is inserted, deleted, or has any column
+//   other than the constraint's own definition changed. So there is no granted name to roster and
+//   no ungranted closure to pin: a cohort array would be empty and `cohortFailures` would compare
+//   it against nothing.
+//
+//   THE FRONTIER IS READ FROM THE CHECK'S OWN DEFINITION, never from a migration number:
+//   `document-capability-registry.test.mjs`'s `proposalLevelApplied()` greps
+//   `pg_get_constraintdef` for the `proposal_only` token, the same law `monotoneWallApplied()`
+//   already follows for 0207's trigger.
+//
+//   REGISTRY_VERSION DOES NOT MOVE: #988's owner ruling reclassifies no row onto the new level
+//   this round (`prior_gl` stays `stored_only`, #983/#1012), and a vocabulary widening that
+//   republishes no row's content does not raise the per-row publication mark — the migration's
+//   own tail proves the registry is still uniformly at 3 (0245's own publish) afterward.
+// #988 END
 // #639 [0216, fixed-asset acquisition] — the ACQUISITION lane, its own cohort for the same
 // "wholly present or wholly absent" reason every roster above carries: folding these names into
 // 0041's FA cohort would red every database between the two frontiers, and `cohortFailures()`
@@ -3378,6 +3457,13 @@ export async function grantMatrixFailures() {
   if (actorRoleLive.length !== 0) {
     failures.push(...cohortFailures("#912 0243 audit actor-role stamp",
       AUDIT_ACTOR_ROLE_0243_COHORT, liveNames));
+  }
+  // #846 [0244] — bimodal for the same reason: wholly present once 0244 applies, wholly absent
+  // before it, because the db-slice-frontiers matrix runs this package against earlier frontiers.
+  const highWaterLive = DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT.filter((n) => liveNames.has(n));
+  if (highWaterLive.length !== 0) {
+    failures.push(...cohortFailures("#846 0244 capability registry version high-water mark",
+      DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
