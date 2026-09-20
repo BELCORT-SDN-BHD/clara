@@ -1784,3 +1784,45 @@ wire shape, no new relation, and no shared roster-census helper (out of scope, A
 next migration that needs the count still re-derives it in its own tail, exactly as 0216 and 0221
 did — this file only gives the first reader a durable place to learn what that census currently
 reads.
+
+## 0237 — `clara._assert_journal_basis`'s `nonzero_total` arm, stated as unreachable (#906)
+
+`clara._assert_journal_basis` ([0178](migrations/0178_accounting_work_journal_successor.sql))
+validates a journal basis before either of its two live callers
+(`clara.create_accounting_plan` at [0193](migrations/0193_accounting_plans.sql):1521 and the
+prepayment door at [0223](migrations/0223_prepayment_amortisation.sql):1246) records it. Its own
+constraint vocabulary lists `nonzero_total` ("the basis moves no money") beside three reachable
+tokens with no note — a reader might assume it is live defence-in-depth. It is not: found
+independently from both the accrual (#652) and prepayment (#653) sides while each wired refusal
+logic through this shared predicate, and recorded in the accrual gap map as untested because it is
+unreachable.
+
+**Why it is unreachable.** Two earlier arms in the same function foreclose it:
+
+* `at_least_two` (0178:743-745) refuses fewer than two lines, so the per-line loop always runs —
+  the vacuous "zero lines, both totals initialise to zero" shape can never reach the totals check.
+* `exactly_one_side` (0178:769-772) refuses any line whose debit and credit are equally signed,
+  including both zero. Combined with `clara._journal_cents` refusing a negative minor-unit value,
+  every surviving line carries exactly one strictly positive side.
+
+An all-zero basis (every line's debit AND credit are zero) is therefore refused by
+`exactly_one_side` on its first line — control never leaves the per-line loop. A basis whose debit
+total is genuinely zero but whose lines are each one-sided forces every line's credit to be
+strictly positive (by the same arm), so the credit total is positive while the debit total is
+zero; `balanced` (0178:780-783) refuses that mismatch — `v_dr <> v_cr` — before `nonzero_total`'s
+own `if v_dr = 0` line is ever reached. `nonzero_total` is retained as a fold guard only. This was
+already downstream knowledge (0223:1257-1266, the prepayment door's own comment, carries the same
+finding at its call site); the predicate itself carried no statement of its own contract.
+
+[0237_journal_basis_zero_total_unreachable.sql](migrations/0237_journal_basis_zero_total_unreachable.sql)
+closes the gap with exactly one statement: a `comment on function` naming `nonzero_total` as
+unreachable by construction and naming both guarding arms, `at_least_two` and `exactly_one_side`.
+Its prestate pins the predicate's body (`sha256(prosrc)`), owner, `SECURITY DEFINER` flag and
+owner-only ACL, and refuses to apply if the body has drifted or no longer carries all three
+tokens; its tail re-reads the comment and re-confirms the same four facts are byte-for-byte
+unmoved. No door, no wire shape, no new relation, no reordering and no recut of either caller
+(explicitly out of scope, Agent Brief): `at_least_two`, `exactly_one_side`, `balanced` and
+`nonzero_total` all still exist, in the same order, raising the same messages.
+[tests/journal-basis-zero-total-unreachable.test.mjs](tests/journal-basis-zero-total-unreachable.test.mjs)
+calls the predicate directly (the ticket's own named seam) and proves both shapes above land on
+the arm this section says they do, never on `nonzero_total`.
