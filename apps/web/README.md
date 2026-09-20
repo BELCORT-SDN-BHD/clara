@@ -1405,3 +1405,30 @@ D12(a)'s list is read off `detail.candidates` and typed as a first-class field b
 `components/accounting/trade-invoice-form.tsx` RENDERS it inline as a choice; the rest of the
 door's sentence (the name it could not resolve, the counterparty kind it expected) is readable
 beside it now, where the route-specific fold used to throw it away.
+
+## #958 — cash is book cash; the tie-out's GL balance is never called cash
+
+Owner's ruling (2026-09-20): only governed book cash, over the published cash account set, is ever
+labelled cash on a human-facing surface. `list_bank_statements`' `tie.gl_balance_cents` and
+`get_bank_reconciliation`'s `gl_prime_cents` (the same DB key, mapped in `lib/bank/recon-types.ts`)
+are both the bank tie-out's own ledger-derived figure for ONE bank account — a THIRD figure,
+alongside the bank statement's closing balance (migration 0232) and book cash, on the same
+ledger-derived-but-different footing. It is a term of the tie-out, never a claim about how much
+cash the client holds, and CONTEXT.md now carries it as its own entry, "Tie-out GL balance".
+
+**Nothing changed on the tree.** Checked first: the one surface that renders it,
+`components/bank/reconciliation-section.tsx`'s `<dl>` row, already labels it "GL balance"
+(`ClientBank.reconciliation.glBalance`); the client home's cash tile already says "Book cash"
+(`ClientFinancial.cash.heading`). This ticket is the vocabulary ruling and its repeatable check,
+not a recut of the tie-out, matching, reconciliation or the client financial pack.
+
+**The backstop.** `apps/web/tests/gl-balance-cash-label-census.test.ts` walks every `.ts`/`.tsx`
+file under `app/` and `components/` for a `.gl_balance_cents`/`.gl_prime_cents` read rendered
+inside JSX, resolves the nearest preceding label element (a JSX text literal, a string literal, or
+a `t("KEY")`/`tc("KEY")` call traced to its `useTranslations` namespace and looked up in the real
+`messages/en.json`), and fails on a "cash" label OR on a label it cannot statically resolve
+(fail-closed). It is an AST check over source AND message copy together — a violation can come from
+a hardcoded JSX label or from reusing an existing cash-labelled i18n key next to this figure. Known
+limitation, documented in the file's own header: it only sees the balance rendered INLINE in JSX: a
+future surface that reads the field into a local variable first and renders that variable elsewhere
+would not be traced across that boundary.

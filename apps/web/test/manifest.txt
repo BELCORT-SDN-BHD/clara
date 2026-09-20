@@ -508,6 +508,7 @@ tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts
 tests/focus-ring-contract.test.ts
 tests/focusRailSubscription.test.mjs
+tests/gl-balance-cash-label-census.test.ts
 tests/holding-state.test.ts
 tests/invite-courier-authority.test.ts
 tests/invite-courier-egress.test.ts
