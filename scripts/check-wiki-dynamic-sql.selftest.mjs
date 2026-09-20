@@ -286,10 +286,15 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
   // shape: a single `unprovable` CoR patch on `clara.cancel_intake_batch` (`pg_get_functiondef
   // (v_oid)` where `v_oid` binds a single literal-cast regprocedure, the identical attribution
   // shape), independently rig-measured to carry no word-bounded "wiki" token anywhere in its
-  // body (riders wave 2 lane 05, chain 0001->0253, 2026-09-20). Eighteen pinned keys total: the
-  // eleven CoR-idiom cores, the four #964 adds, the one #968 add, the one ACL-walled composed
-  // statement, and the one checked reconstruction. The NEXT entry must trip this pin and earn
-  // its own reviewed justification, exactly as these eighteen did.
+  // body (riders wave 2 lane 05, chain 0001->0253, 2026-09-20). #965
+  // (0254_intake_refusal_record.sql) adds ONE more, the same CoR-idiom shape a third time: a
+  // single `unprovable` CoR patch on `clara.create_document_intake` (`pg_get_functiondef(v_oid)`
+  // where `v_oid` binds a single literal-cast regprocedure, the identical attribution shape),
+  // independently rig-measured to carry no word-bounded "wiki" token anywhere in its body
+  // (riders wave 2 lane 05, chain 0001->0254, 2026-09-20). Nineteen pinned keys total: the
+  // eleven CoR-idiom cores, the four #964 adds, the one #968 add, the one #965 add, the one
+  // ACL-walled composed statement, and the one checked reconstruction. The NEXT entry must trip
+  // this pin and earn its own reviewed justification, exactly as these nineteen did.
   const expectedKeys = [
     "_reserve_document_ingest(uuid,uuid,integer,timestamp with time zone)",
     "_resize_document_reservation(uuid,uuid,integer)",
@@ -300,6 +305,7 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
     "book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)",
     "cancel_intake_batch(uuid,uuid,text)",
     "complete_bank_reconciliation(uuid,uuid[],text)",
+    "create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamp with time zone,text)",
     "get_intake_batch(uuid,integer)",
     "match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)",
     "resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)",

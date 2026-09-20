@@ -351,6 +351,27 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
       "_intake_batch_live_children", "_intake_batch_pending_members", "_reserve_op",
       "cancel_accounting_work", "get_intake_batch", "role_rank"],
   }],
+  // #965 (0254_intake_refusal_record.sql), the SAME `execute v_head || 'AS $tag$' || v_new ||
+  // '$tag$'` idiom again, one CoR patch on `clara.create_document_intake`, `v_oid` bound to a
+  // single literal-cast regprocedure (never `to_regprocedure(v_sig)`, for the identical
+  // CoR-patch-attribution reason the #964 header explains). `kind:'unprovable'` (v_head/v_new/
+  // v_back are catalog-derived migration-time text). relations/calls are the EXACT `clara.*`
+  // tokens the LIVE installed body was MEASURED to contain (`select prosrc from pg_proc where
+  // oid = 'clara.create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamptz,text)'
+  // ::regprocedure` on riders wave 2 lane 05 rig `clara_l05`, chain 0001->0254, PG 17.11,
+  // 2026-09-20; regex `\bclara\s*\.\s*(?:"(\w+)"|(\w+))`, the identical extraction
+  // `claraTargets()` uses). None is a wiki relation or wiki-touch call (also confirmed: the body
+  // carries no word-bounded "wiki" substring at all).
+  ["create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamp with time zone,text)", {
+    why: "#965 — the single `clara._reserve_document_ingest` call gains an `exception when "
+      + "sqlstate 'CLR18'` arm, and the refusal it catches commits the already-inserted intake "
+      + "row at failed/limit and RETURNS a refusal outcome instead of letting the raise roll the "
+      + "row back; every other byte is the pinned 0007 body, proved by reverse substitution in "
+      + "the migration itself and by the p965.refusal.* cells in intake-refusal-record.test.mjs.",
+    relations: ["chat_sessions", "document_intakes", "firm_memberships"],
+    calls: ["_audit", "_declared_page_ceiling", "_finish_op", "_hash",
+      "_reserve_document_ingest", "_reserve_op", "role_rank"],
+  }],
 ]);
 
 /** Normalise a waiver value to {why, relations:Set, calls:Set}; a legacy string is a bare
