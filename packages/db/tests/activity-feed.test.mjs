@@ -1905,3 +1905,25 @@ test("af.34 a fixed-asset event lands on kind=assets in BOTH doors, and the asse
   assert.equal(docs.find((r) => r.id === acquired.eventId), undefined,
     "af.34 the acquisition has LEFT the documents rung");
 });
+
+test("af.35 a counterparty-identity event lands on kind=counterparties in BOTH doors, and that filter reaches it", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const cli = world.clients.A1;
+  // TWO types of the same family, so the cell proves the arm is a PREFIX match and not one name:
+  // `counterparty.created` is the birth, `counterparty.identifiers_set` is the identity edit the
+  // ticket's own summary names.
+  const created = await mkEvent({ firm: FIRM_A(), type: "counterparty.created", client: cli, actor: ALICE() });
+  const identified = await mkEvent({ firm: FIRM_A(), type: "counterparty.identifiers_set", client: cli, actor: ALICE() });
+
+  const page = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["counterparties"], limit: 100 }));
+  assert.ok(page.every((r) => r.kind === "counterparties"),
+    "af.35 the counterparties filter returns ONLY counterparties rows");
+
+  for (const ev of [created, identified]) {
+    const row = page.find((r) => r.id === ev.eventId);
+    assert.ok(row, `af.35 ${ev.eventId} is reachable under kinds=['counterparties']`);
+    assert.equal(row.kind, "counterparties", `af.35 list_activity files ${row.event_type} under counterparties`);
+    const detail = await getActivityEvent(BOB(), "event", row.id);
+    assert.equal(detail.kind, "counterparties", `af.35 get_activity_event agrees for ${row.event_type}`);
+  }
+});
