@@ -30,6 +30,14 @@
 //      asks for a structural cell, that standard wins" is what it rests on;
 //      `p638.core.no_regression` in `staff-expense-claim.test.mjs` is the precedent and the cell
 //      #984's AC6 re-derives.
+//   5. (FIX ROUND, L01W2-SPEC-09) `clara.list_accounting_work`, `clara.get_accounting_work_row`
+//      and `clara.list_activity` -- the three READ doors the Work list, the Work detail and the
+//      firm Activity feed are fed from, driven as a signed-in BOOKKEEPER. AC7 was proved on the
+//      web side against hand-built rows and here against the WRITTEN rows; the premise in
+//      between -- that the reads surface an opening Work at all -- was argued from the doors'
+//      bodies and never measured. Section 5 measures it. It is a seam the brief names ("renders
+//      ... on the Work list, Work detail and firm Activity feed, and is selectable in the Work
+//      list's purpose filter"), not a new one.
 //
 // NOT A SEAM, and never asserted as one: the contents of `basis` / `effects` as a DOMAIN answer.
 // They are read here only to prove the rows name the batch they came from.
@@ -45,6 +53,9 @@ import {
   wbEnsureReady, buildWaveBWorld, onboardingClient, seedOpeningCoa, stageBeeSet, stageFullSet,
   planRevision, approveOpeningSeed, openingApprovalRows, seedRegRow,
   approveOpeningCorrection, supersedeOpeningItem, openingItemRows, entryRow, revMapOf,
+  // fix round (L01W2-SPEC-09) -- the three READ doors AC7 is really about, driven as a signed-in
+  // bookkeeper rather than argued about from their bodies.
+  humanQuery,
 } from "./wave-b/wb-fixtures.mjs";
 
 /** The migration whose effects this file describes, and the stem its gate module keys on. */
@@ -408,4 +419,122 @@ test("obw984.vocabulary.census: the purpose vocabulary is four values in the fou
   assert.equal(postingCore.includes(OPENING), false,
     "AC5: the posting core does NOT name the opening purpose - work_not_found is the correct answer for it, and an opening Work never arrives because its entries are approved by clara._approve_opening_entry before the Work row is written");
   noteLane("obw984: the vocabulary is four values on both CHECKs; the model-served admission core and the posting core still read exactly three");
+});
+
+// =============================================================================================
+// 5 - obw984.read_doors -- THE THREE READS A PERSON ACTUALLY LOOKS AT, driven with a REAL
+// approved opening batch.
+//
+// WHY THIS CELL EXISTS (fix round, L01W2-SPEC-09). AC7 -- "an opening Work renders with a human
+// label on the Work list, Work detail and firm Activity feed, and is selectable in the Work
+// list's purpose filter" -- was proved on the WEB side against hand-built component rows, and on
+// the DB side only by asserting the `clara.accounting_work` and `clara.operation_receipts` ROWS.
+// Between the two sat an unmeasured premise: that the read doors those components are fed from
+// SURFACE an opening Work at all. The premise was argued (the doors carry no closed purpose list
+// and join only outward), never measured -- and an argument about four bodies is exactly the kind
+// of claim a later recut falsifies silently.
+//
+// THE SEAMS, and they are the doors the browser calls, not internals:
+//   * `clara.list_accounting_work` -- the Work list AND its purpose filter (one door, two AC7
+//     clauses: the row is listed, and `p_purpose => {opening_balance}` selects it).
+//   * `clara.get_accounting_work_row` -- the Work detail read.
+//   * `clara.list_activity` -- the firm Activity feed.
+// Read as BOB, a BOOKKEEPER who did not approve anything: the floor these doors enforce is
+// bookkeeper, and a Work only its approver could see would be a different defect.
+//
+// NON-VACUOUS BY CONSTRUCTION, twice over: every read below is taken BEFORE the approval on the
+// same client and must be empty, and each filter is asked once for a value the Work does not
+// carry (`p_purpose => {journal_entry}`, `p_kinds => {journal}`) and must exclude it.
+//
+// AND MEASURED ONCE AGAINST A BROKEN SUBJECT (the vacuity control rule 4 asks for): with
+// `clara.list_accounting_work` recut on the rig to carry one extra clause,
+// `and w.purpose <> 'opening_balance'`, this cell failed on exactly the right assertion -- "the
+// Work list now shows exactly the one Work the batch minted, 0 !== 1" -- while the other four
+// cells in this file stayed green, because they read the ROWS and not the DOORS. The door was
+// then restored byte for byte from 0203 (`prosrc` md5 back to b115f2806f642522cca4611f21ad931e,
+// owner clara_fn_owner, SECURITY INVOKER, both pins and the ACL unchanged).
+// =============================================================================================
+
+/** `clara.list_accounting_work` with named arguments, as the browser sends them. */
+const listWork = async (sub, { client = null, purpose = null, limit = 25 } = {}) => (await humanQuery(sub,
+  "select clara.list_accounting_work(p_client => $1::uuid, p_purpose => $2::text[], p_limit => $3::int) as r",
+  [client, purpose, limit])).rows[0].r;
+
+/** `clara.get_accounting_work_row` -- the Work detail's own read. */
+const getWorkRow = async (sub, work) => (await humanQuery(sub,
+  "select clara.get_accounting_work_row(p_work => $1::uuid) as r", [work])).rows[0].r;
+
+/** `clara.list_activity` at the SEVEN-parameter arity 0202 gave it. This file is gated on 0239,
+ *  which is far above 0202, so the arity is not in question here (activity-feed.test.mjs, which
+ *  runs against pre-0202 frontiers too, is where the adaptive wrapper belongs). */
+const listActivity = async (sub, { client = null, kinds = null, work = null, limit = 50 } = {}) => (await humanQuery(sub,
+  "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz,$7::uuid) as r",
+  [null, limit, client, kinds, null, null, work])).rows[0].r;
+
+test("obw984.read_doors: an approved opening batch is listed, addressable and on the Activity feed through the REAL read doors, and its purpose selects it", async (t) => {
+  if (unready(t)) return;
+  const s = await stagedSeed();
+  const BOB = w.users.bob;
+
+  // --- PRESTATE, through the same doors ------------------------------------------------------
+  assert.deepEqual((await listWork(BOB, { client: s.onb.client })).rows, [],
+    "the Work list shows nothing for this client before the approval");
+  assert.deepEqual((await listActivity(BOB, { client: s.onb.client, kinds: ["work"] })).rows, [],
+    "and the Activity feed carries no work-kind row for it either");
+
+  const opKey = opk("obw984-reads");
+  const receipt = await approveOpeningSeed(w.users.hana, {
+    seed: s.seed, planRevision: await planRevision(s.onb.plan), tieSha256: s.doc.sha256,
+    entryRevisions: s.revMap, opKey,
+  });
+  assert.equal(receipt.status, "finalized", "mandatory setup: the batch really approved");
+  const work = (await workRows(s.onb.client))[0];
+  const rec = (await receiptRows(s.onb.client))[0];
+
+  // --- 1 - THE WORK LIST ----------------------------------------------------------------------
+  const page = await listWork(BOB, { client: s.onb.client });
+  assert.equal(page.rows.length, 1, "the Work list now shows exactly the one Work the batch minted");
+  assert.equal(page.rows[0].id, work.id, "and it is that row, not another");
+  assert.equal(page.rows[0].purpose, OPENING,
+    "listed UNDER THE NEW PURPOSE - the door carries no closed purpose list, which this measures rather than argues");
+  assert.equal(page.rows[0].status, "completed", "already finished when it appears");
+  assert.equal(page.rows[0].current_task_id, null, "and names no run, on the wire too");
+  assert.equal(page.rows[0].client_name, (await rootQuery(
+    "select name from clara.clients where id = $1", [s.onb.client])).rows[0].name,
+  "the list's client join resolves for an ONBOARDING client, which is the only kind an opening batch has");
+
+  // --- 2 - THE PURPOSE FILTER (AC7's last clause) ---------------------------------------------
+  const filtered = await listWork(BOB, { client: s.onb.client, purpose: [OPENING] });
+  assert.deepEqual(filtered.rows.map((r) => r.id), [work.id],
+    "p_purpose => {opening_balance} SELECTS it - the filter the Work list's chip sends is honoured server-side");
+  const otherPurpose = await listWork(BOB, { client: s.onb.client, purpose: ["journal_entry"] });
+  assert.deepEqual(otherPurpose.rows, [],
+    "...and p_purpose => {journal_entry} excludes it, so the filter above is not a filter that passes everything");
+
+  // --- 3 - THE WORK DETAIL READ ---------------------------------------------------------------
+  const row = await getWorkRow(BOB, work.id);
+  assert.equal(row.id, work.id, "the detail door addresses the opening Work by id");
+  assert.equal(row.purpose, OPENING, "under the same purpose the list gave");
+  assert.equal(row.status, "completed");
+  assert.equal(row.attempts, 0, "no run attempts: nothing was ever woken for it");
+  assert.equal(row.current_run_status, null);
+  assert.equal(row.entry_id, null,
+    "and it names no single entry - a batch has N, which is why its result names the seed instead");
+
+  // --- 4 - THE FIRM ACTIVITY FEED -------------------------------------------------------------
+  const feed = await listActivity(BOB, { client: s.onb.client, kinds: ["work"] });
+  const mine = feed.rows.filter((r) => r.source === "operation_receipt");
+  assert.equal(mine.length, 1, "the feed carries exactly one operation-receipt row for this client");
+  assert.equal(mine[0].id, rec.id, "and it is the receipt the approval wrote");
+  assert.equal(mine[0].event_type, OPENING,
+    "the feed's event_type for a receipt is its Work's PURPOSE - this is the value describeActivity() renders, and it reaches the browser only because the door's join to clara.accounting_work found the row");
+  assert.equal(mine[0].work_id, work.id, "linked to the Work it belongs to");
+  assert.equal(mine[0].kind, "work", "filed under the work kind, which is the filter it must answer");
+  const scoped = await listActivity(BOB, { client: s.onb.client, work: work.id });
+  assert.deepEqual(scoped.rows.map((r) => r.id), [rec.id],
+    "a p_work-scoped feed read returns the same one row, so the Work detail's own timeline finds it");
+  const journalOnly = await listActivity(BOB, { client: s.onb.client, kinds: ["journal"] });
+  assert.equal(journalOnly.rows.some((r) => r.id === rec.id), false,
+    "...and the journal kind does NOT carry it, so the work-kind read above is a real filter");
+  noteLane(`obw984: the three read doors surface opening work ${work.id} / receipt ${rec.id} to a bookkeeper`);
 });
