@@ -22,8 +22,10 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { assertRaises, rootQuery, endPool } from "./rig-fixtures.mjs";
 import {
-  auditRows, CAPS, CEILINGS, FIRST_INSERT, firmScene, setLimits, storedRow,
+  auditRows, CAPS, CEILINGS, commercialState, FIRST_INSERT, firmScene, P960, setLimits,
+  storedRow,
 } from "./firm-document-limits-writer-fixtures.mjs";
+import { insertUser, opk } from "./rig-fixtures.mjs";
 
 /** The migration's STABLE STEM, probed against clara.schema_migrations — never a file listing,
  *  and never a migration NUMBER (numbers are claimed at merge). */
@@ -31,7 +33,7 @@ const STEM = "firm_document_limits_writer$";
 
 let live = false;
 let executed = 0;
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 9;
 
 before(async () => {
   try {
@@ -242,5 +244,211 @@ test("#960 cell 5 · a non-positive cap and a call naming no cap at all are type
     { docs_per_day: 11, pages_per_day: 22, ocr_concurrency: 3, llm_witness_concurrency: 4 },
     "nine refusals later the stored row is exactly what the one accepted call left");
   assert.equal((await auditRows(scene.firm)).length, 1, "a refused call writes no audit row");
+  executed += 1;
+});
+
+// ===========================================================================
+// CELL 6 — EVERY IDENTITY BELOW THE FIRM'S ADMIN FLOOR IS REFUSED WITH A TYPED ERROR, and the
+// row does not move.
+//
+// THIS CELL PINS RATHER THAN DRIVES, and says so: the floor is `clara._human_ctx(
+// clara.role_rank('admin'))`, the estate's shared preamble, so the refusal was there the moment
+// the door was. What the cell is worth is the proof that THIS door actually carries that
+// preamble — a door that read `clara.jwt_firm()` directly instead would be green everywhere
+// else in this battery and open here.
+//
+// THE CROSS-FIRM CASE IS STRUCTURAL, NOT A CHECK: the door has no `p_firm` argument at all, so
+// another firm's admin can only ever write their OWN firm's caps. The cell proves the shape —
+// a second firm's owner writes and only their own row moves — rather than probing for a wall
+// that would have to exist if the argument did.
+// ===========================================================================
+test("#960 cell 6 · bookkeeper, viewer and a stranger are refused; another firm's admin reaches only their own row", async (t) => {
+  if (gate(t)) return;
+  const scene = await firmScene("floor", ["admin", "bookkeeper", "viewer"]);
+  await setLimits(scene.members.admin, { docs_per_day: 11, pages_per_day: 22, ocr_concurrency: 3, llm_witness_concurrency: 4 });
+
+  for (const role of ["bookkeeper", "viewer"]) {
+    const err = await assertRaises("CLR04",
+      () => setLimits(scene.members[role], { docs_per_day: 999 }), `${role} write`);
+    assert.equal(err.message, "insufficient role", `${role}: the estate's own sentence, verbatim`);
+  }
+
+  // A person with no membership anywhere: refused at the same door, for the other reason.
+  const stranger = await insertUser(P960, "floor_stranger");
+  const err = await assertRaises("CLR04",
+    () => setLimits(stranger, { docs_per_day: 999 }), "stranger write");
+  assert.equal(err.message, "actor has no active membership");
+
+  const row = await storedRow(scene.firm);
+  assert.equal(row.docs_per_day, 11, "three refusals later the cap has not moved");
+  assert.equal((await auditRows(scene.firm)).length, 1, "a refused call writes no audit row");
+
+  // ANOTHER FIRM'S OWNER writes their own caps; this firm's row is untouched.
+  const other = await firmScene("floor_other");
+  await setLimits(other.owner, { docs_per_day: 55 });
+  assert.equal((await storedRow(other.firm)).docs_per_day, 55);
+  assert.equal((await storedRow(scene.firm)).docs_per_day, 11, "the first firm's caps did not move");
+  executed += 1;
+});
+
+// ===========================================================================
+// CELL 7 — THE RECEIPT IS DURABLE AND THE OP KEY MEANS WHAT IT MEANS.
+//
+// Three facts, and the third is the one this door has to add for itself:
+//  (a) the SAME op_key with the SAME caps returns the ORIGINAL receipt, byte for byte, and
+//      writes no second audit row — clara._reserve_op / _finish_op's contract, pinned here
+//      because a door that re-derived a receipt instead of returning the stored one would look
+//      identical on the happy path and lie on a retry;
+//  (b) a NEW op_key at values the firm already holds is ACCEPTED, with `changed: []` — an
+//      admin's re-affirmation is a receipt worth having (clara.set_firm_high_stakes_threshold's
+//      own header says so), and the audit row records that nothing moved rather than inventing
+//      a change;
+//  (c) the SAME op_key with DIFFERENT caps is a typed refusal. `_reserve_op` raises an UNTYPED
+//      CLR10 there ("op_key reused with different args", 0004), which carries no detail.reason
+//      for a surface to branch on — so this door wraps it, exactly as
+//      clara.set_legal_enforcement_mode (0234) does for the same reason.
+// ===========================================================================
+test("#960 cell 7 · the same op key replays its receipt, a new one re-affirms, a reused one with different caps is typed", async (t) => {
+  if (gate(t)) return;
+  const scene = await firmScene("opkey");
+  const key = opk("p960_replay");
+
+  const first = await setLimits(scene.owner, { docs_per_day: 42 }, { opKey: key });
+  const replay = await setLimits(scene.owner, { docs_per_day: 42 }, { opKey: key });
+  assert.deepEqual(replay, first, "the replay is the ORIGINAL receipt, not a fresh derivation");
+  assert.equal((await auditRows(scene.firm)).length, 1, "a replay writes no second audit row");
+
+  const again = await setLimits(scene.owner, { docs_per_day: 42 });
+  assert.deepEqual(again.changed, [], "a re-affirmation changes nothing, and says so");
+  assert.equal(again.caps.docs_per_day, 42);
+  const rows = await auditRows(scene.firm);
+  assert.equal(rows.length, 2, "a re-affirmation under a NEW op key is still receipted");
+  assert.deepEqual(rows[0].args.changes, {}, "...and records that nothing moved");
+
+  const err = await assertRaises("CLR10",
+    () => setLimits(scene.owner, { docs_per_day: 43 }, { opKey: key }), "op key reused");
+  assert.equal(JSON.parse(err.detail ?? "{}").reason, "op_key_conflict",
+    "the reuse refusal is typed, not _reserve_op's bare CLR10");
+  assert.equal((await storedRow(scene.firm)).docs_per_day, 42, "and nothing was written");
+  executed += 1;
+});
+
+// ===========================================================================
+// CELL 8 — THE READ SIDE IS UNCHANGED BY THIS TICKET, in both directions.
+//
+// #635's card renders a firm with no stored row as a NAMED ZERO — not as the relation's
+// first-insert values — because "a number nobody stored is not that firm's cap"
+// (processing-capacity-card.tsx's own header, and 0233's `capacity` object, which reports the
+// four columns raw). #960 adds a writer; it does NOT change that, and this cell is the proof
+// from the door the card actually calls rather than from the card's own props.
+//
+// The second half is the other direction: once the firm HAS written, the same read reports the
+// stored numbers, so the card's control and the card's figures cannot disagree.
+// ===========================================================================
+test("#960 cell 8 · a firm with no row still reads as four nulls, and reads its own numbers after the first write", async (t) => {
+  if (gate(t)) return;
+  const scene = await firmScene("read_side");
+
+  const before = await commercialState(scene.owner);
+  assert.deepEqual(before.capacity, {
+    docs_per_day: null, pages_per_day: null, ocr_concurrency: null,
+    llm_witness_concurrency: null, source: "firm_document_limits",
+  }, "no stored row is four nulls -- never the relation's first-insert values");
+
+  await setLimits(scene.owner, { docs_per_day: 250, ocr_concurrency: 5 });
+
+  const after = await commercialState(scene.owner);
+  assert.deepEqual(after.capacity, {
+    docs_per_day: 250,
+    pages_per_day: FIRST_INSERT.pages_per_day,
+    ocr_concurrency: 5,
+    llm_witness_concurrency: FIRST_INSERT.llm_witness_concurrency,
+    source: "firm_document_limits",
+  }, "after the first write the card's own read reports the stored four");
+  executed += 1;
+});
+
+// ===========================================================================
+// CELL 9 — THE CATALOG CENSUS. A structural cell, and the repo's own documented standard for a
+// migration that opens a new writer onto a relation that had none (work order rule 4's
+// "catalog census / prestate pin / tail assertion" carve-out). Four claims:
+//
+//  (a) EVERY DOOR THAT ENFORCES A CAP IS BYTE-IDENTICAL to the pre-image measured on this rig
+//      before 0270 applied. The brief's last acceptance criterion is "every door enforcing a cap
+//      keeps its existing fallback when no row exists", and the honest proof of "keeps" is that
+//      the bodies did not move at all — each of them still reads
+//      `coalesce(l.<cap>, <fallback>)` off a LEFT JOIN, so a firm with no row is unaffected by
+//      this ticket in either direction.
+//  (b) THE TABLE'S GRANT MATRIX IS UNMOVED: SELECT to clara_authenticated and nothing else to
+//      any application role. #960's out-of-scope list says the read grant is not narrowed; this
+//      says it is not WIDENED either. The door writes as `clara_fn_owner` inside a SECURITY
+//      DEFINER body, which is the whole point: the relation stays unwritable from outside.
+//  (c) THE DOOR IS GRANTED TO clara_authenticated AND NOBODY ELSE, and its posture is the
+//      estate's (owner clara_fn_owner, SECURITY DEFINER, pinned search_path). The role floor is
+//      INSIDE the body (cell 6), never on the grant.
+//  (d) THE ESTATE'S CEILING IS GRANTED TO NOBODY, which is what "no firm can raise it" means
+//      structurally.
+// ===========================================================================
+test("#960 cell 9 · the enforcing doors are unmoved, and the new surface is exactly one granted door", async (t) => {
+  if (gate(t)) return;
+
+  // (a) The pre-images, MEASURED on this rig before 0270 applied and transcribed here.
+  const PINS = {
+    "clara._reserve_document_ingest(uuid,uuid,integer,timestamp with time zone)":
+      "074c9b180729e3f2d8af8d9fecb38be158db9e2a74e4292b11ff7533a1ed9734",
+    "clara._reserve_processing_call(uuid,integer)":
+      "a713fa374a9069e08862a5a234ad0df6f5303a4223de3bdaaeafc99ae4358043",
+    "clara._resize_document_reservation(uuid,uuid,integer)":
+      "41528b318065207775e48c4ac3f196f07d6cdf0511d108affc72b86c07114dbf",
+    "clara._settle_document_reservation(uuid,uuid,integer)":
+      "b72d83e70645d7bbce44a491002981576059e9d0db41a95ee07e6b87930ddee6",
+    "clara._settle_processing_call(uuid,integer)":
+      "e8b50f0d10da45be4caf6e278248750a4b1e862148dc879fbe38e7a5b4a02408",
+    "clara._tf_firm_document_limits_upsert()":
+      "e07fabd4e475ae29ac8b5fa6a4f8477f72698df26110bfe8d4f3e456aa1f8eb2",
+    "clara.claim_document_processing_task(uuid,text,boolean)":
+      "01e517bf575806a01f93441bbc2459856e1f4f12624b312c3ba670ebf111b9a0",
+    "clara.get_firm_commercial_state()":
+      "347141ee22b52c125ff845451051f03354f1f0e9d57cc43d759253f3273ed19e",
+    "clara.settle_ingest_reservation(uuid,integer,text)":
+      "a7b8d4eeed2c17bfaf252fe73e2185c78255ce4d1e10fac2b933619ff50a9aab",
+  };
+  for (const [fn, sha] of Object.entries(PINS)) {
+    const r = await rootQuery(
+      "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid = $1::regprocedure",
+      [fn]);
+    assert.equal(r.rows[0]?.sha, sha, `${fn} MOVED -- 0270 must not touch a body that enforces a cap`);
+  }
+  // NOT VACUOUS: the same probe must disagree for a body 0270 DID write.
+  const own = await rootQuery(
+    "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid = $1::regprocedure",
+    ["clara.set_firm_document_limits(int,int,int,int,text)"]);
+  assert.ok(own.rows[0]?.sha && !Object.values(PINS).includes(own.rows[0].sha),
+    "the probe cannot tell a moved body from an unmoved one");
+
+  // (b) The table's application-role grant matrix.
+  const grants = await rootQuery(
+    `select coalesce(string_agg(grantee || ':' || privilege_type, ',' order by grantee, privilege_type), '') as m
+       from information_schema.role_table_grants
+      where table_schema = 'clara' and table_name = 'firm_document_limits'
+        and grantee in ('clara_authenticated','clara_runtime','clara_agent_ro',
+                        'clara_wake_interactive','clara_wake_proactive','PUBLIC')`);
+  assert.equal(grants.rows[0].m, "clara_authenticated:SELECT",
+    "0270 neither narrowed nor widened the relation's own grants");
+
+  // (c) + (d) the two new routines' posture and ACL.
+  const acl = await rootQuery(
+    `select p.oid::regprocedure::text as n,
+            pg_get_userbyid(p.proowner) || ' | ' || p.prosecdef::text || ' | '
+              || coalesce(array_to_string(p.proconfig, ','), '<none>') || ' | '
+              || coalesce(array_to_string(p.proacl, ','), '<null>') as posture
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara'
+        and p.proname in ('set_firm_document_limits', '_firm_document_limit_ceiling')
+      order by 1`);
+  assert.deepEqual(acl.rows.map((r) => `${r.n} :: ${r.posture}`), [
+    "clara._firm_document_limit_ceiling(text) :: clara_fn_owner | false | search_path=clara, pg_temp | clara_fn_owner=X/clara_fn_owner",
+    "clara.set_firm_document_limits(integer,integer,integer,integer,text) :: clara_fn_owner | true | search_path=clara, pg_temp | clara_fn_owner=X/clara_fn_owner,clara_authenticated=X/clara_fn_owner",
+  ], "exactly one granted door, granted to clara_authenticated alone; the estate's ceiling is granted to nobody");
   executed += 1;
 });

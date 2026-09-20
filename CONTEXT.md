@@ -790,3 +790,8 @@ _Avoid_: A timestamp (two transactions with the same clock reading can be on eit
 **Definition version / 定义版本**:
 The named rule a published figure was computed under, carried on the figure itself so a number and the definition behind it travel together. A change of rule is a new version rather than a silent recomputation of old answers.
 _Avoid_: Metric definition version — that belongs to the delta-metric lane and is a different object; a schema or migration number; an API version.
+
+<!-- #960 -->
+**Processing cap / 处理上限**:
+One of the four per-firm document-processing limits a firm sets for itself — documents per day, pages per day, documents processed at once, model readings at once. The firm's own owner or admin sets each one independently, receipted and audited; a cap nobody has set is ABSENT rather than zero, and the enforcing doors fall back to their own built-in figures until the firm's first write. The estate's own ceiling sits above whatever a firm sets and no firm can raise it.
+_Avoid_: A quota a firm has bought; an operator-granted allowance (the operator sets no firm's caps); treating an unset cap as zero, or as the value a first write would land.

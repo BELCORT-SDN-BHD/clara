@@ -99,6 +99,13 @@ export async function auditRows(firm) {
   return r.rows;
 }
 
+/** The SHIPPED commercial read, as `sub` — the door #635's processing-capacity card actually
+ *  calls. Nothing in this battery re-derives the `capacity` object; it is read from here. */
+export async function commercialState(sub) {
+  const r = await humanQuery(sub, "select clara.get_firm_commercial_state() as result");
+  return r.rows[0].result;
+}
+
 /** Drop the firm's stored row — used by a cell that needs the no-row state AFTER a write. */
 export async function clearRow(firm) {
   await rootQuery("delete from clara.firm_document_limits where firm_id = $1", [firm]);
