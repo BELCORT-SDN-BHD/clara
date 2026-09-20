@@ -19,8 +19,16 @@
 //
 // THE MINTED REFERENCE IS A LABELLED `rootQuery` FIXTURE INSERT, the established pattern at
 // `f-a4-pr1c-fixtures.mjs:60`, `activity-feed.test.mjs:163` and `binding-proposal-pr-1.test.mjs:206`.
-// It is fixture DML, never the thing under test: the battery that PROVES the resolution ladder is
-// `depreciation-history.test.mjs` (`p651.authority.ref_resolves`), and it drives the real door.
+// It is fixture DML, never the thing under test: the batteries that PROVE the resolution ladder are
+// `depreciation-history.test.mjs` (`p651.authority.ref_resolves`) and
+// `authority-ref-human-instruction.test.mjs` (#977's `p977.*`), and both drive the real doors.
+//
+// #977 [0250] CLOSED THE RESIDUAL THIS MODULE USED TO NAME. The ladder proved the instruction's
+// PROVENANCE, not that a person typed it, so this helper minted the cheapest task kind that
+// existed (`autodraft`). The owner's ruling of 2026-09-20 narrowed the chat-lane arm in both
+// doors: a `chat_task` reference resolves only for a `chat_turn` task carrying an author. The
+// helper now mints exactly that shape, and `mintAgentTaskRef` below mints the refused shapes the
+// #977 cells drive.
 
 import assert from "node:assert/strict";
 import { rootQuery, withActor } from "./rig-helpers.mjs";

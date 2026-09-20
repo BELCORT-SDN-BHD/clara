@@ -1143,3 +1143,64 @@ side of the move.
 `packages/db/package.json`'s `"test"` chain at its MIGRATION-order position (last, after
 `fa-depreciation-leg-fold-preintegration-gate.mjs`, 0248). A FOCUSED run does not preload it and
 FAILS LOUDLY below 0249; final acceptance is exactly that focused shape counting ZERO skips.
+
+## What counts as a person's instruction, for both authority doors (#977)
+
+`authority-ref-human-instruction.test.mjs` is frontier-gated on the
+`authority_ref_human_instruction$` stem (migration 0250). It is the estate's first CROSS-LANE
+battery: it drives BOTH `clara.sign_depreciation_authority` (the fixed-asset lane, CLR38, ADMIN+)
+and `clara.create_accounting_plan` (the plan lane, CLR10, BOOKKEEPER+) in one file, because #977's
+whole claim is that the two stop holding two meanings for one word. It therefore imports each
+lane's OWN world rather than building a third — `depreciation-history-fixtures.mjs` for the
+fixed-asset half, `accounting-plans-fixtures.mjs` for the plan half — and both sit on the same
+`rig-helpers.mjs` pool, so one `endPool()` closes it. `authority-ref-human-instruction-fixtures.mjs`
+holds only what the cross-lane claim needs: the frontier gate, the two reason tokens, `refusedWith`
+(a STRICTER assertion than `x41-fa-fixtures.mjs`'s `refuses`, which falls back to matching a token
+anywhere in the message text — #977's claim is that two refusals are TOLD APART by their token, so
+a cell that accepted the token in prose could not see the defect), and the catalog constants.
+
+Six `p977.*` cells:
+
+* `p977.sign.machine_task_refused` / `p977.plan.machine_task_refused` — a `wake` task (no author by
+  construction) and an `autodraft` run that DOES carry a named author are both refused, at each
+  door's own error class, with `authority_ref_not_human_instruction`; the authority stays
+  `proposed` with no window floor and no recorded instruction, and no plan row is written. Each
+  cell also drives a reference naming NO row, which still answers `authority_ref_unresolved` — the
+  two tokens are the point.
+* `p977.definition.shape` — the house shape cell for a new ungranted internal:
+  `clara._authority_ref_refusal(text,uuid,uuid,uuid)` exists, `stable`, SECURITY DEFINER, owned by
+  `clara_fn_owner`, `search_path` pinned, EXECUTE held by nobody (not PUBLIC, not
+  `clara_authenticated`/`clara_runtime`/`clara_agent_ro`).
+* `p977.definition.one` — the catalog census: both doors READ the shared definition, neither still
+  carries its own inline chat-lane existence test, that inline test now survives in EXACTLY ONE
+  `clara` function (`_accrual_plan_core`, the accrual lane's copy, which the owner's ruling
+  deliberately leaves alone), and EXACTLY the two doors the ruling names read the one definition.
+  Normalized in JS by the same rule 0250's tail normalizes `prosrc` in SQL, so the cell and the
+  migration cannot disagree about what "the fragment" is.
+* `p977.both.unauthored_chat_turn_refused` — the cell that forces the rule to be a CONJUNCTION:
+  `clara.agent_tasks.created_by` is nullable for every kind, so a `chat_turn` nobody signed is
+  refused too.
+* `p977.both.person_instruction_accepted` and `p977.both.accounting_work_ref_unchanged` — the
+  "unmoved" half. A `chat_turn` carrying an author still signs and still creates a plan, with the
+  same receipts; an `accounting_work` reference is accepted by both doors exactly as before (and
+  the cell reads `clara.accounting_work.initiator`'s NOT NULL off the catalog first, because that
+  column is what the owner's ruling rests on), while another client's Work still resolves to
+  nothing.
+
+**The fixture that had to move.** `fa-authority-sign-compat.mjs`'s `mintChatTaskRef` minted an
+`autodraft` task — the cheapest arm to mint while ANY kind resolved, and #651's own comment named
+that as the residual this ticket closes. It now mints a `chat_turn` carrying an author, through a
+real `clara.chat_sessions` row, which also removes the trigger-off fallback the old helper needed
+for a not-yet-active client (a chat session only asks that its client be IN the firm).
+`mintAgentTaskRef` beside it mints the four shapes the refusal cells need — `chat_turn` with and
+without an author, `autodraft`, and `wake` (that last one as LABELLED fixture DML with the insert
+trigger off for exactly one statement, inside one transaction, because a wake task's firm and
+client are stamped FROM its intent's event and the cell needs the row to land on a named client).
+`packages/runtime/tests/reconcile-fa.test.mjs` inlines the same change for the belt rig's own
+signature.
+
+`authority-ref-human-instruction-preintegration-gate.mjs` is the package-wide sweep's escape
+(`CLARA_ALLOW_MISSING_AUTHORITY_REF_HUMAN_INSTRUCTION=1`), registered in
+`packages/db/package.json`'s `"test"` chain at its MIGRATION-order position (last, after
+`fa-particulars-completion-fold-preintegration-gate.mjs`, 0249). A FOCUSED run does not preload it
+and FAILS LOUDLY below 0250; final acceptance is exactly that focused shape counting ZERO skips.
