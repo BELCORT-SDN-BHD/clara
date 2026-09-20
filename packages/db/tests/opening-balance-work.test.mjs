@@ -316,3 +316,96 @@ test("obw984.correction.work: approving an opening correction mints a SECOND Wor
   assert.deepEqual(seedWorkAfter, seedWork, "the seed batch's Work is untouched by the correction");
   noteLane(`obw984: a corrected opening now carries two works (${seedWork.id}, ${corWork.id})`);
 });
+
+/** One constraint definition, by relation and name. */
+const constraintDef = async (table, name) => (await rootQuery(
+  "select pg_get_constraintdef(oid) as d from pg_constraint where conrelid = $1::regclass and conname = $2",
+  [table, name])).rows[0]?.d ?? null;
+
+/** One routine's source, by signature. */
+const bodyOf = async (sig) => (await rootQuery(
+  "select prosrc from pg_proc where oid = $1::regprocedure", [sig])).rows[0]?.prosrc ?? null;
+
+// =============================================================================================
+// 4 - obw984.vocabulary.census -- WHERE the vocabulary is closed, and where it deliberately is not.
+//
+// STRUCTURAL BY NATURE, and that is the standard this file is held to (work-order rule 4): the
+// claim is about EVERY place the estate closes the purpose set, and no dynamic call can make a
+// claim about a place it does not reach. It is the sibling of `p638.core.no_regression` in
+// `staff-expense-claim.test.mjs`, which #984 re-derived to the same four-value expectation.
+//
+// AC5's OWN WORDS are what the posting-core half rests on: "the posting core's purpose lookup is
+// unchanged, PROVEN BY RE-READING ITS BODY; an opening Work never reaches it."
+// =============================================================================================
+test("obw984.vocabulary.census: the purpose vocabulary is four values in the four places the columns close it, the two admission cores are NOT both widened, and the posting core still reads the three", async (t) => {
+  if (unready(t)) return;
+
+  // --- 1 · THE TWO COLUMN CHECKS --------------------------------------------------------------
+  const FOUR = "CHECK ((purpose = ANY (ARRAY['journal_entry'::text, "
+    + "'periodic_stock_adjustment'::text, 'payroll_obligation'::text, 'opening_balance'::text])))";
+  for (const [table, name] of [
+    ["clara.accounting_work", "accounting_work_purpose_check"],
+    ["clara.operation_receipts", "operation_receipts_purpose_check"],
+  ]) {
+    const d = await constraintDef(table, name);
+    assert.equal(d, FOUR, `${name} is not 0239's four-value text`);
+    for (const v of PRIOR) {
+      assert.ok(d.includes(`'${v}'::text`), `${name} lost ${v} - 0239 is a widening, not a rewrite`);
+    }
+    assert.ok(d.includes(`'${OPENING}'::text`), `${name} does not admit ${OPENING}`);
+  }
+
+  // --- 2 · THE TWO SHAPE CHECKS THAT READ THE PURPOSE -----------------------------------------
+  const adj = await constraintDef("clara.accounting_work", "ck_accounting_work_adjustment_basis");
+  assert.ok(adj.includes("journal_entry") && adj.includes(OPENING),
+    "both no-particulars purposes must be on the NULL side of ck_accounting_work_adjustment_basis");
+  const shape = await constraintDef("clara.operation_receipts", "ck_operation_receipts_outcome_shape");
+  assert.ok(shape.includes("entry_id"),
+    "the three model-served purposes still have to name the ONE entry their receipt posted");
+  assert.ok(shape.includes("seed_id"),
+    "and an opening batch names its SEED, because it has N entries and owns none of them singly");
+
+  // --- 3 · THE RUN THE OPENING LANE DOES NOT HAVE ---------------------------------------------
+  // This is also AC5's second half, at constraint level: `clara._record_journal_entry_core` writes
+  // its receipt with a NON-NULL task (the run it was woken for). If an opening Work ever reached
+  // the posting core, the receipt it wrote would violate the CHECK below, so the estate refuses
+  // that path rather than merely not taking it.
+  const taskCheck = await constraintDef("clara.operation_receipts", "ck_operation_receipts_task_by_purpose");
+  assert.ok(taskCheck, "0239's purpose-keyed task CHECK is absent");
+  assert.ok(taskCheck.includes(OPENING), "...and does not name the purpose it exempts");
+  const notNull = await rootQuery(
+    "select attnotnull as n from pg_attribute where attrelid = 'clara.operation_receipts'::regclass and attname = 'task_id'");
+  assert.equal(notNull.rows[0].n, false, "task_id is nullable now");
+  const fk = await rootQuery(
+    "select count(*)::int as n from pg_constraint where conrelid = 'clara.operation_receipts'::regclass and conname = 'operation_receipts_task_id_fkey' and contype = 'f'");
+  assert.equal(fk.rows[0].n, 1, "nullable is not unbound: the agent_tasks FK is still there");
+
+  // --- 4 · THE TWO ADMISSION CORES, and which of them learned the value -----------------------
+  const modelCore = await bodyOf(
+    "clara._admit_accounting_work_core(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)");
+  assert.ok(modelCore.includes("'journal_entry','periodic_stock_adjustment','payroll_obligation'"),
+    "the model-served admission core still holds its own closed three-value list");
+  assert.equal(modelCore.includes(OPENING), false,
+    "...and does NOT know the opening purpose: it inserts an agent_tasks row and demands a model name, which is exactly what an opening approval must not acquire");
+  const sibling = await bodyOf(
+    "clara._admit_opening_work(uuid,uuid,uuid,uuid,integer,jsonb,text,uuid,text)");
+  assert.ok(sibling, "the sibling admission path exists");
+  assert.equal(sibling.includes("agent_tasks"), false, "the sibling names no agent task (AC3)");
+  assert.ok(sibling.includes("clara._assert_adjustment_basis"),
+    "...and asks the vocabulary gate, so §B's new arm is live rather than decorative");
+  for (const role of ["public", "clara_authenticated", "clara_runtime", "clara_agent_ro"]) {
+    const g = await rootQuery(
+      "select has_function_privilege($1, 'clara._admit_opening_work(uuid,uuid,uuid,uuid,integer,jsonb,text,uuid,text)'::regprocedure, 'execute') as g",
+      [role]);
+    assert.equal(g.rows[0].g, false, `${role} can execute the sibling admission path - it is reachable only from the two opening doors`);
+  }
+
+  // --- 5 · THE POSTING CORE, RE-READ (AC5) ----------------------------------------------------
+  const postingCore = await bodyOf(
+    "clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)");
+  assert.ok(postingCore.includes("'journal_entry','periodic_stock_adjustment','payroll_obligation'"),
+    "the posting core's purpose lookup is still the 0195 three");
+  assert.equal(postingCore.includes(OPENING), false,
+    "AC5: the posting core does NOT name the opening purpose - work_not_found is the correct answer for it, and an opening Work never arrives because its entries are approved by clara._approve_opening_entry before the Work row is written");
+  noteLane("obw984: the vocabulary is four values on both CHECKs; the model-served admission core and the posting core still read exactly three");
+});
