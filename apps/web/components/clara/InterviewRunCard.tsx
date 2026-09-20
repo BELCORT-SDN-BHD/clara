@@ -14,7 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
@@ -212,6 +212,12 @@ export function InterviewRunCard({
   }
 
   const state = run.state;
+  // CRS-07-07 — AC1 asks for the same "label, help AND ERROR behaviour" the sibling surfaces
+  // show. `run.error` conflates three sources (a background /state read, `submitAnswer`, and
+  // the cancel dialog's own actions); only `errorHeldAtPark !== null` names an answer-submission
+  // refusal, so ONLY that one renders inside the answer Field. Everything else (a read failure,
+  // a cancel-dialog refusal) stays in the card's chrome banner below, unchanged.
+  const answerFieldError = run.errorHeldAtPark !== null ? run.error : null;
   const terminalMessage = state?.terminal
     ? state.terminal.outcome === "interview_complete"
       ? t("terminal.interview_complete")
@@ -246,7 +252,10 @@ export function InterviewRunCard({
 
       <CardContent className="flex flex-col gap-3">
         {startError ? <StateBanner tone="error">{startError}</StateBanner> : null}
-        {run.error ? <StateBanner tone="error">{run.error}</StateBanner> : null}
+        {/* CRS-07-07 — an answer-submission refusal (`answerFieldError`) renders beside the
+            control it belongs to, inside the answer Field below, not here — showing it in BOTH
+            places would be the "half-state" this fix round exists to close. */}
+        {run.error && !answerFieldError ? <StateBanner tone="error">{run.error}</StateBanner> : null}
 
         {!runId ? (
           <Button type="button" size="sm" onClick={() => void startOrContinue()} disabled={starting}>
@@ -300,6 +309,7 @@ export function InterviewRunCard({
                       id={answerId}
                       aria-label={t("answer.label")}
                       aria-describedby={answerDescriptionId}
+                      aria-invalid={answerFieldError ? true : undefined}
                       placeholder={state.pendingPark.phase === "c" ? t("answer.confirmPlaceholder") : t("answer.placeholder")}
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
@@ -319,6 +329,12 @@ export function InterviewRunCard({
                         two without this. Without it the help text was visible-only — never
                         announced to a screen reader. */}
                     <FieldDescription id={answerDescriptionId}>{t("answer.fieldDescription")}</FieldDescription>
+                    {/* CRS-07-07 (code-review fix round) — AC1's still-missing "error placement"
+                        leg: `run.error` from a FAILED `submitAnswer` is this field's own failure
+                        (`answerFieldError` above), so it renders here, beside the control, the
+                        same composition trade-invoice-form.tsx / invite-dialog.tsx /
+                        matching-candidates.tsx use — not only in the card's chrome banner. */}
+                    {answerFieldError ? <FieldError>{answerFieldError}</FieldError> : null}
                   </Field>
                 </FieldGroup>
                 <div className="flex flex-wrap gap-2">

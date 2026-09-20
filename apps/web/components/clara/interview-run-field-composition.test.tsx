@@ -17,7 +17,7 @@ import { test } from "node:test";
 import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
-import { renderComponent } from "../../test/hookHarness";
+import { renderComponent, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import type { SessionTokenAccessor } from "../../lib/session";
 import messages from "../../messages/en.json";
@@ -57,6 +57,38 @@ function router(url: string): Response {
     });
   }
   return json({});
+}
+
+// CRS-07-07 — the same estate as `router`, except the runtime refuses the answer. Matches
+// `useInterviewRun.test.ts`'s own "server_busy" refusal shape (`{error, message}` at 503), the
+// hook's typed envelope (`errorFrom`, lib/interview/api.ts), so this is an independently sourced
+// expected message, not one this test invents.
+function routerWithRefusedAnswer(url: string): Response {
+  if (url === "/api/runtime/interview/answer") {
+    return json({ error: "server_busy", message: "Answer was not accepted" }, 503);
+  }
+  return router(url);
+}
+
+/** Types into the composer and submits it directly through the form's own `onSubmit` — the
+ *  `onboarding-progress-sync.test.tsx` `answerCurrentPark` idiom. The stub DOM has no native
+ *  form submission (a `type="submit"` Button's `onClick` never reaches a real `<form>`'s submit
+ *  event here), so the real handler is invoked the same way a browser's own submit would. */
+async function submitAnswer(h: Awaited<ReturnType<typeof renderComponent>>, body: Stub, text: string): Promise<void> {
+  const textarea = findIn(body, (n) => n.tagName === "TEXTAREA" && n.getAttribute?.("aria-label") === "Your answer");
+  assert.ok(textarea, "the answer textarea must render on a live pending park");
+  await h.act(() => setFieldValue(textarea as never, text));
+
+  const form = findIn(body, (n) => n.tagName === "FORM");
+  assert.ok(form, "the composer's form must render");
+  const propsKey = Object.keys(form as object).find((k) => k.startsWith("__reactProps"));
+  const onSubmit = propsKey
+    ? (form as unknown as Record<string, { onSubmit?: (e: unknown) => unknown }>)[propsKey]?.onSubmit
+    : undefined;
+  assert.ok(onSubmit, "the composer's form must carry the real submit handler");
+  await h.act(async () => {
+    await onSubmit!({ preventDefault() {}, stopPropagation() {}, target: form, currentTarget: form });
+  });
 }
 
 function App(): ReactElement {
@@ -148,6 +180,37 @@ test("900 — no drift: the run chrome (Send button, cancel trigger, card label)
       // dialog are NOT field-shaped and must not have picked up a stray FieldLabel of their own.
       assert.equal(findAllIn(body, (n) => n.tagName === "LABEL").length, 1,
         "exactly the one Field this ticket adds — the run chrome grew no label of its own");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
+});
+
+// CRS-07-07 (code-review fix round) — AC1 asks for the same "label, help AND ERROR behaviour"
+// the sibling surfaces show. The prior round delivered label and help but left every submit
+// failure — including a refused ANSWER, this field's own failure — in the card's chrome banner
+// (`run.error` in a `StateBanner`, above the thread log), which is not "error placement" beside
+// the control the sibling surfaces (trade-invoice-form.tsx, invite-dialog.tsx,
+// matching-candidates.tsx) all use. This proves the missing leg through the component's real
+// rendered output — no source-text proxy.
+test("900 / CRS-07-07 — a refused answer renders through FieldError inside the answer Field, not only the chrome banner", async () => {
+  await withFetch(routerWithRefusedAnswer, async () => {
+    const { h, body } = await mountAndStart();
+    try {
+      await submitAnswer(h, body, "Rome Public Advisory");
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      const form = findIn(body, (n) => n.tagName === "FORM");
+      assert.ok(form, "the answer form must still render — the refused submit does not advance the park");
+      const fieldError = findIn(form!, (n) => n.getAttribute?.("role") === "alert");
+      assert.ok(fieldError, "900/CRS-07-07 — the refusal must render through a role=alert FieldError inside the answer Field");
+      assert.match(textOf(fieldError!), /Answer was not accepted/,
+        "the FieldError must carry the runtime's own refusal message, not a generic placeholder");
+
+      const alerts = findAllIn(body, (n) => n.getAttribute?.("role") === "alert");
+      assert.equal(alerts.length, 1,
+        "the refusal renders exactly once, through the field — no half-state where the same message ALSO doubles into the chrome banner");
     } finally {
       await h.unmount();
       for (let i = 0; i < 3; i++) await h.settle();
