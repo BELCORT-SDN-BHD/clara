@@ -78,6 +78,32 @@ export async function scopeDefaultDroppedCohortApplied() {
   return r.rows[0].dropped;
 }
 
+/** True iff #993's tightened catalog-key grammar (0242_knowledge_key_grammar.sql) is applied:
+ *  BOTH `clara.knowledge_keys.knowledge_key` and `clara.client_fact_keys.fact_key` carry the
+ *  `ck_..._key_grammar` CHECK enforcing `^[a-z][a-z0-9_]{0,62}$` -- the exact grammar
+ *  `clara.record_work_knowledge_read` already enforces at read-record time (0230:682) -- in place
+ *  of each catalog's former `btrim(...) <> ''` CHECK. Same "wholly present or wholly absent" law
+ *  as the two cohorts above: one migration mints both constraints together, so a chain that
+ *  landed only one of them is a defect to surface, not a frontier to skip past silently. */
+export async function keyGrammarCohortApplied() {
+  const r = await rootQuery(
+    `select
+       exists (select 1 from pg_constraint
+                where conrelid = 'clara.knowledge_keys'::regclass
+                  and conname = 'ck_knowledge_keys_key_grammar') as knowledge_keys_grammar,
+       exists (select 1 from pg_constraint
+                where conrelid = 'clara.client_fact_keys'::regclass
+                  and conname = 'ck_client_fact_keys_key_grammar') as client_fact_keys_grammar`,
+  );
+  const row = r.rows[0];
+  const flags = Object.values(row);
+  const present = flags.filter(Boolean).length;
+  if (present !== 0 && present !== flags.length) {
+    throw new Error(`#993 key-grammar cohort is PARTIAL: ${JSON.stringify(row)}`);
+  }
+  return present === flags.length;
+}
+
 /** One firm, four people at four ranks, two clients. Returns everything a cell addresses. */
 export async function knowledgeWorld(tag) {
   const suffix = `${tag}_${randomUUID().slice(0, 8)}`;

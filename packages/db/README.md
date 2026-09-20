@@ -998,8 +998,13 @@ unshadowed**, because it is the shipped `0192:1333-1335` expression the read its
 `drifted` keeps meaning "something in your scope moved" while `relevant` means "and it was yours".
 
 **What a read-set row may contain is walled by the column, not only by the writer.** `keys` has a
-grammar (`^[a-z][a-z0-9_]{0,62}$` — stricter than the catalog's own `btrim(...) <> ''`, which the
-file's header records for the next key-minting migration) and a 400-key cap; `tiers` is a closed
+grammar (`^[a-z][a-z0-9_]{0,62}$` — originally stricter than each catalog's own `btrim(...) <> ''`,
+which this file's header recorded as a hazard for the next key-minting migration;
+`0242_knowledge_key_grammar.sql` (#993) has since tightened `clara.knowledge_keys.knowledge_key`
+and `clara.client_fact_keys.fact_key` to the SAME grammar under their own
+`ck_..._key_grammar` CHECK constraints, so a key either catalog accepts and a key this recorder can
+record are now the same set by construction — this function's own check stays the source of truth
+and was not touched) and a 400-key cap; `tiers` is a closed
 vocabulary `{core, requested, remainder}` of non-negative integers; `as_of` must be a **finite**
 date (`infinity` is a real date value, and this relation can never delete a row); and
 `payload_digest` records the facts the row carries. The reason is the file's own: the read-set must
