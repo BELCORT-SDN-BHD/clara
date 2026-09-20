@@ -202,6 +202,16 @@
     },
     "seeInbox": "See the full inbox",
     "seeActivity": "See all activity",
+    "legalPrompt": {
+      "heading": "Legal standing",
+      "bodyPrompt": "This firm's agreements are not all accepted at their current versions. During the beta this does not stop Clara working on your clients' books — it will be required before the official launch.",
+      "bodyEnforce": "Clara cannot use a model on any client's books until an owner of this firm accepts the current versions of its agreements.",
+      "agreementLine": "{kind} — version {version}, effective {date}",
+      "agreementLineNoDate": "{kind} — version {version}, no effective date recorded",
+      "action": "Accept on firm settings",
+      "ownerHint": "An owner of this firm needs to accept.",
+      "readFailed": "This firm's legal standing could not be read."
+    },
     "notBuilt": "A firm-wide close status per client is still not built: close readiness is read one client at a time, on that client's Close tab. Statutory deadlines are not recorded yet, so nothing here reminds you of one. And organising work in batches across clients does not exist at this altitude — the portfolio counts Work per client and links into the list that owns it."
   },
   "NeedsYou": {
