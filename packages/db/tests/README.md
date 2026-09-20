@@ -1012,3 +1012,40 @@ row ties to the opening entry (`acquisition_entry_id`), and it is the SAME id `s
 own receipt named — the behavioural proof that `_tf_fa_acquisition_birth`'s
 `if new.is_opening_balance then return null; end if;` guard actually prevented a second birth,
 rather than a `prosrc` string match proving only that the guard's TEXT exists.
+
+## The fixed-asset birth-watermark battery (#972)
+
+`fa-birth-watermark.test.mjs` is frontier-gated on the `fa_birth_watermark$` stem (migration 0247)
+— never on a number — and shares `fa-birth-watermark-fixtures.mjs`. Three `p972.*` cells:
+`p972.law` reads the recut birth body off the CATALOG (the belt's watermark expression present
+exactly once, 0216's watermark-free join gone, `t_je_fa_acquisition_birth` still the deferred
+insert-or-update constraint trigger whose re-firing is the mechanism); `p972.retro` drives the
+defect's own shape at the door seam and then through `clara.fa_register_tie` at `x41.s4`'s three
+as-ofs, classified by `x41.s4`'s own `isRed`/`isExplained`; `p972.refire` proves the narrowed join
+did not close the lane 0216 opened.
+
+`fa-birth-watermark-preintegration-gate.mjs` is the package-wide sweep's escape
+(`CLARA_ALLOW_MISSING_FA_BIRTH_WATERMARK=1`), registered in `packages/db/package.json`'s `"test"`
+chain at its MIGRATION-order position (last, after `legal-enforcement-mode-preintegration-gate.mjs`,
+0234). A FOCUSED run does not preload it and FAILS LOUDLY below 0247; final acceptance is exactly
+that focused shape counting ZERO skips.
+
+**The gate also covers one assertion in a cell older than it.** `x41.b3`
+(`x41-wave-d-a-fa.test.mjs`) gained the post-reversal register re-look #972's AC2 asks for, and
+that one `assert` is wrapped in `faBirthWatermarkEnforced()` — the inline half of the same gate,
+which returns a boolean instead of calling `t.skip()` so the rest of the host cell still runs.
+
+**Its clients are `p972_…`, outside the x41 family, on purpose.** Every fixture here is a
+deliberate pre-enrolment shape, and `x41.s4` holds each EXPLAINED difference among `x41_…` clients
+to an allow-list pinned at exactly one entry. Naming them `x41_…` would force that list to grow;
+the classification law is still the sweep's own, imported rather than restated.
+
+**What 0247 changed about `x41.s4`'s reading of `x41.b3`.** Before 0247 the reversal birthed a
+phantom register row whose cost netted the GL out at the two earlier as-ofs and left one
+UNEXPLAINED difference at the settled one. After it, the register is empty and the client shows one
+EXPLAINED difference at the two earlier as-ofs (pre-enrolment GL the register can never hold) and
+ties at the settled one — the same shape `x41.r3` already builds. `x41.b3` therefore JOINED
+`ALLOWED_RED`'s single existing entry (`/^x41_(r3|b3)_/`) rather than getting one of its own: the
+list is still ONE. A register row born by the pre-0247 body survives on a long-lived rig — the
+`fixed_assets` immutability trigger forbids DELETE — so a rig that ran the defect keeps reading
+those clients as unexplained until it is rebuilt; #972 puts cleaning them out of scope explicitly.
