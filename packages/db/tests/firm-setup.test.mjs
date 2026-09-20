@@ -244,7 +244,10 @@ cell("p648.seed.reconcile a plan already carrying firmInterview_v3 items is reco
   assert.equal(receipt.plan_id, w.plan);
   // RED BEFORE THE DOOR EXISTED: a blind insert raises 23505 on uq_onboarding_plan_items_key.
   assert.equal(receipt.catalogue_total, 12);
-  assert.equal(receipt.seeded, 9, "the seed inserted something other than the nine MISSING catalogue rows");
+  // #891: of the nine catalogue rows still missing (legal_name/ssm/mia are already planted),
+  // mpers_eligibility and tin are UNDETERMINED here -- entity_type and turnover are neither of
+  // them among the planted v3 items -- so neither is seeded yet; seven are.
+  assert.equal(receipt.seeded, 7, "the seed inserted something other than the seven MISSING, determinable catalogue rows");
 
   for (const key of ["legal_name", "ssm", "mia"]) {
     const after = await itemRow(w.plan, key);
@@ -287,7 +290,9 @@ cell("p648.seed.empty a claimed firm's empty plan gains exactly the catalogue, a
 
   const key = opk("fsseed");
   const first = await seed(w.admin, { opKey: key });
-  assert.equal(first.seeded, 12);
+  // #891: entity_type and turnover are both unanswered on this brand-new plan, so
+  // mpers_eligibility and tin are both UNDETERMINED and stay unseeded; the other ten rows seed.
+  assert.equal(first.seeded, 10);
   assert.equal(first.catalogue_total, 12);
 
   const rows = await rootQuery(
@@ -295,7 +300,7 @@ cell("p648.seed.empty a claimed firm's empty plan gains exactly the catalogue, a
        from clara.onboarding_plan_items i
        join clara.firm_setup_keys k on k.item_key = i.item_key
       where i.plan_id = $1 order by k.sort_order`, [w.plan]);
-  assert.equal(rows.rows.length, 12);
+  assert.equal(rows.rows.length, 10);
   for (const r of rows.rows) {
     assert.equal(r.state, "pending", `${r.item_key} was seeded in state ${r.state}`);
     assert.equal(r.required_for_commit, r.cat_required, `${r.item_key} lost its catalogue required flag`);
@@ -693,10 +698,21 @@ cell("p648.capture.ineligible the other nine items write NO knowledge record and
   const ineligible = ["legal_name", "ssm", "entity_type", "address", "mia", "turnover", "tin", "fye", "mpers_eligibility"];
   assert.equal(ineligible.length, 9);
   for (const key of ineligible) {
+    if (key === "tin" || key === "mpers_eligibility") {
+      // #891: both depend on an earlier answer in THIS SAME loop (turnover for tin, entity_type
+      // for mpers_eligibility, both already answered by this point in the array's order); a
+      // reconciliation call after that dependency is answered is what makes either one seedable.
+      await seed(w.admin, { opKey: opk(`fsreseed_${key}`) });
+      env = await readSetup(w.admin);
+    }
     const item = env.items.find((i) => i.item_key === key);
     assert.equal(item.knowledge_key, null, `${key} carries a knowledge_key -- D8/D10 keep it a plan item`);
     const receipt = await answer(w.admin, {
-      plan: w.plan, revision: env.revision_token, itemKey: key, answer: sampleAnswer(item),
+      plan: w.plan, revision: env.revision_token, itemKey: key,
+      // #891: turnover's own sampleAnswer (its first option, "<RM1M") would make TIN exempt --
+      // permanently inapplicable, never seeded -- which would refuse this very loop's own later
+      // attempt to answer it. RM1M-5M keeps TIN applicable so this cell can still exercise it.
+      answer: key === "turnover" ? "RM1M-5M" : sampleAnswer(item),
     });
     assert.equal(receipt.knowledge, null, `${key} captured a knowledge record`);
     env = await readSetup(w.admin);

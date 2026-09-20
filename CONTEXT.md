@@ -325,6 +325,10 @@ _Avoid_: Promising a reversal; presenting a pre-lineage merge as correctable; re
 The resumable list of facts a firm must state about itself, derived from the real required items on the firm's own setup record. Progress is the count of those required items that are settled; an item already answered is never asked again, an optional item may be set aside with a stated reason, and the rest of the workspace stays usable throughout.
 _Avoid_: A progress bar with no required items behind it; an onboarding approval ritual; treating optional education as a prerequisite.
 
+**Firm setup applicability**:
+Whether a firm-setup catalogue item is asked of this firm at all, derived live from an earlier answer already on the same setup record rather than stored as a flag of its own: applicable, inapplicable, or not-yet-determined while the answer it depends on is still unanswered. An inapplicable item is never asked and is excluded from the required count on both sides; an item answered before it became inapplicable keeps that answer and is reported inapplicable rather than deleted.
+_Avoid_: A stored applicability flag that can drift from the answer it depends on; asking or counting an item whose predicate is not yet determined; deleting an answer because its item became inapplicable.
+
 **Firm profile fact**:
 A firm-scope knowledge record about the accounting firm's own circumstances, carrying its source, its actor and its revision history like any other knowledge record. Distinct from a client fact, which belongs to one client, and from a **Firm knowledge default**, which is a cross-client instruction rather than a statement about the firm. The firm's registration identity — its registered name, registration number, tax identifier, registered address and professional-body number — is recorded on the firm's setup record with its author rather than as a knowledge record.
 _Avoid_: Recording a firm fact as a client fact; reading a firm profile fact as authority to post.

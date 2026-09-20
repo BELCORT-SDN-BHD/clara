@@ -743,6 +743,24 @@ lingers in `confirmed_facts` forever. `required_outstanding` is a stated residua
 required catalogue key for a plan-less firm too, and #895's Agent Brief named only the counter and
 the unseeded count, so it is untouched here. Neither door's ACL, floor or signature moved.
 
+**#891 (0257, applicability predicates)** lets the catalogue skip an item that does not apply to
+this firm, without editing any of the twelve shipped `clara.firm_setup_keys` rows. The new,
+ungranted `clara._firm_setup_applicability(p_plan, p_item_key)` mirrors exactly two predicates from
+the pre-admission interview — `mpers_eligibility` applies only where `entity_type = 'sdn_bhd'`;
+`tin` applies unless `turnover = '<RM1M'` — reading the SAME plan's own answer to that dependency,
+live, on every call: `'applicable'`, `'inapplicable'`, or `'undetermined'` while the dependency is
+still unanswered. `seed_firm_setup_plan`'s reconciliation now inserts a catalogue row only while it
+reads `'applicable'`; an inapplicable or undetermined one is simply never seeded, and a LATER
+reconciliation picks it up once its dependency is answered. `get_firm_setup` carries a live
+`applicability` field on every item and its `counter.required_total` / `required_answered` now also
+count `mpers_eligibility` or `tin` specifically, but only while each is BOTH actually seeded on this
+plan and reads `'applicable'` right now — excluding either from both sides the moment it is
+inapplicable or was never seeded, even after it was once answered (the answer itself is never
+touched). This stays a `get_firm_setup`-only concept: `clara.commit_firm_setup` still reads the
+catalogue's own (untouched, still `false` on both rows) `required_for_commit` flag directly, so
+neither conditional item blocks a commit — a deliberate, named residual for a follow-up ticket if
+the owner later wants the counter's honesty to become a real gate.
+
 At frontier 0222 the accrual lane adds four public names to that boundary:
 `create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on
 `clara_authenticated`, and `create_accrual_adjustment_for` on `clara_runtime` alone. They are

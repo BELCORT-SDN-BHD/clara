@@ -154,10 +154,12 @@ cell("p895.seed.noop a second seed that adds zero items leaves revision/token/hi
   assert.equal(before.revision_n, 1);
   assert.equal(await revisionCount(w.plan), 1);
 
-  // FIRST SEED: the plan is empty (claim-path shape), so this inserts all twelve catalogue rows —
-  // a real reconciliation, and it still bumps token, revision_n and history exactly as before.
+  // FIRST SEED: the plan is empty (claim-path shape). #891: entity_type/turnover are both
+  // unanswered, so mpers_eligibility/tin are both UNDETERMINED and stay unseeded; this inserts the
+  // other ten catalogue rows -- still a real reconciliation, and it still bumps token, revision_n
+  // and history exactly as before.
   const first = await seed(w.admin, opk("fspseed1"));
-  assert.equal(first.seeded, 12);
+  assert.equal(first.seeded, 10);
   const afterFirst = await planRow(w.plan);
   assert.equal(afterFirst.revision_n, 2, "a real reconciliation must still advance the revision");
   assert.notEqual(afterFirst.revision_token, before.revision_token);
@@ -165,10 +167,11 @@ cell("p895.seed.noop a second seed that adds zero items leaves revision/token/hi
   assert.equal(first.revision_token, afterFirst.revision_token);
   assert.equal(first.revision_n, 2);
 
-  // SECOND SEED, a DIFFERENT op_key (not a replay): every catalogue row is already on the plan,
-  // so this reconciliation adds nothing.
+  // SECOND SEED, a DIFFERENT op_key (not a replay): every DETERMINABLE catalogue row is already on
+  // the plan (#891: mpers_eligibility/tin stay UNDETERMINED -- entity_type/turnover are still
+  // unanswered -- so neither is seedable yet either), so this reconciliation adds nothing.
   const second = await seed(w.admin, opk("fspseed2"));
-  assert.equal(second.seeded, 0, "the plan was already fully seeded");
+  assert.equal(second.seeded, 0, "no further item is seedable while entity_type/turnover remain unanswered");
   const afterSecond = await planRow(w.plan);
   assert.equal(afterSecond.revision_n, 2, "a no-op reconciliation must not advance the revision");
   assert.equal(afterSecond.revision_token, afterFirst.revision_token,
@@ -184,7 +187,7 @@ cell("p895.seed.noop a second seed that adds zero items leaves revision/token/hi
   assert.equal(await auditCount(w.firm, "seed_firm_setup_plan"), 2);
   const seededEvents = await events(w.firm, "firm_setup.seeded");
   assert.equal(seededEvents.length, 2);
-  assert.equal(seededEvents[0].seeded, 12);
+  assert.equal(seededEvents[0].seeded, 10);
   assert.equal(seededEvents[1].seeded, 0);
   assert.equal(seededEvents[0].revision_n, 2);
   assert.equal(seededEvents[1].revision_n, 2, "the no-op event still names the CURRENT (unmoved) revision");
