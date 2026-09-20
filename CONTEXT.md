@@ -588,8 +588,8 @@ A value Clara read out of a document and persisted with its exact source: the do
 _Avoid_: Client Knowledge; a duplicated copy of an extraction value living in Knowledge; a value shown without its source version and region; a fact that failed or skipped its arithmetic check presented as validated.
 
 **Field path**:
-The canonical name of one value inside an extraction — dot-separated segments under a registered namespace, such as `invoice.total`, `myinvois.supplier_tin` or `pages.1.lines.0`. It is validated at the one write boundary that owns it, so a region can always be traced back to what it claims to be.
-_Avoid_: A free-text label; a display name; a path invented by a surface rather than written by a producer.
+The canonical name of one value inside an extraction — dot-separated segments under a registered namespace, such as `invoice.total`, `myinvois.supplier_tin` or `pages.1.lines.0`. It is validated by the one grammar function (`clara._assert_field_path`) both at the persist boundary that owns writing it and, since #857, by a table CHECK on `clara.document_regions` itself, so a region can always be traced back to what it claims to be even when a writer bypasses the persist door.
+_Avoid_: A free-text label; a display name; a path invented by a surface rather than written by a producer; assuming the grammar is enforced only where a producer writes through the persist door.
 
 **Arithmetic validation**:
 A named check run over persisted typed facts — the invoice totals identity, a statement's balance chain, its printed totals — recorded with its outcome and its terms. `unmeasured` means the terms the check needs were never persisted, and is deliberately not a pass.
