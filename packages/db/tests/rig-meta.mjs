@@ -3515,6 +3515,20 @@ export const CHECKOUT_GATE_C3_TABLES = [
 // Slice-1 placeholder). Everything else in the schema MUST be RLS-enabled AND forced.
 export const RLS_EXEMPT = new Set(["schema_migrations", "slice1_smoke"]);
 
+// #857 [0290, the document_regions field_path CHECK] — NO cohort is owed here, and that is a
+// measured disposition rather than an omission, the same one #984's 0239 block above documents.
+// 0290 mints exactly one catalog name, `clara._field_path_conforms`, and revokes EXECUTE from
+// PUBLIC on it with no further GRANT: clara.document_regions carries exactly ONE role with
+// INSERT (clara_fn_owner, measured in 0290's own prestate), and an object's owner may always
+// execute a function it owns regardless of ACL, so the sibling needs no grant for the CHECK it
+// backs to fire on every real writer. An internal granted to NOBODY is expected-false for every
+// role in the live sweep rather than listed here — the same disposition 0234's
+// `_legal_enforcement_mode`, 0239's `_admit_opening_work`, 0186's `_admission_capacity_state` and
+// 0270's `_firm_document_limit_ceiling` carry. 0290 mints no relation and recuts no existing
+// function body (clara._assert_field_path is called, never touched), so there is neither a
+// TABLE cohort nor a body-drift concern to declare either.
+// #857 END
+
 /** Functions `role` can EXECUTE outside pg_catalog + clara (should be none). */
 async function reachableOutsideClara(role) {
   const r = await rootQuery(

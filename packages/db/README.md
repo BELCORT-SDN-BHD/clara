@@ -2969,3 +2969,50 @@ re-creation of 0244's own trigger at 0244's spelling, so a database carrying the
 comes back), `create or replace function`, and an idempotent `comment on`. The prestate reports
 FIRST or REDO, and its pin for the ONE body this file recuts is two-valued by construction —
 0244's pre-image or 0272's own post-image, both measured.
+
+## 0290 — a table CHECK proves the field_path grammar at every writer, including a raw insert (#857)
+
+`0290_document_regions_field_path_check.sql` closes AC2 of #857, the half wave-1 (PR #1025,
+`ddb5a125`) explicitly left open. AC1 shipped there: `scripts/check-document-region-field-paths.mjs`
+is a repository LINT, scanning `packages/{db,runtime}/tests` for a `field_path` literal outside
+0191's grammar and refusing at commit time. A lint cannot see a value assembled at runtime, and it
+runs only when someone runs it; `clara._assert_field_path` (0191) is the runtime grammar, but it
+was reachable from exactly ONE writer, `clara.persist_document_extraction`'s region loop, so any
+RAW `insert into clara.document_regions` — which is most of the 71 the ticket's own triage
+counted — never ran it at all.
+
+0290 mints `clara._field_path_conforms(text) returns boolean`, an IMMUTABLE boolean sibling that
+does nothing but `perform clara._assert_field_path(p_path); return true;`, and adds
+`ck_document_regions_field_path_grammar check (clara._field_path_conforms(field_path))` to the
+table. Because a CHECK's boolean expression may call any function, and a function that RAISES
+instead of returning propagates its exception unchanged, an insert that fails this CHECK is
+refused with `_assert_field_path`'s own typed `(CLR10, detail.reason)` — never Postgres's generic
+`23514 check_violation` an inline regex CHECK would have produced. The sibling is deliberately
+UNGRANTED to every application role: `clara.document_regions` carries exactly one role with
+INSERT, `clara_fn_owner` (every application writer reaches the table through a `SECURITY DEFINER`
+function it owns), and an object's owner may always execute a function it owns regardless of ACL,
+so the CHECK fires on every real writer with no GRANT at all — the same disposition #984's 0239
+(`_admit_opening_work`) and #960's 0270 (`_firm_document_limit_ceiling`) carry, so no
+`packages/db/tests/rig-meta.mjs` cohort is owed (see the "#857 [0290]" comment there).
+
+**The two plural literals are untouched, by construction.** `opening_tb.line` and `prior_gl.line`
+(0201's own two partial-unique-index exclusions) are ordinary registered-namespace paths as far as
+the grammar is concerned. A CHECK is evaluated once PER ROW and carries no uniqueness concept, so
+a forty-row trial balance at ONE `(extraction_id, field_path)` is forty rows each independently
+passing the same per-row test a single invoice fact passes — proved live, with a REAL forty-row
+insert, in `packages/db/tests/document-regions-field-path-check.test.mjs`.
+
+**Populated rows, not an empty table.** `clara.document_regions` started EMPTY on a freshly
+migrated+seeded rig — seeding does not populate it — so the ADD CONSTRAINT would have validated
+against nothing. A preparatory script called `clara.persist_document_extraction` three times
+(THROUGH the real writer door, never a raw fixture insert) before this migration ran, leaving 14
+rows across 10 distinct `field_path` values on the lane database, including five `opening_tb.line`
+rows from one real trial balance; the migration's own prestate refuses to proceed against a
+zero-row table. `packages/db/deploy/0290-field-path-check-census.sql` is the read-only preflight a
+release session runs on hosted first — the SAME predicate the prestate itself re-checks, so
+"census says clean" and "the migration will apply" can never disagree.
+
+**Redo-safe by construction (#957).** S1 is `create or replace function`; S2 is an unconditional
+`drop constraint if exists` before `add constraint` — never a guard-by-name, which would skip
+re-adding a body an edit changed. The prestate accepts two starting states, wholly absent (first
+apply) or wholly present (redo), and refuses only a half state.
