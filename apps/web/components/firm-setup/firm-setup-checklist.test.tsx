@@ -658,6 +658,58 @@ test("fs.web.12 `_reserve_op`'s bare CLR10 is reported as ALREADY RECORDED, not 
   });
 });
 
+test("fs.web.13 an item never asked (inapplicable or undetermined) is hidden; one answered before it became inapplicable stays visible, marked, with no form", async () => {
+  const WITH_APPLICABILITY = {
+    ...ENVELOPE,
+    items: [
+      ...ENVELOPE.items,
+      // #891 — never seeded, and never will be while the predicate reads this way: hidden.
+      item({
+        item_key: "mpers_eligibility", sort_order: 90, group_key: "accounting", kind: "capture",
+        question: "Is the firm eligible to apply MPERS?", required: false, state: "unseeded",
+        applicability: "inapplicable",
+      }),
+      // #891 — the dependency it reads is itself unanswered: also hidden, for a different reason.
+      item({
+        item_key: "tin", sort_order: 70, group_key: "tax", kind: "capture",
+        question: "What is the firm's MyInvois TIN?", required: false, state: "unseeded",
+        applicability: "undetermined",
+      }),
+      // #891 — answered while applicable, then its dependency changed: the answer survives, and
+      // this surface marks it inapplicable rather than hiding it or offering a form to redo it.
+      item({
+        item_key: "framework", sort_order: 100, group_key: "accounting", kind: "must_ask",
+        question: "On which reporting framework are the firm's financial statements prepared?",
+        required: true, state: "answered", answer: { framework_label: "MFRS" }, answer_field: "framework_label",
+        answered_by: "u1", answered_by_name: "Aisyah Rahman", answered_at: "2026-09-01T00:00:00Z",
+        applicability: "inapplicable",
+      }),
+    ],
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(WITH_APPLICABILITY) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+
+      assert.equal(byTestId(h, "firm-setup-item-mpers_eligibility"), null,
+        "an inapplicable, never-answered item was rendered");
+      assert.equal(byTestId(h, "firm-setup-item-tin"), null,
+        "an undetermined item was rendered before its dependency is even answered");
+
+      const row = byTestId(h, "firm-setup-item-framework");
+      assert.ok(row, "an item answered before it became inapplicable was hidden -- its answer would be lost from view");
+      assert.ok(byTestId(h, "firm-setup-inapplicable-framework"), "the inapplicable badge did not render");
+      assert.equal(textOf(byTestId(h, "firm-setup-inapplicable-framework") as never), "Not applicable");
+      assert.equal(textOf(byTestId(h, "firm-setup-answer-framework") as never), "MFRS",
+        "the earlier answer must still be shown");
+      assert.equal(byTestId(h, "firm-setup-change-framework-action"), null,
+        "an inapplicable item still offered a form to change its answer");
+      assert.equal(byTestId(h, "firm-setup-answer-framework-action"), null);
+      assert.equal(byTestId(h, "firm-setup-skip-framework"), null);
+    } finally { await h.unmount(); }
+  });
+});
+
 // ---------------------------------------------------------------------------------------------
 // Base UI portals dialog content onto `document.body`, not into the mount container — the house's
 // first dialog law (`onboarding-checklist.test.tsx`'s own `dialogNode`).

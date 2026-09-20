@@ -18,6 +18,12 @@ export type FirmSetupAnswerShape = "text" | "long_text" | "choice" | "month" | "
  *  exactly what the reconciling seed fixes. It is a real state of this surface, never a null. */
 export type FirmSetupItemState = "unseeded" | "pending" | "answered" | "resolved" | "deferred";
 
+/** #891 — whether this item is asked of THIS firm at all, derived live from an earlier answer on
+ *  the same plan (never stored): `applicable`, `inapplicable`, or `undetermined` while the item it
+ *  depends on is itself unanswered. Ten of the twelve catalogue rows read `applicable` always;
+ *  `mpers_eligibility` (entity_type) and `tin` (turnover) are the only two with a real predicate. */
+export type FirmSetupApplicability = "applicable" | "inapplicable" | "undetermined";
+
 export type FirmSetupPlanState = "open" | "committed" | "cancelled";
 
 /** The catalogue row joined to this firm's plan item. */
@@ -51,6 +57,9 @@ export type FirmSetupItem = {
   knowledge_key: string | null;
   /** The knowledge record this item produced, once it has been answered. */
   knowledge_record_id: string | null;
+  /** #891 — see `FirmSetupApplicability`. Absent on an older fixture reads as `undefined`, which
+   *  `isHiddenByApplicability`/`isNowInapplicable` below both treat as "applicable". */
+  applicability?: FirmSetupApplicability;
 };
 
 /** One confirmed firm profile fact: a `clara.knowledge_records` row in the SAME canonical register
@@ -141,6 +150,23 @@ export function firmSetupGroups(env: FirmSetupEnvelope): { key: string; items: F
   return order.map((key) => ({ key, items: byGroup.get(key) ?? [] }));
 }
 
+/**
+ * #891 — an item this surface must never render a question or an answer form for, because nothing
+ * has ever been recorded against it and its predicate says it either cannot yet be determined or
+ * already reads NO. An item that WAS answered before it became inapplicable is never hidden — its
+ * answer survives, and it renders through `isNowInapplicable` below instead (AC4).
+ */
+export function isHiddenByApplicability(item: FirmSetupItem): boolean {
+  if (item.state !== "unseeded") return false;
+  return item.applicability === "undetermined" || item.applicability === "inapplicable";
+}
+
+/** #891 — an item that DOES carry a plan item (seeded, possibly answered) but whose dependency now
+ *  reads it inapplicable. Its own `state`/`answer` are untouched; only this reads differently. */
+export function isNowInapplicable(item: FirmSetupItem): boolean {
+  return item.state !== "unseeded" && item.applicability === "inapplicable";
+}
+
 /** An item still waiting for a decision. `unseeded` is not answerable until the seed has run. */
 export function isPending(item: FirmSetupItem): boolean {
   return item.state === "pending";
@@ -166,6 +192,10 @@ export function isSettled(item: FirmSetupItem): boolean {
  */
 export function isAnswerable(item: FirmSetupItem): boolean {
   if (item.state === "unseeded") return false;
+  // #891 — an item this firm has answered before but that now reads inapplicable keeps its answer
+  // on screen, with no form: correcting it belongs to whatever made it applicable again (answering
+  // the dependency the other way), never to this item's own control.
+  if (isNowInapplicable(item)) return false;
   if (item.state === "pending") return true;
   return item.knowledge_record_id === null;
 }

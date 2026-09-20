@@ -81,6 +81,8 @@ import {
   correctsOnRegister,
   firmSetupGroups,
   isAnswerable,
+  isHiddenByApplicability,
+  isNowInapplicable,
   isPending,
   type FirmSetupEnvelope,
   type FirmSetupItem,
@@ -531,19 +533,33 @@ export function FirmSetupChecklist() {
 
               <ul className="flex flex-col gap-3">
                 {group.items.map((item) => {
+                  // #891 — an item that has never been asked and never will be (its predicate
+                  // reads inapplicable, or cannot yet be determined) is not rendered at all: it is
+                  // not asked, so there is nothing here for a practitioner to act on or read. An
+                  // item this firm DID answer before it became inapplicable is never hidden this
+                  // way (isHiddenByApplicability requires state === "unseeded") and falls through
+                  // to the normal row below, marked `firm-setup-inapplicable-*` instead.
+                  if (isHiddenByApplicability(item)) return null;
                   const itemOpen = open?.kind === "item" && open.itemKey === item.item_key;
                   const settled = answerText(item);
+                  const inapplicable = isNowInapplicable(item);
                   return (
                     <li key={item.item_key} className="flex flex-col gap-2" data-testid={`firm-setup-item-${item.item_key}`}>
                       <div className="flex flex-wrap items-baseline justify-between gap-2">
                         <span className="text-sm">{item.question}</span>
                         <span className="flex items-center gap-1.5">
-                          {item.required ? (
+                          {inapplicable ? (
+                            <Badge variant="outline" data-testid={`firm-setup-inapplicable-${item.item_key}`}>
+                              {t("item.notApplicable")}
+                            </Badge>
+                          ) : item.required ? (
                             <Badge variant="outline">{t("item.required")}</Badge>
                           ) : (
                             <Badge variant="outline">{t("item.optional")}</Badge>
                           )}
-                          {/* The state word, never a colour alone (appendix D row 7). */}
+                          {/* The state word, never a colour alone (appendix D row 7). Kept even
+                              when inapplicable: the answer below is still what was recorded, and
+                              the state badge is what says so. */}
                           <Badge
                             variant={item.state === "pending" || item.state === "unseeded" ? "outline" : "secondary"}
                             data-testid={`firm-setup-state-${item.item_key}`}

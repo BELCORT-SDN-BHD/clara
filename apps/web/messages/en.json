@@ -581,6 +581,7 @@
       "change": "Change this answer",
       "answerNow": "Answer this now",
       "correctOnRegister": "This fact is on the Knowledge register. Correct or withdraw it under \u201cFacts confirmed in setup\u201d below.",
+      "notApplicable": "Not applicable",
       "skip": "Not now",
       "skippedBecause": "Skipped — {reason}",
       "recordedBy": "Recorded by {who}",
