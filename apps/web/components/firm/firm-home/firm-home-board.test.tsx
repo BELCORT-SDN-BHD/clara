@@ -286,7 +286,7 @@ test("Firm Home (ticket 659, D18.f): recent activity renders the DB's own senten
       // browser. The door files them under their own kinds now, so the sentence would be a
       // false statement on the surface — the honest-note discipline cuts both ways.
       assert.doesNotMatch(h.text(), /wrong kind by the activity door/,
-        "the kind-ladder residual was fixed in the door (#861); its disclosure must not outlive it");
+        "the kind-ladder residual was fixed in the door (ticket 861); its disclosure must not outlive it");
     } finally { await h.unmount(); }
   });
   await withMockedEnv(

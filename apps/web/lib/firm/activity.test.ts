@@ -179,8 +179,9 @@ test("ACTIVITY_KINDS is the door's closed roster, in the door's own order", () =
 test("every activity kind has a non-empty label, so no chip and no row badge can render a raw key", () => {
   const labels = (messages as { Activity: { kindLabels: Record<string, string> } }).Activity.kindLabels;
   for (const kind of ACTIVITY_KINDS) {
-    assert.equal(typeof labels[kind], "string", `Activity.kindLabels.${kind} is missing`);
-    assert.ok(labels[kind].trim().length > 0, `Activity.kindLabels.${kind} is blank`);
+    const label = labels[kind];
+    assert.equal(typeof label, "string", `Activity.kindLabels.${kind} is missing`);
+    assert.ok(label!.trim().length > 0, `Activity.kindLabels.${kind} is blank`);
   }
   // …and nothing extra, so a retired kind cannot leave a label behind that suggests a filter the
   // door would refuse.
