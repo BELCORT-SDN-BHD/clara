@@ -1483,6 +1483,14 @@ only after verifying the target's custody, roles and workflow compatibility.
 `dr:verify` uses distinct `CLARA_DR_SOURCE_URL` and `CLARA_DR_TARGET_URL`, with a principal
 able to read all rows; `CLARA_DR_STRICT=1` makes its canary/AP checks mandatory, and
 `CLARA_DR_VERIFY_OUT` writes evidence. Inspect PASS/FAIL/SKIP outcomes, not just the command's exit.
+The §4.6 relation-grant matrix (tables, views, matviews, partitioned tables AND sequences) compares
+EFFECTIVE grants: a `NULL` `pg_class.relacl` is read as `coalesce(relacl, acldefault(...))`, so it
+reads identically to an explicit owner-only ACL that means the same thing. This is necessary
+because `pg_dump` never emits anything for an ACL that equals the object's default, so the FIRST
+grant/revoke ever run against a relation — even a semantic no-op like `revoke all ... from public`
+on a table PUBLIC never held anything on — permanently materialises the owner's implicit privileges
+on one side while a restored copy's ACL comes back `NULL` again (first seen with 0235's
+`clara.document_binding_claims`, PR #1029).
 
 Database dumps do not include Storage bytes or managed Auth configuration.
 The [backup service](../backup/README.md) adds encrypted off-site document copies and selected Auth
