@@ -303,9 +303,16 @@ test("field.map: anything it cannot name answers null rather than focusing a nea
 // purpose.* — the four surfaces DECISIONS §1.7 gives this ticket
 // ===========================================================================================
 
-const PURPOSES = ["journal_entry", "periodic_stock_adjustment", "payroll_obligation"] as const;
+// #984 · RE-DERIVED ONCE, DELIBERATELY. This list was the three values 0194 admitted; migration
+// 0239 widened `clara.accounting_work.purpose` to a FOURTH, `opening_balance`, so that approving an
+// opening seed or an opening correction mints a real Work and a real operation receipt for the
+// batch (the owner's ruling of 2026-09-20 on #984). The cell was not deleted and not skipped: the
+// claim-lane arms below are untouched, and the point of the census is unchanged — every surface
+// must name the SAME set as the column, whatever that set is.
+const PURPOSES = ["journal_entry", "periodic_stock_adjustment", "payroll_obligation",
+  "opening_balance"] as const;
 
-test("purpose.four: all four surfaces name the SAME three values the column admits", () => {
+test("purpose.four: all four surfaces name the SAME four values the column admits", () => {
   // (1) `lib/work/purpose-label.ts`'s SUFFIX, through its own predicate.
   for (const p of PURPOSES) assert.equal(isKnownWorkPurpose(p), true, `${p} has a label`);
   assert.equal(isKnownWorkPurpose("staff_expense_claim"), false,
