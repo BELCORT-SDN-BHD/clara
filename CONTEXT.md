@@ -329,6 +329,10 @@ _Avoid_: A progress bar with no required items behind it; an onboarding approval
 Whether a firm-setup catalogue item is asked of this firm at all, derived live from an earlier answer already on the same setup record rather than stored as a flag of its own: applicable, inapplicable, or not-yet-determined while the answer it depends on is still unanswered. An inapplicable item is never asked and is excluded from the required count on both sides; an item answered before it became inapplicable keeps that answer and is reported inapplicable rather than deleted.
 _Avoid_: A stored applicability flag that can drift from the answer it depends on; asking or counting an item whose predicate is not yet determined; deleting an answer because its item became inapplicable.
 
+**Firm setup catalogue note**:
+The one accountant-readable sentence a firm-setup catalogue item shows under its question — what the answer is used for and Clara's stated boundary, never an accounting conclusion. It is what the checklist renders; the catalogue's separate engineer note (file names, line numbers, provenance) is never shown to a user. A catalogue item can also be retired, which removes it from every firm's checklist, its counters and its required set without editing or deleting the append-only row itself.
+_Avoid_: The engineer's provenance note as something a firm admin should ever see; treating a retired item as deleted, or as still asked of a firm that has not yet answered it.
+
 **Firm profile fact**:
 A firm-scope knowledge record about the accounting firm's own circumstances, carrying its source, its actor and its revision history like any other knowledge record. Distinct from a client fact, which belongs to one client, and from a **Firm knowledge default**, which is a cross-client instruction rather than a statement about the firm. The firm's registration identity — its registered name, registration number, tax identifier, registered address and professional-body number — is recorded on the firm's setup record with its author rather than as a knowledge record.
 _Avoid_: Recording a firm fact as a client fact; reading a firm profile fact as authority to post.

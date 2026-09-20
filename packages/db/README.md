@@ -761,6 +761,30 @@ catalogue's own (untouched, still `false` on both rows) `required_for_commit` fl
 neither conditional item blocks a commit — a deliberate, named residual for a follow-up ticket if
 the owner later wants the counter's honesty to become a real gate.
 
+**#934 (0258, user-facing catalogue notes and a retire column)** replaces the twelve engineer
+provenance notes (file names, line numbers) a firm admin used to see under each question with one
+owner-approved, accountant-readable sentence. `clara.firm_setup_keys` gains two nullable columns —
+`user_note` (the accountant sentence) and `retired_at` — added by plain `alter table`, never a
+`create table`; the twelve shipped rows' PRE-EXISTING columns (`note`, `question`, everything else)
+are untouched, pinned by a comprehensive row hash in the migration's own prestate and re-measured
+byte-identical at its tail. Populating `user_note` for twelve ALREADY-EXISTING rows needs one
+backfill `update`, run with the table's append-only trigger (0218 SS A) deliberately disabled for
+that one statement and re-enabled immediately, inside the runner's own per-migration transaction --
+the `0176_counterparty_alias_kind_scope.sql` SS 3 house shape, applied here for the first time to
+`firm_setup_keys`. `clara.get_firm_setup` is recut (`create or replace function`, pre-image pinned)
+to PREFER `user_note` over `note` (`coalesce(k.user_note, k.note)` -- a precedence rule, not a hard
+replacement, so a future catalogue row with no accountant sentence yet still renders its engineer
+note rather than nothing) and to OMIT a retired row from every surface it computes over the
+catalogue: `items[]`, `catalogue_total`, `required_outstanding`, and both sides of `counter`. This
+file retires nothing -- every `retired_at` it ever writes is null -- so "omit retired rows" is
+proved BEHAVIOURALLY by `firm-setup-user-notes.test.mjs` against a synthetic row planted and removed
+by the same disable-trigger idiom, never against one of the twelve. `clara.seed_firm_setup_plan` is
+untouched (pinned pre-image, re-measured byte-identical at the tail): whether a retired row should
+still be reconciled into a plan is a NAMED RESIDUAL for whichever later ticket first actually
+retires something, exactly the shape #891 (0257) left for `commit_firm_setup`'s own gate. **#935**
+(the sibling education-tips ticket) depends on this file's retire column and lands after it in the
+same lane.
+
 At frontier 0222 the accrual lane adds four public names to that boundary:
 `create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on
 `clara_authenticated`, and `create_accrual_adjustment_for` on `clara_runtime` alone. They are
