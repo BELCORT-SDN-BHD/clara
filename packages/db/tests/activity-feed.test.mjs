@@ -148,6 +148,47 @@ async function assertSuccessorLinkCohortPresent(t) {
   return true;
 }
 
+// #861 — the kind ladder's five new rungs live in THEIR OWN migration (0264), a FIFTH frontier
+// past 0181's/0183's/0202's/0262's above. Another body-only `create or replace` over both doors'
+// unchanged signatures, so again only the stem check is owed.
+const KIND_LADDER_STEM = "activity_kind_ladder$";
+let _kindLadderReady = null;
+async function kindLadderReady() {
+  if (_kindLadderReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [KIND_LADDER_STEM]);
+      _kindLadderReady = r.rows[0].n > 0;
+    } catch {
+      _kindLadderReady = false;
+    }
+  }
+  return _kindLadderReady;
+}
+
+/** `if (await gateKindLadder(t)) return;` — the quiet per-cell frontier gate. */
+async function gateKindLadder(t) {
+  if (await kindLadderReady()) return false;
+  t.skip(`#861 activity-kind-ladder lane absent (no ${KIND_LADDER_STEM} migration applied)`);
+  return true;
+}
+
+/** The pre-integration discriminator for the same frontier — the double-gate idiom above, once
+ *  per lane: a FOCUSED run against a chain without 0264 is a real failure, and only the
+ *  package-wide sweep's preloaded activity-kind-ladder-preintegration-gate.mjs turns it into a
+ *  skip. */
+async function assertKindLadderCohortPresent(t) {
+  if (await kindLadderReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_ACTIVITY_KIND_LADDER === "1") {
+    t.skip("#861 activity-kind-ladder lane absent (pre-integration sweep)");
+    return true;
+  }
+  assert.fail(
+    "#861: the activity-kind-ladder lane is absent. Apply 0264_activity_kind_ladder.sql, or "
+    + "set CLARA_ALLOW_MISSING_ACTIVITY_KIND_LADDER=1 for the package-wide pre-integration sweep.");
+  return true;
+}
+
 /** The door's regprocedure address at whatever arity this database carries — every catalog probe
  *  below reads the body through this rather than through a literal signature, so the arity change
  *  0202 makes is stated in ONE place. */
@@ -268,6 +309,31 @@ async function mkSweepEvent({ firm, draftedCount, postedCount = 0, refusedCount 
     `select id::text as id, created_at from clara.domain_events where firm_id = $1 and seq = $2`,
     [firm, seq])).rows[0];
   return { runId: run, eventId: ev.id, occurredAt: ev.created_at.toISOString() };
+}
+
+/** #861 — ONE domain event of a named `clara.event_types` name, appended as root through
+ *  `clara._append_event` (the SAME direct-event idiom `mkSweepEvent` above uses, and the same one
+ *  every other direct-event fixture in this rig uses: root bypasses that helper's ungranted ACL).
+ *
+ *  DIRECT rather than through each family's own product door, deliberately and with its limit
+ *  stated: the ladder under test reads `event_type` and NOTHING else — not the payload, not the
+ *  actor, not the object columns — so the row a real `clara.add_counterparty` would write and the
+ *  row this writes are indistinguishable to it. Where the world ALREADY carries a real row of the
+ *  family (member.added, client.created and firm.created are all written by `buildWorld` through
+ *  clara.add_member / clara.create_client / clara.create_firm), the cells below read THAT row and
+ *  this helper is not used at all.
+ *
+ *  `client` is passed only for a client-scoped type: clara._tf_validate_domain_event refuses a
+ *  firm-level type that carries a client_id at all. Returns the event's own id and time, read back
+ *  by (firm_id, seq) exactly as `mkSweepEvent` does — never assumed. */
+async function mkEvent({ firm, type, client = null, actor = null, payload = {} }) {
+  const seq = (await rootQuery(
+    `select clara._append_event($1, $2, $3, $4, null, null, null, null, null, $5::jsonb) as seq`,
+    [firm, type, client, actor, JSON.stringify(payload)])).rows[0].seq;
+  const ev = (await rootQuery(
+    `select id::text as id, created_at from clara.domain_events where firm_id = $1 and seq = $2`,
+    [firm, seq])).rows[0];
+  return { eventId: ev.id, occurredAt: ev.created_at.toISOString() };
 }
 
 // ===========================================================================================
@@ -1778,4 +1844,43 @@ test("af.32 an ORDINARY cancellation (no successor) carries a null successor_wor
   const detail = await getActivityEvent(BOB(), "event", cancelledRow.id);
   assert.ok(Object.prototype.hasOwnProperty.call(detail, "successor_work_id"));
   assert.equal(detail.successor_work_id, null, "af.32 …and the SAME null in the detail door");
+});
+
+// ===========================================================================================
+// 9 · #861 — THE KIND LADDER'S FIVE NEW RUNGS (migration 0264).
+//
+// The owner's ruling of 2026-09-18 on this ticket fixes the vocabulary: `people` (member.*,
+// invite.*), `assets` (asset.*), `counterparties` (counterparty.*), `clients` (client.*,
+// knowledge.*) and `firm` (firm.*), with every unrecognised prefix still landing on the door's
+// STATED DEFAULT, `documents`. Before 0264 all five families fell through that default, where the
+// filter that names them could never find them.
+//
+// THE EXPECTED VALUES BELOW COME FROM THAT RULING, never from re-reading the SQL: each cell names
+// the prefix and the kind the owner assigned it, and the table in af.39 is a transcription of the
+// ruling's own five lines plus the default the two migrations before it already documented.
+// ===========================================================================================
+
+test("af.33 a membership event and an invitation event land on kind=people in BOTH doors, and the people filter reaches them", async (t) => {
+  if (await assertKindLadderCohortPresent(t)) return;
+
+  // The membership row is REAL: `buildWorld` added bob and carol to firm A through
+  // clara.add_member, so the estate's own product path wrote this event before the cell ran.
+  const invite = await mkEvent({ firm: FIRM_A(), type: "invite.issued", actor: ALICE() });
+
+  const page = rowsOf(await listActivity(BOB(), { kinds: ["people"], limit: 100 }));
+  assert.ok(page.length > 0, "af.33 the people filter is accepted by the door and returns rows");
+  assert.ok(page.every((r) => r.kind === "people"),
+    "af.33 the people filter returns ONLY people rows — the roster entry narrows, it does not widen");
+
+  const memberRow = page.find((r) => r.event_type === "member.added");
+  assert.ok(memberRow, "af.33 a real member.added row is reachable under kinds=['people']");
+  const inviteRow = page.find((r) => r.id === invite.eventId);
+  assert.ok(inviteRow, "af.33 an invite.issued row is reachable under the SAME kind");
+
+  for (const row of [memberRow, inviteRow]) {
+    assert.equal(row.kind, "people", `af.33 list_activity files ${row.event_type} under people`);
+    const detail = await getActivityEvent(BOB(), "event", row.id);
+    assert.equal(detail.kind, "people",
+      `af.33 get_activity_event files ${row.event_type} under the SAME kind`);
+  }
 });
