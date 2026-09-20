@@ -36,8 +36,8 @@ import {
   roleQuery, rootQuery, setCapacity, supportCase, supportQueue, undecidedRegistration, insertUser,
   forceOpenedAt, forceStatus, intentState, intentsOf, openIntent, openedCheckout, paymentsFor,
   stampSession, EVENT, deliver, gateApplicantNames, resolveApplicantNames, stripeSessionId,
-  SUPPORT_EVENT, SUPPORT_EVENT_KIND, assertSupportTimelineCohortPresent, dbNow, firmActivity,
-  gateSupportTimeline, operatorFirmViewer, supportTimelineLaneReady,
+  SUPPORT_EVENT, SUPPORT_EVENT_KIND, assertSupportTimelineCohortPresent, dbNow, eventCountsSince,
+  firmActivity, gateSupportTimeline, operatorFirmViewer, supportTimelineLaneReady,
 } from "./operator-support-fixtures.mjs";
 
 const QUEUE_SIG = "clara.list_operator_support_queue(boolean)";
@@ -52,7 +52,7 @@ let operator = null;
 let executed = 0;
 const EXPECTED_CELLS = 19;
 /** #843 — the two timeline cells, counted separately because they ride their own frontier. */
-const EXPECTED_TIMELINE_CELLS = 1;
+const EXPECTED_TIMELINE_CELLS = 2;
 
 before(async () => {
   if (!(await operatorSupportLaneReady())) return;
@@ -1228,6 +1228,53 @@ timelineCell("os.20 every support act the console offers is readable on the OPER
 
   await setCapacity(operator.owner, { maxFirms: null, reason: "#843 os.20 release" });
 }, assertSupportTimelineCohortPresent);
+
+timelineCell("os.21 a replay under the SAME op_key adds no second line to the timeline -- both "
+  + "new appends sit INSIDE the reservation, exactly where os.13 proves the audit row sits",
+async () => {
+  const world = await openProblem(operator, "os21");
+  const capKey = opk("os21-cap");
+  const resKey = opk("os21-res");
+  const since = await dbNow();
+
+  const cap = await setCapacity(operator.owner,
+    { maxFirms: 4244, reason: "#843 os.21", opKey: capKey });
+  const res = await resolveProblemWithKey(operator.owner, world.problem,
+    "#843 os.21 refunded", resKey);
+
+  // THE INSTRUMENT IS clara.domain_events READ AS ROOT, never the door about to be exercised —
+  // a COUNT rather than a presence check, because the defect this cell exists to catch (an
+  // append placed OUTSIDE the reservation) is invisible to any assertion about the first line.
+  const first = await eventCountsSince(operator.firm, since);
+  assert.equal(first.get(SUPPORT_EVENT.capacitySet), 1,
+    "the capacity change appended exactly one admission.capacity_set");
+  assert.equal(first.get(SUPPORT_EVENT.problemResolved), 1,
+    "the resolution appended exactly one stripe_event.problem_resolved");
+
+  // THE LOST-RESPONSE RETRY: the same key, the same arguments, on both doors.
+  const capReplay = await setCapacity(operator.owner,
+    { maxFirms: 4244, reason: "#843 os.21", opKey: capKey });
+  assert.deepEqual(capReplay, cap, "the capacity replay returned the ORIGINAL receipt");
+  const resReplay = await resolveProblemWithKey(operator.owner, world.problem,
+    "#843 os.21 refunded", resKey);
+  assert.deepEqual(resReplay, res, "the resolution replay returned the ORIGINAL receipt");
+
+  const after = await eventCountsSince(operator.firm, since);
+  assert.equal(after.get(SUPPORT_EVENT.capacitySet), 1,
+    "the replay appended no second admission.capacity_set");
+  assert.equal(after.get(SUPPORT_EVENT.problemResolved), 1,
+    "the replay appended no second stripe_event.problem_resolved");
+
+  // …AND THE TIMELINE ITSELF SHOWS ONE LINE EACH. The table count above is the mechanism; this is
+  // the claim the ticket actually makes, read back through the same door os.20 uses.
+  const page = await firmActivity(operator.owner, { since });
+  for (const type of [SUPPORT_EVENT.capacitySet, SUPPORT_EVENT.problemResolved]) {
+    assert.equal(page.rows.filter((r) => r.event_type === type).length, 1,
+      `the operator's timeline shows exactly one ${type} line after the replay`);
+  }
+
+  await setCapacity(operator.owner, { maxFirms: null, reason: "#843 os.21 release" });
+});
 
 test("os.VACUITY CONTROL -- every declared #615 cell executed", async (t) => {
   if (await gateOperatorSupport(t)) return;
