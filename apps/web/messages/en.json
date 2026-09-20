@@ -6179,7 +6179,12 @@
       "close": "Close",
       "report": "Reports",
       "agent": "Agent",
-      "work": "Work"
+      "work": "Work",
+      "people": "People",
+      "assets": "Assets",
+      "counterparties": "Counterparties",
+      "clients": "Clients",
+      "firm": "Firm"
     },
     "statusLabels": {
       "approved": "Approved",

@@ -89,3 +89,65 @@ test("[ADV-2]: a client id absent from the roster reads as filtered, never as 'A
     await h.unmount();
   }
 });
+
+// #861 — THE CHIP ROSTER IS THE DOOR'S ROSTER. `clara.list_activity` gained five kinds in
+// migration 0264 (people, assets, counterparties, clients, firm, per the owner's ruling of
+// 2026-09-18). The bar maps over `ACTIVITY_KINDS`, so the chips follow that vocabulary by
+// construction — what these cells pin is that each one actually RENDERS, under its own label and
+// as a pressable toggle, rather than as a raw `kindLabels.people` key or not at all.
+
+type DomNode = {
+  tagName?: string;
+  nodeValue?: string | null;
+  childNodes?: DomNode[];
+  getAttribute?: (k: string) => string | null;
+};
+
+function textOfNode(node: DomNode): string {
+  if (typeof node.nodeValue === "string") return node.nodeValue;
+  return (node.childNodes ?? []).map((c) => textOfNode(c)).join("");
+}
+
+function chipNamed(h: { find: (p: (n: DomNode) => boolean) => unknown }, label: string): DomNode | null {
+  return (h.find(
+    (n) => n.tagName === "BUTTON"
+      && n.getAttribute?.("type") === "button"
+      && textOfNode(n).trim() === label,
+  ) ?? null) as DomNode | null;
+}
+
+const KIND_CHIP_LABELS: readonly (readonly [string, string])[] = [
+  ["documents", "Documents"], ["journal", "Journal"], ["close", "Close"], ["report", "Reports"],
+  ["agent", "Agent"], ["work", "Work"],
+  ["people", "People"], ["assets", "Assets"], ["counterparties", "Counterparties"],
+  ["clients", "Clients"], ["firm", "Firm"],
+];
+
+test("[861]: the kind bar offers one pressable chip per activity kind, each under its own label", async () => {
+  const h = await mount(App({ client: null, kinds: [], since: null, until: null, event: null }));
+  try {
+    for (const [, label] of KIND_CHIP_LABELS) {
+      const chip = chipNamed(h, label);
+      assert.ok(chip, `no kind chip labelled "${label}"`);
+      assert.equal(chip.getAttribute?.("aria-pressed"), "false",
+        `the "${label}" chip must start unpressed when no kind is filtered`);
+    }
+    assert.doesNotMatch(h.text(), /kindLabels\./, "no chip may render a raw message key");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("[861]: a new kind in the URL state reads as the pressed chip, and only that one", async () => {
+  const h = await mount(App({ client: null, kinds: ["counterparties"], since: null, until: null, event: null }));
+  try {
+    for (const [kind, label] of KIND_CHIP_LABELS) {
+      const chip = chipNamed(h, label);
+      assert.ok(chip, `no kind chip labelled "${label}"`);
+      assert.equal(chip.getAttribute?.("aria-pressed"), kind === "counterparties" ? "true" : "false",
+        `the "${label}" chip's pressed state is wrong for kinds=["counterparties"]`);
+    }
+  } finally {
+    await h.unmount();
+  }
+});

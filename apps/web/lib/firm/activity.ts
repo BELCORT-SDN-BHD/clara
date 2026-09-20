@@ -23,7 +23,12 @@
 //     BIGINT primary key, so the pair is the only reliable address). This module never parses an
 //     id's internal shape; it only ever passes it back to get_activity_event verbatim.
 //   - `kind` is the closed filter/display group the door computes:
-//     documents | journal | close | report | agent | work.
+//     documents | journal | close | report | agent | work | people | assets | counterparties |
+//     clients | firm. The last five arrived with #861 (migration 0264) and the owner's ruling of
+//     2026-09-18: membership/invitation, fixed-asset, counterparty-identity, client-facet and
+//     firm events used to fall through the ladder's stated default onto `documents`, where the
+//     documents filter showed rows about no document at all and no filter value could return
+//     them. Everything the ladder still does not name rides that same stated default.
 //   - The page envelope is `{rows, next_cursor, truncated}`. `next_cursor` is an opaque string —
 //     round-trip it, never decode it.
 //
@@ -66,7 +71,15 @@ import {
 
 // ── the closed kind vocabulary ────────────────────────────────────────────────
 
-export const ACTIVITY_KINDS = ["documents", "journal", "close", "report", "agent", "work"] as const;
+/** The door's own closed roster, in the door's own order — `clara.list_activity` refuses CLR10
+ *  `invalid_kind` for anything outside it (migration 0264's `p_kinds` check), so this list and
+ *  that one are one contract kept in two places, pinned by `lib/firm/activity.test.ts`. */
+export const ACTIVITY_KINDS = [
+  "documents", "journal", "close", "report", "agent", "work",
+  // #861, the owner's ruling of 2026-09-18: member.*/invite.* -> people, asset.* -> assets,
+  // counterparty.* -> counterparties, client.*/knowledge.* -> clients, firm.* -> firm.
+  "people", "assets", "counterparties", "clients", "firm",
+] as const;
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 
 export function isActivityKind(value: string): value is ActivityKind {
