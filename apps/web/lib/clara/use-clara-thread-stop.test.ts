@@ -1342,3 +1342,92 @@ test("1024 a refused stop whose re-attach is REFUSED says only that THIS TAB cou
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
   }
 });
+
+test("1024 …but a revocation delivered MID-STREAM on a re-attach that OPENED is the real thing", async () => {
+  // THE OTHER HALF OF THE RULING ABOVE, and the line it is drawn at. What the stop path may not
+  // do is turn a REFUSED ATTACH into a statement about the reader's access; it was never about
+  // what a revocation costs. A revocation the runtime sends down a read that OPENED is the
+  // `streamRoute.ts` per-poll re-authorisation failing mid-reply — a membership removed, a
+  // session gone private — and there is no second explanation for it. So it is still the
+  // terminal it always was: the clock retires, the parked question is withdrawn (a reader who
+  // may no longer read the reply may not answer its question either), and the task id stays,
+  // because the id is a fact.
+  //
+  // THE TURN IS ONE THIS TAB DID NOT POST, which is the case the ticket is about: `hydrateRun`
+  // is the only thing that knows it is live, exactly as a reload onto a running reply leaves it.
+  const { useClaraThread } = await import("./useClaraThread");
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  const THREAD_MIDSTREAM_REVOKE = "b4b4b4b4-4444-4444-8444-b4b4b4b4b4b4";
+  globalThis.fetch = (async (u: unknown) => {
+    const url = String(u);
+    if (/\/stream/.test(url)) {
+      // A real attach that OPENS — 200, a body — and whose first frame is the revocation the
+      // route writes once its own re-authorisation fails. `runClaraTaskStream` returns on it.
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(
+            `event: revoked\ndata: ${JSON.stringify({ taskId: "task-live", reason: "CLR11" })}\n\n`,
+          ));
+          controller.close();
+        },
+      });
+      return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (/agent_tasks_visible/.test(url)) {
+      return new Response(
+        JSON.stringify([{ id: "task-live", status: "awaiting_input", created_at: "2026-09-12T00:00:00.000Z" }]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (/rpc\/cancel_agent_task/.test(url)) {
+      return refusal("CLR04", "stopping a reply requires a bookkeeper", "insufficient_role");
+    }
+    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const h = await renderHook(() => useClaraThread(session, THREAD_MIDSTREAM_REVOKE));
+    try {
+      await h.settle();
+      await settleUntil(h, () => claraThreadStore.getThread(THREAD_MIDSTREAM_REVOKE).activeTaskId === "task-live",
+        "the mount's own run rehydrate landing", SETTLE_PASSES);
+      // The parked question, as the mount's rehydrate leaves one (the cell above uses the same
+      // shape for the same reason: this is the state, not a shortcut around a door).
+      claraThreadStore.hydrateRun(
+        THREAD_MIDSTREAM_REVOKE,
+        { taskId: "task-live", status: "awaiting_input", startedAt: "2026-09-12T00:00:00.000Z" },
+        PARKED,
+      );
+      await h.act(async () => { await h.rerender(); });
+      assert.equal(claraThreadStore.getThread(THREAD_MIDSTREAM_REVOKE).turnStatus, "awaiting_input",
+        "precondition: the DB arm is the only thing that knows this turn is live");
+      assert.deepEqual(claraThreadStore.getThread(THREAD_MIDSTREAM_REVOKE).parkedClarify, PARKED,
+        "precondition: and Clara is parked on a question");
+
+      await h.act(async () => { await h.current.stopReply(); });
+      await settleUntil(h, () => claraThreadStore.getThread(THREAD_MIDSTREAM_REVOKE).stream.status === "revoked",
+        "the mid-stream revocation reaching the store", SETTLE_PASSES);
+
+      const after = claraThreadStore.getThread(THREAD_MIDSTREAM_REVOKE);
+      assert.equal(after.stream.status, "revoked",
+        "a revocation the runtime SENT is the fact it has always been — the ruling above is about "
+        + "a refused attach, not about what a revocation costs");
+      assert.equal(after.stream.revokedReason, "CLR11", "…carrying the route's own word");
+      assert.equal(after.turnStartedAt, null,
+        "the clock retires: an elapsed time climbing under 'you no longer have access' would be "
+        + "this tab asserting it is still watching something it cannot see");
+      assert.equal(after.turnStatus, null, "…and with it the DB arm that offers the Stop control");
+      assert.equal(after.parkedClarify, null,
+        "the question goes with the access that would have answered it");
+      assert.equal(after.activeTaskId, "task-live", "the task id is still a fact, and is kept");
+    } finally {
+      claraThreadStore.abortStream("task-live");
+      await h.unmount();
+    }
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+});

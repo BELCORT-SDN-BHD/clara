@@ -198,18 +198,30 @@ function attachClaraStream(
   /** #1024 — see `AttachRefusalMeaning` above. */
   attachRefusalMeans: AttachRefusalMeaning = "revocation",
 ): Promise<void> {
+  // #1024 — WHETHER THE ATTACH EVER OPENED, and it is the only thing that can tell a REFUSED
+  // ATTACH from a MID-STREAM REVOCATION here: `runClaraTaskStream` delivers both as the same
+  // `revoked` event, deliberately (#642, one fact one face). `onOpen` fires the instant
+  // `openTaskStream` resolves and BEFORE any event is delivered, so a `revoked` seen while this
+  // is false is the synthesised one from the attach arm, and one seen after it is the route
+  // writing a frame down a body that had already opened.
+  let opened = false;
   return resolveStreamAuth(auth).then(({ token }) =>
     runClaraTaskStream({
       token,
       taskId,
       signal: signal ?? new AbortController().signal,
-      onOpen,
+      onOpen: () => {
+        opened = true;
+        onOpen?.();
+      },
       onEvent: (evt) => {
         // #1024 — A READ THIS TAB OPENED FOR ITSELF DOES NOT WRITE A REVOCATION INTO THE SHARED
-        // STREAM STATE. The refusal is kept out of the store entirely rather than translated into
-        // some other status: the caller that asked for this read is the one holding the press it
-        // followed, and it records what the read cost in its own machine.
-        if (evt.event === "revoked" && attachRefusalMeans === "this-tab-cannot-resume") return;
+        // STREAM STATE — when the REFUSAL IS THE ATTACH. The refusal is kept out of the store
+        // entirely rather than translated into some other status: the caller that asked for this
+        // read is the one holding the press it followed, and it records what the read cost in its
+        // own machine. A revocation that arrives once the read is OPEN has no second explanation
+        // and is never diverted: the runtime SENT it, on this task, to this reader.
+        if (evt.event === "revoked" && !opened && attachRefusalMeans === "this-tab-cannot-resume") return;
         claraThreadStore.applyStreamEvent(threadId, evt);
         if (evt.event === "message") {
           // Terminal authority arrived — refetch the DB's own transcript rather than
