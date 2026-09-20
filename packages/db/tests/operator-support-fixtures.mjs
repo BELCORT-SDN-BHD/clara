@@ -25,6 +25,7 @@
 //        -> jsonb — every queue field plus the arm's own detail; ONE CLR11
 //           `support_case_not_found` for an unknown id, an unknown kind and a mismatched pair.
 
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   CLR, EVENT, PG, PROBLEM, ROLES, applyEvents, assertPair, assertRaises, claimPaidFirm,
@@ -331,4 +332,123 @@ export async function normalizedBody(signature) {
               '\\s+', '', 'g') as body
        from pg_proc p where p.oid = $1::regprocedure`, [signature]);
   return r.rows[0]?.body ?? null;
+}
+
+// ===========================================================================================
+// 5 · #843 — THE SUPPORT ACTS ON THE OPERATOR FIRM'S OWN TIMELINE.
+//
+// A THIRD frontier, for the same reason #776 needed a second one: the `db-slice-frontiers` matrix
+// runs this package against databases pinned between 0188 and this ticket's own migration, where
+// the three support acts exist and only ONE of them (`reject_firm_registration`, 0145) appends a
+// domain event. Gating the new cells on 0188's stem would red every one of those legs while
+// saying nothing about the thing under test.
+// ===========================================================================================
+
+/** The #843 migration's STABLE STEM — never its number (numbers are claimed at MERGE). */
+export const SUPPORT_TIMELINE_STEM = "operator_support_timeline_events$";
+
+/** The three event types the three support acts append, spelled once.
+ *
+ *  `registrationRejected` is 0145's own, live since the operator console existed; the other two
+ *  are this ticket's. They are named in the estate's `<aggregate>.<fact>` house shape
+ *  (`bank.account_created`, `firm_setup.item_answered`), NOT after the function that writes them. */
+export const SUPPORT_EVENT = {
+  registrationRejected: "firm_registration.rejected",
+  capacitySet: "admission.capacity_set",
+  problemResolved: "stripe_event.problem_resolved",
+};
+
+/** The activity KIND all three land on. `clara.list_activity`'s ladder recognises five prefixes
+ *  (`sweep.run_completed`, `entry.%`, `document.%`, `close.%`, `work.%`) and files everything else
+ *  under `documents` — its stated default (0202's `else 'documents'` arm). None of the three
+ *  operator-support types matches a recognised prefix, and none matches one of the five kinds the
+ *  owner ruled for #861 either (`member.*`/`invite.*`, `asset.*`, `counterparty.*`,
+ *  `client.*`/`knowledge.*`, `firm.*` — note `firm_registration.rejected` is NOT `firm.%`), so the
+ *  three ride the default TOGETHER, before and after that recut. See the #843 cells' own comment. */
+export const SUPPORT_EVENT_KIND = "documents";
+
+let _timelineReady = null;
+export async function supportTimelineLaneReady() {
+  if (_timelineReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [SUPPORT_TIMELINE_STEM]);
+      _timelineReady = r.rows[0].n > 0;
+    } catch {
+      _timelineReady = false;
+    }
+  }
+  return _timelineReady;
+}
+
+/** BOTH lanes, because every #843 cell builds its world through the #615 fixtures above and then
+ *  reads the timeline: a database carrying one and not the other cannot run these cells at all.
+ *  Always a COUNTED, quiet skip — the LOUD discriminator is `assertSupportTimelineCohortPresent`
+ *  below, called by the FIRST #843 cell only. */
+export async function gateSupportTimeline(t) {
+  if (await operatorSupportLaneReady() && await supportTimelineLaneReady()) return false;
+  markSkip();
+  t.skip(`#843 operator-support timeline lane absent (no ${SUPPORT_TIMELINE_STEM} migration applied)`);
+  return true;
+}
+
+/** The pre-integration discriminator (accrual-adjustments-fixtures.mjs's idiom, the same one
+ *  activity-feed.test.mjs carries for #840): a FOCUSED run against a database without this
+ *  migration is a REAL failure, and only the package-wide sweep's preloaded gate module
+ *  (operator-support-timeline-preintegration-gate.mjs) turns it into a skip. Called ONCE, by the
+ *  first cell that depends on this frontier; every other #843 cell uses `gateSupportTimeline`. */
+export async function assertSupportTimelineCohortPresent(t) {
+  if (!(await operatorSupportLaneReady())) return gateSupportTimeline(t);
+  if (await supportTimelineLaneReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_OPERATOR_SUPPORT_TIMELINE === "1") {
+    markSkip();
+    t.skip("#843 operator-support timeline lane absent (pre-integration sweep)");
+    return true;
+  }
+  assert.fail(
+    "#843: the operator-support timeline lane is absent. Apply "
+    + "0263_operator_support_timeline_events.sql, or set "
+    + "CLARA_ALLOW_MISSING_OPERATOR_SUPPORT_TIMELINE=1 for the package-wide pre-integration sweep.");
+  return true;
+}
+
+/** `clara.list_activity`, as a named-argument call — the firm-scoped read the operator's own
+ *  timeline is rendered from. The 2026-09-20 correction on #843 replaced `clara.list_firm_timeline`
+ *  (retiring, #998) with this door; both page the SAME `clara.firm_timeline_visible` view at the
+ *  same bookkeeper floor, so only the read moved, never the mechanism.
+ *  Returns the page envelope `{rows, next_cursor, truncated}`. */
+export async function firmActivity(sub, { since = null, limit = 100, kinds = null } = {}) {
+  const r = await humanQuery(sub, namedCall("list_activity", [
+    { name: "p_limit", cast: "int" }, { name: "p_kinds", cast: "text[]" },
+    { name: "p_since", cast: "timestamptz" },
+  ]), [limit, kinds, since]);
+  return r.rows[0].result;
+}
+
+/** A VIEWER of the operator firm — rank 0, one rung BELOW `clara.list_activity`'s bookkeeper
+ *  floor. The sharpest below-floor persona for a read that must refuse rather than answer an
+ *  empty page. */
+export async function operatorFirmViewer(operator, tag = "os") {
+  const sub = await insertUser("w615", `${tag}-viewer`);
+  await rootQuery(
+    "insert into clara.firm_memberships(firm_id,user_id,role) values ($1,$2,'viewer')",
+    [operator.firm, sub]);
+  return sub;
+}
+
+/** The domain events one firm appended at or after `since`, keyed by type -> count. Read as ROOT,
+ *  straight from `clara.domain_events`: the instrument a timeline assertion is checked against,
+ *  never the door it is about to exercise. */
+export async function eventCountsSince(firm, since) {
+  const r = await rootQuery(
+    `select event_type, count(*)::int as n from clara.domain_events
+      where firm_id = $1 and created_at >= $2 group by event_type`, [firm, since]);
+  return new Map(r.rows.map((x) => [x.event_type, x.n]));
+}
+
+/** `now()` as the database sees it — the lower bound every #843 cell windows its reads with, so a
+ *  cell asserts about ITS OWN acts rather than about everything this shared estate ever did. */
+export async function dbNow() {
+  return (await rootQuery("select now() as t")).rows[0].t;
 }

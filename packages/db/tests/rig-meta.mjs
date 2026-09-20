@@ -1362,6 +1362,21 @@ const CHECKOUT_CONVERGENCE_0186_HUMAN_FNS = [
 ];
 export const CHECKOUT_CONVERGENCE_0186_COHORT = [...CHECKOUT_CONVERGENCE_0186_HUMAN_FNS];
 
+// #843 [0263, the operator support acts on the operator firm's own timeline] — NO NEW COHORT, NO
+// NEW NAME, NO GRANT CHANGE, each MEASURED rather than assumed (0263's own §T re-reads owner /
+// SECURITY / settings / ACL after both recuts and refuses on drift).
+// `clara.set_admission_capacity` (this cohort) and `clara.resolve_stripe_event_problem`
+// (CHECKOUT_GATE_C2_HUMAN_FNS, above) are STILL the SAME two doors at their SAME signatures and
+// grant: each gains ONE `clara._append_event` call inside the reservation it already held — no
+// parameter, no new function, no widened or narrowed ACL — so no roster change is owed for
+// either name. The file's other effect is REFERENCE DATA (two `clara.event_types` rows and their
+// `clara.trigger_taxonomy` routing at the active version), which no cohort here enumerates:
+// rig-meta's rosters are about function names and the grants on them, and the estate's own
+// coverage law over the catalog lives in rig-events-structure.test.mjs §7, which this migration's
+// tail re-reads for itself. Same "wholly present or wholly absent" reasoning #840's note (below)
+// states for its own body-only recut of a different pair.
+// #843 END
+
 // #615 (0188 operator support console): the TWO reads the operator's support destination rides,
 // clara_authenticated ONLY -- no agent, wake, runtime or Stripe-webhook sibling, by the design's
 // own shape rather than by omission. Neither is an agent act and neither is reachable from any
