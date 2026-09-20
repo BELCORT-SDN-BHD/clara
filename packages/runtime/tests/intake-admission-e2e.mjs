@@ -753,6 +753,15 @@ async function main() {
 
   void firm;
   await writeFile(join(scratch, "done"), "ok");
+
+  // #967 — DRAIN BEFORE EXIT, NOT A FIXED SLEEP. This process's own engine is the only one running
+  // against this database; the moment it exits, whatever it leaves non-terminal sits inert until
+  // the NEXT CI leg's (#636 intake-batch-e2e.mjs) fresh engine finds and re-attempts it — the
+  // measured ~1.27M-line cross-leg noise this ticket fixes. tests/queue-drain.mjs's own header says
+  // why this belongs at the END of THIS leg rather than at the START of the next one.
+  const { waitForQueueDrain } = await import("./queue-drain.mjs");
+  await waitForQueueDrain(rig, { log: (m) => console.log(m) });
+
   console.log("INTAKE ADMISSION E2E: PASS (7 legs — no human gate, no kind from a failed read, duplicates converge, mixed batch independent, replayed finalize idempotent, H-53 custody, C-37 OFX/XLSX)");
   process.exit(0);
 }

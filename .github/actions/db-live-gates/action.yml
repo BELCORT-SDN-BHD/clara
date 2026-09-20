@@ -34,6 +34,35 @@ runs:
     # workflow/graphile_worker schemas first. Ephemeral clara_intake_ci only —
     # never the shared project; the URL omits the password (pg falls back to the
     # job-env PGPASSWORD for the throwaway service container).
+    # #967 — this step and the two below it deliberately SHARE one database and world to prove a
+    # real chain across upload, admission and batching. Neither of the first two used to drain the
+    # Workflow queue before exiting, so a normal run could carry roughly 1.27M lines of leftover
+    # concurrency-limit/retry noise into the third leg (packages/runtime/README.md's own #967 note,
+    # beside `tests/intake-admission-e2e.mjs`). The fix lives IN the two leg files (each now calls
+    # `tests/queue-drain.mjs`'s `waitForQueueDrain` right before its own `process.exit(0)`, since
+    # each leg's own process is the only one with an engine running to drive the drain) — nothing
+    # in this action's own step sequence changed.
+    #
+    # AC1 MEASUREMENT (fix round 2): a cluster-wide role-count invariant (migration 0154) blocks a
+    # SECOND from-scratch migration chain on this lane's own rig cluster, so a genuinely fresh
+    # `clara_intake_ci` cannot be MIGRATED twice here — but it CAN be built by a TEMPLATE COPY of
+    # this lane's own already-migrated-and-seeded database (`create database clara_intake_ci
+    # template clara_l06`, then the same `bootstrap` this step runs), which mints no role and so
+    # does not collide. On three such genuinely fresh, single-pass, real-CI-order runs of HEAD's two
+    # modified legs (`intake-e2e.mjs` then `intake-admission-e2e.mjs`, both WITH the #967 drain),
+    # two completed clean end to end (leg 1: 38/40 lines, leg 2: 97/98 lines — small, not
+    # concurrency/retry-noise-dominated) and one hit a pre-existing, already-documented Windows-only
+    # EPERM/rename race in the spool (packages/runtime/README.md's "#693 family") inside leg 2's OWN
+    # first assertion, before the drain is ever reached. Reproducing that SAME race, on the SAME
+    # fresh-template rig, against a pre-967 (no-drain) copy of the two leg files 3-for-3 confirms it
+    # is NOT caused by, or specific to, this change. THE NEW "newly-failed" THROW never fired across
+    # any of these runs — the specific worst case fix round 1's own earlier report recorded (a
+    # straggler reaching `failed` mid-wait) did not reproduce despite one run deliberately loaded
+    # with a concurrent `pnpm typecheck`. This is real end-to-end evidence the unit cells alone
+    # cannot give, but it is still local-rig evidence, at a scale far short of the ~1.27M-line
+    # figure a long-lived shared CI runner produced. THE FIRST CI RUN OF THIS STEP SEQUENCE is what
+    # proves AC1's actual number at that scale; update this comment with that run's line counts
+    # once they exist.
     - name: Slice-5 intake transport e2e (isolated DB + world bootstrap)
       shell: bash -e {0}
       run: |
@@ -351,17 +380,55 @@ runs:
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/chat-turn-v21-e2e.mjs
         # #637 — the TWO-BUILD cutover e2e, LAST on this rig because it is the only step here that
-        # BUILDS A SECOND IMAGE. It copies the runtime package to <repo>/.scratch/two-build/previous,
-        # rewrites that copy's registry to pin the PREDECESSOR claraWork body, deletes the successor
-        # body file, and runs `nitro build` there — then spawns that image, admits Work to it, stops
-        # it, spawns THIS tree's build, admits Work to the successor, and resumes the first Work on
-        # its original body inside the second image. That is the one thing the single-process
-        # version-cutover-e2e above cannot show.
+        # BUILDS A SECOND IMAGE (as of #794, TWO second images — see #850 below). It copies the
+        # runtime package to <repo>/.scratch/two-build/previous, rewrites that copy's registry to
+        # pin the PREDECESSOR claraWork body, deletes the successor body file, and runs `nitro
+        # build` there — then spawns that image, admits Work to it, stops it, spawns THIS tree's
+        # build, admits Work to the successor, and resumes the first Work on its original body
+        # inside the second image. That is the one thing the single-process version-cutover-e2e
+        # above cannot show.
         #
-        # MEASURED COST before wiring it (the orchestrator's condition): 78.0s for the scratch build
-        # and 124s for the whole file — Windows-host measurements, re-measured at the #637 fix-round
-        # closure review (superseding this comment's earlier 82.6s / 3m25s), against a ~6 minute
-        # budget. The copy MUST live outside packages/runtime — measured during the spike, a copy at
+        # #850 — THE 78.0s / 124s FIGURES BELOW PREDATE #794's SECOND LEG, so they understate the
+        # step's cost as it stands today: #794 added a chatTurn leg that stages and builds a SECOND
+        # scratch image (<repo>/.scratch/two-build/previous-chat) the same way, to prove the same
+        # cutover law on the lane that has no Work row to resume through — a second full
+        # stage-and-build, paid in full, IN ADDITION to the figures below.
+        #
+        # THE FIX, AND THE GUARD ON IT (tests/scratch-image.mjs `shouldOverlapSecondBuild`,
+        # `OVERLAP_MIN_CORES = 4`): the chatTurn scratch build starts in the BACKGROUND the moment
+        # the claraWork scratch build finishes, overlapped with the claraWork leg's own HTTP/DB-bound
+        # exercise (spawn, admit, stop, spawn again, resume, preflight) — but ONLY when
+        # `os.availableParallelism()` is at or above that threshold. Below it, the chatTurn build
+        # runs SEQUENTIALLY, after the claraWork leg finishes, exactly as it did before this ticket —
+        # slower, but never competing with that leg's own two spawned runtime images and its
+        # timing-sensitive polls (`FETCH_TIMEOUT_MS = 15000`, two-build-cutover-e2e.mjs:163) for a
+        # core neither can spare. The threshold exists because a contention test on this lane's own
+        # 24-core rig — one concurrent `pnpm typecheck`, standing in for a thin core budget — measured
+        # the OVERLAPPED build going from an idle 5.1s to 36.9s (7x) and once FAILING on a `pollTask`
+        # timeout inside the claraWork leg: the trade loses, not wins, once cores are scarce.
+        # GitHub-hosted standard runners report 2 cores, below the threshold, so this step is
+        # expected to take the SEQUENTIAL path there until measured otherwise — read the first CI
+        # run's own log line (`[tb-e2e] #850: availableParallelism()=…`) for which path it took, and
+        # the step's own wall clock either way. Neither leg's own proof moved: each scratch image is
+        # still staged, rewritten and built exactly as before, and each is still independently
+        # scanned against build B's roster for the "differs by exactly one body" invariant
+        # (tests/two-build-cutover-e2e.mjs `bodiesA` / `bodiesA2`) before anything is spawned.
+        #
+        # MEASURED LOCALLY (Windows host, packages/runtime/tests/two-build-cutover-e2e.mjs run
+        # standalone against a bootstrapped clara_rt_test, RELAY_TEST_MODE=1 — this rig has no CI
+        # runner access, so this is NOT the CI figure AC1 asks for): sequential (pre-#850)
+        # 36.6s–42.5s whole-file wall clock across two runs, each scratch build 5.0s–6.2s; overlapped
+        # (post-#850, on THIS 24-core rig, where the guard allows it) 32.3s–34.8s across two runs,
+        # same two scratch builds, same assertions, all passing. AC1 (the step's own before/after
+        # wall clock, measured on CI) REMAINS UNMET: the 78.0s/124s pair below is a Windows-host
+        # measurement from the #637 fix round, not a CI one, and no CI figure for this step — taking
+        # either path — has ever been recorded. Update this comment with the first CI run's own
+        # numbers once they exist.
+        #
+        # 78.0s for the scratch build and 124s for the whole file — Windows-host measurements,
+        # re-measured at the #637 fix-round closure review (superseding this comment's earlier
+        # 82.6s / 3m25s), against a ~6 minute budget, BEFORE #794's second leg (above). The copy
+        # MUST live outside packages/runtime — measured during the spike, a copy at
         # packages/runtime/.scratch made the MAIN nitro build compile 98 workflows instead of 49.
         # Its DATABASE costs the template copy above — a file-level clone, seconds — and not the
         # ~2m20s a from-scratch migrate+seed+bootstrap measures on this runner.

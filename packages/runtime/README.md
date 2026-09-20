@@ -845,6 +845,51 @@ exit path — and the leg has its own skip probe over `clara.open_interruption` 
 `clara.answer_interruption`. Local evidence 2026-09-15: both legs green in one run; hosted evidence
 pending.
 <!-- /#794 -->
+<!-- #850 -->
+**Since #850 the two legs' scratch builds OVERLAP instead of running back to back.** The
+`clara.open_interruption` / `clara.answer_interruption` probe that decides whether the chatTurn leg
+runs at all is now read at the TOP of the file, once, so the file knows before doing anything else
+whether it will need a second scratch image. The chatTurn scratch build is then started (not
+awaited) the moment the claraWork scratch build finishes — a DIFFERENT scratch directory
+(`previous-chat`), a DIFFERENT class rewrite (`chatTurn`, never `claraWork`) — so its `nitro build`
+child process runs in the BACKGROUND while the claraWork leg does its own work: spawn, admit, stop,
+spawn again, resume, preflight, all HTTP/DB round trips rather than CPU work. The chatTurn leg later
+`await`s that already-in-flight promise instead of starting a fresh build, so on any run where the
+claraWork leg's own exercise takes longer than one scratch build, the file pays close to ONE scratch
+build's wall clock for two, rather than two in sequence. Neither leg's proof moved: each image is
+still staged, rewritten and built exactly as `buildPreviousVersionImage` always did it, and each is
+still independently scanned against build B's roster for the "differs by exactly one body"
+invariant before anything is spawned — verified by deliberately colliding the two builds' scratch
+directory names (the plausible mistake this change invites) and watching the file fail loudly
+(`ENOENT` on the claraWork build's own artifact, ripped out from under it mid-flight) before
+reverting to the distinct names. Local evidence 2026-09-20 (Windows host, both legs green, same
+assertions): sequential 36.6s–42.5s whole-file wall clock across two runs before this change,
+32.3s–34.8s across two runs after, each scratch build 5–6s on this rig. The CI wall-clock figure
+(this rig has no CI runner) is in `.github/actions/db-live-gates/action.yml`'s own comment beside
+the step, marked unverified until the next CI run measures it.
+
+**THE FAILURE MODE THIS FIX ALSO CLEANED UP (L06-850-B, fix round 1).** The background
+`chatBuildPromise` used to be neither awaited nor guarded before the outer `finally`'s
+`removeScratchTree()` — a failure early in the claraWork leg (before this file's own `await
+chatBuildPromise`) could reach that `finally` while the background `nitro build` was still writing
+into `.scratch/two-build/previous-chat`, and `rmSync`ing that directory out from under it threw
+`EBUSY` on this rig, reproduced deterministically 3/3 times by an injected early failure. A throw
+from a `finally` REPLACES whatever the `catch` above it already threw, so the drill's real error
+(here, the injection itself) never appeared in the output at all — only the `EBUSY` stack. Fixed by
+awaiting the background build (swallowing its own outcome — cleanup is not a second verdict on it)
+immediately before `removeScratchTree()`, itself now wrapped so a cleanup failure can never mask a
+result either. Re-run with the same injected failure: the real error surfaces cleanly and the
+scratch tree is removed without error.
+
+**A CONCURRENCY RISK NAMED, NOT SOLVED (L06-850-C, fix round 1).** Every number above came from a
+24-core rig, where a background nitro build is nearly free. GitHub-hosted runners have 2-4 cores,
+where that build competes with the claraWork leg's own two spawned images and its
+`FETCH_TIMEOUT_MS = 15000` polls. Measured directly on this rig: the same overlapped build took 5.1s
+idle and 36.9s (7x) with one concurrent `pnpm typecheck` running, and that run FAILED on a
+`pollTask` timeout inside the claraWork leg — the CPU-bound work #850 moves INTO that leg's own
+window. See `.github/actions/db-live-gates/action.yml`'s own comment for the full measurement and
+why no guard is added here.
+<!-- /#850 -->
 
 ### #623 — the accounting-Work lane (`claraWork_v1`, `chatTurn_v18`)
 
@@ -1005,6 +1050,36 @@ actually publishes.
 Standalone, like `intake-e2e.mjs` — not collected by `node --test`. Wired in
 `.github/actions/db-live-gates/action.yml` as its own step, reusing the same throwaway
 database and bootstrapped world the Slice-5 step just built.
+
+<!-- #967 -->
+**Drains its own queue before exiting.** Sharing one database and world across three CI legs
+proves a real cross-leg chain (this leg starts where `intake-e2e.mjs` stops), but nothing used to
+drain the Workflow queue between them: each leg's engine dies with its process, so anything it left
+non-terminal sat inert until the NEXT leg's fresh engine booted its own consumers and found it —
+measured at roughly 1.27 million log lines of leftover concurrency-limit/retry churn, dominated by
+`lib/classify.mjs`'s own capped-task line, before a normal passing run's THIRD leg finished. Both
+`intake-e2e.mjs` and this file now call `tests/queue-drain.mjs`'s `waitForQueueDrain` right before
+their own `process.exit(0)` — the same two censuses `lib/rollback-preflight.mjs` already exposes
+(`censusNonTerminalRuns`, `censusUnboundTasks`), plus a third the two of them deliberately exclude
+(a run left QUEUED by an earlier leg that FAILS while THIS leg's own engine drives it — L06-967-B,
+fix round 1: `tests/queue-drain.mjs`'s own header explains why that needs a baseline rather than a
+blanket "any failed row" rule), bounded (30s default), never a fixed sleep, and each leg's own
+assertions already poll everything they admit to a terminal status first, so a clean run drains in
+well under a second. `tests/intake-batch-e2e.mjs` deliberately does NOT call it: it is the last leg
+on this database in the CI job and its own §5 scope ends with live rows on purpose (a declared-fact
+wait, a quota wait, an unassigned failed upload) that nothing downstream needs drained.
+
+**RELEASE RISK, NAMED RATHER THAN DISCOVERED LATER (L06-967-C, fix round 1):** the drain converts
+today's noisy-but-passing CI run into a RED one on exactly the input #967 was filed about. A capped
+`classify` task some earlier run left `queued` forever (by design — `lib/classify.mjs`'s own
+`MAX_ATTEMPTS` backstop) or a permanently-undispatchable `ocr`/`structured_parse`/`none` task with
+no transport metadata in its sidecar (0051 §2's own guard, `lib/reconciler-documents.mjs:396-413`)
+can never drain, so leg 1 or leg 2 now FAILS at the 30s deadline instead of leg 3 running noisily —
+intended, and the first CI run of this fix may expose it for the first time. A local reproduction
+against this rig's own reused `clara_intake_ci` hit exactly this: once such orphaned rows
+accumulated from an earlier, out-of-order local run, `waitForQueueDrain` correctly refused to call
+the queue drained and timed out (see the action.yml comment above this step).
+<!-- /#967 -->
 
 NAMED RESIDUAL: leg 5 proves the LOST-FINALIZE-RESPONSE convergence, not a SIGKILL
 between finalize and checkpoint. This file boots the runtime in-process (as
@@ -1303,7 +1378,11 @@ so the route's honest 429 never becomes a 500.
 needs the world bootstrapped first (`pnpm --filter @clara/runtime exec bootstrap`). Its N is
 MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one UTC day. It records,
 rather than hides, children lost to a Windows-only EPERM race between the reconciler's sidecar
-reads and `writeIntakeMeta`'s `rename` (the #693 family).
+reads and `writeIntakeMeta`'s `rename` (the #693 family). Runs THIRD on the same shared
+`clara_intake_ci` database and world `intake-e2e.mjs` and `intake-admission-e2e.mjs` build (#967) —
+it does NOT call `tests/queue-drain.mjs` itself (nothing in the CI job follows it on this database),
+but it is the leg that inherits a clean queue from the two before it now draining their own before
+they exit.
 
 **THE BELT'S COUNTERS DISTINGUISH A REFUSAL FROM A DEAD END.** `reconciler-batches.mjs` returns
 `batchCancelFailed` for refusals and `batchCancelBlocked` for a parent whose EVERY child refused

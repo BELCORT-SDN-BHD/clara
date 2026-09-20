@@ -190,6 +190,66 @@ refuses the cutover while any pre-cutover classify task is still claimable witho
 extraction, and its rollback is a new append-only recovery migration applied while that consumer
 stays live. The hosted rollout applied it in that consumer-first order inside the quiescence window.
 
+**Pinning another function's body hash is a named convention in this file, not one migration's
+habit — record it here rather than let each instance read as its own idea.** When a migration
+CALLS a function it does not itself recut, and some part of its own safety argument, its granted
+ACL, its returned shape or an excluded value depends on that function's CURRENT body, it pins a
+pre-image `sha256(prosrc)` of that body: measured on a migrated rig by reading `pg_proc.prosrc`
+through `to_regprocedure`, never transcribed from the creating migration's file text, and asserted
+again, unchanged, in its own prestate (before touching anything) and usually again in its tail
+(after). That pin is a durable COUPLING placed on a function this migration does not own. **The
+rule it creates: a later migration whose OWN NUMBER is BELOW the pinning migration's, and which
+recuts the pinned function, must locate every existing pin on that function and re-measure each
+one against the function's NEW body, in the SAME COMMIT as the recut** — the pin does not update
+itself, and only the migration that changes the body can know whether the pinning migration's
+argument still holds against the new one. The qualifier matters because this repo assigns
+migration numbers per lane in advance, so they can land out of chronological order: "a later
+migration" means one whose number is still below the pin's, not merely one applied after it in
+git history.
+
+A recut whose own number is ABOVE the pinning migration's is a different case, not this rule's
+obligation: the pinning migration is already APPLIED, and this house never edits an applied
+migration to make it re-measure a body that postdates it. Such a recut pins its OWN pre-image of
+the function instead (in its own prestate and tail, the same convention, argued from its own safety
+case) and leaves the earlier, lower-numbered pin exactly as it was — historical, not current, and
+never re-measured, because it was never wrong: it correctly pinned the body that existed at ITS
+number.
+[0234_legal_enforcement_mode.sql](migrations/0234_legal_enforcement_mode.sql), documented further
+down this file, is the worked example: it recuts `clara._accounting_work_egress_live(uuid,uuid)`,
+one of 0233's three non-regression pins named below, but 0233 is applied and unedited — 0234 pins
+its own pre-image of that function instead (0234's "THE SIX PINS", four of them its own recut
+pre-images) and 0233's pin stands, describing 0233's own moment, not 0234's.
+
+The failure this coupling exists to produce is quoted here in its most common shape, but several
+raise wordings coexist across the estate and NONE of them settled the phrasing once and for all —
+`0233`'s three non-regression pins below read **`<name> has DRIFTED from its pinned body -- <reason>`**,
+while `0222` (right after `0221`) raises **`<name> has DRIFTED from the pinned NNNN body`** on all
+six of its own pins, and `0228` raises **`<name> has DRIFTED from its measured live body`** on all
+thirteen of its own. `0231` carries BOTH shapes in one file (four `its pinned body`, one `the pinned
+0189 body`), so "settled from 0221 onward" is not a claim this file can make. The one invariant
+across every wording is the phrase **`has DRIFTED`**: `grep -rn "has DRIFTED"
+packages/db/migrations/` finds every instance regardless of which noun follows it. 0214 below reads
+`has DRIFTED from the pinned 0189 body` — a numbered form, like several others, not a "first"
+anything; migrations as early as 0107 already raise on a drifted pin. Either way it means the LIVE
+function no longer hashes to the sha the pinning migration recorded. Two readings, and the pinning
+migration cannot tell them apart on its own:
+either an intervening migration recut the pinned function and never re-derived this argument
+against the new body (the pin did its job — go re-measure it, in the recutting migration's own
+commit, before this one can be trusted again), or the pin was wrong from the start. Either way the
+check fires from the PRESTATE, before the migration changes anything, and fails CLOSED: a drifted
+pin blocks the migration rather than letting it apply against a body its own stated reasoning no
+longer describes.
+
+The instances DOCUMENTED below are findable by the pinned function's name — for example
+`clara._work_run_attempts` (0214, immediately below, and again in 0231's five pins) and
+`clara.list_review_queue` / `clara.list_accounting_work` / `clara.get_client_work_pack` /
+`clara.list_activity` (0231). 0233's own three non-regression pins are named where 0233 is
+documented, further down this file. This is NOT a complete index of every migration that pins a
+function it does not itself change — 0178, 0182, 0183, 0184, 0189, 0194, 0195, 0197, 0202, 0203,
+0204, 0209, 0212, 0213, 0215, 0216 and others carry the same convention and are not named here. The
+authoritative, complete list is the migrations themselves:
+`grep -rn "has DRIFTED" packages/db/migrations/`.
+
 [0214_client_work_pack.sql](migrations/0214_client_work_pack.sql) owes **no** consumer-first
 obligation either, for a narrower reason: it adds exactly one SECURITY INVOKER read door,
 `clara.get_client_work_pack(p_client, p_preview)`, grants EXECUTE to `clara_authenticated` alone,
@@ -1479,6 +1539,23 @@ NAMES `clara.users_visible` in the comment explaining why it does not use it.
 capacity numbers ride door 2 only so a settings card can render them beside the plan; that is an
 AFFORDANCE, not a wall. The residual stands: that relation still has NO human writer anywhere
 (`0196:36-40`).
+
+**THREE NON-REGRESSION PINS, an instance of the "Pinning another function's body hash" convention
+named above this file's "Migration and deployment behavior" section.** 0233 CALLS three functions
+it does not itself change and pins each one's pre-image `sha256(prosrc)` in both its prestate and
+its tail: `clara.get_current_legal_documents()` (the standing door's own text says its `body` and
+digest stay that function's, never a second copy), `clara.accept_legal_document(text,integer,text,text)`,
+and `clara._accounting_work_egress_live(uuid,uuid)` (the arity-0 argument above copies that door's
+own limb-(a) predicate, 0195:890-906). A later migration whose OWN NUMBER is below 0233's, and
+which recuts any one of these three, must find this pin — and 0231's and 0232's, if it is one of
+theirs too — and re-measure it against the new body in the SAME commit as the recut, or risk the
+exact `has DRIFTED from its pinned body` refusal this file's general note explains. A recut at a
+number ABOVE 0233 is not this obligation: 0233 is applied and this house never edits an applied
+migration, so the recutting migration pins its own pre-image instead and 0233's pin is left
+standing, historical rather than current — 0234 immediately below is exactly that case for
+`clara._accounting_work_egress_live`. (0233's FOURTH pin, on `clara.get_llm_usage_summary`, is
+a different thing: a pre-image of the body 0233 itself recuts, not a non-regression pin on a
+function it leaves alone.)
 
 
 ## 0234 — the platform's legal enforcement mode (#1008)
