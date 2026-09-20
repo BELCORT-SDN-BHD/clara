@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { renderComponent } from "../../test/hookHarness";
+import { enableDomInspection } from "../../test/domInspect";
 import {
   ComposerAttachmentControl,
   COMPOSER_IN_FLIGHT_STATES,
@@ -27,6 +28,14 @@ import {
 import type { QueueState } from "../../lib/documents/useUploadQueue";
 import type { SessionTokenAccessor } from "../../lib/session";
 import messages from "../../messages/en.json";
+
+// #970 — the tray now mounts message-scroller (components/ui/message-scroller.tsx),
+// which reaches `toggleAttribute`/`scrollTo`/`window.setTimeout` on its own container
+// refs. Those are additive capabilities `test/domInspect.ts` bolts on (that file's own
+// header: "safe to call at the top of every a11y/keyboard test file (or once from a
+// shared import)"); this file mounts the real component but never called it before,
+// because nothing here previously reached a vendored primitive that needed them.
+enableDomInspection();
 
 // #970 — THE TRAY ROW'S DISPLAY STATE, PINNED AGAINST THE LIVE EXPORT. `Attachment`
 // (components/ui/attachment.tsx) only knows five states ("idle" | "uploading" |

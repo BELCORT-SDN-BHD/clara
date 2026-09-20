@@ -51,6 +51,12 @@ import {
   AttachmentMedia,
   AttachmentTitle,
 } from "@/components/ui/attachment";
+import {
+  MessageScroller,
+  MessageScrollerContent,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
 import { queueStateLabelKey } from "@/lib/documents/copy";
 import { useUploadQueue, type QueueRejection, type QueueState } from "@/lib/documents/useUploadQueue";
 import type { AttachmentPart } from "@/lib/parts/types";
@@ -185,66 +191,103 @@ export function ComposerAttachmentControl({
             </StateBanner>
           ) : null}
           {queue.items.length > 0 ? (
-            <ul className="flex flex-col gap-1.5" aria-label={t("trayLabel")}>
-              {queue.items.map((item) => (
-                <li key={item.localId} className="enter-panel">
-                  <Attachment
-                    state={attachmentDisplayState(item.state)}
-                    size="sm"
-                    className="w-full"
-                  >
-                    <AttachmentMedia variant="icon">
-                      <Paperclip aria-hidden className="size-3.5" />
-                    </AttachmentMedia>
-                    <AttachmentContent>
-                      <AttachmentTitle title={item.name}>{item.name}</AttachmentTitle>
-                      <AttachmentDescription>{tDocuments(queueStateLabelKey(item))}</AttachmentDescription>
-                    </AttachmentContent>
-                    <AttachmentActions>
-                      {item.state === "error" || item.state === "failed" ? (
-                        <AttachmentAction
-                          type="button"
-                          variant="outline"
-                          aria-label={t("retry", { filename: item.name })}
-                          disabled={disabled}
-                          onClick={() => queue.retry(item.localId)}
-                        >
-                          <RotateCcw aria-hidden />
-                        </AttachmentAction>
-                      ) : null}
-                      <AttachmentAction
-                        type="button"
-                        aria-label={t("remove", { filename: item.name })}
-                        disabled={disabled}
-                        onClick={() => queue.remove(item.localId)}
-                      >
-                        <X aria-hidden />
-                      </AttachmentAction>
-                    </AttachmentActions>
-                  </Attachment>
-                  {/* The intake's OWN refusal, by the status it actually sent — the three
-                      the runtime can produce on the begin leg (intake.mjs:92-102 →
-                      400 bad_request / 413 too_large / 415 bad_type). Anything else falls
-                      through to the operational message VERBATIM, never a guessed cause. */}
-                  {item.state === "error" ? (
-                    <StateBanner
-                      tone="error"
-                      title={t("runtimeRefusalTitle")}
-                      code={item.errorStatus !== null ? String(item.errorStatus) : undefined}
-                      className="mt-1.5 w-full"
-                    >
-                      {item.errorStatus === 413
-                        ? t("runtimeTooLarge")
-                        : item.errorStatus === 415
-                          ? t("runtimeBadType")
-                          : item.errorStatus === 400
-                            ? t("runtimeBadRequest")
-                            : item.error ?? t("runtimeUnknown")}
-                    </StateBanner>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
+            // #970 — BOUNDED, rather than growing the composer without limit: up to
+            // CHAT_MAX_ATTACHMENTS (5) rows, each an Attachment card, would otherwise
+            // push the rail composer's footer taller with every file queued.
+            // message-scroller's own Provider/Root/Viewport/Content are required
+            // ancestors (each calls the primitive's `useMessageScroller` internally
+            // and throws without one — measured against the pinned
+            // node_modules/@shadcn/react/dist/message-scroller/index.js). The `<ul>`/
+            // `<li>` list is UNCHANGED inside Content — `MessageScrollerItem` is
+            // always a bare `<div>` with no `render`/`asChild` escape hatch, so
+            // wrapping each row in one would put a `<div>` between `<ul>` and `<li>`,
+            // breaking the "listitem is a direct child of list" structure this same
+            // tray's own six-file-cap cell (composer-attachment.test.tsx) already
+            // pins at five `<li>`s. That trade means the vendor's own scroll-anchor/
+            // auto-follow-newest tracking (which watches Content's DIRECT children,
+            // and here sees only the one `<ul>`) does not activate — this is a bounded,
+            // styled scroll viewport, not an anchored one, and no prop here claims
+            // otherwise. Content keeps its own default `role="log"` (new attachments
+            // are additions worth announcing); the per-row error banner below opts out
+            // of ITS OWN announcement (`silent`) so the two do not double-speak.
+            <MessageScrollerProvider>
+              <MessageScroller className="max-h-48">
+                <MessageScrollerViewport aria-label={t("trayLabel")}>
+                  <MessageScrollerContent>
+                    <ul className="flex flex-col gap-1.5" aria-label={t("trayLabel")}>
+                      {queue.items.map((item) => (
+                        <li key={item.localId} className="enter-panel">
+                          <Attachment
+                            state={attachmentDisplayState(item.state)}
+                            size="sm"
+                            className="w-full"
+                          >
+                            <AttachmentMedia variant="icon">
+                              <Paperclip aria-hidden className="size-3.5" />
+                            </AttachmentMedia>
+                            <AttachmentContent>
+                              <AttachmentTitle title={item.name}>{item.name}</AttachmentTitle>
+                              <AttachmentDescription>{tDocuments(queueStateLabelKey(item))}</AttachmentDescription>
+                            </AttachmentContent>
+                            <AttachmentActions>
+                              {item.state === "error" || item.state === "failed" ? (
+                                <AttachmentAction
+                                  type="button"
+                                  variant="outline"
+                                  aria-label={t("retry", { filename: item.name })}
+                                  disabled={disabled}
+                                  onClick={() => queue.retry(item.localId)}
+                                >
+                                  <RotateCcw aria-hidden />
+                                </AttachmentAction>
+                              ) : null}
+                              <AttachmentAction
+                                type="button"
+                                aria-label={t("remove", { filename: item.name })}
+                                disabled={disabled}
+                                onClick={() => queue.remove(item.localId)}
+                              >
+                                <X aria-hidden />
+                              </AttachmentAction>
+                            </AttachmentActions>
+                          </Attachment>
+                          {/* The intake's OWN refusal, by the status it actually sent — the three
+                              the runtime can produce on the begin leg (intake.mjs:92-102 →
+                              400 bad_request / 413 too_large / 415 bad_type). Anything else falls
+                              through to the operational message VERBATIM, never a guessed cause. */}
+                          {item.state === "error" ? (
+                            <StateBanner
+                              tone="error"
+                              title={t("runtimeRefusalTitle")}
+                              code={item.errorStatus !== null ? String(item.errorStatus) : undefined}
+                              className="mt-1.5 w-full"
+                              // #970 — SILENT: this banner now sits inside message-scroller's
+                              // Content, which keeps the vendor's own `role="log"` (an
+                              // announcement boundary for new attachments, test/a11yRules.ts's
+                              // `nested-live-region`). components/common/state.tsx's own
+                              // "one-announcement-owner" note is exactly this shape: the log
+                              // already speaks for what changed inside it, so a `role="alert"`
+                              // box in here would double-announce (or worse, be attributed to
+                              // the wrong region). The text is unchanged and still on screen —
+                              // only the announcement is dropped, never the content.
+                              silent
+                            >
+                              {item.errorStatus === 413
+                                ? t("runtimeTooLarge")
+                                : item.errorStatus === 415
+                                  ? t("runtimeBadType")
+                                  : item.errorStatus === 400
+                                    ? t("runtimeBadRequest")
+                                    : item.error ?? t("runtimeUnknown")}
+                            </StateBanner>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </MessageScrollerContent>
+                </MessageScrollerViewport>
+              </MessageScroller>
+            </MessageScrollerProvider>
           ) : null}
         </div>
       ) : null}
