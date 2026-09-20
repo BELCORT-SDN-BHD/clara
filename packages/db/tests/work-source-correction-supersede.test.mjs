@@ -29,6 +29,7 @@ import {
 } from "./work-journal-fixtures.mjs";
 import {
   openWorkQuestion, interruptionRow, answerWorkQuestion, twoFieldAnswer, cancelAgentTask,
+  getWorkQuestion,
 } from "./work-question-fixtures.mjs";
 import {
   filedDocument, ensureClientEgress, mintLegacyInvoiceFactsTask, claimTask,
@@ -37,7 +38,7 @@ import {
 import { timelineEvents } from "./work-cancel-fixtures.mjs";
 
 const STEM = "work_source_correction_supersede$";
-const EXPECTED_CELLS = 9;
+const EXPECTED_CELLS = 10;
 
 let live = false;
 let world = null;
@@ -52,9 +53,9 @@ async function cohortApplied() {
     `select count(*)::int as n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
       where ns.nspname = 'clara' and p.proname = any($1::text[])`,
     [["_source_corrected_work", "_lock_source_corrected_work", "_supersede_source_corrected_work",
-      "_question_source_corrected"]]);
-  if (fns.rows[0].n !== 4) {
-    assert.fail(`0268 ledger row present but only ${fns.rows[0].n}/4 of its routines exist — half-applied migration`);
+      "_question_source_corrected", "_fact_value_changed"]]);
+  if (fns.rows[0].n !== 5) {
+    assert.fail(`0268 ledger row present but only ${fns.rows[0].n}/5 of its routines exist — half-applied migration`);
   }
   return true;
 }
@@ -343,6 +344,17 @@ cell("w885.posted.untouched: a Work that already holds a committed receipt is le
     "the question is still PENDING — nothing was cancelled; it is the ANSWER that is refused");
   assert.equal((await workRow(parked.work_id)).status, rowBefore.status,
     "…and the posted Work itself is still untouched, which is the carve-out");
+
+  // THIRD FIX ROUND (recheck finding L09-RC2-03). The sentence this person meets has to name an
+  // exit that WORKS, and on this arm the restatement door does not: a Work holding a committed
+  // receipt reads as completed to `clara.restate_accounting_work`. The record carries the fact
+  // the surface needs to tell the two arms apart, so the copy and the offered controls can agree
+  // with what the doors really allow.
+  const rec = await getWorkQuestion(KEEPER(), parked.questionId);
+  assert.equal(rec.work_posted, true,
+    "the shared question record says this Work has already posted");
+  assert.ok(rec.source_corrected_at,
+    "…and that its source was corrected after the question was asked");
 });
 
 // =============================================================================================
@@ -430,6 +442,72 @@ cell("w885.no_stale_post: after a correction NO Work the door touched or created
 
   noteLane("w885.no_stale_post: retired " + String(parked.work_id).slice(0, 8)
     + ", replaced=" + entry.replaced + ", reason " + entry.not_replaced_reason);
+});
+
+// =============================================================================================
+// w885.noop.refused — A KEYSTROKE IS NOT A CORRECTION (third fix round, recheck L09-RC2-02).
+//
+// `clara.revise_document_fact` had no unchanged-value guard, so re-typing the value that is
+// already there was accepted, wrote a revision row whose prior_value and new_value are identical,
+// RETIRED every parked Work standing on the document, and made a carved-out question permanently
+// unanswerable -- `clara._question_source_corrected` keys on the EXISTENCE of a revision row and
+// max(recorded_at) can never fall back below the question's created_at.
+//
+// WHAT 'UNCHANGED' MEANS HERE, and it is the stored value rather than the keystrokes: for a
+// monetary fact the NORMALISED cents, for any other the trimmed text. So 'RM 880.00' typed over
+// 'RM 880.00' is refused, and so is '880.00' -- same figure, different spelling -- while a real
+// change of the figure is admitted exactly as before. The correcting door and
+// `clara._question_source_corrected` ask the SAME helper, so they cannot disagree about what a
+// correction is.
+// =============================================================================================
+cell("w885.noop.refused: re-typing the value that is already there is refused, retires nothing, and leaves every question answerable", async () => {
+  const s = await invoiceWithFacts({ client: A1(), totalCents: 88000, tag: "noop" });
+  const parked = await workParkedOnDocument({ client: A1(), document: s.documentId });
+  const before = await workRow(parked.work_id);
+  assert.equal(before.status, "awaiting_input", "mandatory setup: the Work really is parked");
+
+  // 1 · THE SAME TEXT, VERBATIM.
+  const same = await caught(() => reviseFact(KEEPER(), {
+    document: s.documentId, fieldPath: "invoice.total", value: "RM 880.00", observedVersion: 1,
+  }));
+  assert.ok(same, "re-typing the value already on the document is REFUSED");
+  assert.equal(same.code, "CLR10", "…as a payload refusal, not a convergence");
+  assert.equal(detailOf(same).reason, "value_unchanged", "…named for what it is");
+
+  // 2 · THE SAME FIGURE, A DIFFERENT SPELLING. The stored value is what counts, so this is the
+  //     same no-op and gets the same refusal.
+  const spelled = await caught(() => reviseFact(KEEPER(), {
+    document: s.documentId, fieldPath: "invoice.total", value: "880.00", observedVersion: 1,
+  }));
+  assert.ok(spelled, "…and so is the same figure typed differently");
+  assert.equal(detailOf(spelled).reason, "value_unchanged");
+
+  // 3 · NOTHING HAPPENED. No revision row, no retirement, no source-corrected verdict.
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.document_fact_revisions where document_id = $1", [s.documentId])).rows[0].n,
+  0, "no revision row was written at all");
+  const after = await workRow(parked.work_id);
+  assert.equal(after.status, before.status, "the parked Work is untouched");
+  assert.equal(after.superseded_by, null);
+  assert.equal((await interruptionRow(parked.questionId)).status, "pending", "…and its question is still open");
+  const rec = await getWorkQuestion(KEEPER(), parked.questionId);
+  assert.equal(rec.source_corrected_at, null,
+    "…and the record does not read as source-corrected: a keystroke is not a correction");
+
+  // 4 · …AND THE QUESTION IS STILL ANSWERABLE, which is the consequence a person meets.
+  const answered = await answerWorkQuestion(KEEPER(), {
+    question: parked.questionId, version: 1, answer: twoFieldAnswer(),
+  });
+  assert.equal(answered.status, "answered", "the question a no-op could not corrupt is answered normally");
+
+  // 5 · THE CONTROL: a REAL change of the same field, on the same document, still commits.
+  const real = await reviseFact(KEEPER(), {
+    document: s.documentId, fieldPath: "invoice.total", value: "RM 999.00", observedVersion: 1,
+  });
+  assert.equal(real.facts_version, 2, "a genuine correction is admitted exactly as before");
+
+  noteLane("w885.noop.refused: same value refused " + detailOf(same).reason
+    + ", same figure respelled refused " + detailOf(spelled).reason + ", real change facts_version " + real.facts_version);
 });
 
 // =============================================================================================

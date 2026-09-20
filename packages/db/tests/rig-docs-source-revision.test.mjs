@@ -672,9 +672,14 @@ cell("p646.replay.one_receipt: replaying either new door's op key returns the OR
 
   // TWO CONCURRENT CALLS with DIFFERENT keys: the document row lock serialises them, so the second
   // sees a moved version and refuses rather than overwriting.
+  //
+  // THE VALUE HAS TO BE A REAL CHANGE (#885 third fix round). This leg used to re-type the currency
+  // the fixture already carries; since 0268 refuses a revision that changes nothing (CLR10
+  // `value_unchanged`, recheck finding L09-RC2-02) a no-op pair would prove nothing about
+  // concurrency, because BOTH calls would be refused before they ever reached the row lock.
   const settled = await Promise.allSettled([
-    reviseFact(KEEPER(), { document: s.documentId, fieldPath: "invoice.currency", value: "MYR", observedVersion: 2 }),
-    reviseFact(KEEPER(), { document: s.documentId, fieldPath: "invoice.currency", value: "MYR", observedVersion: 2 }),
+    reviseFact(KEEPER(), { document: s.documentId, fieldPath: "invoice.currency", value: "SGD", observedVersion: 2 }),
+    reviseFact(KEEPER(), { document: s.documentId, fieldPath: "invoice.currency", value: "SGD", observedVersion: 2 }),
   ]);
   const ok = settled.filter((r) => r.status === "fulfilled");
   const no = settled.filter((r) => r.status === "rejected");

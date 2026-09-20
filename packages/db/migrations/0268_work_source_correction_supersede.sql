@@ -258,14 +258,18 @@ begin
   end if;
 
   -- SECOND FIX ROUND: the shared question record is recut too (§C2), so it gets the same
-  -- marker-tolerant pin. Its pre-image here is 0265's post-image (#839), measured on this
-  -- lane's rig; the marker is the key this file adds.
+  -- marker-tolerant pin. THIRD FIX ROUND, recheck finding L09-RC2-01: the literal shipped with the
+  -- second round matched no state this body can be in, and NO REDO COULD HAVE CAUGHT IT -- a
+  -- marker-tolerant pin short-circuits its sha branch the moment the live body carries the marker,
+  -- which it did on every redo. The value below is 0265's REAL post-image, measured the only way
+  -- that reaches the first-apply state: rewind the catalog to 0265's own `create or replace`
+  -- statement inside a transaction that is then rolled back, and take sha256(prosrc) there.
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara._work_question_record(uuid)'::regprocedure;
   select encode(sha256(convert_to(v_src,'UTF8')),'hex') into v_sha;
-  if v_sha is distinct from 'e3866088ee13a6ff92fe365d87a82bab7f713ab2e67a267a11b187c9b7c7d1b2'
+  if v_sha is distinct from 'f4b62dd26d7e0acf9c91d54055af9605d10ae05090ad727feb3bcc1f56830212'
      and position('source_corrected_at' in v_src) = 0 then
-    raise exception '#885 prestate: clara._work_question_record has DRIFTED from its pinned pre-image (measured %, expected e3866088ee13a6ff92fe365d87a82bab7f713ab2e67a267a11b187c9b7c7d1b2) and does not carry this file''s key -- re-derive this file against the LIVE body before applying', v_sha
+    raise exception '#885 prestate: clara._work_question_record has DRIFTED from its pinned pre-image (measured %, expected f4b62dd26d7e0acf9c91d54055af9605d10ae05090ad727feb3bcc1f56830212) and does not carry this file''s key -- re-derive this file against the LIVE body before applying', v_sha
       using errcode='CLR10';
   end if;
   if position('source_corrected_at' in v_src) <> 0 then
@@ -345,6 +349,37 @@ comment on function clara._source_corrected_work(uuid,uuid) is
   'committed receipt (#676''s carve-out) and is in one of the three statuses a restatement is '
   'offered from. The WRITE-side twin of clara.list_source_dependents'' work_questions arm.';
 
+-- A1a · DID THIS REVISION CHANGE THE RECORDED VALUE AT ALL? (third fix round, recheck finding
+-- L09-RC2-02.)
+--
+-- A keystroke is not a correction. Re-typing the value that is already on the document used to
+-- be accepted, and every consequence followed in full: the parked Work was retired and a
+-- carved-out question became permanently unanswerable, because the predicate below keys on the
+-- EXISTENCE of a revision row and max(recorded_at) can never fall back below the question's
+-- created_at. MEASURED before this round.
+--
+-- WHAT 'CHANGED' MEANS, and it is the STORED value rather than the keystrokes: when both sides
+-- carry a normalised figure it is the CENTS, so 'RM 880.00' and '880.00' are the same fact
+-- differently spelled; otherwise it is the trimmed text. A fact the reader never persisted has no
+-- prior value at all, and anything is a change against nothing.
+--
+-- ONE NOTION, TWO CALLERS. clara.revise_document_fact refuses a no-op with it, and
+-- clara._question_source_corrected ignores any revision row it calls unchanged -- including rows
+-- written before this guard existed -- so the door and the predicate cannot drift apart.
+create or replace function clara._fact_value_changed(p_prior jsonb, p_new jsonb)
+  returns boolean
+  language sql immutable set search_path = clara, pg_temp as $$
+  select case
+    when p_prior is null or p_new is null then true
+    when (p_prior ? 'cents') and (p_new ? 'cents')
+      then (p_prior->>'cents') is distinct from (p_new->>'cents')
+    else btrim(coalesce(p_prior->>'text', '')) is distinct from btrim(coalesce(p_new->>'text', ''))
+  end;
+$$;
+revoke all on function clara._fact_value_changed(jsonb,jsonb) from public;
+comment on function clara._fact_value_changed(jsonb,jsonb) is
+  '#885: does a fact revision CHANGE the recorded value? The normalised cents when both sides carry them, otherwise the trimmed text. The one notion clara.revise_document_fact refuses a no-op with and clara._question_source_corrected reads a revision row through.';
+
 -- A1b · WAS THIS QUESTION ASKED AGAINST A READING THAT HAS SINCE MOVED? (second fix round,
 -- recheck finding L09-RC-03.)
 --
@@ -374,6 +409,11 @@ create or replace function clara._question_source_corrected(p_question uuid)
       on r.firm_id = w.firm_id
      and r.revision_kind = 'fact'
      and r.recorded_at > i.created_at
+     -- …AND IT ACTUALLY CHANGED THE VALUE (third fix round). A row whose prior_value and
+     -- new_value are the same fact is a keystroke, not a correction, and must not make a
+     -- question unanswerable. Applied HERE as well as at the door so rows written before the
+     -- door's guard existed are read the same way.
+     and clara._fact_value_changed(r.prior_value, r.new_value)
      and exists (select 1 from jsonb_array_elements(coalesce(w.source_refs, '[]'::jsonb)) x
                   where x->>'kind' = 'document' and x->>'document_id' = r.document_id::text)
    where i.id = p_question and i.work_id is not null;
@@ -687,6 +727,17 @@ begin
   end if;
   v_new_value := jsonb_strip_nulls(jsonb_build_object('text', v_raw, 'cents', v_cents));
 
+  -- #885 (third fix round) · A KEYSTROKE IS NOT A CORRECTION. Refused BEFORE anything is
+  -- written: no extraction, no revision row, no facts_version, and -- the reason this is not a
+  -- cosmetic guard -- no retirement of the Work parked on this document and no question turned
+  -- permanently unanswerable. A fact the reader never persisted has no prior value, and anything
+  -- is a change against nothing.
+  if v_prior_value is not null and not clara._fact_value_changed(v_prior_value, v_new_value) then
+    raise exception 'this revision does not change what the document is recorded as saying'
+      using errcode = 'CLR10', detail = jsonb_build_object('reason', 'value_unchanged',
+        'field_path', p_field_path, 'value', v_new_value)::text;
+  end if;
+
   insert into clara.document_extractions(firm_id, document_id, engine_id, engine_kind,
       version_n, status, page_count, envelope)
     values (c.firm, p_document, 'clara-fact-human:v1', 'invoice_facts', v_version, 'done',
@@ -973,7 +1024,13 @@ create or replace function clara._work_question_record(p_question uuid)
     'basis', w.basis,
     -- #885 (second fix round) · WHEN the source this question stands on was corrected, if it was
     -- corrected after the question was asked. NULL otherwise.
-    'source_corrected_at', clara._question_source_corrected(i.id))
+    'source_corrected_at', clara._question_source_corrected(i.id),
+    -- #885 (third fix round) · HAS THIS WORK ALREADY POSTED? It is #676's carve-out, read off the
+    -- same helper the retirement rule asks, and the surface needs it to say something TRUE: a
+    -- Work holding a committed receipt reads as completed to clara.restate_accounting_work, so
+    -- 'state the instruction again' is the wrong exit there and 'Restate' is a control that can
+    -- only be refused (recheck finding L09-RC2-03).
+    'work_posted', clara._work_committed_receipt(w.id) is not null)
   from clara.agent_interruptions i
   join clara.accounting_work w on w.id = i.work_id
   where i.id = p_question and i.work_id is not null;
@@ -1026,6 +1083,16 @@ begin
         using errcode='CLR10';
     end if;
   end loop;
+
+  -- 2a-bis · THE QUESTION PREDICATE READS A REVISION ROW THROUGH THE SAME NOTION the door
+  -- refuses a no-op with, so the two cannot drift (third fix round).
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._question_source_corrected(uuid)'::regprocedure;
+  if position('clara._fact_value_changed(r.prior_value, r.new_value)' in v_src) = 0
+     or position('r.recorded_at > i.created_at' in v_src) = 0 then
+    raise exception '#885 tail: clara._question_source_corrected does not ask BOTH terms (after the question, and a real change)'
+      using errcode='CLR10';
+  end if;
 
   -- 2b · THE FINDER REALLY CARRIES ALL FOUR TERMS of the rule this file documents.
   select p.prosrc into v_src from pg_proc p
@@ -1118,6 +1185,9 @@ begin
   if position('field_path_not_revisable' in v_src) = 0 then v_missing := v_missing || ' lane-wall'; end if;
   if position('monetary_value_malformed' in v_src) = 0 then v_missing := v_missing || ' cents'; end if;
   if position('clara._reserve_op(c.firm, ''revise_document_fact''' in v_src) = 0 then v_missing := v_missing || ' reserve'; end if;
+  -- third fix round: the no-op guard, and the ONE notion it shares with the question predicate.
+  if position('''value_unchanged''' in v_src) = 0 then v_missing := v_missing || ' no-op-guard'; end if;
+  if position('clara._fact_value_changed(v_prior_value, v_new_value)' in v_src) = 0 then v_missing := v_missing || ' shared-changed-notion'; end if;
   if position('''superseded_work'', v_superseded' in v_src) = 0 then v_missing := v_missing || ' receipt-key'; end if;
   if v_missing <> '' then
     raise exception '#885 tail: clara.revise_document_fact LOST guard(s)/key(s):% -- only the three #885 additions may change', v_missing
@@ -1177,8 +1247,9 @@ begin
   end if;
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara._work_question_record(uuid)'::regprocedure;
-  if position('''source_corrected_at'', clara._question_source_corrected(i.id)' in v_src) = 0 then
-    raise exception '#885 tail: clara._work_question_record does not project source_corrected_at'
+  if position('''source_corrected_at'', clara._question_source_corrected(i.id)' in v_src) = 0
+     or position('''work_posted'', clara._work_committed_receipt(w.id) is not null' in v_src) = 0 then
+    raise exception '#885 tail: clara._work_question_record does not project source_corrected_at and work_posted'
       using errcode='CLR10';
   end if;
   v_missing := '';
@@ -1190,11 +1261,17 @@ begin
     raise exception '#885 tail: clara._work_question_record LOST key(s):% -- only the one #885 key may change', v_missing
       using errcode='CLR10';
   end if;
-  if (select count(*)::int from jsonb_object_keys(
-        coalesce((select clara._work_question_record(i.id) from clara.agent_interruptions i
-                   where i.work_id is not null order by i.created_at desc limit 1),
-                 '{}'::jsonb)) k) not in (0, 25) then
-    raise exception '#885 tail: the shared question record no longer carries exactly 0180''s twenty-four keys plus source_corrected_at'
+  -- THE KEY COUNT, MEASURED LIVE WHEN THERE IS A ROW TO MEASURE IT ON -- and said out loud when
+  -- there is not, rather than tolerated silently (third fix round: an unexercised branch is the
+  -- shape that hid L09-RC2-01). On a database with no work-bearing interruption the text checks
+  -- above are the whole assertion, and they name every key this record carries.
+  select count(*)::int into v_n from clara.agent_interruptions where work_id is not null;
+  if v_n = 0 then
+    raise notice '#885 tail: no work-bearing interruption exists here, so the record''s key count was not measured live; the key-by-key text assertions above stand on their own.';
+  elsif (select count(*)::int from jsonb_object_keys(
+        (select clara._work_question_record(i.id) from clara.agent_interruptions i
+          where i.work_id is not null order by i.created_at desc limit 1)) k) <> 26 then
+    raise exception '#885 tail: the shared question record no longer carries exactly 0180''s twenty-four keys plus source_corrected_at and work_posted'
       using errcode='CLR10';
   end if;
   select p.prosrc into v_src from pg_proc p
@@ -1216,7 +1293,7 @@ begin
 
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
    where p.oid = 'clara._work_question_record(uuid)'::regprocedure;
-  if v_sha = 'e3866088ee13a6ff92fe365d87a82bab7f713ab2e67a267a11b187c9b7c7d1b2' then
+  if v_sha = 'f4b62dd26d7e0acf9c91d54055af9605d10ae05090ad727feb3bcc1f56830212' then
     raise exception '#885 tail: clara._work_question_record is BYTE-IDENTICAL to its 0265 pre-image -- the recut did not commit'
       using errcode='CLR10';
   end if;

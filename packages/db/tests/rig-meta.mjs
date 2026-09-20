@@ -2328,9 +2328,13 @@ export const DOCUMENT_SOURCE_REVISION_0217_TABLES = ["document_fact_revisions"];
 //   shared question record. Ungranted for the same reason as the other three -- it reads
 //   clara.document_fact_revisions joined to clara.accounting_work across the Work lane, and the
 //   only callers that should ever ask it are SECURITY DEFINER doors that already hold a firm.
+//   THE FIFTH NAME (third fix round): `_fact_value_changed` is the ONE notion of "this revision
+//   changed the recorded value" that clara.revise_document_fact refuses a no-op with and
+//   clara._question_source_corrected reads a revision row through. Ungranted like its siblings: it
+//   is a predicate over document facts that only those two SECURITY DEFINER bodies should ask.
 const WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS = [
   "_source_corrected_work", "_lock_source_corrected_work", "_supersede_source_corrected_work",
-  "_question_source_corrected",
+  "_question_source_corrected", "_fact_value_changed",
 ];
 export const WORK_SOURCE_CORRECTION_0268_COHORT = [...WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS];
 // #885 END

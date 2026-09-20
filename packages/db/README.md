@@ -866,7 +866,8 @@ the corrected document and the still-answerable question coexist):
 | `clara._source_corrected_work(uuid,uuid)` | The ONE rule: a Work of this firm that still has a PENDING question, names this document in its own `source_refs`, holds NO committed receipt, and is in `queued` / `running` / `awaiting_input`. The write-side twin of `list_source_dependents`' `work_questions` arm, narrowed by the last two terms. Ungranted. |
 | `clara._lock_source_corrected_work(uuid,uuid)` | Takes the `accounting_work → agent_tasks → agent_interruptions` rungs for that set and returns exactly the ids it locked. Ungranted. |
 | `clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid)` | Re-asks the rule under those locks and retires each Work through `clara.cancel_accounting_work`, admitting **no** successor on any arm. Ungranted. |
-| `clara._question_source_corrected(uuid)` | WHEN the source a question stands on was last corrected, if it was corrected **after** the question was asked — the instant, or NULL. Same firm and `source_refs` terms as the rule above. Ungranted. |
+| `clara._question_source_corrected(uuid)` | WHEN the source a question stands on was last corrected, if it was corrected **after** the question was asked AND that revision changed the value — the instant, or NULL. Same firm and `source_refs` terms as the rule above. Ungranted. |
+| `clara._fact_value_changed(jsonb,jsonb)` | Did a revision change the RECORDED value? Normalised cents when both sides carry them, else the trimmed text. The one notion the correcting door refuses a no-op with and the predicate above reads a revision row through. Ungranted. |
 
 **The retirement rides 0199's own door.** `clara.cancel_accounting_work` appends the single
 `work.cancelled` domain event; 0268 registers **no** new event type and **no** taxonomy row, and
@@ -890,6 +891,17 @@ through #721's own restatement door. `packages/db/tests/work-source-correction-s
 RM 999.00, no Work the door touched or created can put a 64000-cent line on the books against that
 document.
 
+**A KEYSTROKE IS NOT A CORRECTION.** `clara.revise_document_fact` refuses a revision that leaves
+the recorded value where it was: CLR10 `value_unchanged`, raised before anything is written — no
+extraction, no revision row, no `facts_version`, and above all no retirement and no question turned
+unanswerable. *Unchanged* means the STORED value, not the keystrokes: the normalised cents when both
+sides carry them (so `RM 880.00` typed over `880.00` is the same fact), otherwise the trimmed text; a
+fact the reader never persisted has no prior value, and anything is a change against nothing.
+`clara._fact_value_changed(jsonb,jsonb)` is that one notion, and BOTH the door and
+`clara._question_source_corrected` ask it — the predicate reads revision rows through it too, so a
+row written before this guard existed cannot make a question read as source-corrected either.
+Pinned by `w885.noop.refused`.
+
 **A question whose source was corrected is not answerable — even where the Work is carved out.**
 The retirement rule deliberately does not touch a Work holding a committed receipt (#676's
 territory), and before this round a person could still answer that Work's pending question after
@@ -899,8 +911,11 @@ source moved after the question was asked, carrying the instant on `detail.curre
 .source_corrected_at`; the same word replaces `cancelled` for a question the retirement closed, so
 the refusal says what changed rather than only that something did. The Work itself is still
 untouched: it is the ANSWER that is refused. `clara._work_question_record` projects
-`source_corrected_at` beside 0180's own keys so B3/B4/B6 render the sentence instead of an answer
-form.
+`source_corrected_at` **and `work_posted`** beside 0180's own keys, so B3/B4/B6 render the sentence
+instead of an answer form — and render the RIGHT sentence: a retired Work is restated on the
+corrected document, while a Work that already posted cannot be restated at all
+(`clara.restate_accounting_work` refuses it CLR13 `not_restatable`), so its sentence names Cancel
+Work and the rail withholds the restate control there.
 
 **What is NOT delivered here, and who owes it.** "Re-admitted ON THE CORRECTED FACTS" needs
 somebody to re-read the corrected document and propose a basis from it. `journalBasisSchema`

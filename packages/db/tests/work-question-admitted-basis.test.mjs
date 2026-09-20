@@ -103,12 +103,14 @@ test("w839.basis.pending get_work_question carries the admitted basis, verbatim,
   ];
   assert.deepEqual(
     [...Object.keys(rec)].sort(),
-    (corrected ? [...KEYS_0265, "source_corrected_at"] : KEYS_0265).sort(),
+    (corrected ? [...KEYS_0265, "source_corrected_at", "work_posted"] : KEYS_0265).sort(),
     "w839.basis.pending: the record carries exactly 0180's fields, plus `basis`, plus "
-    + "`source_corrected_at` once #885/0268 is applied",
+    + "`source_corrected_at` and `work_posted` once #885/0268 is applied",
   );
   assert.equal(corrected ? rec.source_corrected_at : null, null,
     "…and on a question whose source has NOT been corrected since it was asked, that key is null");
+  assert.equal(corrected ? rec.work_posted : false, false,
+    "…and a Work that has not posted says so, which is what lets a surface offer the exit that works");
 });
 
 test("w839.basis.settled the answered record still carries the SAME admitted basis", async (t) => {
