@@ -1718,6 +1718,16 @@ bytes/storage upgrade is its only writer) and keeps its own spelling. `detail.en
 present-and-null on this one arm — the winner committed after the loser's snapshot and no read
 inside a SERIALIZABLE transaction can reach it.
 
+**It serializes on the document, not on the conflict, and that over-refuses on purpose.** A
+SERIALIZABLE session that blocked on *any* other transaction binding the same document is refused,
+including one that left no live evidence link. Measured with both sides driving
+`clara._lock_document_binding` directly: the waiter blocks on a `Lock` and is refused `CLR13`; the
+same call unraced succeeds. The one case where this is stricter than the sequential path is a plain
+coded approval carrying the tie document racing an opening approval — 0213's opening arm probes live
+links alone, so sequentially both stand. Narrowing it is not available: the losing session cannot
+read *what* the winner claimed, which is the same snapshot limit the claim exists to work around.
+The outcome is conservative, typed and retryable.
+
 **Lock order.** The claim is taken after the document row and only ever for the same document, so a
 transaction binding documents A then B takes `A.doc, A.claim, B.doc, B.claim`: the relative order
 of two documents is the one `clara.documents` already imposed, and two transactions that inverted it

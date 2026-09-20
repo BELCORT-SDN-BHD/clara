@@ -81,6 +81,19 @@
 --   name re-reads the document's links in a fresh transaction (#1014's report carries that as a
 --   successor contract).
 --
+--   THE CLAIM SERIALIZES ON THE DOCUMENT, NOT ON THE CONFLICT — AND THAT OVER-REFUSES, ON PURPOSE.
+--   A SERIALIZABLE session that blocked on ANY other transaction binding the same document is
+--   refused, including one that left no live evidence link behind. MEASURED on this rig (both sides
+--   driving `clara._lock_document_binding` directly, so the claim is the only thing in play): the
+--   waiter blocks on a Lock and is refused CLR13 `source_already_posted`; the same call unraced
+--   succeeds. The one case this is stricter than the sequential path is a plain CODED approval
+--   carrying the tie document racing the opening approval — 0213's opening arm probes live links
+--   ALONE, so sequentially both stand. Narrowing it is not available: the losing session cannot read
+--   WHAT the winner claimed (that is the same snapshot limit this file exists to work around), so a
+--   claim key carrying the conflict class would have to be read to be useful. The outcome is
+--   conservative, typed and retryable — the retry sees the committed world and decides correctly —
+--   and #1014's report carries it as a named follow-up rather than leaving it to be discovered.
+--
 --   NO NEW LOCK PAIR, NO NEW RUNG IN THE ESTATE'S LADDER. The claim is taken AFTER the document
 --   row and only ever for the SAME document, so a transaction that binds documents A then B takes
 --   A.doc, A.claim, B.doc, B.claim — the relative order of the two documents is the one
