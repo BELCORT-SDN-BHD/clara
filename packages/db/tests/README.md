@@ -735,7 +735,7 @@ later file in the same sweep does not inherit this one's arrangement.
 `legal-enforcement-mode-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
 does not preload it and fails loudly on a database without 0234, because a skip is not evidence.
 
-## `operator-support.test.mjs` os.19 — #844
+## `operator-support.test.mjs` `os.19` — #844
 
 os.14 (#774) pins the arm-1 lateral's SECOND ordering key (a money-carrying intent status beats a
 bare `opened_at desc`), but every world it or any other cell in the file builds gives a
