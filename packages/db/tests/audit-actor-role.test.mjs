@@ -20,10 +20,10 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { ROLES, assertRaises, endPool, humanQuery, opk, roleQuery, rootQuery } from "./rig-fixtures.mjs";
+import { AGENT_USER_ID, ROLES, assertRaises, endPool, humanQuery, opk, roleQuery, rootQuery } from "./rig-fixtures.mjs";
 import { auditActorRoleCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 4;
+const EXPECTED_CELLS = 5;
 let live = false;
 let executed = 0;
 
@@ -229,4 +229,68 @@ cell("ar.04 a promotion the mechanism never saw says UNKNOWN -- and the register
   assert.equal(entry.authority.promoter_role_now, "admin",
     "…and the promoter's CURRENT role is still reported, as the separate fact it is: an unknown "
     + "historical role must never be filled in from the live roster");
+});
+
+// =============================================================================================
+// SEAM 3 — THE CATALOG. The ruling's own third acceptance criterion: "every governed door
+// inherits the column with no per-door change (a census over `_audit` callers)". This is the
+// structural cell the repo's own standard asks for (work order rule 4), and the behavioural
+// halves beside it walk two doors from lanes this ticket never touched.
+// =============================================================================================
+
+cell("ar.05 every governed door inherits the column with no per-door change -- one writer, one stamp, and no second overload to drift into", async () => {
+  // (a) THE SOLE WRITER. If any function wrote the audit row itself it would write it around the
+  // stamp, and the ruling's "no per-door change" would be false for exactly that door.
+  const writers = (await rootQuery(
+    `select ns.nspname || '.' || p.proname as f
+       from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+      where ns.nspname not in ('pg_catalog', 'information_schema')
+        and p.prosrc like '%insert into clara.audit_log%'
+      order by 1`)).rows.map((r) => r.f);
+  assert.deepEqual(writers, ["clara._audit"],
+    "clara.audit_log must have exactly one writer -- every door's audit row goes through it");
+
+  // (b) ONE SIGNATURE, ONE OVERLOAD. A door that needed a per-door change would show up here as a
+  // second `_audit` to call instead, or as a moved argument list. The exact CALLER COUNT is a
+  // frontier fact and is pinned in 0243's own tail (304 at 0242); here it is a floor, so the cell
+  // stays true as the estate grows.
+  const shape = (await rootQuery(
+    `select count(*)::int as overloads,
+            max(pg_get_function_identity_arguments(p.oid)) as args
+       from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+      where ns.nspname = 'clara' and p.proname = '_audit'`)).rows[0];
+  assert.equal(shape.overloads, 1, "a second clara._audit overload would be a per-door fork");
+  assert.equal(shape.args,
+    "p_firm uuid, p_actor uuid, p_obo uuid, p_wake_kind text, p_fn text, p_entry uuid, p_args jsonb",
+    "clara._audit's argument list is what all of its callers pass positionally -- it must not move");
+  const callers = (await rootQuery(
+    `select count(*)::int as n
+       from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+      where ns.nspname = 'clara' and p.prosrc like '%clara._audit(%'`)).rows[0].n;
+  assert.ok(callers >= 300, `only ${callers} function(s) call clara._audit -- the census that makes "every door" mean something`);
+
+  // (c) A DOOR FROM A LANE THIS TICKET NEVER TOUCHED. clara.create_client (0004) has nothing to do
+  // with knowledge, and inherits the column anyway.
+  const w = await knowledgeWorld("p912a5");
+  await humanQuery(w.admin,
+    "select clara.create_client(p_name => $1, p_op_key => $2) as r",
+    [`p912 inherit ${randomUUID().slice(0, 8)}`, opk("p912cc")]);
+  const created = await auditRowOf(w.firm, "create_client", w.admin);
+  assert.equal(created.actor_role, "admin",
+    "a door in another lane entirely records the role, with no edit of its own");
+
+  // (d) THE WAKE LANE'S ACTOR IS 'none', NEVER NULL. 0004's lane split makes the global agent
+  // identity the actor of every wake act, and it holds no membership by construction. Storing
+  // 'none' is what keeps NULL meaning exactly one thing (ar.04's "predates the mechanism").
+  await rootQuery(
+    `insert into clara.audit_log(firm_id, actor, via_wake_kind, fn, args)
+     values ($1, $2, 'proactive', 'rig_912_wake_actor', '{}'::jsonb)`, [w.firm, AGENT_USER_ID]);
+  const agentRow = (await rootQuery(
+    "select actor_role from clara.audit_log where firm_id = $1 and fn = 'rig_912_wake_actor'",
+    [w.firm])).rows[0];
+  assert.equal(agentRow.actor_role, "none",
+    "an actor with no active membership is recorded as 'none' -- measured, not unknown");
+  // …and 'none' is not a rank, so nothing can compare it as authority.
+  const rank = (await rootQuery("select clara.role_rank('none') as r")).rows[0].r;
+  assert.equal(rank, null);
 });

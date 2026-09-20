@@ -2590,6 +2590,22 @@ const LEGAL_ENFORCEMENT_0234_HUMAN_FNS = [
 ];
 export const LEGAL_ENFORCEMENT_0234_COHORT = [...LEGAL_ENFORCEMENT_0234_HUMAN_FNS];
 // #1008 END
+// #912 [0243, the role at the instant of a governed act] — its own cohort, bimodal like 0234's:
+// wholly present once 0243 applies, wholly absent before it, because the `db-slice-frontiers`
+// matrix runs this package against earlier frontiers.
+//
+//   ONE new body, and it is a TRIGGER function: clara._tf_audit_actor_role stamps
+//   `clara.audit_log.actor_role` BEFORE INSERT. It is granted to NOBODY (a trigger body is
+//   reached by the trigger, never by a caller), so it is expected-false for every role in the
+//   live sweep; this cohort is what fails if the NAME ever disappears, the other half of the
+//   0020 contract. No door is recut and no grant moves: clara._audit keeps its frozen 0004 body
+//   and its signature, which is exactly how all 304 callers inherit the column.
+//
+//   clara.list_firm_knowledge, which 0243 recuts, keeps its existing 0220 cohort membership
+//   (`create or replace` preserves the ACL, and 0243's tail asserts the body and the ACL).
+const AUDIT_ACTOR_ROLE_0243_UNGRANTED_FNS = ["_tf_audit_actor_role"];
+export const AUDIT_ACTOR_ROLE_0243_COHORT = [...AUDIT_ACTOR_ROLE_0243_UNGRANTED_FNS];
+// #912 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -3330,6 +3346,12 @@ export async function grantMatrixFailures() {
   if (enforcementLive.length !== 0) {
     failures.push(...cohortFailures("#1008 0234 platform legal enforcement mode",
       LEGAL_ENFORCEMENT_0234_COHORT, liveNames));
+  }
+  // #912 [0243] — bimodal, same reason as 0234's above.
+  const actorRoleLive = AUDIT_ACTOR_ROLE_0243_COHORT.filter((n) => liveNames.has(n));
+  if (actorRoleLive.length !== 0) {
+    failures.push(...cohortFailures("#912 0243 audit actor-role stamp",
+      AUDIT_ACTOR_ROLE_0243_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
