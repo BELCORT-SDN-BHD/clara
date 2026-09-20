@@ -104,6 +104,33 @@ export async function keyGrammarCohortApplied() {
   return present === flags.length;
 }
 
+/** True iff #912's audit actor-role cohort (0243_audit_actor_role.sql) is applied: the
+ *  `clara.audit_log.actor_role` column AND its own CHECK AND the `t_audit_actor_role` stamp that
+ *  fills it. Same "wholly present or wholly absent" law as the cohorts above: one migration lands
+ *  the column and the stamp together, so a chain carrying only one of them is a defect to surface
+ *  rather than a frontier to skip. */
+export async function auditActorRoleCohortApplied() {
+  const r = await rootQuery(
+    `select
+       exists (select 1 from information_schema.columns
+                where table_schema = 'clara' and table_name = 'audit_log'
+                  and column_name = 'actor_role')                          as role_column,
+       exists (select 1 from pg_constraint
+                where conrelid = 'clara.audit_log'::regclass
+                  and conname = 'ck_audit_log_actor_role')                 as role_check,
+       exists (select 1 from pg_trigger
+                where tgrelid = 'clara.audit_log'::regclass
+                  and not tgisinternal and tgname = 't_audit_actor_role')  as stamp_trigger`,
+  );
+  const row = r.rows[0];
+  const flags = Object.values(row);
+  const present = flags.filter(Boolean).length;
+  if (present !== 0 && present !== flags.length) {
+    throw new Error(`#912 audit actor-role cohort is PARTIAL: ${JSON.stringify(row)}`);
+  }
+  return present === flags.length;
+}
+
 /** One firm, four people at four ranks, two clients. Returns everything a cell addresses. */
 export async function knowledgeWorld(tag) {
   const suffix = `${tag}_${randomUUID().slice(0, 8)}`;
