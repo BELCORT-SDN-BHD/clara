@@ -1204,3 +1204,33 @@ signature.
 `packages/db/package.json`'s `"test"` chain at its MIGRATION-order position (last, after
 `fa-particulars-completion-fold-preintegration-gate.mjs`, 0249). A FOCUSED run does not preload it
 and FAILS LOUDLY below 0250; final acceptance is exactly that focused shape counting ZERO skips.
+
+## The depreciation authority retired-read fallback (#979)
+
+`fa-authority-retired-read.test.mjs` is frontier-gated on the `fa_authority_retired_read$` stem
+(migration 0251) via `fa-authority-retired-read-fixtures.mjs`, which re-exports the whole
+`x41-fa-world.mjs` world (`proposeAuthority`, `signAuthority`, `retireAuthorityVerb`,
+`getAuthority`, `freshFaClient`, …) rather than forking a second copy of it — this ticket changes
+a READ, not the shape of what gets written, so its clients need no ties out of the `x41_…` family
+the way `fa-birth-watermark-fixtures.mjs` (#972) did for a deliberately pre-enrolment, defect-shaped
+fixture. Four `p979.*` cells: `p979.none` pins AC1 (a client with no authority at all still reads
+back a bare `authority: null`); `p979.retired` is AC2's behavioural proof — propose, sign and
+retire one authority, then read it back through `clara.get_depreciation_authority` at the `viewer`
+floor and assert its `status`, `retired_reason`, the now-populated `retired_by`, `retired_at` (to
+the second, cross-checked against a direct table read cast to `epoch` so the assertion never
+depends on the pg driver's own timezone parsing) and `authority_from`, all against the SAME row
+read directly off `clara.fa_depreciation_authorities` as an independent source of truth;
+`p979.recent` proves the fallback picks the MOST RECENT of two retired authorities, never the
+first; `p979.preferred` is AC3/AC5 — a live authority still wins over an older retired one, and
+its returned object carries NONE of the three keys the retired arm adds (asserted by key absence,
+not by an empty value).
+
+`fa-authority-retired-read-preintegration-gate.mjs` is the package-wide sweep's escape
+(`CLARA_ALLOW_MISSING_FA_AUTHORITY_RETIRED_READ=1`), registered in `packages/db/package.json`'s
+`"test"` chain at its MIGRATION-order position (last, after
+`authority-ref-human-instruction-preintegration-gate.mjs`, 0250). A FOCUSED run does not preload it
+and FAILS LOUDLY below 0251; final acceptance is exactly that focused shape counting ZERO skips.
+
+No CONTEXT.md change: `retired` is already this estate's vocabulary (filings, counterparty
+aliases), and 0251 coins no new domain term — it only widens which existing authority state one
+existing read surfaces, matching #973's and #976's own conclusion for their sibling folds.

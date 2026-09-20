@@ -2012,6 +2012,18 @@ export const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT = [
   ...AUTHORITY_REF_HUMAN_INSTRUCTION_0250_UNGRANTED_FNS,
 ];
 
+// #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
+// was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
+// the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:
+// it RECUTS `clara.get_depreciation_authority` to add one fallback select and one conditional
+// field merge, same signature `(uuid)`, same owner, same SECURITY DEFINER, same STABLE
+// volatility, same pinned search_path, same EXECUTE to clara_authenticated and to nobody else
+// (0251's own tail T.5/T.5b/T.5c re-reads exactly that off the catalog). A cohort of its own
+// would be WRONG here rather than merely redundant: cohortFailures() fails a HALF-present cohort,
+// and `get_depreciation_authority` is present on every database from 0041 onward regardless of
+// whether 0251 has been applied.
+// #979 END
+
 // #638 [0221, staff expense claims / employee payables / advance settlement] — its own cohort for
 // the same "wholly present or wholly absent" reason 0178's and 0194's carry.
 //

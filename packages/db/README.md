@@ -864,6 +864,20 @@ out of scope; the lane report files the follow-up. `clara.create_prepayment_sche
 line of its own — it passes its caller's `p_authority_ref` straight through to
 `clara.create_accounting_plan`.
 
+**A retired authority now reads back AS retired, not as "never had one" (#979, migration 0251).**
+`clara.get_depreciation_authority` selected only a `live`-or-`proposed` authority (0041:4225-4227);
+a client whose only authority was RETIRED read back the same bare `authority: null` a client that
+never proposed one reads back — the two states were indistinguishable to any caller. The owner's
+2026-09-20 ruling (on the ticket's own recommendation) says surface the retired case instead: when
+the live-or-proposed select finds nothing, 0251 adds ONE fallback select to the client's most
+recent retired authority (`order by retired_at desc, created_at desc`) and merges
+`retired_reason`/`retired_at`/`authority_from` onto the returned object — ONLY on that retired
+arm, so a live or a proposed authority's object keeps exactly the keys it always carried, byte
+for byte. The existing `retired_by` field (0041:4239), previously always empty because no
+retired row was ever selected, is now populated. Nothing about HOW an authority is retired, or
+`clara.retire_depreciation_authority` itself, moves — that door is pinned byte-for-byte unmoved
+in 0251's prestate and tail, matching the ticket's own out-of-scope line.
+
 **And one thing this file is not.** It does NOT unpark `close_prep`: the wake source stays
 registered-and-disabled, asserted in the prestate AND the tail in `0223:247-250`'s own idiom.
 
