@@ -50,17 +50,22 @@ export const FIRM_SETUP_RPC_VERBS = new Set([
   "answer_firm_setup_item",
   "defer_firm_setup_item",
   "commit_firm_setup",
+  "dismiss_firm_setup_tip",
 ]);
+
+/** #935 — the one education tip this fixture carries. Exported so the spec cannot misspell it. */
+export const TIP_KEY = "tip_invite_colleagues";
 
 function armed(request) {
   return (request.headers.cookie ?? "").includes(`${FIRM_SETUP_COOKIE}=`);
 }
 
 /**
- * THE CATALOGUE, as `clara.get_firm_setup` emits it — six rows over three groups, so the walk
- * meets a single-`Field` fact, a bounded related set, an optional fact it can skip, and a fact
- * that reaches the knowledge register. The shapes and option lists are the ones 0218 seeds from
- * `clara.knowledge_keys.allowed_values`; nothing here invents a vocabulary.
+ * THE CATALOGUE, as `clara.get_firm_setup` emits it — seven rows over four groups, so the walk
+ * meets a single-`Field` fact, a bounded related set, an optional fact it can skip, a fact that
+ * reaches the knowledge register, and (#935) an education tip in its own group. The shapes and
+ * option lists are the ones 0218 seeds from `clara.knowledge_keys.allowed_values`; nothing here
+ * invents a vocabulary.
  *
  * #934 — every `note` below is the owner-approved ACCOUNTANT sentence
  * (0258_firm_setup_user_notes.sql), never the engineer's own provenance text: `get_firm_setup`
@@ -109,6 +114,17 @@ const CATALOGUE = [
     required: false, min_role: "admin", answer_shape: "choice",
     answer_options: ["MYR", "USD", "SGD", "EUR", "GBP", "OTHER"], answer_field: null,
     sort_order: 50, knowledge_key: "default_currency",
+  },
+  // #935 — ONE education tip, so the walk meets a row with `kind: "education"`: a title, a body,
+  // no answer shape any code path reads, and its own group. The real catalogue seeds three; one
+  // is enough to prove the browser's rendering, and the door itself is proven against a real
+  // Postgres in packages/db/tests/firm-setup-education-tips.test.mjs.
+  {
+    item_key: TIP_KEY, kind: "education", group_key: "tips",
+    question: "Invite your colleagues",
+    note: "Settings → Members sends an invitation by email; a bookkeeper sees client work, an admin also manages members and firm setup.",
+    required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
+    sort_order: 130, knowledge_key: null,
   },
 ];
 
@@ -302,6 +318,22 @@ export async function handleFirmSetupSupabase(request, response, path, url, send
       plan_id: FS.planId, revision_token: state.revision, revision_n: state.revisionN,
       item_key: body.p_item_key, state: "deferred", deferred_reason: body.p_reason,
     }), cors);
+    return true;
+  }
+
+  if (verb === "dismiss_firm_setup_tip") {
+    if (!armed(request)) return false;
+    const body = await readCachedJson(request);
+    if (body.p_plan !== FS.planId) return false;
+    // #935 — deliberately NOT `reserve`/`finish`: the real door takes no op_key at all (its whole
+    // point is to ride neither the idempotency ledger nor the plan's CAS token), and it never
+    // rotates `state.revision` — a tip's settlement never competes with an accounting answer for
+    // the same optimistic-concurrency slot (0259_firm_setup_education_tips.sql's own header).
+    const action = body.p_action === "deferred" ? "deferred" : "answered";
+    state.answers.set(body.p_item_key, { state: action, answer: { tip_action: body.p_action } });
+    sendJson(response, 200, {
+      plan_id: FS.planId, item_key: body.p_item_key, state: action, tip_action: body.p_action,
+    }, cors);
     return true;
   }
 

@@ -132,9 +132,11 @@ function mock(handlers: {
   answer?: (call: number, body: unknown) => Response;
   commit?: () => Response;
   defer?: () => Response;
+  dismiss?: (call: number, body: unknown) => Response;
 }, calls: Call[] = []): typeof fetch {
   let setupCalls = 0;
   let answerCalls = 0;
+  let dismissCalls = 0;
   return (async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url);
     const body = init?.body ? JSON.parse(String(init.body)) : null;
@@ -150,6 +152,14 @@ function mock(handlers: {
     }
     if (u.includes("/rest/v1/rpc/commit_firm_setup")) return (handlers.commit ?? (() => jsonResponse({ state: "committed" })))();
     if (u.includes("/rest/v1/rpc/defer_firm_setup_item")) return (handlers.defer ?? (() => jsonResponse({ item_key: "mia" })))();
+    if (u.includes("/rest/v1/rpc/dismiss_firm_setup_tip")) {
+      dismissCalls += 1;
+      const record = body as Record<string, unknown>;
+      return (handlers.dismiss ?? (() => jsonResponse({
+        plan_id: ENVELOPE.plan_id, item_key: record.p_item_key,
+        state: record.p_action === "deferred" ? "deferred" : "answered", tip_action: record.p_action,
+      })))(dismissCalls, body);
+    }
     throw new Error(`unexpected fetch: ${u}`);
   }) as typeof fetch;
 }
@@ -706,6 +716,78 @@ test("fs.web.13 an item never asked (inapplicable or undetermined) is hidden; on
         "an inapplicable item still offered a form to change its answer");
       assert.equal(byTestId(h, "firm-setup-answer-framework-action"), null);
       assert.equal(byTestId(h, "firm-setup-skip-framework"), null);
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.14 an education tip renders a title, a body, Got it and Later with NO answer form, never counts, and disappears once acted on — both actions", async () => {
+  const calls: Call[] = [];
+  const TIP_A = "tip_invite_colleagues";
+  const TIP_B = "tip_knowledge_page";
+  const tip = (key: string, question: string, note: string, sort: number) =>
+    item({
+      item_key: key, kind: "education", group_key: "tips", sort_order: sort,
+      question, note, required: false, state: "pending", answer_shape: "text",
+    });
+  const BOTH_PENDING = {
+    ...ENVELOPE,
+    items: [
+      ...ENVELOPE.items,
+      tip(TIP_A, "Invite your colleagues", "Settings -> Members sends an invitation by email.", 130),
+      tip(TIP_B, "Where Clara keeps what it knows", "Every client has a Knowledge page.", 140),
+    ],
+  };
+  const AFTER_A = {
+    ...BOTH_PENDING,
+    items: BOTH_PENDING.items.map((i) =>
+      i.item_key === TIP_A ? { ...i, state: "answered", answer: { tip_action: "acknowledged" } } : i),
+  };
+  const AFTER_BOTH = {
+    ...AFTER_A,
+    items: AFTER_A.items.map((i) =>
+      i.item_key === TIP_B ? { ...i, state: "deferred", answer: { tip_action: "deferred" } } : i),
+  };
+  await withMockedEnv(mock({
+    setup: (n) => jsonResponse(n === 1 ? BOTH_PENDING : n === 2 ? AFTER_A : AFTER_BOTH),
+  }, calls), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+
+      // A TIP DOES NOT MOVE THE COUNTER — still the fixture's own 2 of 3, unrelated to the tips.
+      assert.equal(textOf(byTestId(h, "firm-setup-counter") as never), "2 of 3 required facts recorded");
+
+      const tipRow = byTestId(h, `firm-setup-tip-${TIP_A}`);
+      assert.ok(tipRow, "the tip did not render");
+      assert.match(textOf(tipRow as never), /Invite your colleagues/);
+      assert.match(textOf(tipRow as never), /Settings -> Members/);
+      // NO answer form and NO accounting-item controls for a tip.
+      assert.equal(byTestId(h, `firm-setup-answer-${TIP_A}-action`), null, "a tip offered an answer control");
+      assert.equal(byTestId(h, `firm-setup-skip-${TIP_A}`), null, "a tip offered the accounting skip control");
+      // TWO tips sharing one group must NOT trigger the bounded-walk mechanism built for facts.
+      assert.equal(byTestId(h, "firm-setup-answer-group-tips"), null,
+        "two tips triggered the accounting bounded-walk stepper");
+
+      // "Got it" on the first tip.
+      await press(h, byTestId(h, `firm-setup-tip-gotit-${TIP_A}`), "Got it");
+      await settleUntil(h, () => byTestId(h, `firm-setup-tip-${TIP_A}`) === null, "tip A's disappearance");
+      const sentA = calls.find((c) => c.url.includes("dismiss_firm_setup_tip"));
+      assert.ok(sentA, "Got it never reached the door");
+      assert.equal((sentA?.body as Record<string, unknown>).p_item_key, TIP_A);
+      assert.equal((sentA?.body as Record<string, unknown>).p_action, "acknowledged");
+      // The second tip is untouched and still offers both controls.
+      assert.ok(byTestId(h, `firm-setup-tip-${TIP_B}`), "the untouched tip disappeared too");
+
+      // "Later" on the second tip.
+      await press(h, byTestId(h, `firm-setup-tip-later-${TIP_B}`), "Later");
+      await settleUntil(h, () => byTestId(h, `firm-setup-tip-${TIP_B}`) === null, "tip B's disappearance");
+      const sentB = calls.filter((c) => c.url.includes("dismiss_firm_setup_tip"))[1];
+      assert.ok(sentB, "Later never reached the door");
+      assert.equal((sentB?.body as Record<string, unknown>).p_item_key, TIP_B);
+      assert.equal((sentB?.body as Record<string, unknown>).p_action, "deferred");
+
+      // Neither dismissal moved the required counter.
+      assert.equal(textOf(byTestId(h, "firm-setup-counter") as never), "2 of 3 required facts recorded");
     } finally { await h.unmount(); }
   });
 });

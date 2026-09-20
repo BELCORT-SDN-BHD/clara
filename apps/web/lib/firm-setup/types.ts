@@ -174,6 +174,17 @@ export function isPending(item: FirmSetupItem): boolean {
   return item.state === "pending";
 }
 
+/**
+ * #935 — an OPTIONAL EDUCATION TIP: a title, a body, "Got it" and "Later", never an answer form.
+ * It never counts toward the required total, never blocks completion, and once acted on it
+ * disappears from this surface entirely rather than staying visible with a "Recorded"/"Skipped"
+ * badge the way an accounting fact does — a tip carries no lasting value once read, and nagging a
+ * dismissed one would be the opposite of what "read-or-later" promises.
+ */
+export function isEducationTip(item: FirmSetupItem): boolean {
+  return item.kind === "education";
+}
+
 /** An item that has been decided: answered, resolved, or deliberately skipped. */
 export function isSettled(item: FirmSetupItem): boolean {
   return item.state === "answered" || item.state === "resolved" || item.state === "deferred";

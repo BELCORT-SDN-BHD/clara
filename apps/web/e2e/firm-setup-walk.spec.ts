@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 import { ensureRealFocus, signInTo } from "./helpers";
-import { FIRM_SETUP_COOKIE } from "./firm-setup-mock.mjs";
+import { FIRM_SETUP_COOKIE, TIP_KEY } from "./firm-setup-mock.mjs";
 
 /**
  * #648 · THE BROWSER LEG for journey A5 — "Resume setup → answer only missing firm facts → saved
@@ -108,6 +108,18 @@ test.describe.serial("#648 · A5 firm setup", () => {
     await expect(page.getByTestId("firm-setup-seeded-notice")).toBeVisible();
     await expect(page.getByTestId("firm-setup-counter")).toHaveText("0 of 3 required facts recorded");
     await scan(page, "the seeded checklist");
+
+    // AC935 — AN EDUCATION TIP: a title, a body, "Got it" and "Later", no answer form, and it
+    // never touches the required counter. "Later" settles it too (read-or-later, not "remind me
+    // later"), so it disappears from the list on the very next render.
+    const tip = page.getByTestId(`firm-setup-tip-${TIP_KEY}`);
+    await expect(tip).toContainText("Invite your colleagues");
+    await expect(tip).toContainText("Settings");
+    await expect(page.getByTestId(`firm-setup-answer-${TIP_KEY}-action`)).toHaveCount(0);
+    await expect(page.getByTestId(`firm-setup-skip-${TIP_KEY}`)).toHaveCount(0);
+    await page.getByTestId(`firm-setup-tip-later-${TIP_KEY}`).click();
+    await expect(tip).toHaveCount(0);
+    await expect(page.getByTestId("firm-setup-counter")).toHaveText("0 of 3 required facts recorded");
 
     // ONE FACT — a single Field, submitted from there.
     await page.getByTestId("firm-setup-answer-fye-action").click();

@@ -72,6 +72,7 @@ import {
   answerFirmSetupItem,
   commitFirmSetup,
   deferFirmSetupItem,
+  dismissFirmSetupTip,
   firmSetupOpKey,
   loadFirmSetup,
   seedFirmSetup,
@@ -81,6 +82,7 @@ import {
   correctsOnRegister,
   firmSetupGroups,
   isAnswerable,
+  isEducationTip,
   isHiddenByApplicability,
   isNowInapplicable,
   isPending,
@@ -360,6 +362,29 @@ export function FirmSetupChecklist() {
     }
   }, [env, setup]);
 
+  /**
+   * #935 — DISMISS AN EDUCATION TIP ("Got it" or "Later"). Deliberately NOT an `Attempt`: this
+   * door takes no op key and no expected revision (0259_firm_setup_education_tips.sql's own
+   * header — a tip's settlement rides neither the idempotency ledger nor the plan's CAS token,
+   * and is idempotent by construction on the server), so there is nothing here for a lost-response
+   * retry to replay byte-for-byte. A second press just calls the door again; the server's own
+   * idempotence absorbs it.
+   */
+  const runDismissTip = useCallback(async (item: FirmSetupItem, action: "acknowledged" | "deferred") => {
+    if (!env?.plan_id) return;
+    setBusy(true);
+    setWriteError(null);
+    try {
+      await dismissFirmSetupTip({ plan: env.plan_id, itemKey: item.item_key, action });
+      await setup.reload();
+    } catch (err) {
+      setWriteError(err);
+      await setup.reload();
+    } finally {
+      setBusy(false);
+    }
+  }, [env, setup]);
+
   const factAct = useMemo(() => ({
     busy,
     error: writeError,
@@ -489,7 +514,11 @@ export function FirmSetupChecklist() {
       ) : null}
 
       {groups.map((group) => {
-        const pending = group.items.filter(isPending);
+        // #935 — an education tip is NEVER part of the bounded-walk mechanism: it has no answer
+        // shape at all, and `FirmSetupItemForm` has nothing to render for one. Every one of the
+        // three tips shares the SAME group_key ("tips"), so without this exclusion three pending
+        // tips would themselves trigger "Answer these 3 together" into a form built for facts.
+        const pending = group.items.filter((i) => isPending(i) && !isEducationTip(i));
         const groupOpen = open?.kind === "group" && open.groupKey === group.key;
         return (
           <Card key={group.key} data-testid={`firm-setup-group-${group.key}`}>
@@ -533,6 +562,40 @@ export function FirmSetupChecklist() {
 
               <ul className="flex flex-col gap-3">
                 {group.items.map((item) => {
+                  // #935 — AN EDUCATION TIP renders its OWN row: a title, a body, "Got it" and
+                  // "Later", and NO answer form, NO required/optional badge and NO state badge —
+                  // none of that vocabulary applies to product guidance. Reading OR skipping
+                  // settles it (the ticket's "read-or-later", not "remind me later"), and either
+                  // one makes it disappear from this list on the next read rather than staying
+                  // visible with a "Recorded"/"Skipped" badge the way an accounting fact does.
+                  if (isEducationTip(item)) {
+                    if (item.state !== "pending") return null;
+                    return (
+                      <li
+                        key={item.item_key} className="flex flex-col gap-2"
+                        data-testid={`firm-setup-tip-${item.item_key}`}
+                      >
+                        <p className="text-sm font-medium">{item.question}</p>
+                        <p className="text-sm text-muted-foreground">{item.note}</p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button" variant="outline" size="sm" disabled={busy}
+                            data-testid={`firm-setup-tip-gotit-${item.item_key}`}
+                            onClick={() => void runDismissTip(item, "acknowledged")}
+                          >
+                            {t("tip.gotIt")}
+                          </Button>
+                          <Button
+                            type="button" variant="ghost" size="sm" disabled={busy}
+                            data-testid={`firm-setup-tip-later-${item.item_key}`}
+                            onClick={() => void runDismissTip(item, "deferred")}
+                          >
+                            {t("tip.later")}
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  }
                   // #891 — an item that has never been asked and never will be (its predicate
                   // reads inapplicable, or cannot yet be determined) is not rendered at all: it is
                   // not asked, so there is nothing here for a practitioner to act on or read. An

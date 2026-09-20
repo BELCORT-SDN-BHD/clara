@@ -572,7 +572,15 @@
       "accounting": {
         "heading": "Accounting policy",
         "purpose": "How the firm's own accounts are prepared. Three of these are recorded as firm defaults in the Knowledge register."
+      },
+      "tips": {
+        "heading": "A few things worth knowing",
+        "purpose": "Optional reading, never a requirement. Reading or skipping one just gets it out of the way."
       }
+    },
+    "tip": {
+      "gotIt": "Got it",
+      "later": "Later"
     },
     "item": {
       "required": "Required",
