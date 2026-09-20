@@ -39,6 +39,11 @@ export type FirmSetupItem = {
    *  `user_note` here (0258_firm_setup_user_notes.sql); the engineer's own provenance note (file
    *  names, line numbers) that rendered here before #934 is no longer what this surface shows. */
   note: string;
+  /** The catalogue's own `required_for_commit` flag, and nothing else: what the Finish gate
+   *  honours, so the Required/Optional badge and the skip control can be driven by it directly.
+   *  #891's conditional rows (`mpers_eligibility`, `tin`) are `false` here however applicable
+   *  they are to this firm — whether that SHOULD gate a commit is an open product question, not
+   *  something this flag may answer on its own (0259 SS G, "ONE NOTION OF REQUIRED"). */
   required: boolean;
   min_role: string;
   answer_shape: FirmSetupAnswerShape;
@@ -113,13 +118,27 @@ export type FirmSetupEnvelope = {
   revision_n: number | null;
   state: FirmSetupPlanState | null;
   committed_at: string | null;
-  /** TRUE once every catalogue row has a plan item. */
+  /** TRUE once every catalogue row this firm can still be asked has a plan item. Since #891 that
+   *  is NOT the same as "the checklist has been started": a conditional row counts as unseeded
+   *  until the answer its predicate reads exists, so `seeded` is false from the first reconcile
+   *  until `entity_type` and `turnover` are both settled. The checklist derives "started" from
+   *  `items[]` instead, and uses `seeded` only to decide whether the reconcile control is
+   *  offered. */
   seeded: boolean;
+  /** How many rows the CATALOGUE holds — which since #935 includes education tips, so it is NOT a
+   *  count of facts this firm has to state. A surface that wants facts counts `items[]` excluding
+   *  `isEducationTip`; see the not-started banner in `firm-setup-checklist.tsx`. */
   catalogue_total: number;
-  /** MEASURED, in the database, over the catalogue's own required set. Never a percentage, never a
-   *  sum over facets that may overlap (#650 AC2), and never #636's cross-batch aggregate. */
+  /** MEASURED, in the database, over the catalogue's own `required_for_commit` set — the SAME set
+   *  `required_outstanding` names and `clara.commit_firm_setup` gates on, so
+   *  `required_total - required_answered` always equals `required_outstanding.length` for a firm
+   *  that holds a plan. Never a percentage, never a sum over facets that may overlap (#650 AC2),
+   *  and never #636's cross-batch aggregate. */
   counter: { required_answered: number; required_total: number };
   items: FirmSetupItem[];
+  /** The required keys still unsettled, NAMED. This is exactly what `clara.commit_firm_setup`
+   *  would refuse over, which is why the Finish control and the sentence beside it are both
+   *  driven by it and can never contradict each other. */
   required_outstanding: string[];
   confirmed_facts: FirmSetupFact[];
 };

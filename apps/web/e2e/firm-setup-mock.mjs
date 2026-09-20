@@ -53,15 +53,18 @@ export const FIRM_SETUP_RPC_VERBS = new Set([
   "dismiss_firm_setup_tip",
 ]);
 
-/** #935 — the one education tip this fixture carries. Exported so the spec cannot misspell it. */
+/** #935 — the two education tips this fixture carries, one per dismissal action ("Later" and
+ *  "Got it"), so the walk covers AC4's "reading and skipping a tip" rather than skipping alone
+ *  (review L06-SPEC-07). Exported so the spec cannot misspell them. */
 export const TIP_KEY = "tip_invite_colleagues";
+export const TIP_KEY_READ = "tip_knowledge_page";
 
 function armed(request) {
   return (request.headers.cookie ?? "").includes(`${FIRM_SETUP_COOKIE}=`);
 }
 
 /**
- * THE CATALOGUE, as `clara.get_firm_setup` emits it — seven rows over four groups, so the walk
+ * THE CATALOGUE, as `clara.get_firm_setup` emits it — eight rows over four groups, so the walk
  * meets a single-`Field` fact, a bounded related set, an optional fact it can skip, a fact that
  * reaches the knowledge register, and (#935) an education tip in its own group. The shapes and
  * option lists are the ones 0218 seeds from `clara.knowledge_keys.allowed_values`; nothing here
@@ -115,16 +118,25 @@ const CATALOGUE = [
     answer_options: ["MYR", "USD", "SGD", "EUR", "GBP", "OTHER"], answer_field: null,
     sort_order: 50, knowledge_key: "default_currency",
   },
-  // #935 — ONE education tip, so the walk meets a row with `kind: "education"`: a title, a body,
-  // no answer shape any code path reads, and its own group. The real catalogue seeds three; one
-  // is enough to prove the browser's rendering, and the door itself is proven against a real
-  // Postgres in packages/db/tests/firm-setup-education-tips.test.mjs.
+  // #935 — TWO education tips, so the walk meets a row with `kind: "education"` for each of the
+  // two actions it offers: "Later" on the first, "Got it" on the second (AC4 asks the walk to
+  // cover READING and skipping, and the first cut pressed only "Later" — review L06-SPEC-07).
+  // A title, a body, no answer shape any code path reads, and their own group. The real catalogue
+  // seeds three; the door itself is proven against a real Postgres in
+  // packages/db/tests/firm-setup-education-tips.test.mjs.
   {
     item_key: TIP_KEY, kind: "education", group_key: "tips",
     question: "Invite your colleagues",
     note: "Settings → Members sends an invitation by email; a bookkeeper sees client work, an admin also manages members and firm setup.",
     required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
     sort_order: 130, knowledge_key: null,
+  },
+  {
+    item_key: TIP_KEY_READ, kind: "education", group_key: "tips",
+    question: "Where Clara keeps what it knows",
+    note: "Every client has a Knowledge page: facts, aliases, preferences and policies with their source; correct or withdraw anything there, and Clara reads it before every task.",
+    required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
+    sort_order: 140, knowledge_key: null,
   },
 ];
 

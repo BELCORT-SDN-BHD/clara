@@ -550,7 +550,9 @@
     "seed": {
       "action": "Start firm setup",
       "working": "Preparing…",
-      "help": "This adds only the questions that are missing. An answer already on this firm's plan is kept exactly as it was and is never asked again."
+      "help": "This adds only the questions that are missing. An answer already on this firm's plan is kept exactly as it was and is never asked again.",
+      "again": "Update the checklist",
+      "againHelp": "An answer you have already given makes another question apply to this firm. This adds only what is missing; everything already recorded is kept."
     },
     "commit": {
       "heading": "Finish setup",

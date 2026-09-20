@@ -135,6 +135,40 @@ function sentCall(attempt: Attempt, index: number, mint: () => SentCall): SentCa
   return call;
 }
 
+/**
+ * #891/#935 (review fix round) — ONE definition of "a fact the bounded group walk may ask", used
+ * by the walk's own count and by the set of Fields it builds, so the two can never disagree.
+ *
+ * Three exclusions, each with its own reason:
+ *   · not pending — a settled fact is never asked again (AC1 of #648);
+ *   · an education tip — it has no answer shape at all and `FirmSetupItemForm` has nothing to
+ *     render for one; three tips sharing the `tips` group would otherwise offer "Answer these 3
+ *     together" into a form built for accounting facts (#935);
+ *   · not answerable right now — `isAnswerable` is false for an item whose predicate has turned
+ *     INAPPLICABLE, and the same row is marked "Not applicable" a few lines below. Guarding only
+ *     the per-item control (as the first cut did) still let the GROUP walk open a step asking the
+ *     question the very same screen says does not apply (#891, review L06-SPEC-01).
+ */
+/**
+ * #891/#935 (review fix round) — does this item put a ROW on the checklist at all?
+ *
+ * Two kinds of row disappear rather than render: an education tip that has been read, skipped or
+ * caught by a commit (there is no reopen door, so dead buttons would be worse than nothing), and
+ * an item that has never been asked and never will be while its predicate reads this way. This
+ * predicate is the one the group Card consults before rendering itself, so a Card whose every row
+ * has disappeared does not stay behind as a heading over nothing — the state #935's "reading or
+ * skipping a tip is remembered so it stops appearing" left visible for the life of the firm
+ * (review L06-SPEC-05).
+ */
+function rendersRow(item: FirmSetupItem, committed: boolean): boolean {
+  if (isEducationTip(item)) return item.state === "pending" && !committed;
+  return !isHiddenByApplicability(item);
+}
+
+function isWalkStep(item: FirmSetupItem): boolean {
+  return isPending(item) && !isEducationTip(item) && isAnswerable(item);
+}
+
 export function FirmSetupChecklist() {
   const t = useTranslations("FirmSetup");
   const caller = useAsyncRead(() => loadCallerContext(sessionTokenAccessor));
@@ -444,13 +478,35 @@ export function FirmSetupChecklist() {
 
   const groups = firmSetupGroups(env);
   const committed = env.state === "committed";
-  const notStarted = !env.seeded && env.items.every((i) => i.state === "unseeded");
-  const allSettled = env.seeded && env.items.every((i) => !isPending(i));
+  // HAS THIS CHECKLIST BEEN STARTED? — a separate question from `seeded`, which #891 turned into
+  // "nothing is left to reconcile". A conditional row counts as unseeded until the answer it
+  // depends on exists, so `seeded` is false from the first reconcile until entity_type and
+  // turnover are both settled (measured on clara_l06). Reading `!seeded` as "not started" put the
+  // big "Start firm setup" button over a half-answered checklist and hid the Finish section
+  // mid-walk (review L06-SPEC-09).
+  const started = env.items.some((i) => i.state !== "unseeded");
+  // HOW MANY FACTS THIS FIRM HAS TO STATE. `catalogue_total` is the size of the CATALOGUE, and
+  // since #935 the catalogue also holds education tips — 15 rows for 12 facts. The not-started
+  // banner says "facts", so it counts facts: `items[]` carries every live catalogue row for this
+  // firm, tips included and flagged, so the count is taken there rather than giving
+  // `catalogue_total` a second meaning the seed receipt's own field would then contradict
+  // (review L06-SPEC-06).
+  const factCount = env.items.filter((i) => !isEducationTip(i)).length;
+  const notStarted = !env.seeded && !started;
+  // THE FINISH GATE, ONE PREDICATE FOR THE SENTENCE AND THE BUTTON. `required_outstanding` is the
+  // envelope's own list of what `clara.commit_firm_setup` would refuse over (it reads
+  // `required_for_commit` off the catalogue, 0218 §E.4), so gating both on it means the sentence
+  // can never contradict the control beside it. The earlier "nothing anywhere is still pending"
+  // reading did contradict it: a pending education tip — or a pending OPTIONAL fact, which the
+  // door has never gated on — printed "Finishing becomes available once every required fact is
+  // recorded or deliberately skipped." beside a working Finish button (#935 review L06-SPEC-04;
+  // the owner's ruling: "a tip never counts toward the required total or blocks completion").
+  const finishAvailable = env.required_outstanding.length === 0;
   const openItems: FirmSetupItem[] =
     open === null ? []
       : open.kind === "item"
         ? env.items.filter((i) => i.item_key === open.itemKey)
-        : env.items.filter((i) => i.group_key === open.groupKey && isPending(i));
+        : env.items.filter((i) => i.group_key === open.groupKey && isWalkStep(i));
 
   return (
     <div className="flex flex-col gap-6" data-testid="firm-setup-checklist">
@@ -499,26 +555,32 @@ export function FirmSetupChecklist() {
         <div data-testid="firm-setup-not-started">
           <StateBanner tone="info">
             <p className="font-medium">{t("notStarted.title")}</p>
-            <p>{t("notStarted.body", { count: env.catalogue_total })}</p>
+            <p>{t("notStarted.body", { count: factCount })}</p>
           </StateBanner>
         </div>
       ) : null}
 
       {!committed && !env.seeded ? (
         <div>
+          {/* ONE control, TWO honest labels: it starts a checklist that has none, and it picks up
+              a question an earlier answer has just made applicable. The door is the same
+              idempotent reconciliation either way. */}
           <Button type="button" disabled={busy} data-testid="firm-setup-seed" onClick={() => void runSeed()}>
-            {busy ? t("seed.working") : t("seed.action")}
+            {busy ? t("seed.working") : started ? t("seed.again") : t("seed.action")}
           </Button>
-          <p className="mt-1 text-xs text-muted-foreground">{t("seed.help")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {started ? t("seed.againHelp") : t("seed.help")}
+          </p>
         </div>
       ) : null}
 
       {groups.map((group) => {
-        // #935 — an education tip is NEVER part of the bounded-walk mechanism: it has no answer
-        // shape at all, and `FirmSetupItemForm` has nothing to render for one. Every one of the
-        // three tips shares the SAME group_key ("tips"), so without this exclusion three pending
-        // tips would themselves trigger "Answer these 3 together" into a form built for facts.
-        const pending = group.items.filter((i) => isPending(i) && !isEducationTip(i));
+        // The bounded RELATED SET this group can walk — `isWalkStep`'s one definition, shared
+        // with `openItems` above so the count on the button and the steps in the form agree.
+        const pending = group.items.filter(isWalkStep);
+        // A group that puts no row on screen renders nothing at all — not a heading and a purpose
+        // over an empty box.
+        if (!group.items.some((i) => rendersRow(i, committed))) return null;
         const groupOpen = open?.kind === "group" && open.groupKey === group.key;
         return (
           <Card key={group.key} data-testid={`firm-setup-group-${group.key}`}>
@@ -575,7 +637,7 @@ export function FirmSetupChecklist() {
                     // pending into a committed checklist has no reopen door to answer through —
                     // showing its title with no working buttons would be dead UI, so it is simply
                     // never offered rather than nagging a firm that is already done.
-                    if (item.state !== "pending" || committed) return null;
+                    if (!rendersRow(item, committed)) return null;
                     return (
                       <li
                         key={item.item_key} className="flex flex-col gap-2"
@@ -608,7 +670,7 @@ export function FirmSetupChecklist() {
                   // item this firm DID answer before it became inapplicable is never hidden this
                   // way (isHiddenByApplicability requires state === "unseeded") and falls through
                   // to the normal row below, marked `firm-setup-inapplicable-*` instead.
-                  if (isHiddenByApplicability(item)) return null;
+                  if (!rendersRow(item, committed)) return null;
                   const itemOpen = open?.kind === "item" && open.itemKey === item.item_key;
                   const settled = answerText(item);
                   const inapplicable = isNowInapplicable(item);
@@ -716,16 +778,18 @@ export function FirmSetupChecklist() {
         );
       })}
 
-      {!committed && env.seeded ? (
+      {/* Finishing is offered from the moment the checklist HAS questions on it, not only once
+          nothing is left to reconcile — see `started` above. */}
+      {!committed && started ? (
         <section aria-labelledby="firm-setup-finish" className="flex flex-col gap-2">
           <SectionHeader level={2} id="firm-setup-finish">{t("commit.heading")}</SectionHeader>
           <p className="text-sm text-muted-foreground">
-            {allSettled ? t("commit.ready") : t("commit.notReady")}
+            {finishAvailable ? t("commit.ready") : t("commit.notReady")}
           </p>
           <div>
             <Button
               type="button"
-              disabled={busy || env.required_outstanding.length > 0}
+              disabled={busy || !finishAvailable}
               data-testid="firm-setup-commit"
               onClick={() => void runCommit()}
             >
