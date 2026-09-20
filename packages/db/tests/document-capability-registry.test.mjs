@@ -110,11 +110,13 @@ let executed = 0;
 // before 0207 — migrations run in strict numeric order — so there is no "0246 without 0207" state
 // to name); the `after` hook below asserts the executed count equals whichever constant the live
 // frontier makes true, so forgetting to bump one of these still fails the whole battery.
-const EXPECTED_CELLS = 22;
+const EXPECTED_CELLS = 23;
+const EXPECTED_CELLS_PRE_0272 = 22;
 const EXPECTED_CELLS_PRE_988 = 20;
 const EXPECTED_CELLS_PRE_0207 = 17;
 let monotoneLive = false;
 let proposalLevelLive = false;
+let wallCompletionLive = false;
 
 async function cohortApplied() {
   const r = await rootQuery(`select
@@ -154,13 +156,32 @@ async function proposalLevelApplied() {
   return (r.rows[0]?.def ?? "").includes("proposal_only");
 }
 
+/** #782 fix round — is 0272 (`document_capability_wall_completion`) applied? Read from a CATALOG
+ *  fact that file installs — the mark ledger's BEFORE TRUNCATE trigger — never from a migration
+ *  number and never from the comment the cell below asserts, which would be circular. 0272
+ *  installs the trigger and re-issues the `limits` comment in ONE file, so the trigger is that
+ *  file's frontier, exactly as the five-value CHECK is 0246's above. */
+async function wallCompletionApplied() {
+  const r = await rootQuery(`select exists (
+      select 1 from pg_trigger t
+       where t.tgrelid = 'clara.document_capability_version_high_water'::regclass
+         and t.tgname = 't_document_capability_high_water_no_truncate'
+         and not t.tgisinternal) as ok`);
+  return r.rows[0].ok === true;
+}
+
 before(async () => {
   live = await cohortApplied();
   monotoneLive = live && await monotoneWallApplied();
   proposalLevelLive = live && await proposalLevelApplied();
+  wallCompletionLive = live && await wallCompletionApplied();
 });
 after(async () => {
-  const want = !monotoneLive ? EXPECTED_CELLS_PRE_0207 : (proposalLevelLive ? EXPECTED_CELLS : EXPECTED_CELLS_PRE_988);
+  const want = !monotoneLive
+    ? EXPECTED_CELLS_PRE_0207
+    : (!proposalLevelLive
+      ? EXPECTED_CELLS_PRE_988
+      : (wallCompletionLive ? EXPECTED_CELLS : EXPECTED_CELLS_PRE_0272));
   if (live) assert.equal(executed, want, `expected ${want} cells to run, ${executed} did`);
   await endPool();
 });
@@ -199,6 +220,18 @@ const proposalLevelCell = (name, fn) => test(name, async (t) => {
   if (gate(t)) return;
   if (!proposalLevelLive) {
     t.skip("0246_business_operation_proposal_only is not applied on this database");
+    return;
+  }
+  executed += 1;
+  await fn(t);
+});
+
+/** #782 fix round — a cell that additionally needs 0272's re-issued `limits` column comment.
+ *  SKIPS (never fails) below that frontier, counted only when it actually ran. */
+const wallCompletionCell = (name, fn) => test(name, async (t) => {
+  if (gate(t)) return;
+  if (!wallCompletionLive) {
+    t.skip("0272_document_capability_wall_completion is not applied on this database");
     return;
   }
   executed += 1;
@@ -331,6 +364,29 @@ cell("an invoice-shaped PDF is facts-supported and records the line-item deferra
     + "and the registry says so in machine-readable form");
   assert.equal(row.limits?.invoice_line_items_reason, "no_consumer_reads_line_facts",
     "the limitation carries its own reason, not a bare verdict");
+});
+
+wallCompletionCell("the registry's OWN documentation of `limits` stops calling invoice line items planned (#782)", async () => {
+  const doc = (await rootQuery(
+    `select col_description('clara.document_capabilities'::regclass, a.attnum) as d
+       from pg_attribute a
+      where a.attrelid = 'clara.document_capabilities'::regclass and a.attname = 'limits'`)).rows[0].d;
+
+  assert.ok(doc, "the limits column carries a comment at all");
+  // #782's AC2 names three surfaces where the deferred-target wording had to stop: the registry
+  // seed, the web copy and the PRD. 0245 moved the DATA and left 0191's column comment behind —
+  // the registry's own machine-readable documentation of the very key it re-seeded.
+  assert.doesNotMatch(doc, /planned/i,
+    "the limits column comment still describes a limit as planned (#782 owner ruling 2026-09-18: "
+    + "stop promising line items)");
+  assert.doesNotMatch(doc, /\bcoming\b|no table yet|accepted target/i,
+    "the limits column comment still describes line items as a target Clara intends to build");
+  assert.match(doc, /invoice_line_items/,
+    "…and it still documents the key it is about, rather than going silent on it");
+  assert.match(doc, /accepted_limitation/,
+    "…at the value 0245 actually seeded");
+  assert.match(doc, /invoice_line_items_reason/,
+    "…with the sibling reason key that makes the limitation checkable");
 });
 
 cell("a payroll_summary PDF is stored and byte-extracted but NEVER facts- or operation-executable (skipped_kind is not executable)", async () => {

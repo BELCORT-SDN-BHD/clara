@@ -43,7 +43,8 @@
 -- 0191's text — "per-LINE facts are an accepted target with no table yet" — which is the registry's
 -- OWN machine-readable documentation of the very key 0245 re-seeded, still calling it planned.
 -- #782's AC2 is "no 'planned' or 'coming' wording for line items remains in the registry seed, the
--- web copy or the PRD". §B.4 re-issues that comment. It rides THIS file rather than a fifth
+-- web copy or the PRD". §B.4 re-issues that comment, and the tail proves the comment and the rows
+-- agree. It rides THIS file rather than a fifth
 -- migration because it is a fix round, not a ticket: one file, two clearly separated sections, one
 -- prestate and one tail, rather than a second round of migration ceremony for one comment.
 --
@@ -322,6 +323,33 @@ comment on function clara._tf_document_capability_high_water_monotone() is
 reset role;
 
 -- =====================================================================================
+-- §B.4  #782's RESIDUAL — the registry's OWN documentation of `limits`. 0245 moved the 28
+-- invoice-family rows from `{"invoice_line_items":"planned"}` to
+-- `{"invoice_line_items":"accepted_limitation","invoice_line_items_reason":
+-- "no_consumer_reads_line_facts"}` and issued no `comment on column`, so
+-- `col_description(clara.document_capabilities.limits)` still carried 0191's sentence — "per-LINE
+-- facts are an accepted target with no table yet" — about the very key 0245 re-seeded. #782's AC2
+-- is that no "planned" or "coming" wording for line items remains in the registry seed; a column
+-- comment IS the registry's machine-readable seed documentation, and it is the one surface a
+-- later reader consults from inside the database.
+--
+-- 0191 IS NOT EDITED. The house fix is a re-issued comment from a successor file, which is
+-- exactly what this lane's own 0246 already did for `business_operation` (0246 §B, re-issuing
+-- 0191's column comment without touching 0191).
+--
+-- WHY THE REASON KEY IS NAMED IN THE COMMENT. A limitation with no reason is a verdict; the
+-- reason is what makes it arguable. `no_consumer_reads_line_facts` is a structural fact about
+-- the schema Clara posts through — packages/runtime/lib/trade-invoice-basis.ts's tool schemas are
+-- `.strict()` and admit no `line_items` field — not a scheduling note, and the comment says so.
+-- =====================================================================================
+set role clara_fn_owner;
+
+comment on column clara.document_capabilities.limits is
+  'Named, machine-readable limitations of a level that is otherwise supported, as `{"<limit>": "<value>"}` with an optional `"<limit>_reason"` sibling. The invoice family carries `{"invoice_line_items": "accepted_limitation", "invoice_line_items_reason": "no_consumer_reads_line_facts"}` (#782, owner ruling 2026-09-18): invoice HEADER facts are persisted with their source regions and drive the questionnaire, the autodraft and the posting; per-LINE facts are a standing, accepted limitation of what Clara reads, not a deferred feature. The reason is structural rather than a schedule -- nothing Clara posts through admits a per-line invoice field, so there is no consumer for such a fact. A limit is not a lower level -- the header facts are real -- but a surface that rendered "facts: validated" without it would overstate what was read.';
+
+reset role;
+
+-- =====================================================================================
 -- §D  TAIL. The wall is present, it is at the right timing, and it actually refuses.
 -- =====================================================================================
 do $w846fix_tail$
@@ -490,6 +518,33 @@ begin
   exception when sqlstate 'ZA276' then null;
   end;
 
+  -- (5d) #782 — THE COLUMN COMMENT MATCHES THE DATA IT DOCUMENTS. Asserted against the LIVE
+  -- catalog rather than against this file's own text, and against the live rows as well: a
+  -- comment that named a value no row carries would be a second way to be wrong.
+  select col_description('clara.document_capabilities'::regclass, a.attnum) into v_def
+    from pg_attribute a
+   where a.attrelid = 'clara.document_capabilities'::regclass and a.attname = 'limits';
+  if v_def is null or v_def ~* 'planned' or v_def ~* 'no table yet' or v_def ~* 'accepted target' then
+    raise exception '#782 fix tail: the limits column comment still describes line items as planned or as a target -- got %', coalesce(v_def, '<none>')
+      using errcode = 'CLR10';
+  end if;
+  if v_def !~ 'accepted_limitation' or v_def !~ 'invoice_line_items_reason' then
+    raise exception '#782 fix tail: the limits column comment does not document the shape 0245 seeded -- got %', v_def
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where limits ->> 'invoice_line_items' = 'accepted_limitation'
+     and limits ->> 'invoice_line_items_reason' = 'no_consumer_reads_line_facts';
+  if v_n <> 28 then
+    raise exception '#782 fix tail: % invoice-family row(s) carry the accepted-limitation shape, not 0245''s 28', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities where limits::text ~* 'planned';
+  if v_n <> 0 then
+    raise exception '#782 fix tail: % registry row(s) still publish a limit valued "planned"', v_n
+      using errcode = 'CLR10';
+  end if;
+
   -- (6) THE PROBES LEFT NOTHING BEHIND, in either table.
   select count(*)::int into v_n from clara.document_capability_version_high_water;
   if v_n <> v_marks then
@@ -505,7 +560,7 @@ begin
     raise exception '#846 fix tail: a probe leaked -- % mark(s) sit off the published version', v_n using errcode = 'CLR10';
   end if;
 
-  raise notice '#846 fix tail: OK -- clara.document_capability_version_high_water refuses TRUNCATE with CLR08 through 0003''s clara._tf_no_truncate, and clara._tf_document_capabilities_version_high_water (body byte-unchanged at its pinned pre-image) is now armed a SECOND time as t_document_capabilities_version_high_water_rekey, a BEFORE UPDATE trigger gated on a change of (format, document_kind), so a re-key onto a published pair is refused with CLR08 / detail.reason = registry_version_high_water naming the DESTINATION key. clara._tf_document_capability_high_water_monotone is recut to refuse a BACKWARDS recorded_at as well, under the same reason and naming the column. All proven behaviourally against the live tables (% marks, registry at version %) and rolled back whole; the whole-registry raise is still admitted, a forward recorded_at stamp is still admitted, and an in-place lowering still refuses under 0207''s registry_version_monotone.',
+  raise notice '#846 fix tail: OK -- clara.document_capability_version_high_water refuses TRUNCATE with CLR08 through 0003''s clara._tf_no_truncate, and clara._tf_document_capabilities_version_high_water (body byte-unchanged at its pinned pre-image) is now armed a SECOND time as t_document_capabilities_version_high_water_rekey, a BEFORE UPDATE trigger gated on a change of (format, document_kind), so a re-key onto a published pair is refused with CLR08 / detail.reason = registry_version_high_water naming the DESTINATION key. clara._tf_document_capability_high_water_monotone is recut to refuse a BACKWARDS recorded_at as well, under the same reason and naming the column. All proven behaviourally against the live tables (% marks, registry at version %) and rolled back whole; the whole-registry raise is still admitted, a forward recorded_at stamp is still admitted, and an in-place lowering still refuses under 0207''s registry_version_monotone. #782: clara.document_capabilities.limits carries a re-issued column comment that documents the accepted-limitation shape (0191 unedited), and no registry row publishes a limit valued "planned".',
     v_marks, v_published;
 end
 $w846fix_tail$;
