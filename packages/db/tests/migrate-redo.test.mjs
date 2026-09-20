@@ -53,6 +53,17 @@ async function ledgerRows(dbname) {
   }
 }
 
+// L05-STD-04 (fix round) — independent literals for AC1's checksum assertions below, computed
+// OUTSIDE migrationChecksum (the function under test) via the system `sha256sum` (coreutils),
+// cross-checked with a bare `crypto.createHash("sha256")` call in a separate node -e invocation:
+//   printf '%s' "create table clara.redo_ac1_baseline(x pg_catalog.int4);" | sha256sum
+//   printf '%s' "create or replace function clara.redo_ac1_fn() returns pg_catalog.int4 language sql as \$\$select 2\$\$;" | sha256sum
+// Asserting against these literals (a known-good, independently-produced value, per tests.md)
+// instead of `migrationChecksum(sameString)` means a `migrationChecksum` that always returned a
+// constant could no longer make this half of the cell pass — only the genuine, correct hash can.
+const AC1_BASELINE_SHA256 = "e8e9628e68a23a7f0c010f6977c0e8fbf5daa867ea303de03f58a2b529bd48ed";
+const AC1_EDITED_FN_SHA256 = "01926b8c313468f7dad1816fbb69aa3bb584850de467835a56e5c8e914f2be60";
+
 test("#957 AC1: redoing the highest applied version after editing its file succeeds, and an immediately following normal run reports nothing pending and no drift", async () => {
   process.env.CLARA_ALLOW_DESTRUCTIVE = "1";
   delete process.env.CLARA_DESTRUCTIVE_TARGET;
@@ -80,12 +91,12 @@ test("#957 AC1: redoing the highest applied version after editing its file succe
 
     const redoResult = await withDatabaseEnv(dbname, () => migrate({ dir, log: silent, redo: "0002_editable" }));
     assert.equal(redoResult.redone, "0002_editable");
-    assert.equal(redoResult.checksum, migrationChecksum(editedSql));
+    assert.equal(redoResult.checksum, AC1_EDITED_FN_SHA256);
 
     const rows = await witness.query("select version, checksum from clara.schema_migrations order by version");
     assert.deepEqual(rows.rows, [
-      { version: "0001_baseline", checksum: migrationChecksum("create table clara.redo_ac1_baseline(x pg_catalog.int4);") },
-      { version: "0002_editable", checksum: migrationChecksum(editedSql) },
+      { version: "0001_baseline", checksum: AC1_BASELINE_SHA256 },
+      { version: "0002_editable", checksum: AC1_EDITED_FN_SHA256 },
     ]);
     // The re-applied BODY actually ran under the edited bytes — not merely a checksum bookkeeping
     // update: the function now returns the corrected value.

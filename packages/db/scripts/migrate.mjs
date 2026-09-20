@@ -409,25 +409,20 @@ export async function migrate({
     // learn it from a run that changed nothing — not after 0056 has already landed.
     // Each file is read exactly once here and carried into the apply loop, so the bytes
     // that were checksummed are the bytes that execute.
+    // #957 — redo touches ONLY the named version, never also whatever else happens to be
+    // unapplied: a caller who wants both runs migrate() again afterward (see the header note).
+    // The two paths differ only in which files this pre-flight walks; the per-migration body
+    // itself (read, checksum, guard, push) is shared below rather than restated twice
+    // (L05-STD-03 fix round — the two copies were identical but for `redo` vs `version`/`file`).
+    const targets =
+      redo !== null ? [{ file: byVersion.get(redo).file, version: redo }] : migrations.filter(({ version }) => !applied.has(version));
     const pending = [];
-    if (redo !== null) {
-      // #957 — redo touches ONLY the named version, never also whatever else happens to be
-      // unapplied: a caller who wants both runs migrate() again afterward (see the header note).
-      const { file } = byVersion.get(redo);
+    for (const { file, version } of targets) {
       const sql = readFileSync(join(migrationsDir, file), "utf8");
       const checksum = migrationChecksum(sql);
-      assertNoTransactionControl(sql, redo);
-      assertNoCheckFunctionBodyOverride(sql, redo);
-      pending.push({ version: redo, sql, checksum, isolation: migrationIsolationLevel(redo, checksum) });
-    } else {
-      for (const { file, version } of migrations) {
-        if (applied.has(version)) continue;
-        const sql = readFileSync(join(migrationsDir, file), "utf8");
-        const checksum = migrationChecksum(sql);
-        assertNoTransactionControl(sql, version);
-        assertNoCheckFunctionBodyOverride(sql, version);
-        pending.push({ version, sql, checksum, isolation: migrationIsolationLevel(version, checksum) });
-      }
+      assertNoTransactionControl(sql, version);
+      assertNoCheckFunctionBodyOverride(sql, version);
+      pending.push({ version, sql, checksum, isolation: migrationIsolationLevel(version, checksum) });
     }
     // A ceremony against an already-migrated database applies nothing, so the per-migration
     // note below never fires — and silence there would read as "no pin is in play". Say what
