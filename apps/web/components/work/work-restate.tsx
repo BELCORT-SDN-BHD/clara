@@ -62,7 +62,11 @@ export function RestateWorkPanel({
   restate = restateWork,
   onRestated,
 }: {
-  work: AccountingWorkRow;
+  /** Only `id` and `basis` are read below — a `Pick`, not the whole row, so a caller that has only
+   *  the shared question record (#839: `clara.get_work_question`'s own `work_id` + `basis`, never a
+   *  second `AccountingWorkRow` read) can mount this control too. An `AccountingWorkRow` still
+   *  satisfies it unprojected, which is what the Work detail passes. */
+  work: Pick<AccountingWorkRow, "id" | "basis">;
   clientId: string;
   session: SessionTokenAccessor;
   restate?: typeof restateWork;

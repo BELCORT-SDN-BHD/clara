@@ -70,7 +70,8 @@ import { PartSummaryCard } from "./PartSummaryCard";
 import { usableId } from "./PartCardShell";
 import { workDetailHref } from "@/lib/navigation/tree";
 import { WorkQuestionForm } from "@/components/work/work-question-form";
-import { WorkQuestionPanel } from "@/components/work/work-question-panel";
+import { WorkQuestionPanel, offersRestateFor } from "@/components/work/work-question-panel";
+import { RestateWorkPanel } from "@/components/work/work-restate";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getSessionIdentity } from "@/lib/settings/account-identity";
@@ -188,7 +189,11 @@ export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
       note={t("note")}
       link={addressable ? { href: workDetailHref(part.client_id, part.work_id), label: t("link") } : null}
     >
-      {parked ? <WorkQuestionPanel workId={part.work_id} announce="none" /> : null}
+      {/* #839 — `offerRestate`: the panel offers "Restate as a new instruction" beside its form
+          once the shared record's `basis` (migration 0265) is present, matching the Work detail.
+          Safe to turn on unconditionally here — this card is never mounted on the Work detail
+          itself, so there is no second restate control to collide with. */}
+      {parked ? <WorkQuestionPanel workId={part.work_id} announce="none" offerRestate /> : null}
       {cancellable || decisionOpen ? (
         <CancelWorkDialog
           workId={part.work_id}
@@ -307,7 +312,7 @@ export function WorkQuestionCard({ part }: { part: WorkQuestionPart }) {
       accounts: await accountsForQuestion(record),
     };
   }, [part.question_id]);
-  const { data, loading } = useHydratedPart(sessionTokenAccessor, load);
+  const { data, loading, reload } = useHydratedPart(sessionTokenAccessor, load);
 
   return (
     <PartSummaryCard
@@ -322,6 +327,18 @@ export function WorkQuestionCard({ part }: { part: WorkQuestionPart }) {
           userId={data.identity.userId}
           announce="none"
           accounts={data.accounts}
+        />
+      ) : null}
+      {/* #839 — the same restate entry point `WorkAcceptedCard` offers above, reused here for the
+          live-stream card's own direct `WorkQuestionForm` mount (this card does not go through
+          `WorkQuestionPanel`, so the panel's own `offerRestate` cannot reach it). Gated on the
+          WORK's status, exactly as the Work detail's sibling mount is. */}
+      {data?.record && offersRestateFor(data.record, true) ? (
+        <RestateWorkPanel
+          work={{ id: data.record.work_id, basis: data.record.basis ?? null }}
+          clientId={part.client_id}
+          session={sessionTokenAccessor}
+          onRestated={reload}
         />
       ) : null}
     </PartSummaryCard>

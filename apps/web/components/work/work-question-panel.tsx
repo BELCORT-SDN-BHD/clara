@@ -30,11 +30,33 @@ import { useTranslations } from "next-intl";
 import { StateBanner } from "@/components/common/state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkQuestionForm, type WorkQuestionAnnounce } from "@/components/work/work-question-form";
+import { RestateWorkPanel } from "@/components/work/work-restate";
 import { workDetailHref } from "@/lib/navigation/tree";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getSessionIdentity } from "@/lib/settings/account-identity";
-import { accountsForQuestion, getPendingWorkQuestion, getWorkQuestion } from "@/lib/work/questions";
+import {
+  accountsForQuestion, getPendingWorkQuestion, getWorkQuestion, type WorkQuestionRecord,
+} from "@/lib/work/questions";
+
+/**
+ * #839 — THE RESTATE GATE, as a PURE function so a cell can drive it directly rather than through
+ * `getSessionIdentity()`'s real Supabase browser client — the one seam this module's own header
+ * says the RTL harness cannot reach (see `work-cards.test.tsx`'s "WHY 'ACCEPTED' IS NOT HERE").
+ *
+ * TRUE only when the CALLER asked for it (`offerRestate` — B3's own separate `RestateWorkPanel`
+ * mount means this panel defaults OFF, see `WorkQuestionPanelProps.offerRestate`), the WORK is
+ * still `awaiting_input` (matching exactly when `work-detail.tsx` offers its own copy — a question
+ * round settling does not by itself mean the Work stopped waiting on a person), and the record
+ * actually carries a `basis` to prefill (absent on a pre-0265 database, or on a record this build
+ * could not read at all).
+ */
+export function offersRestateFor(
+  record: WorkQuestionRecord | null | undefined,
+  offerRestate: boolean,
+): boolean {
+  return offerRestate && record?.work_status === "awaiting_input" && Boolean(record?.basis);
+}
 
 export type WorkQuestionPanelProps = {
   /** Address by WORK when the caller knows the Work (B3), by QUESTION when it knows the question
@@ -61,10 +83,23 @@ export type WorkQuestionPanelProps = {
    *  their surface's announcement boundary. #629 (B6) passes "none" from inside the Clara
    *  transcript, which already announces its own updates. */
   announce?: WorkQuestionAnnounce;
+  /**
+   * #839 — offer "Restate as a new instruction" beside the form, reusing `RestateWorkPanel`
+   * exactly as the Work detail does (`work-detail.tsx` mounts it as a SIBLING of this same panel).
+   *
+   * DEFAULT FALSE, AND DELIBERATELY OPT-IN. The Work detail (B3) already mounts its OWN
+   * `RestateWorkPanel` beside its `WorkQuestionPanel`, fed by the full `AccountingWorkRow` it loads
+   * separately — turning this on there too would render restate TWICE (#839's own third acceptance
+   * line: "no second restate door or duplicate restate UI"). Only the Clara rail's cards
+   * (`WorkCards.tsx`) pass `true`; Needs-you's row (`work-question-affordance.tsx`) is untouched by
+   * this ticket and keeps the default.
+   */
+  offerRestate?: boolean;
 };
 
 export function WorkQuestionPanel({
   workId, questionId, onAnswered, onSettled, onBusy, onLeavePending, fallbackQuestion = null, announce,
+  offerRestate = false,
 }: WorkQuestionPanelProps) {
   const t = useTranslations("WorkQuestion.inbox");
   const silent = announce === "none";
@@ -74,7 +109,7 @@ export function WorkQuestionPanel({
     // The chart, ONLY when the question declares an `account` field — see accountsForQuestion.
     return { record, identity, accounts: await accountsForQuestion(record) };
   }, [questionId, workId]);
-  const { data, loading, err } = useHydratedPart(sessionTokenAccessor, load);
+  const { data, loading, err, reload } = useHydratedPart(sessionTokenAccessor, load);
 
   if (loading) {
     // THE QUESTION IS ALREADY KNOWN; only its typed fields are not. The calling page read the
@@ -131,6 +166,20 @@ export function WorkQuestionPanel({
         onLeavePending={onLeavePending}
         announce={announce}
       />
+      {/* #839 — AND THE OTHER ANSWER, matching `work-detail.tsx`'s own placement of this exact
+          sibling beside its copy of this form. Gated on the WORK's own status (not the question's):
+          B3 offers restate for as long as the Work is `awaiting_input`, whatever this particular
+          question round's own state is, and this mirrors that rather than tying restate to one
+          question's lifecycle. `basis` is the presence check — a record read from a database below
+          the 0265 frontier carries no such key and renders nothing here, honestly. */}
+      {offersRestateFor(data.record, offerRestate) ? (
+        <RestateWorkPanel
+          work={{ id: data.record.work_id, basis: data.record.basis ?? null }}
+          clientId={data.record.client_id}
+          session={sessionTokenAccessor}
+          onRestated={reload}
+        />
+      ) : null}
       {/* THE ROUTE TO THE WORK, built from the HYDRATED record rather than from whatever the
           calling surface happened to have. Offered only where this panel is NOT already on the
           Work's own page (`questionId` addressing means the caller knew the question, not the

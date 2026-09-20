@@ -30,6 +30,7 @@ import { listCoaAccounts } from "@/lib/journals/api";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { RefusalError } from "@/lib/wire";
 import type { SessionTokenAccessor } from "@/lib/session";
+import type { WorkBasis } from "@/lib/work/types";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
@@ -77,6 +78,14 @@ export type WorkQuestionRecord = {
   delivery_attempts: number;
   work_status: string;
   work_basis_digest: string | null;
+  /** #839 — migration 0265: the admitted Work's own basis, transcribed verbatim off
+   *  `clara.accounting_work.basis` beside the digest pair above. Optional for the same reason
+   *  `AccountingWorkRow.initiated_by` is (`apps/web/lib/work/types.ts`'s own header): a database
+   *  below the 0265 frontier has no such key on the jsonb this door returns, and a reader that
+   *  crashed on its absence would be asserting a schema it cannot see. Present and non-null on
+   *  every question read from a 0265-or-later database, because `accounting_work.basis` is itself
+   *  `not null` there. */
+  basis?: WorkBasis | null;
 };
 
 /** The value a human typed for one field, before it is sent. `null` means "left blank", which is
