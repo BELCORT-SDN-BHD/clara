@@ -247,7 +247,7 @@ test("`party_ambiguous` renders its candidates INLINE as a choice, and picking o
     "picking one resolves the refusal in place");
 });
 
-test("#982 the chooser shows each candidate's TIN beside its registration number", async () => {
+test("ticket 982 — the chooser shows each candidate's TIN beside its registration number", async () => {
   // LHDN MyInvois requires the buyer TIN and BRN, so a Malaysian document carries both and a
   // person telling two parties apart may only have the TIN to go on. The door has always carried
   // each candidate's `tin` in the refusal; this form mapped id, name and registration number and
@@ -270,7 +270,7 @@ test("#982 the chooser shows each candidate's TIN beside its registration number
     "…including for the candidate whose registration number the books do not hold, which is the one a person could not otherwise tell apart");
 });
 
-test("#982 `party_identifier_conflict` is a banner with its own sentence, its code and BOTH sides as controls", async () => {
+test("ticket 982 — `party_identifier_conflict` is a banner with its own sentence, its code and BOTH sides as controls", async () => {
   // The door's third party refusal (0274): the document's registration number and its TIN name two
   // different live parties. It is not `party_unresolved` (something DID answer) and not
   // `party_ambiguous` (the person is choosing between two identifiers the document carries, not

@@ -194,7 +194,7 @@ test("a refused party renders its candidates INLINE and preserves the draft", as
   await expect(field(page, "totalCents")).toHaveValue(/1,?060/);
 });
 
-test("#982 an identifier conflict names what disagreed and offers BOTH parties", async ({ page }) => {
+test("ticket 982 — an identifier conflict names what disagreed and offers BOTH parties", async ({ page }) => {
   // 0274's third party refusal, driven through the SAME carrier every refusal on this lane rides:
   // the runtime hands `detail` back verbatim and the form reads `detail.candidates` off it. The
   // person is choosing between the two identifiers the document itself carries, so the sentence
