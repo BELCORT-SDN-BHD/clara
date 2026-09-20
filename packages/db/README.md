@@ -753,14 +753,20 @@ live, on every call: `'applicable'`, `'inapplicable'`, or `'undetermined'` while
 still unanswered. `seed_firm_setup_plan`'s reconciliation now inserts a catalogue row only while it
 reads `'applicable'`; an inapplicable or undetermined one is simply never seeded, and a LATER
 reconciliation picks it up once its dependency is answered. `get_firm_setup` carries a live
-`applicability` field on every item and its `counter.required_total` / `required_answered` now also
-count `mpers_eligibility` or `tin` specifically, but only while each is BOTH actually seeded on this
-plan and reads `'applicable'` right now — excluding either from both sides the moment it is
-inapplicable or was never seeded, even after it was once answered (the answer itself is never
-touched). This stays a `get_firm_setup`-only concept: `clara.commit_firm_setup` still reads the
-catalogue's own (untouched, still `false` on both rows) `required_for_commit` flag directly, so
-neither conditional item blocks a commit — a deliberate, named residual for a follow-up ticket if
-the owner later wants the counter's honesty to become a real gate.
+`applicability` field on every item; an item answered before it became inapplicable keeps that
+answer untouched and is simply reported inapplicable beside it.
+
+0257's first cut ALSO widened `items[].required` and both sides of `counter` to count a seeded,
+applicable `mpers_eligibility`/`tin`. The lane's code review withdrew that widening and
+**0259 SS G** (the fix round; see #935 below) recut the read so there is ONE notion of required
+across the estate: the catalogue's own `required_for_commit` column, which is what
+`clara.commit_firm_setup` gates on, what `required_outstanding` names, what both counter sides
+count and what `items[].required` reports. `required_total - required_answered` is therefore by
+construction the length of `required_outstanding`, and an inapplicable item is excluded from both
+sides because neither conditional row is `required_for_commit` at all. Making the counter's
+honesty a real gate — i.e. deciding that a seeded, applicable TIN should block a commit — remains
+the follow-up ticket 0257's own header proposed; it is one decision about the gate, not two
+half-decisions about the counter.
 
 **#934 (0258, user-facing catalogue notes and a retire column)** replaces the twelve engineer
 provenance notes (file names, line numbers) a firm admin used to see under each question with one
@@ -793,11 +799,16 @@ plain `insert` — brand-new rows, so the append-only trigger is never touched, 
 backfill of twelve EXISTING ones. `clara.onboarding_plan_items.item_kind`'s CHECK is widened to
 admit `education` too, so `seed_firm_setup_plan`'s reconciliation carries the catalogue's own kind
 straight through instead of folding it onto `todo` (0218's own reason for that fold — "a fourth
-value would be a CHECK violation" — no longer holds once this file lands). `get_firm_setup` and
-`commit_firm_setup` are BOTH untouched (pinned pre-images, re-measured byte-identical at the tail):
-every counter/outstanding/gate arm already reads `required_for_commit` (or the two named
-conditional keys) alone, so a tip — never required, never one of those two — can neither inflate a
-counter nor block a commit, for free, from the catalogue data alone. `answer_firm_setup_item` and
+value would be a CHECK violation" — no longer holds once this file lands). `commit_firm_setup` is untouched (pinned pre-image,
+re-measured byte-identical at the tail): every counter/outstanding/gate arm reads
+`required_for_commit` alone, so a tip — never required — can neither inflate a counter nor block a
+commit, for free, from the catalogue data alone. `get_firm_setup` was untouched by this file's
+FIRST cut, for the same reason; the lane's code review then found three defects in that read —
+the withdrawn effectively-required widening (#891 above), the counter disagreeing with
+`required_outstanding`, and a `confirmed_facts` join that had missed #934's retirement filter —
+which all land on the one door, so **SS G** of this same file (re-applied through #957's
+`CLARA_MIGRATION_REDO`, rather than claiming a sixth migration number no lane reserved) recuts it:
+one notion of required, and seven `retired_at is null` filters instead of six. `answer_firm_setup_item` and
 `defer_firm_setup_item` are each recut with one new guard refusing an `education` row by name
 (`CLR10 firm_setup_item_is_a_tip`) — a gap this file closes rather than one the Agent Brief named,
 because until this file no `education` row existed to expose it: without the guard, either generic

@@ -12,11 +12,11 @@
 //     doors; another entity type is not, and stays unseeded across a later reconciliation.
 //   AC2 — `p891.tin.turnover` — the TIN item follows the turnover answer both ways, including
 //     turnover unanswered (undetermined — neither asked nor counted).
-//   AC3 — `p891.counter.excludes` — the required counter counts a determined, seeded, applicable
-//     conditional item on BOTH sides, and drops it from BOTH the moment its dependency is
-//     corrected to make it inapplicable.
+//   AC3 — `p891.counter.excludes` — a conditional item is excluded from the required counter and
+//     from `required_outstanding` whatever its applicability, and the counter's own arithmetic
+//     (`required_total - required_answered`) always equals the length of that named list.
 //   AC4 — `p891.answer.survives` — an item answered before it became inapplicable keeps its
-//     answer; only its reported applicability (and required-ness) changes.
+//     answer; only its reported applicability changes.
 //
 // ROLE DISCIPLINE: every door call runs through `humanQuery` as a named admin persona. The world is
 // planted through the ROOT connection exactly as `clara._create_firm_core` plants a firm plan
@@ -183,49 +183,72 @@ cell("p891.tin.turnover the TIN item follows the turnover answer both ways, incl
 // sides, and drops it from both the moment its dependency makes it inapplicable.
 // =============================================================================================
 
-cell("p891.counter.excludes the required counter includes a seeded, applicable conditional item on both sides, and excludes it from both once its dependency makes it inapplicable", async () => {
+cell("p891.counter.excludes a conditional item is excluded from the required counter and from required_outstanding whatever its applicability, and the counter's arithmetic always matches the named list", async () => {
   const w = await firmSetupWorld("t3");
+
+  /** THE INVARIANT THE SURFACE RENDERS BOTH HALVES OF. `/settings/setup` prints the counter
+   *  ("1 of 9 required facts recorded") directly above the outstanding list ("Still needed: …").
+   *  If `required_total - required_answered` is not the LENGTH of that list, the screen states a
+   *  fraction its own list contradicts — measured on clara_l06 as 8 missing beside 7 named before
+   *  this fix round (review L06-SPEC-03). The independent source of truth is the arithmetic
+   *  itself, not a re-derivation of either side. */
+  const agree = (env, where) => assert.equal(
+    env.counter.required_total - env.counter.required_answered, env.required_outstanding.length,
+    `${where}: the counter says ${env.counter.required_total - env.counter.required_answered} required facts are missing, the outstanding list names ${env.required_outstanding.length}`);
+
   await seed(w.admin, opk("fsaseed3a"));
   let env = await readSetup(w.admin);
-  assert.equal(env.counter.required_total, 8, "the eight unconditional required rows, before any conditional item is ever seeded");
+  assert.equal(env.counter.required_total, 8, "the eight rows the catalogue marks required_for_commit");
   assert.equal(env.counter.required_answered, 0);
   assert.equal(itemOf(env, "tin").required, false);
+  agree(env, "a freshly seeded plan");
 
-  // Turnover determines TIN applicable, but nobody has reconciled the checklist again yet -- the
-  // counter must NOT move for an item nobody has seeded.
+  // Turnover determines TIN applicable. It is still not seeded, and it is still not required.
   await answer(w.admin, {
     plan: w.plan, revision: env.revision_token, itemKey: "turnover", answer: "RM1M-5M",
   });
   env = await readSetup(w.admin);
-  assert.equal(env.counter.required_total, 8,
-    "an applicable-but-unseeded conditional item must not inflate the denominator");
+  assert.equal(itemOf(env, "tin").applicability, "applicable");
+  assert.equal(env.counter.required_total, 8, "an applicable conditional item must not inflate the denominator");
   assert.equal(env.counter.required_answered, 1, "turnover itself is now answered");
+  agree(env, "turnover answered, TIN applicable but unseeded");
 
-  // Reconciling seeds TIN -- now it counts, unanswered, on the denominator alone.
+  // Reconciling seeds TIN. It is APPLICABLE and PENDING — and still outside both sides, because
+  // the catalogue's own `required_for_commit` is what `commit_firm_setup` gates on and what this
+  // counter counts: one notion of "required", not two that can disagree with each other
+  // (review L06-SPEC-02/-03).
   await seed(w.admin, opk("fsaseed3b"));
   env = await readSetup(w.admin);
-  assert.equal(env.counter.required_total, 9, "a seeded, applicable TIN joins the required denominator");
-  assert.equal(env.counter.required_answered, 1, "TIN is not yet answered");
-  assert.equal(itemOf(env, "tin").required, true);
+  assert.equal(itemOf(env, "tin").state, "pending");
+  assert.equal(itemOf(env, "tin").applicability, "applicable");
+  assert.equal(env.counter.required_total, 8, "a seeded, applicable conditional item joined the denominator");
+  assert.equal(env.counter.required_answered, 1);
+  assert.equal(itemOf(env, "tin").required, false,
+    "the per-item flag is the catalogue's own required_for_commit -- widening it withdraws the surface's skip control from a row commit_firm_setup does not require");
+  assert.ok(!env.required_outstanding.includes("tin"),
+    "a row commit_firm_setup does not gate on must never be named as outstanding");
+  agree(env, "a seeded, applicable conditional item");
 
   await answer(w.admin, {
     plan: w.plan, revision: env.revision_token, itemKey: "tin", answer: "C1234567890",
   });
   env = await readSetup(w.admin);
-  assert.equal(env.counter.required_total, 9);
-  assert.equal(env.counter.required_answered, 2, "turnover and tin, both now answered");
+  assert.equal(env.counter.required_total, 8);
+  assert.equal(env.counter.required_answered, 1, "answering a conditional item does not move the numerator either");
+  agree(env, "the conditional item answered");
 
-  // Correcting turnover back under the exemption threshold makes TIN inapplicable LIVE -- excluded
-  // from BOTH sides on the very next read, even though its own answer is untouched.
+  // Correcting turnover back under the exemption threshold makes TIN inapplicable LIVE. Its own
+  // answer is untouched, and it is excluded from both sides — as it was throughout.
   await answer(w.admin, {
     plan: w.plan, revision: env.revision_token, itemKey: "turnover", answer: "<RM1M",
   });
   env = await readSetup(w.admin);
   assert.equal(itemOf(env, "tin").applicability, "inapplicable");
-  assert.equal(env.counter.required_total, 8, "TIN drops out of the denominator");
-  assert.equal(env.counter.required_answered, 1, "…and out of the numerator -- only turnover (itself unconditional) remains counted");
+  assert.equal(env.counter.required_total, 8, "an inapplicable item is excluded from the denominator");
+  assert.equal(env.counter.required_answered, 1, "…and from the numerator");
   assert.equal(itemOf(env, "tin").required, false);
   assert.equal(itemOf(env, "tin").answer, "C1234567890", "the earlier answer is untouched by the exclusion");
+  agree(env, "the conditional item made inapplicable");
 });
 
 // =============================================================================================
@@ -259,5 +282,6 @@ cell("p891.answer.survives an item answered before it became inapplicable keeps 
   assert.equal(mpers.applicability, "inapplicable", "re-derived live, off the corrected entity_type");
   assert.equal(mpers.state, "answered", "the plan item's own state is untouched -- nothing deletes it");
   assert.deepEqual(mpers.answer, { determination: "eligible" }, "the earlier answer survives the correction");
-  assert.equal(mpers.required, false, "an inapplicable item is excluded from the required side too");
+  assert.equal(mpers.required, false,
+    "the per-item required flag is the catalogue's own required_for_commit -- false for a conditional row whatever its applicability, so the surface keeps offering its skip control");
 });

@@ -34,21 +34,61 @@
 --       Agent Brief's acceptance criteria by name; the reasoning is above and the tail proves it.
 --
 -- WHAT THIS FILE DOES NOT DO, each with its authority.
---   * it does NOT touch `clara.get_firm_setup`. Its existing arms already carry every property the
---     ticket's AC2 asks for, for free, from the catalogue data alone:
---       - `required_total`/`required_answered` only ever count a row that is `required_for_commit`
---         (or one of the two named conditional rows) — an `education` row is neither, so it can
---         never inflate either side (0257/0258's own arms, verbatim, unmoved).
---       - `required_outstanding` only ever names a `required_for_commit` row — same reason.
---       - `items[]` already carries `kind` (`k.item_kind`) for every row, tips included, and groups
---         by `group_key` — a `tips` group needs no new SQL, only a new group key in the data and a
---         heading/purpose pair in the surface's own i18n.
---     This is a MEASURED claim, not a hope: the prestate below pins `get_firm_setup`'s pre-image and
---     the tail re-measures it byte-identical, and `firm-setup-education-tips.test.mjs`'s AC2 cell
---     proves the behaviour on a real, seeded tip.
---   * it does NOT touch `clara.commit_firm_setup`. Its outstanding-items gate already reads
---     `required_for_commit` alone (0218 §E.4, unmoved) — a tip can never block it, for the same
---     catalogue-data reason `get_firm_setup`'s counters cannot count one.
+--   * it does NOT touch `clara.commit_firm_setup`. Its outstanding-items gate reads
+--     `required_for_commit` alone (0218 §E.4, unmoved) — a tip can never block it, and since the
+--     fix round below that is the same set `get_firm_setup`'s counter and `required_outstanding`
+--     both read.
+--
+-- =====================================================================================
+-- FIX ROUND — SS G RECUTS `clara.get_firm_setup`, AND ONE NOTION OF REQUIRED
+-- (lane code review, findings L06-SPEC-02, L06-SPEC-03 and L06-SPEC-12).
+--
+-- The first cut of this file left the read alone, correctly for its own ticket: a tip is
+-- `required_for_commit = false`, so no arm of the read could count one, and `items[]` already
+-- carried `kind` and `group_key`. The review then found three defects that ALL land on that one
+-- door, so the fix round folds a single recut into this file — the highest applied migration in
+-- the lane, re-applied through #957's `CLARA_MIGRATION_REDO` — rather than claiming a sixth
+-- migration number no lane reserved.
+--
+-- 0257 (#891) widened "required" in two places at once: `items[].required` and both sides of
+-- `counter` began to read `k.required_for_commit OR (this is mpers_eligibility/tin AND it is
+-- seeded AND it reads applicable right now)`. `required_outstanding` was left on
+-- `k.required_for_commit` alone, and so was `clara.commit_firm_setup` (deliberately — #891's
+-- "Out of scope" keeps the commit gate where it is). The estate therefore carried TWO notions of
+-- required that the SAME screen renders side by side, and they disagreed. Measured on clara_l06
+-- before this fix: a firm whose turnover answer makes TIN applicable, once reconciled, read
+-- `counter = {required_total: 9, required_answered: 1}` above a `required_outstanding` of SEVEN
+-- keys — "1 of 9 required facts recorded" over a "Still needed" list naming seven of the eight
+-- missing. The same widening also set `items[].required = true` on that row, which is what the
+-- checklist gates its skip control and its Required/Optional badge on: a row `commit_firm_setup`
+-- does not require lost its "Not now" button and gained a "Required" badge the Finish gate does
+-- not honour.
+--
+-- THE FIX WITHDRAWS THE WIDENING RATHER THAN SPREADING IT. `required_for_commit` is the ONE
+-- notion: the catalogue column, what `commit_firm_setup` gates on, what `required_outstanding`
+-- names, what both counter sides count, and what `items[].required` reports. Then
+-- `required_total - required_answered` is BY CONSTRUCTION the length of `required_outstanding`
+-- (a required row is either unseeded/pending — outstanding — or answered/resolved/deferred —
+-- counted), and #891's AC3 ("the counter excludes an inapplicable item from numerator and
+-- denominator") holds by construction rather than by a rule that can drift: neither conditional
+-- row is `required_for_commit`, so no answer, correction or reconciliation can put an
+-- inapplicable item on either side. `p891.counter.excludes` re-pins exactly that, asserting the
+-- arithmetic identity at every step of the turnover walk.
+--
+-- WHAT IS DELIBERATELY NOT DONE HERE, and why. The other repair for the same disagreement is to
+-- widen `required_outstanding` to match the widened counter. It is rejected: the checklist
+-- disables Finish on `required_outstanding.length > 0`, so widening that list would refuse in the
+-- browser a commit the door itself accepts — making firm setup harder to finish than #648
+-- shipped it, which is a product decision for the owner and not a review fix. 0257's own header
+-- already proposed "the counter's honesty should become a real gate" as a follow-up ticket; that
+-- is where it belongs, as ONE decision about the gate rather than two half-decisions about the
+-- counter.
+--
+-- SS G also adds the seventh `retired_at is null` filter, on the `confirmed_facts` join. #934's
+-- AC1 says `get_firm_setup` omits retired rows; 0258 filtered six surfaces and its own tail
+-- pinned six, leaving the `confirmed_facts` join (which supplies `item_key`/`question` to the
+-- facts panel) unfiltered. No row is retired today, so nothing changes behaviourally; the tail's
+-- count of seven is what keeps it true (L06-SPEC-12).
 --   * it does NOT touch `clara._firm_setup_plan`, `clara._assert_firm_setup_answer`,
 --     `clara._firm_setup_bump` or `clara._firm_setup_applicability` — all four are re-measured
 --     present and byte-identical at the tail. `dismiss_firm_setup_tip` calls none of them: it needs
@@ -85,8 +125,12 @@
 -- =====================================================================================
 -- REDO SAFETY (#957). Every DDL/DML step below tolerates being re-run over its own prior effects:
 -- the CHECK widen is guarded by a definition probe, the catalogue insert is guarded by
--- `not exists`, and `create or replace function` is naturally idempotent. If a redo is ever used
--- here it is recorded in the ticket's report, per the work order.
+-- `on conflict (item_key) do nothing`, and `create or replace function` is naturally idempotent. The PRESTATE needs more
+-- than idempotence — its pins read "the shape before this file", which a redo has already moved —
+-- so SS0 opens with ONE catalog question (does this file's own new door exist?) and then checks
+-- either the fresh-apply pins or the already-landed ones, never neither. A redo WAS used here: the
+-- fix round added SS G and re-applied this file with
+-- `CLARA_MIGRATION_REDO=0259_firm_setup_education_tips`, recorded in the lane's fix report.
 -- =====================================================================================
 
 set local statement_timeout = '5min';   -- runner rule: the first executable statement
@@ -97,8 +141,16 @@ set local statement_timeout = '5min';   -- runner rule: the first executable sta
 -- earlier ticket in this lane (#894, #895, #891, #934 are all already applied here).
 -- =====================================================================================
 do $i935_pre$
-declare v_sha text; v_n int; v_txt text; v_src text;
+declare v_sha text; v_n int; v_txt text; v_src text; v_redo boolean;
 begin
+  -- 0.0 FRESH APPLY OR REDO? (#957, packages/db/README.md "Redo".) `redo` re-runs THIS file
+  -- against a database that already carries its OWN prior effects, so every pin below that reads
+  -- "the pre-image, before this file" is true on a fresh apply and false on a redo. Rather than
+  -- weakening those pins to "either shape", this block asks ONE question off the catalog -- does
+  -- this file's own new door exist? -- and then checks the fresh-apply pins or the already-landed
+  -- ones, never neither. The fresh-apply arm is unchanged from the first cut, byte for byte.
+  v_redo := to_regprocedure('clara.dismiss_firm_setup_tip(uuid,text,text)') is not null;
+
   -- 0.1 · EVERY NAME THIS FILE RECUTS OR CALLS EXISTS.
   if to_regprocedure('clara.get_firm_setup()') is null
      or to_regprocedure('clara.seed_firm_setup_plan(text)') is null
@@ -111,10 +163,12 @@ begin
       using errcode='CLR10';
   end if;
 
-  -- 0.2 · PRE-IMAGE PINS. `seed_firm_setup_plan`, `answer_firm_setup_item` and
-  -- `defer_firm_setup_item` are RECUT below and pinned as gates; `get_firm_setup` and
-  -- `commit_firm_setup` are NOT recut and pinned as measured baselines, re-read byte-identical at
-  -- the tail -- the checked form of "this file does not touch either read/gate".
+  -- 0.2 · PRE-IMAGE PINS (FRESH APPLY ONLY -- the redo arm at the foot of this block checks the
+  -- same facts in their post-apply shape). `seed_firm_setup_plan`, `answer_firm_setup_item`,
+  -- `defer_firm_setup_item` and -- since the fix round added SS G -- `get_firm_setup` are all
+  -- RECUT below and pinned here as gates; `commit_firm_setup` is NOT recut and is pinned as a
+  -- measured baseline, re-read byte-identical at the tail.
+  if not v_redo then
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
    where p.oid = 'clara.seed_firm_setup_plan(text)'::regprocedure;
   if v_sha <> '57f8c602730119442042a5a3754efa2ca180f3f87ced0af17aea603af3060118' then
@@ -136,7 +190,7 @@ begin
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
    where p.oid = 'clara.get_firm_setup()'::regprocedure;
   if v_sha <> 'dfe46764c5c4932cc771c46c5ee743820da69ebb790420b15314fb6b5e1732b0' then
-    raise exception '#935 prestate: clara.get_firm_setup has DRIFTED from its measured baseline (sha %) -- re-derive the untouched-baseline claim before applying', v_sha
+    raise exception '#935 prestate: clara.get_firm_setup has DRIFTED from its pinned pre-image (sha %) -- re-derive SS G''s recut against the live body before applying', v_sha
       using errcode='CLR10';
   end if;
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
@@ -162,6 +216,10 @@ begin
   select p.prosrc into v_src from pg_proc p where p.oid = 'clara.defer_firm_setup_item(uuid,uuid,text,text,text)'::regprocedure;
   if position($tag$firm_setup_item_is_a_tip$tag$ in v_src) <> 0 then
     raise exception '#935 prestate: clara.defer_firm_setup_item already refuses an education row' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara.get_firm_setup()'::regprocedure;
+  if position($tag$'required', k.required_for_commit,$tag$ in v_src) <> 0 then
+    raise exception '#935 prestate: clara.get_firm_setup already carries SS G''s recut' using errcode='CLR10';
   end if;
   if exists (select 1 from clara.firm_setup_keys
               where item_key in ('tip_invite_colleagues','tip_knowledge_page','tip_start_from_conversation')) then
@@ -202,7 +260,64 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#935 prestate: clean -- every recut/called name is present at its pinned pre-image (seed/answer/defer to recut; get_firm_setup/commit_firm_setup as untouched baselines), clara.dismiss_firm_setup_tip does not yet exist, neither door yet refuses an education row, no tip row exists yet, the catalogue holds exactly its pinned twelve rows byte-identical to the prior tickets'' own pin, and onboarding_plan_items.item_kind does not yet admit education.';
+  raise notice '#935 prestate: clean -- every recut/called name is present at its pinned pre-image (seed/answer/defer/get_firm_setup to recut; commit_firm_setup as an untouched baseline), clara.dismiss_firm_setup_tip does not yet exist, neither door yet refuses an education row, no tip row exists yet, the catalogue holds exactly its pinned twelve rows byte-identical to the prior tickets'' own pin, and onboarding_plan_items.item_kind does not yet admit education.';
+
+  else
+  -- ===========================================================================================
+  -- THE REDO ARM (#957). This file has already applied once on this database and the fix round
+  -- then edited it. Nothing here is weaker than the fresh arm: it checks the SAME facts in their
+  -- post-apply shape, so a database in NEITHER state -- half applied, hand patched, or drifted --
+  -- still refuses rather than being silently re-run over.
+  -- ===========================================================================================
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara.seed_firm_setup_plan(text)'::regprocedure;
+  if position($tag$case k.item_kind when 'education' then 'todo' else k.item_kind end$tag$ in v_src) <> 0 then
+    raise exception '#935 redo prestate: clara.seed_firm_setup_plan still folds education onto todo -- this database is not in this file''s applied state'
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara.answer_firm_setup_item(uuid,uuid,text,jsonb,text)'::regprocedure;
+  if position($tag$firm_setup_item_is_a_tip$tag$ in v_src) = 0 then
+    raise exception '#935 redo prestate: clara.answer_firm_setup_item does not carry this file''s education guard'
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara.defer_firm_setup_item(uuid,uuid,text,text,text)'::regprocedure;
+  if position($tag$firm_setup_item_is_a_tip$tag$ in v_src) = 0 then
+    raise exception '#935 redo prestate: clara.defer_firm_setup_item does not carry this file''s education guard'
+      using errcode='CLR10';
+  end if;
+  -- `commit_firm_setup` is untouched by this file in BOTH arms, so its pin is the same literal.
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.commit_firm_setup(uuid,uuid,text)'::regprocedure;
+  if v_sha <> 'c527f0bf01a9a583d18180270a21bac4c7110b4daf64927ef7967bc428e9dc23' then
+    raise exception '#935 redo prestate: clara.commit_firm_setup has DRIFTED from its measured baseline (sha %)', v_sha
+      using errcode='CLR10';
+  end if;
+  -- The catalogue already holds fifteen rows: the twelve, hashing to the SAME pin the fresh arm
+  -- checks, plus this file's own three tips.
+  select count(*)::int into v_n from clara.firm_setup_keys;
+  if v_n <> 15 then
+    raise exception '#935 redo prestate: the firm setup catalogue holds % rows (expected 15 -- the twelve plus this file''s three tips)', v_n
+      using errcode='CLR10';
+  end if;
+  select encode(sha256(convert_to(string_agg(
+      item_key || '|' || coalesce(knowledge_key,'') || '|' || item_kind || '|' ||
+      required_for_commit::text || '|' || min_role || '|' || group_key || '|' ||
+      answer_shape || '|' || answer_options::text || '|' || coalesce(answer_field,'') || '|' ||
+      question || '|' || note || '|' || sort_order::text, '~' order by sort_order),'UTF8')),'hex')
+    into v_sha from clara.firm_setup_keys
+   where item_key not in ('tip_invite_colleagues','tip_knowledge_page','tip_start_from_conversation');
+  if v_sha <> '156dc83bce062e83ca4fe0185f6a18f9c57891ed8fe16d4e5d4d1f7134e6a1dd' then
+    raise exception '#935 redo prestate: the twelve rows'' pre-existing columns have DRIFTED from the pinned baseline (sha %)', v_sha
+      using errcode='CLR10';
+  end if;
+  select pg_get_constraintdef(c.oid) into v_txt from pg_constraint c
+   where c.conrelid='clara.onboarding_plan_items'::regclass and c.conname='onboarding_plan_items_item_kind_check';
+  if v_txt is null or position('education' in v_txt) = 0 then
+    raise exception '#935 redo prestate: onboarding_plan_items_item_kind_check reads {%}, expected education to be admitted already', v_txt
+      using errcode='CLR10';
+  end if;
+
+  raise notice '#935 prestate: clean (REDO) -- this file''s own effects are already on this database: clara.dismiss_firm_setup_tip is present, both generic doors carry the education guard, the seed no longer folds education onto todo, the catalogue holds fifteen rows whose original twelve still hash to the pinned baseline, and onboarding_plan_items.item_kind already admits education; clara.commit_firm_setup is byte-identical to its baseline. Every statement below is written to be re-runnable over those effects.';
+  end if;
 end
 $i935_pre$;
 
@@ -210,7 +325,11 @@ set role clara_fn_owner;
 
 -- =====================================================================================
 -- SS A — THE THREE TIPS. Plain `insert`: these are brand-new rows, so the append-only trigger is
--- never disabled (contrast #934's backfill, which touched twelve EXISTING rows). `user_note` is set
+-- never disabled (contrast #934's backfill, which touched twelve EXISTING rows) — and
+-- `on conflict (item_key) do nothing` makes it redo-safe WITHOUT an update: a redo finds its own
+-- three rows and inserts none, while a FRESH apply can never take that branch because SS0.3
+-- refuses outright if any tip row already exists. The tail then re-measures all fifteen rows and
+-- their columns, so a silently skipped DRIFTED row is caught rather than tolerated. `user_note` is set
 -- directly at insert -- there is no "before" state for a tip's accountant sentence to fall back
 -- from. `note` (engineer provenance, required not null) records this file's own authority rather
 -- than the interview-segment provenance the twelve original rows carry, because a tip is not one of
@@ -245,7 +364,8 @@ insert into clara.firm_setup_keys
    || 'answer_shape/answer_options/answer_field are inert placeholders: no code path renders a form '
    || 'or validates an answer for item_kind = education (see this migration''s header).',
    'Drop invoices, statements or a one-line instruction into the Clara rail; the work continues even if you close the tab, and anything Clara cannot settle appears under Needs you.',
-   150);
+   150)
+on conflict (item_key) do nothing;
 
 -- =====================================================================================
 -- SS B — WIDEN `onboarding_plan_items.item_kind` TO ADMIT `education`. Guarded by a definition
@@ -527,7 +647,11 @@ revoke all on function clara.defer_firm_setup_item(uuid, uuid, text, text, text)
 -- CONSTRUCTION instead -- a repeat call on an already-settled tip is a silent no-op, never an error
 -- and never a second write.
 -- =====================================================================================
-create function clara.dismiss_firm_setup_tip(p_plan uuid, p_item_key text, p_action text)
+-- `create OR REPLACE`, for redo safety alone (#957): on a FRESH apply SS0.3 refuses outright if
+-- this name already exists, so the `or replace` arm is only ever taken by a redo of this very
+-- file. The tail re-measures owner, SECURITY DEFINER, search_path, plan_cache_mode and the exact
+-- ACL afterwards, so a replaced door cannot quietly inherit a posture this file did not set.
+create or replace function clara.dismiss_firm_setup_tip(p_plan uuid, p_item_key text, p_action text)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp
   set plan_cache_mode = force_custom_plan as $door$
 declare c record; k record; p clara.onboarding_plans; i record; v_key text; v_action text; v_state text;
@@ -595,6 +719,153 @@ begin
 end $door$;
 revoke all on function clara.dismiss_firm_setup_tip(uuid, text, text) from public;
 grant execute on function clara.dismiss_firm_setup_tip(uuid, text, text) to clara_authenticated;
+
+-- =====================================================================================
+-- SS G — `clara.get_firm_setup`, RECUT (FIX ROUND). Three changes against 0258 SS C's body, every
+-- other line of it verbatim:
+--   (1) `items[].required` is the catalogue's own `required_for_commit` again;
+--   (2) `counter.required_total` / `required_answered` count that same set, and nothing else;
+--   (3) the `confirmed_facts` join gains the `retired_at is null` filter the other six surfaces
+--       already carried (#934's own AC1 names the read, and this was the surface it missed).
+-- =====================================================================================
+create or replace function clara.get_firm_setup() returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp
+  set plan_cache_mode = force_custom_plan as $read$
+declare
+  c record; p clara.onboarding_plans; v_items jsonb; v_out jsonb; v_facts jsonb;
+  v_req_total int; v_req_done int; v_total int; v_unseeded int;
+begin
+  c := clara._human_ctx(clara.role_rank('admin'));
+  p := clara._firm_setup_plan(c.firm);
+
+  select coalesce(jsonb_agg(x.j order by x.sort_order), '[]'::jsonb) into v_items from (
+    select jsonb_build_object(
+        'item_key', k.item_key, 'kind', k.item_kind, 'group_key', k.group_key,
+        -- #934: PREFER the accountant-facing user_note over the engineer's own `note` -- a row
+        -- with no user_note yet (never one of the twelve; see header) falls back rather than
+        -- rendering nothing.
+        'question', k.question, 'note', coalesce(k.user_note, k.note),
+        -- #891 FIX ROUND: the catalogue's OWN required_for_commit flag, and nothing else. See
+        -- this file's header, "ONE NOTION OF REQUIRED".
+        'required', k.required_for_commit,
+        'min_role', k.min_role,
+        'answer_shape', k.answer_shape, 'answer_options', k.answer_options,
+        'answer_field', k.answer_field, 'sort_order', k.sort_order,
+        -- 'unseeded' is a REAL state of this surface, not a null: the catalogue row exists and the
+        -- plan has no item for it yet, which is exactly what the reconciling seed fixes.
+        'state', coalesce(i.state, 'unseeded'),
+        'answer', i.answer, 'answered_by', i.answered_by,
+        'answered_by_name', u.display_name, 'answered_at', i.answered_at,
+        'knowledge_key', k.knowledge_key, 'knowledge_record_id', r.record_id,
+        -- #891: 'applicable' | 'inapplicable' | 'undetermined', LIVE off clara._firm_setup_
+        -- applicability -- never stored, so an item answered before it became inapplicable keeps
+        -- its answer (untouched above) and is re-derived as inapplicable on every read.
+        'applicability', clara._firm_setup_applicability(p.id, k.item_key)) as j,
+      k.sort_order as sort_order
+      from clara.firm_setup_keys k
+      left join clara.onboarding_plan_items i
+        on p.id is not null and i.plan_id = p.id and i.item_key = k.item_key
+      left join clara.users u on u.id = i.answered_by
+      -- The record this ITEM produced, matched on the key and the UNCONDITIONAL applicability this
+      -- door captures under. A #654 promotion that carries conditions of its own is a different
+      -- row and is not claimed here.
+      left join clara.knowledge_records r
+        on k.knowledge_key is not null and r.firm_id = c.firm and r.scope_kind = 'firm'
+           and r.knowledge_key = k.knowledge_key and r.superseded_at is null
+           and r.state = 'live' and r.applies_when = '{}'::jsonb
+     -- #934: a RETIRED catalogue row is settled -- never asked, never shown, never counted -- and
+     -- is excluded from this projection entirely rather than rendered with a tombstone flag.
+     where k.retired_at is null
+  ) x;
+
+  select coalesce(jsonb_agg(k.item_key order by k.sort_order), '[]'::jsonb) into v_out
+    from clara.firm_setup_keys k
+    left join clara.onboarding_plan_items i
+      on p.id is not null and i.plan_id = p.id and i.item_key = k.item_key
+   -- #934: a retired row can never be "outstanding" -- it is never asked at all.
+   where k.retired_at is null and k.required_for_commit and (i.id is null or i.state = 'pending');
+
+  -- #934: catalogue_total counts the LIVE catalogue -- a retired row is settled, not "still there
+  -- but not required", so it is excluded here exactly as it is from items[] above.
+  select count(*)::int into v_total from clara.firm_setup_keys where retired_at is null;
+  -- #891: an INAPPLICABLE row is SETTLED -- this file's seed change means it is never inserted, so
+  -- counting it as "still needs seeding" forever would keep `seeded` false for a firm this catalogue
+  -- genuinely has nothing left to ask. An UNDETERMINED row still counts: its fate is not yet known,
+  -- and the reconcile control must stay available until the dependency it needs is answered.
+  -- #934: a RETIRED row is settled the same way an inapplicable one is -- excluded here too, so
+  -- `seeded` can still reach true for a firm whose catalogue has nothing left to ask.
+  select count(*)::int into v_unseeded
+    from clara.firm_setup_keys k
+    left join clara.onboarding_plan_items i
+      on p.id is not null and i.plan_id = p.id and i.item_key = k.item_key
+   where k.retired_at is null and i.id is null
+     and clara._firm_setup_applicability(p.id, k.item_key) <> 'inapplicable';
+  -- #891 FIX ROUND: the required denominator and numerator are the catalogue's own
+  -- required_for_commit set -- the SAME set `required_outstanding` (v_out) names above and the
+  -- SAME set clara.commit_firm_setup gates on (0218 SS E.4, untouched). An inapplicable item is
+  -- excluded from both sides because neither conditional row is required_for_commit at all, which
+  -- no answer, correction or reconciliation can change. See this file's header, "ONE NOTION OF
+  -- REQUIRED", for why the effectively-required widening 0257 carried was withdrawn.
+  -- #934: a RETIRED row is excluded from BOTH sides too, even where it is required_for_commit --
+  -- proven on a synthetic row by firm-setup-user-notes.test.mjs's p934.notes.omits_retired, since
+  -- no shipped row is retired.
+  -- #895 (0256): `p.id is not null` on the denominator -- a firm holding NO firm-scope plan reads
+  -- a 0-of-0 counter rather than a denominator it was never asked to fill.
+  select count(*)::int into v_req_total
+    from clara.firm_setup_keys k
+   where p.id is not null and k.retired_at is null and k.required_for_commit;
+  select count(*)::int into v_req_done
+    from clara.firm_setup_keys k
+    join clara.onboarding_plan_items i
+      on p.id is not null and i.plan_id = p.id and i.item_key = k.item_key
+   where k.retired_at is null and k.required_for_commit
+     and i.state in ('answered','resolved','deferred');
+
+  select coalesce(jsonb_agg(y.j order by y.knowledge_key), '[]'::jsonb) into v_facts from (
+    select clara._knowledge_row_json(r)
+        || jsonb_build_object(
+             'item_key', k.item_key,
+             'question', k.question,
+             'asserted_by_name', u.display_name,
+             'key_description', kk.description,
+             'value_shape', kk.value_shape,
+             'validated_against', kk.validated_against,
+             'authority_bearing', kk.authority_bearing,
+             'asserted_by_active', (m.user_id is not null),
+             'asserted_by_role', m.role,
+             'authority_current', (m.user_id is not null and clara.role_rank(m.role)
+               >= clara.role_rank(clara._knowledge_floor(r.knowledge_key, 'firm'))),
+             -- 0192 SS D.8: a firm default NEVER shadows a client's own live `clara.client_facts`
+             -- row, because the legacy table is still what the estate reads for the five carried
+             -- keys. The surface says so rather than letting the register look self-contradictory.
+             'legacy_client_fact_key',
+               exists (select 1 from clara.client_fact_keys f where f.fact_key = r.knowledge_key)
+           ) as j,
+        r.knowledge_key as knowledge_key
+      from clara.knowledge_records r
+      -- #934 FIX ROUND: a retired catalogue row supplies no item_key/question to this
+      -- projection either -- the sixth surface the retirement filter had missed.
+      join clara.firm_setup_keys k
+        on k.knowledge_key = r.knowledge_key and k.retired_at is null
+      left join clara.users u on u.id = r.asserted_by
+      left join clara.knowledge_keys kk on kk.knowledge_key = r.knowledge_key
+      left join clara.firm_memberships m
+        on m.firm_id = r.firm_id and m.user_id = r.asserted_by and m.status = 'active'
+     where r.firm_id = c.firm and r.scope_kind = 'firm' and r.superseded_at is null
+       and r.state = 'live'
+  ) y;
+
+  return jsonb_build_object(
+    'plan_id', p.id, 'revision_token', p.revision_token, 'revision_n', p.revision_n,
+    'state', p.state, 'committed_at', p.committed_at,
+    'seeded', (p.id is not null and v_unseeded = 0),
+    'catalogue_total', v_total,
+    'counter', jsonb_build_object('required_answered', v_req_done, 'required_total', v_req_total),
+    'items', v_items,
+    'required_outstanding', v_out,
+    'confirmed_facts', v_facts);
+end $read$;
+revoke all on function clara.get_firm_setup() from public;
 
 reset role;
 
@@ -694,14 +965,63 @@ begin
       using errcode='CLR10';
   end if;
 
-  -- 6 · clara.get_firm_setup and clara.commit_firm_setup are BYTE-IDENTICAL to their measured
-  -- baselines -- this file touches neither (header's own claim, checked rather than stated).
-  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
-   where p.oid = 'clara.get_firm_setup()'::regprocedure;
-  if v_sha <> 'dfe46764c5c4932cc771c46c5ee743820da69ebb790420b15314fb6b5e1732b0' then
-    raise exception '#935 tail: clara.get_firm_setup moved (sha %) -- this file must not have touched it', v_sha
+  -- 6 · clara.get_firm_setup's RECUT (SS G, fix round) landed: ONE notion of required, the
+  -- retirement filter on all seven surfaces, and every arm the three prior tickets added.
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara.get_firm_setup()'::regprocedure;
+  foreach v_txt in array array[
+      -- #891 fix round: the per-item flag and both counter sides read the catalogue's own
+      -- required_for_commit and nothing else.
+      $tag$'required', k.required_for_commit,$tag$,
+      $tag$where p.id is not null and k.retired_at is null and k.required_for_commit;$tag$,
+      $tag$where k.retired_at is null and k.required_for_commit
+     and i.state in ('answered','resolved','deferred');$tag$,
+      -- #934 fix round: the confirmed_facts join carries the retirement filter too.
+      $tag$join clara.firm_setup_keys k
+        on k.knowledge_key = r.knowledge_key and k.retired_at is null$tag$,
+      -- ...and every arm the earlier tickets added is still here, verbatim.
+      $tag$'note', coalesce(k.user_note, k.note)$tag$,
+      $tag$'applicability', clara._firm_setup_applicability(p.id, k.item_key)$tag$,
+      $tag$and clara._firm_setup_applicability(p.id, k.item_key) <> 'inapplicable'$tag$
+    ] loop
+    if position(v_txt in v_src) = 0 then
+      raise exception '#935 tail: clara.get_firm_setup is missing an expected fragment: %', v_txt
+        using errcode='CLR10';
+    end if;
+  end loop;
+  -- 6a · THE WITHDRAWN WIDENING IS REALLY GONE. The effectively-required arm 0257 carried paired
+  -- the two conditional keys with the applicability helper inside the per-item flag and both
+  -- counter sides; the fix round withdrew it, and an absence is only proved by looking for it.
+  if position($tag$k.item_key in ('mpers_eligibility','tin')$tag$ in v_src) <> 0 then
+    raise exception '#935 tail: clara.get_firm_setup still carries the withdrawn effectively-required arm'
       using errcode='CLR10';
   end if;
+  -- 6b · SEVEN retirement filters, no more and no fewer: items[], required_outstanding,
+  -- catalogue_total, v_unseeded, required_total, required_answered and confirmed_facts. #934's own
+  -- tail pinned six; confirmed_facts is the one it had missed.
+  v_n := (length(v_src) - length(replace(v_src, 'retired_at is null', ''))) / length('retired_at is null');
+  if v_n <> 7 then
+    raise exception '#935 tail: clara.get_firm_setup carries % occurrences of "retired_at is null", expected exactly 7 (items, required_outstanding, catalogue_total, v_unseeded, required_total, required_answered, confirmed_facts)', v_n
+      using errcode='CLR10';
+  end if;
+  -- 6c · POSTURE, unmoved by `create or replace function`.
+  select pg_get_userbyid(p.proowner) || ' | ' || p.prosecdef::text || ' | '
+         || coalesce(array_to_string(p.proconfig, ','), '<none>') || ' | '
+         || coalesce(array_to_string(p.proacl, ','), '<null>')
+    into v_posture from pg_proc p where p.oid = 'clara.get_firm_setup()'::regprocedure;
+  if v_posture is distinct from
+     'clara_fn_owner | true | search_path=clara, pg_temp,plan_cache_mode=force_custom_plan | clara_fn_owner=X/clara_fn_owner,clara_authenticated=X/clara_fn_owner' then
+    raise exception '#935 tail: clara.get_firm_setup has the wrong posture after the recut; got {%}', v_posture
+      using errcode='CLR10';
+  end if;
+  if has_function_privilege('clara_runtime', 'clara.get_firm_setup()'::regprocedure, 'execute')
+     or has_function_privilege('clara_agent_ro', 'clara.get_firm_setup()'::regprocedure, 'execute')
+     or has_function_privilege('clara_wake_interactive', 'clara.get_firm_setup()'::regprocedure, 'execute')
+     or has_function_privilege('clara_wake_proactive', 'clara.get_firm_setup()'::regprocedure, 'execute') then
+    raise exception '#935 tail: clara.get_firm_setup is EXECUTE-reachable by a machine role after the recut'
+      using errcode='CLR10';
+  end if;
+  -- 6d · clara.commit_firm_setup is BYTE-IDENTICAL to its measured baseline -- the gate this
+  -- file's counter now agrees with is itself untouched (header's own claim, checked).
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
    where p.oid = 'clara.commit_firm_setup(uuid,uuid,text)'::regprocedure;
   if v_sha <> 'c527f0bf01a9a583d18180270a21bac4c7110b4daf64927ef7967bc428e9dc23' then
@@ -755,6 +1075,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#935 tail: OK -- clara.firm_setup_keys gained exactly three education-kind rows (tip_invite_colleagues/tip_knowledge_page/tip_start_from_conversation), required_for_commit=false, group tips, no knowledge_key, none retired, a non-blank user_note each, in sort order after the original twelve, whose own pre-existing columns hash unchanged to the prior pin; onboarding_plan_items.item_kind now admits education alongside must_ask/capture/todo; clara.seed_firm_setup_plan no longer folds education onto todo; clara.answer_firm_setup_item and clara.defer_firm_setup_item each carry exactly one occurrence of the new education guard; clara.get_firm_setup and clara.commit_firm_setup are byte-identical to their measured baselines (untouched); clara.dismiss_firm_setup_tip exists with the standard firm-setup-door posture, is EXECUTE-unreachable by every machine role, and calls no audit/event/bump/reserve primitive in its own body; and the four untouched helpers plus #894''s widened index are unmoved. The BEHAVIOURAL proof (no audit row, no domain event, a real door call under real roles) is firm-setup-education-tips.test.mjs''s job.';
+  raise notice '#935 tail: OK -- clara.firm_setup_keys gained exactly three education-kind rows (tip_invite_colleagues/tip_knowledge_page/tip_start_from_conversation), required_for_commit=false, group tips, no knowledge_key, none retired, a non-blank user_note each, in sort order after the original twelve, whose own pre-existing columns hash unchanged to the prior pin; onboarding_plan_items.item_kind now admits education alongside must_ask/capture/todo; clara.seed_firm_setup_plan no longer folds education onto todo; clara.answer_firm_setup_item and clara.defer_firm_setup_item each carry exactly one occurrence of the new education guard; clara.get_firm_setup''s SS G recut carries ONE notion of required (the catalogue''s own required_for_commit on the per-item flag and on both counter sides, with the withdrawn effectively-required arm measured absent), exactly seven retired_at-is-null filters including the confirmed_facts join #934 had missed, every arm the three prior tickets added, and its exact clara_fn_owner/SECURITY DEFINER/search_path/plan_cache_mode/ACL posture, EXECUTE-unreachable by every machine role; clara.commit_firm_setup is byte-identical to its measured baseline (untouched); clara.dismiss_firm_setup_tip exists with the standard firm-setup-door posture, is EXECUTE-unreachable by every machine role, and calls no audit/event/bump/reserve primitive in its own body; and the four untouched helpers plus #894''s widened index are unmoved. The BEHAVIOURAL proof (no audit row, no domain event, a real door call under real roles) is firm-setup-education-tips.test.mjs''s job.';
 end
 $i935_tail$;
