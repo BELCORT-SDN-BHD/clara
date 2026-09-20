@@ -230,3 +230,161 @@ test("cr.1 the door no longer inverts: an adversary holding the client rung and 
   assert.equal(out.door.receipt.status, "completed", "the door returned its ordinary receipt");
   noteLane("cr.1 door blocked on the rung, then completed; adversary uncontended");
 });
+
+// ===========================================================================
+// AC2 -- the catalogue-derived census. A claim about EVERY door, which no dynamic schedule can
+// make. Derived INDEPENDENTLY of migration 0238's own tail: 0238 uses PostgreSQL regexes over a
+// comment-stripped body; this reads the same catalog into JavaScript and splits it into
+// statements with parenthesis-depth tracking, so a `clara.clients` reference inside a CTE of a
+// statement whose locking clause belongs to another table is not counted. The two detectors
+// agreed on the same eleven bodies and the same single pre-0238 violator, measured before the
+// migration was written.
+// ===========================================================================
+
+/** Strip SQL line comments and block comments, preserving offsets (blanks, not deletes), and
+ *  leaving string literals alone -- a `--` inside a quoted string is not a comment. */
+function stripComments(s) {
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === "-" && s[i + 1] === "-") {
+      while (i < s.length && s[i] !== "\n") { out += " "; i += 1; }
+    } else if (s[i] === "/" && s[i + 1] === "*") {
+      while (i < s.length && !(s[i] === "*" && s[i + 1] === "/")) { out += " "; i += 1; }
+      out += "  "; i += 2;
+    } else if (s[i] === "'") {
+      out += s[i]; i += 1;
+      while (i < s.length) {
+        out += s[i];
+        if (s[i] === "'" && s[i + 1] === "'") { out += s[i + 1]; i += 2; continue; }
+        if (s[i] === "'") { i += 1; break; }
+        i += 1;
+      }
+    } else { out += s[i]; i += 1; }
+  }
+  return out;
+}
+
+const ROW_LOCK = /\bfor\s+(update|no\s+key\s+update|share|key\s+share)\b/gi;
+const CLIENTS = /clara\.clients\b/g;
+const CLIENTS_WRITE = /\b(update|delete\s+from)\s+clara\.clients\b/gi;
+
+/**
+ * Where a body FIRST acquires a `clara.clients` ROW, and where it FIRST takes the client rung.
+ * A client-row acquisition is either a statement that names `clara.clients` at parenthesis depth
+ * 0 and carries a locking clause at depth 0, or an UPDATE/DELETE of the table. Returns
+ * `{ rungAt, rowAt }`, each -1 when absent.
+ */
+function ladder(prosrcRaw) {
+  const src = stripComments(prosrcRaw);
+  const depth = new Array(src.length).fill(0);
+  let d = 0;
+  let inStr = false;
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (ch === "'") inStr = !inStr;
+    if (!inStr) { if (ch === "(") d += 1; else if (ch === ")") d = Math.max(0, d - 1); }
+    depth[i] = d;
+  }
+  const bounds = [0];
+  inStr = false;
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (ch === "'") inStr = !inStr;
+    if (!inStr && ch === ";" && depth[i] === 0) bounds.push(i + 1);
+  }
+  bounds.push(src.length);
+  let rowAt = -1;
+  for (let b = 0; b < bounds.length - 1 && rowAt < 0; b += 1) {
+    const start = bounds[b];
+    const stmt = src.slice(start, bounds[b + 1]);
+    const at = (re) => {
+      re.lastIndex = 0;
+      let m = re.exec(stmt);
+      while (m !== null) {
+        if (depth[start + m.index] === 0) return start + m.index;
+        m = re.exec(stmt);
+      }
+      return -1;
+    };
+    const write = at(CLIENTS_WRITE);
+    if (write >= 0) { rowAt = write; break; }
+    const lock = at(ROW_LOCK);
+    const cl = at(CLIENTS);
+    if (lock >= 0 && cl >= 0) rowAt = cl;
+  }
+  return { rungAt: src.indexOf(`pg_advisory_xact_lock(${CLIENT_RUNG}`), rowAt };
+}
+
+/** The eleven live bodies that acquire a `clara.clients` row, measured on this rig at 237
+ *  migrations (before 0238 was written) and again at 238. Pinned so an empty violator set means
+ *  "nothing inverts", never "the detector stopped detecting". */
+const CLIENT_ROW_BODIES = [
+  "_publish_wiki_page_version_core",
+  "approve_wrong_client_correction",
+  "bootstrap_client_plan",
+  "cancel_client_onboarding",
+  "commit_client_onboarding",
+  "mark_wiki_citations_stale",
+  "retire_document_filing",
+  "retire_wiki_page",
+  "set_client_fy_end",
+  "settle_client_onboarding_facts",
+  "wake_reattribute_document",
+];
+
+async function census() {
+  const r = await rootQuery(
+    `select p.proname::text as fn, p.prosrc
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara'
+      order by p.proname`,
+  );
+  const rows = [];
+  for (const row of r.rows) {
+    const l = ladder(row.prosrc);
+    if (l.rowAt >= 0) rows.push({ fn: row.fn, ...l });
+  }
+  return rows;
+}
+
+test("cr.2 catalogue census: no clara door takes a clara.clients ROW before the client rung", async (t) => {
+  if (unready(t)) return;
+  const rows = await census();
+  const names = rows.map((r) => r.fn);
+  for (const fn of CLIENT_ROW_BODIES) {
+    assert.ok(names.includes(fn),
+      `the census no longer sees clara.${fn} acquiring a clara.clients row -- the detector has `
+      + "stopped detecting, so an empty violator set would mean nothing");
+  }
+  const violators = rows
+    .filter((r) => r.rungAt >= 0 && r.rowAt < r.rungAt)
+    .map((r) => `${r.fn} (row@${r.rowAt} before rung@${r.rungAt})`);
+  assert.deepEqual(violators, [],
+    `a door still takes a clara.clients row before the client rung ${CLIENT_RUNG}`);
+  noteLane(`cr.2 censused ${rows.length} bodies acquiring a clara.clients row, 0 violators`);
+});
+
+test("cr.3 the door itself is IN that census, on the right side of it, with one rung on the source client", async (t) => {
+  if (unready(t)) return;
+  const rows = await census();
+  const door = rows.find((r) => r.fn === "approve_wrong_client_correction");
+  assert.ok(door, "clara.approve_wrong_client_correction must still acquire a clara.clients row -- "
+    + "0238 moved that lock, it did not remove it; removing it would drop the serializer against "
+    + "wiki publication on the source client (0019 SS1)");
+  assert.ok(door.rungAt >= 0, "the door still takes the client rung");
+  assert.ok(door.rungAt < door.rowAt,
+    `the door's rung (@${door.rungAt}) must precede its client row (@${door.rowAt})`);
+
+  const src = (await rootQuery(
+    "select prosrc from pg_proc where oid = 'clara.approve_wrong_client_correction(uuid,text,text,text)'::regprocedure",
+  )).rows[0].prosrc;
+  assert.equal(src.split(`pg_advisory_xact_lock(${CLIENT_RUNG}`).length - 1, 1,
+    "the client rung is acquired exactly once -- for the client it covers, not per item");
+  assert.ok(src.includes(`pg_advisory_xact_lock(${CLIENT_RUNG},hashtext(x.from_client::text))`),
+    "the one acquisition names the correction's SOURCE client (x.from_client)");
+  assert.ok(!src.includes(`pg_advisory_xact_lock(${CLIENT_RUNG},hashtext(o.client_id::text))`),
+    "the per-item acquisition on o.client_id is gone, not merely duplicated");
+  assert.equal(src.split("pg_advisory_xact_lock(203005002").length - 1, 1,
+    "the FIRM rung is still taken exactly once -- no rung was added or renumbered");
+});
