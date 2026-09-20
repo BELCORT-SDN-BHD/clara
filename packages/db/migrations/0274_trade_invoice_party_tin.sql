@@ -251,6 +251,44 @@ begin
     end if;
   end if;
 
+  -- (b3) THE IDENTIFIER CONFLICT (#982 AC3, owner's ruling 2026-09-20: "when a TIN and a
+  -- registration number point at two different live counterparties Clara stops and lets the
+  -- person choose"). The test is on the REGISTRATION-matched row itself: if it carries the
+  -- submitted TIN, the two identifiers agree on it and it is the only row satisfying BOTH, so it
+  -- resolves even when other live parties happen to share that TIN. If it does not, and some
+  -- OTHER live party does, the document's two identifiers disagree and no preference between
+  -- them is Clara's to take.
+  --
+  -- A TIN that matched NOTHING is not a conflict: the registration number is then the only
+  -- identifier that reached anybody, and 0225's outcome for that submission is unchanged (AC4).
+  --
+  -- THE TEST IS NESTED, NOT CONJOINED, on purpose: PostgreSQL does not promise to short-circuit
+  -- `and`, and reading `v_reg_row.tin` when the registration arm never assigned it raises 55000
+  -- ("record is not assigned yet") on every submission that carries no registration number.
+  -- Measured, not feared: the conjoined first cut turned p982.tin.resolves red that way.
+  if v_reg_hit and v_tin_n is not null and v_tin_hits > 0 then
+   if lower(regexp_replace(coalesce(v_reg_row.tin,''),'[^a-zA-Z0-9]','','g')) is distinct from v_tin_n then
+    v_candidates := jsonb_build_array(jsonb_build_object(
+      'counterparty_id', v_reg_row.id, 'name', v_reg_row.name,
+      'registration_no', v_reg_row.registration_no, 'tin', v_reg_row.tin,
+      'matched_on', 'registration'));
+    select v_candidates || coalesce(jsonb_agg(jsonb_build_object(
+             'counterparty_id', cp.id, 'name', cp.name, 'registration_no', cp.registration_no,
+             'tin', cp.tin, 'matched_on', 'tin') order by cp.name, cp.id), '[]'::jsonb)
+      into v_candidates
+      from clara.counterparties cp
+     where cp.client_id = p_client and cp.kind = v_want
+       and cp.merged_into is null and cp.retired_at is null
+       and cp.tin is not null
+       and lower(regexp_replace(cp.tin,'[^a-zA-Z0-9]','','g')) = v_tin_n;
+    raise exception 'the registration number (%) and the tax identification number (%) on this document name different live %s of this client; say which one',
+      v_reg, v_tin, v_want
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','party_identifier_conflict','registration_no',v_reg,
+          'tin',v_tin,'expected_counterparty_kind',v_want,'candidates',v_candidates)::text;
+   end if;
+  end if;
+
   if v_reg_hit then
     return jsonb_build_object('counterparty_id', v_reg_row.id, 'counterparty_kind', v_reg_row.kind,
       'name', v_reg_row.name, 'payment_terms_days', v_reg_row.payment_terms_days);

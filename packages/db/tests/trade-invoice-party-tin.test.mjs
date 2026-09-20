@@ -22,7 +22,8 @@ import { randomUUID } from "node:crypto";
 import {
   gateTiTin, vendor, billParticulars, billBasis, admitTradeInvoiceWork, invoiceRow,
   ensureTiChart, buildWorkWorld, freshWorkClient, endPool,
-  TI_REASON, invoiceCount, entryCount, committedReceiptCount, assertPair, rootQuery,
+  TI_REASON, TI_KIND, customer, invoiceParticulars, invoiceBasis,
+  invoiceCount, entryCount, committedReceiptCount, assertPair, rootQuery,
 } from "./trade-invoice-fixtures.mjs";
 import { printLaneNotes, printSkipCount } from "./wave-a-helpers.mjs";
 
@@ -107,4 +108,126 @@ test("p982.tin.ambiguous a TIN held by TWO live parties of the wanted kind refus
   assert.deepEqual(new Set(amb.detail.candidates.map((c) => c.counterparty_id)), new Set([one, two]));
   assert.ok(amb.detail.candidates.every((c) => c.tin === tin),
     "p982.tin.ambiguous: …each candidate carrying the identifier that was matched on");
+});
+
+test("p982.tin.conflict a TIN and a registration number naming DIFFERENT live parties refuse with a reason of their own, carrying both", async (t) => {
+  if (await gateTiTin(t)) return;
+  const client = await tiClient("tin-conflict");
+  const tin = newTin();
+  const byReg = await vendor(ALICE(), { client, registration: "200101000982" });
+  const byTin = await vendor(ALICE(), { client, tin });
+
+  const clash = await refusesTi(client, "CLR10", TI_REASON.partyIdentifierConflict,
+    () => admitTradeInvoiceWork({
+      client, author: ALICE(),
+      particulars: billParticulars({ counterparty: null, registration: "200101000982", tin }),
+      basis: billBasis(),
+    }),
+    "p982.tin.conflict: the document's two identifiers name two different live vendors");
+  assert.equal(clash.detail.candidates.length, 2,
+    "p982.tin.conflict: BOTH sides are carried, so the person chooses rather than being told");
+  assert.deepEqual(new Set(clash.detail.candidates.map((c) => c.counterparty_id)),
+    new Set([byReg, byTin]));
+  // …and each candidate says WHICH identifier reached it, because the person is choosing between
+  // the document's two identifiers and not between two parties one identifier reaches.
+  const by = Object.fromEntries(clash.detail.candidates.map((c) => [c.counterparty_id, c.matched_on]));
+  assert.equal(by[byReg], "registration");
+  assert.equal(by[byTin], "tin");
+});
+
+// ===========================================================================================
+// WHAT #982 DELIBERATELY DID NOT CHANGE (AC4), and the two scoping promises the new arm makes.
+// These cells pin behaviour rather than drive it: each was GREEN on its first run against the
+// arm the three cells above built, which is the claim — a submission that did not rely on the
+// TIN leaves this door exactly as 0225 left it. Their non-vacuity is proved in the report by a
+// deliberate break of the subject (the `cp.kind = v_want` predicate), which turns
+// p982.tin.kind_scoped red and nothing else.
+// ===========================================================================================
+
+test("p982.tin.agree identifiers that AGREE resolve, and a TIN that matched nothing is not a conflict", async (t) => {
+  if (await gateTiTin(t)) return;
+  const client = await tiClient("tin-agree");
+  const tin = newTin();
+  // ONE party carries both identifiers; a SECOND live party shares only the TIN. The
+  // registration-matched row is the only one satisfying BOTH, so it resolves rather than
+  // refusing — Clara is not choosing between identifiers here, it is reading their intersection.
+  const both = await vendor(ALICE(), { client, registration: "200101000983", tin });
+  await vendor(ALICE(), { client, tin });
+
+  const agreed = await admitTradeInvoiceWork({
+    client, author: ALICE(),
+    particulars: billParticulars({ counterparty: null, registration: "200101000983", tin }),
+    basis: billBasis(),
+  });
+  assert.equal((await invoiceRow(agreed.invoice_id)).counterparty_id, both,
+    "p982.tin.agree: the two identifiers agree on one party, so the submission resolves");
+
+  // AND a TIN nobody holds leaves the registration arm's own outcome alone (0225's behaviour).
+  const unmatched = await admitTradeInvoiceWork({
+    client, author: ALICE(),
+    particulars: billParticulars({ counterparty: null, registration: "200101000983", tin: newTin() }),
+    basis: billBasis(),
+  });
+  assert.equal((await invoiceRow(unmatched.invoice_id)).counterparty_id, both,
+    "p982.tin.agree: a TIN that reached nobody is not a disagreement, so the registration still resolves");
+});
+
+test("p982.tin.kind_scoped a TIN held only by a CUSTOMER leaves a supplier bill unresolved, and the mirror holds", async (t) => {
+  if (await gateTiTin(t)) return;
+  const client = await tiClient("tin-kind");
+  const tin = newTin();
+  const buyer = await customer(ALICE(), { client, tin });
+
+  await refusesTi(client, "CLR10", TI_REASON.partyUnresolved,
+    () => admitTradeInvoiceWork({
+      client, author: ALICE(), kind: TI_KIND.bill,
+      particulars: billParticulars({ counterparty: null, tin }),
+      basis: billBasis(),
+    }),
+    "p982.tin.kind_scoped: a supplier bill is owed TO a vendor, and no vendor holds this TIN");
+
+  // THE MIRROR, so the cell proves a KIND filter rather than "the TIN arm never matches": the
+  // same TIN resolves the sales invoice the customer is owed on.
+  const sold = await admitTradeInvoiceWork({
+    client, author: ALICE(), kind: TI_KIND.sales,
+    particulars: invoiceParticulars({ counterparty: null, tin }),
+    basis: invoiceBasis(),
+  });
+  assert.equal((await invoiceRow(sold.invoice_id)).counterparty_id, buyer,
+    "p982.tin.kind_scoped: …and the same TIN resolves the invoice whose kind wants a customer");
+});
+
+test("p982.tin.id_wins a submission that NAMES the counterparty id keeps 0225's outcome, whatever its TIN says", async (t) => {
+  if (await gateTiTin(t)) return;
+  const client = await tiClient("tin-id");
+  const tin = newTin();
+  const named = await vendor(ALICE(), { client });
+  await vendor(ALICE(), { client, tin });   // a different live vendor, holding the submitted TIN
+
+  const ok = await admitTradeInvoiceWork({
+    client, author: ALICE(),
+    particulars: billParticulars({ counterparty: named, tin }),
+    basis: billBasis(),
+  });
+  assert.equal((await invoiceRow(ok.invoice_id)).counterparty_id, named,
+    "p982.tin.id_wins: the id arm returns before the identifier tier, exactly as 0225 wrote it");
+});
+
+test("p982.tin.normalised a TIN printed with spaces and dashes resolves the party whose stored TIN carries none", async (t) => {
+  if (await gateTiTin(t)) return;
+  const client = await tiClient("tin-norm");
+  const tin = newTin();
+  const held = await vendor(ALICE(), { client, tin });
+  // The estate has exactly ONE identifier normalisation, and 0274 reads a TIN through it because
+  // the ruling puts the TIN on the registration number's own tier. A document printing
+  // `C 1234-5678901` names the party stored as `C12345678901`.
+  const printed = `${tin.slice(0, 1)} ${tin.slice(1, 5)}-${tin.slice(5)}`;
+
+  const ok = await admitTradeInvoiceWork({
+    client, author: ALICE(),
+    particulars: billParticulars({ counterparty: null, tin: printed }),
+    basis: billBasis(),
+  });
+  assert.equal((await invoiceRow(ok.invoice_id)).counterparty_id, held,
+    "p982.tin.normalised: the punctuation a printer added is not part of the identifier");
 });

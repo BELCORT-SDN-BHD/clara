@@ -2969,3 +2969,69 @@ re-creation of 0244's own trigger at 0244's spelling, so a database carrying the
 comes back), `create or replace function`, and an idempotent `comment on`. The prestate reports
 FIRST or REDO, and its pin for the ONE body this file recuts is two-valued by construction —
 0244's pre-image or 0272's own post-image, both measured.
+
+## 0274 — a trade-invoice party resolves by its TIN (#982)
+
+The owner ruled on 2026-09-20 that a TIN becomes a real resolution key for a trade-invoice
+counterparty, **at the same tier as the normalised registration number**, and that when a TIN and
+a registration number point at two different live counterparties Clara stops and lets the person
+choose. The reason was checked before the mechanism: LHDN MyInvois requires the buyer TIN and BRN
+and validates both from 2026-08-01, so a document whose clearest printed identifier is a TIN is an
+ordinary case.
+
+`0274_trade_invoice_party_tin.sql` recuts exactly ONE body — 0225's
+`clara._trade_invoice_resolve_party` — and creates one index. No table, column, trigger, policy or
+grant moves, and no other function is created or recut. The recut keeps the body's owner
+(`clara_fn_owner`), `security definer`, `set search_path = clara, pg_temp`, `stable` volatility and
+its owner-only ACL; 0225's tail assertion that this internal is ungranted to every application role
+still holds and 0274's tail re-asserts it.
+
+**The resolution order after 0274.** The id arm is 0225's, verbatim. Then the registration number
+and the TIN are ONE tier, each arm needing a single live, unmerged match of the kind the invoice
+kind requires; then the normalised name and its live aliases, 0225's own arm, unchanged.
+
+| submitted | live parties of the wanted kind | outcome |
+|---|---|---|
+| TIN only | exactly one holds it | resolves to it |
+| TIN only | two or more hold it | `party_ambiguous`, both candidates carried |
+| registration + TIN | the registration-matched row also holds the TIN | resolves to it |
+| registration + TIN | the TIN reaches nobody | resolves by registration (0225's outcome) |
+| registration + TIN | each reaches a DIFFERENT live party | `party_identifier_conflict`, both carried |
+| counterparty id | — | 0225's outcome, whatever the TIN says |
+
+**The third refusal reason, `party_identifier_conflict`**, is distinct from `party_unresolved`
+(nothing answered) and `party_ambiguous` (one identifier, several parties) because the remedy is
+different: the person is choosing between two identifiers the document itself carries. Its
+`detail` carries `registration_no`, `tin`, `expected_counterparty_kind` and `candidates`, and each
+candidate carries the same four keys `party_ambiguous` already uses plus `matched_on`
+(`registration` or `tin`), so every reader of this lane's refusals renders one candidate one way.
+
+**Why the TIN is normalised the way the registration number is.** The estate has exactly ONE
+identifier normalisation — `lower(regexp_replace(v, '[^a-zA-Z0-9]', '', 'g'))` — byte-identical in
+`clara.create_counterparty` (0021:99-101), `clara.set_counterparty_identifiers` (0215:965-967) and
+the resolver's registration arm. A TIN is printed with spaces and dashes exactly as a registration
+number is, and the ruling puts it at the same tier. There is no `tin_normalized` COLUMN, so the arm
+normalises both sides at read time, and `ix_counterparties_client_kind_tin_normalized` — a partial
+expression index on `(client_id, kind, lower(regexp_replace(tin, …)))` over live, unmerged rows —
+is what keeps that an index scan rather than a sweep of every firm's parties, twice per admission
+(0225 step 5 and step 7 both call the resolver). 0215's cross-client identity WATCH (0215:1157-1164)
+still compares `o.tin = cp.tin` raw and is NOT changed here: it answers a different question.
+
+**A nested `if`, not a conjunction.** PostgreSQL does not promise to short-circuit `and`, so the
+conflict test reads `v_reg_row.tin` only inside an `if v_reg_hit …` that has already passed.
+Measured, not feared: the conjoined first cut raised 55000 ("record `v_reg_row` is not assigned
+yet") on every submission carrying no registration number.
+
+**Redo-safe by construction** (#957): `create or replace function`, `create index if not exists`,
+and a prestate that accepts EITHER the pinned 0225 pre-image
+(`4967217e8d413f3f58d935aea966764a91c42afc2c15342e8bfcfe2a23a7a0a8`) OR a body already carrying the
+file's `#982` marker. Because the marker branch is the only one a redo can take, the FIRST-APPLY
+branch was proved separately: inside one transaction that was rolled back, 0225's own create
+statement was re-run (restoring prosrc to exactly the pinned sha) and the prestate block was run
+verbatim, reporting `clean` without the redo notice.
+
+**The frontier triad**, per the wave-2/3 work order: `tests/trade-invoice-party-tin.test.mjs`
+(#982's cells, in their own file so a chain carrying 0225 and not 0274 still runs #655's battery in
+full), `tests/trade-invoice-party-tin-preintegration-gate.mjs` keyed on the stem
+`trade_invoice_party_tin$`, and its `--import` token in `package.json`'s test script in
+migration order. No `rig-meta.mjs` cohort changes: 0274 mints no function and moves no grant.

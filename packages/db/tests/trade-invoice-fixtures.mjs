@@ -139,6 +139,12 @@ export const TI_REASON = {
   invalidParticulars: "invalid_particulars",
   invalidCurrency: "invalid_currency",
   invalidTaxFacts: "invalid_tax_facts",
+  // THE NINETEENTH (#982, owner's ruling 2026-09-20): the submitted registration number and the
+  // submitted TIN each name a DIFFERENT live party of the wanted kind. Distinct from
+  // `party_unresolved` (nothing answered) and from `party_ambiguous` (one identifier, several
+  // parties) because the remedy is different: the person is choosing between two identifiers the
+  // document itself carries, not between two parties one identifier reaches.
+  partyIdentifierConflict: "party_identifier_conflict",
   // Raised by the birth trigger and by clara._tf_open_items_validate, not by the door.
   counterpartyKindMismatch: "counterparty_kind_mismatch",
   genericControlLeg: "generic_control_leg",

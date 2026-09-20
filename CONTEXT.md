@@ -374,6 +374,10 @@ _Avoid_: Automatically sharing one client's private facts or practices with ever
 Who one supplier or customer of a client *is*, as a durable record: a stable tenant-scoped id that survives every rename and merge, the current name, the registration number and TIN, every alias, and the correction history behind all of it. A vendor and a customer are separate identities even under one name, and two clients of one firm may carry the same registration number or TIN without being linked.
 _Avoid_: The displayed name as the identity; a binding ceremony as a prerequisite for working with a party; linking two clients' parties because an identifier matches.
 
+**Identifier conflict**:
+A submitted document whose registration number and whose TIN each name a *different* live counterparty of the same client. Clara stops and shows both, with the identifier that reached each one, so the person decides which party the document is about; she never prefers one identifier over the other. Distinct from an ambiguous party, where one identifier reaches several parties, and from an unresolved one, where no identifier reaches anybody.
+_Avoid_: Silently preferring the registration number; treating an identifier that matched nobody as a disagreement; resolving the clash by creating a party.
+
 **Counterparty alias**:
 Another name the same party is known by — a former name, a trade name, a name a person stated or a name read off a named document. Each alias records the lane that wrote it (a person in the app, Clara, client setup, or an unrecorded legacy lane), the stated basis and, where one exists, the source document and extraction it was read from. Retiring an alias stops it matching new activity and keeps it readable as history.
 _Avoid_: Labelling a machine-written alias as a person's; a source claimed with no document behind it; deleting an alias to correct it.
