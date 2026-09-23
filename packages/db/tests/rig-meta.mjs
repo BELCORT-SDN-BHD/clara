@@ -353,6 +353,21 @@ const PAYROLL_0296_COHORT = [...PAYROLL_0296_RUNTIME_FNS];
 // expected=false IS that assertion, same posture as PAYROLL_0296's two internals above.
 const PAYROLL_SETTLEMENT_0298_HUMAN_FNS = ["get_payroll_settlement_candidates", "settle_payroll_net_pay"];
 const PAYROLL_SETTLEMENT_0298_COHORT = [...PAYROLL_SETTLEMENT_0298_HUMAN_FNS];
+// #948 [0299] the agreement-contract reading and acquisition lane, riders wave 4 lane 01. Its OWN
+// cohort per the "wholly present or wholly absent" rule, exactly as PAYROLL_0296 is: folding
+// these into that array would red every database whose chain stops at 0298.
+//   persist_agreement_facts — the atomic idempotent two-row persist for the `contract_facts` lane,
+//     and the ONE writer of agreement facts. clara_runtime only; #948 adds no human door at all,
+//     because the terms a person reads come back through the document read every other family's
+//     facts come back through.
+//   fail_agreement_facts — the terminal settle for a running contract_facts task; mirrors
+//     fail_payroll_facts / fail_witness_facts, with the agreement lane's own code vocabulary.
+// The file's other new bodies (_agreement_answers_ok, evaluate_agreement_contract_state_v1,
+// _agreement_entry_plan, _agreement_posting_verdict, _post_agreement_acquisition) stay ungranted
+// to every application role — the sweep's expected=false IS that assertion, same posture as
+// PAYROLL_0296's two internals above.
+const AGREEMENT_0299_RUNTIME_FNS = ["persist_agreement_facts", "fail_agreement_facts"];
+const AGREEMENT_0299_COHORT = [...AGREEMENT_0299_RUNTIME_FNS];
 // F-A1 PR-4 — the bank-statement witness cutover. Its OWN cohort rather than an addition to
 // BANK_0038_*, and that is not cosmetic: `cohortFailures` tolerates a WHOLLY absent cohort (a
 // chain that stops short of this wave) but fails a PARTIAL one, so folding these two names
@@ -3669,6 +3684,9 @@ export const ALLOWED = {
     ...PAYROLL_0296_RUNTIME_FNS, // [#945, 0296] the payroll_facts lane's whole reachable API --
     // the atomic pair persist and its terminal settle. The block where the array is declared
     // names each verb and its consumer; #945 grants no human EXECUTE at all
+    ...AGREEMENT_0299_RUNTIME_FNS, // [#948, 0299] the contract_facts lane's whole reachable API --
+    // the atomic pair persist and its terminal settle. Same posture as PAYROLL_0296 above; #948
+    // grants no human EXECUTE at all
     ...F_A7_GAMMA_RUNTIME_FNS, // [Wave-F Track A, F-A7 gamma] prepare_firm_egress_dispatch,
     // mirroring WAVE_B_0020_RUNTIME_FNS' prepare_egress_dispatch (see the block above)
     ...F_A9_PR1A_RUNTIME_FNS, // [Wave-F Track A, F-A9 PR-1A] the second door — see the block above
@@ -3906,6 +3924,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("#945 0296 payroll-summary reading lane", PAYROLL_0296_COHORT, liveNames));
   failures.push(...cohortFailures("#947 0298 payroll net-pay settlement", PAYROLL_SETTLEMENT_0298_COHORT, liveNames));
+  failures.push(...cohortFailures("#948 0299 agreement-contract reading + acquisition lane", AGREEMENT_0299_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("#623 0178 accounting-work lane", WORK_JOURNAL_0178_COHORT, liveNames));
   failures.push(...cohortFailures("#629 0180 shared work-question lane", WORK_QUESTIONS_0180_COHORT, liveNames));

@@ -706,3 +706,228 @@ test("S4 · every other kind's route through the recut router is unchanged", asy
   const otherReceipt = await enqueueInvoiceFacts(other.documentId);
   assert.equal(otherReceipt.status, "skipped_kind", "the skipped_kind arm still serves every kind with no reader");
 });
+
+// ---------------------------------------------------------------------------
+// S5 — the persist door (AC1's banked read)
+// ---------------------------------------------------------------------------
+
+/** Drive an agreement contract all the way to a CLAIMED, running task through the real doors,
+ *  and hand back everything the persist call needs. */
+async function runningAgreementTask(client) {
+  const doc = await agreementDoc(client);
+  await enqueueInvoiceFacts(doc.documentId);
+  const task = (
+    await rootQuery(
+      "select id from clara.document_processing_tasks where document_id=$1 and lane='contract_facts' and status='queued' order by version_n desc limit 1",
+      [doc.documentId],
+    )
+  ).rows[0];
+  assert.ok(task, "mandatory setup: the router queued a contract_facts task");
+  const claimed = await claimTask(task.id, { egressApproved: true });
+  assert.equal(claimed.status, "running", `mandatory setup: the task is claimable (got ${JSON.stringify(claimed)})`);
+  const sha = (await rootQuery("select sha256 from clara.documents where id=$1", [doc.documentId])).rows[0].sha256;
+  return { ...doc, taskId: task.id, sha };
+}
+
+function call(env, { pin, promptHash, citations = [] }) {
+  return { input_pin: pin, prompt_hash: promptHash, envelope: env, citations };
+}
+
+async function persist(taskId, textCall, visionCall, pages = 1) {
+  const r = await rootQuery("select clara.persist_agreement_facts($1,$2::jsonb,$3::jsonb,$4) as receipt", [
+    taskId, JSON.stringify(textCall), JSON.stringify(visionCall), pages,
+  ]);
+  return r.rows[0].receipt;
+}
+
+const regionsOf = async (documentId) => (
+  await rootQuery(
+    `select r.field_path, r.text_content, r.monetary_raw, r.monetary_cents, r.locator, e.engine_kind
+       from clara.document_regions r
+       join clara.document_extractions e on e.id = r.extraction_id
+      where e.document_id = $1
+        and e.engine_kind in ('agreement_text_facts','agreement_vision_facts')
+      order by r.field_path`,
+    [documentId],
+  )
+).rows;
+
+test("S5 · the agreement's typed terms land as regions, an unprinted term says so, and the read replays idempotently", async (t) => {
+  if (unready(t)) return;
+
+  const doc = await runningAgreementTask(world.clients.A1);
+  // A page that prints no repayment schedule prints no charges either — the reading a real
+  // one-page hire-purchase letter produces.
+  const answers = { "contract.agreement.total_charges": notPrinted() };
+  const [textEnv, visionEnv] = bothChannels({ answers });
+
+  const receipt = await persist(
+    doc.taskId,
+    call(textEnv, { pin: doc.extractionId, promptHash: "agreement-text-v1",
+      citations: [{ field_path: "contract.agreement.cash_price", region_idx: 1 }] }),
+    call(visionEnv, { pin: doc.sha, promptHash: "agreement-vision-v1" }),
+  );
+  assert.equal(receipt.status, "done");
+  assert.equal(receipt.replayed, false);
+
+  const regions = await regionsOf(doc.documentId);
+  assert.equal(regions.length, RUN_FIELDS.length,
+    `one region per run-level question, answered or not: ${JSON.stringify(regions.map((r) => r.field_path))}`);
+  for (const r of regions) {
+    assert.equal(r.engine_kind, "agreement_text_facts", "every fact hangs off the CANONICAL text row of the pair");
+  }
+
+  const price = regions.find((r) => r.field_path === "contract.agreement.cash_price");
+  assert.equal(price.monetary_cents, "12000000", "the printed cash price, as the DB's own integer");
+  assert.equal(price.monetary_raw, "120,000.00", "…beside the verbatim rendering the page carries");
+  assert.equal(price.text_content, "120,000.00");
+  assert.equal(
+    price.locator.source_region_id,
+    doc.regionId,
+    "…resolved through the estate's ONE citation numbering, so a person can click the figure and see the page",
+  );
+
+  const charges = regions.find((r) => r.field_path === "contract.agreement.total_charges");
+  assert.ok(charges, "an UNPRINTED term still lands as a fact — silence is a reading, not an absence");
+  assert.equal(charges.monetary_cents, null, "…carrying NO figure at all, which is what `not printed` means");
+  assert.equal(charges.monetary_raw, null);
+  assert.equal(charges.text_content, null, "…never the string '0' and never a zero cents value");
+
+  // The five NON-monetary questions land as text and carry no monetary columns at all: a name,
+  // a date, a prose description and a count are not money.
+  for (const f of ["contract.agreement.kind", "contract.agreement.financier",
+    "contract.agreement.agreement_date", "contract.agreement.asset_description",
+    "contract.agreement.term_months"]) {
+    const r = regions.find((x) => x.field_path === f);
+    assert.equal(r.text_content, PRINTED[f].raw, `${f} lands as its verbatim rendering`);
+    assert.equal(r.monetary_cents, null, `${f} is not money and carries no cents`);
+    assert.equal(r.monetary_raw, null, `${f} is not money and carries no monetary rendering`);
+  }
+
+  // The pair is banked under its OWN engine kinds, so clara._invoice_fact_state can never
+  // resolve an agreement envelope as an invoice corroboration.
+  const kinds = (
+    await rootQuery(
+      "select engine_kind from clara.document_extractions where document_id=$1 order by engine_kind",
+      [doc.documentId],
+    )
+  ).rows.map((k) => k.engine_kind);
+  assert.deepEqual(
+    kinds.sort(),
+    ["agreement_text_facts", "agreement_vision_facts", "ocr"],
+    "the OCR row the read was pinned to, plus the agreement pair under its own two kinds",
+  );
+
+  // The fact state rides with the text row: what the evaluator decided at the one moment both
+  // envelopes existed, banked beside the answers it judged.
+  const banked = (
+    await rootQuery(
+      "select envelope from clara.document_extractions where document_id=$1 and engine_kind='agreement_text_facts'",
+      [doc.documentId],
+    )
+  ).rows[0].envelope;
+  assert.equal(banked.contract_state.agreement_class, "hire_purchase");
+  assert.equal(banked.contract_state.state_version, "v1");
+  assert.equal(banked.contract.channel, "text");
+  assert.equal(Object.keys(banked.contract.answers).length, RUN_FIELDS.length);
+  assert.equal(banked.contract.rows.length, 3, "the PRINTED repayment schedule is part of what the page says");
+
+  // Idempotent replay: a worker that re-settles a done task gets the stored receipt back and
+  // banks nothing a second time.
+  const replay = await persist(
+    doc.taskId,
+    call(textEnv, { pin: doc.extractionId, promptHash: "agreement-text-v1" }),
+    call(visionEnv, { pin: doc.sha, promptHash: "agreement-vision-v1" }),
+  );
+  assert.equal(replay.replayed, true);
+  assert.equal((await regionsOf(doc.documentId)).length, RUN_FIELDS.length, "a replay writes no second set of facts");
+});
+
+test("S5 · the door refuses a structurally malformed read at the write boundary, and banks a DISAGREEING one in full", async (t) => {
+  if (unready(t)) return;
+
+  // (a) A broken vocabulary is refused before anything is inserted.
+  const a = await runningAgreementTask(world.clients.A1);
+  const [okText, okVision] = bothChannels();
+  const broken = envelope({ drop: ["contract.agreement.total_payable"] });
+  await assert.rejects(
+    () => persist(a.taskId, call(broken, { pin: a.extractionId, promptHash: "t" }),
+      call(okVision, { pin: a.sha, promptHash: "v" })),
+    /vocabulary|malformed/i,
+    "a question the read did not answer is a refusal, not a silent `not_printed`",
+  );
+  assert.equal((await regionsOf(a.documentId)).length, 0, "…and nothing at all was written");
+
+  // (b) ONE prompt used twice is one reading twice, not two readings.
+  await assert.rejects(
+    () => persist(a.taskId, call(okText, { pin: a.extractionId, promptHash: "same" }),
+      call(okVision, { pin: a.sha, promptHash: "same" })),
+    /prompt hash/i,
+    "the independence receipt requires distinct prompts",
+  );
+
+  // (c) A pin that does not resolve to a done OCR extraction of THIS document.
+  await assert.rejects(
+    () => persist(a.taskId, call(okText, { pin: a.documentId, promptHash: "t" }),
+      call(okVision, { pin: a.sha, promptHash: "v" })),
+    /input pin/i,
+    "the text channel's pin must resolve to this document's own done OCR extraction",
+  );
+
+  // (d) A WELL-FORMED read whose two channels disagree is banked IN FULL, with the disagreement
+  //     named in the state — a person cannot adjudicate a reading they cannot see.
+  const b = await runningAgreementTask(world.clients.A2);
+  const visionDiffers = envelope({ channel: "vision", answers: { "contract.agreement.deposit": value("25,000.00") } });
+  const receipt = await persist(
+    b.taskId,
+    call(okText, { pin: b.extractionId, promptHash: "agreement-text-v1" }),
+    call(visionDiffers, { pin: b.sha, promptHash: "agreement-vision-v1" }),
+  );
+  assert.equal(receipt.status, "done", "a read that disagrees with itself is still a read");
+  const state = (
+    await rootQuery(
+      "select envelope->'contract_state' as s from clara.document_extractions where document_id=$1 and engine_kind='agreement_text_facts'",
+      [b.documentId],
+    )
+  ).rows[0].s;
+  assert.deepEqual(state.disagreed, ["contract.agreement.deposit"]);
+  assert.equal(state.checks.price_identity.state, "not_checkable");
+  assert.equal(state.checks.price_identity.reason, "deposit_not_established");
+  assert.equal((await regionsOf(b.documentId)).length, RUN_FIELDS.length, "every question still banks a fact");
+  const dep = (await regionsOf(b.documentId)).find((r) => r.field_path === "contract.agreement.deposit");
+  assert.equal(dep.monetary_raw, "20,000.00", "the TEXT channel's rendering, which is the one that can cite a region");
+  assert.equal(dep.monetary_cents, null, "…and no integer, because there is no figure both readings support");
+
+  // Every refusal above left task `a` exactly as it found it — running, unclaimed by any write.
+  // Settle it so a cell that is finished with a task does not hold this firm's per-lane
+  // concurrency window open for the next one.
+  assert.equal(
+    (await rootQuery("select status from clara.document_processing_tasks where id=$1", [a.taskId])).rows[0].status,
+    "running",
+    "a refusal at the write boundary never settles the task it refused",
+  );
+  await rootQuery("select clara.fail_agreement_facts($1,$2)", [a.taskId, "internal"]);
+});
+
+test("S5 · fail_agreement_facts settles a running task terminally, under the lane's own code vocabulary", async (t) => {
+  if (unready(t)) return;
+
+  const doc = await runningAgreementTask(world.clients.A1);
+  const r = await rootQuery("select clara.fail_agreement_facts($1,$2) as receipt", [doc.taskId, "corrupt"]);
+  assert.equal(r.rows[0].receipt.status, "failed");
+  assert.equal(r.rows[0].receipt.reason, "corrupt");
+
+  const again = await rootQuery("select clara.fail_agreement_facts($1,$2) as receipt", [doc.taskId, "corrupt"]);
+  assert.equal(again.rows[0].receipt.replayed, true, "a re-settle of a failed task replays");
+
+  // An unrecognised reason coerces to engine_error rather than widening the lane's vocabulary.
+  const other = await runningAgreementTask(world.clients.A1);
+  const coerced = await rootQuery("select clara.fail_agreement_facts($1,$2) as receipt", [other.taskId, "who_knows"]);
+  assert.equal(coerced.rows[0].receipt.reason, "engine_error");
+
+  const ev = await rootQuery(
+    "select count(*)::int n from clara.domain_events where document_id=$1 and event_type='document.agreement_facts_failed'",
+    [doc.documentId],
+  );
+  assert.equal(ev.rows[0].n, 1, "the lane's OWN failure twin, never the invoice lane's");
+});

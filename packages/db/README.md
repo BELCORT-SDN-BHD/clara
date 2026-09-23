@@ -5018,3 +5018,105 @@ reports a run fully unsettled (ignoring every debit) was installed and the batte
 8 of 17 cells failed (S1's arithmetic cells, S3's already-settled/replay cells, S4's three
 clearing cells, S6's clearing cell), then `CLARA_MIGRATION_REDO` restored the real body and all 17
 passed again.
+
+## #948 — hire-purchase and finance-lease agreements are read, and the acquisition they create is posted (0299)
+
+`0299_agreement_contract_acquisition.sql` does for an agreement contract what 0296 and 0297
+together did for a payslip: it widens the estate so the pair can be READ, and — when the page is a
+financing agreement whose arithmetic holds — POSTED into the fixed-asset lane. Parent #926, owner
+ruling 2026-09-18 (option G). The issue body is the contract; its single comment (2026-09-19) is an
+AI triage note whose factual correction is followed below.
+
+**There is no fixed-asset birth door, and this file invents none.** The triage note is right:
+`clara._tf_fa_acquisition_birth` (0216) is a lane-AGNOSTIC deferred constraint trigger on
+`clara.journal_entries` that fires on any entry reaching `approved` and, for every line debiting an
+account enrolled in `clara.fa_account_profiles` (0041), inserts the `clara.fixed_assets` row itself,
+reading the account's live depreciation policy (`clara.fa_account_depreciation_policies`, #932) for
+the particulars. So this lane posts an ORDINARY entry that debits the enrolled asset account and the
+trigger does the rest — which is also how AC4's "depreciation particulars come from the account's
+policy and are never invented here" is made true STRUCTURALLY: 0299 writes no depreciation column
+anywhere.
+
+**The accounting treatment differs by kind, and the standard chart already says so.**
+`0150_coa_template_pr_a.sql` ships *2440 Hire Purchase Interest Suspense* beside *2430 Hire Purchase
+Creditor*, and *2450 Finance Lease Obligation* with no interest-suspense counterpart. That is the
+gross method for hire purchase and the net method for a finance lease, which is what MPERS Section
+20.9 asks of a lessee (recognise the asset and the liability at the lower of fair value and the
+present value of the minimum lease payments, the finance charge allocated over the term). This file
+plants no chart row; the wave's shared rows are 0295's.
+
+**§A prestate.** Every pin is BIMODAL by construction — the pre-image sha OR a body already carrying
+this file's own marker — because three tickets of the same lane (#945, #946, #947) recut bodies
+between 0295 and here, so the pins are what is LIVE on the lane database, never what an older
+header pinned.
+
+**§B the field-path namespace.** `clara._assert_field_path` gains `contract`, in the roster's own
+reading order. `clara._field_path_conforms` — the boolean sibling the `clara.document_regions` CHECK
+evaluates — is byte-untouched, so the wall and the persist boundary stay on one grammar. The
+namespace names the FACT FAMILY, not the document kind, which is why #949's tenancy terms read the
+same one rather than minting a second.
+
+**§C the answer vocabulary** — `clara._agreement_answers_ok(jsonb,text)`, the family's OWN belt and
+never an arm of `clara._witness_answers_ok` or `clara._payroll_answers_ok`: a versioned workflow may
+not couple its shape to another family's frozen files. Eleven run-level questions (what the
+agreement calls itself, the financier, the signing date, what was acquired, the cash price, the
+deposit or trade-in, the amount financed, the total charges, the total payable, the term, the
+instalment) and four per-instalment cells, which are exactly the terms of the row identity
+`principal + interest = instalment`. Every question is answered, `not_printed` is an answer, there
+is no third state, and the envelope itself is closed to three members so a totals bag cannot travel
+beside the answers as a read.
+
+**§D the deterministic evaluator** — `clara.evaluate_agreement_contract_state_v1(jsonb,jsonb)`,
+registered in `clara.evaluator_versions` in this same file, closure ONE member by construction (it
+reads no table and calls no `clara` function, asserted by a call-shape scan of `prosrc`). It does
+AC2's two named checks — deposit + amount financed = cash price, and the printed schedule's
+instalments reconciled to financed plus charges — and it CLASSIFIES, from the rendering the page
+uses for itself against a closed ordered keyword roster (the Malay forms included). An unrecognised
+rendering is `other`; a page that does not say is `not_established`; neither is ever guessed into a
+financing class. Both checks read the PRINTED figures rather than the `established` verdict, which
+is measured rather than reasoned: the first cut required `established` and its `fails` arm turned
+out to be unreachable exactly when a schedule column contradicted its printed total.
+
+**§E the facts router.** An `agreement_contract` pdf or image fell straight through to the router's
+`skipped_kind` dead end, and the capability registry's `stored_only` verdict for the pair was DERIVED
+from that fall-through. The lane is its OWN, `contract_facts`, not `llm_witness` and not
+`payroll_facts`: every facts lane is claimed BY LANE ALONE, so a contract pair parked on either
+would be read with that family's prompts. Five CHECK widenings, two registered and routed event
+types, and five surgical SPLICES of live bodies (the router core, the wrapper's invoice-twin
+exclusion, the transition wall, the claim body and the release sweep) — never re-typed, because
+three of the five were last recut by #945 in this same lane.
+
+**§F the persist door** — `clara.persist_agreement_facts(uuid,jsonb,jsonb,integer)`, the ONE writer
+of agreement facts, and `clara.fail_agreement_facts(uuid,text)`, its terminal twin. Both
+`clara_runtime` only; #948 adds no human door, because the terms a person reads come back through
+the same document read every other family's facts come back through.
+
+*Where the payslip lane STRIPS, this one BANKS.* 0296 discards the per-employee rows because #945's
+brief forbids persisting an employee figure. #948's brief asks for the opposite in terms — "where
+the agreement prints a repayment schedule, each scheduled instalment with its principal and interest
+split" is part of what Clara reads — and a repayment schedule is the agreement's own printed table,
+not a third party's pay. It is also the record an MPERS 20 / MFRS 16 interest-allocation successor
+must read. So both channel rows carry the channel's answers AND its quoted schedule; the text row
+additionally carries the fact state.
+
+*Eleven typed facts and no more.* `uq_document_regions_extraction_field_path` admits ONE region per
+field path per extraction, so a schedule cell could not have a region of its own even if the door
+wanted one: the schedule lives in the envelope, the typed facts are the run-level terms. An
+unprinted term still gets a row carrying no rendering and no cents — that row IS the reading "the
+page does not print this". The five non-monetary questions (a name, a name, a date, prose and a
+count) carry no monetary column at all.
+
+**rig-meta cohort.** `AGREEMENT_0299_RUNTIME_FNS` (`persist_agreement_facts`,
+`fail_agreement_facts`) — its own cohort per the "wholly present or wholly absent" rule, and both
+names are in `ALLOWED[clara_runtime]`. Every other body this file mints stays ungranted to every
+application role; the T17 sweep's default "no role may execute anything unlisted" posture IS that
+assertion.
+
+**Redo posture.** Every body is `create or replace`, every constraint is dropped-if-exists before it
+is added, every insert is `on conflict do nothing`, and every splice detects its own marker in the
+installed body and no-ops with a notice. `CLARA_MIGRATION_REDO=0299_agreement_contract_acquisition`
+was used for each fix round while this file was built. THE ONE THING A REDO CANNOT REPLAY is §D.1's
+freeze registration (`clara.evaluator_versions` is historical and `clara.evaluator_version_members`
+append-only, which is the point of a freeze): that block INSERTs when absent and, when present,
+re-derives the closure hash and refuses by name if it moved — so an edit to the evaluator body fails
+loudly and its only lawful repair is a `_v2`.
