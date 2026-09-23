@@ -548,9 +548,12 @@ its work once the adversary rolls back.
 
 Two cells are worth knowing about before editing them:
 
-- `p649.identity.direct_birth_residual` asserts that `begin_client_onboarding` **still succeeds**
-  at arity ≥ 2. It documents the residual deliberately; it is not a missing wall to "fix" by
-  strengthening the assertion.
+- `p649.identity.direct_birth_residual` used to assert that `begin_client_onboarding` **still
+  succeeded** at arity ≥ 2 — the residual, documented rather than hidden. #899
+  (`0287_client_birth_wall.sql`) CLOSED it: the cell now asserts the opposite, that the door
+  refuses the same way the read does, with no prior read required. The name is kept so the history
+  reads honestly; the dedicated battery for the door that closed it is
+  `client-birth-wall.test.mjs` below.
 - `p649.identity.census_replay` re-runs `0103:1225-1239`'s five-role EXECUTE census over the three
   `name_family_*` helpers and asserts it is still EMPTY. The whole wrapper design turns on that
   negative, so a cell that ever needs relaxing is a design change, not a test change.
@@ -558,6 +561,30 @@ Two cells are worth knowing about before editing them:
 Counterparty fixtures are planted as post-images: `clara.counterparties` carries an immutability
 trigger (CLR08) and `ck_counterparties_merge_retirement` admits retirement only as a merge, so a
 retired counterparty is inserted with both `merged_into` and `retired_at` set.
+
+## `client-birth-wall.test.mjs` (0287, #899)
+
+Eleven cells over the two granted doors `0287_client_birth_wall.sql` wires to the shared, ungranted
+`clara._client_birth_core`, plus a live catalogue census. Frontier-gated on the live catalog through
+`client-birth-wall-preintegration-gate.mjs`: a package-wide run against a chain below 0287 SKIPS
+loudly, a focused run FAILS, and a PARTIAL cohort (some but not all of `_client_birth_core`,
+`open_client_onboarding` and the re-pointed `begin_client_onboarding` present) throws rather than
+skipping — the estate's "wholly present or wholly absent" rule.
+
+- `p899.new_verb.*` — `clara.open_client_onboarding`, called with **no prior read**: arity 0
+  creates; arity ≥ 2 refuses with the same CLR10 `name_family_collision` token and candidate rows
+  `client_identity_candidates` itself returns (AC1); arity 1 refuses without an acknowledgement and
+  succeeds with the read's own candidate id, and a WRONG id refuses the same way as none at all
+  (AC2); a same-op_key replay returns the byte-identical receipt exactly once; the admin floor
+  refuses a bookkeeper and a viewer.
+- `p899.legacy.*` — `clara.begin_client_onboarding`, re-pointed: arity ≥ 2 now refuses (closing
+  `client-onboarding-identity.test.mjs`'s own `p649.identity.direct_birth_residual`); arity 0 and
+  arity 1 are unchanged from before 0287 — the deliberate scope boundary the migration's own header
+  argues for, proved here rather than left assumed.
+- `p899.census.*` — a live, catalogue-derived sweep of every granted human/agent/wake-reachable
+  body that mints a `clara.clients` row (directly, or by delegating to `_client_birth_core`), naming
+  `clara.create_client` as the one documented, tested exception, plus a belt asserting
+  `_client_birth_core` itself holds no application-role grant.
 
 ## Batteries with their own frontier gate
 

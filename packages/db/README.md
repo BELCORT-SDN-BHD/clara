@@ -631,10 +631,11 @@ the predicate; 0219's tail re-measures that census against the committed catalog
 `tests/client-onboarding-identity.test.mjs`'s `p649.identity.census_replay` re-measures it again at
 test time.
 
-**What the wall is not.** The read blocks nothing by itself: a caller that never asks can still
-call `begin_client_onboarding` at any arity and a client is born. That residual is deliberate
-(this wave recuts no birth verb, and a defaulted third parameter would create the overload
-`0103:1055-1070` refuses) and is kept honest by `p649.identity.direct_birth_residual`.
+**What the wall was, and is not any more.** The read used to block nothing by itself: a caller
+that never asked could still call `begin_client_onboarding` at any arity and a client was born.
+[0287_client_birth_wall.sql](migrations/0287_client_birth_wall.sql) (#899) closed that residual —
+see "The client birth wall (0287, #899)" below. `p649.identity.direct_birth_residual` now asserts
+the CLOSURE, not the gap; the name is kept so the history reads honestly.
 
 `clara.settle_client_onboarding_facts(p_plan uuid, p_fy_end_month int, p_fy_end_day int,
 p_op_key text)` — SECURITY DEFINER, bookkeeper floor, human lane only. It carries a **committed**
@@ -674,6 +675,58 @@ client onboarding plan's financial-year end onto `clara.clients` by calling
 - **The day is not in Knowledge this wave** — a named residual. `clara.knowledge_keys` and
   `clara.knowledge_plan_item_map` belong to #654, and 0219's tail asserts it minted no row in
   either.
+
+## The client birth wall (0287, #899)
+
+[0287_client_birth_wall.sql](migrations/0287_client_birth_wall.sql) moves the name-collision wall
+0219 added from a READ a caller can skip to the DOOR that mints a `clara.clients` row, closing the
+residual 0219's own header named. Two of the two granted entrances the ticket's triage measured are
+addressed; the third (`create_client`) is a documented, tested exception — see below.
+
+`clara._client_birth_core(p_actor, p_firm, p_name, p_identifier, p_acknowledged_candidate,
+p_require_ack_at_one, p_fn, p_op_key)` — ungranted, `security definer`. The ONE body that performs
+the candidate resolution `clara.client_identity_candidates` already performs (it CALLS that
+function, never a second copy of the family predicate) ahead of the `insert into clara.clients`,
+in the same transaction as the onboarding plan it also mints. Reserves the op **before** the wall
+(house guard order): the name an op_key is minting legitimately matches itself as an exact-name
+candidate on a byte-identical replay, so checking the wall first would make a successful retry
+refuse itself.
+
+Two granted doors share this one core:
+
+- `clara.open_client_onboarding(p_name, p_op_key, p_identifier default null, p_acknowledged_candidate default null)`
+  — NEW, admin floor. Arity 0 proceeds; arity 1 raises CLR10
+  `identity_acknowledgement_required` unless `p_acknowledged_candidate` names the one candidate the
+  read returns; arity ≥ 2 raises the same CLR10 `name_family_collision` the read raises, carrying
+  the same rows. This is the birth verb the ticket asks for — both `AddClientControl` (the client
+  register's Add Client control) and the ⌘K command palette dispatch through it.
+- `clara.begin_client_onboarding(p_name, p_op_key)` — RE-POINTED (`create or replace`, signature
+  and grant unchanged). Now raises the same CLR10 `name_family_collision` at arity ≥ 2 — this is
+  what closes `p649.identity.direct_birth_residual`. Arity 1 is **deliberately unchanged**: the
+  two-argument signature has no parameter to carry an acknowledgement, and a defaulted third
+  parameter would create the overload `0103:1055-1070` refuses, so an arity-1 wall through this
+  door would be an unconditional refusal rather than a gate a caller could clear. Measured against
+  every real caller on this branch (`rig-fixtures.mjs`, `wave-b/wb-fixtures.mjs` and its test
+  files, the interview and opening-ledger e2e spawners): none ever accumulates a THIRD same-family
+  party under one firm through this door, so the arity-≥-2 wall costs them nothing while the
+  arity-1 boundary stays exactly where the owner's 2026-09-15 ruling put it.
+
+**`clara.create_client(text,text)` is deliberately left untouched — body and grant both — and is
+the one place 0287 departs from the brief's literal "no granted role reaches an unwalled
+client-minting verb".** `rig-fixtures.mjs`'s shared `buildWorld()` (read by dozens of battery
+files) and `wave-b/wb-fixtures.mjs`'s `buildWaveBWorld()` both construct a THIRD same-leading-token
+client in one firm through `create_client`, and `name-only-guard.test.mjs` constructs six more
+through the same shared JS fixture helper; re-pointing `create_client`'s body would turn all of
+those red for a fixture-naming coincidence unrelated to what any of them test, and withdrawing its
+grant would meet the forty-eight-plus test files that call it through `rig-fixtures.mjs`'s
+`createClient()` helper with a bare 42501 on their very first fixture client. `create_client` has
+no product caller — this ticket's own triage measured that with a repo-wide grep. Closing this
+residual for real needs a dedicated migration of those call sites onto `open_client_onboarding` (or
+a rewrite of the fixture naming convention so it stops manufacturing same-family collisions by
+construction) first; `client-birth-wall.test.mjs`'s `p899.census.create_client_documented_exception`
+keeps the gap named and tested rather than silent, and the estate's own census
+(`p899.census.granted_client_minters_have_wall_except_create_client`) fails loudly the day another
+granted body joins it unremarked.
 
 ## Storage grant/policy battery
 

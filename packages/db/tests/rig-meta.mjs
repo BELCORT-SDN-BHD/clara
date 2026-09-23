@@ -2944,6 +2944,20 @@ const FIRM_SETUP_TIP_0259_HUMAN_FNS = ["dismiss_firm_setup_tip"];
 export const FIRM_SETUP_TIP_0259_COHORT = [...FIRM_SETUP_TIP_0259_HUMAN_FNS];
 // #935 END
 
+// #899 [0287, client birth wall] — THE ONE NEW GRANTED NAME: `open_client_onboarding`, the
+// birth verb that folds `clara.client_identity_candidates`'s own candidate resolution into the
+// door that creates a client (arity 0 proceeds, arity 1 needs `p_acknowledged_candidate`, arity
+// >=2 raises CLR10 `name_family_collision`) — clara_authenticated ONLY, admin-floored in its own
+// body through `clara._human_ctx`; clara_runtime, clara_agent_ro and both wake roles gain ZERO
+// (0287's own tail asserts the shape). `begin_client_onboarding` is RECUT (re-pointed at the
+// shared, ungranted `clara._client_birth_core`) but mints no new name and keeps its existing
+// WAVE_B_HUMAN_FNS membership above — its grant did not move (`create or replace` preserves the
+// ACL, and 0287's own tail asserts it byte-for-byte). `create_client` is untouched by 0287 (see
+// that migration's header for why) and keeps its existing WRITERS membership above unmoved.
+const CLIENT_BIRTH_WALL_0287_HUMAN_FNS = ["open_client_onboarding"];
+export const CLIENT_BIRTH_WALL_0287_COHORT = [...CLIENT_BIRTH_WALL_0287_HUMAN_FNS];
+// #899 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -3206,6 +3220,10 @@ export const ALLOWED = {
     // four wake lanes gain ZERO, and the ungranted ceiling clara._firm_document_limit_ceiling
     // holds no role at all.
     ...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS,
+    // #899 [0287] the client birth verb — see the block above. clara_authenticated ONLY;
+    // clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the ungranted
+    // shared core clara._client_birth_core holds no role at all.
+    ...CLIENT_BIRTH_WALL_0287_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3729,6 +3747,12 @@ export async function grantMatrixFailures() {
   if (capWriterLive.length !== 0) {
     failures.push(...cohortFailures("#960 0270 firm document-limits writer",
       FIRM_DOCUMENT_LIMITS_0270_COHORT, liveNames));
+  }
+  // #899 [0287] — bimodal, same reasoning as 0234's/0270's above.
+  const clientBirthWallLive = CLIENT_BIRTH_WALL_0287_COHORT.filter((n) => liveNames.has(n));
+  if (clientBirthWallLive.length !== 0) {
+    failures.push(...cohortFailures("#899 0287 client birth wall",
+      CLIENT_BIRTH_WALL_0287_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

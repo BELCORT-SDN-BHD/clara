@@ -70,6 +70,14 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
   /** Writers lawfully OUTSIDE the _reserve_op discipline (each cites its law). */
   const RESERVE_LAW_EXEMPT = new Set([
     "run_client_lint", "run_lint_all", // L3: op_key validated + audited, NOT op_receipts-reserved
+    // #899 (0287_client_birth_wall.sql): begin_client_onboarding now DELEGATES to the ungranted
+    // clara._client_birth_core, which is where the literal `_reserve_op` call lives — the
+    // discipline moved with it, it did not drop. Proven behaviourally in
+    // client-birth-wall.test.mjs's p899.new_verb.replay (same-op_key retry on the sibling
+    // wrapper clara.open_client_onboarding, which shares this exact core) and in this file's own
+    // "O3: same-op_key retry" cell in wb-o-lifecycle.test.mjs, exercised through
+    // begin_client_onboarding itself.
+    "begin_client_onboarding",
   ]);
   const droppedReservation = writers.filter((fn) => !RESERVE_LAW_EXEMPT.has(fn) && !reserving.has(fn));
   assert.equal(droppedReservation.length, 0,
