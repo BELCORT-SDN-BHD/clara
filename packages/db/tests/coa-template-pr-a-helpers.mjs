@@ -181,9 +181,16 @@ export async function humanAccountCodes(sub, template) {
 // Root-side readers (superuser bypasses RLS -- used for ground truth, never as a wall proof)
 // ---------------------------------------------------------------------------
 
+/** Pinned to v1 explicitly -- 0295 (#941/#942/#946/#949's pre-step) mints my_sme_starter v2
+ *  alongside it (a published template's rows are frozen, so a widened chart ships as a new
+ *  version rather than an edit of v1; v1 stays published, untouched, forever). This whole file's
+ *  battery is written to exercise 0150's OWN fixed 42-family / 142-account artifact, so it pins
+ *  the row the same way coa-template-pr-b-helpers.mjs's sibling platformStarter() already does
+ *  (`and version = 1`, coa-template-pr-b-helpers.mjs:198) rather than reading rows[0] off an
+ *  unordered multi-row result once a second platform version exists. */
 export async function platformTemplate() {
   const r = await rootQuery(
-    "select * from clara.coa_templates where scope = 'platform' and template_key = 'my_sme_starter'",
+    "select * from clara.coa_templates where scope = 'platform' and template_key = 'my_sme_starter' and version = 1",
   );
   return r.rows[0] ?? null;
 }
