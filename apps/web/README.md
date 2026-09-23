@@ -240,8 +240,9 @@ so the firm intake surface mounts the same control rather than copying a second 
 
 The client register's **Add client** control reuses ⌘K's own dispatch rather than minting a second
 call site. Confirm asks `clara.client_identity_candidates` before it reaches
-`clara.begin_client_onboarding`, and the answer decides what happens next — the three arities the
-owner ruled on 2026-09-15:
+`clara.open_client_onboarding` (#899; `clara.begin_client_onboarding` before
+`0287_client_birth_wall.sql` re-pointed this control at the new birth verb), and the answer decides
+what happens next — the three arities the owner ruled on 2026-09-15:
 
 - **0** — nothing in the firm answers to that name. The same click goes straight on to the door.
 - **1** — the candidate is **shown**, with a real link to the record and the reason it matched, and
@@ -262,19 +263,28 @@ text. **There is no client-side duplicate rule and there must not be one**: the 
 not be granted to any application role (a live census in migration 0103 raises on any such grant),
 which is why the browser is given a definer wrapper and never the predicate.
 
-**The wall is the READ, not the birth door.** A caller that never asks can still call
-`begin_client_onboarding` and a client is born — a named residual, kept honest by
-`packages/db/tests/client-onboarding-identity.test.mjs`'s `p649.identity.direct_birth_residual`.
+**The wall used to be the READ, not the birth door — #899 moved it.**
+`0287_client_birth_wall.sql` folds `clara.client_identity_candidates`' own candidate resolution
+into the door itself, through one ungranted shared core (`clara._client_birth_core`) both granted
+doors call: a caller that never asks can no longer create a two-or-more same-family client, through
+either door. `packages/db/tests/client-onboarding-identity.test.mjs`'s
+`p649.identity.direct_birth_residual` now asserts that closure (the name is kept so the history
+reads honestly); `packages/db/tests/client-birth-wall.test.mjs` is #899's own battery.
 
-**⌘K is a SECOND entrance to that door, and it does not ask.** `DO_ACTIONS`'
-`beginClientOnboarding` (`lib/command/do-actions.ts`) is dispatched straight from the palette
-(`components/command/command-palette.tsx`), with no `client_identity_candidates` read anywhere in
-that path — `agentic-finish-walk.spec.ts`'s 裁-37 arm proves it green, dispatching with zero
-identity reads in the whole run. So the arities above are the register control's wall, not the
-product's: the same name typed into the palette is born unchecked. That is a **named residual**,
-not a claim, and it is a face-level sibling of the birth-door one above — closing it means giving
-the palette an arity-1 acknowledgement of its own (a design, not a one-liner), or moving the wall
-into the door, which needs the new birth verb the residual above describes.
+**⌘K is a SECOND entrance to the SAME door, and it still does not ask — and does not need to.**
+`DO_ACTIONS`' `beginClientOnboarding` (`lib/command/do-actions.ts`) dispatches through
+`open_client_onboarding` (`lib/command/do-dispatch.ts`'s own case) with no
+`client_identity_candidates` read anywhere in that path, exactly as before #899. What changed is
+that the door reached at the end of that path now carries its own wall at **every** arity ≥ 1, not
+only ≥ 2: `open_client_onboarding` requires an acknowledgement at arity 1 for every caller, and the
+palette never has a candidate to acknowledge, so it forwards none. At arity ≥ 2 the door refuses
+CLR10 `name_family_collision`; at arity 1 it refuses CLR10 `identity_acknowledgement_required` —
+both VERBATIM, both rendered by the palette's existing DoorRefusal handling, never a client-side
+guess (`lib/command/do-actions.test.ts`'s "the palette cannot create a two-match client" cell,
+`agentic-finish-walk.spec.ts`'s 裁-37 arm). The refusal message itself names the register's Add
+Client control as where to go next — the brief's "refuses and points at the register's control",
+not a second acknowledgement face grafted onto the palette. Only the register's own control can
+clear the arity-1 wall, because only it has somewhere to show the candidate and read the tick.
 
 **Committing an onboarding plan writes neither Knowledge nor the client's own record.** Two
 separate, named acts follow it at the same call site, and they are treated differently on purpose:
@@ -1676,6 +1686,44 @@ mounts a fresh instance against the same run — its assertion is FLIPPED, the d
 other proves clear-on-submit and preserve-on-refusal against two independent runs. What they
 cannot prove at this harness's altitude is the rendered, user-visible `.value` (the
 `HTMLTextAreaElementStub` gap that file's header documents); that is the browser walk's claim.
+
+## Ticket 1012 — the prior-GL seeding lane is retired, and the browser says so
+
+Owner ruling 2026-09-20 (on ticket 983): the prior-GL seeding lane gets no browser entrance,
+because the product direction is the Client KB — nobody pre-registers by hand what Clara can learn
+from a source. Migration `0288_seeding_lane_retired.sql` recut `clara.create_seeding_batch`,
+`clara.tick_seeding_proposal` and `clara.decline_seeding_proposal` to one typed refusal (`CLR34`,
+`detail.reason = "seeding_lane_retired"`). Three things changed here, and one deliberately did not.
+
+**`SeedingBatchesPanel` is read-only, and it says why.** The Tick and Decline dialogs are gone,
+and a `StateBanner` carrying `ReportsSnapshotsSeeding.seeding.retiredNotice` renders in their
+place. The banner is the point: the beta rule is that nothing is switched off silently, so a
+person who filed a prior general ledger last month and comes back for the tick-list is told the
+lane is retired rather than finding the buttons simply absent. Every past batch and proposal stays
+on screen with its state, kind and payload — the retirement deletes nothing.
+
+**The two CLOSERS stay.** `Cancel batch` and `Complete batch` still render on an OPEN batch,
+because a batch left open at the moment of retirement must still be closeable by the firm that
+owns it, or its history is stranded open forever. `lib/reports/api.ts` keeps both wrappers and
+both reads, and has NO `tickSeedingProposal` / `declineSeedingProposal` any more: a wrapper in
+front of a door that refuses everything is a decoy a future surface could be wired to.
+`components/reports/seeding-batches-retired.test.tsx` holds all three claims — the rendered
+absence, the rendered notice, and a census cell over the module's own exports.
+
+**The `seeding_proposal` needs-you row is gone with its row kind.** 0288 §C spliced the CTE out of
+`clara.list_review_queue`, so the queue emits no such row for any client — including one that
+still owns OPEN proposals, which is the whole point: a row nobody can act on is worse than no row.
+`REVIEW_QUEUE_ROW_KINDS` is back to TEN entries, the registry entry and
+`components/firm/seeding-proposal-affordance.tsx` are deleted, and `NeedsYou.rowKind.*` and
+`NeedsYou.reviewSeedingProposals` lose their strings. This is the first time a row kind has been
+REMOVED from that closed world; `lib/firm/needs-you.ts`'s own grounding note records the five
+places the walk touched, in reverse.
+
+**What did NOT change: `ReviewQueueRow`'s three seeding-only fields.** `client_name`, `batch_ids`
+and `open_proposal_count` are still typed, because the DB still emits them — 0288 keeps them in
+the shared column vector rather than recut all ten surviving CTEs, so they are now null on every
+row. The type states what the envelope CONTAINS, not what is useful in it; dropping them would
+make the type disagree with the read. Nothing in the UI consumes them any more.
 
 ## #981 — the durable-Work refusal carrier, read once
 

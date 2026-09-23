@@ -113,9 +113,56 @@ const opKey = (): string => crypto.randomUUID();
 /** clara.begin_client_onboarding(p_name text, p_op_key text) — 0017:2492,
  *  admin floor. Mints a BRAND NEW client (status 'onboarding') + its plan in
  *  one transaction — this is the ONLY one of the five doors that does not
- *  take an existing client id. Returns `{client_id, plan_id}` (0017:2522). */
+ *  take an existing client id. Returns `{client_id, plan_id}` (0017:2522).
+ *
+ *  #899 (0287_client_birth_wall.sql): this door now raises the SAME CLR10
+ *  `name_family_collision` `openClientOnboarding` below raises at arity >=2 —
+ *  it has no argument to carry an acknowledgement, so arity 1 is UNCHANGED
+ *  (it still creates; see that migration's header for why).
+ *
+ *  NO WEB CALLER REMAINS (fix round 1, review finding SPEC-L07-02). An earlier cut of
+ *  this comment claimed `BeginOnboardingCard.tsx` was "this door's one remaining direct
+ *  caller and needs no change: it already renders a `DoorRefusal` verbatim" — which was
+ *  wrong in the case that matters: at arity 1 this door raises NOTHING, so there was no
+ *  refusal to render and that card could still mint a same-family client silently. It now
+ *  calls `openClientOnboarding` with a null acknowledgement. This function is kept as the
+ *  typed client for a door the estate still grants and the rig still drives, and its shape
+ *  is pinned by `api.test.ts`; it is NOT an alternative for a new face. A face that creates
+ *  a client uses `openClientOnboarding`. */
 export async function beginClientOnboarding(name: string, opts: Opts = {}): Promise<{ client_id: string; plan_id: string }> {
   return callDoor("begin_client_onboarding", { p_name: name, p_op_key: opKey() }, opts);
+}
+
+/** clara.open_client_onboarding(p_name text, p_op_key text, p_identifier jsonb,
+ *  p_acknowledged_candidate uuid) — 0287_client_birth_wall.sql, admin floor.
+ *  THE client birth verb (#899): folds `clara.client_identity_candidates`'s own
+ *  candidate resolution into the door that creates the client. Arity 0
+ *  proceeds; arity 1 raises CLR10 `identity_acknowledgement_required` unless
+ *  `acknowledgedCandidate` names the one candidate the read returned; arity
+ *  >=2 raises the estate's own CLR10 `name_family_collision` with the same
+ *  rows the read carries. Returns `{client_id, plan_id}`, exactly like
+ *  `beginClientOnboarding` above.
+ *
+ *  `identifier` IS RECORDED, not only consulted (fix round 1, W3L07-ADV-06): the door
+ *  writes it against the new client under `clara.add_client_identifier`'s own
+ *  normalisation, so the wall a caller cleared with an identifier also holds for the
+ *  next caller. No face supplies one today — both live callers (`do-dispatch.ts`'s
+ *  "beginClientOnboarding" case and `AddClientControl`) send `null`. */
+export async function openClientOnboarding(
+  name: string,
+  args: { identifier?: { kind: string; value: string } | null; acknowledgedCandidate?: string | null } = {},
+  opts: Opts = {},
+): Promise<{ client_id: string; plan_id: string }> {
+  return callDoor(
+    "open_client_onboarding",
+    {
+      p_name: name,
+      p_op_key: opKey(),
+      p_identifier: args.identifier ?? null,
+      p_acknowledged_candidate: args.acknowledgedCandidate ?? null,
+    },
+    opts,
+  );
 }
 
 /** clara.bootstrap_client_plan(p_client uuid, p_op_key text) — 0017:2567,

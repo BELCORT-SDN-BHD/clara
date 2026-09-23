@@ -6,33 +6,41 @@
 // WHAT IS REAL AND WHAT IS FAKE. The browser, the built Next bundle and every line of client code
 // under test are REAL — the register, the Add-client dialog, the candidate face, the
 // acknowledgement gate, the focus manager, the layout at 320 CSS px and at 200% zoom. What is
-// faked is PostgREST: `clara.client_identity_candidates` and `clara.begin_client_onboarding`. So
+// faked is PostgREST: `clara.client_identity_candidates` and `clara.open_client_onboarding`
+// (#899, 0287_client_birth_wall.sql — this fixture answered `clara.begin_client_onboarding`
+// before that migration re-pointed the register's Add-client control at the new birth verb). So
 // this walk proves the JOURNEY and what the surface does with the database's answers; it proves
 // NOTHING about whether Postgres really finds a name family, really refuses at arity >= 2, or
 // really births a client and its plan in one transaction.
-// `packages/db/tests/client-onboarding-identity.test.mjs` owns those against a real Postgres.
+// `packages/db/tests/client-onboarding-identity.test.mjs` and `client-birth-wall.test.mjs` own
+// those against a real Postgres.
 //
 // ONE OF THE TWO VERBS IS ANSWERED FOR EVERY NAME, and the asymmetry is deliberate.
 // `clara.client_identity_candidates` has exactly ONE claimant in this suite — this file — and the
 // Add-client control asks it BEFORE every dispatch, on every walk, including walks that own no
 // client_identity fixture at all. A verb nobody answers is an outage, not a fall-through, so this
 // lane answers every other name with the honest arity-0 shape (`{name, arity: 0, candidates: []}`)
-// and keeps its three fixture names for the three arities. `clara.begin_client_onboarding` has a
-// SECOND claimant (`agentic-finish-mock.mjs`, which answers it for every name its own walk mints),
-// so that one still falls through for a name this lane does not own.
+// and keeps its three fixture names for the three arities. `clara.open_client_onboarding` (#899
+// renamed this from `clara.begin_client_onboarding`, which this file answered before
+// 0287_client_birth_wall.sql) has a SECOND claimant (`agentic-finish-mock.mjs`, which answers it
+// for every name its own walk mints), so that one still falls through for a name this lane does
+// not own.
 //
 // SCOPED BY THE REQUEST'S OWN SUBJECT, and for this door the subject IS the name.
-// `clara.begin_client_onboarding(p_name, p_op_key)` takes a free-text name and nothing else —
-// there is no id in the request to key on — so the name is not a LABEL for the subject here, it is
-// the subject. `agentic-finish-mock.mjs` declares the same verb `unscopeable` because its own walk
-// does not care WHICH name reached it; this lane's three names are its whole fixture, so it gates
-// on them and falls through for every other name, including that lane's. Both claimants are
-// declared in `e2e-fixture-ownership.test.ts`'s SHARED_RPC_VERBS.
+// `clara.open_client_onboarding(p_name, p_op_key, p_identifier, p_acknowledged_candidate)` takes
+// a free-text name plus the two #899 arguments this fixture does not need to inspect (the
+// register's own client-side gate already decided whether to send an acknowledgement, and this
+// fixture never constructs the wrong-acknowledgement case) — there is no id in the request to key
+// on, so the name is not a LABEL for the subject here, it is the subject. `agentic-finish-mock.mjs`
+// declares the same verb `unscopeable` because its own walk does not care WHICH name reached it;
+// this lane's three names are its whole fixture, so it gates on them and falls through for every
+// other name, including that lane's. Both claimants are declared in
+// `e2e-fixture-ownership.test.ts`'s SHARED_RPC_VERBS.
 
 // THE BODY IS READ THROUGH THE SHARED CACHE, never a private loop. A Node request stream drains
 // exactly once, so a lane that parses it privately hands every later lane in `serve-built.mjs`'s
 // chain an empty `{}` — the silent failure `mock-dispatch.mjs`'s own header was written for, and
-// `begin_client_onboarding`'s other claimant (`agentic-finish-mock.mjs`, hooked AFTER this lane)
+// `open_client_onboarding`'s other claimant (`agentic-finish-mock.mjs`, hooked AFTER this lane)
 // reads its body through the same helper.
 import { matchVerb, readCachedJson } from "./mock-dispatch.mjs";
 
@@ -78,7 +86,7 @@ const CANDIDATE_COUNTERPARTY = {
 const OWNED_NAMES = new Set([CLIENT_CREATE.freeName, CLIENT_CREATE.loneName, CLIENT_CREATE.collidingName]);
 
 /** The ONLY RPC verbs this lane's dispatch chain recognises. */
-export const CLIENT_CREATE_RPC_VERBS = new Set(["client_identity_candidates", "begin_client_onboarding"]);
+export const CLIENT_CREATE_RPC_VERBS = new Set(["client_identity_candidates", "open_client_onboarding"]);
 const OWNED_VERBS = CLIENT_CREATE_RPC_VERBS;
 
 /** The rows the two id-scoped `/rest/v1/clients` reads answer with. `bornClients` grows when the
@@ -167,7 +175,7 @@ export async function handleClientCreateSupabase(request, response, path, url, s
     return true;
   }
 
-  if (verb === "begin_client_onboarding") {
+  if (verb === "open_client_onboarding") {
     // A NAME THIS LANE DOES NOT OWN FALLS THROUGH to whichever lane minted it — above all the
     // P6-5 lane, which answers this door for every other name and says so in its own
     // declaration. The walk only ever reaches here for a name the face let through.

@@ -89,9 +89,18 @@ export async function seedOpeningCoa(sub, client) {
   await seedMarkers(sub, client);
 }
 
-/** Birth an onboarding client (O3) and return {client, plan, revision}. */
+/** Birth an onboarding client (O3) and return {client, plan, revision}.
+ *
+ *  #899 (0287_client_birth_wall.sql): the default name's RANDOM part now sits INSIDE the
+ *  leading token (no separator between "wbonb" and the random hex) rather than after an
+ *  underscore. `clara.name_family_token` matches on the leading token alone, and this file's
+ *  own `before()` shares ONE firm across every test — a constant "wbonb" leading token made
+ *  every default-named call here a same-family sibling of every other one, which was invisible
+ *  before `begin_client_onboarding` enforced the two-or-more wall and started refusing this
+ *  file's own third-and-later default-named client. The random hex now breaks that family on
+ *  every call, matching what a genuinely distinct fixture name is supposed to look like. */
 export async function onboardingClient(sub, name = null) {
-  const r = await beginOnboarding(sub, { name: name ?? `wbonb_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}` });
+  const r = await beginOnboarding(sub, { name: name ?? `wbonb${randomUUID().slice(0, 8)}_${Date.now().toString(36)}` });
   const plan = r.plan_id;
   const rev = (await planRow(plan))?.revision_token ?? null;
   return { client: r.client_id, plan, revision: rev, receipt: r };

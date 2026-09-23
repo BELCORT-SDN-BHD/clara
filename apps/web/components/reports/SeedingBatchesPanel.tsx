@@ -1,19 +1,23 @@
 "use client";
 
 // T9 (port-wave) — seeding batches + proposals (clara.seeding_batches /
-// clara.seeding_proposals). PLAN-VS-CATALOG CONFLICT, reported (see the
-// build's own report): the port-wave plan's §5 table lists a `seeding_
-// proposal` needs-you row with tick/decline inline acts, but the LIVE
-// clara.list_review_queue body (rung-0 census against the 0140 catalog) has
-// exactly eight row_kind values — draft, uncoded_filing, open_question,
-// coding_task, compliance_watch, lint_finding, fixed_asset_incomplete,
-// staff_advance_incomplete — none of them `seeding_proposal`. Registering a
-// ninth kind into lib/firm/needs-you.ts's closed world would fabricate a
-// row the DB never emits (AGENTS.md's "the UI never invents a... link").
-// This panel is the buildable substitute: a direct RLS read of the real
-// tables, with the SAME tick/decline doors as door dialogs rather than
-// needs-you inline acts — cancel/complete batch doors sit alongside them,
-// since a batch is the object those doors govern.
+// clara.seeding_proposals), READ-ONLY SINCE #1012.
+//
+// #1012 (0288_seeding_lane_retired.sql; owner ruling 2026-09-20 on #983): the prior-GL seeding
+// lane is RETIRED. `clara.create_seeding_batch`, `clara.tick_seeding_proposal` and
+// `clara.decline_seeding_proposal` answer one typed refusal, because the product direction is
+// the Client KB — nobody pre-registers by hand what Clara can learn from a source. So this
+// panel offers no Tick and no Decline: a control whose only possible outcome is a refusal is
+// worse than no control, and the beta rule is that nothing is switched off silently, which is
+// why the retirement notice is rendered rather than the controls simply vanishing.
+//
+// WHAT THE PANEL STILL IS. Every past batch and proposal stays on screen, read straight off the
+// real tables under RLS, with its state, its kind and its payload — the retirement deletes
+// nothing. The two CLOSERS survive as door dialogs: a batch left open at the moment of
+// retirement must still be cancellable or completable by the firm that owns it, or its history
+// would be stranded open forever. The `seeding_proposal` needs-you row that used to bridge into
+// this panel is gone with the row kind itself (0288 §C), so this tab is the only surface the
+// lane has left, and it asks nobody for anything.
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
@@ -28,8 +32,6 @@ import {
   listSeedingProposals,
   cancelSeedingBatch,
   completeSeedingBatch,
-  declineSeedingProposal,
-  tickSeedingProposal,
 } from "@/lib/reports/api";
 import { businessDateTime } from "@/lib/business-date";
 import type { SeedingBatchRow, SeedingBatchState, SeedingProposalRow, SeedingProposalState } from "@/lib/reports/types";
@@ -70,11 +72,8 @@ export function SeedingBatchesPanel({ clientId, session }: { clientId: string; s
     await proposals.reload();
     return ok;
   };
-  // F5 (independent review): proposal-scoped acts (tick/decline) ride
-  // proposals' OWN act()-and-reload cycle (part2 §7.1(2)) directly — never a
-  // hand-rolled err state that drops the CLR code, which is what ProposalRow
-  // did before this fix.
-  const actProposal = proposals.act;
+  // #1012: there is no proposal-scoped act any more. The tick/decline pair was the only one,
+  // and both doors are retired, so `proposals` is a pure read here.
 
   // F1 (independent review, HIGH): the loading/error gate below used to
   // consult ONLY batches.err — a proposals-only failure (e.g. a 401 on that
@@ -92,6 +91,7 @@ export function SeedingBatchesPanel({ clientId, session }: { clientId: string; s
         <CardDescription className="text-xs">{t("subheading")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
+        <StateBanner tone="info">{t("retiredNotice")}</StateBanner>
         {dataReady && loadErr ? (
           <StateBanner tone="error" code={loadClr ? `${loadClr.code}${loadClr.reason ? ` · ${loadClr.reason}` : ""}` : undefined}>
             {loadErr}
@@ -110,7 +110,6 @@ export function SeedingBatchesPanel({ clientId, session }: { clientId: string; s
                 proposals={proposalsByBatch.get(b.id) ?? []}
                 busy={batches.busy || proposals.busy}
                 actBatch={actBatch}
-                actProposal={actProposal}
               />
             ))}
           </div>
@@ -125,13 +124,11 @@ function BatchGroup({
   proposals,
   busy,
   actBatch,
-  actProposal,
 }: {
   batch: SeedingBatchRow;
   proposals: SeedingProposalRow[];
   busy: boolean;
   actBatch: (fn: () => Promise<void>) => Promise<boolean>;
-  actProposal: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ReportsSnapshotsSeeding.seeding");
   const openCount = proposals.filter((p) => p.state === "proposed").length;
@@ -156,7 +153,7 @@ function BatchGroup({
       ) : (
         <ul className="flex flex-col gap-2">
           {proposals.map((p) => (
-            <ProposalRow key={p.id} proposal={p} batchOpen={batch.state === "open"} busy={busy} act={actProposal} />
+            <ProposalRow key={p.id} proposal={p} />
           ))}
         </ul>
       )}
@@ -188,21 +185,11 @@ function CompleteBatchDialog({ batchId, busy, act }: { batchId: string; busy: bo
   );
 }
 
-function ProposalRow({
-  proposal,
-  batchOpen,
-  busy,
-  act,
-}: {
-  proposal: SeedingProposalRow;
-  batchOpen: boolean;
-  busy: boolean;
-  // F5 (independent review): the SAME useHydratedPart act()-and-reload shape
-  // every sibling door in this file already uses — a refusal's CLR code +
-  // reason now surfaces through the panel's own top banner (loadErr/loadClr
-  // above), never a hand-rolled local err that drops the code.
-  act: (fn: () => Promise<void>) => Promise<boolean>;
-}) {
+function ProposalRow({ proposal }: { proposal: SeedingProposalRow }) {
+  // #1012: READ-ONLY. This row used to carry Tick and Decline whenever its batch was open and
+  // its own state was 'proposed'; both doors are retired, so the row renders what the proposal
+  // says and nothing a person can press. The state badge still distinguishes a proposal that
+  // was ticked, declined or refused before the retirement from one left open.
   return (
     <li className="flex flex-col gap-1 rounded-md border border-border/60 p-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -210,36 +197,6 @@ function ProposalRow({
         <span className="font-mono text-xs text-card-foreground">{proposal.proposal_kind}</span>
       </div>
       <p className="text-xs text-muted-foreground wrap-anywhere">{JSON.stringify(proposal.payload)}</p>
-      {batchOpen && proposal.state === "proposed" ? (
-        <div className="flex flex-wrap gap-2">
-          <TickDialog proposalId={proposal.id} busy={busy} act={act} />
-          <DeclineDialog proposalId={proposal.id} busy={busy} act={act} />
-        </div>
-      ) : null}
     </li>
-  );
-}
-
-function TickDialog({ proposalId, busy, act }: { proposalId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
-  const t = useTranslations("ReportsSnapshotsSeeding.seeding.tick");
-  return (
-    <DoorDialog
-      triggerLabel={t("trigger")} title={t("title")} description={t("description")} confirmLabel={t("confirm")} busy={busy}
-      onConfirm={() => act(async () => { await tickSeedingProposal(proposalId); })}
-    />
-  );
-}
-
-function DeclineDialog({ proposalId, busy, act }: { proposalId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
-  const t = useTranslations("ReportsSnapshotsSeeding.seeding.decline");
-  const [reason, setReason] = useState("");
-  return (
-    <DoorDialog
-      triggerLabel={t("trigger")} title={t("title")} confirmLabel={t("confirm")} busy={busy}
-      confirmDisabled={reason.trim().length === 0}
-      onConfirm={() => act(async () => { await declineSeedingProposal({ proposalId, reason }); })}
-    >
-      <Input aria-label={t("reasonPlaceholder")} placeholder={t("reasonPlaceholder")} value={reason} onChange={(e) => setReason(e.target.value)} />
-    </DoorDialog>
   );
 }

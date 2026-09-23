@@ -195,12 +195,12 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   // :153-164 comment already names, mirrored to the removal direction.
   "_wake_cred_full", "ack_compliance_watch", "acknowledge_sweep_run", "add_bank_account",
   "admit_autodraft_task", "answer_interruption", "approve_opening_correction", "approve_opening_seed", "approve_pair_reversal",
-  "approve_wrong_client_correction", "begin_client_onboarding", "bootstrap_client_plan", "cancel_agent_task",
+  "approve_wrong_client_correction", "bootstrap_client_plan", "cancel_agent_task",
   "cancel_client_onboarding", "cancel_opening_seed", "cancel_pair_reversal", "cancel_seeding_batch", "claim_document_intake_upload",
   "claim_document_processing_task", "classify_document", "commit_client_onboarding", "complete_bank_reconciliation", "complete_coding_task",
   "complete_fixed_asset_particulars", "complete_pending_match", "complete_seeding_batch", "complete_stored_document_task", "confirm_attribution_candidate",
-  "consume_egress_dispatch", "create_client", "create_firm", "create_seeding_batch", "deactivate_bank_account",
-  "deactivate_client_egress_purpose", "decline_seeding_proposal", "dismiss_attribution_candidate", "dismiss_coding_task",
+  "consume_egress_dispatch", "create_client", "create_firm", "deactivate_bank_account",
+  "deactivate_client_egress_purpose", "dismiss_attribution_candidate", "dismiss_coding_task",
   "dismiss_open_question", "enrol_staff_advance_account", "evaluate_sst_watch", "evaluate_sst_watches_all",
   "fail_classify", "fail_invoice_facts", "fail_statement_facts", "finalize_document_intake", "get_bank_reconciliation",
   "get_context_pack", "list_review_queue", "list_vendor_bindings", "mark_document_intake_received",
@@ -219,8 +219,13 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   // begin_chat_turn: 0282 recut the body to a bare typed refusal, so it reads no clock any more
   // on a database that has the retirement -- and still does on every `db-slice-frontiers` leg
   // pinned before it, which is why the name is pushed back rather than deleted.
+  // `tick_seeding_proposal` left this same line at ticket 1012 (migration 0288) for exactly the
+  // same reason and by the same mechanism, into SEEDING_LANE_RETIRED_0288_CLOCK_NAMES below
+  // (with its two siblings, which leave from the lines above). The two retirements are
+  // independent and BOTH removals stand: this array is the "still stamps a clock" roster, and
+  // neither name does any more once its own migration has applied.
   "settle_chat_turn", "settle_ingest_reservation", "sign_bank_rule",
-  "sign_depreciation_authority", "sign_vendor_identity_binding", "snooze_compliance_watch", "tick_seeding_proposal",
+  "sign_depreciation_authority", "sign_vendor_identity_binding", "snooze_compliance_watch",
   "unmatch_bank_match", "update_onboarding_plan", "upsert_fa_account_profile", "verify_document_intake", "void_bank_reconciliation",
   "void_bank_statement", "wake_context", "wake_record_notification", "withdraw_draft",
 ].sort();
@@ -238,6 +243,27 @@ const RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES = [
   "_ocr_sales_floor", "acknowledge_rule_posts", "decline_coding_rule", "execute_rule_post",
   "list_autopost_rules", "propose_autopost_rule", "reconcile_autopost_rules", "retire_autopost_rule",
   "retire_coding_rule", "sign_autopost_rule", "sign_coding_rule",
+];
+
+// ---------------------------------------------------------------------------
+// TWO MORE REVERSE-GATED COHORTS, the exact shape the block above uses: a name that carried a
+// bare clock token from early in the estate's life and STOPS carrying one at a named migration.
+// Each is pushed back on a database that has not yet applied its migration, so arm (D) stays
+// exact at both frontiers and a MISSING name still fails.
+//
+// (a) #899 [0287_client_birth_wall.sql]. `clara.begin_client_onboarding`'s body was moved into
+// the new ungranted `clara._client_birth_core`, which the base roster above carries: the clock
+// token went with the body. The door itself is now a thin wrapper with none.
+const BIRTH_WALL_0287_MOVED_CLOCK_NAMES = ["begin_client_onboarding"];
+// …and the body it moved INTO, born at 0287, so it is forward-gated rather than pushed back.
+const BIRTH_WALL_0287_CLOCK_NAMES = ["_client_birth_core"];
+// (b) Ticket 1012 [0288_seeding_lane_retired.sql]. All three prior-GL seeding write doors are
+// recut to ONE typed refusal (CLR34 `seeding_lane_retired`) that raises before anything else, so
+// none of them stamps a timestamp any more -- there is no body left to stamp one. The two
+// CLOSERS (cancel_seeding_batch / complete_seeding_batch) are byte-unchanged and stay in the base
+// roster above, which is the discriminating half of this edit.
+const SEEDING_LANE_RETIRED_0288_CLOCK_NAMES = [
+  "create_seeding_batch", "decline_seeding_proposal", "tick_seeding_proposal",
 ];
 
 // ---------------------------------------------------------------------------
@@ -1390,6 +1416,9 @@ export async function s5BareTokenRoster(query) {
   // REVERSE gate, no lower bound -- these eleven are early-born (see the array's own header),
   // so they are expected everywhere the roster reaches UNTIL the cutover retires them.
   if (!(await appliedStem("f_a2_cutover_retirement$"))) names.push(...RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES);
+  if (await appliedStem("client_birth_wall$")) names.push(...BIRTH_WALL_0287_CLOCK_NAMES);
+  else names.push(...BIRTH_WALL_0287_MOVED_CLOCK_NAMES);
+  if (!(await appliedStem("seeding_lane_retired$"))) names.push(...SEEDING_LANE_RETIRED_0288_CLOCK_NAMES);
   if (await applied("0046_%")) names.push(...SALES_LANE_0046_CLOCK_NAMES);
   if (await applied("0046_%") && !(await appliedStem("f_a2_cutover_retirement$"))) {
     names.push(...SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES);

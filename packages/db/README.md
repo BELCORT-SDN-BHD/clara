@@ -561,6 +561,50 @@ REWRITTEN by #872 to assert the new, agreeing behaviour (it now demotes an issue
 `issuer_lapsed` on both reads, and shows `accept_invite` still refusing CLR04 for an invited role
 that outranks the issuer's now-lower current rank — the wall, not the read, is what still refuses).
 
+## The counterparty merge door's own lock order
+
+`clara.merge_counterparties` (0011:1820, body replaced by 0015, spliced by 0149 S2 and again by
+[0289_merge_alias_lane.sql](migrations/0289_merge_alias_lane.sql) — #889) takes its locks in
+THREE rungs, in this order, and the order is not incidental — it is the one thing standing
+between two concurrent merges and a `40P01` deadlock:
+
+1. **Both counterparty rows, `for update`, in `id` ORDER — never in `(survivor, merged)`
+   argument order.** `perform 1 from clara.counterparties cp where cp.id in (p_survivor,
+   p_merged) order by cp.id for update;` (0015:2260-2261). Two sessions merging the same pair
+   in OPPOSITE roles — one calling `merge(A, B)`, the other `merge(B, A)` — would lock A-then-B
+   and B-then-A respectively if the door locked in call-argument order, the classic AB/BA
+   deadlock shape. Sorting by `id` before the lock makes BOTH sessions request the SAME global
+   order regardless of which argument named which row, so one session waits and the other
+   proceeds — never a cycle.
+Before any of the three rungs, the door decides whether the two ids are its caller's business at
+all — and **a counterparty outside the caller's firm is answered `CLR11 counterparty not found`,
+exactly as an id that exists nowhere is.** 0289's second splice lifted the firm test out of the
+combined guard that used to answer `CLR23 cross_client` for a foreign firm's REAL rows, which made
+the door a cross-tenant existence oracle against the estate's own rule that CLR11 means
+"not-found-in-your-firm, no existence oracle". `cross_client` still answers for the case it was
+written for: two counterparties of the caller's OWN firm under different clients
+(`p889.merge.no_cross_tenant_oracle` drives both sides).
+
+2. **The alias insert**, into `clara.counterparty_aliases` (0015:2295, recut by 0289 to name
+   `recorded_via`). An insert of a new row takes no lock on any EXISTING row, so this rung adds
+   no deadlock surface of its own; it sits between the two rungs that do because the merged
+   party's former name must be recorded before its `coding_rules` are touched (a professional
+   reading the identity page mid-merge sees the alias before the retirement, never after).
+3. **The merged party's `coding_rules` rows, `for update`** — vendor_account first, then
+   autopost (0015:2299-2301, :2317-2319). Each `select … for update` locks at most the one live
+   rule of its type for `p_merged`; unlike rung 1, there is no cross-row ordering concern here
+   because no other door takes a `coding_rules` lock keyed on more than one counterparty at
+   once.
+
+**The deadlock class this order avoids is the same one the member-doors section above names for
+`clara.firms`**: two sessions that would otherwise acquire the SAME two row locks in opposite
+orders. The fix is the same shape too — sort a fixed key (`id`, not the caller's argument
+position) before locking — but the two orders are independent of each other: nothing here takes
+a `clara.firms` lock, and nothing in the member-doors chain touches `clara.counterparties`. A
+future recut that locks `p_survivor` then `p_merged` (or vice versa) directly, without the
+`order by cp.id`, is a deadlock regression against 0289's own `sha256(prosrc)` pin on this body
+(the value 0215's own P6 residue pin already carries too) — not a style change.
+
 ## The `interactive_client` wake kind
 
 `clara.wake_fn_allowlist` rows for the `interactive_client` wake kind are not "structurally
@@ -631,10 +675,11 @@ the predicate; 0219's tail re-measures that census against the committed catalog
 `tests/client-onboarding-identity.test.mjs`'s `p649.identity.census_replay` re-measures it again at
 test time.
 
-**What the wall is not.** The read blocks nothing by itself: a caller that never asks can still
-call `begin_client_onboarding` at any arity and a client is born. That residual is deliberate
-(this wave recuts no birth verb, and a defaulted third parameter would create the overload
-`0103:1055-1070` refuses) and is kept honest by `p649.identity.direct_birth_residual`.
+**What the wall was, and is not any more.** The read used to block nothing by itself: a caller
+that never asked could still call `begin_client_onboarding` at any arity and a client was born.
+[0287_client_birth_wall.sql](migrations/0287_client_birth_wall.sql) (#899) closed that residual —
+see "The client birth wall (0287, #899)" below. `p649.identity.direct_birth_residual` now asserts
+the CLOSURE, not the gap; the name is kept so the history reads honestly.
 
 `clara.settle_client_onboarding_facts(p_plan uuid, p_fy_end_month int, p_fy_end_day int,
 p_op_key text)` — SECURITY DEFINER, bookkeeper floor, human lane only. It carries a **committed**
@@ -674,6 +719,88 @@ client onboarding plan's financial-year end onto `clara.clients` by calling
 - **The day is not in Knowledge this wave** — a named residual. `clara.knowledge_keys` and
   `clara.knowledge_plan_item_map` belong to #654, and 0219's tail asserts it minted no row in
   either.
+
+## The client birth wall (0287, #899)
+
+[0287_client_birth_wall.sql](migrations/0287_client_birth_wall.sql) moves the name-collision wall
+0219 added from a READ a caller can skip to the DOOR that mints a `clara.clients` row, closing the
+residual 0219's own header named. The ticket's 2026-09-19 triage measured **two** still-open
+granted entrances: the command palette's dispatch to `begin_client_onboarding`, and
+`clara.create_client(text,text)`'s standing `clara_authenticated` grant. **One of the two is
+closed** (the palette, and with it the legacy door, at arity ≥ 2). **The other is still open**:
+`create_client` keeps its body and its grant, and 0287 marks it SUPERSEDED in the catalogue rather
+than closing it — so the ticket's "no granted human role can reach a client-minting verb that lacks
+the wall" is NOT yet true. What IS measured is how far that gap reaches; see below.
+
+`clara._client_birth_core(p_actor, p_firm, p_name, p_identifier, p_acknowledged_candidate,
+p_require_ack_at_one, p_fn, p_op_key)` — ungranted, `security definer`. The ONE body that performs
+the candidate resolution `clara.client_identity_candidates` already performs (it CALLS that
+function, never a second copy of the family predicate) ahead of the `insert into clara.clients`,
+in the same transaction as the onboarding plan it also mints. Reserves the op **before** the wall
+(house guard order): the name an op_key is minting legitimately matches itself as an exact-name
+candidate on a byte-identical replay, so checking the wall first would make a successful retry
+refuse itself.
+
+Two granted doors share this one core:
+
+- `clara.open_client_onboarding(p_name, p_op_key, p_identifier default null, p_acknowledged_candidate default null)`
+  — NEW, admin floor. Arity 0 proceeds; arity 1 raises CLR10
+  `identity_acknowledgement_required` unless `p_acknowledged_candidate` names the one candidate the
+  read returns; arity ≥ 2 raises the same CLR10 `name_family_collision` the read raises, carrying
+  the same rows. This is the birth verb the ticket asks for — both `AddClientControl` (the client
+  register's Add Client control) and the ⌘K command palette dispatch through it.
+- `clara.begin_client_onboarding(p_name, p_op_key)` — RE-POINTED (`create or replace`, signature
+  and grant unchanged). Now raises the same CLR10 `name_family_collision` at arity ≥ 2 — this is
+  what closes `p649.identity.direct_birth_residual`. Arity 1 is **deliberately unchanged**: the
+  two-argument signature has no parameter to carry an acknowledgement, and a defaulted third
+  parameter would create the overload `0103:1055-1070` refuses, so an arity-1 wall through this
+  door would be an unconditional refusal rather than a gate a caller could clear. Measured against
+  every real caller on this branch (`rig-fixtures.mjs`, `wave-b/wb-fixtures.mjs` and its test
+  files, the interview and opening-ledger e2e spawners): none ever accumulates a THIRD same-family
+  party under one firm through this door, so the arity-≥-2 wall costs them nothing while the
+  arity-1 boundary stays exactly where the owner's 2026-09-15 ruling put it.
+
+**`clara.create_client(text,text)` keeps its body and its grant, and is the one place 0287
+departs from the brief's literal "no granted role reaches an unwalled client-minting verb". It is
+an OPEN residual, not a closed question.** 0287 §C2 does give the brief's third per-verb answer —
+SUPERSEDED — where a reader of the catalogue can see it: a `comment on function` naming
+`open_client_onboarding` as the successor and saying in the same sentence that the gap is still
+open. The comment is the only thing about this verb 0287 changes; the prestate and the tail pin its
+body and its grant byte-for-byte. `rig-fixtures.mjs`'s shared `buildWorld()` (read by dozens of battery
+files) and `wave-b/wb-fixtures.mjs`'s `buildWaveBWorld()` both construct a THIRD same-leading-token
+client in one firm through `create_client`, and `name-only-guard.test.mjs` constructs six more
+through the same shared JS fixture helper; re-pointing `create_client`'s body would turn all of
+those red for a fixture-naming coincidence unrelated to what any of them test, and withdrawing its
+grant would meet the forty-eight-plus test files that call it through `rig-fixtures.mjs`'s
+`createClient()` helper with a bare 42501 on their very first fixture client. `create_client` has
+no product caller — this ticket's own triage measured that with a repo-wide grep. Closing this
+residual for real needs a dedicated migration of those call sites onto `open_client_onboarding` (or
+a rewrite of the fixture naming convention so it stops manufacturing same-family collisions by
+construction) first.
+
+Three cells bound the gap rather than claiming it away.
+`p899.census.granted_client_minters_and_the_one_residual` sweeps the live catalogue and fails
+loudly the day a SECOND granted minter loses the wall — or the day the array empties, which would
+mean this section and the ticket's criterion both need rewriting.
+`p899.census.create_client_documented_exception` drives the residual so it is evidenced, not
+asserted. `p899.census.create_client_residual_is_bounded` proves the reach: the catalogue comment
+is live, **no product tree calls the verb at all** (`apps/web/app|components|lib` and every
+`packages/runtime` tree the operation census counts as production are swept and empty), and the one
+non-test caller anywhere — `scripts/onboard-rpr.mjs`, the beta onboarding operator — runs as the
+postgres superuser with a jwt GUC and never `SET ROLE`s to `clara_authenticated`, so it does not
+ride the grant this residual is about.
+
+**Two guarantees the core carries that the doors above do not state.** (1) The wall is
+SERIALISED: `_client_birth_core` takes `pg_advisory_xact_lock(203005008, hashtext(firm || ':' ||
+name_family_token(name)))` BEFORE the candidate read. A read followed by an insert is a
+time-of-check/time-of-use window — two concurrent sessions each see the other's uncommitted client
+as absent, each clears the same arity-1 acknowledgement, and the firm ends with three same-family
+parties, a state the door refuses to reach one caller at a time. Measured with two real
+connections; the cell is `p899.new_verb.concurrent_same_family_serialised`. The key is (firm,
+family), not the whole firm, so unrelated births never wait on each other. (2) `p_identifier` is
+RECORDED, not only consulted: the core writes it into `clara.client_identifiers` under
+`clara.add_client_identifier`'s own normalisation, so a wall a caller cleared with an identifier
+also holds for the next caller. Both are re-asserted structurally by 0287's own tail (T.5b).
 
 ## Storage grant/policy battery
 
@@ -1603,7 +1730,11 @@ precedent `af3b5955` (#779) set when it shipped 0207 and +147 lines of that file
   shape (counterparty, account and date, NEVER an amount) and the fact that **no browser entrance
   exists** — nothing in `apps/web` calls `POST /api/seeding/prepare` — with
   `limits = {"browser_entrance":"absent"}` making that gap machine-readable, which is 0191's own
-  instrument for a named gap (`:235-236`, "A limit is not a lower level").
+  instrument for a named gap (`:235-236`, "A limit is not a lower level"). **Both halves of that
+  wording were replaced by 0288** (ticket 1012): the operation is retired and the entrance is not
+  merely unbuilt, so the rows now carry `limits = {"seeding_lane":"retired", …}` and a basis that
+  says so — see "0288 — the prior-GL seeding lane is retired" at the foot of this file. The LEVEL
+  argument below is unaffected and still stands.
 
 **Why the prior_gl LEVEL was held, measured rather than preferred.** #656's brief rules it to
 `supported`. 0228 was written that way, applied to a rig, and the registry's own cell
@@ -4119,6 +4250,86 @@ absent, and there is no backfill and no data-dependent branch anywhere in the pr
 A `CLARA_MIGRATION_REDO` of this file was exercised during authoring; note that `create table if not
 exists` SKIPS an existing relation, so a redo that also changed the table's own definition would
 need the table dropped first — the redo used here changed only the function body.
+
+## 0288 — the prior-GL seeding lane is retired (ticket 1012)
+
+Owner ruling 2026-09-20 (on ticket 983): the prior-GL seeding lane gets no browser entrance,
+because the product direction is the Client KB — `docs/PRD.md`'s Client Knowledge section states
+it, and nobody pre-registers by hand what Clara can learn from a source. There is no successor UI
+to build for a lane that asked a professional to tick a pre-registration list, so the lane is
+retired instead.
+
+**The change, in four sections of one file.**
+
+| § | What it does |
+|---|---|
+| B | `clara.create_seeding_batch`, `clara.tick_seeding_proposal` and `clara.decline_seeding_proposal` are recut IN PLACE to ONE shared typed refusal: `CLR34`, `detail.reason = "seeding_lane_retired"`, one sentence, identical in all three bodies (the tail asserts the literal on each). |
+| C | `clara.list_review_queue` loses its ninth row kind, `seeding_proposal` — the `seeding_rows` CTE and its union arm are spliced out. |
+| D | The seven `prior_gl` `document_capabilities` rows republish: `limits {"browser_entrance":"absent"}` becomes `{"seeding_lane":"retired","seeding_lane_reason":"client_kb_replaces_manual_pre_registration"}`, and the basis says the lane is retired instead of promising an entrance. Whole-registry version raise, by UPDATE, 0228's and 0245's idiom. |
+| E | Tail: posture, ACLs, the two closers' byte-identity, and a forced-rollback behavioural probe driving all three refusals and proving they write nothing. |
+
+**Why a refusal and not a drop — the 0271 question, answered the other way.** 0271 dropped
+`clara.create_account_set_v1` because it had zero live callers and a dropped body needs no
+re-derivation by a future census. These three had live callers: the runtime's seeding-prepare
+route and the web Reports panel's tick/decline dialogs. A caller that meets `42883
+undefined_function` reports an internal error, not a retirement, and a caller that meets `42501
+insufficient_privilege` (had the grants been revoked) reports a permission problem it can neither
+diagnose nor fix. The estate's own idiom for this case is 0007's `clara.ingest_document`: keep the
+signature, keep the arity, keep the grant, answer a deterministic typed retirement. **No grant
+moves**, so exactly the roles that could call these doors before can call them now, and receive an
+answer they can render.
+
+**Why the refusal is the WHOLE body.** The three doors' first statements were a `_reserve_op`
+idempotency reservation (the creator) and a `clara._human_ctx(role_rank('admin'))` ladder (both
+deciders). Raising ahead of either is deliberate: a retired door must write nothing at all, and a
+reservation is a write. A caller replaying a retired `op_key` therefore meets the same refusal
+every time rather than a cached receipt — the lane has no state left to be idempotent about. The
+cost is named rather than hidden: the deciders no longer distinguish "not an admin" from
+"retired", and the creator no longer distinguishes "not a prior GL" from "retired". That is what a
+retirement means — the answer does not depend on the request.
+
+**What survives, and why each one had to.**
+
+- `clara.cancel_seeding_batch` and `clara.complete_seeding_batch` are **byte-unchanged**, pinned in
+  the prestate and re-pinned in the tail. A batch left open at the moment of retirement must still
+  be closeable by the firm that owns it; retiring the closers would strand its history open
+  forever. `seeding-lane-retired.test.mjs` drives both on a planted pre-retirement batch.
+- Every READ of a batch or a proposal, both relations, their policies and their grants. This file
+  deletes no batch, no proposal and no published wiki page.
+- `packages/runtime/lib/wiki-projection.mjs`'s `seeding.proposal_decided` lane. A hosted firm's
+  HISTORICAL ticked proposals still replay into deterministic wiki pages; the lane simply never
+  receives a new event again.
+
+**The queue splice, and its named residual.** §C is the NINTH splice of `clara.list_review_queue`
+(after 0017, 0036, 0041, 0043, 0146, 0168, 0180, 0260) and the FIRST that removes a row kind. It is
+boundary-anchored — cut between the CTE's own opener and the next CTE's, with a gravestone comment
+in its place — because the block being removed is thirty lines of prose no migration should have to
+re-type in order to delete. The ELEVEN pre-splice row kinds are witnessed in code AND cross-checked
+against the raw text (0260's HIGH-1 guard), and the TEN survivors are re-witnessed after. The
+residual: the three columns that CTE alone ever populated (`client_name`, `batch_ids`,
+`open_proposal_count`) STAY in the shared column vector and are now null on every row. Dropping
+them would mean recutting all ten surviving CTEs and the row-json builder — a far wider change to a
+body ten other row kinds share — for no behavioural gain, and it would move a 31-key row shape that
+two independent test rosters and the web's `ReviewQueueRow` type all restate.
+
+**Why the whole registry's version rises for seven rows.** The registry's own executable law is
+`count(distinct registry_version) = 1` over all 240 rows — asserted by
+`document-capability-registry.test.mjs` and, since #846 (0244), by a `DEFERRABLE INITIALLY
+DEFERRED` constraint trigger that judges the transaction on what it LEAVES. A seven-row raise would
+leave two versions and be refused. §D therefore corrects the content and then raises every row by
+one, by UPDATE, never DELETE-then-INSERT. **The version is measured, not pinned**: ticket 1012's
+own sequencing note says these rows share a monotone wall with #782 and #990, so the prestate
+asserts uniformity and a floor (`>= 3`), remembers what it measured, and the tail asserts exactly
+measured + 1. On this lane's database that is 3 → 4.
+
+**Redo-safe (#957), and bimodal by construction.** Every pin on a body this file RECUTS succeeds on
+either branch: FIRST APPLY (the live body is the measured pre-image, pinned by sha) or REDO (the
+live body already carries this file's own `seeding_lane_retired` marker). §C recognises "already
+spliced" from the live body and skips itself; §D recognises its own limits and skips itself, so a
+redo never raises the registry version twice. Because `CLARA_MIGRATION_REDO` can only ever exercise
+the second branch, the FIRST branch was proven by hand on the lane rig: the three pre-images were
+restored, the file was re-applied, and §A took the pinned-sha arm — see the ticket report for the
+transcript.
 
 ## 0290 — a table CHECK proves the field_path grammar at every writer, including a raw insert (#857)
 

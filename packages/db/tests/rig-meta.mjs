@@ -531,6 +531,12 @@ const WAVE_B_HUMAN_FNS = [
   "seed_fixed_asset", "approve_opening_seed",
   "supersede_opening_item", "approve_opening_correction", "reopen_opening_seed",
   "get_opening_dryrun",
+  // ticket 1012 (0288_seeding_lane_retired.sql): tick_seeding_proposal and
+  // decline_seeding_proposal are RETIRED IN PLACE -- each body is one typed refusal (CLR34
+  // seeding_lane_retired). They stay HERE, at their exact human-lane grants, on purpose: a
+  // revoked grant would answer 42501 insufficient_privilege instead of the retirement, which is
+  // the wrong sentence and the wrong shape for the web layer's refusal mapping. So this matrix
+  // is unchanged BY DESIGN, and that is the fact this comment records.
   "tick_seeding_proposal", "decline_seeding_proposal", "complete_seeding_batch",
   "cancel_seeding_batch", "get_lint_finding", "resolve_lint_finding",
 ];
@@ -538,6 +544,8 @@ const WAVE_B_RUNTIME_FNS = [
   "publish_wiki_page_version", "record_wiki_source_ingest",
   "set_wiki_synthesis_hold", "clear_wiki_synthesis_hold",
   "update_onboarding_plan", "record_opening_targets_parsed",
+  // ticket 1012 (0288): RETIRED IN PLACE, runtime grant preserved -- see the note on the two
+  // deciders in WAVE_B_HUMAN_FNS above for why a retired door keeps its grant.
   "create_seeding_batch", "run_client_lint", "run_lint_all",
   // 0019 [§3, amendment 8]: the stale-mark writer is runtime-ONLY. Listing it
   // here is what makes the rig-isolation grant matrix cover it — the human,
@@ -3099,6 +3107,19 @@ export const ACCRUAL_CORRECTION_0284_COHORT = [...ACCRUAL_CORRECTION_0284_HUMAN_
 //   0286 recuts no 0017 body and mints no human door, so nothing else moves.
 const OPENING_SOURCE_REREAD_0286_RUNTIME_FNS = ["refresh_opening_targets_from_reread"];
 export const OPENING_SOURCE_REREAD_0286_COHORT = [...OPENING_SOURCE_REREAD_0286_RUNTIME_FNS];
+// #899 [0287, client birth wall] — THE ONE NEW GRANTED NAME: `open_client_onboarding`, the
+// birth verb that folds `clara.client_identity_candidates`'s own candidate resolution into the
+// door that creates a client (arity 0 proceeds, arity 1 needs `p_acknowledged_candidate`, arity
+// >=2 raises CLR10 `name_family_collision`) — clara_authenticated ONLY, admin-floored in its own
+// body through `clara._human_ctx`; clara_runtime, clara_agent_ro and both wake roles gain ZERO
+// (0287's own tail asserts the shape). `begin_client_onboarding` is RECUT (re-pointed at the
+// shared, ungranted `clara._client_birth_core`) but mints no new name and keeps its existing
+// WAVE_B_HUMAN_FNS membership above — its grant did not move (`create or replace` preserves the
+// ACL, and 0287's own tail asserts it byte-for-byte). `create_client` is untouched by 0287 (see
+// that migration's header for why) and keeps its existing WRITERS membership above unmoved.
+const CLIENT_BIRTH_WALL_0287_HUMAN_FNS = ["open_client_onboarding"];
+export const CLIENT_BIRTH_WALL_0287_COHORT = [...CLIENT_BIRTH_WALL_0287_HUMAN_FNS];
+// #899 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -3383,6 +3404,10 @@ export const ALLOWED = {
     // ONLY; clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the door
     // nests clara.revise_accounting_plan (0193) UNCHANGED rather than recutting it.
     ...ACCRUAL_CORRECTION_0284_HUMAN_FNS,
+    // #899 [0287] the client birth verb — see the block above. clara_authenticated ONLY;
+    // clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the ungranted
+    // shared core clara._client_birth_core holds no role at all.
+    ...CLIENT_BIRTH_WALL_0287_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3959,6 +3984,12 @@ export async function grantMatrixFailures() {
   if (openingRereadLive.length !== 0) {
     failures.push(...cohortFailures("#986 0286 opening-source re-read remedy",
       OPENING_SOURCE_REREAD_0286_COHORT, liveNames));
+  }
+  // #899 [0287] — bimodal, same reasoning as 0234's/0270's above.
+  const clientBirthWallLive = CLIENT_BIRTH_WALL_0287_COHORT.filter((n) => liveNames.has(n));
+  if (clientBirthWallLive.length !== 0) {
+    failures.push(...cohortFailures("#899 0287 client birth wall",
+      CLIENT_BIRTH_WALL_0287_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

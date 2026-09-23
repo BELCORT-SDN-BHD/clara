@@ -21,17 +21,24 @@
 //   - 0043_wave_d_b1_staff_advances.sql:3553-3692 (S3.8) — copies 0041's shape
 //     exactly for row_kind='staff_advance_incomplete', `advance_id`.
 //   - 0146_ninth_rowkind_seeding_proposal.sql (裁-17,
-//     docs/plan/active/mohe-grill-rulings-2026-08-28.md) — adds row_kind='seeding_proposal',
-//     BATCH-LEVEL (one row per client with >=1 OPEN clara.seeding_proposals row, aggregated
-//     across every open batch that client owns). Unlike asset_id/advance_id, its three new
-//     keys (client_name/batch_ids/open_proposal_count) cannot be derived from the shared
-//     `id` column at json-build time — this row's `id` IS the client_id, not one proposal's
-//     id — so they ride their own dedicated columns instead, always present, null on every
-//     OTHER row_kind (the finding_id posture, no `case when row_kind=` gate needed).
+//     docs/plan/active/mohe-grill-rulings-2026-08-28.md) — added row_kind='seeding_proposal',
+//     BATCH-LEVEL, with three dedicated keys (client_name/batch_ids/open_proposal_count).
+//     RETIRED by 0288 (see below): the kind is gone, the three columns are not.
 //   - 0180_work_questions.sql (#629) — adds row_kind='work_question', the TENTH kind, section
 //     `needs_you`/lane `needs_you`. Reuses the existing 30-key shape unchanged (`id`/
 //     `question_id` carry the question, `task_id` the parked run); the counts envelope gains
 //     ONE integer, `work_questions`.
+//   - 0288_seeding_lane_retired.sql (ticket 1012, riders wave 3 lane 07, owner ruling
+//     2026-09-20 on ticket 983) — REMOVES row_kind='seeding_proposal', the first row kind this
+//     read has ever lost. The prior-GL seeding lane it chased accepts no new work
+//     (clara.create_seeding_batch / tick_seeding_proposal / decline_seeding_proposal all answer
+//     one typed refusal), so every such row pointed at a decision nobody can make, and the beta
+//     rule is that nothing un-actionable is shown. A NAMED RESIDUAL the migration records: the
+//     three keys that row alone ever populated (client_name / batch_ids / open_proposal_count)
+//     STAY in the envelope and are now null on every row, because dropping them would mean
+//     recutting all ten surviving CTEs for no behavioural gain. They are kept in
+//     `ReviewQueueRow` below for the same reason — the shape is what the DB emits, not what a
+//     live kind needs.
 //   - 0260_depreciation_authority_pending_rowkind.sql (#974, riders wave 2 lane 07, owner
 //     ruling 2026-09-20) — adds row_kind='depreciation_authority_pending', the ELEVENTH kind,
 //     section `needs_you`/lane `needs_you`: a client's proposed, unsigned depreciation
@@ -40,15 +47,15 @@
 //     time — the asset_id/advance_id idiom, not seeding_proposal's dedicated-column shape —
 //     because a client carries AT MOST ONE proposed authority
 //     (uq_fa_authorities_proposed), so no aggregation is needed. No new counts.* key.
-// The LIVE row_kind set is therefore ELEVEN values, not the four the 0011 body
+// The LIVE row_kind set is therefore TEN values, not the four the 0011 body
 // alone would suggest: draft, uncoded_filing, open_question, coding_task,
 // compliance_watch, lint_finding, fixed_asset_incomplete, staff_advance_incomplete,
-// seeding_proposal, work_question, depreciation_authority_pending — see
+// work_question, depreciation_authority_pending — see
 // REVIEW_QUEUE_ROW_KINDS below, the single source components/firm/needs-you-row.tsx's label
 // lookup is built from (never a hand-cast key path).
-// `counts` carries NINE integers (seeding_proposal and depreciation_authority_pending each add
-// none — lane stays NULL for the former, `needs_you` for the latter, so ready/needs_review/
-// needs_you fold them in without a dedicated tally). The envelope ALSO
+// `counts` carries NINE integers (depreciation_authority_pending adds none — its lane is
+// `needs_you`, so ready/needs_review/needs_you folds it in without a dedicated tally; the
+// retired seeding_proposal added none either, so its removal moves no tally). The envelope ALSO
 // carries top-level `compliance`/`lint` detail objects (per-client SST/lint figures,
 // BYTE-UNCHANGED by 裁-17) that THIS BUILD DOES NOT RENDER — a named, scoped gap (not
 // silently dropped from the type: see `ReviewQueueEnvelope`'s own comment), not a claim
@@ -82,6 +89,11 @@
 //   (4) components/firm/needs-you-affordances.tsx's NEEDS_YOU_AFFORDANCES registry +
 //       needs-you-affordances.test.ts's by-name resolution cases,
 //   (5) messages/en.json's `NeedsYou.rowKind.*` label map.
+// 0288 (ticket 1012) walked the SAME five places in reverse to REMOVE a kind, which is the
+// first time that has happened: the array below, the migration's marker roster, both
+// FULL_ROW_KEYS rosters (unchanged — the key set did not move, only the kind), the affordance
+// registry (its entry and the whole seeding-proposal-affordance.tsx module are deleted) and the
+// label map.
 //
 // FIVE PINS, NOT SEVEN, SINCE P6-X. Two more lived in the legacy dashboard —
 // its `queueKindCatalog.ts` catalog + DB-free literal array, and its
@@ -122,7 +134,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 
 /** The full LIVE row_kind taxonomy (grounding note above) — the closed world
  *  components/firm/needs-you-row.tsx's label lookup is checked against. Extend
- *  this array (never a standalone string literal) the day a twelfth kind ships
+ *  this array (never a standalone string literal) the day a new kind ships
  *  — the slot #974 once reserved for 裁-18b's agent vendor-binding proposal
  *  door is VOID (see this file's own "EXTENSION POINT, CORRECTED" note above),
  *  so a future addition starts fresh rather than resuming that reservation. */
@@ -135,9 +147,6 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   "lint_finding",
   "fixed_asset_incomplete",
   "staff_advance_incomplete",
-  // 裁-17 (0146_ninth_rowkind_seeding_proposal.sql): batch-level, one row
-  // per client with >=1 OPEN clara.seeding_proposals row.
-  "seeding_proposal",
   // #629 (0180_work_questions.sql): ONE row per PENDING question a running
   // accounting Work is parked on. Section `needs_you`, lane `needs_you` — a
   // person must act before the Work can move, exactly like an open_question.
@@ -243,13 +252,16 @@ export type ReviewQueueRow = {
   asset_id: string | null;
   /** 0043+: staff_advance_incomplete rows only. */
   advance_id: string | null;
-  /** 裁-17+: seeding_proposal rows only — the client's own name (batch-level,
-   *  one row per client, so no single underlying entity carries it). */
+  /** 裁-17 (0146) — DEAD SINCE 0288 (ticket 1012). These three were the retired
+   *  `seeding_proposal` row's own columns; that row kind is gone, and the migration keeps the
+   *  columns in the shared vector rather than recut all ten surviving CTEs, so the DB now emits
+   *  them as null on EVERY row. They stay typed here because this type states what the envelope
+   *  CONTAINS, not what is useful in it — dropping them would make the type disagree with the
+   *  read. Nothing in the UI consumes them any more. */
   client_name: string | null;
-  /** 裁-17+: seeding_proposal rows only — every OPEN batch's id for this client. */
+  /** 裁-17 (0146) — DEAD SINCE 0288; see `client_name` above. */
   batch_ids: string[] | null;
-  /** 裁-17+: seeding_proposal rows only — the count of OPEN proposals summed
-   *  across every open batch. */
+  /** 裁-17 (0146) — DEAD SINCE 0288; see `client_name` above. */
   open_proposal_count: number | null;
   /** #974 (0260)+: depreciation_authority_pending rows only — mirrors the shared `id`
    *  column (the asset_id/advance_id idiom), because a client carries at most one

@@ -548,9 +548,12 @@ its work once the adversary rolls back.
 
 Two cells are worth knowing about before editing them:
 
-- `p649.identity.direct_birth_residual` asserts that `begin_client_onboarding` **still succeeds**
-  at arity ≥ 2. It documents the residual deliberately; it is not a missing wall to "fix" by
-  strengthening the assertion.
+- `p649.identity.direct_birth_residual` used to assert that `begin_client_onboarding` **still
+  succeeded** at arity ≥ 2 — the residual, documented rather than hidden. #899
+  (`0287_client_birth_wall.sql`) CLOSED it: the cell now asserts the opposite, that the door
+  refuses the same way the read does, with no prior read required. The name is kept so the history
+  reads honestly; the dedicated battery for the door that closed it is
+  `client-birth-wall.test.mjs` below.
 - `p649.identity.census_replay` re-runs `0103:1225-1239`'s five-role EXECUTE census over the three
   `name_family_*` helpers and asserts it is still EMPTY. The whole wrapper design turns on that
   negative, so a cell that ever needs relaxing is a design change, not a test change.
@@ -558,6 +561,42 @@ Two cells are worth knowing about before editing them:
 Counterparty fixtures are planted as post-images: `clara.counterparties` carries an immutability
 trigger (CLR08) and `ck_counterparties_merge_retirement` admits retirement only as a merge, so a
 retired counterparty is inserted with both `merged_into` and `retired_at` set.
+
+## `client-birth-wall.test.mjs` (0287, #899)
+
+Fourteen cells over the two granted doors `0287_client_birth_wall.sql` wires to the shared, ungranted
+`clara._client_birth_core`, plus a live catalogue census. Frontier-gated on the live catalog through
+`client-birth-wall-preintegration-gate.mjs`: a package-wide run against a chain below 0287 SKIPS
+loudly, a focused run FAILS, and a PARTIAL cohort (some but not all of `_client_birth_core`,
+`open_client_onboarding` and the re-pointed `begin_client_onboarding` present) throws rather than
+skipping — the estate's "wholly present or wholly absent" rule.
+
+- `p899.new_verb.*` — `clara.open_client_onboarding`, called with **no prior read**: arity 0
+  creates; arity ≥ 2 refuses with the same CLR10 `name_family_collision` token and candidate rows
+  `client_identity_candidates` itself returns (AC1); arity 1 refuses without an acknowledgement and
+  succeeds with the read's own candidate id, and a WRONG id refuses the same way as none at all
+  (AC2); a same-op_key replay returns the byte-identical receipt exactly once; the admin floor
+  refuses a bookkeeper and a viewer. Two more cells own the door's guarantees BEYOND one caller:
+  `identifier_is_recorded_not_only_consulted` proves the door STORES the identifier it walled
+  against (so the next caller's read matches it, and a malformed one refuses before anything is
+  created), and `concurrent_same_family_serialised` drives TWO real connections — session A holds
+  its birth open, session B blocks on the door's own family lock (proved from `pg_blocking_pids`,
+  never a sleep), and once A commits B meets the wall a sequential caller meets instead of minting
+  a third same-family client.
+- `p899.legacy.*` — `clara.begin_client_onboarding`, re-pointed: arity ≥ 2 now refuses (closing
+  `client-onboarding-identity.test.mjs`'s own `p649.identity.direct_birth_residual`); arity 0 and
+  arity 1 are unchanged from before 0287 — the deliberate scope boundary the migration's own header
+  argues for, proved here rather than left assumed.
+- `p899.census.*` — a live, catalogue-derived sweep of every granted human/agent/wake-reachable
+  body that mints a `clara.clients` row (directly, or by delegating to `_client_birth_core`), plus a
+  belt asserting `_client_birth_core` itself holds no application-role grant. **These cells BOUND
+  the one residual; they do not claim the ticket's census criterion is met, because it is not.**
+  `clara.create_client` is still granted and still unwalled, so the roster of unwalled granted
+  minters is asserted to be exactly `["create_client"]` — a new member is a regression and an empty
+  array means the residual was closed and both this census and the criterion should be rewritten.
+  `create_client_residual_is_bounded` then measures the reach: the catalogue comment marking the
+  verb superseded is live, no product tree calls it, and the single operator script that does runs
+  as the superuser rather than on the grant. See `packages/db/README.md`, "The client birth wall".
 
 ## Batteries with their own frontier gate
 
@@ -1759,3 +1798,77 @@ and FAILS LOUDLY below 0251; final acceptance is exactly that focused shape coun
 No CONTEXT.md change: `retired` is already this estate's vocabulary (filings, counterparty
 aliases), and 0251 coins no new domain term — it only widens which existing authority state one
 existing read surfaces, matching #973's and #976's own conclusion for their sibling folds.
+
+## `seeding-lane-retired.test.mjs` (0288, ticket 1012)
+
+Five cells over the retirement of the prior-GL seeding lane. Frontier-gated on the LIVE CATALOG
+through `seeding-lane-retired-preintegration-gate.mjs`: a package-wide run against a chain below
+0288 SKIPS loudly, a focused run FAILS, and a PARTIAL cohort (some but not all of the three write
+doors carrying the retirement marker) throws rather than skipping.
+
+- `p1012.create.*` — `clara.create_seeding_batch`, driven through the runtime lane on a filed,
+  verified, `prior_gl`-stamped document it would have ACCEPTED before: `CLR34` with
+  `detail.reason = "seeding_lane_retired"`, no batch row, no `clara.op_receipts` row (the door
+  refuses ahead of the reservation) and no `seeding.batch_created` event. A human caller still
+  meets the privilege wall, not the new body — the retirement loosens no access.
+- `p1012.deciders.*` — `clara.tick_seeding_proposal` and `clara.decline_seeding_proposal`, driven
+  by a real ADMIN (the exact floor both doors used to enforce, so the refusal is the retirement and
+  not an authorisation failure in disguise) against a planted OPEN proposal. Same code, same
+  reason, byte-identical message on both; both proposals stay `proposed`, nothing is reserved and
+  no `seeding.proposal_decided` event is appended.
+- `p1012.closers.*` — `clara.cancel_seeding_batch` and `clara.complete_seeding_batch` still close a
+  batch left open at the retirement, with the cancellation reason recorded verbatim and
+  `complete`'s stats deriving `still_proposed` from the proposals nobody can decide any more. Both
+  batches keep their proposal rows afterwards.
+- `p1012.queue.*` — `clara.list_review_queue` emits NO `seeding_proposal` row for a client carrying
+  two OPEN proposals in an OPEN batch, firm-wide and client-scoped, with an open question on a
+  sibling client as the positive control so an empty result cannot be an envelope that returned
+  nothing.
+- `p1012.registry.*` — the seven `prior_gl` `document_capabilities` rows state the retirement in
+  BOTH `basis` and `limits`, no row anywhere still carries `browser_entrance`, every `prior_gl`
+  row keeps `business_operation = stored_only`, the registry publishes one version at or above 4,
+  and every high-water mark agrees.
+- `p1012.reads.*` — a planted batch and its proposals read back through a REAL per-role session
+  under real RLS, with state, source binding, kind and payload intact, and a member of another
+  firm reads none of it. The other half of the same claim is structural and cannot be measured
+  from the catalog: 0288's own file text contains no `update`/`delete` against either relation,
+  so history is not rewritten BY CONSTRUCTION rather than by counting rows.
+
+**History is PLANTED, not minted.** After 0288 no door can create a seeding batch, so the
+pre-retirement state these cells read is written by root INSERT — the same posture
+`client-birth-wall.test.mjs` uses for a fixture whose creating door is out of reach. Every
+ASSERTION still runs through a real door or a real per-role session.
+
+`ninth-rowkind-seeding-proposal.test.mjs` is the other half: it now carries the row kind's story
+from its birth at 0146 to its retirement at 0288 — no client produces the row, and the eight
+surviving kinds its own fixtures can produce are each observed at the unchanged 31-key shape with
+the three seeding-only columns null on every row. `wb-s-seeding.test.mjs` keeps only what survives
+the lane (the `prior_gl` document kind, the facts gate, the structural negatives, the wiki ingest,
+O8 row 13) and its header names every cell it lost and why.
+
+No CONTEXT.md change: the retirement coins no domain term. `Opening source` still describes the
+prior general ledger a firm receives, and the `business operation` entry's note that `prior_gl`
+stays `stored_only` pending the Client Knowledge Base's own ingestion path is exactly what 0288
+makes true rather than something it changes.
+
+## `merge-alias-lane.test.mjs` (0289, #889)
+
+Three cells over `clara.merge_counterparties`, the one door `0289_merge_alias_lane.sql` recuts.
+Frontier-gated on a BEHAVIOUR rather than a structure — 0289 adds no catalog object, so the probe
+is the body's own `sha256(prosrc)` — through `merge-alias-lane-preintegration-gate.mjs`: a
+package-wide run below 0289 SKIPS loudly, a focused run FAILS.
+
+- `p889.merge.human_lane` — one real merge, then read back: the residue alias row, BOTH identity
+  revisions it produces (`alias_added` on the survivor, `merged` on the merged party) and the
+  emitted `counterparty.alias_added` event all carry `recorded_via = 'human_ui'` and agree. Before
+  #889 the first read `legacy_unknown` and the second `human_ui` for the same human act.
+- `p889.merge.no_cross_tenant_oracle` — another firm's REAL counterparty ids and ids that exist
+  nowhere get the SAME refusal (code, message and typed reason), so the door cannot be used to
+  test whether an arbitrary uuid is live elsewhere in the estate; a same-firm, different-client
+  pair still answers `CLR23 cross_client`.
+- `p889.census.no_legacy_writer` — the closed-world census, run again here so drift is caught by
+  the daily battery and not only at apply time. It is keyed on the SIGNATURE (an overload cannot
+  hide inside a member), it inspects EVERY alias insert in each body rather than the first, and it
+  reads the VALUE written at `recorded_via` rather than only the column name — a body that named
+  the column and bound it to a variable used to pass. Its own parser is proved non-vacuous against
+  a crafted body in the same cell.

@@ -275,6 +275,27 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "ca9ede2bd4b065a8d3b4e67bde07b5afffbe937b2c1c083e580baf563de5a640",
     },
   ],
+  // Ticket 1012 [0288] (riders wave 3, lane 07) — the SAME 0146/0168/0180/0260 splice family,
+  // run in reverse for the first time: a row kind is REMOVED from the queue rather than added.
+  [
+    "0288_seeding_lane_retired.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at a literal signature and re-installed with its `seeding_rows` CTE and that CTE's union arm REMOVED (a gravestone comment in their place), because ticket 1012 retires the prior-GL seeding lane the row kind chased. The spliced text is built by boundary-anchored substring surgery between two literal CTE openers, each asserted to occur exactly once, plus one exact-count `replace()` of the union arm; the block emits no view definition at all, so neither P4 scope view can be a target, and its own postcheck re-derives every one of the TEN surviving row-kind markers at their prestate counts and asserts the removed kind's marker is gone. Same family as 0146's, 0168's, 0180's and 0260's splices of the same queue function. The file's OTHER sections use no dynamic SQL: three `create or replace function` statements at literal signatures recut the retired doors to one typed refusal, two `update clara.document_capabilities` statements republish seven prior_gl rows and raise the registry version, and the prestate/tail blocks read the catalog and drive the real doors inside a forced-rollback subtransaction.",
+      sha256: "6b6c5d031e2fe33de52c935befe35a4efcc8c4e321b53c4c2943f99ca34857bc",
+    },
+  ],
+  // #889 [0289] (riders wave 3, lane 07) — the SAME 0149 read-splice-prove family, appended at
+  // the sorted position. Added in this lane's FIX round: the first generation shipped without an
+  // entry, so this census threw "unreviewed dynamic-SQL barrier at 0289_merge_alias_lane.sql".
+  [
+    "0289_merge_alias_lane.sql",
+    {
+      reason:
+        "Reviewed read-splice-prove of exactly ONE FUNCTION — clara.merge_counterparties(uuid,uuid,uuid,text,text), read with pg_get_functiondef at that literal regprocedure spelled in this file and re-installed with TWO boundary-anchored substitutions: its residue alias insert gains the recorded_via column and the literal 'human_ui', and its combined firm/client guard is split so a counterparty outside the caller's firm answers CLR11 not-found rather than the CLR23 cross_client that made the door a cross-tenant existence oracle. Both images are derived branch-free, one replace() per top-level assignment, from that one pg_get_functiondef base; each anchor is asserted to occur EXACTLY once on whichever branch it belongs to, and S2 re-reads the COMMITTED body, applies the REVERSE of both substitutions and requires the remainder to equal the pre-image byte for byte plus a pinned post-splice prosrc sha256. The function returns jsonb, so it cannot emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. The file creates no relation, no function (only a pg_temp anchor-count helper) and no grant; its other statements are the prestate, which pins the recorded_via CHECK and five witness bodies by sha, and the closed-world census of application-reachable clara.counterparty_aliases writers.",
+      sha256: "2832301cfc379c493fefa5a7e88fe7752fc2e5b74033bd9f1f0895bce2c68e9e",
+    },
+  ],
   // #990 [0291] (riders wave 3, lane 08) — the bank-statement line source-citation lane, the same
   // 0175/0177/0191/0201/0226/0234 splice family: pg_get_functiondef recuts of a CLOSED literal
   // roster of named FUNCTIONS, each read at its own literal regprocedure signature.

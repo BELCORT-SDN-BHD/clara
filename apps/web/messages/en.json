@@ -237,7 +237,6 @@
       "lint_finding": "Lint finding",
       "fixed_asset_incomplete": "Fixed asset — particulars incomplete",
       "staff_advance_incomplete": "Staff advance — particulars incomplete",
-      "seeding_proposal": "Seeding proposals awaiting review",
       "work_question": "Clara is waiting on an answer",
       "depreciation_authority_pending": "Depreciation authority awaiting signature",
       "unknown": "Unrecognized item ({kind})"
@@ -266,7 +265,6 @@
       "ask": "Ask Clara about this",
       "askPrefill": "Clara proposed a new client file named \"{name}\": \"{question}\" — what is the proposal based on?"
     },
-    "reviewSeedingProposals": "Review in Reports",
     "loadMore": "Load more",
     "loadingMore": "Loading more…",
     "highStakes": "high stakes",
@@ -5702,18 +5700,7 @@
         "description": "clara.complete_seeding_batch — records the batch's final tick/decline/refuse counts.",
         "confirm": "Complete batch"
       },
-      "tick": {
-        "trigger": "Tick",
-        "title": "Tick this proposal",
-        "description": "clara.tick_seeding_proposal — accepts the proposal, birthing or binding the counterparty it names.",
-        "confirm": "Tick"
-      },
-      "decline": {
-        "trigger": "Decline",
-        "title": "Decline this proposal",
-        "confirm": "Decline",
-        "reasonPlaceholder": "Reason"
-      }
+      "retiredNotice": "This lane is retired: Clara now learns a client’s counterparties and coding from the source itself, so no proposal can be ticked or declined. Everything below stays readable, and a batch left open can still be cancelled or completed."
     },
     "wiki": {
       "heading": "Wiki pages",

@@ -10,7 +10,6 @@ import { documentRoutes } from "./documentRoutes.js";
 import { reportRoutes } from "./reportRoutes.js";
 import { interviewRoutes } from "./interviewRoutes.js";
 import { openingRoutes } from "./openingRoutes.js";
-import { seedingRoutes } from "./seedingRoutes.js";
 import { stripeWebhookRoutes } from "./stripeRoutes.js";
 import { authWallRoutes } from "./authWallRoutes.js";
 import { buildInfoRoutes } from "./buildInfoRoutes.js";
@@ -110,10 +109,17 @@ app.use(streamRoutes());
 // runs. Enqueue/answer/cancel/state; governance verbs stay on the dashboard (PostgREST).
 app.use(interviewRoutes());
 // Wave-B onboarding document lanes (R2): the opening-targets parse route (bookkeeper+;
-// deterministic extraction-surface read -> record_opening_targets_parsed) and the
-// prior-GL seeding-prepare route (admin; typed S1 proposals -> create_seeding_batch).
+// deterministic extraction-surface read -> record_opening_targets_parsed).
+//
+// #1012 (0288_seeding_lane_retired.sql, owner ruling 2026-09-20 on #983): the prior-GL
+// seeding-prepare route is GONE, with its module. The product direction is the Client KB,
+// where nobody pre-registers by hand what Clara can learn from a source, so the lane that
+// turned a filed prior general ledger into a tick-list accepts no new work:
+// clara.create_seeding_batch answers a typed retirement (CLR34 seeding_lane_retired). A route
+// in front of a door that refuses everything is a decoy, so it is removed rather than left to
+// relay. Every past batch, proposal and published page stays readable, and the two closers
+// (clara.cancel_seeding_batch / clara.complete_seeding_batch) are untouched.
 app.use(openingRoutes());
-app.use(seedingRoutes());
 // Document bytes for the doc_review split-view (PIN-DELTA-4) — human JWT -> definer read ->
 // Storage stream with the runtime custody credential; the browser never holds a credential.
 app.use(documentRoutes());

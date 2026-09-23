@@ -1,8 +1,9 @@
 // H-51 / CB-AE2E-024 — the "Add client" control on /clients.
 //
 // WHAT THESE CELLS ARE FOR. The control is an AFFORDANCE gate in front of a door that is the
-// real wall: `begin_client_onboarding` is `security definer` and floors at admin inside its own
-// body (`_human_ctx(role_rank('admin'))`, 0017_wave_b.sql:2497). So the property under test is
+// real wall: `clara.open_client_onboarding` (#899) is `security definer` and floors at admin
+// inside its own body (`_human_ctx(role_rank('admin'))`, 0287_client_birth_wall.sql §B). So the
+// property under test is
 // not "the database refused" — a mock re-implementing a Postgres floor would be a second copy
 // of a wall, and greening it would prove the copy. It is: the caller the DATABASE ranks below
 // the floor is never OFFERED the control, the caller it ranks above is, the dispatch goes
@@ -82,7 +83,7 @@ function mockEstate(persona: Persona, opts: { refuse?: boolean } = {}) {
     }
     if (u.includes("/rest/v1/clients")) return jsonResponse([]);
     if (u.includes("/rest/v1/client_facts")) return jsonResponse([]);
-    if (u.includes("/rpc/begin_client_onboarding")) {
+    if (u.includes("/rpc/open_client_onboarding")) {
       beginCalls.push(init?.body ? JSON.parse(String(init.body)) : null);
       return opts.refuse
         ? jsonResponse({ code: "CLR04", message: "your role may not open a client file", details: null }, 400)
@@ -161,7 +162,7 @@ test("H-51 — the transcribed floor is the DOOR's, held by the ⌘K drift guard
   const spec = findDoAction("beginClientOnboarding");
   assert.ok(spec, "the register's control gates on this spec");
   assert.equal(spec.floor, "admin");
-  assert.deepEqual(spec.floorSource, { kind: "sql", fn: "begin_client_onboarding" });
+  assert.deepEqual(spec.floorSource, { kind: "sql", fn: "open_client_onboarding" });
 });
 
 test("H-51 — a FAILED authority read renders an honest note, never an absence that reads as 'your role grants nothing'", async () => {
@@ -280,7 +281,7 @@ test("ticket 659 — a register RE-READ that returns a row does not remount the 
       return jsonResponse(clientsSeen === 1 ? [] : [{ id: "44444444-4444-4444-8444-444444444444", name: "Somebody Else", status: "active", created_at: "2026-09-01T00:00:00Z" }]);
     }
     if (u.includes("/rest/v1/client_facts")) return jsonResponse([]);
-    if (u.includes("/rpc/begin_client_onboarding")) {
+    if (u.includes("/rpc/open_client_onboarding")) {
       beginCalls.push(init?.body ? JSON.parse(String(init.body)) : null);
       return jsonResponse({ client_id: NEW_CLIENT_ID, plan_id: "plan-new" });
     }

@@ -26,6 +26,7 @@
 
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 import {
   CLR, PG, ROLES, assertRaises, opk, rootQuery, humanQuery, roleQuery, ensureReady, endPool,
@@ -47,20 +48,34 @@ const MIGRATION = "0228_opening_ledger_source.sql";
  *  three different stems). Deriving it from a file name is not a safe rule here. */
 const GATE_ENV = "CLARA_ALLOW_MISSING_OPENING_LEDGER_SOURCE";
 /** 0228's premise probe is NOT a `to_regprocedure` check — the file installs no function. It is
- *  the republication itself: 0228 raised the registry to version 2.
- *
- *  A FLOOR, NOT AN EQUALITY (ADV-03, riders wave 3 review round 1). The original probe demanded
- *  EXACTLY 2, and the registry has since been republished by later migrations — 0245 (#782) raised
- *  every one of the 240 rows to 3, and `document-capability-registry.test.mjs` pins that 3. On any
- *  database at 0245 or later this file's premise therefore read "0228 is not applied" and ALL
- *  TWELVE of its cells skipped: measured on clara_l06 under the full gate chain, 12 tests / 0 pass
- *  / 12 skipped. The battery went dark on the day a NEIGHBOURING migration republished the
- *  registry, which is precisely the shape a premise probe must not have. What 0228 actually
- *  guarantees is that the registry stands at ITS publication OR A LATER ONE, published as a single
- *  version across the whole table (0207's monotonic wall makes "or later" the only direction), and
- *  that is what this floor says. The precedent for re-basing a registry-version constant in ONE
- *  place with the reason beside it is `document-capability-registry.test.mjs`'s own note. */
-const PUBLISHED_REGISTRY_VERSION = 2;
+ *  the republication itself: the registry publishes a version, and 0228 (#656) published 2. */
+// A FLOOR, NOT AN EQUALITY, and that is the whole point. Lane 06 (ADV-03) and lane 07
+// (W3L07-ADV-04) found this independently in the same wave and reached the same design; both
+// lanes' reasoning is kept here because each carries evidence the other does not.
+//
+// THE RULE (lane 07). The registry version is a MUTABLE published value: 0228 (#656) published 2,
+// #782's 0245 republished at 3, ticket 1012's 0288 at 4, and every later republication raises it
+// again for content that has nothing to do with this file. An EXACT-equality premise turned that
+// ordinary event into a silent retirement of all twelve cells below, because the gate module
+// preloaded by the full suite sets the skip variable unconditionally.
+//
+// THE MEASUREMENT (lane 06). On any database at 0245 or later the old probe read "0228 is not
+// applied" and ALL TWELVE cells skipped — measured on clara_l06 under the full gate chain,
+// 12 tests / 0 pass / 12 skipped. The battery went dark on the day a NEIGHBOURING migration
+// republished the registry, which is precisely the shape a premise probe must not have.
+//
+// A floor cannot fail that way: a republication can only ever raise the number (0207's monotonic
+// wall makes "or later" the only direction), so the battery keeps running and its own content
+// assertions (p656.registry.*) are what red when the registry says something new. What 0228
+// actually guarantees is that the registry stands at ITS publication or a later one, published as
+// a single version across the whole table — and that is what this floor says.
+//
+// The number is the version at which THIS file's registry expectations were last re-derived, so
+// it is still a real premise: a chain that predates 0228 publishes 1 and is refused. It stands at
+// 4 because ticket 1012's 0288 is the last migration in this wave to republish, which
+// `document-capability-registry.test.mjs`'s own `PUBLISHED_REGISTRY_VERSION = 4` pins — the
+// precedent for re-basing a registry-version constant in ONE place with the reason beside it.
+const MIN_PUBLISHED_REGISTRY_VERSION = 4;
 
 let ready = false;
 
@@ -71,11 +86,11 @@ before(async () => {
   // assertion under test.
   const seen = (await rootQuery(
     "select min(registry_version)::int as v, count(distinct registry_version)::int as n from clara.document_capabilities")).rows[0];
-  if (!(seen?.v >= PUBLISHED_REGISTRY_VERSION) || seen?.n !== 1) {
+  if (!(Number.isInteger(seen?.v) && seen.v >= MIN_PUBLISHED_REGISTRY_VERSION) || seen?.n !== 1) {
     if (process.env[GATE_ENV] !== "1") {
       throw new Error(
         `opening-ledger-source premise ${MIGRATION} is not applied (clara.document_capabilities publishes `
-        + `version ${seen?.v} across ${seen?.n} distinct value(s), expected >= ${PUBLISHED_REGISTRY_VERSION} across 1) `
+        + `version ${seen?.v} across ${seen?.n} distinct value(s), expected at least ${MIN_PUBLISHED_REGISTRY_VERSION} across 1) `
         + `and ${GATE_ENV} is unset -- this is a FOCUSED run and must fail loudly, not skip. Preload `
         + "./tests/opening-ledger-source-preintegration-gate.mjs for an estate sweep against a pre-0228 chain.",
       );
@@ -110,7 +125,12 @@ async function world() {
  *  OPEN, TIED seed. Everything below is built through audited writers. */
 async function tiedScene(tag, { asOf = "2026-01-01" } = {}) {
   const w = await world();
-  const { client, plan } = await onboardingClient(w.users.alice, `p656_${tag}_${opk("c")}`);
+  // #899 (0287): the client birth wall refuses a THIRD client whose name shares a family
+  // token with two existing ones, and clara.name_family_token is the FIRST alphanumeric
+  // token of the name -- so `p656_<tag>_<opk>` put every fixture client of this file in one
+  // family and the third onwards were refused. The unique part leads now, exactly as
+  // wb-fixtures.mjs's own onboardingClient() default was recut to do.
+  const { client, plan } = await onboardingClient(w.users.alice, `p656${randomUUID().slice(0, 8)}_${tag}_${opk("c")}`);
   await seedOpeningCoa(w.users.alice, client);
   const doc = await openingDoc(w.users.alice, { firm: w.firms.A, client });
   const receipt = await createOpeningSeed(w.users.alice, {
@@ -208,7 +228,7 @@ const targetRows = (seed) => rootQuery(
 //       professional reads on `components/documents/capability-tiers.tsx`.
 // ---------------------------------------------------------------------------------------------
 
-test("p656.registry.prior_gl_operation: the corrected rows read back at 0228's publication or a later one with the capability they can actually deliver, and the missing browser entrance is NAMED", async (t) => {
+test("p656.registry.prior_gl_operation: the corrected rows read back, at one published registry version no older than this battery's own floor, with the capability they can actually deliver and the retired seeding lane NAMED", async (t) => {
   if (unready(t)) return;
   // rootQuery: `clara.document_capabilities` carries NO app-role write and the agent lane reads
   // it only through a DEFINER door; the table itself is a fixture-level read here. The
@@ -236,17 +256,24 @@ test("p656.registry.prior_gl_operation: the corrected rows read back at 0228's p
 
   // prior_gl — the operation is REAL and older than this ticket, and the gap is the ENTRANCE.
   const pg = rows.filter((r) => r.document_kind === "prior_gl");
-  const named = pg.filter((r) => r.limits?.browser_entrance !== undefined);
+  // TICKET 1012 (0288) REPLACED THE NAMED GAP WITH A RETIREMENT. 0228's claim here was "the
+  // operation is REAL and the gap is the ENTRANCE nobody has built"; both halves have moved.
+  // clara.create_seeding_batch now answers a typed refusal and POST /api/seeding/prepare is
+  // deleted, so the rows say the lane is retired instead of promising an entrance. What this
+  // cell still owns is the SAME discipline on the SAME seven rows: exactly the formats
+  // seeding-parse.mjs has a reader for carry the named limit, and the basis says what is true.
+  const named = pg.filter((r) => r.limits?.seeding_lane !== undefined);
   assert.deepEqual(named.map((r) => r.format).sort(),
     ["heic", "jpeg", "pdf", "png", "tiff", "webp", "xlsx"],
-    "exactly the formats seeding-parse.mjs has a reader for carry the named gap");
+    "exactly the formats seeding-parse.mjs has a reader for carry the named limit");
   for (const r of named) {
-    assert.equal(r.limits.browser_entrance, "absent",
-      "`absent` is the word the face renders — never `unavailable`, which is not in this estate's vocabulary");
-    assert.match(r.basis, /create_seeding_batch/, "the basis names the operation that exists today");
-    assert.match(r.basis, /\/api\/seeding\/prepare/, "…and the entrance nobody has built");
+    assert.equal(r.limits.seeding_lane, "retired", "the limit STATES the retirement");
+    assert.equal(r.limits.browser_entrance, undefined,
+      "`absent` is superseded — a retired lane has no entrance to be missing");
+    assert.match(r.basis, /RETIRED/, "the basis says the lane is retired");
+    assert.match(r.basis, /0288_seeding_lane_retired\.sql/, "…and names the migration that retired it");
     assert.doesNotMatch(r.basis, /Clara derives nothing to drive it/,
-      "that sentence was the lie: a filed prior GL drives create_seeding_batch today");
+      "0228 removed that sentence and 0288 does not put it back");
   }
 
   // THE LEVEL IS HELD, AND HELD BY LAW RATHER THAN BY PREFERENCE. #656's brief rules prior_gl to
@@ -259,15 +286,19 @@ test("p656.registry.prior_gl_operation: the corrected rows read back at 0228's p
       where business_operation='supported' and typed_facts<>'supported'`)).rows;
   assert.deepEqual(crossed, [], "no business operation may be promised over facts that do not exist");
 
-  // The whole registry publishes exactly ONE version at a time, and it stands at 0228's
-  // publication or a later one — never below it (0207's monotonic wall, exercised just below).
+  // The whole registry publishes exactly ONE version at a time, and never a version older than
+  // the one this file's expectations were re-derived against — never below it (0207's monotonic
+  // wall, exercised just below). The NUMBER is deliberately not pinned exactly (fix round 1,
+  // W3L07-ADV-04): it is a mutable published value that any later republication raises for
+  // content outside this subject, and the facts this cell actually owns are the row content
+  // asserted above, not the counter.
   const v = (await rootQuery(
     `select count(*)::int as n, count(distinct registry_version)::int as versions,
             min(registry_version)::int as v from clara.document_capabilities`)).rows[0];
   assert.equal(v.n, 240, "0228 inserts and deletes nothing");
   assert.equal(v.versions, 1, "the registry publishes exactly one version at a time");
-  assert.ok(v.v >= PUBLISHED_REGISTRY_VERSION,
-    `the registry stands at ${v.v}, below 0228's own publication ${PUBLISHED_REGISTRY_VERSION}`);
+  assert.ok(v.v >= MIN_PUBLISHED_REGISTRY_VERSION,
+    `the registry publishes version ${v.v}, older than the ${MIN_PUBLISHED_REGISTRY_VERSION} this battery was re-derived against`);
 
   // A DOWNGRADE is still refused by 0207's wall — the republication rode the wall, it did not
   // step around it (#846: UPDATE that raises, never DELETE-then-INSERT).
@@ -529,7 +560,7 @@ test("p656.tie.unmapped_blocks: on a DOCUMENT-sourced basis an unmapped line can
   // a surface that read an empty `unmapped_labels` on a DOCUMENT basis as "everything is mapped"
   // would paint exactly C-25's quiet pass.
   const w = sc.w;
-  const keyed = await onboardingClient(w.users.alice, `p656_keyed_${opk("c")}`);
+  const keyed = await onboardingClient(w.users.alice, `p656${randomUUID().slice(0, 8)}_keyed_${opk("c")}`);
   await seedOpeningCoa(w.users.alice, keyed.client);
   const keyedReceipt = await createOpeningSeed(w.users.alice, {
     client: keyed.client, plan: keyed.plan, asOf: sc.asOf, tieDocument: null, tieSha256: null,
@@ -685,7 +716,7 @@ test("p656.roles.viewer_denied: a viewer cannot create, parse or approve, and a 
   // client with NO live basis, so the refusal under test is unambiguously the role floor and not
   // `uq_opening_seed_registry_once`'s duplicate_seed — a guard-ordering trap this cell walked into
   // on its first run and which would have made a CLR31 read as proof of a CLR04.
-  const fresh = await onboardingClient(w.users.alice, `p656_floor_${opk("c")}`);
+  const fresh = await onboardingClient(w.users.alice, `p656${randomUUID().slice(0, 8)}_floor_${opk("c")}`);
   await seedOpeningCoa(w.users.alice, fresh.client);
   const freshDoc = await openingDoc(w.users.alice, { firm: sc.firm, client: fresh.client });
   await assertRaises(CLR.authz, () => createOpeningSeed(w.users.carol, {

@@ -2,7 +2,10 @@
 
 // The FIRM-ALTITUDE half of the onboarding card — `OnboardingChecklistCard` renders this when
 // no `clientId` is in scope. Split out of `OnboardingChecklistCard.tsx` only to keep that file
-// readable; the behaviour, the door and every comment below are unchanged.
+// readable; the behaviour and every comment below are unchanged by that split. The DOOR moved
+// once since: #899 re-points it from `clara.begin_client_onboarding` to the one birth verb
+// `clara.open_client_onboarding` (see `onConfirm` for why a bare write-and-report affordance
+// must route through the walled verb rather than the unwalled legacy one).
 
 import { useState } from "react";
 import Link from "next/link";
@@ -11,7 +14,7 @@ import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
-import { beginClientOnboarding } from "@/lib/onboarding/api";
+import { openClientOnboarding } from "@/lib/onboarding/api";
 import { isDoorRefusal } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { OnboardingDoorDialog } from "./OnboardingDoorDialog";
@@ -47,7 +50,15 @@ export function BeginOnboardingCard({ session }: { session: SessionTokenAccessor
     // read on a governed act).
     setResult(null);
     try {
-      const out = await beginClientOnboarding(name.trim(), { session });
+      // #899 (fix round 1): the ONE birth verb, with NO acknowledgement. This card has no
+      // candidate read and no acknowledgement face, so it cannot answer an arity-1 collision —
+      // and `begin_client_onboarding`, which it called before, is deliberately unwalled at
+      // arity 1, which meant this rail could still mint a same-family client silently. Through
+      // `open_client_onboarding` a null acknowledgement is refused at the DOOR
+      // (`identity_acknowledgement_required`), and the refusal — which names the client
+      // register's Add Client control, the face that CAN acknowledge — renders verbatim in the
+      // banner below, exactly as any other `DoorRefusal` does here.
+      const out = await openClientOnboarding(name.trim(), { acknowledgedCandidate: null }, { session });
       setResult(out);
       setName("");
       return true;

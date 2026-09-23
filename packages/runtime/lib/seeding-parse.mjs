@@ -17,6 +17,17 @@
 // anchor); the dashboard binds it, wiki_projection cites it (no anchor ⇒ refused, not faked).
 // The DB owns the hard rules: control accounts refused at parse; a duplicate open batch
 // trips the (client, sha) unique → 409 {existing:true, batchId}. Never fabricates.
+//
+// #1012 (0288_seeding_lane_retired.sql, owner ruling 2026-09-20 on #983) — THE WRITE HALF OF
+// THIS MODULE IS RETIRED, THE READ HALF IS NOT. `clara.create_seeding_batch` now answers one
+// typed refusal (CLR34, detail.reason = 'seeding_lane_retired'), and the runtime route that
+// fronted it (`src/seedingRoutes.ts`, POST /api/seeding/prepare) is DELETED, so nothing in this
+// process calls `prepareSeeding` any more. It is kept, rather than removed with the route, for
+// two reasons: it is the only place the three deterministic prior-GL readers below are composed
+// end to end, and the Client KB lane that REPLACES this one (#663) reads a prior general ledger
+// by exactly those readers. What it does at its last step is now decided by the DB: the refusal
+// travels back through `mapSeedingDbError`, which maps the retirement to 410 Gone with the
+// reason verbatim. No caller of this module can reach a write any more.
 
 // The self-contained ZIP/XLSX reader lives in its own deep module (kept seeding-parse
 // under the line ceiling); re-exported so callers/tests keep one import surface.
@@ -324,6 +335,12 @@ export function isClaraError(err) {
 export function mapSeedingDbError(err) {
   if (!isClaraError(err)) return null;
   const reason = claraReason(err);
+  // #1012 (0288): the lane is retired. 410 Gone, never 409/422 — the source was fine, the
+  // operation no longer exists, and a caller must not read this as something to retry or fix.
+  // The reason travels verbatim so a successor surface can say the same word the DB said.
+  if (err.code === "CLR34" && reason === "seeding_lane_retired") {
+    return { http: 410, body: { status: "retired", reason: "seeding_lane_retired", message: err.message } };
+  }
   if (err.code === "CLR34" && reason === "not_prior_gl") {
     return { http: 422, body: { status: "unparseable", reason: "not_prior_gl" } };
   }

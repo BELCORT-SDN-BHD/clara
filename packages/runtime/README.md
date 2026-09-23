@@ -706,7 +706,10 @@ adds nothing any deployed image calls, so it is safe to apply ahead of the relea
 writer quiescence of its own. Rolling the image back is safe with 0190 still applied: the previous
 image calls `clara.get_document_for_human_read` (v1), which 0190 leaves byte-identical and still
 granted to `clara_runtime` — and which `lib/seeding-parse.mjs` still calls today, so v1 is not
-retired by this change.
+retired by this change. (Since ticket 1012 nothing in the running process calls
+`lib/seeding-parse.mjs`'s write path at all — see "The prior-GL seeding lane is retired" below —
+but the module and its `get_document_for_human_read` v1 read are still there, so this rollback
+statement holds unchanged.)
 
 1. Apply required database changes with the [database deployment contract](../db/README.md).
    For a fresh engine only, run the installed `bootstrap` CLI against the intended session
@@ -1887,6 +1890,32 @@ asserts the door's own object beside it. All three carried the same pre-#981 lit
 `assert.deepEqual(body, {error, field, reason})`, and `node:assert/strict` deepEqual is
 deepStrictEqual — one additive key fails it. Any future change to the promoted half of a
 durable-Work refusal has to move those three lines together.
+
+## The prior-GL seeding lane is retired (ticket 1012, migration 0288)
+
+`POST /api/seeding/prepare` and `src/seedingRoutes.ts` are **GONE**. Owner ruling 2026-09-20 (on
+ticket 983): the prior-GL seeding lane gets no browser entrance, because the product direction is
+the Client KB — nobody pre-registers by hand what Clara can learn from a source. Migration
+[`0288_seeding_lane_retired.sql`](../db/migrations/0288_seeding_lane_retired.sql) recut
+`clara.create_seeding_batch`, `clara.tick_seeding_proposal` and `clara.decline_seeding_proposal`
+to one shared typed refusal — `CLR34`, `detail.reason = "seeding_lane_retired"`, one sentence —
+raising ahead of any reservation, so a retired door writes nothing at all.
+
+**Why the route is removed rather than left to relay.** A route in front of a door that refuses
+every input is a decoy a future surface could be wired to: the same reason
+[`0271`](../db/migrations/0271_retire_create_account_set_v1.sql) gave for dropping a body with no
+callers. The DOORS keep their signatures and grants, because a caller must meet the retirement and
+not `42501 insufficient_privilege`; the ROUTE has no such obligation, because no caller of it
+survives.
+
+**What stays, and why.**
+
+| Surface | State |
+|---|---|
+| `lib/seeding-parse.mjs`'s READ half (grammar, xlsx reader, region/cell readers, `entriesToProposals`) | Untouched. It is the deterministic prior-GL reader the Client KB lane inherits (ticket 663). |
+| `lib/seeding-parse.mjs`'s `prepareSeeding` | Kept, uncalled. It is the only place the three readers are composed end to end. Its last step now meets the retirement, and `mapSeedingDbError` maps that to **410 Gone** with `{status:"retired", reason:"seeding_lane_retired", message}` — never 409 or 422, which a caller would read as "retry" or "fix the source". |
+| `lib/wiki-projection.mjs`'s `seeding.proposal_decided` lane | Untouched, and it must stay: a hosted firm's HISTORICAL ticked proposals still replay into deterministic wiki pages. It simply never receives a new event. Proven in `tests/wave-b-seeding-prepare.test.mjs`'s replay cell, which plants a ticked proposal and its decided event and drains the projection. |
+| `clara.cancel_seeding_batch` / `clara.complete_seeding_batch` | Byte-unchanged. A batch left open at the moment of retirement must still be closeable by the firm that owns it. |
 
 ## #980 — the shared World harness's third script, and the trade-invoice lane's park and cancel
 
