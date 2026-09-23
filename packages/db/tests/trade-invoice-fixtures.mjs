@@ -190,6 +190,12 @@ export const TI_KIND = { sales: "sales_invoice", bill: "supplier_bill" };
 /** #1007 · the TWO independent duplicate signals the probe reports, and the ONLY two. Amount
  *  alone, or counterparty alone, is never one: a monthly rent bill legitimately repeats both. */
 export const TI_DUP_SIGNAL = { reference: "same_reference", money: "same_total_and_date" };
+/** #1007's own refusal tokens — the ACK door's, never the probe's: the probe warns and refuses
+ *  nothing, by the owner's ruling of 2026-09-20. */
+export const TI_ACK_REASON = {
+  nothingAcknowledged: "nothing_acknowledged",
+  unknownAcknowledgedInvoice: "unknown_acknowledged_invoice",
+};
 export const DUE_SOURCE = { stated: "stated", terms: "counterparty_terms", absent: "absent" };
 
 /** The chart this battery posts against, ON TOP of `WCHART`. Codes are the starter template's own
@@ -372,6 +378,38 @@ export async function probeTradeInvoiceDuplicates(sub, { client, kind = TI_KIND.
     { name: "p_client", cast: "uuid" }, { name: "p_kind", cast: "text" },
     { name: "p_particulars", cast: "jsonb" },
   ]), [client, kind, JSON.stringify(particulars)]);
+  return r.rows[0].result;
+}
+
+/** #1007 · THE RUNTIME TWIN, actor-explicit, for the chat lane. Same answer, same matcher; the
+ *  authority preamble is `clara.admit_trade_invoice_work`'s own. */
+export async function probeTradeInvoiceDuplicatesFor({
+  client, author, kind = TI_KIND.bill, particulars, role = ROLES.runtime,
+}) {
+  const r = await roleQuery(role, namedCall("probe_trade_invoice_duplicates_for", [
+    { name: "p_client", cast: "uuid" }, { name: "p_author", cast: "uuid" },
+    { name: "p_kind", cast: "text" }, { name: "p_particulars", cast: "jsonb" },
+  ]), [client, author, kind, JSON.stringify(particulars)]);
+  return r.rows[0].result;
+}
+
+/** #1007 · THE "RECORDED ANYWAY" RECORD. A runtime act OBO a named human, exactly as admission is
+ *  — the route writes it BEFORE it admits, so no invoice can carry a warning nobody kept. */
+export async function recordTradeInvoiceDuplicateAck({
+  client, author, intentKey, kind = TI_KIND.bill, particulars, shown, role = ROLES.runtime,
+}) {
+  const r = await roleQuery(role, namedCall("record_trade_invoice_duplicate_ack", [
+    { name: "p_client", cast: "uuid" }, { name: "p_author", cast: "uuid" },
+    { name: "p_intent_key", cast: "text" }, { name: "p_kind", cast: "text" },
+    { name: "p_particulars", cast: "jsonb" }, { name: "p_shown", cast: "jsonb" },
+  ]), [client, author, intentKey, kind, JSON.stringify(particulars), JSON.stringify(shown)]);
+  return r.rows[0].result;
+}
+
+/** #1007 · what a reviewer reads afterwards: the acknowledgement this Work was admitted under. */
+export async function getTradeInvoiceDuplicateAck(sub, workId) {
+  const r = await humanQuery(sub,
+    "select clara.get_trade_invoice_duplicate_ack(p_work => $1::uuid) as result", [workId]);
   return r.rows[0].result;
 }
 

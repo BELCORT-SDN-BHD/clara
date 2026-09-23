@@ -3089,13 +3089,51 @@ row census across the lane's four tables and `clara.audit_log` is unchanged by a
 audited itself would be a write), and a second session takes `for update nowait` on the very row
 the probe just reported while the probe's transaction is still open.
 
-**Authority.** `clara.probe_trade_invoice_duplicates(uuid,text,jsonb)` takes its firm **and** actor
-from the session (`clara._human_ctx`, bookkeeper floor — the floor of the recording step it
-precedes) and is granted to `clara_authenticated` alone: a `security definer` function with a
-caller-supplied tenant parameter is the cross-tenant-oracle shape 0219 names. Another firm's client
-and an unknown id leave with the byte-identical `CLR11 client_not_found` sentence. The three
-internals — `_trade_invoice_reference_key`, `_trade_invoice_duplicate_matches` and
-`_trade_invoice_probe_core` — are granted to nobody and the tail asserts it.
+**Authority, and why there are two probe doors.** `clara.probe_trade_invoice_duplicates(uuid,text,jsonb)`
+takes its firm **and** actor from the session (`clara._human_ctx`, bookkeeper floor — the floor of
+the recording step it precedes) and is granted to `clara_authenticated` alone: a `security definer`
+function with a caller-supplied tenant parameter is the cross-tenant-oracle shape 0219 names.
+Another firm's client and an unknown id leave with the byte-identical `CLR11 client_not_found`
+sentence. The chat lane cannot use that door, and this is measured rather than assumed:
+`packages/runtime/lib/pools.mjs` issues only `set role clara_runtime` plus two timeouts and never
+sets `request.jwt.claims`, so `clara._human_ctx` raises `CLR04` on every runtime connection. Hence
+`clara.probe_trade_invoice_duplicates_for(uuid,uuid,text,jsonb)`, actor-explicit and
+`clara_runtime`'s alone — the shape `clara.create_accrual_adjustment_for` (0222) already has here.
+It carries `clara.admit_trade_invoice_work`'s own authority preamble arm for arm
+(`clara._trade_invoice_actor_firm`), and **both doors delegate to the one ungranted matcher**, so
+the form and the chat lane can never be shown different answers. The four internals —
+`_trade_invoice_reference_key`, `_trade_invoice_duplicate_matches`, `_trade_invoice_probe_core` and
+`_trade_invoice_actor_firm` — are granted to nobody and the tail asserts it.
+
+**The "recorded anyway" record.** When the person goes ahead, that choice is kept in
+`clara.trade_invoice_duplicate_acks`: who, when, and which earlier invoices they were shown,
+**re-read from `clara.trade_invoices` at write time rather than echoed from the browser**, so a
+reviewer is reading the books and not a browser's memory of them. Three things about its shape are
+deliberate.
+
+- **It is keyed on the recording attempt’s intent key, not on the new invoice**, because it is
+  written *before* the admission it authorises. `withRuntime` is autocommit, so the route’s two
+  calls are two transactions whichever way round they go; writing the acknowledgement first makes
+  the only possible inconsistency "a choice that led nowhere" — an acknowledgement whose admission
+  then refused, which no read surfaces, because `clara.get_trade_invoice_duplicate_ack(uuid)`
+  reaches it *through an admitted Work*. The other order would make it "a knowing second recording
+  that looks like an accident", which is the distinction this ticket exists to preserve.
+  `uq_accounting_work_intent` already makes `(firm, client, intent_key)` the identity of one
+  recording attempt, so the join from a Work back to its acknowledgement is exact.
+- **It is idempotent on the act, not on the key**: `(firm, client, intent_key, ack_digest)`, where
+  the digest covers the particulars and the sorted ids that were shown. A lost-response retry
+  re-sends the identical act and converges on one row; a person who changed the figures after a
+  refusal and was shown a *different* set appends a truer second row instead of leaving the first
+  standing as a record of a choice they did not make.
+- **It is append-only and the browser lane cannot write it.** RLS is enabled *and* forced, the
+  append-only and no-truncate belts are installed, `clara_authenticated` holds `SELECT` and no DML,
+  and the writer `clara.record_trade_invoice_duplicate_ack(uuid,uuid,text,text,jsonb,jsonb)` is
+  `clara_runtime`'s alone, acting OBO a named human — it authorises
+  `clara.admit_trade_invoice_work`'s own act, so it carries that door's authority model. It admits
+  nothing, enqueues nothing and refuses no duplicate. Its two named refusals are
+  `nothing_acknowledged` (an acknowledgement that names no earlier invoice) and
+  `unknown_acknowledged_invoice` (an id this client's books of this kind do not hold), both
+  `CLR10` with a `detail.reason` the route can map — never a bare CHECK violation.
 
 **No index is added.** The matcher reads one counterparty's invoices of one client, which
 `ix_trade_invoices_counterparty` (0225, on `(counterparty_id, document_date desc)`) already reduces

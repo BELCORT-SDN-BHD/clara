@@ -20,9 +20,10 @@ import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  gateTiDup, TI_KIND, TI_DUP_SIGNAL,
+  gateTiDup, TI_KIND, TI_DUP_SIGNAL, TI_ACK_REASON,
   ensureTiChart, vendor, billParticulars, billBasis,
-  admitTradeInvoiceWork, probeTradeInvoiceDuplicates,
+  admitTradeInvoiceWork, probeTradeInvoiceDuplicates, probeTradeInvoiceDuplicatesFor,
+  recordTradeInvoiceDuplicateAck, getTradeInvoiceDuplicateAck, getTradeInvoice,
   buildWorkWorld, freshWorkClient, endPool,
   claimWorkRun, settleWorkRun, mintClientObo, wakeRecordJournalEntry, entriesForClient,
   opk, rootQuery, assertPair, customer, invoiceParticulars, invoiceBasis,
@@ -39,6 +40,8 @@ after(async () => {
 });
 
 const ALICE = () => world.users.alice;      // owner of firm A
+const CAROL = () => world.users.carol;      // viewer of firm A -- under the bookkeeper floor
+const DAVE = () => world.users.dave;        // owner of firm B -- no member of firm A at all
 
 /** A dedicated client of firm A carrying the trade-invoice chart. The probe is client-scoped, so
  *  a fresh client per cell is what makes each cell's invoice population exactly what it says. */
@@ -339,4 +342,219 @@ test("p1007.probe.is_a_read the probe writes nothing and holds no row lock -- pr
     });
   assert.equal(locked, recorded.invoice_id,
     "p1007.probe.is_a_read: a second session took a row lock on the reported invoice WHILE the probe's transaction was still open -- the probe holds none");
+});
+
+test("p1007.twin.same_answer the chat lane's actor-explicit twin answers exactly what the form's probe answers, carries the admission door's own authority ladder, and is NOT a signed-in session's to call", async (t) => {
+  if (await gateTiDup(t)) return;
+  const client = await tiClient("duptwin");
+  const cp = await vendor(ALICE(), { client });
+  const recorded = await recordBill(client, { particulars: { counterparty: cp, reference: "TWIN-0001" } });
+  const particulars = billParticulars({
+    counterparty: cp, reference: "twin 0001", totalCents: 91100, documentDate: "2026-03-09",
+  });
+
+  // (1) ONE ANSWER, TWO DOORS. The point of the twin is that the chat lane and the form can never
+  // be shown different things, so the two answers are compared WHOLE rather than field by field.
+  const human = await probeTradeInvoiceDuplicates(ALICE(), { client, kind: TI_KIND.bill, particulars });
+  const twin = await probeTradeInvoiceDuplicatesFor({ client, author: ALICE(), kind: TI_KIND.bill, particulars });
+  assert.deepEqual(twin, human,
+    "p1007.twin.same_answer: the runtime twin's answer is the signed-in bookkeeper's answer, whole");
+  assert.deepEqual(twin.matches.map((m) => m.invoice_id), [recorded.invoice_id],
+    "p1007.twin.same_answer: …and it really is the bill already recorded, not an empty agreement");
+
+  // (2) THE ADMISSION DOOR'S OWN LADDER, arm for arm. A viewer may not ask: the floor of the probe
+  // is the floor of the recording step it precedes.
+  await assertPair("CLR04", "insufficient_role",
+    () => probeTradeInvoiceDuplicatesFor({ client, author: CAROL(), kind: TI_KIND.bill, particulars }),
+    "p1007.twin.same_answer: a viewer is under the bookkeeper floor here too");
+
+  // …and NO EXISTENCE ORACLE: a non-member author on a real client and an unknown client id leave
+  // with the byte-identical sentence.
+  const foreign = await assertPair("CLR11", "client_not_found",
+    () => probeTradeInvoiceDuplicatesFor({ client, author: DAVE(), kind: TI_KIND.bill, particulars }),
+    "p1007.twin.same_answer: another firm's owner gets client_not_found");
+  const unknown = await assertPair("CLR11", "client_not_found",
+    () => probeTradeInvoiceDuplicatesFor({
+      client: randomUUID(), author: ALICE(), kind: TI_KIND.bill, particulars,
+    }),
+    "p1007.twin.same_answer: an unknown client id gets the SAME answer");
+  assert.equal(foreign.err.message, unknown.err.message,
+    "p1007.twin.same_answer: …and the two messages are byte-equal, so the twin is no existence oracle");
+
+  // (3) THE TWIN IS THE MACHINE LANE'S ALONE. A caller-supplied actor on a SESSION-authenticated
+  // role would be the cross-tenant-oracle shape, so clara_authenticated holds no grant on it.
+  const denied = await probeTradeInvoiceDuplicatesFor({
+    client, author: ALICE(), kind: TI_KIND.bill, particulars, role: ROLES.authenticated,
+  }).then(() => null, (e) => e);
+  assert.equal(denied?.code, "42501",
+    "p1007.twin.same_answer: a clara_authenticated session may not execute the actor-explicit twin");
+});
+
+test("p1007.ack.recorded_anyway the person who was warned and recorded anyway is kept with the Work -- who, when and which earlier invoice they were shown -- and the admission itself is 0225's, unchanged", async (t) => {
+  if (await gateTiDup(t)) return;
+  const client = await tiClient("dupack");
+  const cp = await vendor(ALICE(), { client });
+  const first = await postBill(client, {
+    particulars: { counterparty: cp, reference: "ACK-0001", totalCents: 106000,
+      documentDate: "2026-03-04" },
+  });
+
+  // THE WARNING THE PERSON SAW, from the door the form calls.
+  const particulars = billParticulars({
+    counterparty: cp, reference: "ack 0001", totalCents: 106000, documentDate: "2026-03-04",
+  });
+  const warned = await probeTradeInvoiceDuplicates(ALICE(), { client, kind: TI_KIND.bill, particulars });
+  assert.equal(warned.match_count, 1, "p1007.ack.recorded_anyway: the person really was warned");
+
+  // …AND THE CHOICE, kept BEFORE the admission it authorises, under the intent key that admission
+  // will ride. Nothing is admitted yet.
+  const intentKey = `ti-dup-ack-${randomUUID()}`;
+  const worksBefore = (await rootQuery(
+    "select count(*)::int n from clara.accounting_work where client_id=$1", [client])).rows[0].n;
+  const ack = await recordTradeInvoiceDuplicateAck({
+    client, author: ALICE(), intentKey, kind: TI_KIND.bill, particulars,
+    shown: warned.matches.map((m) => m.invoice_id),
+  });
+  assert.ok(ack.ack_id, "p1007.ack.recorded_anyway: the choice was kept");
+  assert.equal(ack.replayed, false, "p1007.ack.recorded_anyway: …as a first acknowledgement");
+  assert.equal(ack.shown_count, 1, "p1007.ack.recorded_anyway: …naming the one invoice shown");
+  assert.equal((await rootQuery(
+    "select count(*)::int n from clara.accounting_work where client_id=$1", [client])).rows[0].n,
+  worksBefore, "p1007.ack.recorded_anyway: keeping the choice ADMITS NOTHING -- no Work was born");
+
+  // THE ADMISSION IS 0225'S, UNCHANGED: the same door, the same receipt, the same invoice.
+  const second = await admitTradeInvoiceWork({
+    client, author: ALICE(), kind: TI_KIND.bill, particulars, basis: billBasis(), intentKey,
+  });
+  assert.ok(second.invoice_id, "p1007.ack.recorded_anyway: the second bill was recorded anyway");
+  assert.notEqual(second.invoice_id, first.invoice_id,
+    "p1007.ack.recorded_anyway: …as its OWN invoice -- the warning never merged the two");
+  assert.equal((await getTradeInvoice(ALICE(), second.work_id)).reference, "ack 0001",
+    "p1007.ack.recorded_anyway: …and 0225's own read answers for it exactly as before");
+
+  // WHAT THE REVIEWER READS AFTERWARDS, through the Work: who, when, and what they were shown.
+  const kept = await getTradeInvoiceDuplicateAck(ALICE(), second.work_id);
+  assert.ok(kept, "p1007.ack.recorded_anyway: the Work carries its acknowledgement");
+  assert.equal(kept.acknowledged_by, ALICE(),
+    "p1007.ack.recorded_anyway: WHO -- the named human the runtime acted for");
+  assert.ok(Date.parse(kept.acknowledged_at) > 0,
+    "p1007.ack.recorded_anyway: WHEN -- a real instant, not a placeholder");
+  assert.equal(kept.intent_key, intentKey,
+    "p1007.ack.recorded_anyway: …tied to the recording attempt by its own intent key");
+  assert.deepEqual(kept.shown.map((x) => x.invoice_id), [first.invoice_id],
+    "p1007.ack.recorded_anyway: WHICH -- the earlier invoice, by its own id");
+  assert.equal(kept.shown[0].reference, "ACK-0001",
+    "p1007.ack.recorded_anyway: …re-read from the books (the reference AS RECORDED, not as retyped)");
+  assert.equal(kept.shown[0].work_id, first.work_id,
+    "p1007.ack.recorded_anyway: …carrying the Work that recorded it, so the reviewer can open it");
+
+  // AND A RECORDING NOBODY WAS WARNED ABOUT READS BACK AS EXACTLY THAT: null, not an empty shape.
+  const innocent = await recordBill(client, {
+    particulars: { counterparty: cp, reference: "ACK-9999", documentDate: "2026-03-09" },
+  });
+  assert.equal(await getTradeInvoiceDuplicateAck(ALICE(), innocent.work_id), null,
+    "p1007.ack.recorded_anyway: a Work nobody was warned about carries no acknowledgement");
+});
+
+test("p1007.ack.guards an acknowledgement that names nothing, or an invoice these books do not hold, is refused by name; the same act sent twice converges on ONE record; and no browser session can write one", async (t) => {
+  if (await gateTiDup(t)) return;
+  const client = await tiClient("dupackg");
+  const other = await tiClient("dupackg2");
+  const cp = await vendor(ALICE(), { client });
+  const otherCp = await vendor(ALICE(), { client: other });
+  const shownInvoice = await recordBill(client, {
+    particulars: { counterparty: cp, reference: "GUARD-0001" },
+  });
+  const elsewhere = await recordBill(other, {
+    particulars: { counterparty: otherCp, reference: "GUARD-0001" },
+  });
+  const particulars = billParticulars({ counterparty: cp, reference: "guard 0001" });
+  const acks = async () => (await rootQuery(
+    "select count(*)::int n from clara.trade_invoice_duplicate_acks where client_id=$1",
+    [client])).rows[0].n;
+
+  // (1) AN EMPTY ACKNOWLEDGEMENT IS NOT AN ACKNOWLEDGEMENT. Nobody was shown anything, so there
+  // is no choice to keep -- and the refusal is a NAMED one the route can map, not a 23514.
+  const before = await acks();
+  const empty = await assertPair("CLR10", TI_ACK_REASON.nothingAcknowledged,
+    () => recordTradeInvoiceDuplicateAck({
+      client, author: ALICE(), intentKey: `ti-dup-ack-${randomUUID()}`,
+      kind: TI_KIND.bill, particulars, shown: [],
+    }),
+    "p1007.ack.guards: an acknowledgement that names no earlier invoice is refused");
+  assert.notEqual(empty.err.code, "23514",
+    "p1007.ack.guards: …by name, not as a bare CHECK violation the route cannot explain");
+  assert.equal(await acks(), before, "p1007.ack.guards: …and nothing was written");
+
+  // (2) AN INVOICE THESE BOOKS DO NOT HOLD. The other client's bill is real, and carries the same
+  // document number -- it is still not something THIS client's person can have been shown.
+  await assertPair("CLR10", TI_ACK_REASON.unknownAcknowledgedInvoice,
+    () => recordTradeInvoiceDuplicateAck({
+      client, author: ALICE(), intentKey: `ti-dup-ack-${randomUUID()}`,
+      kind: TI_KIND.bill, particulars, shown: [elsewhere.invoice_id],
+    }),
+    "p1007.ack.guards: another client's invoice was never on this client's screen");
+  await assertPair("CLR10", TI_ACK_REASON.unknownAcknowledgedInvoice,
+    () => recordTradeInvoiceDuplicateAck({
+      client, author: ALICE(), intentKey: `ti-dup-ack-${randomUUID()}`,
+      kind: TI_KIND.bill, particulars, shown: ["not-a-uuid"],
+    }),
+    "p1007.ack.guards: …and a thing that is not an invoice id at all leaves under the same name");
+
+  // (3) A LOST RESPONSE IS RETRIED, and the retry is the SAME act: one record, not two, and the
+  // door says which it was. The identity is the recording attempt plus what was shown.
+  const intentKey = `ti-dup-ack-${randomUUID()}`;
+  const first = await recordTradeInvoiceDuplicateAck({
+    client, author: ALICE(), intentKey, kind: TI_KIND.bill, particulars,
+    shown: [shownInvoice.invoice_id],
+  });
+  const retry = await recordTradeInvoiceDuplicateAck({
+    client, author: ALICE(), intentKey, kind: TI_KIND.bill, particulars,
+    shown: [shownInvoice.invoice_id],
+  });
+  assert.equal(retry.ack_id, first.ack_id,
+    "p1007.ack.guards: the retry converged on the record the first call wrote");
+  assert.equal(first.replayed, false, "p1007.ack.guards: …the first call knew it was the first");
+  assert.equal(retry.replayed, true, "p1007.ack.guards: …and the second knew it was a replay");
+  assert.equal((await rootQuery(
+    "select count(*)::int n from clara.trade_invoice_duplicate_acks where intent_key=$1",
+    [intentKey])).rows[0].n, 1,
+  "p1007.ack.guards: ONE row for one choice, however many times the browser sent it");
+
+  // (4) THE FLOOR IS THE RECORDING STEP'S OWN. A viewer cannot authorise a recording.
+  await assertPair("CLR04", "insufficient_role",
+    () => recordTradeInvoiceDuplicateAck({
+      client, author: CAROL(), intentKey: `ti-dup-ack-${randomUUID()}`,
+      kind: TI_KIND.bill, particulars, shown: [shownInvoice.invoice_id],
+    }),
+    "p1007.ack.guards: a viewer may not record anyway on somebody else's behalf");
+
+  // (5) THE BROWSER LANE CANNOT WRITE ONE AT ALL -- neither through the door (no grant) nor
+  // straight into the table (SELECT only). The choice is the runtime's to record, OBO a human.
+  const deniedDoor = await recordTradeInvoiceDuplicateAck({
+    client, author: ALICE(), intentKey: `ti-dup-ack-${randomUUID()}`,
+    kind: TI_KIND.bill, particulars, shown: [shownInvoice.invoice_id],
+    role: ROLES.authenticated,
+  }).then(() => null, (e) => e);
+  assert.equal(deniedDoor?.code, "42501",
+    "p1007.ack.guards: a signed-in session may not execute the acknowledgement writer");
+  const deniedTable = await withActor({ role: ROLES.authenticated, jwtSub: ALICE() },
+    (c) => c.query(
+      "insert into clara.trade_invoice_duplicate_acks(firm_id, client_id, intent_key, kind,"
+      + " counterparty_id, document_date, total_cents, shown, ack_digest, acknowledged_by)"
+      + " values ($1::uuid, $1::uuid, 'x', 'supplier_bill', $1::uuid, '2026-03-04', 1,"
+      + " '[]'::jsonb, repeat('0', 64), $1::uuid)", [client]),
+  ).then(() => null, (e) => e);
+  assert.equal(deniedTable?.code, "42501",
+    "p1007.ack.guards: …and holds no INSERT on the acknowledgements table either");
+
+  // (6) THE READ IS FIRM-SCOPED AND VIEWER-FLOORED: a colleague who may look at the books may
+  // read what was acknowledged, and another firm reads NOTHING -- not even that a Work exists.
+  const admitted = await admitTradeInvoiceWork({
+    client, author: ALICE(), kind: TI_KIND.bill, particulars, basis: billBasis(), intentKey,
+  });
+  assert.equal((await getTradeInvoiceDuplicateAck(CAROL(), admitted.work_id)).ack_id, first.ack_id,
+    "p1007.ack.guards: a viewer of this firm reads the acknowledgement the Work was admitted under");
+  assert.equal(await getTradeInvoiceDuplicateAck(DAVE(), admitted.work_id), null,
+    "p1007.ack.guards: another firm reads nothing at all");
 });
