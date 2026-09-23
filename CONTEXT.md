@@ -484,8 +484,12 @@ A body that live, non-terminal runs are parked on and that the image now serving
 _Avoid_: A failed run; a reason to treat the Work as cancelled; a condition safe to discover after a rollback.
 
 **Rollback preflight**:
-The check run before releasing an earlier image: does that target carry every body live runs are parked on, and every class an already-admitted Work still needs. A refusal has two admissible answers — retain the bodies in a compatibility build, or complete a verified drain — and elapsed time is neither.
-_Avoid_: Rollback points as a substitute for it; "nothing looked busy" as a drain.
+The check run before releasing an earlier image: does that target carry every body live runs are parked on, every class an already-admitted Work still needs, and every runtime contract marker the applied schema now requires. A refusal has two admissible answers — retain the bodies in a compatibility build, or complete a verified drain — and elapsed time is neither. A marker refusal is a third case and neither answer reaches it: it is a rule in the applied schema rather than a row in a queue, so the only way past it is a target that carries the marker.
+_Avoid_: Rollback points as a substitute for it; "nothing looked busy" as a drain; treating a marker refusal as drainable.
+
+**Runtime contract marker**:
+An image's own declaration that it understands what one door RETURNS after a migration changed it — carried as a literal in the built artifact, so a rollback decision is a measurement of the target image rather than a list of image tags somebody keeps by hand. A marker names behaviour that exists in the image, not a build date: the marker and the code that handles the new answer stand or fall together. The rule that a given marker is REQUIRED lives with the migration frontier, not with the image, because an image built before the rule existed carries neither and that is precisely the state the rule has to detect.
+_Avoid_: A version number, a build sha or an image tag as a substitute; a marker for a change an older image reads correctly; a marker kept after the behaviour it names was removed.
 
 **Operation receipt**:
 The record that one logical operation identity committed its business effect: which run and bundle produced it, which human authority it acted for, and which objects it created. At most one committed receipt exists per logical operation identity; a replay returns it and a changed payload under that identity is refused.
