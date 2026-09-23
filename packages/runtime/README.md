@@ -1497,17 +1497,29 @@ this leg's own final check. #1027 made the failure legible (both counters, both 
 **The fix does not depend on the engine being slower than the leg.** The disjointness check now
 branches on whether a live child remains, never on timing: `cancelling` is read once as before (a
 negative that converges is a negative that was never true, so it stays unpolled); any other state
-is accepted ONLY IF every one of firm P's children has independently reached a terminal Work status
-— in which case the leg logs it as the correct outcome it is and moves on — and still throws,
-exactly as before, if a live child remains while the parent reads terminal (the belt settling the
-estate prematurely, the one genuine regression this leg exists to catch). The refusal-counting and
+is accepted ONLY IF `clara._intake_batch_live_children` returns nothing for that parent — in which
+case the leg logs it as the correct outcome it is and moves on — and still throws, exactly as
+before, if a live child remains while the parent reads terminal (the belt settling the estate
+prematurely, the one genuine regression this leg exists to catch). The refusal-counting and
 attribution assertions above (`pWatch.refusals >= 1`, `blocked >= 1`, `cancel_blocked=
 canceller_not_active`) are untouched and still run before this check, so a belt that stops counting
 refusals still reds there regardless of how firm P's children finish.
 
+**THE LIVENESS PREDICATE IS THE ESTATE'S OWN, NOT A SECOND SPELLING OF IT** (review SPEC-1028-01).
+The leg asks `clara._intake_batch_live_children($1)` — the function
+`clara.sweep_intake_batch_cancellations` itself settles a parent by
+(`packages/db/migrations/0229_intake_batches.sql`) — rather than re-deriving liveness from a Work-
+status set. A status set is only HALF of that function: it also excludes a child that already
+holds a committed `clara.operation_receipts` row, which is out of the belt's hands while its Work
+status is still non-terminal. Re-spelling it here would have made a parent the belt settled
+CORRECTLY read as "settled prematurely" — the exact opposite of what the leg says. Both the
+`engine_wins` fault's own wait and the "honestly still stopping" branch read the same function, so
+what the fault waits for and what the assertion checks cannot drift apart, and both branches now
+PRINT the rows they read instead of asserting a live child remains without looking.
+
 **`CLARA_P636_LEG4_FAULT=engine_wins`** is the new, third fault value (`late_poison` and
-`slow_settle` are #1027's own two): it WAITS — a fixture action, never a belt one — for firm P's two
-children to reach a terminal Work status, then sweeps the belt once more so the parent's own
+`slow_settle` are #1027's own two): it WAITS — a fixture action, never a belt one — for firm P's
+parent to have no live child left, then sweeps the belt once more so the parent's own
 settlement is visible before the disjointness check reads it. It manufactures deterministically what
 a slow host produces by accident, so the fix is proved against the exact scenario rather than hoped
 for. Measured on throwaway clones of a migrated database (WSL, Node 22, `/opt/node/bin/node`):
@@ -1515,16 +1527,23 @@ against the PRE-#1028 disjointness check (throwaway clara_704), `engine_wins` re
 two children reached terminal in 6205 ms — `AssertionError: …and firm P's is honestly still
 stopping… actual: 'cancelled', expected: 'cancelling'` — the exact defect this ticket exists to
 close. Against the fixed check the same fault (throwaway clara_703) PASSES: children terminal after
-5051 ms, `LEG4 firm P's parent reached 'cancelled' because the World finished its own children
-first (the #1028 race, not a belt defect) — refusals were still COUNTED (2) and ATTRIBUTED
-(blocked=1, door read canceller_not_active during polling) before the engine got there.` The belt's
-own vacuity control (`fanOutCancel` rewritten so a CLR04 refusal records as a success, no
+5051 ms, and the same fault re-run against the estate-predicate check (throwaway clara_722 and
+clara_725) passes too: `LEG4 firm P's parent reached 'cancelled' with NO live child left by the
+estate's own reckoning (the #1028 race, not a belt defect) — refusals were still COUNTED (2) and
+ATTRIBUTED (blocked=1, door read canceller_not_active during polling) before the engine got
+there.`
+
+The belt's own vacuity control (`fanOutCancel` rewritten so a CLR04 refusal records as a success, no
 `engine_wins`, throwaway clara_705) still reds at the P-loop's own refusal deadline —
 `refusals=0 blocked=0` after 9 sweeps in 5604 ms — because that assertion runs and fails BEFORE the
 disjointness check is ever reached: the fix adds no new way for a genuine regression to slip
 through. Five consecutive clean runs against fresh clones (clara_706…clara_710, no fault) all pass,
-each logging "firm P is honestly still stopping — a live child remains" (the ordinary, unpolled
-path is unchanged). `packages/runtime/lib/intake-batches.mjs`'s `fanOutCancel` was restored
+and the estate-predicate check repeats that on fresh clones clara_721 and clara_724, each logging
+"firm P is honestly still stopping — 2 live child(ren) remain: […member_id/work_id…]" (the
+ordinary, unpolled path is unchanged, and now prints what it read). Its own vacuity control:
+forcing the else branch (`if (false)`) on a clean run, while both children are still live, reds
+with "firm P's parent was declared done while it still had a LIVE child" and the two live rows
+named (throwaway clara_723, exit 1) — restored byte for byte afterwards. `packages/runtime/lib/intake-batches.mjs`'s `fanOutCancel` was restored
 byte-for-byte after the vacuity control (`git status`/`git diff` clean, verified).
 
 ## #1026 — the live gates' heap budget
