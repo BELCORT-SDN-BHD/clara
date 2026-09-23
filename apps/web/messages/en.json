@@ -3693,6 +3693,7 @@
       }
     },
     "adjustments": {
+      "retiredNotice": "This lane is retired. Set up recurring or reversing entries as an accounting plan instead (Client → Plans).",
       "templatesHeading": "Templates",
       "runsHeading": "Runs",
       "emptyTemplates": "No recurring adjustment templates for this client.",
@@ -4844,38 +4845,6 @@
       "cancel": "Cancel",
       "working": "Working…"
     },
-    "linesEditor": {
-      "lineNo": "#",
-      "account": "Account",
-      "debit": "Debit",
-      "credit": "Credit",
-      "selectAccount": "Select an account…",
-      "removeLine": "Remove line",
-      "presentationSumLabel": "Sum (presentation only)",
-      "notBalanced": "Debits and credits do not balance yet — the DB will refuse an unbalanced entry.",
-      "addLine": "Add line"
-    },
-    "proposeTemplate": {
-      "trigger": "Propose template",
-      "title": "Propose a recurring adjustment template",
-      "description": "An admin must sign this before it can run. Lines are the template's own recipe — every occurrence posts them unchanged.",
-      "nameLabel": "Name",
-      "cadenceLabel": "Cadence",
-      "cadence": {
-        "monthly": "Monthly",
-        "annual": "Annual"
-      },
-      "autoReverseLabel": "Auto-reverse each occurrence at the start of the next period",
-      "startDateLabel": "Start date",
-      "endDateLabel": "End date (optional)",
-      "memoLabel": "Memo template",
-      "memoHint": "The memo every occurrence carries — required, since it is the only description a scheduled run posts with."
-    },
-    "signTemplate": {
-      "trigger": "Sign",
-      "title": "Sign \"{name}\"",
-      "description": "Signing is admin-only. This re-checks the template's dates are still the first/last day of a period under the client's CURRENT fiscal year — a stale window refuses rather than posting on the wrong dates."
-    },
     "retireTemplate": {
       "trigger": "Retire",
       "title": "Retire \"{name}\"",
@@ -4883,7 +4852,7 @@
       "reasonLabel": "Reason"
     },
     "runDue": {
-      "due": "An adjustment run is due for {start} – {end}.",
+      "dueRetired": "A pre-retirement template still has an unposted period ({start} – {end}), and nothing will post it — the recurring-adjustment lane is retired. Retire the template and set up an accounting plan instead (Client → Plans).",
       "nothingDue": "No adjustment run is due right now.",
       "allBlocked": "Every live template's next period is blocked — see the run history below.",
       "clientNotFound": "Client not found.",
@@ -4903,16 +4872,6 @@
       "soloOccurrenceNote": "This run is a solo occurrence, not an auto-reverse pair — correct it from the Journals tab.",
       "wallFallback": "Not correctable right now ({wall}).",
       "unavailable": "Could not load run history — see the error above."
-    },
-    "runNow": {
-      "trigger": "Run now",
-      "title": "Run an adjustment manually",
-      "description": "The period must exactly match the live template's own cadence window, and must have already ended.",
-      "templateLabel": "Template",
-      "selectTemplate": "Select a live template…",
-      "noLiveTemplates": "No live templates yet — sign one above first.",
-      "periodStartLabel": "Period start",
-      "periodEndLabel": "Period end"
     },
     "reversePair": {
       "trigger": "Reverse pair",
@@ -6604,8 +6563,8 @@
       "catchUpToInvalid": "That is not a calendar date.",
       "catchUpToBeforeFrom": "The end of the window cannot be before its start.",
       "catchUpBeforeAuthority": "This plan's authority starts later than that. A catch-up cannot reach back past it.",
-      "overlapTitle": "A recurring adjustment already moves these accounts",
-      "overlapBody": "The plan was created. A live recurring adjustment template on this client already posts to one or more of the same accounts ({templates}), so check that the two are not both intended to run.",
+      "overlapTitle": "Another plan already moves these accounts",
+      "overlapBody": "The plan was created. Another live accounting plan of this client already posts to one or more of the same accounts ({templates}), so check that the two are not both intended to run.",
       "overlapContinue": "Back to plans",
       "fieldPurpose": "Purpose",
       "purposeFrozen": "A plan's purpose is recorded when it is authorised and does not change with a revision.",
@@ -6767,7 +6726,7 @@
       "retry": "Try again",
       "draftNotKept": "This browser is not keeping your draft, so a reload will lose it. Everything you type still submits normally.",
       "overlapTitle": "Another schedule already moves one of these accounts",
-      "overlapBody": "The accrual was recorded. A live adjustment template of this client already moves one of these accounts: {templates}. Check that the same cost is not being recorded twice.",
+      "overlapBody": "The accrual was recorded. Another live accounting plan of this client already moves one of these accounts: {templates}. Check that the same cost is not being recorded twice.",
       "overlapContinue": "Go to accruals",
       "deniedTitle": "You cannot record an accrual",
       "deniedBody": "Recording an accrual needs a bookkeeper role in this firm. Ask someone who has one.",
@@ -6948,8 +6907,8 @@
       "refusalAuthorityUnresolved": "The instruction this schedule cites does not exist for this client. Choose one of this client's own recorded instructions and try again.",
       "refusalOperationInFlight": "The same request is already in flight. Waiting for it rather than asking twice.",
       "refusalPostedAnyway": "The prepayment itself is still posted and still needs a schedule. Your entries are kept — fix what the message names and configure it again.",
-      "overlapTitle": "A recurring adjustment already moves these accounts",
-      "overlapBody": "The schedule was configured. A live recurring adjustment template on this client already posts to one or more of the same accounts ({templates}), so check that the two are not both intended to run.",
+      "overlapTitle": "Another plan already moves these accounts",
+      "overlapBody": "The schedule was configured. Another live accounting plan of this client already posts to one or more of the same accounts ({templates}), so check that the two are not both intended to run.",
       "overlapContinue": "Back to prepayments",
       "endedNoControls": "This schedule has ended. Configure a new one if the remaining periods are still to be charged.",
       "unknown": "The database refused this and gave a reason this page does not recognise. Its own words are shown above."

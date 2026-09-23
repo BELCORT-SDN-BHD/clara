@@ -4,8 +4,11 @@
 //   1. routing  — domain_events -> wake_intents        (lib/relay.mjs, Slice 3)
 //   2. drain    — wake_intents -> agent_tasks + outbox  (lib/drain.mjs)
 //   3. reconcile — converge task rows with engine truth + expiry + prune + the
-//      SST/lint/FA/adjustment daily repair belts (reconciler; Wave A2.1 §7's own
-//      autopost-rule expiry sweep retired with its DB function at `0118`, F-A2 PR-3)
+//      SST/lint/FA daily repair belts (reconciler; Wave A2.1 §7's own autopost-rule
+//      expiry sweep retired with its DB function at `0118`, F-A2 PR-3; the Wave D-b
+//      adjustment-occurrence sweep's own daily trigger retired at #928, owner ruling
+//      #788 — UNLIKE the autopost case, the DB surface it called is NOT dropped by
+//      any ticket of that ruling and still stands, ungranted of any caller)
 // plus a 'world' heartbeat (process-liveness proxy for /ready). A missing/empty
 // active taxonomy HALTs the loop and EXITS the process non-zero (crash-only; the
 // supervisor / Fly restarts) — an un-routable state is never silently swallowed.
@@ -25,7 +28,7 @@ import { drainCycle } from "./drain.mjs";
 import { runReconcilerSweep } from "./reconciler.mjs";
 // Wave E lane ζ. Wired HERE rather than inside runReconcilerSweep for the repo's own module-size
 // budget — reconciler.mjs already stands 26 lines over the 500-line file discipline, which is the
-// same pressure that split reconciler-sst / -lint / -fa / -adjustments out of it. The two render
+// same pressure that split reconciler-sst / -lint / -fa out of it. The two render
 // belts run on different cadences anyway (dispatch every fast cycle, enqueue daily), and this is
 // where every other cadence decision is already made.
 import { reconcileRenderDispatch, reconcileRenderEnqueue } from "./reconciler-render.mjs";
@@ -88,13 +91,18 @@ const LINT_RECONCILE_MS = Number.isFinite(LINT_RECONCILE_MS_ENV) && LINT_RECONCI
 // feature-detect + per-client depreciation_run_due probe decide whether there is anything to do.
 const FA_RECONCILE_MS_ENV = Number(process.env.CLARA_FA_RECONCILE_MS);
 const FA_RECONCILE_MS = Number.isFinite(FA_RECONCILE_MS_ENV) && FA_RECONCILE_MS_ENV > 0 ? FA_RECONCILE_MS_ENV : 24 * 3600000;
-// Finite-guarded like the SST/lint/FA cadence: junk or non-positive CLARA_ADJ_RECONCILE_MS
-// falls back to 24h — a NaN here would make the due-check permanently false and silently
-// DISABLE the Wave D-b adjustment-occurrence belt. This gates only the DAILY cadence;
-// reconciler-adjustments.mjs's own feature-detect + per-client adjustment_run_due probe
-// decide whether there is anything to do.
-const ADJ_RECONCILE_MS_ENV = Number(process.env.CLARA_ADJ_RECONCILE_MS);
-const ADJ_RECONCILE_MS = Number.isFinite(ADJ_RECONCILE_MS_ENV) && ADJ_RECONCILE_MS_ENV > 0 ? ADJ_RECONCILE_MS_ENV : 24 * 3600000;
+// The Wave D-b adjustment-occurrence sweep's own cadence knob (CLARA_ADJ_RECONCILE_MS,
+// ADJ_RECONCILE_MS, adjustmentRunDue) retired here WITH the belt it gated (#928, owner
+// ruling #788: retire the 0045 recurring-adjustment template lane fully). Unlike the
+// autopost retirement above, the DB surface (clara.adjustment_run_due /
+// clara.run_adjustment_occurrence, migration 0045) is NOT dropped — #927 closed the
+// human-facing write doors, #928 retires this belt and #929 takes the plan advisory's
+// template arm and the vocabulary, and NONE of the three touches those two functions:
+// 0282 pins both bodies byte-unchanged in its prestate and re-reads them in its tail,
+// and both keep their clara_runtime EXECUTE grant with no caller left in the image.
+// So this caller retires AHEAD of a callee that survives it, on purpose: nothing
+// schedules a call into it any more, on any frontier. Dropping the two functions is a
+// residual this lane does not own (see the #927/#928/#929 reports).
 // Finite-guarded like every cadence above — a NaN here would make the due-check permanently false
 // and silently DISABLE the Wave E lane-ζ render-enqueue fallback, which is the belt that keeps a
 // sealed run from sitting without a render job if lane ε's seal has not yet been repointed to
@@ -106,7 +114,7 @@ const RENDER_ENQUEUE_MS = Number.isFinite(RENDER_ENQUEUE_MS_ENV) && RENDER_ENQUE
 // DECISION RATHER THAN AN OMISSION (C54.3: "treat cadence as an authorised schedule product
 // setting; do not inherit 1h as current"). `reconcilePlanOccurrences` is registered
 // UNCONDITIONALLY inside runReconcilerSweep — every cycle, the reconcileRenderDispatch shape, not
-// the SST/lint/FA/adjustment daily shape — because its whole cost is ONE call whose candidate
+// the SST/lint/FA daily shape — because its whole cost is ONE call whose candidate
 // query is gated in SQL on `due_date <= (now() at time zone <the revision's timezone>)::date`
 // behind two partial indexes, and because a daily belt would put up to 24 hours between a due date
 // arriving in Kuala Lumpur and the Work existing. There is therefore no `lastPlanRun` below and no
@@ -136,16 +144,6 @@ export function lintReconcileDue(lastRunMs, nowMs, intervalMs = LINT_RECONCILE_M
  *  idempotent recomputation, so an extra run is a no-op). Wave D-a §3.4 (WD-R4/R5/R6) —
  *  this predicate only gates CADENCE, never the migration's presence. */
 export function depreciationRunDue(lastRunMs, nowMs, intervalMs = FA_RECONCILE_MS) {
-  return nowMs - lastRunMs >= intervalMs;
-}
-
-/** True iff the daily adjustment-occurrence sweep is due (pure — the since-last-run guard;
- *  lastRunMs=0 makes the first cycle after (re)boot run it immediately, which is safe:
- *  reconciler-adjustments.mjs feature-detects 0045 itself and per-client
- *  adjustment_run_due is idempotent recomputation, so an extra run is a no-op). Wave D-b
- *  §2.3/§2.7 (WD-R8/R9) — this predicate only gates CADENCE, never the migration's
- *  presence. */
-export function adjustmentRunDue(lastRunMs, nowMs, intervalMs = ADJ_RECONCILE_MS) {
   return nowMs - lastRunMs >= intervalMs;
 }
 
@@ -186,7 +184,6 @@ export function startLeaderLoop(deps) {
     let lastSstRun = 0; // 0 ⇒ the first cycle after boot runs the SST repair belt (catches pre-existing crossings post-0016)
     let lastLintRun = 0; // 0 ⇒ the first cycle after boot runs the wiki lint belt (catches pre-existing conditions post-0017, WB-R8 daily cadence)
     let lastFaRun = 0; // 0 ⇒ first cycle after boot runs the depreciation sweep (reconciler-fa.mjs feature-detects 0041 itself, so a pre-0041 boot is a cheap no-op)
-    let lastAdjRun = 0; // 0 ⇒ first cycle after boot runs the adjustment-occurrence sweep (reconciler-adjustments.mjs feature-detects 0045 itself, so a pre-0045 boot is a cheap no-op)
     let lastRenderEnqueueRun = 0; // 0 ⇒ first cycle after boot runs the ζ render-enqueue fallback (reconciler-render.mjs feature-detects the ζ migration itself, so a pre-ζ boot is a cheap no-op)
     // STAMPED AT LOOP ENTRY, NOT 0, AND UNLIKE EVERY SIBLING ABOVE — the #511 review's B-2.
     // A `0` sentinel makes the FIRST leader cycle after boot sweep immediately, which put a
@@ -222,14 +219,12 @@ export function startLeaderLoop(deps) {
             const sstDue = sstReconcileDue(lastSstRun, Date.now());
             const lintDue = lintReconcileDue(lastLintRun, Date.now());
             const faDue = depreciationRunDue(lastFaRun, Date.now());
-            const adjDue = adjustmentRunDue(lastAdjRun, Date.now());
             const swept = await runReconcilerSweep(client, {
               ...deps,
               prune: iteration % PRUNE_EVERY === 0,
               sstWatches: sstDue,
               lintBelt: lintDue,
               faRuns: faDue,
-              adjRuns: adjDue,
             });
             // #852 — read off the sweep receipt, not from a call this loop makes itself. `?? 0`
             // rather than a bare compare because a belt that FAILED contributes no counters at all
@@ -241,7 +236,6 @@ export function startLeaderLoop(deps) {
             if (sstDue && swept.sstOk) lastSstRun = Date.now(); // a failed SST belt retries next cycle
             if (lintDue && swept.lintOk) lastLintRun = Date.now(); // a failed lint belt retries next cycle
             if (faDue && swept.faOk) lastFaRun = Date.now(); // a failed FA sweep retries next cycle
-            if (adjDue && swept.adjOk) lastAdjRun = Date.now(); // a failed adjustment sweep retries next cycle
             // Wave E lane ζ. Both belts isolate their own errors and return flags rather than
             // throwing, so neither can abort this cycle the way the section-I zombie did — but
             // they are ALSO wrapped, because "a sweeper that cannot fail" is a claim, and the

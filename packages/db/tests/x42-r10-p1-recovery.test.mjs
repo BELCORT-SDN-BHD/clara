@@ -27,8 +27,9 @@ import {
   opk, endPool, printLaneNotes, printSkipCount, rootQuery, humanQuery, namedCall,
   x42EnsureReady, skip42, caught, reasonToken,
   EXPA, EXPB, ACCR, ACCR2, mon,
-  runManual, retireTemplate, signTemplate,
+  runOccurrence, retireTemplate, signTemplate,
   accrualLines, adjWorld, freshAdjClient, liveTemplate, approveDraft, glNet,
+  insertTemplateRaw, x42TemplatesRetiredReady,
 } from "./x42-adj-helpers.mjs";
 
 let live = false;
@@ -45,24 +46,48 @@ after(async () => {
 });
 const skipHere = (t) => skip42(t, live);
 
-const proposeR = async (sub, {
-  client, name, cadence = "monthly", start, end = null, autoReverse = false,
-  lines, memo = "x42 p1r accrual", replaces = null, opKey = null,
-}) => (await humanQuery(sub, namedCall("propose_adjustment_template", [
-  { name: "p_client" }, { name: "p_name" }, { name: "p_cadence" },
-  { name: "p_start_date", cast: "date" }, { name: "p_end_date", cast: "date" },
-  { name: "p_auto_reverse", cast: "boolean" }, { name: "p_lines", cast: "jsonb" },
-  { name: "p_memo_template" }, { name: "p_op_key" }, { name: "p_replaces", cast: "uuid" },
-]), [client, name, cadence, start, end, autoReverse, JSON.stringify(lines), memo,
-  opKey ?? opk("x42p1rprop"), replaces])).rows[0].result;
+// [#927] THE MINT, AT TWO FRONTIERS (the x42-r11-lineage.test.mjs shape). The propose and sign
+// doors are typed refusals from migration 0282, so above that frontier the helper mints the row
+// the doors used to write -- x42-adj-helpers' SURGERY 5, carrying the declared predecessor and
+// the lineage root the propose core derived. This cell's subject is the POSTER's prohibition and
+// the recovery walk it names, and both are unchanged by which mint produced the row.
+const templatesRetired = () => x42TemplatesRetiredReady();
+
+const proposeR = async (sub, o) => {
+  const {
+    client, name, cadence = "monthly", start, end = null, autoReverse = false,
+    lines, memo = "x42 p1r accrual", replaces = null, opKey = null,
+  } = o;
+  if (await templatesRetired()) {
+    const t = await insertTemplateRaw({
+      client, status: "proposed", name, cadence, start, end, autoReverse, lines, memo,
+      proposer: sub, replaces });
+    return { template_id: t.id, warnings: null };
+  }
+  return (await humanQuery(sub, namedCall("propose_adjustment_template", [
+    { name: "p_client" }, { name: "p_name" }, { name: "p_cadence" },
+    { name: "p_start_date", cast: "date" }, { name: "p_end_date", cast: "date" },
+    { name: "p_auto_reverse", cast: "boolean" }, { name: "p_lines", cast: "jsonb" },
+    { name: "p_memo_template" }, { name: "p_op_key" }, { name: "p_replaces", cast: "uuid" },
+  ]), [client, name, cadence, start, end, autoReverse, JSON.stringify(lines), memo,
+    opKey ?? opk("x42p1rprop"), replaces])).rows[0].result;
+};
 
 async function liveReplacement(o) {
+  if (await templatesRetired()) {
+    const t = await insertTemplateRaw({
+      client: o.client, status: "live", name: o.name, cadence: o.cadence ?? "monthly",
+      start: o.start, end: o.end ?? null, autoReverse: o.autoReverse ?? false, lines: o.lines,
+      memo: o.memo ?? "x42 p1r accrual", proposer: w.users.bob, signer: w.users.hana,
+      replaces: o.replaces ?? null });
+    return { template_id: t.id, warnings: null };
+  }
   const p = await proposeR(w.users.bob, o);
   await signTemplate(w.users.hana, { client: o.client, template: p.template_id, opKey: opk("x42p1rsig") });
   return p;
 }
 
-const refusalOf = (client, template, period) => caught(() => runManual(w.users.bob, {
+const refusalOf = (client, template, period) => caught(() => runOccurrence({
   client, template, periodStart: period.start, periodEnd: period.end }));
 
 // ---------------------------------------------------------------------------------------
@@ -78,7 +103,7 @@ test("x42.r10p1h a MIS-DECLARED predecessor puts round 9's prohibition back on r
     client, label: "r10p1h audit", start: M[0].start,
     lines: accrualLines(300_000, { debit: EXPA, credit: ACCR }), memo: "audit fee" });
   for (const P of M) {
-    const r = await runManual(w.users.bob, { client, template: audit.id, periodStart: P.start, periodEnd: P.end });
+    const r = await runOccurrence({ client, template: audit.id, periodStart: P.start, periodEnd: P.end });
     await approveDraft(w.users.alice, r.entry_id);
   }
   await retireTemplate(w.users.hana, { client, template: audit.id, reason: "engagement ended" });
@@ -128,22 +153,36 @@ test("x42.r10p1h a MIS-DECLARED predecessor puts round 9's prohibition back on r
     "…with the act that produces correct books offered again");
 
   // BOTH DECLARATIONS SURVIVE IN THE TRAIL — the point of never editing one in place.
-  const trail = await rootQuery(
-    `select (a.args ->> 'replaces_template_id') as repl
-       from clara.audit_log a
-      where a.fn = 'propose_adjustment_template'
-        and (a.args ->> 'client') = $1::text
-      order by a.id`, [client]);
-  const declared = trail.rows.map((r) => r.repl);
-  assert.ok(declared.includes(audit.id), "the mistaken declaration is still on the record");
-  assert.ok(declared.includes(null), "…beside the corrected proposal that names nobody");
+  // [#927] The trail is the PROPOSE DOOR's own audit row, and that door retired at 0282, so above
+  // that frontier the RECORD ON THE ROWS is what carries the same fact: the mistaken declaration
+  // and the corrected one are two separate templates, one naming a predecessor and one naming
+  // nobody, neither edited in place. The audit-trail form runs on a pre-0282 chain.
+  if (await templatesRetired()) {
+    const rows = (await rootQuery(
+      `select id, replaces_template_id from clara.adjustment_templates
+        where client_id = $1 and id = any($2::uuid[]) order by created_at, id`,
+      [client, [wrong.template_id, fixed.template_id]])).rows;
+    const declared = rows.map((r) => r.replaces_template_id);
+    assert.ok(declared.includes(audit.id), "the mistaken declaration is still on the record");
+    assert.ok(declared.includes(null), "…beside the corrected proposal that names nobody");
+  } else {
+    const trail = await rootQuery(
+      `select (a.args ->> 'replaces_template_id') as repl
+         from clara.audit_log a
+        where a.fn = 'propose_adjustment_template'
+          and (a.args ->> 'client') = $1::text
+        order by a.id`, [client]);
+    const declared = trail.rows.map((r) => r.repl);
+    assert.ok(declared.includes(audit.id), "the mistaken declaration is still on the record");
+    assert.ok(declared.includes(null), "…beside the corrected proposal that names nobody");
+  }
 
   // NOW TAKE THE ACT THE CAUTION OFFERS, and assert the MONEY (WDB-R4).
   const recut = await liveTemplate({
     client, label: "r10p1h legal recut", start: M[0].start,
     lines: accrualLines(120_000, { debit: EXPB, credit: ACCR2 }), memo: "legal fee, own code" });
   for (const P of M) {
-    const r = await runManual(w.users.bob, { client, template: recut.id, periodStart: P.start, periodEnd: P.end });
+    const r = await runOccurrence({ client, template: recut.id, periodStart: P.start, periodEnd: P.end });
     await approveDraft(w.users.alice, r.entry_id);
   }
   assert.equal(await glNet(client, EXPA), 600_000, "the audit accrual the firm must keep is intact");

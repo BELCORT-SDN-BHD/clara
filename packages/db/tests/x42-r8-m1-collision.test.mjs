@@ -41,7 +41,8 @@ import {
   opk, endPool, printLaneNotes, printSkipCount, rootQuery, humanQuery,
   x42EnsureReady, skip42, caught, reasonToken, idOf,
   EXPA, EXPB, ACCR, ACCR2, CLR10, CLR38, mon,
-  runManual, reversePair, adjustmentRunDue, retireTemplate, proposeTemplate,
+  runOccurrence, reversePair, adjustmentRunDue, retireTemplate, proposeTemplate,
+  x42TemplatesRetiredReady, noteLane,
   accrualLines, adjWorld, freshAdjClient, freshAdjFirm, firmThresholdOf, liveTemplate,
   approveDraft, reverseEntry, mirrorOf, glNet, stampedEntries, pairRows,
 } from "./x42-adj-helpers.mjs";
@@ -59,10 +60,31 @@ after(async () => {
   await endPool();
 });
 
+// [#927] `propose_adjustment_template` and `sign_adjustment_template` are typed refusals from
+// migration 0282 (owner ruling #788: retire the 0045 recurring-adjustment template lane). Where a
+// cell's subject is the POSTER or the books, the template is minted directly (x42-adj-helpers'
+// SURGERY 5) and every assertion stands; where its subject is a door-only law, the door's
+// retirement is what is asserted above that frontier, and the original law runs in full on a
+// pre-0282 chain -- the d-b2 slice leg's 0001..0045 copy (.github/actions/frontier-leg).
+const templatesRetired = () => x42TemplatesRetiredReady();
+
+async function proposeDoorRetired(client, law) {
+  if (!(await templatesRetired())) return false;
+  const err = await caught(() => proposeTemplate(w.users.bob, {
+    client, name: `retired probe ${Math.random()}`, cadence: "monthly", start: mon(-3).start,
+    end: null, autoReverse: false, lines: accrualLines(100_000), memo: "retired probe" }));
+  assert.ok(err, `${law}: the propose door answers something -- it must REFUSE`);
+  assert.equal(err.code, CLR10);
+  assert.equal(reasonToken(err), "adjustment_template_lane_retired",
+    `${law}: the door that carried this law is retired (#927)`);
+  noteLane(`${law} — the propose-door half retired at 0282; asserted as a refusal here and in full on a pre-0282 chain`);
+  return true;
+}
+
 const skipHere = (t) => skip42(t, live, "the round-8 collision-gate battery");
 
 /** Run a period as a human and return the refusal (or null when it was admitted). */
-const runRefusal = (client, template, period) => caught(() => runManual(w.users.bob, {
+const runRefusal = (client, template, period) => caught(() => runOccurrence({
   client, template, periodStart: period.start, periodEnd: period.end,
 }));
 
@@ -91,7 +113,7 @@ test("x42.r8m1a a [WDB-G13] edit that ADDS an accrual leg cannot re-accrue the s
     client, label: "r8m1a v1", start: MONTHS[0].start, lines: accrualLines(5_000_000),
     memo: "r8m1a v1" });
   for (const p of MONTHS) {
-    const r = await runManual(w.users.bob, {
+    const r = await runOccurrence({
       client, template: t1.id, periodStart: p.start, periodEnd: p.end });
     await approveDraft(w.users.alice, r.entry_id);
   }
@@ -144,7 +166,7 @@ test("x42.r8m1b a [WDB-G13] edit that moves ONE SEN into a second accrual code s
 
   const t1 = await liveTemplate({
     client, label: "r8m1b v1", start: P.start, lines: accrualLines(5_000_000), memo: "r8m1b v1" });
-  const r1 = await runManual(w.users.bob, {
+  const r1 = await runOccurrence({
     client, template: t1.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r1.entry_id);
 
@@ -192,7 +214,7 @@ test("x42.r8m1c the named remedy is followable: after a collision refusal, re-cu
 
   const tA = await liveTemplate({
     client, label: "r8m1c A", start: P.start, lines: accrualLines(2_000_000), memo: "r8m1c A" });
-  const rA = await runManual(w.users.bob, {
+  const rA = await runOccurrence({
     client, template: tA.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, rA.entry_id);
 
@@ -214,7 +236,7 @@ test("x42.r8m1c the named remedy is followable: after a collision refusal, re-cu
   const tDisjoint = await liveTemplate({
     client, label: "r8m1c disjoint", start: P.start,
     lines: accrualLines(700_000, { debit: EXPB, credit: ACCR2 }), memo: "r8m1c disjoint" });
-  const r2 = await runManual(w.users.bob, {
+  const r2 = await runOccurrence({
     client, template: tDisjoint.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r2.entry_id);
 
@@ -252,7 +274,7 @@ test("x42.r8m1d the gate keys on the RESOLVED occurrence, not the mirror's swapp
   const tAuto = await liveTemplate({
     client, label: "r8m1d auto", start: P.start, autoReverse: true,
     lines: accrualLines(1_800_000), memo: "r8m1d auto" });
-  const rA = await runManual(w.users.bob, {
+  const rA = await runOccurrence({
     client, template: tAuto.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, rA.entry_id);
   const mirror = await mirrorOf(rA.entry_id);
@@ -280,7 +302,7 @@ test("x42.r8m1d the gate keys on the RESOLVED occurrence, not the mirror's swapp
     lines: accrualLines(400_000, { debit: ACCR, credit: EXPA }), memo: "r8m1d flip" });
   let rFlip = null;
   assert.equal(await caught(async () => {
-    rFlip = await runManual(w.users.bob, {
+    rFlip = await runOccurrence({
       client, template: tFlip.id, periodStart: P.start, periodEnd: P.end });
   }), null, "a mirror-shaped template shares no element with the RESOLVED occurrence and is admitted");
   await approveDraft(w.users.alice, rFlip.entry_id);
@@ -322,35 +344,39 @@ test("x42.r8m1e the template family refuses dates its own period-stamp grammar c
   if (skipHere(t)) return;
   const client = await freshAdjClient("r8m1e");
 
-  const propose = (start, end = null) => caught(() => proposeTemplate(w.users.bob, {
-    client, name: `x42 r8m1e ${start} ${end} ${Math.random()}`, cadence: "monthly",
-    start, end, autoReverse: false, lines: accrualLines(100_000), memo: "r8m1e",
-  }));
+  // THE PROPOSE HALF is the propose door's own date-domain law, retired with the door at 0282.
+  // THE POSTER HALF below is untouched by that and is asserted in full at every frontier.
+  if (!(await proposeDoorRetired(client, "x42.r8m1e the propose-side date domain"))) {
+    const propose = (start, end = null) => caught(() => proposeTemplate(w.users.bob, {
+      client, name: `x42 r8m1e ${start} ${end} ${Math.random()}`, cadence: "monthly",
+      start, end, autoReverse: false, lines: accrualLines(100_000), memo: "r8m1e",
+    }));
 
-  for (const bad of ["0001-01-01 BC", "4713-01-01 BC", "10000-01-01"]) {
-    const err = await propose(bad);
-    assert.ok(err, `propose refuses start_date ${bad}`);
-    assert.equal(err.code, CLR10);
-    assert.equal(reasonToken(err), "template_date_unsupported");
-    assert.equal(JSON.parse(err.detail).axis, "start_date");
-  }
-  const errEnd = await propose(mon(-6).start, "10000-01-31");
-  assert.ok(errEnd, "and the END date is asked the same question");
-  assert.equal(reasonToken(errEnd), "template_date_unsupported");
-  assert.equal(JSON.parse(errEnd.detail).axis, "end_date");
+    for (const bad of ["0001-01-01 BC", "4713-01-01 BC", "10000-01-01"]) {
+      const err = await propose(bad);
+      assert.ok(err, `propose refuses start_date ${bad}`);
+      assert.equal(err.code, CLR10);
+      assert.equal(reasonToken(err), "template_date_unsupported");
+      assert.equal(JSON.parse(err.detail).axis, "start_date");
+    }
+    const errEnd = await propose(mon(-6).start, "10000-01-31");
+    assert.ok(errEnd, "and the END date is asked the same question");
+    assert.equal(reasonToken(errEnd), "template_date_unsupported");
+    assert.equal(JSON.parse(errEnd.detail).axis, "end_date");
 
-  // THE EDGES ARE IN. The domain is [0001-01-01, 9999-12-31] AD inclusive, and a rule stated as
-  // a range must be tested at the range, not near it.
-  for (const edge of ["0001-01-01", "9999-12-01"]) {
-    const p = await proposeTemplate(w.users.bob, {
-      client, name: `x42 r8m1e edge ${edge} ${Math.random()}`, cadence: "monthly",
-      start: edge, end: null, autoReverse: false, lines: accrualLines(100_000),
-      memo: "r8m1e edge", opKey: opk("r8m1e"),
-    });
-    const id = idOf(p, "template_id", "id");
-    assert.ok(id, `${edge} is inside the supported domain and proposes`);
-    // retire is admin+ (WD-R9) -- hana, never bob.
-    await retireTemplate(w.users.hana, { client, template: id, reason: "r8m1e edge parked" });
+    // THE EDGES ARE IN. The domain is [0001-01-01, 9999-12-31] AD inclusive, and a rule stated as
+    // a range must be tested at the range, not near it.
+    for (const edge of ["0001-01-01", "9999-12-01"]) {
+      const p = await proposeTemplate(w.users.bob, {
+        client, name: `x42 r8m1e edge ${edge} ${Math.random()}`, cadence: "monthly",
+        start: edge, end: null, autoReverse: false, lines: accrualLines(100_000),
+        memo: "r8m1e edge", opKey: opk("r8m1e"),
+      });
+      const id = idOf(p, "template_id", "id");
+      assert.ok(id, `${edge} is inside the supported domain and proposes`);
+      // retire is admin+ (WD-R9) -- hana, never bob.
+      await retireTemplate(w.users.hana, { client, template: id, reason: "r8m1e edge parked" });
+    }
   }
 
   // THE POSTER'S OWN DOOR. clara.run_adjustment_manual takes both bounds from a human, so it
@@ -360,7 +386,7 @@ test("x42.r8m1e the template family refuses dates its own period-stamp grammar c
   const tpl = await liveTemplate({
     client, label: "r8m1e ok", start: mon(-6).start, lines: accrualLines(100_000),
     memo: "r8m1e ok" });
-  const errRun = await caught(() => runManual(w.users.bob, {
+  const errRun = await caught(() => runOccurrence({
     client, template: tpl.id, periodStart: "0001-01-01 BC", periodEnd: "0001-01-31 BC" }));
   assert.ok(errRun, "the poster refuses a BC period");
   assert.equal(errRun.code, CLR38);
@@ -369,7 +395,7 @@ test("x42.r8m1e the template family refuses dates its own period-stamp grammar c
 
   // …and an ordinary AD period on the same template still runs, so the guard is a domain check
   // and not a new refusal in the ordinary path.
-  const ok = await runManual(w.users.bob, {
+  const ok = await runOccurrence({
     client, template: tpl.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, ok.entry_id);
   assert.equal(await glNet(client, EXPA, P.end), 100_000, "the AD domain is untouched");
@@ -388,7 +414,7 @@ test("x42.r8m1f every run receipt reports its own live correction state — corr
   const c1 = await freshAdjClient("r8m1f1");
   const t1 = await liveTemplate({
     client: c1, label: "r8m1f solo", start: P.start, lines: accrualLines(600_000), memo: "solo" });
-  const r1 = await runManual(w.users.bob, {
+  const r1 = await runOccurrence({
     client: c1, template: t1.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r1.entry_id);
   let rows = await listRuns(w.users.bob, c1);
@@ -410,7 +436,7 @@ test("x42.r8m1f every run receipt reports its own live correction state — corr
   const t2 = await liveTemplate({
     client: c2, label: "r8m1f pair", start: P.start, autoReverse: true,
     lines: accrualLines(600_000), memo: "pair" });
-  const r2 = await runManual(w.users.bob, {
+  const r2 = await runOccurrence({
     client: c2, template: t2.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r2.entry_id);
   rows = await listRuns(w.users.bob, c2);
@@ -433,7 +459,7 @@ test("x42.r8m1f every run receipt reports its own live correction state — corr
   const t3 = await liveTemplate({
     client: c3, label: "r8m1f park", start: P.start, autoReverse: true,
     lines: accrualLines(cents), memo: "park", proposer: users.keeper, signer: users.admin });
-  const r3 = await runManual(users.keeper, {
+  const r3 = await runOccurrence({
     client: c3, template: t3.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(users.owner, r3.entry_id);
   const parked = await reversePair(users.keeper, {
@@ -464,7 +490,7 @@ test("x42.r8m1g when the standing occurrence's pair correction is already PENDIN
   const tA = await liveTemplate({
     client, label: "r8m1g A", start: P.start, autoReverse: true, lines: accrualLines(cents),
     memo: "r8m1g A", proposer: users.keeper, signer: users.admin });
-  const rA = await runManual(users.keeper, {
+  const rA = await runOccurrence({
     client, template: tA.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(users.owner, rA.entry_id);
   const parked = await reversePair(users.keeper, {
@@ -484,7 +510,7 @@ test("x42.r8m1g when the standing occurrence's pair correction is already PENDIN
   assert.equal(gate.correction_wall, "pair_already_active",
     "and the wall that closed the door is reported by its own token");
 
-  const err = await caught(() => runManual(users.keeper, {
+  const err = await caught(() => runOccurrence({
     client, template: tB.id, periodStart: P.start, periodEnd: P.end }));
   assert.ok(err, "the poster refuses the colliding period");
   assert.equal(reasonToken(err), "period_shape_already_met");

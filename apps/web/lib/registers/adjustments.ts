@@ -4,6 +4,20 @@
 // clara.adjustment_runs (0045:1459-1482, granted :1515) — both firm-scoped by RLS
 // (firm_id = jwt_firm()); the client_id filter below narrows to this workspace.
 //
+// [#927, riders wave 3] THE 0045 RECURRING-ADJUSTMENT TEMPLATE LANE IS RETIRED (owner
+// ruling on #788, 2026-09-18; migration 0282). `clara.propose_adjustment_template`,
+// `clara.sign_adjustment_template` and `clara.run_adjustment_manual` now each answer ONE
+// typed refusal, unconditionally — so this module NO LONGER EXPORTS a wrapper for any of
+// the three (the three writers the ticket's own acceptance criterion names). A firm sets up
+// recurring or reversing accounting through an Accounting plan (Client → Plans) instead.
+//
+// WHAT SURVIVES, D6 ("historical receipts and in-flight legacy visibility are retained"):
+// every READ below (the two plain table reads, the three RPC reads) and `retireAdjustment
+// Template` / the pair-reversal ceremony (`reverseAdjustmentPair`, `approvePairReversal`,
+// `cancelPairReversal`) — none of those five doors moved, and a firm that ran this lane
+// before today can still read its history, retire a stray live template and finish a
+// reversal already in flight.
+//
 // T4 (port wave) rung-0 census, 2026-08-28, instance-unique throwaway rig, migrated
 // 0001..0140, LIVE catalog read directly via pg_proc/pg_get_functiondef (apps/web/
 // AGENTS.md's "chase the LIVE body" rule) — never the plan's own door names on trust.
@@ -25,28 +39,17 @@
 // `clara.list_adjustment_templates(p_client)` also exists live and is EXECUTE-granted to
 // clara_authenticated, but is deliberately NOT wired here either: every field this train's
 // template ceremony needs (id, status, cadence — to gate which of Sign/Retire renders) is
-// already on the row `loadAdjustmentTemplates` below returns, and Propose creates a fresh
-// row rather than reading an existing one. Wrapping a door with no caller would be dead
-// code, not evidence of a wider read.
+// already on the row `loadAdjustmentTemplates` below returns. Wrapping a door with no
+// caller would be dead code, not evidence of a wider read.
 //
-// GOVERNED WRITES (this train's own owed half — Q3's "apps/web deliberately reads the
-// adjustment tables directly… so the owed half is the WRITE surface"): propose/sign/retire
-// a template, run one manually, and the pair-reversal ceremony (reverse → approve/cancel).
-// Every write below is bookkeeper+ except sign/retire (admin+, matching the depreciation-
-// authority precedent: the signature is what makes a template able to post). Every write
-// takes a required `p_op_key` (a fresh `crypto.randomUUID()` per call — never reused across
-// a retry, doors.ts's own header) and returns the shared `clara._finish_op` envelope
+// GOVERNED WRITES THAT REMAIN: retire a template, and the pair-reversal ceremony
+// (reverse → approve/cancel). Retire is admin+ (matching the depreciation-authority
+// precedent: the signature that made a template able to post is also what governs
+// standing it down); the pair-reversal ceremony is bookkeeper+. Every write below takes a
+// required `p_op_key` (a fresh `crypto.randomUUID()` per call — never reused across a
+// retry, doors.ts's own header) and returns the shared `clara._finish_op` envelope
 // VERBATIM — this module reports it, never re-shapes it (hydrate-never-trust: the caller
 // re-reads via useHydratedPart().act()).
-//
-// `propose_adjustment_template` also accepts `p_replaces` (supersede a live template with a
-// revised proposal) and `p_schedule` (a variable, period-by-period amortisation schedule —
-// the F-A4 PR-2a prepayment limb). Both default to `null` at the live body and this dialog
-// deliberately leaves them there: `p_replaces` is a template-lineage flow with its own
-// ancestor-bridging rules and `p_schedule` is a whole second congruence-checked sub-language
-// (0140's own core body runs ~650 lines partly validating it) — neither is "not built," both
-// are a scope trim this pass makes on a door that is fully functional without them. A plain,
-// constant-lines recurring template (the common case) needs neither.
 
 import { getRows } from "../read";
 import { callDoor } from "../doors";
@@ -207,88 +210,13 @@ export function adjustmentRunDue(session: SessionTokenAccessor, clientId: string
 // =====================================================================
 // Governed writes — callDoor, refusal verbatim, never retried. See this
 // file's header for the full grounding on every door below.
+//
+// [#927] propose/sign/run-manual are GONE from this module entirely — the doors
+// themselves now answer ONE typed refusal (`adjustment_template_lane_retired`,
+// migration 0282) for any caller, so a wrapper that only ever surfaced that refusal
+// would be dead weight this module does not carry. The client-side line-shape type
+// those three used to share (`account_code`/`debit_cents`/`credit_cents`) left with them.
 // =====================================================================
-
-// F9 (independent review, nit — trued 2026-08-28 re-verify): `propose_
-// adjustment_template`'s own line-validation loop reads only `account_code`/
-// `debit_cents`/`credit_cents` off each element — unlike journal/staff-
-// advance lines, it never rejects an unrecognised key, so a per-line
-// `description` rides along. CONFIRMED (not merely "may"): `clara._adj_
-// canon_lines` — the content-hash canonicalisation the door runs before
-// persisting — DOES carry it through: `nullif(btrim(coalesce(x.value ->>
-// 'description', '')), '')`, byte-identical at both the 0140 and 0141
-// catalog. Deliberately still NOT exposed by this dialog: the memo_template
-// field is already the one description every occurrence carries, and this
-// train's scope stops at the common case — that decision stands on its own
-// footing now, not on an unresolved "might not persist" doubt.
-export type AdjustmentTemplateLineInput = {
-  account_code: string;
-  debit_cents: number;
-  credit_cents: number;
-};
-
-export type ProposeAdjustmentTemplateInput = {
-  clientId: string;
-  name: string;
-  cadence: "monthly" | "annual";
-  startDate: string;
-  endDate: string | null;
-  autoReverse: boolean;
-  lines: AdjustmentTemplateLineInput[];
-  memoTemplate: string;
-};
-
-export type ProposeAdjustmentTemplateResult = {
-  template_id: string;
-  status: "proposed";
-  content_hash: string;
-  /** ALWAYS present, empty array included (the live body's own stable-shape
-   *  rule) — e.g. a period-overlap advisory against another live template on
-   *  the same account. Advisory only: never a gate. */
-  warnings: unknown[];
-};
-
-/** clara.propose_adjustment_template(p_client,p_name,p_cadence,p_start_date,
- *  p_end_date,p_auto_reverse,p_lines,p_memo_template,p_op_key,p_replaces,
- *  p_schedule) — bookkeeper+. `lines` needs >=2 rows, each exactly one
- *  positive debit XOR credit in cents, balanced to the sen — the DB is the
- *  authority; a real CLR10 renders verbatim. `p_replaces`/`p_schedule` are
- *  deliberately not exposed by this dialog (this file's header). */
-export function proposeAdjustmentTemplate(
-  session: SessionTokenAccessor,
-  input: ProposeAdjustmentTemplateInput,
-): Promise<ProposeAdjustmentTemplateResult> {
-  return callDoor<ProposeAdjustmentTemplateResult>(
-    "propose_adjustment_template",
-    {
-      p_client: input.clientId,
-      p_name: input.name,
-      p_cadence: input.cadence,
-      p_start_date: input.startDate,
-      p_end_date: input.endDate,
-      p_auto_reverse: input.autoReverse,
-      p_lines: input.lines,
-      p_memo_template: input.memoTemplate,
-      p_op_key: opKey(),
-      p_replaces: null,
-      p_schedule: null,
-    },
-    { session },
-  );
-}
-
-/** clara.sign_adjustment_template(p_client,p_template,p_op_key) — admin+ (the
- *  same floor as sign_depreciation_authority: the signature is what makes the
- *  template able to post). Re-derives start/end-date freshness against the
- *  client's FY as of NOW — refuses CLR10 `template_fy_stale` if the FY moved
- *  since propose. */
-export function signAdjustmentTemplate(
-  session: SessionTokenAccessor,
-  clientId: string,
-  templateId: string,
-): Promise<unknown> {
-  return callDoor("sign_adjustment_template", { p_client: clientId, p_template: templateId, p_op_key: opKey() }, { session });
-}
 
 /** clara.retire_adjustment_template(p_client,p_template,p_reason,p_op_key) —
  *  admin+. `reason` is required (CLR10 blank). Refuses CLR38
@@ -303,24 +231,6 @@ export function retireAdjustmentTemplate(
   return callDoor(
     "retire_adjustment_template",
     { p_client: clientId, p_template: templateId, p_reason: reason, p_op_key: opKey() },
-    { session },
-  );
-}
-
-/** clara.run_adjustment_manual(p_client,p_template,p_period_start,
- *  p_period_end,p_op_key) — bookkeeper+. The period must exactly match the
- *  live template's own cadence window and must have already ended; refuses
- *  CLR38/CLR10 with a named reason otherwise (rendered verbatim). */
-export function runAdjustmentManual(
-  session: SessionTokenAccessor,
-  clientId: string,
-  templateId: string,
-  periodStart: string,
-  periodEnd: string,
-): Promise<unknown> {
-  return callDoor(
-    "run_adjustment_manual",
-    { p_client: clientId, p_template: templateId, p_period_start: periodStart, p_period_end: periodEnd, p_op_key: opKey() },
     { session },
   );
 }

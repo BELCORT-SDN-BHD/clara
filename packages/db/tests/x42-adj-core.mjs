@@ -112,6 +112,9 @@ export const T = {
   adjustmentStale: "adjustment_stale", // CLR39 (+ axis)
   adjustmentPairLocked: "adjustment_pair_locked", // CLR39
   pairDraftLocked: "pair_draft_locked", // CLR39
+  // [#927] the ONE token all three closed doors share (propose/sign/run_adjustment_manual) —
+  // migration 0282's own header: "one reason, one message, all three doors".
+  adjustmentTemplateLaneRetired: "adjustment_template_lane_retired", // CLR10
 };
 
 /** Arm (2)'s SEVEN re-validation axes, in the design's own §2.6 order. */
@@ -171,6 +174,47 @@ export function skip42(t, live, label = "the Wave-D-b adjustment battery") {
     return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// #927 — the propose/sign/run_adjustment_manual RETIREMENT frontier (migration 0282,
+// stem `retire_adjustment_template_doors$`). A database that has 0045 but not yet 0282 still
+// answers `x42EnsureReady() === true` (the table + propose_adjustment_template both resolve —
+// they always did, from 0045 on), so THAT gate cannot tell the two apart. Only the handful of
+// cells that assert the NEW closed-door behaviour need this second, narrower gate; every other
+// cell in this battery is untouched by #927 (it now runs the poster through the MACHINE door,
+// clara.run_adjustment_occurrence, which #927 never recuts) and must keep running on an older
+// chain exactly as it always has — so this check is called from INSIDE those few cells, never
+// from a file's own top-level before(), which would wrongly gate the whole file on #927.
+// ---------------------------------------------------------------------------
+
+const RETIREMENT_STEM = "retire_adjustment_template_doors$";
+let _retired = null;
+
+export async function x42TemplatesRetiredReady() {
+  if (_retired !== null) return _retired;
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [RETIREMENT_STEM]);
+  _retired = r.rows[0].n > 0;
+  return _retired;
+}
+
+/** Loud unless the estate-sweep gate module preloaded — the same discipline skip42 follows,
+ *  scoped to a SINGLE cell rather than a whole file (see the header just above). */
+export async function skip42Retired(t, label) {
+  const ready = await x42TemplatesRetiredReady();
+  if (ready) return false;
+  if (process.env.CLARA_ALLOW_MISSING_ADJUSTMENT_TEMPLATE_RETIREMENT === "1") {
+    markSkip();
+    t.skip(`0282 not applied (no ${RETIREMENT_STEM} row in clara.schema_migrations) — ${label} is dormant`);
+    return true;
+  }
+  throw new Error(
+    `#927 premise 0282_retire_adjustment_template_doors.sql is not applied (no ${RETIREMENT_STEM} row in ` +
+    "clara.schema_migrations) and CLARA_ALLOW_MISSING_ADJUSTMENT_TEMPLATE_RETIREMENT is unset — this is a " +
+    "FOCUSED run and must fail loudly, not skip. Preload " +
+    "./tests/adjustment-template-doors-retired-preintegration-gate.mjs for an estate sweep against a " +
+    "pre-#927 chain.");
 }
 
 // ---------------------------------------------------------------------------

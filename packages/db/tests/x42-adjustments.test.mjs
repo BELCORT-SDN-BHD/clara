@@ -16,19 +16,20 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, humanQuery, namedCall, opk, idOf, endPool, printLaneNotes,
-  printSkipCount, assertRaises, PG, CLR,
-  x42EnsureReady, skip42, refuses, refusesAxis, refusesCode,
-  T, CLR38, CLR10, CLR04,
-  EXPA, EXPB, ACCR, ACCR2, PREP2, BANKX, ARX, INACT, FACOST, FAACC, FAEXP,
+  humanQuery, namedCall, opk, endPool, printLaneNotes,
+  printSkipCount, assertRaises, PG,
+  x42EnsureReady, skip42, skip42Retired,
+  refuses, refusesAxis, refusesCode,
+  T, CLR38, CLR10,
+  EXPB, ACCR2,
   mon, dayIn, addDays, mytToday, lastEndedFy, occurrenceMemo, expectedMode,
-  proposeTemplate, signTemplate, retireTemplate, runManual,
+  proposeTemplate, signTemplate, retireTemplate, runManual, runOccurrence,
   adjustmentRunDue, adjustmentRunDueAsHuman, runAndSettle, caught,
-  setClientFyEnd, upsertFaProfile,
-  enrolAdvance, addBankAccount, accrualLines, prepaymentLines, uniqTag,
-  adjWorld, freshAdjClient, liveTemplate, approveDraft,
+  setClientFyEnd,
+  accrualLines, uniqTag,
+  adjWorld, freshAdjClient, liveTemplate, insertTemplateRaw, approveDraft,
   templateRow, templateRows, entryRowOf, entryLinesOf, receiptForEntry, runRowsForTemplate,
-  rampClock, signedOnMyt, firmThresholdOf, clientFy, deactivateAccountRaw,
+  rampClock, signedOnMyt, firmThresholdOf, clientFy,
 } from "./x42-adj-helpers.mjs";
 
 let live = false;
@@ -48,179 +49,75 @@ after(async () => {
 const skipHere = (t) => skip42(t, live, "the Wave-D-b adjustment lifecycle battery");
 
 // ===========================================================================
-// x42.t — THE TEMPLATE LIFECYCLE.
+// x42.t — THE TEMPLATE LIFECYCLE. [#927] `propose_adjustment_template` and
+// `sign_adjustment_template` are RETIRED (one typed refusal apiece, "a cell per closed
+// door" — x42.t1/t2/t3 below); `retire_adjustment_template` and the poster's admission law
+// are D6 UNTOUCHED and keep their own coverage (x42.t4 on, driven through the surviving
+// MACHINE door `clara.run_adjustment_occurrence` rather than the now-retired
+// `run_adjustment_manual`).
 // ===========================================================================
 
-test("x42.t1 propose→sign is the happy path: the envelope names {template_id, status, content_hash}, propose floors at bookkeeper+ and sign/retire at admin+ (WD-R9)", async (t) => {
+test("x42.t1 clara.propose_adjustment_template is retired: every caller, of every role, gets the SAME typed refusal naming the retirement and pointing at accounting plans — and writes nothing", async (t) => {
   if (skipHere(t)) return;
+  if (await skip42Retired(t, "the propose-is-retired cell")) return;
   const client = await freshAdjClient("t1");
+  const before = (await templateRows(client)).length;
   const lines = accrualLines(120_000);
-  const name = `x42 t1 ${uniqTag()}`;
 
-  // A VIEWER cannot propose (bookkeeper+ floor).
-  await assertRaises(CLR04, () => proposeTemplate(w.users.carol, {
-    client, name: `${name} viewer`, start: mon(-3).start, lines, memo: "x42 t1",
-  }), "a VIEWER proposing an adjustment template");
-
-  const proposed = await proposeTemplate(w.users.bob, {
-    client, name, cadence: "monthly", start: mon(-3).start, lines, memo: "x42 t1 accrual",
-  });
-  const id = idOf(proposed, "template_id");
-  assert.ok(id, `the propose envelope names template_id (got ${JSON.stringify(proposed)})`);
-  assert.equal(proposed.status, "proposed", "…and the status it was born in");
-  assert.ok(typeof proposed.content_hash === "string" && proposed.content_hash.length > 0,
-    "…and the content_hash the partial-unique scope is keyed on (ABI §A)");
-
-  // Signing is admin+ — a bookkeeper is refused, and so is retiring.
-  await assertRaises(CLR04, () => signTemplate(w.users.bob, { client, template: id }),
-    "a BOOKKEEPER signing a template (WD-R9 floors signing at admin+)");
-  assert.equal((await templateRow(id)).status, "proposed", "the refused sign left the template proposed");
-
-  const signed = await signTemplate(w.users.hana, { client, template: id });
-  assert.equal(signed.template_id ?? signed.id, id, "the sign envelope names the same template");
-  assert.equal(signed.status, "live", "…now LIVE");
-  const row = await templateRow(id);
-  assert.equal(row.signed_by, w.users.hana, "signing stamps signed_by — the last_human_editor identity (§2.2)");
-  assert.ok(row.signed_at, "…and signed_at, which WDB-G4's catch-up boundary reads");
-
-  await assertRaises(CLR04, () => retireTemplate(w.users.bob, { client, template: id }),
-    "a BOOKKEEPER retiring a template");
-  const retired = await retireTemplate(w.users.hana, { client, template: id, reason: "x42 t1 done" });
-  assert.equal(retired.status, "retired", "an admin retires it");
+  for (const [label, sub] of [["a viewer", w.users.carol], ["a bookkeeper", w.users.bob], ["an admin", w.users.hana]]) {
+    const err = await refuses(() => proposeTemplate(sub, {
+      client, name: `x42 t1 ${label} ${uniqTag()}`, start: mon(-3).start, lines, memo: "x42 t1",
+    }), T.adjustmentTemplateLaneRetired, `${label} calling the retired propose door`, { code: CLR10 });
+    assert.match(err.message, /accounting plan/i, "…and the message points at the surviving lane");
+  }
+  assert.equal((await templateRows(client)).length, before, "no half-born template row survives any of the three calls");
 });
 
-test("x42.t2 the content-hash duplicate wall is scoped to proposed+live: an identical live twin refuses template_duplicate, a RETIRED twin does not block", async (t) => {
+test("x42.t2 clara.sign_adjustment_template is retired: the same typed refusal, whatever template id or role is offered — writing nothing, never even reaching a not-found check", async (t) => {
   if (skipHere(t)) return;
+  if (await skip42Retired(t, "the sign-is-retired cell")) return;
   const client = await freshAdjClient("t2");
-  const spec = { client, name: `x42 t2 ${uniqTag()}`, cadence: "monthly", start: mon(-3).start, end: null, autoReverse: false, lines: accrualLines(90_000), memo: "x42 t2" };
+  // A REAL, historical live template (SURGERY 5) — proving the refusal fires before the
+  // door ever looks the template up, not merely on a made-up id.
+  const tpl = await liveTemplate({ client, label: "t2", start: mon(-3).start });
 
-  const first = await proposeTemplate(w.users.bob, spec);
-  const firstId = idOf(first, "template_id");
-  // A byte-identical PROPOSED twin collides (the partial unique covers 'proposed').
-  await refuses(() => proposeTemplate(w.users.bob, spec), T.templateDuplicate,
-    "a byte-identical second proposal while the first is PROPOSED", { code: CLR10 });
-
-  await signTemplate(w.users.hana, { client, template: firstId });
-  await refuses(() => proposeTemplate(w.users.bob, spec), T.templateDuplicate,
-    "a byte-identical second proposal while the first is LIVE", { code: CLR10 });
-
-  // Retiring the twin frees the hash — the scope is 'proposed','live' ONLY (§2.1).
-  await retireTemplate(w.users.hana, { client, template: firstId, reason: "x42 t2 retire" });
-  const second = await proposeTemplate(w.users.bob, spec);
-  assert.ok(idOf(second, "template_id"), "an identical template is proposable once the twin is RETIRED");
-  assert.equal((await templateRows(client)).length, 2, "…and both rows survive (retire, never delete)");
-  assert.equal(second.content_hash, first.content_hash,
-    "…carrying the SAME content_hash, which is what proves the scope (not the hash) moved");
+  for (const [label, sub, template] of [
+    ["a real live template", w.users.hana, tpl.id],
+    ["a made-up template id", w.users.hana, "00000000-0000-4000-8000-000000000000"],
+    ["a bookkeeper (the pre-#927 floor would have refused CLR04, not this)", w.users.bob, tpl.id],
+  ]) {
+    const err = await refuses(() => signTemplate(sub, { client, template }),
+      T.adjustmentTemplateLaneRetired, `${label}: signing through the retired door`, { code: CLR10 });
+    assert.match(err.message, /accounting plan/i, "…and the message points at the surviving lane");
+  }
+  assert.equal((await templateRow(tpl.id)).status, "live", "the real template's status never moved");
 });
 
-test("x42.t3 propose validation: start_date must be a cadence period-START, end_date a period-END, end >= start, and the line set must be >=2 balanced positive one-sided rows", async (t) => {
+test("x42.t3 clara.run_adjustment_manual is retired: the same typed refusal — a firm running an occurrence by hand is pointed at accounting plans, never at a stale-period message that no longer describes anything reachable", async (t) => {
   if (skipHere(t)) return;
+  if (await skip42Retired(t, "the manual-run-is-retired cell")) return;
   const client = await freshAdjClient("t3");
-  const m = mon(-3);
-  const base = { client, cadence: "monthly", start: m.start, end: null, autoReverse: false, lines: accrualLines(50_000), memo: "x42 t3" };
-  const P = (over) => proposeTemplate(w.users.bob, { ...base, name: `x42 t3 ${uniqTag()}`, ...over });
+  const tpl = await liveTemplate({ client, label: "t3", start: mon(-3).start });
 
-  await refuses(() => P({ start: dayIn(m, 5) }), T.templateFyStale,
-    "a MONTHLY start_date that is not the first of a month", { code: CLR10 });
-  await refuses(() => P({ end: dayIn(m, 20) }), T.templateFyStale,
-    "a MONTHLY end_date that is not a month END", { code: CLR10 });
-  // Annual alignment is measured against the CURRENT FYE (unset here → 31 December).
-  const fy = lastEndedFy(12, 31);
-  await refuses(() => P({ cadence: "annual", start: addDays(fy.start, 1) }), T.templateFyStale,
-    "an ANNUAL start_date that is not the client's FY period-START", { code: CLR10 });
-  await P({ cadence: "annual", start: fy.start, end: fy.end }); // the aligned annual shape IS admitted
+  const err = await refuses(() => runManual(w.users.bob, {
+    client, template: tpl.id, periodStart: mon(-3).start, periodEnd: mon(-3).end }),
+  T.adjustmentTemplateLaneRetired, "running a real live template's due period by hand", { code: CLR10 });
+  assert.match(err.message, /accounting plan/i, "…and the message points at the surviving lane");
+  assert.equal((await runRowsForTemplate(tpl.id)).length, 0, "no occurrence was minted");
 
-  await refusesCode(() => P({ start: mon(-2).start, end: mon(-3).end }), [CLR10, PG.checkViolation],
-    "end_date BEFORE start_date");
-  await refusesCode(() => P({ lines: [{ account_code: EXPA, debit_cents: 100, credit_cents: 0 }] }), [CLR10],
-    "a ONE-row line set (ABI §C demands >= 2)");
-  await refusesCode(() => P({ lines: [
-    { account_code: EXPA, debit_cents: 100, credit_cents: 0 },
-    { account_code: ACCR, debit_cents: 0, credit_cents: 99 }] }), [CLR10, CLR.balance],
-  "a line set that does not balance to the sen");
-  await refusesCode(() => P({ lines: [
-    { account_code: EXPA, debit_cents: 100, credit_cents: 40 },
-    { account_code: ACCR, debit_cents: 0, credit_cents: 60 }] }), [CLR10],
-  "a row carrying BOTH a debit and a credit (exactly one side per row)");
-  await refusesCode(() => P({ lines: [
-    { account_code: EXPA, debit_cents: 0, credit_cents: 0 },
-    { account_code: ACCR, debit_cents: 0, credit_cents: 0 }] }), [CLR10],
-  "a ZERO-amount line set (an occurrence ALWAYS carries a charge)");
+  // The MACHINE twin is UNTOUCHED — #928, not this ticket, retires the runtime's only
+  // remaining caller of it. The same period the human door just refused still runs fine
+  // through it, which is the whole point of D6 leaving it alone.
+  const r = await runOccurrence({
+    client, template: tpl.id, periodStart: mon(-3).start, periodEnd: mon(-3).end });
+  assert.equal(r.status, "drafted", "clara.run_adjustment_occurrence (the machine door) is unaffected by #927");
 });
 
-test("x42.t4 propose-time line eligibility refuses all five ineligible codes — inactive, control-classed, the client's bank code, an FA-reserved code and an actively-enrolled advance code — and writes nothing", async (t) => {
+test("x42.t4 retire refuses while an occurrence draft is outstanding and succeeds once it resolves; set_client_fy_end is blocked by a live ANNUAL template and NOT by a live MONTHLY one", async (t) => {
   if (skipHere(t)) return;
   const client = await freshAdjClient("t4");
-  const before = (await templateRows(client)).length;
-  const P = (lines) => proposeTemplate(w.users.bob, {
-    client, name: `x42 t4 ${uniqTag()}`, cadence: "monthly", start: mon(-3).start,
-    end: null, autoReverse: false, lines, memo: "x42 t4",
-  });
-
-  // (a) INACTIVE. MEASURED first (the x41.b6 finding): no COA deactivation door exists,
-  // so the inactive shape is staged by superuser surgery — see the helper's header.
-  assert.equal((await rootQuery(
-    `select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='clara' and p.proname ~ '^(deactivate|retire|archive)_.*_account$'
-        and p.proname not like '%bank%' and p.proname not like '%advance%'`)).rows[0].n, 0,
-  "still no COA deactivation verb — the inactive account remains a surgery-only shape");
-  await deactivateAccountRaw(client, INACT);
-  await refusesCode(() => P(accrualLines(50_000, { debit: INACT })), [CLR10],
-    "a template line on an INACTIVE account");
-
-  // (b) CONTROL-CLASSED — `account_class IS NULL` is the rule (§2.1).
-  await refusesCode(() => P(accrualLines(50_000, { debit: EXPA, credit: ARX })), [CLR10],
-    "a template line on a CONTROL-class (receivable) account");
-
-  // (c) THE CLIENT'S BANK CODE — a template must never move the bank.
-  await addBankAccount(w.users.alice, {
-    client, bankCode: "MBB", accountNumber: `4242${uniqTag()}${uniqTag()}`, coaAccountCode: BANKX,
-  });
-  await refusesCode(() => P(accrualLines(50_000, { debit: EXPA, credit: BANKX })), [CLR10],
-    "a template line on the client's registered BANK code");
-
-  // (d) AN FA-RESERVED CODE — `_acct_role_reserved` reads FA profiles ∪ register rows.
-  await upsertFaProfile(w.users.alice, { client, assetAccount: FACOST, accumAccount: FAACC, expenseAccount: FAEXP });
-  await refusesCode(() => P(prepaymentLines(50_000, { asset: FACOST })), [CLR10],
-    "a template line on an FA-enrolled COST account");
-
-  // (e) AN ACTIVELY-ENROLLED ADVANCE CODE — the same reader's third arm (WDB-G7).
-  await enrolAdvance(w.users.hana, { client, accountCode: PREP2 });
-  await refusesCode(() => P(prepaymentLines(50_000, { asset: PREP2 })), [CLR10],
-    "a template line on an actively-enrolled STAFF-ADVANCE account");
-
-  assert.equal((await templateRows(client)).length, before,
-    "every eligibility refusal wrote NOTHING — no half-born template row survives");
-  // The control: two ordinary, unreserved, active, non-control codes ARE admitted.
-  assert.ok(idOf(await P(accrualLines(50_000, { debit: EXPB, credit: ACCR2 })), "template_id"),
-    "…and an ordinary expense/accrual pair is still proposable (the rule is eligibility, not scarcity)");
-});
-
-test("x42.t5 sign-time revalidation closes the propose→FYE-change→sign window: the annual template that was aligned at propose refuses template_fy_stale at sign", async (t) => {
-  if (skipHere(t)) return;
-  const client = await freshAdjClient("t5");
-  await setClientFyEnd(w.users.alice, { client, month: 12, day: 31 });
-  const fy = lastEndedFy(12, 31);
-  const proposed = await proposeTemplate(w.users.bob, {
-    client, name: `x42 t5 ${uniqTag()}`, cadence: "annual", start: fy.start, end: null,
-    autoReverse: false, lines: accrualLines(70_000), memo: "x42 t5 annual",
-  });
-  const id = idOf(proposed, "template_id");
-
-  // A PROPOSED annual template does not block the FYE door (§2.2 guards LIVE ones).
-  await setClientFyEnd(w.users.alice, { client, month: 6, day: 30 });
-  assert.deepEqual(await clientFy(client), { month: 6, day: 30 }, "the FYE really moved to 30 June");
-
-  await refuses(() => signTemplate(w.users.hana, { client, template: id }), T.templateFyStale,
-    "signing an annual template whose start_date no longer aligns to the CURRENT FYE", { code: CLR10 });
-  assert.equal((await templateRow(id)).status, "proposed", "the refused sign left it PROPOSED — never half-signed");
-});
-
-test("x42.t6 retire refuses while an occurrence draft is outstanding and succeeds once it resolves; set_client_fy_end is blocked by a live ANNUAL template and NOT by a live MONTHLY one", async (t) => {
-  if (skipHere(t)) return;
-  const client = await freshAdjClient("t6");
-  const tpl = await liveTemplate({ client, label: "t6", start: mon(-3).start });
-  const first = await runManual(w.users.bob, {
+  const tpl = await liveTemplate({ client, label: "t4", start: mon(-3).start });
+  const first = await runOccurrence({
     client, template: tpl.id, periodStart: mon(-3).start, periodEnd: mon(-3).end });
   assert.equal(first.status, "drafted", "the ramp's first occurrence drafts");
 
@@ -253,84 +150,78 @@ test("x42.t6 retire refuses while an occurrence draft is outstanding and succeed
 // x42.p — THE POSTER'S ADMISSION LAW (design §2.3; tokens are ABI §F rows).
 // ===========================================================================
 
-test("x42.p1 poster admission: template_not_live, period_out_of_window, occurrence_draft_outstanding and period_already_met each refuse CLR38 by name", async (t) => {
+test("x42.p1 poster admission: template_not_live, period_out_of_window, occurrence_draft_outstanding and period_already_met each refuse CLR38 by name — driven through the surviving MACHINE door (run_adjustment_manual is retired; x42.t3 proves that separately)", async (t) => {
   if (skipHere(t)) return;
   const client = await freshAdjClient("p1");
   const lines = accrualLines(80_000);
 
-  // NOT LIVE — a merely PROPOSED template, and a RETIRED one.
-  const proposedOnly = idOf(await proposeTemplate(w.users.bob, {
-    client, name: `x42 p1 proposed ${uniqTag()}`, cadence: "monthly", start: mon(-3).start,
-    end: null, autoReverse: false, lines, memo: "x42 p1" }), "template_id");
-  await refuses(() => runManual(w.users.bob, {
+  // NOT LIVE — a merely PROPOSED template (SURGERY 5, since #927 retired the door that
+  // used to mint one), and a RETIRED one.
+  const proposedOnly = (await insertTemplateRaw({
+    client, status: "proposed", label: "p1proposed", cadence: "monthly", start: mon(-3).start,
+    end: null, autoReverse: false, lines, memo: "x42 p1" })).id;
+  await refuses(() => runOccurrence({
     client, template: proposedOnly, periodStart: mon(-3).start, periodEnd: mon(-3).end }),
   T.templateNotLive, "running a PROPOSED template", { code: CLR38 });
 
   // WINDOW — [start_date, coalesce(end_date, 'infinity')].
   const bounded = await liveTemplate({
     client, label: "p1w", start: mon(-3).start, end: mon(-2).end, lines });
-  await refuses(() => runManual(w.users.bob, {
+  await refuses(() => runOccurrence({
     client, template: bounded.id, periodStart: mon(-4).start, periodEnd: mon(-4).end }),
   T.periodOutOfWindow, "a period BEFORE start_date", { code: CLR38 });
-  await refuses(() => runManual(w.users.bob, {
+  await refuses(() => runOccurrence({
     client, template: bounded.id, periodStart: mon(-1).start, periodEnd: mon(-1).end }),
   T.periodOutOfWindow, "a period AFTER end_date", { code: CLR38 });
 
   // BLOCKED — one outstanding occurrence draft closes the whole template.
-  const first = await runManual(w.users.bob, {
+  const first = await runOccurrence({
     client, template: bounded.id, periodStart: mon(-3).start, periodEnd: mon(-3).end });
   assert.equal(first.status, "drafted", "the first occurrence drafts (ramp + WDB-G4)");
-  await refuses(() => runManual(w.users.bob, {
+  await refuses(() => runOccurrence({
     client, template: bounded.id, periodStart: mon(-2).start, periodEnd: mon(-2).end }),
   T.occurrenceDraftOutstanding, "a SECOND period while an occurrence draft is outstanding", { code: CLR38 });
 
   // MET — an approved, un-reversed role='occurrence' entry for the pair.
   await approveDraft(w.users.alice, first.entry_id);
-  await refuses(() => runManual(w.users.bob, {
+  await refuses(() => runOccurrence({
     client, template: bounded.id, periodStart: mon(-3).start, periodEnd: mon(-3).end }),
   T.periodAlreadyMet, "re-running a period that is already met", { code: CLR38 });
 
   await retireTemplate(w.users.hana, { client, template: bounded.id, reason: "x42 p1 retire" });
-  await refuses(() => runManual(w.users.bob, {
+  await refuses(() => runOccurrence({
     client, template: bounded.id, periodStart: mon(-2).start, periodEnd: mon(-2).end }),
   T.templateNotLive, "running a RETIRED template", { code: CLR38 });
 });
 
-test("x42.p2 period_request_invalid names its axis (not_cadence_aligned / not_ended), and the two floors bind: the machine verb is clara_runtime-only, the human twin is bookkeeper+", async (t) => {
+test("x42.p2 period_request_invalid names its axis (not_cadence_aligned / not_ended); the verb is clara_runtime-only", async (t) => {
   if (skipHere(t)) return;
   const client = await freshAdjClient("p2");
   const tpl = await liveTemplate({ client, label: "p2", start: mon(-4).start });
   const m = mon(-3);
 
-  await refusesAxis(() => runManual(w.users.bob, {
+  await refusesAxis(() => runOccurrence({
     client, template: tpl.id, periodStart: dayIn(m, 5), periodEnd: m.end }),
   T.periodRequestInvalid, ["not_cadence_aligned"],
   "a monthly period whose START is not the first of the month", { code: CLR38 });
-  await refusesAxis(() => runManual(w.users.bob, {
+  await refusesAxis(() => runOccurrence({
     client, template: tpl.id, periodStart: m.start, periodEnd: addDays(m.end, -1) }),
   T.periodRequestInvalid, ["not_cadence_aligned"],
   "a monthly period whose END is not the month end", { code: CLR38 });
-  await refusesAxis(() => runManual(w.users.bob, {
+  await refusesAxis(() => runOccurrence({
     client, template: tpl.id, periodStart: mon(1).start, periodEnd: mon(1).end }),
   T.periodRequestInvalid, ["not_ended"],
   "a cadence-aligned period that has NOT ended (mon(+1) is wholly in the future)", { code: CLR38 });
 
   // The MACHINE verb is granted to clara_runtime ONLY (ABI §A) — a human is refused at
-  // the ROLE level, not by a message.
+  // the ROLE level, not by a message. [#927] It no longer has a HUMAN twin at all:
+  // run_adjustment_manual is retired (x42.t3), so this is the door's whole floor now.
   await assertRaises(PG.insufficientPrivilege, () => humanQuery(w.users.alice, namedCall(
     "run_adjustment_occurrence", [
       { name: "p_client" }, { name: "p_template" }, { name: "p_period_start", cast: "date" },
       { name: "p_period_end", cast: "date" }, { name: "p_op_key" }]),
   [client, tpl.id, m.start, m.end, opk("x42humanmachine")]),
   "a HUMAN calling the machine-only run_adjustment_occurrence");
-
-  // …and the human twin floors at bookkeeper+.
-  await assertRaises(CLR04, () => runManual(w.users.carol, {
-    client, template: tpl.id, periodStart: m.start, periodEnd: m.end }),
-  "a VIEWER calling run_adjustment_manual");
-  assert.equal((await runManual(w.users.bob, {
-    client, template: tpl.id, periodStart: m.start, periodEnd: m.end })).status, "drafted",
-  "…while a bookkeeper runs it lawfully");
 });
 
 // ===========================================================================
@@ -347,7 +238,7 @@ test("x42.m1 [WDB-G4] catch-up occurrences ALL draft: every period that ENDED BE
   const seen = [];
   for (const p of [mon(-3), mon(-2), mon(-1)]) {
     const before = await rampClock(tpl.id);
-    const r = await runManual(w.users.bob, {
+    const r = await runOccurrence({
       client, template: tpl.id, periodStart: p.start, periodEnd: p.end });
     assert.equal(r.status, "drafted",
       `${p.key}: a catch-up occurrence DRAFTS (ramp earned=${before.earned}) — WDB-G4`);
@@ -375,7 +266,7 @@ test("x42.m2 the ramp: occurrence #1 drafts, #2 auto-posts once the ramp is earn
   const signedOn = await signedOnMyt(tpl.id);
 
   const p1 = mon(-4);
-  const r1 = await runManual(w.users.bob, { client, template: tpl.id, periodStart: p1.start, periodEnd: p1.end });
+  const r1 = await runOccurrence({ client, template: tpl.id, periodStart: p1.start, periodEnd: p1.end });
   assert.equal(r1.status, "drafted", "occurrence #1 ALWAYS drafts — the one-time ramp (WD-R8)");
   assert.equal(expectedMode({ periodEnd: p1.end, signedOn, rampEarned: false, highStakes: false }), "draft",
     "…and the design's own mode predicate agrees for #1");
@@ -385,7 +276,7 @@ test("x42.m2 the ramp: occurrence #1 drafts, #2 auto-posts once the ramp is earn
   const p2 = mon(-3);
   const want = expectedMode({ periodEnd: p2.end, signedOn, rampEarned: true, highStakes: false });
   assert.equal(want, "post", "the fixture really reaches the non-catch-up branch");
-  const r2 = await runManual(w.users.bob, { client, template: tpl.id, periodStart: p2.start, periodEnd: p2.end });
+  const r2 = await runOccurrence({ client, template: tpl.id, periodStart: p2.start, periodEnd: p2.end });
   assert.equal(r2.status, "posted", "occurrence #2 AUTO-POSTS (ramp earned · not high-stakes · not catch-up)");
   assert.equal(r2.mode, "post", "…with mode 'post'");
   const e2 = await entryRowOf(r2.entry_id);
@@ -399,28 +290,34 @@ test("x42.m2 the ramp: occurrence #1 drafts, #2 auto-posts once the ramp is earn
     client, label: "m2hs", start: mon(-4).start, cents: threshold + 500_000,
     lines: accrualLines(threshold + 500_000, { debit: EXPB, credit: ACCR2 }),
     backdateSignTo: mon(-5).end });
-  const h1 = await runManual(w.users.bob, { client, template: hs.id, periodStart: p1.start, periodEnd: p1.end });
+  const h1 = await runOccurrence({ client, template: hs.id, periodStart: p1.start, periodEnd: p1.end });
   assert.equal(h1.status, "drafted", "a high-stakes occurrence drafts for a distinct checker");
   await approveDraft(w.users.alice, h1.entry_id);
-  const h2 = await runManual(w.users.bob, { client, template: hs.id, periodStart: p2.start, periodEnd: p2.end });
+  const h2 = await runOccurrence({ client, template: hs.id, periodStart: p2.start, periodEnd: p2.end });
   assert.equal(h2.status, "drafted", "…and every subsequent high-stakes period still drafts, ramp or no ramp");
   assert.equal(expectedMode({ periodEnd: p2.end, signedOn: await signedOnMyt(hs.id), rampEarned: true, highStakes: true }),
     "draft", "…exactly as the design's mode predicate composes it");
 });
 
-test("x42.m3 the occurrence entry shape: origin='scheduled_run', posting_date=period_end, maker=actor, last_human_editor=the signer, the three headers FALSE (annual too), the ABI §B flags stamp and the memo grammar", async (t) => {
+test("x42.m3 the occurrence entry shape: origin='scheduled_run', posting_date=period_end, maker_actor=last_human_editor=the signer (run_adjustment_manual is retired — #927 — so no acting human is ever the maker any more), the three headers FALSE (annual too), the ABI §B flags stamp and the memo grammar", async (t) => {
   if (skipHere(t)) return;
   const client = await freshAdjClient("m3");
   const memo = "Accrued audit fee";
   const tpl = await liveTemplate({ client, label: "m3", start: mon(-3).start, cents: 45_600, memo });
   const p = mon(-3);
-  const r = await runManual(w.users.bob, { client, template: tpl.id, periodStart: p.start, periodEnd: p.end });
+  const r = await runOccurrence({ client, template: tpl.id, periodStart: p.start, periodEnd: p.end });
   const e = await entryRowOf(r.entry_id);
 
   assert.equal(e.status, "draft", "the occurrence is born a draft here (catch-up)");
   assert.equal(e.origin, "scheduled_run", "origin='scheduled_run' (the §8 writer census)");
   assert.equal(e.posting_date, p.end, "posting_date = period_end");
-  assert.equal(e.maker_actor, w.users.bob, "maker_actor = the acting caller");
+  // [#927] `_adj_run_occurrence_core` reads `v_actor := coalesce(p_actor, t.signed_by)`
+  // (0045:4506); the machine door passes p_actor=NULL, so maker_actor falls back to the
+  // template's own signer — exactly like last_human_editor beside it. Before #927 this cell
+  // drove run_adjustment_manual and asserted maker_actor = the acting bookkeeper; that door
+  // is retired (x42.t3), so every occurrence from here on is machine-run and this is the
+  // shape it really has now.
+  assert.equal(e.maker_actor, tpl.signedBy, "maker_actor = the template's signer (machine-run: no acting human)");
   assert.equal(e.last_human_editor, tpl.signedBy,
     "last_human_editor = template.signed_by — else the distinct-checker intent never binds");
   assert.equal(e.is_opening_balance, false, "is_opening_balance FALSE, always (§2.3)");
@@ -469,7 +366,7 @@ test("x42.m3 the occurrence entry shape: origin='scheduled_run', posting_date=pe
   const fy = lastEndedFy(12, 31);
   const at = await liveTemplate({
     client: aClient, label: "m3annual", cadence: "annual", start: fy.start, cents: 33_300, memo });
-  const ar = await runManual(w.users.bob, {
+  const ar = await runOccurrence({
     client: aClient, template: at.id, periodStart: fy.start, periodEnd: fy.end });
   const ae = await entryRowOf(ar.entry_id);
   assert.equal(ae.is_year_end, false, "an ANNUAL occurrence is is_year_end FALSE (the headers-FALSE cell)");
@@ -496,7 +393,7 @@ test("x42.d1 adjustment_run_due names the OLDEST unmet (template, period) among 
   assert.equal(due1.period_end, mon(-3).end, "…period_end alongside it");
   assert.deepEqual(due1.blocked, [], "…and nothing is blocked yet");
 
-  const first = await runManual(w.users.bob, {
+  const first = await runOccurrence({
     client, template: a.id, periodStart: mon(-3).start, periodEnd: mon(-3).end });
   const due2 = await adjustmentRunDue(client);
   assert.equal(due2.due, true, "A is blocked by its own draft, so the oracle moves to B");
@@ -523,7 +420,7 @@ test("x42.d1 adjustment_run_due names the OLDEST unmet (template, period) among 
   await runAndSettle({ client, template: b.id, period: mon(-1) });
   const drained = await adjustmentRunDue(client);
   assert.equal(drained.due, false, "once every ended period is met, nothing is due (mon(0) has not ended)");
-  assert.equal((await caught(() => runManual(w.users.bob, {
+  assert.equal((await caught(() => runOccurrence({
     client, template: a.id, periodStart: mon(0).start, periodEnd: mon(0).end }))) !== null, true,
   "…and the month in progress is refused rather than silently posted");
 });

@@ -7,14 +7,23 @@
 // fallback (never a key path, never a silent cast) for any value outside the
 // known set.
 //
+// [#927, riders wave 3] THE 0045 RECURRING-ADJUSTMENT TEMPLATE LANE IS RETIRED (owner
+// ruling on #788, 2026-09-18; migration 0282). This tab renders a one-line retirement
+// notice pointing at Client → Plans, and there is no control to propose, sign or
+// manually run a template — the three doors behind them now answer one typed refusal
+// apiece. What stays exactly as it was (D6 — historical receipts and in-flight legacy
+// visibility are retained): every list below, Retire (a firm can still stand down a
+// stray pre-retirement template), and the whole run-history / pair-reversal ledger,
+// including its Reverse/Approve/Cancel ceremony.
+//
 // T4 (port wave): the write half. The passive templates/runs lists below are
 // UNCHANGED table reads (Q3's own ruling — this train must not replace a working
-// table read with an RPC read). Three NEW sections extend them: the template
-// governance ceremony (propose/sign/retire, acting on the SAME template rows this
-// file already reads), the run-due banner and run-history panel (the write
-// ceremony's own governance bundle — lib/registers/adjustments-workbench.ts), and
-// the pair-reversal ledger. hydrate-never-trust: every write re-reads the whole
-// governance bundle via useHydratedPart().act() — never an optimistic paint.
+// table read with an RPC read). Sections extend them: the template governance
+// ceremony (now retire-only, acting on the SAME template rows this file already
+// reads), the run-history panel (the write ceremony's own governance bundle —
+// lib/registers/adjustments-workbench.ts), and the pair-reversal ledger.
+// hydrate-never-trust: every write re-reads the whole governance bundle via
+// useHydratedPart().act() — never an optimistic paint.
 
 import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
@@ -22,16 +31,12 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import {
   loadAdjustmentTemplates,
   loadAdjustmentRuns,
-  proposeAdjustmentTemplate,
-  signAdjustmentTemplate,
   retireAdjustmentTemplate,
-  runAdjustmentManual,
   reverseAdjustmentPair,
   approvePairReversal,
   cancelPairReversal,
 } from "@/lib/registers/adjustments";
 import { loadAdjustmentGovernance } from "@/lib/registers/adjustments-workbench";
-import { loadChartOfAccounts } from "@/lib/registers/accounts";
 import { fmtCents } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataTableCard } from "@/components/common/data-table-card";
@@ -39,7 +44,7 @@ import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner, LoadingState, EmptyState } from "@/components/common/state";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState } from "@/components/firm/data-state";
-import { ProposeTemplateDialog, SignTemplateDialog, RetireTemplateDialog } from "./adjustment-template-ceremony";
+import { RetireTemplateDialog } from "./adjustment-template-ceremony";
 import { AdjustmentRunDueBanner } from "./adjustment-run-due-banner";
 import { AdjustmentRunHistoryPanel } from "./adjustment-run-history-panel";
 import { AdjustmentPairReversalPanel } from "./adjustment-pair-reversal-panel";
@@ -51,7 +56,6 @@ export function AdjustmentsRegister({ clientId }: { clientId: string }) {
   // The passive lists — UNCHANGED table reads (this file's own header).
   const templates = useAsyncRead(() => loadAdjustmentTemplates(sessionTokenAccessor, clientId));
   const runs = useAsyncRead(() => loadAdjustmentRuns(sessionTokenAccessor, clientId));
-  const accounts = useAsyncRead(() => loadChartOfAccounts(sessionTokenAccessor, clientId));
   // The governance bundle — feeds every write below (hydrate-never-trust).
   const gov = useHydratedPart(sessionTokenAccessor, (s) => loadAdjustmentGovernance(s, clientId));
 
@@ -71,6 +75,7 @@ export function AdjustmentsRegister({ clientId }: { clientId: string }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <StateBanner tone="neutral">{t("retiredNotice")}</StateBanner>
       {gov.err ? (
         <StateBanner tone="error" code={gov.clr ? `${gov.clr.code}${gov.clr.reason ? ` · ${gov.clr.reason}` : ""}` : undefined}>
           {gov.err}
@@ -78,24 +83,7 @@ export function AdjustmentsRegister({ clientId }: { clientId: string }) {
       ) : null}
       {gov.data ? <AdjustmentRunDueBanner due={gov.data.due} /> : null}
       <section className="flex flex-col gap-2">
-        <SectionHeader
-          level={2}
-          action={
-            <ProposeTemplateDialog
-              accounts={accounts.data ?? []}
-              busy={gov.busy}
-              onSubmit={(input) =>
-                gov.act(() =>
-                  proposeAdjustmentTemplate(sessionTokenAccessor, { ...input, clientId }).then(() => {
-                    templates.reload();
-                  }),
-                )
-              }
-            />
-          }
-        >
-          {t("templatesHeading")}
-        </SectionHeader>
+        <SectionHeader level={2}>{t("templatesHeading")}</SectionHeader>
         <DataState
           loading={templates.loading}
           error={templates.error}
@@ -116,19 +104,6 @@ export function AdjustmentsRegister({ clientId }: { clientId: string }) {
                   {t("cadence")}: {cadenceLabels[tpl.cadence] ?? tpl.cadence}
                 </span>
                 <div className="ml-auto flex gap-2">
-                  {tpl.status === "proposed" ? (
-                    <SignTemplateDialog
-                      templateName={tpl.name}
-                      busy={gov.busy}
-                      onSubmit={() =>
-                        gov.act(() =>
-                          signAdjustmentTemplate(sessionTokenAccessor, clientId, tpl.id).then(() => {
-                            templates.reload();
-                          }),
-                        )
-                      }
-                    />
-                  ) : null}
                   {tpl.status !== "retired" ? (
                     <RetireTemplateDialog
                       templateName={tpl.name}
@@ -188,16 +163,8 @@ export function AdjustmentsRegister({ clientId }: { clientId: string }) {
           <LoadingState>{tc("loading")}</LoadingState>
         ) : gov.data ? (
           <AdjustmentRunHistoryPanel
-            templates={templates.data ?? []}
             runs={gov.data.runs}
             busy={gov.busy}
-            onRunNow={(templateId, periodStart, periodEnd) =>
-              gov.act(() =>
-                runAdjustmentManual(sessionTokenAccessor, clientId, templateId, periodStart, periodEnd).then(() => {
-                  runs.reload();
-                }),
-              )
-            }
             onReversePair={(occurrenceEntryId, reason) => gov.act(() => reverseAdjustmentPair(sessionTokenAccessor, clientId, occurrenceEntryId, reason).then(() => undefined))}
           />
         ) : (

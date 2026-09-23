@@ -263,6 +263,14 @@ their producer/activation work remains open. Reporting uses a separate
 [render service](../reporting-render/README.md). Tax computation and SST return issuance are
 incomplete; reference tables and the SST compliance watch do not constitute an issuing tax engine.
 
+### The Wave D-b adjustment-occurrence sweep — retired (#928)
+
+The leader's daily sweep for the 0045 recurring/reversing-adjustment template lane is retired:
+`#788`'s owner ruling retires the 0045 lane fully, `#927` closed its human-facing write doors
+first, and `#928` stops the runtime's daily trigger and deletes `lib/reconciler-adjustments.mjs`
+whole — accounting plans' own occurrence scan (migration 0193, `lib/plan-occurrences.mjs`) is the
+separate, newer system and is untouched.
+
 ## Local commands
 
 From the repository root:

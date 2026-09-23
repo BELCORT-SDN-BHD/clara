@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 import {
   humanQuery, noteLane, endPool, printLaneNotes, printSkipCount,
   x42EnsureReady, skip42, caught, T, mon,
-  runManual, adjustmentRunDue, proposeTemplate, idOf,
+  runOccurrence, adjustmentRunDue, insertTemplateRaw, idOf,
   adjWorld, freshAdjClient, liveTemplate, approveDraft, accrualLines, prepaymentLines,
   runRowsForTemplate, EXPB, ACCR2, PREP, EXPA,
 } from "./x42-adj-helpers.mjs";
@@ -69,12 +69,14 @@ test("x42.r1 list_adjustment_templates: ONE envelope, the ABI §D.1 columns unde
   if (skipHere(t)) return;
   const client = await freshAdjClient("r1");
   const live1 = await liveTemplate({ client, label: "r1live", start: mon(-3).start, cents: 40_000 });
-  const proposed = await proposeTemplate(w.users.bob, {
-    client, name: `x42 r1prop ${live1.id.slice(0, 6)}`, cadence: "monthly",
+  // [#927] propose_adjustment_template is retired — a PROPOSED (unsigned) row is now minted
+  // by direct INSERT (SURGERY 5), the same shape a real proposal would have left behind.
+  const proposed = await insertTemplateRaw({
+    client, status: "proposed", label: `r1prop_${live1.id.slice(0, 6)}`, cadence: "monthly",
     start: mon(-2).start, end: null, autoReverse: true,
     lines: accrualLines(30_000, { debit: EXPB, credit: ACCR2 }), memo: "x42 r1 proposal",
   });
-  const proposedId = idOf(proposed, "template_id", "id");
+  const proposedId = proposed.id;
 
   const payload = await listTemplates(w.users.bob, client);
   const rows = assertEnvelope(payload, "templates", "list_adjustment_templates");
@@ -121,7 +123,7 @@ test("x42.r2 the blocked[] remedy is REACHABLE, not merely named: the template r
   const before = (await listTemplates(w.users.bob, client)).templates[0];
   assert.equal(before.occurrence_draft_entry_id, null, "nothing is outstanding before a run");
 
-  const receipt = await runManual(w.users.bob, {
+  const receipt = await runOccurrence({
     client, template: tpl.id, periodStart: mon(-3).start, periodEnd: mon(-3).end });
   const entry = idOf(receipt, "entry_id", "id");
   assert.ok(entry, `the poster names its entry (got ${JSON.stringify(receipt)})`);
@@ -156,7 +158,7 @@ test("x42.r3 list_adjustment_runs is newest-period-first and get_adjustment_run 
   // Two occurrences, oldest first — the ladder's own order, so "newest first" in the read
   // is a real re-ordering rather than an accident of insertion.
   for (const p of [mon(-3), mon(-2)]) {
-    const rec = await runManual(w.users.bob, { client, template: tpl.id, periodStart: p.start, periodEnd: p.end });
+    const rec = await runOccurrence({ client, template: tpl.id, periodStart: p.start, periodEnd: p.end });
     await approveDraft(w.users.alice, idOf(rec, "entry_id", "id"));
   }
 
@@ -189,7 +191,7 @@ test("x42.r4 firm scope: a cross-firm caller gets no existence oracle from any o
   const tpl = await liveTemplate({
     client, label: "r4", start: mon(-3).start, cents: 20_000,
     lines: prepaymentLines(20_000, { asset: PREP, expense: EXPA }) });
-  const rec = await runManual(w.users.bob, {
+  const rec = await runOccurrence({
     client, template: tpl.id, periodStart: mon(-3).start, periodEnd: mon(-3).end });
   await approveDraft(w.users.alice, idOf(rec, "entry_id", "id"));
   const runId = (await runRowsForTemplate(tpl.id))[0].id;

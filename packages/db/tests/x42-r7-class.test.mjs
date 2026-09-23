@@ -36,7 +36,7 @@ import {
   endPool, printLaneNotes, printSkipCount,
   x42EnsureReady, skip42, caught, reasonToken,
   EXPA, ACCR, EXPB, ACCR2, CLR38, mon, lastEndedFy, clientFy,
-  runManual, reversePair, approvePairReversal, adjustmentRunDue, retireTemplate,
+  runOccurrence, reversePair, approvePairReversal, adjustmentRunDue, retireTemplate,
   accrualLines, adjWorld, freshAdjClient, liveTemplate, approveDraft,
   entryRowOf, mirrorOf, glNet, stampedEntries, rootQuery,
 } from "./x42-adj-helpers.mjs";
@@ -69,7 +69,7 @@ const shapeOfTemplate = async (id) => (await rootQuery(
   [id])).rows[0].s;
 
 /** Run a period as a human and return the refusal (or null when it was admitted). */
-const runRefusal = (client, template, period) => caught(() => runManual(w.users.bob, {
+const runRefusal = (client, template, period) => caught(() => runOccurrence({
   client, template, periodStart: period.start, periodEnd: period.end,
 }));
 
@@ -88,7 +88,7 @@ test("x42.r7b1 a [WDB-G13] edit that itemises one leg across two lines on the SA
     client, label: "r7b1 v1", start: P.start, lines: accrualLines(5_000_000),
     memo: "r7b1 v1",
   });
-  const r1 = await runManual(w.users.bob, {
+  const r1 = await runOccurrence({
     client, template: t1.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r1.entry_id);
 
@@ -159,7 +159,7 @@ test("x42.r7b2 the shape key's boundaries: the SIDE is part of the element (oppo
   assert.notDeepEqual(await shapeOfTemplate(tB.id), await shapeOfTemplate(tA.id),
     "the SIDE is part of the element -- Dr EXPA and Cr EXPA are two different facts about one account");
 
-  const rA = await runManual(w.users.bob, {
+  const rA = await runOccurrence({
     client, template: tA.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, rA.entry_id);
 
@@ -191,7 +191,7 @@ test("x42.r7b2 the shape key's boundaries: the SIDE is part of the element (oppo
   const tAutoA = await liveTemplate({
     client: cAuto, label: "r7b2 auto", start: P.start, autoReverse: true,
     lines: accrualLines(2_000_000), memo: "r7b2 auto" });
-  const rAuto = await runManual(w.users.bob, {
+  const rAuto = await runOccurrence({
     client: cAuto, template: tAutoA.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, rAuto.entry_id);
   const tFlip2 = await liveTemplate({
@@ -199,7 +199,7 @@ test("x42.r7b2 the shape key's boundaries: the SIDE is part of the element (oppo
     lines: accrualLines(1_100_000, { debit: ACCR, credit: EXPA }), memo: "r7b2 flip2" });
   let rFlip2 = null;
   assert.equal(await caught(async () => {
-    rFlip2 = await runManual(w.users.bob, {
+    rFlip2 = await runOccurrence({
       client: cAuto, template: tFlip2.id, periodStart: P.start, periodEnd: P.end });
   }), null,
     "…in the occurrence's OWN period the flip is still admitted: the mirror's money is not there yet");
@@ -250,7 +250,7 @@ test("x42.r7b3 a monthly and an annual template on one shape collide in EVERY ov
     lines: accrualLines(500_000), memo: "r7b3 monthly" });
 
   // DIRECTION B: the ANNUAL stands first, and BOTH the FY-opening month and February are refused.
-  const ra = await runManual(w.users.bob, {
+  const ra = await runOccurrence({
     client, template: annual.id, periodStart: F.start, periodEnd: F.end });
   await approveDraft(w.users.alice, ra.entry_id);
 
@@ -271,10 +271,10 @@ test("x42.r7b3 a monthly and an annual template on one shape collide in EVERY ov
   const a2 = await liveTemplate({
     client: c2, label: "r7b3b annual", cadence: "annual", start: F.start,
     lines: accrualLines(6_000_000), memo: "r7b3b annual" });
-  const rm = await runManual(w.users.bob, {
+  const rm = await runOccurrence({
     client: c2, template: m2.id, periodStart: F.start, periodEnd: janEnd });
   await approveDraft(w.users.alice, rm.entry_id);
-  const errAnnual = await caught(() => runManual(w.users.bob, {
+  const errAnnual = await caught(() => runOccurrence({
     client: c2, template: a2.id, periodStart: F.start, periodEnd: F.end }));
   assert.ok(errAnnual, "the annual FY overlapping a standing monthly accrual is refused");
   assert.equal(reasonToken(errAnnual), "period_shape_already_met");
@@ -305,7 +305,7 @@ test("x42.r7b4 an AUTO-REVERSE template drains four consecutive months: the mirr
     lines: accrualLines(1_500_000), memo: "r7b4 auto" });
 
   for (const p of [mon(-5), mon(-4), mon(-3), mon(-2)]) {
-    const r = await runManual(w.users.bob, {
+    const r = await runOccurrence({
       client, template: tpl.id, periodStart: p.start, periodEnd: p.end });
     await approveDraft(w.users.alice, r.entry_id);
     const occ = (await entryRowOf(r.entry_id));
@@ -335,7 +335,7 @@ test("x42.r7b5 a period holding a corrected PAIR and a standing same-shape occur
   const tA = await liveTemplate({
     client, label: "r7b5 A", start: P.start, autoReverse: true,
     lines: accrualLines(4_000_000), memo: "r7b5 A" });
-  const rA = await runManual(w.users.bob, {
+  const rA = await runOccurrence({
     client, template: tA.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, rA.entry_id);
   const pair = await reversePair(w.users.bob, {
@@ -347,7 +347,7 @@ test("x42.r7b5 a period holding a corrected PAIR and a standing same-shape occur
   // B: a DIFFERENT template on the SAME shape, admitted because nothing of that shape stands.
   const tB = await liveTemplate({
     client, label: "r7b5 B", start: P.start, lines: accrualLines(3_000_000), memo: "r7b5 B" });
-  const rB = await runManual(w.users.bob, {
+  const rB = await runOccurrence({
     client, template: tB.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, rB.entry_id);
 
@@ -360,7 +360,7 @@ test("x42.r7b5 a period holding a corrected PAIR and a standing same-shape occur
     "met-ness is a fact about the SET, and it outranks mixedness whatever order the scan ran in");
   assert.equal(gate.entry_id, rB.entry_id, "and it names the entry that is actually standing");
 
-  const err = await caught(() => runManual(w.users.bob, {
+  const err = await caught(() => runOccurrence({
     client, template: tA.id, periodStart: P.start, periodEnd: P.end }));
   assert.ok(err, "A's re-run is refused");
   assert.equal(reasonToken(err), "period_shape_already_met",
@@ -394,7 +394,7 @@ test("x42.r7b6 when the standing entry is half of an auto pair the refusal names
   const t1 = await liveTemplate({
     client, label: "r7b6 v1", start: mon(-5).start, autoReverse: true,
     lines: accrualLines(2_500_000), memo: "r7b6 v1" });
-  const r1 = await runManual(w.users.bob, {
+  const r1 = await runOccurrence({
     client, template: t1.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r1.entry_id);
   assert.ok(await mirrorOf(r1.entry_id), "the auto-reverse pair exists");
@@ -425,7 +425,7 @@ test("x42.r7b6 when the standing entry is half of an auto pair the refusal names
   }
 
   // AND THE PERIOD RE-OPENS, at the corrected figure, exactly once.
-  const r2 = await runManual(w.users.bob, {
+  const r2 = await runOccurrence({
     client, template: t2.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r2.entry_id);
   assert.equal(await glNet(client, EXPA, P.end), 2_900_000,

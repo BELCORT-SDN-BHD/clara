@@ -40,7 +40,8 @@ import {
   opk, endPool, printLaneNotes, printSkipCount, rootQuery, getPool,
   x42EnsureReady, skip42, caught, reasonToken,
   EXPA, EXPB, ACCR, ACCR2, FACOST, FAACC, CLR38, mon,
-  runManual, retireTemplate, proposeTemplate, signTemplate, adjustmentRunDue,
+  runOccurrence, retireTemplate, proposeTemplate, signTemplate, adjustmentRunDue,
+  x42TemplatesRetiredReady, noteLane,
   accrualLines, adjWorld, freshAdjClient, liveTemplate, approveDraft, glNet,
   upsertFaProfile, templateRow,
 } from "./x42-adj-helpers.mjs";
@@ -58,9 +59,30 @@ after(async () => {
   await endPool();
 });
 
+// [#927] `propose_adjustment_template` and `sign_adjustment_template` are typed refusals from
+// migration 0282 (owner ruling #788: retire the 0045 recurring-adjustment template lane). The
+// cells below whose subject is the POSTER's caution or the due oracle mint their templates
+// directly (x42-adj-helpers' SURGERY 5) and keep every assertion; the cells whose subject IS the
+// propose-time advisory assert the door's retirement above that frontier and run in full on a
+// pre-0282 chain -- the d-b2 slice leg's 0001..0045 copy, where the advisory is still reachable.
+const templatesRetired = () => x42TemplatesRetiredReady();
+
+async function proposeDoorRetired(client, law) {
+  if (!(await templatesRetired())) return false;
+  const err = await caught(() => proposeTemplate(w.users.bob, {
+    client, name: `r10 retired probe ${Math.random()}`, cadence: "monthly", start: mon(-3).start,
+    lines: accrualLines(100_000, { debit: EXPA, credit: ACCR }), memo: "retired probe",
+    opKey: opk("r10ret") }));
+  assert.ok(err, `${law}: the propose door answers something -- it must REFUSE`);
+  assert.equal(reasonToken(err), "adjustment_template_lane_retired",
+    `${law}: the door that carried this law is retired (#927)`);
+  noteLane(`${law} — the propose-door half retired at 0282; asserted as a refusal here and in full on a pre-0282 chain`);
+  return true;
+}
+
 const skipHere = (t) => skip42(t, live, "the round-10 honest-remedy battery");
 
-const runRefusal = (client, template, period) => caught(() => runManual(w.users.bob, {
+const runRefusal = (client, template, period) => caught(() => runOccurrence({
   client, template, periodStart: period.start, periodEnd: period.end,
 }));
 
@@ -117,7 +139,7 @@ test("x42.r10o1a a retired sibling that is NOT a predecessor gets a measured cau
     client, label: "r10o1a audit", start: M[0].start,
     lines: accrualLines(300_000, { debit: EXPA, credit: ACCR }), memo: "audit fee" });
   for (const P of M) {
-    const r = await runManual(w.users.bob, {
+    const r = await runOccurrence({
       client, template: tAudit.id, periodStart: P.start, periodEnd: P.end });
     await approveDraft(w.users.alice, r.entry_id);
   }
@@ -158,7 +180,7 @@ test("x42.r10o1a a retired sibling that is NOT a predecessor gets a measured cau
     client, label: "r10o1a legal recut", start: M[0].start,
     lines: accrualLines(120_000, { debit: EXPB, credit: ACCR2 }), memo: "legal fee, own code" });
   for (const P of M) {
-    const r = await runManual(w.users.bob, {
+    const r = await runOccurrence({
       client, template: tLegal2.id, periodStart: P.start, periodEnd: P.end });
     await approveDraft(w.users.alice, r.entry_id);
   }
@@ -180,33 +202,43 @@ test("x42.r10o1b proposing a template that collides with a LIVE sibling is admit
     client, label: "r10o1b gen1", start: M[0].start,
     lines: accrualLines(300_000, { debit: EXPA, credit: ACCR }), memo: "accrual v1" });
   for (const P of M) {
-    const r = await runManual(w.users.bob, {
+    const r = await runOccurrence({
       client, template: gen1.id, periodStart: P.start, periodEnd: P.end });
     await approveDraft(w.users.alice, r.entry_id);
   }
 
-  const proposed = await proposeTemplate(w.users.bob, {
-    client, name: `r10o1b gen2 ${Date.now()}`, cadence: "monthly", start: M[0].start,
-    lines: accrualLines(150_000, { debit: EXPA, credit: ACCR }), memo: "accrual v2",
-    opKey: opk("r10o1b") });
-  assert.ok(proposed.template_id, "the propose-first ORDER IS LAWFUL and stays admitted");
-  assert.equal(proposed.warnings.length, 1, "…and it is not silent about what it just created");
-  const wr = proposed.warnings[0];
-  assert.equal(wr.axis, "colliding_live_sibling");
-  assert.equal(wr.template_id, gen1.id, "the warning NAMES the sibling");
-  assert.equal(wr.status, "live");
-  assert.equal(wr.containment, "identical", "…and the shape relation, which is what an edit looks like");
-  assert.equal(wr.standing_charges, 3, "…and how many periods it already carries");
-  assert.equal(wr.first_period, M[0].start);
-  assert.equal(wr.last_period, M[2].end);
-  assert.match(wr.message, /would book those periods twice/,
-    "…and says, in words, what the distinct-codes act would cost if this IS the replacement");
-  assert.deepEqual(wr.colliding_elements, [`${ACCR}:C`, `${EXPA}:D`].sort(),
-    "the colliding elements come off the gate's own overlap derivation");
+  let gen2 = null;
+  if (await proposeDoorRetired(client, "x42.r10o1b lane O1's colliding-live-sibling advisory")) {
+    // The advisory's door is gone; its SUBJECT -- the collision -- is still real, and the poster's
+    // caution below is what the firm meets now. Mint the colliding template directly.
+    gen2 = (await liveTemplate({
+      client, name: `r10o1b gen2 ${Date.now()}`, start: M[0].start,
+      lines: accrualLines(150_000, { debit: EXPA, credit: ACCR }), memo: "accrual v2" })).id;
+  } else {
+    const proposed = await proposeTemplate(w.users.bob, {
+      client, name: `r10o1b gen2 ${Date.now()}`, cadence: "monthly", start: M[0].start,
+      lines: accrualLines(150_000, { debit: EXPA, credit: ACCR }), memo: "accrual v2",
+      opKey: opk("r10o1b") });
+    assert.ok(proposed.template_id, "the propose-first ORDER IS LAWFUL and stays admitted");
+    assert.equal(proposed.warnings.length, 1, "…and it is not silent about what it just created");
+    const wr = proposed.warnings[0];
+    assert.equal(wr.axis, "colliding_live_sibling");
+    assert.equal(wr.template_id, gen1.id, "the warning NAMES the sibling");
+    assert.equal(wr.status, "live");
+    assert.equal(wr.containment, "identical", "…and the shape relation, which is what an edit looks like");
+    assert.equal(wr.standing_charges, 3, "…and how many periods it already carries");
+    assert.equal(wr.first_period, M[0].start);
+    assert.equal(wr.last_period, M[2].end);
+    assert.match(wr.message, /would book those periods twice/,
+      "…and says, in words, what the distinct-codes act would cost if this IS the replacement");
+    assert.deepEqual(wr.colliding_elements, [`${ACCR}:C`, `${EXPA}:D`].sort(),
+      "the colliding elements come off the gate's own overlap derivation");
+    await signTemplate(w.users.hana, { client, template: proposed.template_id, opKey: opk("r10o1bs") });
+    gen2 = proposed.template_id;
+  }
 
   // AND THE POSTER'S CAUTION RIDES THE 'live' BRANCH — the exact branch round 9 left plain.
-  await signTemplate(w.users.hana, { client, template: proposed.template_id, opKey: opk("r10o1bs") });
-  const err = await runRefusal(client, proposed.template_id, M[0]);
+  const err = await runRefusal(client, gen2, M[0]);
   assert.equal(reasonToken(err), "period_shape_already_met");
   const d = JSON.parse(err.detail);
   assert.equal(d.standing_template_status, "live");
@@ -275,7 +307,7 @@ test("x42.r10o1d template_line_ineligible measures this template's own standing 
     client, label: "r10o1d accrual", start: M[0].start,
     lines: accrualLines(50_000, { debit: EXPA, credit: ACCR }), memo: "audit accrual" });
   for (const P of M) {
-    const r = await runManual(w.users.bob, {
+    const r = await runOccurrence({
       client, template: tpl.id, periodStart: P.start, periodEnd: P.end });
     await approveDraft(w.users.alice, r.entry_id);
   }
@@ -330,7 +362,7 @@ test("x42.r10o1e when two standing members of one window collide on different el
   const tpl = await liveTemplate({
     client, label: "r10o1e pair", start: P.start, autoReverse: true,
     lines: accrualLines(250_000, { debit: EXPA, credit: ACCR }), memo: "pair" });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r.entry_id);
   const mirror = (await rootQuery(
@@ -365,6 +397,10 @@ test("x42.r10o1f the propose advisories change nothing about admission: an impla
   // (1) ORDINARY: the key is present and empty. A caller that must test for the key's existence
   // is a caller that will one day forget.
   const c1 = await freshAdjClient("r10o1f1");
+  // [#927] Every arm of this cell reads `warnings` off a propose receipt, and the door that
+  // carried them retired at 0282. Above that frontier the retirement is what is asserted; the
+  // whole advisory contract runs on a pre-0282 chain (the d-b2 slice leg).
+  if (await proposeDoorRetired(c1, "x42.r10o1f the propose-time advisory contract")) return;
   const ordinary = await proposeTemplate(w.users.bob, {
     client: c1, name: `r10o1f ordinary ${Date.now()}`, cadence: "monthly", start: P.start,
     lines: accrualLines(100_000, { debit: EXPA, credit: ACCR }), memo: "ordinary",
@@ -412,11 +448,9 @@ test("x42.r10o1g an ancient start date never trips the scan guard (the walk retu
 
   // (a) THE CASE THE OLD COMMENT CLAIMED: it does not reach the guard at all.
   const c1 = await freshAdjClient("r10o1g1");
-  const ancient = await proposeTemplate(w.users.bob, {
-    client: c1, name: `r10o1g ancient ${Date.now()}`, cadence: "monthly", start: "0001-01-01",
-    lines: accrualLines(100_000, { debit: EXPA, credit: ACCR }), memo: "ancient",
-    opKey: opk("r10o1g1") });
-  await signTemplate(w.users.hana, { client: c1, template: ancient.template_id, opKey: opk("r10o1g2") });
+  await liveTemplate({
+    client: c1, name: `r10o1g ancient ${Date.now()}`, start: "0001-01-01",
+    lines: accrualLines(100_000, { debit: EXPA, credit: ACCR }), memo: "ancient" });
   const due = await adjustmentRunDue(c1);
   assert.equal(due.due, true, "the oracle answers on the FIRST iteration — the guard is silent");
   assert.equal(due.period_end, "0001-01-31", "…naming the first period, which is unmet");
@@ -425,11 +459,9 @@ test("x42.r10o1g an ancient start date never trips the scan guard (the walk retu
   // approved, un-corrected occurrences of ONE template — the only state that can walk 2,400 times.
   const c2 = await freshAdjClient("r10o1g3");
   const start = "1800-01-01";
-  const tpl = await proposeTemplate(w.users.bob, {
-    client: c2, name: `r10o1g long ${Date.now()}`, cadence: "monthly", start,
-    lines: accrualLines(1_000, { debit: EXPA, credit: ACCR }), memo: "long",
-    opKey: opk("r10o1g4") });
-  await signTemplate(w.users.hana, { client: c2, template: tpl.template_id, opKey: opk("r10o1g5") });
+  const tpl = await liveTemplate({
+    client: c2, name: `r10o1g long ${Date.now()}`, start,
+    lines: accrualLines(1_000, { debit: EXPA, credit: ACCR }), memo: "long" });
   const conn = await getPool().connect();
   try {
     await conn.query("set session_replication_role = replica");
@@ -459,7 +491,7 @@ test("x42.r10o1g an ancient start date never trips the scan guard (the walk retu
        select i.id, i.firm_id, $1, v.n, v.code, v.dr, v.cr
          from ins i, (values (1, $4::text, 1000::bigint, 0::bigint),
                              (2, $5::text, 0::bigint, 1000::bigint)) v(n, code, dr, cr)`,
-      [c2, start, tpl.template_id, EXPA, ACCR]);
+      [c2, start, tpl.id, EXPA, ACCR]);
   } finally {
     await conn.query("set session_replication_role = origin").catch(() => {});
     conn.release();

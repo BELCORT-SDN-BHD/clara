@@ -58,6 +58,7 @@ const DOCUMENTS_LANE_MOCK = join(E2E_DIR, "documents-viewer-mock.mjs");
 const LANE_MOCKS = [
   "accrual-mock.mjs",
   "activity-mock.mjs",
+  "adjustments-retired-mock.mjs",
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
   "bank-match-mock.mjs",
@@ -618,6 +619,11 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // new handler was scoped by `ours`, and three of the four were invisible to the instrument that
   // would have contradicted it. The preview door has always been visible (`/rest/v1/rpc/…`).
   "members-lifecycle-mock.mjs": { unscopeable: [], debt: [] },
+  // #927's own lane — the retired Adjustments register (`?tab=adjustments`). Every handler
+  // (`clients` by `id`, `adjustment_templates`/`adjustment_runs`/`adjustment_pair_reversals` by
+  // `client_id`, and the three RPC verbs by `p_client`) names this lane's own client id and falls
+  // through otherwise. Declares neither list, the shape a new lane mock should aim for.
+  "adjustments-retired-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {

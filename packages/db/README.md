@@ -3500,6 +3500,394 @@ Frontier gate: `tests/fa-arrears-resolution-preintegration-gate.mjs`, keyed on t
 `tests/depreciation-history.test.mjs` is BIMODAL on this file's stem: once the fold is recorded,
 everything #651 measured is unchanged.
 
+## 0280 — the plan lane's own door gains the accrual entrance's wall (#908)
+
+**Context.** #652 (migration 0222) added `clara._assert_accrual_schedule_yields`, an entrance-level
+refusal for a schedule whose day rule can never reach a due date inside its own effective window,
+but wired it ONLY into `clara.create_accrual_adjustment`/`clara.revise_accrual_adjustment`. The
+underlying `clara._assert_plan_schedule` (0193:1572, recut by 0223) — the ONE validator
+`clara.create_accounting_plan` and `clara.revise_accounting_plan` both call, and the one
+`clara._accrual_plan_core` (0222:961) also reaches directly with `p_kind = 'reversing_journal'` —
+carried no such refusal, so a caller of the shared door directly (bypassing the two accrual doors)
+could still record a `'reversing_journal'`, `'recurring_journal'` or `'amortisation_schedule'` plan
+that is recorded and never performs.
+
+**What 0280 does.** `0280_plan_schedule_yield_wall.sql` recuts `clara._assert_plan_schedule` with
+ONE new arm, added after every arm 0223 wrote, unconditionally on `p_kind`: when
+`p_effective_to is not null` and `clara._accrual_schedule_yields` (0222:796, IMMUTABLE, untouched)
+answers false for the same five arguments the function already carries, it raises CLR10
+`plan_schedule_yields_no_occurrence`, naming `day_of_month` for a day-of-month rule and `day_rule`
+otherwise — the accrual entrance's own field logic, restated. No signature change, no volatility
+change (still IMMUTABLE), no new relation, no new function; `clara.create_accounting_plan` and
+`clara.revise_accounting_plan` keep byte-identical bodies and inherit the arm through the one
+function they already call, exactly as 0223's own amortisation-cadence arm already does for
+`revise_accounting_plan`.
+
+**Why the accrual entrance keeps its own token.** `create_accrual_adjustment` (0222:1134) and
+`revise_accrual_adjustment` both call `_assert_accrual_schedule_yields` — their OWN CLR10 token —
+at 0222:1182/1283, strictly BEFORE either door's nested `_accrual_plan_core` ever reaches
+`_assert_plan_schedule` at 0222:1027. A `raise exception` stops the transaction outright, so 0280's
+new arm is never reached through either accrual door; it only ever fires for a caller that reaches
+`_assert_plan_schedule` without going through `_assert_accrual_schedule_yields` first —
+`clara.create_accounting_plan`, `clara.revise_accounting_plan`, and `_accrual_plan_core`'s own
+direct call, which nothing upstream of it protects on the bypass path the ticket names.
+`tests/plan-schedule-yield-wall.test.mjs`'s `pw908.accrual-entrance-unmoved` cell drives
+`create_accrual_adjustment` with a no-yield shape and measures the accrual token still answers.
+
+**Why an open-ended plan (`effective_to is null`) is not this wall's business.**
+`clara._plan_due_events` returns no rows once its own `p_end` argument is null (0193:851), which
+would make the boolean predicate read "no occurrence" for every open-ended schedule — this lane's
+own DEFAULT shape (`accounting-plans-fixtures.mjs`'s `createAccountingPlan` defaults `effectiveTo`
+to `null`). The new arm is therefore gated on `p_effective_to is not null`, mirroring
+`_assert_accrual_schedule_yields`'s own guard (0222:820). Measured: the whole pre-existing
+`accounting-plans.test.mjs` (20/20), `accrual-adjustments.test.mjs` (21/21),
+`prepayment-schedule.test.mjs` (18/18) and `accounting-plan-occurrences.test.mjs` (16/16) batteries
+are green after this file applies, and `pw908.legitimate-plans` additionally drives an open-ended
+plan and a bounded, genuinely-reaching plan of each of the three kinds — including a
+`'reversing_journal'` plan created DIRECTLY through `create_accounting_plan`, the very bypass the
+issue names — and measures every one accepted.
+
+**Prestate/tail.** Pins (pre-image `sha256(prosrc)`, MEASURED on a 267-migration, `0001->0272`
+rig): `clara._assert_plan_schedule` (`e3640588afe0…67fd7`, the post-0223 body), and as
+non-regression `clara._accrual_schedule_yields` (`c75bf4c036cb…1a42`),
+`clara._plan_due_events` (`66100718e518…3384`), `clara.create_accounting_plan`
+(`84b67058244b…8d6c4`), `clara.revise_accounting_plan` (`87c9f1e9bcf4…431f`) and
+`clara._assert_accrual_schedule_yields` (`fd504b300a89…ec9f`). The prestate is REDO-tolerant by
+construction (#957): it recognises either the measured pre-0280 pre-image or this file's own prior
+output (its new token together with every pre-existing arm's own token), and refuses anything else
+rather than guessing. `create or replace function` on the unchanged signature converges to the same
+text either way, so §A itself carries no branch. The tail re-reads every pin, re-asserts every
+existing arm's token is still present BY NAME (0280 adds, it does not rewrite), and re-confirms
+owner, `SECURITY DEFINER`, `search_path`, `IMMUTABLE` volatility and the owner-only ACL are
+unmoved. Measured redo: applied FIRST (with a cosmetic notice-message bug — a reused loop variable
+printed the wrong sha in the closing `raise notice`, never in an `if` check), then fixed and
+re-applied via `CLARA_MIGRATION_REDO=0280_plan_schedule_yield_wall`, which took the REDO branch
+correctly and converged to the same functional body.
+
+**What 0280 does not do (Agent Brief "Out of scope").** It does not rename
+`accrual_schedule_yields_no_occurrence` or touch `clara._assert_accrual_schedule_yields`. It does
+not touch `clara._plan_due_events` or `clara._accrual_schedule_yields` — both pinned, both
+untouched; 0280 adds no logic of its own, only a call. It does not recut
+`clara.create_accounting_plan` or `clara.revise_accounting_plan`.
+
+**Known gap, not this ticket's scope.** `apps/web/lib/plans/schedule.ts`'s `validatePlanSchedule`
+is the general plan form's own mirror of `_assert_plan_schedule` and carries no yield check (unlike
+`apps/web/lib/work/accrual-draft.ts`, which already mirrors the accrual entrance's own wall) —
+after 0280, a well-shaped but non-yielding schedule submitted through the general plan form now
+gets a correct but LATE refusal from the door rather than an early one beside the field. Filing a
+follow-up to add the mirror is recommended; #908's Agent Brief names only the SQL validator and its
+two doors as in scope.
+
+## 0281 — the plan-overlap advisory gains a sibling-plan arm (#909)
+
+**Context.** `clara._plan_overlap_warning` (0193:1155) has scanned `clara.adjustment_templates`
+since the plan lane's own birth — a plan created over a live 0045 template's accounts has always
+been warned — but it never scanned `clara.accounting_plans` itself. An accrual plan
+(`reversing_journal`) and an amortisation plan (`amortisation_schedule`) on the same account
+therefore warned about NEITHER each other NOR anything else: nothing on the plan side ever looked
+at a sibling plan at all. #909 was originally filed wider (a cross-lane, template-vs-plan
+direction, and a refuse-vs-advise question); the owner's 2026-09-18 ruling on #788 retires the
+whole 0045 lane in three tracer-bullet tickets (#927 → #928 → #929, "blueprint and vocabulary",
+which drops the template arm entirely when it closes) and re-scoped #909 to exactly the
+sibling-plan half, independent of that retirement.
+
+**What 0281 does.** `0281_plan_overlap_sibling_arm.sql` recuts `clara._plan_overlap_warning` with
+a second arm, `UNION ALL`ed with the existing (unchanged) template arm: every OTHER live (`active`
+or `paused` — an `ended` plan can never run again) `clara.accounting_plans` row of the same client
+whose CURRENT (unsuperseded) revision's basis lines intersect the basis being evaluated. Both arms
+are merged into the ONE `templates` list the three plan-creating doors and their web forms already
+render (`overlap_warning.templates.map((x) => x.name)`, which does not branch on `kind`), so none
+of them needs a single line changed — a sibling plan's entry reuses `name`/`cadence`/`accounts`
+from the template shape and adds its own honestly-named `plan_id` rather than borrowing
+`template_id`. `kind` keeps its literal `'adjustment_template_overlap'` value whenever any template
+row matches (byte-for-byte what `accounting-plans.test.mjs`'s own `p640.schedule.overlap` already
+asserts, unedited by this file) and reads `'accounting_plan_overlap'` only when the match set is
+purely sibling plans — a stated, transitional imprecision for the case where both match at once,
+accepted because a hosted census the same day found ZERO rows in `clara.adjustment_templates` and
+#929 deletes the template arm shortly regardless. No signature change, no new relation, no new
+door; `clara.create_accounting_plan`, `clara.revise_accounting_plan` and `clara._accrual_plan_core`
+keep byte-identical bodies and inherit the widened warning through the one function they already
+call.
+
+**Self-exclusion, by basis identity.** The function carries no plan id (the Agent Brief's own "Key
+interfaces" line names only this function for change, and "the three plan-creating doors ...
+unchanged"), so the plan being evaluated is excluded with `r.basis is distinct from p_basis`: every
+call site (`create_accounting_plan` 0193:1552, `revise_accounting_plan` 0193:1751,
+`_accrual_plan_core` 0222:1045 — all pinned as non-regression) already writes the row a call is FOR
+— inserting it, or superseding the live revision with a freshly-inserted one — strictly BEFORE
+reaching this function, always carrying `r.basis = p_basis` exactly. A genuinely different
+sibling's own basis is a different jsonb value and is never excluded. The accepted, stated
+limitation: two INDEPENDENT plans whose bases are byte-for-byte identical would hide each other
+from this advisory — judged acceptable because the advisory is advisory (a false negative here
+costs a missed warning, never a wrong refusal) and this estate has never produced that coincidence
+in practice. `tests/plan-overlap-sibling-arm.test.mjs`'s `p909.no-overlap` cell proves the ordinary
+case (a fresh plan's own basis never warns about itself) is unaffected.
+
+**Prestate/tail.** Pins (pre-image `sha256(prosrc)`, MEASURED on a 269-migration, `0001->0280` rig):
+`clara._plan_overlap_warning` (`f550d0b393f9…9a074`, the post-0193 body, unmoved through 0222/0223/
+0250/0280 since none of them recut it), and as non-regression `clara.create_accounting_plan`
+(`84b67058244b…8d6c4`), `clara.revise_accounting_plan` (`87c9f1e9bcf4…431f`) and
+`clara._accrual_plan_core` (`b3bd10065ed7…9da8`). The prestate is REDO-tolerant by construction
+(#957): it recognises either the measured pre-0281 pre-image or this file's own prior output (its
+new token, the existing arm's own token, the new tables it reaches and the self-exclusion guard,
+together), and refuses anything else rather than guessing. `create or replace function` on the
+unchanged signature converges to the same text either way, so §A itself carries no branch. The tail
+re-reads every pin, re-asserts the existing arm's own tokens are still present BY NAME (0281 adds,
+it does not rewrite), and re-confirms owner, `SECURITY DEFINER`, `search_path`, `STABLE` volatility
+and the owner-only ACL are unmoved. Measured: applied FIRST (the fresh-apply branch, confirmed by
+the prestate's own notice naming "measured pre-0281 pre-image"), then a temporary hand-swap back to
+the pre-#909 body proved every new cell in `plan-overlap-sibling-arm.test.mjs` red for the right
+reason except the one negative case both bodies happen to satisfy (`p909.no-overlap`), the body
+restored byte-for-byte from this file's own §A, and then genuinely re-applied via
+`CLARA_MIGRATION_REDO=0281_plan_overlap_sibling_arm`, which took the REDO branch ("own prior
+output") correctly.
+
+**What 0281 does not do (Agent Brief "Out of scope").** It does not touch the 0045-side advisory
+(`_wdb_period_overlap_advisory`) or add any refusal on top of either arm — still advisory, per the
+Agent Brief's own words. It does not recut `clara.create_accounting_plan`,
+`clara.revise_accounting_plan` or `clara._accrual_plan_core`. It does not widen this function's
+signature or edit any of the three plan-creating doors or their web forms — the section above
+states why that was unnecessary rather than merely deferred. The cross-lane direction and the
+refuse-vs-advise question #909 was originally filed with are #788's, closed as split into
+#927 → #928 → #929.
+
+## 0282 — the 0045 recurring-adjustment template lane's three human-write doors close (#927)
+
+**Context.** #788 (owner ruling, 2026-09-18): "retire the 0045 recurring-adjustment template lane
+fully" — the hosted census the same day found ZERO rows in `clara.adjustment_templates`, of any
+status, so no data migration is owed. The ruling is delivered in three tracer-bullet tickets,
+#927 → #928 → #929. This is #927, step one: it closes the three doors that could ever CREATE or
+ADVANCE a template's schedule — `clara.propose_adjustment_template`, `clara.sign_adjustment_
+template` and `clara.run_adjustment_manual` — leaving everything else in the lane exactly as it
+was. #928 removes the daily runtime sweep next (the only OTHER way a period could ever fall due);
+#929 drops the plan-overlap advisory's now-dead template arm and rewrites the product record.
+
+**What 0282 does.** `0282_retire_adjustment_template_doors.sql` recuts the three doors' bodies —
+same signatures, same owner, same `SECURITY DEFINER` flag, same `search_path`, same
+`clara_authenticated`-only ACL — to `raise exception` unconditionally, before touching any
+argument, any table or `clara._human_ctx`: the door is closed to every caller alike, not merely
+re-floored. All three share ONE token — `errcode = 'CLR10'`, `detail.reason =
+'adjustment_template_lane_retired'` — and a message naming the specific verb that no longer exists,
+ending by pointing at the surviving lane ("create an accounting plan instead — Client → Plans").
+No new relation, no new grant, no `DROP`.
+
+**The prestate guard: no non-retired template may exist when this file lands.** A `proposed` row
+could never be signed again (sign closes in the same transaction); a `live` row could never run
+another occurrence by hand again (manual-run closes too) and, once #928 lands, never again at all —
+either shape would be this file silently orphaning a schedule a firm is still relying on. Only
+`status = 'retired'` is admitted; a from-scratch chain carries no row at all and passes vacuously.
+Measured on `clara_l05` (riders wave 3, lane 05) before this file was authored: ten leftover
+`status='live'` rows from #909's own rig fixtures (`plan-overlap-sibling-arm.test.mjs`'s "Rig combo
+template" / "Rig overlap template" cells, born 2026-09-20 by direct `INSERT`, never cleaned up
+because that file's own fixture never retires them) — retired by hand through the still-open
+`retire_adjustment_template` door before applying, which is the guard's own intended remedy for any
+lane that meets it non-empty; never a silent `DELETE` (retire, never delete, is this table's own
+law throughout 0045).
+
+**What stays exactly as it is (D6: "historical receipts and in-flight legacy visibility are
+retained"), and how the prestate/tail prove it.** `clara.retire_adjustment_template`
+(`66a113f25326…d8b45`), the reversal-pair machine (`reverse_adjustment_pair` `f167cab16f5c…8580`,
+`approve_pair_reversal` `5fa46ad5ca2a…d9d`, `cancel_pair_reversal` `ad7e0fc6ebee…8192`), the
+correction door (`_adj_correction_door` `5b22b62819fe…93e52`) and the three reads
+(`list_adjustment_templates` `97cabd663904…75ff`, `list_adjustment_runs` `197872e84d54…c93f`,
+`get_adjustment_run` `ff75553cab62…8ac3`) are pinned by pre-image `sha256(prosrc)` in §0 and
+re-pinned unchanged in §T — none of those seven bodies is touched, recut or re-granted. Also pinned
+non-regression, for the same reason: `clara.run_adjustment_occurrence` (`d61707e27aa4…8a252`) and
+`clara.adjustment_run_due` (`f01e9e403a73…26052`) — #928, not this file, retires the runtime belt
+that is their only remaining caller, so the doors themselves must keep working exactly as today
+until it does — and `clara._propose_adjustment_template_core` (`b975d0af972d…9ee810`), the OLD
+propose door's own former callee, still reachable through `clara._agent_prepayment_schedule_core`
+(0140), which this file does not go near.
+
+**Prestate/tail.** Pins (pre-image `sha256(prosrc)`, MEASURED on `clara_l05`, 281 migrations,
+`0001->0281`, 2026-09-21): `clara.propose_adjustment_template` (`1319ba44fe95…3c7cd5`),
+`clara.sign_adjustment_template` (`e7ace43b0043…88c2dff`) and `clara.run_adjustment_manual`
+(`45c4546994c7…f1edc6`), each redo-tolerant by construction (#957) — the prestate recognises either
+the measured pre-#927 pre-image or this file's own prior output (the `adjustment_template_lane_
+retired` token in the body), and refuses a MIXED state (some old, some already recut) outright
+rather than building on a partial prior apply. The tail does not merely re-read `prosrc`: it CALLS
+all three, as `clara_fn_owner` (no PostgREST session needed — none of the three reaches
+`_human_ctx` any more), and asserts the caught `CLR10`'s `detail.reason` is exactly
+`adjustment_template_lane_retired` — a behavioural proof, not only a static one — before re-reading
+owner/`SECURITY DEFINER`/`search_path`/ACL and the nine non-regression pins above.
+
+**What 0282 does not do.** It does not touch `clara.retire_adjustment_template`, the reversal-pair
+machine, the correction door, any read, `run_adjustment_occurrence`, `adjustment_run_due` or
+`_propose_adjustment_template_core` — the section above states why each survives rather than
+merely asserting it. It does not remove the daily runtime sweep (#928) or rewrite `CONTEXT.md` /
+`ARCHITECTURE.md` / `PRD.md` or the plan-overlap advisory's template arm (#929). It does not
+migrate data — the prestate's own guard is what makes that safe, not a claim that no live template
+could exist.
+
+**Two operational facts a release or a redo of 0282 must carry (fix round, 2026-09-23).**
+
+- **Its live-template guard is a LIVE gate, not a recorded fact.** 0282 refuses to apply while any
+  `clara.adjustment_templates` row is non-retired. The hosted census that found zero was taken on
+  2026-09-18; on release day the count must be taken again, and a non-zero answer is cleared by a
+  retire-by-hand pass through `clara.retire_adjustment_template` (which admits `proposed ->
+  retired` and back-fills `signed_by`/`signed_at` for a never-signed row) before the migration is
+  run, not by loosening the guard.
+- **A redo of 0282 on any rig that has run the db suite is REFUSED, by design.** This lane's own
+  fixtures mint non-retired rows by direct INSERT and do not clean up
+  (`tests/x42-adj-helpers.mjs`'s `insertTemplateRaw`, `tests/plan-overlap-sibling-arm.test.mjs`'s
+  and `tests/plan-overlap-template-arm-retired.test.mjs`'s planted rows), so the guard's own count
+  is non-zero the moment the batteries have run — measured at 491 non-retired rows on `clara_l05`.
+  That is the guard working: those rows are exactly the orphans it refuses to create. A
+  from-scratch chain passes it vacuously (nothing under `seeds/` or `scripts/` inserts the table),
+  so the integrator's from-scratch proof is the one that carries this migration, and a rig that
+  needs the redo retires its own fixture rows first.
+
+**A citation 0280 carries that resolves to nothing (fix round, 2026-09-23).**
+`0280_plan_schedule_yield_wall.sql` names `clara.revise_accrual_adjustment` three times — twice in
+its header and once at `:265`, inside the `clara._assert_plan_schedule` body it ships, so the
+string is permanent `prosrc` on every estate it reaches. No such function exists: the `clara`
+functions matching `%accrual%` are `create_accrual_adjustment`, `create_accrual_adjustment_for`,
+`get_accrual_adjustment`, `list_accrual_adjustments` and the private helpers. The two real callers
+of `clara._assert_accrual_schedule_yields` are **`clara.create_accrual_adjustment`** (granted
+`clara_authenticated`) and **`clara.create_accrual_adjustment_for`** (granted `clara_runtime` — the
+on-behalf-of door), so the accrual entrance's yield wall guards the runtime door too, which 0280's
+header does not say. The behaviour is correct either way; only the record was wrong. 0280 is
+applied and immutable, and is not the highest applied version, so #957's redo cannot reach it — the
+correction lives here and in `0283`'s own header.
+
+## 0283 — the plan-overlap advisory loses its 0045 template arm, and the arm that survives is fixed twice (#929)
+
+**Context.** #788 (owner ruling, 2026-09-18): "retire the 0045 recurring-adjustment template lane
+fully," delivered in three tracer-bullet tickets. #927 closed the three human-write doors; #928
+retired the daily runtime sweep; this is #929, step three: the LAST live surface the 0045 lane
+still reached — `clara._plan_overlap_warning`'s template arm, which 0281 (#909) left in place
+alongside its own new sibling-plan arm — closes too. `clara.adjustment_templates` itself and every
+read of it (D6's retained historical surface: `list_adjustment_templates`, Registers →
+Adjustments) are untouched; this migration only stops the plan-creation advisory from SCANNING
+that table.
+
+**What 0283 does.** `0283_retire_plan_overlap_template_arm.sql` recuts `clara._plan_overlap_warning`
+a second time: 0281's own ARM 1 (the `clara.adjustment_templates` scan and its `UNION ALL`) is
+deleted outright; 0281's ARM 2 (the sibling-plan scan) survives, unindented to the top level.
+`kind` collapses from a two-branch `case` to the single literal `'accounting_plan_overlap'` — the
+only value this function can ever answer from here on. No new relation, no new door, no data
+migration (a live `clara.adjustment_templates` row, historical or a rig fixture, simply stops being
+named — it is neither read nor written by this file). The three plan-creating doors and their web
+forms (`apps/web/components/{plans,accruals,prepayments}-form.tsx`) read only
+`overlap_warning.templates.map((x) => x.name)` and never branch on `kind` (0281's own header,
+unmoved), so no FORM needed a code change; the `PlanOverlapWarning`-shaped TypeScript types
+(`lib/{plans,accruals,prepayments}/api.ts`) and the `overlapTitle`/`overlapBody` copy in
+`messages/en.json` were corrected in the same commit to stop describing a "recurring adjustment
+template" that can no longer exist, and no longer carry a `template_id` field that can no longer
+appear.
+
+**…and what its FIX ROUND (2026-09-23, second round) added to the same file.** Two review findings
+were defects in the arm that SURVIVES the retirement, not in the retirement. Round one deferred
+both on the ground that the honest fix recuts three caller bodies four migrations pin
+byte-unchanged; that ground was withdrawn in round two, because 0280–0283 are one unmerged lane's
+own migrations, 0283 is the highest applied version (so #957's redo can reach it), and the pins in
+0280/0281/0282 run BEFORE this file in every chain and still see the pre-images they name. Wave 3
+reserved `0280–0283` for this lane and `0284` onward belongs to another, so a fourth file was never
+an option: this one grows, and its NAME is now narrower than its content.
+
+- **FIX 1 — self-exclusion by identity.** All three doors compute this advisory AFTER writing their
+  own plan row or their own new live revision, so the function has always had to exclude the
+  caller's own plan. 0281 excluded it by BASIS VALUE (`r.basis is distinct from p_basis`), which
+  also hid every OTHER plan carrying the same basis — total overlap, the case a human most needs
+  told. Measured on `clara_l05`: 7 `(client, basis_digest)` groups held 28 live plans with
+  byte-identical bases (four at a time, 4 ms apart, from the rig's own seed) and the advisory
+  answered `NULL` for them. The signature becomes
+  `clara._plan_overlap_warning(p_client uuid, p_basis jsonb, p_self_plan uuid)`, the predicate
+  becomes `p.id is distinct from p_self_plan`, and **the two-argument signature is dropped** so the
+  blind spot cannot be reached through a surviving overload. Not a by-value heuristic instead:
+  excluding "the most recently written identical-basis plan" would make `revise_accounting_plan`
+  warn a firm about the very plan it is revising, and a warning that names your own row teaches the
+  reader to skip the key.
+- **FIX 2 — the concurrency window.** The advisory is computed inside the creating transaction, so
+  two sessions creating overlapping plans for one client each read the other's row as uncommitted
+  and BOTH answered null. All three doors now take the client advisory rung
+  `pg_advisory_xact_lock(203005004, hashtext(<client>::text))` — the same rung
+  `clara.retire_adjustment_template` takes — after their op-receipt reservation (0037 §K's own
+  order) and above any `clara.accounting_plans` row lock (0238's order for this rung). Censused
+  before it was added: of the 51 bodies that take 203005004, **none** reads or locks
+  `clara.accounting_plans`, so the only new ordered pair is "client rung → plan row" and no body
+  holds a plan row while waiting for that rung.
+
+**Prestate/tail.** The prestate decides which of two admissible starting shapes it is looking at
+BY SIGNATURE — a fact about the catalog, not a marker inside a body, which is what the wave-3
+addendum asks for — and then every pin on the branch it picked is a hard sha:
+
+| | FRESH APPLY (two-argument advisory live, no three-argument one) | REDO #957 (three-argument live, no two-argument one) |
+|---|---|---|
+| `clara._plan_overlap_warning` | `33b23167…1e0b` (0281's own two-arm output) | `c2566349…f7dc` |
+| `clara.create_accounting_plan` | `84b67058…d6c4` | `99f60787…b424` |
+| `clara.revise_accounting_plan` | `87c9f1e9…431f` | `8a6e69ef…2886` |
+| `clara._accrual_plan_core` | `b3bd1006…9da8` | `31adc6d4…9bc5` |
+
+Both signatures present at once, or neither, is refused rather than guessed past. The tail re-reads
+`prosrc` and asserts: the template tokens are GONE; the two-argument signature is gone and exactly
+one `_plan_overlap_warning` resolves; the surviving arm self-excludes by `p.id is distinct from
+p_self_plan` and NO LONGER by basis value; each of the three callers takes the client rung, passes
+its own plan id, and takes that rung above any `clara.accounting_plans` row lock; all three keep
+their ACLs across the recut; `revise_accounting_plan` still re-reads `plan_ended` under the plan row
+lock (0193's review finding S4, which `p640.revision.end_race` also censuses); and the recut
+advisory keeps its owner, `SECURITY DEFINER` flag, `search_path`, `STABLE` volatility and owner-only
+ACL. **Both branches were exercised for real on `clara_l05`**: the pre-image was restored by
+re-running 0281's own `§A` statement, then `CLARA_MIGRATION_REDO=0283_retire_plan_overlap_template_arm`
+reported `FRESH APPLY`; a second redo over that result reported `REDO (#957)`. See
+`tests/plan-overlap-template-arm-retired.test.mjs` for the outside-in re-proof and the
+red-then-green trace of both fixes.
+
+**What stays exactly as it is.** `clara.adjustment_templates` keeps every row it has (live,
+proposed or retired); `clara.list_adjustment_templates`, `clara.list_adjustment_runs`,
+`clara.get_adjustment_run` and Registers → Adjustments (#927) still show them in full — only the
+PLAN-CREATION advisory stops consulting the table. `tests/plan-overlap-sibling-arm.test.mjs`
+(#909's own file) keeps every cell that is still true unconditionally from 0281 on (the sibling
+arm's own five design-decision cells, its tail's non-template assertions); its one cell that is no
+longer true anywhere (`p909.combined-with-template`, 0281's own documented "moot once #929 lands"
+case) is removed, with a pointer to this migration's own dedicated file,
+`tests/plan-overlap-template-arm-retired.test.mjs`, which owns the current-contract proof
+(`p929.template-alone`, `p929.template-with-sibling`, `p929.tail`). `accounting-plans.test.mjs`'s
+`p640.schedule.overlap` is retargeted the same way, gated locally on this migration's own stem.
+
+**What 0283 does not do.** It does not touch `clara.adjustment_templates` or any of its readers —
+D6's retained historical surface is untouched. It recuts `clara.create_accounting_plan`,
+`clara.revise_accounting_plan` and `clara._accrual_plan_core`, but only by the two edits FIX 1 and
+FIX 2 name: every other line of those three bodies is reproduced from the pre-image the table above
+pins. It does not edit `CONTEXT.md`'s two
+`_Avoid_` lines (a separate, non-migration commit in this same ticket), `docs/ARCHITECTURE.md` or
+`docs/PRD.md` — the blueprints are never edited outside a #683 sync; this ticket's closing report
+carries the `ARCHITECTURE.md:500` blueprint-drift line and the C08.1 nested-obligation disposition
+addressed to #683 instead. It does not close #788 or edit #909's comment — the ticket's own triage
+correction records both are already satisfied.
+
+**What the three-step retirement leaves standing, and the cell that watches it (fix round,
+2026-09-23).** None of #927/#928/#929 touches `clara._propose_adjustment_template_core`, and one
+path still reaches it: `clara.wake_establish_prepayment_schedule` (0140's agent prepayment limb,
+granted to `clara_wake_interactive` and carried in `clara.wake_fn_allowlist` as `(close_prep,
+wake_establish_prepayment_schedule)`) → `clara._agent_prepayment_schedule_core` → that core, which
+INSERTs a `proposed` template row. Driven, not read off the source: calling the core inside a
+rolled-back transaction on `clara_l05` answered `{"status":"proposed","template_id":…}` and left
+one row before the rollback. Such a row could never be signed, run, swept or named by the
+advisory — exactly the orphan 0282's live-template guard exists to prevent. Two things hold it
+shut, and neither is a wall in this database. First, `clara.wake_engine_sources.close_prep.enabled
+= false` (parked since 0133; 0138/0140/0159/0223 each pin it) — but the flag bites in the RUNTIME,
+not here: `clara.mint_wake_credential_for_task` is granted to `clara_runtime` and never reads it
+(hence the 771 `close_prep` credentials the batteries themselves minted on `clara_l05`), while
+`packages/runtime/lib/wake-engine.mjs:392-397` and `:801-804` promote a task to `running` only
+`… and exists (select 1 from clara.wake_engine_sources where source_key=$2 and enabled)`. Second,
+`clara.wake_fn_allowlist` names that wrapper for `close_prep` **and for no other wake kind** —
+which matters because every other kind is live, and `interactive_client` (minted from a chat turn
+by `clara.mint_chat_close_credential`) has no `wake_engine_sources` row the flag could speak for.
+Retiring or rerouting the limb at `clara.create_prepayment_schedule` (0223) is a product act the
+#788 split did not publish, so it is deliberately not done here; instead the containment is a live
+cell — `tests/plan-overlap-template-arm-retired.test.mjs`'s `p929.containment`, whose two
+rolled-back mutants flip the flag and widen the allowlist — which goes red with the remedy in its
+message the day anyone unparks `close_prep` or registers that wrapper under a live wake kind.
+0283's own header carries the same statement. It is the ONE finding of the three the fix rounds
+left open: unlike FIX 1 and FIX 2 it is not a wrong answer in code this lane wrote but a product
+capability nobody has ruled on, so the ruling — retire the limb, or reroute it onto
+`clara.create_prepayment_schedule` (0223), or accept the residual — is owed before the code is.
+The two sibling-arm defects it used to sit beside are NOT open: 0281's "a coincidence this estate
+has never produced" justification was withdrawn as measurably false and then fixed (FIX 1), and the
+concurrency window is closed (FIX 2). Ledger checksum after the fix round's two redos:
+`0832489ac90494c17e31d90ca570bd35127ec229e8552d663534b180e7520ef3`.
+
 ## 0284 — a dedicated accrual-correction door (#936, riders wave 3, lane 06)
 
 `0284_accrual_correction.sql` closes the bug measured during #907's review: the only way to

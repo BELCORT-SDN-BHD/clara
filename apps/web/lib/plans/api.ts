@@ -198,9 +198,14 @@ export type PlanOccurrenceAttempt = {
   admitted_at: string;
 };
 
+/** #929/0283 retired the 0045 template arm: `kind` can only ever read
+ *  `"accounting_plan_overlap"` now, and every entry is keyed by `plan_id` — `template_id` was the
+ *  retired arm's own field and never appears any more. Kept as `string`/no literal union so a
+ *  stale client build reading an older server's `"adjustment_template_overlap"` payload still
+ *  typechecks (the form never branches on `kind`, only on `overlap_warning !== null`). */
 export type PlanOverlapWarning = {
   kind: string;
-  templates: readonly { template_id: string; name: string; cadence: string; accounts: readonly string[] }[];
+  templates: readonly { plan_id: string; name: string; cadence: string; accounts: readonly string[] }[];
 };
 
 export type PlanCreated = {
@@ -210,8 +215,16 @@ export type PlanCreated = {
   status: string;
   kind: string;
   next_occurrences: readonly { due_date: string; leg: string }[];
-  /** ADVISORY, never a refusal: a live 0045 adjustment template of this client already moves one
-   *  of these accounts. The form renders it as a persistent Alert (never a toast). */
+  /** ADVISORY, never a refusal: a live SIBLING accounting plan of this client already moves one
+   *  of these accounts (`clara._plan_overlap_warning`, 0281/#909). The 0045 adjustment-template
+   *  arm this warning also used to carry was retired by #929/0283 — it can never fire again. The
+   *  form renders it as a persistent Alert (never a toast).
+ *
+ *  #929's fix round (0283) also settled what a `null` here MEANS. The advisory excludes the plan
+ *  the door just wrote by its own ID, not by the basis value it carries, so a sibling plan with a
+ *  byte-identical basis — total overlap — is now named rather than swallowed; and the three
+ *  plan-creating doors serialise on the client advisory rung, so two people creating overlapping
+ *  plans at the same moment no longer both read `null`. */
   overlap_warning: PlanOverlapWarning | null;
 };
 

@@ -9,10 +9,9 @@ import test, { before } from "node:test";
 import assert from "node:assert/strict";
 import { noteLane } from "./rig-runtime-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
-import { humanQuery } from "./rig-helpers.mjs";
 import {
   ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught,
-  receiptsForTask, templateById, derivedOpKey, VERB12, uniq, account, MODEL,
+  receiptsForTask, templateById, derivedOpKey, VERB12, uniq, account, MODEL, mintTemplate,
 } from "./f-a4-pr2a-fixtures.mjs";
 
 let skipped = 0;
@@ -310,12 +309,16 @@ test("fa4p2a.W45-nulldigest a twin carrying NO digest is REFUSED, never replayed
   const lines = [
     { account_code: sc.target, debit_cents: 100, credit_cents: 0, description: "d" },
     { account_code: sc.prepaid, debit_cents: 0, credit_cents: 100, description: "c" }];
-  const planted = await humanQuery(sc.alice,
-    `select clara.propose_adjustment_template($1::uuid,$2,'monthly',date '2025-02-01',
-       date '2025-02-28',false,$3::jsonb,'m',$4) as r`,
-    [sc.client, `w45n-${uniq()}`, JSON.stringify(lines), sub]);
-  const twin = planted.rows[0].r?.template_id;
-  assert.ok(twin, "the human proposal did not land -- the fixture, not the wall, is broken");
+  // [#927] THE DOOR THAT COULD BUILD THIS SHAPE RETIRED at migration 0282, and the cell's own
+  // header already says what the shape stands for: "exactly a pre-migration row's shape -- sub-key
+  // present, digest NULL". Above that frontier the twin is therefore minted directly, with the
+  // agent's own delegate sub-key as its op key, which is the population this wall exists for. The
+  // WALL is unchanged and is driven in full at both frontiers.
+  const planted = await mintTemplate(sc.alice, {
+    client: sc.client, name: `w45n-${uniq()}`, start: "2025-02-01", end: "2025-02-28",
+    lines, opKey: sub });
+  const twin = planted?.template_id;
+  assert.ok(twin, "the twin did not land -- the fixture, not the wall, is broken");
   const row = await templateById(twin);
   assert.equal(row.proposed_op_key, sub, "the planted twin does not carry the agent's sub-key");
   assert.equal(row.proposed_request_digest, null,
@@ -342,11 +345,12 @@ test("fa4p2a.W45-nulldigest a twin carrying NO digest is REFUSED, never replayed
   const lines2 = [
     { account_code: sc2.target, debit_cents: 100, credit_cents: 0, description: "d" },
     { account_code: sc2.prepaid, debit_cents: 0, credit_cents: 100, description: "c" }];
-  const planted2 = await humanQuery(sc2.alice,
-    `select clara.propose_adjustment_template($1::uuid,$2,'monthly',date '2025-02-01',
-       date '2025-02-28',false,$3::jsonb,'m',$4) as r`,
-    [sc2.client, `w45n2-${uniq()}`, JSON.stringify(lines2), sub2]);
-  const twin2 = planted2.rows[0].r?.template_id;
+  // [#927] Minted the same way as arm 1's twin -- see the note there; the door that used to build
+  // this shape is retired, and a pre-migration row is what the shape stands for either way.
+  const planted2 = await mintTemplate(sc2.alice, {
+    client: sc2.client, name: `w45n2-${uniq()}`, start: "2025-02-01", end: "2025-02-28",
+    lines: lines2, opKey: sub2 });
+  const twin2 = planted2?.template_id;
   await rootQuery(
     `insert into clara.agent_act_receipts (firm_id, client_id, act_kind, subject_kind, subject_id,
         acting_actor, via_wake_kind, wake_task_id, model_name, model_version, rationale, verdict,

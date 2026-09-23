@@ -14,15 +14,19 @@ import { withTxn } from "./rig-txn.mjs";
 import {
   ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught, uniq,
   proposeTemplate, pair, templateById, receiptsForTask, opk, derivedOpKey, MODEL,
+  mintTemplate, makeTemplateLive, adjTemplateDoorsRetired,
 } from "./f-a4-pr2a-fixtures.mjs";
 
 let skipped = 0;
 const markSkip = () => { skipped += 1; };
 before(async () => { await ensurePrepay(noteLane); });
 
-const sign = (sub, client, template) => humanQuery(sub,
-  "select clara.sign_adjustment_template($1::uuid,$2::uuid,$3) as r",
-  [client, template, opk("fa4p2a-sign")]).then((r) => r.rows[0].r);
+// [#927] `clara.sign_adjustment_template` became one typed refusal at migration 0282 (owner
+// ruling #788: retire the 0045 recurring-adjustment template lane). W35's subject is THE BOOKS --
+// what a live schedule-bearing template posts -- so it keeps its full assertion set and takes the
+// frontier-aware live-maker; the cell whose subject IS the human door (W34's twin equivalence)
+// asserts the retirement instead.
+const sign = (sub, client, template) => makeTemplateLive(sub, { client, template });
 
 // THE OCCURRENCE BELT IS clara_runtime's, not a human's -- measured: the door holds EXECUTE for
 // clara_fn_owner and clara_runtime only, and a human call answers 42501. That is the design's own
@@ -170,6 +174,20 @@ test("fa4p2a.W34 the agent core and the human door, given IDENTICAL inputs, prod
   if (prepayGate(t, markSkip)) return;
   // Differing only in the two ctx-derived fields. If these ever diverge, the extraction has stopped
   // being a MOVE and become a second implementation.
+  // [#927] THE HUMAN HALF OF THIS TWIN RETIRED at 0282: `clara.propose_adjustment_template` is
+  // one typed refusal, so there is no longer a human door to be equivalent TO. Above that
+  // frontier the cell asserts that, and the equivalence runs in full on a pre-0282 chain.
+  if (await adjTemplateDoorsRetired()) {
+    const sc0 = await prepaidScene("w34r", { cents: 90000 });
+    const e = await caught(() => proposeTemplate(sc0.alice, {
+      client: sc0.client, name: `w34r-${uniq()}`, start: "2025-02-01", end: "2025-02-28",
+      lines: pair(sc0.target, sc0.prepaid, 100) }));
+    assert.ok(e, "the human door answered -- it must REFUSE once 0282 is applied");
+    assert.equal(JSON.parse(e.detail).reason, "adjustment_template_lane_retired",
+      "the human half of the twin is retired (#927); the agent core it was compared with is untouched");
+    noteLane("W34 -- the human door retired at 0282; the twin-equivalence claim runs on a pre-0282 chain");
+    return;
+  }
   const sc = await prepaidScene("w34", { cents: 90000 });
   await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
   const agent = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
@@ -235,7 +253,7 @@ test("fa4p2a.W44 the DUE ORACLE, the SIGN PROJECTION and the two shared helpers 
   // CONSTRUCTION -- which is why they needed no recut and the D1 inventory stayed at four.
   const sc = await prepaidScene("w44", { cents: 90000 });
   const lines = pair(sc.target, sc.prepaid, 30000);
-  const withSched = await proposeTemplate(sc.alice, {
+  const withSched = await mintTemplate(sc.alice, {
     client: sc.client, name: `w44s-${uniq()}`, start: "2025-02-01", end: "2025-04-30", lines,
     schedule: [
       { period_start: "2025-02-01", period_end: "2025-02-28", lines: pair(sc.target, sc.prepaid, 30000) },
@@ -243,7 +261,7 @@ test("fa4p2a.W44 the DUE ORACLE, the SIGN PROJECTION and the two shared helpers 
       { period_start: "2025-04-01", period_end: "2025-04-30", lines: pair(sc.target, sc.prepaid, 30000) },
     ] });
   const twin = await prepaidScene("w44b", { cents: 90000 });
-  const nullSched = await proposeTemplate(twin.alice, {
+  const nullSched = await mintTemplate(twin.alice, {
     client: twin.client, name: `w44n-${uniq()}`, start: "2025-02-01", end: "2025-04-30",
     lines: pair(twin.target, twin.prepaid, 30000) });
 

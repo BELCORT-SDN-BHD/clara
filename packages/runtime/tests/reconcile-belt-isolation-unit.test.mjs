@@ -34,7 +34,6 @@ import { join } from "node:path";
 import { reconcileTasks, runReconcilerSweep } from "../lib/reconciler.mjs";
 import * as reconcilerModule from "../lib/reconciler.mjs";
 import { reconcileFaRuns } from "../lib/reconciler-fa.mjs";
-import { reconcileAdjustmentRuns } from "../lib/reconciler-adjustments.mjs";
 import { reconcileRenderEnqueue } from "../lib/reconciler-render.mjs";
 import { reconcileDocumentIntakes, reconcileDocumentTasks } from "../lib/reconciler-documents.mjs";
 import { TaxonomyHaltError } from "../lib/relay.mjs";
@@ -311,17 +310,7 @@ test("FA probe: an unreadable catalog read is faOk:FALSE and dormant:FALSE — i
   assert.ok(!client.queries.some((q) => /from clara\.clients/.test(q.sql)), "the belt is skipped whole — no client is half-swept");
 });
 
-test("ADJ probe: same law, same shape — adjOk:FALSE, adjDormant:FALSE, belt skipped, cause logged", async () => {
-  const client = probeFailsClient("terminating connection due to administrator command");
-  const log = [];
-  const out = await reconcileAdjustmentRuns(client, { log: (m) => log.push(m) });
-  assert.equal(out.adjOk, false);
-  assert.equal(out.adjDormant, false);
-  assert.ok(log.some((m) => /adjustment surface probe error/.test(m)));
-  assert.ok(!client.queries.some((q) => /from clara\.clients/.test(q.sql)), "skipped whole");
-});
-
-test("the probes' dormant path is UNCHANGED — a genuinely absent surface is still a clean ok:true no-op", async () => {
+test("the probe's dormant path is UNCHANGED — a genuinely absent surface is still a clean ok:true no-op", async () => {
   const absent = {
     query(sql) {
       if (/to_regprocedure/.test(sql)) return Promise.resolve({ rows: [{ surface: false }], rowCount: 1 });
@@ -329,17 +318,14 @@ test("the probes' dormant path is UNCHANGED — a genuinely absent surface is st
     },
   };
   const fa = await reconcileFaRuns(absent, { log: () => {} });
-  const adj = await reconcileAdjustmentRuns(absent, { log: () => {} });
   assert.deepEqual([fa.faOk, fa.dormant], [true, true], "pre-0041 boots dormant, not failed");
-  assert.deepEqual([adj.adjOk, adj.adjDormant], [true, true], "pre-0045 likewise — the wrap did not turn dormancy into failure");
 });
 
 test("a probe failure inside a DAILY belt skips that belt ONLY — the sweep behind it completes", async () => {
   const client = sweepClient({ failOn: (sql) => (/to_regprocedure/.test(sql) ? new Error("connection reset") : null) });
   const log = [];
-  const swept = await runReconcilerSweep(client, { ...chatDeps((m) => log.push(m)), faRuns: true, adjRuns: true, prune: true });
+  const swept = await runReconcilerSweep(client, { ...chatDeps((m) => log.push(m)), faRuns: true, prune: true });
   assert.equal(swept.faOk, false, "the FA belt reports its own failure…");
-  assert.equal(swept.adjOk, false, "…and so does the adjustment belt, independently");
   // #636's belt (0229) joined this law at wave 2026-09-18 by DECISIONS §6.3: it feature-detects
   // through the SAME `to_regprocedure` read, so this fixture injects the identical failure into
   // it, and it must contain it the identical way rather than name itself in `beltErrors`.
@@ -408,6 +394,72 @@ test("autopost belt: POSITIVE CONTROL — even a client ready to answer the OLD 
   assert.ok(!client.queries.some((q) => /reconcile_autopost_rules/.test(q.sql)),
     "STILL never asked, even though this fixture was ready to answer — the retirement is unconditional, not DB-state-dependent");
   assert.ok(!("autopostOk" in swept), "a stub-satisfied old query would have produced autopostOk:true — it is simply absent instead");
+});
+
+// ---------------------------------------------------------------------------
+// The Wave D-b adjustment-occurrence belt — RETIRED at `#928` (owner ruling `#788`: retire the
+// 0045 recurring-adjustment template lane fully). UNLIKE the autopost belt above, the DB
+// surface (clara.adjustment_run_due / clara.run_adjustment_occurrence, migration 0045) is NOT
+// dropped by this ticket — `#927` closed the human-facing write doors first, and `#929` drops
+// the functions themselves. So this battery's positive control is stronger than the autopost
+// one's: the stub answers EVERY query the belt used to make, including the exact-signature
+// to_regprocedure probe, with a LIVE, valid surface — and the belt still must never be asked,
+// because the CALL PATH itself (reconciler-adjustments.mjs) is gone, independent of whether
+// the callee it used to reach still exists on this frontier.
+// ---------------------------------------------------------------------------
+
+/** A client that would have answered the OLD adjustment belt's queries validly on a frontier
+ *  where 0045's functions are still live (the real shape today, ahead of #929) — the POSITIVE
+ *  CONTROL: if the call path still existed, THIS client is exactly what would have made it
+ *  succeed with adjOk:true and a posted occurrence. */
+function preRetirementAdjustmentStubClient(open = []) {
+  const queries = [];
+  return {
+    queries,
+    query(sql, params) {
+      const s = String(sql).trim();
+      queries.push({ sql: s, params });
+      if (/runtime_heartbeats/.test(s)) return Promise.resolve({ rows: [], rowCount: 0 });
+      if (/to_regprocedure/.test(s)) return Promise.resolve({ rows: [{ surface: true }], rowCount: 1 });
+      if (/from clara\.clients/.test(s)) return Promise.resolve({ rows: [{ id: "c1" }], rowCount: 1 });
+      if (/adjustment_run_due/.test(s)) {
+        return Promise.resolve({ rows: [{ r: { due: true, template_id: "t1", period_start: "2026-01-01", period_end: "2026-01-31" } }], rowCount: 1 });
+      }
+      if (/^select clara\.run_adjustment_occurrence\(/.test(s)) {
+        return Promise.resolve({ rows: [{ r: { status: "posted", entry_id: "e1", run_id: "r1", mode: "post" } }], rowCount: 1 });
+      }
+      if (/status in \('running','awaiting_input'\)/.test(s)) {
+        const rows = open.map((t) => ({ id: t.id, status: t.status, workflow_run_id: `wf-${t.id}` }));
+        return Promise.resolve({ rows, rowCount: rows.length });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    },
+  };
+}
+
+test("adjustment belt: the export itself is GONE — reconcileAdjustmentRuns is no longer on the module", () => {
+  assert.equal(typeof reconcilerModule.reconcileAdjustmentRuns, "undefined",
+    "reconciler-adjustments.mjs is deleted whole (#928); a re-add here is exactly the regression this battery guards");
+});
+
+test("adjustment belt: RETIRED — never queried even on a frontier where 0045's functions still exist (the real shape today)", async () => {
+  const client = preRetirementAdjustmentStubClient([{ id: randomUUID(), status: "running" }]);
+  const swept = await runReconcilerSweep(client, { ...chatDeps(() => {}), adjRuns: true });
+  assert.ok(!client.queries.some((q) => /adjustment_run_due|run_adjustment_occurrence/.test(q.sql)),
+    "the belt is never issued at all — not attempted-and-caught, GONE from the call path — even though `adjRuns:true` " +
+    "and a ready-to-answer stub are exactly what would have produced adjOk:true/adjPosted:1 before #928");
+  assert.deepEqual(swept.beltErrors, [], "so nothing named 'adjustment runs' can appear as a contained failure either");
+  assert.ok(!("adjOk" in swept) && !("adjExamined" in swept) && !("adjPosted" in swept) && !("adjDrafted" in swept)
+    && !("adjFailed" in swept) && !("adjDormant" in swept) && !("adjBlockedClients" in swept) && !("adjTransientBlockedClients" in swept),
+    "no adj-shaped key survives in the receipt — a caller's old `swept.adjOk` read now sees undefined");
+});
+
+test("adjustment belt: unconditional too — an ordinary sweep with no adjRuns flag at all never touches it either", async () => {
+  const client = preRetirementAdjustmentStubClient();
+  const swept = await runReconcilerSweep(client, chatDeps(() => {}));
+  assert.ok(!client.queries.some((q) => /adjustment_run_due|run_adjustment_occurrence/.test(q.sql)),
+    "no flag, no call — the retirement does not depend on the leader ever passing adjRuns");
+  assert.ok(!("adjOk" in swept));
 });
 
 test("render enqueue: its surface probe is isolated like its dispatch sibling (renderEnqueueOk:false, not a throw)", async () => {
