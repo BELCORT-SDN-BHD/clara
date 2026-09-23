@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { access, mkdir, open, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -105,9 +105,39 @@ async function renameIntoPlace(from, to) {
   }
 }
 
+/**
+ * THE TEMP FILE IS THIS CALL'S ALONE (#1043).
+ *
+ * It used to be named `${path}.${pid}.${Date.now()}.tmp`, whose only per-call component is a
+ * MILLISECOND — so two writers of the SAME sidecar inside ONE process computed the SAME temp path
+ * whenever they landed in the same millisecond, and "atomic" stopped being true for both of them:
+ * they `writeFile` into one inode and each `rename` it away. The loser's rename finds nothing to
+ * move and throws `ENOENT` (which `renameIntoPlace` deliberately does not retry), and — far more
+ * often — the two writes interleave so the body the WINNER renames into place is a splice of both.
+ * A spliced `intake-<id>.json` reads back as "not found" for a live capability
+ * (`intake.mjs`'s `requireCapability` catches the parse error to `null`); a spliced
+ * `task-<id>.json` hard-fails `documentIngest_v2`.
+ *
+ * TWO SUCH WRITERS EXIST ON THE ORDINARY INTAKE PATH, and one of them is a belt, so this is not a
+ * corner: `intake.mjs`'s `finalizeDocumentIntake` writes the full transport sidecar for the task
+ * `clara.finalize_document_intake` just minted, while `reconciler-documents.mjs`'s
+ * `documentTaskIndex` merges EVERY `clara.document_processing_tasks` row onto its own sidecar on
+ * every sweep — and that row is committed before the intake path's own write runs.
+ *
+ * MEASURED AT 300 ROUNDS OF THE TWO SHAPES, and the RUNNER's platform is the bad one: on Linux
+ * (WSL, the shape CI runs) 286 of 300 rounds threw ENOENT and 271 left an unparseable sidecar,
+ * because two writes on a fast filesystem land in the same millisecond nearly every time; on this
+ * Windows rig, 6 and 116. After this change, 0 and 0 on both. CI job 107339673336 is the same
+ * defect in the wild (#1043).
+ *
+ * `randomUUID()` is the same per-call uniqueness `intake.mjs`'s `taskTempPath` already uses for the
+ * spool's other temp file, so the two temp shapes agree. The pid stays because it is what tells a
+ * human reading a spool directory whose leftover a temp file is. Both still end in `.tmp`, so
+ * `SPOOL_REAPABLE` and `listJsonEntries` ignore them exactly as before.
+ */
 async function atomicJson(path, value) {
   await ensureSpoolDir();
-  const next = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const next = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(next, `${JSON.stringify(value)}\n`, { encoding: "utf8", mode: 0o600 });
   try {
     await renameIntoPlace(next, path);
@@ -424,6 +454,10 @@ export async function spoolHealth() {
   try {
     await ensureSpoolDir();
     await access(dir);
+    // Deliberately still millisecond-only per #1043's fix, unlike atomicJson's temp name above:
+    // this write never renames into place (writeFile just overwrites the same inode again) and the
+    // `rm(..., { force: true })` below swallows a double delete, so two probes colliding on the
+    // same millisecond cost nothing.
     const probe = join(dir, `.ready-${process.pid}-${Date.now()}`);
     await writeFile(probe, "ok", { mode: 0o600 });
     await rm(probe, { force: true });

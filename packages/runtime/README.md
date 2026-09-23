@@ -1844,6 +1844,55 @@ end-to-end recovery cell (`p966 the belt still recovers a crashed mid-flight int
 abandoned-sidecar expiry cell, both of which now age their fixture's mtime rather than sweeping
 against a file they wrote in the same millisecond.
 
+## #1043 — a spool sidecar's temp file is unique per call, so two writers cannot splice one body
+
+**The defect, measured.** `#966` above made `atomicJson`'s rename survive a concurrent READER. It
+did not make the write survive a concurrent WRITER, because the temp file both writers used was the
+same file: `${path}.${pid}.${Date.now()}.tmp`, whose only per-call component is a millisecond. Two
+writers of the SAME sidecar inside ONE process therefore shared one temp path whenever they landed
+in the same millisecond, and both `writeFile` into it and `rename` it away. Two failures follow, and
+the quiet one is the worse:
+
+- the loser's `rename` finds nothing to move and throws `ENOENT` — which `renameIntoPlace`
+  deliberately does not retry (only the three Windows contention codes do) — so a live intake is
+  failed with an untyped `internal`;
+- far more often the two `writeFile`s interleave on the one inode, and the body the WINNER renames
+  into place is a splice of both. A spliced `intake-<id>.json` reads back as **"not found"** for a
+  live capability, because `lib/intake.mjs`'s `requireCapability` catches the parse error to `null`;
+  a spliced `task-<id>.json` hard-fails `documentIngest_v2`, which reads its transport off it.
+
+**Two such writers are on the ordinary intake path, and one of them is a belt.**
+`lib/intake.mjs:439` writes the full transport sidecar for the task `clara.finalize_document_intake`
+has just minted, while `lib/reconciler-documents.mjs:267` (`documentTaskIndex`) merges EVERY
+`clara.document_processing_tasks` row onto its own sidecar on every reconciler sweep — and that row
+is committed BEFORE the intake path's own write runs. Nothing about it is a corner case.
+
+**The fix.** `atomicJson`'s temp file is `${path}.${pid}.${randomUUID()}.tmp` — the same per-call
+uniqueness `lib/intake.mjs`'s `taskTempPath` already uses for the spool's other temp file. The pid
+stays because it is what tells a human reading a spool directory whose leftover a temp file is. Both
+shapes still end in `.tmp`, so `SPOOL_REAPABLE` and `listJsonEntries` ignore them exactly as before.
+`spoolHealth`'s own probe file keeps the old millisecond-only name on purpose — it never renames
+into place, so two probes colliding on one millisecond just overwrite and doubly-remove the same
+inode, which costs nothing.
+
+**What is still true after it, stated.** Two writers of one sidecar still race on the rename itself,
+and the last rename wins: a full transport write and a DB-row merge landing together can still leave
+the merge's shorter body on disk, which is the read-then-write residual `mergeTaskMeta`'s own header
+already names (task #28, P4), and which is now tracked as its own defect, #1044. What changed is that
+no reader ever sees a body no writer wrote, and no writer is told its write failed because a sibling
+won.
+
+**Evidence.** `tests/intake-sidecar-race.test.mjs`'s `p1043.collide` — 200 rounds of the two real
+writer shapes against one task sidecar, asserting that no write is rejected, that the body on disk is
+one of the two field for field (not merely parseable), and that both writers won rounds so the cell
+is not vacuous. Measured against the pre-fix code over 300 rounds, and **the runner's platform is
+the bad one**: on Linux (WSL, the shape CI runs) 286 of 300 rounds threw `ENOENT` and 271 left an
+unparseable sidecar, because two writes on a fast filesystem land in the same millisecond nearly
+every time; on this Windows rig, 6 and 116. After the fix, 0 and 0 on both. In the wild: CI job 107339673336, where the
+`#633` admission e2e's very first upload failed
+`ENOENT … rename '/tmp/clara-intake-admission-AdS9Jw/spool/task-c6245da9-….json.7113.1790191021685.tmp'`
+1.8 s after the world booted.
+
 ## #981 — one structured-detail carrier on a durable-Work refusal, instead of a fold per refusal
 
 `src/workRoutes.ts` turns one raised database error into one HTTP answer (`workErrorResponse`). It
