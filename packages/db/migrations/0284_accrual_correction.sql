@@ -42,6 +42,28 @@
 -- instruction, memo, source document) -- never the schedule, never the authority window. A ticket
 -- that wants to correct THOSE stays on `clara.revise_accounting_plan` itself.
 --
+-- AND "THE LIVE REVISION" MEANS THE LIVE REVISION, NOT THE ACCRUAL ROW'S MEMORY OF IT (ADV-01,
+-- riders wave 3 review round 1, driven on clara_l06 inside rolled-back transactions). An accrual's
+-- plan is reachable by the GENERIC plan-revision door a bookkeeper uses today, and a firm may
+-- lawfully move that window afterwards -- withdrawing future authority it no longer grants, or
+-- extending it. `clara.accrual_adjustments.effective_from/effective_to` is a fact DERIVED at the
+-- moment its own row was written; after such a revision it is STALE. An earlier cut of this file
+-- read the window from `v_old` (the superseded accrual row) while reading every other schedule
+-- argument from `v_cur` (the live revision), so a correction silently reverted a lawful plan
+-- revision: it restored an authority the firm had withdrawn -- the money-posting direction, since
+-- the plan then accrues months nobody authorised -- or dropped one it had extended, with no
+-- refusal and no overlap warning. Every place the window is used now reads `v_cur`, which also
+-- means the SHARED 0222 predicate `clara._assert_accrual_term_window` is evaluated against the
+-- authority that is actually live: a corrected term that no longer brackets it is refused by name
+-- (`accrual_term_window_mismatch`) instead of quietly shrinking the window to fit.
+--
+-- WHICH IS WHY THE TERM-WINDOW WALL SITS AFTER RUNG 1 AND NOT WITH THE PAYLOAD HALF. It is not a
+-- payload check at all: one of its two operands is MUTABLE WORLD STATE (the live revision's
+-- window), exactly like the accounts and the filing `clara._assert_accrual_world` proves. It
+-- belongs where the rest of the world half is -- after the reservation branch, under the plan row
+-- lock that stops the window moving between the read and the nested revision. What stays above the
+-- reservation is `clara._assert_accrual_particulars`, which reads nothing but the payload.
+--
 -- WHY THE COLUMNS AND THE UNIQUE INDEX NEEDED NO MIGRATION OF THEIR OWN. 0222 already declared
 -- `corrects_accrual_id`, `corrected_by_accrual_id`, the append-only trigger's one-admitted-update
 -- arm (`old.corrected_by_accrual_id is not null or new.corrected_by_accrual_id is null` -> refuse)
@@ -161,6 +183,7 @@ declare
   v_old clara.accrual_adjustments%rowtype;
   v_cur clara.accounting_plan_revisions%rowtype;
   v_fresh_corrected_by uuid;
+  v_nested_detail text; v_nested_message text;
   v_basis jsonb; v_dedupe jsonb; v_revision jsonb; v_new_id uuid; v_result jsonb;
 begin
   if p_op_key is null or p_op_key ~ '^\s*$' then
@@ -190,10 +213,9 @@ begin
   end if;
 
   -- THE PAYLOAD HALF, BEFORE THE RESERVATION -- deterministic, no side effects, safe to re-run on
-  -- a replay. The authority window is the LIVE row's own, unmoved by this door (see the header).
+  -- a replay. It is the payload ALONE: the term-window wall reads the LIVE revision's authority,
+  -- which is mutable world state, so it sits in the world half below (see the header).
   perform clara._assert_accrual_particulars(p_accrual);
-  perform clara._assert_accrual_term_window(p_accrual, v_old.effective_from, v_old.effective_to);
-  v_basis := clara._accrual_journal_basis(p_accrual, v_old.purpose, v_old.effective_from);
 
   -- THE RESERVATION. Re-raised with a typed reason, the same wrap `create_accrual_adjustment`
   -- gives `_reserve_op`'s own untyped "op_key reused with different args" (0004:46).
@@ -239,12 +261,40 @@ begin
       detail='{"reason":"no_live_revision"}';
   end if;
 
+  -- THE AUTHORITY WINDOW IS THE LIVE REVISION'S OWN, read under the lock that holds it still.
+  -- Never `v_old`'s: that pair is what the accrual row remembered when it was written, and a
+  -- lawful plan revision since then has moved it (see the header, ADV-01). The shared 0222
+  -- predicate therefore judges the corrected term against the authority that is actually live.
+  perform clara._assert_accrual_term_window(p_accrual, v_cur.effective_from, v_cur.effective_to);
+  v_basis := clara._accrual_journal_basis(p_accrual, v_old.purpose, v_cur.effective_from);
+
   -- THE NESTED DOOR -- clara.revise_accounting_plan, PINNED, UNTOUCHED (see the header for why:
   -- lane 05 pins this same body). Every schedule argument is the LIVE revision's own, carried
   -- through unchanged; only the basis is new.
-  v_revision := clara.revise_accounting_plan(v_old.plan_id, v_cur.frequency, v_cur.day_rule,
-    v_cur.day_of_month, v_cur.timezone, v_old.effective_from, v_old.effective_to, v_basis,
-    v_cur.reversal_day_rule, p_op_key || ':plan');
+  --
+  -- THE DERIVED KEY'S OWN COLLISION IS TYPED (ADV-06). `clara._reserve_op` keys on
+  -- (firm_id, fn, op_key), so `p_op_key || ':plan'` shares the (firm, 'revise_accounting_plan')
+  -- namespace with keys a caller chooses for that door DIRECTLY -- and #936 is the first place the
+  -- nested door is one a human reaches with an arbitrary key of their own. When the two collide,
+  -- the nested door re-raises `_reserve_op`'s own message with NO detail at all, so a surface can
+  -- render only CLR10 and the raw sentence. This wrap types exactly that case -- an UNTYPED CLR10
+  -- out of the nested call -- and re-raises everything else byte-identically with a bare `raise`,
+  -- so no refusal the plan door already classifies is masked or renamed.
+  begin
+    v_revision := clara.revise_accounting_plan(v_old.plan_id, v_cur.frequency, v_cur.day_rule,
+      v_cur.day_of_month, v_cur.timezone, v_cur.effective_from, v_cur.effective_to, v_basis,
+      v_cur.reversal_day_rule, p_op_key || ':plan');
+  exception when sqlstate 'CLR10' then
+    get stacked diagnostics v_nested_detail = pg_exception_detail,
+                            v_nested_message = message_text;
+    if coalesce(btrim(v_nested_detail), '') = '' then
+      raise exception 'the plan revision this correction records is blocked: %', v_nested_message
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','plan_op_key_conflict','field','op_key',
+            'nested_op_key', p_op_key || ':plan')::text;
+    end if;
+    raise;
+  end;
 
   -- THE SUCCESSOR ROW, for the revision that just came out of the nested call. Every column
   -- `create_accrual_adjustment`'s own tail (`_accrual_finish`, 0222 §C) writes, from the CORRECTED
@@ -256,7 +306,7 @@ begin
       instruction, corrects_accrual_id, recorded_by)
     values (v_firm, v_old.client_id, v_old.plan_id, (v_revision ->> 'revision')::int, v_old.purpose,
       btrim(p_accrual ->> 'expense_account_code'), btrim(p_accrual ->> 'liability_account_code'),
-      (p_accrual ->> 'amount_cents')::bigint, 'MYR', v_old.effective_from, v_old.effective_to,
+      (p_accrual ->> 'amount_cents')::bigint, 'MYR', v_cur.effective_from, v_cur.effective_to,
       (p_accrual ->> 'service_period_start')::date, (p_accrual ->> 'service_period_end')::date,
       p_accrual ->> 'term_source',
       nullif(btrim(coalesce(p_accrual ->> 'document_service_period_id','')),'')::uuid,
@@ -293,8 +343,10 @@ comment on function clara.correct_accrual_adjustment(uuid,jsonb,text) is
   'corrected basis, writes the SUCCESSOR accrual-detail row for that revision with '
   'corrects_accrual_id naming the row it supersedes, and stamps the superseded row''s '
   'corrected_by_accrual_id -- the one update 0222''s append-only trigger admits. The schedule and '
-  'the authority window are the live revision''s own, carried through unchanged: this door corrects '
-  'what was STATED, never when or how often the plan runs. bookkeeper+; idempotent on '
+  'the authority window are the live revision''s own -- read under the plan row lock, never the '
+  'superseded accrual row''s stale copy -- and carried through unchanged: this door corrects '
+  'what was STATED, never when or how often the plan runs, and a corrected term that no longer '
+  'brackets the LIVE authority is refused accrual_term_window_mismatch. bookkeeper+; idempotent on '
   '(firm, correct_accrual_adjustment, op_key); the plan verb it nests holds the derived key '
   'op_key||'':plan''; already-posted occurrences and their reversals are untouched -- the correction '
   'applies from the next due date, exactly as clara.revise_accounting_plan''s own supersede-and-keep '
@@ -379,9 +431,26 @@ begin
       'clara._finish_op(', 'clara._audit(', 'clara.revise_accounting_plan(',
       'clara._assert_accrual_particulars(', 'clara._assert_accrual_term_window(',
       'clara._assert_accrual_world(', 'for update', 'corrected_by_accrual_id = v_new_id',
-      'accrual_already_corrected'] loop
+      'accrual_already_corrected',
+      -- ADV-01: the authority window comes from the LIVE revision, at BOTH places it is used
+      -- (the shared term-window predicate and the nested plan verb).
+      'clara._assert_accrual_term_window(p_accrual, v_cur.effective_from, v_cur.effective_to)',
+      'v_cur.effective_from, v_cur.effective_to, v_basis',
+      -- ADV-06: the derived nested key's collision is classified rather than bare.
+      'plan_op_key_conflict'] loop
     if position(r in v_src) = 0 then
       raise exception '#936 tail: the door is missing "%"', r using errcode='CLR10';
+    end if;
+  end loop;
+  -- …AND THE STALE PAIR IS NOWHERE IN THE BODY. An assertion about what IS present cannot catch a
+  -- second, forgotten use of the superseded accrual row's remembered window, which is exactly the
+  -- shape ADV-01 found: five schedule arguments read from the live revision and the sixth from
+  -- `v_old`. `v_old` is still read for identity, purpose, authority and the plan id; its window is
+  -- what must never be read again.
+  foreach r in array array['v_old.effective_from', 'v_old.effective_to'] loop
+    if position(r in v_src) > 0 then
+      raise exception '#936 tail: the door still reads "%" -- the authority window is the LIVE revision''s, never the superseded accrual row''s', r
+        using errcode='CLR10';
     end if;
   end loop;
 
@@ -412,6 +481,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#936 tail: OK -- clara.correct_accrual_adjustment resolves, is SECURITY DEFINER owned by clara_fn_owner with a pinned search_path, granted to clara_authenticated alone (no PUBLIC, no clara_runtime, no agent read lane); its body carries the bookkeeper floor, the reservation/receipt pair, the audit call, the nested (never recut) clara.revise_accounting_plan, the shared 0222 particulars/term-window/world predicates, the RUNG-1 lock, the one-way correction stamp and the accrual_already_corrected token; the twelve bodies it depends on hash byte-identically to their measured pre-images, so nothing was recut; and clara.accrual_adjustments keeps its three triggers and uq_accrual_adjustments_corrects unmoved.';
+  raise notice '#936 tail: OK -- clara.correct_accrual_adjustment resolves, is SECURITY DEFINER owned by clara_fn_owner with a pinned search_path, granted to clara_authenticated alone (no PUBLIC, no clara_runtime, no agent read lane); its body carries the bookkeeper floor, the reservation/receipt pair, the audit call, the nested (never recut) clara.revise_accounting_plan, the shared 0222 particulars/term-window/world predicates, the RUNG-1 lock, the one-way correction stamp, the accrual_already_corrected and plan_op_key_conflict tokens, and the authority window read from the LIVE revision at both of its uses with the superseded row''s stale pair absent from the body entirely; the twelve bodies it depends on hash byte-identically to their measured pre-images, so nothing was recut; and clara.accrual_adjustments keeps its three triggers and uq_accrual_adjustments_corrects unmoved.';
 end
 $t936_tail$;

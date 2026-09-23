@@ -79,6 +79,10 @@ export async function assertAccrualCorrectionCohortPresent(t) {
 
 export const ACCRUAL_CORRECTION_REASON = {
   alreadyCorrected: "accrual_already_corrected",
+  // The derived nested key the correction hands clara.revise_accounting_plan shares a namespace
+  // with keys a caller chooses for that door directly. When the two collide, the nested door's
+  // OWN untyped CLR10 is re-raised with this reason rather than escaping unclassifiable (ADV-06).
+  planOpKeyConflict: "plan_op_key_conflict",
 };
 
 // ===========================================================================================

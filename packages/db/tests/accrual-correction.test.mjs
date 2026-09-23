@@ -35,7 +35,8 @@ import assert from "node:assert/strict";
 import {
   gateAccrualCorrection, assertAccrualCorrectionCohortPresent, buildWorkWorld, endPool,
   printLaneNotes, printSkipCount, opk, rootQuery, CLR, assertPair,
-  instructionRef, occurrenceRows, postPlanWork,
+  instructionRef, occurrenceRows, occurrenceExtras, postPlanWork,
+  reviseAccountingPlan, requestPlanCatchUp,
   todayInPlanZone, shiftMonths,
   accrual, accrualRows, accrualCount, freshAccrualClient,
   createAccrualAdjustment, getAccrualAdjustment,
@@ -70,6 +71,32 @@ async function monthEndBack(n) {
   return r.rows[0].d;
 }
 
+/** A window that STARTS in the past and ENDS in the future, with two named later endpoints.
+ *  The window-authority cells need a schedule whose authority a firm can still lawfully WITHDRAW
+ *  (`withdrawTo`, still ahead of today and still inside the stated term) or lawfully EXTEND past
+ *  the term it accrues for (`overreachTo`) — neither of which a wholly-past window admits. The
+ *  first due date is the end of LAST month, so the configuration still admits one occurrence on
+ *  every calendar day this battery runs. */
+async function bridgingSpan() {
+  return {
+    from: monthStart(await shiftMonths(today, -1)),
+    to: await monthEndBack(-2),
+    withdrawTo: await monthEndBack(-1),
+    overreachTo: await monthEndBack(-3),
+  };
+}
+
+/** The plan's LIVE revision, with every date rendered ::text — node-postgres hands a `date`
+ *  column back as a LOCAL-midnight Date, and a window assertion must never travel through one. */
+async function liveWindow(plan) {
+  const r = await rootQuery(
+    `select revision, frequency, day_rule, day_of_month, timezone, reversal_day_rule, basis,
+            effective_from::text as effective_from,
+            case when effective_to is null then null else effective_to::text end as effective_to
+       from clara.accounting_plan_revisions where plan_id=$1 and superseded_at is null`, [plan]);
+  return r.rows[0];
+}
+
 /** A window that ENDS at last month's month end — safely in the past on every calendar day this
  *  battery runs, so "the current period's occurrence was admitted at configuration time" holds
  *  regardless of today's date (the same reasoning `span()` states in accrual-adjustments.test.mjs). */
@@ -82,10 +109,10 @@ async function pastSpan(monthsBack = 2) {
 
 /** A complete, valid accrual configuration on a FRESH client of firm A, through the human
  *  configuration door — the base row every correction cell corrects. */
-async function configureBase({ sub = BOB(), tag = "p936", over = {} } = {}) {
+async function configureBase({ sub = BOB(), tag = "p936", over = {}, span = null } = {}) {
   const client = await freshAccrualClient(ALICE(), tag);
   const ref = await instructionRef({ client, author: sub });
-  const s = await pastSpan(2);
+  const s = span ?? (await pastSpan(2));
   const particulars = accrual({
     servicePeriodStart: s.from, servicePeriodEnd: s.to, ...over,
   });
@@ -173,10 +200,25 @@ test("p936.posted.untouched — an occurrence already posted under the OLD revis
   const workId = base.occurrence.work_id;
   const entry = await postPlanWork({ work: workId, client: base.client, author: base.author, firm: world.firms.A });
 
+  // THE REVERSAL THIS CELL'S OWN TITLE CLAIMS, ADMITTED RATHER THAN ASSUMED (L06-SPEC-01). The
+  // accrual's reversal leg falls due on the first day of the following month and is admissible
+  // only once its accrual is ON THE BOOKS (0193's orphan wall, p652.reversal.binds). It is
+  // admitted and left OUTSTANDING — an admitted, unposted reversal is exactly the state the
+  // ticket's acceptance line is about, and the scene has to contain one for the claim to mean
+  // anything.
+  const reversalDue = monthStart(today);
+  const opened = await requestPlanCatchUp(BOB(), { plan: base.plan_id, from: reversalDue, to: reversalDue });
+  assert.equal(opened.admitted, 1, "the reversal is admitted once its accrual is on the books");
+  const revBefore = (await occurrenceExtras(base.plan_id)).find((x) => x.leg === "reversal");
+  assert.ok(revBefore, "the reversal occurrence exists before the correction");
+  assert.equal(revBefore.reverses_entry_id, entry, "…and NAMES the entry it will undo");
+
   const before = await occurrenceRows(base.plan_id);
-  assert.equal(before.length, 1, "one occurrence exists before the correction");
-  const beforeOcc = before[0];
-  assert.equal(beforeOcc.revision, 1, "…admitted under revision 1");
+  assert.equal(before.length, 2, "two occurrences exist before the correction: the posted accrual and its reversal");
+  const beforePrimary = before.find((o) => o.leg === "primary");
+  const beforeReversal = before.find((o) => o.leg === "reversal");
+  assert.equal(beforePrimary.revision, 1, "…the accrual admitted under revision 1");
+  assert.equal(beforeReversal.revision, 1, "…and so was its reversal");
 
   const corrected = accrual({
     servicePeriodStart: base.particulars.service_period_start,
@@ -185,19 +227,29 @@ test("p936.posted.untouched — an occurrence already posted under the OLD revis
   });
   await correctAccrualAdjustment(BOB(), { accrualId: base.accrual_id, accrual: corrected });
 
-  // THE ALREADY-ADMITTED OCCURRENCE IS BYTE-FOR-BYTE UNMOVED: same row, same revision, same
-  // work_id, same admission — a correction writes a new PLAN REVISION and a new ACCRUAL DETAIL
+  // THE ALREADY-ADMITTED OCCURRENCES ARE BYTE-FOR-BYTE UNMOVED: same rows, same revisions, same
+  // work_ids, same admissions — a correction writes a new PLAN REVISION and a new ACCRUAL DETAIL
   // row; it does not touch clara.accounting_plan_occurrences at all.
   const after = await occurrenceRows(base.plan_id);
-  assert.equal(after.length, 1, "the correction admitted NO new occurrence of its own");
-  assert.deepEqual(after[0], beforeOcc, "the occurrence row is byte-for-byte unmoved by the correction");
+  assert.equal(after.length, 2, "the correction admitted NO new occurrence of its own");
+  assert.deepEqual(after.find((o) => o.leg === "primary"), beforePrimary,
+    "the posted accrual's occurrence row is byte-for-byte unmoved by the correction");
+  assert.deepEqual(after.find((o) => o.leg === "reversal"), beforeReversal,
+    "…and so is its OUTSTANDING reversal — the half this cell's title claims");
+  const revAfter = (await occurrenceExtras(base.plan_id)).find((x) => x.leg === "reversal");
+  assert.deepEqual(revAfter, revBefore,
+    "the reversal still names the entry it undoes, and its attempts ledger did not move");
 
   // …AND THE ENTRY IT ALREADY POSTED IS UNCHANGED — read independently through the lineage join,
   // keyed on the OLD accrual id, whose own detail must still show what actually posted.
   const oldDetail = await getAccrualAdjustment(BOB(), base.accrual_id);
   assert.equal(oldDetail.posted, true, "the old accrual is still recorded as posted");
-  assert.equal(oldDetail.occurrences[0].entry_id, entry, "…against the SAME entry it always named");
-  assert.equal(oldDetail.occurrences[0].revision, 1, "…admitted under the OLD revision, unchanged");
+  assert.equal(oldDetail.occurrences.length, 2, "the old accrual's own read carries both legs");
+  const postedOcc = oldDetail.occurrences.find((o) => o.leg === "primary");
+  assert.equal(postedOcc.entry_id, entry, "…against the SAME entry it always named");
+  assert.equal(postedOcc.revision, 1, "…admitted under the OLD revision, unchanged");
+  assert.equal(oldDetail.reversal?.reverses_entry_id, entry,
+    "…and the reversal it names at the top level still undoes that same entry");
 });
 
 // ===========================================================================================
@@ -301,4 +353,137 @@ test("p936.acl.grants — the correction door is clara_authenticated only: no PU
   assert.equal(r.rows[0].authenticated, true, "clara_authenticated holds EXECUTE");
   assert.equal(r.rows[0].public, false, "PUBLIC does not");
   assert.equal(r.rows[0].runtime, false, "clara_runtime does not — there is no OBO twin for this ticket's scope");
+});
+
+// ===========================================================================================
+// p936.window.withdrawn — A LAWFUL PLAN REVISION IS NOT UNDONE BY A LATER CORRECTION.
+//
+// The adversarial lens (ADV-01) drove this on the rig: the correction door took its schedule
+// arguments from the LIVE revision but its (effective_from, effective_to) pair from the
+// SUPERSEDED ACCRUAL ROW, so a correction silently restored an authority the firm had withdrawn
+// through clara.revise_accounting_plan — the money-posting direction, because the plan then
+// accrues months the firm had stopped authorising. p936.basic cannot see it: there, the window
+// was never moved, so the stale pair and the live pair are the same pair.
+// ===========================================================================================
+
+test("p936.window.withdrawn — authority a firm withdrew through clara.revise_accounting_plan survives a later correction: the correction carries the LIVE revision's window, never the superseded accrual row's", async (t) => {
+  if (await gateAccrualCorrection(t)) return;
+  const s = await bridgingSpan();
+  const base = await configureBase({ tag: "withdrawn", span: { from: s.from, to: s.to } });
+  assert.equal(base.revision, 1, "the base accrual is on the plan's first revision");
+
+  // THE LAWFUL REVISION, through the generic plan door a bookkeeper reaches today: the firm
+  // withdraws the last month of authority. Every other schedule argument is the live one.
+  const before = await liveWindow(base.plan_id);
+  assert.equal(before.effective_to, s.to, "the configuration's own window, before anything moved");
+  await reviseAccountingPlan(BOB(), {
+    plan: base.plan_id, frequency: before.frequency, dayRule: before.day_rule,
+    dayOfMonth: before.day_of_month, timezone: before.timezone,
+    effectiveFrom: before.effective_from, effectiveTo: s.withdrawTo,
+    basis: before.basis, reversalDayRule: before.reversal_day_rule,
+    opKey: opk("p936-withdraw"),
+  });
+  const withdrawn = await liveWindow(base.plan_id);
+  assert.equal(withdrawn.revision, 2, "the lawful revision is the plan's second");
+  assert.equal(withdrawn.effective_to, s.withdrawTo, "…and it is the one that withdrew the authority");
+
+  // THE CORRECTION — the amount only; this door corrects what was STATED, never the window.
+  const result = await correctAccrualAdjustment(BOB(), {
+    accrualId: base.accrual_id,
+    accrual: accrual({
+      servicePeriodStart: base.particulars.service_period_start,
+      servicePeriodEnd: base.particulars.service_period_end,
+      cents: 777700,
+    }),
+  });
+  assert.equal(result.revision, 3, "the correction advances the plan to a third revision");
+  assert.equal(result.superseded_revision, 2, "…superseding the lawful revision, not the first");
+
+  const after = await liveWindow(base.plan_id);
+  assert.equal(after.effective_to, s.withdrawTo,
+    "THE WITHDRAWN AUTHORITY STANDS: the correction did not restore the month the firm had stopped authorising");
+  assert.equal(after.effective_from, before.effective_from, "…and the window's other side did not move either");
+  assert.equal(after.basis.lines[0].debit_cents, 777700, "…while the corrected amount IS on the live basis");
+
+  // AND THE SUCCESSOR ACCRUAL ROW AGREES WITH THE PLAN IT NAMES — the whole point of #936 is that
+  // the two stop contradicting each other, so the window on the detail row is the live one too.
+  const rows = await accrualRows(base.client);
+  const newRow = rows.find((r) => r.id === result.accrual_id);
+  assert.equal(newRow.effective_to, s.withdrawTo, "the successor accrual row carries the LIVE window");
+  assert.equal(newRow.effective_from, before.effective_from);
+});
+
+// ===========================================================================================
+// p936.window.extended — AN AUTHORITY THAT OUTRAN ITS TERM IS REFUSED BY NAME, NEVER SHRUNK BACK.
+// ===========================================================================================
+
+test("p936.window.extended — when a lawful revision extended the authority past the stated term, a correction is REFUSED accrual_term_window_mismatch rather than silently shrinking the window back to the superseded row's", async (t) => {
+  if (await gateAccrualCorrection(t)) return;
+  const s = await bridgingSpan();
+  const base = await configureBase({ tag: "extended", span: { from: s.from, to: s.to } });
+
+  const before = await liveWindow(base.plan_id);
+  await reviseAccountingPlan(BOB(), {
+    plan: base.plan_id, frequency: before.frequency, dayRule: before.day_rule,
+    dayOfMonth: before.day_of_month, timezone: before.timezone,
+    effectiveFrom: before.effective_from, effectiveTo: s.overreachTo,
+    basis: before.basis, reversalDayRule: before.reversal_day_rule,
+    opKey: opk("p936-extend"),
+  });
+  const extended = await liveWindow(base.plan_id);
+  assert.equal(extended.effective_to, s.overreachTo, "the plan now claims authority past the stated term");
+  const countBefore = await accrualCount(base.client);
+
+  // The corrected particulars restate the SAME term. Against the LIVE window that term no longer
+  // brackets the authority, and the shared 0222 predicate says so by name.
+  await assertPair(CLR.badRequest, ACCRUAL_REASON.termWindowMismatch,
+    () => correctAccrualAdjustment(BOB(), {
+      accrualId: base.accrual_id,
+      accrual: accrual({
+        servicePeriodStart: base.particulars.service_period_start,
+        servicePeriodEnd: base.particulars.service_period_end,
+        cents: 888800,
+      }),
+    }), "a correction whose stated term no longer brackets the LIVE authority");
+
+  const after = await liveWindow(base.plan_id);
+  assert.equal(after.revision, extended.revision, "the refused correction advanced no revision");
+  assert.equal(after.effective_to, s.overreachTo, "…and the extended authority is untouched");
+  assert.equal(await accrualCount(base.client), countBefore, "nothing was written");
+});
+
+// ===========================================================================================
+// p936.refusal.plan_key_conflict — THE DERIVED NESTED KEY'S COLLISION IS TYPED, NOT BARE.
+//
+// ADV-06: the derived nested key lands in the SAME (firm, 'revise_accounting_plan') namespace a
+// caller reaches directly with a key of its own choosing. The collision used to escape as
+// clara._reserve_op's own untyped CLR10 with no DETAIL at all, so no surface could classify it.
+// ===========================================================================================
+
+test("p936.refusal.plan_key_conflict — a correction whose derived plan key was already spent by a DIRECT plan revision is refused with a typed reason, never a bare untyped CLR10", async (t) => {
+  if (await gateAccrualCorrection(t)) return;
+  const base = await configureBase({ tag: "plankey" });
+  const key = opk("p936-plankey");
+
+  // Somebody spends the derived key on the generic plan door first.
+  const before = await liveWindow(base.plan_id);
+  await reviseAccountingPlan(BOB(), {
+    plan: base.plan_id, frequency: before.frequency, dayRule: before.day_rule,
+    dayOfMonth: before.day_of_month, timezone: before.timezone,
+    effectiveFrom: before.effective_from, effectiveTo: before.effective_to,
+    basis: before.basis, reversalDayRule: before.reversal_day_rule,
+    opKey: key + ":plan",
+  });
+  const countBefore = await accrualCount(base.client);
+
+  await assertPair(CLR.badRequest, ACCRUAL_CORRECTION_REASON.planOpKeyConflict,
+    () => correctAccrualAdjustment(BOB(), {
+      accrualId: base.accrual_id, opKey: key,
+      accrual: accrual({
+        servicePeriodStart: base.particulars.service_period_start,
+        servicePeriodEnd: base.particulars.service_period_end,
+        cents: 313100,
+      }),
+    }), "a correction whose derived plan key is already spent");
+  assert.equal(await accrualCount(base.client), countBefore, "nothing was written");
 });
