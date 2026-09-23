@@ -112,6 +112,18 @@ an extracted or inferred period; a term the product derived from an invoice's ow
 a date range it saw, or a conversation it summarised; treating a corrected term as something a
 revision re-derives — a re-derived allocation is a new schedule.
 
+**Corrected term**:
+A service period a person has RE-STATED with different dates, so what the document is taken to say
+about the span it buys has changed. It is not the same fact as a superseded term ROW: recording a
+period on a document that already carries a live one supersedes the old row whatever the new one
+says, so a second verification that restates the same two dates supersedes a row and corrects
+nothing. Only a corrected term makes an allocation already derived from the old one wrong, and only
+a corrected term is grounds for telling a firm its schedule has to be rebuilt.
+_Avoid_: Reading "the row this schedule rode is no longer live" as "the term was corrected" — the
+first is bookkeeping about rows, the second is a statement about the client's affairs, and a
+surface that confuses them tells a firm to abandon a running amortisation for no reason; treating a
+corrected term as something a revision re-derives — a re-derived allocation is a new schedule.
+
 **Plan catch-up**:
 Admitting due events that already passed, over a window a person names. Oldest first, bounded per
 request, and never reaching back past the date the plan's authority starts.

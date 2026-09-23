@@ -825,6 +825,63 @@ that cannot work is not shown. Both verbs share `callOpeningAct` in `lib/registe
 and settle the SAME banner, so a person who performed one act on one basis is owed one standing
 answer rather than two competing ones.
 
+**The refresh door's own three refusals are said in words too** (review round 1, ADV-05). 0286
+mints `no_reread_to_refresh`, `stale_extraction_version` and `refresh_extraction_mixed`, and none
+of them is a sentence — they are machine words, unlike the producer's named refusals the banner
+renders verbatim for good reason. `no_reread_to_refresh` is the single likeliest outcome of the new
+act (a colleague, or a second tab, refreshed the basis first), and a professional met
+"Refused · CLR31 · no_reread_to_refresh" has been told nothing at all. Each has its own branch in
+`OpeningParseOutcomeBanner` with its own literal message key — a lookup table over `t()` would
+compile while a key was missing and fail in the face — and each says what happened, that nothing
+was changed, and what to do next.
+
+**The basis's state shows WHICH reading it stands on, after the moment has passed** (#986 AC2,
+review round 1, L06-SPEC-04). The 202 banner lives in component state and is gone on reload, so a
+colleague opening the basis later saw a target set with nothing saying an earlier reading had been
+retired from under it. `loadOpeningTargetRefreshes` reads `clara.opening_target_refreshes` (plain
+firm-scoped SELECT, no door, no new grant) newest-first, and `OpeningSourceHeader` names the
+newest receipt beside the provenance line: how many readings this basis has stood on, when the
+last retirement happened, and how many lines replaced how many. It is a SEPARATE `useAsyncRead` in
+`OpeningSeedWorkbench` for the same reason the tie document's filename is — a failure there (an
+older database under a newer build, most of all) must degrade to "no refresh is named" rather than
+take the targets and the tie gates down with it. The component still mints nothing: the counts and
+the date are the receipt's, and the only arithmetic is `refreshes.length + 1`, because the FIRST
+reading leaves no receipt.
+
+## #936 — the generic plan revision is not the road to an accrual's figures
+
+`clara.revise_accounting_plan` accepts an accrual's plan happily: it knows nothing about accruals.
+It records a new plan revision carrying the new basis while `clara.accrual_adjustments` stays keyed
+to the revision it was written for, so a reader joining plan → revision → accrual detail afterwards
+sees the OLD amount beside the NEW one the ledger will post from the next due date — the books
+contradicting themselves, which is the defect #936's first sentence names. The dedicated door
+`clara.correct_accrual_adjustment` (0284) advances BOTH together, and
+`/clients/:clientId/accruals/:accrualId/correct` is where a person reaches it.
+
+`PlanReviseForm` holds that wall at the only surface that can START the generic act: for a plan an
+accrual's figures are stated on it renders no form at all, says what would go wrong in the words of
+the books, and links to the correction. The discriminator is a SECOND read —
+`liveAccrualForPlan(loadAccruals(clientId), planId)`, keyed on
+`clara.accrual_adjustments.plan_id` — because `clara.get_accounting_plan` carries no such field and
+`kind` cannot stand in for it: an accrual's plan is a `reversing_journal`, and so is an ordinary
+reversing journal nobody configured from an accrual (measured on the lane rig: 115 reversing plans
+with an accrual, 3 without). The live row is the highest revision, because a corrected accrual
+leaves both rows on the relation — that is the whole of #936's lineage. The read is folded into the
+SAME `DataState` as the plan read, so the form renders only once BOTH have succeeded: a surface
+that fell back to the form when it could not tell would be choosing to risk the contradiction, and
+the plan's other lifecycle controls are all still on its detail page.
+
+## #919 — a corrected term on the prepayment surfaces
+
+Both the detail banner and the list row's **Term corrected** badge are keyed on `term_moved === true`
+and never on `term_live`. `clara._record_document_service_period_core` supersedes the live service
+period UNCONDITIONALLY — it compares no dates — so `term_live` goes false on a re-record that
+restates the term byte for byte, and a surface keyed on it told firms that a running amortisation
+needed rebuilding when nothing about the term had changed. `=== true` rather than a truthiness test
+is the second half of the same discipline: the field arrives as unvalidated jsonb, and an absent one
+— a web build ahead of its database, or a rolled-back migration under a live runtime — is falsy,
+which would paint the warning on every prepayment in the firm.
+
 **The coverage footer is not the tie.** Mapped/unmapped counts and cents live in the target panel,
 labelled as coverage, with no percentage — and deliberately OUTSIDE `OpeningDryrunStrip`, whose own
 law is that it mints no numeral and re-derives no tie. C-25's defect was exactly a coverage figure

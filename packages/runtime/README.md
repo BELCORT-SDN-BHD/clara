@@ -1364,6 +1364,21 @@ become a second road past the pinned parse key.
 **`openingOpKey` did not move**, and that is the point: `parseOpeningTargets` refuses a re-read
 exactly as it did before, and `clara.record_opening_targets_parsed`'s body sha is pinned in 0286's
 prestate AND tail.
+
+**A receipt with no counts is not a successful refresh** (review round 1, ADV-08).
+`clara._reserve_op` answers `{pending:true}` when the key is held with no stored result, and the
+door returns that envelope verbatim on its dedupe branch. Reading the counts as
+`targets_recorded ?? lines.length` painted that envelope as a 202 "N read, 0 retired" — an act
+that did nothing, reported as news. `refreshOpeningTargets` now answers a typed 409
+`{status:'refused', code:'CLR13', reason:'operation_in_flight'}` for a receipt carrying no
+`targets_recorded`, and the counts it does report are the RECEIPT's own, never the payload's
+length: how many lines the new reading carried and how many the reading it left behind had are
+facts about the DOCUMENT, not about what this process happened to send. The state is hard to reach
+(the door takes `opening_seed_registry FOR UPDATE` before its reservation, so two callers
+serialize and the reservation and the receipt commit together), which is exactly why it must not
+be papered over. A DB-side mirror of #936's own `pending` branch was considered and left out: no
+cell could ever drive it through the door, so it would be untestable defensive code inside a
+migration whose tail census cannot reach behaviour.
 ## The intake batch lane (#636)
 
 `lib/intake-batches.mjs` is a NEW, NON-FROZEN module carrying every line of batch logic:

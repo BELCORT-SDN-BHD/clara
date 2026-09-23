@@ -2994,7 +2994,36 @@ no column, no trigger, no index. `corrects_accrual_id`, `corrected_by_accrual_id
 ("the columns and the unique index exist; no writer does today") is why. The door carries the LIVE
 revision's own schedule and authority window through to the nested `revise_accounting_plan` call
 unchanged; it corrects what was STATED (amount, either leg, term, method, instruction), never when
-or how often the plan runs. Already-posted occurrences and their reversals are consequently
+or how often the plan runs.
+
+**"The LIVE revision" means the live revision** (review round 1, ADV-01 — driven on the lane rig
+inside rolled-back transactions). An accrual's plan is reachable by the GENERIC plan-revision door
+a bookkeeper uses today, so a firm may lawfully move its window afterwards — withdrawing future
+authority it no longer grants, or extending it. `clara.accrual_adjustments.effective_from/
+effective_to` is a fact derived when that row was written, and after such a revision it is STALE.
+The first cut of this file read five schedule arguments from the live revision and the
+`(effective_from, effective_to)` pair from the SUPERSEDED accrual row, so a correction silently
+reverted a lawful plan revision: it restored an authority the firm had withdrawn — the
+money-posting direction, since the plan then accrues months nobody authorised — or dropped one it
+had extended, with no refusal and no overlap warning. Every use of the window now reads the live
+revision, which also means `clara._assert_accrual_term_window` judges the corrected term against
+the authority that is actually live: a term that no longer brackets it is refused by name
+(`accrual_term_window_mismatch`) instead of quietly shrinking the window to fit. The term-window
+wall consequently sits in the WORLD half, after the reservation branch and under the RUNG-1 lock,
+because one of its two operands is mutable world state; only `clara._assert_accrual_particulars`,
+which reads nothing but the payload, stays above the reservation. The tail census pins both: the
+two `v_cur` uses must be present and `v_old.effective_from`/`v_old.effective_to` must be ABSENT
+from the body, because an assertion about what IS present cannot catch a second, forgotten use of
+the stale pair.
+
+**The derived nested key's collision is typed** (ADV-06). `clara._reserve_op` keys on
+`(firm_id, fn, op_key)`, so the nested `p_op_key || ':plan'` shares the
+`(firm, 'revise_accounting_plan')` namespace with keys a caller chooses for that door DIRECTLY —
+and #936 is the first place the nested door is one a human reaches with an arbitrary key of their
+own. The nested call is wrapped: an UNTYPED CLR10 out of it (which is exactly `_reserve_op`'s own
+detail-less "op_key reused with different args") re-raises with
+`{"reason":"plan_op_key_conflict"}`, and every other refusal re-raises byte-identically through a
+bare `raise`, so nothing the plan door already classifies is masked or renamed. Already-posted occurrences and their reversals are consequently
 untouched by construction — `clara.accounting_plan_occurrences` is never written by this door, and
 a past occurrence keeps naming the revision it ran under, exactly as 0193's own supersede-and-keep
 shape already guarantees for every other revision.
@@ -3030,14 +3059,43 @@ row and the stored allocation never moves, because a re-derived schedule is a NE
 NEW plan — but nothing on the read side made "this schedule is riding a since-superseded term"
 visible without a person already holding that rule as tribal knowledge.
 
-**What the file adds, and what it does not.** `term_live` (boolean) and `term_superseded_by`
-(uuid, null while live), joined from `clara.document_service_periods` on `service_period_id`, on
+**What the file adds, and what it does not.** `term_live` (boolean), `term_superseded_by` (uuid,
+null while live), `term_moved` (boolean) and the live term itself as `term_current_start` /
+`term_current_end`, joined from `clara.document_service_periods` on `service_period_id`, on
 BOTH reads — no new argument, no floor change, no new relation, no new grant, no recut of
 `clara.record_document_service_period` or any other 0140/0223 body. The join is safe inside each
 definer body without minting one: both reads already run as `clara_fn_owner`, and
 `document_service_periods` carries the same RLS-forced, owner-exempt-nothing-but-the-owner-policy
 posture `prepayment_schedules` does (`p_dsp_owner … for all to clara_fn_owner using (true)`,
 0140), pinned in this file's own prestate and re-measured in its tail.
+
+**Why `term_moved` exists beside `term_live`** (review round 1, ADV-02 — driven on the lane rig
+inside a rolled-back transaction). `clara._record_document_service_period_core` (0140) supersedes
+the live row UNCONDITIONALLY: it compares no dates. So `term_live` goes FALSE on ANY re-record of a
+document's service period, including one that restates the term byte for byte — a second
+verification against the same invoice, a retyped basis sentence. A surface keyed on `term_live`
+alone therefore told a firm that its term "has since been corrected" and that "a corrected term
+needs a new schedule" when nothing about the term had moved: a false statement of fact, and
+materially wrong advice about a running amortisation. The two facts are different in kind and both
+are reported. `term_live`/`term_superseded_by` are the AUDIT pair — which row this schedule was
+derived from, and whether it is still the live statement of the term. `term_moved` is the one a
+SURFACE may act on: true only when the row is superseded AND the term that stands today states a
+different `(period_start, period_end)`. The comparison is against the document's one
+`superseded_at is null` row (`uq_document_service_period_live`), never against `superseded_by`'s,
+so a twice-corrected term answers about the term in force rather than an intermediate one.
+
+**The prestate pin is bimodal, and the FIRST branch was proved by hand.** This file RECUTS the two
+bodies it pins, so after one apply their live `sha256(prosrc)` is no longer the 0223 pre-image the
+prestate was measured against; an unconditional pin would refuse its own redo (the wave-3
+work-order addendum names exactly this trap). The prestate admits two pre-images per body and says
+which it found — the 0223 sha (`FIRST`) or a body already carrying this file's own `term_live`
+field beside its `#919` attribution (`REDO`) — and refuses a body matching neither. Half and half
+is not a mode: one read at its pre-image and the other already recut means something outside this
+file moved one of them, and the prestate refuses rather than papering over it. Because
+`CLARA_MIGRATION_REDO` only ever takes the `REDO` branch, the `FIRST` branch was driven by hand:
+inside one transaction that was rolled back, 0223's own two `create function` statements were
+re-run as `create or replace` to restore the pre-images (both re-measured equal to the pinned
+shas), this prestate block was executed verbatim, and it reported `FIRST`.
 
 **Why a join, never a stored column.** `clara.prepayment_schedules` is APPEND-ONLY IN FULL
 (`_tf_prepayment_schedules_append_only`) precisely because every column on it is a fact derived at
@@ -3103,6 +3161,18 @@ state predicate. A retired state on that table would silently make nine bodies w
 recut — in the one lane whose whole point is that a stale figure must never stand quietly beside a
 fresh one. The live target set stays exactly "the rows in the table", which is what all nine already
 believe, and the supersession is recorded where a reader can ask for it.
+
+**The caller's echo is walled the same way the parse door walls it** (review round 1, ADV-07).
+`clara.record_opening_targets_parsed` admits an OPTIONAL `opening_fact` on a line — a parser
+echoing the triple it believes it read — and accepts that echo only when it is exactly the triple
+the database independently proved from the cited region, refusing
+`opening_extraction_fact_malformed` / `opening_extraction_fact_mismatch` otherwise. The first cut
+of this file ran the field-level fact assertion but IGNORED the key, so the refresh door silently
+accepted a payload the parse door would have refused, while its own header claimed "byte for byte
+the parse door's own per-line validation". Two write doors on one lane must not disagree about
+what a payload may CLAIM — the more so because #986's successor contract hands this core to #985's
+chat tool — so the wall runs here too, in the same position, with the same two tokens, and pinned
+by the tail census. It is a wall, never a source of figures: nothing stored is taken from the echo.
 
 **The reservation comes before the precondition the door consumes**, and the ordering was measured
 (`tests/opening-source-reread.test.mjs`, `p986.reread.refresh_walls`, found the other order on its
