@@ -28,11 +28,11 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   gate975, armed975, fiscalYear, reopenYear, recordResolution, resolutionRows,
-  runManual, runPeriod, runDue, entryRowOf, approveEntry, clientCharges, runRows,
+  runManual, runPeriod, runDue, runDueAsHuman, entryRowOf, approveEntry, clientCharges, runRows,
   buyAsset, completeSL, mon, dayIn, opk,
   refuses, noteLane, printLaneNotes, printSkipCount, endPool, x41EnsureReady,
 } from "./fa-arrears-resolution-fixtures.mjs";
-import { draftDepreciationEntries, depreciationEntries } from "./depreciation-history-fixtures.mjs";
+import { previewRun, draftDepreciationEntries, depreciationEntries } from "./depreciation-history-fixtures.mjs";
 
 let live = false;
 before(async () => { live = await x41EnsureReady(); });
@@ -324,4 +324,71 @@ test("p975.parks the swept run door PARKS with a stated reason instead of postin
     "the closed year's month is charged, carrying its own month, exactly as #651 measured");
   assert.deepEqual((await runRows(client)).filter((r) => r.period_end <= start.end), [],
     "…and no run receipt was written inside the closed year");
+});
+
+// ===========================================================================================
+// 5 · THE REPORT (the brief's first key interface). The due probe's skipped-closed report gains
+//     the arrears it would otherwise fold forward, so the question can be asked BEFORE anything
+//     posts — and `skipped_closed` itself does not move a byte.
+// ===========================================================================================
+
+test("p975.probe the due probe and the preview both state the closed-year arrears and the answer once it exists, while skipped_closed keeps exactly the shape #651 gave it", async (t) => {
+  if (await gate(t)) return;
+  const { w, client, fy, start, open } = await closedYearArrears("probe");
+
+  const due = await runDue(client);
+  assert.deepEqual(due.skipped_closed, [{
+    period_start: start.start, period_end: start.end, fiscal_year_id: fy,
+    fy_label: String(start.y), fy_status: "closed",
+  }], "#651's own report, key for key — this ticket adds a sibling, it does not edit this one");
+
+  assert.ok(due.closed_arrears, "the probe now says what the next run would fold forward");
+  assert.equal(due.closed_arrears.arrears_cents, MONTHLY);
+  assert.equal(due.closed_arrears.fiscal_years.length, 1);
+  assert.equal(due.closed_arrears.fiscal_years[0].fiscal_year_id, fy);
+  assert.equal(due.closed_arrears.fiscal_years[0].arrears_cents, MONTHLY);
+  assert.equal(due.closed_arrears.fiscal_years[0].resolution, null,
+    "…and that nobody has answered yet");
+
+  const asHuman = await runDueAsHuman(w.users.carol, client);
+  assert.deepEqual(asHuman.closed_arrears, due.closed_arrears,
+    "clara.depreciation_run_due surfaces it verbatim — the surface reads what the belt reads");
+
+  const pv = await previewRun(w.users.carol, client);
+  assert.deepEqual(pv.skipped_closed, due.skipped_closed, "the preview still carries #651's report");
+  assert.deepEqual(pv.closed_arrears, due.closed_arrears,
+    "…and the arrears figure the question will be asked about, before anything is written");
+  assert.equal(pv.period_start, open.start, "…for the OPEN period it would run");
+
+  // ONCE ANSWERED, THE REPORT SAYS SO — the accountant sees the standing ruling rather than
+  // being asked a second time.
+  await recordResolution(w.users.bob, {
+    client, fiscalYear: fy, choice: "fold_current", arrearsCents: MONTHLY,
+    periodStart: open.start, periodEnd: open.end, reason: "immaterial",
+  });
+  const after = await previewRun(w.users.carol, client);
+  assert.equal(after.closed_arrears.fiscal_years[0].resolution.choice, "fold_current");
+  assert.equal(after.closed_arrears.fiscal_years[0].resolution.decided_by, w.users.bob);
+  assert.ok(after.closed_arrears.fiscal_years[0].resolution.decided_at,
+    "…with the timestamp it was made at");
+  assert.deepEqual(after.skipped_closed, due.skipped_closed,
+    "and answering the question still does not move #651's report");
+});
+
+test("p975.no_closed a client with NO closed year behaves exactly as it did before #975: nothing is asked, the run posts, and the report is empty rather than absent", async (t) => {
+  if (await gate(t)) return;
+  const { w, client, start } = await armed975("no_closed");
+
+  const due = await runDue(client);
+  assert.equal(due.due, true);
+  assert.equal(due.period_start, start.start, "the oldest unmet period is the asset's own first month");
+  assert.deepEqual(due.skipped_closed, [], "nothing was skipped");
+  assert.deepEqual(due.closed_arrears, { arrears_cents: 0, fiscal_years: [] },
+    "…and the arrears report is EMPTY rather than missing, so a reader never has to guess");
+
+  const run = await runManual(w.users.bob, { client, periodStart: start.start, periodEnd: start.end });
+  assert.equal(run.status, "drafted", "WD-R5: the first run under a fresh authority DRAFTS — unchanged");
+  assert.equal(String(run.charged_cents), String(MONTHLY));
+  assert.equal(run.arrears_folded, null, "nothing was folded, and the receipt says so");
+  assert.equal((await resolutionRows(client)).length, 0, "nobody was asked anything");
 });

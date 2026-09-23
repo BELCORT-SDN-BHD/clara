@@ -66,6 +66,12 @@ declare
   -- moments before this file was written, never transcribed from an earlier migration's header.
   c_run_core_pre constant text :=
     'b22776bd955c3c3c6fafcc5a349b5367c49ae061ec3a5a5f596af4b4bf941605';
+  -- The due oracle (0227's own recut) and the preview (0248's), the two bodies that carry the
+  -- arrears figure to the surface. Both measured on the same rig at the same moment.
+  c_due_oracle_pre constant text :=
+    '234e5c4c71ce2e20739bd2f197726c1cdab8b7cf90b1cb78766d30673c9dda1c';
+  c_preview_pre constant text :=
+    'f76126612c9cba1a3aee42ec9ca4e3a6b287883ed921a4ffdd2383cb5a32fcf7';
 begin
   if to_regclass('clara.fixed_assets') is null or to_regclass('clara.fiscal_years') is null then
     raise exception '#975 prestate: the fixed-asset register or the close model is absent -- 0041 and 0056 must apply first'
@@ -97,6 +103,8 @@ begin
   for v_pin in select * from (values
       -- RECUT by this file (§C).
       ('clara._fa_run_period_core(uuid,date,date,text,uuid,uuid,text)', c_run_core_pre, 'recut'),
+      ('clara._fa_oldest_unmet_period(uuid)', c_due_oracle_pre, 'recut'),
+      ('clara.preview_depreciation_run(uuid)', c_preview_pre, 'recut'),
       -- NON-REGRESSION: the locked-period wall this file must not move (AC4), the two run doors
       -- whose bodies only delegate, the reopen path the restatement choice points at, and every
       -- arithmetic body the new helper leans on.
@@ -246,14 +254,24 @@ begin
     -- charged(X) = what the WHOLE client's register would charge if a run ended at X. The
     -- difference over a year's span is that year's share of the arrears, exactly — no
     -- apportionment, because `clara._fa_compute_charges` reads only its period END.
-    v_before := coalesce((clara._fa_compute_charges(p_client, fy.starts_on - 1, fy.starts_on - 1)
-                          ->> 'charged_cents')::bigint, 0);
+    --
+    -- THE YEAR'S END IS MEASURED FIRST, AND A ZERO ENDS THE YEAR THERE. charged() is monotone and
+    -- never negative, so charged(end) = 0 forces charged(start-1) = 0 and the difference is 0 too:
+    -- the second computation would only re-confirm it. That matters because this body now runs
+    -- inside the belt's own due probe, and the STEADY state — a client with closed years and
+    -- nothing uncharged in them — is exactly this branch. One computation per closed year there,
+    -- two only where a question is really owed.
     v_after := coalesce((clara._fa_compute_charges(p_client, v_end, v_end)
                          ->> 'charged_cents')::bigint, 0);
-    v_amt := greatest(v_after - v_before, 0);
-    if v_amt <= 0 then
+    if v_after <= 0 then
       -- A closed year with nothing uncharged in it is not an arrears question at all, and
       -- listing it would make the question unreadable on a client with a long history.
+      continue;
+    end if;
+    v_before := coalesce((clara._fa_compute_charges(p_client, fy.starts_on - 1, fy.starts_on - 1)
+                          ->> 'charged_cents')::bigint, 0);
+    v_amt := greatest(v_after - v_before, 0);
+    if v_amt <= 0 then
       continue;
     end if;
     select jsonb_build_object('id', r.id, 'choice', r.choice,
@@ -389,6 +407,215 @@ do $p975_racl$ declare f text; begin
     execute format('alter function %s owner to clara_fn_owner', f);
   end loop;
 end $p975_racl$;
+
+-- =====================================================================================
+-- §B3 clara._fa_oldest_unmet_period, RECUT. 0227's body, byte for byte, plus the arrears figure
+--     beside its own `skipped_closed` report. Nothing about WHICH period is due moves: the
+--     authority floor, the closed-period skip, the draft freeze and the re-run gate are all
+--     untouched, and `skipped_closed`'s entries keep every key #651 gave them.
+-- =====================================================================================
+CREATE OR REPLACE FUNCTION clara._fa_oldest_unmet_period(p_client uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $function$
+declare au record; v_today date; v_horizon date; v_first date; v_ps date; v_pe date;
+        v_skipped_closed jsonb := '[]'::jsonb; v_guard int := 0;
+        v_fy_id uuid; v_fy_label text; v_fy_status text;
+        fa record; v_one date;
+begin
+  select * into au from clara.fa_depreciation_authorities
+    where client_id = p_client and status = 'live';
+  if not found then
+    return jsonb_build_object('due', false, 'reason', 'authority_not_live');
+  end if;
+  v_today := clara._fa_today();
+  v_horizon := clara._fa_month_end(v_today);
+  -- DRAFT-N BLOCKS N+1 [L2/round-2 fold 1]. The sweep never calls into a refusal it can
+  -- predict, so the probe answers false rather than letting the verb raise.
+  if exists (select 1 from clara.journal_entries je
+             where je.client_id = p_client and je.status = 'draft'
+               and je.flags ? 'depreciation_charges') then
+    return jsonb_build_object('due', false, 'reason', 'period_draft_outstanding');
+  end if;
+  -- 0042 (as-built ladder round 6): THE ONE RE-RUN ADMISSION QUESTION, ASKED OF THIS CLIENT'S
+  -- OWN CHARGE ROWS. A charge whose unwind carries a different effective_date left the month it
+  -- charged still holding money while flipping the coverage probe below to "uncovered" -- so
+  -- this body would report the month due and the poster would charge it a second time, over a
+  -- figure that never left. Measured before the fix at exactly double, unattended, with the
+  -- register tie certifying zero difference. The horizon is the widest month this walk can
+  -- reach, so the gate sees every row a proposal out of here could cause to be re-charged.
+  -- Reasoning, and the identical question the adjustment lane asks: clara._wdb_rerun_breach.
+  if clara._wdb_rerun_breach(p_client, 'depreciation_charges', null::text[],
+                             v_horizon, v_horizon) is not null then
+    return jsonb_build_object('due', false, 'reason', 'period_correction_unsound');
+  end if;
+  -- THE ONE ORACLE (S2.2b): due-ness is what the ARITHMETIC emits, over exactly the status
+  -- scope the computation charges [round-3 fold F3]. Every filter the earlier form spelled out
+  -- here -- method, completeness, the money clock, the supersede bound, the disposal month --
+  -- now lives inside clara._fa_asset_charges, which is the only place it can never drift from
+  -- what actually posts. The outstanding-disposal-draft freeze stays here because it is a
+  -- CLIENT-scope sequencing fact, not part of an asset's schedule.
+  -- THE SHRINKING HORIZON [round-3.5 fold G6, cheap win]. Only the EARLIEST due month matters,
+  -- so once a candidate is in hand every later asset is asked a strictly smaller question: bound
+  -- it at the day before the current minimum and the arithmetic stops at that month instead of
+  -- projecting the whole horizon. Semantically identical (the answer is still min over assets);
+  -- measurably cheaper on a client with many assets, which is the sweep's hot loop.
+  for fa in select f.id as id from clara.fixed_assets f
+            where f.client_id = p_client and f.status in ('active', 'superseded')
+            order by f.acquired_date, f.id loop
+    if clara._fa_disposal_draft_outstanding(p_client, fa.id, v_horizon) then
+      continue;
+    end if;
+    v_one := clara._fa_first_due_month(fa.id,
+               case when v_first is null then v_horizon else v_first - 1 end);
+    if v_one is not null then v_first := v_one; end if;
+  end loop;
+  if v_first is null then
+    return jsonb_build_object('due', false, 'reason', 'nothing_due');
+  end if;
+  -- 0227 (#651, D8 + D9): THE AUTHORITY FLOOR AND THE CLOSED-PERIOD SKIP, IN ONE WALK.
+  -- The arithmetic above answers WHICH MONTH first owes a charge; this walk answers WHICH PERIOD
+  -- may lawfully be PROPOSED for it. Two questions can move the answer forward, neither of them
+  -- arithmetic: the authority's own window floor (D8 -- a signature is not permission to charge
+  -- every past period) and a fiscal year that is closing or closed (D9 -- the poster would refuse,
+  -- and an oracle that does not ask advertises a period its poster refuses, once per sweep,
+  -- forever; 0042:4441 names that exact failure).
+  -- WHAT A SKIP DOES NOT MEAN: the skipped months' ARREARS are still charged by the next open
+  -- period's run, because clara._fa_asset_charges charges every uncharged month up to the period
+  -- end and this file does not touch it. The charge ROWS keep their own months; the journal ENTRY
+  -- is dated in the open period. `skipped_closed` means "never RUN in its own right", never
+  -- "this money is gone" -- and it is reported so a professional can see it happen.
+  loop
+    v_guard := v_guard + 1;
+    if v_guard > 1200 then
+      -- A hundred years of monthly periods. Unreachable in practice; the probe must ANSWER.
+      return jsonb_build_object('due', false, 'reason', 'period_unreachable',
+        'skipped_closed', v_skipped_closed,
+        'closed_arrears', clara._fa_closed_arrears(p_client, coalesce(v_pe, v_first)));
+    end if;
+    if au.cadence = 'monthly' then
+      v_ps := v_first; v_pe := clara._fa_month_end(v_first);
+    else
+      v_ps := clara._fa_fy_open_for(p_client, v_first);
+      v_pe := clara._fa_fy_end_for(p_client, v_first);
+    end if;
+    -- A period is DUE only once it has ENDED (design SS3.1). MYT, never the session zone.
+    if v_pe >= v_today then
+      return jsonb_build_object('due', false, 'reason', 'period_not_ended',
+        'skipped_closed', v_skipped_closed,
+        'closed_arrears', clara._fa_closed_arrears(p_client, v_pe));
+    end if;
+    -- THE AUTHORITY WINDOW'S FLOOR (D8). NULL on every authority signed before 0227, which is
+    -- what keeps this inert until a signature carries a window.
+    if au.authority_from is not null and v_ps < au.authority_from then
+      v_first := v_pe + 1;
+      continue;
+    end if;
+    select fy.id, fy.label, fy.status into v_fy_id, v_fy_label, v_fy_status
+      from clara.fiscal_years fy
+     where fy.client_id = p_client
+       and v_pe between fy.starts_on and fy.ends_on
+     order by (fy.status in ('closing','closed')) desc, fy.starts_on desc
+     limit 1;
+    if v_fy_id is not null and v_fy_status not in ('open', 'reopened') then
+      v_skipped_closed := v_skipped_closed || jsonb_build_array(jsonb_build_object(
+        'period_start', v_ps, 'period_end', v_pe, 'fiscal_year_id', v_fy_id,
+        'fy_label', v_fy_label, 'fy_status', v_fy_status));
+      v_first := v_pe + 1;
+      continue;
+    end if;
+    exit;
+  end loop;
+  -- #975 (0279): THE REPORT GAINS THE ARREARS IT WOULD OTHERWISE FOLD FORWARD, and
+  -- `skipped_closed` itself does not move a byte -- the figure rides BESIDE it, so the question
+  -- can be asked before anything posts (the ticket's first key interface). It is measured at the
+  -- OPEN period's end, which is exactly the through-date the run will use, so the surface and the
+  -- poster can never state two different numbers about the same fold. It is reported even when
+  -- nothing was skipped: a closed year can carry arrears with no period skipped at all (an asset
+  -- whose particulars were completed after that year closed), and the run stops for those too.
+  return jsonb_build_object('due', true, 'period_start', v_ps, 'period_end', v_pe,
+    'cadence', au.cadence, 'skipped_closed', v_skipped_closed,
+    'closed_arrears', clara._fa_closed_arrears(p_client, v_pe));
+end $function$
+
+
+;
+
+-- =====================================================================================
+-- §B4 clara.preview_depreciation_run, RECUT. 0248's body, byte for byte, plus the ONE key that
+--     carries the oracle's arrears report to the surface. The preview still writes nothing.
+-- =====================================================================================
+CREATE OR REPLACE FUNCTION clara.preview_depreciation_run(p_client uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $function$
+declare c record; au record; v_due jsonb; v_res jsonb; v_legs jsonb := '[]'::jsonb;
+        v_mode text; v_ramp boolean;
+begin
+  c := clara._human_ctx(clara.role_rank('viewer'));
+  if not exists (select 1 from clara.clients cl where cl.id = p_client and cl.firm_id = c.firm) then
+    raise exception 'client is not in your firm' using errcode = 'CLR11',
+      detail = '{"reason":"client_not_found"}';
+  end if;
+  select * into au from clara.fa_depreciation_authorities
+    where client_id = p_client and status = 'live';
+  v_due := clara._depreciation_run_due_core(p_client, c.firm);
+  if not coalesce((v_due ->> 'due')::boolean, false) then
+    return jsonb_build_object('client_id', p_client, 'due', false,
+      'reason', v_due ->> 'reason', 'cadence', au.cadence,
+      'authority_from', au.authority_from,
+      'skipped_closed', coalesce(v_due -> 'skipped_closed', '[]'::jsonb),
+      -- #975 (0279): the oracle's own arrears report, passed through unchanged. `coalesce` keeps
+      -- the key present and EMPTY on every answer that carries none, so a reader never has to
+      -- tell "no arrears" from "this build does not say".
+      'closed_arrears', coalesce(v_due -> 'closed_arrears',
+        jsonb_build_object('arrears_cents', 0, 'fiscal_years', '[]'::jsonb)),
+      'charges', '[]'::jsonb, 'skipped', '[]'::jsonb, 'legs', '[]'::jsonb,
+      'charged_cents', 0, 'entries', 0);
+  end if;
+  v_res := clara._fa_compute_charges(p_client, (v_due ->> 'period_start')::date,
+    (v_due ->> 'period_end')::date);
+  -- LEGS AGGREGATED PER (expense, accumulated) PAIR. #973 (0248): the pairing now lives in
+  -- clara._fa_depreciation_leg_pairing, the ONE routine this preview and the poster
+  -- clara._fa_run_period_core both call, so the preview can never show a different pairing
+  -- from the entry the run will write (see that function's own comment).
+  v_legs := clara._fa_depreciation_leg_pairing(v_res -> 'charges');
+  -- THE RAMP PREDICATE, DERIVED exactly as the poster derives it (0041's design SS1.4). It
+  -- answers what the run WOULD do; a high-stakes entry still drafts, which the surface says.
+  v_ramp := exists (select 1 from clara.journal_entries j
+                    where j.client_id = p_client and j.origin = 'scheduled_run'
+                      and j.status = 'approved' and j.reversed_by is null
+                      and (j.flags -> 'depreciation_charges' ->> 'authority_id')::uuid = au.id);
+  v_mode := case when v_ramp then 'post' else 'draft' end;
+  return jsonb_build_object('client_id', p_client, 'due', true,
+    'reason', v_due ->> 'reason',
+    'period_start', (v_due ->> 'period_start')::date,
+    'period_end', (v_due ->> 'period_end')::date,
+    'cadence', au.cadence, 'authority_from', au.authority_from,
+    'authority_ref', au.authority_ref,
+    'skipped_closed', coalesce(v_due -> 'skipped_closed', '[]'::jsonb),
+    'closed_arrears', coalesce(v_due -> 'closed_arrears',
+      jsonb_build_object('arrears_cents', 0, 'fiscal_years', '[]'::jsonb)),
+    'charges', (select coalesce(jsonb_agg(jsonb_build_object(
+          'asset_id', x ->> 'asset_id',
+          'description', (select f.description from clara.fixed_assets f
+                           where f.id = (x ->> 'asset_id')::uuid),
+          'period_start', x ->> 'period_start', 'period_end', x ->> 'period_end',
+          'amount_cents', (x ->> 'amount_cents')::bigint) order by x ->> 'period_start'),
+        '[]'::jsonb) from jsonb_array_elements(v_res -> 'charges') x),
+    'skipped', coalesce(v_res -> 'skipped', '[]'::jsonb),
+    'charged_cents', (v_res ->> 'charged_cents')::bigint,
+    'entries', (v_res ->> 'entries')::int,
+    'legs', v_legs,
+    'mode_would_be', v_mode, 'ramp_earned', v_ramp);
+end $function$
+
+
+;
 
 -- =====================================================================================
 -- §C clara._fa_run_period_core, RECUT. The body 0041 shipped and 0042/0227/0248 have each
@@ -816,6 +1043,58 @@ begin
   if v_n <> 4 then
     raise exception '#975 tail T.3c: clara._fa_run_period_core has % callers, expected the four 0227 pins (run_depreciation_period, run_depreciation_manual, _agent_depreciation_catchup_core, run_depreciation_period_for)', v_n
       using errcode='CLR10';
+  end if;
+
+  -- T.3d THE RECUT DUE ORACLE carries the arrears report on each of its three skipped-closed
+  -- answers and NOTHING ELSE moved: #651's own skip, the authority floor, the draft freeze and
+  -- the re-run gate each keep a marker here.
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara._fa_oldest_unmet_period(uuid)'::regprocedure;
+  for v_pin in select * from (values
+      ('clara._fa_closed_arrears(p_client,', 3),
+      ($$'skipped_closed', v_skipped_closed$$, 3),
+      ($$'reason', 'period_unreachable'$$, 1),
+      ($$'reason', 'period_not_ended'$$, 1),
+      ($$'reason', 'period_draft_outstanding'$$, 1),
+      ($$'reason', 'period_correction_unsound'$$, 1),
+      ($$'reason', 'nothing_due'$$, 1),
+      ($$'reason', 'authority_not_live'$$, 1),
+      ('au.authority_from is not null and v_ps < au.authority_from', 1),
+      ($$v_fy_status not in ('open', 'reopened')$$, 1)) as t(marker, want) loop
+    v_n := (length(v_src) - length(replace(v_src, v_pin.marker, ''))) / length(v_pin.marker);
+    if v_n <> v_pin.want then
+      raise exception '#975 tail T.3d: the recut clara._fa_oldest_unmet_period carries "%" % time(s), expected %', v_pin.marker, v_n, v_pin.want
+        using errcode='CLR10';
+    end if;
+  end loop;
+  select count(*)::int into v_n from pg_proc p
+   where p.oid = 'clara._fa_oldest_unmet_period(uuid)'::regprocedure
+     and p.provolatile = 's' and p.prosecdef and p.proowner::regrole::text = 'clara_fn_owner'
+     and 'search_path=clara, pg_temp' = any(p.proconfig);
+  if v_n <> 1 then
+    raise exception '#975 tail T.3e: clara._fa_oldest_unmet_period lost its stable/definer/owner/search_path shape' using errcode='CLR10';
+  end if;
+
+  -- T.3f THE RECUT PREVIEW carries the key on BOTH of its returns and still writes nothing: its
+  -- own not-due and due arms each keep their markers, and 0248's folded leg pairing is intact.
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara.preview_depreciation_run(uuid)'::regprocedure;
+  for v_pin in select * from (values
+      ($$'closed_arrears', coalesce(v_due -> 'closed_arrears'$$, 2),
+      ($$'skipped_closed', coalesce(v_due -> 'skipped_closed'$$, 2),
+      ('clara._fa_depreciation_leg_pairing(v_res', 1),
+      ('clara._human_ctx(clara.role_rank(''viewer''))', 1),
+      ($$'mode_would_be', v_mode$$, 1)) as t(marker, want) loop
+    v_n := (length(v_src) - length(replace(v_src, v_pin.marker, ''))) / length(v_pin.marker);
+    if v_n <> v_pin.want then
+      raise exception '#975 tail T.3f: the recut clara.preview_depreciation_run carries "%" % time(s), expected %', v_pin.marker, v_n, v_pin.want
+        using errcode='CLR10';
+    end if;
+  end loop;
+  select count(*)::int into v_n from pg_proc p
+   where p.oid = 'clara.preview_depreciation_run(uuid)'::regprocedure
+     and p.provolatile = 's' and p.prosecdef and p.proowner::regrole::text = 'clara_fn_owner'
+     and 'search_path=clara, pg_temp' = any(p.proconfig);
+  if v_n <> 1 then
+    raise exception '#975 tail T.3g: clara.preview_depreciation_run lost its stable/definer/owner/search_path shape' using errcode='CLR10';
   end if;
 
   -- T.4 NON-REGRESSION, re-read: the locked-period wall, both run doors, the reopen path and
