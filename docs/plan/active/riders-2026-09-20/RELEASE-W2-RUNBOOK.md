@@ -690,38 +690,118 @@ command and the runtime/database asymmetry named in step 9.
 
 ---
 
-## § RESULTS (as run)
+## § RESULTS (as run, 2026-09-23, UTC)
 
-**RUN ________ (UTC ________) by ________.** Every row below is a reading. As-run logs: ________.
+**Authority.** The owner's riders plan of 2026-09-20 (each wave ends with its hosted release and the
+tickets close on hosted evidence), the release-ownership ruling of 2026-09-17, and the owner's
+resumption on 2026-09-23 ("continue"). Beta ruling confirmed unchanged: hosted data is test data.
 
-Owner authorisation (the literal sentence, timestamped, in-session): ________
+**Gates 0a.** `main` = RELEASE_SHA = `68b979bf9de76fc40f701c85e8e86dcee052cab0` (PR #1029, merge
+of `integration/riders-w2` at `0a60889a1`; the merge tree is identical to the PR head tree). CI on
+the merge commit: run 35828489632 SUCCESS (lint, build, db-estate, db-live-gates, render-drill,
+db-split-partition-total). PR #1029 took three CI runs: run 1 red in the DR round trip (0235's
+owner-only ACL, which pg_dump does not round-trip; `dr-verify` now compares effective grants,
+`df7f76021`), run 2 red on a clock-dependent #964 control (`4cd725f8c`) and on the pre-existing
+`ready.test.mjs` #617 fault cell (filed as #1033), run 3 green. Web rollback lever confirmed:
+`922f9428-215c-4536-9602-5e0dd007efbd` at 100% before the window. No frozen body changed
+(`check-frozen-workflows`: 312 / 55 / 3, `bodies=55`).
 
-Build tree: `git rev-parse HEAD` = ________ = `origin/main`; `ci` ________ on that sha;
-`git status --porcelain` = ________.
+**Step 1.** `fly auth whoami` = `tools@belcort.com`; one machine `48ee715b763048`, started, 2/2.
 
-| step | reading |
-|---|---|
-| 0 rehearsal (0234 -> 0272 replay, 38 files, T) | ________ |
-| 0a gates (ci, porcelain, owner go, freeze-lint) | ________ |
-| 1 fly auth | ________ |
-| 2 probe machine (id, image, created, destroyed) | ________ |
-| 3 preflight `--plan` (pending, generated reads, GAPs) | ________ |
-| 3a ledger + drift gate + pending set | ________ |
-| 3b fingerprint vs the rig baseline (keys, DRIFT, PINNED DRIFT, TOLERATED) | ________ |
-| 3c data preconditions (each id, ok or STOP) | ________ |
-| 3d quiescence census (pre) | ________ |
-| 3f backup (path, bytes, sha256, wall, CA workaround used?) | ________ |
-| 4 runtime image (tag -> `sha256:` digest, size) | ________ |
-| 5 web (Worker Version ID, tag, uploaded at) | ________ |
-| 6a machine stop (timestamp, state) | ________ |
-| 6b re-census (locks on the eleven tables, F10) | ________ |
-| 6c migrate (`38 new · 267 total`? wall, per-file notices, ledger re-read, per-file `applied_at`) | ________ |
-| 7 release (probe destroyed, deploy, start, `/ready`, boot lines, `bodies=`, five banners, outage window) | ________ |
-| 8 promote (version, signed-out smoke, the ten signed-in surfaces) | ________ |
-| 9 preflight (gate (a), gate (b), exit code) | ________ |
-| 10 post reads (ledger, the four assertions, the seven owed questions) | ________ |
-| 11a freeze-lint / `--lock-deployed` (expect: nothing to lock) | ________ |
-| 11b ticket closures (42) | ________ |
-| post census | ________ |
+**Step 2.** Probe `185d2d2f209358` (`probe-w2`) from `refresh-ddb5a125`, World off.
 
-**Rollback points AFTER (from the ledger):** DB ________ · runtime ________ · web ________.
+**Step 3, pre-window reads (06:51:44Z, `reads-w2.mjs --prod --baseline fp-hosted.json`).** Hosted
+identity `postgres@…:5432` PG 17.6. Ledger 229 / `0234_legal_enforcement_mode`, drift gate
+229/229, pending set exactly the 38 files above the frontier, 0 PARSE GAP. Estate fingerprint vs the
+rig's hosted-frontier baseline: 10766 keys compared, 10752 equal, **14 differences, all role-level
+and all Supabase-only**: the seven `*_login` roles carry LOGIN on hosted (the migrations create
+them NOLOGIN; the credential is provisioned by the operator), `clara_storage_docs` and its two
+memberships exist only on hosted, `authenticated -> clara_authenticated` and four
+`postgres -> clara_*` memberships exist only on hosted. No function body, relation, policy, trigger,
+constraint or index differs. None of the 38 migrations asserts a role attribute or membership
+(grepped: `pg_roles` is used only to resolve owners and grantees by name), so the 14 STOPs were
+overruled as environment facts, not drift; recorded here. Data preconditions: all 11 generated
+CHECK reads, both index reads and all 23 hand-written preconditions `ok` (0 rows would fail any
+CHECK; 0 duplicate firm-scope plans; registry 240 rows at one version 2 with 28 planned; the
+firm-setup twelve in the pinned order with the pinned hash `156dc83b…`; audit_log 4326 rows /
+904 kB; 0 work-bearing interruptions, so 0268's populated-tail branch does not fire on hosted
+either). Quiescence: no non-terminal task or Work, no pending interruption, workflow_runs
+non-terminal 0, no F10 holder, no lock on the tables this wave alters; the one
+`statement_facts running` document_processing_tasks row is the orphan known since 2026-09-19.
+
+**Step 3f, backup (06:52:57Z to 06:53:58Z).** Full dump
+`packages/db/backups/clara-clara-graphile-worker-workflow-workflow-drizzle-2026-09-23T06-53-02-506Z.sql`
+= 218,769,251 bytes, plus globals `clara-globals-2026-09-23T06-53-56-705Z.sql` (12,177 bytes),
+through the WSL wrapper with the pooler CA pinned.
+
+**Steps 4 and 5, before the window.** Runtime image
+`registry.fly.io/clara-runtime:refresh-68b979bf` = `sha256:3ee73d61a28b85f163339207d75b8954f2971d5eff54ca4a99e78dff8f8c85b5`
+(265 MB), built from a detached checkout at RELEASE_SHA. Web Worker version
+`686ab53f-4079-4305-8d0b-54efac86adc0`, tag `refresh-68b979bf`, uploaded 06:52:55Z, not promoted.
+
+**Step 6, the window.** 6a: `machine stop 48ee715b763048` at 07:15:31Z, `stopped` at 07:15:40Z.
+6b: census through the probe: CLEAN (no non-terminal work, no lock, no F10 holder; 12 idle
+pooler-held `clara_runtime_login` sessions, none holding anything). 6c: `migrate.mjs` from the
+RELEASE_SHA checkout through the probe DSN, 07:16:02Z to 07:18:48Z (2 min 46 s):
+**`migrate: 38 new migration(s) applied · 267 total`**, 38 prestate notices clean, 38 tail
+notices OK, no CLR, no lock wait. Read out loud: `#782 prestate: OK -- registry publishes version 2
+uniformly across 240 rows, 28 invoice-family rows carry limits.invoice_line_items = planned`;
+`#934 prestate: clean -- … clara.firm_setup_keys holds exactly the twelve pinned rows in their
+pinned order`; `#885 tail: no work-bearing interruption exists here, so the record's key count was
+not measured live; the key-by-key text assertions above stand on their own`. 6d: ledger read
+**267 / `0272_document_capability_wall_completion`**: branch (iv), drive forward.
+
+**Post reads through the probe (07:19:09Z, `reads-w2.mjs --post --prod --baseline fp-upg2.json`).**
+Ledger 229 + 38 = 267 at 0272; every one of the 38 new rows at its file checksum (missing 0,
+mismatch 0); drift gate 267/267; fingerprint vs the UPGRADED rig baseline: 10816 keys compared,
+10802 equal, the SAME 14 role-level Supabase-only differences as before the window and nothing
+else. No new drift.
+
+**Step 7.** Probe destroyed. `fly deploy --image …@sha256:3ee73d61…` onto the stopped machine
+07:19:45Z (reached `stopped`, as expected); `machine start` 07:20:29Z; `/ready` 200 at 07:20:51Z.
+**Outage: 07:15:31Z to 07:20:51Z, 5 min 20 s.** Boot lines: `serving
+git_sha=68b979bf9de76fc40f701c85e8e86dcee052cab0 frontier=0272_document_capability_wall_completion(267)
+bodies=55 pins closeExample=closeExampleV1 chatTurn=chatTurn_v21 claraWork=claraWork_v5 …`;
+`stranded bodies n=0` BEFORE `durable world started pid=644`; five `clara-work/v1..v5` bundle
+banners; `CONTROL listening`; `LEADER acquired` (07:20:39Z to 07:20:41Z).
+
+**Step 8.** `wrangler versions deploy 686ab53f…@100%` 07:21:14Z to 07:21:21Z (previous
+`922f9428…`, tag `refresh-ddb5a125`). Signed-out smoke at 07:21:28Z: `/login`, `/favicon.ico`,
+`/icon.png` 200; `/pending`, `/api/build-info`, `/checkout/cancel` 307 to `/login?next=…`;
+`/settings/registrations`, `/admin/registrations` 307 to `/operator`; cross-origin POST
+`/auth/confirm/resend` 403; runtime `/ready` 200. Signed-in walk: NOT done in this window (no
+operator browser session); the per-lane surfaces table in step 8 is the owner's next signed-in
+check.
+
+**Step 10, the reads this wave owes (through a second probe `2870155c674998` on the previous
+image, 07:26Z).** (1) Registry: 240 rows, one distinct `registry_version` = **3**; 28 rows carry
+`invoice_line_items = accepted_limitation`, **zero** still `planned`; 0 rows at
+`business_operation = proposal_only`; high-water ledger 240 rows at version 3. (2) Audit column:
+4332 rows, 4330 NULL (never back-filled), **2 rows written after the release carry a real
+`actor_role`**; table 920 kB (was 904 kB; the 0243 index build was trivial at this size).
+(3) Knowledge: 14 keys, kinds `{assertion 11, policy 2, preference 1}`, both grammar CHECKs live.
+(4) Firm setup: 15 rows, 15 with a `user_note` (the twelve notes plus the three education tips'
+own notes), 0 retired. (5) `uq_onboarding_plans_one_firm` live as `(firm_id) WHERE scope_kind =
+'firm'` with no `state` term; 0 firms hold more than one firm-scope plan. (6) 0 work-bearing
+`agent_interruptions` rows on hosted, so 0268's twenty-six-key tail branch never fired here (it
+was exercised on the rig with real rows before the release). (7) 0 `fixed_assets` rows, so the
+0247 question does not arise. Reference deltas as measured on the rig: knowledge_keys 13 to 14,
+knowledge_plan_item_map 10 to 11, event_types 137 to 139, trigger_taxonomy 150 to 152,
+firm_setup_keys 12 to 15. Stranded-body census 0, workflow_runs non-terminal 0, agent_tasks
+non-terminal 0.
+
+**Step 9, rollback preflight demonstration.** Run at 07:38:39Z through the second probe (`refresh-ddb5a125`) with that image's own bundle (`/app/.output/server/index.mjs`, 10,920,355 bytes, sha256 `45e9c91a…5fcd` verified against the machine's own `sha256sum`; the sftp path stalled at 32 KB twice, so the bundle was streamed over `ssh console` and verified by hash). Result: `rollback-preflight: ALLOWED`: gate (a) `FRONTIER_BODY_RULES` at frontier 0272 checks only `0195` (`claraWork_v3`), which the previous image carries; gate (b) the stranded-body census reads 0 non-terminal runs and 0 unbound live tasks, and the target supports the same 55 bodies. This is a positive control, NOT a licence: the preflight knows nothing about the intake door's return-contract change in 0254, so it says ALLOWED for an image that would answer 201 to a refused upload. Filed as a follow-up: the rule table needs a 0254 rule.
+
+**Step 11.** No manifest to lock (no frozen body changed). Tickets: 40 closed with the hosted
+evidence above (#885 closed as PARTIAL with its remainder in #1030; #782 had been closed by the
+merge itself and received its comment afterwards). Follow-ups filed while closing: #1030, #1031
+(#898's unmet clause), #1032 (#891's owner decision, since ruled: option A), #1033 (the #617 fault
+cell). Owner rulings of 2026-09-23 recorded on #871 and #1032.
+
+**Deviations from the draft.** The probe's DSN was piped with a small wrapper
+(`via-probe.sh`: `fly ssh console … printenv WORKFLOW_POSTGRES_URL | dsn-pipe.mjs -- <cmd>`, run
+from the RELEASE_SHA checkout with `CLARA_REPO` and `CLARA_MIGRATIONS_DIR` pointed at it). The 14
+role-level STOPs were overruled on the reasoning above rather than by editing the script's
+verdict; the script's own design (a STOP on any fingerprint difference) is kept, and the next
+release should export its baseline from a database whose roles match hosted, or teach the script
+that role attributes and memberships are environment facts.
