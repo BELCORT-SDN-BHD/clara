@@ -1049,22 +1049,25 @@ test("p652.basis.period_text — every occurrence of one accrual posts the SAME 
 // p652.method.honoured — THE ENUM HOLDS THE RULE THIS SLICE ACTUALLY POSTS (review round 1, A2).
 // ===========================================================================================
 
-test("p652.method.honoured — the closed selection set is exactly the rule the schedule honours; the three drafted rules are refused by name and write nothing", async (t) => {
+test("p652.method.honoured — the closed selection set is exactly the rules the schedule honours; the two WITHDRAWN rules are refused by name and write nothing", async (t) => {
   if (await gateAccruals(t)) return;
-  assert.deepEqual(ACCRUAL_METHODS, ["stated_amount"],
-    "one rule is recorded because one rule is performed: the frozen basis carries the stated amount "
-    + "and clara._plan_occurrence_basis only moves the posting date");
+  // #937 (0303) added `stated_period_amount` — the second rule the ledger performs — so the census
+  // now reads two. The claim this cell has always made is unchanged: a rule is in the set only
+  // when a lane HONOURS it (review round 1, A2), and the two that nothing performs stay out.
+  assert.deepEqual(ACCRUAL_METHODS, ["stated_amount", "stated_period_amount"],
+    "a rule is recorded because a rule is performed: the frozen basis carries the stated amount, "
+    + "and #937's resolver hands the shared basis builder one line per due date");
   const client = await freshAccrualClient(ALICE(), "method");
   const ref = await instructionRef({ client, author: BOB() });
-  for (const rule of ["stated_period_amount", "source_document_amount", "prior_period_amount"]) {
+  for (const rule of ["source_document_amount", "prior_period_amount"]) {
     const refused = await assertPair(CLR.badRequest, ACCRUAL_REASON.methodUnsupported,
       () => createAccrualAdjustment(BOB(), {
         client, authorityRef: ref,
         accrual: accrual({ method: { rule }, servicePeriodStart: "2026-07-01", servicePeriodEnd: "2026-07-31" }),
         effectiveFrom: "2026-07-01", effectiveTo: "2026-07-31", opKey: opk("p652-method"),
       }),
-      `the drafted selection rule ${rule}, which nothing in this slice performs`);
-    assert.deepEqual(refused.detail.supported, ["stated_amount"],
+      `the withdrawn selection rule ${rule}, which nothing in this estate performs`);
+    assert.deepEqual(refused.detail.supported, ["stated_amount", "stated_period_amount"],
       "the refusal LISTS what is honoured, so a caller is not left guessing");
   }
   assert.equal(await accrualCount(client), 0, "and no accrual was recorded under a rule nobody applies");

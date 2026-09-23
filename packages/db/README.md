@@ -4769,3 +4769,89 @@ for the real document-filing/draft/approve pipeline a document-sourced bill need
 replace function`; `clara.skip_plan_occurrence`'s create/grant/revoke are idempotent. The prestate
 asserts nothing about the splice marker or the door's own absence beyond what a redo already
 tolerates.
+
+## 0303 — an accrual may carry a person-stated amount per period (#937, riders wave 4, lane 03)
+
+`0303_accrual_period_amounts.sql` gives an accrual a second selection rule, `stated_period_amount`:
+July 3,000, August 3,500, each due date posting its own figure and its own reversal. Before it, the
+only shapes available to an accountant whose monthly cost varies were one accrual per month (three
+plans, three authorities, three schedules for one instruction) or an average nobody stated.
+
+**It rides #653's seam rather than inventing a second one.** `clara._plan_admit_occurrence` already
+resolves a PER-DUE-DATE line in its own VOLATILE body and hands it to `clara._plan_occurrence_basis`
+as an ARGUMENT — which is exactly what lets that body stay IMMUTABLE — and already treats a NULL
+line as a real answer refused BY NAME on the occurrence rather than a licence to fall back to the
+revision's constant. This file adds the accrual lane's own resolver beside the amortisation one and
+teaches the admission core to ask it. `clara._plan_occurrence_basis` is NOT touched: the prestate
+and the tail both re-hash it, and the tail re-asserts it is still IMMUTABLE.
+
+**The amounts live in `clara.accrual_period_amounts`, keyed on the accrual DETAIL and the due
+date.** Not a jsonb column on `clara.accrual_adjustments` (append-only by trigger with exactly one
+admitted update, 0284's correction stamp — a blob there could never be corrected), and not the
+amortisation lane's `period_lines` jsonb either: that array is a frozen evaluator's DERIVED output
+carried verbatim, and this one is figures a person typed. Opposite provenance, separate carriers.
+The relation holds no `plan_id` and no `revision`: the detail names both, and a denormalised pair is
+a second place for them to disagree. Append-only in full, RLS forced, `relacl` NULL — every reach is
+a definer door.
+
+**Which accrual detail is "live" is the highest revision on the plan, not `= the live plan
+revision`.** A bookkeeper may lawfully revise the plan itself (`clara.revise_accounting_plan`) to
+widen or withdraw authority, which advances the plan to a revision the accrual detail does not name;
+keying the resolver on equality would make it answer NULL for an accrual that is plainly still
+running, and the admission core would then post the frozen constant (the accrual's TOTAL) for every
+remaining period. Highest revision is the rule `apps/web/lib/accruals/api.ts`'s own
+`liveAccrualForPlan` already states for the same relation. A plain reversing journal nobody
+configured from an accrual has no detail row at all, so the probe answers NULL, neither arm is
+taken, and its constant basis keeps posting byte for byte.
+
+**A reversal resolves its own PRIMARY's line, and only once that accrual has posted.** The reversal
+leg falls on the first day of the month after the accrual it undoes, a date this relation
+deliberately holds no row for, so the recut core resolves on `v_primary_due` — the accrual date it
+has already measured under the plan lock for the orphan wall. The accrual arm is gated on
+`v_primary_entry is not null` for a reversal leg, so a reversal with nothing behind it falls through
+to 0193's orphan wall and is refused as `reversal_before_primary` — its honest name — instead of
+being told its period has no stated amount.
+
+**The door enforces five rules; the occurrence enforces the sixth.**
+`clara._assert_accrual_period_amounts` (IMMUTABLE, ungranted, called from `clara._accrual_finish`
+and from `clara.correct_accrual_adjustment`) asks: every element carries an ISO `due_date` and a
+positive integer `amount_cents` with no two naming one date (`accrual_period_amount_invalid`,
+`accrual_period_amount_duplicate`); every stated date is one this schedule actually produces inside
+the authority window, walked with `clara._plan_due_nth` itself
+(`accrual_period_amount_not_scheduled`); every date the schedule produces is stated
+(`accrual_period_amount_missing`); the amounts sum EXACTLY to the accrual's own `amount_cents`,
+which under this rule is the TOTAL for the window (`accrual_period_amounts_unbalanced`); and the
+final-period remainder convention binds exactly the shape it names — when the set IS an equal split
+with one odd period, that period must be the LAST (`accrual_period_remainder_misplaced`). A
+genuinely uneven set never enters that arm: the convention governs where a DIVISION's leftover cent
+goes, not what a person may state. Under any other rule a `period_amounts` key is refused outright
+(`accrual_period_amounts_unexpected`).
+
+The sixth is the one the door cannot see: a due date that appears AFTER configuration, because
+`clara.revise_accounting_plan` widened the window. That records
+`accrual_period_amount_missing` (CLR10) on the occurrence, admits no Work and posts nothing — and
+the SAME row becomes admissible once a correction states the amount, exactly as 0223's own
+missing-line refusal behaves.
+
+**`clara._accrual_canonical` is recut to fold the set in**, sorted by due date. All three doors
+reserve on `clara._hash(… clara._accrual_canonical(p_accrual) …)`; a canonical form blind to
+`period_amounts` made two DIFFERENT per-period sets under one op key a REPLAY of the first rather
+than the typed `op_key_conflict` the estate promises (`p937.op_key` drives exactly that, and its
+vacuity control is a revert of this body to 0222's — which reproduces the hole).
+
+**`clara._accrual_methods()` and `accrual_adjustments_method_check` widen together, and the tail
+proves they agree by EVALUATING the constraint's own expression** (`pg_get_expr(conbin, conrelid)`
+over a one-row `VALUES` alias) once per member of the function's own answer, plus once for each of
+the two withdrawn rules and once for a method object carrying a second key. A text comparison would
+have passed on a constraint that admits something the function never offers.
+
+**No new granted name, so no `rig-meta.mjs` cohort** — the 0285/0295 shape, not the 0284/0302 one.
+Every function this file adds is an ungranted internal reached through doors that already exist, and
+the tail asserts that no `clara\_%` role but `clara_fn_owner` can execute either of them.
+
+**Redo-safe by construction** ("Redo (#957)" above): `create table if not exists`, `create or
+replace function`, `drop trigger if exists`, `drop policy if exists`, `drop constraint if exists`
+before the widened CHECK, and a prestate that reports FIRST APPLY or REDO instead of refusing on
+this file's own objects — the five bodies it recuts are each pinned at their pre-image OR at this
+file's own output and must be at exactly one of the two, so a half-applied state is refused by name.
+Both branches were driven on `clara_l03`: the real first apply, then `CLARA_MIGRATION_REDO`.

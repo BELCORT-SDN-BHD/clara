@@ -751,11 +751,22 @@ an already-corrected row (refused by name: one correction per target).
 **Calculation method**:
 The rule that says WHICH stated amount each of a schedule's periods uses. It selects among amounts a
 person supplied; it computes none, which is why it is a closed set of named rules rather than a
-versioned formula. Today the set holds exactly the rule the schedule performs — the amount stated on
-the record, accrued in every period of the window — because a recorded selection nobody performs is
-a promise the ledger does not keep.
+versioned formula. The set holds exactly the rules a lane performs — the amount stated on the
+record, accrued in every period of the window, and the amount stated for each period separately —
+because a recorded selection nobody performs is a promise the ledger does not keep.
 _Avoid_: A rate, a proration or an allocation the product performs; a formula; a rule offered on a
 form that no lane applies; anything a caller can extend without a new named rule.
+
+**Stated period amount**:
+The amount a person states for ONE period of an accrual, keyed to the due date that period ends on.
+The stated amounts cover every period the schedule reaches inside the authority window and sum
+exactly to the accrual's total; where an even split leaves a cent over, that cent belongs to the
+final period. Each due date posts its own stated amount and its own reversal, and a due date nobody
+stated an amount for posts nothing and records a typed refusal on that occurrence — the accrual's
+total is never used in its place. Changing one is a correction, which writes a successor accrual
+detail carrying its own amounts; the superseded detail keeps the amounts it actually ran under.
+_Avoid_: A per-period figure the product derived, averaged or read off a document; an in-place edit
+of a period already stated; a partial set completed by a fallback.
 
 **Supplied obligation particulars**:
 The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it derives none of them.

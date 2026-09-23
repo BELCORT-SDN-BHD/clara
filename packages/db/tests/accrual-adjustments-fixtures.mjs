@@ -116,13 +116,21 @@ export const ACCRUAL_REASON = {
   catchUpBeforeAuthority: "catch_up_before_authority",
 };
 
-/** The closed selection-rule set `accrual.method.rule` admits: ONE member, because one member is
- *  what the schedule performs. The frozen revision basis carries the amount a human stated and
+/** The closed selection-rule set `accrual.method.rule` admits: one member per rule the schedule
+ *  actually performs, and no more.
+ *
+ *  `stated_amount` (0222) — the frozen revision basis carries the amount a human stated and
  *  `clara._plan_occurrence_basis` only moves the posting date, so "the amount stated here, every
- *  period" is the whole of what this slice selects. The three rules drafted beside it
- *  (`stated_period_amount`, `source_document_amount`, `prior_period_amount`) would each have posted
- *  the SAME cents — they are a successor residual, not a shipped choice (review round 1, A2). */
-export const ACCRUAL_METHODS = ["stated_amount"];
+ *  period" is the whole of what it selects.
+ *
+ *  `stated_period_amount` (#937, 0303) — one figure per DUE DATE, resolved at admission by
+ *  `clara._plan_accrual_period_line` and handed to the shared basis builder as a line override;
+ *  the revision's constant is never a fallback. It joined the set when the lane that HONOURS it
+ *  landed, which is the rule review round 1's finding A2 stated.
+ *
+ *  `source_document_amount` and `prior_period_amount` stay withdrawn (owner ruling 2026-09-18):
+ *  nothing performs them. */
+export const ACCRUAL_METHODS = ["stated_amount", "stated_period_amount"];
 
 /** The liability account this lane accrues into. The #623 chart (`WCHART`) carries an expense, a
  *  bank asset, a receivable control and a retired expense — no liability at all — so the accrual's
@@ -176,6 +184,10 @@ export function accrual({
   memo = "Accrued July office rent",
   sourceDocumentId = null,
   documentServicePeriodId = null,
+  // #937 — the PER-PERIOD amounts, present ONLY under the `stated_period_amount` rule. `null`
+  // leaves the key off the object entirely, which is what every `stated_amount` cell sends and
+  // what 0303's own wall requires of them.
+  periodAmounts = null,
   omit = [],
 } = {}) {
   const a = {
@@ -192,6 +204,7 @@ export function accrual({
     source_document_id: sourceDocumentId,
     document_service_period_id: documentServicePeriodId,
   };
+  if (periodAmounts !== null) a.period_amounts = periodAmounts;
   for (const k of omit) delete a[k];
   return a;
 }
