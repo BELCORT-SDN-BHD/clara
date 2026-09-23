@@ -22,14 +22,15 @@
 // declare-and-verify shape `sign-in-census.test.ts` uses for its own WRAPPERS: a thin function that
 // forwards to the shared helper is not a second copy; a function that reimplements the wait is). A
 // scan not preceded by a settle — direct, or through a verified wrapper CALLED anywhere earlier in
-// the file — since the last scan (or the start of the file) is an offender.
+// the SAME cell — since the last scan (or the cell's own opening) is an offender.
 //
 // WHY COMMENTS ARE STRIPPED FIRST. This suite's own prose regularly quotes the exact code shapes
 // this census greps for — `staff-expense-claim-walk.spec.ts`'s own header said "one full-page
 // `AxeBuilder.analyze()` is 14.4 s alone" a full five lines ahead of its one real, already-settled
 // call, and a comment-blind first cut of this file read that prose as a second, uncovered scan.
-// `stripComments` below removes `//` and `/* */` content (never string/template contents) while
-// preserving every newline, so line numbers stay true to the real file.
+// `stripComments` (`./spec-census`, shared with `cell-budget-census.test.ts` since #864's own fix
+// round) removes `//` and block-comment content — never string/template contents — while preserving
+// every newline, so line numbers stay true to the real file.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
