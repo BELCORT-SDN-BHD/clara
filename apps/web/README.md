@@ -366,7 +366,13 @@ mock origin. `e2e/members-lifecycle-mock.mjs` answers the Supabase admin REST en
 `clara.invite_member` verb with a realistic three-key receipt (`invite_id`/`token_hash`/
 `expires_at`, plus the plaintext `token`, matching `0147`'s own body), and
 `POST /e2e-invite-mail-capture`, which records what `send()` posted instead of relaying it. All
-scoped by `ours`, exactly like every other handler in that file.
+three carry that file's own `if (!ours) return false;` guard — the mail-capture one only since
+the code-review fix round: it shipped without the guard while this paragraph claimed otherwise,
+on a path `run.mjs` now sets for EVERY e2e run, and the census that should have contradicted the
+claim could not see any of the three. `HANDLER_OPENER` in
+`e2e/e2e-fixture-ownership.test.ts` reads `/auth/…` and `/e2e-…` openers from that round on, so
+the claim is now MEASURED: N5 censuses all four of this lane's non-`/rest/` handlers as scoped
+(44/44).
 `e2e/members-invite-walk.spec.ts`'s first cell now drives the invite dialog to a settled
 `"The invitation to … was sent."` banner and a new pending row, then reads
 `e2e_members_lifecycle_invite_trace` for positive evidence that both calls actually fired and

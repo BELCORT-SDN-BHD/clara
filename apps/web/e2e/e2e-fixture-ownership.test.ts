@@ -149,8 +149,16 @@ test("N4 · no lane fixture may claim the FIRM ALTITUDE for the shared subject",
  * so FIVE of its ten handlers were invisible to a gate whose whole job is to see them — and an
  * unscoped one among them would have passed in silence. A census that cannot see a handler
  * cannot report it unscoped, which is this file's own failure mode, one level up.
+ *
+ * SPEC-1022-1 (wave 3): the same failure mode, a second time, and this time it hid a real
+ * unscoped handler. `members-lifecycle-mock.mjs` grew four handlers under `/auth/…` and
+ * `/e2e-…` while the commit that added them stated every new handler was scoped — three were
+ * invisible here, and the fourth (`/e2e-invite-mail-capture`) was genuinely unscoped on a path
+ * `run.mjs` now sets for EVERY e2e run. Both prefixes are recognised from here on. The only
+ * other handler this widening newly sees anywhere is `operator-support-mock.mjs`'s own control
+ * endpoint, declared below with its reason rather than left silent.
  */
-const HANDLER_OPENER = /(?:path === "(\/(?:rest|api)\/[^"]+)"|verb === "([a-z0-9_]+)")/;
+const HANDLER_OPENER = /(?:path === "(\/(?:rest|api|auth)\/[^"]+|\/e2e-[^"]+)"|verb === "([a-z0-9_]+)")/;
 const HANDLER_OPENER_G = new RegExp(HANDLER_OPENER.source, "g");
 
 /** The label a census row carries, so a verb-dispatched handler reads like the route it answers. */
@@ -255,8 +263,17 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // `set_admission_capacity` writes the estate's ONE configuration row. All three are measured to
   // have no other caller anywhere in `apps/web/e2e`, and all three answer CLR04 to the bookkeeper
   // persona, so an unowned caller is REFUSED rather than served someone else's fixture.
+  //
+  // A FOURTH joined them when `HANDLER_OPENER` learned `/e2e-…` openers (SPEC-1022-1): this
+  // lane's own control endpoint, `POST /e2e-operator/reset`, which every cell in
+  // `operator-support-walk.spec.ts` calls first because `workers: 1` gives the file one server and
+  // three of its cells decide or resolve a case. It carries no request-borne subject to scope on
+  // — its body is empty and its whole job is to put THIS lane's module state back to its
+  // starting point — and the path names this lane, so no sibling walk can reach it by accident.
+  // It was unscoped and unmeasured before this round; it is unscoped and NAMED now.
   "operator-support-mock.mjs": {
     unscopeable: [
+      "/e2e-operator/reset",
       "/rest/v1/rpc/list_operator_support_queue",
       "/rest/v1/rpc/get_admission_capacity",
       "/rest/v1/rpc/set_admission_capacity",
@@ -579,11 +596,15 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // exact-verb allow-list before any branch (`plans-mock.mjs:286`'s shape), so a verb it does not
   // declare falls through with the request body never opened.
   //
-  // TWO OF ITS HANDLERS THIS CENSUS CANNOT SEE, named here rather than left silent: the acceptance
-  // leg answers `/auth/v1/verify` (only for `type: "invite"` AND this lane's own token_hash; the
-  // CORE branch answers `signup` and 400s the rest) and the preview door (only for one of this
-  // lane's two `ct` tokens). `HANDLER_OPENER` matches `/rest/…` and `/api/…` openers, so the auth
-  // one is outside its reach — it is scoped by token, and falls through for everything else.
+  // ITS FOUR NON-`/rest/` HANDLERS ARE CENSUSED SINCE SPEC-1022-1, not merely described here: the
+  // acceptance leg's `/auth/v1/verify` (only for `type: "invite"` AND this lane's own token_hash;
+  // the CORE branch answers `signup` and 400s the rest), the two #1022 identity-provisioning
+  // calls `admin()` makes (`/auth/v1/admin/users`, `/auth/v1/admin/generate_link`) and the #1022
+  // mail capture (`/e2e-invite-mail-capture`). `HANDLER_OPENER` reads `/auth/…` and `/e2e-…`
+  // openers from this round on, so all four are measured rather than taken on trust — which is
+  // how the mail-capture handler's MISSING guard was found: the commit that added it said every
+  // new handler was scoped by `ours`, and three of the four were invisible to the instrument that
+  // would have contradicted it. The preview door has always been visible (`/rest/v1/rpc/…`).
   "members-lifecycle-mock.mjs": { unscopeable: [], debt: [] },
 };
 

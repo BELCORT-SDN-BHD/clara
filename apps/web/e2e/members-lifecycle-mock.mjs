@@ -48,9 +48,14 @@
 // a real Supabase project. Both point at THIS SAME mock origin, under `/e2e-supabase`, so both
 // land on the handlers below: `GET /auth/v1/admin/users` (an empty directory — nobody this
 // harness invites is already a confirmed user) and `POST /auth/v1/admin/generate_link` (a fixed
-// hashed token), scoped by `ours` exactly like every other handler in this file, plus
-// `POST /e2e-invite-mail-capture`, which records the message `send()` posted instead of relaying
-// it anywhere.
+// hashed token), plus `POST /e2e-invite-mail-capture`, which records the message `send()` posted
+// instead of relaying it anywhere. All three carry this file's own `if (!ours) return false;`
+// guard — the mail-capture one only since the code-review fix round (SPEC-1022-2): it shipped
+// WITHOUT the guard its two siblings carry while this header said every new handler had it, and
+// `run.mjs` sets `CLARA_E2E_INVITE_MAIL_ENDPOINT` for every e2e run, so that path was live for
+// every lane. The census that would have caught it could not see any of the three either
+// (SPEC-1022-1): `HANDLER_OPENER` learned `/auth/…` and `/e2e-…` openers in the same round, and
+// all four of this lane's non-`/rest/` handlers are censused now.
 //
 // So the invite leg now drives the real dialog, the real courier round trip, the REAL
 // `clara.invite_member` verb this lane answers below, and a settled SUCCESS banner with a new
@@ -324,6 +329,7 @@ export async function handleMembersLifecycleSupabase(request, response, path, ur
   // `CLARA_E2E_INVITE_MAIL_ENDPOINT` is set, so the exact body a real deployment would have sent
   // to Resend is observable — and captured, never relayed anywhere else.
   if (request.method === "POST" && path === "/e2e-invite-mail-capture") {
+    if (!ours) return false;
     const body = await readCachedJson(request);
     state.capturedMail = {
       to: Array.isArray(body?.to) ? body.to[0] : null,
