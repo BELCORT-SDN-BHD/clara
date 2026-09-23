@@ -2944,6 +2944,33 @@ const FIRM_SETUP_TIP_0259_HUMAN_FNS = ["dismiss_firm_setup_tip"];
 export const FIRM_SETUP_TIP_0259_COHORT = [...FIRM_SETUP_TIP_0259_HUMAN_FNS];
 // #935 END
 
+// #1007 [0275, warn before recording a trade invoice that looks like one already recorded] — its
+// own cohort, frontier-tolerant like every cohort above: wholly absent on a chain below 0275,
+// wholly present once it applies, and a PARTIAL cohort is what `cohortFailures` reports.
+//
+//   ONE HUMAN READ, clara_authenticated ONLY. `probe_trade_invoice_duplicates(uuid,text,jsonb)`
+//   answers "which already-recorded invoices of this client look like the one about to be
+//   recorded", on two independent signals (same normalised document number; same total on the
+//   same document date). It is floored on the bookkeeper rank in its own body — the floor of the
+//   recording step it precedes — and takes its firm AND actor from the session, so it is no
+//   cross-tenant oracle. clara_runtime, both agent read roles and all four wake lanes gain ZERO:
+//   the body is `_human_ctx`-gated, so a lane carrying no JWT claims could not execute it even if
+//   it held the grant (packages/runtime/lib/pools.mjs sets no request.jwt.claims).
+//
+//   THREE INTERNALS, granted to NOBODY: `_trade_invoice_reference_key` (the ONE document-number
+//   normalisation), `_trade_invoice_duplicate_matches` (the ONE matcher both entrances share, so
+//   the form and the chat lane can never be shown different answers) and `_trade_invoice_probe_core`
+//   (the shared body). They are rostered here so a half-applied 0275 is reported as one, and are
+//   expected-false for every role in the live grant sweep rather than listed in ALLOWED.
+const TRADE_INVOICE_DUPLICATE_0275_HUMAN_FNS = ["probe_trade_invoice_duplicates"];
+const TRADE_INVOICE_DUPLICATE_0275_UNGRANTED_FNS = [
+  "_trade_invoice_reference_key", "_trade_invoice_duplicate_matches", "_trade_invoice_probe_core",
+];
+export const TRADE_INVOICE_DUPLICATE_0275_COHORT = [
+  ...TRADE_INVOICE_DUPLICATE_0275_HUMAN_FNS, ...TRADE_INVOICE_DUPLICATE_0275_UNGRANTED_FNS,
+];
+// #1007 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -3137,6 +3164,9 @@ export const ALLOWED = {
     // clara_runtime holds it too (it echoes what the run posted), the agent role and both wake
     // roles gain ZERO.
     ...TRADE_INVOICES_0225_HUMAN_FNS,
+    // #1007 [0275] the trade-invoice duplicate probe — see the block above. clara_authenticated
+    // ONLY, bookkeeper-floored in its own body; every machine lane gains ZERO.
+    ...TRADE_INVOICE_DUPLICATE_0275_HUMAN_FNS,
     // #640 [0193] the eleven accounting-plan doors — see the block above. clara_authenticated
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
@@ -3855,6 +3885,10 @@ export async function grantMatrixFailures() {
   }
   failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
   failures.push(...cohortFailures("#935 0259 firm setup education tip dismissal", FIRM_SETUP_TIP_0259_COHORT, liveNames));
+  // #1007 [0275] — the probe, its matcher and the two normalisation/body internals ship as one
+  // lane; half of them is a door with no matcher, or a matcher no entrance can reach.
+  failures.push(...cohortFailures("#1007 0275 trade-invoice duplicate probe",
+    TRADE_INVOICE_DUPLICATE_0275_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-6 apps/web read doors", CHECKOUT_GATE_C6_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));

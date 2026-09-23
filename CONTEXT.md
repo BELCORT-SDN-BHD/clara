@@ -378,6 +378,10 @@ _Avoid_: The displayed name as the identity; a binding ceremony as a prerequisit
 A submitted document whose registration number and whose TIN each name a *different* live counterparty of the same client. Clara stops and shows both, with the identifier that reached each one, so the person decides which party the document is about; she never prefers one identifier over the other. Distinct from an ambiguous party, where one identifier reaches several parties, and from an unresolved one, where no identifier reaches anybody.
 _Avoid_: Silently preferring the registration number; treating an identifier that matched nobody as a disagreement; resolving the clash by creating a party.
 
+**Probable duplicate**:
+An invoice or bill about to be recorded that looks like one this client already has on the books: the same counterparty and the same document number ignoring case, spaces and punctuation, or the same counterparty, the same total and the same document date. Clara shows what she found and the person decides; she never refuses the recording, and she never treats a repeated amount or a repeated counterparty on its own as a sign. An earlier document whose Work will never post, or whose entry was reversed, is not on the books and is not a sign either.
+_Avoid_: Blocking or auto-merging a suspected duplicate; a unique constraint on a document number; matching across clients, across kinds or on the amount alone; calling a replayed request a probable duplicate (that is an intent key converging, not a second document).
+
 **Counterparty alias**:
 Another name the same party is known by — a former name, a trade name, a name a person stated or a name read off a named document. Each alias records the lane that wrote it (a person in the app, Clara, client setup, or an unrecorded legacy lane), the stated basis and, where one exists, the source document and extraction it was read from. Retiring an alias stops it matching new activity and keeps it readable as history.
 _Avoid_: Labelling a machine-written alias as a person's; a source claimed with no document behind it; deleting an alias to correct it.

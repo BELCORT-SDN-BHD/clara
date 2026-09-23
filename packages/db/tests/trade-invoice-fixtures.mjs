@@ -87,6 +87,42 @@ export async function gateTiTin(t) {
   return true;
 }
 
+/** #1007's migration STABLE STEM — a THIRD frontier on this lane: a chain can carry 0225 and
+ *  0274 and not 0275, and on that chain #655's and #982's batteries must still run in full while
+ *  #1007's skips. */
+export const TI_DUP_STEM = "trade_invoice_duplicate_probe$";
+
+let _dupReady = null;
+export async function tiDupLaneReady() {
+  if (_dupReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [TI_DUP_STEM]);
+      _dupReady = r.rows[0].n > 0;
+    } catch {
+      _dupReady = false;
+    }
+  }
+  return _dupReady;
+}
+
+/** `if (await gateTiDup(t)) return;` — #1007's own per-cell frontier gate, the same idiom as
+ *  `gateTi` and `gateTiTin`, keyed on `TI_DUP_STEM`. */
+export async function gateTiDup(t) {
+  if (await tiDupLaneReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_TRADE_INVOICE_DUPLICATE_PROBE === "1") {
+    markSkip();
+    t.skip(`#1007 trade-invoice duplicate probe absent (no ${TI_DUP_STEM} migration applied)`);
+    return true;
+  }
+  assert.fail(
+    "#1007: the trade-invoice duplicate probe is absent. Apply 0275_trade_invoice_duplicate_probe.sql "
+    + "(or its numbered suite copy), or set CLARA_ALLOW_MISSING_TRADE_INVOICE_DUPLICATE_PROBE=1 for "
+    + "the package-wide pre-integration sweep.",
+  );
+  return true;
+}
+
 /**
  * `if (await gateTi(t)) return;` — the house per-cell frontier gate.
  *
@@ -151,6 +187,9 @@ export const TI_REASON = {
 };
 
 export const TI_KIND = { sales: "sales_invoice", bill: "supplier_bill" };
+/** #1007 · the TWO independent duplicate signals the probe reports, and the ONLY two. Amount
+ *  alone, or counterparty alone, is never one: a monthly rent bill legitimately repeats both. */
+export const TI_DUP_SIGNAL = { reference: "same_reference", money: "same_total_and_date" };
 export const DUE_SOURCE = { stated: "stated", terms: "counterparty_terms", absent: "absent" };
 
 /** The chart this battery posts against, ON TOP of `WCHART`. Codes are the starter template's own
@@ -323,6 +362,16 @@ export async function admitTradeInvoiceWork({
 export async function getTradeInvoice(sub, workId) {
   const r = await humanQuery(sub,
     "select clara.get_trade_invoice(p_work => $1::uuid) as result", [workId]);
+  return r.rows[0].result;
+}
+
+/** #1007 · THE PROBE, driven as the SIGNED-IN HUMAN — its only production caller is the browser,
+ *  through PostgREST, as the bookkeeper who is about to record the invoice. */
+export async function probeTradeInvoiceDuplicates(sub, { client, kind = TI_KIND.bill, particulars }) {
+  const r = await humanQuery(sub, namedCall("probe_trade_invoice_duplicates", [
+    { name: "p_client", cast: "uuid" }, { name: "p_kind", cast: "text" },
+    { name: "p_particulars", cast: "jsonb" },
+  ]), [client, kind, JSON.stringify(particulars)]);
   return r.rows[0].result;
 }
 

@@ -3035,3 +3035,80 @@ verbatim, reporting `clean` without the redo notice.
 full), `tests/trade-invoice-party-tin-preintegration-gate.mjs` keyed on the stem
 `trade_invoice_party_tin$`, and its `--import` token in `package.json`'s test script in
 migration order. No `rig-meta.mjs` cohort changes: 0274 mints no function and moves no grant.
+
+## 0275 — warn before recording a trade invoice that looks like one already recorded (#1007)
+
+On the trade-invoice lane 0225 shipped, "duplicate" meant a replayed *intent* and nothing else:
+`uq_accounting_work_intent` converges a repeated `(firm, client, intent_key)` onto one Work, and
+nothing in the door, the birth trigger or the belts ever looked at
+`(client_id, counterparty_id, reference)`. The same supplier bill sent twice under two intent keys
+posted twice and doubled the payable. The owner ruled on 2026-09-20: check at the **recording**
+step, **warn and let the person decide, never refuse**, and do not look at the document number
+alone — also look at the amount and the counterparty.
+
+`0275_trade_invoice_duplicate_probe.sql` is **purely additive**. It recuts nothing:
+`clara.admit_trade_invoice_work`'s replay semantics, its refusal ladder and the posting core are
+untouched, and the file's tail re-reads both that door and 0274's
+`clara._trade_invoice_resolve_party` to prove their `sha256(prosrc)` did not move while it applied.
+**A unique constraint on `reference` would be wrong and is not added**: the column is nullable and
+suppliers legitimately reuse numbers.
+
+**The two signals, and why there are two rather than one conjunction.**
+
+| signal | fires when | skipped when |
+|---|---|---|
+| `same_reference` | same counterparty **and** the same reference after normalisation | the new document states no reference, or the stored one states none |
+| `same_total_and_date` | same counterparty, same `total_cents` **and** the same `document_date` | the new document states no date or no total |
+
+They are joined by OR, and amount alone or counterparty alone is never a match — a monthly rent
+bill legitimately repeats its amount. The shape is chosen against two real products: QuickBooks
+Online warns on vendor + bill number and still lets the person save, while SAP's standard duplicate
+check requires vendor, currency, company code, gross amount, reference and invoice date to *all*
+match, which is known to let a duplicate through whenever the reference was typed differently.
+
+**The reference normalisation is the estate's one identifier normalisation** —
+`lower(regexp_replace(v, '[^a-zA-Z0-9]', '', 'g'))`, byte-identical in `clara.create_counterparty`
+(0021), `clara.set_counterparty_identifiers` (0215) and 0274's registration and TIN arms — so
+`INV-001`, `inv 001` and `INV001` are one document number here too. A reference that normalises
+away entirely is folded to NULL rather than matched, or every unnumbered bill would match every
+other unnumbered bill. `clara._trade_invoice_reference_key(text)` is `immutable` and is the one
+place that answer lives.
+
+**Which earlier invoices count.** Only ones that are, or still may become, a posting: the Work is
+not in the estate's own closed terminal-without-posting set
+(`refused`, `failed`, `cancelled`, `expired` — the four 0178 and 0184 already treat as one class),
+and the posted entry, if there is one, has no `clara.journal_entries.reversed_by`. An invoice whose
+Work is still queued or running **does** count: it is about to post, and a second recording would
+double the payable exactly as a posted one would. `expired` is the fourth member of the class the
+ticket named in prose, not a widening of it: an expired Work has no more chance of posting than a
+cancelled one, and leaving it in would warn about a bill nobody can record.
+
+**The probe is a read.** Every body is `stable`, so PostgreSQL refuses a write inside it, and the
+matcher takes no `for update` / `for share`. `p1007.probe.is_a_read` proves both from outside: a
+row census across the lane's four tables and `clara.audit_log` is unchanged by a probe (a read that
+audited itself would be a write), and a second session takes `for update nowait` on the very row
+the probe just reported while the probe's transaction is still open.
+
+**Authority.** `clara.probe_trade_invoice_duplicates(uuid,text,jsonb)` takes its firm **and** actor
+from the session (`clara._human_ctx`, bookkeeper floor — the floor of the recording step it
+precedes) and is granted to `clara_authenticated` alone: a `security definer` function with a
+caller-supplied tenant parameter is the cross-tenant-oracle shape 0219 names. Another firm's client
+and an unknown id leave with the byte-identical `CLR11 client_not_found` sentence. The three
+internals — `_trade_invoice_reference_key`, `_trade_invoice_duplicate_matches` and
+`_trade_invoice_probe_core` — are granted to nobody and the tail asserts it.
+
+**No index is added.** The matcher reads one counterparty's invoices of one client, which
+`ix_trade_invoices_counterparty` (0225, on `(counterparty_id, document_date desc)`) already reduces
+to an index scan.
+
+**Redo-safe by construction** (#957): every statement is `create or replace function` or a
+`revoke`/`grant` on one, and the prestate reports FIRST or REDO from a catalog probe rather than
+branching on a body's shape.
+
+**The frontier triad**, per the wave-2/3 work order:
+`tests/trade-invoice-duplicate-probe.test.mjs` (#1007's cells, in their own file so a chain
+carrying 0225 and 0274 and not 0275 still runs #655's and #982's batteries in full),
+`tests/trade-invoice-duplicate-probe-preintegration-gate.mjs` keyed on the stem
+`trade_invoice_duplicate_probe$`, and its `--import` token in `package.json`'s test script in
+migration order. `TRADE_INVOICE_DUPLICATE_0275_COHORT` in [tests/rig-meta.mjs](tests/rig-meta.mjs)
+attributes the new names.
