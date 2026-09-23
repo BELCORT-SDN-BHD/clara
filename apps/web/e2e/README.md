@@ -105,7 +105,7 @@ Three rules the budgets do not replace:
 
 ## Coverage map
 
-The checked-in suite currently contains 25 specs:
+The checked-in suite currently contains 49 specs:
 
 | Spec | What it exercises |
 |---|---|

@@ -23,7 +23,7 @@
 // Two test runners, one directory, one loader each: that is what the cell below pins.
 
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -72,4 +72,31 @@ test("#851 · THE VACUITY CONTROL: the stock pattern this narrows WOULD have tak
   assert.ok(testMatch instanceof RegExp);
   assert.equal(discovers(testMatch, "sign-in-census.test.ts"), false, "the narrowed pattern drops the node:test file");
   assert.equal(discovers(testMatch, "documents-viewer-walk.spec.ts"), true, "and keeps the walk");
+});
+
+// #1019 — THE COVERAGE-MAP COUNT, HELD BY A CELL INSTEAD OF BY MEMORY.
+//
+// README.md's "Coverage map" section opens with a sentence naming an exact number of specs the
+// suite "currently contains." That number is hand-maintained prose, not generated from the real
+// file count, and by 2026-09-20 it had drifted to less than half the real count (stated 25,
+// real 49) without anything going red. This cell reads the sentence's own number out of the
+// README and checks it against the same `*.spec.ts` count `discovers` above already computes, so
+// the next spec added or removed fails this cell until the sentence is updated to match.
+const COVERAGE_MAP_COUNT = /The checked-in suite currently contains (\d+) specs:/;
+
+test("#1019 · README's coverage-map count matches the real number of checked-in spec files", () => {
+  const readmePath = join(E2E_DIR, "README.md");
+  const readme = readFileSync(readmePath, "utf8");
+
+  const match = readme.match(COVERAGE_MAP_COUNT);
+  assert.ok(match, "README.md must state the coverage-map count in the pinned sentence shape");
+
+  const statedCount = Number(match![1]);
+  const realCount = readdirSync(E2E_DIR).filter((name) => name.endsWith(".spec.ts")).length;
+
+  assert.equal(
+    statedCount,
+    realCount,
+    `README.md's coverage-map sentence states ${statedCount} specs but the checked-in suite has ${realCount} — update the sentence`,
+  );
 });
