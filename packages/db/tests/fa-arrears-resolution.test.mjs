@@ -27,8 +27,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  gate975, armed975, fiscalYear, recordResolution, resolutionRows,
-  runManual, runDue, entryRowOf, approveEntry, clientCharges, runRows,
+  gate975, armed975, fiscalYear, reopenYear, recordResolution, resolutionRows,
+  runManual, runPeriod, runDue, entryRowOf, approveEntry, clientCharges, runRows,
   buyAsset, completeSL, mon, dayIn, opk,
   refuses, noteLane, printLaneNotes, printSkipCount, endPool, x41EnsureReady,
 } from "./fa-arrears-resolution-fixtures.mjs";
@@ -188,4 +188,140 @@ test("p975.fold a recorded fold_current is stored with its author and timestamp,
     "…and it names the SAME record, not a second one");
   assert.equal((await resolutionRows(client)).length, 1,
     "…and no second answer was asked for or recorded");
+});
+
+// ===========================================================================================
+// 3 · THE OTHER RESOLUTION (AC1/AC2). `reopen_prior` REFUSES the fold and points at the one
+//     way back in; the reopened year's own period is then runnable in its own right.
+// ===========================================================================================
+
+test("p975.reopen a recorded reopen_prior refuses the fold and names clara.reopen_fiscal_year; once the year IS reopened its own period is runnable in its own right and nothing is folded", async (t) => {
+  if (await gate(t)) return;
+  const { w, client, fy, start, open } = await closedYearArrears("reopen");
+
+  // Mandatory setup: the question stands, and the amount it states is the one judged below.
+  const asked = await refuses(() => runManual(w.users.bob,
+    { client, periodStart: open.start, periodEnd: open.end }),
+  "arrears_resolution_required", "p975.reopen.setup");
+  assert.equal(JSON.parse(String(asked.detail)).arrears_cents, MONTHLY);
+
+  await recordResolution(w.users.bob, {
+    client, fiscalYear: fy, choice: "reopen_prior", arrearsCents: MONTHLY,
+    periodStart: open.start, periodEnd: open.end, reason: "material to this client",
+  });
+
+  const err = await refuses(() => runManual(w.users.bob,
+    { client, periodStart: open.start, periodEnd: open.end, opKey: opk("p975reo") }),
+  "arrears_awaiting_reopen", "p975.reopen");
+  assert.equal(err.code, "CLR38");
+  const d = JSON.parse(String(err.detail));
+  assert.equal(d.chosen, "reopen_prior", "the refusal says which resolution was chosen");
+  assert.equal(d.remedy, "reopen_fiscal_year", "…and the one way back in");
+  assert.equal(d.fiscal_years[0].fiscal_year_id, fy);
+  assert.equal(d.arrears_cents, MONTHLY);
+  assert.match(String(err.message), /reopen_fiscal_year/,
+    "the human sentence names the reopen path too, not only the detail json");
+  assert.deepEqual(await depreciationEntries(client), [],
+    "a restatement choice posts NOTHING into the open period — that is the whole point of it");
+
+  // AND THE ORACLE STILL SKIPS THE YEAR WHILE IT IS CLOSED: #651's report is unchanged by the
+  // answer, because the answer is about the ARREARS, not about the wall.
+  const stillClosed = await runDue(client);
+  assert.equal(stillClosed.period_start, open.start);
+  assert.ok(stillClosed.skipped_closed.some((x) => x.period_start === start.start));
+
+  // THE REOPEN ITSELF. `clara.reopen_fiscal_year` is untouched by this ticket; the fixture walks
+  // the one lifecycle edge that door walks, and what is asserted here is what the FA lane does
+  // once the column says `reopened`.
+  await reopenYear(fy);
+  const due = await runDue(client);
+  assert.equal(due.due, true);
+  assert.equal(due.period_start, start.start,
+    `the reopened year's own month is now the oldest unmet period (got ${JSON.stringify(due)})`);
+  assert.deepEqual(due.skipped_closed, [], "…and nothing is skipped any more");
+
+  const run = await runManual(w.users.bob,
+    { client, periodStart: start.start, periodEnd: start.end, opKey: opk("p975restate") });
+  assert.equal(run.status, "drafted", "WD-R5: the first run under a fresh authority DRAFTS");
+  const entry = await entryRowOf(run.entry_id);
+  assert.equal(entry.posting_date, start.end,
+    "THE CHARGE IS DATED IN THE REOPENED YEAR — that is the restatement, not a fold");
+  assert.equal(run.arrears_folded, null,
+    "…and nothing was folded forward: arrears_folded is null on a run that folds nothing");
+  assert.equal(String(run.charged_cents), String(MONTHLY));
+});
+
+// ===========================================================================================
+// 4 · THE SWEPT RUN (AC3). No person is there to answer, so the machine lane PARKS with a
+//     stated reason instead of posting — and completes once a choice exists.
+// ===========================================================================================
+
+test("p975.parks the swept run door PARKS with a stated reason instead of posting, parks again on a reopen_prior record, and completes once the record is superseded by fold_current", async (t) => {
+  if (await gate(t)) return;
+  const { w, client, fy, start, open } = await closedYearArrears("parks");
+
+  // THE BELT'S OWN PROBE still says due — parking is not "nothing to do".
+  const due = await runDue(client);
+  assert.equal(due.due, true);
+  assert.equal(due.period_start, open.start);
+
+  const parked = await runPeriod({ client, periodStart: open.start, periodEnd: open.end });
+  assert.equal(parked.status, "parked",
+    `the machine lane parks rather than posting (got ${JSON.stringify(parked)})`);
+  assert.equal(parked.reason, "arrears_resolution_required", "…and SAYS why");
+  assert.equal(String(parked.arrears_cents), String(MONTHLY), "…stating the amount");
+  assert.equal(parked.fiscal_years[0].fiscal_year_id, fy, "…and the year");
+  assert.deepEqual(parked.resolutions, ["fold_current", "reopen_prior"]);
+  assert.equal(parked.chosen, null, "…and that nobody has chosen yet");
+  assert.equal(parked.remedy, "record_fa_arrears_resolution");
+  assert.deepEqual(await depreciationEntries(client), [],
+    "NOTHING was posted — a park is a decision not to write, not a half-write");
+  assert.deepEqual(await clientCharges(client), []);
+
+  // A RESTATEMENT CHOICE PARKS TOO, on its own reason: the belt may not post into an open period
+  // a person has ruled must be restated in the closed one.
+  await recordResolution(w.users.bob, {
+    client, fiscalYear: fy, choice: "reopen_prior", arrearsCents: MONTHLY,
+    periodStart: open.start, periodEnd: open.end, reason: "material, pending reopen",
+  });
+  const parked2 = await runPeriod({ client, periodStart: open.start, periodEnd: open.end, opKey: opk("p975park2") });
+  assert.equal(parked2.status, "parked");
+  assert.equal(parked2.reason, "arrears_awaiting_reopen");
+  assert.equal(parked2.chosen, "reopen_prior");
+  assert.equal(parked2.remedy, "reopen_fiscal_year");
+  assert.deepEqual(await depreciationEntries(client), []);
+
+  // THE CHANGE OF MIND IS APPEND-ONLY: the old judgement keeps its author and its timestamp, and
+  // exactly one row stays live.
+  const superseding = await recordResolution(w.users.bob, {
+    client, fiscalYear: fy, choice: "fold_current", arrearsCents: MONTHLY,
+    periodStart: open.start, periodEnd: open.end, reason: "re-assessed as immaterial",
+  });
+  const rows = await resolutionRows(client);
+  assert.equal(rows.length, 2, "two judgements on file, not one mutated row");
+  assert.equal(rows[0].choice, "reopen_prior");
+  assert.equal(rows[0].active, false, "…the first one is superseded");
+  assert.equal(rows[0].superseded_by, w.users.bob);
+  assert.ok(rows[0].superseded_at instanceof Date);
+  assert.equal(rows[1].choice, "fold_current");
+  assert.equal(rows[1].active, true);
+  assert.equal(superseding.supersedes, rows[0].id, "…and the door SAYS what it superseded");
+  assert.equal(rows.filter((r) => r.active).length, 1, "exactly one live answer per (client, year)");
+
+  // AND THE PARKED RUN COMPLETES. Same door, same period, nothing else changed.
+  const done = await runPeriod({ client, periodStart: open.start, periodEnd: open.end, opKey: opk("p975done") });
+  assert.notEqual(done.status, "parked");
+  assert.equal(done.status, "drafted", "WD-R5: the first run under a fresh authority DRAFTS");
+  const entry = await entryRowOf(done.entry_id);
+  assert.equal(entry.posting_date, open.end);
+  assert.equal(done.arrears_folded[0].choice, "fold_current");
+  assert.equal(done.arrears_folded[0].resolution_id, rows[1].id,
+    "…and the receipt names the LIVE record, never the superseded one");
+  await approveEntry(w.users.alice,
+    { entry: done.entry_id, expectedRevision: entry.revision_token, opKey: opk("p975parkapr") });
+  const charges = await clientCharges(client);
+  assert.ok(charges.some((c) => c.period_start === start.start),
+    "the closed year's month is charged, carrying its own month, exactly as #651 measured");
+  assert.deepEqual((await runRows(client)).filter((r) => r.period_end <= start.end), [],
+    "…and no run receipt was written inside the closed year");
 });
