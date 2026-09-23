@@ -518,3 +518,172 @@ comment on function clara._payroll_entry_plan(uuid, jsonb) is
   '#946: THE DRAFTING BODY. An established payroll fact state (0296''s evaluator output) plus this client''s own chart in; the payroll entry out -- the gross debited to salaries and wages, each employer contribution the document prints debited to its own employment-cost account, every statutory deduction (employee and employer portions together) credited to its own payable, and the net credited to salaries payable. It drafts from `established` facts ALONE, gives an unprinted line no leg at all, resolves every account by code in the client''s chart and carries the name it resolved, and requires EXACT balance rather than the rounding tolerance clara._validate_entry_lines allows. Every failure is a named refusal in `refusals`; it writes nothing. Ungranted: reached from clara._payroll_posting_verdict.';
 
 reset role;
+
+-- =====================================================================================
+-- §D  THE UNATTENDED GATE (AC3) -- clara._payroll_posting_verdict(uuid) returns jsonb.
+--
+--     "It posts unattended only when every condition holds: both reading channels agree, every
+--     arithmetic check passes, every account resolves in this client's own chart, the payslip's
+--     own month is established, and no payroll entry for that client and month is already
+--     posted. When any condition fails the run does not post; it appears under Needs you naming
+--     the condition that failed" (the brief).
+--
+--     THE SHAPE IS THE INVOICE LANE'S, AND THAT IS DELIBERATE (see the header). Three properties
+--     are copied from clara._agent_post_entry_core rather than re-invented:
+--       (1) A CLOSED RUNG ROSTER, walked in order, with EVERY rung carrying an explicit verdict.
+--           The roster is the array below and nothing else; a rung whose key were missing from
+--           the vector would be a gate that fails OPEN, which is the D26 defect the invoice lane
+--           found the hard way and which its own comment records.
+--       (2) THE FIRST FAILING RUNG IS THE REASON. A person is told the condition that stopped
+--           the post, not a list -- but the whole vector travels beside it so a reviewer can see
+--           everything that was evaluated.
+--       (3) THE GATE WRITES NOTHING. It is STABLE: no receipt, no marker, no refusal row. A
+--           blocked run is visible because §H DERIVES its Needs-you row from this same body, so
+--           the row clears itself the moment the block does -- no dismissal mechanism, nothing
+--           stored, nothing to reconcile.
+--
+--     ONE BODY, TWO READERS. §E (the post) and §H (the queue) both call this, so the sentence a
+--     person reads under Needs you and the decision the lane acted on cannot drift apart. That
+--     is the whole reason the gate is a function rather than a branch inside the poster.
+--
+--     WHICH READING IT JUDGES: the NEWEST payroll pair banked for the document
+--     (`engine_kind='payroll_text_facts'`, highest `version_n`). A re-extraction mints a new
+--     version, and the live reading is the one the lane is asked about.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._payroll_posting_verdict(p_document uuid)
+  returns jsonb language plpgsql stable
+  set search_path = clara, pg_temp as $ppv$
+declare
+  -- THE CLOSED ROSTER, in the order a person should be told about a failure. `filed` and
+  -- `facts_read` come first because without them the rest is unanswerable; the middle five are
+  -- the brief's own conditions; `entry_balances` is a belt that cannot fail once the arithmetic
+  -- rung passed, and is evaluated anyway because a gate that assumes its own invariants is a
+  -- gate that stops checking them.
+  v_rungs text[] := array['filed','facts_read','channels_agree','arithmetic_holds',
+                          'period_established','run_totals_printed','accounts_resolve',
+                          'entry_balances'];
+  v_tokens jsonb := jsonb_build_object(
+    'filed','not_filed', 'facts_read','payroll_not_read',
+    'channels_agree','channels_disagree', 'arithmetic_holds','arithmetic_failed',
+    'period_established','period_not_established', 'run_totals_printed','run_totals_not_printed',
+    'accounts_resolve','account_missing', 'entry_balances','entry_unbalanced');
+  v_vector jsonb := '{}'::jsonb;
+  v_detail jsonb := '{}'::jsonb;
+  v_first text; v_rung text;
+  f record;
+  v_filing uuid; v_client uuid; v_firm uuid; v_sha text;
+  v_extraction uuid; v_state jsonb; v_plan jsonb := null;
+  v_disagree text[] := '{}'; v_arith text[] := '{}';
+  v_contested jsonb; v_unbal jsonb; v_unchk jsonb;
+begin
+  -- 1 · FILED. The entry this lane posts is a DOCUMENT entry bound to the document's live
+  --     filing, so a document with no live filing has nothing to bind to.
+  select f2.id, f2.client_id, f2.firm_id into v_filing, v_client, v_firm
+    from clara.document_filings f2
+   where f2.document_id = p_document and f2.retired_at is null
+   order by f2.filed_at desc limit 1;
+  v_vector := v_vector || jsonb_build_object('filed', case when v_filing is null then 'not_filed' else 'pass' end);
+
+  -- 2 · FACTS READ. The newest payroll pair banked for this document.
+  if v_filing is not null then
+    select e.id, e.envelope->'payroll_state' into v_extraction, v_state
+      from clara.document_extractions e
+     where e.document_id = p_document and e.engine_kind = 'payroll_text_facts' and e.status = 'done'
+     order by e.version_n desc, e.extracted_at desc limit 1;
+  end if;
+  v_vector := v_vector || jsonb_build_object('facts_read',
+    case when v_state is null then 'payroll_not_read' else 'pass' end);
+
+  if v_state is not null then
+    -- 3 · CHANNELS AGREE. A question the two readings answer differently, or a quoted employee
+    --     row they read differently -- either one means there is no single reading to post.
+    v_contested := coalesce(v_state->'rows'->'contested','[]'::jsonb);
+    for f in select k, v from jsonb_each(coalesce(v_state->'facts','{}'::jsonb)) as t(k, v) order by k loop
+      if (f.v->>'state') in ('channels_disagree','rows_contested') then
+        v_disagree := v_disagree || f.k;
+      elsif (f.v->>'state') in ('totals_mismatch','rows_unbalanced','unreadable','unanswered') then
+        v_arith := v_arith || f.k;
+      end if;
+    end loop;
+    if coalesce(array_length(v_disagree,1),0) > 0 or jsonb_array_length(v_contested) > 0 then
+      v_vector := v_vector || jsonb_build_object('channels_agree','channels_disagree');
+      v_detail := v_detail || jsonb_build_object('fields', to_jsonb(v_disagree),
+        'contested_rows', v_contested);
+    else
+      v_vector := v_vector || jsonb_build_object('channels_agree','pass');
+    end if;
+
+    -- 4 · ARITHMETIC HOLDS. A row whose own gross-minus-deductions identity fails, a row the
+    --     evaluator could not check at all, a printed total the row sum contradicts, or a
+    --     rendering that is not a figure.
+    v_unbal := coalesce(v_state->'rows'->'unbalanced','[]'::jsonb);
+    v_unchk := coalesce(v_state->'rows'->'unchecked','[]'::jsonb);
+    if coalesce(array_length(v_arith,1),0) > 0
+       or jsonb_array_length(v_unbal) > 0 or jsonb_array_length(v_unchk) > 0 then
+      v_vector := v_vector || jsonb_build_object('arithmetic_holds','arithmetic_failed');
+      v_detail := v_detail || jsonb_build_object('fields', to_jsonb(v_arith),
+        'unbalanced_rows', v_unbal, 'unchecked_rows', v_unchk);
+    else
+      v_vector := v_vector || jsonb_build_object('arithmetic_holds','pass');
+    end if;
+
+    -- 5-8 · THE DRAFTING BODY ANSWERS THE REST. The month, the run totals, the chart and the
+    --       balance are exactly what §C already decides, so they are read off its refusals
+    --       rather than re-decided here -- one body per question, never two.
+    v_plan := clara._payroll_entry_plan(v_client, v_state);
+    foreach v_rung in array array['period_established','run_totals_printed','accounts_resolve','entry_balances'] loop
+      if exists (select 1 from jsonb_array_elements(v_plan->'refusals') x
+                  where x->>'reason' = v_tokens->>v_rung) then
+        v_vector := v_vector || jsonb_build_object(v_rung, v_tokens->>v_rung);
+      else
+        v_vector := v_vector || jsonb_build_object(v_rung, 'pass');
+      end if;
+    end loop;
+    v_detail := v_detail || jsonb_build_object(
+      'missing_accounts', coalesce(v_plan->'missing_accounts','[]'::jsonb),
+      'plan_refusals', coalesce(v_plan->'refusals','[]'::jsonb));
+  else
+    -- Nothing was read, so nothing downstream of it was evaluated. Every rung still carries an
+    -- explicit verdict: `not_evaluated` is a verdict, an absent key is a hole.
+    foreach v_rung in array array['channels_agree','arithmetic_holds','period_established',
+                                  'run_totals_printed','accounts_resolve','entry_balances'] loop
+      v_vector := v_vector || jsonb_build_object(v_rung, 'not_evaluated');
+    end loop;
+  end if;
+
+  -- THE FIRST FAILING RUNG IS THE REASON. Walked over the CLOSED roster, so a rung whose key the
+  -- vector somehow lacks reads as a failure rather than as a pass.
+  v_first := null;
+  foreach v_rung in array v_rungs loop
+    if v_first is null and coalesce(v_vector->>v_rung,'') <> 'pass' then v_first := v_rung; end if;
+  end loop;
+
+  select d.sha256 into v_sha from clara.documents d where d.id = p_document;
+
+  return jsonb_build_object(
+    'verdict', case when v_first is null then 'ready' else 'blocked' end,
+    'rung', to_jsonb(v_first),
+    'reason', to_jsonb(case when v_first is null then null else v_tokens->>v_first end),
+    'rung_vector', v_vector,
+    'detail', v_detail,
+    'document_id', p_document,
+    'client_id', to_jsonb(v_client),
+    'firm_id', to_jsonb(v_firm),
+    'filing_id', to_jsonb(v_filing),
+    'source_doc_sha256', to_jsonb(v_sha),
+    'extraction_id', to_jsonb(v_extraction),
+    'period_month', coalesce(v_plan->'period_month','null'::jsonb),
+    'posting_date', coalesce(v_plan->'posting_date','null'::jsonb),
+    'plan', coalesce(v_plan,'null'::jsonb));
+end $ppv$;
+
+revoke all on function clara._payroll_posting_verdict(uuid) from public;
+
+comment on function clara._payroll_posting_verdict(uuid) is
+  '#946: THE UNATTENDED GATE for a payroll summary -- the closed rung roster the brief names, walked in order, every rung carrying an explicit verdict and the FIRST failure being the reason a person is told. It WRITES NOTHING (STABLE): clara._post_payroll_run acts on it and clara.list_review_queue DERIVES its payroll_posting_blocked row from it, so the decision the lane took and the sentence a person reads are the same body and cannot drift. Judges the NEWEST payroll pair banked for the document. Ungranted: reached from those two callers alone.';
+
+reset role;

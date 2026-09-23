@@ -454,3 +454,205 @@ test("S1 · a run whose totals the page does not print has nothing to post, and 
   );
   assert.deepEqual(p.legs, [], "and nothing at all is drafted");
 });
+
+// ---------------------------------------------------------------------------
+// S2 — the unattended gate
+//
+// From here on the cells drive REAL documents: filed through the real doors, routed into the
+// payroll lane by the real router, claimed as a real task and settled through the real persist
+// door. Nothing below writes an extraction, a region or a task by surgery.
+// ---------------------------------------------------------------------------
+
+/** The typed witness_extraction consent is granted ONCE per client (the grant door refuses a
+ *  second live consent for the same purpose), so this asks before it grants. */
+async function hasWitnessConsent(client) {
+  const r = await rootQuery(
+    `select exists(select 1 from clara.client_egress_purpose_activations a
+        join clara.client_egress_purpose_consents c
+          on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id and c.purpose=a.purpose
+       where a.client_id=$1 and a.purpose='witness_extraction'
+         and a.deactivated_at is null and c.revoked_at is null) as live`,
+    [client],
+  );
+  return r.rows[0].live === true;
+}
+
+/** A FILED payroll-summary pdf with a done OCR extraction and one cited region, born through the
+ *  real doors (#945's own `payrollDoc` shape), never by surgery. */
+async function payrollDoc(sub, client) {
+  const firm = await firmOf(client);
+  if (!(await hasWitnessConsent(client))) {
+    const evidence = await consentEvidenceDoc(sub, { firm });
+    const grant = await grantPurpose(sub, { client, purpose: "witness_extraction", evidenceDocument: evidence.documentId });
+    await activatePurpose(sub, { client, purpose: "witness_extraction", consent: grant.consent_id });
+  }
+  const doc = await filedDocument(sub, { firm, client, kind: "payroll_summary" });
+  const extractionId = await seedExtraction({ firm, document: doc.documentId, engineKind: "ocr", status: "done" });
+  await seedRegion({ firm, extraction: extractionId, fieldPath: "payroll.run.gross_pay", textContent: "5,000.00" });
+  return { ...doc, firm, client, extractionId };
+}
+
+/** Drive a payroll document all the way through the lane: filed, routed, claimed, read. Returns
+ *  the document and the persist receipt. */
+async function readPayrollDoc(sub, client, { answers = {}, rows = null, visionAnswers = null } = {}) {
+  const doc = await payrollDoc(sub, client);
+  await enqueueInvoiceFacts(doc.documentId);
+  const task = (
+    await rootQuery(
+      `select id from clara.document_processing_tasks
+        where document_id=$1 and lane='payroll_facts' and status='queued'
+        order by version_n desc limit 1`,
+      [doc.documentId],
+    )
+  ).rows[0];
+  assert.ok(task, "mandatory setup: the router queued a payroll_facts task");
+  const claimed = await claimTask(task.id, { egressApproved: true });
+  assert.equal(claimed.status, "running", `mandatory setup: the task is claimable (got ${JSON.stringify(claimed)})`);
+  const sha = (await rootQuery("select sha256 from clara.documents where id=$1", [doc.documentId])).rows[0].sha256;
+
+  const textEnv = envelope({ channel: "text", answers, rows });
+  const visionEnv = envelope({ channel: "vision", answers: visionAnswers ?? answers, rows });
+  const receipt = (
+    await rootQuery("select clara.persist_payroll_facts($1,$2::jsonb,$3::jsonb,$4) as receipt", [
+      task.id,
+      JSON.stringify({ input_pin: doc.extractionId, prompt_hash: "p946-text", envelope: textEnv }),
+      JSON.stringify({ input_pin: sha, prompt_hash: "p946-vision", envelope: visionEnv }),
+      1,
+    ])
+  ).rows[0].receipt;
+  assert.equal(receipt.status, "done", `mandatory setup: the read settled (got ${JSON.stringify(receipt)})`);
+  return { ...doc, taskId: task.id, receipt };
+}
+
+async function verdict(documentId) {
+  const r = await rootQuery("select clara._payroll_posting_verdict($1) as v", [documentId]);
+  return r.rows[0].v;
+}
+
+const entriesOf = async (documentId) =>
+  (
+    await rootQuery(
+      `select id, status, posting_date::text as posting_date, origin, memo, flags, filing_id,
+              document_id, maker_actor, checker_actor
+         from clara.journal_entries where document_id=$1 order by created_at`,
+      [documentId],
+    )
+  ).rows;
+
+test("S2 · a clean run is READY, and the verdict carries the entry it would post", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1);
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.verdict, "ready", `every condition holds: ${JSON.stringify(v.rung_vector)}`);
+  assert.equal(v.reason, null);
+  assert.equal(v.rung, null);
+  assert.equal(v.client_id, world.clients.A1);
+  assert.equal(v.posting_date, "2026-08-31", "the END of the payslip's own month");
+  assert.equal(Number(v.plan.debit_cents), EXPECTED_TOTAL);
+  assert.equal(v.plan.legs.length, 11);
+  // EVERY rung is evaluated, not just up to the first pass: a vector with a missing key is how
+  // a gate fails open (the invoice lane's own D26 lesson).
+  for (const rung of ["filed", "facts_read", "channels_agree", "arithmetic_holds", "period_established",
+    "run_totals_printed", "accounts_resolve", "entry_balances"]) {
+    assert.equal(v.rung_vector[rung], "pass", `rung ${rung} must carry an explicit verdict`);
+  }
+});
+
+test("S2 · two channels that read a figure differently never post, and the gate names the question", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // The text channel read PCB as 160.00; the vision channel read 180.00. Everything else agrees.
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    visionAnswers: { "payroll.run.pcb": value("180.00") },
+  });
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.verdict, "blocked");
+  assert.equal(v.rung, "channels_agree", `the FIRST failing condition: ${JSON.stringify(v.rung_vector)}`);
+  assert.equal(v.reason, "channels_disagree");
+  assert.deepEqual(v.detail.fields, ["payroll.run.pcb"], "…naming the question the two readings differ on");
+  assert.equal(v.rung_vector.channels_agree, "channels_disagree");
+});
+
+test("S2 · a row that does not balance never posts, and the gate names the row", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // Row 2's own identity fails: gross 2,000.00 less 273.65 of deductions is 1,726.35, not
+  // 1,700.00. The page contradicts itself, and nothing is posted on a page that does.
+  const broken = { ...R2, net: "1,700.00" };
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    rows: [payslipRow(1, R1), payslipRow(2, broken)],
+  });
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.verdict, "blocked");
+  assert.equal(v.rung, "arithmetic_holds", `${JSON.stringify(v.rung_vector)}`);
+  assert.equal(v.reason, "arithmetic_failed");
+  assert.deepEqual(v.detail.unbalanced_rows, [2], "…naming WHICH row did not balance");
+  assert.equal((await entriesOf(doc.documentId)).length, 0, "and no entry exists for this document at all");
+});
+
+test("S2 · a printed total the rows contradict never posts", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // The rows sum to 5,000.00 gross; the totals row prints 5,100.00. Both readings agree about
+  // the contradiction, which is exactly why it is an ARITHMETIC failure and not a channel one.
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { "payroll.run.gross_pay": value("5,100.00") },
+  });
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.verdict, "blocked");
+  assert.equal(v.rung, "arithmetic_holds");
+  assert.equal(v.reason, "arithmetic_failed");
+  assert.deepEqual(v.detail.fields, ["payroll.run.gross_pay"], "…naming the total that contradicts its rows");
+});
+
+test("S2 · a month the page does not establish asks instead of posting", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { "payroll.run.period": notPrinted() },
+  });
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.verdict, "blocked");
+  assert.equal(v.rung, "period_established");
+  assert.equal(v.reason, "period_not_established");
+  assert.equal(v.posting_date, null, "no date is invented for a month nobody established");
+  assert.equal((await entriesOf(doc.documentId)).length, 0);
+});
+
+test("S2 · an account this client's chart does not hold never posts, and the gate names the code", async (t) => {
+  if (unready(t)) return;
+
+  // world.clients.B1 belongs to firm B and has never been given a payroll chart.
+  const doc = await readPayrollDoc(world.users.dave, world.clients.B1);
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.verdict, "blocked");
+  assert.equal(v.rung, "accounts_resolve");
+  assert.equal(v.reason, "account_missing");
+  assert.ok(v.detail.missing_accounts.includes("6000"), `${JSON.stringify(v.detail)}`);
+  assert.ok(v.detail.missing_accounts.includes("2040"), "…including the salaries-payable row this lane needs");
+});
+
+test("S2 · a document that was never read has no verdict to give, and says so", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await payrollDoc(world.users.alice, world.clients.A1);
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.verdict, "blocked");
+  assert.equal(v.rung, "facts_read");
+  assert.equal(v.reason, "payroll_not_read");
+  assert.equal(v.rung_vector.filed, "pass", "it IS filed — the gate distinguishes unfiled from unread");
+});
