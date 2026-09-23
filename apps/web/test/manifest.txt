@@ -313,6 +313,7 @@ components/work/work-question-form.test.tsx
 components/work/work-question-panel.test.tsx
 components/work/work-restate.test.tsx
 components/work/work-saved-views.test.tsx
+e2e/cell-budget-census.test.ts
 e2e/e2e-fixture-ownership.test.ts
 e2e/mock-dispatch.test.ts
 e2e/run-args.test.ts
