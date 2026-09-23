@@ -26,6 +26,7 @@
 
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 import {
   CLR, PG, ROLES, assertRaises, opk, rootQuery, humanQuery, roleQuery, ensureReady, endPool,
@@ -48,7 +49,12 @@ const MIGRATION = "0228_opening_ledger_source.sql";
 const GATE_ENV = "CLARA_ALLOW_MISSING_OPENING_LEDGER_SOURCE";
 /** 0228's premise probe is NOT a `to_regprocedure` check — the file installs no function. It is
  *  the republication itself: the registry publishes version 2. */
-const PUBLISHED_REGISTRY_VERSION = 2;
+// The version this battery's own registry cell expects. 0228 (#656) published 2; #782's 0245
+// republished at 3 and ticket 1012's 0288 at 4, each for content outside this file's subject.
+// The number is re-based here rather than left behind, because the gate below SKIPS the whole
+// file when it does not match — a stale number silently retires this battery instead of redding
+// it (which is exactly what happened between 0245 and 0288: the file skipped on every lane).
+const PUBLISHED_REGISTRY_VERSION = 4;
 
 let ready = false;
 
@@ -98,7 +104,12 @@ async function world() {
  *  OPEN, TIED seed. Everything below is built through audited writers. */
 async function tiedScene(tag, { asOf = "2026-01-01" } = {}) {
   const w = await world();
-  const { client, plan } = await onboardingClient(w.users.alice, `p656_${tag}_${opk("c")}`);
+  // #899 (0287): the client birth wall refuses a THIRD client whose name shares a family
+  // token with two existing ones, and clara.name_family_token is the FIRST alphanumeric
+  // token of the name -- so `p656_<tag>_<opk>` put every fixture client of this file in one
+  // family and the third onwards were refused. The unique part leads now, exactly as
+  // wb-fixtures.mjs's own onboardingClient() default was recut to do.
+  const { client, plan } = await onboardingClient(w.users.alice, `p656${randomUUID().slice(0, 8)}_${tag}_${opk("c")}`);
   await seedOpeningCoa(w.users.alice, client);
   const doc = await openingDoc(w.users.alice, { firm: w.firms.A, client });
   const receipt = await createOpeningSeed(w.users.alice, {
@@ -224,17 +235,24 @@ test("p656.registry.prior_gl_operation: the corrected rows read back at version 
 
   // prior_gl — the operation is REAL and older than this ticket, and the gap is the ENTRANCE.
   const pg = rows.filter((r) => r.document_kind === "prior_gl");
-  const named = pg.filter((r) => r.limits?.browser_entrance !== undefined);
+  // TICKET 1012 (0288) REPLACED THE NAMED GAP WITH A RETIREMENT. 0228's claim here was "the
+  // operation is REAL and the gap is the ENTRANCE nobody has built"; both halves have moved.
+  // clara.create_seeding_batch now answers a typed refusal and POST /api/seeding/prepare is
+  // deleted, so the rows say the lane is retired instead of promising an entrance. What this
+  // cell still owns is the SAME discipline on the SAME seven rows: exactly the formats
+  // seeding-parse.mjs has a reader for carry the named limit, and the basis says what is true.
+  const named = pg.filter((r) => r.limits?.seeding_lane !== undefined);
   assert.deepEqual(named.map((r) => r.format).sort(),
     ["heic", "jpeg", "pdf", "png", "tiff", "webp", "xlsx"],
-    "exactly the formats seeding-parse.mjs has a reader for carry the named gap");
+    "exactly the formats seeding-parse.mjs has a reader for carry the named limit");
   for (const r of named) {
-    assert.equal(r.limits.browser_entrance, "absent",
-      "`absent` is the word the face renders — never `unavailable`, which is not in this estate's vocabulary");
-    assert.match(r.basis, /create_seeding_batch/, "the basis names the operation that exists today");
-    assert.match(r.basis, /\/api\/seeding\/prepare/, "…and the entrance nobody has built");
+    assert.equal(r.limits.seeding_lane, "retired", "the limit STATES the retirement");
+    assert.equal(r.limits.browser_entrance, undefined,
+      "`absent` is superseded — a retired lane has no entrance to be missing");
+    assert.match(r.basis, /RETIRED/, "the basis says the lane is retired");
+    assert.match(r.basis, /0288_seeding_lane_retired\.sql/, "…and names the migration that retired it");
     assert.doesNotMatch(r.basis, /Clara derives nothing to drive it/,
-      "that sentence was the lie: a filed prior GL drives create_seeding_batch today");
+      "0228 removed that sentence and 0288 does not put it back");
   }
 
   // THE LEVEL IS HELD, AND HELD BY LAW RATHER THAN BY PREFERENCE. #656's brief rules prior_gl to
@@ -515,7 +533,7 @@ test("p656.tie.unmapped_blocks: on a DOCUMENT-sourced basis an unmapped line can
   // a surface that read an empty `unmapped_labels` on a DOCUMENT basis as "everything is mapped"
   // would paint exactly C-25's quiet pass.
   const w = sc.w;
-  const keyed = await onboardingClient(w.users.alice, `p656_keyed_${opk("c")}`);
+  const keyed = await onboardingClient(w.users.alice, `p656${randomUUID().slice(0, 8)}_keyed_${opk("c")}`);
   await seedOpeningCoa(w.users.alice, keyed.client);
   const keyedReceipt = await createOpeningSeed(w.users.alice, {
     client: keyed.client, plan: keyed.plan, asOf: sc.asOf, tieDocument: null, tieSha256: null,
@@ -671,7 +689,7 @@ test("p656.roles.viewer_denied: a viewer cannot create, parse or approve, and a 
   // client with NO live basis, so the refusal under test is unambiguously the role floor and not
   // `uq_opening_seed_registry_once`'s duplicate_seed — a guard-ordering trap this cell walked into
   // on its first run and which would have made a CLR31 read as proof of a CLR04.
-  const fresh = await onboardingClient(w.users.alice, `p656_floor_${opk("c")}`);
+  const fresh = await onboardingClient(w.users.alice, `p656${randomUUID().slice(0, 8)}_floor_${opk("c")}`);
   await seedOpeningCoa(w.users.alice, fresh.client);
   const freshDoc = await openingDoc(w.users.alice, { firm: sc.firm, client: fresh.client });
   await assertRaises(CLR.authz, () => createOpeningSeed(w.users.carol, {

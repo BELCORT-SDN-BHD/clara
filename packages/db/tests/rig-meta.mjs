@@ -531,6 +531,12 @@ const WAVE_B_HUMAN_FNS = [
   "seed_fixed_asset", "approve_opening_seed",
   "supersede_opening_item", "approve_opening_correction", "reopen_opening_seed",
   "get_opening_dryrun",
+  // ticket 1012 (0288_seeding_lane_retired.sql): tick_seeding_proposal and
+  // decline_seeding_proposal are RETIRED IN PLACE -- each body is one typed refusal (CLR34
+  // seeding_lane_retired). They stay HERE, at their exact human-lane grants, on purpose: a
+  // revoked grant would answer 42501 insufficient_privilege instead of the retirement, which is
+  // the wrong sentence and the wrong shape for the web layer's refusal mapping. So this matrix
+  // is unchanged BY DESIGN, and that is the fact this comment records.
   "tick_seeding_proposal", "decline_seeding_proposal", "complete_seeding_batch",
   "cancel_seeding_batch", "get_lint_finding", "resolve_lint_finding",
 ];
@@ -538,6 +544,8 @@ const WAVE_B_RUNTIME_FNS = [
   "publish_wiki_page_version", "record_wiki_source_ingest",
   "set_wiki_synthesis_hold", "clear_wiki_synthesis_hold",
   "update_onboarding_plan", "record_opening_targets_parsed",
+  // ticket 1012 (0288): RETIRED IN PLACE, runtime grant preserved -- see the note on the two
+  // deciders in WAVE_B_HUMAN_FNS above for why a retired door keeps its grant.
   "create_seeding_batch", "run_client_lint", "run_lint_all",
   // 0019 [§3, amendment 8]: the stale-mark writer is runtime-ONLY. Listing it
   // here is what makes the rig-isolation grant matrix cover it — the human,

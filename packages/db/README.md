@@ -1648,7 +1648,11 @@ precedent `af3b5955` (#779) set when it shipped 0207 and +147 lines of that file
   shape (counterparty, account and date, NEVER an amount) and the fact that **no browser entrance
   exists** — nothing in `apps/web` calls `POST /api/seeding/prepare` — with
   `limits = {"browser_entrance":"absent"}` making that gap machine-readable, which is 0191's own
-  instrument for a named gap (`:235-236`, "A limit is not a lower level").
+  instrument for a named gap (`:235-236`, "A limit is not a lower level"). **Both halves of that
+  wording were replaced by 0288** (ticket 1012): the operation is retired and the entrance is not
+  merely unbuilt, so the rows now carry `limits = {"seeding_lane":"retired", …}` and a basis that
+  says so — see "0288 — the prior-GL seeding lane is retired" at the foot of this file. The LEVEL
+  argument below is unaffected and still stands.
 
 **Why the prior_gl LEVEL was held, measured rather than preferred.** #656's brief rules it to
 `supported`. 0228 was written that way, applied to a rig, and the registry's own cell
@@ -3022,3 +3026,83 @@ re-creation of 0244's own trigger at 0244's spelling, so a database carrying the
 comes back), `create or replace function`, and an idempotent `comment on`. The prestate reports
 FIRST or REDO, and its pin for the ONE body this file recuts is two-valued by construction —
 0244's pre-image or 0272's own post-image, both measured.
+
+## 0288 — the prior-GL seeding lane is retired (ticket 1012)
+
+Owner ruling 2026-09-20 (on ticket 983): the prior-GL seeding lane gets no browser entrance,
+because the product direction is the Client KB — `docs/PRD.md`'s Client Knowledge section states
+it, and nobody pre-registers by hand what Clara can learn from a source. There is no successor UI
+to build for a lane that asked a professional to tick a pre-registration list, so the lane is
+retired instead.
+
+**The change, in four sections of one file.**
+
+| § | What it does |
+|---|---|
+| B | `clara.create_seeding_batch`, `clara.tick_seeding_proposal` and `clara.decline_seeding_proposal` are recut IN PLACE to ONE shared typed refusal: `CLR34`, `detail.reason = "seeding_lane_retired"`, one sentence, identical in all three bodies (the tail asserts the literal on each). |
+| C | `clara.list_review_queue` loses its ninth row kind, `seeding_proposal` — the `seeding_rows` CTE and its union arm are spliced out. |
+| D | The seven `prior_gl` `document_capabilities` rows republish: `limits {"browser_entrance":"absent"}` becomes `{"seeding_lane":"retired","seeding_lane_reason":"client_kb_replaces_manual_pre_registration"}`, and the basis says the lane is retired instead of promising an entrance. Whole-registry version raise, by UPDATE, 0228's and 0245's idiom. |
+| E | Tail: posture, ACLs, the two closers' byte-identity, and a forced-rollback behavioural probe driving all three refusals and proving they write nothing. |
+
+**Why a refusal and not a drop — the 0271 question, answered the other way.** 0271 dropped
+`clara.create_account_set_v1` because it had zero live callers and a dropped body needs no
+re-derivation by a future census. These three had live callers: the runtime's seeding-prepare
+route and the web Reports panel's tick/decline dialogs. A caller that meets `42883
+undefined_function` reports an internal error, not a retirement, and a caller that meets `42501
+insufficient_privilege` (had the grants been revoked) reports a permission problem it can neither
+diagnose nor fix. The estate's own idiom for this case is 0007's `clara.ingest_document`: keep the
+signature, keep the arity, keep the grant, answer a deterministic typed retirement. **No grant
+moves**, so exactly the roles that could call these doors before can call them now, and receive an
+answer they can render.
+
+**Why the refusal is the WHOLE body.** The three doors' first statements were a `_reserve_op`
+idempotency reservation (the creator) and a `clara._human_ctx(role_rank('admin'))` ladder (both
+deciders). Raising ahead of either is deliberate: a retired door must write nothing at all, and a
+reservation is a write. A caller replaying a retired `op_key` therefore meets the same refusal
+every time rather than a cached receipt — the lane has no state left to be idempotent about. The
+cost is named rather than hidden: the deciders no longer distinguish "not an admin" from
+"retired", and the creator no longer distinguishes "not a prior GL" from "retired". That is what a
+retirement means — the answer does not depend on the request.
+
+**What survives, and why each one had to.**
+
+- `clara.cancel_seeding_batch` and `clara.complete_seeding_batch` are **byte-unchanged**, pinned in
+  the prestate and re-pinned in the tail. A batch left open at the moment of retirement must still
+  be closeable by the firm that owns it; retiring the closers would strand its history open
+  forever. `seeding-lane-retired.test.mjs` drives both on a planted pre-retirement batch.
+- Every READ of a batch or a proposal, both relations, their policies and their grants. This file
+  deletes no batch, no proposal and no published wiki page.
+- `packages/runtime/lib/wiki-projection.mjs`'s `seeding.proposal_decided` lane. A hosted firm's
+  HISTORICAL ticked proposals still replay into deterministic wiki pages; the lane simply never
+  receives a new event again.
+
+**The queue splice, and its named residual.** §C is the NINTH splice of `clara.list_review_queue`
+(after 0017, 0036, 0041, 0043, 0146, 0168, 0180, 0260) and the FIRST that removes a row kind. It is
+boundary-anchored — cut between the CTE's own opener and the next CTE's, with a gravestone comment
+in its place — because the block being removed is thirty lines of prose no migration should have to
+re-type in order to delete. The ELEVEN pre-splice row kinds are witnessed in code AND cross-checked
+against the raw text (0260's HIGH-1 guard), and the TEN survivors are re-witnessed after. The
+residual: the three columns that CTE alone ever populated (`client_name`, `batch_ids`,
+`open_proposal_count`) STAY in the shared column vector and are now null on every row. Dropping
+them would mean recutting all ten surviving CTEs and the row-json builder — a far wider change to a
+body ten other row kinds share — for no behavioural gain, and it would move a 31-key row shape that
+two independent test rosters and the web's `ReviewQueueRow` type all restate.
+
+**Why the whole registry's version rises for seven rows.** The registry's own executable law is
+`count(distinct registry_version) = 1` over all 240 rows — asserted by
+`document-capability-registry.test.mjs` and, since #846 (0244), by a `DEFERRABLE INITIALLY
+DEFERRED` constraint trigger that judges the transaction on what it LEAVES. A seven-row raise would
+leave two versions and be refused. §D therefore corrects the content and then raises every row by
+one, by UPDATE, never DELETE-then-INSERT. **The version is measured, not pinned**: ticket 1012's
+own sequencing note says these rows share a monotone wall with #782 and #990, so the prestate
+asserts uniformity and a floor (`>= 3`), remembers what it measured, and the tail asserts exactly
+measured + 1. On this lane's database that is 3 → 4.
+
+**Redo-safe (#957), and bimodal by construction.** Every pin on a body this file RECUTS succeeds on
+either branch: FIRST APPLY (the live body is the measured pre-image, pinned by sha) or REDO (the
+live body already carries this file's own `seeding_lane_retired` marker). §C recognises "already
+spliced" from the live body and skips itself; §D recognises its own limits and skips itself, so a
+redo never raises the registry version twice. Because `CLARA_MIGRATION_REDO` can only ever exercise
+the second branch, the FIRST branch was proven by hand on the lane rig: the three pre-images were
+restored, the file was re-applied, and §A took the pinned-sha arm — see the ticket report for the
+transcript.

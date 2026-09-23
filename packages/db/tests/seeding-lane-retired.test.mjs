@@ -35,7 +35,7 @@ import {
   batchRow, proposalRows, eventsOf,
 } from "./wave-b/wb-fixtures.mjs";
 
-const EXPECTED_CELLS = 4;
+const EXPECTED_CELLS = 5;
 const RETIRED_REASON = "seeding_lane_retired";
 
 let live = false;
@@ -274,4 +274,60 @@ cell("p1012.queue.no_seeding_row_even_for_a_client_with_open_proposals", async (
   const firmWide = await listReviewQueue(humanPersona(w.users.alice), { scope: {}, limit: 500 });
   assert.ok(rowsOfKind(firmWide, "open_question").length > 0,
     "positive control: the SAME envelope still carries other row kinds");
+});
+
+cell("p1012.registry.prior_gl_rows_state_the_retirement_not_an_absent_entrance", async () => {
+  const rows = (await rootQuery(
+    `select format, typed_facts, business_operation, registry_version, basis, limits
+       from clara.document_capabilities where document_kind = 'prior_gl' order by format`)).rows;
+  assert.equal(rows.length, 12, "twelve formats, as 0191 seeded them — this ticket inserts and deletes nothing");
+
+  // THE SEVEN ROWS 0228 NAMED. They are exactly the formats packages/runtime/lib/seeding-parse.mjs
+  // has a reader for; they were the ones carrying `limits.browser_entrance = "absent"`, and they
+  // are the ones whose basis promised the operation.
+  const retired = rows.filter((r) => r.limits?.seeding_lane !== undefined);
+  assert.deepEqual(retired.map((r) => r.format).sort(),
+    ["heic", "jpeg", "pdf", "png", "tiff", "webp", "xlsx"],
+    "exactly the seven formats 0228 named now carry the retirement limit");
+
+  for (const r of retired) {
+    assert.equal(r.limits.seeding_lane, "retired", `${r.format}: the limit STATES the retirement`);
+    assert.equal(r.limits.seeding_lane_reason, "client_kb_replaces_manual_pre_registration",
+      `${r.format}: …and names why, the two-key shape 0245 set`);
+    assert.equal(r.limits.browser_entrance, undefined,
+      `${r.format}: "an absent entrance" is superseded — a retired lane has no entrance to be missing`);
+    assert.match(r.basis, /retired/i, `${r.format}: the basis says the lane is retired`);
+    assert.match(r.basis, /0288/, `${r.format}: …and names the migration that retired it`);
+    assert.doesNotMatch(r.basis, /NO BROWSER ENTRANCE EXISTS YET/,
+      `${r.format}: the "not built yet" sentence cannot stand beside a retirement`);
+    assert.doesNotMatch(r.basis, /Clara derives nothing to drive it/,
+      `${r.format}: 0228 removed that sentence and this ticket does not put it back`);
+  }
+
+  // THE LEVEL IS UNCHANGED, on EVERY prior_gl row. The ticket's own out-of-scope line:
+  // widening this kind's business-operation or typed-facts level is not this change.
+  for (const r of rows) {
+    assert.equal(r.business_operation, "stored_only", `${r.format}: business_operation is untouched`);
+    assert.equal(r.typed_facts, r.format === "xml" ? "unsupported" : "stored_only",
+      `${r.format}: typed_facts is untouched`);
+  }
+
+  // THE REGISTRY PUBLISHES ONE VERSION, AND IT ROSE. 4 is what this republication publishes on a
+  // chain whose previous publication was #782's 3; a sibling lane republishing first would raise
+  // it further, which is why the floor is asserted rather than an exact equality (the ticket's
+  // own sequencing note: whichever lands second re-derives against the live rows).
+  const v = (await rootQuery(
+    `select count(*)::int as n, count(distinct registry_version)::int as versions,
+            min(registry_version)::int as v from clara.document_capabilities`)).rows[0];
+  assert.equal(v.n, 240, "the republication inserts and deletes nothing");
+  assert.equal(v.versions, 1, "the registry publishes exactly one version at a time");
+  assert.ok(v.v >= 4, `the registry version rose past #782's 3 (got ${v.v})`);
+
+  // THE HIGH-WATER MARK ROSE WITH IT, every pair, through #846's ordinary writer path.
+  const drift = (await rootQuery(
+    `select count(*)::int as n from clara.document_capabilities c
+       left join clara.document_capability_version_high_water h
+         on h.format = c.format and h.document_kind = c.document_kind
+      where h.format is null or h.registry_version is distinct from c.registry_version`)).rows[0];
+  assert.equal(drift.n, 0, "no pair's high-water mark disagrees with the published registry");
 });

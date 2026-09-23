@@ -1769,3 +1769,50 @@ and FAILS LOUDLY below 0251; final acceptance is exactly that focused shape coun
 No CONTEXT.md change: `retired` is already this estate's vocabulary (filings, counterparty
 aliases), and 0251 coins no new domain term — it only widens which existing authority state one
 existing read surfaces, matching #973's and #976's own conclusion for their sibling folds.
+
+## `seeding-lane-retired.test.mjs` (0288, ticket 1012)
+
+Five cells over the retirement of the prior-GL seeding lane. Frontier-gated on the LIVE CATALOG
+through `seeding-lane-retired-preintegration-gate.mjs`: a package-wide run against a chain below
+0288 SKIPS loudly, a focused run FAILS, and a PARTIAL cohort (some but not all of the three write
+doors carrying the retirement marker) throws rather than skipping.
+
+- `p1012.create.*` — `clara.create_seeding_batch`, driven through the runtime lane on a filed,
+  verified, `prior_gl`-stamped document it would have ACCEPTED before: `CLR34` with
+  `detail.reason = "seeding_lane_retired"`, no batch row, no `clara.op_receipts` row (the door
+  refuses ahead of the reservation) and no `seeding.batch_created` event. A human caller still
+  meets the privilege wall, not the new body — the retirement loosens no access.
+- `p1012.deciders.*` — `clara.tick_seeding_proposal` and `clara.decline_seeding_proposal`, driven
+  by a real ADMIN (the exact floor both doors used to enforce, so the refusal is the retirement and
+  not an authorisation failure in disguise) against a planted OPEN proposal. Same code, same
+  reason, byte-identical message on both; both proposals stay `proposed`, nothing is reserved and
+  no `seeding.proposal_decided` event is appended.
+- `p1012.closers.*` — `clara.cancel_seeding_batch` and `clara.complete_seeding_batch` still close a
+  batch left open at the retirement, with the cancellation reason recorded verbatim and
+  `complete`'s stats deriving `still_proposed` from the proposals nobody can decide any more. Both
+  batches keep their proposal rows afterwards.
+- `p1012.queue.*` — `clara.list_review_queue` emits NO `seeding_proposal` row for a client carrying
+  two OPEN proposals in an OPEN batch, firm-wide and client-scoped, with an open question on a
+  sibling client as the positive control so an empty result cannot be an envelope that returned
+  nothing.
+- `p1012.registry.*` — the seven `prior_gl` `document_capabilities` rows state the retirement in
+  BOTH `basis` and `limits`, no row anywhere still carries `browser_entrance`, every `prior_gl`
+  row keeps `business_operation = stored_only`, the registry publishes one version at or above 4,
+  and every high-water mark agrees.
+
+**History is PLANTED, not minted.** After 0288 no door can create a seeding batch, so the
+pre-retirement state these cells read is written by root INSERT — the same posture
+`client-birth-wall.test.mjs` uses for a fixture whose creating door is out of reach. Every
+ASSERTION still runs through a real door or a real per-role session.
+
+`ninth-rowkind-seeding-proposal.test.mjs` is the other half: it now carries the row kind's story
+from its birth at 0146 to its retirement at 0288 — no client produces the row, and the eight
+surviving kinds its own fixtures can produce are each observed at the unchanged 31-key shape with
+the three seeding-only columns null on every row. `wb-s-seeding.test.mjs` keeps only what survives
+the lane (the `prior_gl` document kind, the facts gate, the structural negatives, the wiki ingest,
+O8 row 13) and its header names every cell it lost and why.
+
+No CONTEXT.md change: the retirement coins no domain term. `Opening source` still describes the
+prior general ledger a firm receives, and the `business operation` entry's note that `prior_gl`
+stays `stored_only` pending the Client Knowledge Base's own ingestion path is exactly what 0288
+makes true rather than something it changes.

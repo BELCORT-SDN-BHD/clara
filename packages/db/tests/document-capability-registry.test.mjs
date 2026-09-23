@@ -76,7 +76,8 @@ const BUSINESS_OPERATION_LEVELS = Object.freeze([...LEVELS, "proposal_only"]);
  *  DELETE-then-INSERT, #846) and changes CONTENT on thirteen rows only: six `opening_balance_doc`
  *  azure-di rows to `typed_facts`/`business_operation` = supported, now that #656 wires the
  *  `opening_tb.line` producer in line at the OCR pass, and seven `prior_gl` rows' basis + a named
- *  `{"browser_entrance":"absent"}` limit.
+ *  `{"browser_entrance":"absent"}` limit — the limit ticket 1012's 0288 later REPLACES (see 4,
+ *  below).
  *
  *  2 until #782's `0245_invoice_line_items_accepted_limitation.sql`, which republished the WHOLE
  *  registry again at 3 (owner ruling 2026-09-18: no invoice line items this round) and changed
@@ -95,10 +96,21 @@ const BUSINESS_OPERATION_LEVELS = Object.freeze([...LEVELS, "proposal_only"]);
  *  minted a whole relation and two walls, touched zero rows and did not move the version either)
  *  precedents.
  *
+ *  4 since ticket 1012's `0288_seeding_lane_retired.sql`, which republished the WHOLE registry
+ *  again and changed CONTENT on the SEVEN `prior_gl` rows `packages/runtime/lib/seeding-parse.mjs`
+ *  has a reader for (heic/jpeg/pdf/png/tiff/webp/xlsx): 0228's `limits {"browser_entrance":
+ *  "absent"}` is REPLACED by `{"seeding_lane":"retired", "seeding_lane_reason":
+ *  "client_kb_replaces_manual_pre_registration"}`, and the basis sentence promising an entrance
+ *  nobody had built is replaced by one naming the retirement. "Not built yet" was a promise;
+ *  after 0288 the three write doors answer a typed refusal and the runtime route is deleted, so
+ *  the registry would otherwise advertise an operation that no longer exists.
+ *  `business_operation` moves on NO row — `prior_gl` stays `stored_only`, exactly as #988's
+ *  ruling above already settled — so the honesty cell at the foot of this file is unaffected.
+ *
  *  A future republication re-bases HERE, in one place, and says why beside the number — the
  *  precedent for editing this battery in the same commit as the migration is `af3b5955` (#779),
  *  which shipped 0207 and +147 lines of this file together. */
-const PUBLISHED_REGISTRY_VERSION = 3;
+const PUBLISHED_REGISTRY_VERSION = 4;
 
 let live = false;
 let executed = 0;

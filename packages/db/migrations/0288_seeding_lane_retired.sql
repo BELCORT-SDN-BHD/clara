@@ -381,6 +381,235 @@ end
 $p1012_lrq$;
 
 -- =====================================================================================
+-- §D  THE REGISTRY REPUBLICATION. `clara.document_capabilities`' seven `prior_gl` rows stop
+--     saying "no browser entrance exists YET" and say the lane is RETIRED instead.
+--
+-- WHAT 0228 WROTE AND WHY IT IS NOW WRONG. #656 (0228) corrected these rows honestly for its own
+-- moment: a filed prior general ledger DID drive `clara.create_seeding_batch` through the
+-- deterministic reader, and NOTHING in the web app called `POST /api/seeding/prepare`, so 0228
+-- named the gap — `limits {"browser_entrance":"absent"}` plus a basis sentence promising the
+-- entrance nobody had built. "Not built yet" is a promise. After §B there is nothing left to
+-- build: the doors refuse and the route is deleted. Leaving the old wording would leave the
+-- registry — the estate's own machine-readable statement of what Clara can do with a document —
+-- advertising an operation that no longer exists.
+--
+-- WHAT DOES NOT MOVE. `business_operation` stays `stored_only` and `typed_facts` stays where each
+-- row had it. #1012's own out-of-scope line rules out widening either, and #988's owner ruling
+-- (0246's header) already settled that `prior_gl` stays `stored_only` pending the Client KB. The
+-- other five `prior_gl` rows (csv, docx, ofx, tsv, xml — the formats seeding-parse.mjs never had
+-- a reader for) are untouched: they never promised the operation, so they have nothing to retire.
+--
+-- WHY THE WHOLE REGISTRY'S VERSION RISES FOR SEVEN ROWS. The registry's own executable law is
+-- `count(distinct registry_version) = 1` over all 240 rows — asserted by
+-- `document-capability-registry.test.mjs` AND, since #846 (0244), by a DEFERRABLE INITIALLY
+-- DEFERRED constraint trigger that judges the transaction on what it LEAVES. A seven-row raise
+-- would leave two versions and be refused. So this file does what 0228 and 0245 did before it:
+-- correct the content, then raise every row by one, by UPDATE, never DELETE-then-INSERT (#846's
+-- high-water wall), under 0207's monotone wall which permits a raise.
+--
+-- THE VERSION IS MEASURED, NOT PINNED. #1012's own sequencing note: these rows are republished
+-- under a monotone version wall SHARED with #782 and #990, so whichever lands second must
+-- re-derive against the live rows and take the next version rather than assume a pinned one.
+-- The prestate therefore asserts UNIFORMITY and a FLOOR (>= 3, #782's publication, which is what
+-- this lane's database carries), remembers what it measured, and the tail asserts exactly
+-- measured + 1. A sibling lane that republishes first simply moves both numbers together.
+--
+-- REDO-SAFE: the republication recognises its own effects (no row carries `browser_entrance` any
+-- more AND the seven carry the retirement limit) and skips itself entirely, so a
+-- CLARA_MIGRATION_REDO of this file never raises the version twice.
+-- =====================================================================================
+do $p1012_registry$
+declare
+  v_n int; v_sha text; v_before int; r record;
+  v_marker constant text := 'The filing is work a person completes -- but Clara does NOT derive nothing:';
+  v_retired constant text :=
+    'The filing is work a person completes. A filed prior general ledger USED to drive '
+    || 'clara.create_seeding_batch through the deterministic reader '
+    || 'packages/runtime/lib/seeding-parse.mjs; that lane is RETIRED by migration '
+    || '0288_seeding_lane_retired.sql (ticket 1012, owner ruling 2026-09-20 on ticket 983). Its '
+    || 'three write doors answer a typed refusal and the runtime route that fronted them is '
+    || 'removed, because the product direction is the Client KB: nobody pre-registers by hand '
+    || 'what Clara can learn from a source. Existing batches, proposals and published pages stay '
+    || 'readable, and a batch left open can still be cancelled or completed. The level stays '
+    || 'stored_only for the reason it always did -- this registry reserves a supported business '
+    || 'operation for a pair Clara can carry TYPED FACTS into, and nothing has ever produced a '
+    || 'prior_gl.line region.';
+begin
+  if to_regclass('clara.document_capabilities') is null then
+    raise exception '#1012 sectionD prestate: clara.document_capabilities is absent -- 0191 must apply first'
+      using errcode = 'CLR10';
+  end if;
+
+  select count(*)::int into v_n from clara.document_capabilities
+   where document_kind = 'prior_gl' and limits ? 'browser_entrance';
+  if v_n = 0 then
+    select count(*)::int into v_n from clara.document_capabilities
+     where document_kind = 'prior_gl' and limits ->> 'seeding_lane' = 'retired';
+    if v_n <> 7 then
+      raise exception '#1012 sectionD prestate: no prior_gl row carries browser_entrance, and % (not 7) carry the retirement limit -- this is neither a first apply nor a redo', v_n
+        using errcode = 'CLR10';
+    end if;
+    raise notice '#1012 sectionD: the seven prior_gl rows already state the retirement -- REDO branch, this republication is a no-op.';
+  else
+    -- (a) THE SEVEN ROWS, exactly as 0228 left them.
+    if v_n <> 7 then
+      raise exception '#1012 sectionD prestate: % prior_gl row(s) carry limits.browser_entrance, not the 7 #656 (0228) named', v_n
+        using errcode = 'CLR10';
+    end if;
+    select count(*)::int into v_n from clara.document_capabilities
+     where document_kind = 'prior_gl' and limits ? 'browser_entrance'
+       and position(v_marker in basis) > 0;
+    if v_n <> 7 then
+      raise exception '#1012 sectionD prestate: only % of the 7 rows carry the basis sentence this file rewrites -- 0228''s text has drifted, re-derive before republishing', v_n
+        using errcode = 'CLR10';
+    end if;
+    if exists (select 1 from clara.document_capabilities where limits ? 'seeding_lane') then
+      raise exception '#1012 sectionD prestate: a row already carries limits.seeding_lane -- this file would not be the first writer'
+        using errcode = 'CLR10';
+    end if;
+    select count(*)::int into v_n from clara.document_capabilities
+     where document_kind <> 'prior_gl' and limits ? 'browser_entrance';
+    if v_n <> 0 then
+      raise exception '#1012 sectionD prestate: % row(s) OUTSIDE prior_gl carry browser_entrance -- this file must not touch them', v_n
+        using errcode = 'CLR10';
+    end if;
+
+    -- (b) THE REGISTRY IS UNIFORM AND AT OR ABOVE #782's PUBLICATION. Measured, never pinned:
+    --     a sibling lane republishing first moves this number, and that is allowed.
+    select count(distinct registry_version)::int into v_n from clara.document_capabilities;
+    if v_n <> 1 then
+      raise exception '#1012 sectionD prestate: the registry publishes % distinct registry_versions, not one', v_n
+        using errcode = 'CLR10';
+    end if;
+    select min(registry_version)::int into v_before from clara.document_capabilities;
+    if v_before < 3 then
+      raise exception '#1012 sectionD prestate: the registry publishes version %, below #782''s 3 -- 0245 must apply first', v_before
+        using errcode = 'CLR10';
+    end if;
+    select count(*)::int into v_n from clara.document_capabilities;
+    if v_n <> 240 then
+      raise exception '#1012 sectionD prestate: the registry holds % rows, not 240 -- this file inserts and deletes nothing', v_n
+        using errcode = 'CLR10';
+    end if;
+
+    -- (c) THE FIVE WALL BODIES THIS RAISE RIDES, pinned by sha as measured on this rig now
+    --     (0272 recut one of them after 0245 pinned it, so these are re-measured, not copied).
+    for r in select * from (values
+        ('clara._tf_document_capabilities_version_monotone()',  '170df87b15ca9eafa40e0dfa2e09423d145de89e0ed55b3c44247ec68b9e9c56'),
+        ('clara._tf_document_capabilities_version_high_water()', 'b40906871b7e7e43bff50799c187d7ae38d13d30f61f7a1ab99547d6de8618c9'),
+        ('clara._tf_document_capabilities_high_water_record()',  '839c51fb125268bf17bd2fd35ed4d4583cae4d251aad6724a241fc78429de40d'),
+        ('clara._tf_document_capability_high_water_monotone()',  '62e83a3b249ca1d0186041ac36c6f77615f3631b04d96eb57fc16f010974ec8c'),
+        ('clara._tf_document_capabilities_version_uniform()',    'd21b6837207cb438ab13caf279ef3d52a69066c480e20807f5be3ae7895ef776')
+        ) as t(sig, want) loop
+      if to_regprocedure(r.sig) is null then
+        raise exception '#1012 sectionD prestate: % is absent -- 0207/0244/0272 must apply first', r.sig using errcode = 'CLR10';
+      end if;
+      select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+       where p.oid = r.sig::regprocedure;
+      if v_sha is distinct from r.want then
+        raise exception '#1012 sectionD prestate: % body drifted (sha %) -- this file must not touch it', r.sig, v_sha
+          using errcode = 'CLR10';
+      end if;
+    end loop;
+
+    -- (d) THE HIGH-WATER MARK ALREADY AGREES, so this raise is the ordinary writer path.
+    select count(*)::int into v_n
+      from clara.document_capabilities c
+      left join clara.document_capability_version_high_water h
+        on h.format = c.format and h.document_kind = c.document_kind
+     where h.format is null or h.registry_version is distinct from c.registry_version;
+    if v_n <> 0 then
+      raise exception '#1012 sectionD prestate: % pair(s) carry a high-water mark that disagrees with the published registry', v_n
+        using errcode = 'CLR10';
+    end if;
+
+    raise notice '#1012 sectionD prestate: OK -- 7 prior_gl rows carry browser_entrance and 0228''s basis sentence, no row carries seeding_lane yet, the registry publishes version % uniformly across 240 rows, the five wall bodies are at their measured shas and every high-water mark agrees.', v_before;
+
+    -- ===================================================================================
+    -- THE REPUBLICATION. Two statements, content first then the registry-wide raise (0228's
+    -- and 0245's order), so a failure in the correction cannot leave the registry at a version
+    -- whose content never landed, and #846's deferred uniformity wall judges what is LEFT.
+    -- ===================================================================================
+    set role clara_fn_owner;
+
+    -- D1 · THE CONTENT CORRECTION. The basis keeps its ENGINE-specific opening (each row names
+    --      its own reader) and replaces everything from 0228's own marker sentence onward, so
+    --      no row's engine claim is re-typed by this file. The limit is REPLACED, not merged:
+    --      `browser_entrance` is not a weaker form of the truth, it is a superseded one.
+    update clara.document_capabilities
+       set basis = left(basis, position(v_marker in basis) - 1) || v_retired,
+           limits = (limits - 'browser_entrance') || jsonb_build_object(
+             'seeding_lane', 'retired',
+             'seeding_lane_reason', 'client_kb_replaces_manual_pre_registration')
+     where document_kind = 'prior_gl' and limits ? 'browser_entrance';
+
+    -- D2 · THE REGISTRY-WIDE RAISE, one statement, every row, +1 from the uniform version the
+    --      prestate measured. 0207's wall sees a raise and permits it; 0244's writer raises every
+    --      pair's high-water mark in the same statement, as an AFTER trigger.
+    update clara.document_capabilities set registry_version = registry_version + 1;
+
+    reset role;
+
+    -- ===================================================================================
+    -- TAIL, re-reading the live rows rather than trusting the two statements above.
+    -- ===================================================================================
+    select count(*)::int into v_n from clara.document_capabilities
+     where document_kind = 'prior_gl'
+       and limits ->> 'seeding_lane' = 'retired'
+       and limits ->> 'seeding_lane_reason' = 'client_kb_replaces_manual_pre_registration'
+       and not (limits ? 'browser_entrance')
+       and position('0288_seeding_lane_retired.sql' in basis) > 0
+       and position('RETIRED' in basis) > 0
+       and position('NO BROWSER ENTRANCE EXISTS YET' in basis) = 0;
+    if v_n <> 7 then
+      raise exception '#1012 sectionD tail: % row(s) state the retirement in both basis and limits, not the 7 measured', v_n
+        using errcode = 'CLR10';
+    end if;
+    if exists (select 1 from clara.document_capabilities where limits ? 'browser_entrance') then
+      raise exception '#1012 sectionD tail: a row still carries browser_entrance' using errcode = 'CLR10';
+    end if;
+    select count(*)::int into v_n from clara.document_capabilities
+     where document_kind = 'prior_gl' and business_operation <> 'stored_only';
+    if v_n <> 0 then
+      raise exception '#1012 sectionD tail: % prior_gl row(s) moved off business_operation = stored_only -- this file changes basis and limits only', v_n
+        using errcode = 'CLR10';
+    end if;
+    select count(distinct registry_version)::int into v_n from clara.document_capabilities;
+    if v_n <> 1 then
+      raise exception '#1012 sectionD tail: the registry publishes % distinct registry_versions', v_n using errcode = 'CLR10';
+    end if;
+    select min(registry_version)::int into v_n from clara.document_capabilities;
+    if v_n <> v_before + 1 then
+      raise exception '#1012 sectionD tail: the registry publishes version %, not the % this raise owed', v_n, v_before + 1
+        using errcode = 'CLR10';
+    end if;
+    select count(*)::int into v_n from clara.document_capabilities;
+    if v_n <> 240 then
+      raise exception '#1012 sectionD tail: the registry now holds % rows', v_n using errcode = 'CLR10';
+    end if;
+    select count(*)::int into v_n
+      from clara.document_capabilities c
+      left join clara.document_capability_version_high_water h
+        on h.format = c.format and h.document_kind = c.document_kind
+     where h.format is null or h.registry_version is distinct from c.registry_version;
+    if v_n <> 0 then
+      raise exception '#1012 sectionD tail: % pair(s) carry a high-water mark that disagrees after the raise', v_n
+        using errcode = 'CLR10';
+    end if;
+    if pg_catalog.has_table_privilege('clara_authenticated', 'clara.document_capabilities', 'INSERT')
+       or pg_catalog.has_table_privilege('clara_authenticated', 'clara.document_capabilities', 'UPDATE')
+       or pg_catalog.has_table_privilege('clara_authenticated', 'clara.document_capabilities', 'DELETE')
+       or pg_catalog.has_table_privilege('clara_agent_ro', 'clara.document_capabilities', 'SELECT') then
+      raise exception '#1012 sectionD tail: an application role gained a write grant (or the agent lane gained SELECT) on the registry'
+        using errcode = 'CLR10';
+    end if;
+
+    raise notice '#1012 sectionD tail: OK -- the seven prior_gl rows seeding-parse.mjs has a reader for now state the RETIREMENT in both basis and limits (seeding_lane = retired, with its reason), no row anywhere still carries browser_entrance, every prior_gl row keeps business_operation = stored_only, the registry re-publishes at version % across all 240 rows (one distinct version) with every high-water mark in lockstep, and no application role gained anything. 0191, 0207, 0228, 0244, 0245 and 0272 are not edited by this file.', v_before + 1;
+  end if;
+end
+$p1012_registry$;
+
+-- =====================================================================================
 -- §E  TAIL. Re-reads the live catalog rather than trusting the statements above ran as
 --     written, and drives the retirement behaviourally inside a forced-rollback
 --     subtransaction (the 0018/0019/0020/0146/0260 CLR99-probe idiom) so nothing synthetic
