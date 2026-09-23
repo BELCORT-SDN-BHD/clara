@@ -13,10 +13,12 @@
 //     (who used to clear sign's floor) and a viewer (who never cleared anything) are both
 //     refused identically by the ACL layer now, before rank is ever read.
 //   vb921.5 list_vendor_bindings, get_vendor_binding and revoke_vendor_identity_binding remain
-//     reachable — driven end-to-end against a REAL binding (built by the #921 raw-fixture
-//     helpers, since propose/sign no longer exist as a way to get one): the read verbs return
-//     the row, and revoke actually transitions it to 'revoked'. None of the three touch a
-//     door this migration moved.
+//     reachable — driven end-to-end AS A HUMAN against a REAL binding: the read verbs return the
+//     row, and revoke actually transitions it to 'revoked'. None of the three touch a door this
+//     migration moved. The binding itself is built through the propose/sign BODIES, carried by
+//     `clara_fn_owner` (x36-vendor-binding-helpers.mjs's `…AsFnOwner` wrappers and their header)
+//     — the bodies are untouched by 0273 and D6 keeps them; only the human GRANT is gone, which
+//     is what vb921.1–.4 above prove.
 //
 // FAIL, NEVER SKIP, when run in isolation against a chain missing 0273 (the estate's fail0017
 // idiom) — a package-wide pre-integration sweep tolerates absence instead via
@@ -32,7 +34,7 @@ import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
   seedPayableAccount, seedClientHardIdentifier, seedPassingWindow,
-  insertHumanProposedBinding, signLiveDirect,
+  proposeAsFnOwner, signLiveAsFnOwner,
 } from "./x36-vendor-binding-helpers.mjs";
 
 let ready = false;
@@ -115,12 +117,15 @@ test("vb921.4 the denial holds for every rank — an admin (sign's own former fl
 
 test("vb921.5 list_vendor_bindings, get_vendor_binding and revoke_vendor_identity_binding remain reachable, driven end-to-end against a real binding", async () => {
   requireReady();
-  // The only way left to get a binding into 'proposed'/'live' is the #921 raw-fixture helpers
-  // (see their own header): propose/sign no longer exist as a way to build one.
+  // The fixture binding is built through the REAL propose/sign bodies, carried by
+  // `clara_fn_owner` (see x36-vendor-binding-helpers.mjs's header): no human session could
+  // reach them — that is exactly what vb921.1–.4 above prove — but the bodies themselves are
+  // untouched by 0273, so the row this builds is one the doors really would have written.
   const cp = await seedPassingWindow(w, "VB921");
-  const p = await insertHumanProposedBinding(w.firms.A, w.clients.A1, cp.id, w.users.bob);
-  assert.equal(p.status, "proposed", "fixture: the raw-inserted row is proposed");
-  await signLiveDirect(p.binding_id, w.users.alice);
+  const p = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  assert.equal(p.status, "proposed", "fixture: the proposal really is in 'proposed'");
+  const signed = await signLiveAsFnOwner(w.users.alice, { binding: p.binding_id });
+  assert.equal(signed.status, "live", "fixture: the binding really reached 'live'");
 
   const listed = await humanQuery(w.users.bob,
     "select * from clara.list_vendor_bindings(p_client => $1)", [w.clients.A1]);

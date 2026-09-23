@@ -34,7 +34,7 @@ import {
   upsertAccountClassed, upsertPayableAccount,
 } from "./wave-a-fixtures.mjs";
 import {
-  has29, propose, seedApprovedEntry, seedBareDocument, seedF123Evidence, signLive,
+  has29, proposeAsFnOwner, seedApprovedEntry, seedBareDocument, seedF123Evidence, signLiveAsFnOwner,
   seedPayableAccount, seedVendorCounterparty, seedClientHardIdentifier
 } from "./x36-vendor-binding-helpers.mjs";
 
@@ -209,14 +209,14 @@ async function bindLive(cp, pageVendor, invoiceIds) {
       { postingDate, approvedAt: `${postingDate}T09:00:00Z` },
     );
   }
-  const proposed = await propose(w.users.bob, {
+  const proposed = await proposeAsFnOwner(w.users.bob, {
     client: w.clients.A1,
     counterparty: cp.id,
   });
   // signLive (裁-18b PR-1 finding C3): the post-time re-check is proven by a catalog witness on
   // the approve path now, so signing refuses until PR-3 mints the marker; the helper plants it,
   // drives the REAL door, and restores the body byte-for-byte.
-  return signLive(w.users.alice, { binding: proposed.binding_id });
+  return signLiveAsFnOwner(w.users.alice, { binding: proposed.binding_id });
 }
 
 before(async () => {

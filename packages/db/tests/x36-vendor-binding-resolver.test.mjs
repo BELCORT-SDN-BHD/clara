@@ -31,8 +31,8 @@ import { rootQuery, endPool } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
-  has28, has29, seedPayableAccount, seedLiveBinding, seedBareDocument, seedF123Evidence, signLive,
-  seedVendorCounterparty, seedApprovedEntry, propose, seedClientHardIdentifier,
+  has28, has29, seedPayableAccount, seedLiveBinding, seedBareDocument, seedF123Evidence, signLiveAsFnOwner,
+  seedVendorCounterparty, seedApprovedEntry, proposeAsFnOwner, seedClientHardIdentifier,
 } from "./x36-vendor-binding-helpers.mjs";
 
 let has0028 = false;
@@ -110,11 +110,11 @@ async function bindLiveWithInvoiceId(cp, invoiceId, evidenceIdentity = cp) {
       { postingDate: d, approvedAt: `${d}T09:00:00Z` });
     i += 1;
   }
-  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const proposed = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
   // signLive: the post-time re-check is proven by a witnessed prosrc sha now (裁-18b PR-1 finding
   // C3), so signing refuses until PR-3 mints the witness; the helper performs PR-3's two acts and
   // undoes both.
-  return signLive(w.users.alice, { binding: proposed.binding_id });
+  return signLiveAsFnOwner(w.users.alice, { binding: proposed.binding_id });
 }
 
 /** Add one more top-band OCR region to a document's (already-seeded) ocr extraction,

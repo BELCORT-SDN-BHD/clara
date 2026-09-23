@@ -22,9 +22,9 @@ import {
   upsertPayableAccount, withActor, withSessionAuth,
 } from "./wave-a-fixtures.mjs";
 import {
-  FULL_ABSENT_RECEIPT, has28, has29, propose, seedApprovedEntry,
+  FULL_ABSENT_RECEIPT, has28, has29, proposeAsFnOwner, seedApprovedEntry,
   seedBareDocument, seedF123Evidence, seedPassingWindow,
-  seedPayableAccount, seedVendorCounterparty, signLive, seedClientHardIdentifier
+  seedPayableAccount, seedVendorCounterparty, signLiveAsFnOwner, seedClientHardIdentifier
 } from "./x36-vendor-binding-helpers.mjs";
 
 const EZSEC_FRAGMENTS = [
@@ -385,7 +385,7 @@ function requireReady(t) {
 test("x30.1 real EZSEC window derives the exact LCP, proposes, and signs live", async (t) => {
   if (requireReady(t)) return;
   const seeded = await seedWindow("X30-EZSEC", EZSEC_FRAGMENTS);
-  const proposed = await propose(w.users.bob, {
+  const proposed = await proposeAsFnOwner(w.users.bob, {
     client: w.clients.A1,
     counterparty: seeded.cp.id,
   });
@@ -394,7 +394,7 @@ test("x30.1 real EZSEC window derives the exact LCP, proposes, and signs live", 
   // CATALOG WITNESS on the approve path now, not by the append-only 0029 ledger row, so signing
   // REFUSES until PR-3 mints the marker. The helper plants it, signs through the REAL audited
   // door with every other wall live, and restores the body byte-for-byte.
-  const signed = await signLive(w.users.alice, {
+  const signed = await signLiveAsFnOwner(w.users.alice, {
     binding: proposed.binding_id,
   });
   assert.equal(signed.status, "live");
@@ -521,7 +521,7 @@ test("x30.3 the degenerate exact LCP 'in' refuses features_unstable / CLR36", as
   ]);
   let error = null;
   try {
-    await propose(w.users.bob, {
+    await proposeAsFnOwner(w.users.bob, {
       client: w.clients.A1,
       counterparty: cp.id,
     });
@@ -540,7 +540,7 @@ test("x30.4 identical fragments retain the full normalized F1", async (t) => {
     "select clara._binding_normalize($1) as norm",
     [cp.name],
   )).rows[0].norm;
-  const proposed = await propose(w.users.bob, {
+  const proposed = await proposeAsFnOwner(w.users.bob, {
     client: w.clients.A1,
     counterparty: cp.id,
   });
@@ -562,7 +562,7 @@ test("x30.5 an LCP long enough to clear the length floor but made ENTIRELY of de
   ]);
   let error = null;
   try {
-    await propose(w.users.bob, {
+    await proposeAsFnOwner(w.users.bob, {
       client: w.clients.A1,
       counterparty: cp.id,
     });
@@ -590,7 +590,7 @@ test("x30.6 the spelled-out Malaysian corporate forms (sendirian/berhad) are den
   ]);
   let error = null;
   try {
-    await propose(w.users.bob, {
+    await proposeAsFnOwner(w.users.bob, {
       client: w.clients.A1,
       counterparty: cp.id,
     });
