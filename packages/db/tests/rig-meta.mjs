@@ -3131,8 +3131,15 @@ export const CLIENT_BIRTH_WALL_0287_COHORT = [...CLIENT_BIRTH_WALL_0287_HUMAN_FN
 //   constraint 2; the owner's default 6, 2026-09-18 — the model may only ever ask the fixed
 //   two-date question). 0305's own tail asserts that by pg_proc count, not by convention.
 const PREPAYMENT_STATED_TERM_0305_HUMAN_FNS = ["record_prepayment_stated_term"];
-//   …and the UNGRANTED closure: the carrier's supersede-only trigger. No new runtime verb.
-const PREPAYMENT_STATED_TERM_0305_UNGRANTED_FNS = ["_tf_pst_supersede_only"];
+//   …and the UNGRANTED closure: the carrier's supersede-only trigger and the SECOND deterministic
+//   evaluator, `prepayment_schedule_v2` — v1's formula with the amount, the released account, the
+//   released side and the term as ARGUMENTS, registered as its own single-member
+//   clara.evaluator_versions closure. It is granted to NOBODY, exactly as v1 is: it is reached only
+//   from a definer door, no consumer exists for a human grant, and law 31 says do not mint one. No
+//   new runtime verb.
+const PREPAYMENT_STATED_TERM_0305_UNGRANTED_FNS = [
+  "_tf_pst_supersede_only", "prepayment_schedule_v2",
+];
 export const PREPAYMENT_STATED_TERM_0305_COHORT = [
   ...PREPAYMENT_STATED_TERM_0305_HUMAN_FNS, ...PREPAYMENT_STATED_TERM_0305_UNGRANTED_FNS,
 ];

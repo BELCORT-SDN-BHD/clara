@@ -413,10 +413,238 @@ revoke all on function clara.record_prepayment_stated_term(uuid,uuid,date,date,t
 comment on function clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text) is
   '#939: the ONE lawful producer of clara.prepayment_stated_terms. Bookkeeper floor, clara_authenticated only; NO agent grant and NO wake wrapper exists, because a service period a model supplied would be a model-generated value entering a durable artifact (hard constraint 2; owner default 6, 2026-09-18) -- the model may only ever ask the fixed two-date question. Refuses a document-bound recognition by name: that lane has its own carrier and its own door, and two live terms for one prepayment would have no rule for which wins.';
 
+-- =====================================================================================
+-- §C — clara.prepayment_schedule_v2 — THE SAME FORMULA, WITH THE AMOUNT AND THE TERM AS INPUTS.
+--
+-- WHY A _v2 AND NOT AN EDIT. `clara.prepayment_schedule_v1` is a registered single-member
+-- `clara.evaluator_versions` closure: `clara.verify_evaluator_freeze()` re-derives its body hash
+-- LIVE from the catalog between every migration's body and its commit, so an in-place edit fails at
+-- APPLY, not merely at review. Law 9 applied to evaluators: a changed formula is a _vN, never an
+-- edit. The formula here is UNCHANGED — the two evaluators agree line for line on every input v1
+-- can see, and cell `p939.evaluator.v2_agrees` drives both and compares them rather than asserting
+-- it.
+--
+-- WHAT ACTUALLY CHANGES IS WHO DECIDES. v1 reads the term off `clara.document_service_periods` and
+-- the amount off "the one debited asset leg" of the source entry, so the EVALUATOR picks both the
+-- source leg and the term source. v2 takes all three as ARGUMENTS, which moves those two choices to
+-- the DOOR — where they belong, because they are exactly what #939 makes conditional: the term may
+-- now come from a person's statement, and the released leg may now be a CREDITED LIABILITY rather
+-- than a debited asset (the deferred-revenue mirror #941 builds on 2030, which is why
+-- `p_release_side` is an argument and not this body's guess). The arithmetic stays where it was.
+--
+-- IT CALLS NO OTHER clara FUNCTION AND READS NO TABLE, which is what keeps its own registration a
+-- genuine SINGLE-MEMBER closure (§C.1). Registering an N-member closure freezes N bodies estate-wide
+-- — `verify_evaluator_freeze()` ignores the `deployed` flag and hashes the full
+-- `pg_get_functiondef` — so every member is a body a later lane can never recut without reding an
+-- apply. v1 earned its one member the same way and §TAIL censuses this one for the same property.
+--
+-- THE CAP LIVES HERE TOO, and that is not duplication. v1 can never meet a term longer than 120
+-- charged months because its carrier refuses to hold one (`ck_dsp_max_periods`,
+-- `ck_pst_max_periods`). v2's term is an ARGUMENT, so without this wall it would happily emit a
+-- 121st line for a term no door in this estate would accept. Same constant, same arithmetic, same
+-- reason — the owner's decision 5 is "the same 120-month cap as a document term".
+--
+-- ITS REFUSALS ARE RETURNED, NEVER RAISED — 0140's own contract for an evaluator, which is exactly
+-- what lets a door re-raise them with their payloads intact and an agent lane land them as rungs.
+-- The tokens are 0140's five, unchanged; `axis` says which arm answered.
+--
+-- POSTURE: STABLE, SECURITY DEFINER, pinned search_path, owned by `clara_fn_owner`, and UNGRANTED —
+-- v1's posture verbatim. The definer confers nothing (no application role can execute it at all);
+-- it is spelled the same so the pair can be compared on the formula rather than on the frame.
+-- =====================================================================================
+create or replace function clara.prepayment_schedule_v2(
+    p_total_cents bigint, p_account_code text, p_release_side text,
+    p_term_start date, p_term_end date) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $eval2$
+declare
+  v_code  text;
+  v_side  text;
+  v_first date;
+  v_last  date;
+  v_n     int;
+  v_base  bigint;
+  v_rem   bigint;
+  v_lines jsonb := '[]'::jsonb;
+  v_ps    date;
+  v_pe    date;
+  v_amt   bigint;
+  i       int;
+begin
+  -- -----------------------------------------------------------------------------------------
+  -- FITNESS OF THE SUPPLIED LEG. v1 answers these by reading the entry; here the caller states
+  -- them, so each one is a first-class refusal rather than an assumption about a good caller.
+  -- -----------------------------------------------------------------------------------------
+  if p_total_cents is null or p_total_cents <= 0 then
+    return jsonb_build_object('schedule_version', 'v2', 'refusal', 'prepayment_source_unfit',
+      'axis', 'amount_not_positive',
+      'reason', 'an amortisation releases a positive amount',
+      'total_cents', p_total_cents);
+  end if;
+  v_code := nullif(btrim(coalesce(p_account_code, '')), '');
+  if v_code is null then
+    return jsonb_build_object('schedule_version', 'v2', 'refusal', 'prepayment_source_unfit',
+      'axis', 'account_missing',
+      'reason', 'the released leg names no account');
+  end if;
+  -- A CLOSED SET, and the caller must choose. A default would be this body guessing which side of
+  -- the released leg the periods post against — a prepaid ASSET is released by CREDIT and a
+  -- deferred-revenue LIABILITY by DEBIT, and getting that wrong posts the books backwards.
+  v_side := btrim(coalesce(p_release_side, ''));
+  if v_side not in ('credit', 'debit') then
+    return jsonb_build_object('schedule_version', 'v2', 'refusal', 'prepayment_source_unfit',
+      'axis', 'release_side_unknown',
+      'reason', 'the released leg is either credited (a prepaid asset) or debited (a deferred-revenue liability)',
+      'release_side', p_release_side);
+  end if;
+
+  -- -----------------------------------------------------------------------------------------
+  -- THE TERM. ORDER IS LOAD-BEARING (0140's own Codex P4a finding, restated because this body
+  -- repeats the arithmetic): presence, then finiteness, then the DOMAIN in pure date comparison,
+  -- and only THEN anything that does interval arithmetic. A finite 5874897-AD date passes
+  -- isfinite and then OVERFLOWS the timestamp domain inside `date_trunc(...) + interval '1 month'`,
+  -- so the guard would blow up before the typed refusal it guards could speak.
+  -- -----------------------------------------------------------------------------------------
+  if p_term_start is null or p_term_end is null then
+    return jsonb_build_object('schedule_version', 'v2', 'refusal', 'prepayment_term_underivable',
+      'axis', 'dates_missing', 'reason', 'a term needs both of its dates');
+  end if;
+  if not isfinite(p_term_start) or not isfinite(p_term_end) then
+    return jsonb_build_object('schedule_version', 'v2', 'refusal', 'prepayment_term_underivable',
+      'axis', 'dates_not_finite', 'reason', 'a term must carry finite dates');
+  end if;
+  if p_term_start < date '1900-01-01' or p_term_start > date '2200-12-31'
+     or p_term_end < date '1900-01-01' or p_term_end > date '2200-12-31' then
+    return jsonb_build_object('schedule_version', 'v2', 'refusal', 'prepayment_term_underivable',
+      'axis', 'dates_out_of_domain',
+      'reason', 'a term must fall inside 1900-01-01 .. 2200-12-31',
+      'domain_from', date '1900-01-01', 'domain_to', date '2200-12-31',
+      'term_start', p_term_start, 'term_end', p_term_end);
+  end if;
+  if p_term_end < p_term_start then
+    return jsonb_build_object('schedule_version', 'v2', 'refusal', 'prepayment_term_underivable',
+      'axis', 'dates_inverted', 'reason', 'a term ends on or after it starts',
+      'term_start', p_term_start, 'term_end', p_term_end);
+  end if;
+
+  -- THE PERIODS — v1's ruled predicate, spelled identically: the first charged month is the first
+  -- whose day 1 the term covers; the last is the last whose day 1 the term covers.
+  v_first := case when p_term_start = date_trunc('month', p_term_start)::date
+                  then p_term_start
+                  else (date_trunc('month', p_term_start) + interval '1 month')::date end;
+  v_last  := date_trunc('month', p_term_end)::date;
+  v_n := ((extract(year from v_last)::int * 12 + extract(month from v_last)::int)
+        - (extract(year from v_first)::int * 12 + extract(month from v_first)::int)) + 1;
+  if v_n < 1 then
+    return jsonb_build_object('schedule_version', 'v2', 'refusal', 'prepayment_term_underivable',
+      'axis', 'no_whole_month',
+      'reason', 'the term covers no calendar month''s first day, so it charges no whole month',
+      'term_start', p_term_start, 'term_end', p_term_end);
+  end if;
+  if v_n > 120 then
+    return jsonb_build_object('schedule_version', 'v2', 'refusal', 'prepayment_term_underivable',
+      'axis', 'term_too_long',
+      'reason', 'a term spanning more charged months than this estate''s carriers admit',
+      'max_periods', 120, 'derived_periods', v_n,
+      'term_start', p_term_start, 'term_end', p_term_end);
+  end if;
+
+  -- base truncated toward zero; the remainder lands WHOLLY in the final period, so the emitted
+  -- amounts sum to total_cents EXACTLY. v1's line, and the reason is the same: "round each period"
+  -- loses sen.
+  v_base := p_total_cents / v_n;
+  v_rem  := p_total_cents - (v_base * v_n);
+
+  for i in 0 .. v_n - 1 loop
+    v_ps := (v_first + (i || ' months')::interval)::date;
+    v_pe := ((v_first + ((i + 1) || ' months')::interval) - interval '1 day')::date;
+    v_amt := v_base + case when i = v_n - 1 then v_rem else 0 end;
+    -- THE RELEASED HALF ONLY, exactly as v1 emits it. The charge half is the door's: it pairs each
+    -- of these with the judged EXPENSE (or earned REVENUE) account for the same amount, which is
+    -- what keeps this evaluator amounts-only and hard constraint 2 exact.
+    v_lines := v_lines || jsonb_build_object(
+      'period_start', v_ps, 'period_end', v_pe,
+      'debit_cents',  case when v_side = 'debit'  then v_amt else 0 end,
+      'credit_cents', case when v_side = 'credit' then v_amt else 0 end,
+      'account_code', v_code);
+  end loop;
+
+  return jsonb_build_object(
+    'schedule_version', 'v2',
+    'period_lines', v_lines,
+    'total_cents', p_total_cents,
+    'period_count', v_n,
+    'release_account_code', v_code,
+    'release_side', v_side,
+    'term_start', p_term_start, 'term_end', p_term_end,
+    'remainder_placement', 'final_period');
+end $eval2$;
+revoke all on function clara.prepayment_schedule_v2(bigint,text,text,date,date) from public;
+
+-- -------------------------------------------------------------------------------------------------
+-- §C.1 — THE FREEZE REGISTRATION, single-member by construction. 0140 §C.1's shape verbatim.
+--
+-- THE search_path HERE IS LOAD-BEARING, NOT COSMETIC (0059:243-245's recorded reason, which 0091
+-- and 0140 restate): clara.verify_evaluator_freeze() reproduces the closure hash under
+-- pg_catalog,pg_temp, so a registration performed under ANY OTHER search_path stores a hash the
+-- verifier CANNOT reproduce and every later apply reds. It is set immediately before and restored
+-- immediately after.
+--
+-- ONE MEMBER, deliberately. Registering a closure freezes EVERY member body estate-wide, so an
+-- N-member registration is N bodies a later lane can never recut without reding an apply.
+-- clara.prepayment_schedule_v2 calls no other clara function precisely so that this list can
+-- honestly have one entry, and §TAIL censuses that property rather than trusting this comment.
+--
+-- deployed = false: evaluator versions are BORN undeployed (clara._tf_evaluator_deploy_once) and
+-- the flip is a one-way ceremony act run from merged main. The freeze binds regardless — the flag
+-- is about traffic, not about immutability.
+--
+-- GUARDED FOR REDO (#957), and the guard is a PRESENCE test rather than an upsert on purpose:
+-- clara.evaluator_version_members is append-only and clara.evaluator_versions refuses DELETE
+-- outright, so this registration is a ONE-SHOT act. A redo after an edit to the v2 BODY would
+-- therefore leave a stale member hash and clara.verify_evaluator_freeze() would fail the apply —
+-- loudly, which is the correct outcome: once registered, a changed formula is a _v3 and never an
+-- edit. That is law 9, and it applies to this file's own author too.
+-- -------------------------------------------------------------------------------------------------
+set local search_path = pg_catalog, pg_temp;
+do $t939_freeze$
+declare e uuid; h bytea;
+begin
+  if exists (select 1 from clara.evaluator_versions
+              where evaluator_name = 'prepayment_schedule' and version = 2 and firm_id is null) then
+    raise notice '#939 freeze: prepayment_schedule v2 is already registered -- this is a redo, and the registration is a one-shot act (clara.evaluator_version_members is append-only). clara.verify_evaluator_freeze() will refuse this apply if the body moved since.';
+  else
+    select sha256(convert_to(string_agg(
+             encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text, 'UTF8')), 'hex'),
+             '' order by o), 'UTF8')) into h
+      from (values (0, 'clara.prepayment_schedule_v2(bigint,text,text,date,date)')) m(o, s);
+    insert into clara.evaluator_versions(evaluator_name, version, entrypoint_signature,
+        closure_sha256, migration_version, deployed)
+      values ('prepayment_schedule', 2,
+        'clara.prepayment_schedule_v2(bigint,text,text,date,date)', h,
+        -- *** CLAIMED AT MERGE: the literal is this file's own name, trued from its authored form
+        -- in the SAME commit as any rename (.claude/rules/db-migrations.md). A stale literal here
+        -- would point a later reader at a file that does not exist. ***
+        '0305_prepayment_stated_term', false)
+      returning id into e;
+    insert into clara.evaluator_version_members(evaluator_version_id, ordinal, member_signature,
+        body_sha256, firm_id)
+      select e, o, s, sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text, 'UTF8')),
+             null::uuid
+        from (values (0, 'clara.prepayment_schedule_v2(bigint,text,text,date,date)')) m(o, s);
+  end if;
+end
+$t939_freeze$;
+set local search_path = clara, pg_temp;
+
+comment on function clara.prepayment_schedule_v2(bigint,text,text,date,date) is
+  '#939: the versioned deterministic evaluator behind the memo-only prepayment lane. clara.prepayment_schedule_v1''s formula UNCHANGED — whole-calendar-month straight line, a month charged iff the term covers its FIRST day, the remainder wholly in the final period — with the amount, the released account, the released SIDE and the term supplied as arguments, so the DOOR picks the source leg and the term source rather than this body. The side is an argument because a prepaid ASSET is released by credit and a deferred-revenue LIABILITY by debit, and a default would be this body guessing which. Calls no other clara function and reads no table, which is what keeps its evaluator_versions closure at ONE member and the freeze meaningful; a changed formula is a _v3, never an edit.';
+
 reset role;
 
 grant execute on function clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)
   to clara_authenticated;
+-- clara.prepayment_schedule_v2 is granted to NOBODY, exactly as v1 is: it is reached only from a
+-- definer door, no consumer exists for a human grant, and law 31 says do not mint one.
 
 -- =====================================================================================
 -- §TAIL — what must be true AFTER this file, measured rather than asserted by having applied.
@@ -502,6 +730,38 @@ begin
    where n.nspname = 'clara' and p.proname ~ 'prepayment_stated_term';
   if v_n <> 1 then
     raise exception '#939 tail: expected exactly ONE function named for the stated term (the human door), found % -- a wake wrapper or an agent core would be one of them', v_n
+      using errcode='CLR10';
+  end if;
+
+  -- 4b · THE SECOND EVALUATOR. It resolves at its exact signature, wears v1's posture verbatim,
+  --      holds NO grant at all, and — the property its single-member freeze rests on — CALLS NO
+  --      OTHER clara FUNCTION. The census matches a CALL SHAPE (`clara.<identifier>(`) rather than
+  --      the bare string 'clara.', because a qualified table name would match that and report call
+  --      sites that do not exist (0140's own W11 note). It is a SPELLING instrument, not an
+  --      identity one; §C.1's single-member registration is the structural half that binds.
+  if to_regprocedure('clara.prepayment_schedule_v2(bigint,text,text,date,date)') is null then
+    raise exception '#939 tail: clara.prepayment_schedule_v2 does not resolve at its exact signature'
+      using errcode='CLR10';
+  end if;
+  select pg_get_userbyid(p.proowner) || ' | ' || p.prosecdef::text || ' | ' || p.provolatile::text
+         || ' | ' || coalesce(array_to_string(p.proconfig, ','), '<none>')
+    into v_posture from pg_proc p
+   where p.oid = 'clara.prepayment_schedule_v2(bigint,text,text,date,date)'::regprocedure;
+  if v_posture is distinct from 'clara_fn_owner | true | s | search_path=clara, pg_temp' then
+    raise exception '#939 tail: prepayment_schedule_v2''s posture is not v1''s -- got {%}', v_posture
+      using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from pg_proc p, aclexplode(p.proacl) a
+   where p.oid = 'clara.prepayment_schedule_v2(bigint,text,text,date,date)'::regprocedure
+     and pg_get_userbyid(a.grantee) <> 'clara_fn_owner';
+  if v_n <> 0 then
+    raise exception '#939 tail: clara.prepayment_schedule_v2 holds % application grant(s) -- it is reached only from a definer door and law 31 says do not mint one', v_n
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_posture from pg_proc p
+   where p.oid = 'clara.prepayment_schedule_v2(bigint,text,text,date,date)'::regprocedure;
+  if v_posture ~ 'clara\.[a-zA-Z_][a-zA-Z0-9_]*\s*\(' then
+    raise exception '#939 tail: clara.prepayment_schedule_v2 calls another clara function -- its closure cannot honestly be registered with one member'
       using errcode='CLR10';
   end if;
 

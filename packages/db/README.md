@@ -4745,3 +4745,31 @@ was found in is reported in the notice, so a half-and-half reading is visible ra
 `clara.prepayment_schedule_v1` is pinned UNCONDITIONALLY at both ends of the file: it is a
 registered single-member `clara.evaluator_versions` closure and this file never touches it, so a
 changed sha is always a finding.
+
+**The second evaluator.** `clara.prepayment_schedule_v2(total_cents, account_code, release_side,
+term_start, term_end)` is `clara.prepayment_schedule_v1`'s formula UNCHANGED — whole-calendar-month
+straight line, a month charged iff the term covers its FIRST day, the remainder wholly in the final
+period — with the amount, the released account, the released SIDE and the term supplied as
+arguments. What changes is who decides: v1 reads the term off `clara.document_service_periods` and
+the amount off "the one debited asset leg", so the EVALUATOR picks both the source leg and the term
+source; v2 moves those two choices to the DOOR, because they are exactly what #939 makes
+conditional. `release_side` is an argument rather than a default because a prepaid ASSET is released
+by credit and a deferred-revenue LIABILITY by debit, and getting that wrong posts the books
+backwards — which is also how the #941 deferred-revenue mirror rides the same evaluator.
+
+It calls no other `clara` function and reads no table, which is what keeps its own
+`clara.evaluator_versions` registration a genuine SINGLE-MEMBER closure (registering an N-member
+closure freezes N bodies estate-wide). The 120-month cap lives inside v2 as well as on both
+carriers: v1 can never meet a longer term because its carrier refuses to hold one, but v2's term is
+an argument and without the wall it would emit a 121st line for a term no door admits.
+`prepayment_schedule_v2` is NOT in `frozen-evaluators.json`: that lint discovers only the
+`clara.evaluate_*` spelling (`check-frozen-evaluators.mjs:62`), which is why
+`clara.prepayment_schedule_v1` has no entry there either — the DB-side freeze
+(`clara.verify_evaluator_freeze()`, run by `migrate.mjs` between every migration body and its
+commit) is what binds both.
+
+**The registration is a ONE-SHOT act, including for this file's own author.**
+`clara.evaluator_version_members` is append-only and `clara.evaluator_versions` refuses DELETE, so
+the freeze block is guarded by a presence test rather than an upsert. A redo after an edit to the
+v2 body therefore leaves a stale member hash and `verify_evaluator_freeze()` fails that apply —
+loudly, which is correct: once registered, a changed formula is a `_v3`, never an edit.

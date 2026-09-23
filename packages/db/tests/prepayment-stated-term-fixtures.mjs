@@ -16,10 +16,15 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 
 import {
-  rootQuery, humanQuery, namedCall, opk, account, prepaymentScene,
+  rootQuery, humanQuery, namedCall, opk, account, prepaymentScene, recordPeriod, monthEndAfter,
 } from "./prepayment-schedule-fixtures.mjs";
+// The fiscal-year opener, re-exported here because #653's own fixtures import it without passing
+// it on: the 120-month cell needs the CONTIGUOUS successor year `clara.open_fiscal_year` demands,
+// and the scene builder only ever opens the year the term ENDS in.
+import { openDefaultFY } from "./x56-fixtures.mjs";
 
 export * from "./prepayment-schedule-fixtures.mjs";
+export { openDefaultFY };
 
 // ===========================================================================================
 // 1 · The frontier gate.
@@ -161,6 +166,31 @@ export async function statedTermScene(tag, opts = {}) {
   const scene = await prepaymentScene(tag, opts);
   const memo = await memoOnlyRecognition(scene, { cents: opts.memoCents ?? opts.cents ?? 120000 });
   return { ...scene, memoEntry: memo.entry, memoCents: memo.cents };
+}
+
+/**
+ * A SCENE WHOSE DOCUMENT TERM IS THE CARRIER'S 120-MONTH MAXIMUM — the longest term
+ * `clara.prepayment_schedule_v1` can ever see, because `clara.record_document_service_period` and
+ * `ck_dsp_max_periods` both stop at 120 charged months.
+ *
+ * It cannot be built by asking `prepaymentScene` for 120 months: that builder opens the fiscal
+ * year the term ENDS in, and `clara.open_fiscal_year` refuses a year that is not CONTIGUOUS with
+ * its predecessor (measured: "fiscal year starting 2036-01-01 is not contiguous with its
+ * predecessor ending 2026-12-31"). So the scene is built SHORT, its immediate successor year is
+ * opened — which is all v1's FY arm asks for, an OPEN year starting after the entry's own year —
+ * and the term is then re-recorded at its maximum through the same human door, which supersedes
+ * the short one.
+ */
+export async function maxTermScene(tag, { cents = 1200000 } = {}) {
+  const scene = await prepaymentScene(tag, { cents, termMonthsBack: 1, termMonths: 2 });
+  const year = Number(scene.termStart.slice(0, 4));
+  await openDefaultFY(scene.alice, {
+    client: scene.client, startsOn: `${year + 1}-01-01`, tag: `p939 ${tag} successor` });
+  const termEnd = await monthEndAfter(scene.termStart, 119);
+  await recordPeriod(scene.bob, {
+    document: scene.document, start: scene.termStart, end: termEnd,
+    basis: "#939 battery: a ten-year maintenance contract, the carrier's stated maximum" });
+  return { ...scene, termEnd, termMonths: 120 };
 }
 
 /** A SECOND expense account, for the cells that need a target distinct from the scene's. */

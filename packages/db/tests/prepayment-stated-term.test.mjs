@@ -17,13 +17,13 @@ import assert from "node:assert/strict";
 import {
   assertStatedTermLanePresent, endPool, rootQuery, CLR, assertPair, assertRaises,
   statedTermScene, recordStatedTerm, statedTermRow, statedTermsFor, roleCanExecute,
-  functionsMatching, nowhereId,
-  STATED_TERM_REASON, STATED_TERM_DOOR_SIG,
+  functionsMatching, nowhereId, prepaymentScene, scheduleV1, scheduleV2, monthEndAfter, maxTermScene,
+  STATED_TERM_REASON, STATED_TERM_DOOR_SIG, EVALUATOR_V2_SIG,
 } from "./prepayment-stated-term-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 1;
+const EXPECTED_CELLS = 3;
 
 before(async () => {
   ready = await (async () => {
@@ -138,4 +138,168 @@ cell("p939.stated_term.record — a bookkeeper states the service period of a ME
   assert.deepEqual(await functionsMatching("prepayment_stated_term"),
     ["record_prepayment_stated_term"],
     "exactly one function carries this name — no wake wrapper, no agent core");
+});
+
+// ===========================================================================================
+// AC2 — THE SECOND EVALUATOR. Same formula, the amount and the term as INPUTS.
+// ===========================================================================================
+
+cell("p939.evaluator.v2_agrees — on the SAME document-backed recognition clara.prepayment_schedule_v2 emits the frozen v1's period lines, total, period count and remainder placement byte for byte, agrees again at the carrier's 120-month maximum, mirrors the amounts onto the DEBIT side when the released leg is a liability, and refuses a 121-month term, a non-positive amount, an unknown side and a term covering no month's first day by name", async () => {
+  // ---- THE ORDINARY CASE, and the remainder is the point. 100,001 cents over three whole months
+  // is 33,333 / 33,333 / 33,335: the base truncates toward zero and the remainder lands WHOLLY in
+  // the final period. The expected amounts are a worked example, never a re-computation of what
+  // the subject computes.
+  const scene = await prepaymentScene("v2-agree", {
+    cents: 100001, termMonthsBack: 4, termMonths: 3 });
+  const v1 = await scheduleV1(scene.client, scene.entry);
+  assert.equal(v1.refusal, undefined, "the document-backed scene really does derive a schedule");
+  assert.equal(v1.period_count, 3);
+  assert.deepEqual(v1.period_lines.map((l) => Number(l.credit_cents)), [33333, 33333, 33335],
+    "the frozen evaluator's own arithmetic, stated as a worked example");
+
+  const v2 = await scheduleV2({
+    totalCents: 100001, accountCode: scene.prepaid, releaseSide: "credit",
+    termStart: scene.termStart, termEnd: scene.termEnd });
+  assert.equal(v2.refusal, undefined, "v2 admits the same input");
+  assert.equal(v2.schedule_version, "v2", "…and says which evaluator answered");
+  assert.deepEqual(v2.period_lines, v1.period_lines,
+    "v2's period lines are v1's, byte for byte — identical formula, the term and the amount merely supplied rather than read");
+  assert.equal(v2.total_cents, v1.total_cents);
+  assert.equal(v2.period_count, v1.period_count);
+  assert.equal(v2.remainder_placement, v1.remainder_placement);
+  assert.equal(v2.term_start, v1.term_start);
+  assert.equal(v2.term_end, v1.term_end);
+  assert.equal(v2.release_account_code, v1.prepaid_account_code,
+    "the released leg is the one the CALLER picked; v1 read the same code off the entry itself");
+  assert.equal(v2.release_side, "credit");
+
+  // ---- THE 120-MONTH MAXIMUM. `record_document_service_period` admits exactly 120 charged months
+  // and `ck_dsp_max_periods` holds the same line, so this is the LONGEST term v1 can ever see —
+  // and the two evaluators must still agree there rather than only on short terms.
+  const long = await maxTermScene("v2-cap", { cents: 1200000 });
+  const longV1 = await scheduleV1(long.client, long.entry);
+  assert.equal(longV1.refusal, undefined,
+    "a 120-month document-backed term is admissible — the cap is inclusive");
+  assert.equal(longV1.period_count, 120);
+  const longV2 = await scheduleV2({
+    totalCents: 1200000, accountCode: long.prepaid, releaseSide: "credit",
+    termStart: long.termStart, termEnd: long.termEnd });
+  assert.equal(longV2.period_count, 120);
+  assert.deepEqual(longV2.period_lines, longV1.period_lines,
+    "at the carrier's maximum the two evaluators still agree line for line");
+
+  // ---- ONE MONTH FURTHER. v1 can never meet a 121-month term because its carrier refuses to hold
+  // one; v2 takes the term as an ARGUMENT, so the same cap has to live inside v2 or it would emit a
+  // 121st line for a term no door in this estate would accept.
+  const tooLong = await monthEndAfter(long.termStart, 120);
+  const over = await scheduleV2({
+    totalCents: 1200000, accountCode: long.prepaid, releaseSide: "credit",
+    termStart: long.termStart, termEnd: tooLong });
+  assert.equal(over.refusal, "prepayment_term_underivable",
+    "121 charged months is refused, by the same cap the document carrier enforces");
+  assert.equal(over.derived_periods, 121);
+  assert.equal(over.max_periods, 120);
+
+  // ---- THE MIRROR. #941's deferred-revenue lane releases a CREDITED LIABILITY: the same
+  // arithmetic, the other side. The amounts do not move; only which side of the released leg they
+  // land on does, which is why the side is the caller's and not the evaluator's guess.
+  const mirrored = await scheduleV2({
+    totalCents: 100001, accountCode: "2030", releaseSide: "debit",
+    termStart: scene.termStart, termEnd: scene.termEnd });
+  assert.equal(mirrored.refusal, undefined);
+  assert.deepEqual(mirrored.period_lines.map((l) => Number(l.debit_cents)), [33333, 33333, 33335],
+    "the same three amounts, released by DEBIT");
+  assert.deepEqual(mirrored.period_lines.map((l) => Number(l.credit_cents)), [0, 0, 0]);
+  assert.deepEqual(mirrored.period_lines.map((l) => l.account_code), ["2030", "2030", "2030"]);
+  assert.equal(mirrored.release_side, "debit");
+
+  // ---- THE REFUSALS ARE RETURNED, NEVER RAISED — 0140's contract for an evaluator, which is what
+  // lets a door re-raise them with their payloads intact and an agent lane land them as rungs.
+  const noAmount = await scheduleV2({
+    totalCents: 0, accountCode: scene.prepaid, releaseSide: "credit",
+    termStart: scene.termStart, termEnd: scene.termEnd });
+  assert.equal(noAmount.refusal, "prepayment_source_unfit");
+  assert.equal(noAmount.axis, "amount_not_positive");
+
+  const noAccount = await scheduleV2({
+    totalCents: 100001, accountCode: "   ", releaseSide: "credit",
+    termStart: scene.termStart, termEnd: scene.termEnd });
+  assert.equal(noAccount.refusal, "prepayment_source_unfit");
+  assert.equal(noAccount.axis, "account_missing");
+
+  const badSide = await scheduleV2({
+    totalCents: 100001, accountCode: scene.prepaid, releaseSide: "sideways",
+    termStart: scene.termStart, termEnd: scene.termEnd });
+  assert.equal(badSide.refusal, "prepayment_source_unfit");
+  assert.equal(badSide.axis, "release_side_unknown");
+
+  const inverted = await scheduleV2({
+    totalCents: 100001, accountCode: scene.prepaid, releaseSide: "credit",
+    termStart: scene.termEnd, termEnd: scene.termStart });
+  assert.equal(inverted.refusal, "prepayment_term_underivable");
+  assert.equal(inverted.axis, "dates_inverted");
+
+  // A term wholly inside one calendar month covers no month's FIRST day, so it charges no whole
+  // month — v1's own `v_n < 1` arm, restated on v2's own inputs.
+  const noMonth = await scheduleV2({
+    totalCents: 100001, accountCode: scene.prepaid, releaseSide: "credit",
+    termStart: "2026-03-02", termEnd: "2026-03-20" });
+  assert.equal(noMonth.refusal, "prepayment_term_underivable");
+  assert.equal(noMonth.axis, "no_whole_month");
+});
+
+cell("p939.evaluator.frozen — clara.prepayment_schedule_v2 is registered as its OWN clara.evaluator_versions closure with exactly ONE member whose registered hash equals the live body's, v1's own registration is unmoved beside it, and neither evaluator holds an application grant", async () => {
+  const rows = await rootQuery(
+    `select e.evaluator_name, e.version, e.entrypoint_signature, e.deployed,
+            e.migration_version,
+            (select count(*)::int from clara.evaluator_version_members m
+              where m.evaluator_version_id = e.id) as members,
+            encode(e.closure_sha256,'hex') as closure
+       from clara.evaluator_versions e
+      where e.evaluator_name = 'prepayment_schedule'
+      order by e.version`);
+  assert.equal(rows.rows.length, 2,
+    "the prepayment_schedule evaluator now has exactly two registered versions");
+  const [v1, v2] = rows.rows;
+  assert.equal(v1.version, 1);
+  assert.equal(v1.entrypoint_signature, "clara.prepayment_schedule_v1(uuid,uuid)");
+  assert.equal(v1.members, 1, "0140's registration is still single-member");
+  assert.equal(v2.version, 2);
+  assert.equal(v2.entrypoint_signature, EVALUATOR_V2_SIG);
+  assert.equal(v2.members, 1,
+    "…and v2's is too: it calls no other clara function, so its closure can honestly have one entry");
+  assert.equal(v2.deployed, false,
+    "evaluator versions are born undeployed — the flip is a one-way ceremony act, not this file's");
+  assert.equal(v2.migration_version, "0305_prepayment_stated_term",
+    "the registration names the file that minted it");
+
+  // THE FREEZE IS MEASURED, never restated: the member hash is recomputed LIVE off
+  // pg_get_functiondef — the same instrument clara.verify_evaluator_freeze() uses between every
+  // migration body and its commit.
+  const members = await rootQuery(
+    `select m.member_signature,
+            encode(m.body_sha256,'hex') as registered,
+            encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(m.member_signature))::text,'UTF8')),'hex') as live
+       from clara.evaluator_version_members m
+       join clara.evaluator_versions e on e.id = m.evaluator_version_id
+      where e.evaluator_name = 'prepayment_schedule'
+      order by e.version`);
+  assert.equal(members.rows.length, 2);
+  for (const m of members.rows) {
+    assert.equal(m.live, m.registered,
+      `${m.member_signature}'s live body still hashes to its registered member hash`);
+  }
+  // …and the verifier itself agrees, over the WHOLE estate rather than over these two rows.
+  const verified = await rootQuery("select clara.verify_evaluator_freeze() as r");
+  assert.equal(verified.rows[0].r.ok, true);
+
+  // NEITHER EVALUATOR IS REACHABLE BY ANY APPLICATION ROLE. A grant minted to reach one from a
+  // door would red the rig's closed ungranted census; this reads the same fact positively.
+  for (const sig of ["clara.prepayment_schedule_v1(uuid,uuid)", EVALUATOR_V2_SIG]) {
+    for (const role of ["clara_authenticated", "clara_agent_ro", "clara_wake_interactive",
+                        "clara_wake_proactive", "clara_runtime"]) {
+      assert.equal(await roleCanExecute(role, sig), false,
+        `${role} must not be able to execute ${sig}`);
+    }
+  }
 });
