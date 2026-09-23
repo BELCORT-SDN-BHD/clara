@@ -128,6 +128,13 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // this lane is posted on a guess. The row's own sentence plus needs-you-links.ts's link to
     // the documents tab are the whole affordance.
     payroll_posting_blocked: null,
+    // #947 (0298, riders wave 4 lane 01): NO inline act. Accepting a settlement candidate names a
+    // SPECIFIC bank line among however many a run offers — a decision the inbox row's own fixed
+    // shape (one row, no per-candidate slot) cannot carry, unlike a single confirm/dismiss click.
+    // needs-you-links.ts's link into the bank tab's Matching view, where
+    // `PayrollSettlementsSection` renders every candidate with its own Accept button, is the
+    // whole affordance.
+    payroll_net_pay_unsettled: null,
   } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
 

@@ -240,6 +240,7 @@
       "work_question": "Clara is waiting on an answer",
       "depreciation_authority_pending": "Depreciation authority awaiting signature",
       "payroll_posting_blocked": "Payroll run not posted",
+      "payroll_net_pay_unsettled": "Payroll payment not found yet",
       "unknown": "Unrecognized item ({kind})"
     },
     "openClient": "Open client",
@@ -253,7 +254,8 @@
       "fixed_asset_incomplete": "Open the registers tab",
       "staff_advance_incomplete": "Open the registers tab",
       "depreciation_authority_pending": "Open the fixed assets register",
-      "payroll_posting_blocked": "Open the documents tab"
+      "payroll_posting_blocked": "Open the documents tab",
+      "payroll_net_pay_unsettled": "Open the bank tab"
     },
     "askClara": "Ask Clara about this",
     "askPrefill": "About this {kind} in my Needs-you inbox — what should I look at first?",
@@ -3231,6 +3233,19 @@
       "outcomeSource": "Source file",
       "outcomeCitation": "Source citation",
       "outcomeOpKey": "Operation key"
+    },
+    "payrollSettlements": {
+      "heading": "Payroll settlements",
+      "body": "A posted payroll run's net pay, and the bank line that pays it — find it, then accept.",
+      "empty": "No payroll run is waiting on its bank payment.",
+      "runHeading": "{period} — net pay",
+      "noCandidates": "No matching bank line yet.",
+      "colDate": "Date",
+      "colDescription": "Description",
+      "colAmount": "Amount",
+      "colAccept": "Accept",
+      "accept": "Accept",
+      "acceptAria": "Accept {description} as this run's settlement"
     },
     "exceptions": {
       "proposalsHeading": "Open exception proposals",

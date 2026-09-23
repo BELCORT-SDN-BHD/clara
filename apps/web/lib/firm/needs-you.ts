@@ -60,16 +60,25 @@
 //     `document_id` the payslip, `entry_id` the entry a DUPLICATE refusal points at, `period`
 //     the month, `question_text` the reason. No new counts.* key and NO new json key, so both
 //     FULL_ROW_KEYS rosters named under pin (3) below stay byte-unchanged.
-// The LIVE row_kind set is therefore ELEVEN values, not the four the 0011 body
+//   - 0298_payroll_net_pay_settlement.sql (#947, riders wave 4 lane 01) — adds
+//     row_kind='payroll_net_pay_unsettled', the TWELFTH kind: ONE row per posted payroll run
+//     whose net pay has not yet left the bank. DERIVED from clara._payroll_net_pay_unsettled's
+//     FIFO ledger read: stores nothing, clears itself the moment the account's own balance says
+//     the run is covered, by any of three routes (Clara's own /bank settlement door, a person's
+//     hand-booked entry, or that entry reconciled through the ordinary matcher) — no dismissal
+//     act. It reuses the EXISTING shape unchanged: `id`/`filing_id` carry the run's own filing,
+//     `entry_id` the posted payroll entry itself. No new counts.* key and NO new json key.
+// The LIVE row_kind set is therefore THIRTEEN values, not the four the 0011 body
 // alone would suggest: draft, uncoded_filing, open_question, coding_task,
 // compliance_watch, lint_finding, fixed_asset_incomplete, staff_advance_incomplete,
-// work_question, depreciation_authority_pending, payroll_posting_blocked — see
-// REVIEW_QUEUE_ROW_KINDS below, the single source components/firm/needs-you-row.tsx's label
-// lookup is built from (never a hand-cast key path).
+// work_question, depreciation_authority_pending, payroll_posting_blocked,
+// payroll_net_pay_unsettled — see REVIEW_QUEUE_ROW_KINDS below, the single source
+// components/firm/needs-you-row.tsx's label lookup is built from (never a hand-cast key path).
 // `counts` carries NINE integers (depreciation_authority_pending adds none — its lane is
 // `needs_you`, so ready/needs_review/needs_you folds it in without a dedicated tally; the
 // retired seeding_proposal added none either, so its removal moves no tally; #946's
-// payroll_posting_blocked adds none for the same reason as depreciation_authority_pending). The envelope ALSO
+// payroll_posting_blocked and #947's payroll_net_pay_unsettled add none for the same reason as
+// depreciation_authority_pending). The envelope ALSO
 // carries top-level `compliance`/`lint` detail objects (per-client SST/lint figures,
 // BYTE-UNCHANGED by 裁-17) that THIS BUILD DOES NOT RENDER — a named, scoped gap (not
 // silently dropped from the type: see `ReviewQueueEnvelope`'s own comment), not a claim
@@ -190,6 +199,17 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // folds it into counts.needs_you already), and no new json key, so the two db-side
   // FULL_ROW_KEYS rosters are byte-unchanged.
   "payroll_posting_blocked",
+  // #947 (0298_payroll_net_pay_settlement.sql, riders wave 4 lane 01): the THIRTEENTH kind. ONE
+  // row per posted payroll run whose net pay has not yet left the bank — the Settlement candidate
+  // row shape (CONTEXT.md), #657's own, applied to payroll: DERIVED from
+  // clara._payroll_net_pay_unsettled's FIFO ledger read, stores nothing, and clears itself the
+  // moment the account's own balance says the run is covered — by any of three routes (Clara's
+  // own /bank settlement door, a person's hand-booked entry, or that entry reconciled through the
+  // ordinary bank matcher), so there is no dismissal act. Section `needs_you`, lane `needs_you`.
+  // `id`/`filing_id` carry the run's own filing; `entry_id` names the posted payroll entry itself
+  // (no ambiguity to point at, unlike a duplicate refusal). No counts.* key is minted and no new
+  // json key, so the two db-side FULL_ROW_KEYS rosters stay byte-unchanged.
+  "payroll_net_pay_unsettled",
 ] as const;
 
 export type ReviewQueueRowKind = (typeof REVIEW_QUEUE_ROW_KINDS)[number];

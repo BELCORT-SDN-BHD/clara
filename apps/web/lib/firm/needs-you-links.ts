@@ -113,6 +113,17 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // the row. (`?tab=` is not used here: the documents tab has no view that selects a single
   // document from the URL, so naming one would be a link to a view that does not exist.)
   payroll_posting_blocked: "/documents",
+  // #947 (0298) — the bank tab, bare (not `?tab=matching`). `PayrollSettlementsSection` mounts
+  // inside the Matching view, which is where the act this row names — find the bank line, accept
+  // it — actually lives, but `ACCOUNTING_ITEMS`'s own `bank` entry (lib/navigation/tree.ts)
+  // names no `tab`, so `?tab=matching` is not a view `CLIENT_ROUTES` itself emits today
+  // (this file's own test proves every query-carrying suffix against that set, the same way
+  // `depreciation_authority_pending`'s `?tab=fixedAssets` is proven — adding the matching
+  // symmetric entry for bank is scoped OUT of this ticket, recorded as a follow-up rather than
+  // widening a shared navigation registry four other lanes touch this wave). A bare `/bank`
+  // lands one tab away (the default is `accounts`) rather than zero, which is still the honest
+  // answer today.
+  payroll_net_pay_unsettled: "/bank",
 });
 
 /**
