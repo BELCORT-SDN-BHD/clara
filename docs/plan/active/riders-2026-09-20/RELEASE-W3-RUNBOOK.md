@@ -775,38 +775,99 @@ straight to wave 3's, and say which.
 
 ---
 
-## § RESULTS (as run)
+## § RESULTS (as run, 2026-09-23, UTC)
 
-**RUN ________ (UTC ________) by ________.** Every row below is a reading. As-run logs: ________.
+**Authority.** The owner's riders plan of 2026-09-20 (each wave ends with its hosted release and the
+tickets close on hosted evidence), the release-ownership ruling of 2026-09-17, and the owner's
+resumption on 2026-09-23. Beta ruling unchanged: hosted data is test data.
 
-Owner authorisation (the literal sentence, timestamped, in-session): ________
+**Gates 0a.** `main` = RELEASE_SHA = `46cf7c852790e7e935be1e7454aab3726bca8a7e` (PR #1039, merge of
+`integration/riders-w3` at `2aa74efde`; the merge tree is identical to the PR head tree). CI on the
+PR: green on its first run. CI on the merge commit: run 35889978189 SUCCESS (lint, build,
+db-estate, db-live-gates, render-drill, storage-policy-battery, db-split-partition-total). Web
+rollback lever confirmed: `686ab53f-4079-4305-8d0b-54efac86adc0` at 100% before the window. No
+frozen body changed (`check-frozen-workflows`: 312 / 55 / 3, `bodies=55`).
 
-Build tree: `git rev-parse HEAD` = ________ = `origin/main`; `ci` ________ on that sha;
-`git status --porcelain` = ________.
+**Step 1.** `fly auth whoami` = `tools@belcort.com`; one machine `48ee715b763048`, started, 2/2.
 
-| step | reading |
-|---|---|
-| 0 rehearsal (0272 -> 0293 replay, 21 files, T) | ________ |
-| 0a gates (ci, porcelain, owner go, freeze-lint) | ________ |
-| 1 fly auth | ________ |
-| 2 probe machine (id, image, created, destroyed) | ________ |
-| 3 preflight `--plan` (pending, generated reads, GAPs) | ________ |
-| 3a ledger + drift gate + pending set | ________ |
-| 3b fingerprint vs the rig baseline (keys, DRIFT, PINNED DRIFT, TOLERATED, **env**) | ________ |
-| 3c data preconditions (each id, ok or STOP) | ________ |
-| 3d quiescence census (pre) | ________ |
-| 3f backup (path, bytes, sha256, wall, CA workaround used?) | ________ |
-| 4 runtime image (tag -> `sha256:` digest, size) | ________ |
-| 5 web (Worker Version ID, tag, uploaded at) | ________ |
-| 6a machine stop (timestamp, state) | ________ |
-| 6b re-census (locks on the six relations, F10) | ________ |
-| 6c migrate (`21 new · 288 total`? wall, per-file notices, ledger re-read, per-file `applied_at`) | ________ |
-| 7 release (probe destroyed, deploy, start, `/ready`, boot lines, `bodies=`, five banners, outage window) | ________ |
-| 8 promote (version, signed-out smoke, the eleven signed-in surfaces) | ________ |
-| 9 preflight (gate (a), gate (b), exit code, the #1035 note) | ________ |
-| 10 post reads (ledger, the four assertions, the eight owed questions) | ________ |
-| 11a freeze-lint / `--lock-deployed` (expect: nothing to lock) | ________ |
-| 11b ticket closures (40) | ________ |
-| post census | ________ |
+**Step 2.** Probe `6835051b651238` (`probe-w3`) from `refresh-68b979bf`, World off.
 
-**Rollback points AFTER (from the ledger):** DB ________ · runtime ________ · web ________.
+**Step 3, pre-window reads (16:38:29Z, `reads-w3.mjs --prod --baseline fp-w3-hosted.json`).**
+Ledger 267 / `0272_document_capability_wall_completion`, drift gate 267/267, pending set exactly
+the 21 files above the frontier, 0 PARSE GAP. Fingerprint vs the rig's hosted-frontier baseline:
+10817 keys compared, 10803 equal, **14 env lines** (the same Supabase-only role attributes and
+memberships the wave-2 window met, now printed as environment facts, never a STOP), 0 STOP. Data
+preconditions all `ok`: 0 non-retired `adjustment_templates` rows (so 0282's guard cannot stop the
+chain), 1906 `document_regions` rows all conforming to 0290's grammar, the registry at 240 rows /
+one version 3 with exactly the 7 `prior_gl` browser entrances 0288 retires and no `seeding_lane`
+key yet, 0 fixed assets (0279's parked branch does not arise), 2 counterparties entering 0274's
+normalised-TIN index with no conflict. Quiescence: no non-terminal task or Work, no pending
+interruption, workflow_runs non-terminal 0, no F10 holder, no lock on the relations this wave
+locks; the one `statement_facts running` document_processing_tasks row is the orphan known since
+2026-09-19. **Verdict CLEAN.**
+
+**Step 3f, backup (16:38:45Z to 16:39:51Z).** Full dump
+`packages/db/backups/clara-clara-graphile-worker-workflow-workflow-drizzle-2026-09-23T16-38-51-846Z.sql`
+= 219,574,948 bytes, plus globals `clara-globals-2026-09-23T16-39-49-855Z.sql` (12,177 bytes).
+
+**Steps 4 and 5, before the window.** Runtime image
+`registry.fly.io/clara-runtime:refresh-46cf7c85` = `sha256:a6beb66f3ae657764c83cbf1243c1229483f563ddf75a3f1fc925791ec5c2a1b`
+(265 MB), built from a detached checkout at RELEASE_SHA. Web Worker version
+`b659a3d4-a253-4f49-8a7e-c89306f6ab82`, tag `refresh-46cf7c85`, uploaded 16:38:48Z, not promoted.
+
+**Step 6, the window.** 6a: `machine stop 48ee715b763048` 17:04:30Z, `stopped` 17:04:39Z. 6b:
+census through the probe: CLEAN, 0 runtime sessions, no lock on `bank_statement_lines`,
+`counterparties`, `document_capabilities`, `document_regions`, `fixed_assets` or the rest of the
+roster. 6c: `migrate.mjs` through the probe DSN, 17:04:53Z to 17:06:21Z (1 min 28 s):
+**`migrate: 21 new migration(s) applied · 288 total`**, every prestate clean, every tail OK, no CLR,
+no lock wait (the "does not exist, skipping" notices are 0275's redo-safe drop-if-exists forms).
+6d: ledger **288 / `0293_fa_arrears_judgement_scope`**: branch (iv), drive forward.
+
+**Post reads through the probe (17:06:43Z, `reads-w3.mjs --post --prod --baseline fp-w3-upg.json`).**
+Ledger 267 + 21 = 288 at 0293; every one of the 21 new rows at its file checksum; drift gate
+288/288; fingerprint vs the UPGRADED rig baseline: 10984 keys compared, 10970 equal, the same 14
+env lines and nothing else. **Verdict CLEAN.**
+
+**Step 7.** Probe destroyed. `fly deploy --image …@sha256:a6beb66f…` onto the stopped machine
+17:06:49Z (reached `stopped`); `machine start` 17:07:35Z; `/ready` 200 at 17:07:56Z.
+**Outage: 17:04:30Z to 17:07:56Z, 3 min 26 s.** Boot lines: `serving
+git_sha=46cf7c852790e7e935be1e7454aab3726bca8a7e frontier=0293_fa_arrears_judgement_scope(288)
+bodies=55 pins closeExample=closeExampleV1 chatTurn=chatTurn_v21 claraWork=claraWork_v5 …`;
+`stranded bodies n=0` BEFORE `durable world started pid=643`; five `clara-work/v1..v5` bundle
+banners; `LEADER acquired`; `CONTROL listening` (17:07:45Z).
+
+**Step 8.** `wrangler versions deploy b659a3d4…@100%` 17:08:15Z to 17:08:22Z (previous
+`686ab53f…`, tag `refresh-68b979bf`). Signed-out smoke at 17:08:36Z: `/login`, `/favicon.ico`,
+`/icon.png` 200; `/pending`, `/api/build-info`, `/checkout/cancel` 307 to `/login?next=…`;
+`/settings/registrations`, `/admin/registrations` 307 to `/operator`; cross-origin POST
+`/auth/confirm/resend` 403; runtime `/ready` 200. Signed-in walk: not done in this window (no
+operator browser session); the per-lane surfaces table in step 8 is the owner's next signed-in
+check.
+
+**Step 9, rollback preflight demonstration (second probe `683d611be96458` on `refresh-68b979bf`,
+its own bundle 10,924,519 bytes, sha256 `5695ac4e…65e9` verified against the machine's own
+`sha256sum`, streamed over `ssh console`).** `rollback-preflight: ALLOWED`: gate (a)
+`FRONTIER_BODY_RULES` at frontier 0293 checks only `0195`; gate (b) 0 non-terminal runs, 0 unbound
+live tasks, the target carries the same 55 bodies. A positive control only: the preflight does not
+know that 0279 gives the depreciation run a fourth outcome the previous image would count as a
+post (#1035, second instance), so `refresh-68b979bf` is NOT a lawful target while the ledger is at
+0279 or above.
+
+**Step 10, the reads this wave owes (same probe, 17:1xZ).** Ledger 288 / 0293. Registry: 240
+rows, one distinct version, now **4** (0288's bump), 28 rows at `accepted_limitation`, high-water
+240 rows. Audit column: 4448 rows, 4330 still NULL (never back-filled), 118 written since the
+wave-2 release carry a real `actor_role`; table 944 kB. Knowledge 14 keys; firm setup 15 rows, 15
+with a note, 0 retired; 0 firms with more than one firm-scope plan; 0 work-bearing interruptions;
+0 fixed assets; workflow_runs non-terminal 0; agent_tasks non-terminal 0; reference deltas
+unchanged since wave 2 (knowledge_keys 14, plan_item_map 11, event_types 139, trigger_taxonomy
+152, firm_setup_keys 15).
+
+**Step 11.** No manifest to lock. Tickets: 40 closed with the hosted evidence above (#927 had been
+closed by the merge itself from a commit message and received its comment afterwards; #990 closed
+PARTIAL with its producer half in #1037). Follow-ups filed while closing: #1036 (#927's dormant
+wake-door residual), #1037, #1038 (#899's residual). #1023's AC2 (the three drills' CI legs) is
+answered by a `workflow_dispatch` of `ci.yml` on `main`, run 35893727271, recorded in PROGRESS
+once it finishes.
+
+**Deviations from the draft.** None in the ceremony. The preflight's role-level fingerprint keys
+printed as env lines as designed; nothing was overruled this time.
