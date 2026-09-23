@@ -1347,3 +1347,158 @@ begin
   end loop;
 end
 $w946_lrq$;
+
+-- =====================================================================================
+-- §Z  TAIL. Everything this file claims to have done, re-derived from the live catalog.
+--
+--     NO NEW GRANTED OBJECT, SO NO rig-meta COHORT (0260's own posture, and its reason). Every
+--     function this file adds is an INTERNAL, reached from bodies that are already granted:
+--     clara.persist_payroll_facts (clara_runtime, 0296) calls the poster, and
+--     clara.list_review_queue (clara_authenticated, viewer-floored) calls the verdict. rig-meta's
+--     cohorts audit GRANT correctness on newly introduced CALLABLE objects, and there is none
+--     here -- the sweep's "expected = false" over these four names IS the assertion, and §Z's
+--     own grant check below is the second belt. #946 adds NO human door: the decision is
+--     machine-made and the only surface is the Needs-you row a person reads.
+-- =====================================================================================
+do $w946_tail$
+declare
+  v_def text; v_code text; v_n int; v_state jsonb; v_plan jsonb; r record;
+begin
+  -- 1 · THE FOUR NEW BODIES EXIST, ARE OWNED BY clara_fn_owner, PIN THEIR search_path, AND ARE
+  --     REACHABLE BY NO APPLICATION ROLE AT ALL.
+  for r in select * from (values
+      ('clara._payroll_period_month(text)'),
+      ('clara._payroll_entry_plan(uuid,jsonb)'),
+      ('clara._payroll_posting_verdict(uuid)'),
+      ('clara._post_payroll_run(uuid)')
+      ) as t(sig) loop
+    if to_regprocedure(r.sig) is null then
+      raise exception '#946 tail: % is absent', r.sig using errcode = 'CLR10';
+    end if;
+    if (select p.proowner::regrole::text from pg_proc p where p.oid = r.sig::regprocedure)
+       is distinct from 'clara_fn_owner' then
+      raise exception '#946 tail: % is not owned by clara_fn_owner', r.sig using errcode = 'CLR10';
+    end if;
+    if (select coalesce(array_to_string(p.proconfig, ','), '') from pg_proc p
+         where p.oid = r.sig::regprocedure) not like '%search_path=%' then
+      raise exception '#946 tail: % does not pin its search_path', r.sig using errcode = 'CLR10';
+    end if;
+    -- NOT a proacl-is-null test: `revoke all ... from public` leaves the owner's own entry
+    -- behind, so a non-null ACL here is the NORMAL shape of an ungranted body. What matters is
+    -- that no APPLICATION role can execute it, which is asked of each role by name.
+    if exists (select 1 from aclexplode((select p.proacl from pg_proc p where p.oid = r.sig::regprocedure)) a
+                where a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+      raise exception '#946 tail: % is EXECUTE-reachable by PUBLIC', r.sig using errcode = 'CLR10';
+    end if;
+    for v_code in select rolname from unnest(array['clara_runtime','clara_authenticated','clara_anon']) rolname loop
+      if to_regrole(v_code) is not null
+         and has_function_privilege(v_code, r.sig::regprocedure, 'EXECUTE') then
+        raise exception '#946 tail: % is EXECUTE-reachable by % -- these are internals', r.sig, v_code
+          using errcode = 'CLR10';
+      end if;
+    end loop;
+  end loop;
+
+  -- 2 · THE PERSIST DOOR STILL BELONGS TO clara_runtime AND NOW POSTS WHAT IT READS.
+  if not has_function_privilege('clara_runtime',
+       'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)'::regprocedure, 'EXECUTE') then
+    raise exception '#946 tail: the recut persist door lost its clara_runtime grant' using errcode = 'CLR10';
+  end if;
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+   where p.oid = 'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)'::regprocedure;
+  if position('clara._post_payroll_run(t.document_id)' in v_def) = 0 then
+    raise exception '#946 tail: the persist door does not call the post' using errcode = 'CLR10';
+  end if;
+
+  -- 3 · THE QUEUE PROJECTS THE NEW KIND EXACTLY ONCE AND KEPT ITS GRANT.
+  if not has_function_privilege('clara_authenticated',
+       'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure, 'EXECUTE') then
+    raise exception '#946 tail: list_review_queue lost its clara_authenticated grant' using errcode = 'CLR10';
+  end if;
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+   where p.oid = 'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  v_n := (length(v_code) - length(replace(v_code, '''payroll_posting_blocked''::text row_kind', '')))
+         / length('''payroll_posting_blocked''::text row_kind');
+  if v_n <> 1 then
+    raise exception '#946 tail: the queue projects payroll_posting_blocked % time(s), expected 1', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- 4 · THE RECEIPT VOCABULARY GAINED ONE LANE AND LOST NONE.
+  select pg_get_constraintdef(oid) into v_def from pg_constraint
+   where conrelid = 'clara.entry_post_receipts'::regclass
+     and conname = 'entry_post_receipts_via_wake_kind_check';
+  if position('payroll_facts' in v_def) = 0 or position('autodraft' in v_def) = 0
+     or position('interactive' in v_def) = 0 or position('bank_agent' in v_def) = 0 then
+    raise exception '#946 tail: the receipt lane vocabulary is not {autodraft, interactive, bank_agent, payroll_facts} (live: %)', v_def
+      using errcode = 'CLR10';
+  end if;
+
+  -- 5 · THIS FILE APPENDED NO CHART ROW. `2040 Salaries Payable` is 0295's, and there is exactly
+  --     one of it on the published standard chart -- the same structural claim the prestate made,
+  --     re-read after every statement in this file has run.
+  select count(*)::int into v_n from clara.coa_template_accounts a
+    join clara.coa_templates t on t.id = a.template_id
+   where t.template_key = 'my_sme_starter' and t.scope = 'platform' and t.state = 'published'
+     and a.account_code = '2040';
+  if v_n <> 1 then
+    raise exception '#946 tail: the published standard chart carries % rows at code 2040, expected exactly 1 (0295''s) -- this file appends no chart row', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- 6 · A BEHAVIOURAL PROBE, fixture-free: the month parser, the drafting body and 0296's
+  --     evaluator, driven together on a state the evaluator itself produced, against a client id
+  --     that holds no chart at all. It proves the installed bodies ANSWER (rather than merely
+  --     existing), that the month is read off the page's own rendering, and that a chart which
+  --     resolves nothing is a NAMED refusal rather than a silent substitution. No row is written
+  --     anywhere: _payroll_entry_plan is STABLE and the client id is a random uuid.
+  v_state := clara.evaluate_payroll_run_state_v1(
+    jsonb_build_object('payroll', jsonb_build_object('channel','text','rows','[]'::jsonb,
+      'answers', jsonb_build_object(
+        'payroll.run.period',       jsonb_build_object('state','value','raw','August 2026'),
+        'payroll.run.gross_pay',    jsonb_build_object('state','value','raw','1,000.00'),
+        'payroll.run.epf_employee', jsonb_build_object('state','value','raw','110.00'),
+        'payroll.run.epf_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.socso_employee', jsonb_build_object('state','not_printed'),
+        'payroll.run.socso_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.eis_employee', jsonb_build_object('state','not_printed'),
+        'payroll.run.eis_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.pcb',          jsonb_build_object('state','not_printed'),
+        'payroll.run.hrdf_levy',    jsonb_build_object('state','not_printed'),
+        'payroll.run.net_pay',      jsonb_build_object('state','value','raw','890.00')))),
+    jsonb_build_object('payroll', jsonb_build_object('channel','vision','rows','[]'::jsonb,
+      'answers', jsonb_build_object(
+        'payroll.run.period',       jsonb_build_object('state','value','raw','August 2026'),
+        'payroll.run.gross_pay',    jsonb_build_object('state','value','raw','1,000.00'),
+        'payroll.run.epf_employee', jsonb_build_object('state','value','raw','110.00'),
+        'payroll.run.epf_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.socso_employee', jsonb_build_object('state','not_printed'),
+        'payroll.run.socso_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.eis_employee', jsonb_build_object('state','not_printed'),
+        'payroll.run.eis_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.pcb',          jsonb_build_object('state','not_printed'),
+        'payroll.run.hrdf_levy',    jsonb_build_object('state','not_printed'),
+        'payroll.run.net_pay',      jsonb_build_object('state','value','raw','890.00')))));
+  v_plan := clara._payroll_entry_plan(gen_random_uuid(), v_state);
+  if (v_plan->>'posting_date') is distinct from '2026-08-31' then
+    raise exception '#946 tail probe: "August 2026" did not establish the month (posting_date %) -- the parser is not live',
+      v_plan->>'posting_date' using errcode = 'CLR10';
+  end if;
+  if (v_plan->>'ready')::boolean is not false
+     or not exists (select 1 from jsonb_array_elements(v_plan->'refusals') x
+                     where x->>'reason' = 'account_missing') then
+    raise exception '#946 tail probe: a client with no chart at all did not produce a NAMED account_missing refusal (%)', v_plan
+      using errcode = 'CLR10';
+  end if;
+  if position('6000' in coalesce(v_plan->'missing_accounts','[]'::jsonb)::text) = 0 then
+    raise exception '#946 tail probe: the refusal does not name the account code a person must add (%)',
+      v_plan->'missing_accounts' using errcode = 'CLR10';
+  end if;
+  if jsonb_array_length(coalesce(v_plan->'legs','[]'::jsonb)) <> 0 then
+    raise exception '#946 tail probe: legs were drafted against accounts that do not exist' using errcode = 'CLR10';
+  end if;
+
+  raise notice '#946 tail: OK -- the four new bodies are live, owned by clara_fn_owner, search_path-pinned and EXECUTE-reachable by NO application role; clara.persist_payroll_facts keeps its clara_runtime grant and now calls clara._post_payroll_run; clara.list_review_queue keeps its clara_authenticated grant and projects payroll_posting_blocked exactly once; clara.entry_post_receipts admits the payroll_facts lane beside the three it already admitted; the published standard chart still carries exactly ONE row at code 2040 (0295''s -- this file appends none); and a fixture-free probe drove the evaluator, the month parser and the drafting body together, establishing August 2026 from the page''s own rendering and refusing a chartless client BY NAME with the account code it lacks.';
+end
+$w946_tail$;

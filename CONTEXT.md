@@ -776,6 +776,20 @@ _Avoid_: A contribution rate or threshold applied by the product; a total the mo
 blank filled with zero; an employee-level figure kept after the read (the per-employee quotes exist
 only so the evaluator can sum and cross-check them, and are discarded in the same transaction).
 
+**Payroll posting gate**:
+The closed list of conditions a payroll summary has to satisfy before its entry is posted with
+nobody watching: both readings of the page agree, every arithmetic check passes, the payslip's own
+month is established, the fiscal year that month falls in is open, every account the entry needs
+resolves in this client's own chart, and no payroll entry for that client and month is already
+posted — through this lane or through the accountant-supplied obligation lane. The conditions are
+asked in a fixed order and the FIRST one that fails is the reason a person is told; the rest are
+still evaluated and travel with it. A run that fails any of them posts NOTHING and appears under
+Needs you naming what failed, which row did not balance, which account is missing or which entry it
+would duplicate. The verdict is derived, never stored, so it clears itself the moment the condition
+clears.
+_Avoid_: Posting a partial entry; filling an unprinted line with zero; smoothing an imbalance into
+the rounding account; a stored refusal a person has to dismiss; a model deciding any of it.
+
 **Fixed asset acquisition**:
 The moment a client takes an asset onto its books: one approved journal entry whose debit lands on
 an enrolled fixed-asset cost account, and — in the SAME transaction, on whichever lane posted it —

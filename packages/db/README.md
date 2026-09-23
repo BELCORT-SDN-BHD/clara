@@ -4793,3 +4793,115 @@ idempotent re-fire, the consent gate, and every other kind's route unchanged); S
 (the eleven regions including the not-printed one, the pair's own engine kinds, the replay, the
 proof that no per-employee rendering reaches durable storage, and the four structural refusals);
 S6 the capability read and the whole-registry republication.
+
+## #946 — a payroll summary that was read and whose arithmetic holds posts itself (0297)
+
+`0297_payroll_summary_posting.sql` is the DRAFTING AND POSTING half of the same owner ruling
+(#926, 2026-09-18, option G). #945 read the payslip; this file turns what it read into an entry
+and posts it unattended, or says why it did not.
+
+**AC1 was already satisfied when this file was written, and it appends no chart row.**
+`0295_wave4_chart_rows.sql` — the wave-4 pre-step that landed the four standard-chart rows
+#941/#942/#946/#949 share, once, before those lanes were cut — already minted
+`2040 Salaries Payable` (liability, no class, no statutory tag) as `my_sme_starter` version 2.
+This file CONSUMES it by code and name. The other ten accounts it reaches are `0150`'s and are
+likewise resolved by code: 6000 Salaries and Wages and 6010/6020/6030/6040 (employer
+EPF/SOCSO/EIS/HRDF), 2100/2110/2120/2130/2140 (EPF/SOCSO/EIS/PCB/HRDF payable).
+
+**The entry.** Gross to salaries and wages; each employer contribution the page prints to its own
+employment-cost account; every statutory deduction — employee AND employer portions together — to
+its own payable; PCB to its payable (employee side only; PCB has no employer half); the net to
+2040. The employee's own EPF, SOCSO, EIS and PCB are deductions from gross, never a second
+expense, which is exactly why the entry balances: gross minus those four equals net, 0296's own
+row identity read at run level. A line the document does not print produces no leg at all — not a
+zero one — and a printed `0.00` is the same answer for posting purposes.
+
+**Why the database posts it and not an agent.** The gate DISCIPLINE is the invoice lane's: a
+closed rung roster walked in order, every rung carrying an explicit verdict (a missing key is how
+a gate fails open — the invoice lane's own D26 lesson), the first failure being the reason a
+person is told, a refusal that commits so the reason is durable and writes no receipt, and exactly
+one `clara.entry_post_receipts` row on a successful post. What is NOT reused is
+`clara._agent_post_entry_core` itself: its rungs bind on `clara._invoice_fact_state` corroboration
+anchored to `invoice.total`, on coding kinds, AR/AP control legs and counterparty identity — none
+of which a payroll run has, so it would answer "no" for reasons unrelated to payroll. And no model
+is needed: coding an invoice is a judgement, coding a payroll run is fixed by the statutory chart
+and 0296's frozen evaluator has already done every sum. Putting a model in the loop would add a
+guess to a lane whose whole promise is that it never guesses. The receipt says so: its
+`model_snapshot` names the deterministic producer (`clara_db`), and `gate_verdicts` carries the
+READING's own extraction and engine id so the model call that produced the facts stays reachable.
+
+**The four bodies.**
+
+| Body | What it decides |
+|---|---|
+| `clara._payroll_period_month(text)` | The payslip's own month, from the rendering the page printed. A CLOSED set of unambiguous renderings (`2026-08`, `2026/08`, `08/2026`, `2026-08-31`, `August 2026`, `Aug 2026`, `2026 August`); everything else — in particular any all-numeric triple, which cannot be told apart from its own reversal — returns NULL so the run is ASKED rather than posted on a guess. Locale-free (its own month array, never `to_date('Month YYYY')`), which is what makes it honestly IMMUTABLE. |
+| `clara._payroll_entry_plan(uuid, jsonb)` | THE DRAFTING BODY. A fact state plus this client's chart in, the entry out: every leg carrying the account it resolved and the basis it resolved from. It drafts from `established` facts ALONE — never from `computed_cents`, the row sum the evaluator offers when the page prints rows but no totals row, because re-judging a frozen evaluator's own verdict from outside its closure is what the freeze exists to prevent. Balance is EXACT: `_validate_entry_lines`' 5-cent rounding tolerance would hide the defect the gate exists to catch. |
+| `clara._payroll_posting_verdict(uuid)` | THE GATE. Ten rungs: `filed`, `facts_read`, `channels_agree`, `arithmetic_holds`, `period_established`, `period_open`, `run_totals_printed`, `accounts_resolve`, `entry_balances`, `no_duplicate_entry`. It WRITES NOTHING (STABLE), and it carries the SENTENCE a person reads — so the queue renders that body's own words and the decision the lane took can never drift from what is on screen. |
+| `clara._post_payroll_run(uuid)` | The post. Ready: one draft entry with its legs, the approval, the receipt, the `entry.posted` event. Blocked: nothing at all, and the verdict comes back. It RETURNS rather than raises, because it runs inside the read's own transaction and a raise would lose the facts a person needs in order to clear the block. |
+
+**The duplicate guard (AC4) sees BOTH payroll lanes.** Four scopes, first match reported:
+`same_document` (the estate's own `clara._document_posting_entry`, asked here so the answer is a
+named refusal rather than the source-binding wall's raise at the write), `same_filing` (a live
+draft or approved entry already on this filing), `same_month_payroll_run` (another document's run
+already covers the month, read off this lane's own `flags->'payroll_run'` marker) and
+`payroll_obligation` (the month was booked through `0194_periodic_adjustments.sql`'s lane, whose
+own `flags->'payroll_obligation'` marker carries the period it covers — #946's triage note asked
+for exactly this, and without it a client whose September obligation was booked that way would get
+a second, conflicting entry the moment a September payslip was read). The refusal carries the
+entry's id, date and memo, so a person can tell a correction from a re-upload without opening the
+ledger. A reversed entry is not a duplicate: `reversed_by is null` throughout, so a reversal
+re-opens the month.
+
+**Why the marker is written at the draft insert.** `clara._tf_entry_immutable`'s draft→approved
+allowset does not include `flags`, and its approved→approved allowset is the reversal pair alone,
+so `flags->'payroll_run'` has exactly one moment in which it can be written. It sits on the same
+footing as 0194's `payroll_obligation` marker (0225:1830): no gate reads it for permission, and an
+entry that moved a statutory liability should say so on its face.
+
+**Needs you (AC3).** `clara.list_review_queue` gains `row_kind='payroll_posting_blocked'`
+(section `needs_you`, lane `needs_you`), spliced additively the way #974 (0260) added the
+depreciation kind. The row is DERIVED from the verdict and stores nothing: it appears for a filed
+payroll summary that has been READ and whose filing carries no live entry, and it clears itself
+when the block clears — add the missing account, or post the run, and it is gone on the next read.
+No dismissal act, no attempt table, nothing to reconcile. It coexists with the filing's own
+`uncoded_filing` row, which is the brief's own model: AC6 says the summary "stops appearing as
+uncoded once its entry exists", so before that it IS an uncoded filing and this row sits beside it
+saying why. No `counts.*` key and no new json key are minted, so both `FULL_ROW_KEYS` rosters are
+byte-unchanged.
+
+**AC6 costs no mechanism at all.** The posted entry is a DOCUMENT entry bound to the filing
+(`origin='document'`, `document_id`, `source_doc_sha256`, `filing_id`), and `list_review_queue`'s
+`filing_rows` CTE already excludes a filing carrying a live draft or approved entry. The uncoded
+row therefore disappears the moment the entry exists and comes back if it is ever reversed — with
+no dismissal mechanism, exactly as the brief asks.
+
+**The one widened constraint.** `clara.entry_post_receipts.via_wake_kind` gains `payroll_facts`.
+Writing `autodraft` instead would have been the cheaper edit and a lie: no autodraft credential
+exists for this post and an auditor reading receipts by lane would find payroll runs filed under
+the invoice lane's name.
+
+**No new granted object, so no rig-meta cohort** (0260's posture and its reason). All four bodies
+are internals reached from `clara.persist_payroll_facts` (already `clara_runtime`) and
+`clara.list_review_queue` (already `clara_authenticated`); the tail asserts each is owned by
+`clara_fn_owner`, pins its `search_path` and is EXECUTE-reachable by no application role and not
+by PUBLIC. #946 adds NO human door.
+
+**Redo posture.** Every body is `create or replace`; the constraint swap is
+`drop constraint if exists` then `add`; both splices (`persist_payroll_facts` and
+`list_review_queue`) detect their own marker in the installed body and no-op with a notice, and
+their postchecks re-read the COMMITTED catalog in BOTH branches so a redo proves them too.
+`CLARA_MIGRATION_REDO=0297_payroll_summary_posting` was used repeatedly while this file was built.
+
+**Cells** (`tests/payroll-summary-posting.test.mjs`, gated on
+`tests/payroll-summary-posting-preintegration-gate.mjs`): S0 the standard chart's salaries-payable
+row (evidence for AC1, already satisfied by 0295); S1 the drafting body against a worked example
+whose arithmetic is done by hand in the file — the eleven-leg entry, an unprinted line and a
+printed zero, the employee-portion treatment on both the figures and the bases, a missing account,
+the nine admitted month renderings and the six refused ones, and a page with no totals row; S2 the
+gate — the verdict re-read as DERIVED after the chart is fixed, channels disagreeing, a row that
+does not balance, a printed total the rows contradict, a month that cannot be established, a chart
+that resolves nothing, an unread document, a second upload of the same month, and an obligation
+already booked through 0194's lane; S3 the unattended post — the approved entry with its legs, its
+receipt, its event and no counterparty on any leg, a blocked run that writes nothing while keeping
+its facts, and a closed fiscal year; S4/S5 the Needs-you row and the uncoded filing, both read
+through the real `clara.list_review_queue`.
