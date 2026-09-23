@@ -100,6 +100,19 @@
 --     parse, and it can never be used to bypass the (seed, document) key on a basis that has not
 --     been re-read.
 --
+-- THE CALLER'S ECHO IS WALLED THE SAME WAY THE PARSE DOOR WALLS IT (ADV-07, riders wave 3 review
+-- round 1). `clara.record_opening_targets_parsed` admits an OPTIONAL `opening_fact` on a line --
+-- a parser echoing the triple it believes it read -- and accepts that echo only when it is
+-- EXACTLY the triple the database independently proved from the cited region, refusing
+-- `opening_extraction_fact_malformed` / `opening_extraction_fact_mismatch` otherwise ([R3-F1] in
+-- its own body). The first cut of this file ran the field-level fact assertion but IGNORED the
+-- key, so the refresh door silently accepted a payload the parse door would have refused, while
+-- this header claimed "byte for byte the parse door's own per-line validation". Two write doors
+-- on one lane must not disagree about what a payload may CLAIM -- the more so because #986's
+-- successor contract hands this core to #985's chat tool -- so the wall is run here too, in the
+-- same position and with the same two tokens. It is a wall, never a source of figures: nothing
+-- stored is ever taken from the echo.
+--
 -- WHICH READING THE RECEIPT NAMES AS THE ONE LEFT. `from_extraction_id` is the extraction of the
 -- NEWEST retired target. Every writer in this estate records a basis's document targets from ONE
 -- reading at a time, so in practice the retired set is homogeneous; the receipt does not depend on
@@ -298,6 +311,7 @@ declare
   v_dedupe jsonb; v_result jsonb;
   v_count int := 0; v_retired_n int; v_retired jsonb; v_from uuid; v_refresh uuid;
   v_key text; v_account text; v_debit bigint; v_credit bigint;
+  v_asserted_account text; v_asserted_side text; v_asserted_amount bigint;
 begin
   if p_op_key is null or btrim(p_op_key) = '' or p_extraction is null
      or jsonb_typeof(p_lines) <> 'array' or jsonb_array_length(p_lines) = 0 then
@@ -402,6 +416,35 @@ begin
     end if;
     perform clara._assert_opening_target_fact(
       s.firm_id, p_document, j -> 'extraction_ref', v_account, v_debit, v_credit);
+    -- [R3-F1], the parse door's own echo wall, run here for the same reason (see the header). A
+    -- caller MAY echo the fact it believes it read; the echo is accepted only when it is exactly
+    -- the triple proved independently above, and nothing stored below is ever taken from it.
+    if j ? 'opening_fact' then
+      if jsonb_typeof(j -> 'opening_fact') <> 'object' then
+        raise exception 'caller opening fact is malformed'
+          using errcode='CLR31', detail='{"reason":"opening_extraction_fact_malformed"}';
+      end if;
+      begin
+        v_asserted_account := nullif(btrim(j #>> '{opening_fact,account_code}'), '');
+        v_asserted_amount := nullif(j #>> '{opening_fact,amount_cents}', '')::bigint;
+        v_asserted_side := lower(nullif(btrim(j #>> '{opening_fact,side}'), ''));
+      exception when others then
+        raise exception 'caller opening fact is malformed'
+          using errcode='CLR31', detail='{"reason":"opening_extraction_fact_malformed"}';
+      end;
+      if v_asserted_account is null or v_asserted_amount is null or v_asserted_amount <= 0
+         or v_asserted_side not in ('debit', 'credit') then
+        raise exception 'caller opening fact is malformed'
+          using errcode='CLR31', detail='{"reason":"opening_extraction_fact_malformed"}';
+      end if;
+      if v_asserted_account is distinct from v_account
+         or v_asserted_amount is distinct from greatest(v_debit, v_credit)
+         or v_asserted_side is distinct from
+              (case when v_debit > 0 then 'debit' else 'credit' end) then
+        raise exception 'caller opening fact contradicts extraction evidence'
+          using errcode='CLR31', detail='{"reason":"opening_extraction_fact_mismatch"}';
+      end if;
+    end if;
     insert into clara.opening_tb_targets(firm_id, client_id, seed_id, line_key,
         account_code, source_label, debit_cents, credit_cents, provenance_kind,
         document_id, source_sha256, extraction_ref)
@@ -519,7 +562,9 @@ begin
       'clara._record_onboarding_contributor(', 'delete from clara.opening_tb_targets',
       'clara.opening_target_refreshes', 'for update',
       'no_reread_to_refresh', 'refresh_extraction_mixed', 'stale_extraction_version',
-      'tie_mismatch', 'registry_not_open'] loop
+      'tie_mismatch', 'registry_not_open',
+      -- ADV-07: the parse door's own caller-echo wall, run on this lane too.
+      'opening_fact', 'opening_extraction_fact_malformed', 'opening_extraction_fact_mismatch'] loop
     if position(r in v_src) = 0 then
       raise exception '#986 tail: the refresh door is missing "%"', r using errcode='CLR10';
     end if;

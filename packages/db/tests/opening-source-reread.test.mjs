@@ -426,6 +426,88 @@ test("p986.reread.refresh_walls: a refresh onto a reading the document left, a p
 });
 
 // ---------------------------------------------------------------------------------------------
+// 4b — THE CALLER'S ECHO. `clara.record_opening_targets_parsed` admits an OPTIONAL `opening_fact`
+//      on a line and accepts it only when it is EXACTLY the triple the database proved from the
+//      cited region ([R3-F1]). The refresh door is the same lane writing the same rows, so it must
+//      not accept a claim the parse door refuses (ADV-07).
+// ---------------------------------------------------------------------------------------------
+
+test("p986.reread.fact_echo: the refresh door runs the parse door's OWN caller-echo wall -- a contradicting opening_fact is refused by name, a malformed one too, and a matching echo passes", async (t) => {
+  if (unready(t)) return;
+  const sc = await tiedScene("echo");
+  const first = await produceTbRegions({ firm: sc.firm, doc: sc.doc, lines: BEE_LINES });
+  await recordOpeningTargetsParsed({
+    seed: sc.seed, document: sc.doc.documentId, lines: withRefs(BEE_LINES, first.refs),
+    opKey: `openingparse:${sc.seed}:${sc.doc.documentId}`,
+  });
+  const second = await produceTbRegions({ firm: sc.firm, doc: sc.doc, lines: BEE_LINES });
+  const fresh = () => withRefs(BEE_LINES, second.refs);
+
+  /** The same payload with ONE line carrying a caller-asserted fact. */
+  const withEcho = (echo) => fresh().map((l) => (l.line_key === "cash" ? { ...l, opening_fact: echo } : l));
+
+  // THE PREMISE, DRIVEN: the parse door refuses exactly this echo, so "the two doors agree" is a
+  // claim about a refusal that exists rather than one this cell invented. The key is a fresh one,
+  // because the pinned (seed, document) key would answer the re-read conflict first.
+  const parseSaid = await assertRaises("CLR31", () => recordOpeningTargetsParsed({
+    seed: sc.seed, document: sc.doc.documentId,
+    lines: withEcho({ account_code: WB_COA.cash, amount_cents: BEE.cashDr + 100, side: "debit" }),
+    opKey: opk("p986-echo-parse"),
+  }), "the PARSE door on a contradicting echo");
+  assert.equal(claraReason(parseSaid), "opening_extraction_fact_mismatch");
+
+  // …AND SO DOES THE REFRESH DOOR, with the same token.
+  const mismatch = await assertRaises("CLR31", () => refreshOpeningTargets({
+    seed: sc.seed, document: sc.doc.documentId, extraction: second.extractionId,
+    lines: withEcho({ account_code: WB_COA.cash, amount_cents: BEE.cashDr + 100, side: "debit" }),
+    opKey: opk("p986-echo-mismatch"),
+  }), "a refresh whose echoed fact contradicts the stored evidence");
+  assert.equal(claraReason(mismatch), "opening_extraction_fact_mismatch",
+    `the refresh door must refuse what the parse door refuses, got ${claraReason(mismatch)}`);
+
+  // A SIDE THAT DISAGREES IS THE SAME FAULT — the echo is compared field by field, not by amount.
+  const sided = await assertRaises("CLR31", () => refreshOpeningTargets({
+    seed: sc.seed, document: sc.doc.documentId, extraction: second.extractionId,
+    lines: withEcho({ account_code: WB_COA.cash, amount_cents: BEE.cashDr, side: "credit" }),
+    opKey: opk("p986-echo-side"),
+  }), "a refresh whose echoed side contradicts the stored evidence");
+  assert.equal(claraReason(sided), "opening_extraction_fact_mismatch");
+
+  // A MALFORMED ECHO IS ITS OWN TOKEN, never "mismatch": nothing was compared.
+  const malformed = await assertRaises("CLR31", () => refreshOpeningTargets({
+    seed: sc.seed, document: sc.doc.documentId, extraction: second.extractionId,
+    lines: withEcho("not an object"),
+    opKey: opk("p986-echo-malformed"),
+  }), "a refresh whose echoed fact is not an object");
+  assert.equal(claraReason(malformed), "opening_extraction_fact_malformed",
+    `a malformed echo is its own fault, got ${claraReason(malformed)}`);
+
+  // NOTHING MOVED. All three refusals happen inside the replace loop, after the retire — so the
+  // transaction rolling back is what leaves the basis exactly where it stood, on the first
+  // reading, with no receipt.
+  const stood = await targetRows(sc.seed);
+  assert.equal(stood.length, 3, "a refused refresh left the target set where it was");
+  for (const r of stood) assert.equal(r.extraction_ref.extraction_id, first.extractionId);
+  // rootQuery: a receipt row count is a fact no door returns.
+  assert.equal(
+    (await rootQuery("select count(*)::int as n from clara.opening_target_refreshes where seed_id=$1", [sc.seed]))
+      .rows[0].n, 0, "…and wrote no receipt");
+
+  // AND A MATCHING ECHO PASSES. The wall admits the claim it can verify; the figures stored are
+  // still the database's own, never the caller's.
+  const out = await refreshOpeningTargets({
+    seed: sc.seed, document: sc.doc.documentId, extraction: second.extractionId,
+    lines: withEcho({ account_code: WB_COA.cash, amount_cents: BEE.cashDr, side: "debit" }),
+  });
+  assert.equal(Number(out.targets_recorded), 3, "a truthful echo is accepted");
+  const rows = await targetRows(sc.seed);
+  assert.equal(rows.length, 3);
+  const cash = rows.find((r) => r.account_code === WB_COA.cash);
+  assert.equal(Number(cash.debit_cents), BEE.cashDr, "…and the stored figure is the evidence's, not the echo's");
+  assert.equal(cash.extraction_ref.extraction_id, second.extractionId);
+});
+
+// ---------------------------------------------------------------------------------------------
 // 5 — THE FLOORS AND THE RECEIPT'S OWN POSTURE. A document-primary opening target is written by
 //     the lane that re-derived it from stored evidence, never by a browser that typed it — and
 //     the record of a refresh is read by a professional, written by nobody.
