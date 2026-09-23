@@ -139,7 +139,11 @@ function ownPollMs(text: string): number {
  *  units. A `polls:`/`scans:` argument that is not a plain number is reported as `unreadable` —
  *  never silently trusted, and never silently counted as zero either. */
 type Declared = { polls: number; scans: number; unreadable: string[] };
-function ownDeclared(text: string, prices: { poll: number; scan: number }): Declared {
+
+/** What a `test.setTimeout(cellBudgetMs({...}))` written in THIS text declares, in units. Only a
+ *  cell may use this shape: `test.setTimeout` REPLACES the timeout, so the same call inside a
+ *  helper would silently discard whatever the cell had already been granted. */
+function declaredByCellBudgetMs(text: string): Declared {
   const declared: Declared = { polls: 0, scans: 0, unreadable: [] };
   for (const m of text.matchAll(/\bcellBudgetMs\(/g)) {
     const args = callArgs(text, m.index + m[0].length - 1);
@@ -151,16 +155,22 @@ function ownDeclared(text: string, prices: { poll: number; scan: number }): Decl
       else declared.unreadable.push(`${key}: ${raw}`);
     }
   }
+  return declared;
+}
+
+/** What `grantCellBudget(CELL_BUDGET.x [* n])` calls in THIS text add, in units. This shape is
+ *  additive, so it is legitimate anywhere — in a cell, or inside a helper the cell calls. */
+function grantedHere(text: string): Declared {
+  const granted: Declared = { polls: 0, scans: 0, unreadable: [] };
   for (const m of text.matchAll(/\bgrantCellBudget\(/g)) {
     const args = callArgs(text, m.index + m[0].length - 1);
     for (const g of args.matchAll(/CELL_BUDGET\.(poll|scan)\b(?:\s*\*\s*([0-9_]+))?/g)) {
       const times = g[2] ? Number(g[2].replaceAll("_", "")) : 1;
-      if (g[1] === "poll") declared.polls += times;
-      else declared.scans += times;
+      if (g[1] === "poll") granted.polls += times;
+      else granted.scans += times;
     }
-    void prices;
   }
-  return declared;
+  return granted;
 }
 
 export type CellGap = {
@@ -191,17 +201,12 @@ export function cellBudgetGaps(file: string, source: string, helpersSource: stri
     transitiveAmount(text, bodies, (body) => settleNames.reduce((n, name) => n + callCount(body, name), 0));
   const pollMsOf = (text: string): number => transitiveAmount(text, bodies, ownPollMs);
   const declaredOf = (text: string): Declared => {
-    const totals: Declared = { polls: 0, scans: 0, unreadable: [] };
-    // `grantCellBudget` is additive and may sit inside a helper, so it is counted transitively;
-    // `cellBudgetMs` is read at the cell's own level, where the `test.setTimeout` that consumes it
-    // is written.
-    const own = ownDeclared(text, prices);
-    const granted = transitiveAmount(text, bodies, (body) => ownDeclared(body, prices).polls) - own.polls;
-    const grantedScans = transitiveAmount(text, bodies, (body) => ownDeclared(body, prices).scans) - own.scans;
-    totals.polls = own.polls + granted;
-    totals.scans = own.scans + grantedScans;
-    totals.unreadable = own.unreadable;
-    return totals;
+    const own = declaredByCellBudgetMs(text);
+    return {
+      polls: own.polls + transitiveAmount(text, bodies, (body) => grantedHere(body).polls),
+      scans: own.scans + transitiveAmount(text, bodies, (body) => grantedHere(body).scans),
+      unreadable: own.unreadable,
+    };
   };
 
   const gaps: CellGap[] = [];
