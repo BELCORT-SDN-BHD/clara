@@ -3119,6 +3119,19 @@ export const OPENING_SOURCE_REREAD_0286_COHORT = [...OPENING_SOURCE_REREAD_0286_
 // that migration's header for why) and keeps its existing WRITERS membership above unmoved.
 const CLIENT_BIRTH_WALL_0287_HUMAN_FNS = ["open_client_onboarding"];
 export const CLIENT_BIRTH_WALL_0287_COHORT = [...CLIENT_BIRTH_WALL_0287_HUMAN_FNS];
+
+// #938 [0302, riders wave 4 lane 03] — its own cohort, the same "wholly present or wholly absent"
+// reason 0284's/0287's own carry: the `db-slice-frontiers` matrix runs this package against
+// databases pinned at earlier frontiers where 0222/0193 has applied and 0302 has not.
+//
+//   the ONE new human door — clara_authenticated ONLY. It skips exactly one future due date off
+//   an active plan's schedule (see 0302's own header); clara_runtime, both agent read roles and
+//   all four wake lanes gain ZERO — no OBO twin, no agent read, no wake wrapper. The read half
+//   (row_kind='accrual_bill_conflict' on clara.list_review_queue, already in ALLOWED via the
+//   pre-existing list_review_queue membership) mints no new granted name and needs no cohort of
+//   its own, exactly as 0260's own splice did not.
+const ACCRUAL_BILL_CONFLICT_0302_HUMAN_FNS = ["skip_plan_occurrence"];
+export const ACCRUAL_BILL_CONFLICT_0302_COHORT = [...ACCRUAL_BILL_CONFLICT_0302_HUMAN_FNS];
 // #899 END
 
 export const ALLOWED = {
@@ -3408,6 +3421,11 @@ export const ALLOWED = {
     // clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the ungranted
     // shared core clara._client_birth_core holds no role at all.
     ...CLIENT_BIRTH_WALL_0287_HUMAN_FNS,
+    // #938 [0302] the skip-one-occurrence door — see the block above. clara_authenticated ONLY;
+    // clara_runtime, both agent read roles and all four wake lanes gain ZERO. It writes a marker
+    // row `clara._plan_admissible_event`'s own picker already treats as handled — it does not
+    // recut or nest the admission core.
+    ...ACCRUAL_BILL_CONFLICT_0302_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3990,6 +4008,13 @@ export async function grantMatrixFailures() {
   if (clientBirthWallLive.length !== 0) {
     failures.push(...cohortFailures("#899 0287 client birth wall",
       CLIENT_BIRTH_WALL_0287_COHORT, liveNames));
+  }
+  // #938 [0302] — bimodal, same reasoning as 0287's above: wholly present once 0302 applies,
+  // wholly absent before it.
+  const accrualBillConflictLive = ACCRUAL_BILL_CONFLICT_0302_COHORT.filter((n) => liveNames.has(n));
+  if (accrualBillConflictLive.length !== 0) {
+    failures.push(...cohortFailures("#938 0302 accrual-bill-conflict skip door",
+      ACCRUAL_BILL_CONFLICT_0302_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

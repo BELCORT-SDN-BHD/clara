@@ -4697,3 +4697,75 @@ override census equal to v1's row for row; S6 drives `clara.list_coa_templates()
 firm session and shows exactly ONE published `my_sme_starter` row — version 2, 146 accounts — with
 v1 retired, unmoved at 42/142 and still carrying 0150's own content hash. Each carries its own
 vacuity control (a rolled-back mutation of the exact fact under test).
+
+## 0302 — a bill posts inside an accrued period, and Clara notices (#938, riders wave 4, lane 03)
+
+`0302_accrual_bill_conflict.sql` closes the gap #907's own review measured: a `reversing_journal`
+plan's reversal nets an estimate against a bill that arrives in the FOLLOWING period correctly, but
+nothing links a bill to an open accrual, so one that arrives in the SAME period is charged twice
+until the reversal runs — and nobody is told.
+
+**The read is a twelfth `clara.list_review_queue` row_kind, `accrual_bill_conflict`, spliced in
+exactly the way #974 (0260) added the eleventh** — read the installed definition, splice a new CTE
++ union arm via `replace()` on the live prosrc, re-verify every prior row_kind survived at its
+exact marker count. No AC1 shape (a new door vs. an arm on an existing read) required a choice: no
+"accrual attention read" exists on this base, and the ticket also wants the item on Needs-you,
+which is this function. `id` is the PLAN's own id — not the occurrence's, unlike
+`asset_id`/`advance_id`/`authority_id`, which all mirror the shared `id` because that entity's OWN
+id is what a caller needs back. This row's two remedies both act on the plan
+(`clara.skip_plan_occurrence`, and `clara.request_plan_catch_up` for "reverse now"), so no new
+column joins the 28-wide shared vector at all — the smaller of the two splice shapes 0146/0260
+demonstrate. `period` carries the flagged occurrence's own due date as ISO text, never a formatted
+month, because a remedy must name the exact occurrence back byte for byte. `AT MOST ONE ROW PER
+PLAN` (`distinct on`): a plan has at most one open (posted, unreversed) accrual occurrence at a
+time in ordinary use.
+
+**The period boundary is `clara._plan_covered_through`'s own expression** (`period_key +
+step_months - 1 day`, step from the admitting revision's `frequency`), inlined rather than called
+because that function answers a different question (the plan's high-water mark). It is
+DELIBERATELY NOT `clara._plan_reversal_date`: that function answers "when does the scheduled
+reversal fall" (always the first of the next CALENDAR month, 0193:837, whatever the plan's
+frequency), not "how long is this accrual's own period" — conflating the two would flag a bill in
+month two of a quarterly accrual as "next period" when it is not. "Document-sourced" is
+`clara.journal_entries.origin='document'`, the estate's own predicate (0009's `_draft_entry_core`);
+the candidate must also hit the accrual's own `expense_account_code` (joined by `(plan_id,
+revision)`, so a corrected accrual's later revision reads its own particulars) and be a live
+approved entry. "Not yet reversed" is an occurrence-row EXISTENCE check (`leg='reversal'`, same
+`period_key`, `work_id` not null) — never a date comparison — because the flagged case is exactly
+"the scheduled reversal is very often not yet due either", and a refused reversal attempt (`work_id`
+null) does not clear the flag: money has not moved.
+
+**"Reverse now" needed no new door.** AC2 names exactly ONE new door ("add a skip-one-occurrence
+door IF NONE EXISTS"). "Reverse now" rides `clara.request_plan_catch_up` (0193, UNCHANGED) with a
+window from the flagged occurrence's own due date through its scheduled reversal date — precisely
+what a bookkeeper could already send that door. When the reversal is due, it admits and the row
+clears on the next read; while it genuinely is not yet due, the door's own `catch_up_in_future`
+refusal answers honestly rather than the surface pretending an early reversal happened.
+
+**`clara.skip_plan_occurrence` removes exactly one future due date, without recutting the frozen
+admission core.** `clara._plan_admissible_event` (0193:1077) is the ONE candidate picker
+`wake_due_plan_occurrences` calls, and its primary-candidate arm requires BOTH `not exists (…
+due_date = v_dp)` and `not exists (… period_key = …)` before it will ever offer a date again.
+Writing an `accounting_plan_occurrences` row for the target date (`leg='primary'`, `work_id` NULL,
+`outcome.state='skipped'`) satisfies the first predicate outright, so the automatic scan never
+re-offers it. `clara._tf_plan_occurrences_append_only`'s two raising arms both gate on `old.work_id
+is not null`, which a skip marker never is, so a later DELIBERATE `request_plan_catch_up` naming
+that exact date can still override the skip — the admission core's own convergence law is what
+makes the marker binding, and this door touches no other body. It never targets the CURRENT
+(already posted) occurrence — only a future date with no occurrence row yet, computed via
+`clara._plan_due_index_on_or_before`/`clara._plan_due_nth`, the same arithmetic the schedule itself
+uses.
+
+**Migration triad.** `tests/accrual-bill-conflict-preintegration-gate.mjs` (stem
+`accrual_bill_conflict$`), `ACCRUAL_BILL_CONFLICT_0302_COHORT`/`_HUMAN_FNS` in `tests/rig-meta.mjs`
+(spread into `ALLOWED[clara_authenticated]` and its own bimodal `cohortFailures()` call, the
+wave-2 `0270` pattern — the read itself mints no new granted name, exactly as 0260's own splice did
+not), and the gate's `--import` token in `package.json`'s test script, last in migration order.
+Battery: `tests/accrual-bill-conflict.test.mjs`, frontier-gated on the same stem, extending
+`tests/accrual-adjustments-fixtures.mjs` (0222's own) and `tests/s6-helpers.mjs`/`rig-fixtures.mjs`
+for the real document-filing/draft/approve pipeline a document-sourced bill needs.
+
+**Redo-safe by construction**: the splice's one statement that changes the catalog is `create or
+replace function`; `clara.skip_plan_occurrence`'s create/grant/revoke are idempotent. The prestate
+asserts nothing about the splice marker or the door's own absence beyond what a redo already
+tolerates.
