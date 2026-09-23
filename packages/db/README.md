@@ -4840,10 +4840,16 @@ than the typed `op_key_conflict` the estate promises (`p937.op_key` drives exact
 vacuity control is a revert of this body to 0222's — which reproduces the hole).
 
 **`clara._accrual_methods()` and `accrual_adjustments_method_check` widen together, and the tail
-proves they agree by EVALUATING the constraint's own expression** (`pg_get_expr(conbin, conrelid)`
-over a one-row `VALUES` alias) once per member of the function's own answer, plus once for each of
-the two withdrawn rules and once for a method object carrying a second key. A text comparison would
-have passed on a constraint that admits something the function never offers.
+proves they agree by DRIVING the predicate.** Not a text comparison of the two spellings — that
+would pass on a constraint admitting something the function never offers — and not a dynamic
+`execute` of the constraint's rendered expression either: `apps/web/test/sqlFunctionCensus.ts`
+refuses a migration whose `execute` it cannot resolve statically, and that rule is right, because a
+migration that builds SQL at run time cannot be read by the tooling that audits what migrations do.
+The tail instead creates a TEMPORARY table carrying the byte-identical literal CHECK, ties it to the
+real one by comparing their rendered `pg_get_expr(conbin, conrelid)` output whitespace-normalised,
+then INSERTS one row per member of `clara._accrual_methods()` (all must be accepted) and one each
+for the two withdrawn rules, a blank, an unenumerated word, a method object carrying a second key
+and a non-object (all must raise 23514).
 
 **No new granted name, so no `rig-meta.mjs` cohort** — the 0285/0295 shape, not the 0284/0302 one.
 Every function this file adds is an ungranted internal reached through doors that already exist, and

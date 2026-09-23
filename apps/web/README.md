@@ -1822,3 +1822,49 @@ Pinned as its own id, `foreground-on-muted-selected-document-row` (kept separate
 reason several other pairs in that file are kept separate), with a margin-specific assertion in
 `tests/token-contrast.test.ts` — shown red against the pre-fix pairing (4.62:1 against a `>=10:1`
 bar) before the fix, green after. Never fixed by relaxing a threshold.
+
+## #937 — an accrual may state an amount for each period
+
+The accrual form's method control is a real choice now. It was a STATEMENT while migration 0222
+admitted one rule (`components/accruals/accrual-form.tsx`'s own note said why: a select listing
+rules that all post the same cents invites a preparer to record an intention the ledger never
+carries out). Migration 0303 added `stated_period_amount`, which posts different cents per period,
+so the control became a `<select>` of the two rules the ledger actually performs. The two withdrawn
+rules stay out of it (owner ruling 2026-09-18).
+
+`components/accruals/accrual-period-amounts.tsx` is ONE block rendered by TWO surfaces — the create
+form (#652) and the correction form (#936) — because "what does each period accrue" is one question
+and a second copy of it is one more place for the two forms to disagree about what a valid set is.
+
+**The due date is chosen, never typed.** `accrualScheduleDues` (`lib/accruals/api.ts`) mirrors
+`clara._plan_due_nth`'s own walk — k from 0, stop past the window — and the block's `<select>`
+offers exactly those dates, so the door's `accrual_period_amount_not_scheduled` refusal is
+unreachable from this surface: a form does not offer a control whose only outcome is a refusal. A
+row whose date the schedule no longer produces (a restored draft under a schedule the preparer has
+since changed) keeps its value in the select so the figure is not silently dropped, and the
+validator names it.
+
+**The running total sits beside the controls.** The exact-sum rule is the door's
+(`accrual_period_amounts_unbalanced`), and a preparer typing six periods cannot hold the arithmetic
+in their head: the block prints what has been stated against the accrual's own total and which way
+it is out. `amount_cents` means the TOTAL for the window under this rule, so the field's own label
+and hint change with the method.
+
+**The preview shows the FIRST period that will post**, with `clara._plan_accrual_period_line`'s own
+line wording rather than the frozen basis's. No entry ever carries the window total under this rule,
+so previewing it would be showing a line the ledger will not write.
+
+**`lib/work/accrual-draft.ts` mirrors each of 0303's walls** and nothing more: shape, no duplicate
+date, the exact sum, the final-period remainder over exactly the even-split shape it governs, and —
+where the schedule is known — every stated date scheduled and every scheduled date stated.
+`AccrualCorrectionWindow` widened from two dates to the LIVE revision's whole schedule (all five
+facts read off the accrual, none of them a control on that form). `fieldForAccrualPath` strips the
+subscript 0303 can put in a refusal path, so `accrual.period_amounts[2].amount_cents` focuses the
+one control there is for it.
+
+**Narrow width and keyboard** are structural rather than asserted after the fact: every row is
+`flex flex-wrap` so the date, the amount and the remove button stack at phone width instead of
+scrolling sideways, and every control is a real `<select>`, `<input>` or `<button>` in the reading
+order with its own `<label for>`. `accrual-form.test.tsx` runs the shared `test/a11yRules.ts` scan
+over the form with the block mounted and asserts every rule clean but `heading-order`, which is an
+artefact of mounting the VIEW without its route's own h1/h2 and predates this lane.
