@@ -71,6 +71,13 @@ export type FixedAssetRow = {
    *  under #679's lock law). */
   change_class?: "estimate" | "policy" | "error" | null;
   change_reason?: string | null;
+  /** #932 (migration 0277) — set ONLY when this row was born COMPLETE from the account's live
+   *  default depreciation policy at acquisition (never back-filled onto an existing row): the
+   *  policy's own id and version, so the register can render "particulars from <account> policy
+   *  v<N>" from a READ, never a client-side inference. Both null on every row a policy did not
+   *  birth, including every row that predates 0277. */
+  depreciation_policy_id?: string | null;
+  depreciation_policy_version?: number | null;
 };
 
 /** The three classes `ck_fixed_assets_change_class` admits. */

@@ -449,6 +449,7 @@ lib/registers/counterparty-doors.test.ts
 lib/registers/counterparty.test.ts
 lib/registers/depreciation.test.ts
 lib/registers/fa-account-profiles.test.ts
+lib/registers/fa-depreciation-policies.test.ts
 lib/registers/fa-refusal-field.test.ts
 lib/registers/fixed-assets.test.ts
 lib/registers/knowledge.test.ts
