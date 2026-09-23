@@ -214,4 +214,146 @@ begin
   end if;
 end $afp$;
 
+-- =====================================================================================
+-- §C  THE ANSWER-VOCABULARY GATE (AC1, first half) — clara._agreement_answers_ok(jsonb, text).
+--
+--     ITS OWN CLOSURE, NOT AN ARM OF ANOTHER FAMILY'S. clara._witness_answers_ok's belt is the
+--     ELEVEN INVOICE fields and its body is reached from clara.persist_witness_facts, under the
+--     F-A1/F-A2 frozen-evaluator regime; clara._payroll_answers_ok's belt is the payslip's. A
+--     versioned workflow may not couple its shape to another family's frozen files, so this
+--     family gets its own body — one function, two independent vocabularies, exactly the trade
+--     0296 §C recorded.
+--
+--     THE VOCABULARY, AND WHY EACH NAME EXISTS. ELEVEN RUN-level questions, which are the brief's
+--     own list ("what was acquired, the cash price, the deposit or trade-in, the amount financed,
+--     the term, the instalment") plus the three a lane needs before it may act on any of them:
+--       kind              — what the agreement CALLS ITSELF, verbatim. AC2's "it distinguishes a
+--                           hire-purchase or finance-lease agreement from other agreements and
+--                           says which it read" is decided from THIS rendering by §D's closed
+--                           roster; the model quotes, it never classifies.
+--       financier         — the named owner / lessor / financier. Part of the agreement's
+--                           identity, which is what the duplicate guard keys on.
+--       agreement_date    — the day it was signed, which is the day the asset and the liability
+--                           come into existence and therefore this entry's posting date.
+--       asset_description — what was acquired, as prose. Carried onto the entry's memo; it is
+--                           NEVER read as an account code (see the header).
+--       cash_price · deposit · amount_financed · total_charges · total_payable
+--                         — the five money figures. `deposit` is the brief's "deposit or
+--                           trade-in": one question, because the page states one figure at
+--                           signing whichever it is, and a trade-in allowance reduces what is
+--                           financed exactly as cash does.
+--       term_months · instalment_amount
+--                         — the brief's "the term, and the instalment".
+--     Then FOUR per-instalment cells — due_date, instalment, principal, interest — which are
+--     exactly the terms of the row identity `principal + interest = instalment` §D checks, and
+--     exactly the three columns whose sums reconcile to amount_financed, total_charges and
+--     total_payable.
+--
+--     EVERY QUESTION IS ANSWERED, AND `not_printed` IS AN ANSWER. Both halves of the rule live
+--     here: a missing key is a refusal (the shape that would let a blank pass for a zero), and
+--     `not_printed` is a first-class state (the shape that says the page is silent — an
+--     agreement that prints no repayment schedule prints no charges either, and must be able to
+--     say so). There is no third state and no default.
+--
+--     THE ENVELOPE ITSELF IS CLOSED to three members. A `totals` key smuggled in beside the
+--     answers would be a computed figure travelling as a read, which is the one thing this family
+--     forbids the model to produce.
+--
+--     STABLE, SECURITY DEFINER, pinned search_path, UNGRANTED — clara._witness_answers_ok's own
+--     posture, kept: its only caller is the persist door, which runs as the owner.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+create or replace function clara._agreement_answers_ok(p_envelope jsonb, p_channel text)
+  returns boolean language plpgsql stable security definer
+  set search_path = clara, pg_temp as $aao$
+declare
+  -- The ELEVEN run-level questions. Four are non-monetary renderings (kind, financier,
+  -- agreement_date, asset_description), one is a count (term_months); the other six are money
+  -- the page either prints or does not.
+  v_run text[] := array['contract.agreement.kind','contract.agreement.financier',
+    'contract.agreement.agreement_date','contract.agreement.asset_description',
+    'contract.agreement.cash_price','contract.agreement.deposit',
+    'contract.agreement.amount_financed','contract.agreement.total_charges',
+    'contract.agreement.total_payable','contract.agreement.term_months',
+    'contract.agreement.instalment_amount'];
+  -- The FOUR cells a printed repayment-schedule row prints.
+  v_cell text[] := array['contract.schedule.due_date','contract.schedule.instalment',
+    'contract.schedule.principal','contract.schedule.interest'];
+  v_contract jsonb; v_answers jsonb; v_rows jsonb; v_row jsonb; v_cells jsonb;
+  v_f text; v_a jsonb; v_state text; v_raw text; v_no int; v_seen int[] := array[]::int[];
+begin
+  if p_envelope is null or jsonb_typeof(p_envelope) <> 'object' then return false; end if;
+  v_contract := p_envelope->'contract';
+  if v_contract is null or jsonb_typeof(v_contract) <> 'object' then return false; end if;
+  if exists (select 1 from jsonb_object_keys(v_contract) as k(name)
+              where k.name not in ('channel','answers','rows')) then return false; end if;
+  if (v_contract->>'channel') is distinct from p_channel then return false; end if;
+
+  v_answers := v_contract->'answers';
+  if v_answers is null or jsonb_typeof(v_answers) <> 'object' then return false; end if;
+  -- HALF ONE: every key present is a KNOWN key.
+  if exists (select 1 from jsonb_object_keys(v_answers) as k(name)
+              where k.name <> all(v_run)) then return false; end if;
+  -- HALF TWO: every one of the eleven is PRESENT. A `count = 11` test would pass a map that
+  -- answered one question twice under two spellings, which is why this is a loop and not a count
+  -- (clara._witness_answers_ok's own recorded reason for the same shape).
+  foreach v_f in array v_run loop
+    v_a := v_answers->v_f;
+    if v_a is null or jsonb_typeof(v_a) <> 'object' then return false; end if;
+    v_state := v_a->>'state';
+    if v_state is null or v_state not in ('value','not_printed') then return false; end if;
+    if v_state = 'value' then
+      v_raw := nullif(btrim(coalesce(v_a->>'raw','')),'');
+      if v_raw is null then return false; end if;
+      -- The same 200-character bound clara._witness_answers_ok applies to every answer. An asset
+      -- description longer than that is a refusal to READ, never a silent truncation: the memo a
+      -- person reads must be the rendering the page carries.
+      if length(v_a->>'raw') > 200 then return false; end if;
+    end if;
+  end loop;
+
+  v_rows := v_contract->'rows';
+  if v_rows is null or jsonb_typeof(v_rows) <> 'array' then return false; end if;
+  -- A BOUND ON THE QUOTED ROWS. 2000 is far past any repayment schedule a Malaysian SME's
+  -- agreement prints (a 30-year mortgage-style schedule is 360) and far short of a payload that
+  -- could make the evaluator's own loop a denial of service.
+  if jsonb_array_length(v_rows) > 2000 then return false; end if;
+  for v_row in select value from jsonb_array_elements(v_rows) loop
+    if jsonb_typeof(v_row) <> 'object' then return false; end if;
+    if exists (select 1 from jsonb_object_keys(v_row) as k(name)
+                where k.name not in ('row_no','cells')) then return false; end if;
+    if jsonb_typeof(v_row->'row_no') <> 'number' then return false; end if;
+    -- The shape is checked BEFORE the cast: a fractional or negative instalment number is refused
+    -- as a malformed read rather than silently rounded into a neighbour's row.
+    if (v_row->>'row_no') !~ '^[1-9][0-9]*$' then return false; end if;
+    v_no := (v_row->>'row_no')::int;
+    -- TWO ROWS AT ONE PRINTED INSTALMENT NUMBER would be double-counted by every column sum.
+    if v_no = any(v_seen) then return false; end if;
+    v_seen := v_seen || v_no;
+    v_cells := v_row->'cells';
+    if v_cells is null or jsonb_typeof(v_cells) <> 'object' then return false; end if;
+    if exists (select 1 from jsonb_object_keys(v_cells) as k(name)
+                where k.name <> all(v_cell)) then return false; end if;
+    foreach v_f in array v_cell loop
+      v_a := v_cells->v_f;
+      if v_a is null or jsonb_typeof(v_a) <> 'object' then return false; end if;
+      v_state := v_a->>'state';
+      if v_state is null or v_state not in ('value','not_printed') then return false; end if;
+      if v_state = 'value' then
+        v_raw := nullif(btrim(coalesce(v_a->>'raw','')),'');
+        if v_raw is null then return false; end if;
+        if length(v_a->>'raw') > 200 then return false; end if;
+      end if;
+    end loop;
+  end loop;
+
+  return true;
+end $aao$;
+
+revoke all on function clara._agreement_answers_ok(jsonb, text) from public;
+
+comment on function clara._agreement_answers_ok(jsonb, text) is
+  '#948: the agreement-contract family''s OWN closed answer vocabulary — eleven run-level questions (what the agreement calls itself, the financier, the signing date, what was acquired, the cash price, the deposit or trade-in, the amount financed, the total charges, the total payable, the term and the instalment) and four per-instalment schedule cells, every one of them answered, `not_printed` a first-class answer, an unknown key at any level a refusal. Deliberately NOT an arm of clara._witness_answers_ok or clara._payroll_answers_ok: a versioned workflow may not couple its shape to another family''s frozen files. Ungranted; its only caller is clara.persist_agreement_facts, which runs as the owner.';
+
 reset role;

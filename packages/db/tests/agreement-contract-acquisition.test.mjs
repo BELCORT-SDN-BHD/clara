@@ -140,3 +140,147 @@ test("S1 · every agreement field path conforms to the canonical grammar, and a 
     assert.equal(await conforms(p), true, `${p} still conforms — 0299 recuts the roster on nobody`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// S2 — the answer-vocabulary gate (AC1, first half)
+// ---------------------------------------------------------------------------
+
+const value = (raw) => ({ state: "value", raw });
+const notPrinted = () => ({ state: "not_printed" });
+
+/** The worked example, printed once here and used by every later cell. A hire-purchase
+ *  agreement for a lorry: cash price 120,000.00, deposit 20,000.00, financed 100,000.00, total
+ *  charges 8,400.00, total payable 108,400.00 over 36 months at 3,011.11 — figures checked BY
+ *  HAND, never by re-running what the database runs (WORK-ORDER rule 4). */
+const PRINTED = {
+  "contract.agreement.kind": value("Hire Purchase Agreement"),
+  "contract.agreement.financier": value("Maybank Islamic Berhad"),
+  "contract.agreement.agreement_date": value("2026-03-14"),
+  "contract.agreement.asset_description": value("Isuzu NLR77 3.0 lorry, chassis JAANLR77LP7100123"),
+  "contract.agreement.cash_price": value("120,000.00"),
+  "contract.agreement.deposit": value("20,000.00"),
+  "contract.agreement.amount_financed": value("100,000.00"),
+  "contract.agreement.total_charges": value("8,400.00"),
+  "contract.agreement.total_payable": value("108,400.00"),
+  "contract.agreement.term_months": value("36"),
+  "contract.agreement.instalment_amount": value("3,011.11"),
+};
+
+function scheduleRow(rowNo, { due, instalment, principal, interest }) {
+  return {
+    row_no: rowNo,
+    cells: {
+      "contract.schedule.due_date": value(due),
+      "contract.schedule.instalment": value(instalment),
+      "contract.schedule.principal": value(principal),
+      "contract.schedule.interest": value(interest),
+    },
+  };
+}
+
+/** A THREE-ROW printed schedule that reconciles to the worked example by hand:
+ *    principal  40,000.00 + 35,000.00 + 25,000.00 = 100,000.00  (= amount financed)
+ *    interest    3,400.00 +  3,000.00 +  2,000.00 =   8,400.00  (= total charges)
+ *    instalment 43,400.00 + 38,000.00 + 27,000.00 = 108,400.00  (= total payable)
+ *  and each row's own identity principal + interest = instalment holds. */
+const SCHEDULE = () => [
+  scheduleRow(1, { due: "2026-04-14", instalment: "43,400.00", principal: "40,000.00", interest: "3,400.00" }),
+  scheduleRow(2, { due: "2026-05-14", instalment: "38,000.00", principal: "35,000.00", interest: "3,000.00" }),
+  scheduleRow(3, { due: "2026-06-14", instalment: "27,000.00", principal: "25,000.00", interest: "2,000.00" }),
+];
+
+function envelope({ channel = "text", answers = {}, rows = null, drop = [] } = {}) {
+  const a = {};
+  for (const f of RUN_FIELDS) {
+    if (drop.includes(f)) continue;
+    a[f] = f in answers ? answers[f] : PRINTED[f];
+  }
+  return { contract: { channel, answers: a, rows: rows ?? SCHEDULE() } };
+}
+
+async function answersOk(env, channel) {
+  const r = await rootQuery("select clara._agreement_answers_ok($1::jsonb, $2) as ok", [
+    JSON.stringify(env),
+    channel,
+  ]);
+  return r.rows[0].ok;
+}
+
+test("S2 · the agreement answer vocabulary is closed: every question answered, not_printed a first-class answer, an unknown key at any level refused", async (t) => {
+  if (unready(t)) return;
+
+  assert.equal(await answersOk(envelope(), "text"), true, "the printed shape is admitted");
+  assert.equal(
+    await answersOk(envelope({ channel: "vision" }), "vision"),
+    true,
+    "…on either channel, when the envelope's own channel matches the one claimed",
+  );
+  assert.equal(
+    await answersOk(envelope({ channel: "vision" }), "text"),
+    false,
+    "the channel receipt is checked: an envelope that says `vision` is not a text reading",
+  );
+
+  // `not_printed` is an ANSWER, not an omission: an agreement with no printed schedule prints no
+  // total charges and no instalment, and the questionnaire must be able to say so.
+  assert.equal(
+    await answersOk(
+      envelope({
+        answers: {
+          "contract.agreement.total_charges": notPrinted(),
+          "contract.agreement.instalment_amount": notPrinted(),
+        },
+        rows: [],
+      }),
+      "text",
+    ),
+    true,
+    "a page that prints no charges and no schedule is a complete reading",
+  );
+
+  // HALF TWO: every one of the eleven is PRESENT. Each dropped in turn — the shape that would let
+  // a silent omission pass for `not_printed`.
+  for (const f of RUN_FIELDS) {
+    assert.equal(await answersOk(envelope({ drop: [f] }), "text"), false, `dropping ${f} is a refusal`);
+  }
+
+  // HALF ONE: an unknown key, at all THREE levels.
+  const extraRunAnswer = envelope();
+  extraRunAnswer.contract.answers["contract.agreement.residual_value"] = value("1.00");
+  assert.equal(await answersOk(extraRunAnswer, "text"), false, "an unknown run-level question is refused");
+
+  const extraCell = envelope();
+  extraCell.contract.rows[0].cells["contract.schedule.balance"] = value("60,000.00");
+  assert.equal(await answersOk(extraCell, "text"), false, "an unknown schedule cell is refused");
+
+  const extraMember = envelope();
+  extraMember.contract.totals = { financed: "100,000.00" };
+  assert.equal(
+    await answersOk(extraMember, "text"),
+    false,
+    "the envelope itself is closed: a totals bag beside the answers is a computed figure travelling as a read",
+  );
+
+  // A row that does not answer all four cells cannot be reconciled and is refused outright.
+  const shortRow = envelope();
+  delete shortRow.contract.rows[1].cells["contract.schedule.interest"];
+  assert.equal(await answersOk(shortRow, "text"), false, "an incomplete schedule row is refused");
+
+  // Two rows at one printed instalment number would be double-counted by every column sum.
+  const rows = SCHEDULE();
+  rows[1].row_no = 1;
+  assert.equal(await answersOk(envelope({ rows }), "text"), false, "a duplicated row_no is refused");
+
+  // A blank rendering is not a reading, and there is no third state.
+  const blank = envelope({ answers: { "contract.agreement.cash_price": { state: "value", raw: "   " } } });
+  assert.equal(await answersOk(blank, "text"), false, "a blank rendering is refused");
+  const thirdState = envelope({ answers: { "contract.agreement.deposit": { state: "unknown" } } });
+  assert.equal(await answersOk(thirdState, "text"), false, "there is no third answer state");
+
+  // Zero quoted rows is a legitimate reading (an agreement that prints no schedule), and the
+  // envelope still has to carry the array.
+  assert.equal(await answersOk(envelope({ rows: [] }), "text"), true, "zero schedule rows is admitted");
+  const noRows = envelope();
+  delete noRows.contract.rows;
+  assert.equal(await answersOk(noRows, "text"), false, "a missing rows array is refused");
+});
