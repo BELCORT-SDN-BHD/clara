@@ -188,7 +188,13 @@ export type AccrualCreated = {
    *  on top of it — three scheduled-adjustment carriers can legitimately overlap. The 0045
    *  adjustment-template arm this warning also used to carry was retired by #929/0283: `kind` can
    *  only ever read `"accounting_plan_overlap"` now, and every entry is keyed by `plan_id`, never
-   *  `template_id`. */
+   *  `template_id`.
+ *
+ *  #929's fix round (0283) also settled what a `null` here MEANS. The advisory excludes the plan
+ *  the door just wrote by its own ID, not by the basis value it carries, so a sibling plan with a
+ *  byte-identical basis — total overlap — is now named rather than swallowed; and the three
+ *  plan-creating doors serialise on the client advisory rung, so two people creating overlapping
+ *  plans at the same moment no longer both read `null`. */
   overlap_warning: {
     kind: string;
     templates: readonly { plan_id: string; name: string; cadence: string; accounts: readonly string[] }[];

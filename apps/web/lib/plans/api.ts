@@ -218,7 +218,13 @@ export type PlanCreated = {
   /** ADVISORY, never a refusal: a live SIBLING accounting plan of this client already moves one
    *  of these accounts (`clara._plan_overlap_warning`, 0281/#909). The 0045 adjustment-template
    *  arm this warning also used to carry was retired by #929/0283 — it can never fire again. The
-   *  form renders it as a persistent Alert (never a toast). */
+   *  form renders it as a persistent Alert (never a toast).
+ *
+ *  #929's fix round (0283) also settled what a `null` here MEANS. The advisory excludes the plan
+ *  the door just wrote by its own ID, not by the basis value it carries, so a sibling plan with a
+ *  byte-identical basis — total overlap — is now named rather than swallowed; and the three
+ *  plan-creating doors serialise on the client advisory rung, so two people creating overlapping
+ *  plans at the same moment no longer both read `null`. */
   overlap_warning: PlanOverlapWarning | null;
 };
 
