@@ -565,13 +565,14 @@ declare
   -- gate that stops checking them.
   v_rungs text[] := array['filed','facts_read','channels_agree','arithmetic_holds',
                           'period_established','period_open','run_totals_printed',
-                          'accounts_resolve','entry_balances'];
+                          'accounts_resolve','entry_balances','no_duplicate_entry'];
   v_tokens jsonb := jsonb_build_object(
     'filed','not_filed', 'facts_read','payroll_not_read',
     'channels_agree','channels_disagree', 'arithmetic_holds','arithmetic_failed',
     'period_established','period_not_established', 'period_open','period_closed',
     'run_totals_printed','run_totals_not_printed',
-    'accounts_resolve','account_missing', 'entry_balances','entry_unbalanced');
+    'accounts_resolve','account_missing', 'entry_balances','entry_unbalanced',
+    'no_duplicate_entry','duplicate_entry');
   v_vector jsonb := '{}'::jsonb;
   v_detail jsonb := '{}'::jsonb;
   v_first text; v_rung text;
@@ -580,6 +581,7 @@ declare
   v_extraction uuid; v_state jsonb; v_plan jsonb := null;
   v_disagree text[] := '{}'; v_arith text[] := '{}';
   v_contested jsonb; v_unbal jsonb; v_unchk jsonb;
+  v_dup_entry uuid; v_dup_scope text;
 begin
   -- 1 · FILED. The entry this lane posts is a DOCUMENT entry bound to the document's live
   --     filing, so a document with no live filing has nothing to bind to.
@@ -673,12 +675,84 @@ begin
     else
       v_vector := v_vector || jsonb_build_object('period_open','pass');
     end if;
+
+    -- 10 · NO PAYROLL ENTRY FOR THIS CLIENT AND MONTH IS ALREADY POSTED (AC4). FOUR SCOPES, in
+    --      the order a person would want to hear them, and the FIRST match is the one reported
+    --      because it is the most specific thing that can be said:
+    --
+    --      same_document        -- this very document already backs a posted entry. The estate's
+    --                              own `clara._document_posting_entry`, asked here so the answer
+    --                              is a NAMED refusal rather than the source-binding wall's raise
+    --                              at the write.
+    --      same_filing          -- this filing already carries a live draft or approved entry.
+    --                              Somebody (or something) got there first; this lane never
+    --                              overwrites another writer's work, and the one-open-draft
+    --                              unique index would refuse the insert anyway.
+    --      same_month_payroll_run -- ANOTHER document's payroll run already covers this month.
+    --                              This is the re-upload case: a second copy of August, or a
+    --                              corrected payslip somebody filed again. Read off this lane's
+    --                              own `flags->'payroll_run'` marker on the ledger itself.
+    --      payroll_obligation   -- the month was already booked through the OTHER payroll lane:
+    --                              `0194_periodic_adjustments.sql` (#643) posts a statutory
+    --                              payroll obligation from accountant-supplied particulars and
+    --                              stamps `flags->'payroll_obligation'` with the period it covers
+    --                              (0225:1830). Without this scope, a client whose September
+    --                              obligation was booked that way would get a second, conflicting
+    --                              entry the moment a September payslip was read -- which is
+    --                              exactly what #946's triage note asked this guard to prevent.
+    --
+    --      THE REFUSAL POINTS AT THE ENTRY, with its date and its memo, so a person can tell a
+    --      CORRECTION from a RE-UPLOAD without opening the ledger. A reversed entry is not a
+    --      duplicate: `reversed_by is null` throughout, so a reversal re-opens the month.
+    v_dup_entry := clara._document_posting_entry(v_client, p_document);
+    if v_dup_entry is not null then
+      v_dup_scope := 'same_document';
+    end if;
+    if v_dup_entry is null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.filing_id = v_filing
+         and (j.status = 'draft' or (j.status = 'approved' and j.reversed_by is null))
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'same_filing'; end if;
+    end if;
+    if v_dup_entry is null and (v_plan->>'period_month') is not null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.client_id = v_client and j.status = 'approved' and j.reversed_by is null
+         and j.document_id is distinct from p_document
+         and j.flags->'payroll_run'->>'period_month' = v_plan->>'period_month'
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'same_month_payroll_run'; end if;
+    end if;
+    if v_dup_entry is null and (v_plan->>'period_month') is not null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.client_id = v_client and j.status = 'approved' and j.reversed_by is null
+         and j.flags ? 'payroll_obligation'
+         and (j.flags->'payroll_obligation'->>'period_start') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         and (j.flags->'payroll_obligation'->>'period_end') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         -- The obligation's own period OVERLAPS the payslip's month.
+         and (j.flags->'payroll_obligation'->>'period_start')::date
+               <= ((v_plan->>'period_month')::date + interval '1 month - 1 day')::date
+         and (j.flags->'payroll_obligation'->>'period_end')::date >= (v_plan->>'period_month')::date
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'payroll_obligation'; end if;
+    end if;
+
+    if v_dup_entry is null then
+      v_vector := v_vector || jsonb_build_object('no_duplicate_entry','pass');
+    else
+      v_vector := v_vector || jsonb_build_object('no_duplicate_entry','duplicate_entry');
+      v_detail := v_detail || jsonb_build_object('duplicate',
+        (select jsonb_build_object('scope', v_dup_scope, 'entry_id', j.id,
+                  'status', j.status, 'posting_date', to_char(j.posting_date,'YYYY-MM-DD'),
+                  'memo', j.memo)
+           from clara.journal_entries j where j.id = v_dup_entry));
+    end if;
   else
     -- Nothing was read, so nothing downstream of it was evaluated. Every rung still carries an
     -- explicit verdict: `not_evaluated` is a verdict, an absent key is a hole.
     foreach v_rung in array array['channels_agree','arithmetic_holds','period_established',
                                   'period_open','run_totals_printed','accounts_resolve',
-                                  'entry_balances'] loop
+                                  'entry_balances','no_duplicate_entry'] loop
       v_vector := v_vector || jsonb_build_object(v_rung, 'not_evaluated');
     end loop;
   end if;
@@ -704,6 +778,7 @@ begin
     'filing_id', to_jsonb(v_filing),
     'source_doc_sha256', to_jsonb(v_sha),
     'extraction_id', to_jsonb(v_extraction),
+    'existing_entry_id', to_jsonb(v_dup_entry),
     'period_month', coalesce(v_plan->'period_month','null'::jsonb),
     'posting_date', coalesce(v_plan->'posting_date','null'::jsonb),
     'plan', coalesce(v_plan,'null'::jsonb));

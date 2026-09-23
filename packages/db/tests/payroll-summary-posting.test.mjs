@@ -36,7 +36,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, ensureReady, endPool, buildWorld, upsertAccount } from "./rig-fixtures.mjs";
+import { rootQuery, ensureReady, endPool, buildWorld, upsertAccount, draftEntry, approveEntry, freshResolution, human } from "./rig-fixtures.mjs";
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
 import { fiscalYear } from "./depreciation-history-fixtures.mjs";
@@ -530,6 +530,18 @@ async function verdict(documentId) {
   return r.rows[0].v;
 }
 
+/** Every payroll-run entry this lane has posted for a client, newest last. */
+const payrollEntriesOf = async (client) =>
+  (
+    await rootQuery(
+      `select id, status, posting_date::text as posting_date, memo, flags
+         from clara.journal_entries
+        where client_id=$1 and status='approved' and reversed_by is null
+          and flags ? 'payroll_run' order by created_at`,
+      [client],
+    )
+  ).rows;
+
 const entriesOf = async (documentId) =>
   (
     await rootQuery(
@@ -540,24 +552,39 @@ const entriesOf = async (documentId) =>
     )
   ).rows;
 
-test("S2 · a clean run is READY, and the verdict carries the entry it would post", async (t) => {
+test("S2 · the verdict is DERIVED: a run blocked by a missing account reads READY the moment the chart gains it", async (t) => {
   if (unready(t)) return;
 
-  await seedPayrollChart(world.users.alice, world.clients.A1);
-  const doc = await readPayrollDoc(world.users.alice, world.clients.A1);
+  // The gate stores nothing, so its answer is always about the estate as it is NOW. This cell
+  // drives that end to end: a client whose chart lacks salaries payable reads a payslip, the run
+  // is blocked, a person adds the account through the ordinary chart door, and the SAME document
+  // now reads ready — with no re-extraction, no dismissal and nothing to clean up.
+  await seedPayrollChart(world.users.alice, world.clients.A2, { omit: ["2040"] });
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A2, {
+    answers: { "payroll.run.period": value("2026-01") },
+  });
+
+  const blocked = await verdict(doc.documentId);
+  assert.equal(blocked.verdict, "blocked");
+  assert.equal(blocked.rung, "accounts_resolve", `${JSON.stringify(blocked.rung_vector)}`);
+  assert.equal(doc.receipt.posting.posted, false, "…so the read posted nothing");
+
+  await upsertAccount(world.users.alice, {
+    client: world.clients.A2, code: "2040", name: "Salaries Payable", type: "liability", opKey: opk("coa-fix"),
+  });
 
   const v = await verdict(doc.documentId);
-  assert.equal(v.verdict, "ready", `every condition holds: ${JSON.stringify(v.rung_vector)}`);
+  assert.equal(v.verdict, "ready", `every condition now holds: ${JSON.stringify(v.rung_vector)}`);
   assert.equal(v.reason, null);
   assert.equal(v.rung, null);
-  assert.equal(v.client_id, world.clients.A1);
-  assert.equal(v.posting_date, "2026-08-31", "the END of the payslip's own month");
+  assert.equal(v.client_id, world.clients.A2);
+  assert.equal(v.posting_date, "2026-01-31", "the END of the payslip's own month");
   assert.equal(Number(v.plan.debit_cents), EXPECTED_TOTAL);
   assert.equal(v.plan.legs.length, 11);
-  // EVERY rung is evaluated, not just up to the first pass: a vector with a missing key is how
-  // a gate fails open (the invoice lane's own D26 lesson).
+  // EVERY rung is evaluated, not just up to the first pass: a vector with a missing key is how a
+  // gate fails open (the invoice lane's own D26 lesson).
   for (const rung of ["filed", "facts_read", "channels_agree", "arithmetic_holds", "period_established",
-    "run_totals_printed", "accounts_resolve", "entry_balances"]) {
+    "period_open", "run_totals_printed", "accounts_resolve", "entry_balances", "no_duplicate_entry"]) {
     assert.equal(v.rung_vector[rung], "pass", `rung ${rung} must carry an explicit verdict`);
   }
 });
@@ -801,4 +828,108 @@ test("S3 · a payroll run whose month falls in a closed year is not posted", asy
 
   const v = await verdict(doc.documentId);
   assert.equal(v.detail.closed_fiscal_year.status, "closed", "the gate names the year that is shut");
+});
+
+// ---------------------------------------------------------------------------
+// S2 (continued) — the duplicate guard (AC4)
+//
+// These cells run AFTER the clean post above, deliberately: the August 2026 run for
+// world.clients.A1 is already on the books by the time they start, which is the real state a
+// re-upload arrives in.
+// ---------------------------------------------------------------------------
+
+test("S2 · a second upload of the same month never posts, and the refusal points at the entry that exists", async (t) => {
+  if (unready(t)) return;
+
+  // The August 2026 run for this client was posted by the cell above. What arrives now is the
+  // SAME month on a DIFFERENT document — a re-upload, or a corrected payslip somebody re-filed.
+  const posted = (await payrollEntriesOf(world.clients.A1)).filter(
+    (e) => e.flags?.payroll_run?.period_month === "2026-08-01",
+  );
+  assert.equal(posted.length, 1, "mandatory setup: exactly one August 2026 payroll entry is already posted");
+
+  const again = await readPayrollDoc(world.users.alice, world.clients.A1);
+
+  assert.equal(again.receipt.posting.posted, false, "the second upload does NOT post");
+  assert.equal(again.receipt.posting.rung, "no_duplicate_entry");
+  assert.equal(again.receipt.posting.reason, "duplicate_entry");
+  assert.equal((await entriesOf(again.documentId)).length, 0, "…and leaves no entry of its own");
+
+  const v = await verdict(again.documentId);
+  assert.equal(
+    v.existing_entry_id,
+    posted[0].id,
+    "the guard POINTS AT the entry that already exists, so a person can tell a correction from a re-upload",
+  );
+  assert.equal(v.detail.duplicate.scope, "same_month_payroll_run");
+  assert.equal(v.detail.duplicate.posting_date, "2026-08-31", "…with the date it was posted on");
+  assert.equal(v.detail.duplicate.memo, "Payroll run August 2026");
+
+  // Every earlier rung still passed: this run is BLOCKED because it is a duplicate, not because
+  // anything about the document itself was wrong.
+  for (const rung of ["channels_agree", "arithmetic_holds", "period_established", "period_open",
+    "run_totals_printed", "accounts_resolve", "entry_balances"]) {
+    assert.equal(v.rung_vector[rung], "pass", `rung ${rung}`);
+  }
+
+  // A DIFFERENT month on the same client is not a duplicate at all.
+  const july = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { "payroll.run.period": value("July 2026") },
+  });
+  assert.equal(july.receipt.posting.posted, true, `a different month posts: ${JSON.stringify(july.receipt.posting)}`);
+  assert.equal(july.receipt.posting.posting_date, "2026-07-31");
+});
+
+test("S2 · an obligation already booked through the periodic-adjustment lane blocks the same month too", async (t) => {
+  if (unready(t)) return;
+
+  // `0194_periodic_adjustments.sql` (#643) books a statutory payroll obligation through the
+  // accounting-Work lane and stamps `flags->'payroll_obligation'` with the period it covers
+  // (0225:1830). A client whose September obligation was booked THAT way must not get a second,
+  // conflicting entry when a September payslip is read — the guard sees both lanes, not only
+  // its own.
+  //
+  // LABELLED FIXTURE: the entry is built through the real draft/approve doors and its marker is
+  // stamped while it is still a DRAFT, which is the only window `clara._tf_entry_immutable`
+  // admits a `flags` change. Driving the whole Work admission ceremony (admit_periodic_
+  // adjustment_work, its intent key, its bundle digest and its operation receipt) would add a
+  // hundred lines of fixture that prove nothing this cell claims: what is under test is whether
+  // THIS lane's guard reads that marker.
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const resolution = await freshResolution(world.users.alice, world.clients.A1);
+  const drafted = await draftEntry(human(world.users.alice), {
+    client: world.clients.A1,
+    resolution,
+    postingDate: "2026-09-30",
+    memo: "September 2026 statutory payroll obligation (periodic adjustment lane)",
+    lines: [
+      { account_code: "6000", debit_cents: 100000, credit_cents: 0, description: "wages" },
+      { account_code: "2040", debit_cents: 0, credit_cents: 100000, description: "payable" },
+    ],
+    opKey: opk("obl-draft"),
+  });
+  await rootQuery(
+    `update clara.journal_entries
+        set flags = jsonb_build_object('payroll_obligation', jsonb_build_object(
+              'period_start','2026-09-01','period_end','2026-09-30','obligation_kind','epf'))
+      where id=$1 and status='draft'`,
+    [drafted.entry_id],
+  );
+  const token = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [drafted.entry_id]))
+    .rows[0].revision_token;
+  await approveEntry(world.users.bob, {
+    entry: drafted.entry_id,
+    expectedRevision: token,
+    opKey: opk("obl-approve"),
+  });
+
+  const sept = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { "payroll.run.period": value("September 2026") },
+  });
+  assert.equal(sept.receipt.posting.posted, false, "the payslip does not double-book the month");
+  assert.equal(sept.receipt.posting.reason, "duplicate_entry");
+
+  const v = await verdict(sept.documentId);
+  assert.equal(v.detail.duplicate.scope, "payroll_obligation", "…and says WHICH lane already booked it");
+  assert.equal(v.existing_entry_id, drafted.entry_id, "pointing at that lane's own entry");
 });
