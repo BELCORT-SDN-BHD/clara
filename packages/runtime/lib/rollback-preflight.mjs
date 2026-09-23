@@ -228,6 +228,29 @@ export function frontierRuleViolations(frontierVersion, carried = {}, rules = FR
 }
 
 /**
+ * ONE DESCRIPTION OF ONE VIOLATION — the reason it is refused under, the thing the applied schema
+ * requires, the verb by which an image has it, and what the target does not do with it.
+ *
+ * Both things that print a violation read this: the verdict's own refusal lines below, and the
+ * CLI's per-violation line inside `printFrontier`. That is the reason `refusalFooterLines` and
+ * `taskIsStranded` already state in this file — a second inline copy of a rule drifts from the
+ * verdict that used it — applied to the one place that still had one (review F1): a third kind of
+ * rule must be unable to reach one output path and miss the other.
+ * @param {{requirement:string, body:string|null, contract:string|null}} v
+ * @returns {{reason:string, verb:string, needs:string, lack:string}}
+ */
+export function frontierViolationPhrase(v) {
+  return v.requirement === "contract"
+    ? {
+      reason: "frontier_requires_contract",
+      verb: "understand",
+      needs: `the ${v.contract} door contract`,
+      lack: "does NOT declare",
+    }
+    : { reason: "frontier_requires_body", verb: "carry", needs: `${v.body}`, lack: "does NOT carry" };
+}
+
+/**
  * THE FRONTIER REFUSAL, as the lines an operator reads — one per violation, naming the rule, the
  * migration and the thing the target does not carry.
  *
@@ -241,11 +264,9 @@ export function frontierRuleViolations(frontierVersion, carried = {}, rules = FR
 export function frontierRefusalLines(result) {
   const at = result.frontier.version ?? "an UNREADABLE frontier";
   return result.frontier.violations.map((v) => {
-    const head = v.requirement === "contract"
-      ? `  - frontier_requires_contract: this database is at ${at}, and ${v.migration} requires the image to `
-        + `understand the ${v.contract} door contract, which the target does NOT declare.`
-      : `  - frontier_requires_body: this database is at ${at}, and ${v.migration} requires the image to `
-        + `carry ${v.body}, which the target does NOT.`;
+    const p = frontierViolationPhrase(v);
+    const head = `  - ${p.reason}: this database is at ${at}, and ${v.migration} requires the image to `
+      + `${p.verb} ${p.needs}, which the target ${p.lack}.`;
     return v.why ? `${head}\n      ${v.why}` : head;
   });
 }

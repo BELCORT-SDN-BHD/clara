@@ -92,6 +92,7 @@
 import { readFileSync } from "node:fs";
 import {
   frontierRefusalLines,
+  frontierViolationPhrase,
   preflight,
   refusalFooterLines,
   supportedBodiesFromBundle,
@@ -241,11 +242,10 @@ function printFrontier(frontier) {
   // such rather than left blank — blank would read as "not looked at".
   console.log(`    contracts the target declares: ${frontier.contracts.join(", ") || "(none declared)"}`);
   for (const v of frontier.violations) {
-    console.log(
-      v.requirement === "contract"
-        ? `      !! ${v.migration} requires the ${v.contract} door contract, which the target does NOT declare`
-        : `      !! ${v.migration} requires ${v.body}, which the target does NOT carry`,
-    );
+    // BY IMPORT, like the refusal loop in main(): one describer answers for both kinds of rule, so
+    // this line and the refusal the verdict prints cannot drift apart (review F1).
+    const p = frontierViolationPhrase(v);
+    console.log(`      !! ${v.migration} requires ${p.needs}, which the target ${p.lack}`);
   }
   if (frontier.violations.length === 0) console.log("      ok  the target satisfies every rule the applied schema carries");
 }

@@ -39,7 +39,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import * as rig from "./rig.mjs";
@@ -64,6 +64,7 @@ import {
   classOfBody,
   frontierRefusalLines,
   frontierRuleViolations,
+  frontierViolationPhrase,
   migrationOrdinal,
   preflight,
   readMigrationFrontier,
@@ -1110,4 +1111,49 @@ test("637.pf: a read that THROWS is never answered as 'allowed'", { skip: SKIP }
 
 test("637.pf: teardown", { skip: SKIP }, async () => {
   await rig.endPool();
+});
+
+// ONE DESCRIPTION OF A VIOLATION, FOR BOTH THINGS THAT PRINT ONE [#1035, review F1].
+//
+// `frontierRefusalLines` exists because "a second inline copy of a rule drifts from the verdict
+// that used it" — this module's own stated law, the one `refusalFooterLines` and `taskIsStranded`
+// already cite. The CLI's `printFrontier` carried exactly such a second copy: its own
+// `requirement === "contract"` ternary, three lines away from the import. Both output paths now
+// read one describer, so a third kind of rule cannot reach one of them and miss the other.
+
+test("#1035/F1: one describer answers for a body rule and for a contract rule", () => {
+  const body = frontierViolationPhrase({ requirement: "body", body: "claraWork_v5", contract: null, migration: "0195_x" });
+  assert.equal(body.reason, "frontier_requires_body");
+  assert.equal(body.needs, "claraWork_v5");
+  assert.match(body.lack, /does NOT carry/, "a body the target does not CARRY");
+
+  const contract = frontierViolationPhrase({ requirement: "contract", body: null, contract: "intake_refusal_record_v1", migration: "0254_x" });
+  assert.equal(contract.reason, "frontier_requires_contract");
+  assert.match(contract.needs, /intake_refusal_record_v1 door contract/);
+  assert.match(contract.lack, /does NOT declare/, "a contract the target does not DECLARE — declaring is what a marker is");
+
+  // The verdict's own refusal lines are built from it, and still name every load-bearing token.
+  const lines = frontierRefusalLines({
+    frontier: {
+      version: "0272_document_capability_wall_completion",
+      violations: [{ requirement: "contract", body: null, contract: "intake_refusal_record_v1", migration: "0254_intake_refusal_record", why: null }],
+    },
+  });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /frontier_requires_contract/);
+  assert.match(lines[0], /0254_intake_refusal_record/);
+  assert.match(lines[0], /intake_refusal_record_v1/);
+  assert.match(lines[0], /0272_document_capability_wall_completion/);
+});
+
+test("#1035/F1: the CLI's own per-violation print carries no second copy of the rule", () => {
+  const cli = readFileSync(fileURLToPath(new URL("../scripts/rollback-preflight.mjs", import.meta.url)), "utf8");
+  const start = cli.indexOf("function printFrontier(");
+  assert.ok(start > 0, "scripts/rollback-preflight.mjs no longer has printFrontier — this census must be repointed, not deleted");
+  const end = cli.indexOf("\nasync function main(", start);
+  const body = cli.slice(start, end === -1 ? cli.length : end);
+  assert.equal(/requirement\s*===/.test(body), false,
+    "printFrontier branches on v.requirement itself instead of calling the shared describer — that is the second "
+    + "inline copy this module's own design law forbids: it drifts from the refusal the verdict prints");
+  assert.match(body, /frontierViolationPhrase\(/, "…it must build its line from the shared describer");
 });
