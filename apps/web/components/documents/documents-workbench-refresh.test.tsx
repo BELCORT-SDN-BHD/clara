@@ -341,14 +341,47 @@ test("[633]: the registry is read ONCE per mount and never enters the poll's bud
   });
 });
 
+/** #1021 — settle until `countOf()` stops growing for a real wall-clock window, or a deadline
+ *  passes. `intake-receipts.tsx` gives this cell no other externally visible signal that the poll's
+ *  tick ceiling (`use-settle-poll.ts`'s `DEFAULT_MAX_TICKS`) was actually reached: the watermark and
+ *  the manual-Refresh button both stay in the SAME state whether the poll is still ticking or
+ *  already exhausted, because an unsettled row keeps `load.unsettled > 0` true throughout — so the
+ *  read count going, and staying, flat is the only honest way to observe "the poll spent its whole
+ *  budget and stopped". A fixed settle COUNT (this cell's previous shape) is what #1021 found could
+ *  under-run once this file shares a timer queue with every other file's own polls in a full-suite
+ *  pass: the number of macrotask hops a zero-delay poll needs to spend its budget grows with host
+ *  contention, the same class of flake document-detail-live-refresh.test.tsx's own `settleUntil`
+ *  (#904) fixed for a condition-based wait. A deadline gives the real event loop the time it needs
+ *  regardless of how many other files' timers are queued alongside this one's. */
+async function settleUntilQuiet(
+  h: { settle: () => Promise<void> },
+  countOf: () => number,
+  label: string,
+): Promise<number> {
+  const deadline = Date.now() + 10_000;
+  const QUIET_MS = 300;
+  let last = countOf();
+  let quietSince = Date.now();
+  while (Date.now() - quietSince < QUIET_MS) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label} to go quiet`);
+    await h.settle();
+    const cur = countOf();
+    if (cur !== last) { last = cur; quietSince = Date.now(); }
+  }
+  return last;
+}
+
 test("[633]: an UNSETTLED receipt keeps a bounded watch and says so; the poll's budget is finite", async () => {
   // A row that never settles. The poll must issue SOME reads and then stop, rather
   // than either never re-reading or re-reading forever.
   await withReceipts(() => [receiptRow({ status: "verifying", document_id: null })], async (h, counts) => {
     assert.match(h.text(), /Watching 1 unfinished upload/, "the watermark must say what is still moving");
     const mount = counts.document_intakes_visible ?? 0;
-    for (let i = 0; i < 40; i++) await h.settle();
-    const grew = (counts.document_intakes_visible ?? 0) - mount;
+    const settled = await settleUntilQuiet(
+      h, () => counts.document_intakes_visible ?? 0,
+      "the unsettled receipts poll to spend its whole tick budget and stop",
+    );
+    const grew = settled - mount;
     // NON-VACUITY (fix round): the poll must have actually run, or "inside its ceiling"
     // is a statement about nothing — which is exactly what this cell used to assert.
     assert.ok(grew > 0, "the poll must issue SOME read while a row is still moving");

@@ -1357,6 +1357,29 @@ poll's own tick to land under host contention (1 failure in a 5-run sample). Fol
 that cell's own settle budget specifically — out of #875's stated scope (auditing *other*
 pollers) and not the same instance #875 was asked to fix.
 
+## #1021 — the [633] unsettled-receipt cell's settle budget, fixed to a deadline
+
+**Landed** — the follow-up #875 named above. The cell's fixed `for (let i = 0; i < 40; i++) await
+h.settle();` is replaced with `settleUntilQuiet` (same file, just above the cell): it keeps calling
+`h.settle()` until `document_intakes_visible`'s read count has held flat for a real 300 ms wall-clock
+window, bounded by a 10 s deadline — the same shape `document-detail-live-refresh.test.tsx`'s own
+`settleUntil` (#904) already uses for a condition-based wait, adapted here to a "no more reads are
+coming" wait rather than a "the read I want has arrived" one, since `intake-receipts.tsx` gives this
+cell no other externally visible signal that `use-settle-poll.ts`'s tick ceiling was reached (the
+watermark and the manual-Refresh button read the same whether the poll is still ticking or already
+exhausted, because an unsettled row keeps `load.unsettled > 0` true throughout). A real deadline, not
+an iteration count, is what gives the poll's zero-delay ticks the wall-clock room they need once this
+file's timer queue is shared with every other file's own polls in a full-suite pass — the exact
+mechanism the adjacent finding above measured as a 1-in-5 failure.
+
+The poll itself (`lib/documents/use-settle-poll.ts`) is unchanged; this is a test-only fix, and the
+cell's assertions (`grew > 0`, `grew <= 12`, the manual-Refresh control) are unchanged in substance.
+Non-vacuity re-verified for this round too: with the bound temporarily widened to `maxTicks: 1000`
+(third arg to `withReceipts`, reverted byte-for-byte afterward), the cell fails — `settleUntilQuiet`
+times out waiting for the count to go quiet within its 10 s deadline (ticks never finish inside that
+window), so the fix still catches a removed or widened bound rather than turning the assertion
+vacuous.
+
 ## #897 — the full-screen onboarding altitude leg (code-review fix round; still open)
 
 **Not delivered.** #897's own AC1 asks for a mock-lane cell proving typed-but-unsubmitted
