@@ -249,7 +249,7 @@ test("firmCapabilities: each capability turns on at exactly its own floor, and n
 // own "retired or forced false" choice. This is the retirement half of the "not one property
 // silently stuck at false forever" argument: an absent property is discoverable by a `keyof`
 // compile error at every call site, the same way a truly deleted door is.
-test("firmCapabilities: canProposeVendorBinding and canSignVendorBinding no longer exist (#921 [0273] retired them, no rank ever grants either)", () => {
+test("firmCapabilities: canProposeVendorBinding and canSignVendorBinding no longer exist (ticket 921 [0273] retired them, no rank ever grants either)", () => {
   const owner = firmCapabilities({ role_rank: 3, is_operator: true });
   assert.equal("canProposeVendorBinding" in owner, false, "the capability was retired, not merely forced false");
   assert.equal("canSignVendorBinding" in owner, false, "the capability was retired, not merely forced false");

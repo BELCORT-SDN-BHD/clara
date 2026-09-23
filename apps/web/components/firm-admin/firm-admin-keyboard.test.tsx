@@ -137,7 +137,7 @@ async function mountVendorBindingsWithClientSelected() {
   return { h, body };
 }
 
-test("no Propose or Sign trigger reaches the keyboard walk — #921 [0273] retired both doors", async () => {
+test("no Propose or Sign trigger reaches the keyboard walk — ticket 921 [0273] retired both doors", async () => {
   await withMockedEnv(
     async (u) => mockVendorBindingsFetch(String(u)),
     async () => {

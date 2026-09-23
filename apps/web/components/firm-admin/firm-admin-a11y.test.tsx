@@ -272,12 +272,12 @@ test("vendor-bindings panel: no Propose or Sign trigger renders (retired, not me
         assert.equal(
           findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Propose binding")),
           null,
-          "the Propose trigger must not render — #921 [0273] retired the door",
+          "the Propose trigger must not render — ticket 921 [0273] retired the door",
         );
         assert.equal(
           findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign"),
           null,
-          "the Sign trigger must not render — #921 [0273] retired the door",
+          "the Sign trigger must not render — ticket 921 [0273] retired the door",
         );
 
         const revokeTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Revoke");

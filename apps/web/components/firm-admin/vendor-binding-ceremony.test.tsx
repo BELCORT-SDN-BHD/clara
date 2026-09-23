@@ -120,7 +120,7 @@ async function mount(scope: { role_rank: number | null; is_operator: boolean }) 
 const OWNER_SCOPE = { role_rank: 3, is_operator: false };
 const VIEWER_SCOPE = { role_rank: 0, is_operator: false };
 
-test("no Propose control renders, at any rank — #921 [0273] retired the door, not merely rank-gated it", async () => {
+test("no Propose control renders, at any rank — ticket 921 [0273] retired the door, not merely rank-gated it", async () => {
   const impl = (async (url: RequestInfo | URL) => {
     const u = String(url);
     if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
@@ -155,7 +155,7 @@ test("no Propose control renders, at any rank — #921 [0273] retired the door, 
   });
 });
 
-test("no Sign control renders, at any rank, even for a historical 'proposed' row — #921 [0273]", async () => {
+test("no Sign control renders, at any rank, even for a historical 'proposed' row — ticket 921 [0273]", async () => {
   const impl = (async (url: RequestInfo | URL) => {
     const u = String(url);
     if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
@@ -186,7 +186,7 @@ test("no Sign control renders, at any rank, even for a historical 'proposed' row
   });
 });
 
-test("Revoke stays offered on a live binding to bookkeeper+, and absent below it — #921 [0273] left this door untouched (D6's in-flight-legacy-visibility half)", async () => {
+test("Revoke stays offered on a live binding to bookkeeper+, and absent below it — ticket 921 [0273] left this door untouched (D6's in-flight-legacy-visibility half)", async () => {
   const impl = (async (url: RequestInfo | URL) => {
     const u = String(url);
     if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
