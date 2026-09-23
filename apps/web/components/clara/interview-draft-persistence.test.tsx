@@ -119,7 +119,7 @@ function App() {
   });
 }
 
-test("SPEC-897-1 / #897 — a typed-but-unsubmitted interview answer SURVIVES an unmount of the card that held it", async () => {
+test("SPEC-897-1 / ticket 897 — a typed-but-unsubmitted interview answer SURVIVES an unmount of the card that held it", async () => {
   await withMockedEnv(
     (async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -188,17 +188,17 @@ test("SPEC-897-1 / #897 — a typed-but-unsubmitted interview answer SURVIVES an
         assert.equal(
           claraThreadStore.getInterviewDraft("c1"),
           "Rome Public Advisory",
-          "#897: the STORE must still hold instance A's text — the ground truth `useSyncExternalStore` reads from",
+          "ticket 897: the STORE must still hold instance A's text — the ground truth `useSyncExternalStore` reads from",
         );
         assert.equal(
           (answerB as unknown as { defaultValue?: string }).defaultValue ?? "",
           "Rome Public Advisory",
-          "#897: react-dom's own initial-mount write to this textarea must carry instance A's text — InterviewRunCard's " +
+          "ticket 897: react-dom's own initial-mount write to this textarea must carry instance A's text — InterviewRunCard's " +
           "`draft` now reads/writes claraThreadStore.interviewDrafts, keyed by clientId alone, so a " +
           "fresh instance's FIRST render already sees the earlier keystrokes (the same remount the " +
           "rail <-> full-screen altitude change causes — rail-mount.tsx's own note). The rendered, " +
           "user-visible `.value` itself is proven in the browser, not this harness — " +
-          "agentic-finish-walk.spec.ts's own #897 arm, where a real textarea's `.value` behaves as specified.",
+          "agentic-finish-walk.spec.ts's own ticket-897 arm, where a real textarea's `.value` behaves as specified.",
         );
       } finally {
         await b.unmount();
@@ -213,7 +213,7 @@ test("SPEC-897-1 / #897 — a typed-but-unsubmitted interview answer SURVIVES an
   );
 });
 
-test("#897 — a CONFIRMED delivery clears the draft; a REFUSED one leaves it for the human to fix and resend", async () => {
+test("ticket 897 — a CONFIRMED delivery clears the draft; a REFUSED one leaves it for the human to fix and resend", async () => {
   // Two independent runs (run-2 succeeds, run-3 is refused), so the two arms below share no
   // server-side state and neither's polling can answer the other's questions.
   const SUCCEEDING_RUN = {
