@@ -3058,3 +3058,76 @@ a second world.
 **Redo-safe by construction**: the two statements that change the catalog are
 `create or replace function`; the prestate asserts nothing about this file's own additions being
 absent.
+
+## 0286 — a re-read opening document becomes re-parsable (#986, riders wave 3, lane 06)
+
+`0286_opening_source_reread.sql` closes the dead end #656 measured and filed (its `656-final.md`
+residual R4 / follow-up F4). A tied opening basis's document-primary targets are recorded from ONE
+reading of the tie document by `clara.record_opening_targets_parsed` (0017), under an op key the
+runtime mints as `openingparse:<seed>:<document>` — deliberately stable per (seed, document), so a
+retried POST cannot double a basis — while the payload that key hashes is keyed by REGION ID. When
+the document is genuinely READ AGAIN, two walls close at once: the re-parse refuses (`_reserve_op`
+sees the same key with different args, CLR10, mapped by the runtime to the typed conflict
+`source_reread_since_parse`) and so does the APPROVAL (`clara.approve_opening_seed` re-runs
+`clara._assert_opening_target_fact` over every target, and `_assert_opening_extraction_ref` refuses
+a citation whose extraction is superseded — CLR31 `extraction_not_accepted`). The basis can be
+neither re-parsed nor approved; the only escape was to cancel it and start another, discarding
+every drafted opening item with it.
+
+**And a fresh op key is not the fix.** Handing the parse door a random key after a re-read succeeds
+and leaves the OLD targets standing beside the new ones — the new reading mints new region ids and
+therefore new `line_key`s, and `uq_opening_tb_targets_key` is on (seed_id, line_key). A three-line
+trial balance would carry six targets and tie to nothing. That is what the stable key exists to
+prevent, and it is why the remedy has to RETIRE the superseded set rather than merely record
+another one.
+
+**What the file adds.** (1) `clara.opening_target_refreshes` — an append-only, FORCE-RLS receipt
+relation: one row per refresh naming the basis, the document, the reading LEFT and the reading
+ARRIVED AT, the retired and recorded counts, and the retired rows VERBATIM. (2)
+`clara.refresh_opening_targets_from_reread(uuid,jsonb,uuid,uuid,text)` — ONE door, `clara_runtime`
+only, exactly as `record_opening_targets_parsed` is, whose op key carries the NEW EXTRACTION
+(`openingreread:<seed>:<document>:<extraction>`). It runs the parse door's own front-door walls, then
+three of its own (`stale_extraction_version` — the reading refreshed onto must be the document's
+authoritative run; `refresh_extraction_mixed` — every line cites that one reading;
+`no_reread_to_refresh` — the basis must already stand on a different reading), retires the stale
+targets, records the new ones through the same field-level fact assertion, and writes the receipt.
+(3) Nothing else: no column on `clara.opening_tb_targets`, no trigger on it, no recut of any 0017
+body, no new grant to any human or agent lane.
+
+**Why a receipt relation and not a `state` column on the targets.** `clara.opening_items` carries
+the estate's supersede-chain shape (`state`, `superseded_by_item`, `supersedes_item_id`) and was the
+first candidate. Measured, it does not fit: `clara._opening_seed_deltas`, `clara._assert_opening_tie`,
+`clara.get_opening_dryrun`, `clara.approve_opening_seed`'s two target sweeps, 0056's close-model read
+and 0239's three `opening_balance_work` reads ALL sum or scan `clara.opening_tb_targets` with no
+state predicate. A retired state on that table would silently make nine bodies wrong until each was
+recut — in the one lane whose whole point is that a stale figure must never stand quietly beside a
+fresh one. The live target set stays exactly "the rows in the table", which is what all nine already
+believe, and the supersession is recorded where a reader can ask for it.
+
+**The reservation comes before the precondition the door consumes**, and the ordering was measured
+(`tests/opening-source-reread.test.mjs`, `p986.reread.refresh_walls`, found the other order on its
+first run). Everything above `_reserve_op` is a FRONT-DOOR wall — the same set the parse door checks
+before ITS reservation — and a replay is honoured only while those hold. `no_reread_to_refresh` is
+different in kind: a successful refresh makes it false, because the stale targets it names are the
+ones the door has just retired, so checking it first made a retried POST refuse instead of replaying
+its own receipt.
+
+**Migration triad.** `tests/opening-source-reread-preintegration-gate.mjs` (stem
+`opening_source_reread$`, detected off the CATALOG rather than a migration number) and the gate's
+`--import` token in `package.json`'s test script, last in migration order; a
+`OPENING_SOURCE_REREAD_0286_COHORT` in `tests/rig-meta.mjs`, spread into `ALLOWED[clara_runtime]`
+and given its own bimodal `cohortFailures()` call. Battery: `tests/opening-source-reread.test.mjs`,
+standing on the real-producer fixture `tests/wave-b/wb-opening-producer.mjs` — its own module
+because a test file cannot import another test file without running its cells, and #656's battery
+grew the same helper inline. Every `opening_tb.line` region it creates goes through
+`clara.persist_document_extraction`, never a raw INSERT, so a genuine second reading supersedes the
+first and moves `documents.authoritative_extraction_id` exactly as production does.
+
+**Redo-safe by construction**: `create table if not exists`, `create index if not exists`,
+`alter table … enable/force row level security`, `drop policy if exists` before each `create policy`,
+`create or replace trigger` (PostgreSQL 14+; this estate runs 17), `create or replace function`, and
+an idempotent `grant`. The prestate asserts nothing about this file's own door or relation being
+absent, and there is no backfill and no data-dependent branch anywhere in the prestate or the tail.
+A `CLARA_MIGRATION_REDO` of this file was exercised during authoring; note that `create table if not
+exists` SKIPS an existing relation, so a redo that also changed the table's own definition would
+need the table dropped first — the redo used here changed only the function body.

@@ -259,6 +259,15 @@ tie-out compares the books against, never a posting in its own right.
 _Avoid_: Calling an unmapped target an error — it is work a person has still to do; calling a
 target a journal line.
 
+**Opening source refresh**:
+Bringing an opening basis's targets onto a NEW reading of the same tie document, after the document
+was genuinely read again. The targets standing on the reading the document has left are retired and
+replaced, line by line, from the new one — never re-pointed and never left beside it — and the act
+leaves a receipt naming the reading left, the reading arrived at, and the retired rows verbatim.
+_Avoid_: Calling it a re-parse — parsing one reading twice is still refused, and that refusal is
+what the refresh exists beside, not instead of; calling it a correction — nobody changed what the
+document says, only which reading of it the basis stands on.
+
 **Opening Work**:
 The Work record an approved opening batch carries: one per approval — the seed batch, then one per
 correction batch — under the `opening_balance` purpose, so the opening appears on the Work list,

@@ -2954,6 +2954,19 @@ export const FIRM_SETUP_TIP_0259_COHORT = [...FIRM_SETUP_TIP_0259_HUMAN_FNS];
 const ACCRUAL_CORRECTION_0284_HUMAN_FNS = ["correct_accrual_adjustment"];
 export const ACCRUAL_CORRECTION_0284_COHORT = [...ACCRUAL_CORRECTION_0284_HUMAN_FNS];
 
+// #986 [0286, a re-read opening document becomes re-parsable] — its own cohort, the same
+// "wholly present or wholly absent" reason 0222's and 0284's carry: the `db-slice-frontiers`
+// matrix runs this package against databases pinned at earlier frontiers where 0017 has applied
+// and 0286 has not.
+//
+//   the ONE door — clara_runtime ONLY, exactly as clara.record_opening_targets_parsed
+//   (WAVE_B_RUNTIME_FNS above) is held: a document-primary opening target is written by the lane
+//   that re-derived it from stored evidence, never by a browser that typed it. Declared here so a
+//   grant to clara_authenticated, to either agent read role or to any wake lane FAILS the matrix.
+//   0286 recuts no 0017 body and mints no human door, so nothing else moves.
+const OPENING_SOURCE_REREAD_0286_RUNTIME_FNS = ["refresh_opening_targets_from_reread"];
+export const OPENING_SOURCE_REREAD_0286_COHORT = [...OPENING_SOURCE_REREAD_0286_RUNTIME_FNS];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -3470,6 +3483,10 @@ export const ALLOWED = {
     // ONLY, the clara.admit_periodic_adjustment_work shape. It takes its actor from an argument
     // because a runtime connection carries no human JWT; the browser lane holds none of it.
     ...ACCRUAL_ADJUSTMENTS_0222_RUNTIME_FNS,
+    // [#986, 0286] the opening-source re-read remedy — clara_runtime ONLY, the same lane
+    // clara.record_opening_targets_parsed sits in (WAVE_B_RUNTIME_FNS above). See the block
+    // where the cohort is declared.
+    ...OPENING_SOURCE_REREAD_0286_RUNTIME_FNS,
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -3750,6 +3767,13 @@ export async function grantMatrixFailures() {
   if (accrualCorrectionLive.length !== 0) {
     failures.push(...cohortFailures("#936 0284 dedicated accrual-correction door",
       ACCRUAL_CORRECTION_0284_COHORT, liveNames));
+  }
+  // #986 [0286] — bimodal, same reasoning as 0284's above: wholly present once 0286 applies,
+  // wholly absent before it.
+  const openingRereadLive = OPENING_SOURCE_REREAD_0286_COHORT.filter((n) => liveNames.has(n));
+  if (openingRereadLive.length !== 0) {
+    failures.push(...cohortFailures("#986 0286 opening-source re-read remedy",
+      OPENING_SOURCE_REREAD_0286_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
