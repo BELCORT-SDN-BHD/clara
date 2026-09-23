@@ -264,6 +264,7 @@ const CLOSED_WAVE_ACTION = path.join(REPO_ROOT, ".github", "actions", "closed-wa
 
 const NEWLY_COVERED = [
   { file: "checkout-convergence-upgrade.test.mjs", db: "clara_0186_upgrade_ci" },
+  { file: "rig-runtime-upgrade.test.mjs", db: "clara_runtime_upgrade_ci" },
 ];
 
 /** The composite-action step (its `- name:` line through the next step's, or EOF) whose `run:`

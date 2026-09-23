@@ -398,3 +398,33 @@ runs:
       run: |
         PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
           node tests/rig-cluster-reset.mjs --drop-database=clara_0186_upgrade_ci --sweep-roles
+
+    # #1023 — Slice-4 rig, durable runtime part 7: UPGRADE / CUTOVER (contract §3.9 + S4-ND9), the
+    # ONLY runtime test that resets the database. It applies only 0001->0005, seeds a synthetic
+    # taxonomy version, leaves PENDING intents for all three wake-bound decisions, THEN applies
+    # 0006 and proves they survive and are consumable and the new guards are live. Reset-gated
+    # (drops schema clara), so it SKIPS in the concurrent all-packages sweep, and before this
+    # ticket it had no documented PGDATABASE recipe at all, let alone a CI leg
+    # (packages/db/tests/README.md's #845 section, "no CI leg at all"). Run it FOR REAL here,
+    # ALONE, in its OWN throwaway database — the exact name (`clara_runtime_upgrade_ci`) the #845
+    # fix round's added header recipe documents. It applies only through 0006, well below the
+    # role-minting migration 0154 (RIG.md), so unlike the 0186 drill above it carries no in-file
+    # role sweep of its own — the shared cleanup below still runs regardless, protecting the
+    # cluster against whichever drill ran before it.
+    - name: Slice-4 runtime upgrade/cutover drill (isolated DB, #1023)
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_runtime_upgrade_ci'
+        PGDATABASE=clara_runtime_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          node --test tests/rig-runtime-upgrade.test.mjs
+
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same mechanism,
+    # this step's own database.
+    - name: Cluster cleanup — drop clara_runtime_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_runtime_upgrade_ci --sweep-roles
