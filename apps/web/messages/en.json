@@ -5729,7 +5729,7 @@
     },
     "vendorBindings": {
       "pageHeading": "Vendor identity bindings",
-      "pageDescription": "Propose, sign and revoke a vendor's identity binding. Signing requires an admin who did not propose it — the person who proposed a binding cannot also sign it; let Clara propose it, or add a second admin.",
+      "pageDescription": "Review history and revoke a vendor's identity binding. Proposing and signing are retired — Clara maintains counterparty identities and aliases from evidence automatically.",
       "notPrerequisiteNotice": "Vendor identity bindings are no longer a prerequisite for processing documents — Clara maintains counterparty identities and aliases from evidence automatically. This register remains for history and for governing existing bindings.",
       "clientPickerLabel": "Client",
       "clientPickerLoading": "Loading clients…",
@@ -5747,9 +5747,6 @@
       },
       "fingerprint": "Vendor name \"{f1}\" · invoice prefix \"{f2}\"",
       "evidenceLine": "{evidence} evidence entr{evidence, plural, one {y} other {ies}} · {resolutions} resolution{resolutions, plural, one {} other {s}} · {divergences} divergence{divergences, plural, one {} other {s}} (30d)",
-      "signTrigger": "Sign",
-      "signTitle": "Sign this vendor identity binding",
-      "signDescription": "Signing makes this binding LIVE — future invoices from this vendor auto-bind to the counterparty it names. Requires an admin who did not propose this binding; the person who proposed it cannot also sign it — let Clara propose it, or add a second admin.",
       "revokeTrigger": "Revoke",
       "revokeTitle": "Revoke this vendor identity binding",
       "revokeDescription": "Revoking ends auto-binding for this vendor immediately. A reason is required.",
@@ -5761,14 +5758,7 @@
       "detailEvidenceCount": "{count, plural, one {# entry} other {# entries}}",
       "detailResolutions": "Resolutions",
       "detailResolutionsCount": "{count, plural, one {# resolution} other {# resolutions}}",
-      "detailFingerprintHash": "Content fingerprint",
-      "proposeTrigger": "Propose binding",
-      "proposeTitle": "Propose a vendor identity binding",
-      "proposeDescription": "The DB derives the binding's own fingerprint from at least three recent approved entries for this vendor — this dialog only names which counterparty to bind.",
-      "counterpartyLabel": "Vendor",
-      "counterpartyPlaceholder": "Select a vendor…",
-      "counterpartyNoneYet": "No eligible vendors for this client yet",
-      "counterpartiesLoading": "Loading vendors…"
+      "detailFingerprintHash": "Content fingerprint"
     },
     "sharing": {
       "sharedBadge": "Shared with firm",

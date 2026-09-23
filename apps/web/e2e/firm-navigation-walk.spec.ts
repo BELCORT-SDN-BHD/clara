@@ -195,6 +195,54 @@ test("the high-stakes threshold control is GONE from /settings/firm for every ra
   }
 });
 
+// #921 [0273]: migration 0273 revoked clara_authenticated's EXECUTE on
+// propose_vendor_identity_binding and sign_vendor_identity_binding OUTRIGHT, for every rank — D6
+// keeps only historical receipts (list/get) and the ability to close an in-flight LIVE binding
+// (revoke). Unlike the threshold control above (a rank-shaped retirement), this one is
+// UNCONDITIONAL: an owner, who used to clear both the propose AND the sign floor, is asserted
+// identically to a bookkeeper. `page.route` stubs `list_vendor_bindings`/`get_vendor_binding`
+// the same way the E-3/E-2 block below stubs its own reads — the shared mock never carried this
+// RPC (the panel is client-scoped and no walk drove it before this cell).
+test("the vendor-bindings panel offers NO propose or sign control at any rank — the doors are revoked, not merely rank-gated", async ({ page }) => {
+  const bindingRow = {
+    binding_id: "22222222-2222-4222-8222-222222222222",
+    counterparty_id: "33333333-3333-4333-8333-333333333333",
+    counterparty_name: "Example Supplier Sdn Bhd",
+    status: "live",
+    f1_vendor_name_norm: "example supplier sdn bhd",
+    f2_invoice_prefix: "INV-E",
+    registration_at_signing: "202401011111",
+    signed_by: "44444444-4444-4444-8444-444444444444",
+    signed_at: "2026-01-02T00:00:00Z",
+    expires_at: "2026-12-31T00:00:00Z",
+    evidence_count: 3,
+    resolution_count: 1,
+    divergence_documents: 0,
+  };
+  await page.route("**/e2e-supabase/rest/v1/rpc/list_vendor_bindings", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([bindingRow]) }));
+
+  for (const email of ["owner@example.test", "bookkeeper@example.test"]) {
+    await signIn(page, email);
+    await page.goto("/settings/vendor-bindings");
+    await expect(page.getByRole("heading", { name: "Vendor identity bindings", level: 1 })).toBeVisible();
+    await page.getByLabel("Client").selectOption({ label: "Rome Properties" });
+    await expect(page.getByText("Example Supplier Sdn Bhd")).toBeVisible();
+
+    // BY ROLE and BY TEXT, both personas — #921's own retirement, not a rank floor.
+    await expect(page.getByRole("button", { name: "Propose binding", exact: true })).toHaveCount(0);
+    await expect(page.getByText("Propose binding")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Sign", exact: true })).toHaveCount(0);
+    await expect(page.getByText("Sign this vendor identity binding")).toHaveCount(0);
+    // D6 keeps the ability to close an in-flight LIVE binding — Revoke stays offered.
+    await expect(page.getByRole("button", { name: "Revoke", exact: true })).toBeVisible();
+
+    const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+    expect(result.violations, `/settings/vendor-bindings as ${email}`).toEqual([]);
+    await page.context().clearCookies();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // E-3 / E-2 — the two surfaces the owner reported as contentless.
 //

@@ -199,30 +199,29 @@ const BINDINGS = [
     evidence_count: 5, resolution_count: 4, divergence_documents: 0,
   },
 ];
-const COUNTERPARTIES = [{ id: "cp3", name: "Supplier Three Sdn Bhd", registration_normalized: "202401017777" }];
-
-// F2's own read (independent review, 2026-08-28): the Sign/Revoke dialogs now
-// mount VendorBindingDetailView on open, which fetches get_vendor_binding —
-// a real response here, not just an "unexpected fetch" swallowed into an
-// error banner, is what makes the a11y scan below prove something (the P3
+// F2's own read (independent review, 2026-08-28): the Revoke dialog now mounts
+// VendorBindingDetailView on open, which fetches get_vendor_binding — a real
+// response here, not just an "unexpected fetch" swallowed into an error
+// banner, is what makes the a11y scan below prove something (the P3
 // vacuous-test lesson: a passing scan over a hidden error banner proves
 // nothing about the content a reviewer actually needs to see).
 const BINDING_DETAIL = {
   binding: {
-    id: "b1", firm_id: "f1", client_id: "c1", counterparty_id: "cp1", status: "proposed",
-    f1_vendor_name_norm: "supplier one sdn bhd", f2_invoice_prefix: "INV-S", registration_at_signing: "202401012345",
+    id: "b2", firm_id: "f1", client_id: "c1", counterparty_id: "cp2", status: "live",
+    f1_vendor_name_norm: "supplier two sdn bhd", f2_invoice_prefix: "INV-T", registration_at_signing: "202401019999",
     content_hash: "a".repeat(64), created_by: "u1234567-89ab-cdef-0123-456789abcdef", created_at: "2026-01-01T00:00:00Z",
-    signed_by: null, signed_at: null, revoked_by: null, revoked_at: null, revoke_reason: null, expires_at: "2026-12-31T00:00:00Z",
+    signed_by: "u1", signed_at: "2026-02-01T00:00:00Z", revoked_by: null, revoked_at: null, revoke_reason: null, expires_at: "2026-12-31T00:00:00Z",
   },
-  counterparty: { counterparty_id: "cp1", counterparty_name: "Supplier One Sdn Bhd" },
+  counterparty: { counterparty_id: "cp2", counterparty_name: "Supplier Two Sdn Bhd" },
   evidence: [{ entry_id: "e1", document_id: "d1", facts_extraction_id: "f1", ocr_extraction_id: "o1", posting_date: "2026-01-01" }],
   resolutions: [],
 };
 
+// #921 [0273]: no counterparties stub any more — the Propose dialog that read
+// it is retired, and the panel never issues that request now.
 function mockVendorBindingsFetch(u: string): Response {
   if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
   if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
-  if (u.includes("/rest/v1/counterparties")) return jsonResponse(COUNTERPARTIES);
   if (u.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
   throw new Error(`unexpected fetch: ${u}`);
 }
@@ -261,54 +260,35 @@ test("vendor-bindings panel: a selected client's bindings list has zero a11y vio
   );
 });
 
-test("vendor-bindings panel: the Propose binding dialog (open, with its counterparty select) has zero a11y violations", async () => {
+// #921 [0273] RETIRED the Propose and Sign dialogs outright — the two a11y cells that used to
+// open them went with the controls (full history: git blame on this file before #921). What
+// remains is Revoke's own a11y scan, D6's "in-flight legacy visibility" half, unchanged by 0273.
+test("vendor-bindings panel: no Propose or Sign trigger renders (retired, not merely rank-gated) — the Revoke dialog (live row) has zero a11y violations", async () => {
   await withMockedEnv(
     async (u) => mockVendorBindingsFetch(String(u)),
     async () => {
       const { h, body } = await mountVendorBindingsWithClientSelected();
       try {
-        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Propose binding"));
-        assert.ok(trigger, "the Propose binding trigger must render");
-        await h.fireEvent(trigger! as never, "click");
-        for (let i = 0; i < 4; i++) await h.settle();
-        assert.match(textOf(body as never), /Supplier Three Sdn Bhd/, "the counterparty select's own real option must be reachable");
-        const violations = checkAccessibility(body as never);
-        assert.deepEqual(violations, [], JSON.stringify(violations));
-      } finally {
-        await h.unmount();
-      }
-    },
-  );
-});
-
-test("vendor-bindings panel: the Sign dialog (proposed row) and the Revoke dialog (live row) each have zero a11y violations", async () => {
-  await withMockedEnv(
-    async (u) => mockVendorBindingsFetch(String(u)),
-    async () => {
-      const { h, body } = await mountVendorBindingsWithClientSelected();
-      try {
-        const signTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign");
-        assert.ok(signTrigger, "the Sign trigger must render for the proposed binding — never pre-hidden on a client-side role guess");
-        await h.fireEvent(signTrigger! as never, "click");
-        for (let i = 0; i < 6; i++) await h.settle();
-        // F2 (independent review): the consent must show what it approves —
-        // a real get_vendor_binding response must have actually rendered,
-        // not merely "no crash happened".
-        assert.match(textOf(body as never), /u1234567/, "the detail view's own real created_by chip must render");
-        let violations = checkAccessibility(body as never);
-        assert.deepEqual(violations, [], `Sign dialog: ${JSON.stringify(violations)}`);
-
-        const cancel = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel");
-        assert.ok(cancel, "the Sign dialog's Cancel must render");
-        await h.fireEvent(cancel! as never, "click");
-        for (let i = 0; i < 4; i++) await h.settle();
+        assert.equal(
+          findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Propose binding")),
+          null,
+          "the Propose trigger must not render — #921 [0273] retired the door",
+        );
+        assert.equal(
+          findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign"),
+          null,
+          "the Sign trigger must not render — #921 [0273] retired the door",
+        );
 
         const revokeTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Revoke");
         assert.ok(revokeTrigger, "the Revoke trigger must render for the live binding");
         await h.fireEvent(revokeTrigger! as never, "click");
         for (let i = 0; i < 6; i++) await h.settle();
-        assert.match(textOf(body as never), /u1234567/, "the Revoke dialog's own detail view must have rendered too");
-        violations = checkAccessibility(body as never);
+        // F2 (independent review): the consent must show what it approves —
+        // a real get_vendor_binding response must have actually rendered,
+        // not merely "no crash happened".
+        assert.match(textOf(body as never), /u1234567/, "the Revoke dialog's own detail view must have rendered");
+        const violations = checkAccessibility(body as never);
         assert.deepEqual(violations, [], `Revoke dialog: ${JSON.stringify(violations)}`);
       } finally {
         await h.unmount();
@@ -317,13 +297,17 @@ test("vendor-bindings panel: the Sign dialog (proposed row) and the Revoke dialo
   );
 });
 
-// --- F3(a)/(b) regression pins (independent re-verify, 2026-08-28) ---------
+// --- F3(a) regression pin (independent re-verify, 2026-08-28) --------------
 //
-// The fix round's own tests never actually exercised the CLIENTS or
-// COUNTERPARTIES read FAILING — every assertion ran against a happy-path
-// mock, so reverting either fix left the shipped suite green. These two
-// cells drive the real failure path and pin the fix's own observable
-// behaviour: L8(a), a fix round pins what it fixed.
+// The fix round's own tests never actually exercised the CLIENTS read
+// FAILING — every assertion ran against a happy-path mock, so reverting the
+// fix left the shipped suite green. This cell drives the real failure path
+// and pins the fix's own observable behaviour: L8(a), a fix round pins what
+// it fixed.
+//
+// F3(b) (the sibling cell for a failed COUNTERPARTIES read) went with the
+// Propose dialog it drove — #921 [0273] retired that door outright. Full
+// history: git blame on this file before #921.
 
 // --- F3(a) regression -------------------------------------------------------
 
@@ -372,38 +356,3 @@ test("F3(a) REGRESSION: a failed client-names read DISCLOSES itself — the regi
   );
 });
 
-// --- F3(b) regression -------------------------------------------------------
-
-test("F3(b) REGRESSION: a failed counterparties read KEEPS the Propose door and explains itself inside the dialog", async () => {
-  await withMockedEnv(
-    async (u) => {
-      const url = String(u);
-      if (url.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
-      if (url.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
-      if (url.includes("/rest/v1/counterparties")) return jsonResponse({ message: "counterparties read failed" }, 500);
-      if (url.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
-      throw new Error(`unexpected fetch: ${url}`);
-    },
-    async () => {
-      const { h, body } = await mountVendorBindingsWithClientSelected();
-      try {
-        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Propose binding"));
-        assert.ok(
-          trigger,
-          "the Propose trigger must render even when the counterparties read failed — a failed READ must never look like 'you may not do this'",
-        );
-        await h.fireEvent(trigger as never, "click");
-        for (let i = 0; i < 6; i++) await h.settle();
-        const txt = textOf(body as never);
-        assert.match(txt, /counterparties read failed/, "the read's verbatim message must render INSIDE the dialog body");
-        assert.ok(
-          findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Retry"),
-          "a Retry control must be offered",
-        );
-      } finally {
-        await h.unmount();
-        for (let i = 0; i < 3; i++) await h.settle();
-      }
-    },
-  );
-});

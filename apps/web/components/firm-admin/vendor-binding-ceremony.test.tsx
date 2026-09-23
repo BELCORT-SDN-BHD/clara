@@ -1,25 +1,23 @@
-// The vendor-binding Sign/Revoke ceremony — a real refusal drives THROUGH the
-// dialog's own Confirm button (using hookHarness.ts's `clickButton`, the
-// direct-prop-invocation mechanism its own header documents as required for
-// ANY control inside an open @base-ui/react Dialog portal — `h.fireEvent`
-// silently no-ops there) and asserts the CLR code + message land VERBATIM in
-// the PANEL's own persistent banner, never inside the dialog — which
-// FirmAdminDoorDialog auto-closes on every confirm attempt regardless of
-// outcome (CloseDoorDialog's own contract, ported). Security-note load-bearing
-// test: sign is a RANK-gated act (admin+) AND, as of the pre-beta hardening
-// batch (裁-18a, mohe-grill-rulings, 2026-08-28), a PERSON-gated one too — the
-// signer must not be the binding's own proposer, unconditionally. This file's
-// own cell below drives the RANK refusal specifically; the trigger this
-// train's own header says is never pre-hidden on a client-side role OR
-// identity guess — this proves the DB's OWN refusal is what actually renders
-// when either rule is exercised.
+// The vendor-binding ceremony — #921 [0273] RETIRED THE PROPOSE AND SIGN
+// CONTROLS OUTRIGHT (migration 0273 revoked clara_authenticated's EXECUTE on
+// both doors for every rank; D6 keeps only "historical receipts and
+// in-flight legacy visibility"). This file used to drive a real refusal
+// through the Sign dialog's own Confirm button — that dialog no longer
+// exists, so those cells go with it (full history: git blame on this file
+// before #921). What survives is the negative space those cells used to take
+// for granted (the trigger renders unconditionally): the cells below prove
+// the OPPOSITE now holds — no propose or sign control renders, AT ANY RANK,
+// including the ranks that used to clear the floor (bookkeeper for propose,
+// admin for sign) — this is a RETIREMENT, not a rank-shaped narrowing, so an
+// owner is refused identically to a viewer. Revoke is UNCHANGED (0273 never
+// touched it) and stays offered to bookkeeper+ on a "live" row.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { FirmScopeProvider } from "@/components/firm-scope-provider";
-import { renderComponent, textOf, clickButton } from "../../test/hookHarness";
+import { renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { VendorBindingsPanel } from "./vendor-bindings-panel";
@@ -57,7 +55,12 @@ function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<vo
 }
 
 const CLIENTS = [{ id: "c1", name: "Acme Sdn Bhd", status: "active", created_at: "2026-01-01T00:00:00Z" }];
-const BINDINGS = [
+
+/** A HISTORICAL "proposed" row — the door that creates one is revoked, so the only way one
+ *  exists on a real database now is a row created before #921 [0273] applied. D6's "historical
+ *  receipts" half: it stays visible, with no action underneath it (no Sign, and it is not
+ *  "live" so not Revoke either). */
+const BINDINGS_PROPOSED = [
   {
     binding_id: "b1", counterparty_id: "cp1", counterparty_name: "Supplier One Sdn Bhd", status: "proposed",
     f1_vendor_name_norm: "supplier one sdn bhd", f2_invoice_prefix: "INV-S", registration_at_signing: "202401012345",
@@ -65,35 +68,25 @@ const BINDINGS = [
     evidence_count: 3, resolution_count: 0, divergence_documents: 0,
   },
 ];
-const COUNTERPARTIES: unknown[] = [];
-// F2's own read: the Sign dialog now mounts VendorBindingDetailView on open.
-const BINDING_DETAIL = {
-  binding: {
-    id: "b1", firm_id: "f1", client_id: "c1", counterparty_id: "cp1", status: "proposed",
-    f1_vendor_name_norm: "supplier one sdn bhd", f2_invoice_prefix: "INV-S", registration_at_signing: "202401012345",
-    content_hash: "a".repeat(64), created_by: "u1234567-89ab-cdef-0123-456789abcdef", created_at: "2026-01-01T00:00:00Z",
-    signed_by: null, signed_at: null, revoked_by: null, revoked_at: null, revoke_reason: null, expires_at: "2026-12-31T00:00:00Z",
+
+/** A "live" row — D6's "in-flight legacy visibility" half: Revoke stays offered to
+ *  bookkeeper+, unchanged by #921 [0273] (0273 never touched revoke_vendor_identity_binding). */
+const BINDINGS_LIVE = [
+  {
+    binding_id: "b2", counterparty_id: "cp2", counterparty_name: "Supplier Two Sdn Bhd", status: "live",
+    f1_vendor_name_norm: "supplier two sdn bhd", f2_invoice_prefix: "INV-T", registration_at_signing: "202401019999",
+    signed_by: "u1234567-89ab-cdef-0123-456789abcdef", signed_at: "2026-01-03T00:00:00Z", expires_at: "2026-12-31T00:00:00Z",
+    evidence_count: 5, resolution_count: 2, divergence_documents: 0,
   },
-  counterparty: { counterparty_id: "cp1", counterparty_name: "Supplier One Sdn Bhd" },
-  evidence: [{ entry_id: "e1", document_id: "d1", facts_extraction_id: "f1", ocr_extraction_id: "o1", posting_date: "2026-01-01" }],
-  resolutions: [],
-};
+];
 
-// E-7 (裁-187): the vendor-bindings panel now shapes its own controls from the
-// firm layout's positively-read caller context, so these mounts supply the
-// provider the real tree always has. ADMIN rank is the fixture, because that is
-// the rank every pre-existing cell here was implicitly exercising when the
-// controls were rendered unconditionally — the BELOW-admin cases are new cells
-// of their own, not a silent change of what these ones prove.
-const ADMIN_SCOPE = { role_rank: 2, is_operator: false };
-
-async function mount(scope?: { role_rank: number | null; is_operator: boolean }) {
+async function mount(scope: { role_rank: number | null; is_operator: boolean }) {
   const h = await renderComponent(
     createElement(NextIntlClientProvider, {
       locale: "en",
       messages,
       children: createElement(FirmScopeProvider, {
-        scope: scope ?? ADMIN_SCOPE,
+        scope,
         children: createElement("div", null, createElement("h1", null, "Vendor identity bindings"), createElement(VendorBindingsPanel)),
       }),
     }),
@@ -113,162 +106,117 @@ async function mount(scope?: { role_rank: number | null; is_operator: boolean })
   return { h, body };
 }
 
-test("Sign refusal (CLR04, insufficient rank): a real click through the dialog's own Confirm button renders the CLR code + message VERBATIM, and the dialog STAYS OPEN carrying it (CB-AE2E-004)", async () => {
-  const calls: { url: string }[] = [];
+/** viewer 0 · bookkeeper 1 · admin 2 · owner 3 (clara.role_rank, 0002:326-331). The TWO
+ *  BOUNDARY ranks, not the full ladder: viewer never cleared either retired floor, and owner
+ *  clears every floor this table has ever named (propose's old bookkeeper+ AND sign's old
+ *  admin+ both sit strictly below it) — so "owner sees neither control" is the single strongest
+ *  witness that #921 is an unconditional retirement, not a rank-shaped narrowing, and adding
+ *  bookkeeper/admin cells beside it would prove nothing an owner's absence does not already
+ *  imply monotonically. Kept to two ranks (not one) so a cell also holds the ceiling and floor
+ *  distinct: each mount/unmount is a real jsdom render of the whole panel tree, and this file
+ *  found in review that iterating the full four-rank ladder across three cells pushed the test
+ *  process's heap into OOM territory — the same reason `capabilities.test.ts`'s own "turns on at
+ *  exactly its own floor" cell samples the boundary ranks rather than the whole ladder. */
+const OWNER_SCOPE = { role_rank: 3, is_operator: false };
+const VIEWER_SCOPE = { role_rank: 0, is_operator: false };
+
+test("no Propose control renders, at any rank — #921 [0273] retired the door, not merely rank-gated it", async () => {
   const impl = (async (url: RequestInfo | URL) => {
     const u = String(url);
-    calls.push({ url: u });
     if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
-    if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
-    if (u.includes("/rest/v1/counterparties")) return jsonResponse(COUNTERPARTIES);
-    if (u.includes("/rpc/sign_vendor_identity_binding")) {
-      return jsonResponse({ code: "CLR04", message: "insufficient rank — sign_vendor_identity_binding requires admin" }, 400);
-    }
-    if (u.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
+    if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS_LIVE);
+    // #921's own vacuity control drove this branch RED against the pre-retirement
+    // UI (git blame): the old ProposeBindingDialog also reads counterparties, and
+    // an unmocked 404 there crashed the whole panel — a false "no button found"
+    // for the WRONG reason. Answered honestly (empty register) so a genuine
+    // regression is what turns this cell red, not an unrelated fetch failure.
+    if (u.includes("/rest/v1/counterparties")) return jsonResponse([]);
     throw new Error(`unexpected fetch: ${u}`);
   }) as typeof fetch;
 
   await withMockedEnv(impl, async () => {
-    const { h, body } = await mount();
-    try {
-      const signTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign");
-      assert.ok(signTrigger, "the Sign trigger must render — never pre-hidden on a client-side role guess");
-      await h.fireEvent(signTrigger! as never, "click");
-      for (let i = 0; i < 4; i++) await h.settle();
-
-      const confirmButton = findIn(
-        body as never,
-        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign" && (n as unknown) !== (signTrigger as unknown),
-      );
-      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger");
-
-      // Portal trap (hookHarness.ts's own header): h.fireEvent cannot reach a
-      // control inside an open base-ui Dialog's portaled content — the
-      // direct-prop-invocation `clickButton` is required.
-      await h.act(() => { clickButton(confirmButton as never); });
-      for (let i = 0; i < 8; i++) await h.settle();
-
-      // CB-AE2E-004 (2026-09-04): a REFUSED confirm keeps the dialog open, and the
-      // refusal renders inside it. Its own Cancel control exists only while open, so
-      // its presence is the open signal. The old assertion demanded the opposite.
-      const cancelStillOpen = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel");
-      assert.ok(cancelStillOpen, "the dialog must STAY OPEN after a refused confirm");
-
-      const bodyText = textOf(body as never);
-      assert.match(bodyText, /CLR04/, "the CLR code must render, verbatim");
-      assert.match(bodyText, /insufficient rank/, "the DB's own message must render, verbatim — never re-worded");
-
-      const call = calls.find((c) => c.url.includes("/rpc/sign_vendor_identity_binding"));
-      assert.ok(call, "sign_vendor_identity_binding must have actually been called — the DB's rank check is the wall, not a client-side gate");
-    } finally {
-      await h.unmount();
-      for (let i = 0; i < 3; i++) await h.settle();
+    for (const scope of [OWNER_SCOPE, VIEWER_SCOPE]) {
+      const { h, body } = await mount(scope);
+      try {
+        // BY ROLE and BY TEXT — a control rendered as a non-button, or a leftover
+        // label, would slip past one of the two (firm-navigation-walk.spec.ts's own
+        // house convention for a retired control).
+        assert.equal(
+          findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Propose binding"),
+          null,
+          `rank ${scope.role_rank}: the Propose trigger must not render — the door has no rank left that reaches it`,
+        );
+        assert.doesNotMatch(textOf(body as never), /Propose binding/, `rank ${scope.role_rank}: the label must not survive anywhere in the page text`);
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
     }
   });
 });
 
-// MED-3 (independent review, 2026-08-29): the signer<>proposer wall's CLR04 refusal carries a
-// stable `reason` token in its DETAIL (`{"reason":"signer_is_proposer"}`), distinct from the
-// bare-message shape the RANK-floor refusal above carries (which has no reason token). This
-// cell proves the estate's generic wire.ts reason-parsing pipeline (`parseReasonToken`,
-// already wired into every StateBanner via `clr.reason`) actually surfaces THIS wall's reason
-// — no vendor-bindings.ts change was needed (confirmed: `signVendorIdentityBinding` is a bare
-// `callDoor` passthrough, no error transform), but nothing proved the reason renders until now.
-test("Sign refusal (CLR04, signer_is_proposer): the wall's stable reason token renders in the panel's own banner, distinguishing it from a bare rank refusal", async () => {
-  const calls: { url: string }[] = [];
+test("no Sign control renders, at any rank, even for a historical 'proposed' row — #921 [0273]", async () => {
   const impl = (async (url: RequestInfo | URL) => {
     const u = String(url);
-    calls.push({ url: u });
     if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
-    if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
-    if (u.includes("/rest/v1/counterparties")) return jsonResponse(COUNTERPARTIES);
-    if (u.includes("/rpc/sign_vendor_identity_binding")) {
-      // The exact PostgREST error envelope shape (code/message/details) a real
-      // DETAIL '{"reason":"signer_is_proposer"}' raise produces (wire.ts's
-      // classifyPgrestFailure reads `body.details`, JSON-parses it via
-      // parseReasonToken).
-      return jsonResponse({
-        code: "CLR04",
-        message: "the signer cannot be the same person who proposed this binding; let Clara propose it, or add a second admin",
-        details: JSON.stringify({ reason: "signer_is_proposer" }),
-      }, 400);
-    }
-    if (u.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
+    if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS_PROPOSED);
+    if (u.includes("/rest/v1/counterparties")) return jsonResponse([]);
     throw new Error(`unexpected fetch: ${u}`);
   }) as typeof fetch;
 
   await withMockedEnv(impl, async () => {
-    const { h, body } = await mount();
-    try {
-      const signTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign");
-      assert.ok(signTrigger, "the Sign trigger must render");
-      await h.fireEvent(signTrigger! as never, "click");
-      for (let i = 0; i < 4; i++) await h.settle();
-
-      const confirmButton = findIn(
-        body as never,
-        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign" && (n as unknown) !== (signTrigger as unknown),
-      );
-      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger");
-      await h.act(() => { clickButton(confirmButton as never); });
-      for (let i = 0; i < 8; i++) await h.settle();
-
-      const bodyText = textOf(body as never);
-      assert.match(bodyText, /CLR04/, "the CLR code must render, verbatim");
-      assert.match(bodyText, /let Clara propose it, or add a second admin/, "the wall's own message, in the OWNER'S RULED WORDS, must render verbatim");
-      // THE DISCRIMINATING ASSERTION (MED-3, rev-hb F2: structured, not English-prose
-      // matching): every panel renders the reason in the EXACT `${code} · ${reason}` slot
-      // format (compliance-register-panel.tsx / vendor-bindings-panel.tsx / this component
-      // all share it) — pin THAT exact shape, not merely "the token appears somewhere",
-      // which is what tells a caller this is SPECIFICALLY the signer<>proposer wall,
-      // distinguishable from a bare rank refusal (the previous cell, no reason token at all)
-      // or any other CLR04 in the estate.
-      assert.match(bodyText, /CLR04 · signer_is_proposer/, "the wall's stable reason token must render in the banner's own CODE · REASON slot, not just appear anywhere in the page text");
-
-      const call = calls.find((c) => c.url.includes("/rpc/sign_vendor_identity_binding"));
-      assert.ok(call, "sign_vendor_identity_binding must have actually been called — the DB's wall is the wall, not a client-side gate");
-    } finally {
-      await h.unmount();
-      for (let i = 0; i < 3; i++) await h.settle();
+    for (const scope of [OWNER_SCOPE, VIEWER_SCOPE]) {
+      const { h, body } = await mount(scope);
+      try {
+        // The historical row itself still renders as HISTORY (D6's "historical
+        // receipts" half) — its absence would mean the panel broke, not that Sign
+        // was correctly retired.
+        assert.match(textOf(body as never), /Supplier One Sdn Bhd/, `rank ${scope.role_rank}: the historical row must still render`);
+        assert.equal(
+          findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign"),
+          null,
+          `rank ${scope.role_rank}: the Sign trigger must not render — the door has no rank left that reaches it`,
+        );
+        assert.doesNotMatch(textOf(body as never), /Sign this vendor identity binding/, `rank ${scope.role_rank}: the Sign dialog title must not survive anywhere in the page text`);
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
     }
   });
 });
 
-// 裁-18a (mohe-grill-rulings, 2026-08-28) copy re-true pin: before this ruling landed,
-// signDescription claimed "the same admin who proposed it may also sign it" — the DB now
-// REFUSES exactly that (a signer<>proposer wall, unconditional even for a single-admin firm),
-// so the old claim would be actively false if it survived. This cell opens the real Sign
-// dialog (no confirm — just the description that renders while the human is deciding) and
-// pins both halves: the corrected copy renders, and the retired copy does not.
-test("Sign dialog description states the signer<>proposer rule (裁-18a), not the retired same-admin claim", async () => {
+test("Revoke stays offered on a live binding to bookkeeper+, and absent below it — #921 [0273] left this door untouched (D6's in-flight-legacy-visibility half)", async () => {
   const impl = (async (url: RequestInfo | URL) => {
     const u = String(url);
     if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
-    if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
-    if (u.includes("/rest/v1/counterparties")) return jsonResponse(COUNTERPARTIES);
-    if (u.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
+    if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS_LIVE);
+    if (u.includes("/rest/v1/counterparties")) return jsonResponse([]);
     throw new Error(`unexpected fetch: ${u}`);
   }) as typeof fetch;
 
   await withMockedEnv(impl, async () => {
-    const { h, body } = await mount();
+    const viewer = await mount({ role_rank: 0, is_operator: false });
     try {
-      const signTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign");
-      assert.ok(signTrigger, "the Sign trigger must render");
-      await h.fireEvent(signTrigger! as never, "click");
-      for (let i = 0; i < 4; i++) await h.settle();
-
-      const dialogText = textOf(body as never);
-      assert.match(dialogText, /an admin who did not propose this binding/,
-        "the corrected copy (裁-18a) must render in the open Sign dialog");
-      assert.doesNotMatch(dialogText, /the same admin who proposed it may also sign it/,
-        "the retired, now-false copy must not render");
-      // rev-hb F1: both exits, in the owner's own words.
-      assert.match(dialogText, /let Clara propose it, or add a second admin/,
-        "the Sign dialog's own description must name both lawful exits, verbatim");
+      assert.equal(
+        findIn(viewer.body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Revoke"),
+        null,
+        "a viewer, below the bookkeeper floor, is offered no Revoke trigger",
+      );
     } finally {
-      await h.unmount();
-      for (let i = 0; i < 3; i++) await h.settle();
+      await viewer.h.unmount();
+      for (let i = 0; i < 3; i++) await viewer.h.settle();
+    }
+
+    const bookkeeper = await mount({ role_rank: 1, is_operator: false });
+    try {
+      assert.ok(
+        findIn(bookkeeper.body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Revoke"),
+        "a bookkeeper, at revoke_vendor_identity_binding's own floor (0028:903), is offered Revoke",
+      );
+    } finally {
+      await bookkeeper.h.unmount();
+      for (let i = 0; i < 3; i++) await bookkeeper.h.settle();
     }
   });
 });
