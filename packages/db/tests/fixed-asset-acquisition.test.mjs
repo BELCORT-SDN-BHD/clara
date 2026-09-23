@@ -771,7 +771,7 @@ test("p639.belt.convention_comment both trigger bodies carry the belt/birth conv
 
   // THE BIRTH'S BODY IS NOT BYTE-FROZEN BY THIS TICKET, and a cell that pinned it here would
   // claim it was. #882 asserts that 0278 moved nothing; whether the body is at 0277's bytes is a
-  // fact each RECUTTING migration pins in its own prestate and tail (0277's, then 0280's, which
+  // fact each RECUTTING migration pins in its own prestate and tail (0277's, then 0292's, which
   // lawfully recut both birth sites to decline a policy that no longer fits its enrolment). What
   // survives every such recut — and what this cell therefore asserts — is that no earlier
   // marker was lost along the way.

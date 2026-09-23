@@ -1,4 +1,4 @@
--- 0280_fa_policy_enrolment_congruence — #932 FIX ROUND (riders wave 3, lane 04 review): A DEFAULT
+-- 0292_fa_policy_enrolment_congruence — #932 FIX ROUND (riders wave 3, lane 04 review): A DEFAULT
 -- DEPRECIATION POLICY APPLIES ONLY WHILE IT STILL FITS THE ENROLMENT IT WAS VALIDATED AGAINST.
 -- =====================================================================================
 -- Spec of record: issue #932 and the lane's own adversarial review (ADV-L04-1, blocker,
@@ -84,9 +84,9 @@ begin
   -- signal is the marker only this file writes.
   select p.prosrc into v_comment from pg_proc p
    where p.oid = 'clara._tf_fa_acquisition_birth()'::regprocedure;
-  if position('#932 FIX ROUND (0280)' in coalesce(v_comment, '')) > 0 then
+  if position('#932 FIX ROUND (0292)' in coalesce(v_comment, '')) > 0 then
     v_redo := true;
-    raise notice '#932 fix-round prestate: the recut birth body already carries this file''s marker -- treating this as a #957 REDO of 0280 itself. Both statements are create-or-replace; the tail re-proves the whole post-state from scratch.';
+    raise notice '#932 fix-round prestate: the recut birth body already carries this file''s marker -- treating this as a #957 REDO of 0292 itself. Both statements are create-or-replace; the tail re-proves the whole post-state from scratch.';
   end if;
 
   for v_pin in select * from (values
@@ -192,7 +192,7 @@ begin
     select * into v_pol from clara.fa_account_depreciation_policies
       where client_id = new.client_id and asset_account_code = l.account_code and active
       limit 1;
-    -- #932 FIX ROUND (0280): THE POLICY MUST STILL FIT THE ENROLMENT IT WAS VALIDATED AGAINST.
+    -- #932 FIX ROUND (0292): THE POLICY MUST STILL FIT THE ENROLMENT IT WAS VALIDATED AGAINST.
     -- clara.set_fa_depreciation_policy refuses every method but `none` on a NON-DEPRECIABLE
     -- enrolment (0277 §B) -- but that is a wall at SET time only. Re-issuing the enrolment with
     -- no accumulated-depreciation account leaves the depreciating policy LIVE, and a row born
@@ -208,7 +208,7 @@ begin
       -- POLICY-COVERED: the row is born COMPLETE, never "particulars pending". The start date is
       -- the ACQUISITION'S OWN posting date (owner ruling 2026-09-18) — never today's date, and
       -- never the policy's own effective_from.
-      -- #932 FIX ROUND (0280), SPEC-932-2: 0277's own words here were "effective_from ... only
+      -- #932 FIX ROUND (0292), SPEC-932-2: 0277's own words here were "effective_from ... only
       -- gates WHICH acquisitions the policy reaches", and that was never true of the code
       -- underneath them — this lookup filters on `active` alone, and no consumer in packages/db
       -- or apps/web reads effective_from for any decision. It is a RECORDED fact (when the person
@@ -667,7 +667,7 @@ begin
       select * into v_pol from clara.fa_account_depreciation_policies
         where client_id = e.client_id and asset_account_code = l.account_code and active
         limit 1;
-      -- #932 FIX ROUND (0280): THE SAME ENROLMENT-CONGRUENCE GUARD §B gives the deferred
+      -- #932 FIX ROUND (0292): THE SAME ENROLMENT-CONGRUENCE GUARD §B gives the deferred
       -- trigger, for the same reason and in the same words (see §B's own note): a policy whose
       -- enrolment has since been re-issued as non-depreciable is DECLINED, and the row births
       -- pending rather than COMPLETE-and-unchargeable.
@@ -735,7 +735,7 @@ comment on function clara._tf_fa_acquisition_birth() is
   'fa_belt_unregistered_movement. Owner ruling 2026-09-18 (#882): that outcome stays -- the '
   'instant is reachable by no production door, and neither trigger is widened to read the '
   'other''s signal. '
-  '#932 FIX ROUND (0280): a policy applies only while it still FITS the enrolment it was '
+  '#932 FIX ROUND (0292): a policy applies only while it still FITS the enrolment it was '
   'validated against. Re-issuing the enrolment with no accumulated-depreciation account leaves a '
   'depreciating policy live, and a row born from it would be COMPLETE with nowhere to post -- so '
   'this trigger declines a live policy whose method is not none when the CURRENT enrolment '
@@ -758,7 +758,7 @@ begin
       ($$if v_pol.id is not null and not (l.accum_code is null and v_pol.method <> 'none') then$$, 1),
       -- TWICE in this body: once on the guard itself, once on the SPEC-932-2 prose correction
       -- inside the covered branch (the header says why both ride here).
-      ('#932 FIX ROUND (0280)', 2),
+      ('#932 FIX ROUND (0292)', 2),
       ('from clara.fa_account_depreciation_policies', 1),
       ('insert into clara.fixed_assets(', 1),
       ('on conflict (acquisition_line_id) do nothing', 1),
@@ -799,7 +799,7 @@ begin
   select p.prosrc into v_src from pg_proc p where p.oid = 'clara._fa_on_approve(uuid)'::regprocedure;
   for v_pin in select * from (values
       ($$if v_pol.id is not null and not (l.accum_code is null and v_pol.method <> 'none') then$$, 1),
-      ('#932 FIX ROUND (0280)', 1),
+      ('#932 FIX ROUND (0292)', 1),
       ('from clara.fa_account_depreciation_policies', 1),
       ('on conflict (acquisition_line_id) do nothing', 1),
       ($$'Fixed asset (particulars pending) - '$$, 1),
@@ -841,7 +841,7 @@ begin
   end if;
   if position('#639' in v_comment) = 0 or position('#972 (0247)' in v_comment) = 0
      or position('#932 (0277)' in v_comment) = 0 or position('#882 (0278)' in v_comment) = 0
-     or position('#932 FIX ROUND (0280)' in v_comment) = 0 then
+     or position('#932 FIX ROUND (0292)' in v_comment) = 0 then
     raise exception '#932 fix-round tail T.3c: the birth''s comment lost a provenance marker (#639 / #972 (0247) / #932 (0277) / #882 (0278)) or never gained this file''s own' using errcode='CLR10';
   end if;
 

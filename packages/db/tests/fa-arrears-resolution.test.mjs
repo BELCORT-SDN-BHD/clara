@@ -53,7 +53,7 @@ async function gate(t) {
   return gate975(t);
 }
 
-/** …and the four cells that assert the FIX ROUND's behaviour need 0281 as well. */
+/** …and the four cells that assert the FIX ROUND's behaviour need 0293 as well. */
 async function gateB(t) {
   if (!live) {
     t.skip("0041 is not applied — the #975 battery is dormant");

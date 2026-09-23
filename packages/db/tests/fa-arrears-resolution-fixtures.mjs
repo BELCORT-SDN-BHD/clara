@@ -63,7 +63,7 @@ export async function gate975(t) {
   return true;
 }
 
-/** `0281_fa_arrears_judgement_scope.sql` → `fa_arrears_judgement_scope$`. #975's fix round
+/** `0293_fa_arrears_judgement_scope.sql` → `fa_arrears_judgement_scope$`. #975's fix round
  *  (spec review SPEC-975-1, adversarial ADV-L04-2/3/4): the refusal states the NAMED year's own
  *  amount, a judgement licenses only the figure it was made about, and reopen_prior is refused on
  *  a year that is only closing. Its own stem, because a chain can carry 0279 without it. */
@@ -84,8 +84,8 @@ async function fa975bReady() {
   return _ready0281;
 }
 
-/** The per-CELL frontier gate for the fix round, COUNTED — `gate975`'s exact shape on 0281's own
- *  stem. A FOCUSED invocation FAILS LOUDLY below 0281: a skip is not evidence. */
+/** The per-CELL frontier gate for the fix round, COUNTED — `gate975`'s exact shape on 0293's own
+ *  stem. A FOCUSED invocation FAILS LOUDLY below 0293: a skip is not evidence. */
 export async function gate975b(t) {
   if (await gate975(t)) return true;
   if (await fa975bReady()) return false;

@@ -1,4 +1,4 @@
--- 0281_fa_arrears_judgement_scope — #975 FIX ROUND (riders wave 3, lane 04 review): A MATERIALITY
+-- 0293_fa_arrears_judgement_scope — #975 FIX ROUND (riders wave 3, lane 04 review): A MATERIALITY
 -- JUDGEMENT LICENSES THE FIGURE IT WAS MADE ABOUT, THE REFUSAL STATES THE NAMED YEAR'S OWN
 -- AMOUNT, AND EVERY REMEDY IT NAMES IS ONE THE READER CAN ACTUALLY REACH.
 -- =====================================================================================
@@ -51,7 +51,7 @@
 -- `clara.record_fa_arrears_resolution` and `clara._fa_run_period_core`, taken byte for byte and
 -- changed only in the places the three defects live -- and three static ACL statements
 -- re-asserting the record door's grant. It creates no relation, mints no function, adds no role
--- and moves no grant, so it owes no rig-meta cohort (0278 and 0280 make the same claim for the
+-- and moves no grant, so it owes no rig-meta cohort (0278 and 0292 make the same claim for the
 -- same reason). It contains NO dynamic SQL at all -- the ACL is three literal statements rather
 -- than 0279's bulk loop -- so it needs no reviewed-barrier entry in
 -- apps/web/tests/firm-scope-db-pins.corpus.ts either.
@@ -70,8 +70,8 @@ do $p975b_pre$
 declare
   v_sha text; v_pin record; v_redo boolean := false;
   -- THE LIVE PRE-IMAGES, measured off pg_proc.prosrc on the lane-04 rig (clara_l04, PG 17, chain
-  -- 0001..0280) moments before this file was written, never transcribed from an earlier
-  -- migration's header.
+  -- 0001..0279 plus this lane's own fix-round sibling, renumbered 0292 at merge) moments before
+  -- this file was written, never transcribed from an earlier migration's header.
   c_core_pre constant text :=
     '5679c4ab696a3e9b48fede3054511c5d9e236c59cf4ceb9f72062fcb11ad4105';
   c_record_pre constant text :=
@@ -89,9 +89,9 @@ begin
   -- this file writes.
   select p.prosrc into v_sha from pg_proc p
    where p.oid = 'clara._fa_run_period_core(uuid,date,date,text,uuid,uuid,text)'::regprocedure;
-  if position('#975 FIX ROUND (0281' in coalesce(v_sha, '')) > 0 then
+  if position('#975 FIX ROUND (0293' in coalesce(v_sha, '')) > 0 then
     v_redo := true;
-    raise notice '#975 fix-round prestate: the recut run core already carries this file''s marker -- treating this as a #957 REDO of 0281 itself. Every statement below is redo-safe by construction; the tail re-proves the whole post-state from scratch.';
+    raise notice '#975 fix-round prestate: the recut run core already carries this file''s marker -- treating this as a #957 REDO of 0293 itself. Every statement below is redo-safe by construction; the tail re-proves the whole post-state from scratch.';
   end if;
 
   for v_pin in select * from (values
@@ -208,7 +208,7 @@ begin
         detail = jsonb_build_object('reason', 'fa_arrears_resolution_invalid',
           'axis', 'year_not_closed', 'fy_status', fy.status)::text;
   end if;
-  -- #975 FIX ROUND (0281, adversarial review ADV-L04-4): reopen_prior NAMES A REMEDY, and on a
+  -- #975 FIX ROUND (0293, adversarial review ADV-L04-4): reopen_prior NAMES A REMEDY, and on a
   -- year that is only CLOSING that remedy does not exist. clara._tf_fiscal_years_lifecycle
   -- (0056:334-336) admits open|reopened -> closing, closing -> open|closed, and closed ->
   -- reopened -- there is NO closing -> reopened edge, and clara.reopen_fiscal_year is the
@@ -297,7 +297,7 @@ declare
   v_actor uuid; v_ramp boolean; v_status text; v_dr bigint; v_cr bigint; v_breach jsonb;
   -- #975 (0279): the closed-year arrears question -- see the block below the locked-period wall.
   v_arr jsonb; v_unresolved jsonb; v_awaiting jsonb; v_chosen jsonb;
-  -- #975 FIX ROUND (0281): the third bucket (a judgement whose figure has moved), the ONE year
+  -- #975 FIX ROUND (0293): the third bucket (a judgement whose figure has moved), the ONE year
   -- each refusal names, its OWN amount, the client-wide total under its own name, and the remedy
   -- that is actually reachable from the named year's status.
   v_stale jsonb; v_named jsonb; v_amt bigint; v_total bigint; v_remedy text;
@@ -443,7 +443,7 @@ begin
     -- the figure that still stands and is waiting for its year to be reopened. Any of the three
     -- stops the run.
     --
-    -- #975 FIX ROUND (0281, adversarial review ADV-L04-2): `v_stale` is new. The record door
+    -- #975 FIX ROUND (0293, adversarial review ADV-L04-2): `v_stale` is new. The record door
     -- already enforces "a materiality judgement is made ABOUT an amount" at RECORD time (0279's
     -- own `arrears_changed` axis, and its comment: a judgement filed against a stale figure
     -- "would put a stale ruling on the file"). Nothing applied the same law at FOLD time, so a
@@ -465,7 +465,7 @@ begin
        and (y -> 'resolution' ->> 'arrears_cents')::bigint
            is not distinct from (y ->> 'arrears_cents')::bigint;
     if jsonb_array_length(v_unresolved) > 0 then
-      -- THE NAMED YEAR'S OWN AMOUNT, NEVER THE CLIENT-WIDE TOTAL [0281, ADV-L04-3 / SPEC-975-1].
+      -- THE NAMED YEAR'S OWN AMOUNT, NEVER THE CLIENT-WIDE TOTAL [0293, ADV-L04-3 / SPEC-975-1].
       -- The sentence names ONE year, so it must quote THAT year's figure: quoting the sum over
       -- every closing/closed year made the remedy unusable, because clara.record_fa_arrears_
       -- resolution re-measures PER YEAR and refuses any other number. The total is a real figure
@@ -530,7 +530,7 @@ begin
     if jsonb_array_length(v_awaiting) > 0 then
       v_named := v_awaiting -> 0;
       v_amt := (v_named ->> 'arrears_cents')::bigint;
-      -- THE REMEDY IS DERIVED FROM THE NAMED YEAR'S OWN STATUS [0281, ADV-L04-4]. The record
+      -- THE REMEDY IS DERIVED FROM THE NAMED YEAR'S OWN STATUS [0293, ADV-L04-4]. The record
       -- door now refuses reopen_prior on a CLOSING year outright, so this branch reaches a
       -- closing year only through a row recorded while the year was closed and since walked
       -- closed -> reopened -> closing. A refusal may not name an edge that does not exist from

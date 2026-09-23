@@ -264,7 +264,7 @@ test("p932.birth.uncovered an account with no policy still parks the question ex
   assert.equal(json.rows[0].j.particulars_complete, false, "the row is NOT complete — the question is still open");
 });
 
-/** The fix round's own frontier: 0277 AND 0280. */
+/** The fix round's own frontier: 0277 AND 0292. */
 const shutC = async (t) => (skip41(t, live, "the #932 default depreciation policy battery") ? true : await gate932c(t));
 
 test("p932.drift a policy set against a DEPRECIABLE enrolment stops applying the moment that enrolment is re-issued as NON-depreciable: the acquisition is born PENDING, and the client's depreciation lane is not wedged", async (t) => {

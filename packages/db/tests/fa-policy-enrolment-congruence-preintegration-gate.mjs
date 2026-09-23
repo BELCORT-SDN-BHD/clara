@@ -1,4 +1,4 @@
-// Pre-integration gate for #932's fix-round enrolment-congruence guard (migration 0280). NOT a
+// Pre-integration gate for #932's fix-round enrolment-congruence guard (migration 0292). NOT a
 // test file: preload it for an estate sweep run against a chain that predates this file's
 // migration, so the sweep greens with a LOUD skip instead of hard-failing the `p932.drift` cell
 // against a database where a stale default depreciation policy still births an unchargeable

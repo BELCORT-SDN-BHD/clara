@@ -56,7 +56,7 @@ export async function gate932(t) {
   return true;
 }
 
-/** `0280_fa_policy_enrolment_congruence.sql` → `fa_policy_enrolment_congruence$`. #932's fix
+/** `0292_fa_policy_enrolment_congruence.sql` → `fa_policy_enrolment_congruence$`. #932's fix
  *  round (adversarial review ADV-L04-1): a default policy applies only while it still FITS the
  *  enrolment it was validated against. Its own stem, because a chain can carry 0277 without it. */
 export const FA_POLICY_ENROLMENT_CONGRUENCE_STEM = "fa_policy_enrolment_congruence$";
@@ -76,8 +76,8 @@ async function fa932cReady() {
   return _ready0280;
 }
 
-/** The per-CELL frontier gate for the fix round, COUNTED — `gate932`'s exact shape on 0280's own
- *  stem. A FOCUSED invocation FAILS LOUDLY below 0280: a skip is not evidence. */
+/** The per-CELL frontier gate for the fix round, COUNTED — `gate932`'s exact shape on 0292's own
+ *  stem. A FOCUSED invocation FAILS LOUDLY below 0292: a skip is not evidence. */
 export async function gate932c(t) {
   if (await gate932(t)) return true;
   if (await fa932cReady()) return false;

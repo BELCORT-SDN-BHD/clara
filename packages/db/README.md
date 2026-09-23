@@ -3055,6 +3055,7 @@ the grant must have been re-made", 0154's own claim about the recreated 3-arg si
 rather than deleted: the OWNER's EXECUTE is asserted at every frontier, and the HUMAN's EXECUTE is
 asserted to track the `vendor_binding_write_doors_revoked` ledger row, so the cell reads true on
 both sides of this migration.
+
 ## 0274 — a trade-invoice party resolves by its TIN (#982)
 
 The owner ruled on 2026-09-20 that a TIN becomes a real resolution key for a trade-invoice
@@ -3313,6 +3314,7 @@ carrying 0225 and 0274 and not 0275 still runs #655's and #982's batteries in fu
 `trade_invoice_duplicate_probe$`, and its `--import` token in `package.json`'s test script in
 migration order. `TRADE_INVOICE_DUPLICATE_0275_COHORT` in [tests/rig-meta.mjs](tests/rig-meta.mjs)
 attributes the new names.
+
 ## 0277 — a default depreciation policy per enrolled fixed-asset account (#932, riders wave 3 lane 04)
 
 `0277_fa_default_depreciation_policy.sql` mints `clara.fa_account_depreciation_policies` (append-
@@ -3498,115 +3500,6 @@ Frontier gate: `tests/fa-arrears-resolution-preintegration-gate.mjs`, keyed on t
 `tests/depreciation-history.test.mjs` is BIMODAL on this file's stem: once the fold is recorded,
 everything #651 measured is unchanged.
 
-## 0280 — a default depreciation policy applies only while it still fits its enrolment (#932 fix round, riders wave 3 lane 04)
-
-`0280_fa_policy_enrolment_congruence.sql` closes the blocker the lane's adversarial review drove
-(ADV-L04-1). `clara.set_fa_depreciation_policy` refuses every method but `none` on a
-NON-depreciable enrolment (0277 §B), but that is a wall at SET time only, and
-`clara.upsert_fa_account_profile` is version-forward and reads no policy (0277 pins it unmoved, and
-so does this file). ONE ordinary re-enrolment with `accum_depr_account_code = null` therefore left a
-`straight_line` policy live; the next acquisition was born COMPLETE from it while taking its
-accumulated and expense codes from the NEW profile — i.e. NULL. `clara.preview_depreciation_run`
-then offered two legs with `account_code: null` and `clara.run_depreciation_manual` died on an
-untyped `23502` (`journal_lines.account_code`), which no door can rescue —
-`complete_fixed_asset_particulars` refuses `fa_particulars_already_complete` and
-`revise_fixed_asset_particulars` refuses the `depreciation_method` key — and which
-`packages/runtime/lib/reconciler-fa.mjs` isolates per client, silently stopping that client's
-depreciation for good.
-
-**The change is one line in each of the two birth sites**, plus the comment that names it: the
-policy-covered branch is entered only when `not (l.accum_code is null and v_pol.method <> 'none')`.
-A declined policy falls through to 0247's own UNCOVERED branch, so the row births exactly as an
-uncovered non-depreciable acquisition does — method `none`, no start date, no provenance, the
-"particulars pending" description — and a person is asked, which is what the estate already does
-for every account carrying no policy at all. The enrolment door keeps accumulated and expense a
-PAIR (`0041:2785-2789`), so the accumulated code alone decides it.
-
-**Why a separate file rather than an edit to 0277.** 0278's prestate pins 0277's post-image of
-`clara._tf_fa_acquisition_birth` by `sha256(prosrc)` and accretes onto its 842-character comment,
-and #957's redo path re-applies only the HIGHEST applied version — so editing 0277 in place would
-have broken 0278's prestate on a from-scratch chain and could not have been re-applied to the rig
-at all. The number is provisional and claimed at MERGE; the battery gates on the stable stem
-`fa_policy_enrolment_congruence$`.
-
-**Shape.** Prestate pins both recut bodies at their measured 0277 post-images
-(`c2c62b29…`, `ea7499ae…`) with a redo branch keyed on this file's own marker, pins four bodies it
-does NOT touch (`clara.upsert_fa_account_profile`, `clara._fa_particulars_complete`,
-`clara.set_fa_depreciation_policy`, `clara._fa_asset_json`), and hashes the birth's catalog comment
-at 0278's own 1553 characters before accreting one sentence onto it. The tail re-reads both bodies
-for the guard marker AND for every marker 0277's own tail pinned (0247's four exclusions, the #972
-watermark, the single conflict-targeted insert, both description literals, the three untouched arms
-of `clara._fa_on_approve`), proves the UNGUARDED form is gone from both, re-checks
-owner/definer/search_path/ACL and the deferred trigger's binding, and re-reads the four unmoved
-bodies. It creates no relation, mints no function and moves no grant, so it owes no `rig-meta.mjs`
-cohort (0278 makes the same claim for the same reason) and no
-`apps/web/tests/firm-scope-db-pins.corpus.ts` barrier entry — it contains no dynamic SQL at all.
-
-**Cells.** `p932.drift` in `tests/fa-depreciation-policy.test.mjs`, gated on this file's own stem
-through `gate932c` (`tests/fa-depreciation-policy-fixtures.mjs`) and
-`tests/fa-policy-enrolment-congruence-preintegration-gate.mjs`: set a `straight_line` policy,
-re-issue the enrolment as non-depreciable through the real door, acquire, and see the row born
-pending with no provenance — then drive `liveAuthority` + the due ladder and see no `23502`.
-
-## 0281 — a materiality judgement licenses the figure it was made about (#975 fix round, riders wave 3 lane 04)
-
-`0281_fa_arrears_judgement_scope.sql` closes three defects the lane's review drove against 0279.
-0279 asks the right question; what it got wrong is the answer's SCOPE. It recuts exactly two
-bodies — `clara.record_fa_arrears_resolution` and `clara._fa_run_period_core` — and contains no
-dynamic SQL at all.
-
-**(1) A judgement about one amount authorised folding any later amount** (ADV-L04-2 blocker,
-SPEC-975-2). The record door already enforces "a materiality judgement is made ABOUT an amount": it
-re-measures the year and refuses CLR37 `arrears_changed` when the figure moved between the question
-and the answer. `clara._fa_run_period_core` applied no such test at FOLD time — it read the
-CURRENTLY measured arrears and the STORED choice and never compared them. DRIVEN: a `fold_current`
-recorded about 10,000 sen proceeded to fold 20,000, and the receipt named the very record whose own
-stored figure was 10,000. The guard now splits the affected years THREE ways — no live resolution,
-a live resolution made about a different figure, or a `reopen_prior` at the figure that still
-stands — and the middle bucket refuses (or parks) on its own reason
-`arrears_changed_since_judgement`, naming `judged_cents` and `arrears_cents` both. AC2's "a later
-run proceeds on the record without asking again" is untouched for an unmoved figure, which is what
-AC2 is about.
-
-**(2) The refusal stated the client-wide TOTAL as the named year's amount** (ADV-L04-3,
-SPEC-975-1). 0279 raised and parked with the sum over every closing/closed year carrying arrears —
-including years already answered — while naming only the first unresolved year. It compounded: the
-record door re-measures PER YEAR, so a caller answering with the number the refusal had just stated
-was refused `arrears_changed` and the run stayed blocked. The web panel escaped it only because it
-passes its own per-year figure. Every sentence and every `detail.arrears_cents` now carries the
-NAMED year's own amount, and the client-wide total rides beside it under `total_arrears_cents`.
-
-**(3) `reopen_prior` was admitted on a year that is only CLOSING** (ADV-L04-4).
-`clara._tf_fiscal_years_lifecycle` admits `open|reopened → closing`, `closing → open|closed` and
-`closed → reopened`; there is no `closing → reopened` edge, and `clara.reopen_fiscal_year` is the
-`closed → reopened` verb. DRIVEN: the judgement was admitted, the run then refused
-`arrears_awaiting_reopen` with remedy `reopen_fiscal_year`, and that remedy's own write was refused
-CLR10 `fy_lifecycle_edge_invalid`. The record door now refuses `reopen_prior` while the year is
-still closing, on its own axis `year_still_closing`, naming `clara.finalize_close`. `fold_current`
-stays open on a closing year: this refuses one unreachable remedy, never the question. The run core
-also derives its awaiting-remedy from the named year's own status, for the one path that can still
-reach a closing year carrying a live `reopen_prior` (`closed → reopened → closing` after the
-judgement was made).
-
-**Not touched, and pinned in both the prestate and the tail:** `clara._fa_closed_arrears` (the
-arithmetic was never wrong — only the scope the refusal quoted it at), the due oracle, the preview,
-both run verbs, the Work lane's run door, `clara._fa_assert_period_open`,
-`clara.reopen_fiscal_year` and `clara.finalize_close`. It mints no function and moves no grant, so
-it owes no `rig-meta.mjs` cohort, and being free of dynamic SQL it needs no barrier entry in
-`apps/web/tests/firm-scope-db-pins.corpus.ts`. Its ACL section is three literal statements rather
-than 0279's bulk `execute format` loop, for exactly that reason.
-
-**Cells** (`tests/fa-arrears-resolution.test.mjs`, gated on the stable stem
-`fa_arrears_judgement_scope$` through `gate975b` and
-`tests/fa-arrears-judgement-scope-preintegration-gate.mjs`): `p975.two_years` builds the first
-TWO-closed-year state the battery ever had and answers the first year with the number the refusal
-stated; `p975.stale.park` drives the swept lane over a moved figure; `p975.closing_reopen` drives
-the closing-year refusal and then shows `fold_current` still admitted; and `p975.fold`'s later-run
-segment — which previously MEASURED the silent larger fold — now drives the re-ask and the
-re-judgement.
-
-**Why a separate file rather than an edit to 0279.** #957's redo path re-applies only the HIGHEST
-applied version, and 0279 is no longer it. The number is provisional and claimed at MERGE.
 ## 0284 — a dedicated accrual-correction door (#936, riders wave 3, lane 06)
 
 `0284_accrual_correction.sql` closes the bug measured during #907's review: the only way to
@@ -3838,6 +3731,7 @@ absent, and there is no backfill and no data-dependent branch anywhere in the pr
 A `CLARA_MIGRATION_REDO` of this file was exercised during authoring; note that `create table if not
 exists` SKIPS an existing relation, so a redo that also changed the table's own definition would
 need the table dropped first — the redo used here changed only the function body.
+
 ## 0290 — a table CHECK proves the field_path grammar at every writer, including a raw insert (#857)
 
 `0290_document_regions_field_path_check.sql` closes AC2 of #857, the half wave-1 (PR #1025,
@@ -3958,3 +3852,113 @@ S2/S3's textual splice is NOT re-run on a redo — the first-apply anchor text n
 already-recut body — so the prestate instead proves, on the redo branch, that the live bodies already
 carry this file's own citation markers, and S2/S3 skip with a `NOTICE` rather than re-searching for
 an anchor that would never be found.
+
+## 0292 — a default depreciation policy applies only while it still fits its enrolment (#932 fix round, riders wave 3 lane 04)
+
+`0292_fa_policy_enrolment_congruence.sql` closes the blocker the lane's adversarial review drove
+(ADV-L04-1). `clara.set_fa_depreciation_policy` refuses every method but `none` on a
+NON-depreciable enrolment (0277 §B), but that is a wall at SET time only, and
+`clara.upsert_fa_account_profile` is version-forward and reads no policy (0277 pins it unmoved, and
+so does this file). ONE ordinary re-enrolment with `accum_depr_account_code = null` therefore left a
+`straight_line` policy live; the next acquisition was born COMPLETE from it while taking its
+accumulated and expense codes from the NEW profile — i.e. NULL. `clara.preview_depreciation_run`
+then offered two legs with `account_code: null` and `clara.run_depreciation_manual` died on an
+untyped `23502` (`journal_lines.account_code`), which no door can rescue —
+`complete_fixed_asset_particulars` refuses `fa_particulars_already_complete` and
+`revise_fixed_asset_particulars` refuses the `depreciation_method` key — and which
+`packages/runtime/lib/reconciler-fa.mjs` isolates per client, silently stopping that client's
+depreciation for good.
+
+**The change is one line in each of the two birth sites**, plus the comment that names it: the
+policy-covered branch is entered only when `not (l.accum_code is null and v_pol.method <> 'none')`.
+A declined policy falls through to 0247's own UNCOVERED branch, so the row births exactly as an
+uncovered non-depreciable acquisition does — method `none`, no start date, no provenance, the
+"particulars pending" description — and a person is asked, which is what the estate already does
+for every account carrying no policy at all. The enrolment door keeps accumulated and expense a
+PAIR (`0041:2785-2789`), so the accumulated code alone decides it.
+
+**Why a separate file rather than an edit to 0277.** 0278's prestate pins 0277's post-image of
+`clara._tf_fa_acquisition_birth` by `sha256(prosrc)` and accretes onto its 842-character comment,
+and #957's redo path re-applies only the HIGHEST applied version — so editing 0277 in place would
+have broken 0278's prestate on a from-scratch chain and could not have been re-applied to the rig
+at all. The number is provisional and claimed at MERGE; the battery gates on the stable stem
+`fa_policy_enrolment_congruence$`.
+
+**Shape.** Prestate pins both recut bodies at their measured 0277 post-images
+(`c2c62b29…`, `ea7499ae…`) with a redo branch keyed on this file's own marker, pins four bodies it
+does NOT touch (`clara.upsert_fa_account_profile`, `clara._fa_particulars_complete`,
+`clara.set_fa_depreciation_policy`, `clara._fa_asset_json`), and hashes the birth's catalog comment
+at 0278's own 1553 characters before accreting one sentence onto it. The tail re-reads both bodies
+for the guard marker AND for every marker 0277's own tail pinned (0247's four exclusions, the #972
+watermark, the single conflict-targeted insert, both description literals, the three untouched arms
+of `clara._fa_on_approve`), proves the UNGUARDED form is gone from both, re-checks
+owner/definer/search_path/ACL and the deferred trigger's binding, and re-reads the four unmoved
+bodies. It creates no relation, mints no function and moves no grant, so it owes no `rig-meta.mjs`
+cohort (0278 makes the same claim for the same reason) and no
+`apps/web/tests/firm-scope-db-pins.corpus.ts` barrier entry — it contains no dynamic SQL at all.
+
+**Cells.** `p932.drift` in `tests/fa-depreciation-policy.test.mjs`, gated on this file's own stem
+through `gate932c` (`tests/fa-depreciation-policy-fixtures.mjs`) and
+`tests/fa-policy-enrolment-congruence-preintegration-gate.mjs`: set a `straight_line` policy,
+re-issue the enrolment as non-depreciable through the real door, acquire, and see the row born
+pending with no provenance — then drive `liveAuthority` + the due ladder and see no `23502`.
+
+## 0293 — a materiality judgement licenses the figure it was made about (#975 fix round, riders wave 3 lane 04)
+
+`0293_fa_arrears_judgement_scope.sql` closes three defects the lane's review drove against 0279.
+0279 asks the right question; what it got wrong is the answer's SCOPE. It recuts exactly two
+bodies — `clara.record_fa_arrears_resolution` and `clara._fa_run_period_core` — and contains no
+dynamic SQL at all.
+
+**(1) A judgement about one amount authorised folding any later amount** (ADV-L04-2 blocker,
+SPEC-975-2). The record door already enforces "a materiality judgement is made ABOUT an amount": it
+re-measures the year and refuses CLR37 `arrears_changed` when the figure moved between the question
+and the answer. `clara._fa_run_period_core` applied no such test at FOLD time — it read the
+CURRENTLY measured arrears and the STORED choice and never compared them. DRIVEN: a `fold_current`
+recorded about 10,000 sen proceeded to fold 20,000, and the receipt named the very record whose own
+stored figure was 10,000. The guard now splits the affected years THREE ways — no live resolution,
+a live resolution made about a different figure, or a `reopen_prior` at the figure that still
+stands — and the middle bucket refuses (or parks) on its own reason
+`arrears_changed_since_judgement`, naming `judged_cents` and `arrears_cents` both. AC2's "a later
+run proceeds on the record without asking again" is untouched for an unmoved figure, which is what
+AC2 is about.
+
+**(2) The refusal stated the client-wide TOTAL as the named year's amount** (ADV-L04-3,
+SPEC-975-1). 0279 raised and parked with the sum over every closing/closed year carrying arrears —
+including years already answered — while naming only the first unresolved year. It compounded: the
+record door re-measures PER YEAR, so a caller answering with the number the refusal had just stated
+was refused `arrears_changed` and the run stayed blocked. The web panel escaped it only because it
+passes its own per-year figure. Every sentence and every `detail.arrears_cents` now carries the
+NAMED year's own amount, and the client-wide total rides beside it under `total_arrears_cents`.
+
+**(3) `reopen_prior` was admitted on a year that is only CLOSING** (ADV-L04-4).
+`clara._tf_fiscal_years_lifecycle` admits `open|reopened → closing`, `closing → open|closed` and
+`closed → reopened`; there is no `closing → reopened` edge, and `clara.reopen_fiscal_year` is the
+`closed → reopened` verb. DRIVEN: the judgement was admitted, the run then refused
+`arrears_awaiting_reopen` with remedy `reopen_fiscal_year`, and that remedy's own write was refused
+CLR10 `fy_lifecycle_edge_invalid`. The record door now refuses `reopen_prior` while the year is
+still closing, on its own axis `year_still_closing`, naming `clara.finalize_close`. `fold_current`
+stays open on a closing year: this refuses one unreachable remedy, never the question. The run core
+also derives its awaiting-remedy from the named year's own status, for the one path that can still
+reach a closing year carrying a live `reopen_prior` (`closed → reopened → closing` after the
+judgement was made).
+
+**Not touched, and pinned in both the prestate and the tail:** `clara._fa_closed_arrears` (the
+arithmetic was never wrong — only the scope the refusal quoted it at), the due oracle, the preview,
+both run verbs, the Work lane's run door, `clara._fa_assert_period_open`,
+`clara.reopen_fiscal_year` and `clara.finalize_close`. It mints no function and moves no grant, so
+it owes no `rig-meta.mjs` cohort, and being free of dynamic SQL it needs no barrier entry in
+`apps/web/tests/firm-scope-db-pins.corpus.ts`. Its ACL section is three literal statements rather
+than 0279's bulk `execute format` loop, for exactly that reason.
+
+**Cells** (`tests/fa-arrears-resolution.test.mjs`, gated on the stable stem
+`fa_arrears_judgement_scope$` through `gate975b` and
+`tests/fa-arrears-judgement-scope-preintegration-gate.mjs`): `p975.two_years` builds the first
+TWO-closed-year state the battery ever had and answers the first year with the number the refusal
+stated; `p975.stale.park` drives the swept lane over a moved figure; `p975.closing_reopen` drives
+the closing-year refusal and then shows `fold_current` still admitted; and `p975.fold`'s later-run
+segment — which previously MEASURED the silent larger fold — now drives the re-ask and the
+re-judgement.
+
+**Why a separate file rather than an edit to 0279.** #957's redo path re-applies only the HIGHEST
+applied version, and 0279 is no longer it. The number is provisional and claimed at MERGE.
