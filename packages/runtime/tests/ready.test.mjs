@@ -484,11 +484,28 @@ test("ready: world ON with a STALE control beat FAILS (control listener dead)", 
  * polls for the CONDITION instead — so the assertion is about convergence, which is what the
  * recovery half actually claims, and the budget is about the host, which is what a red here then
  * means. The failure message says so explicitly.
+ *
+ * #1033 — EVERY ITERATION also refreshes the world/control heartbeats this file's own `checks`
+ * depend on. This loop can legitimately span MULTIPLE background probe cycles under host load: a
+ * cycle whose hard bound is blown discards the whole cycle's verdict (never a stale one — see
+ * lane-probe.mjs's own header), so a caller waiting on a real fault can end up waiting for the
+ * loop's next scheduled tick. The world/control heartbeats are an UNRELATED clock with its own
+ * staleness window (`health.mjs`'s HEARTBEAT_STALE_MS, 30s by default) that a caller sets once,
+ * before the wait starts, and this loop used to never touch again — so a wait long enough to
+ * reach a correct lane verdict could also, coincidentally, be long enough to make that heartbeat
+ * read stale and fail readiness for a reason that has nothing to do with the lane fault being
+ * waited on (measured on CI in wave-2 integration PR #1029's second run: the disconnect cell
+ * timed out at 30089ms, 89ms past both 30s defaults). Refreshing here removes the race without
+ * touching either production default: the probe's real cadence and the heartbeat's real staleness
+ * window are both untouched: this is a caller merely proving it is still alive while it waits, the
+ * same as `setBeat` already does once at the top of every cell that turns the world on.
  */
 async function settleLaneUntil(pred, what, budgetMs = LANE_SETTLE_BUDGET_MS) {
   const deadline = Date.now() + budgetMs;
   let last = null;
   for (;;) {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
     await _waitForLaneProbeSettleForTest();
     last = await checkReadiness();
     if (pred(last)) return last;
@@ -558,6 +575,64 @@ test("#617 fault: a lane DISCONNECTS -> ok:false with a sanitized code -> RECOVE
     _resetLaneProbeCacheForTest();
     if (prevRead === undefined) delete process.env.CLARA_READ_DATABASE_URL;
     else process.env.CLARA_READ_DATABASE_URL = prevRead;
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+// #1033 — the clock collision behind CI PR #1029's flake in the cell above. Reproduced
+// DETERMINISTICALLY, on a bounded budget, instead of racing real host load: a probe cycle is
+// forced to blow its own hard bound (every lane answers slower than a shrunk
+// `CLARA_LANE_PROBE_CYCLE_MS`), which discards the WHOLE cycle's verdict — even an
+// already-correct one — and forces `settleLaneUntil` to wait for the loop's next scheduled tick.
+// `health.mjs`'s `HEARTBEAT_STALE_MS` is a plain top-level `const`, read from
+// `CLARA_HEARTBEAT_STALE_MS` once at module load (before any test body runs), so a test cannot
+// shrink IT — instead `CLARA_LANE_PROBE_INTERVAL_MS` (read dynamically, per call) is set to 35s,
+// deliberately PAST the real, unshrunk 30s heartbeat window with margin, so the one discarded
+// cycle's wait crosses that boundary deterministically rather than racing it at the edge. The
+// world/control heartbeats this test sets ONCE, at the top, are a clock `settleLaneUntil` does
+// not own and previously never refreshed while it polled.
+test("#617 fault: settleLaneUntil keeps the world/control heartbeats fresh across a discarded probe cycle (#1033)", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  const prevInterval = process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+  const prevCycle = process.env.CLARA_LANE_PROBE_CYCLE_MS;
+  process.env.CLARA_START_WORLD = "1";
+  process.env.CLARA_LANE_PROBE_INTERVAL_MS = "35000"; // > the real, unshrinkable 30s heartbeat window, with margin
+  process.env.CLARA_LANE_PROBE_CYCLE_MS = "50";
+  _resetLaneProbeCacheForTest();
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+
+    let calls = 0;
+    _setLaneProbeForTest(async (d) => {
+      calls += 1;
+      // The FIRST cycle's seven concurrent probes (one per LANE_ROSTER entry) each answer slower
+      // than the 50ms cycle bound — the shape one slow, unrelated lane produces under host load —
+      // so `withHardTimeout` discards the whole cycle. Every later call answers instantly, once
+      // the loop's next tick (35s later) starts a second cycle.
+      if (calls <= LANE_ROSTER.length) await new Promise((r) => setTimeout(r, 150));
+      return d.lane === "read" ? { lane: d.lane, ok: false, error: "TEST_FAULT" } : { lane: d.lane, ok: true, latency_ms: 1 };
+    });
+
+    const down = await settleLaneUntil(
+      (r) => Array.isArray(r.checks.pools) && r.checks.pools.find((l) => l.lane === "read")?.ok === false,
+      "the injected READ-lane fault reporting ok:false",
+      45_000, // bounded — one 35s interval tick plus slack, never open-ended
+    );
+    const downLane = down.checks.pools.find((l) => l.lane === "read");
+    assert.equal(downLane.ok, false, "mandatory setup: the fault really was recorded, after the first cycle was discarded");
+    assert.equal(
+      down.ready,
+      true,
+      "a non-runtime lane failure is a WARN, never a 503 — even after a discarded cycle forced the wait past the heartbeat's own 30s staleness window (#1033)",
+    );
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prevCycle === undefined) delete process.env.CLARA_LANE_PROBE_CYCLE_MS;
+    else process.env.CLARA_LANE_PROBE_CYCLE_MS = prevCycle;
+    if (prevInterval === undefined) delete process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+    else process.env.CLARA_LANE_PROBE_INTERVAL_MS = prevInterval;
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;
   }
