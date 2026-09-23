@@ -4905,3 +4905,116 @@ already booked through 0194's lane; S3 the unattended post — the approved entr
 receipt, its event and no counterparty on any leg, a blocked run that writes nothing while keeping
 its facts, and a closed fiscal year; S4/S5 the Needs-you row and the uncoded filing, both read
 through the real `clara.list_review_queue`.
+
+## #947 — find the net-pay payment on the bank statement and propose its settlement (0298)
+
+`0298_payroll_net_pay_settlement.sql` is the SECOND half of #926's "always two steps" ruling
+(question 4): #946 (0297) posts the run to 2040 Salaries Payable; this file finds the bank line
+that pays it and lets a person accept the settlement. Blocked by #946 alone — there is nothing to
+settle until a payroll entry posts.
+
+**The shape is #657's own, reused, never re-invented** (WAVE-4 LANE RULE (c)). CONTEXT.md's
+"Settlement candidate row": derived, stores nothing, offers candidates and never chooses, clears
+itself the moment the underlying facts stop producing it. #657's pending bank line is its first
+instance; this is the second.
+
+**Why not `clara.settle_from_bank_line` (#655/#657's own composite).** MEASURED before writing a
+line of this file: `clara._settle_from_bank_line_core` (0044:1706) requires a `p_counterparty`
+whose `kind` is `customer` or `vendor` (`counterparties_kind_check`, 0015:160) and posts through
+the AR/AP subledger composites (`clara.open_items.domain in ('ar','ap')`). A payroll run's net-pay
+leg carries no counterparty — #946's own S3 cell proves it ("salaries payable is deliberately not
+a control account") — so forcing one through that door would mean inventing a fictitious
+counterparty to satisfy a domain check that does not describe what a payroll run is. #657's own
+header declines to mint a second settlement door for exactly this reason ("#655 births the open
+item, #657 allocates"); this file is in #655's own position (no subledger, and 2040 will never have
+one) and mints the ONE settlement door a non-subledger liability needs.
+
+**"Unsettled" is a ledger fact, not a marker.** `clara._payroll_net_pay_unsettled(p_client)` FIFO-
+allocates every approved, non-reversed 2040 DEBIT — however it was booked — against every approved,
+non-reversed `payroll_run`-flagged 2040 CREDIT, oldest run first. No new marker convention decides
+"this debit settles that run": the row disappears the moment the account's own balance says the run
+is covered, which is what lets AC3's three routes (Clara's own door, a person's own hand-booked
+entry, a hand-booked entry reconciled through the ordinary `match_bank_line` door) all clear it
+through the same read, with no dismissal mechanism of any kind.
+
+**2040 is not payroll-run-exclusive, measured, not assumed.** A first cut of this file assumed it
+was; its own prestate, run against the lane database, proved that wrong — #946's own duplicate
+guard names a second lane, `0194_periodic_adjustments.sql` (#643), whose recurring-obligation
+templates can credit ANY liability account a bookkeeper names, including 2040, flagged
+`payroll_obligation`. Both the credit and the debit sides of the FIFO read exclude anything so
+flagged: it is a different liability instance sharing the account by a firm's own bookkeeping
+choice, never a payroll run's own net pay or a payment toward it. An unflagged 2040 leg belonging
+to NEITHER lane is expected and correct once AC3's hand-booked routes (b)/(c) are in normal use —
+the prestate/tail note it (informational only, never a refusal), a lesson this file's own redo
+cycle taught it: a first cut refused any such leg outright and immediately refused its own battery's
+"a person recorded it by hand" fixture.
+
+**The window.** Candidates are offered within ten calendar days either side of the run's own
+posting date (`c_window_days`, `clara._payroll_settlement_bank_candidates`) — generous enough for
+an early run ahead of a public holiday, narrow enough to keep out an unrelated payment from a
+different month. AMOUNT is never "within tolerance" (Q3/SYNTHESIS J2's own law from #657): a
+candidate's signed cents must equal the negative of the run's own unsettled cents, to the cent, or
+it is not offered.
+
+**The five bodies.**
+
+| Body | What it does |
+|---|---|
+| `clara._payroll_net_pay_unsettled(uuid)` | THE LEDGER READ. Per-client FIFO allocation, oldest run first. STABLE, ungranted. |
+| `clara._payroll_settlement_bank_candidates(uuid,bigint,date,int)` | THE MATCH BASIS. Live, unspent, unexcepted bank lines at the exact negative amount, within the window. STABLE, ungranted. |
+| `clara.get_payroll_settlement_candidates(uuid)` | AC1's granted read. bookkeeper+, `clara_authenticated` only. |
+| `clara._settle_payroll_net_pay_core(jsonb,uuid,uuid,uuid,text)` | THE SETTLEMENT. Books Dr 2040 / Cr the bank's own COA for the run's own unsettled cents, approves it directly (`via_wake_kind='interactive'`, an ALREADY-admitted value — no CHECK widening owed), writes the receipt, then calls `clara._match_bank_line_core` DIRECTLY (the #655/#657 idiom: ctx threaded, never re-derived) to bind the new entry to the chosen line — literally "through an existing bank-side door" (AC2). Lock order: the pre-existing payroll entry first, the client advisory rung, the bank rows LAST (one frame further in, inside the reused core) — the estate's own law, unchanged. Ungranted. |
+| `clara.settle_payroll_net_pay(uuid,uuid,uuid,text)` | AC2's granted door. bookkeeper+, `clara_authenticated` only. |
+
+**Needs you (AC2's arm).** `clara.list_review_queue` gains `row_kind='payroll_net_pay_unsettled'`
+(section `needs_you`, lane `needs_you`), spliced additively beside #946's own `payroll_rows` CTE.
+`id`/`filing_id` carry the run's own filing; `entry_id` names the posted payroll entry itself (no
+duplicate to point at, unlike #946's arm). No `counts.*` key, no new json key. "Declining leaves the
+row untouched" (AC2) costs no code: there is no dismissal act to build, only the read itself, which
+keeps returning the row until the ledger says otherwise.
+
+**Ambiguity is shown, never resolved (AC4).** Two bank lines that both carry the run's own exact
+unsettled amount, within the window, are BOTH returned by
+`clara._payroll_settlement_bank_candidates` — nothing in this file ranks, scores or auto-selects
+either. The person names ONE line to `clara.settle_payroll_net_pay`; the other stays live and
+unmatched.
+
+**No rig-meta cohort omission (unlike #946).** This file DOES mint newly-granted, callable objects
+— `get_payroll_settlement_candidates` and `settle_payroll_net_pay`, both `clara_authenticated`
+only. Both are in `tests/rig-meta.mjs`'s `ALLOWED[clara_authenticated]` roster and in their own
+`PAYROLL_SETTLEMENT_0298_COHORT`, checked by `operation-census.test.mjs`'s grant-correctness sweep
+(T17). The three internals stay ungranted to every role, covered by that same sweep's default
+"no role may execute anything unlisted" posture — no cohort entry needed for them, #946's own 0260
+posture restated.
+
+**Redo posture.** All five bodies are `create or replace` (a first cut used bare `create function`
+for the four new-to-this-file ones and had to be converted after a redo hit `already installed`
+this migration's own tail caught, below). The queue splice detects its own marker in the installed
+body and no-ops with a notice; its postcheck re-reads the COMMITTED catalog in both branches.
+`CLARA_MIGRATION_REDO=0298_payroll_net_pay_settlement` was used repeatedly while this file was
+built, including once to restore `list_review_queue` to its pinned pre-image after an early splice
+bug (a wrong CTE column reference) reached the catalog — the redo mechanism cannot itself undo an
+already-spliced marker, so the pre-image was reconstructed by reversing the file's own two
+substitutions and reinstalled by hand before the redo, the same "prove the first-apply branch
+yourself" discipline the wave-3 addendum names for a marker-tolerant pin.
+
+**Cells** (`tests/payroll-settlement.test.mjs`, gated on
+`tests/payroll-settlement-preintegration-gate.mjs`): S1 the ledger read — a clean run fully
+unsettled, a hand-booked debit reducing it to the cent, a `payroll_obligation`-flagged credit and
+its own (labelled-fixture) debit never mixing into the run's own balance, and two runs settled
+oldest-first; S2 the candidate read (AC1) — an empty list with no bank line yet, an exact-amount
+in-window line offered while a wrong amount and a far date are not, and an already-matched or
+excepted line never offered; S3 the settlement door (AC2) driven end to end — the Dr 2040/Cr bank
+entry, the receipt, the reused core's own `bank_matches`/line-member/entry-member rows, an idempotent
+replay, an amount-mismatch refusal, an already-settled refusal and a non-payroll-entry refusal, each
+driven for real; S4 the three routes (AC3) each clearing the row, with a cell counting exactly one
+new journal entry and one new `bank_matches` row across the whole run (no dismissal record
+anywhere); S5 ambiguity (AC4) — two equal candidates both offered, neither settled; S6 the
+Needs-you row's own fields and its clearing, plus "declining leaves the row untouched" read twice
+with no act in between.
+
+**Vacuity control, run and it bites.** A mutant `clara._payroll_net_pay_unsettled` that always
+reports a run fully unsettled (ignoring every debit) was installed and the battery run against it:
+8 of 17 cells failed (S1's arithmetic cells, S3's already-settled/replay cells, S4's three
+clearing cells, S6's clearing cell), then `CLARA_MIGRATION_REDO` restored the real body and all 17
+passed again.

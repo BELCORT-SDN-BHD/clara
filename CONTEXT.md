@@ -952,7 +952,9 @@ time it is read, it never becomes an object with its own lifecycle, and it clear
 moment the underlying facts stop producing it — nobody dismisses it, nobody closes it, and
 nothing has to be cleaned up when the decision is made elsewhere. It offers candidates and never
 chooses: an ambiguous case stays pending with the same one question, and choosing is the human's
-act. #657's pending bank line is its first instance.
+act. #657's pending bank line is its first instance; #947 (a posted payroll run's unsettled net
+pay, offered against candidate bank lines) is the second, reusing the same shape rather than
+minting a sibling concept.
 _Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row
 that survives the fact that produced it; a suggestion the product acts on by itself.
 

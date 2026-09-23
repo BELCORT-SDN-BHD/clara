@@ -344,6 +344,15 @@ const WITNESS_F_A1_PR3_COHORT = [...WITNESS_F_A1_PR3_RUNTIME_FNS];
 // get_document_extract, which already serves every family.
 const PAYROLL_0296_RUNTIME_FNS = ["persist_payroll_facts", "fail_payroll_facts"];
 const PAYROLL_0296_COHORT = [...PAYROLL_0296_RUNTIME_FNS];
+// #947 [0298] the payroll net-pay settlement lane, riders wave 4 lane 01. TWO clara_authenticated
+// doors (bookkeeper+): get_payroll_settlement_candidates (AC1's derived read) and
+// settle_payroll_net_pay (AC2's accept door, which reuses clara._match_bank_line_core directly
+// rather than minting a second matching mechanism). The three internals this file mints
+// (_payroll_net_pay_unsettled, _payroll_settlement_bank_candidates,
+// _settle_payroll_net_pay_core) stay ungranted to every application role — the sweep's
+// expected=false IS that assertion, same posture as PAYROLL_0296's two internals above.
+const PAYROLL_SETTLEMENT_0298_HUMAN_FNS = ["get_payroll_settlement_candidates", "settle_payroll_net_pay"];
+const PAYROLL_SETTLEMENT_0298_COHORT = [...PAYROLL_SETTLEMENT_0298_HUMAN_FNS];
 // F-A1 PR-4 — the bank-statement witness cutover. Its OWN cohort rather than an addition to
 // BANK_0038_*, and that is not cosmetic: `cohortFailures` tolerates a WHOLLY absent cohort (a
 // chain that stops short of this wave) but fails a PARTIAL one, so folding these two names
@@ -3422,6 +3431,10 @@ export const ALLOWED = {
     // clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the ungranted
     // shared core clara._client_birth_core holds no role at all.
     ...CLIENT_BIRTH_WALL_0287_HUMAN_FNS,
+    // #947 [0298] the payroll net-pay settlement lane — see the block above. clara_authenticated
+    // ONLY, bookkeeper floor body-enforced; clara_runtime, both agent read roles and all four
+    // wake lanes gain ZERO, and the three internals it reaches through hold no role at all.
+    ...PAYROLL_SETTLEMENT_0298_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3892,6 +3905,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("#945 0296 payroll-summary reading lane", PAYROLL_0296_COHORT, liveNames));
+  failures.push(...cohortFailures("#947 0298 payroll net-pay settlement", PAYROLL_SETTLEMENT_0298_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("#623 0178 accounting-work lane", WORK_JOURNAL_0178_COHORT, liveNames));
   failures.push(...cohortFailures("#629 0180 shared work-question lane", WORK_QUESTIONS_0180_COHORT, liveNames));

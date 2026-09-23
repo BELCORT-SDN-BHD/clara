@@ -318,4 +318,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "25ba80f517b201290fd0f3676bdffdc5c60a0def4a068511e9b2fc4f06bf28af",
     },
   ],
+  // #947 [0298] (riders wave 4, lane 01) — the payroll net-pay settlement lane: the SAME
+  // 0146/0168/0180/0260/0288/0297 splice family for the review queue alone (this file recuts no
+  // other body). Appended at the sorted position.
+  [
+    "0298_payroll_net_pay_settlement.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at its own literal regprocedure spelled in this file and re-installed with one payroll_settlement_rows CTE and one union arm, in the 0146/0260/0297 idiom (two boundary-anchored substitutions: the all_rows union tail gains the new arm, and the new CTE is inserted immediately before the (now-rewritten) all_rows opener; each anchor asserted to occur EXACTLY once). It returns jsonb, so it cannot emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. The splice detects its own marker in the INSTALLED body and no-ops on a redo, and its postcheck re-reads the COMMITTED catalog in either branch for every pre-existing row-kind marker (including #946's own payroll_posting_blocked) at its exact count plus one. Every other object this migration creates is static DDL the lexer inspects directly — five `create or replace function` statements at literal signatures (the ledger read, the match-basis read, the two granted doors and the settlement core) — and the file mints no table, no new chart row and no new event type.",
+      sha256: "012f01664c276cbbebd1f39581db2a39315a786a8b7f6c582300e12bda0bb90b",
+    },
+  ],
 ]);
