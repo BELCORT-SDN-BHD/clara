@@ -98,6 +98,21 @@
 -- picking v2 (or a template forked from it) through the existing `list_coa_templates` /
 -- `apply_coa_template` doors -- unchanged surfaces, no new door.
 --
+-- A NEW VERSION CARRIES FOUR TIERS, NOT TWO. clara.coa_template_entity_overrides (0156:388-412)
+-- is the THIRD child tier of a template and it is keyed BY template_id (0156:401,
+-- `primary key (template_id, entity_type, account_code)`), with 0156's two reviewed society rows
+-- seeded against v1 ONLY (0156:443-459, `... and t.version = 1`). A version that copies only the
+-- families and the accounts therefore ships a chart whose society variant is GONE: measured
+-- through the estate's own single spelling, clara._coa_effective_account_name, a society client
+-- on such a version is planted BOTH 3040 'Accumulated Fund' and an un-relabelled 3900 'Retained
+-- Earnings' -- the two-accounts-one-name defect 0156's seed block exists to discharge, and the
+-- exact outcome its own M3/M4 mutants name (coa-template-pr-b.test.mjs:928-950). This file
+-- therefore copies that tier too, verbatim and basis and all, AFTER the accounts (the composite
+-- FK fk_coa_override_account references coa_template_accounts(template_id, account_code)), and
+-- the tail proves v2's census EQUALS v1's row for row rather than merely counting it. The
+-- override tier does not enter clara._coa_template_content_sha256 -- that helper hashes the
+-- families' and the accounts' content only -- so the copy leaves v2's published hash untouched.
+--
 -- NO RIG-META COHORT IS OWED. This file mints no relation, no function, no role and no grant --
 -- it is four INSERTs and one UPDATE against tables 0150 already created, exactly the same claim
 -- 0278 and 0292 make for the same reason (packages/db/README.md, "0292" section). A template row
@@ -196,6 +211,12 @@ begin
     alter table clara.coa_template_accounts disable trigger t_coa_template_accounts_freeze;
     alter table clara.coa_template_families disable trigger t_coa_template_families_freeze;
     alter table clara.coa_templates disable trigger t_coa_templates_freeze;
+    -- OVERRIDES FIRST. fk_coa_override_account references
+    -- coa_template_accounts(template_id, account_code) (0156:403-404), so the accounts delete
+    -- below raises 23503 while v2 still carries the society rows this file copies. The override
+    -- table carries no freeze trigger of its own -- only t_..._no_truncate -- so a plain delete
+    -- is all it needs.
+    delete from clara.coa_template_entity_overrides where template_id = v2_id;
     delete from clara.coa_template_accounts where template_id = v2_id;
     delete from clara.coa_template_families where template_id = v2_id;
     delete from clara.coa_templates where id = v2_id;
@@ -275,12 +296,28 @@ begin
       (v2_id, 'trade_payables', '2050', 'Rent Payable', 'liability', null, null, 60,
         false, null, null);
 
+  -- THE ENTITY OVERRIDES, CARRIED FORWARD. clara.coa_template_entity_overrides is keyed BY
+  -- template_id (0156:401) and its two reviewed rows were seeded against v1 ONLY
+  -- (0156:443-459, `... and t.version = 1`), so a new version starts with NONE of them. Left
+  -- uncopied, a SOCIETY client adopting v2 is planted BOTH 3040 'Accumulated Fund' and an
+  -- un-relabelled 3900 'Retained Earnings' -- exactly the two-accounts-one-name defect 0156's
+  -- seed block exists to discharge, and exactly what its own M3/M4 mutants name. Copied with
+  -- the same INSERT ... SELECT shape the families and accounts use, AFTER the accounts (the FK
+  -- fk_coa_override_account references coa_template_accounts(template_id, account_code)), and
+  -- verbatim -- the basis text travels too, because a row that cannot say where it came from has
+  -- established nothing (0156's own words for this column).
+  insert into clara.coa_template_entity_overrides(template_id, entity_type, account_code,
+      override_name, suppress, basis)
+    select v2_id, o.entity_type, o.account_code, o.override_name, o.suppress, o.basis
+      from clara.coa_template_entity_overrides o where o.template_id = v1_id;
+
   v_sha := clara._coa_template_content_sha256(v2_id);
   update clara.coa_templates
      set state = 'published', published_at = now(), content_sha256 = v_sha
    where id = v2_id;
 
-  raise notice '0295 seed: my_sme_starter v2 (%) PUBLISHED -- 42 families / 146 accounts (142 carried over from v1 verbatim, 4 new: 1180 Accrued Income, 2030 Deferred Revenue, 2040 Salaries Payable, 2050 Rent Payable), content_sha256 %.', v2_id, encode(v_sha, 'hex');
+  raise notice '0295 seed: my_sme_starter v2 (%) PUBLISHED -- 42 families / 146 accounts (142 carried over from v1 verbatim, 4 new: 1180 Accrued Income, 2030 Deferred Revenue, 2040 Salaries Payable, 2050 Rent Payable) and % entity override row(s) carried forward from v1, content_sha256 %.',
+    v2_id, (select count(*) from clara.coa_template_entity_overrides where template_id = v2_id), encode(v_sha, 'hex');
 end
 $p295_seed$;
 
@@ -435,7 +472,34 @@ begin
       if sqlstate is distinct from 'CLR08' then raise; end if;
   end;
 
-  raise notice '0295 tail OK: my_sme_starter v1 (%) is unmoved at 42/142, hash %; v2 (%) is PUBLISHED, migration-authored, forked_from v1, at 42 families / 146 accounts with the four new rows exactly as specified, no code collision across the estate''s templates, the five special markers intact, all three freeze triggers armed, and v2 itself now refuses a sixth account exactly as v1 does.',
+  -- T.10 THE ENTITY OVERRIDES CENSUS: v2 carries EXACTLY what v1 carries, row for row. A count
+  -- would not catch a row that travelled with the wrong name, the wrong flag or a lost basis, so
+  -- this compares the whole tuple set both ways (an EXCEPT in each direction, not a count).
+  select string_agg(format('%s/%s %s suppress=%s', entity_type, account_code,
+           coalesce(override_name, '<null>'), suppress), ' · ' order by entity_type, account_code)
+    into v_bad
+    from ((select entity_type, account_code, override_name, suppress, basis
+             from clara.coa_template_entity_overrides where template_id = v2_id
+           except
+           select entity_type, account_code, override_name, suppress, basis
+             from clara.coa_template_entity_overrides where template_id = v1_id)
+          union all
+          (select entity_type, account_code, override_name, suppress, basis
+             from clara.coa_template_entity_overrides where template_id = v1_id
+           except
+           select entity_type, account_code, override_name, suppress, basis
+             from clara.coa_template_entity_overrides where template_id = v2_id)) d;
+  if v_bad is not null then
+    raise exception '0295 tail T.10: v2''s entity-override census does not equal v1''s -- the symmetric difference is % (a society client adopting v2 would be planted BOTH 3040 and an un-relabelled 3900)', v_bad
+      using errcode = 'CLR10';
+  end if;
+  select count(*) into v_n from clara.coa_template_entity_overrides where template_id = v2_id;
+  if v_n <> 2 then
+    raise exception '0295 tail T.10: v2 carries % entity override row(s), expected 0156''s own two society rows', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice '0295 tail OK: my_sme_starter v1 (%) is unmoved at 42/142, hash %; v2 (%) is PUBLISHED, migration-authored, forked_from v1, at 42 families / 146 accounts with the four new rows exactly as specified, no code collision across the estate''s templates, the five special markers intact, 0156''s two society entity overrides carried forward row for row so a society client adopting v2 still gets 3900 as `Accumulated Fund` and no 3040, all three freeze triggers armed, and v2 itself now refuses a sixth account exactly as v1 does.',
     v1_id, v1_hash, v2_id;
 end
 $p295_tail$;

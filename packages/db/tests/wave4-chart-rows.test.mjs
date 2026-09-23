@@ -47,7 +47,12 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, ensureReady, buildWorld, endPool } from "./rig-fixtures.mjs";
 import { withRolledBackTx } from "./coa-template-pr-a-helpers.mjs";
-import { applyTemplate, newInterviewClient, clientChartMap } from "./coa-template-pr-b-helpers.mjs";
+import {
+  applyTemplate,
+  newInterviewClient,
+  clientChartMap,
+  asHumanOn,
+} from "./coa-template-pr-b-helpers.mjs";
 
 const NEW_CODES = ["1180", "2030", "2040", "2050"];
 const EXPECTED = {
@@ -280,4 +285,68 @@ test("S4 · none of the four new codes collides across every platform template c
     );
     assert.equal(broken.rows[0].n, 2, "MUTANT: with a second platform template's 2030 planted the collision read must find two");
   });
+});
+
+// ---------------------------------------------------------------------------
+// S5 -- the society entity overrides ride the new version
+// ---------------------------------------------------------------------------
+
+test("S5 · a SOCIETY client applying the CURRENT template gets 3900 relabelled `Accumulated Fund` and NO 3040 -- 0156's entity overrides ride the new version", async (t) => {
+  if (unready(t)) return;
+
+  // THE CENSUS FIRST, row for row. clara.coa_template_entity_overrides is keyed BY template_id
+  // (0156:401), so a new template version starts with NONE of them unless they are carried
+  // forward deliberately. v2 must carry exactly what v1 carries -- same entity_type, code,
+  // override_name, suppress and basis -- or the society chart silently regresses to the
+  // two-accounts-one-name defect 0156's own seed block exists to discharge.
+  const census = async (templateId) =>
+    (
+      await rootQuery(
+        `select entity_type, account_code, coalesce(override_name, '<null>') as override_name,
+                suppress, basis
+           from clara.coa_template_entity_overrides where template_id = $1
+          order by entity_type, account_code`,
+        [templateId],
+      )
+    ).rows;
+  const onV1 = await census(v1.id);
+  assert.equal(onV1.length, 2, "mandatory setup: v1 carries 0156's own two reviewed society rows");
+  assert.deepEqual(await census(current.id), onV1,
+    "the current template's override census must equal v1's, row for row");
+
+  // ...AND THE BEHAVIOUR, DRIVEN. A society client born through the real doors, applying the
+  // current template through clara.apply_coa_template -- the mirror of coa-template-pr-b.test.mjs
+  // §5.1 on the version this migration mints.
+  const soc = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "s5soc", answers: { entity_type: "society" },
+  });
+  const res = await applyTemplate(world.users.alice, {
+    client: soc, template: current.id, families: null, opKey: `w4-s5-${soc}`,
+  });
+  assert.ok(res.families.includes("equity_society"), "mandatory setup: the society-keyed equity family was proposed");
+  const map = await clientChartMap(soc);
+  assert.equal(map["3900"]?.name, "Accumulated Fund", "3900 must be relabelled for a society");
+  assert.equal(map["3900"]?.special, "retained_earnings", "and the marker the estate requires is intact");
+  assert.equal(map["3040"], undefined, "3040 must be SUPPRESSED -- one concept, one account");
+
+  // VACUITY CONTROL: delete the CURRENT template's own society/3900 relabel (inside a rolled-back
+  // transaction) and show a society client applying it then gets the mislabelled name back.
+  const soc2 = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "s5mut", answers: { entity_type: "society" },
+  });
+  const mutated = await withRolledBackTx(async (c) => {
+    await c.query("set local role clara_fn_owner");
+    await c.query(
+      "delete from clara.coa_template_entity_overrides where template_id = $1 and entity_type = 'society' and account_code = '3900'",
+      [current.id],
+    );
+    await c.query("reset role");
+    await asHumanOn(c, world.users.alice, "select clara.apply_coa_template($1,$2,null::text[],$3)",
+      [soc2, current.id, `w4-s5m-${soc2}`]);
+    const r = await c.query("select name from clara.coa_accounts where client_id = $1 and account_code = '3900'", [soc2]);
+    return r.rows[0]?.name;
+  });
+  assert.equal(mutated, "Retained Earnings",
+    "MUTANT: delete the current template's relabel row and the society gets the mislabelled name back");
+  assert.deepEqual(await census(current.id), onV1, "the shipping override rows survived the mutant");
 });

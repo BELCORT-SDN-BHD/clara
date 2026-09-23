@@ -4618,6 +4618,22 @@ renders each option's title, version and account count, so the picker showing tw
 options once v2 exists is a distinction the existing UI already draws, not a gap this migration
 leaves open.
 
+**A new version carries FOUR tiers, not two.** `clara.coa_template_entity_overrides`
+(0156:388-412) is a template's third child tier and it is keyed by `template_id`
+(`primary key (template_id, entity_type, account_code)`), with 0156's two reviewed society rows
+seeded against v1 only (`... and t.version = 1`, 0156:443-459). A version that copied only the
+families and the accounts would ship a chart whose society variant is GONE — a society client on
+it is planted BOTH `3040 Accumulated Fund` and an un-relabelled `3900 Retained Earnings`, the
+two-accounts-one-name defect 0156's seed exists to discharge. 0295 therefore copies that tier too,
+verbatim (the `basis` text travels with each row), after the accounts because
+`fk_coa_override_account` references `coa_template_accounts(template_id, account_code)`; the tail
+proves v2's census EQUALS v1's row for row (a symmetric `except` in both directions, not a count).
+The tier does not enter `clara._coa_template_content_sha256`, which hashes families and accounts
+only, so the copy leaves v2's published hash unchanged. `coa-template-pr-b.test.mjs` §5.2's
+restore assertion moved from a global `count(*) = 2` to a per-template count in the same commit:
+a global census is satisfied by a version that carries none of them, which is precisely the
+omission this review caught.
+
 **No rig-meta cohort is owed.** This file mints no relation, no function, no role and no grant —
 four INSERTs and one UPDATE against tables 0150 already created — the same claim 0278 and 0292
 make for the same reason. A template row is data, not a name a cohort would track.
