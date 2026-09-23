@@ -72,12 +72,8 @@ export type FirmCapabilities = {
   readonly canRevokeInvite: boolean;
   /** Approve or reject a firm registration request (owner AND operator firm). */
   readonly canDecideFirmRegistrations: boolean;
-  /** Propose a vendor identity binding. */
-  readonly canProposeVendorBinding: boolean;
-  /** Revoke a live vendor identity binding. */
+  /** Revoke a live vendor identity binding — D6's "in-flight legacy visibility" half. */
   readonly canRevokeVendorBinding: boolean;
-  /** Sign a proposed vendor identity binding. */
-  readonly canSignVendorBinding: boolean;
   /** Record an account's SST turnover classification on the client Tax tab.
    *
    *  THE READ IS NOT GATED, ONLY THE CONTROL (review-557, N7). A viewer may see this client's
@@ -170,45 +166,24 @@ export const FIRM_CAPABILITY_FLOORS = [
     line: 836,
   },
   {
-    capability: "canProposeVendorBinding",
-    door: "propose_vendor_identity_binding",
-    role: "bookkeeper",
-    migration: "0154_binding_proposal_pr_1.sql",
-    line: 2506,
-  },
-  {
     capability: "canRevokeVendorBinding",
     door: "revoke_vendor_identity_binding",
     role: "bookkeeper",
     migration: "0028_vendor_identity_binding.sql",
     line: 903,
   },
-  {
-    // THE LIVE BODY IS 0154, AND THE TWO-ARGUMENT ONE NO LONGER EXISTS. This
-    // citation has now been wrong twice, in two different ways, which is the
-    // whole argument for the census the test uses:
-    //   · 0028 was the first cut. `lib/firm-admin/vendor-bindings.ts`'s header
-    //     censused these five doors on 2026-08-28 against the then-frontier 0140
-    //     and called 0028 "LIVE-UNTOUCHED" — 0144 and 0154 both landed after it.
-    //   · 0144:333 replaced the TWO-argument body, and this row cited it. Also
-    //     dead: `0154_binding_proposal_pr_1.sql:2725` is a hard
-    //     `drop function clara.sign_vendor_identity_binding(uuid,text)`, and
-    //     0154:2727 creates a THREE-argument body with
-    //     `p_attestation text default null` in its place (a signature change
-    //     cannot ride CREATE OR REPLACE, so the old overload had to go or stay
-    //     shadow-reachable — 0154's own note says exactly that).
-    // The web still posts TWO arguments; PostgREST resolves them against the
-    // three-argument body through its default. So the live floor is 0154:2742.
-    // A "last file that mentions the name" census would have picked this up;
-    // a "last file that CREATES it" census would too — but only a census that
-    // also honours DROPs can tell a live overload from a dead one, which is why
-    // capabilities.test.ts now walks `semanticFunctionOperations`.
-    capability: "canSignVendorBinding",
-    door: "sign_vendor_identity_binding",
-    role: "admin",
-    migration: "0154_binding_proposal_pr_1.sql",
-    line: 2742,
-  },
+  // #921 [0273] (2026-09-20/21) RETIRED the `canProposeVendorBinding` and `canSignVendorBinding`
+  // rows this block used to carry (propose_vendor_identity_binding at 0154:2506,
+  // sign_vendor_identity_binding at 0154:2742 — history in git blame, not here). A FLOOR row
+  // mirrors a REACHABLE door's rank check, so a caller at or above the floor is offered a
+  // control that will succeed; migration 0273 revoked clara_authenticated's EXECUTE on both
+  // doors OUTRIGHT, for every rank, so there is no floor left to mirror — an owner and a
+  // viewer are now refused identically (vendor-binding-write-doors-revoked.test.mjs vb921.4).
+  // Retiring the capability (not merely forcing it false) makes that a compile-time fact: no
+  // call site can reference `capabilities.canProposeVendorBinding` or `.canSignVendorBinding`
+  // and silently read `false` forever. `canRevokeVendorBinding` above is UNCHANGED — 0273 never
+  // touched `revoke_vendor_identity_binding` — and stays the one vendor-binding write this
+  // table still mirrors, D6's "in-flight legacy visibility".
   {
     // The client Tax tab's ONE governed write (review-557, N7). Created at `0016:905` and never
     // replaced or dropped — the census below proves that rather than this comment asserting it.
@@ -270,9 +245,7 @@ const NOTHING: FirmCapabilities = {
   canInviteMember: false,
   canRevokeInvite: false,
   canDecideFirmRegistrations: false,
-  canProposeVendorBinding: false,
   canRevokeVendorBinding: false,
-  canSignVendorBinding: false,
   canClassifyTurnover: false,
   canReadFirmCommercialState: false,
 };
@@ -298,9 +271,7 @@ export function firmCapabilities(scope: CapabilityScope | null): FirmCapabilitie
     canRevokeInvite: atLeast(rank, "admin"),
     canDecideFirmRegistrations:
       atLeast(rank, "owner") && isOperatorConsoleEligible({ role_rank: rank, is_operator: scope.is_operator }),
-    canProposeVendorBinding: atLeast(rank, "bookkeeper"),
     canRevokeVendorBinding: atLeast(rank, "bookkeeper"),
-    canSignVendorBinding: atLeast(rank, "admin"),
     canClassifyTurnover: atLeast(rank, "bookkeeper"),
     canReadFirmCommercialState: atLeast(rank, "admin"),
   };

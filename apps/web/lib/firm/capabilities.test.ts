@@ -205,9 +205,7 @@ const ALL_FALSE: FirmCapabilities = {
   canInviteMember: false,
   canRevokeInvite: false,
   canDecideFirmRegistrations: false,
-  canProposeVendorBinding: false,
   canRevokeVendorBinding: false,
-  canSignVendorBinding: false,
   canClassifyTurnover: false,
   // #635 — the firm's own commercial state (plan, payment record, processing caps). Admin floor,
   // mirroring clara.get_firm_commercial_state's own `_human_ctx` at 0233:342.
@@ -229,11 +227,7 @@ test("firmCapabilities: the four unknown-rank shapes ALL deny — the gate fails
 test("firmCapabilities: each capability turns on at exactly its own floor, and not one rank earlier", () => {
   const at = (rank: number) => firmCapabilities({ role_rank: rank, is_operator: true });
   // viewer 0 · bookkeeper 1 · admin 2 · owner 3 (clara.role_rank, 0002:326-331)
-  assert.deepEqual(at(0).canProposeVendorBinding, false, "a viewer may not propose a binding");
-  assert.deepEqual(at(1).canProposeVendorBinding, true, "a bookkeeper may");
   assert.deepEqual(at(1).canRevokeVendorBinding, true, "a bookkeeper may revoke one");
-  assert.deepEqual(at(1).canSignVendorBinding, false, "a bookkeeper may NOT sign one — that door is admin+");
-  assert.deepEqual(at(2).canSignVendorBinding, true, "an admin may sign");
   assert.deepEqual(at(1).canManageMembers, false, "a bookkeeper may not change a role or remove a member");
   assert.deepEqual(at(2).canManageMembers, true, "an admin may");
   assert.deepEqual(at(2).canInviteMember, true, "an admin may invite");
@@ -245,6 +239,22 @@ test("firmCapabilities: each capability turns on at exactly its own floor, and n
   // write the door can only answer CLR04.
   assert.deepEqual(at(0).canClassifyTurnover, false, "a viewer may not classify turnover");
   assert.deepEqual(at(1).canClassifyTurnover, true, "a bookkeeper may — set_turnover_classification's own floor");
+});
+
+// #921 [0273]: `propose_vendor_identity_binding` and `sign_vendor_identity_binding` had EXECUTE
+// revoked from clara_authenticated for EVERY rank — D6 keeps only historical receipts
+// (list/get) and the ability to close an in-flight binding (revoke). A "floor" mirror table
+// exists to say WHICH rank a reachable door needs; a door no rank can reach has no floor to
+// mirror, so both capabilities are RETIRED outright (not merely forced false) — the ticket's
+// own "retired or forced false" choice. This is the retirement half of the "not one property
+// silently stuck at false forever" argument: an absent property is discoverable by a `keyof`
+// compile error at every call site, the same way a truly deleted door is.
+test("firmCapabilities: canProposeVendorBinding and canSignVendorBinding no longer exist (#921 [0273] retired them, no rank ever grants either)", () => {
+  const owner = firmCapabilities({ role_rank: 3, is_operator: true });
+  assert.equal("canProposeVendorBinding" in owner, false, "the capability was retired, not merely forced false");
+  assert.equal("canSignVendorBinding" in owner, false, "the capability was retired, not merely forced false");
+  assert.equal("canProposeVendorBinding" in ALL_FALSE, false);
+  assert.equal("canSignVendorBinding" in ALL_FALSE, false);
 });
 
 // --- the two rank-only walls inside the members doors -----------------------
