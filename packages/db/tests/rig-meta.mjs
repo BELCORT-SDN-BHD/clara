@@ -3120,6 +3120,23 @@ export const OPENING_SOURCE_REREAD_0286_COHORT = [...OPENING_SOURCE_REREAD_0286_
 const CLIENT_BIRTH_WALL_0287_HUMAN_FNS = ["open_client_onboarding"];
 export const CLIENT_BIRTH_WALL_0287_COHORT = [...CLIENT_BIRTH_WALL_0287_HUMAN_FNS];
 // #899 END
+// #939 [0305, a prepayment with no document is amortised from a person-stated service period] —
+// its own cohort, the same "wholly present or wholly absent" reason 0284's carries: the
+// `db-slice-frontiers` matrix runs this package against databases pinned at earlier frontiers
+// where 0223 has applied and 0305 has not.
+//
+//   the ONE human door — clara_authenticated ONLY, bookkeeper-floored in its own body. The agent
+//   role, both wake roles and clara_runtime gain ZERO and NO wake wrapper exists at all: a service
+//   period a model supplied would be a model-generated value entering a durable artifact (hard
+//   constraint 2; the owner's default 6, 2026-09-18 — the model may only ever ask the fixed
+//   two-date question). 0305's own tail asserts that by pg_proc count, not by convention.
+const PREPAYMENT_STATED_TERM_0305_HUMAN_FNS = ["record_prepayment_stated_term"];
+//   …and the UNGRANTED closure: the carrier's supersede-only trigger. No new runtime verb.
+const PREPAYMENT_STATED_TERM_0305_UNGRANTED_FNS = ["_tf_pst_supersede_only"];
+export const PREPAYMENT_STATED_TERM_0305_COHORT = [
+  ...PREPAYMENT_STATED_TERM_0305_HUMAN_FNS, ...PREPAYMENT_STATED_TERM_0305_UNGRANTED_FNS,
+];
+// #939 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -3408,6 +3425,10 @@ export const ALLOWED = {
     // clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the ungranted
     // shared core clara._client_birth_core holds no role at all.
     ...CLIENT_BIRTH_WALL_0287_HUMAN_FNS,
+    // #939 [0305] the stated-prepayment-term door — see the block above. clara_authenticated
+    // ONLY, bookkeeper-floored in its own body; clara_runtime, both agent read roles and all four
+    // wake lanes gain ZERO, and no wake wrapper for it exists anywhere in the catalog.
+    ...PREPAYMENT_STATED_TERM_0305_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3990,6 +4011,13 @@ export async function grantMatrixFailures() {
   if (clientBirthWallLive.length !== 0) {
     failures.push(...cohortFailures("#899 0287 client birth wall",
       CLIENT_BIRTH_WALL_0287_COHORT, liveNames));
+  }
+  // #939 [0305] — bimodal, same reasoning as 0284's above: wholly present once 0305 applies,
+  // wholly absent before it.
+  const statedTermLive = PREPAYMENT_STATED_TERM_0305_COHORT.filter((n) => liveNames.has(n));
+  if (statedTermLive.length !== 0) {
+    failures.push(...cohortFailures("#939 0305 person-stated prepayment term",
+      PREPAYMENT_STATED_TERM_0305_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

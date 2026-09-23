@@ -4697,3 +4697,51 @@ override census equal to v1's row for row; S6 drives `clara.list_coa_templates()
 firm session and shows exactly ONE published `my_sme_starter` row — version 2, 146 accounts — with
 v1 retired, unmoved at 42/142 and still carrying 0150's own content hash. Each carries its own
 vacuity control (a rolled-back mutation of the exact fact under test).
+
+## 0305 — a prepayment with no document is amortised from a person-stated service period (#939, riders wave 4, lane 04)
+
+`ck_je_basis` (0003) admits a MEMO-ONLY journal entry: the client paid a year of insurance and said
+so, the accountant recorded the payment against a prepaid asset, and no invoice ever arrived.
+`clara.prepayment_schedule_v1` reads its term off `clara.document_service_periods`, which is keyed
+to a DOCUMENT, so such an entry answered `prepayment_term_underivable` naming
+`journal_entries.document_id` and the lane stopped there — a prepaid asset on the books with nothing
+amortising it, and no remedy but inventing a document. The accrual lane already accepts a
+person-stated period with no document; `0305_prepayment_stated_term.sql` brings the prepayment lane
+level with it.
+
+**The second term carrier.** `clara.prepayment_stated_terms` sits at RECOGNITION-ENTRY grain, not
+document grain, because the recognition entry is the only durable thing a memo-only term is about.
+It is NOT a nullable `document_id` on `clara.document_service_periods`: that relation's tenancy is a
+composite FK onto `clara.documents(id, firm_id)`, its liveness index is `unique (document_id) where
+superseded_at is null`, and its congruence trigger resolves region → extraction → document — making
+the column nullable would void all three at once, on the table the accrual lane and the prepayment
+lane share. Its discipline is that relation's own, column for column: supersede-never-mutate
+(`t_pst_supersede_only`), one live row per source entry (`uq_prepayment_stated_term_live`), a
+REQUIRED free-text `reason`, a recorded `stated_by`/`stated_at`, finite and domain-bounded dates,
+and the SAME 120-month cap computed with the SAME arithmetic the evaluator uses
+(`ck_pst_max_periods` is `ck_dsp_max_periods`' expression verbatim — the owner's decision 5 is "the
+same cap", and a cap computed a second way would be a second cap). Forced RLS with an owner policy
+and a SELECT-only, firm-predicated, bookkeeper-floored human policy.
+
+**One human door, and no machine lane at all.**
+`clara.record_prepayment_stated_term(client, source_entry, period_start, period_end, reason, op_key)`
+is bookkeeper-floored (the owner's decision 2: the same floor as recording a document's service
+period), `clara_authenticated` ONLY, with `clara._reserve_op` idempotency taken before any mutable
+validation. There is no agent grant and NO WAKE WRAPPER — the owner's default 6: a period a model
+supplied would be a model-generated value entering a durable artifact, so the model may only ever
+ask the fixed two-date question. The tail asserts that by a `pg_proc` count (exactly one function
+is named for the stated term), not by convention. The door refuses a document-bound recognition by
+name (`prepayment_stated_term_source_has_document`, naming
+`clara.record_document_service_period` as the remedy): two live terms for one prepayment would have
+no rule for which wins.
+
+**Prestate pins are PER BODY, not global.** 0285 (#919) pinned its two recut bodies under one mode
+and refused a half-and-half reading. That coupling is right for two bodies recut for one reason in
+one go and wrong here: 0305 recuts four bodies for four different reasons, and sibling tickets of
+the same lane recut some of the same reads immediately after it. Each body therefore admits exactly
+two pre-images of its OWN — its measured live `sha256(prosrc)`, or a body already carrying this
+file's `#939` attribution — and anything else is real drift and refuses by name. The mode each body
+was found in is reported in the notice, so a half-and-half reading is visible rather than silent.
+`clara.prepayment_schedule_v1` is pinned UNCONDITIONALLY at both ends of the file: it is a
+registered single-member `clara.evaluator_versions` closure and this file never touches it, so a
+changed sha is always a finding.
