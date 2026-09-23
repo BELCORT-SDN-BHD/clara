@@ -402,22 +402,43 @@ test("p636.batch.ladder_by_kind — the same member count binds on DIFFERENT cei
 // (0229's own words about this cell, restated). The MECHANISM proof — that the three production
 // bodies actually COMPUTE this expression — lives in document-ingest-window-myt.test.mjs, gated
 // on 0252's stem, never duplicated here.
+// #964 CI RED (wave-2 integration PR #1029, second run, 2026-09-20T16:12Z = 00:12 MYT): this cell
+// used to derive `ws` AND its OLD-rule control from `now()` directly. Between MYT midnight and
+// 08:00 MYT that is TWO different now()-derived quantities that silently disagree about which
+// calendar date is "today" — `ws` truncates now() in the MYT zone (today's MYT date), while the
+// control truncated now() in the UTC zone (still YESTERDAY's date at that hour, since 00:00-08:00
+// MYT is 16:00-24:00 UTC of the day before). The 06:00-MYT-today probe then landed on-or-after
+// YESTERDAY's UTC-truncated boundary, so `counted_old_utc_today` came back true when the cell
+// expected false — a bug in the CONTROL, not in the door (0252's shipped window is unaffected;
+// see the door check in this ticket's report). Fixed by making every instant in this cell a
+// function of one FIXED reference instant, never of now(), for all three arms (the straddle pair,
+// the same-day pair, the 06:00 arm). The OLD-rule boundary is derived as `ws + 8 hours` — "08:00
+// MYT of the reference date" — pure arithmetic off `ws`, never a second, independently-truncated
+// instant, so the cell is correct for a reference at ANY hour of the day, not merely a
+// conveniently-chosen one. The control's precise claim: under the OLD rule (a UTC calendar day,
+// i.e. an MYT window that runs 08:00-to-08:00) a reservation at 06:00 MYT belongs to the PREVIOUS
+// window; under the NEW rule (MYT midnight to MYT midnight) it belongs to TODAY's — both evaluated
+// for the fixed reference instant below, proved stable at 00:12, 07:59, 08:01 and 23:59 MYT in
+// this ticket's report.
 test("p964.window.capacity_window_myt — the daily window is an Asia/Kuala_Lumpur calendar day, reset at MYT midnight", async (t) => {
   if (await gate(t)) return;
+  const REF = "2026-06-15T12:00:00+08:00"; // any ordinary MYT calendar date; Malaysia has no DST.
   const w = (await rootQuery(
-    `select (date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur') as ws,
-            ((date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur')
-               at time zone 'Asia/Kuala_Lumpur')::time::text as local_time`)).rows[0];
+    `select (date_trunc('day', $1::timestamptz at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur') as ws,
+            ((date_trunc('day', $1::timestamptz at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur')
+               at time zone 'Asia/Kuala_Lumpur')::time::text as local_time`,
+    [REF])).rows[0];
   assert.equal(w.local_time, "00:00:00",
     "the MYT-day boundary lands at MYT MIDNIGHT — the card says 'resets at midnight', never 08:00");
   const ws = w.ws.getTime();
+  const wsIso = new Date(ws).toISOString();
 
   // AC3 + the boundary itself: a pair straddling MYT MIDNIGHT falls in DIFFERENT windows.
   const straddleMidnight = await rootQuery(
-    `select (v.ts >= (date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur')) as counted_today,
+    `select (v.ts >= $2::timestamptz) as counted_today,
             (date_trunc('day', v.ts at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur') as myt_window
        from unnest($1::timestamptz[]) as v(ts)`,
-    [[ws - 1000, ws + 1000].map((t2) => new Date(t2).toISOString())]);
+    [[ws - 1000, ws + 1000].map((t2) => new Date(t2).toISOString()), wsIso]);
   const [beforeMidnight, afterMidnight] = straddleMidnight.rows;
   assert.notEqual(beforeMidnight.myt_window.getTime(), afterMidnight.myt_window.getTime(),
     "two reservations straddling MYT MIDNIGHT fall in DIFFERENT daily windows");
@@ -435,10 +456,9 @@ test("p964.window.capacity_window_myt — the daily window is an Asia/Kuala_Lump
   // AC1: a reservation at 06:00 MYT counts against TODAY's MYT window — under the OLD 08:00-reset
   // window it would still have belonged to YESTERDAY's window (06:00 MYT is before 08:00 MYT).
   const sixAmMyt = await rootQuery(
-    `select (v.ts >= (date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur')) as counted_myt_today,
-            (v.ts >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc')) as counted_old_utc_today
-       from unnest($1::timestamptz[]) as v(ts)`,
-    [[new Date(ws + 6 * 3600 * 1000).toISOString()]]);
+    `select ($1::timestamptz >= $2::timestamptz) as counted_myt_today,
+            ($1::timestamptz >= ($2::timestamptz + interval '8 hours')) as counted_old_utc_today`,
+    [new Date(ws + 6 * 3600 * 1000).toISOString(), wsIso]);
   assert.equal(sixAmMyt.rows[0].counted_myt_today, true,
     "06:00 MYT must count against TODAY's MYT window");
   assert.equal(sixAmMyt.rows[0].counted_old_utc_today, false,
