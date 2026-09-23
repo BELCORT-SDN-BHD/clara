@@ -5166,3 +5166,27 @@ also what makes `clara._tf_fa_acquisition_birth`'s own precondition true by cons
 touches no depreciation column anywhere, so AC4's "never invented here" is structural. Balance is
 EXACT, never `clara._validate_entry_lines`' 5-cent rounding tolerance, and is checked only when
 nothing else already refused.
+
+**§J the unattended gate** — `clara._agreement_posting_verdict(uuid)`. 0297 §D's shape condition
+for condition (a closed rung roster walked in order, every rung carrying an explicit verdict, the
+FIRST failure being the reason a person is told, and the body itself STABLE so a blocked acquisition
+leaves nothing to reconcile), plus the two rungs this family has and the payroll lane does not:
+WHICH KIND of agreement the page says it is, and WHICH fixed-asset account the client enrolled.
+Fifteen rungs: `filed`, `facts_read`, `channels_agree`, `arithmetic_holds`, `agreement_kind_read`,
+`financing_agreement`, `agreement_date_established`, `period_open`, `price_terms_printed`,
+`price_identity_holds`, `schedule_reconciles`, `asset_account_resolves`, `accounts_resolve`,
+`entry_balances`, `no_duplicate_entry`.
+
+*`not_evaluated` is a verdict; an absent key is a hole.* §I returns EARLY at two points, so the
+questions past them were genuinely never asked. The plan reports how far it got in `stage`
+(`kind` / `price` / `complete`) and the gate writes `not_evaluated` for everything beyond it rather
+than reading a missing refusal as a pass — the same fails-open defect from the other direction.
+`no_duplicate_entry` is guarded the same way: "is it already posted" is a question about an entry a
+tenancy will never make.
+
+*The duplicate guard's three scopes*: `same_document` (the estate's own
+`clara._document_posting_entry`), `same_filing` (this lane never overwrites another writer's work),
+and `same_agreement` — another document's approved, unreversed entry whose
+`flags->'agreement_acquisition'` carries the same financier, signing date and cash price. Those three
+printed terms ARE the agreement's identity; a reversed entry is never a duplicate, so a reversal
+re-opens the agreement.

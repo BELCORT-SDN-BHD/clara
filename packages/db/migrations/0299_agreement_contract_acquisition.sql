@@ -2008,6 +2008,7 @@ declare
 begin
   if p_state is null or p_state->>'state_version' is distinct from 'v1' then
     return jsonb_build_object('plan_version','v1','ready',false,'legs','[]'::jsonb,
+      'stage','kind',
       'agreement_class',null,'financing',false,
       'agreement_date_raw',null,'posting_date',null,
       'asset_account_code',null,'asset_account_name',null,
@@ -2042,6 +2043,7 @@ begin
   end if;
   if jsonb_array_length(v_refusals) > 0 then
     return jsonb_build_object('plan_version','v1','ready',false,'legs','[]'::jsonb,
+      'stage','kind',
       'agreement_class', to_jsonb(v_class),'financing', v_financing,
       'agreement_date_raw',null,'posting_date',null,
       'asset_account_code',null,'asset_account_name',null,
@@ -2085,6 +2087,7 @@ begin
         'amount_financed_state', p_state->'facts'->'contract.agreement.amount_financed'->>'state',
         'deposit_state', p_state->'facts'->'contract.agreement.deposit'->>'state'));
     return jsonb_build_object('plan_version','v1','ready',false,'legs','[]'::jsonb,
+      'stage','price',
       'agreement_class', to_jsonb(v_class),'financing', v_financing,
       'agreement_date_raw', to_jsonb(v_date_raw),'posting_date', to_jsonb(v_posting),
       'asset_account_code',null,'asset_account_name',null,
@@ -2197,6 +2200,11 @@ begin
 
   return jsonb_build_object(
     'plan_version','v1',
+    -- HOW FAR THIS BODY GOT. The two early returns above mean the questions past them were
+    -- genuinely never asked, and 0299 §J writes `not_evaluated` rather than `pass` for those
+    -- rungs. Deriving it from the plan's own stage is what keeps the two bodies from disagreeing
+    -- about where it stopped.
+    'stage','complete',
     'agreement_class', to_jsonb(v_class),
     'financing', v_financing,
     'agreement_date_raw', to_jsonb(v_date_raw),
@@ -2220,5 +2228,369 @@ revoke all on function clara._agreement_entry_plan(uuid, jsonb) from public;
 
 comment on function clara._agreement_entry_plan(uuid, jsonb) is
   '#948: THE DRAFTING BODY. An established agreement fact state (clara.evaluate_agreement_contract_state_v1''s output) plus this client''s own chart and fixed-asset enrolments in; the acquisition entry out -- the asset debited at the printed cash price to the account the client ENROLLED, the liability recognised against the financier (a hire purchase GROSS, with the unexpired charge in suspense; a finance lease NET, per MPERS 20.9), and the deposit the agreement states credited to a payable rather than to a bank account Clara never saw move. A non-financing agreement drafts NOTHING and says so by name. It writes no depreciation particular of any kind -- #932/#933 own the policy and clara._tf_fa_acquisition_birth reads it. Exact balance, never the rounding tolerance. Every failure is a named refusal in `refusals`; it writes nothing. Ungranted: reached from clara._agreement_posting_verdict.';
+
+reset role;
+
+-- =====================================================================================
+-- §J  THE UNATTENDED GATE (AC4) -- clara._agreement_posting_verdict(uuid) returns jsonb.
+--
+--     "The same unattended gate as the payroll lane applies: both reading channels agreeing,
+--     every arithmetic check passing, every account resolving, no already-posted acquisition for
+--     this agreement. Anything else goes to Needs you naming what failed." (the brief.) This is
+--     that gate, condition for condition, with the two rungs this family has and the payroll lane
+--     does not -- WHICH KIND of agreement it is, and WHICH asset account it belongs to.
+--
+--     THE SHAPE IS 0297 §D's, AND THAT IS DELIBERATE. Three properties are carried over rather
+--     than re-invented:
+--       (1) A CLOSED RUNG ROSTER, walked in order, EVERY rung carrying an explicit verdict. A
+--           rung whose key were missing from the vector would be a gate that fails OPEN, which is
+--           the D26 defect the invoice lane found the hard way.
+--       (2) THE FIRST FAILING RUNG IS THE REASON. A person is told the condition that stopped the
+--           post, not a list -- but the whole vector travels beside it so a reviewer can see
+--           everything that was evaluated.
+--       (3) THE GATE WRITES NOTHING. It is STABLE: no receipt, no marker, no refusal row. A
+--           blocked acquisition is visible because §L DERIVES its Needs-you row from this same
+--           body, so the row clears itself the moment the block does.
+--
+--     ONE BODY, TWO READERS. §K (the post) and §L (the queue) both call this, so the sentence a
+--     person reads and the decision the lane acted on cannot drift apart.
+--
+--     `not_evaluated` IS A VERDICT, AN ABSENT KEY IS A HOLE. §I returns EARLY at two points (a
+--     page that is not a financing agreement, and one whose price terms are not established), and
+--     the rungs beyond that point were genuinely never run. The plan says how far it got in
+--     `stage`, and this body writes `not_evaluated` for everything past it rather than reading a
+--     missing refusal as a pass. That is the same fails-open defect from the other direction, and
+--     deriving it from the plan's own stage keeps the two bodies from disagreeing about where it
+--     stopped.
+--
+--     WHICH READING IT JUDGES: the NEWEST agreement pair banked for the document
+--     (`engine_kind='agreement_text_facts'`, highest `version_n`). A re-extraction mints a new
+--     version, and the live reading is the one the lane is asked about.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._agreement_posting_verdict(p_document uuid)
+  returns jsonb language plpgsql stable
+  set search_path = clara, pg_temp as $apv$
+declare
+  -- THE CLOSED ROSTER, in the order a person should be told about a failure. `filed` and
+  -- `facts_read` come first because without them the rest is unanswerable; `entry_balances` is a
+  -- belt that cannot fail once the arithmetic and the price identity passed, and is evaluated
+  -- anyway because a gate that assumes its own invariants is a gate that stops checking them.
+  v_rungs text[] := array['filed','facts_read','channels_agree','arithmetic_holds',
+                          'agreement_kind_read','financing_agreement','agreement_date_established',
+                          'period_open','price_terms_printed','price_identity_holds',
+                          'schedule_reconciles','asset_account_resolves','accounts_resolve',
+                          'entry_balances','no_duplicate_entry'];
+  -- Each rung's token IS the plan refusal reason it reads, where the plan decides it.
+  v_tokens jsonb := jsonb_build_object(
+    'filed','not_filed', 'facts_read','agreement_not_read',
+    'channels_agree','channels_disagree', 'arithmetic_holds','arithmetic_failed',
+    'agreement_kind_read','agreement_kind_not_established',
+    'financing_agreement','not_a_financing_agreement',
+    'agreement_date_established','agreement_date_not_established',
+    'period_open','period_closed',
+    'price_terms_printed','price_terms_not_established',
+    'price_identity_holds','price_identity_failed',
+    'schedule_reconciles','schedule_does_not_reconcile',
+    'asset_account_resolves','asset_account_unresolved',
+    'accounts_resolve','account_missing', 'entry_balances','entry_unbalanced',
+    'no_duplicate_entry','duplicate_entry');
+  -- The rungs §I answers, in roster order, paired with the STAGE at which each becomes
+  -- answerable. A plan that returned at `kind` answers only the first two.
+  v_plan_rungs text[] := array['agreement_kind_read','financing_agreement',
+                               'agreement_date_established','price_terms_printed',
+                               'price_identity_holds','schedule_reconciles',
+                               'asset_account_resolves','accounts_resolve','entry_balances'];
+  v_plan_stage text[] := array['kind','kind',
+                               'price','price',
+                               'complete','complete','complete','complete','complete'];
+  v_stage_rank jsonb := jsonb_build_object('kind',1,'price',2,'complete',3);
+  v_vector jsonb := '{}'::jsonb;
+  v_detail jsonb := '{}'::jsonb;
+  v_first text; v_rung text;
+  f record;
+  v_filing uuid; v_client uuid; v_firm uuid; v_sha text;
+  v_extraction uuid; v_state jsonb; v_plan jsonb := null; v_stage text;
+  v_disagree text[] := '{}'; v_arith text[] := '{}';
+  v_contested jsonb; v_unbal jsonb; v_unchk jsonb;
+  v_dup_entry uuid; v_dup_scope text;
+  v_sentence text; v_label text; v_i int;
+begin
+  -- 1 · FILED. The entry this lane posts is a DOCUMENT entry bound to the document's live filing,
+  --     so a document with no live filing has nothing to bind to.
+  select f2.id, f2.client_id, f2.firm_id into v_filing, v_client, v_firm
+    from clara.document_filings f2
+   where f2.document_id = p_document and f2.retired_at is null
+   order by f2.filed_at desc limit 1;
+  v_vector := v_vector || jsonb_build_object('filed', case when v_filing is null then 'not_filed' else 'pass' end);
+
+  -- 2 · FACTS READ. The newest agreement pair banked for this document.
+  if v_filing is not null then
+    select e.id, e.envelope->'contract_state' into v_extraction, v_state
+      from clara.document_extractions e
+     where e.document_id = p_document and e.engine_kind = 'agreement_text_facts' and e.status = 'done'
+     order by e.version_n desc, e.extracted_at desc limit 1;
+  end if;
+  v_vector := v_vector || jsonb_build_object('facts_read',
+    case when v_state is null then 'agreement_not_read' else 'pass' end);
+
+  if v_state is not null then
+    -- 3 · CHANNELS AGREE. A question the two readings answer differently, or a quoted schedule
+    --     row they read differently -- either one means there is no single reading to post.
+    v_contested := coalesce(v_state->'rows'->'contested','[]'::jsonb);
+    for f in select k, v from jsonb_each(coalesce(v_state->'facts','{}'::jsonb)) as t(k, v) order by k loop
+      if (f.v->>'state') in ('channels_disagree','rows_contested') then
+        v_disagree := v_disagree || f.k;
+      elsif (f.v->>'state') in ('totals_mismatch','rows_unbalanced','unreadable') then
+        v_arith := v_arith || f.k;
+      end if;
+    end loop;
+    if coalesce(array_length(v_disagree,1),0) > 0 or jsonb_array_length(v_contested) > 0 then
+      v_vector := v_vector || jsonb_build_object('channels_agree','channels_disagree');
+      v_detail := v_detail || jsonb_build_object('fields', to_jsonb(v_disagree),
+        'contested_rows', v_contested);
+    else
+      v_vector := v_vector || jsonb_build_object('channels_agree','pass');
+    end if;
+
+    -- 4 · ARITHMETIC HOLDS. A schedule row whose own principal + interest = instalment identity
+    --     fails, a row the evaluator could not check at all, a printed total the column sum
+    --     contradicts, or a rendering that is not a figure.
+    v_unbal := coalesce(v_state->'rows'->'unbalanced','[]'::jsonb);
+    v_unchk := coalesce(v_state->'rows'->'unchecked','[]'::jsonb);
+    if coalesce(array_length(v_arith,1),0) > 0
+       or jsonb_array_length(v_unbal) > 0 or jsonb_array_length(v_unchk) > 0 then
+      v_vector := v_vector || jsonb_build_object('arithmetic_holds','arithmetic_failed');
+      v_detail := v_detail || jsonb_build_object('fields', to_jsonb(v_arith),
+        'unbalanced_rows', v_unbal, 'unchecked_rows', v_unchk);
+    else
+      v_vector := v_vector || jsonb_build_object('arithmetic_holds','pass');
+    end if;
+
+    -- 5 · THE DRAFTING BODY ANSWERS THE REST. The kind, the class, the date, the price terms, the
+    --     two named checks, the enrolment, the chart and the balance are exactly what §I already
+    --     decides, so they are read off its refusals rather than re-decided here -- one body per
+    --     question, never two.
+    v_plan := clara._agreement_entry_plan(v_client, v_state);
+    v_stage := coalesce(v_plan->>'stage','complete');
+    for v_i in 1 .. array_length(v_plan_rungs,1) loop
+      v_rung := v_plan_rungs[v_i];
+      if exists (select 1 from jsonb_array_elements(v_plan->'refusals') x
+                  where x->>'reason' = v_tokens->>v_rung) then
+        v_vector := v_vector || jsonb_build_object(v_rung, v_tokens->>v_rung);
+      elsif (v_stage_rank->>v_plan_stage[v_i])::int > (v_stage_rank->>v_stage)::int then
+        -- The plan returned before this question was asked. `not_evaluated` is a verdict.
+        v_vector := v_vector || jsonb_build_object(v_rung, 'not_evaluated');
+      else
+        v_vector := v_vector || jsonb_build_object(v_rung, 'pass');
+      end if;
+    end loop;
+    v_detail := v_detail || jsonb_build_object(
+      'missing_accounts', coalesce(v_plan->'missing_accounts','[]'::jsonb),
+      'enrolled_accounts', coalesce(
+        (select x->'detail'->'accounts' from jsonb_array_elements(v_plan->'refusals') x
+          where x->>'reason' = 'asset_account_unresolved' limit 1), '[]'::jsonb),
+      'plan_refusals', coalesce(v_plan->'refusals','[]'::jsonb));
+
+    -- 6 · THE PERIOD IS STILL OPEN. `clara._tf_period_wall` refuses an approved touch whose
+    --     posting date falls inside a fiscal year in `closing` or `closed`, and it is right to.
+    --     The gate asks the SAME question up front rather than letting the wall raise at the
+    --     post, for one reason that matters to a person: §L derives the Needs-you row from this
+    --     verdict, so a condition the gate did not evaluate would make that row say "ready" about
+    --     an acquisition the estate will refuse. A rung that only the wall knows about is a row
+    --     that lies.
+    if v_plan->>'posting_date' is null then
+      v_vector := v_vector || jsonb_build_object('period_open','not_evaluated');
+    elsif exists (select 1 from clara.fiscal_years fy
+                   where fy.client_id = v_client
+                     and (v_plan->>'posting_date')::date between fy.starts_on and fy.ends_on
+                     and fy.status in ('closing','closed')) then
+      v_vector := v_vector || jsonb_build_object('period_open','period_closed');
+      v_detail := v_detail || jsonb_build_object('closed_fiscal_year',
+        (select jsonb_build_object('label', fy.label, 'status', fy.status,
+                  'starts_on', fy.starts_on, 'ends_on', fy.ends_on)
+           from clara.fiscal_years fy
+          where fy.client_id = v_client
+            and (v_plan->>'posting_date')::date between fy.starts_on and fy.ends_on
+            and fy.status in ('closing','closed')
+          order by fy.starts_on desc limit 1));
+    else
+      v_vector := v_vector || jsonb_build_object('period_open','pass');
+    end if;
+
+    -- 7 · NO ACQUISITION FOR THIS AGREEMENT IS ALREADY POSTED. THREE SCOPES, in the order a
+    --     person would want to hear them, and the FIRST match is reported because it is the most
+    --     specific thing that can be said:
+    --
+    --     same_document  -- this very document already backs a posted entry. The estate's own
+    --                       clara._document_posting_entry, asked here so the answer is a NAMED
+    --                       refusal rather than the source-binding wall's raise at the write.
+    --     same_filing    -- this filing already carries a live draft or approved entry. Somebody
+    --                       (or something) got there first; this lane never overwrites another
+    --                       writer's work, and the one-open-draft unique index would refuse the
+    --                       insert anyway.
+    --     same_agreement -- ANOTHER document's acquisition already covers THIS agreement. The
+    --                       re-upload case: a second scan of the same contract, or a corrected
+    --                       copy filed again. Keyed on the three printed terms that ARE the
+    --                       agreement's identity -- the financier, the signing date and the cash
+    --                       price -- read off this lane's own `flags->'agreement_acquisition'`
+    --                       marker on the ledger itself rather than a side table nobody else
+    --                       maintains. Two DIFFERENT agreements with one financier, one signing
+    --                       date and one cash price is a coincidence a person adjudicates; one
+    --                       agreement posted twice is a defect, and this guard prefers to ask.
+    --
+    --     A reversed entry is not a duplicate: `reversed_by is null` throughout, so a reversal
+    --     re-opens the agreement.
+    -- ONLY WHEN THERE IS AN ACQUISITION TO DUPLICATE. A tenancy, or a page whose price terms are
+    -- not established, drafts nothing, so "is it already posted" is a question about an entry
+    -- that will not be made: `not_evaluated` is the honest verdict, and a `pass` here would be a
+    -- gate reporting a check it never ran.
+    if v_stage <> 'complete' then
+      v_vector := v_vector || jsonb_build_object('no_duplicate_entry','not_evaluated');
+    else
+    v_dup_entry := clara._document_posting_entry(v_client, p_document);
+    if v_dup_entry is not null then
+      v_dup_scope := 'same_document';
+    end if;
+    if v_dup_entry is null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.filing_id = v_filing
+         and (j.status = 'draft' or (j.status = 'approved' and j.reversed_by is null))
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'same_filing'; end if;
+    end if;
+    if v_dup_entry is null and (v_plan->>'financier') is not null
+       and (v_plan->>'posting_date') is not null and (v_plan->>'cash_price_cents') is not null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.client_id = v_client and j.status = 'approved' and j.reversed_by is null
+         and j.document_id is distinct from p_document
+         and j.flags->'agreement_acquisition'->>'financier' = v_plan->>'financier'
+         and j.flags->'agreement_acquisition'->>'agreement_date' = v_plan->>'posting_date'
+         and j.flags->'agreement_acquisition'->>'cash_price_cents' = v_plan->>'cash_price_cents'
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'same_agreement'; end if;
+    end if;
+
+    if v_dup_entry is null then
+      v_vector := v_vector || jsonb_build_object('no_duplicate_entry','pass');
+    else
+      v_vector := v_vector || jsonb_build_object('no_duplicate_entry','duplicate_entry');
+      v_detail := v_detail || jsonb_build_object('duplicate',
+        (select jsonb_build_object('scope', v_dup_scope, 'entry_id', j.id,
+                  'status', j.status, 'posting_date', to_char(j.posting_date,'YYYY-MM-DD'),
+                  'memo', j.memo)
+           from clara.journal_entries j where j.id = v_dup_entry));
+    end if;
+    end if;
+  else
+    -- Nothing was read, so nothing downstream of it was evaluated. Every rung still carries an
+    -- explicit verdict: `not_evaluated` is a verdict, an absent key is a hole.
+    foreach v_rung in array array['channels_agree','arithmetic_holds','agreement_kind_read',
+                                  'financing_agreement','agreement_date_established','period_open',
+                                  'price_terms_printed','price_identity_holds','schedule_reconciles',
+                                  'asset_account_resolves','accounts_resolve','entry_balances',
+                                  'no_duplicate_entry'] loop
+      v_vector := v_vector || jsonb_build_object(v_rung, 'not_evaluated');
+    end loop;
+  end if;
+
+  -- THE FIRST FAILING RUNG IS THE REASON. Walked over the CLOSED roster, so a rung whose key the
+  -- vector somehow lacks reads as a failure rather than as a pass.
+  v_first := null;
+  foreach v_rung in array v_rungs loop
+    if v_first is null and coalesce(v_vector->>v_rung,'') <> 'pass' then v_first := v_rung; end if;
+  end loop;
+
+  select d.sha256 into v_sha from clara.documents d where d.id = p_document;
+
+  -- THE SENTENCE A PERSON READS, BUILT HERE AND NOWHERE ELSE. §L's Needs-you row renders it
+  -- verbatim, so the words on screen and the decision the lane took come out of ONE body.
+  v_label := case when v_plan->>'posting_date' is not null
+                  then coalesce(nullif(v_plan->>'financier',''), 'this agreement')
+                       || ' dated ' || to_char((v_plan->>'posting_date')::date, 'FMDD FMMonth YYYY')
+                  else 'This agreement' end;
+  v_sentence := case coalesce(v_first, 'ready')
+    when 'ready' then
+      format('The acquisition under %s is ready to post but no entry exists yet -- re-file the agreement to post it.', v_label)
+    when 'filed' then 'This agreement is not filed under a client, so it has nothing to post against.'
+    when 'facts_read' then 'This agreement has not been read yet.'
+    when 'channels_agree' then
+      format('%s was not posted: the two readings of this agreement disagree (%s). Check the page and re-file it.',
+        v_label, coalesce(nullif(array_to_string(v_disagree, ', '), ''), 'a quoted instalment row'))
+    when 'arithmetic_holds' then
+      format('%s was not posted: the page does not add up (%s). Nothing is posted from a page that contradicts itself.',
+        v_label,
+        concat_ws('; ',
+          nullif(array_to_string(v_arith, ', '), ''),
+          case when jsonb_array_length(coalesce(v_unbal,'[]'::jsonb)) > 0
+               then 'instalments that do not balance: ' || replace(trim(both '[]' from v_unbal::text), ',', ', ') end,
+          case when jsonb_array_length(coalesce(v_unchk,'[]'::jsonb)) > 0
+               then 'instalments that could not be checked: ' || replace(trim(both '[]' from v_unchk::text), ',', ', ') end))
+    when 'agreement_kind_read' then
+      'An agreement was read but the page does not say, readably, what kind of agreement it is, so nothing was posted. Tell Clara whether this is a hire purchase, a finance lease or something else.'
+    when 'financing_agreement' then
+      format('This is a %s, which creates no asset and no liability on the day it is signed, so there is nothing to post. Its terms have been read and are on the document.',
+        replace(coalesce(v_plan->>'agreement_class','agreement'), '_', ' '))
+    when 'agreement_date_established' then
+      format('An agreement was read but the day it was signed could not be established from what the page prints (%s), so nothing was posted. Tell Clara the signing date, or re-file a copy that prints it unambiguously.',
+        coalesce(quote_literal(v_plan->>'agreement_date_raw'), 'the page prints no date'))
+    when 'period_open' then
+      format('%s was not posted: the fiscal year covering %s is %s.',
+        v_label, v_plan->>'posting_date',
+        coalesce(v_detail->'closed_fiscal_year'->>'status', 'not open'))
+    when 'price_terms_printed' then
+      'An agreement was read but the cash price and the amount financed are not both established from what the page prints, so nothing was posted. Check the page and re-file it.'
+    when 'price_identity_holds' then
+      format('%s was not posted: the deposit and the amount financed do not add up to the cash price (%s). Nothing is posted from a page that contradicts itself.',
+        v_label, coalesce(v_detail->'plan_refusals'->0->'detail'->>'reason', 'the figures differ'))
+    when 'schedule_reconciles' then
+      format('%s was not posted: the printed repayment schedule does not reconcile to the amount financed plus the charges. Check the page and re-file it.', v_label)
+    when 'asset_account_resolves' then
+      format('%s was not posted: Clara cannot tell which fixed-asset account this belongs to (%s enrolled). The page describes what was acquired in words, and a description is not an account -- enrol the account, or tell Clara which one to use.',
+        v_label,
+        coalesce((select x->'detail'->>'enrolments' from jsonb_array_elements(coalesce(v_plan->'refusals','[]'::jsonb)) x
+                   where x->>'reason' = 'asset_account_unresolved' limit 1), 'no account'))
+    when 'accounts_resolve' then
+      format('%s was not posted: this client''s chart of accounts has no %s. Add the account(s) and re-file the agreement.',
+        v_label,
+        coalesce(nullif(replace(trim(both '[]' from coalesce(v_plan->'missing_accounts','[]'::jsonb)::text), '"', ''), ''), 'account it needs'))
+    when 'entry_balances' then
+      format('%s was not posted: the entry it would make does not balance (%s debit, %s credit).',
+        v_label, v_plan->>'debit_cents', v_plan->>'credit_cents')
+    when 'no_duplicate_entry' then
+      format('%s is already posted (%s, %s). This copy was not posted again -- open that entry to decide whether this is a correction or a re-upload.',
+        v_label,
+        coalesce(v_detail->'duplicate'->>'memo', 'an existing entry'),
+        coalesce(v_detail->'duplicate'->>'posting_date', 'no date'))
+    else format('%s was not posted (%s).', v_label, coalesce(v_tokens->>v_first, v_first))
+  end;
+
+  return jsonb_build_object(
+    'sentence', v_sentence,
+    'agreement_label', to_jsonb(v_label),
+    'verdict', case when v_first is null then 'ready' else 'blocked' end,
+    'rung', to_jsonb(v_first),
+    'reason', to_jsonb(case when v_first is null then null else v_tokens->>v_first end),
+    'rung_vector', v_vector,
+    'detail', v_detail,
+    'document_id', p_document,
+    'client_id', to_jsonb(v_client),
+    'firm_id', to_jsonb(v_firm),
+    'filing_id', to_jsonb(v_filing),
+    'source_doc_sha256', to_jsonb(v_sha),
+    'extraction_id', to_jsonb(v_extraction),
+    'existing_entry_id', to_jsonb(v_dup_entry),
+    'agreement_class', coalesce(v_plan->'agreement_class','null'::jsonb),
+    'posting_date', coalesce(v_plan->'posting_date','null'::jsonb),
+    'plan', coalesce(v_plan,'null'::jsonb));
+end $apv$;
+
+revoke all on function clara._agreement_posting_verdict(uuid) from public;
+
+comment on function clara._agreement_posting_verdict(uuid) is
+  '#948: THE UNATTENDED GATE for an agreement contract -- the closed rung roster the brief names, walked in order, every rung carrying an explicit verdict and the FIRST failure being the reason a person is told. It is 0297 §D''s shape condition for condition, plus the two rungs this family has and the payroll lane does not: WHICH KIND of agreement the page says it is, and WHICH fixed-asset account the client enrolled. It WRITES NOTHING (STABLE): clara._post_agreement_acquisition acts on it and clara.list_review_queue DERIVES its agreement_posting_blocked row from it, so the decision the lane took and the sentence a person reads are the same body and cannot drift. Judges the NEWEST agreement pair banked for the document. Ungranted: reached from those two callers alone.';
 
 reset role;

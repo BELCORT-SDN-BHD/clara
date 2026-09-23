@@ -39,8 +39,10 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, ensureReady, endPool, buildWorld, createClient, upsertAccount } from "./rig-fixtures.mjs";
-import { opk } from "./rig-helpers.mjs";
+import { rootQuery, ensureReady, endPool, buildWorld, createClient, upsertAccount, draftEntry, freshResolution } from "./rig-fixtures.mjs";
+import { fiscalYear } from "./depreciation-history-fixtures.mjs";
+import { retireDocumentFiling } from "./rig-docs-fixtures.mjs";
+import { opk, human } from "./rig-helpers.mjs";
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, docTasks, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
 import { upsertFaProfile } from "./x41-fa-fixtures.mjs";
@@ -1304,4 +1306,214 @@ test("S7 · printed figures that do not hold stop the draft: the price identity,
     })));
     assert.equal(q.posting_date, iso, `${raw} establishes ${iso === null ? "nothing" : iso}`);
   }
+});
+
+
+// ---------------------------------------------------------------------------
+// S8 — the unattended gate (AC4's "condition for condition", AC5's non-financing branch)
+// ---------------------------------------------------------------------------
+
+/** Drive an agreement contract all the way through the REAL doors — filed, routed, claimed,
+ *  read — and hand back the document and what the persist call made of it. */
+async function readAgreement(client, opts = {}) {
+  const doc = await runningAgreementTask(client);
+  const [textEnv, visionEnv] = bothChannels(opts);
+  const receipt = await persist(
+    doc.taskId,
+    call(opts.textEnv ?? textEnv, { pin: doc.extractionId, promptHash: "agreement-text-v1" }),
+    call(opts.visionEnv ?? visionEnv, { pin: doc.sha, promptHash: "agreement-vision-v1" }),
+  );
+  return { ...doc, receipt };
+}
+
+const verdict = async (documentId) =>
+  (await rootQuery("select clara._agreement_posting_verdict($1) as v", [documentId])).rows[0].v;
+
+test("S8 · the gate walks a CLOSED roster in order, every rung carries an explicit verdict, and the first failure is the reason", async (t) => {
+  if (unready(t)) return;
+
+  const sub = world.users.alice;
+  // A client enrolled for fixed assets whose chart is missing ONE of the codes this entry needs.
+  const client = await createClient(sub, { name: `${world.prefix}_948gate`, opKey: opk("cli-948") });
+  await upsertAccount(sub, { client, code: "9990", name: "Rounding", type: "equity", special: "rounding", opKey: opk("coa-948") });
+  await upsertAccount(sub, { client, code: FA_COST, name: "Motor Vehicles — cost", type: "asset", opKey: opk("coa-948") });
+  await upsertFaProfile(sub, { client, assetAccount: FA_COST, opKey: opk("enrol-948") });
+  await upsertAccount(sub, { client, code: "2440", name: "Hire Purchase Interest Suspense", type: "liability", opKey: opk("coa-948") });
+  await upsertAccount(sub, { client, code: "2010", name: "Other Payables", type: "liability", opKey: opk("coa-948") });
+  // 2430 Hire Purchase Creditor is deliberately absent.
+
+  const doc = await readAgreement(client);
+  const blocked = await verdict(doc.documentId);
+  assert.equal(blocked.verdict, "blocked");
+  assert.equal(blocked.rung, "accounts_resolve", `${JSON.stringify(blocked.rung_vector)}`);
+  assert.equal(blocked.reason, "account_missing");
+  assert.match(blocked.sentence, /2430/, "the sentence NAMES the account a person must add");
+  assert.deepEqual(blocked.detail.missing_accounts, ["2430"]);
+
+  // EVERY rung carries an explicit verdict: a rung whose key were missing from the vector would
+  // be a gate that fails OPEN, which is the D26 defect the invoice lane found the hard way.
+  const ROSTER = ["filed", "facts_read", "channels_agree", "arithmetic_holds", "agreement_kind_read",
+    "financing_agreement", "agreement_date_established", "period_open", "price_terms_printed",
+    "price_identity_holds", "schedule_reconciles", "asset_account_resolves", "accounts_resolve",
+    "entry_balances", "no_duplicate_entry"];
+  assert.deepEqual(Object.keys(blocked.rung_vector).sort(), [...ROSTER].sort(),
+    "the vector is the closed roster, no key more and no key fewer");
+  for (const r of ROSTER.slice(0, ROSTER.indexOf("accounts_resolve"))) {
+    assert.equal(blocked.rung_vector[r], "pass", `${r} passed, and is the reason accounts_resolve is the FIRST failure`);
+  }
+
+  // Add the missing account and the SAME body says ready — nothing was stored, so nothing has to
+  // be cleared.
+  await upsertAccount(sub, { client, code: "2430", name: "Hire Purchase Creditor", type: "liability", opKey: opk("coa-948") });
+  const ready = await verdict(doc.documentId);
+  assert.equal(ready.verdict, "ready", `${JSON.stringify(ready.rung_vector)}`);
+  assert.equal(ready.reason, null);
+  assert.equal(ready.rung, null);
+  assert.equal(ready.posting_date, "2026-03-14");
+  assert.equal(ready.plan.legs.length, 4);
+  assert.equal(Number(ready.plan.debit_cents), 12840000);
+  assert.equal(ready.client_id, client);
+});
+
+test("S8 · the gate WRITES NOTHING: two reads of a blocked agreement leave the estate byte-identical", async (t) => {
+  if (unready(t)) return;
+
+  const volatility = (
+    await rootQuery("select p.provolatile as v from pg_proc p where p.oid='clara._agreement_posting_verdict(uuid)'::regprocedure")
+  ).rows[0].v;
+  assert.equal(volatility, "s", "the gate is STABLE — it cannot write, which is what lets the queue derive from it");
+
+  const client = await enrolledClient("quiet");
+  const doc = await readAgreement(client, { answers: { "contract.agreement.kind": value("Tenancy Agreement") } });
+  const before = (
+    await rootQuery(
+      `select (select count(*) from clara.journal_entries where client_id=$1)::int e,
+              (select count(*) from clara.domain_events where client_id=$1)::int v,
+              (select count(*) from clara.audit_log)::int a`,
+      [client],
+    )
+  ).rows[0];
+  await verdict(doc.documentId);
+  await verdict(doc.documentId);
+  const after = (
+    await rootQuery(
+      `select (select count(*) from clara.journal_entries where client_id=$1)::int e,
+              (select count(*) from clara.domain_events where client_id=$1)::int v,
+              (select count(*) from clara.audit_log)::int a`,
+      [client],
+    )
+  ).rows[0];
+  assert.deepEqual(after, before, "no entry, no event, no audit row — a blocked agreement leaves no refusal record to reconcile");
+});
+
+test("S8 · a tenancy agreement is READ and never reaches the fixed-asset lane (AC5)", async (t) => {
+  if (unready(t)) return;
+
+  const client = await enrolledClient("ten8");
+  const doc = await readAgreement(client, { answers: { "contract.agreement.kind": value("Tenancy Agreement") } });
+
+  // It WAS read: the typed terms are banked, which is what #949's contract-terms record will
+  // stand on. It simply drafts nothing.
+  assert.equal(doc.receipt.status, "done");
+  assert.equal((await regionsOf(doc.documentId)).length, RUN_FIELDS.length);
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.verdict, "blocked");
+  assert.equal(v.rung, "financing_agreement");
+  assert.equal(v.reason, "not_a_financing_agreement");
+  assert.match(v.sentence, /tenancy/i, "the sentence says what the page IS, not merely what it is not");
+  assert.match(v.sentence, /no asset/i, "…and why that means there is nothing to post on the day it was signed");
+
+  // The rungs BELOW the failure are not_evaluated, never `pass`: a gate that reported a pass it
+  // never ran would be the same fails-open defect from the other direction.
+  for (const r of ["agreement_date_established", "period_open", "price_terms_printed",
+    "price_identity_holds", "schedule_reconciles", "asset_account_resolves", "accounts_resolve",
+    "entry_balances", "no_duplicate_entry"]) {
+    assert.equal(v.rung_vector[r], "not_evaluated", `${r} was never reached and says so`);
+  }
+
+  // AC5's own words: nothing at all reached the fixed-asset lane.
+  const fa = (
+    await rootQuery("select count(*)::int n from clara.fixed_assets where client_id=$1", [client])
+  ).rows[0].n;
+  assert.equal(fa, 0, "a tenancy agreement never births a fixed asset");
+  const entries = (
+    await rootQuery("select count(*)::int n from clara.journal_entries where client_id=$1", [client])
+  ).rows[0].n;
+  assert.equal(entries, 0, "…and never a journal entry either");
+});
+
+test("S8 · the conditions the brief names, each driven: unread, unfiled, channels disagreeing, a closed year, a duplicate", async (t) => {
+  if (unready(t)) return;
+
+  const sub = world.users.alice;
+
+  // (a) NOT READ. A filed agreement contract with no banked pair.
+  const c1 = await enrolledClient("unread");
+  const bare = await agreementDoc(c1);
+  const unread = await verdict(bare.documentId);
+  assert.equal(unread.rung, "facts_read");
+  assert.equal(unread.reason, "agreement_not_read");
+
+  // (b) NOT FILED. The same document after its filing is retired: the entry this lane posts is
+  //     bound to a live filing, so there is nothing left to bind to.
+  const c2 = await enrolledClient("unfiled");
+  const d2 = await readAgreement(c2);
+  const f2 = (
+    await rootQuery("select id, revision_token from clara.document_filings where document_id=$1 and retired_at is null", [d2.documentId])
+  ).rows[0];
+  await retireDocumentFiling(sub, { filing: f2.id, reason: "#948 gate cell", expectedRevision: f2.revision_token, opKey: opk("retire-948") });
+  const unfiled = await verdict(d2.documentId);
+  assert.equal(unfiled.rung, "filed");
+  assert.equal(unfiled.reason, "not_filed");
+
+  // (c) THE TWO READINGS DISAGREE. Nothing is posted from a page read two different ways.
+  const c3 = await enrolledClient("disagree");
+  const d3 = await readAgreement(c3, {
+    textEnv: envelope(),
+    visionEnv: envelope({ channel: "vision", answers: { "contract.agreement.cash_price": value("125,000.00") } }),
+  });
+  const dis = await verdict(d3.documentId);
+  assert.equal(dis.rung, "channels_agree");
+  assert.equal(dis.reason, "channels_disagree");
+  assert.deepEqual(dis.detail.fields, ["contract.agreement.cash_price"]);
+
+  // (d) THE PAGE DOES NOT ADD UP. A printed total the schedule column contradicts.
+  const c4 = await enrolledClient("arith");
+  const d4 = await readAgreement(c4, { answers: { "contract.agreement.total_charges": value("9,000.00") } });
+  const arith = await verdict(d4.documentId);
+  assert.equal(arith.rung, "arithmetic_holds");
+  assert.equal(arith.reason, "arithmetic_failed");
+
+  // (e) A CLOSED YEAR. clara._tf_period_wall would refuse the write; the gate asks the same
+  //     question up front, so the derived Needs-you row cannot say "ready" about a run the estate
+  //     will refuse.
+  const c5 = await enrolledClient("closed");
+  const firm5 = await firmOf(c5);
+  await fiscalYear(firm5, c5, { startsOn: "2026-01-01", endsOn: "2026-12-31", status: "closed", owner: sub });
+  const d5 = await readAgreement(c5);
+  const closed = await verdict(d5.documentId);
+  assert.equal(closed.rung, "period_open");
+  assert.equal(closed.reason, "period_closed");
+  assert.equal(closed.detail.closed_fiscal_year.status, "closed", "the gate names the year that is shut");
+
+  // (f) ALREADY POSTED. A live entry on this very filing: this lane never overwrites another
+  //     writer's work, and the refusal POINTS at the entry so a person can tell a correction from
+  //     a re-upload.
+  const c6 = await enrolledClient("dup");
+  const d6 = await readAgreement(c6);
+  const res = await freshResolution(sub, c6);
+  const hand = await draftEntry(human(sub), {
+    client: c6, resolution: res, postingDate: "2026-03-14", memo: "Hand-booked acquisition",
+    lines: [
+      { account_code: FA_COST, debit_cents: 12000000, credit_cents: 0, description: "Lorry" },
+      { account_code: "2430", debit_cents: 0, credit_cents: 12000000, description: "Financier" },
+    ],
+    document: d6.documentId, sha256: d6.sha, opKey: opk("dup-948"),
+  });
+  const dup = await verdict(d6.documentId);
+  assert.equal(dup.rung, "no_duplicate_entry");
+  assert.equal(dup.reason, "duplicate_entry");
+  assert.equal(dup.detail.duplicate.entry_id, hand.entry_id);
+  assert.match(dup.sentence, /already/i);
 });
