@@ -490,8 +490,13 @@ test("p653.kind.unsupported — depreciation and close STILL answer plan_kind_un
         dayOfMonth: null, effectiveFrom: scene.termEnd, basis: b,
       }),
       `plan kind ${kind}`);
+    // #941 (0308) widened the set by ONE more member, additively: the three kinds this cell was
+    // written for keep their exact spelling and their order, and `revenue_recognition_schedule`
+    // joins them. The claim under test is unchanged — the refusal NAMES what is supported — and a
+    // list that had dropped or reordered a member would still fail here.
     assert.deepEqual(detail.supported,
-      ["recurring_journal", "reversing_journal", "amortisation_schedule"],
+      ["recurring_journal", "reversing_journal", "amortisation_schedule",
+        "revenue_recognition_schedule"],
       "the refusal NAMES what the widened slice does support");
   }
 

@@ -74,17 +74,20 @@ export async function assertDeferredLanePresent(t) {
 // ===========================================================================================
 
 export const DR_HUMAN_SIG =
-  "clara.create_revenue_recognition_schedule(uuid,uuid,text,text,text,jsonb,text)";
+  "clara.create_revenue_recognition_schedule(uuid,uuid,text,text,text,jsonb,text,text)";
 export const DR_OBO_SIG =
-  "clara.create_revenue_recognition_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text)";
+  "clara.create_revenue_recognition_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text,text)";
 export const DR_READ_SIG = "clara.read_revenue_recognition_source_for(uuid,uuid,uuid)";
 export const DR_CORE_SIG =
-  "clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)";
+  "clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)";
 export const DR_PLAN_CORE_SIG =
   "clara._obo_plan_core(text,uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)";
 export const DR_PERIOD_LINE_SIG = "clara._plan_revenue_recognition_period_line(uuid,date)";
 
 export const RECOGNITION_KIND = "revenue_recognition_schedule";
+/** The ONE pattern this estate offers. Usage-based and milestone recognition need a measure of
+ *  progress the estate does not carry, so the door refuses them BY NAME rather than guessing one. */
+export const RECOGNITION_PATTERN = "straight_line";
 
 export const DR_REASON = {
   sourceUnfit: "deferred_revenue_source_unfit",
@@ -146,17 +149,18 @@ const DR_SPECS = [
   { name: "p_client", cast: "uuid" }, { name: "p_source_entry", cast: "uuid" },
   { name: "p_revenue_account", cast: "text" }, { name: "p_revenue_basis", cast: "text" },
   { name: "p_purpose", cast: "text" }, { name: "p_authority_ref", cast: "jsonb" },
-  { name: "p_op_key", cast: "text" },
+  { name: "p_op_key", cast: "text" }, { name: "p_pattern", cast: "text" },
 ];
 
 /** THE HUMAN DOOR — `clara_authenticated` only, bookkeeper floor in its own body. */
 export async function createRecognitionSchedule(sub, {
   client, sourceEntry, revenueAccount, revenueBasis = REVENUE_BASIS,
   purpose = "Membership fee recognition", authorityRef, opKey = null,
+  pattern = RECOGNITION_PATTERN,
 }) {
   const r = await humanQuery(sub, namedCall("create_revenue_recognition_schedule", DR_SPECS),
     [client, sourceEntry, revenueAccount, revenueBasis, purpose,
-      JSON.stringify(authorityRef), opKey ?? opk("p941-create")]);
+      JSON.stringify(authorityRef), opKey ?? opk("p941-create"), pattern]);
   return r.rows[0].result;
 }
 
@@ -165,6 +169,7 @@ const DR_OBO_SPECS = [
   { name: "p_source_entry", cast: "uuid" }, { name: "p_revenue_account", cast: "text" },
   { name: "p_revenue_basis", cast: "text" }, { name: "p_purpose", cast: "text" },
   { name: "p_authority_ref", cast: "jsonb" }, { name: "p_op_key", cast: "text" },
+  { name: "p_pattern", cast: "text" },
 ];
 
 /**
@@ -175,11 +180,12 @@ const DR_OBO_SPECS = [
 export async function createRecognitionScheduleFor({
   client, author, sourceEntry, revenueAccount, revenueBasis = REVENUE_BASIS,
   purpose = "Membership fee recognition", authorityRef, opKey = null,
+  pattern = RECOGNITION_PATTERN,
 }) {
   const r = await roleQuery(ROLES.runtime,
     namedCall("create_revenue_recognition_schedule_for", DR_OBO_SPECS),
     [client, author, sourceEntry, revenueAccount, revenueBasis, purpose,
-      JSON.stringify(authorityRef), opKey ?? opk("p941-obo")]);
+      JSON.stringify(authorityRef), opKey ?? opk("p941-obo"), pattern]);
   return r.rows[0].result;
 }
 

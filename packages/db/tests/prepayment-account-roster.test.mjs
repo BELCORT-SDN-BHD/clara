@@ -209,11 +209,18 @@ cell("p940.enrol.refusals — an unknown, control-class, bank-bound, fixed-asset
       client: scene.client, account: scene.prepaid, purpose: "prepaid_expense" }),
     "enrolling under a purpose the closed set does not carry");
   assert.equal(badPurpose.detail.axis, ROSTER_AXIS.purposeUnknown);
-  const notYet = await assertPair(CLR37, ROSTER_REASON.invalid,
+  // #941 (0308) STATED THAT RULE, so this arm now measures the RULE rather than its absence: the
+  // scene's PREPAID ASSET under the deferred-revenue purpose is refused `not_liability_class`,
+  // which is the same sentence in the other direction and the same one axis the door has always
+  // answered with. Before 0308 the answer here was `purpose_rule_not_stated`; the cell keeps its
+  // place in the closed-set sweep because "the second purpose is not the first" is still what it
+  // proves. `p941.enrol.deferred_revenue` owns the positive half.
+  const secondPurpose = await assertPair(CLR37, ROSTER_REASON.invalid,
     () => enrolPrepaymentAccount(scene.bob, {
       client: scene.client, account: scene.prepaid, purpose: ROSTER_PURPOSE.deferredRevenue }),
-    "enrolling under the deferred-revenue purpose before #941 states its rule");
-  assert.equal(notYet.detail.axis, ROSTER_AXIS.purposeRuleNotStated);
+    "enrolling a prepaid ASSET under the deferred-revenue purpose");
+  assert.equal(secondPurpose.detail.axis, "not_liability_class");
+  assert.equal(secondPurpose.detail.account_type, "asset");
   // …and the COLUMN admits it, which is the half that makes #941 an arm rather than a relation.
   const admits = await rootQuery(`select pg_get_constraintdef(c.oid) as def from pg_constraint c
      where c.conrelid = 'clara.prepayment_account_enrolments'::regclass and c.contype = 'c'
