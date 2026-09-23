@@ -248,4 +248,14 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "d84659c80b4aee33f46038660ee97e2f322a7e6861cdc5874ebfb79507cde81f",
     },
   ],
+  // Ticket 1012 [0288] (riders wave 3, lane 07) — the SAME 0146/0168/0180/0260 splice family,
+  // run in reverse for the first time: a row kind is REMOVED from the queue rather than added.
+  [
+    "0288_seeding_lane_retired.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at a literal signature and re-installed with its `seeding_rows` CTE and that CTE's union arm REMOVED (a gravestone comment in their place), because ticket 1012 retires the prior-GL seeding lane the row kind chased. The spliced text is built by boundary-anchored substring surgery between two literal CTE openers, each asserted to occur exactly once, plus one exact-count `replace()` of the union arm; the block emits no view definition at all, so neither P4 scope view can be a target, and its own postcheck re-derives every one of the TEN surviving row-kind markers at their prestate counts and asserts the removed kind's marker is gone. Same family as 0146's, 0168's, 0180's and 0260's splices of the same queue function. The file's OTHER sections use no dynamic SQL: three `create or replace function` statements at literal signatures recut the retired doors to one typed refusal, two `update clara.document_capabilities` statements republish seven prior_gl rows and raise the registry version, and the prestate/tail blocks read the catalog and drive the real doors inside a forced-rollback subtransaction.",
+      sha256: "6b6c5d031e2fe33de52c935befe35a4efcc8c4e321b53c4c2943f99ca34857bc",
+    },
+  ],
 ]);

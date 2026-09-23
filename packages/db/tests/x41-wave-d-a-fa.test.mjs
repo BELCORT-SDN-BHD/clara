@@ -28,6 +28,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import {
   rootQuery, withActor, opk, ROLES, roleCanExecute, fnSource, checkDefs, idOf, noteLane, endPool,
   printLaneNotes, printSkipCount, reverseEntry, freshResolution, x41EnsureReady, skip41,
@@ -463,7 +464,9 @@ test("x41.b4 door (a) is status-blind: the acquisition reversal that flips the r
 
 test("x41.b5 a K gl_balance leg on an ENROLLED account is refused by name — enrolment is the commitment to an itemised register", async (t) => {
   if (skipHere(t)) return;
-  const o = await wb.onboardingClient(w.users.hana, `x41kgl_${uniqTag()}`);
+  // #899 (0287): a unique LEADING token, or the birth wall refuses the third client of the
+  // `x41kgl` family -- see freshEnrolledFaClient's own note in x41-fa-world.mjs.
+  const o = await wb.onboardingClient(w.users.hana, `x41kgl${randomUUID().slice(0, 8)}_${uniqTag()}`);
   await wb.seedOpeningCoa(w.users.alice, o.client);
   await buildFaChart(w.users.alice, o.client);
   await upsertFaProfile(w.users.alice, { client: o.client, assetAccount: COST, accumAccount: ACCUM, expenseAccount: EXPENSE });

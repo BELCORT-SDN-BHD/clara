@@ -6,6 +6,7 @@
 // audited verbs — the x37 dog-fooding law. A raw INSERT appears ONLY where no audited
 // verb can reach the shape under test, and each such site carries a comment saying why.
 
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import {
   rootQuery, opk, idOf,
@@ -362,7 +363,13 @@ export async function earnRamp(client, period, opts = {}) {
  *  truth. */
 export async function freshEnrolledFaClient(label) {
   const w = await faWorld();
-  const o = await wb.onboardingClient(w.users.hana, label);
+  // #899 (0287_client_birth_wall.sql): clara.name_family_token is the FIRST alphanumeric token of
+  // a client's name, and the birth wall refuses a THIRD client of the same family. Every caller
+  // here passed a label whose leading token was SHARED (`x41k_<label>_<uniq>`, `884refuse`), so
+  // the third onboarding client of a run was refused. The unique part leads now -- the same
+  // recut wb-fixtures.mjs's own onboardingClient() default took -- which fixes every caller of
+  // this helper at once rather than one label at a time.
+  const o = await wb.onboardingClient(w.users.hana, `fa${randomUUID().slice(0, 8)}_${label}`);
   await wb.seedOpeningCoa(w.users.alice, o.client);
   await buildFaChart(w.users.alice, o.client);
   await upsertFaProfile(w.users.alice, { client: o.client, assetAccount: COST, accumAccount: ACCUM, expenseAccount: EXPENSE });
