@@ -285,6 +285,14 @@ const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   // itself IS a ⌘K row (`prepayments`, ACCOUNTING_PRESENTATION above) and is discoverable that way.
   { pattern: "/clients/[clientId]/prepayments/new", builder: "prepaymentCreateHref" },
   { pattern: "/clients/[clientId]/prepayments/[scheduleId]", builder: "prepaymentDetailHref" },
+  // #941's two deferred-revenue destinations, the mirror of #653's pair above and here for the
+  // same reason: each is reached from a surface that HOLDS the thing -- the attention band's
+  // "configure the schedule" row (which carries the receipt in its query string), the list row,
+  // the detail's own controls -- so the href is built from an id at render time and there is no
+  // literal to find. The LIST itself IS a Go row (`deferredRevenue`, ACCOUNTING_PRESENTATION
+  // above) and is discoverable that way.
+  { pattern: "/clients/[clientId]/deferred-revenue/new", builder: "deferredRevenueCreateHref" },
+  { pattern: "/clients/[clientId]/deferred-revenue/[scheduleId]", builder: "deferredRevenueDetailHref" },
 ];
 
 function orphanedFirmPages(
