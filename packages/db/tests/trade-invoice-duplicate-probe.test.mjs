@@ -20,7 +20,7 @@ import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  gateTiDup, TI_KIND, TI_DUP_SIGNAL, TI_ACK_REASON,
+  gateTiDup, TI_KIND, TI_DUP_SIGNAL, TI_ACK_REASON, TI_REASON,
   ensureTiChart, vendor, billParticulars, billBasis,
   admitTradeInvoiceWork, probeTradeInvoiceDuplicates, probeTradeInvoiceDuplicatesFor,
   recordTradeInvoiceDuplicateAck, getTradeInvoiceDuplicateAck, getTradeInvoice,
@@ -28,6 +28,7 @@ import {
   claimWorkRun, settleWorkRun, mintClientObo, wakeRecordJournalEntry, entriesForClient,
   opk, rootQuery, assertPair, customer, invoiceParticulars, invoiceBasis,
 } from "./trade-invoice-fixtures.mjs";
+import { mergeCounterparties } from "./counterparty-identity-fixtures.mjs";
 import { withActor, ROLES } from "./rig-helpers.mjs";
 import { printLaneNotes, printSkipCount } from "./wave-a-helpers.mjs";
 
@@ -557,4 +558,169 @@ test("p1007.ack.guards an acknowledgement that names nothing, or an invoice thes
     "p1007.ack.guards: a viewer of this firm reads the acknowledgement the Work was admitted under");
   assert.equal(await getTradeInvoiceDuplicateAck(DAVE(), admitted.work_id), null,
     "p1007.ack.guards: another firm reads nothing at all");
+});
+
+// ---------------------------------------------------------------------------------------------
+// FIX ROUND (wave 3, lane 02). The three cells below were written against findings raised by the
+// lane's reviews, each one reproduced on this database before its subject was changed.
+// ---------------------------------------------------------------------------------------------
+
+test("p1007.ack.rode_this_recording the acknowledgement a reviewer reads is the one THIS recording rode -- a later choice about other figures, under the same intent key, is never shown in its place (ADV-1007-1)", async (t) => {
+  if (await gateTiDup(t)) return;
+  const client = await tiClient("dupride");
+  const cp = await vendor(ALICE(), { client });
+  // THE EARLIER BILL the person was genuinely warned about.
+  const earlier = await postBill(client, {
+    particulars: { counterparty: cp, reference: "RIDE-0001", totalCents: 106000,
+      documentDate: "2026-03-04" },
+  });
+
+  const particulars = billParticulars({
+    counterparty: cp, reference: "ride 0001", totalCents: 106000, documentDate: "2026-03-04",
+  });
+  const warned = await probeTradeInvoiceDuplicates(ALICE(), { client, kind: TI_KIND.bill, particulars });
+  assert.equal(warned.match_count, 1, "p1007.ack.rode_this_recording: the person really was warned");
+
+  // THE RECORDING THAT HAPPENED: the choice kept first, then the admission, under one intent key.
+  const intentKey = `ti-dup-ride-${randomUUID()}`;
+  const rode = await recordTradeInvoiceDuplicateAck({
+    client, author: ALICE(), intentKey, kind: TI_KIND.bill, particulars,
+    shown: warned.matches.map((m) => m.invoice_id),
+  });
+  const work = await admitTradeInvoiceWork({
+    client, author: ALICE(), kind: TI_KIND.bill, particulars, basis: billBasis(), intentKey,
+  });
+  assert.equal((await getTradeInvoiceDuplicateAck(ALICE(), work.work_id)).ack_id, rode.ack_id,
+    "p1007.ack.rode_this_recording: the Work reads back the acknowledgement it was admitted under");
+
+  // WHAT THE BROWSER REALLY DOES NEXT. The form keeps ONE intent key per draft, and after an
+  // accepted recording the fields stay on screen and the button re-enables: editing the total and
+  // submitting again warns (the bill just recorded matches), the person presses "Record it
+  // anyway", and a SECOND acknowledgement lands under the SAME key -- for figures this Work never
+  // carried, naming this Work's OWN invoice as the earlier document.
+  const edited = billParticulars({
+    counterparty: cp, reference: "ride 0001", totalCents: 999900, documentDate: "2026-03-04",
+  });
+  const later = await recordTradeInvoiceDuplicateAck({
+    client, author: ALICE(), intentKey, kind: TI_KIND.bill, particulars: edited,
+    shown: [work.invoice_id],
+  });
+  assert.notEqual(later.ack_id, rode.ack_id,
+    "p1007.ack.rode_this_recording: a different act under the same key is a SECOND record, by design");
+  await assertPair("CLR10", "intent_payload_conflict", () => admitTradeInvoiceWork({
+    client, author: ALICE(), kind: TI_KIND.bill, particulars: edited,
+    basis: billBasis({ totalCents: 999900 }), intentKey,
+  }), "p1007.ack.rode_this_recording: …and the admission that would have ridden it REFUSED");
+
+  // THE REVIEWER STILL READS WHAT HAPPENED, not what was attempted afterwards.
+  const kept = await getTradeInvoiceDuplicateAck(ALICE(), work.work_id);
+  assert.equal(kept.ack_id, rode.ack_id,
+    "p1007.ack.rode_this_recording: the reviewer reads the acknowledgement this recording rode");
+  assert.equal(kept.total_cents, 106000,
+    "p1007.ack.rode_this_recording: …for the figures the Work actually recorded");
+  assert.deepEqual(kept.shown.map((x) => x.invoice_id), [earlier.invoice_id],
+    "p1007.ack.rode_this_recording: …naming the EARLIER invoice, never the Work's own");
+});
+
+test("p1007.probe.across_a_merge a bill recorded against a vendor that was later MERGED into another is still reported when the survivor is named (ADV-1007-2)", async (t) => {
+  if (await gateTiDup(t)) return;
+  const client = await tiClient("dupmerge");
+  const survivor = await vendor(ALICE(), { client, name: `Survivor ${randomUUID().slice(0, 8)}` });
+  const absorbed = await vendor(ALICE(), { client, name: `Absorbed ${randomUUID().slice(0, 8)}` });
+
+  // THE BILL AS IT WAS RECORDED: against the party the books held at the time.
+  const earlier = await recordBill(client, {
+    particulars: { counterparty: absorbed, reference: "MERGE-0001", totalCents: 106000,
+      documentDate: "2026-03-04" },
+  });
+  const before = await probeTradeInvoiceDuplicates(ALICE(), {
+    client, kind: TI_KIND.bill,
+    particulars: billParticulars({ counterparty: absorbed, reference: "MERGE-0001" }),
+  });
+  assert.equal(before.match_count, 1,
+    "p1007.probe.across_a_merge: before the merge, the second recording of that number warns");
+
+  // AN ORDINARY BOOKKEEPING ACT: the duplicate vendor record is merged away. 0149's rule makes the
+  // SURVIVOR the party every later document resolves to; the stored invoice keeps the id it was
+  // recorded under, because clara.merge_counterparties rewrites no history.
+  await mergeCounterparties(ALICE(), { client, survivor, merged: absorbed });
+
+  const after = await probeTradeInvoiceDuplicates(ALICE(), {
+    client, kind: TI_KIND.bill,
+    particulars: billParticulars({ counterparty: survivor, reference: "MERGE-0001" }),
+  });
+  assert.equal(after.counterparty_id, survivor,
+    "p1007.probe.across_a_merge: the probe asks about the survivor, as the admission would");
+  assert.equal(after.match_count, 1,
+    "p1007.probe.across_a_merge: …and the bill recorded against the absorbed party is STILL reported");
+  assert.equal(after.matches[0].invoice_id, earlier.invoice_id,
+    "p1007.probe.across_a_merge: …by its own id");
+
+  // NAMING THE ABSORBED PARTY IS THE SAME QUESTION: the resolver canonicalises it first, so both
+  // spellings of "this vendor" get one answer.
+  const viaAbsorbed = await probeTradeInvoiceDuplicates(ALICE(), {
+    client, kind: TI_KIND.bill,
+    particulars: billParticulars({ counterparty: absorbed, reference: "MERGE-0001" }),
+  });
+  assert.equal(viaAbsorbed.match_count, 1,
+    "p1007.probe.across_a_merge: naming the absorbed party answers the same, through the survivor");
+
+  // AND A THIRD VENDOR THAT WAS NEVER PART OF THE MERGE IS STILL NOT THIS ONE.
+  const stranger = await vendor(ALICE(), { client, name: `Stranger ${randomUUID().slice(0, 8)}` });
+  const none = await probeTradeInvoiceDuplicates(ALICE(), {
+    client, kind: TI_KIND.bill,
+    particulars: billParticulars({ counterparty: stranger, reference: "MERGE-0001" }),
+  });
+  assert.equal(none.match_count, 0,
+    "p1007.probe.across_a_merge: the merge widened the question by exactly the merged family, nothing more");
+});
+
+test("p1007.probe.client_inactive the form's probe and the chat lane's twin give the SAME answer on an archived client -- the recording step's own answer (ADV-1007-3)", async (t) => {
+  if (await gateTiDup(t)) return;
+  const client = await tiClient("dupdormant");
+  const cp = await vendor(ALICE(), { client });
+  await recordBill(client, { particulars: { counterparty: cp, reference: "DORMANT-0001" } });
+  const particulars = billParticulars({ counterparty: cp, reference: "DORMANT-0001" });
+
+  // While the client is active, both doors warn — the premise this cell stands on.
+  assert.equal(
+    (await probeTradeInvoiceDuplicates(ALICE(), { client, kind: TI_KIND.bill, particulars })).match_count,
+    1, "p1007.probe.client_inactive: while the client is active the form's probe warns");
+
+  // A LABELLED FIXTURE SHORTCUT, the same one p655.authority.cited_and_inactive uses: archiving a
+  // client is the client lifecycle's own door, and driving it here would test that lane.
+  await rootQuery("update clara.clients set status='archived' where id=$1", [client]);
+  try {
+    await assertPair("CLR10", "client_inactive",
+      () => probeTradeInvoiceDuplicates(ALICE(), { client, kind: TI_KIND.bill, particulars }),
+      "p1007.probe.client_inactive: the form's probe answers the recording step's own refusal");
+    await assertPair("CLR10", "client_inactive",
+      () => probeTradeInvoiceDuplicatesFor({ client, author: ALICE(), kind: TI_KIND.bill, particulars }),
+      "p1007.probe.client_inactive: …and the chat lane's twin answers exactly the same");
+  } finally {
+    await rootQuery("update clara.clients set status='active' where id=$1", [client]);
+  }
+});
+
+test("p1007.ack.typed_shape the acknowledgement writer names a bad total and a bad document date the way the admission door does, instead of leaking a constraint violation (ADV-1007-4)", async (t) => {
+  if (await gateTiDup(t)) return;
+  const client = await tiClient("dupshape");
+  const cp = await vendor(ALICE(), { client });
+  const shown = await recordBill(client, {
+    particulars: { counterparty: cp, reference: "SHAPE-0001" },
+  });
+  const ack = (over) => recordTradeInvoiceDuplicateAck({
+    client, author: ALICE(), intentKey: `ti-dup-shape-${randomUUID()}`, kind: TI_KIND.bill,
+    particulars: billParticulars({ counterparty: cp, reference: "SHAPE-0001", ...over }),
+    shown: [shown.invoice_id],
+  });
+
+  // THE WRITER IS THE DOOR THE SUCCESSOR CONTRACT HANDS THE CHAT LANE, and the route calls it
+  // FIRST — so an untyped raise here surfaces in place of the admission's own refusal.
+  await assertPair("CLR10", TI_REASON.invalidTotal, () => ack({ totalCents: 0 }),
+    "p1007.ack.typed_shape: a zero total is the door's own invalid_total, not a 23514");
+  await assertPair("CLR10", TI_REASON.invalidTotal, () => ack({ totalCents: -100 }),
+    "p1007.ack.typed_shape: …and so is a negative one");
+  await assertPair("CLR10", TI_REASON.invalidDueDate, () => ack({ documentDate: "not-a-date" }),
+    "p1007.ack.typed_shape: an unreadable document date is invalid_due_date, not a 22007");
 });

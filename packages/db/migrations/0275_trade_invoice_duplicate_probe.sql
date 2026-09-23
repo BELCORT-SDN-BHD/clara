@@ -15,12 +15,14 @@
 -- the belts ever looked at (client_id, counterparty_id, reference). That cell is rewritten by this
 -- PR to prove the new behaviour rather than the residual.
 --
--- THIS FILE IS PURELY ADDITIVE. It creates one table, four ungranted internals, two probe reads
--- (the human one and its actor-explicit runtime twin), one writer and one read of what it wrote.
--- IT RECUTS NOTHING: `clara.admit_trade_invoice_work`'s replay semantics, its refusal ladder and
--- the posting core are untouched, and the tail re-reads both the door and the party resolver to
--- prove this file moved neither. A UNIQUE CONSTRAINT ON `reference` WOULD BE WRONG AND IS NOT
--- ADDED: the column is nullable and suppliers legitimately reuse numbers (0225 section A says so).
+-- FOR #1007 THIS FILE IS PURELY ADDITIVE. It creates one table, four ungranted internals, two
+-- probe reads (the human one and its actor-explicit runtime twin), one writer and one read of what
+-- it wrote. It recuts NOTHING of 0225's: `clara.admit_trade_invoice_work`'s replay semantics, its
+-- refusal ladder and the posting core are untouched, and the tail re-reads the door to prove this
+-- file moved it not at all. The ONE body it does recut is 0274's party resolver, for #982's fix
+-- round and for the reason stated below. A UNIQUE CONSTRAINT ON `reference` WOULD BE WRONG AND IS
+-- NOT ADDED: the column is nullable and suppliers legitimately reuse numbers (0225 section A says
+-- so).
 --
 -- THE TWO SIGNALS, AND WHY THERE ARE TWO RATHER THAN ONE CONJUNCTION.
 --   1 · SAME DOCUMENT NUMBER — same counterparty AND the same reference after normalisation.
@@ -88,9 +90,19 @@
 -- settlement-time checks (#662) and credit notes; editing 0225, 0274, any frozen workflow body or
 -- the blueprints.
 --
+-- THIS FILE ALSO CARRIES THE FIX ROUND'S ONE RECUT OF 0274'S BODY (#982R2, section 10), AND THE
+-- REASON IS MECHANICAL. The supported re-apply path for an unmerged migration
+-- (`CLARA_MIGRATION_REDO`, "Redo (#957)" in packages/db/README.md) takes the HIGHEST APPLIED
+-- VERSION ONLY, so that nothing built on top of a file is silently invalidated — and 0275 sits on
+-- top of 0274 on every lane database. Editing 0274 in place would mean the hand procedure #957
+-- exists to abolish. 0272 states the same reason for not editing 0244. So the ONE body #982's
+-- review round asked to change is recut here, by the only file on this lane that can still be
+-- re-applied, and 0274 stays byte-frozen with its ledger row intact. The recut keeps 0274's
+-- `#982` marker (0274's own tail reads it) and adds `#982R2`, which is what this file's prestate
+-- reads to tell a redo from a first apply.
+--
 -- REDO-SAFE (#957). Every statement is `create table if not exists` / `create or replace function`
 -- / `create index if not exists`, or is guarded by a catalog probe, and the prestate accepts a
--- chain on which this file's own objects already exist (a
 -- chain on which this file's own objects already exist (a
 -- `CLARA_MIGRATION_REDO=0275_trade_invoice_duplicate_probe` re-run over its own effects).
 -- =====================================================================================
@@ -98,6 +110,7 @@
 do $t1007_pre$
 declare
   v_sha text;
+  v_src text;
   v_n int;
   v_def text;
 begin
@@ -118,11 +131,19 @@ begin
   -- lane. The party resolver is the one the probe calls, so the probe can only ever report
   -- matches for the party the ADMISSION would resolve; the admission door is re-read in the tail
   -- to prove this file left it exactly as it found it.
-  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+  -- TWO-VALUED BY CONSTRUCTION, and both values measured: 0274's post-image on a first apply,
+  -- and this file's own recut (section 10, marker `#982R2`) on a redo. The marker branch is the
+  -- supported #957 redo, never a drift exemption -- anything else still raises.
+  select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara._trade_invoice_resolve_party(uuid,text,jsonb)'::regprocedure;
+  v_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
   if v_sha is distinct from 'be2df90e5899a1692682d843e6967be828952b3e42f3b09fe317437677db7cf8' then
-    raise exception '#1007 prestate: clara._trade_invoice_resolve_party has DRIFTED (measured %, expected be2df90e5899a1692682d843e6967be828952b3e42f3b09fe317437677db7cf8 -- 0274''s post-image) -- the probe resolves its party through it and cannot vouch for a body it does not recognise', v_sha
-      using errcode='CLR10';
+    if position('#982R2' in v_src) > 0 then
+      raise notice '#1007 prestate: clara._trade_invoice_resolve_party already carries this file''s own #982R2 recut -- this is a REDO (#957) over this file''s own effects, which create-or-replace makes safe.';
+    else
+      raise exception '#1007 prestate: clara._trade_invoice_resolve_party has DRIFTED (measured %, expected be2df90e5899a1692682d843e6967be828952b3e42f3b09fe317437677db7cf8 -- 0274''s post-image) -- the probe resolves its party through it and cannot vouch for a body it does not recognise', v_sha
+        using errcode='CLR10';
+    end if;
   end if;
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
    where p.oid = 'clara.admit_trade_invoice_work(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)'::regprocedure;
@@ -202,11 +223,33 @@ comment on function clara._trade_invoice_reference_key(text) is
 -- IT READS ONE COUNTERPARTY'S INVOICES OF ONE CLIENT, which `ix_trade_invoices_counterparty`
 -- (0225:365-366, on (counterparty_id, document_date desc)) already reduces to an index scan — so
 -- neither signal needs an index of its own and none is added.
+--
+-- "ONE COUNTERPARTY" MEANS THE MERGED FAMILY, NOT ONE ROW (fix round, ADV-1007-2). Merging a
+-- duplicate vendor record is an ordinary bookkeeping act with a shipped door, and
+-- `clara.merge_counterparties` (0011) rewrites no history: it stamps `merged_into` on the absorbed
+-- row and leaves every `clara.trade_invoices.counterparty_id` exactly as it was recorded. The
+-- resolver, meanwhile, canonicalises what the caller submitted (0149's rule), so `p_counterparty`
+-- is always the SURVIVOR. The first cut compared that survivor against the STORED id and was
+-- therefore blind across a merge: driven on the lane database, a bill recorded against the
+-- absorbed party stopped warning the moment the merge landed, and the same bill number was then
+-- recorded a second time with no warning at all — the doubled payable this file exists to prevent.
+-- So the filter walks the merge tree DOWN from the survivor (`ix_counterparties_merged_into`
+-- indexes exactly that edge) and compares against the family, which is one row in every case where
+-- nothing was ever merged. It is `p_counterparty` PLUS what was merged into it: a caller that
+-- hands in a non-canonical id still gets its own sub-family, never somebody else's.
 -- ---------------------------------------------------------------------------------
 create or replace function clara._trade_invoice_duplicate_matches(p_client uuid, p_kind text,
     p_counterparty uuid, p_reference text, p_document_date date, p_total_cents bigint)
   returns jsonb language sql stable security definer set search_path = clara, pg_temp as $$
-  with candidate as (
+  with recursive family as (
+    select p_counterparty as id
+    union
+    select cp.id
+      from clara.counterparties cp
+      join family f on cp.merged_into = f.id
+     where cp.client_id = p_client
+  ),
+  candidate as (
     select ti.id, ti.work_id, ti.reference, ti.document_date, ti.total_cents, ti.created_at,
            ti.recorded_by,
            coalesce(st.state, 'admitted') as state,
@@ -227,7 +270,7 @@ create or replace function clara._trade_invoice_duplicate_matches(p_client uuid,
         on st.invoice_id = ti.id and st.state = 'posted'
      where ti.client_id = p_client
        and ti.kind = p_kind
-       and ti.counterparty_id = p_counterparty
+       and ti.counterparty_id in (select f.id from family f)
        -- THE WORK STILL MAY POST. The estate's own closed terminal-without-posting set.
        and w.status not in ('refused','failed','cancelled','expired')
        -- …AND ITS ENTRY, IF IT HAS ONE, WAS NOT UNWOUND.
@@ -255,7 +298,8 @@ $$;
 revoke all on function clara._trade_invoice_duplicate_matches(uuid,text,uuid,text,date,bigint) from public;
 comment on function clara._trade_invoice_duplicate_matches(uuid,text,uuid,text,date,bigint) is
   '#1007: the ONE duplicate matcher for the trade-invoice lane -- which already-recorded invoices '
-  'of THIS client, THIS kind and THIS counterparty look like the one about to be recorded, on '
+  'of THIS client, THIS kind and THIS counterparty (including every party merged into it) look '
+  'like the one about to be recorded, on '
   'either of two independent signals (same normalised document number; same total on the same '
   'document date). Never matches on amount alone or counterparty alone. Skips an invoice whose '
   'Work is refused/failed/cancelled/expired and one whose posted entry was reversed. Ungranted to '
@@ -321,14 +365,25 @@ comment on function clara._trade_invoice_probe_core(uuid,text,jsonb) is
 create or replace function clara.probe_trade_invoice_duplicates(p_client uuid, p_kind text,
     p_particulars jsonb) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
-declare c record; v_firm uuid;
+declare c record; v_firm uuid; v_client_status text;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
-  select cl.firm_id into v_firm from clara.clients cl
+  select cl.firm_id, cl.status into v_firm, v_client_status from clara.clients cl
    where cl.id = p_client and cl.firm_id = c.firm;
   if v_firm is null then
     raise exception 'client not found in your firm' using errcode='CLR11',
       detail='{"reason":"client_not_found"}';
+  end if;
+  -- THE RECORDING STEP'S OWN LAST ARM (fix round, ADV-1007-3). The first cut stopped at "this
+  -- client is in my firm", so on an ARCHIVED client the form warned about a recording the
+  -- admission then refused, and the two entrances disagreed about the same question -- measured
+  -- on the lane database, where the twin raised `client_inactive` and this door answered
+  -- normally. The token and the sentence are `clara.admit_trade_invoice_work`'s own, through
+  -- `clara._trade_invoice_actor_firm`, which is the whole point: a probe is the step BEFORE a
+  -- recording, and it may not be reachable where the recording is not.
+  if v_client_status <> 'active' then
+    raise exception 'client is not active -- no new accounting work' using errcode='CLR10',
+      detail='{"reason":"client_inactive"}';
   end if;
   return clara._trade_invoice_probe_core(p_client, p_kind, p_particulars);
 end $$;
@@ -337,7 +392,8 @@ grant execute on function clara.probe_trade_invoice_duplicates(uuid,text,jsonb) 
 comment on function clara.probe_trade_invoice_duplicates(uuid,text,jsonb) is
   '#1007: which already-recorded invoices of this client look like the one about to be recorded. '
   'Bookkeeper floor, firm AND actor from the session; writes nothing and takes no row lock. It '
-  'warns -- it never refuses on a duplicate. The web form calls this one.';
+  'warns -- it never refuses on a duplicate, though it does answer the recording step''s own '
+  'authority refusals, client_inactive included, so the form and the chat lane never disagree.';
 
 
 -- ---------------------------------------------------------------------------------
@@ -504,11 +560,41 @@ begin
   v_party := clara._trade_invoice_resolve_party(p_client, v_kind, p_particulars);
   v_cp := (v_party->>'counterparty_id')::uuid;
   v_reference := nullif(btrim(coalesce(p_particulars->>'reference','')),'');
-  v_document_date := nullif(btrim(coalesce(p_particulars->>'document_date','')),'')::date;
-  v_total := nullif(btrim(coalesce(p_particulars->>'total_cents','')),'')::numeric::bigint;
-  if v_document_date is null or v_total is null then
+  if nullif(btrim(coalesce(p_particulars->>'document_date','')),'') is null
+     or nullif(btrim(coalesce(p_particulars->>'total_cents','')),'') is null then
     raise exception 'an acknowledgement records the document date and total it was shown against'
       using errcode='CLR10', detail='{"reason":"invalid_particulars","constraint":"document_date_and_total"}';
+  end if;
+  -- THE TWO SHAPES THE COLUMN CHECKS WOULD OTHERWISE ANSWER FOR (fix round, ADV-1007-4), restated
+  -- here with `clara._assert_trade_invoice_basis`'s OWN tokens and sentences, word for word. This
+  -- writer restates every other guard by name, and it is the door the successor contract hands the
+  -- chat lane -- and the route calls it BEFORE the admission, so an untyped raise here reaches a
+  -- caller in place of the door's own refusal. Measured on the lane database: a zero total left as
+  -- a bare `23514 ... trade_invoice_duplicate_acks_total_cents_check`, and an unreadable document
+  -- date as `22007`. The CHECK constraints stay: they are the belt, not the message.
+  begin
+    v_document_date := (p_particulars->>'document_date')::date;
+  exception when others then
+    raise exception 'a trade invoice carries the date the document itself states'
+      using errcode='CLR10',
+        detail='{"reason":"invalid_due_date","field":"document_date","constraint":"date"}';
+  end;
+  begin
+    v_total := (p_particulars->>'total_cents')::numeric::bigint;
+  exception when others then
+    raise exception 'a trade invoice states its total in whole sen' using errcode='CLR10',
+      detail='{"reason":"invalid_total","field":"total_cents","constraint":"integer"}';
+  end;
+  if (p_particulars->>'total_cents')::numeric <> v_total then
+    raise exception 'a trade invoice states its total in whole sen, not a fraction of one'
+      using errcode='CLR10',
+        detail='{"reason":"invalid_total","field":"total_cents","constraint":"integer"}';
+  end if;
+  if v_total <= 0 then
+    raise exception 'a trade invoice states a positive total; a credit is not a negative invoice'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','invalid_total','field','total_cents',
+          'total_cents',v_total,'constraint','positive')::text;
   end if;
 
   -- WHAT WAS SHOWN. An empty acknowledgement is not an acknowledgement, and an id this client's
@@ -584,6 +670,29 @@ comment on function clara.record_trade_invoice_duplicate_ack(uuid,uuid,text,text
 -- (9) WHAT A REVIEWER READS AFTERWARDS. Viewer floor, firm-scoped, keyed by the Work -- the
 -- surface that lets somebody tell a knowing second recording from an accident. clara_authenticated
 -- ONLY: the machine lane has nothing to do with it and cannot satisfy clara._human_ctx anyway.
+--
+-- IT READS THE ACKNOWLEDGEMENT THIS RECORDING RODE, NOT MERELY ONE THAT SHARES ITS INTENT KEY.
+-- The first cut of this body joined on (firm, client, intent_key) alone and took the newest row,
+-- which was wrong in the one direction that matters. The writer is idempotent on
+-- (firm, client, intent_key, ack_digest) and therefore APPENDS a second row for a second act under
+-- one key -- deliberately -- and the route writes an acknowledgement BEFORE an admission that may
+-- then refuse. Driven on the lane database (`p1007.ack.rode_this_recording`): after a recording of
+-- RM 1,060.00, an edited resubmit under the same key acknowledged RM 9,999.00 and named THIS
+-- Work's own invoice as the earlier document; the admission refused with `intent_payload_conflict`
+-- and the reviewer's read then answered the acknowledgement that belonged to nothing.
+--
+-- SO THE JOIN IS NARROWED BY WHAT THE WORK ACTUALLY RECORDED, through its own trade-invoice row:
+--   · the SAME kind, counterparty, document date and total in sen, and the same document number
+--     under this lane's ONE normalisation (a number retyped `ack 0001` against a recorded
+--     `ACK-0001` is the same number, which is exactly what the acknowledgement's own digest says);
+--   · and written BEFORE the Work was admitted, because an acknowledgement a recording could not
+--     have ridden is not the record of that recording's choice.
+-- Between two acknowledgements the admission COULD have ridden (the same figures, a different set
+-- of earlier invoices shown), the LAST one before the admission is the one it rode.
+--
+-- A Work with no trade-invoice row of its own -- another lane's Work that happens to carry the
+-- same intent key -- now answers NULL rather than a trade-invoice acknowledgement, because the
+-- join has nothing to stand on.
 -- ---------------------------------------------------------------------------------
 create or replace function clara.get_trade_invoice_duplicate_ack(p_work uuid) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
@@ -605,11 +714,23 @@ begin
       'shown', a.shown)
     into v_out
     from clara.accounting_work w
+    join clara.trade_invoices ti on ti.work_id = w.id
     join clara.trade_invoice_duplicate_acks a
       on a.firm_id = w.firm_id and a.client_id = w.client_id and a.intent_key = w.intent_key
+     and a.kind = ti.kind
+     and a.counterparty_id = ti.counterparty_id
+     and a.document_date = ti.document_date
+     and a.total_cents = ti.total_cents
+     and clara._trade_invoice_reference_key(a.reference)
+         is not distinct from clara._trade_invoice_reference_key(ti.reference)
+     and a.acknowledged_at <= w.created_at
     left join clara.users u on u.id = a.acknowledged_by
    where w.id = p_work and w.firm_id = c.firm
-   order by a.acknowledged_at desc, a.id desc
+   -- THE LAST ACKNOWLEDGEMENT THE ADMISSION COULD HAVE RIDDEN, then a CONTENT tie-break rather
+   -- than a random primary key: two acknowledgements can share `acknowledged_at` to the
+   -- microsecond (measured: two real connections did), and a reviewer's read must not answer
+   -- differently from one call to the next.
+   order by a.acknowledged_at desc, a.ack_digest desc, a.id desc
    limit 1;
   return v_out;
 end $$;
@@ -618,8 +739,271 @@ grant execute on function clara.get_trade_invoice_duplicate_ack(uuid) to clara_a
 comment on function clara.get_trade_invoice_duplicate_ack(uuid) is
   '#1007: the acknowledgement this Work was admitted under -- who was warned, when, and which '
   'earlier invoices they were shown -- or NULL when nobody was warned. Viewer floor, firm-scoped. '
-  'Reached through the Work, so an acknowledgement whose admission then refused is never surfaced '
-  'as a recording that happened.';
+  'Reached through the Work AND through what that Work actually recorded (same kind, counterparty, '
+  'normalised document number, document date and total, acknowledged before the admission), so a '
+  'later choice under the same intent key -- one whose admission refused -- is never read in its '
+  'place.';
+
+-- ---------------------------------------------------------------------------------
+-- (10) #982's FIX ROUND: THE ONE RECUT OF 0274'S PARTY RESOLVER (#982R2).
+--
+-- WHY IT IS HERE AND NOT IN 0274: see this file's header. `CLARA_MIGRATION_REDO` re-applies the
+-- HIGHEST applied version only, and 0275 sits above 0274 on every lane database, so 0274 is
+-- byte-frozen and this file is the one that can still be re-applied.
+--
+-- WHAT CHANGES, and nothing else does. Sections (a) NAMED BY ID, (b1) the registration arm, (b2)
+-- the TIN count, (b3) the identifier conflict, the one-TIN-hit resolution, the name/alias
+-- candidate set, `party_unresolved` and the NAME branch's `party_ambiguous` are 0274's and 0225's,
+-- carried over BYTE FOR BYTE -- the name branch in particular keeps 0225's detail shape exactly,
+-- which is #982's own AC4. The single changed arm is `v_tin_hits > 1`, and its reason is written
+-- at the arm.
+--
+-- THE POSTURE IS 0225'S, unchanged and re-asserted in the tail: owned by `clara_fn_owner`,
+-- SECURITY DEFINER, `set search_path = clara, pg_temp`, `stable`, and granted to NOBODY.
+-- ---------------------------------------------------------------------------------
+create or replace function clara._trade_invoice_resolve_party(p_client uuid, p_kind text, p_particulars jsonb)
+  returns jsonb language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_want text; v_id uuid; v_canon uuid; v_row record; v_name text; v_name_n text;
+  v_reg text; v_reg_n text; v_tin text; v_tin_n text; v_n int; v_candidates jsonb;
+  v_reg_row record; v_reg_hit boolean := false;
+  v_tin_row record; v_tin_hits int := 0;
+  -- #982R2 (fix round, ADV-982-1): the parties the NAME reaches, read before the TIN arm may
+  -- refuse, so a shared TIN never answers with a list the document's own name is missing from.
+  v_name_ids uuid[];
+begin
+  v_want := case p_kind when 'sales_invoice' then 'customer' else 'vendor' end;
+  v_id := nullif(btrim(coalesce(p_particulars->'counterparty'->>'id','')),'')::uuid;
+
+  -- (a) NAMED BY ID. The canonical survivor is what a merge left behind; reading the stored id raw
+  -- would bind history to a party that no longer speaks for itself (0149's rule).
+  if v_id is not null then
+    v_canon := clara._canonical_counterparty(p_client, v_id);
+    select cp.* into v_row from clara.counterparties cp
+     where cp.id = v_canon and cp.client_id = p_client
+       and cp.merged_into is null and cp.retired_at is null;
+    if not found then
+      raise exception 'that counterparty is not a live party of this client' using errcode='CLR10',
+        detail=jsonb_build_object('reason','party_unresolved','counterparty_id',v_id)::text;
+    end if;
+    if v_row.kind <> v_want then
+      raise exception 'a % is recorded against a %, and this party is a %', p_kind, v_want, v_row.kind
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','wrong_control_domain','counterparty_id',v_row.id,
+            'counterparty_kind',v_row.kind,'expected_counterparty_kind',v_want,
+            'kind',p_kind)::text;
+    end if;
+    return jsonb_build_object('counterparty_id', v_row.id, 'counterparty_kind', v_row.kind,
+      'name', v_row.name, 'payment_terms_days', v_row.payment_terms_days);
+  end if;
+
+  -- (b) NAMED BY IDENTITY. #982 (owner's ruling 2026-09-20): the registration number and the TIN
+  -- are ONE TIER, read before the name, each arm needing a single live match of the wanted kind.
+  -- The normalised name and its live aliases -- 0215's own surface, read, never written -- are
+  -- the tier after it, unchanged.
+  v_name := nullif(btrim(coalesce(p_particulars->'counterparty'->>'name','')),'');
+  v_reg  := nullif(btrim(coalesce(p_particulars->'counterparty'->>'registration_no','')),'');
+  v_tin  := nullif(btrim(coalesce(p_particulars->'counterparty'->>'tin','')),'');
+  if v_name is null and v_reg is null and v_tin is null then
+    raise exception 'a trade invoice names its counterparty' using errcode='CLR10',
+      detail='{"reason":"party_unresolved","constraint":"required"}';
+  end if;
+  v_name_n := lower(regexp_replace(coalesce(v_name,''),'[^a-zA-Z0-9]','','g'));
+  v_reg_n  := case when v_reg is null then null
+                   else lower(regexp_replace(v_reg,'[^a-zA-Z0-9]','','g')) end;
+  -- THE SAME NORMALISATION, on the same identifier tier (see this file's header). A TIN that
+  -- normalises away entirely is not an identifier and must not match every party whose TIN also
+  -- normalises to nothing, so it is folded to NULL here rather than compared.
+  v_tin_n  := nullif(case when v_tin is null then null
+                          else lower(regexp_replace(v_tin,'[^a-zA-Z0-9]','','g')) end, '');
+
+  -- (b1) THE REGISTRATION ARM. At most ONE live row can answer, because
+  -- uq_counterparties_client_registration is unique on (client_id, kind, registration_normalized)
+  -- -- the premise the prestate pins.
+  if v_reg_n is not null then
+    select cp.* into v_reg_row from clara.counterparties cp
+     where cp.client_id = p_client and cp.kind = v_want
+       and cp.registration_normalized = v_reg_n
+       and cp.merged_into is null and cp.retired_at is null
+     order by cp.id limit 1;
+    v_reg_hit := found;
+  end if;
+
+  -- (b2) THE TIN ARM. Nothing constrains a TIN to one party, so this arm COUNTS first and reads
+  -- the row only when exactly one live party of the wanted kind answers.
+  if v_tin_n is not null then
+    select count(*)::int into v_tin_hits from clara.counterparties cp
+     where cp.client_id = p_client and cp.kind = v_want
+       and cp.merged_into is null and cp.retired_at is null
+       and cp.tin is not null
+       and lower(regexp_replace(cp.tin,'[^a-zA-Z0-9]','','g')) = v_tin_n;
+    if v_tin_hits = 1 then
+      select cp.* into v_tin_row from clara.counterparties cp
+       where cp.client_id = p_client and cp.kind = v_want
+         and cp.merged_into is null and cp.retired_at is null
+         and cp.tin is not null
+         and lower(regexp_replace(cp.tin,'[^a-zA-Z0-9]','','g')) = v_tin_n;
+    end if;
+  end if;
+
+  -- (b3) THE IDENTIFIER CONFLICT (#982 AC3, owner's ruling 2026-09-20: "when a TIN and a
+  -- registration number point at two different live counterparties Clara stops and lets the
+  -- person choose"). The test is on the REGISTRATION-matched row itself: if it carries the
+  -- submitted TIN, the two identifiers agree on it and it is the only row satisfying BOTH, so it
+  -- resolves even when other live parties happen to share that TIN. If it does not, and some
+  -- OTHER live party does, the document's two identifiers disagree and no preference between
+  -- them is Clara's to take.
+  --
+  -- A TIN that matched NOTHING is not a conflict: the registration number is then the only
+  -- identifier that reached anybody, and 0225's outcome for that submission is unchanged (AC4).
+  --
+  -- THE TEST IS NESTED, NOT CONJOINED, on purpose: PostgreSQL does not promise to short-circuit
+  -- `and`, and reading `v_reg_row.tin` when the registration arm never assigned it raises 55000
+  -- ("record is not assigned yet") on every submission that carries no registration number.
+  -- Measured, not feared: the conjoined first cut turned p982.tin.resolves red that way.
+  if v_reg_hit and v_tin_n is not null and v_tin_hits > 0 then
+   if lower(regexp_replace(coalesce(v_reg_row.tin,''),'[^a-zA-Z0-9]','','g')) is distinct from v_tin_n then
+    v_candidates := jsonb_build_array(jsonb_build_object(
+      'counterparty_id', v_reg_row.id, 'name', v_reg_row.name,
+      'registration_no', v_reg_row.registration_no, 'tin', v_reg_row.tin,
+      'matched_on', 'registration'));
+    select v_candidates || coalesce(jsonb_agg(jsonb_build_object(
+             'counterparty_id', cp.id, 'name', cp.name, 'registration_no', cp.registration_no,
+             'tin', cp.tin, 'matched_on', 'tin') order by cp.name, cp.id), '[]'::jsonb)
+      into v_candidates
+      from clara.counterparties cp
+     where cp.client_id = p_client and cp.kind = v_want
+       and cp.merged_into is null and cp.retired_at is null
+       and cp.tin is not null
+       and lower(regexp_replace(cp.tin,'[^a-zA-Z0-9]','','g')) = v_tin_n;
+    raise exception 'the registration number (%) and the tax identification number (%) on this document name different live %s of this client; say which one',
+      v_reg, v_tin, v_want
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','party_identifier_conflict','registration_no',v_reg,
+          'tin',v_tin,'expected_counterparty_kind',v_want,'candidates',v_candidates)::text;
+   end if;
+  end if;
+
+  if v_reg_hit then
+    return jsonb_build_object('counterparty_id', v_reg_row.id, 'counterparty_kind', v_reg_row.kind,
+      'name', v_reg_row.name, 'payment_terms_days', v_reg_row.payment_terms_days);
+  end if;
+  if v_tin_hits = 1 then
+    return jsonb_build_object('counterparty_id', v_tin_row.id, 'counterparty_kind', v_tin_row.kind,
+      'name', v_tin_row.name, 'payment_terms_days', v_tin_row.payment_terms_days);
+  end if;
+  if v_tin_hits > 1 then
+    -- #982 AC2, as recut by the fix round (#982R2, ADV-982-1). Nothing constrains a TIN to one
+    -- party, so a TIN several live parties hold is a data-entry fact a PERSON settles. What the
+    -- first cut got wrong is what it settled it WITH: it refused on the TIN alone, before the name
+    -- tier was ever consulted, so a document naming "Gamma Works" and carrying a TIN two OTHER
+    -- vendors share was answered with a chooser offering those two and not Gamma Works -- a list
+    -- naming two parties the document never mentions and omitting the one it does, for a
+    -- submission that resolved cleanly before 0274. Measured on the lane database, not feared.
+    --
+    -- AN IDENTIFIER THAT ANSWERS WITH SEVERAL PARTIES HAS NOT IDENTIFIED ANYBODY, so it does not
+    -- outrank the name printed beside it -- the estate's identifier-over-name tier law is about an
+    -- identifier that ANSWERED. The name tier is therefore read here, and:
+    --   - if it answers with exactly ONE party AND that party is one of the TIN's, the two
+    --     identifiers AGREE on it and the document resolves -- the same rule (b3) applies to a
+    --     registration-matched row that carries the submitted TIN;
+    --   - otherwise Clara stops, and the chooser carries BOTH the parties the TIN reached and the
+    --     parties the name reached, each saying WHICH identifier reached it. Never a silent pick:
+    --     the owner's ruling of 2026-09-20 is that Clara never prefers an identifier silently.
+    if v_name_n <> '' then
+      select array_agg(distinct cp.id) into v_name_ids
+        from clara.counterparties cp
+        left join clara.counterparty_aliases al
+          on al.counterparty_id = cp.id and al.retired_at is null
+         and al.alias_normalized = v_name_n
+       where cp.client_id = p_client and cp.kind = v_want
+         and cp.merged_into is null and cp.retired_at is null
+         and (cp.name_normalized = v_name_n or al.id is not null);
+    end if;
+    if array_length(v_name_ids, 1) = 1
+       and exists (select 1 from clara.counterparties cp
+                    where cp.id = v_name_ids[1] and cp.client_id = p_client and cp.kind = v_want
+                      and cp.merged_into is null and cp.retired_at is null
+                      and cp.tin is not null
+                      and lower(regexp_replace(cp.tin,'[^a-zA-Z0-9]','','g')) = v_tin_n) then
+      select cp.* into v_row from clara.counterparties cp where cp.id = v_name_ids[1];
+      return jsonb_build_object('counterparty_id', v_row.id, 'counterparty_kind', v_row.kind,
+        'name', v_row.name, 'payment_terms_days', v_row.payment_terms_days);
+    end if;
+    -- THE UNION, in the SAME candidate shape every other refusal on this lane carries, so a
+    -- reader renders one candidate one way.
+    select jsonb_agg(jsonb_build_object('counterparty_id', c.id, 'name', c.name,
+             'registration_no', c.registration_no, 'tin', c.tin, 'matched_on', c.matched_on)
+             order by c.name, c.id)
+      into v_candidates
+      from (select cp.id, cp.name, cp.registration_no, cp.tin,
+                   case when cp.id = any(coalesce(v_name_ids, '{}'::uuid[]))
+                        then 'tin_and_name' else 'tin' end as matched_on
+              from clara.counterparties cp
+             where cp.client_id = p_client and cp.kind = v_want
+               and cp.merged_into is null and cp.retired_at is null
+               and cp.tin is not null
+               and lower(regexp_replace(cp.tin,'[^a-zA-Z0-9]','','g')) = v_tin_n
+            union all
+            select cp.id, cp.name, cp.registration_no, cp.tin, 'name'
+              from clara.counterparties cp
+             where cp.id = any(coalesce(v_name_ids, '{}'::uuid[]))
+               and not (cp.tin is not null
+                        and lower(regexp_replace(cp.tin,'[^a-zA-Z0-9]','','g')) = v_tin_n)) c;
+    raise exception 'the tax identification number % is held by more than one live % of this client; say which one this document is about',
+      v_tin, v_want
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','party_ambiguous','tin',v_tin,'matched_on','tin',
+          'name',v_name,'expected_counterparty_kind',v_want,'candidates',v_candidates)::text;
+  end if;
+
+  -- THE CANDIDATE SET, by normalised name OR a live alias. `distinct` because a party can carry
+  -- several aliases that all normalise to the submitted name.
+  select count(distinct cp.id)::int into v_n
+    from clara.counterparties cp
+    left join clara.counterparty_aliases al
+      on al.counterparty_id = cp.id and al.retired_at is null
+     and al.alias_normalized = v_name_n
+   where cp.client_id = p_client and cp.kind = v_want
+     and cp.merged_into is null and cp.retired_at is null
+     and v_name_n <> '' and (cp.name_normalized = v_name_n or al.id is not null);
+  if v_n = 0 then
+    raise exception 'no % of this client answers to %', v_want, coalesce(v_name, v_reg, v_tin)
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','party_unresolved','name',v_name,
+          'registration_no',v_reg,'expected_counterparty_kind',v_want)::text;
+  end if;
+  if v_n > 1 then
+    -- CARRIED VERBATIM (D12a), so the person picks from what the books actually hold rather than
+    -- from a summary somebody wrote.
+    select jsonb_agg(jsonb_build_object('counterparty_id', c.id, 'name', c.name,
+             'registration_no', c.registration_no, 'tin', c.tin) order by c.name, c.id)
+      into v_candidates
+      from (select distinct cp.id, cp.name, cp.registration_no, cp.tin
+              from clara.counterparties cp
+              left join clara.counterparty_aliases al
+                on al.counterparty_id = cp.id and al.retired_at is null
+               and al.alias_normalized = v_name_n
+             where cp.client_id = p_client and cp.kind = v_want
+               and cp.merged_into is null and cp.retired_at is null
+               and (cp.name_normalized = v_name_n or al.id is not null)) c;
+    raise exception '% %s of this client answer to %; say which one', v_n, v_want, v_name
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','party_ambiguous','name',v_name,
+          'expected_counterparty_kind',v_want,'candidates',v_candidates)::text;
+  end if;
+  select distinct on (cp.id) cp.* into v_row
+    from clara.counterparties cp
+    left join clara.counterparty_aliases al
+      on al.counterparty_id = cp.id and al.retired_at is null
+     and al.alias_normalized = v_name_n
+   where cp.client_id = p_client and cp.kind = v_want
+     and cp.merged_into is null and cp.retired_at is null
+     and (cp.name_normalized = v_name_n or al.id is not null);
+  return jsonb_build_object('counterparty_id', v_row.id, 'counterparty_kind', v_row.kind,
+    'name', v_row.name, 'payment_terms_days', v_row.payment_terms_days);
+end $$;
+revoke all on function clara._trade_invoice_resolve_party(uuid,text,jsonb) from public;
 
 reset role;
 
@@ -627,7 +1011,7 @@ reset role;
 -- TAIL. Re-reads the live catalog rather than trusting the statements above ran as written.
 -- =====================================================================================
 do $t1007_tail$
-declare v_sha text; v_sig text; v_n int;
+declare v_sha text; v_src text; v_sig text; v_n int;
 begin
   -- (T.1) THE EIGHT BODIES EXIST, each exactly once.
   select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -723,20 +1107,44 @@ begin
     end if;
   end loop;
 
-  -- (T.3) THE 0225/0274 BODIES DID NOT MOVE. This file is additive and the pins prove it.
+  -- (T.3) 0225'S ADMISSION DOOR DID NOT MOVE. Nothing here touches it, and the pin proves it.
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
    where p.oid = 'clara.admit_trade_invoice_work(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)'::regprocedure;
   if v_sha is distinct from 'c1693503fa0221de53af2e1ddfe716c2baa9c3e3d82c14e02007a04c45d70f5c' then
     raise exception '#1007 tail: clara.admit_trade_invoice_work MOVED while this file applied (got %) -- it must not have', v_sha
       using errcode='CLR10';
   end if;
-  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+  -- (T.4) THE ONE BODY THIS FILE RECUTS IS THIS FILE'S, AND KEPT 0225's POSTURE. It exists
+  -- exactly once, carries BOTH markers -- 0274's `#982` (0274's own tail reads it) and this
+  -- file's `#982R2` -- and is still an ungranted internal.
+  select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.proname = '_trade_invoice_resolve_party';
+  if v_n <> 1 then
+    raise exception '#1007 tail: clara._trade_invoice_resolve_party has % bodies after the recut (expected exactly 1)', v_n
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara._trade_invoice_resolve_party(uuid,text,jsonb)'::regprocedure;
-  if v_sha is distinct from 'be2df90e5899a1692682d843e6967be828952b3e42f3b09fe317437677db7cf8' then
-    raise exception '#1007 tail: clara._trade_invoice_resolve_party MOVED while this file applied (got %)', v_sha
+  if position('#982' in v_src) = 0 or position('#982R2' in v_src) = 0 then
+    raise exception '#1007 tail: the live party resolver carries no #982/#982R2 marker -- the fix-round recut did not take'
+      using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from pg_proc p
+   where p.oid = 'clara._trade_invoice_resolve_party(uuid,text,jsonb)'::regprocedure
+     and p.proowner = 'clara_fn_owner'::regrole
+     and p.prosecdef and p.provolatile = 's'
+     and p.proconfig @> array['search_path=clara, pg_temp'];
+  if v_n <> 1 then
+    raise exception '#1007 tail: the recut party resolver lost its owner / security definer / search_path / stable posture'
+      using errcode='CLR10';
+  end if;
+  if has_function_privilege('clara_authenticated', 'clara._trade_invoice_resolve_party(uuid,text,jsonb)', 'EXECUTE')
+     or has_function_privilege('clara_runtime', 'clara._trade_invoice_resolve_party(uuid,text,jsonb)', 'EXECUTE')
+     or has_function_privilege('clara_agent_ro', 'clara._trade_invoice_resolve_party(uuid,text,jsonb)', 'EXECUTE') then
+    raise exception '#1007 tail: the recut party resolver is granted to an application role -- it is an internal'
       using errcode='CLR10';
   end if;
 
-  raise notice '#1007 tail OK: the two probe doors, the acknowledgement writer and its read stand on four ungranted internals; the session-scoped probe and the acknowledgement read are clara_authenticated''s alone, the actor-explicit twin and the writer are clara_runtime''s alone, the acknowledgements are append-only with SELECT and no DML for the browser lane, and 0225''s admission door and 0274''s party resolver are byte-identical to their pinned pre-images.';
+  raise notice '#1007 tail OK: the two probe doors, the acknowledgement writer and its read stand on four ungranted internals; the session-scoped probe and the acknowledgement read are clara_authenticated''s alone, the actor-explicit twin and the writer are clara_runtime''s alone, the acknowledgements are append-only with SELECT and no DML for the browser lane, 0225''s admission door is byte-identical to its pinned pre-image, and 0274''s party resolver carries this file''s own #982R2 recut with 0225''s posture and no application-role grant.';
 end
 $t1007_tail$;

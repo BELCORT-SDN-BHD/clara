@@ -3036,6 +3036,21 @@ full), `tests/trade-invoice-party-tin-preintegration-gate.mjs` keyed on the stem
 `trade_invoice_party_tin$`, and its `--import` token in `package.json`'s test script in
 migration order. No `rig-meta.mjs` cohort changes: 0274 mints no function and moves no grant.
 
+**Two things this file's own text no longer tells the whole truth about**, recorded here because
+0274 is byte-frozen (its ledger row is not the frontier any more — see 0275's "fix round"):
+
+- **A TIN several parties hold.** 0274's `v_tin_hits > 1` arm refused before the name tier was
+  consulted. 0275 section 10 recuts that arm: a shared TIN no longer outranks the name printed
+  beside it, and the chooser carries every party either identifier reached. The rule is stated in
+  0275's section below.
+- **A TIN outranks a uniquely-resolving name, silently.** A bill naming Beta and carrying Alpha's
+  TIN is admitted against **Alpha**. This is not new and not a defect of 0274: 0225 already does
+  exactly this for a registration number (a name that uniquely resolves to Beta plus Alpha's
+  registration number has always admitted against Alpha), and the owner's ruling put the TIN "at
+  the same tier as the normalised registration number". A **name is never a conflict partner** on
+  this lane; only the two identifiers are. If the estate should stop on name-vs-identifier
+  disagreement too, that is a ticket, not a fix.
+
 ## 0275 — warn before recording a trade invoice that looks like one already recorded (#1007)
 
 On the trade-invoice lane 0225 shipped, "duplicate" meant a replayed *intent* and nothing else:
@@ -3046,12 +3061,12 @@ posted twice and doubled the payable. The owner ruled on 2026-09-20: check at th
 step, **warn and let the person decide, never refuse**, and do not look at the document number
 alone — also look at the amount and the counterparty.
 
-`0275_trade_invoice_duplicate_probe.sql` is **purely additive**. It recuts nothing:
-`clara.admit_trade_invoice_work`'s replay semantics, its refusal ladder and the posting core are
-untouched, and the file's tail re-reads both that door and 0274's
-`clara._trade_invoice_resolve_party` to prove their `sha256(prosrc)` did not move while it applied.
-**A unique constraint on `reference` would be wrong and is not added**: the column is nullable and
-suppliers legitimately reuse numbers.
+For #1007 `0275_trade_invoice_duplicate_probe.sql` is **purely additive**. It recuts nothing of
+0225's: `clara.admit_trade_invoice_work`'s replay semantics, its refusal ladder and the posting
+core are untouched, and the file's tail re-reads that door to prove its `sha256(prosrc)` did not
+move while it applied. **A unique constraint on `reference` would be wrong and is not added**: the
+column is nullable and suppliers legitimately reuse numbers. The one body it *does* recut is
+0274's party resolver, for #982's fix round — see "The fix round" below.
 
 **The two signals, and why there are two rather than one conjunction.**
 
@@ -3073,6 +3088,17 @@ match, which is known to let a duplicate through whenever the reference was type
 away entirely is folded to NULL rather than matched, or every unnumbered bill would match every
 other unnumbered bill. `clara._trade_invoice_reference_key(text)` is `immutable` and is the one
 place that answer lives.
+
+**"The same counterparty" means the merged family.** `clara.merge_counterparties` (0011) stamps
+`merged_into` on the absorbed row and rewrites no history, so a bill keeps the
+`clara.trade_invoices.counterparty_id` it was recorded under; the resolver, meanwhile,
+canonicalises what the caller submitted (0149's rule) and always answers the *survivor*. The first
+cut compared the survivor against the stored id and was therefore blind across a merge — measured
+on a lane database, a bill recorded against the absorbed party stopped warning the moment the merge
+landed, and the same bill number was then recorded a second time with no warning at all. The
+matcher now walks the merge tree down from the survivor (`ix_counterparties_merged_into` indexes
+that edge) and compares against the whole family, which is one row wherever nothing was ever
+merged. `p1007.probe.across_a_merge` drives it through `clara.merge_counterparties` itself.
 
 **Which earlier invoices count.** Only ones that are, or still may become, a posting: the Work is
 not in the estate's own closed terminal-without-posting set
@@ -3135,13 +3161,65 @@ deliberate.
   `unknown_acknowledged_invoice` (an id this client's books of this kind do not hold), both
   `CLR10` with a `detail.reason` the route can map — never a bare CHECK violation.
 
+**What a reviewer reads afterwards, and how it is bound to the recording.**
+`clara.get_trade_invoice_duplicate_ack(uuid)` is viewer-floored and firm-scoped, and it reaches the
+acknowledgement **through the Work and through what that Work actually recorded**: the same kind,
+counterparty, document date and total in sen, the same document number under this lane's one
+normalisation, and an `acknowledged_at` at or before the Work's own `created_at`. The first cut
+joined on `(firm, client, intent_key)` alone and took the newest row, which was wrong in the one
+direction that matters — driven on a lane database (`p1007.ack.rode_this_recording`), a Work that
+recorded RM 1,060.00 read back an acknowledgement for RM 9,999.00 naming **its own invoice** as the
+earlier document, because the browser mints one intent key per draft and an edited resubmit
+acknowledges again under it before the admission refuses `intent_payload_conflict`. Between two
+acknowledgements the admission could equally have ridden, the last one before it wins, and the
+tie-break after that is the act's own digest rather than a random primary key (two real connections
+were measured writing `acknowledged_at` equal to the microsecond). A Work with no trade-invoice row
+of its own — another lane's Work that happens to share an intent key — now answers NULL.
+
+`apps/web`'s Work page reads it: a recording somebody was warned about says who was warned and
+which earlier document they were shown, and a recording nobody was warned about says nothing at
+all. The page never claims a recording was *not* a duplicate.
+
 **No index is added.** The matcher reads one counterparty's invoices of one client, which
 `ix_trade_invoices_counterparty` (0225, on `(counterparty_id, document_date desc)`) already reduces
-to an index scan.
+to an index scan; the merged-family walk reads `ix_counterparties_merged_into`.
 
-**Redo-safe by construction** (#957): every statement is `create or replace function` or a
-`revoke`/`grant` on one, and the prestate reports FIRST or REDO from a catalog probe rather than
-branching on a body's shape.
+**The fix round (wave 3, lane 02) — and why a #1007 file carries a #982 recut.** The lane's review
+round raised one change to 0274's `clara._trade_invoice_resolve_party`: a TIN held by several
+parties refused before the name tier was consulted, so a document naming one vendor and carrying a
+TIN two *other* vendors share was answered with a chooser offering those two and omitting the one
+the document names — a submission that resolved cleanly before 0274. 0274 could not carry the fix:
+the supported re-apply path (`CLARA_MIGRATION_REDO`, "Redo (#957)" above) takes the **highest
+applied version only**, so that nothing built on top of a file is silently invalidated, and 0275
+sits on top of 0274 on every lane database. Editing 0274 in place would mean the hand procedure
+#957 exists to abolish. 0272 gives the same reason for not editing 0244. So section 10 of 0275
+recuts that one body, 0274 stays byte-frozen with its ledger row intact, and the rule now reads:
+
+> An identifier that answers with several parties has not identified anybody, so it does not
+> outrank the name printed beside it. Where the name answers to exactly one of the parties holding
+> that TIN, the two identifiers agree on it and the document resolves. Otherwise Clara stops, and
+> the chooser carries every party either identifier reached, each saying which one reached it
+> (`matched_on` ∈ `registration` | `tin` | `name` | `tin_and_name`).
+
+Everything else in that body — the id arm, the registration arm, the identifier conflict, the
+one-TIN-hit resolution, `party_unresolved` and the NAME branch's `party_ambiguous`, whose detail
+shape is #982's AC4 — is carried over byte for byte. The recut keeps 0274's `#982` marker and adds
+`#982R2`, which is what 0275's prestate reads to tell a redo from a first apply; that pin is
+two-valued by construction and both values are measured.
+
+The same round also: restated the acknowledgement writer's total and document-date guards with
+`clara._assert_trade_invoice_basis`'s own `invalid_total` / `invalid_due_date` tokens, so the CHECK
+constraints are a belt rather than the message a caller reads
+(`p1007.ack.typed_shape`); and gave `clara.probe_trade_invoice_duplicates` the admission's
+`client_inactive` arm, because on an archived client the form used to warn about a recording the
+admission then refused (`p1007.probe.client_inactive`).
+
+**Redo-safe by construction** (#957): every statement is `create table if not exists`,
+`create index if not exists`, `create or replace function`, a `revoke`/`grant` on one, or a
+`drop … if exists` before its `create` (the policies and the two belts); the prestate reports FIRST
+or REDO from a catalog probe rather than branching on a body's shape, except for the one
+two-valued pin on the body section 10 recuts, whose first-apply branch is proved by hand in a
+rolled-back transaction.
 
 **The frontier triad**, per the wave-2/3 work order:
 `tests/trade-invoice-duplicate-probe.test.mjs` (#1007's cells, in their own file so a chain

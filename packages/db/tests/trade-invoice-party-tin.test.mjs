@@ -20,7 +20,7 @@ import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  gateTiTin, vendor, billParticulars, billBasis, admitTradeInvoiceWork, invoiceRow,
+  gateTiTin, gateTiDup, vendor, billParticulars, billBasis, admitTradeInvoiceWork, invoiceRow,
   ensureTiChart, buildWorkWorld, freshWorkClient, endPool,
   TI_REASON, TI_KIND, customer, invoiceParticulars, invoiceBasis,
   invoiceCount, entryCount, committedReceiptCount, assertPair, rootQuery,
@@ -230,4 +230,60 @@ test("p982.tin.normalised a TIN printed with spaces and dashes resolves the part
   });
   assert.equal((await invoiceRow(ok.invoice_id)).counterparty_id, held,
     "p982.tin.normalised: the punctuation a printer added is not part of the identifier");
+});
+
+// ===========================================================================================
+// FIX ROUND (wave 3, lane 02): THE NAME PRINTED BESIDE A SHARED TIN (ADV-982-1).
+//
+// These two cells gate on #1007's frontier, not #982's: the body they drive is recut by
+// 0275_trade_invoice_duplicate_probe, because `CLARA_MIGRATION_REDO` (#957) takes the HIGHEST
+// applied version only and 0275 sits above 0274 on every lane database. The migration's own
+// header says the same thing, and packages/db/README.md's 0275 section records it.
+// ===========================================================================================
+
+test("p982.tin.shared_with_a_name a TIN several parties hold does not silently outrank the name printed beside it: the chooser carries the NAMED party too, and says which identifier reached each one", async (t) => {
+  if (await gateTiDup(t)) return;
+  const client = await tiClient("tin-named");
+  const tin = newTin();
+  // The party the DOCUMENT names, holding no TIN at all: before 0274 this submission resolved to
+  // it, because a TIN was not a key.
+  const named = await vendor(ALICE(), { client, name: `Gamma Works ${randomUUID().slice(0, 8)}` });
+  const holderOne = await vendor(ALICE(), { client, tin });
+  const holderTwo = await vendor(ALICE(), { client, tin });
+  const namedRow = await rootQuery("select name from clara.counterparties where id=$1", [named]);
+
+  const amb = await refusesTi(client, "CLR10", TI_REASON.partyAmbiguous,
+    () => admitTradeInvoiceWork({
+      client, author: ALICE(),
+      particulars: billParticulars({ counterparty: null, name: namedRow.rows[0].name, tin }),
+      basis: billBasis(),
+    }),
+    "p982.tin.shared_with_a_name: a shared TIN has not identified anybody");
+  assert.deepEqual(new Set(amb.detail.candidates.map((c) => c.counterparty_id)),
+    new Set([named, holderOne, holderTwo]),
+    "p982.tin.shared_with_a_name: the chooser offers the party the document NAMES as well as the two that hold the number");
+  const by = Object.fromEntries(amb.detail.candidates.map((c) => [c.counterparty_id, c.matched_on]));
+  assert.equal(by[named], "name",
+    "p982.tin.shared_with_a_name: …saying which identifier reached the named party");
+  assert.equal(by[holderOne], "tin");
+  assert.equal(by[holderTwo], "tin");
+});
+
+test("p982.tin.shared_name_decides when the name printed beside a shared TIN answers to ONE of the parties holding it, the two identifiers agree on that party and the document resolves", async (t) => {
+  if (await gateTiDup(t)) return;
+  const client = await tiClient("tin-decides");
+  const tin = newTin();
+  const wanted = await vendor(ALICE(), { client, name: `Delta One ${randomUUID().slice(0, 8)}`, tin });
+  const other = await vendor(ALICE(), { client, name: `Delta Two ${randomUUID().slice(0, 8)}`, tin });
+  const wantedRow = await rootQuery("select name from clara.counterparties where id=$1", [wanted]);
+
+  const ok = await admitTradeInvoiceWork({
+    client, author: ALICE(),
+    particulars: billParticulars({ counterparty: null, name: wantedRow.rows[0].name, tin }),
+    basis: billBasis(),
+  });
+  assert.equal((await invoiceRow(ok.invoice_id)).counterparty_id, wanted,
+    "p982.tin.shared_name_decides: the name settled which of the two parties holding that TIN the document is about");
+  assert.notEqual(wanted, other,
+    "p982.tin.shared_name_decides: …and the other holder of the same TIN is a real, live, different party");
 });
