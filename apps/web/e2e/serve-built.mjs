@@ -93,6 +93,8 @@ import { handlePeriodicAdjustmentRuntime, handlePeriodicAdjustmentSupabase } fro
 // and falls through otherwise. No runtime hook — every write is a plain PostgREST RPC. See
 // staff-advances-register-mock.mjs.
 import { handleStaffAdvancesRegisterSupabase } from "./staff-advances-register-mock.mjs";
+// #927 (riders wave 3) — the retired Adjustments register (`?tab=adjustments`).
+import { handleAdjustmentsRetiredSupabase } from "./adjustments-retired-mock.mjs";
 // #638's own lane — the staff-expense-claim form, its enrolment read, its refusals and its
 // register. Scoped to its own client id in every branch (the control endpoint included) and
 // file-disjoint from every other lane. See staff-expense-claim-mock.mjs.
@@ -728,6 +730,11 @@ async function handleSupabase(request, response, url) {
   // would hold nothing but their placeholder with this hook after it. Every branch is scoped to
   // this lane's own client and falls through otherwise.
   if (await handleStaffAdvancesRegisterSupabase(request, response, path, url, sendJson, cors)) return;
+  // #927 — the retired Adjustments register (`?tab=adjustments`). No account picker to starve
+  // (Propose/Sign are gone with their doors), so position relative to home-board-mock.mjs is not
+  // load-bearing here; kept beside its closest sibling, staff-advances-register, all the same.
+  // Every branch is scoped to this lane's own client and falls through otherwise.
+  if (await handleAdjustmentsRetiredSupabase(request, response, path, url, sendJson, cors)) return;
   // #638, beside its closest sibling and ahead of the home board for the identical reason:
   // `home-board-mock.mjs`'s EMPTY_RELATIONS answers `/rest/v1/coa_accounts` with an honest `[]`
   // for every subject, so with this hook after it the claim form's account pickers would hold
