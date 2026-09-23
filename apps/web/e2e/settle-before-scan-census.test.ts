@@ -32,81 +32,11 @@
 // preserving every newline, so line numbers stay true to the real file.
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 
-const E2E_DIR = dirname(fileURLToPath(import.meta.url));
-
-/** Every browser spec in this directory, read from disk — the same reasoning
- *  `sign-in-census.test.ts` gives for not hand-keeping this list. */
-function specFiles(): string[] {
-  return readdirSync(E2E_DIR)
-    .filter((name) => name.endsWith(".spec.ts"))
-    .sort();
-}
-
-/**
- * Removes `//` line comments and `/* *\/` block comments, leaving string and template-literal
- * contents untouched (a URL like `"https://x"` must never be read as a comment start) and every
- * newline in place, so a line number computed against the RETURNED text still names the same line
- * in the original file.
- */
-export function stripComments(source: string): string {
-  let out = "";
-  let i = 0;
-  const n = source.length;
-  while (i < n) {
-    const c = source[i];
-    const c2 = source[i + 1];
-    if (c === "/" && c2 === "/") {
-      while (i < n && source[i] !== "\n") i += 1;
-      continue;
-    }
-    if (c === "/" && c2 === "*") {
-      i += 2;
-      while (i < n && !(source[i] === "*" && source[i + 1] === "/")) {
-        if (source[i] === "\n") out += "\n";
-        i += 1;
-      }
-      i += 2;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      const quote = c;
-      out += c;
-      i += 1;
-      while (i < n && source[i] !== quote) {
-        if (source[i] === "\\") {
-          out += source[i];
-          i += 1;
-          if (i < n) {
-            out += source[i];
-            i += 1;
-          }
-          continue;
-        }
-        out += source[i];
-        i += 1;
-      }
-      if (i < n) {
-        out += source[i];
-        i += 1;
-      }
-      continue;
-    }
-    out += c;
-    i += 1;
-  }
-  return out;
-}
-
-function lineAt(source: string, index: number): number {
-  let line = 1;
-  for (let i = 0; i < index; i += 1) if (source[i] === "\n") line += 1;
-  return line;
-}
+import { E2E_DIR, functionBody, lineAt, specFiles, stripComments } from "./spec-census";
 
 /**
  * LOCAL WRAPPERS — a function that forwards to `settleForScan` before this census's job is done, so
@@ -129,29 +59,10 @@ function wrapperNamesFor(specName: string): string[] {
   return LOCAL_WRAPPERS[specName]?.names ?? [];
 }
 
-/**
- * Extracts a top-level `async function NAME(...) { … }`'s own body, brace-balanced so a nested `{`
- * (an `if`, an object literal) does not end the extraction early. Returns null if no such
- * declaration exists — the caller's job is to say that is a problem, not this one's.
- */
-export function functionBody(source: string, name: string): string | null {
-  const decl = new RegExp(String.raw`(?:^|\n)\s*(?:export\s+)?async\s+function\s+${name}\s*\(`);
-  const declMatch = decl.exec(source);
-  if (!declMatch) return null;
-  const openBrace = source.indexOf("{", declMatch.index + declMatch[0].length);
-  if (openBrace === -1) return null;
-  let depth = 0;
-  for (let i = openBrace; i < source.length; i += 1) {
-    if (source[i] === "{") depth += 1;
-    else if (source[i] === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(openBrace + 1, i);
-    }
-  }
-  return null;
-}
-
 const SCAN_CALL = /\.analyze\(\s*\)/g;
+/** The opener of a CELL — every marker walk below resets at one, because two cells never share
+ *  a page, let alone a settled one. */
+const CELL_OPENER = /\btest(?:\.only)?\(\s*["'`]/g;
 const DIRECT_SETTLE = /settleForScan\(\s*page\b/g;
 
 function wrapperCallPattern(names: string[]): RegExp | null {
@@ -167,19 +78,27 @@ function wrapperCallPattern(names: string[]): RegExp | null {
  * `stripComments` preserves every original newline rather than collapsing comment blocks.
  */
 export function unsettledScanLines(strippedSource: string, wrapperNames: string[] = []): number[] {
-  type Marker = { kind: "scan" | "settle"; idx: number };
+  type Marker = { kind: "scan" | "settle" | "cell"; idx: number };
   const markers: Marker[] = [...strippedSource.matchAll(SCAN_CALL)].map((m) => ({ kind: "scan", idx: m.index }));
   for (const m of strippedSource.matchAll(DIRECT_SETTLE)) markers.push({ kind: "settle", idx: m.index });
   const wrapperPattern = wrapperCallPattern(wrapperNames);
   if (wrapperPattern) {
     for (const m of strippedSource.matchAll(wrapperPattern)) markers.push({ kind: "settle", idx: m.index });
   }
+  // A CELL BOUNDARY SPENDS WHATEVER WAS LEFT (review finding SPEC-1017-C). The markers are file
+  // ordered, so without this a settle at the END of one cell cleared an unsettled scan at the
+  // START of the next — two cells never share a page, let alone a settled one. Latent when found
+  // (a boundary-aware re-run over all 50 real files reported the same zero offenders), which is
+  // exactly when a hole is cheapest to close.
+  for (const m of strippedSource.matchAll(CELL_OPENER)) markers.push({ kind: "cell", idx: m.index });
   markers.sort((a, b) => a.idx - b.idx);
 
   let settled = false;
   const offenders: number[] = [];
   for (const marker of markers) {
-    if (marker.kind === "settle") {
+    if (marker.kind === "cell") {
+      settled = false;
+    } else if (marker.kind === "settle") {
       settled = true;
     } else {
       if (!settled) offenders.push(lineAt(strippedSource, marker.idx));
@@ -278,6 +197,32 @@ test("#1017 · THE VACUITY CONTROL: the detector actually detects, and does not 
     "await new AxeBuilder({ page }).analyze();",
   ].join("\n");
   assert.deepEqual(unsettledScanLines(stripComments(twoScansOneSettle)), [4], "a settle spent on one scan must not cover the next");
+
+  // ACROSS A CELL BOUNDARY (review finding SPEC-1017-C): cell A's trailing settle must NOT clear
+  // cell B's bare scan. They never share a page — B gets a fresh context, and the settle A spent
+  // measured a document that no longer exists. Latent when found (no real file depended on it),
+  // which is the cheapest moment to close it.
+  const settleInThePreviousCell = [
+    'test("A", async ({ page }) => {',
+    "  await settleForScan(page);",
+    "});",
+    'test("B", async ({ page }) => {',
+    "  await new AxeBuilder({ page }).analyze();",
+    "});",
+  ].join("\n");
+  assert.deepEqual(
+    unsettledScanLines(stripComments(settleInThePreviousCell)),
+    [5],
+    "a settle at the end of one cell must not clear an unsettled scan in the next",
+  );
+
+  // The same two cells with B settling for itself: clean. (Without this arm the rule above could
+  // be satisfied by a census that simply never clears anything after a boundary.)
+  assert.deepEqual(
+    unsettledScanLines(stripComments(settleInThePreviousCell.replace("  await new AxeBuilder", "  await settleForScan(page);\n  await new AxeBuilder"))),
+    [],
+    "a cell that settles for itself is clean either side of a boundary",
+  );
 
   // A COMMENT NAMING THE SHAPE IS NOT THE SHAPE — the real false positive this file's own header
   // records, reproduced as a fixture: prose ahead of the one real, already-settled call.
