@@ -2909,6 +2909,26 @@ export const FA_DEFAULT_DEPRECIATION_POLICY_0277_COHORT = [
 ];
 // #932 END
 
+// #975 [0279, the closed-year arrears question] — its own cohort, bimodal like 0277's: wholly
+// present once 0279 applies, wholly absent before it, because the `db-slice-frontiers` matrix
+// runs this package against earlier frontiers.
+//
+//   ONE NEW HUMAN DOOR, clara_authenticated ONLY, floored on bookkeeper in its own body
+//   (`clara._human_ctx(clara.role_rank('bookkeeper'))`, the SAME floor
+//   `clara.run_depreciation_manual` takes — the person who may run the period is the person who
+//   may judge its arrears): `record_fa_arrears_resolution`. clara_runtime, both agent read roles
+//   and all four wake lanes gain ZERO: materiality is a professional judgement under IAS 8 and no
+//   machine lane may make it, and a lane carrying no JWT claims could not pass `_human_ctx` even
+//   if it held the grant.
+//
+//   0279's own internal, `clara._fa_closed_arrears`, is granted to NOBODY — it is reached only
+//   from the DEFINER bodies of the run core and the door above — and is therefore expected-false
+//   for every role in the live sweep rather than listed here. That is the same disposition 0270's
+//   `clara._firm_document_limit_ceiling` and 0234's `clara._legal_enforcement_mode` carry.
+const FA_CLOSED_YEAR_ARREARS_0279_HUMAN_FNS = ["record_fa_arrears_resolution"];
+export const FA_CLOSED_YEAR_ARREARS_0279_COHORT = [...FA_CLOSED_YEAR_ARREARS_0279_HUMAN_FNS];
+// #975 END
+
 // #1014 [0235, the document binding claim] — ONE relation and NO function name: 0235 recuts
 // clara._lock_document_binding in place (a `create or replace`, so no catalog entry enters or
 // leaves) and mints clara.document_binding_claims, the serialization token that makes a blocked
@@ -3234,6 +3254,11 @@ export const ALLOWED = {
     // see the block above. clara_authenticated ONLY; clara_runtime, both agent read roles and
     // all four wake lanes gain ZERO.
     ...FA_DEFAULT_DEPRECIATION_POLICY_0277_HUMAN_FNS,
+    // #975 [0279] the closed-year arrears resolution door — bookkeeper+, see the block above.
+    // clara_authenticated ONLY; clara_runtime, both agent read roles and all four wake lanes gain
+    // ZERO, because materiality is a professional judgement under IAS 8 and no machine lane makes
+    // it. The ungranted internal clara._fa_closed_arrears holds no role at all.
+    ...FA_CLOSED_YEAR_ARREARS_0279_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3763,6 +3788,12 @@ export async function grantMatrixFailures() {
   if (depreciationPolicyLive.length !== 0) {
     failures.push(...cohortFailures("#932 0277 fixed-asset default depreciation policy",
       FA_DEFAULT_DEPRECIATION_POLICY_0277_COHORT, liveNames));
+  }
+  // #975 [0279] — bimodal, exactly as 0277's above.
+  const closedArrearsLive = FA_CLOSED_YEAR_ARREARS_0279_COHORT.filter((n) => liveNames.has(n));
+  if (closedArrearsLive.length !== 0) {
+    failures.push(...cohortFailures("#975 0279 closed-year arrears resolution",
+      FA_CLOSED_YEAR_ARREARS_0279_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

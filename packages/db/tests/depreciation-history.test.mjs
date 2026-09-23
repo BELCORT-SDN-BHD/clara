@@ -22,6 +22,10 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+// #975 (0279) — the closed-year arrears question sits in front of the arrears run this file's
+// `p651.period.closed_belt_skips` cell drives. The cell is bimodal on 0279's own stem; these two
+// names are the only thing it borrows from that battery's fixtures.
+import { fa975Ready, recordResolution } from "./fa-arrears-resolution-fixtures.mjs";
 import {
   gate651, p651Client, fiscalYear, liveAuthorityWithRef, signWithRef, previewRun, runPeriodFor,
   proposeAuthority, retireAuthority, authorityEnvelope,
@@ -276,6 +280,25 @@ test("p651.period.closed_belt_skips the oracle SKIPS a closed period, names it i
   // THE SKIPPED PERIOD IS NEVER RUN IN ITS OWN RIGHT. Running the offered OPEN period charges the
   // arrears — the charge ROWS keep their own months, the journal ENTRY is dated in the open period,
   // so the closed year's reported figures never move. That is the measured truth and it is visible.
+  //
+  // #975 (0279) PUTS A QUESTION IN FRONT OF THAT RUN, and nothing else about it. Under the owner's
+  // ruling of 2026-09-20 (IAS 8) the fold is a MATERIALITY judgement Clara may not default, so the
+  // run stops and asks until the accountant records `fold_current`. Once recorded, everything this
+  // cell measured before #975 is unchanged — which is exactly what the branch below asserts. The
+  // cell is BIMODAL on 0279's own stem, because `db-slice-frontiers` runs this package against
+  // frontiers that predate it.
+  if (await fa975Ready()) {
+    const asked = await refuses(() => runManual(w.users.bob,
+      { client, periodStart: mon(-2).start, periodEnd: mon(-2).end }),
+    "arrears_resolution_required", "period.closed_belt_skips.asked");
+    const ad = JSON.parse(String(asked.detail));
+    assert.equal(ad.fiscal_years[0].fiscal_year_id, fy,
+      "#975's question names the SAME year this cell closed");
+    await recordResolution(w.users.bob, {
+      client, fiscalYear: fy, choice: "fold_current", arrearsCents: ad.arrears_cents,
+      periodStart: mon(-2).start, periodEnd: mon(-2).end, reason: "p651 belt-skip cell",
+    });
+  }
   const { receipt, entryId } = await runManualAndSettle(client, mon(-2));
   assert.notEqual(receipt.status, "noop");
   const entry = await entryRowOf(entryId);
