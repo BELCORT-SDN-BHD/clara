@@ -4793,3 +4793,31 @@ firm its prepayment could never be amortised at all. It now carries
 reads `v1` on a document-backed schedule and `v2` on a human-stated one, and
 `evaluator_version_id` resolves by the entrypoint signature the branch chose rather than by a
 literal.
+
+**Both reads are extended, not forked.** `term_live`, `term_superseded_by`, `term_moved`,
+`term_current_start` and `term_current_end` keep their exact #919 meanings and are now computed
+against WHICHEVER carrier the schedule rode, chosen by `term_source`. A surface written against
+#919 keeps working; forking them into `document_term_live` / `stated_term_live` would have made
+every reader ask which pair to trust. ADV-02 carries over unchanged, because
+`clara.record_prepayment_stated_term` supersedes unconditionally too. Three fields are genuinely
+new: `term_source`, and `term_stated_by` / `term_stated_at` / `term_reason`, which are NULL on the
+document lane rather than filled from the document's own recorder — "a person stated this term" is
+a different claim from "somebody typed a service period off an invoice".
+
+`list_prepayment_schedules`' join onto `clara.document_service_periods` was INNER (0285) and is now
+LEFT. That is a fix, not a refactor: the moment a schedule exists with no document row it would
+have been ABSENT from its own firm's list — live in the books, invisible on the screen.
+`clara.get_prepayment_schedule`'s envelope is now built as two `jsonb_build_object` calls
+concatenated with `||`, because that function is variadic and PostgreSQL refuses more than 100
+arguments (54023, measured here the moment the five new keys were added).
+
+**Arm B of the attention read stops hiding memo-only prepayments.** Its
+`je.document_id is not null` filter was not arbitrary — with no other carrier a memo-only
+recognition could never be configured, so listing it would have offered an action that could only
+refuse — but with #939 it hides exactly the prepayments this ticket exists to rescue. Each
+candidate now carries `term_carrier` (which carrier its term would live in), `has_live_term`
+computed against that carrier, and `next_step` as a closed token: `configure_schedule`,
+`record_document_service_period`, or `state_service_period`. A token rather than a sentence,
+because the copy is the surface's and the fact is the database's. `clara._adj_line_eligibility_breach`
+is now the only thing keeping an ordinary memo-only receivable out of the band, so
+`p939.attention.memo_only` drives that wall on this lane rather than assuming it carries over.

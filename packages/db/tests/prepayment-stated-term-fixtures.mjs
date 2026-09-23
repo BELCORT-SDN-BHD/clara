@@ -159,6 +159,41 @@ export async function memoOnlyRecognition(scene, { cents = 120000, postingDate =
   return { entry: d.entry_id, cents };
 }
 
+/**
+ * A MEMO-ONLY, APPROVED RECOGNITION WHOSE ONE DEBITED ASSET LEG IS NOT A PREPAYMENT — by default
+ * the estate's own receivable CONTROL account.
+ *
+ * It exists because #939 removed arm B's `document_id is not null` filter, and that filter was
+ * doing a second job nobody had asked it to do: it kept memo-only entries out of the band
+ * entirely. With it gone, the ONLY thing standing between arm B and every memo-only receivable a
+ * firm posts is `clara._adj_line_eligibility_breach`, so that wall has to be driven on this lane
+ * rather than assumed to carry over from the document one.
+ *
+ * A CONTROL-CLASS LINE REQUIRES A COUNTERPARTY (CLR23, measured on this rig), which is the estate
+ * saying the same thing this fixture is about: a receivable is somebody's, and a prepayment is
+ * nobody's.
+ */
+export async function memoOnlyIneligible(scene, { cents = 77000, code = "374-C56" } = {}) {
+  const { draftEntryV3, approveEntry, freshResolution } = await import("./wave-a-reads.mjs");
+  const u = randomUUID().slice(0, 8);
+  const d = await draftEntryV3(scene.alice, {
+    client: scene.client,
+    resolution: await freshResolution(scene.alice, scene.client,
+      { subjectKind: "manual", subjectId: null }),
+    memo: `#939 memo-only receivable ${u}`,
+    postingDate: scene.postingDate,
+    lines: [
+      { account_code: code, debit_cents: cents, credit_cents: 0, description: "receivable" },
+      { account_code: "684-C56", debit_cents: 0, credit_cents: cents, description: "sale" },
+    ],
+    vendor: { kind: "customer", new: { name: `p939 customer ${u}` } },
+    opKey: opk("p939-ctl"),
+  });
+  await approveEntry(scene.bob, {
+    entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("p939-ctla") });
+  return { entry: d.entry_id, code, cents };
+}
+
 /** #653's scene plus a memo-only recognition of the same client, so a cell can drive the whole
  *  memo-only lane from one call. `recordTerm` stays true: the scene's OWN document-bound entry is
  *  what the v1/v2 agreement cell needs. */

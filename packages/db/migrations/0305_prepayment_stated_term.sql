@@ -1183,6 +1183,416 @@ begin
   return clara._finish_op(v_firm, 'create_prepayment_schedule', p_op_key, v_result);
 end $$;
 
+
+-- =====================================================================================
+-- §F — THE TWO SCHEDULE READS, EXTENDED. #919 (0285) gave both reads five term-liveness fields
+-- joined from `clara.document_service_periods`. #939 adds a SECOND carrier, and the ticket's own
+-- line is "the reads #919 recuts are extended, not forked".
+--
+-- SO THERE IS ONE SET OF FIELDS, NOT TWO. `term_live`, `term_superseded_by`, `term_moved`,
+-- `term_current_start` and `term_current_end` keep their exact #919 meanings and are computed
+-- against WHICHEVER carrier the schedule actually rode, chosen by `term_source`. A surface written
+-- against #919 keeps working and gains nothing to learn; a schedule on the new lane answers the
+-- same questions. Forking them into `document_term_live` / `stated_term_live` would have made
+-- every reader ask which pair to trust.
+--
+-- ADV-02 CARRIES OVER UNCHANGED, because the second carrier has the same property that made it
+-- necessary: `clara.record_prepayment_stated_term` supersedes the live statement UNCONDITIONALLY —
+-- it compares no dates — so `term_live` goes false on a restatement that repeats the term byte for
+-- byte. `term_moved` stays the fact a surface may act on, and it is computed against the statement
+-- that stands TODAY, never against `superseded_by`'s, which may be an intermediate row of a
+-- twice-corrected chain.
+--
+-- THE `join` BECAME A `left join`, AND THAT IS THE BUG THIS SECTION ALSO FIXES. 0285's list read
+-- joined `clara.document_service_periods` INNER on `service_period_id`. The moment a schedule
+-- exists with no document row — which is precisely what §E now creates — that schedule would be
+-- ABSENT from its own firm's list: live in the books, invisible on the screen. Cell
+-- `p939.reads.term_source` drives both reads with one schedule of each lane on one client.
+--
+-- THREE FIELDS ARE GENUINELY NEW, and they are the difference the ticket is about: `term_source`
+-- says which carrier, and `term_stated_by` / `term_stated_at` / `term_reason` carry WHO stated the
+-- term, WHEN and WHY. They are NULL on the document lane rather than filled with the document's
+-- own recorder, because "a person stated this term" is a different claim from "somebody typed a
+-- service period off an invoice", and the surface must be able to tell them apart.
+-- =====================================================================================
+create or replace function clara.get_prepayment_schedule(p_schedule uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_ctx record; s clara.prepayment_schedules; p clara.accounting_plans; r record;
+  v_occ jsonb; v_periods jsonb; v_entry record; v_covered date;
+  v_term_live boolean; v_term_superseded_by uuid; v_term_moved boolean;  -- #919
+  v_term_current_start date; v_term_current_end date;                    -- #919
+  v_term_stated_by uuid; v_term_stated_at timestamptz; v_term_reason text;  -- #939
+begin
+  select * into v_ctx from clara._prepayment_ctx(p_schedule, clara.role_rank('viewer')) c;
+  s := v_ctx.sc;
+  select * into p from clara.accounting_plans where id = s.plan_id;
+  select * into r from clara.accounting_plan_revisions
+   where plan_id = s.plan_id and superseded_at is null;
+  v_covered := clara._plan_covered_through(s.plan_id);
+  select je.posting_date, je.memo, je.status into v_entry
+    from clara.journal_entries je where je.id = s.source_entry_id;
+
+  -- EVERY OCCURRENCE, with the same projection 0193's own occurrence read gives — the committed
+  -- receipt only, the entry id out of its effects, the typed refusal reason, and the Work's own
+  -- settled error where the refusal happened at POSTING rather than at admission.
+  select coalesce(jsonb_agg(x order by x ->> 'due_date'), '[]'::jsonb) into v_occ
+    from (
+      select jsonb_build_object(
+        'occurrence_id', o.id, 'due_date', to_char(o.due_date,'YYYY-MM-DD'), 'leg', o.leg,
+        'period_key', to_char(o.period_key,'YYYY-MM-DD'), 'attempt', o.attempt,
+        'revision', o.revision, 'intent_key', o.intent_key, 'work_id', o.work_id,
+        'admitted_at', o.admitted_at, 'outcome', o.outcome, 'created_at', o.created_at,
+        'attempts', o.attempts,
+        'work_status', w.status, 'work_error', w.error,
+        'receipt_id', (select rc.id from clara.operation_receipts rc
+                        where rc.work_id = o.work_id and rc.outcome = 'committed'
+                        order by rc.created_at limit 1),
+        'entry_id', (select rc.effects ->> 'entry_id' from clara.operation_receipts rc
+                      where rc.work_id = o.work_id and rc.outcome = 'committed'
+                      order by rc.created_at limit 1)) as x
+        from clara.accounting_plan_occurrences o
+        left join clara.accounting_work w on w.id = o.work_id
+       where o.plan_id = s.plan_id
+    ) t;
+
+  select coalesce(jsonb_agg(y order by y ->> 'period_end'), '[]'::jsonb) into v_periods
+    from (
+      select (l || jsonb_build_object('occurrence',
+               (select e from jsonb_array_elements(v_occ) e
+                 where e ->> 'due_date' = l ->> 'period_end' limit 1))) as y
+        from jsonb_array_elements(s.period_lines) l
+    ) u;
+
+  -- #919/#939 — THE TERM-LIVENESS FIELDS, over the carrier this schedule actually rode.
+  -- `service_period_id` / `stated_term_id` name the row this schedule was DERIVED from (0223's own
+  -- append-only design: a corrected term supersedes that row and NEVER moves the stored
+  -- allocation). Joined here rather than assumed live, because a bookkeeper can correct the term at
+  -- any later point — through `clara.record_document_service_period` or, on the memo-only lane,
+  -- `clara.record_prepayment_stated_term` — and this read is the only place that fact becomes
+  -- visible: the schedule row itself keeps naming the row it actually rode.
+  --
+  -- `term_live` is the AUDIT fact (is the row this schedule rode still the live statement?).
+  -- `term_moved` is the fact a SURFACE may act on: BOTH term doors supersede unconditionally, so a
+  -- re-record that restates the SAME dates flips `term_live` while changing nothing a firm needs
+  -- to act on (ADV-02). The comparison is against the term that stands TODAY — the carrier's one
+  -- `superseded_at is null` row — never against `superseded_by`'s, which may be an intermediate row
+  -- of a twice-corrected chain.
+  if s.term_source = 'human_stated' then
+    select (t.superseded_at is null), t.superseded_by, cur.period_start, cur.period_end,
+           (t.superseded_at is not null
+              and (cur.period_start, cur.period_end)
+                    is distinct from (t.period_start, t.period_end)),
+           t.stated_by, t.stated_at, t.reason
+      into v_term_live, v_term_superseded_by, v_term_current_start, v_term_current_end,
+           v_term_moved, v_term_stated_by, v_term_stated_at, v_term_reason
+      from clara.prepayment_stated_terms t
+      left join lateral (
+        select c.period_start, c.period_end from clara.prepayment_stated_terms c
+         where c.source_entry_id = t.source_entry_id and c.superseded_at is null limit 1) cur on true
+     where t.id = s.stated_term_id;
+  else
+    select (sp.superseded_at is null), sp.superseded_by, cur.period_start, cur.period_end,
+           (sp.superseded_at is not null
+              and (cur.period_start, cur.period_end)
+                    is distinct from (sp.period_start, sp.period_end))
+      into v_term_live, v_term_superseded_by, v_term_current_start, v_term_current_end, v_term_moved
+      from clara.document_service_periods sp
+      left join lateral (
+        select c.period_start, c.period_end from clara.document_service_periods c
+         where c.document_id = sp.document_id and c.superseded_at is null limit 1) cur on true
+     where sp.id = s.service_period_id;
+  end if;
+
+  return jsonb_build_object(
+    'schedule_id', s.id, 'client_id', s.client_id, 'plan_id', s.plan_id,
+    'revision', s.revision, 'kind', p.kind, 'status', p.status, 'purpose', p.purpose,
+    'source_entry_id', s.source_entry_id,
+    'source_posting_date', case when v_entry.posting_date is null then null
+                                else to_char(v_entry.posting_date,'YYYY-MM-DD') end,
+    'source_memo', v_entry.memo, 'source_status', v_entry.status,
+    'document_id', s.document_id, 'service_period_id', s.service_period_id,
+    -- #939 — WHICH CARRIER, and on the stated lane WHO said so, WHEN and WHY. Null on the document
+    -- lane rather than filled from the document's own recorder: "a person stated this term" is a
+    -- different claim from "somebody typed a service period off an invoice".
+    'term_source', s.term_source, 'stated_term_id', s.stated_term_id,
+    'term_stated_by', v_term_stated_by, 'term_stated_at', v_term_stated_at,
+    'term_reason', v_term_reason,
+    'term_live', v_term_live, 'term_superseded_by', v_term_superseded_by,  -- #919
+    'term_moved', v_term_moved,                                            -- #919
+    'term_current_start', case when v_term_current_start is null then null
+                               else to_char(v_term_current_start,'YYYY-MM-DD') end,
+    'term_current_end', case when v_term_current_end is null then null
+                             else to_char(v_term_current_end,'YYYY-MM-DD') end,
+    'term_start', to_char(s.term_start,'YYYY-MM-DD'), 'term_end', to_char(s.term_end,'YYYY-MM-DD'),
+    'basis_kind', s.basis_kind)
+    -- THE ENVELOPE IS BUILT IN TWO HALVES AND CONCATENATED, and that is a LIMIT, not a taste:
+    -- jsonb_build_object is a variadic function and PostgreSQL refuses more than 100 arguments
+    -- (54023, measured on this rig the moment #939's five new keys were added). `||` over two
+    -- objects is the estate's own spelling for the same value; no key moves and no key changes.
+    || jsonb_build_object(
+    'prepaid_account_code', s.prepaid_account_code,
+    'expense_account_code', s.expense_account_code,
+    'expense_account_basis', s.expense_account_basis,
+    'total_cents', s.total_cents, 'period_count', s.period_count,
+    'remainder_placement', s.remainder_placement, 'schedule_version', s.schedule_version,
+    'created_by', s.created_by, 'created_at', s.created_at,
+    'authority_kind', p.authority_kind, 'authority_ref', p.authority_ref,
+    'authorised_by', p.authorised_by, 'authorised_at', p.authorised_at,
+    'authority_from', to_char(p.authority_from,'YYYY-MM-DD'),
+    'covered_through', case when v_covered is null then null else to_char(v_covered,'YYYY-MM-DD') end,
+    'paused_at', p.paused_at, 'paused_by', p.paused_by, 'paused_reason', p.paused_reason,
+    'ended_at', p.ended_at, 'ended_by', p.ended_by, 'ended_reason', p.ended_reason,
+    'live_revision', case when r.revision is null then null else jsonb_build_object(
+      'revision', r.revision, 'frequency', r.frequency, 'day_rule', r.day_rule,
+      'day_of_month', r.day_of_month, 'timezone', r.timezone,
+      'effective_from', to_char(r.effective_from,'YYYY-MM-DD'),
+      'effective_to', case when r.effective_to is null then null else to_char(r.effective_to,'YYYY-MM-DD') end,
+      'basis', r.basis, 'basis_digest', r.basis_digest) end,
+    'periods', v_periods, 'occurrences', v_occ,
+    -- THE TWO BOUNDARY SENTENCES THE SURFACE MUST SAY, answered by the database rather than
+    -- written into a component: a schedule creates journal Work and never initiates a payment, and
+    -- accepted configuration is not a posted occurrence.
+    'configuration_only', true);
+end $$;
+
+create or replace function clara.list_prepayment_schedules(p_client uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare v_actor uuid; v_firm uuid; v_rows jsonb;
+begin
+  select a.actor, a.firm into v_actor, v_firm from clara._human_ctx(clara.role_rank('viewer')) a;
+  if not exists (select 1 from clara.clients c where c.id = p_client and c.firm_id = v_firm) then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  select coalesce(jsonb_agg(x order by x ->> 'created_at' desc), '[]'::jsonb) into v_rows
+    from (
+      select jsonb_build_object(
+        'schedule_id', s.id, 'plan_id', s.plan_id, 'purpose', p.purpose, 'status', p.status,
+        'source_entry_id', s.source_entry_id, 'document_id', s.document_id,
+        'term_start', to_char(s.term_start,'YYYY-MM-DD'),
+        'term_end', to_char(s.term_end,'YYYY-MM-DD'),
+        -- #939 — WHICH CARRIER the term came from, and on the stated lane who said so, when and
+        -- why. The list carries them so a marker and a filter need no second read.
+        'term_source', s.term_source, 'stated_term_id', s.stated_term_id,
+        'term_stated_by', pst.stated_by, 'term_stated_at', pst.stated_at,
+        'term_reason', pst.reason,
+        -- #919/#939 — the SAME term-liveness fields get_prepayment_schedule carries, computed the
+        -- same way against the term that stands TODAY (ADV-02), over whichever carrier this
+        -- schedule rode.
+        'term_live', case when s.term_source = 'human_stated'
+                          then (pst.superseded_at is null)
+                          else (dsp.superseded_at is null) end,
+        'term_superseded_by', case when s.term_source = 'human_stated'
+                          then pst.superseded_by else dsp.superseded_by end,
+        'term_moved', case when s.term_source = 'human_stated'
+                          then (pst.superseded_at is not null
+                                and (pcur.period_start, pcur.period_end)
+                                      is distinct from (pst.period_start, pst.period_end))
+                          else (dsp.superseded_at is not null
+                                and (dcur.period_start, dcur.period_end)
+                                      is distinct from (dsp.period_start, dsp.period_end)) end,
+        'term_current_start', case
+          when s.term_source = 'human_stated' then
+            case when pcur.period_start is null then null
+                 else to_char(pcur.period_start,'YYYY-MM-DD') end
+          else case when dcur.period_start is null then null
+                    else to_char(dcur.period_start,'YYYY-MM-DD') end end,
+        'term_current_end', case
+          when s.term_source = 'human_stated' then
+            case when pcur.period_end is null then null
+                 else to_char(pcur.period_end,'YYYY-MM-DD') end
+          else case when dcur.period_end is null then null
+                    else to_char(dcur.period_end,'YYYY-MM-DD') end end,
+        'prepaid_account_code', s.prepaid_account_code,
+        'expense_account_code', s.expense_account_code,
+        'total_cents', s.total_cents, 'period_count', s.period_count,
+        'basis_kind', s.basis_kind, 'created_at', s.created_at,
+        'effective_from', case when r.effective_from is null then null
+                               else to_char(r.effective_from,'YYYY-MM-DD') end,
+        'effective_to', case when r.effective_to is null then null
+                             else to_char(r.effective_to,'YYYY-MM-DD') end,
+        -- HOW MANY PERIODS ACTUALLY PUT MONEY ON THE BOOKS. A committed receipt, never an
+        -- admitted Work: "admitted" and "posted" are two facts and the list says the second one.
+        'posted_periods', (select count(*)::int from clara.accounting_plan_occurrences o
+                            join clara.operation_receipts rc on rc.work_id = o.work_id
+                                                            and rc.outcome = 'committed'
+                            where o.plan_id = s.plan_id),
+        'occurrence_count', (select count(*)::int from clara.accounting_plan_occurrences o
+                              where o.plan_id = s.plan_id),
+        'next_due', (select to_char(e.due_date,'YYYY-MM-DD')
+                       from clara._plan_due_events(r.effective_from, r.frequency, r.day_rule,
+                              r.day_of_month, r.auto_reverse,
+                              greatest(r.effective_from, coalesce(
+                                (select max(o.due_date) + 1 from clara.accounting_plan_occurrences o
+                                  where o.plan_id = s.plan_id), r.effective_from)),
+                              coalesce(r.effective_to, r.effective_from + 3650), 1) e limit 1)
+      ) as x
+        from clara.prepayment_schedules s
+        join clara.accounting_plans p on p.id = s.plan_id
+        left join clara.accounting_plan_revisions r
+               on r.plan_id = s.plan_id and r.superseded_at is null
+        -- #939 — LEFT, not INNER. 0285 joined the document carrier INNER on service_period_id,
+        -- which silently DROPPED any schedule with no document row from its own firm's list the
+        -- moment such a schedule could exist. Both carriers are now optional joins and
+        -- `term_source` says which one to read.
+        left join clara.document_service_periods dsp on dsp.id = s.service_period_id
+        left join lateral (
+          select c.period_start, c.period_end from clara.document_service_periods c
+           where c.document_id = dsp.document_id and c.superseded_at is null limit 1) dcur on true
+        left join clara.prepayment_stated_terms pst on pst.id = s.stated_term_id
+        left join lateral (
+          select c.period_start, c.period_end from clara.prepayment_stated_terms c
+           where c.source_entry_id = pst.source_entry_id and c.superseded_at is null limit 1) pcur on true
+       where s.client_id = p_client and s.firm_id = v_firm
+    ) t;
+  return jsonb_build_object('client_id', p_client, 'schedules', v_rows);
+end $$;
+
+
+-- =====================================================================================
+-- §G — clara.list_prepayment_attention — RECUT. Arm B is "recognised, not yet amortised", and
+-- before this file it filtered `je.document_id is not null`. That filter was not arbitrary: with
+-- no other term carrier, a memo-only recognition could never be configured, so advertising it
+-- would have been offering an action that could only refuse. #939 makes it configurable, so the
+-- filter now HIDES exactly the prepayments this ticket exists to rescue — a prepaid asset sitting
+-- on the books with nothing tracking it and nothing on any screen saying so.
+--
+-- WHAT THE ARM NOW SAYS. Each candidate carries WHICH carrier its term would live in
+-- (`term_carrier`), whether that carrier already holds a live term (`has_live_term`), and the
+-- person's NEXT ACT as a closed token (`next_step`): `configure_schedule` when a term already
+-- stands, `record_document_service_period` for a document-bound recognition that has none, and
+-- `state_service_period` for a memo-only one. A token rather than a sentence, because the copy is
+-- the surface's and the FACT is the database's.
+--
+-- ARM A AND THE PAGING ENVELOPE DO NOT MOVE. The cap, the ordering-before-cutting and the two
+-- truncation flags are 0223's, unchanged.
+-- =====================================================================================
+create or replace function clara.list_prepayment_attention(p_client uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare v_actor uuid; v_firm uuid; v_a jsonb; v_b jsonb;
+        v_a_trunc boolean := false; v_b_trunc boolean := false;
+begin
+  select a.actor, a.firm into v_actor, v_firm from clara._human_ctx(clara.role_rank('viewer')) a;
+  if not exists (select 1 from clara.clients c where c.id = p_client and c.firm_id = v_firm) then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+
+  -- THE PAGE IS ORDERED BEFORE IT IS CUT, and the envelope says when the cut bit. A `limit 50`
+  -- inside a select with NO ORDER BY hands back an ARBITRARY fifty and the ordering applied
+  -- afterwards only sorts the survivors -- so on a client with more candidates than the cap the
+  -- NEWEST refusal, which is the one this read exists to surface, could simply be absent with
+  -- nothing saying so. Measured by `p653.attention.window`.
+  with cand_a as (
+      select jsonb_build_object(
+        'arm', 'refusing', 'schedule_id', s.id, 'plan_id', s.plan_id, 'purpose', p.purpose,
+        'status', p.status, 'occurrence_id', o.id,
+        'due_date', to_char(o.due_date,'YYYY-MM-DD'),
+        'period_key', to_char(o.period_key,'YYYY-MM-DD'),
+        'attempt', o.attempt, 'work_id', o.work_id,
+        -- WHERE it stopped, because the operator's next move differs: an admission refusal is a
+        -- plan-lane fact (authority, window, period line), a posting refusal is a books fact
+        -- (closed period, withdrawn egress authority) recorded on the Work.
+        'stage', case when coalesce(o.outcome ->> 'state','') = 'refused' then 'admission'
+                      else 'posting' end,
+        'code', case when coalesce(o.outcome ->> 'state','') = 'refused' then o.outcome ->> 'code'
+                     else w.error ->> 'code' end,
+        'reason', case when coalesce(o.outcome ->> 'state','') = 'refused' then o.outcome ->> 'reason'
+                       else w.error ->> 'reason' end,
+        'message', case when coalesce(o.outcome ->> 'state','') = 'refused' then o.outcome ->> 'message'
+                        else w.error ->> 'message' end,
+        'work_status', w.status,
+        -- The catch-up window this period would need, so the surface can offer the EXISTING
+        -- window-only door rather than inventing a recovery of its own.
+        'catch_up_from', to_char(o.due_date,'YYYY-MM-DD'),
+        'catch_up_to', to_char(o.due_date,'YYYY-MM-DD')) as x,
+        o.due_date as sk
+        from clara.prepayment_schedules s
+        join clara.accounting_plans p on p.id = s.plan_id
+        cross join lateral (
+          select o2.* from clara.accounting_plan_occurrences o2
+           where o2.plan_id = s.plan_id
+           order by o2.due_date desc, o2.created_at desc limit 1) o
+        left join clara.accounting_work w on w.id = o.work_id
+       where s.client_id = p_client and s.firm_id = v_firm and p.status <> 'ended'
+         and (
+           coalesce(o.outcome ->> 'state','') = 'refused'
+           or (o.work_id is not null
+               and w.status in ('failed','refused','cancelled','expired')
+               and not exists (select 1 from clara.operation_receipts rc
+                                where rc.work_id = o.work_id and rc.outcome = 'committed')))
+    )
+  select coalesce(jsonb_agg(p.x order by p.sk desc, p.x ->> 'occurrence_id'), '[]'::jsonb),
+         (select count(*) from cand_a) > 50
+    into v_a, v_a_trunc
+    from (select c.x, c.sk from cand_a c order by c.sk desc, c.x ->> 'occurrence_id' limit 50) p;
+
+  with cand_b as (
+      select jsonb_build_object(
+        'arm', 'unscheduled', 'entry_id', je.id,
+        'posting_date', to_char(je.posting_date,'YYYY-MM-DD'), 'memo', je.memo,
+        'document_id', je.document_id,
+        'prepaid_account_code', x.account_code, 'amount_cents', x.debit_cents,
+        -- #939 — WHICH CARRIER this recognition's term lives in. A document-bound recognition's
+        -- term belongs to its document; a memo-only one's belongs to the person who states it.
+        'term_carrier', case when je.document_id is not null
+                             then 'document_service_period' else 'human_stated' end,
+        'has_live_term', case when je.document_id is not null
+          then exists (select 1 from clara.document_service_periods sp
+                        where sp.document_id = je.document_id and sp.superseded_at is null)
+          else exists (select 1 from clara.prepayment_stated_terms t
+                        where t.source_entry_id = je.id and t.superseded_at is null) end,
+        -- #939 — THE NEXT ACT, as a CLOSED TOKEN. The copy is the surface's; the fact is this
+        -- read's. Before this file a memo-only prepayment was not listed at all, so there was no
+        -- next act to name and a firm had no way to discover the gap.
+        'next_step', case
+          when (case when je.document_id is not null
+                then exists (select 1 from clara.document_service_periods sp
+                              where sp.document_id = je.document_id and sp.superseded_at is null)
+                else exists (select 1 from clara.prepayment_stated_terms t
+                              where t.source_entry_id = je.id and t.superseded_at is null) end)
+            then 'configure_schedule'
+          when je.document_id is not null then 'record_document_service_period'
+          else 'state_service_period' end) as y,
+        je.posting_date as sk
+        from clara.journal_entries je
+        cross join lateral (
+          select jl.account_code, jl.debit_cents, count(*) over () as legs
+            from clara.journal_lines jl
+            join clara.coa_accounts ca on ca.client_id = jl.client_id
+                                      and ca.account_code = jl.account_code
+           where jl.entry_id = je.id and jl.debit_cents > 0 and ca.account_type = 'asset') x
+       where je.client_id = p_client and je.status = 'approved'
+         -- #939 — THE `document_id is not null` FILTER IS GONE. It was not arbitrary: with no
+         -- other term carrier a memo-only recognition could never be configured, so listing it
+         -- would have offered an action that could only refuse. Now it can be, so the filter
+         -- hides exactly the prepayments this ticket exists to rescue.
+         and je.reversed_by is null
+         and x.legs = 1
+         and not exists (select 1 from clara.prepayment_schedules s
+                          where s.source_entry_id = je.id)
+         -- THE SAME ELIGIBILITY WALL THE DOOR APPLIES to the prepaid leg (§D), so the band cannot
+         -- advertise a recognition the door would refuse. Without it arm B lists every ordinary
+         -- sales invoice, documented bank receipt and fixed-asset purchase as "posted, not yet
+         -- amortised" with a "configure the schedule" action -- measured on the rig.
+         and clara._adj_line_eligibility_breach(p_client,
+               jsonb_build_array(jsonb_build_object('account_code', x.account_code,
+                 'debit_cents', 0, 'credit_cents', 1))) is null
+    )
+  select coalesce(jsonb_agg(q.y order by q.sk desc, q.y ->> 'entry_id'), '[]'::jsonb),
+         (select count(*) from cand_b) > 50
+    into v_b, v_b_trunc
+    from (select c.y, c.sk from cand_b c order by c.sk desc, c.y ->> 'entry_id' limit 50) q;
+
+  return jsonb_build_object('client_id', p_client, 'refusing', v_a, 'unscheduled', v_b,
+    -- THE CAP, SAID OUT LOUD. A band showing fifty of nine hundred without this reads as "nothing
+    -- else is failing", which is the exact misreading the whole read exists to prevent.
+    'refusing_truncated', v_a_trunc, 'unscheduled_truncated', v_b_trunc,
+    'cap', 50,
+    'attention', v_a || v_b);
+end $$;
+
 reset role;
 
 grant execute on function clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)
@@ -1307,6 +1717,84 @@ begin
   if v_posture ~ 'clara\.[a-zA-Z_][a-zA-Z0-9_]*\s*\(' then
     raise exception '#939 tail: clara.prepayment_schedule_v2 calls another clara function -- its closure cannot honestly be registered with one member'
       using errcode='CLR10';
+  end if;
+
+  -- 4c · THE FOUR RECUT BODIES. Each keeps its posture and its clara_authenticated-ONLY ACL, and
+  --      each actually carries this file's own attribution — never inferred from the diff having
+  --      applied. (`list_prepayment_attention` is recut by §G; it is censused here with the rest.)
+  foreach v_posture in array array[
+      'clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)',
+      'clara.get_prepayment_schedule(uuid)',
+      'clara.list_prepayment_schedules(uuid)',
+      'clara.list_prepayment_attention(uuid)'] loop
+    if to_regprocedure(v_posture) is null then
+      raise exception '#939 tail: % does not resolve after the recut', v_posture using errcode='CLR10';
+    end if;
+    if not exists (select 1 from pg_proc p
+                    where p.oid = v_posture::regprocedure
+                      and pg_get_userbyid(p.proowner) = 'clara_fn_owner' and p.prosecdef
+                      and coalesce(array_to_string(p.proconfig, ','), '') = 'search_path=clara, pg_temp') then
+      raise exception '#939 tail: %''s owner/definer/search_path posture moved', v_posture
+        using errcode='CLR10';
+    end if;
+    if not has_function_privilege('clara_authenticated', v_posture::regprocedure, 'execute') then
+      raise exception '#939 tail: clara_authenticated lost EXECUTE on %', v_posture using errcode='CLR10';
+    end if;
+    if has_function_privilege('public', v_posture::regprocedure, 'execute')
+       or has_function_privilege('clara_runtime', v_posture::regprocedure, 'execute')
+       or has_function_privilege('clara_agent_ro', v_posture::regprocedure, 'execute') then
+      raise exception '#939 tail: % gained a PUBLIC, runtime or agent grant -- this lane is human-only',
+        v_posture using errcode='CLR10';
+    end if;
+    select p.prosrc into v_sha from pg_proc p where p.oid = v_posture::regprocedure;
+    if position('#939' in v_sha) = 0 then
+      raise exception '#939 tail: % does not carry this file''s own attribution -- the recut did not land',
+        v_posture using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- 4d · THE TWO READS CARRY ONE SET OF TERM-LIVENESS FIELDS OVER TWO CARRIERS, and the list's
+  --      join is LEFT rather than INNER -- the fix without which a memo-only schedule would be
+  --      absent from its own firm's list.
+  select p.prosrc into v_sha from pg_proc p
+   where p.oid = 'clara.list_prepayment_schedules(uuid)'::regprocedure;
+  if position('left join clara.document_service_periods' in v_sha) = 0
+     or position('left join clara.prepayment_stated_terms' in v_sha) = 0
+     or position('term_source' in v_sha) = 0 or position('term_moved' in v_sha) = 0 then
+    raise exception '#939 tail: list_prepayment_schedules is missing a LEFT term join or the term_source projection'
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_sha from pg_proc p
+   where p.oid = 'clara.get_prepayment_schedule(uuid)'::regprocedure;
+  if position('clara.prepayment_stated_terms' in v_sha) = 0
+     or position('term_stated_by' in v_sha) = 0 or position('term_reason' in v_sha) = 0
+     or position('term_moved' in v_sha) = 0 then
+    raise exception '#939 tail: get_prepayment_schedule is missing the stated-term branch or its who/when/why projection'
+      using errcode='CLR10';
+  end if;
+
+  -- 4e · THE SCHEDULE RELATION'S NEW SHAPE, and the constraint that keeps a provenance claim
+  --      pointing at something.
+  if not exists (select 1 from pg_attribute where attrelid = 'clara.prepayment_schedules'::regclass
+                   and attname = 'term_source' and attnotnull and not attisdropped)
+     or not exists (select 1 from pg_attribute where attrelid = 'clara.prepayment_schedules'::regclass
+                      and attname = 'stated_term_id' and not attisdropped) then
+    raise exception '#939 tail: clara.prepayment_schedules is missing term_source (NOT NULL) or stated_term_id'
+      using errcode='CLR10';
+  end if;
+  if exists (select 1 from pg_attribute where attrelid = 'clara.prepayment_schedules'::regclass
+               and attname in ('service_period_id','document_id') and attnotnull and not attisdropped) then
+    raise exception '#939 tail: service_period_id/document_id are still NOT NULL -- a memo-only schedule cannot be stored'
+      using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'clara.prepayment_schedules'::regclass
+                   and conname = 'ck_ps_term_source_carrier') then
+    raise exception '#939 tail: ck_ps_term_source_carrier is absent -- a row could claim a provenance it cannot point at'
+      using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from clara.prepayment_schedules where term_source is null;
+  if v_n <> 0 then
+    raise exception '#939 tail: % existing schedule(s) carry no term_source', v_n using errcode='CLR10';
   end if;
 
   -- 5 · THE FROZEN EVALUATOR IS STILL EXACTLY WHERE 0140 LEFT IT, re-measured AFTER this file ran.

@@ -20,14 +20,15 @@ import {
   functionsMatching, nowhereId, prepaymentScene, scheduleV1, scheduleV2, monthEndAfter, maxTermScene,
   STATED_TERM_REASON, STATED_TERM_DOOR_SIG, EVALUATOR_V2_SIG, PREPAY_REASON,
   createPrepaymentSchedule, scheduleTermSource, scheduleCountFor, unapprovedEntry, ambiguousAssetEntry,
-  getPrepaymentSchedule, scheduleRow, monthStartBack, opk,
+  getPrepaymentSchedule, listPrepaymentSchedules, listPrepaymentAttention, memoOnlyIneligible,
+  scheduleRow, monthStartBack, opk,
   wakeDuePlanOccurrences, occurrenceRows, workRow, claimWorkRun, settleWorkRun,
   mintClientObo, wakeRecordJournalEntry, receiptsForWork,
 } from "./prepayment-stated-term-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 7;
 
 before(async () => {
   ready = await (async () => {
@@ -480,4 +481,168 @@ cell("p939.supersede.running — a stated term corrected AFTER its schedule has 
       client: scene.client, sourceEntry: scene.memoEntry,
       expenseAccount: scene.target, authorityRef: scene.authorityRef }),
     "configuring a second schedule over a recognition whose term was corrected");
+});
+
+// ===========================================================================================
+// AC5/AC6 — THE TWO READS CARRY THE TERM SOURCE, AND #919's LIVENESS FIELDS ARE EXTENDED TO THE
+//           SECOND CARRIER RATHER THAN FORKED.
+// ===========================================================================================
+
+cell("p939.reads.term_source — both schedule reads return a human-stated schedule beside a document-backed one, each saying which carrier its term came from, with WHO stated it, WHEN and WHY on the stated lane; #919's term_live / term_superseded_by / term_moved / term_current_* are the SAME five fields computed against whichever carrier the schedule rode, and a re-statement that changes nothing leaves term_moved false", async () => {
+  const scene = await statedTermScene("reads", {
+    cents: 90000, termMonthsBack: 4, termMonths: 3, memoCents: 60000 });
+  const stated = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#939 battery: the client confirmed the cover runs three months from the payment" });
+  const memoSchedule = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry, purpose: "Memo-only insurance",
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+  const docSchedule = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry, purpose: "Documented subscription",
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+
+  // ---- THE LIST RETURNS BOTH. Before this ticket it joined clara.document_service_periods
+  // INNER, so a schedule with no document row would have been absent from the firm's own list
+  // entirely — present in the books, invisible on the screen.
+  const list = await listPrepaymentSchedules(scene.bob, scene.client);
+  assert.equal(list.schedules.length, 2, "the memo-only schedule is not dropped by the term join");
+  const memoRow = list.schedules.find((r) => r.schedule_id === memoSchedule.schedule_id);
+  const docRow = list.schedules.find((r) => r.schedule_id === docSchedule.schedule_id);
+  assert.ok(memoRow && docRow);
+
+  assert.equal(memoRow.term_source, "human_stated");
+  assert.equal(memoRow.stated_term_id, stated.stated_term_id);
+  assert.equal(memoRow.document_id, null);
+  assert.equal(memoRow.term_live, true, "the statement it rode is still the live one");
+  assert.equal(memoRow.term_superseded_by, null);
+  assert.equal(memoRow.term_moved, false);
+  assert.equal(memoRow.term_current_start, scene.termStart);
+  assert.equal(memoRow.term_current_end, scene.termEnd);
+
+  assert.equal(docRow.term_source, "document_service_period");
+  assert.equal(docRow.stated_term_id, null);
+  assert.ok(docRow.document_id, "the document lane still names its document");
+  assert.equal(docRow.term_live, true);
+  assert.equal(docRow.term_moved, false);
+
+  // ---- THE DETAIL SAYS WHO, WHEN AND WHY. That trio is the whole difference between a term a
+  // document states on its face and a term a named person stated on the telephone.
+  const memoDetail = await getPrepaymentSchedule(scene.bob, memoSchedule.schedule_id);
+  assert.equal(memoDetail.term_source, "human_stated");
+  assert.equal(memoDetail.stated_term_id, stated.stated_term_id);
+  assert.equal(memoDetail.term_stated_by, stated.stated_by, "WHO stated it");
+  assert.ok(memoDetail.term_stated_at, "WHEN");
+  assert.equal(memoDetail.term_reason,
+    "#939 battery: the client confirmed the cover runs three months from the payment", "…and WHY");
+  assert.equal(memoDetail.document_id, null);
+  assert.equal(memoDetail.service_period_id, null);
+  assert.equal(memoDetail.term_live, true);
+  assert.equal(memoDetail.basis_kind, "human_stated");
+
+  const docDetail = await getPrepaymentSchedule(scene.bob, docSchedule.schedule_id);
+  assert.equal(docDetail.term_source, "document_service_period");
+  assert.equal(docDetail.stated_term_id, null);
+  assert.equal(docDetail.term_stated_by, null,
+    "the document lane's provenance is the document, so the stated trio is absent rather than invented");
+  assert.equal(docDetail.term_stated_at, null);
+  assert.equal(docDetail.term_reason, null);
+  assert.ok(docDetail.service_period_id);
+  assert.equal(docDetail.term_live, true, "#919's own fields still answer on the document lane");
+  assert.equal(docDetail.term_moved, false);
+
+  // ---- A RE-STATEMENT THAT CHANGES NOTHING. The stating door supersedes unconditionally — it
+  // compares no dates — so `term_live` goes false on a restatement that repeats the term byte for
+  // byte. `term_moved` is the fact a surface may act on, and it stays FALSE. That is #919's ADV-02
+  // ruling, extended to this carrier rather than re-decided for it.
+  const restated = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#939 battery: the same dates, verified a second time against the bank statement" });
+  const afterRestate = await getPrepaymentSchedule(scene.bob, memoSchedule.schedule_id);
+  assert.equal(afterRestate.term_live, false, "the statement this schedule rode is no longer live");
+  assert.equal(afterRestate.term_superseded_by, restated.stated_term_id, "…and it names its successor");
+  assert.equal(afterRestate.term_moved, false, "but the TERM did not move, so no surface may say it did");
+  assert.equal(afterRestate.term_current_start, scene.termStart);
+  assert.equal(afterRestate.term_current_end, scene.termEnd);
+  assert.equal(afterRestate.stated_term_id, stated.stated_term_id,
+    "the schedule still names the statement it actually rode");
+  assert.equal(afterRestate.term_reason,
+    "#939 battery: the client confirmed the cover runs three months from the payment",
+    "…and shows THAT statement's reason, not the newest one's");
+
+  // ---- A CORRECTION THAT REALLY MOVES THE TERM. Now both flags say so, on both reads.
+  const newStart = await monthStartBack(3);
+  const newEnd = await monthEndAfter(newStart, 2);
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry, start: newStart, end: newEnd,
+    reason: "#939 battery: the cover actually began a month later" });
+  const moved = await getPrepaymentSchedule(scene.bob, memoSchedule.schedule_id);
+  assert.equal(moved.term_live, false);
+  assert.equal(moved.term_moved, true, "the term that stands today states different dates");
+  assert.equal(moved.term_current_start, newStart);
+  assert.equal(moved.term_current_end, newEnd);
+  assert.equal(moved.term_start, scene.termStart, "the schedule's own allocation did not move");
+  const movedList = await listPrepaymentSchedules(scene.bob, scene.client);
+  const movedRow = movedList.schedules.find((r) => r.schedule_id === memoSchedule.schedule_id);
+  assert.equal(movedRow.term_moved, true, "the list says the same thing the detail does");
+  assert.equal(movedRow.term_current_start, newStart);
+});
+
+// ===========================================================================================
+// AC3 (second half) — THE ATTENTION BAND FINDS A MEMO-ONLY PREPAYMENT AND NAMES THE NEXT ACT.
+// ===========================================================================================
+
+cell("p939.attention.memo_only — arm B lists a memo-only recognition with 'state the service period' as its next step, names the carrier its term would live in, flips to 'configure the schedule' the moment a term is stated, drops the row once a schedule exists, and still refuses to advertise a memo-only RECEIVABLE", async () => {
+  const scene = await statedTermScene("attention", {
+    cents: 90000, termMonthsBack: 4, termMonths: 3, memoCents: 45000 });
+  const decoy = await memoOnlyIneligible(scene);
+
+  const before = await listPrepaymentAttention(scene.bob, scene.client);
+  const memoBefore = before.unscheduled.find((r) => r.entry_id === scene.memoEntry);
+  assert.ok(memoBefore,
+    "a memo-only prepayment is a CANDIDATE -- before this ticket the arm filtered it out entirely, so a prepaid asset could sit on the books with nothing on any screen saying so");
+  assert.equal(memoBefore.document_id, null);
+  assert.equal(memoBefore.term_carrier, "human_stated",
+    "the read says WHERE this recognition's term would live");
+  assert.equal(memoBefore.has_live_term, false);
+  assert.equal(memoBefore.next_step, "state_service_period",
+    "…and names the person's next act as a closed token the surface maps to its own copy");
+  assert.equal(memoBefore.prepaid_account_code, scene.prepaid);
+  assert.equal(memoBefore.amount_cents, 45000);
+
+  // THE DOCUMENT LANE IS UNCHANGED, and it is the contrast that makes the token useful: the
+  // scene's own document-bound recognition already carries a live service period.
+  const docBefore = before.unscheduled.find((r) => r.entry_id === scene.entry);
+  assert.ok(docBefore);
+  assert.equal(docBefore.term_carrier, "document_service_period");
+  assert.equal(docBefore.has_live_term, true);
+  assert.equal(docBefore.next_step, "configure_schedule");
+
+  // THE WALL THAT KEEPS THE ARM HONEST NOW THAT THE FILTER IS GONE. A memo-only entry whose one
+  // debited asset is the receivable CONTROL account is an ordinary uninvoiced sale, not a
+  // prepayment, and the door would refuse it -- so the band must not offer it.
+  assert.equal(before.unscheduled.filter((r) => r.entry_id === decoy.entry).length, 0,
+    "a memo-only RECEIVABLE is not advertised as a prepayment awaiting a term");
+
+  // ---- THE TERM IS STATED. Same row, next act moves.
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd });
+  const stated = await listPrepaymentAttention(scene.bob, scene.client);
+  const memoStated = stated.unscheduled.find((r) => r.entry_id === scene.memoEntry);
+  assert.ok(memoStated, "it is still a candidate -- stating a term is not configuring a schedule");
+  assert.equal(memoStated.has_live_term, true);
+  assert.equal(memoStated.next_step, "configure_schedule");
+
+  // ---- THE SCHEDULE IS CONFIGURED. The row leaves the band, because the band is "recognised, NOT
+  // YET amortised".
+  await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+  const done = await listPrepaymentAttention(scene.bob, scene.client);
+  assert.equal(done.unscheduled.filter((r) => r.entry_id === scene.memoEntry).length, 0,
+    "an amortised prepayment is no longer awaiting amortisation");
+  assert.equal(done.unscheduled.filter((r) => r.entry_id === scene.entry).length, 1,
+    "…and the document-bound sibling is untouched");
 });
