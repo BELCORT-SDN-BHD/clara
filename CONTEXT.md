@@ -84,9 +84,10 @@ posted one; treating an amortisation period's amount as the same as every other 
 
 **Prepayment schedule**:
 The derived amortisation of ONE posted prepayment: the recognition entry that put it on the books,
-the prepaid account read off that entry's own single debited asset leg — and judged ELIGIBLE by the
-same rule every other lane uses, so a receivable control, a bank account or a reserved role is
-refused rather than amortised — the Service period its document states, the expense account a
+the prepaid account read off that entry's own single debited asset leg — ENROLLED on the client's
+Prepayment account roster, and judged ELIGIBLE by the same rule every other lane uses, so an account
+nobody enrolled, or a receivable control, a bank account or a reserved role, is refused rather than
+amortised — the Service period its document states, the expense account a
 person judged with the grounds they stated, and the exact allocation across whole calendar months
 with the remainder wholly in the final period. It is DERIVED, not typed: the amount, the period
 count, the per-period figures, the cadence and the authority window all come from the frozen
@@ -99,6 +100,25 @@ delivered by #927–#929), except for one PARKED agent entrance that still mints
 retired or rerouted before it is ever unparked; an editable table of period amounts; a schedule
 that pays anything — the money left the bank before the schedule existed; "configured" as a
 synonym for "posted", which is a different fact and a different count.
+
+**Prepayment account roster**:
+The per-client list of accounts a firm has enrolled as holding prepayments. It is the POSITIVE half
+of prepayment eligibility: the shared wall every lane uses is negative — is this leg a control
+account, a bank account, inactive, reserved by another register — and an ordinary asset account with
+none of those marks passes it, so a deposit or a prepaid tax could be amortised into expense for a
+whole term. Enrolling is a bookkeeper's judgement about THIS client's chart, recorded with the
+one-line reason the person gave and kept as an immutable interval: re-stating the reason opens a new
+enrolment rather than editing the old one, so the basis a schedule was configured under stays
+readable for as long as the schedule does. Retiring closes the account to NEW schedules only — a
+schedule already running posts to the end of its term, because nothing on the monthly admission path
+asks the roster. One roster carries both purposes a release schedule can have (a prepaid asset, and
+deferred revenue's credited liability), so a firm never has two answers to "may this account carry a
+release schedule".
+_Avoid_: A mark on the firm's standard chart template — the same template account is a prepayment
+for one client and an ordinary deposit for the next; a new member of the chart's account class,
+which the shared wall reads as a CONTROL account and would make every prepaid account ineligible; a
+back-check of schedules already running, or an automatic enrolment derived from history; reading a
+retirement as "that amortisation stops"; a second roster for deferred revenue.
 
 **Service period**:
 The span of time an accrued or prepaid cost belongs to, stated by an identified person — for a

@@ -4833,3 +4833,122 @@ sight (measured on the lane rig the moment 0305 applied: the floor read one too 
 for the reason all three are there: evaluator versions are BORN undeployed and the flip is a
 separate ceremony act. The rosters are extended, never loosened — each addition is conditional on
 the row existing, so the censuses stay exact on a pre-0305 chain too.
+
+## 0306 — a per-client roster of prepayment accounts gates amortisation ahead of the shared wall (#940, riders wave 4, lane 04)
+
+`clara.prepayment_schedule_v1` (0140) takes "the one debited asset leg" verbatim and never asks
+WHICH asset. 0223 put `clara._adj_line_eligibility_breach` (0042) on that leg and 0305 carried the
+same wall onto the memo-only lane, but that wall is NEGATIVE — not a control account, not a bank
+account, not inactive, not reserved by the fixed-asset or staff-advance rosters — so an ordinary
+asset account with no class, no bank stamp and no reserved role passes it on both lanes. A utility
+deposit, an inventory purchase or a prepaid tax could therefore be amortised into expense for a
+whole stated term with every entry balanced and every period receipted, and arm B ADVERTISED them
+with a "configure the schedule" action beside each. 0223's own header named the missing half and
+said why it had not been built: "a roster would need a chart-level classification this estate does
+not carry".
+
+**Why it is not a chart classification, measured rather than assumed.** `coa_accounts.account_class`
+admits only `payable` and `receivable`, and the shared wall refuses ANY non-null class as a control
+account — so a `prepaid` member of that enum would make every prepaid account INELIGIBLE (#911's own
+triage measurement, 2026-09-17, and the reason the owner's ruling rejected option D). The positive
+classification needs its own carrier, and the estate already has the shape: the per-client enrolment
+register.
+
+**The roster.** `clara.prepayment_account_enrolments` is `clara.staff_advance_accounts`' (0043)
+shape, which is itself `clara.fa_account_profiles`' (0041) clone — an immutable
+`[enrolled_at, retired_at]` interval, version-forward on any change, a REQUIRED non-blank reason,
+a no-delete + no-truncate pair, forced RLS and a SELECT-only application grant. Per CLIENT, not a
+mark on the firm's template (owner decision 1: the same template account is a prepayment for one
+client and an ordinary deposit for the next). One live row per `(client, account, purpose)`
+(`uq_prepayment_account_enrolments_live`).
+
+Two things it does NOT copy from those two:
+
+* **an update guard.** 0041 and 0043 both carry none, and say so. Here the REASON is the fact the
+  roster exists to hold, and a reason that could be rewritten in place is a label rather than a
+  basis, so `_tf_pae_retire_only` admits exactly one update — the retirement stamp — and refuses a
+  retired row outright. The version-forward path never needs an in-place edit (it retires and
+  inserts), so the guard costs the doors nothing.
+* **the op-key columns.** 0043 carries `created_op_key`/`retired_op_key`; `clara.op_receipts`
+  already records which decision wrote which row, and 0041's profile carries neither.
+
+**The purpose is a closed set from birth.** `purpose in ('prepayment', 'deferred_revenue')`.
+Deferred revenue (#941) is the mirror of this lane — a credited LIABILITY released over the same
+term by the same evaluator — and it needs the same positive roster with a different account-type
+rule. A second relation would give two answers to one question, so the owner's 2026-09-18 ruling is
+"No second roster is ever opened". The COLUMN admits the second purpose today; the DOOR refuses it
+by name (`prepayment_account_enrolment_invalid` / `purpose_rule_not_stated`) until #941 states that
+rule, because admitting a purpose whose rule does not exist would enrol a liability under the asset
+rule.
+
+**The two doors.** `clara.enrol_prepayment_account(p_client, p_account, p_purpose, p_reason,
+p_op_key)` and `clara.retire_prepayment_account(p_client, p_account, p_purpose, p_op_key)`, both at
+the BOOKKEEPER floor and granted to `clara_authenticated` alone — no agent grant, no wake wrapper,
+asserted by `pg_proc` count in §TAIL rather than by convention. Enrolment answers every reason an
+account cannot hold prepayments (owner decision 6, "the refusal happens at enrolment with a stated
+reason, not later at the schedule door"):
+
+| axis | source |
+|---|---|
+| `account_unknown` / `account_inactive` / `control_account` / `bank_account` / `account_reserved` | `clara._adj_line_eligibility_breach`, the ESTATE's own rule, carried through with its own axis |
+| `not_asset_class` | the one positive rule this purpose adds — a prepayment is a prepaid ASSET |
+| `reason_missing` | owner decision 4 |
+| `purpose_unknown` / `purpose_rule_not_stated` | the closed set, and the arm #941 opens |
+| `not_enrolled` (retire) | a no-op that answered "done" would let a panel report a retirement that never happened |
+
+Re-enrolling with the SAME reason is idempotent; a RESTATED reason retires the live row and inserts
+a fresh one, so the basis a schedule was configured under stays readable for as long as the schedule
+does.
+
+**One spelling, four callers.** `clara._prepayment_account_enrolled(client, code, purpose)` is the
+whole roster question, `stable security definer` and granted to NOBODY (it is reached only from a
+definer body, exactly as the shared wall is). §D's recut of `clara.create_prepayment_schedule` calls
+it; §E's recut of `clara.list_prepayment_attention` calls it in arm B's candidate predicate; #915's
+OBO twin and #941's deferred-revenue mirror call it with their own purpose. A predicate copied into
+four bodies is four chances for the band and the door to disagree, and the brief's own criterion is
+"the door and arm B agree both ways".
+
+**The order is roster-then-wall, and that is the brief's.** An account that fails both is told about
+the roster, because the reason it can never be enrolled is stated at the enrolment door. The wall is
+UNCHANGED and still guards the accounts the roster admits — an account enrolled while it was
+eligible and bound as a bank account the next day answers `prepaid_account_ineligible` with the
+shared helper's own breach, which `p940.schedule.roster_gate` drives rather than asserts. §0 pins
+`clara._adj_line_eligibility_breach` and `clara._acct_role_reserved` UNCONDITIONALLY and §TAIL
+re-measures the first after the file has run: "this file does not change the wall" is a claim, and
+the sha is the evidence.
+
+**Nothing on the admission path asks the roster** (owner decision 3/5). Retiring an account closes
+it to NEW schedules and nothing else: `p940.retire.future_only` retires the account BEFORE a single
+period has posted — the worst case — and then drives the monthly scan, the Work claim and a real
+posting through the OBO door to a committed receipt, with the stored allocation byte-identical
+afterwards and no roster row back-filled by any of it.
+
+**Prestate pins, measured on `clara_l04` after 0305:**
+
+| signature | `sha256(prosrc)` | mode |
+|---|---|---|
+| `clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)` | `d1d3b5326009c6d1149075d5fcb1c6eff943c4c59034685b59c4fa3ec0c50f4a` | bimodal (recut by §D) |
+| `clara.list_prepayment_attention(uuid)` | `745ca3032410529233eb2bcad143553cb6a6b89026350fb5cb4450fe740093e9` | bimodal (recut by §E) |
+| `clara._adj_line_eligibility_breach(uuid,jsonb)` | `727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021` | **unconditional** — asked, never edited |
+| `clara._acct_role_reserved(uuid,text)` | `e1b44ed0c2449c4e4947e40b0d9d2675da73d02c7365e90453382e158ebf69cd` | **unconditional** — the reserved-account axis rests on it |
+
+Per body, not global, for 0305's own stated reason: three sibling tickets of this lane (#915, #941,
+#1036) recut some of the same bodies immediately after this file, so a global mode would refuse a
+legitimate estate in which a sibling had already moved one of them. Each body admits its measured
+pre-image or a body already carrying this file's `#940` attribution, and anything else refuses BY
+NAME.
+
+**Gate module, cohort, chain.** `tests/prepayment-account-roster-preintegration-gate.mjs` (stem
+`prepayment_account_roster$`, env `CLARA_ALLOW_MISSING_PREPAYMENT_ACCOUNT_ROSTER`);
+`PREPAYMENT_ACCOUNT_ROSTER_0306_COHORT` in `tests/rig-meta.mjs` (the two human doors on the
+`clara_authenticated` roster, `_tf_pae_retire_only` and `_prepayment_account_enrolled` ungranted),
+bimodal like 0305's; the `--import` entry in `package.json` in MIGRATION ORDER, immediately after
+`prepayment-stated-term-preintegration-gate.mjs`.
+
+**The shared scene builder enrols.** Every prepayment battery in this package reaches its
+recognition through `prepaidScene` (`tests/f-a4-pr2a-fixtures.mjs`), so that builder now enrols its
+prepaid account through the REAL door, guarded on that door's exact signature — a database pinned
+before 0306 is unaffected. `prepaymentRosterGateLive()` is the shared probe a cell asks when its
+expected REFUSAL differs either side of this frontier; `p653.schedule.prepaid_leg_ineligible` is the
+one such cell, and it now measures the wall's judgement where it speaks after 0306 — at the
+enrolment door.

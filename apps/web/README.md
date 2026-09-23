@@ -1853,3 +1853,61 @@ Pinned as its own id, `foreground-on-muted-selected-document-row` (kept separate
 reason several other pairs in that file are kept separate), with a margin-specific assertion in
 `tests/token-contrast.test.ts` — shown red against the pre-fix pairing (4.62:1 against a `>=10:1`
 bar) before the fix, green after. Never fixed by relaxing a threshold.
+
+## #940 — which accounts hold prepayments, and what the surfaces say when none do
+
+Before migration 0306 any ordinary asset account could be amortised: the prepaid-leg wall is
+NEGATIVE (not a control account, not a bank account, not inactive, not reserved by another
+register), so a deposit or a prepaid tax passed it. A per-client ROSTER now carries the positive
+statement — this account holds prepayments — and it gates both the schedule door and the attention
+band's candidate arm. Three surfaces change.
+
+**`components/registers/prepayment-accounts-panel.tsx` — the roster itself**, on the Registers page
+beside the fixed-asset account profiles (the ticket's own placement: this is an account-ENROLMENT
+panel, and the Registers page is where this client's account enrolments live). It reads
+`clara.prepayment_account_enrolments` DIRECTLY through `lib/registers/prepayment-accounts.ts` — that
+relation carries a real SELECT grant to `clara_authenticated` under forced RLS, the same Q3
+read-the-tables mechanism `lib/registers/fa-account-profiles.ts` uses — so `useHydratedPart`'s
+`act()` re-reads the live roster after every enrol/retire rather than painting its own answer.
+
+* **The empty state names the consequence**, not the emptiness: "No account is enrolled as a
+  prepayment account for this client yet. Until one is, no prepayment here can be amortised." It is
+  gated on `loading`, because on THIS panel that sentence is load-bearing.
+* **Every row shows the REASON.** It is the whole audit trail a later reader has for why this
+  account was treated as a prepayment account; stored and hidden would make it a label.
+* **The enrol dropdown offers only what the door's POSITIVE rule admits** — this client's active,
+  non-control ASSET accounts — and never tries to pre-empt the door's five negative axes. Those are
+  the estate's own judgement (`clara._adj_line_eligibility_breach`, carried through with its own
+  axis), and a client-side copy could disagree with it.
+* **Confirm is disabled until a reason is typed.** The door refuses a blank one by name and stays
+  the backstop; a person should not be sent to the database to be told to type a sentence.
+* **The retire dialog says the sentence a person could otherwise get wrong**: it closes the account
+  to NEW schedules, and a schedule already running keeps posting to the end of its term.
+
+**`components/prepayments/prepayment-form.tsx` — why there may be nothing to choose.** Arm B can now
+be empty for a NEW reason, and "this client has nothing unamortised" and "no account is enrolled, so
+nothing here could ever be configured" are different facts with different next acts. The form reads
+the roster and, when it is genuinely EMPTY, says which and links to the panel. The claim is gated on
+a real empty ARRAY, never on a null: a read that failed claims nothing at all about the roster,
+which is the false-absence class review law 2 exists for, and
+`prepayments-roster-gate.test.tsx`'s second cell drives the failed read to prove it.
+
+**The refusal is discriminated by its AXIS, not its reason.** `prepayment_source_unfit` covers five
+different facts; `prepaid_account_not_enrolled` is the only one whose remedy lives on another page,
+so it is the only one that gets a sentence and a link beside the database's own words. Read off
+`DoorRefusal.detail.axis`, never inferred from the message.
+
+**`prepaymentAccountsHref`** (`lib/navigation/tree.ts`) is one helper rather than three spellings of
+`/registers?tab=fixedAssets`, so a later move of the panel is one edit.
+
+**The browser leg.** `prepayments.walk.roster` runs the whole journey in one browser — read the
+roster, retire it, meet the form's empty-roster banner, follow its link back, enrol the account
+again with a typed reason, and configure the SAME prepayment that was refused minutes earlier. It
+carries its own recognition and schedule ids, runs last in the file, and leaves the account
+enrolled; `prepayments-mock.mjs` gates every arm-B row on the roster, because every arm-B row is an
+offer and the door would refuse one on an unenrolled account.
+
+**Copy is EN only.** The brief asks for "en and zh copy"; this build ships a single static locale
+(`i18n/request.ts` pins `const locale = "en"` and `messages/` holds `en.json` alone), so there is no
+zh catalogue for the strings to land in. The namespace is `PrepaymentAccounts`, plus five keys in
+`Prepayments` for the form's banner and the roster refusal.

@@ -4,7 +4,9 @@
 //
 // WHAT IT ASKS, and why each one is a human judgement rather than a derivation:
 //   · WHICH posted prepayment — chosen from `clara.list_prepayment_attention`'s ARM B, which is
-//     the evaluator's OWN predicate (approved, document-bound, exactly one debited asset line). A
+//     the DOOR's own predicate: approved, exactly one debited asset line, a term its carrier can
+//     state (#939 removed the document-bound half — a memo-only recognition is amortised from a
+//     person-stated period), and — #940 — an account on the client's PREPAYMENT ROSTER. A
 //     free-text entry id would be a control whose only likely outcome is `prepayment_source_unfit`.
 //   · WHICH INSTRUCTION authorises it — a Select over this client's own `clara.accounting_work`,
 //     the plans form's own control (`plan-form.tsx`). `clara.create_accounting_plan` RESOLVES the
