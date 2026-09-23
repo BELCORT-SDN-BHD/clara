@@ -806,6 +806,25 @@ database's own words: the named 422 VERBATIM with its counts and failing rows,
 `no_opening_tb_lines` as the honest keyed-fallback signal rather than an error, a 403 as denied
 (naming the restriction, offering no fake retry).
 
+**#986 — the one refusal on this lane that carries an act.** `source_reread_since_parse` is what the
+runtime answers when the bound document has been READ AGAIN: the parse op key is stable per
+(seed, document) so a retried POST cannot double a basis, while the payload it hashes is keyed by
+region id, so a second reading arrives as the same key with different args. That refusal is correct
+and it has not changed — but until #986 it was also the end of the road, because the basis's lines
+then cite a reading the document has superseded and `approve_opening_seed` refuses those too, so
+the only way on was to abandon the basis.
+
+`isSourceRereadConflict` picks out exactly that token, and the outcome banner renders it in WORDS
+("The document was read again") with **Refresh from the new reading** beside it. The button calls
+`refreshOpeningSource` -> `POST /api/runtime/opening/refresh-targets` — a SECOND VERB, never a retry
+of the read, because reading again would refuse again on purpose — and the 202 names BOTH numbers:
+how many lines the new reading carried and how many the reading it left behind had. "5 read, 3
+retired" and "5 read, 5 retired" are different facts about the document. Every OTHER refusal keeps
+the plain block: a closed registry or a moved tie is not something refreshing can fix, and a control
+that cannot work is not shown. Both verbs share `callOpeningAct` in `lib/registers/opening-source.ts`
+and settle the SAME banner, so a person who performed one act on one basis is owed one standing
+answer rather than two competing ones.
+
 **The coverage footer is not the tie.** Mapped/unmapped counts and cents live in the target panel,
 labelled as coverage, with no percentage — and deliberately OUTSIDE `OpeningDryrunStrip`, whose own
 law is that it mints no numeral and re-derives no tie. C-25's defect was exactly a coverage figure

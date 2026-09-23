@@ -19,7 +19,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
-import { isKeyedFallback, parseOpeningSource } from "../../lib/registers/opening-source";
+import { isKeyedFallback, isSourceRereadConflict, parseOpeningSource, refreshOpeningSource } from "../../lib/registers/opening-source";
 import { OpeningParseAction } from "./opening-parse-action";
 import messages from "../../messages/en.json";
 
@@ -238,6 +238,104 @@ test("a transport failure is classified by KIND and quotes no body", async () =>
       assert.match(h.text(), /transport/);
       assert.doesNotMatch(h.text(), /network down/, "a raw transport message is never surfaced unclassified");
       assert.match(h.text(), /Nothing was recorded/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// #986 — THE WAY FORWARD FROM A RE-READ.
+//
+// `source_reread_since_parse` was an honest refusal with nowhere to go: this surface printed the
+// raw token under "Refused" and the basis could not be read again OR approved, so the only way on
+// was to abandon it. These cells hold the two halves of the remedy: the wire to the refresh route,
+// and the fact that THIS conflict — and no other — offers the act by name.
+// ---------------------------------------------------------------------------------------------
+
+test("isSourceRereadConflict is TRUE only for the re-read conflict, never for another refusal", () => {
+  assert.equal(isSourceRereadConflict({ kind: "refused", reason: "source_reread_since_parse", code: null }), true);
+  assert.equal(isSourceRereadConflict({ kind: "refused", reason: "registry_not_open", code: null }), false);
+  assert.equal(isSourceRereadConflict({ kind: "refused", reason: "tie_mismatch", code: "CLR31" }), false);
+  assert.equal(isSourceRereadConflict({ kind: "parsed", lines: 3 }), false);
+});
+
+test("ticket 986: every answer the refresh route contracts becomes a typed outcome", async () => {
+  const cases: Array<[number, unknown, unknown]> = [
+    [202, { status: "refreshed", lines: 5, retired: 3 }, { kind: "refreshed", lines: 5, retired: 3 }],
+    [409, { status: "refused", code: "CLR31", reason: "no_reread_to_refresh" },
+      { kind: "refused", reason: "no_reread_to_refresh", code: "CLR31" }],
+    [409, { status: "conflict", reason: "registry_not_open" }, { kind: "refused", reason: "registry_not_open", code: null }],
+    [422, { status: "unparseable", reason: "no_opening_tb_lines" },
+      { kind: "unparseable", reason: "no_opening_tb_lines", unmappedAccounts: [] }],
+    [403, { error: "forbidden" }, { kind: "denied" }],
+    [404, { error: "not_found" }, { kind: "not_found" }],
+  ];
+  for (const [status, body, expected] of cases) {
+    await withRoute(() => jsonResponse(body, status), async () => {
+      assert.deepEqual(await refreshOpeningSource("s1"), expected, `status ${status}`);
+    });
+  }
+});
+
+test("ticket 986: the refresh goes to its OWN same-origin proxy path, never the parse one", async () => {
+  await withRoute((url, init) => {
+    assert.equal(url, "/api/runtime/opening/refresh-targets",
+      "the refresh is a second verb on the same lane, not a flag on the parse route");
+    assert.equal(init?.method, "POST");
+    assert.equal(init?.redirect, "manual");
+    assert.deepEqual(JSON.parse(String(init?.body)), { seedId: "s1" });
+    assert.match(String((init?.headers as Record<string, string>).authorization), /^Bearer /);
+    return jsonResponse({ status: "refreshed", lines: 1, retired: 1 }, 202);
+  }, async () => { await refreshOpeningSource("s1"); });
+});
+
+test("ticket 986: the re-read conflict is the ONE refusal that carries the act, and running it refreshes the basis", async () => {
+  // Both verbs are routed from one handler, so this cell drives the REAL two-call sequence a
+  // person makes: read -> the conflict -> refresh.
+  let refreshCalls = 0;
+  await withRoute((url) => {
+    if (url.endsWith("/parse-targets")) {
+      return jsonResponse({ status: "conflict", reason: "source_reread_since_parse" }, 409);
+    }
+    refreshCalls += 1;
+    return jsonResponse({ status: "refreshed", lines: 5, retired: 3 }, 202);
+  }, async () => {
+    const { h, reloads } = await mount();
+    try {
+      await click(h);
+      const text = h.text();
+      // THE FACT, IN WORDS. The raw token told a professional nothing and named no act.
+      assert.match(text, /read again/i, `the conflict must be said in words; got: ${text}`);
+      assert.doesNotMatch(text, /source_reread_since_parse/,
+        "the token is the runtime's vocabulary, not a person's");
+      const refresh = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Refresh from the new reading"));
+      assert.ok(refresh, "without the act beside it this refusal is still the dead end ticket 656 filed");
+
+      await h.fireEvent(refresh, "click");
+      for (let i = 0; i < 8; i++) await h.settle();
+      assert.equal(refreshCalls, 1, "the act calls the refresh verb, never the read again");
+      const after = h.text();
+      assert.match(after, /5 line\(s\)/, "the new reading's count");
+      assert.match(after, /3 /, "…and how many the reading it left behind had");
+      assert.equal(reloads(), 1, "the targets and the tie gates must move together after a refresh");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("ticket 986: another refusal offers NO refresh — a control that cannot work is never shown", async () => {
+  await withRoute(() => jsonResponse({ status: "conflict", reason: "registry_not_open" }, 409), async () => {
+    const { h } = await mount();
+    try {
+      await click(h);
+      assert.match(h.text(), /Refused/);
+      assert.ok(
+        !h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Refresh from the new reading")),
+        "a closed registry is not a re-read; refreshing it would refuse, so the act is not offered",
+      );
+      assert.match(h.text(), /registry_not_open/, "…and the plain block still carries the reason verbatim");
     } finally {
       await h.unmount();
     }
