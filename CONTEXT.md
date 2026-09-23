@@ -93,8 +93,9 @@ with the remainder wholly in the final period. It is DERIVED, not typed: the amo
 count, the per-period figures, the cadence and the authority window all come from the frozen
 evaluator's reading of rows this database already holds, and the only things a person supplies are
 which prepayment, under WHOSE INSTRUCTION, which expense account, why, and what the schedule is
-for. It configures an Accounting plan of kind `amortisation_schedule`; the belt
-admits each period.
+for — through their own door, or through the On-behalf-of door Clara uses in a conversation, which
+records the same person and shares the same idempotency key. It configures an Accounting plan of
+kind `amortisation_schedule`; the belt admits each period.
 _Avoid_: A recurring adjustment template — the 0045 template lane was retired 2026-09-18 (#788,
 delivered by #927–#929), except for one PARKED agent entrance that still mints one and must be
 retired or rerouted before it is ever unparked; an editable table of period amounts; a schedule
@@ -119,6 +120,24 @@ for one client and an ordinary deposit for the next; a new member of the chart's
 which the shared wall reads as a CONTROL account and would make every prepaid account ineligible; a
 back-check of schedules already running, or an automatic enrolment derived from history; reading a
 retirement as "that amortisation stops"; a second roster for deferred revenue.
+
+**On-behalf-of door**:
+The second entrance to a write a person may make, for the times Clara makes it FOR them in a
+conversation. It is a separate function whose name ends `_for`, granted to the runtime lane and to
+nobody else, and it differs from the human door in exactly one thing: it takes the human's identity
+as an ARGUMENT instead of reading it from their session, because the runtime connection carries no
+session. It then proves that identity rather than trusting it — the membership must be live in this
+firm at the moment the books are written, at the same role floor the human door applies — and a
+human who is not a member of the firm at all is answered exactly as an unknown client is, so the
+pair can never be used to learn whose client is whose. Everything else is the SAME body, so the two
+entrances cannot answer one rule two ways, and both share one idempotency namespace whose key
+identifies the DECISION and not who typed it: a configuration Clara made and a person's own replay
+of it under the same key converge on one receipt and one record.
+_Avoid_: A widened grant on the human door — that would be a write with no named human at all;
+"the agent's own authority" — the authority is always the person the door acts for, and the
+instruction it cites must be a person's; a second copy of the human door's body, which is how two
+entrances start answering the same rule differently; treating an on-behalf-of write as something a
+wake or agent lane may reach, or as a way around a judgement only a person may state.
 
 **Service period**:
 The span of time an accrued or prepaid cost belongs to, stated by an identified person — for a

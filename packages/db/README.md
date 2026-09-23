@@ -4952,3 +4952,145 @@ before 0306 is unaffected. `prepaymentRosterGateLive()` is the shared probe a ce
 expected REFUSAL differs either side of this frontier; `p653.schedule.prepaid_leg_ineligible` is the
 one such cell, and it now measures the wall's judgement where it speaks after 0306 — at the
 enrolment door.
+
+## 0307 — the prepayment-schedule door gets its `clara_runtime` twin, on the human door's own body (#915, riders wave 4, lane 04)
+
+`clara.create_prepayment_schedule` is granted to `clara_authenticated` alone and is
+`_human_ctx`-fronted at the bookkeeper rank; 0223 defined no `_for` twin, and the three reads are
+`clara_authenticated`-only. The runtime pool runs as `clara_runtime` and carries no JWT, so both
+contracts written at the foot of `packages/runtime/lib/prepayment-schedule-basis.ts` — the chat tool
+`start_prepayment_schedule_work` and the Work term park's `read_prepayment_source` — could only ever
+return a grant refusal, which is why that module is still outside every frozen closure and why the
+PRD's chat-entrance line for prepayment amortisation is not yet true.
+
+**What this file adds.** An actor-explicit OBO twin
+`clara.create_prepayment_schedule_for(p_client, p_author, p_source_entry, p_expense_account,
+p_expense_basis, p_purpose, p_authority_ref, p_op_key)` in `clara.create_accrual_adjustment_for`'s
+shape (0222) — `clara_runtime` only, the initiator named in an ARGUMENT and re-checked LIVE against
+this firm's memberships — and one narrow machine-lane read,
+`clara.read_prepayment_source_for(p_firm, p_client, p_source_entry)`.
+
+### Why a shared core rather than a second body
+
+This is the one place the file departs from 0222's precedent, and the reason is measurable in 0222
+itself: the accrual pair duplicates its validation across two doors and has already drifted —
+`clara._accrual_plan_core` still resolves authority with 0222's own `exists` probes while
+`clara.create_accounting_plan` was narrowed by #977/0250 to refuse an instruction that is not a
+PERSON's, so the accrual OBO lane accepts an authority reference the human lane refuses. The
+prepayment door's body is ~500 lines (the term-carrier branch, #940's roster gate, 0042's shared
+negative wall, the expense half, the allocation, the basis rung, the plan, the insert race and the
+audit), and #915's own acceptance criterion is "the twin's refusal vocabulary matches the human
+door's for every shared rule". Two copies of that body make that criterion a promise; one body makes
+it a fact.
+
+So the file EXTRACTS rather than copies:
+
+| function | who runs it | what it owns |
+|---|---|---|
+| `clara.create_prepayment_schedule` | `clara_authenticated` | the op key, `clara._human_ctx(bookkeeper)`, the client ladder |
+| `clara.create_prepayment_schedule_for` | `clara_runtime` | the op key, a null-author wall, the client ladder, the LIVE authority recheck |
+| `clara._prepayment_schedule_core` | nobody (definer-internal) | everything else, byte for byte what the human door ran after 0306 |
+| `clara._prepayment_plan_core` | nobody (definer-internal) | the amortisation plan step for the OBO lane |
+
+The core's ONE new branch is `p_lane`, a closed set of two that raises on anything else. It decides
+which plan step runs and nothing else.
+
+### Why the OBO lane needs its own plan step
+
+`clara.create_accounting_plan` resolves its actor through `clara._human_ctx` → `clara.jwt_sub()`,
+and a `clara_runtime` connection carries no `request.jwt.claims`: nesting it would raise CLR04
+`no authenticated actor` on every OBO call. `clara._accrual_plan_core` exists for exactly that
+reason and `clara._prepayment_plan_core` is its sibling for the amortisation kind. It copies 0193's
+authority ladder verbatim AND asks `clara._authority_ref_refusal` (0250/#977) — the line the accrual
+core does not have — so the two prepayment lanes answer `authority_ref_invalid` (object / kind / id),
+`authority_ref_unresolved` and `authority_ref_not_human_instruction` identically. It takes no op key
+of its own: the outer `create_prepayment_schedule` reservation already covers the whole
+configuration, which is the ONE deliberate difference between the lanes (the human lane additionally
+holds 0193's nested `op_key || ':plan'` receipt).
+
+### One op-key namespace, and the author is not in the hash
+
+The reservation is taken inside the shared core under the verb name `create_prepayment_schedule`,
+over a payload hash of the CALLER'S OWN ARGUMENTS — client, source entry, expense account, expense
+basis, purpose, authority — and NOT over the author. That is what makes the ticket's convergence
+true in both directions: a chat configuration whose response was lost and the human replay of the
+same decision under the same key return one answer, one `clara.op_receipts` row and one schedule.
+A hash that included the author would turn that replay into an `op_key reused with different args`
+refusal, which is the defect `_reserve_op` exists to prevent.
+
+### The machine-lane read
+
+`clara.read_prepayment_source_for` is `clara.read_knowledge_record_for`'s posture (0230): SCOPE
+EXPLICIT (firm and client are arguments, never inferred from a JWT the caller does not have),
+`clara_runtime` ONLY, one subject, `stable`, and NO BYTES — there is no bytes key and there never
+will be; the byte door is 0190's and is not reachable from a term read. It answers the entry's
+status, posting date and bound document ID (an identifier, not content), the one debited asset leg
+and its cents (or the candidate count when it is not exactly one), the RECORDED term from either
+carrier — `clara.document_service_periods` or #939's `clara.prepayment_stated_terms` — with its
+period, its basis KIND and the basis TEXT a person wrote, and the schedule that already amortises
+the recognition if there is one. With no term recorded it reports the ABSENCE and names the HUMAN
+door that fills it, never an empty term a run could read as "no term is needed".
+
+Its consumer is `claraWork`'s term park, which cannot be cut until `claraWork_v6` (the report for
+#915 carries the successor contract in full). The read is built now because a migration is not a
+workflow cut's to write.
+
+**Scalars, not records.** §E declares scalar locals rather than plpgsql `record`s, and the reason is
+a defect this file met on the rig: a `record` that no `select into` ever reaches raises
+`record "v_sp" is not assigned yet` the moment a field is read — so a memo-only recognition (no
+document, hence no document-carrier select) made the read RAISE instead of reporting the absence it
+exists to report. The same held for the prepaid leg when an entry debits zero or many asset
+accounts.
+
+### What it deliberately does not do
+
+* It does not widen `clara.create_prepayment_schedule`'s ACL. `clara_runtime` still cannot execute
+  it — an OBO call must name its human, and a runtime grant on the human door would be a
+  configuration that names nobody. 0306's tail asserted that ("human-only until #915"); this file
+  keeps it true by adding a door rather than a grant, and its own tail re-asserts it.
+* It grants the agent role and both wake roles NOTHING. The legacy
+  `clara.wake_establish_prepayment_schedule` (the template lane, wake source asserted disabled) is
+  untouched: #1036 is the ticket that reroutes it onto this door.
+* It opens no agent path to recording a service period or to enrolling a prepayment account. Both
+  stay human doors with no wake wrapper (hard constraint 2; owner decision 4 of 2026-09-18).
+
+### Prestate pins
+
+One recut body, bimodal (its measured pre-image, or a body already carrying this file's `#915`
+attribution), and six neighbours pinned UNCONDITIONALLY because the extracted core calls all six
+verbatim and this file edits none of them:
+
+| signature | `sha256(prosrc)` | mode |
+|---|---|---|
+| `clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)` | `446a8dcd060ca7e274012e7a15baa6f5c54e912ee7c53633748adc26b88340b0` | bimodal (recut by §C) |
+| `clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)` | `99f6078775c07440122cde4f180c2f2f11aea7fcd5f0504cb6ffe6c8776cb424` | unconditional |
+| `clara._authority_ref_refusal(text,uuid,uuid,uuid)` | `c4148f6d95cd03876d6b8efe97d658e07e493e1743a075e1fe81901fd8fa61b7` | unconditional |
+| `clara._prepayment_account_enrolled(uuid,text,text)` | `0c10eafa94824a00a5d4c7b08ae1ba093d52f0e4f2c0b953a7951b46a27948db` | unconditional |
+| `clara._adj_line_eligibility_breach(uuid,jsonb)` | `727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021` | unconditional |
+| `clara.prepayment_schedule_v1(uuid,uuid)` | `ecbc76053272a2abb6055740062895d6feb308ffae348a6363391190046727f2` | unconditional |
+| `clara.prepayment_schedule_v2(bigint,text,text,date,date)` | `9f5123adf67fcbf573b994efa60d27b1aa35beab8ced54ffbc4a3078896f0194` | unconditional |
+
+§TAIL re-measures all six after the file has run: "this file only extracts and adds" is a claim, and
+the shas are the evidence. The pin on `clara.create_accounting_plan` is load-bearing in an unusual
+way — this file deliberately does NOT call it on the OBO lane, so a change to it is a change to one
+lane only, and the pin is what makes that visible instead of silent.
+
+**Post-0307 live shas**, for whoever recuts these next (#941, #1036):
+
+| signature | `sha256(prosrc)` |
+|---|---|
+| `clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)` | `62f909b7802faacf1d8b18e4040e9bf70f99ce344f7120bc35f37be7c0e54879` |
+| `clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)` | `acf5d120aa7f3a6e751ce3a21d02e7bdced202067540ec1d81a85396de4b82aa` |
+| `clara._prepayment_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)` | `0b34d44d70fa92f78f1d13dcf7866ce38aa99f7a6d2430cf329a48e4a7cd17dc` |
+| `clara.create_prepayment_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text)` | `230db25c762adb1283f5d96f9334f797cf5b30ef54b7a8395a39cf111770f98a` |
+| `clara.read_prepayment_source_for(uuid,uuid,uuid)` | `6475458ed34d9b9ef357f8fb6e4eb9766042e30e1252c30d607fabd1a120495b` |
+
+#941's deferred-revenue mirror and #1036's wake reroute now have ONE body to reach rather than two:
+a lane that adds a rule adds it to `clara._prepayment_schedule_core` and both entrances have it.
+
+**Gate module, cohort, chain.** `tests/prepayment-schedule-obo-preintegration-gate.mjs` (stem
+`prepayment_schedule_obo_twin$`, env `CLARA_ALLOW_MISSING_PREPAYMENT_SCHEDULE_OBO`);
+`PREPAYMENT_SCHEDULE_OBO_0307_COHORT` in `tests/rig-meta.mjs` (the twin and the read on the
+`clara_runtime` roster, the two cores ungranted), bimodal like 0306's; the `--import` entry in
+`package.json` in MIGRATION ORDER, immediately after
+`prepayment-account-roster-preintegration-gate.mjs`.
