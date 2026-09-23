@@ -63,6 +63,21 @@ Every spec takes its sign-in from [`helpers.ts`](helpers.ts) — `signIn(page, e
 
 A third cell keeps both lists live: an entry that no longer offends fails, so the lists can shrink but cannot rot — it is what forced the `entry-faces-walk.spec.ts` entry out once the detector stopped mis-reading that file. A fourth is the vacuity control — the detector is driven over synthetic offenders (the variable-then-click shape, the indirected Password locator, the regex spellings, and a real form whose two acts are separated by a comment block) and over compliant, signup and two-different-forms sources, so an empty census is evidence rather than an instrument that never fired.
 
+### One settle-before-scan, and the census that holds it (#760, #1017)
+
+Every spec that scans with axe calls [`helpers.ts`](helpers.ts)'s `settleForScan(page)` immediately before `new AxeBuilder(...).analyze()` — the ONE spelling of "this page has stopped moving, measure it now": every `.enter-content`/`.enter-panel` element at `opacity: 1` AND no finite `document.getAnimations()` entry still running. #760 built it after three walks independently measured the same intermittent axe `color-contrast` violation — a scan that runs mid-transition measures a COMPOSITED colour nobody ever ships. By wave 3 (2026-09-20) two more independent findings (the integration gate's own three-run classification, and a repo-wide count on this ticket) showed most of the suite's scans still called the scanner directly, or through a local routine that waited only on `getAnimations()` or only on `networkidle` — never on the fade's own opacity, the exact gap #760 closed for the three walks it touched and nowhere else.
+
+[`settle-before-scan-census.test.ts`](settle-before-scan-census.test.ts) is that rule with a cell behind it, the same shape `sign-in-census.test.ts` uses: comment-stripped source (this suite's own prose regularly quotes the exact code shapes the census greps for), a scan not preceded — since the last scan, or the start of the file — by a direct `settleForScan(page)` call or a call to a verified `LOCAL_WRAPPERS` delegate is an offender.
+
+| List | Entries | What it permits |
+|---|---|---|
+| `LOCAL_WRAPPERS` | `a11y-finish-walk.spec.ts` (`gotoSettled`), `home-board-walk.spec.ts` (`settled`) | a file's own navigate-then-settle idiom, verified (by extracting its balanced function body) to call `settleForScan(page)` itself rather than reimplement the wait |
+| `EXCEPTIONS` | *(empty)* | a spec file the rule does not hold, with the reason recorded — empty as of #1017's own fold |
+
+A second cell verifies every `LOCAL_WRAPPERS` entry actually delegates (a name registered whose body never calls `settleForScan(page)` fails on its own), a third keeps `EXCEPTIONS` live the same way the sign-in census does, and a fourth is the vacuity control (an unsettled offender, a settled compliant source, two scans sharing one settle, a comment naming the shape without being it, and a wrapper call site recognised only when its name is registered).
+
+The same ticket's other half: `filed-document-list.tsx`'s selected row measured 4.62:1 at REST (muted-foreground on the muted selection background) — the tightest margin above 4.5:1 in `check-token-contrast.mjs` outside the identity-canvas block — close enough that anti-aliasing at a glyph edge measured 4.49:1 and 4.36:1 on two independent full-browser-suite runs, on an unchanged token and an unchanged spec file. Settling the scan fixes the mid-transition reading; the selected row's cells now render at `text-foreground` instead (14.32:1, pinned as `foreground-on-muted-selected-document-row`) so the resting pair itself is never close enough for anti-aliasing to matter.
+
 ## One worker, one host (#706)
 
 The harness is single-worker by construction and it must not share a machine with another test suite while it runs.

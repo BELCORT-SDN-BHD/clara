@@ -1405,3 +1405,40 @@ D12(a)'s list is read off `detail.candidates` and typed as a first-class field b
 `components/accounting/trade-invoice-form.tsx` RENDERS it inline as a choice; the rest of the
 door's sentence (the name it could not resolve, the counterparty kind it expected) is readable
 beside it now, where the route-specific fold used to throw it away.
+
+## #1017 — every accessibility scan settles through one shared helper, and one row got a real margin
+
+`#760` built `settleForScan` (`e2e/helpers.ts`) after three walks independently measured the same
+intermittent axe `color-contrast` violation: a scan that runs before the mount/selection fade
+reaches its resting opacity measures a COMPOSITED mid-transition colour nobody ever ships. That
+fix covered a handful of named scans. Two more independent findings during the riders waves (the
+integration gate's own three-run classification, and a repo-wide count) showed the large majority
+of the suite's `AxeBuilder` scans still called the scanner directly, or through a local settle
+routine that waited only on `document.getAnimations()` (or only on `networkidle`) and never on the
+fade's own opacity — the exact gap #760 closed for three walks and left everywhere else.
+
+**Every scan now settles first, through one shared implementation.** Ten spec files' identical
+local `settle()`+`scan()` pair now has `settle()` delegate to `settleForScan`; eleven spec files'
+identical local `expectAccessible()` now settles before its own scan; `a11y-finish-walk.spec.ts`'s
+`gotoSettled` and `home-board-walk.spec.ts`'s `settled` (called from dozens of sites) now delegate
+too. Fourteen remaining spec files call `settleForScan(page)` directly ahead of each scan,
+including `document-correction-walk.spec.ts`'s routed-views axe cell — the specific cell the
+wave-1/wave-2 flake was measured on. `e2e/settle-before-scan-census.test.ts` holds the convention
+mechanically (`e2e/README.md`'s own "One settle-before-scan" section has the full shape), and the
+previously-flaky cell was re-run 12 times under deliberate CPU load (twelve background busy-loop
+processes on a 24-core host) with zero failures.
+
+**The owner's own triage ruling on 2026-09-20 widened the ticket once more.** The same axe cell
+went red on the SAME selected-document row in two consecutive isolated re-runs, measuring 4.49:1
+against the 4.5:1 floor, on an UNCHANGED token and an unchanged spec file — so this was never only
+a settle-before-scan gap. `muted-foreground-on-muted` measured 4.62:1 at REST, the tightest margin
+above 4.5:1 in `scripts/check-token-contrast.mjs` outside the identity-canvas block — close enough
+that anti-aliasing at a glyph edge could plausibly decide which side a live scan landed on.
+`components/documents/filed-document-list.tsx`'s selected row now renders its caption cells at
+`text-foreground` instead of `text-muted-foreground` (the same idiom `components/ui/command.tsx`'s
+own `CommandItem` selected state already uses on the same `bg-muted` ground), measuring 14.32:1.
+Pinned as its own id, `foreground-on-muted-selected-document-row` (kept separate from
+`foreground-on-muted`, which the file already uses for other consumers, for the same token-drift
+reason several other pairs in that file are kept separate), with a margin-specific assertion in
+`tests/token-contrast.test.ts` — shown red against the pre-fix pairing (4.62:1 against a `>=10:1`
+bar) before the fix, green after. Never fixed by relaxing a threshold.
