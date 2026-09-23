@@ -1021,7 +1021,7 @@ test("fs.web.17 a half-seeded checklist keeps its Finish section and calls the r
 
 const TIN_NOTE = "The firm's MyInvois TIN. Required once the firm's turnover makes MyInvois mandatory (RM1 million or more); optional below that, and you may still record it if the firm has registered for MyInvois voluntarily.";
 
-test("fs.web.18 an optional tin renders its Optional marking and note sentence, and the bounded group walk still offers it beside a required fact", async () => {
+test("fs.web.18 an optional tin renders its Optional marking AND its accountant sentence, and the bounded group walk still offers it beside a required fact", async () => {
   const OPTIONAL_TIN_ENV = {
     ...ENVELOPE,
     counter: { required_answered: 0, required_total: 1 },
@@ -1051,6 +1051,21 @@ test("fs.web.18 an optional tin renders its Optional marking and note sentence, 
       assert.doesNotMatch(textOf(row as never), /Not applicable/,
         "an optional item was marked the way an inapplicable one is");
       assert.equal(byTestId(h, "firm-setup-inapplicable-tin"), null);
+
+      // …AND ITS SENTENCE (AC4's "the optional marking AND its sentence"). The row itself never
+      // renders `item.note` -- only the education-tip branch does -- so the accountant sentence
+      // reaches the screen through the item form, exactly as it does for the REQUIRED tin in
+      // fs.web.19. An OPTIONAL item offers both controls, so the form is opened, read and
+      // cancelled before the bounded walk below, which is a different open state.
+      assert.ok(byTestId(h, "firm-setup-skip-tin"),
+        "an optional, pending tin must still offer the skip control a required one hides");
+      await press(h, byTestId(h, "firm-setup-answer-tin-action"), "the answer control");
+      const form = byTestId(h, "firm-setup-item-form");
+      assert.ok(form, "opening an optional, pending item rendered no form");
+      assert.match(textOf(form as never), new RegExp(TIN_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+        "the optional tin's form did not render the accountant sentence");
+      await press(h, byTestId(h, "firm-setup-cancel"), "the form's cancel control");
+      assert.equal(byTestId(h, "firm-setup-item-form"), null, "cancelling left the form open");
 
       // THE BOUNDED GROUP WALK: two pending facts in one group -- one required (turnover), one
       // optional (tin) -- and BOTH are offered: `isWalkStep` never excludes an item for being
