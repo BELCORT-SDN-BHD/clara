@@ -1384,9 +1384,10 @@ generalises to all 14 call sites.
 
 **Acceptance #3 ("every affected drill still passes its ordinary run") is PARTIAL, not done (code
 review L03-CRS3).** What runs here is only "no import-time crash from the added import" — a skip
-is not the drill's ordinary run — and, as the next paragraph says plainly, 3 of the 14 files have
-no CI leg anywhere to run the real thing. The fix-round report states this criterion's status as
-PARTIAL rather than folding it into the ticket's overall DONE.
+is not the drill's ordinary run — and, as the next paragraph says plainly, 3 of the 14 files HAD
+no CI leg anywhere to run the real thing at the time (#1023 has since closed that gap; this
+paragraph is #845's own acceptance record, not a live claim). The fix-round report states this
+criterion's status as PARTIAL rather than folding it into the ticket's overall DONE.
 
 **This suite never sets `CLARA_RIG_ALLOW_RESET`.** The 14 drills' own destructive paths are meant
 to be CI's job, one file at a time, on an isolated database — as of #845 only 11 of the 14 had a
