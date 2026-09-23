@@ -295,14 +295,17 @@ optional attachment, and a SIGKILL between the database commit and the workflow 
 advance arm — where the allocation is minted by a deferred constraint trigger at commit, so only a
 real World can show the four writes are one transaction.
 
-This is a general rule, not per-file guidance: none of the standalone e2es
-(`tests/interview-e2e.mjs`, `tests/version-cutover-e2e.mjs`, `tests/work-journal-e2e.mjs`,
-`tests/work-question-e2e.mjs`, `tests/work-cancel-e2e.mjs`,
-`tests/periodic-adjustment-e2e.mjs`, `tests/staff-expense-claim-e2e.mjs`) may share a host with another suite
-WHILE it is actually running. `db-live-gates` runs each battery alone — one at a time on the same
-rig, never concurrently with anything else that could touch the same rows or steal the same lease
-clock. Running one locally while another suite hammers the same database at the same time is the
-one setup CI does not reproduce and these e2es do not defend against.
+This is a general rule, not per-file guidance, and it deliberately NAMES NO FILE (#919 — the list
+here previously said "five" while enumerating seven, itself already stale against the actual set):
+none of the standalone e2es this package ships that
+[`db-live-gates/action.yml`](../../.github/actions/db-live-gates/action.yml) wires by path may
+share a host with another suite WHILE it is actually running — grep that action for
+`world-gate.mjs` (or `.output/server` for the three intake legs it drives directly) for the
+CURRENT, authoritative set and its order, rather than trust a count restated here to stay in sync.
+`db-live-gates` runs each battery alone — one at a time on the same rig, never concurrently with
+anything else that could touch the same rows or steal the same lease clock. Running one locally
+while another suite hammers the same database at the same time is the one setup CI does not
+reproduce and these e2es do not defend against.
 
 `tests/version-cutover-e2e.mjs` is the one exception to needing a *clean* rig, not to the rule
 above: its rollback preflight — per-name and inventory-shaped alike — is scoped to the
