@@ -40,6 +40,11 @@ export const DRIVERS = Object.freeze([
   "chat-turn-v19-e2e.mjs",
   "chat-turn-v20-e2e.mjs",
   "chat-turn-v21-e2e.mjs",
+  "fixed-asset-acquisition-e2e.mjs",
+  "work-egress-e2e.mjs",
+  "periodic-adjustment-e2e.mjs",
+  "staff-expense-claim-e2e.mjs",
+  "work-journal-e2e.mjs",
 ]);
 
 /** Pure text-level census of one driver's source — no execution, no filesystem beyond the read
