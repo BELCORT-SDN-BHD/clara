@@ -731,6 +731,18 @@ journal entry.
 _Avoid_: A depreciation authority (that is the firm's permission to run it); a schedule (that is
 what these produce); a policy the product infers from the evidence; a second accounting entry.
 
+**Default depreciation policy**:
+A person-set, versioned default for ONE enrolled fixed-asset account — method, useful life or
+rate, and residual — signed once and applied at every later acquisition on that account which
+states no particulars of its own. A covered acquisition is born with complete depreciation
+particulars, never pending ones, and the register row carries the policy's own version so its
+provenance is a read, never a guess. Setting a policy again never mutates the one it replaces: the
+live row retires and a fresh one is minted one version higher, and only acquisitions AFTER that
+change are born from it — an asset a prior version already birthed keeps its own particulars.
+_Avoid_: A rule the product infers from an asset's own evidence (that is exactly what Depreciation
+particulars is not); a class finer than the account; a back-fill of an asset already waiting; a
+value an acquisition itself states (that always wins, because a policy fills only what is absent).
+
 **Depreciation change class**:
 What KIND of change a revision to an asset's depreciation particulars is, recorded on the generation
 the revision MINTED and never on the one it superseded. Three are recognised — an *estimate* change
