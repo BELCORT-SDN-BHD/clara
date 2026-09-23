@@ -64,17 +64,22 @@ export async function fyeDayCohortApplied() {
   return present === flags.length;
 }
 
-/** True iff #1031's fye pair-wall cohort (0310_knowledge_fye_pair_wall.sql) is applied: the
- *  ungranted rule `clara._knowledge_assert_fye_pair` exists AND both write doors that can touch
- *  either year-end key -- `clara._knowledge_capture_core` and `clara.correct_knowledge` -- carry
- *  its call in their live body. A marker probe rather than a bare existence check, the same
- *  reason `auditActorRoleCohortApplied` above gives: each of those two functions has existed
- *  since 0192, so a bare `to_regprocedure` on them would report this cohort applied estate-wide.
- *  Same "wholly present or wholly absent" law as the cohorts above. */
+/** True iff #1031's fye pair-wall cohort is applied. The cohort is TWO files that ship together
+ *  as one unit -- 0310_knowledge_fye_pair_wall.sql (the rule and the two write doors that consult
+ *  it) and its own fix round 0317_knowledge_fye_pair_applicability.sql (the rule re-cut at four
+ *  arguments so the sibling is read at the INCOMING APPLICABILITY, and 0310's three-argument form
+ *  dropped) -- so this probe asks for the shape the cohort finally ships: the FOUR-argument
+ *  ungranted rule exists AND both write doors that can touch either year-end key
+ *  (`clara._knowledge_capture_core`, `clara.correct_knowledge`) carry its call in their live body.
+ *  A marker probe rather than a bare existence check, the same reason `auditActorRoleCohortApplied`
+ *  above gives: each of those two functions has existed since 0192, so a bare `to_regprocedure` on
+ *  them would report this cohort applied estate-wide. Same "wholly present or wholly absent" law
+ *  as the cohorts above -- a database carrying 0310 WITHOUT 0317 is a half-applied cohort and is
+ *  surfaced as PARTIAL rather than skipped, which is exactly what it is. */
 export async function fyePairWallCohortApplied() {
   const r = await rootQuery(
     `select
-       to_regprocedure('clara._knowledge_assert_fye_pair(uuid,text,jsonb)') is not null as rule_fn,
+       to_regprocedure('clara._knowledge_assert_fye_pair(uuid,text,jsonb,jsonb)') is not null as rule_fn,
        (select position('_knowledge_assert_fye_pair(' in p.prosrc) > 0 from pg_proc p
          where p.oid = 'clara._knowledge_capture_core(uuid,text,uuid,text,jsonb,jsonb,date,date,text,text,jsonb,uuid,text,text,text,text)'::regprocedure)
                                                                        as capture_core_calls_it,

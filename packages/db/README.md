@@ -1055,6 +1055,23 @@ grant changes, so — like 0257 itself, and like `rig-meta.mjs`'s own `#979` pre
 NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed") — this file adds no
 `rig-meta.mjs` cohort.
 
+**The population 0311 does NOT reach, stated rather than left silent** (#1032's own fix round,
+review finding L06-SPEC-06). 0311 recuts `clara.seed_firm_setup_plan` but backfills no existing
+plan, and that door refuses outright when the plan is not open (`CLR10 firm_setup_not_open`). A
+firm that COMMITTED its firm-setup plan before 0311 therefore has no `tin` row and no path to one:
+the catalogue carries no reopen door (measured on the live catalog — `_assert_firm_setup_answer`,
+`_firm_setup_applicability`, `_firm_setup_bump`, `_firm_setup_plan`, `answer_firm_setup_item`,
+`commit_firm_setup`, `defer_firm_setup_item`, `dismiss_firm_setup_tip`, `get_firm_setup`,
+`seed_firm_setup_plan`, and nothing else), and the web checklist guards every write control behind
+`!committed`. This is NOT specific to `tin`: a committed firm-setup plan has always been closed to
+every later catalogue row, including #935's three education tips, so backfilling `tin` alone would
+reach only the one item and would have to invent either a reopen door or a write into a committed
+plan — both of them product decisions well outside #1032's brief, which is why neither is taken
+here. Against the standing beta ruling ("nothing is dark") this is a REAL, disclosed gap for
+firms that committed below the RM1M threshold before 0311; it wants its own ticket — reopening, or
+amending, a committed firm-setup plan — and it is named here and in the lane's fix report so the
+owner can rule on it rather than discover it.
+
 At frontier 0222 the accrual lane adds four public names to that boundary:
 `create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on
 `clara_authenticated`, and `create_accrual_adjustment_for` on `clara_runtime` alone. They are
@@ -4846,3 +4863,71 @@ through fd.05 are unmoved and stay 0240-only.
 `create or replace function`; the grant/revoke pairs are idempotent. The prestate detects its own
 redo by the same signal 0248 uses — both recut bodies already calling the new rule — and refuses a
 PARTIAL signal (one caller updated, the other not) rather than guessing.
+## 0317 — the year-end pair rule reads its sibling at the incoming applicability, and an impossible pair no longer aborts a promotion (#1031 fix round, riders wave 4, lane 06)
+
+`0317_knowledge_fye_pair_applicability.sql` fixes 0310, which is applied and therefore immutable.
+It takes a number from wave 4's OVERFLOW block (`0315` and up — `riders-2026-09-20/README.md`'s
+own rule for a fix round that needs another migration), never the next free number, and 0310 and
+0317 ship together as ONE cohort: `knowledge-fixtures.mjs`'s `fyePairWallCohortApplied` probes the
+shape the pair wall finally takes, `tests/fye-pair-wall-preintegration-gate.mjs` gates both, and a
+database carrying 0310 alone is reported PARTIAL rather than skipped, which is what it is.
+
+**Defect 1 — the sibling was read without its applicability.** 0310's rule selected the sibling
+year-end row on `state = 'live' and scope_kind = 'client' and client_id = $1 and knowledge_key =
+<sibling>`, with no `applies_when` predicate and no `ORDER BY`. But `uq_knowledge_live` (0192) is
+PARTIAL over (scope, subject, key, APPLICABILITY): one client may legitimately hold several live
+rows of one key, one per `applies_when` — the state
+`apps/web/components/registers/knowledge-panel.tsx` names out loud. "The sibling row" was therefore
+not one row, and the read took an arbitrary one. DRIVEN through `clara.capture_knowledge` as a
+bookkeeper, both directions: month 1 at `{}` plus month 2 at `{"from_fy":2025}` let day 31 at
+`{"from_fy":2025}` be ACCEPTED — leaving month 2 and day 31 live at the SAME applicability, the
+exact pair `clara.set_client_fy_end` refuses on the client row; and month 2 at `{}` plus month 1 at
+`{"from_fy":2025}` made day 31 at `{"from_fy":2025}` — 31 January, a real date — be REFUSED,
+naming a month belonging to a different applicability. The rule now takes the applicability it is
+judging and reads the sibling through `clara._knowledge_applies_when_digest`, the SAME digest the
+capture core computes for its own supersession lookup and the same one that partial index is over,
+so at most one row can match and `select … into` cannot be ambiguous. That needs a fourth
+argument, so the rule is re-cut at `(uuid, text, jsonb, jsonb)` and 0310's three-argument form is
+DROPPED after both callers move — the catalogue never carries two overloads, and `rig-meta.mjs`'s
+cohort is by NAME, so it is unmoved. `clara._knowledge_capture_core` passes its own
+`p_applies_when`; `clara.correct_knowledge` passes `r.applies_when`, the live record's own
+applicability, which a correction reuses verbatim and never moves.
+
+**Defect 2 — an impossible pair aborted a whole promotion.** #1031's brief asked for the
+onboarding promotion path to be unchanged. `clara.promote_plan_answers_to_knowledge` withholds a
+per-item refusal and carries on: its loop catches CLR10 and CLR11 around the nested
+`clara._knowledge_capture_core` and appends the item to `withheld`. The pair rule raises CLR37 —
+the client-row door's own typed reason, which is right — and CLR37 was not in that catch, so a
+committed plan holding an impossible pair raised straight out of the loop and NOTHING was
+promoted, `entity_type` included. DRIVEN on the rig before the fix. The arm now catches CLR37 too,
+so the offending key alone is withheld with its own sqlstate and detail, which IS this door's
+documented behaviour. Cell: `knowledge-onboarding-promotion.test.mjs` `kp.14`, with a vacuity
+control (the pre-image body put back on the rig, the cell seen failing with the raised CLR37, then
+restored through `CLARA_MIGRATION_REDO`).
+
+**Disclosed residual — 29 February outside a leap year is still accepted.** #1031's "current
+behavior" enumerated three impossible cases: 31 for a 30-day month, 30 or 31 for February, and 29
+for February when the pair is not tied to a leap year. The first two are closed; the third is NOT,
+deliberately. The rule is `clara.set_client_fy_end`'s own calendar rule copied verbatim (0041),
+that rule admits `month = 2 and day = 29`, the year-end pair carries no year to judge a leap year
+against, and the client-row door is explicitly out of #1031's scope — so refusing 29 February in
+Knowledge ALONE would re-create the very disagreement between two records of one fact that #1031
+exists to remove. Named in `clara._knowledge_assert_fye_pair`'s own body, in 0317's header and in
+the lane's fix report; a follow-up belongs on the CLIENT-ROW door, where both records can move
+together.
+
+**How the three pasted bodies are proved.** 0317 re-cuts three whole bodies statically (no
+`pg_get_functiondef` splice, so no new entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is
+owed — the file contains no dynamic SQL at all). Each pasted body is the LIVE pre-image plus
+exactly one named chunk, and the tail proves it by REVERSE SUBSTITUTION: it reads the installed
+body, puts the pre-0317 chunk back, and requires the result to hash to the `sha256(prosrc)` the
+prestate pinned. A change smuggled anywhere else in a pasted body reds the migration instead of
+shipping.
+
+**Redo-safe by construction (#957).** Every statement is `create or replace function` or
+`drop function if exists`. The prestate detects its own redo by ONE signal — the four-argument
+rule live, the three-argument one gone, and BOTH write doors already calling it — and refuses a
+PARTIAL signal rather than guessing. Both branches were exercised on the lane database: the FIRST
+APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
+`CLARA_MIGRATION_REDO=0317_knowledge_fye_pair_applicability` after the promotion door was put back
+at its pre-image for `kp.14`'s vacuity control.

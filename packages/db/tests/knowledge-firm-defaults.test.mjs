@@ -923,17 +923,20 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
       + "applies_when, no pack content — which is why granting it to clara_authenticated does "
       + "not breach #783."],
   ]);
-  // #1031 (0310) ADDS ONE MORE READ, bimodal like 0230's five above and for the same reason: the
-  // loop underneath MEASURES the claim on the live body, and presence is asserted only once this
-  // battery's own frontier carries 0310.
+  // #1031 (0310 + its fix round 0317) ADDS ONE MORE READ, bimodal like 0230's five above and for
+  // the same reason: the loop underneath MEASURES the claim on the live body, and presence is
+  // asserted only once this battery's own frontier carries the pair-wall cohort.
   const FYE_PAIR_WALL_0310_CONSUMERS = new Map([
     ["_knowledge_assert_fye_pair",
-      "#1031 (0310) — judges the financial-year-end PAIR (financial_year_end_month, "
-      + "financial_year_end_day) against the sibling key's own LIVE value for the same client. A "
-      + "STABLE SELECT of exactly the one sibling row (state='live', scope_kind='client', "
-      + "client_id=$1, knowledge_key=<sibling>); it writes nothing anywhere and is UNGRANTED, so "
-      + "it authorises no application role anything either — see clara._knowledge_capture_core "
-      + "and clara.correct_knowledge, the two callers that consult it."],
+      "#1031 (0310, re-cut at four arguments by 0317) — judges the financial-year-end PAIR "
+      + "(financial_year_end_month, financial_year_end_day) against the sibling key's own LIVE "
+      + "value for the same client AT THE SAME APPLICABILITY. A STABLE SELECT of at most one "
+      + "sibling row (state='live', scope_kind='client', client_id=$1, knowledge_key=<sibling>, "
+      + "applies_when_digest=<the incoming applicability's digest> — the same digest "
+      + "uq_knowledge_live is partial over, which is why at most one row can match); it writes "
+      + "nothing anywhere and is UNGRANTED, so it authorises no application role anything either "
+      + "— see clara._knowledge_capture_core and clara.correct_knowledge, the two callers that "
+      + "consult it."],
   ]);
   const retrievalLive = readers.some((r) => r.proname === "retrieve_knowledge");
   const pairWallLive = readers.some((r) => r.proname === "_knowledge_assert_fye_pair");

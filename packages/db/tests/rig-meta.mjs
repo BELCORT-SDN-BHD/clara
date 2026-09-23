@@ -2242,9 +2242,12 @@ export const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT = [
   ...AUTHORITY_REF_HUMAN_INSTRUCTION_0250_UNGRANTED_FNS,
 ];
 
-// #1031 [0310, the financial-year-end pair wall in Knowledge] — its own cohort, the same "wholly
-// present or wholly absent" reason the two above carry: the `db-slice-frontiers` matrix runs this
-// package against databases pinned at earlier frontiers where 0240 has applied and 0310 has not.
+// #1031 [0310 + its fix round 0317, the financial-year-end pair wall in Knowledge] — its own
+// cohort, the same "wholly present or wholly absent" reason the two above carry: the
+// `db-slice-frontiers` matrix runs this package against databases pinned at earlier frontiers
+// where 0240 has applied and 0310 has not. The cohort is BY NAME, so 0317 re-cutting the rule
+// from three arguments to four (the sibling is read at the incoming applicability) moves nothing
+// here and 0317 adds NO new name of its own — the one name below is the whole of it.
 // `_knowledge_assert_fye_pair` is UNGRANTED like `_authority_ref_refusal` above: the main sweep
 // fails the moment a grant appears on it, this cohort fails if it ever DISAPPEARS from either of
 // the two write doors (`_knowledge_capture_core`, `correct_knowledge`) that must both call it —

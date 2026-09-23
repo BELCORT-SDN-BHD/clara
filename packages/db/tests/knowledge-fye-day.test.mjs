@@ -37,7 +37,7 @@ import {
 } from "./knowledge-fixtures.mjs";
 
 const EXPECTED_CELLS = 5; // fd.01 .. fd.05 -- the 0240 cohort alone
-const PAIR_EXPECTED_CELLS = 5; // fd.06 (rewritten) .. fd.10 -- #1031's 0310 cohort on top of 0240
+const PAIR_EXPECTED_CELLS = 7; // fd.06 (rewritten) .. fd.12 -- #1031's pair-wall cohort on top of 0240
 let live = false;
 let pairWallLive = false;
 let executed = 0;
@@ -386,4 +386,78 @@ pairCell("fd.10 clara.correct_knowledge ALSO consults the pair rule -- the secon
   assert.equal(live.rows.length, 1);
   assert.equal(live.rows[0].value, 30);
   assert.equal(live.rows[0].revision_n, 1);
+});
+// =============================================================================================
+// #1031's OWN FIX ROUND (0317_knowledge_fye_pair_applicability.sql, review finding L06-SPEC-02).
+// 0310's rule read "the sibling year-end row for this client" with NO applicability predicate,
+// although `uq_knowledge_live` (0192) is partial over (scope, subject, key, APPLICABILITY): one
+// client may hold SEVERAL live rows of one key, one per applies_when. An unscoped, unordered read
+// therefore judged the incoming value against an ARBITRARY sibling -- which both accepted a pair
+// that cannot exist and refused one that can. Both directions are driven below, through the
+// public capture door, at TWO applicabilities.
+// =============================================================================================
+
+pairCell("fd.11 the sibling is read AT THE INCOMING APPLICABILITY: an impossible pair cannot hide behind a possible sibling at a DIFFERENT applies_when", async () => {
+  const w = await knowledgeWorld("fd11");
+  const FY25 = { from_fy: 2025 };
+
+  // A possible month at the DEFAULT applicability, and an incompatible one at from_fy 2025. Both
+  // are live at once -- that is what a partial unique index over the applicability permits.
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 1, basis: "the client's year ended in January until 2025" })).status, "captured");
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 2, appliesWhen: FY25, basis: "from FY2025 the client's year ends in February" })).status,
+    "captured");
+
+  // Day 31 AT from_fy 2025 must be judged against FEBRUARY (that applicability's own month), not
+  // against January. Before the fix the unscoped read took the other row and ACCEPTED this,
+  // leaving month=2 and day=31 live at the SAME applicability -- the exact pair
+  // clara.set_client_fy_end refuses on the client row.
+  const refusal = await assertRaises("CLR37", () => capture(w.bookkeeper, {
+    key: "financial_year_end_day", client: w.clientA, value: 31, appliesWhen: FY25,
+    basis: "the client says the 31st" }),
+    "capturing financial_year_end_day=31 at from_fy 2025, where that applicability's own month is 2");
+  const detail = reasonAndAxis(refusal);
+  assert.equal(detail.reason, "fa_particulars_invalid");
+  assert.equal(detail.axis, "fy_end");
+  assert.equal(detail.month, 2, "the refusal must name the month live AT THE INCOMING APPLICABILITY");
+  assert.equal(detail.day, 31);
+
+  // NOTHING LANDED at either applicability: no live day row for this client at all.
+  assert.equal(
+    await rootQuery(
+      "select count(*)::int as n from clara.knowledge_records where client_id = $1 and knowledge_key = 'financial_year_end_day' and state = 'live'",
+      [w.clientA]).then((r) => r.rows[0].n),
+    0, "the refused day must not have landed at any applicability");
+});
+
+pairCell("fd.12 ...and the mirror image: a POSSIBLE pair is not refused because some OTHER applicability holds an incompatible month", async () => {
+  const w = await knowledgeWorld("fd12");
+  const FY25 = { from_fy: 2025 };
+
+  // February at the DEFAULT applicability, January from FY2025.
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 2, basis: "the client's year ended in February until 2025" })).status, "captured");
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 1, appliesWhen: FY25, basis: "from FY2025 the client's year ends in January" })).status,
+    "captured");
+
+  // 31 January is a real date. Before the fix this was REFUSED CLR37 with detail
+  // {"month":2,"day":31} -- naming a month that belongs to a DIFFERENT applicability.
+  const ok = await capture(w.bookkeeper, { key: "financial_year_end_day", client: w.clientA,
+    value: 31, appliesWhen: FY25, basis: "the client says the 31st" });
+  assert.equal(ok.status, "captured",
+    "31 January is a real calendar day; a sibling month at another applicability must not refuse it");
+
+  // The default applicability is untouched -- it still holds February alone, with no day beside it.
+  const rows = await rootQuery(
+    `select r.knowledge_key, r.value, r.applies_when from clara.knowledge_records r
+      where r.client_id = $1 and r.state = 'live' order by r.knowledge_key, r.applies_when::text`,
+    [w.clientA]);
+  assert.deepEqual(
+    rows.rows.map((r) => [r.knowledge_key, r.value, r.applies_when]),
+    [["financial_year_end_day", 31, FY25],
+     ["financial_year_end_month", 1, FY25],
+     ["financial_year_end_month", 2, {}]],
+    "the live rows per applicability are not what the two captures and the default month left");
 });
