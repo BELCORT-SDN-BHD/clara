@@ -154,13 +154,14 @@ cell("p895.seed.noop a second seed that adds zero items leaves revision/token/hi
   assert.equal(before.revision_n, 1);
   assert.equal(await revisionCount(w.plan), 1);
 
-  // FIRST SEED: the plan is empty (claim-path shape). #891: entity_type/turnover are both
-  // unanswered, so mpers_eligibility/tin are both UNDETERMINED and stay unseeded; this inserts the
-  // other ten catalogue rows -- still a real reconciliation, and it still bumps token, revision_n
-  // and history exactly as before. #935: plus the three education tips (no predicate at all):
-  // thirteen.
+  // FIRST SEED: the plan is empty (claim-path shape). #891: entity_type is unanswered, so
+  // mpers_eligibility is UNDETERMINED and stays unseeded. #1032 (0311): tin is NOT held back any
+  // more -- it is seeded for EVERY firm and merely reads OPTIONAL while turnover is unanswered --
+  // so this inserts eleven catalogue rows, still a real reconciliation, and it still bumps token,
+  // revision_n and history exactly as before. #935: plus the three education tips (no predicate at
+  // all): fourteen. (firm-setup.test.mjs's p648.seed.empty counts the same catalogue the same way.)
   const first = await seed(w.admin, opk("fspseed1"));
-  assert.equal(first.seeded, 13);
+  assert.equal(first.seeded, 14);
   const afterFirst = await planRow(w.plan);
   assert.equal(afterFirst.revision_n, 2, "a real reconciliation must still advance the revision");
   assert.notEqual(afterFirst.revision_token, before.revision_token);
@@ -168,11 +169,11 @@ cell("p895.seed.noop a second seed that adds zero items leaves revision/token/hi
   assert.equal(first.revision_token, afterFirst.revision_token);
   assert.equal(first.revision_n, 2);
 
-  // SECOND SEED, a DIFFERENT op_key (not a replay): every DETERMINABLE catalogue row is already on
-  // the plan (#891: mpers_eligibility/tin stay UNDETERMINED -- entity_type/turnover are still
-  // unanswered -- so neither is seedable yet either), so this reconciliation adds nothing.
+  // SECOND SEED, a DIFFERENT op_key (not a replay): every SEEDABLE catalogue row is already on the
+  // plan (#891: mpers_eligibility stays UNDETERMINED -- entity_type is still unanswered -- so it
+  // is not seedable yet; #1032: tin already seeded above), so this reconciliation adds nothing.
   const second = await seed(w.admin, opk("fspseed2"));
-  assert.equal(second.seeded, 0, "no further item is seedable while entity_type/turnover remain unanswered");
+  assert.equal(second.seeded, 0, "no further item is seedable while entity_type remains unanswered");
   const afterSecond = await planRow(w.plan);
   assert.equal(afterSecond.revision_n, 2, "a no-op reconciliation must not advance the revision");
   assert.equal(afterSecond.revision_token, afterFirst.revision_token,
@@ -188,7 +189,7 @@ cell("p895.seed.noop a second seed that adds zero items leaves revision/token/hi
   assert.equal(await auditCount(w.firm, "seed_firm_setup_plan"), 2);
   const seededEvents = await events(w.firm, "firm_setup.seeded");
   assert.equal(seededEvents.length, 2);
-  assert.equal(seededEvents[0].seeded, 13);
+  assert.equal(seededEvents[0].seeded, 14);
   assert.equal(seededEvents[1].seeded, 0);
   assert.equal(seededEvents[0].revision_n, 2);
   assert.equal(seededEvents[1].revision_n, 2, "the no-op event still names the CURRENT (unmoved) revision");
