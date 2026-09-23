@@ -169,6 +169,12 @@ export async function settleForScan(page: Page): Promise<void> {
  * held green by `cell-budget-census.test.ts` (README.md's own "Per-cell timeout policy"
  * section names it).
  *
+ * WHERE EACH UNIT IS SPENT (#864 fix round). Two of the three are granted automatically, at the
+ * point the work happens: `signInTo` grants `signIn` and `settleForScan` grants `scan`, both
+ * additively, so the headroom follows the calls a cell actually makes — including the ones inside
+ * a loop, which no count written at the top of a cell can track. `poll` is the one a cell still
+ * states for itself, because a fixture wait has no shared chokepoint to hang a grant on.
+ *
  * A BUDGET IS A CEILING, NEVER A WAIT. Nothing below makes any cell slower: a cell that
  * finishes in 8 s still finishes in 8 s. The per-assertion timeouts are what actually bound
  * each step, and they are unchanged.
