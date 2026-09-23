@@ -135,7 +135,7 @@ test("FixedAssetIncompleteAffordance: the real door call carries a non-empty op_
 
         assert.equal(seen.length, 2, "complete_fixed_asset_particulars must have been called twice");
         assert.match(seen[0]!.url, /\/rpc\/complete_fixed_asset_particulars$/);
-        assert.equal(typeof seen[0]!.body.p_op_key, "string", "#978 — the caller supplies a key; the door mints nothing");
+        assert.equal(typeof seen[0]!.body.p_op_key, "string", "ticket 978 — the caller supplies a key; the door mints nothing");
         assert.ok((seen[0]!.body.p_op_key as string).length > 0);
         assert.equal(seen[0]!.body.p_op_key, seen[1]!.body.p_op_key,
           "the retry carries the SAME key — a lost response replays the same completion, not a second one");

@@ -184,7 +184,7 @@ test("complete.posts a caller-held op_key that reaches the door and SURVIVES a r
 
     const posts = calls.filter((c) => c.url.includes("/rpc/complete_fixed_asset_particulars"));
     assert.equal(posts.length, 2, "two attempts at the same decision");
-    assert.equal(typeof posts[0]!.body.p_op_key, "string", "#978 — the caller supplies a key; the door mints nothing");
+    assert.equal(typeof posts[0]!.body.p_op_key, "string", "ticket 978 — the caller supplies a key; the door mints nothing");
     assert.ok((posts[0]!.body.p_op_key as string).length > 0);
     assert.equal(posts[0]!.body.p_op_key, posts[1]!.body.p_op_key,
       "the retry carries the SAME key — a lost response replays the same completion, not a second one");
@@ -209,7 +209,7 @@ test("dispose.posts a caller-held op_key that reaches the door and SURVIVES a re
 
     const posts = calls.filter((c) => c.url.includes("/rpc/dispose_fixed_asset"));
     assert.equal(posts.length, 2, "two attempts at the same decision");
-    assert.equal(typeof posts[0]!.body.p_op_key, "string", "#978 — the caller supplies a key; the door mints nothing");
+    assert.equal(typeof posts[0]!.body.p_op_key, "string", "ticket 978 — the caller supplies a key; the door mints nothing");
     assert.ok((posts[0]!.body.p_op_key as string).length > 0);
     assert.equal(posts[0]!.body.p_op_key, posts[1]!.body.p_op_key,
       "the retry carries the SAME key — a lost response replays the same disposal, not a second one");
