@@ -151,7 +151,10 @@ test("prepayments.walk.refusal: a refused configure keeps every field, prints th
 // ===========================================================================================
 
 test("prepayments.walk.memo_only: a prepayment with no document is found in the band, a person states its service period, the schedule is configured off that statement, and the detail and the list both say the term came from a person rather than a document", async ({ page }) => {
-  test.setTimeout(cellBudgetMs({ polls: 3 }));
+  // FOUR polls, not three: this cell's own explicit waits total 60s (two 30s URL waits) against a
+  // 30s base, and #864's census refuses a cell whose waits can eat its whole budget without saying
+  // so. The number is the census's own arithmetic, read off its refusal rather than guessed.
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await signInTo(page, LIST_URL);
 
   // THE BAND FINDS IT. Before #939 this prepayment was not listed at all: posted, unamortised, and
