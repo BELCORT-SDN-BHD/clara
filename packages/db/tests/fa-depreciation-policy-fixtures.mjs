@@ -56,6 +56,42 @@ export async function gate932(t) {
   return true;
 }
 
+/** `0280_fa_policy_enrolment_congruence.sql` → `fa_policy_enrolment_congruence$`. #932's fix
+ *  round (adversarial review ADV-L04-1): a default policy applies only while it still FITS the
+ *  enrolment it was validated against. Its own stem, because a chain can carry 0277 without it. */
+export const FA_POLICY_ENROLMENT_CONGRUENCE_STEM = "fa_policy_enrolment_congruence$";
+
+let _ready0280 = null;
+async function fa932cReady() {
+  if (_ready0280 === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [FA_POLICY_ENROLMENT_CONGRUENCE_STEM]);
+      _ready0280 = r.rows[0].n > 0;
+    } catch {
+      _ready0280 = false;
+    }
+  }
+  return _ready0280;
+}
+
+/** The per-CELL frontier gate for the fix round, COUNTED — `gate932`'s exact shape on 0280's own
+ *  stem. A FOCUSED invocation FAILS LOUDLY below 0280: a skip is not evidence. */
+export async function gate932c(t) {
+  if (await gate932(t)) return true;
+  if (await fa932cReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_FA_POLICY_ENROLMENT_CONGRUENCE !== "1") {
+    assert.fail(
+      `#932 fix-round migration (${FA_POLICY_ENROLMENT_CONGRUENCE_STEM}) is NOT applied to this `
+      + "database, and this is a FOCUSED run. A skip is not evidence: apply the migration, or "
+      + "preload tests/fa-policy-enrolment-congruence-preintegration-gate.mjs for a package-wide sweep.");
+  }
+  markSkip();
+  t.skip(`#932 enrolment-congruence guard absent (no ${FA_POLICY_ENROLMENT_CONGRUENCE_STEM} migration applied)`);
+  return true;
+}
+
 // ===========================================================================================
 // 2 · The client factory. Outside the x41 family, on the x41 chart, with the cost account
 //     enrolled unless the cell asks otherwise.

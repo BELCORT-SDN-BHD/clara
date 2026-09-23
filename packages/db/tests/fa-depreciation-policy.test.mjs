@@ -40,11 +40,11 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  gate932, p932Client, setFaPolicy, retireFaPolicy, policyRows, activePolicyRow, FA_POLICY_INVALID,
+  gate932, gate932c, p932Client, setFaPolicy, retireFaPolicy, policyRows, activePolicyRow, FA_POLICY_INVALID,
   rootQuery, noteLane, endPool, printLaneNotes, printSkipCount, x41EnsureReady, skip41,
   faWorld, faRow, buyAsset, completeParticulars, reviseParticulars,
-  refuses, mon, dayIn, liveAuthority, drainDue, chargeRows,
-  LAND,
+  refuses, mon, dayIn, liveAuthority, drainDue, chargeRows, upsertFaProfile,
+  COST, LAND,
 } from "./fa-depreciation-policy-fixtures.mjs";
 
 let live = false;
@@ -258,6 +258,51 @@ test("p932.birth.uncovered an account with no policy still parks the question ex
   const json = await rootQuery(
     "select clara._fa_asset_json(id, current_date) as j from clara.fixed_assets where id = $1", [asset.id]);
   assert.equal(json.rows[0].j.particulars_complete, false, "the row is NOT complete — the question is still open");
+});
+
+/** The fix round's own frontier: 0277 AND 0280. */
+const shutC = async (t) => (skip41(t, live, "the #932 default depreciation policy battery") ? true : await gate932c(t));
+
+test("p932.drift a policy set against a DEPRECIABLE enrolment stops applying the moment that enrolment is re-issued as NON-depreciable: the acquisition is born PENDING, and the client's depreciation lane is not wedged", async (t) => {
+  if (await shutC(t)) return;
+  const client = await p932Client("drift");
+  await setFaPolicy(w.users.alice, { client, method: "straight_line", usefulLifeMonths: 36, residualCents: 0 });
+
+  // THE ENROLMENT THE POLICY WAS VALIDATED AGAINST IS RE-ISSUED AS NON-DEPRECIABLE. One
+  // ordinary call of the enrolment door, which is version-forward and never consults a policy:
+  // clara.set_fa_depreciation_policy's own `non_depreciable` wall (0277 SSB) is a wall at SET
+  // time only, and nothing re-checks it afterwards.
+  await upsertFaProfile(w.users.alice, { client, assetAccount: COST, accumAccount: null, expenseAccount: null });
+  const pol = await activePolicyRow(client);
+  assert.equal(pol?.method, "straight_line",
+    "the policy row is STILL live and still says straight_line — re-enrolling retires nothing");
+
+  const { asset } = await buyAsset({ client, cents: COST_CENTS, postingDate: dayIn(mon(-3), 5) });
+  const row = await faRow(asset.id);
+  assert.equal(row.accum_depr_account_code, null,
+    "the register row is born on the NEW enrolment's accounts — there is nowhere to post a charge");
+  assert.equal(row.depr_expense_account_code, null);
+  assert.equal(row.depreciation_method, "none",
+    "…so the policy does NOT apply: the row births exactly as an uncovered non-depreciable acquisition does");
+  assert.equal(row.depreciation_start_date, null, "…with no start date until a person completes it");
+  assert.equal(row.depreciation_policy_id, null, "…and no policy provenance, because no policy was applied");
+  assert.equal(row.depreciation_policy_version, null);
+  assert.ok(row.description.includes("particulars pending"),
+    `…and the placeholder description says the question is open (got ${JSON.stringify(row.description)})`);
+
+  const json = await rootQuery(
+    "select clara._fa_asset_json(id, current_date) as j from clara.fixed_assets where id = $1", [asset.id]);
+  assert.equal(json.rows[0].j.particulars_complete, false,
+    "clara._fa_particulars_complete reports the row INCOMPLETE — the depreciation engine's own gate");
+
+  // AND THE CLIENT'S DEPRECIATION LANE STILL RUNS. An unchargeable COMPLETE row makes
+  // clara.run_depreciation_manual build a journal line with a NULL account_code and die on an
+  // untyped 23502 that no door can rescue, wedging every later run for this client.
+  await liveAuthority(client, "monthly");
+  const runs = await drainDue(client);
+  assert.deepEqual(await chargeRows(asset.id), [],
+    "nothing was charged against an asset nobody has completed");
+  noteLane(`p932.drift: ${runs.length} period(s) ran with no 23502 — the stale policy was declined at birth, not carried into a journal line`);
 });
 
 // ===========================================================================================

@@ -3154,3 +3154,53 @@ Frontier gate: `tests/fa-arrears-resolution-preintegration-gate.mjs`, keyed on t
 `p975.probe`, `p975.no_closed`, `p975.work_lane`), and `p651.period.closed_belt_skips` in
 `tests/depreciation-history.test.mjs` is BIMODAL on this file's stem: once the fold is recorded,
 everything #651 measured is unchanged.
+
+## 0280 — a default depreciation policy applies only while it still fits its enrolment (#932 fix round, riders wave 3 lane 04)
+
+`0280_fa_policy_enrolment_congruence.sql` closes the blocker the lane's adversarial review drove
+(ADV-L04-1). `clara.set_fa_depreciation_policy` refuses every method but `none` on a
+NON-depreciable enrolment (0277 §B), but that is a wall at SET time only, and
+`clara.upsert_fa_account_profile` is version-forward and reads no policy (0277 pins it unmoved, and
+so does this file). ONE ordinary re-enrolment with `accum_depr_account_code = null` therefore left a
+`straight_line` policy live; the next acquisition was born COMPLETE from it while taking its
+accumulated and expense codes from the NEW profile — i.e. NULL. `clara.preview_depreciation_run`
+then offered two legs with `account_code: null` and `clara.run_depreciation_manual` died on an
+untyped `23502` (`journal_lines.account_code`), which no door can rescue —
+`complete_fixed_asset_particulars` refuses `fa_particulars_already_complete` and
+`revise_fixed_asset_particulars` refuses the `depreciation_method` key — and which
+`packages/runtime/lib/reconciler-fa.mjs` isolates per client, silently stopping that client's
+depreciation for good.
+
+**The change is one line in each of the two birth sites**, plus the comment that names it: the
+policy-covered branch is entered only when `not (l.accum_code is null and v_pol.method <> 'none')`.
+A declined policy falls through to 0247's own UNCOVERED branch, so the row births exactly as an
+uncovered non-depreciable acquisition does — method `none`, no start date, no provenance, the
+"particulars pending" description — and a person is asked, which is what the estate already does
+for every account carrying no policy at all. The enrolment door keeps accumulated and expense a
+PAIR (`0041:2785-2789`), so the accumulated code alone decides it.
+
+**Why a separate file rather than an edit to 0277.** 0278's prestate pins 0277's post-image of
+`clara._tf_fa_acquisition_birth` by `sha256(prosrc)` and accretes onto its 842-character comment,
+and #957's redo path re-applies only the HIGHEST applied version — so editing 0277 in place would
+have broken 0278's prestate on a from-scratch chain and could not have been re-applied to the rig
+at all. The number is provisional and claimed at MERGE; the battery gates on the stable stem
+`fa_policy_enrolment_congruence$`.
+
+**Shape.** Prestate pins both recut bodies at their measured 0277 post-images
+(`c2c62b29…`, `ea7499ae…`) with a redo branch keyed on this file's own marker, pins four bodies it
+does NOT touch (`clara.upsert_fa_account_profile`, `clara._fa_particulars_complete`,
+`clara.set_fa_depreciation_policy`, `clara._fa_asset_json`), and hashes the birth's catalog comment
+at 0278's own 1553 characters before accreting one sentence onto it. The tail re-reads both bodies
+for the guard marker AND for every marker 0277's own tail pinned (0247's four exclusions, the #972
+watermark, the single conflict-targeted insert, both description literals, the three untouched arms
+of `clara._fa_on_approve`), proves the UNGUARDED form is gone from both, re-checks
+owner/definer/search_path/ACL and the deferred trigger's binding, and re-reads the four unmoved
+bodies. It creates no relation, mints no function and moves no grant, so it owes no `rig-meta.mjs`
+cohort (0278 makes the same claim for the same reason) and no
+`apps/web/tests/firm-scope-db-pins.corpus.ts` barrier entry — it contains no dynamic SQL at all.
+
+**Cells.** `p932.drift` in `tests/fa-depreciation-policy.test.mjs`, gated on this file's own stem
+through `gate932c` (`tests/fa-depreciation-policy-fixtures.mjs`) and
+`tests/fa-policy-enrolment-congruence-preintegration-gate.mjs`: set a `straight_line` policy,
+re-issue the enrolment as non-depreciable through the real door, acquire, and see the row born
+pending with no provenance — then drive `liveAuthority` + the due ladder and see no `23502`.
