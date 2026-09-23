@@ -85,21 +85,37 @@ import { makeClient } from "./relay.mjs";
 export const TERMINAL_RUN_STATUSES = Object.freeze(["completed", "failed", "cancelled"]);
 
 /**
- * MIGRATIONS WHOSE RULE NEEDS A BODY IN THE IMAGE — the frontier rule's whole content, as DATA.
+ * MIGRATIONS WHOSE RULE THE IMAGE MUST SATISFY — the frontier rule's whole content, as DATA.
  *
  * Once the database frontier is at or past `migration`, a target image that does not carry every
- * identifier in `requires` is REFUSED, whatever the run census says. A later cutover that puts a
- * rule of this shape in the schema adds a ROW here; it does not touch the verdict code, and
- * tests/rollback-preflight.test.mjs reads this table rather than restating it.
+ * identifier in `requires` AND every id in `requiresContracts` is REFUSED, whatever the run census
+ * says. A later cutover that puts a rule of either shape in the schema adds a ROW here; it does
+ * not touch the verdict code, and tests/rollback-preflight.test.mjs reads this table rather than
+ * restating it.
  *
- * `requires` names BODY IDENTIFIERS (`claraWork_v3`), the same vocabulary
- * `supportedBodiesFromBundle` and `/api/build-info`'s `bodies` speak, so the comparison is exact
- * rather than class-shaped: `claraWork_v2` does not satisfy a rule that names `claraWork_v3`.
+ * TWO KINDS OF REQUIREMENT, ONE TABLE (#1035).
+ *   · `requires` names BODY IDENTIFIERS (`claraWork_v3`), the vocabulary
+ *     `supportedBodiesFromBundle` and `/api/build-info`'s `bodies` speak. The comparison is exact
+ *     rather than class-shaped: `claraWork_v2` does not satisfy a rule that names `claraWork_v3`.
+ *   · `requiresContracts` names CONTRACT IDS (`intake_refusal_record_v1`), the vocabulary
+ *     `supportedContractsFromBundle` and `/api/build-info`'s `contracts` speak — declared by
+ *     `lib/runtime-contracts.mjs`. This is the rule for a migration that changed what a DOOR
+ *     RETURNS: the target can run every parked body and still MISREAD the answer it gets.
+ *
+ * WHY BOTH LISTS ARE ALWAYS PRESENT, even when empty: a row that omitted one would be read as
+ * requiring nothing of that kind, and the omission and the empty list would be indistinguishable
+ * at the exact moment somebody adds a rule in a hurry.
+ *
+ * WHY THE IDS ARE BARE HERE AND PREFIXED IN THE ROSTER. This module ships inside the runtime
+ * bundle too (plugins/startWorld.ts imports its boot census), so a rule spelling the scannable
+ * marker form would put that marker in every image carrying the rule — and the scan would then
+ * find a declaration the image never made. The rule names the id; only the roster names the marker.
  */
-export const FRONTIER_BODY_RULES = Object.freeze([
+export const FRONTIER_RULES = Object.freeze([
   Object.freeze({
     migration: "0195_work_egress_purpose_and_execution_trace",
     requires: Object.freeze(["claraWork_v3"]),
+    requiresContracts: Object.freeze([]),
     why:
       "0195's recut clara._record_journal_entry_core requires a consumed accounting_work egress "
       + "authorisation at the accounting write, and claraWork_v3 is the FIRST body that obtains one "
@@ -108,6 +124,33 @@ export const FRONTIER_BODY_RULES = Object.freeze([
       + "cut — from no body before v3, which is why the rule names v3 and not the newest one). A "
       + "target without it would run the Work lane entirely through 0195's pre-v3 grandfather arm "
       + "— the wall in force, and nothing subject to it.",
+  }),
+  Object.freeze({
+    migration: "0254_intake_refusal_record",
+    requires: Object.freeze([]),
+    requiresContracts: Object.freeze(["intake_refusal_record_v1"]),
+    why:
+      "From 0254 clara.create_document_intake COMMITS a ceiling-refused intake and RETURNS "
+      + "refused:true; before it, the door raised CLR18 and the freshly inserted row rolled back "
+      + "with the transaction. An image that does not read the flag takes the refusal receipt for "
+      + "an accepted intake: it reads an intake_id off it, mints an upload capability, answers 201 "
+      + "to the uploader for a file the firm's daily ceiling turned away, and leaves a sidecar the "
+      + "recovery sweep re-drives on every pass until its TTL expires it. The run census cannot "
+      + "see this: nothing is parked, and the estate reads clean (RELEASE-W2-RUNBOOK.md § RESULTS, "
+      + "step 9, 2026-09-23 — ALLOWED, and it should not have been).",
+  }),
+  Object.freeze({
+    migration: "0279_fa_closed_year_arrears",
+    requires: Object.freeze([]),
+    requiresContracts: Object.freeze(["fa_parked_run_v1"]),
+    why:
+      "From 0279 clara.run_depreciation_period answers status:'parked' instead of posting when the "
+      + "charge would fold a closing or closed fiscal year's months into the open period and nobody "
+      + "has judged their materiality (IAS 8 leaves that judgement to the accountant). An image "
+      + "that does not know the status counts the park as a POST — the belt reports work it never "
+      + "did — and because the due probe still answers due:true, honestly, it keeps chasing the "
+      + "same period to the per-client cap, banking one parked receipt per call "
+      + "(RELEASE-W3-RUNBOOK.md, step 9: the same gap, a second time).",
   }),
 ]);
 
@@ -120,29 +163,67 @@ export function migrationOrdinal(version) {
 }
 
 /**
- * THE FRONTIER RULE, pure. Which required bodies is this target missing, given this frontier?
+ * THE FRONTIER RULE, pure. What is this target missing, given this frontier?
+ *
+ * ONE function over BOTH requirement kinds, because they are one question asked of one table: an
+ * image is a lawful target only if it can run what is parked AND read what the doors return. A
+ * violation says WHICH kind it is (`requirement`), so the CLI can print the right sentence and the
+ * verdict can carry two distinct reasons — a missing body is drainable state, a missing contract
+ * is a rule in the applied schema and nothing drains it.
  *
  * @param {string|null} frontierVersion the database's max `clara.schema_migrations.version`
- * @param {ReadonlyArray<string>} supported the TARGET image's body identifiers
- * @param {ReadonlyArray<{migration:string, requires:ReadonlyArray<string>, why?:string}>} [rules]
- * @returns {Array<{migration:string, body:string, why:string|null}>}
+ * @param {{bodies?:ReadonlyArray<string>, contracts?:ReadonlyArray<string>}} carried what the
+ *        TARGET image declares: its body identifiers and its contract ids
+ * @param {ReadonlyArray<{migration:string, requires:ReadonlyArray<string>,
+ *        requiresContracts:ReadonlyArray<string>, why?:string}>} [rules]
+ * @returns {Array<{migration:string, requirement:"body"|"contract", body:string|null,
+ *        contract:string|null, why:string|null}>}
  */
-export function frontierBodyViolations(frontierVersion, supported, rules = FRONTIER_BODY_RULES) {
+export function frontierRuleViolations(frontierVersion, carried = {}, rules = FRONTIER_RULES) {
   // A database with NO migrations applied carries none of these rules, and saying so is honest
   // rather than lax: the schema the rule is about does not exist yet. An UNREADABLE version is the
   // other case entirely — every rule applies, because this module cannot prove one does not.
   if (frontierVersion === null || frontierVersion === undefined) return [];
   const at = migrationOrdinal(frontierVersion);
-  const carried = new Set(supported.map(String));
+  const bodies = new Set((carried.bodies ?? []).map(String));
+  const contracts = new Set((carried.contracts ?? []).map(String));
   const out = [];
   for (const rule of rules) {
     const needsFrom = migrationOrdinal(rule.migration);
     if (at !== null && needsFrom !== null && at < needsFrom) continue;
-    for (const body of rule.requires) {
-      if (!carried.has(body)) out.push({ migration: rule.migration, body, why: rule.why ?? null });
+    for (const body of rule.requires ?? []) {
+      if (!bodies.has(body)) out.push({ migration: rule.migration, requirement: "body", body, contract: null, why: rule.why ?? null });
+    }
+    for (const contract of rule.requiresContracts ?? []) {
+      if (!contracts.has(contract)) {
+        out.push({ migration: rule.migration, requirement: "contract", body: null, contract, why: rule.why ?? null });
+      }
     }
   }
   return out;
+}
+
+/**
+ * THE FRONTIER REFUSAL, as the lines an operator reads — one per violation, naming the rule, the
+ * migration and the thing the target does not carry.
+ *
+ * A PURE EXPORT rather than a loop inside the CLI, for the reason `refusalFooterLines` and
+ * `taskIsStranded` already state in this file: a second inline copy of a rule drifts from the
+ * verdict, and the worst available failure mode is a refusal whose printed reasons do not match
+ * the one that caused it.
+ * @param {{frontier:{version:string|null, violations:ReadonlyArray<object>}}} result
+ * @returns {string[]}
+ */
+export function frontierRefusalLines(result) {
+  const at = result.frontier.version ?? "an UNREADABLE frontier";
+  return result.frontier.violations.map((v) => {
+    const head = v.requirement === "contract"
+      ? `  - frontier_requires_contract: this database is at ${at}, and ${v.migration} requires the image to `
+        + `understand the ${v.contract} door contract, which the target does NOT declare.`
+      : `  - frontier_requires_body: this database is at ${at}, and ${v.migration} requires the image to `
+        + `carry ${v.body}, which the target does NOT.`;
+    return v.why ? `${head}\n      ${v.why}` : head;
+  });
 }
 
 /** The database's migration frontier: `max(version)` over `clara.schema_migrations` — the same
@@ -281,6 +362,32 @@ export function supportedBodiesFromBundle(bundleText) {
   for (const m of bundleText.matchAll(/workflows\/([A-Za-z0-9_.-]+)\/\/([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
     if (moduleStemOf(m[2]) === m[1]) found.add(m[2]);
   }
+  return [...found].sort();
+}
+
+/**
+ * #1035 — Every DOOR CONTRACT a built bundle declares it understands, read off its own literals.
+ *
+ * The body scan above answers "can this image RUN the parked work". It cannot answer the other
+ * question a rollback has to ask: does this image READ WHAT THE DOORS NOW RETURN. `lib/runtime-
+ * contracts.mjs` is where an image declares that, one `clara.contract` marker per contract, and
+ * this is the reading half — the same evidence class as the body directives, for the same reason:
+ * the artifact is what ships, the source tree is not.
+ *
+ * ZERO MARKERS IS A REAL AND COMMON ANSWER, unlike zero bodies. Every image built before this
+ * mechanism existed carries none, and that is precisely the target a rollback points at — so the
+ * caller must NOT treat an empty result as an unreadable bundle.
+ *
+ * The regex wants the prefix FOLLOWED BY an id. The bare prefix constant is itself in any bundle
+ * carrying the roster module, and reading that as a declaration would hand every image a contract
+ * it never named.
+ * @param {string} bundleText
+ * @returns {string[]} contract ids, sorted and de-duplicated
+ */
+export function supportedContractsFromBundle(bundleText) {
+  if (typeof bundleText !== "string") return [];
+  const found = new Set();
+  for (const m of bundleText.matchAll(/clara\.contract\/\/([a-z][a-z0-9_]*_v\d+)/g)) found.add(m[1]);
   return [...found].sort();
 }
 
@@ -527,7 +634,12 @@ function verdictOver(supported, runs, unbound, frontierViolations = []) {
   const reasons = [];
   if (outside.length > 0) reasons.push("unsupported_body");
   if (stranding.length > 0) reasons.push("unbound_task");
-  if (frontierViolations.length > 0) reasons.push("frontier_requires_body");
+  // TWO FRONTIER REASONS, NOT ONE (#1035). A missing BODY and a misread DOOR CONTRACT are both
+  // rules in the applied schema, but they are different facts about the target and an operator
+  // reading the exit needs to tell them apart: one is answered by a compatibility build that
+  // retains the body, the other only by an image that declares the contract.
+  if (frontierViolations.some((v) => v.requirement !== "contract")) reasons.push("frontier_requires_body");
+  if (frontierViolations.some((v) => v.requirement === "contract")) reasons.push("frontier_requires_contract");
   return {
     verdict: reasons.length === 0 ? "allowed" : "refused",
     reasons,
@@ -559,10 +671,16 @@ function verdictOver(supported, runs, unbound, frontierViolations = []) {
  * READS it — that is the production path, and it is one read. Pass it (a version string, or `null`
  * for "nothing applied") only where the caller is asking the question about a frontier other than
  * the connected database's: the pure unit cells do exactly that, and nothing else should.
+ *
+ * `contracts` (#1035) is the TARGET's contract-id roster, from `supportedContractsFromBundle` or
+ * from `/api/build-info`'s `contracts`. It DEFAULTS TO EMPTY, and that default is fail-closed on
+ * purpose: an image that declares nothing is exactly the image the two 2026-09-23 windows were
+ * pointed at, and the honest reading of "no declaration" is "does not understand", never "fine".
  */
-export async function preflight({ query, supported, scope = {}, frontier }) {
+export async function preflight({ query, supported, contracts = [], scope = {}, frontier }) {
   if (typeof query !== "function") throw new TypeError("preflight needs a `query` function");
   if (!Array.isArray(supported)) throw new TypeError("preflight needs a `supported` array of body identifiers");
+  if (!Array.isArray(contracts)) throw new TypeError("preflight needs a `contracts` array of contract ids");
 
   const given = Boolean(scope.runIds || scope.nameLike || scope.workIds || scope.taskIds || scope.documentTaskIds);
 
@@ -574,7 +692,7 @@ export async function preflight({ query, supported, scope = {}, frontier }) {
   // the drills, a pipeline — gets it without opting in; a rule you have to remember to ask for is
   // a rule that is not enforced.
   const frontierVersion = frontier === undefined ? await readMigrationFrontier(query) : frontier ?? null;
-  const frontierViolations = frontierBodyViolations(frontierVersion, [...supported]);
+  const frontierViolations = frontierRuleViolations(frontierVersion, { bodies: [...supported], contracts: [...contracts] });
   const global = verdictOver([...supported], allRuns, allUnbound, frontierViolations);
 
   let scoped = null;
@@ -631,7 +749,11 @@ export async function preflight({ query, supported, scope = {}, frontier }) {
       version: frontierVersion,
       measured: true,
       violations: frontierViolations,
-      rules: FRONTIER_BODY_RULES.map((r) => r.migration),
+      rules: FRONTIER_RULES.map((r) => r.migration),
+      // WHAT WAS MEASURED ON THE TARGET SIDE, echoed for the same reason the unbound census refuses
+      // an unlooked-for zero: an empty `violations` beside an empty `contracts` on a pre-0254
+      // database is a pass, and on a 0254 database it would be a bug — the reader can tell.
+      contracts: [...contracts],
     },
     supported: [...supported],
     scope: {
