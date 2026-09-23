@@ -98,6 +98,23 @@ export function openingOpKey(seedId, documentId) {
   return `openingparse:${seedId}:${documentId}`;
 }
 
+/**
+ * #986 — THE OP KEY FOR A REFRESH, AND WHY IT IS A SECOND KEY RATHER THAN A WIDER FIRST ONE.
+ *
+ * `openingOpKey` is stable per (seed, document) ON PURPOSE: a retried POST of one parse must not
+ * double a basis, and #656 pinned that shape. Adding the extraction to IT would have made every
+ * re-read a fresh parse — which succeeds and leaves the OLD targets standing beside the new ones,
+ * because a second reading mints new region ids and therefore new `line_key`s. So the remedy is a
+ * SEPARATE door under a SEPARATE key that carries the reading: a retried refresh of the same
+ * reading replays, and a LATER reading is a new act which must retire what the last one left.
+ *
+ * The literal is mirrored in `packages/db/tests/opening-source-reread.test.mjs` (that package does
+ * not depend on this one); both spell it out so a drift here reds there.
+ */
+export function openingRefreshOpKey(seedId, documentId, extractionId) {
+  return `openingreread:${seedId}:${documentId}:${extractionId}`;
+}
+
 // --- DB reads (clara_runtime) ------------------------------------------------------
 
 const SELECT_OPENING_SEED_SQL =
@@ -282,10 +299,12 @@ export function mapOpeningDbError(err) {
     // message — a house function of ours, not third-party text — and it is deliberately narrow:
     // every other CLR10 keeps the unparseable answer it always had.
     //
-    // NAMED RESIDUAL, recorded rather than silently fixed: this refusal is honest but it is still
-    // a DEAD END. Re-parsing a re-read document would need either an op key that carries the
-    // extraction (a change to a pinned, load-bearing idempotency shape) or a door that re-points
-    // existing targets; #656's report files it.
+    // #986 CLOSED THE DEAD END THIS ARM USED TO NAME, AND DID NOT TOUCH THE ARM. The refusal is
+    // still the right answer — a second reading is not a retry, and the pinned (seed, document)
+    // key must keep saying so. What changed is that it is no longer the end of the road:
+    // `refreshOpeningTargets` below brings the basis onto the new reading under a key that carries
+    // the extraction, retiring the targets the old reading left. A surface that renders this
+    // conflict should offer that act by name.
     if (reason === null && /op_key reused with different args/.test(String(err.message ?? ""))) {
       return { http: 409, body: { status: "conflict", reason: "source_reread_since_parse" } };
     }
@@ -299,6 +318,82 @@ export function mapOpeningDbError(err) {
 }
 
 // --- the route core (clara_runtime) ------------------------------------------------
+
+/**
+ * The half BOTH doors share: resolve the basis, read the authoritative tie-document reading, and
+ * map it to the `p_lines` payload a writer takes. Returns either `{ refusal }` — the typed
+ * `{ http, body }` the caller returns verbatim — or `{ seed, lines }` when the reading yielded a
+ * whole, parseable target set.
+ *
+ * EXTRACTED, NOT REWRITTEN (#986). Every branch below is #656's, in #656's order and with #656's
+ * words and tokens; the only thing that changed is that a second door now stands on it. The
+ * seventeen cells `tests/wave-b-opening-parse.test.mjs` already carried are the proof that
+ * nothing moved — they drive `parseOpeningTargets`, which is now this function plus its own write.
+ *
+ * @param {import("pg").ClientBase} client  a clara_runtime connection
+ * @param {{seedId:string, firmId:string}} args
+ * @returns {Promise<{refusal:{http:number, body:object}}|{seed:object, lines:Array<object>}>}
+ */
+async function readOpeningParseSubject(client, { seedId, firmId }) {
+  if (typeof seedId !== "string" || !UUID_RE.test(seedId)) {
+    return { refusal: { http: 404, body: { error: "not_found", message: "not found" } } };
+  }
+  const seed = await readOpeningSeed(client, seedId);
+  // Indistinguishable not-found: a foreign-firm seed and a missing seed look identical.
+  if (!seed || seed.firm_id !== firmId) {
+    return { refusal: { http: 404, body: { error: "not_found", message: "not found" } } };
+  }
+  if (seed.state !== "open") {
+    return { refusal: { http: 409, body: { status: "conflict", reason: "registry_not_open" } } };
+  }
+  if (!seed.tie_document_id) {
+    return { refusal: { http: 422, body: { status: "unparseable", reason: "no_tie_document" } } };
+  }
+
+  const regions = await readTieRegions(client, { documentId: seed.tie_document_id, firmId });
+  const { lines, failures } = mapRegionsToLines(regions);
+  if (failures.length > 0) {
+    // STRICT (F-H5): any nonblank region that fails the grammar fails the WHOLE parse —
+    // never author a partial target set. Name the failing regions.
+    return {
+      refusal: {
+        http: 422,
+        body: {
+          status: "unparseable",
+          reason: namedUnparseableReason("opening_tb.line region(s)", failures.map((f) => f.region_id)),
+        },
+      },
+    };
+  }
+  if (lines.length === 0) {
+    // ZERO LINES HAS TWO MEANINGS AND THEY ARE NOT THE SAME ANSWER (#656 fix-round, A1).
+    //   · the reader REFUSED a trial balance it did read (it does not balance; a row is
+    //     unparseable) — its reason names what is wrong and the person must go and look at the
+    //     document. Answered VERBATIM, in the `unparseable` family but NOT as the keyed-fallback
+    //     token, so the face renders it as a warning carrying the reason rather than as an
+    //     information banner offering to key the balances.
+    //   · the document is not a trial balance this reader knows — the keyed-fallback signal
+    //     (WB-R15), unchanged.
+    const refused = await readOpeningRefusal(client, { documentId: seed.tie_document_id, firmId });
+    if (refused) {
+      return {
+        refusal: {
+          http: 422,
+          body: {
+            status: "unparseable",
+            reason: refused.reason,
+            source_refusal: true,
+            failing_rows: refused.refusals
+              .map((r) => (r && typeof r.row_key === "string" ? r.row_key : null))
+              .filter((k) => k !== null),
+          },
+        },
+      };
+    }
+    return { refusal: { http: 422, body: { status: "unparseable", reason: "no_opening_tb_lines" } } };
+  }
+  return { seed, lines };
+}
 
 /**
  * Parse an opening seed's tie document and record document-primary targets. Returns a
@@ -317,59 +412,9 @@ export function mapOpeningDbError(err) {
  * @returns {Promise<{http:number, body:object}>}
  */
 export async function parseOpeningTargets(client, { seedId, firmId, reassert }) {
-  if (typeof seedId !== "string" || !UUID_RE.test(seedId)) {
-    return { http: 404, body: { error: "not_found", message: "not found" } };
-  }
-  const seed = await readOpeningSeed(client, seedId);
-  // Indistinguishable not-found: a foreign-firm seed and a missing seed look identical.
-  if (!seed || seed.firm_id !== firmId) {
-    return { http: 404, body: { error: "not_found", message: "not found" } };
-  }
-  if (seed.state !== "open") {
-    return { http: 409, body: { status: "conflict", reason: "registry_not_open" } };
-  }
-  if (!seed.tie_document_id) {
-    return { http: 422, body: { status: "unparseable", reason: "no_tie_document" } };
-  }
-
-  const regions = await readTieRegions(client, { documentId: seed.tie_document_id, firmId });
-  const { lines, failures } = mapRegionsToLines(regions);
-  if (failures.length > 0) {
-    // STRICT (F-H5): any nonblank region that fails the grammar fails the WHOLE parse —
-    // never author a partial target set. Name the failing regions.
-    return {
-      http: 422,
-      body: {
-        status: "unparseable",
-        reason: namedUnparseableReason("opening_tb.line region(s)", failures.map((f) => f.region_id)),
-      },
-    };
-  }
-  if (lines.length === 0) {
-    // ZERO LINES HAS TWO MEANINGS AND THEY ARE NOT THE SAME ANSWER (#656 fix-round, A1).
-    //   · the reader REFUSED a trial balance it did read (it does not balance; a row is
-    //     unparseable) — its reason names what is wrong and the person must go and look at the
-    //     document. Answered VERBATIM, in the `unparseable` family but NOT as the keyed-fallback
-    //     token, so the face renders it as a warning carrying the reason rather than as an
-    //     information banner offering to key the balances.
-    //   · the document is not a trial balance this reader knows — the keyed-fallback signal
-    //     (WB-R15), unchanged.
-    const refused = await readOpeningRefusal(client, { documentId: seed.tie_document_id, firmId });
-    if (refused) {
-      return {
-        http: 422,
-        body: {
-          status: "unparseable",
-          reason: refused.reason,
-          source_refusal: true,
-          failing_rows: refused.refusals
-            .map((r) => (r && typeof r.row_key === "string" ? r.row_key : null))
-            .filter((k) => k !== null),
-        },
-      };
-    }
-    return { http: 422, body: { status: "unparseable", reason: "no_opening_tb_lines" } };
-  }
+  const subject = await readOpeningParseSubject(client, { seedId, firmId });
+  if (subject.refusal) return subject.refusal;
+  const { seed, lines } = subject;
 
   // Re-check the caller's authority on THIS connection right before the audited write —
   // the parse window must not outlive the authz (F-H7). A revoked member throws 403.
@@ -383,6 +428,68 @@ export async function parseOpeningTargets(client, { seedId, firmId, reassert }) 
     );
     const recorded = Number(r.rows[0]?.r?.targets_recorded ?? lines.length);
     return { http: 202, body: { status: "parsed", lines: recorded } };
+  } catch (err) {
+    const mapped = mapOpeningDbError(err) ?? mapOpeningFkError(err);
+    if (mapped) return mapped;
+    throw err;
+  }
+}
+
+/**
+ * #986 — BRING A BASIS ONTO A NEW READING OF ITS OWN TIE DOCUMENT.
+ *
+ * THE WAY FORWARD FROM `source_reread_since_parse`, and nothing else. `parseOpeningTargets` above
+ * still refuses a re-read exactly as it did — the op key is stable per (seed, document) and the
+ * payload is keyed by region id, so `_reserve_op` sees the same key with different args — and that
+ * refusal is correct: a second reading is not a retry. What #656 had no answer for is what a
+ * person does NEXT, because the basis's targets then cite an extraction the document has
+ * superseded, and `clara.approve_opening_seed` refuses those too (`extraction_not_accepted`). This
+ * door is that answer: it retires the targets standing on the reading the document left and
+ * records the new reading's, under a key that carries the new extraction.
+ *
+ * SAME READ HALF, DIFFERENT WRITE HALF: one reading, whole or not at all, every figure re-derived
+ * by the database from its own stored region. It refuses `no_reread_to_refresh` on a basis nobody
+ * re-read, so it can never become a second road past the pinned parse key.
+ *
+ * Contract: 202 `{status:'refreshed', lines, retired}` · 409 `{status:'conflict'|'refused', …}` ·
+ * 422 `{status:'unparseable', reason}` · 404 — the parse route's own shapes, with one extra
+ * success word, because "I replaced what was there" is not the same news as "I read this".
+ *
+ * @param {import("pg").ClientBase} client  a clara_runtime connection
+ * @param {{seedId:string, firmId:string, reassert?:() => Promise<void>}} args
+ * @returns {Promise<{http:number, body:object}>}
+ */
+export async function refreshOpeningTargets(client, { seedId, firmId, reassert }) {
+  const subject = await readOpeningParseSubject(client, { seedId, firmId });
+  if (subject.refusal) return subject.refusal;
+  const { seed, lines } = subject;
+
+  // WHICH READING THIS ACT IS ABOUT. `SELECT_TIE_REGIONS_SQL` returns the regions of exactly ONE
+  // extraction, so every line carries the same `extraction_id`; it is read off the first rather
+  // than re-derived, and the database's own `refresh_extraction_mixed` wall is what refuses a
+  // payload that somehow mixed readings. Naming it here is not a second guard — it is how the op
+  // key learns which reading it is keyed to.
+  const extractionId = lines[0].extraction_ref.extraction_id;
+
+  // F-H7, unchanged: the window between reading the evidence and the audited write must not
+  // outlive the authz.
+  if (reassert) await reassert();
+
+  const opKey = openingRefreshOpKey(seed.id, seed.tie_document_id, extractionId);
+  try {
+    const r = await client.query(
+      "select clara.refresh_opening_targets_from_reread($1, $2::jsonb, $3, $4, $5) as r",
+      [seed.id, JSON.stringify(lines), seed.tie_document_id, extractionId, opKey],
+    );
+    const receipt = r.rows[0]?.r ?? {};
+    return {
+      http: 202,
+      body: {
+        status: "refreshed",
+        lines: Number(receipt.targets_recorded ?? lines.length),
+        retired: Number(receipt.targets_retired ?? 0),
+      },
+    };
   } catch (err) {
     const mapped = mapOpeningDbError(err) ?? mapOpeningFkError(err);
     if (mapped) return mapped;

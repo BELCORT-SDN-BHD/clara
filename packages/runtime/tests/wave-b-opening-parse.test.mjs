@@ -15,9 +15,11 @@ import {
   parseOpeningTbLine,
   mapRegionsToLines,
   openingOpKey,
+  openingRefreshOpKey,
   mapOpeningDbError,
   mapOpeningFkError,
   parseOpeningTargets,
+  refreshOpeningTargets,
 } from "../lib/opening-parse.mjs";
 import { AuthError } from "../lib/authz.mjs";
 import { normalizeAzureLayout } from "../lib/egress.mjs";
@@ -389,8 +391,10 @@ test("#656 RE-READ: a second REAL OCR pass supersedes the cited run, and the re-
   assert.equal(rows.rowCount, 5, "the refused re-parse authored nothing and doubled nothing");
   for (const r of rows.rows) {
     assert.equal(r.extraction_ref.extraction_id, first.extractionId,
-      "the stale citation stands until a human reopens the basis -- the residual #656's report files");
+      "the refused re-parse leaves the basis exactly where it was -- on the reading it was parsed from");
   }
+  // WHAT HAPPENS NEXT is #986's, not this cell's: `refreshOpeningTargets` below is the way forward
+  // from this conflict. The refusal itself is unchanged, and this cell is what proves that.
 });
 
 // ---------------------------------------------------------------------------
@@ -532,4 +536,70 @@ test("#656 A6: ONE contradicting opening_tb.line region aborts the WHOLE persist
 
   // …and the guard does keep it unreachable: the real producer refuses to emit the same drift.
   assert.equal(disagreeingOpeningRegion([contradicting])?.field_path, OPENING_TB_FIELD_PATH);
+});
+
+// ---------------------------------------------------------------------------
+// #986 — THE RE-READ REMEDY. The conflict above keeps firing for the same condition; what changes
+// is that a person now has somewhere to go from it.
+// ---------------------------------------------------------------------------
+
+test("#986 openingRefreshOpKey carries the READING, where openingOpKey deliberately does not", () => {
+  assert.equal(openingRefreshOpKey("seed-1", "doc-1", "ext-9"), "openingreread:seed-1:doc-1:ext-9");
+  // A LATER READING IS A DIFFERENT ACT, and that is the whole difference between the two keys:
+  // the parse key is stable per (seed, document) so a retried POST cannot double a basis, and the
+  // refresh key adds the extraction so a retried refresh replays while a NEW reading does not.
+  assert.notEqual(openingRefreshOpKey("s", "d", "ext-9"), openingRefreshOpKey("s", "d", "ext-10"));
+  // …and the pinned parse key did not move.
+  assert.equal(openingOpKey("seed-1", "doc-1"), "openingparse:seed-1:doc-1");
+});
+
+test("#986 RE-READ REMEDY: after the conflict, the refresh core brings the basis onto the new reading and retires the old one", { skip }, async () => {
+  const fx = await buildOpeningFixture("p986-refresh", { accounts: ACCOUNTS });
+  const first = await realOcrPass({ firm: fx.firm, documentId: fx.documentId, cells: BALANCED() });
+  const parsed = await rig.asRuntime((c) => parseOpeningTargets(c, { seedId: fx.seed, firmId: fx.firm }));
+  assert.equal(parsed.http, 202, JSON.stringify(parsed.body));
+  assert.equal(parsed.body.lines, 5);
+
+  // The document is READ AGAIN — the ordinary production event — and the parse door refuses,
+  // exactly as it did before #986. THAT REFUSAL IS NOT WHAT CHANGED.
+  const second = await realOcrPass({ firm: fx.firm, documentId: fx.documentId, cells: BALANCED() });
+  assert.notEqual(second.extractionId, first.extractionId);
+  const conflict = await rig.asRuntime((c) => parseOpeningTargets(c, { seedId: fx.seed, firmId: fx.firm }));
+  assert.deepEqual(conflict.body, { status: "conflict", reason: "source_reread_since_parse" });
+
+  // WHAT CHANGED: the conflict has a way forward.
+  const out = await rig.asRuntime((c) => refreshOpeningTargets(c, { seedId: fx.seed, firmId: fx.firm }));
+  assert.equal(out.http, 202, JSON.stringify(out.body));
+  assert.equal(out.body.status, "refreshed", "a refresh is its own outcome, never a second 'parsed'");
+  assert.equal(out.body.lines, 5, "the new reading's five lines");
+  assert.equal(out.body.retired, 5, "…and the five that stood on the reading the document left");
+
+  // RETIRED AND REPLACED, NEVER BESIDE: five targets, every one citing the authoritative run.
+  const rows = await rig.rootQuery(
+    "select extraction_ref from clara.opening_tb_targets where seed_id=$1", [fx.seed]);
+  assert.equal(rows.rowCount, 5, "the basis was refreshed, not doubled");
+  for (const r of rows.rows) assert.equal(r.extraction_ref.extraction_id, second.extractionId);
+
+  // A RETRIED POST REPLAYS. The key carries the reading, so the same refresh is idempotent.
+  const again = await rig.asRuntime((c) => refreshOpeningTargets(c, { seedId: fx.seed, firmId: fx.firm }));
+  assert.deepEqual(again, out, "a retried refresh returns the same answer and retires nothing twice");
+  assert.equal(
+    (await rig.rootQuery("select count(*)::int as n from clara.opening_tb_targets where seed_id=$1", [fx.seed]))
+      .rows[0].n, 5);
+});
+
+test("#986 the refresh is not a second parse: on a basis nobody re-read it refuses BY NAME", { skip }, async () => {
+  const fx = await buildOpeningFixture("p986-noreread", { accounts: ACCOUNTS });
+  await realOcrPass({ firm: fx.firm, documentId: fx.documentId, cells: BALANCED() });
+  const parsed = await rig.asRuntime((c) => parseOpeningTargets(c, { seedId: fx.seed, firmId: fx.firm }));
+  assert.equal(parsed.http, 202, JSON.stringify(parsed.body));
+
+  const out = await rig.asRuntime((c) => refreshOpeningTargets(c, { seedId: fx.seed, firmId: fx.firm }));
+  assert.equal(out.http, 409, JSON.stringify(out.body));
+  assert.deepEqual(out.body, { status: "refused", code: "CLR31", reason: "no_reread_to_refresh" },
+    "the surface must be able to tell 'there is nothing to refresh' from 'the refresh failed'");
+  // Nothing moved.
+  assert.equal(
+    (await rig.rootQuery("select count(*)::int as n from clara.opening_tb_targets where seed_id=$1", [fx.seed]))
+      .rows[0].n, 5);
 });

@@ -1336,13 +1336,34 @@ because emitting nothing is exactly what the lane did before the module existed.
 - CLR10 `op_key reused with different args` — the parse's op key is stable per (seed, document) so a
   retry cannot double a basis, while the payload it hashes is keyed by region id. Re-reading the
   tie document therefore makes a second parse a replay CONFLICT, which the generic arm reported as
-  `malformed_lines`. It is now a typed 409 `source_reread_since_parse`. **Named residual**: the
-  answer is honest but still a dead end; re-parsing a re-read document needs either an op key
-  carrying the extraction or a door that re-points existing targets.
+  `malformed_lines`. It is now a typed 409 `source_reread_since_parse`, and #986 (below) is the way
+  forward from it.
 
 `tests/opening-ledger-source-e2e.mjs` is the standalone leg that runs the whole chain on real
 Postgres. It bootstraps **no Workflow World**, measured rather than skipped: no workflow touches the
 opening lane, so AC7's database-boundary clause applies.
+
+### The re-read remedy (#986)
+
+`source_reread_since_parse` was honest and still a dead end: the basis's targets then cite an
+extraction the document has superseded, so `clara.approve_opening_seed` refuses them too
+(`extraction_not_accepted`), and the only escape was to cancel the basis and start another. And a
+fresh op key is NOT the fix — it succeeds and leaves the old targets standing beside the new ones,
+because a second reading mints new region ids and therefore new `line_key`s.
+
+`refreshOpeningTargets` (same module) is the second door, reached at
+`POST /api/opening/refresh-targets` with the same bookkeeper+ floor, the same single clara_runtime
+transaction and the same F-H7 re-assertion. It shares the parse's WHOLE read half —
+`readOpeningParseSubject`, extracted from `parseOpeningTargets` without changing one branch — and
+calls `clara.refresh_opening_targets_from_reread` (migration 0286) under
+`openingRefreshOpKey(seed, document, extraction)`: a retried refresh of the same reading replays,
+a LATER reading is a new act. It answers 202 `{status:'refreshed', lines, retired}`, and 409
+`{status:'refused', reason:'no_reread_to_refresh'}` on a basis nobody re-read, so it can never
+become a second road past the pinned parse key.
+
+**`openingOpKey` did not move**, and that is the point: `parseOpeningTargets` refuses a re-read
+exactly as it did before, and `clara.record_opening_targets_parsed`'s body sha is pinned in 0286's
+prestate AND tail.
 ## The intake batch lane (#636)
 
 `lib/intake-batches.mjs` is a NEW, NON-FROZEN module carrying every line of batch logic:
