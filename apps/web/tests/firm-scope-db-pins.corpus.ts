@@ -248,4 +248,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "d84659c80b4aee33f46038660ee97e2f322a7e6861cdc5874ebfb79507cde81f",
     },
   ],
+  // #990 [0291] (riders wave 3, lane 08) — the bank-statement line source-citation lane, the same
+  // 0175/0177/0191/0201/0226/0234 splice family: pg_get_functiondef recuts of a CLOSED literal
+  // roster of named FUNCTIONS, each read at its own literal regprocedure signature.
+  [
+    "0291_bank_statement_line_citation.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly TWO named functions, each read at its own literal regprocedure spelled in this file — clara._persist_statement_core_v2(uuid,uuid,uuid,jsonb,text,uuid,uuid,uuid,text,text) on TWO counted anchors (the reader2-wrong-lane guard block, which gains a sibling citation-shape guard, and the atomic INSERT into clara.bank_statement_lines, which gains three citation columns sourced from a LEFT JOIN onto reader1's raw payload) and clara.get_bank_line_matching_context(uuid) on ONE counted anchor (the line jsonb_build_object's closing tuple, which gains citation_page). Both return jsonb, so neither can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Each splice asserts its anchor occurs EXACTLY once before replacing, and each postcheck re-reads the INSTALLED body for the literal marker (citation_extraction_id / citation_page) it just spliced in. Every other object this migration creates (three nullable columns plus four CHECK/FK constraints on clara.bank_statement_lines) is static DDL the lexer inspects directly, and the file's own prestate pins the pre-image prosrc sha256 of all three bodies it reasons about (the two splice targets plus the untouched neighbour clara._stmt_lines_norm) MEASURED live on the lane database, per the wave-3 rig rule.",
+      sha256: "45235f2dab6652a3faa15abff761ea953993ecf4636fcbfcab8ad2a6637505b3",
+    },
+  ],
 ]);
