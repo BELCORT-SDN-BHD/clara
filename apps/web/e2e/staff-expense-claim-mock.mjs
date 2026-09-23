@@ -30,10 +30,12 @@
 // way that a handler claiming a SHARED endpoint replaces everyone else's fixture). This lane claims
 // no unfiltered register, no shared session list and no firm-wide read.
 //
-// TWO VERBS ARE DECLARED SHARED rather than owned: `list_accounting_work` and
-// `staff_advance_summary` are read by surfaces other lanes also drive, so this module answers
-// NEITHER — it reads `staff_advance_accounts` (its own client's, by `client_id`) and its own three
-// claim doors, and nothing else.
+// ONE VERB IS DECLARED SHARED rather than owned: `list_accounting_work` is read by surfaces other
+// lanes also drive, so this module answers it NEITHER. `staff_advance_summary` used to be shared
+// the same way, until #930 gave this form's own advance-application arm a CHOOSER fed by that
+// exact read: this module now answers it for its OWN client id (`SEC.clientId`) below, exactly as
+// `staff-advances-register-mock.mjs` answers it for its own (`SAR.clientId`) — the two never
+// collide, because each falls through the instant the request's `p_client` is not its own.
 import { readCachedJson } from "./mock-dispatch.mjs";
 
 
@@ -52,6 +54,10 @@ export const SEC = {
   advanceFresh: "1191",
   enrolmentId: "63863e01-6386-4638-8638-63863863e01a",
   advanceId: "63863a01-6386-4638-8638-63863863a01a",
+  /** #930's own advance-chooser fixture: Farah's outstanding advance, as `staff_advance_summary`
+   *  states it — booked before this walk's own claims, still carrying a balance. */
+  advanceIssueDate: "2026-02-01",
+  advanceOutstandingCents: 40000,
   /** A Work the walk's happy submit resolves to — the persistent outcome the form navigates to. */
   workId: "63809001-6380-4638-8638-638063809001",
   claimId: "63809aaa-6380-4638-8638-638063809aaa",
@@ -309,6 +315,39 @@ export async function handleStaffExpenseClaimSupabase(request, response, path, u
       pending_item_count: row.pending_item_count,
       corrects_claim_id: row.corrects_claim_id,
       corrected_by_claim_id: row.corrected_by_claim_id,
+    }, cors);
+    return true;
+  }
+
+  // #930 — THE ADVANCE CHOOSER'S OWN READ, owned here for `SEC.clientId` only (this file's own
+  // header explains why this verb is no longer left to the register lane alone). ONE outstanding
+  // advance, Farah's, so the chooser's happy path has exactly one real option to pick.
+  if (verb === "staff_advance_summary") {
+    const body = await readCachedJson(request);
+    if (body?.p_client !== SEC.clientId) return false;
+    sendJson(response, 200, {
+      client_id: SEC.clientId,
+      as_of: typeof body?.p_as_of === "string" ? body.p_as_of : "2026-03-31",
+      advances: [
+        {
+          enrolment_id: SEC.enrolmentId,
+          account_code: SEC.advance,
+          person_label: "Farah binti Idris",
+          advance_id: SEC.advanceId,
+          issue_date: SEC.advanceIssueDate,
+          amount_cents: 100000,
+          outstanding_cents: SEC.advanceOutstandingCents,
+          days_outstanding: 30,
+          purpose: null,
+          reference: null,
+          voided: false,
+          particulars_complete: false,
+          enrolment_active: true,
+        },
+      ],
+      outstanding_cents: SEC.advanceOutstandingCents,
+      incomplete_count: 1,
+      policy_notes: [],
     }, cors);
     return true;
   }

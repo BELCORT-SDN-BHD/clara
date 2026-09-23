@@ -203,7 +203,11 @@ test("t638 the SETTLEMENT switch preserves what was typed, and only the active l
   // Switch to the advance arm — a Radio Group with a FieldSet legend (appendix D #46).
   await page.getByRole("radio", { name: "It discharges an advance they already hold" }).click();
   await field(page, "advanceAccountCode").selectOption(SEC.advance);
-  await field(page, "advanceId").fill(SEC.advanceId);
+  // #930 — NO MORE TYPING AN ID: the claimant's own outstanding advance is CHOSEN from a list fed
+  // by `staff_advance_summary`, each option naming its booking date and outstanding amount.
+  await expect(field(page, "advanceId")).toContainText(SEC.advanceIssueDate);
+  await expect(field(page, "advanceId")).toContainText("400.00");
+  await field(page, "advanceId").selectOption(SEC.advanceId);
   // The reimbursement control is gone from the page while its arm is inactive.
   await expect(field(page, "payableAccountCode")).toHaveCount(0);
 
