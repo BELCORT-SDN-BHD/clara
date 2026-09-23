@@ -2279,6 +2279,18 @@ export const STAFF_EXPENSE_CLAIMS_0221_COHORT = [
   ...STAFF_EXPENSE_CLAIMS_0221_RUNTIME_FNS, ...STAFF_EXPENSE_CLAIMS_0221_HUMAN_FNS,
   ...STAFF_EXPENSE_CLAIMS_0221_UNGRANTED_FNS,
 ];
+// #931 [0301, one claim discharging SEVERAL advances through a confirmed allocation list] — its
+// OWN cohort rather than an addition to 0221's, and that is mechanical rather than cosmetic:
+// `cohortFailures()` fails a PARTIAL cohort by design, so folding this name into the list above
+// would make every database pinned between 0221 and 0301 report a half-applied #638.
+//
+//   ONE new UNGRANTED name — the pure normalisation of a claim's allocation list, shared by the
+//   validator, the canonical form, the settlement-account reader and the door so the four can
+//   never disagree about what "the advances this claim discharges" means. #931 adds NO granted
+//   function and moves NO grant: the door, the two reads and their ACLs are 0221's own, and the
+//   new relation is read through those same reads.
+const SEC_ALLOCATIONS_0301_UNGRANTED_FNS = ["_claim_allocations"];
+export const SEC_ALLOCATIONS_0301_COHORT = [...SEC_ALLOCATIONS_0301_UNGRANTED_FNS];
 
 // #640 [0193, explicitly authorised recurring/reversing accounting plans] — its own cohort for the
 // same "wholly present or wholly absent" reason 0178's and 0184's carry.
@@ -3890,6 +3902,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#654 0220 firm knowledge defaults", KNOWLEDGE_FIRM_0220_COHORT, liveNames));
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
   failures.push(...cohortFailures("#638 0221 staff-expense-claim lane", STAFF_EXPENSE_CLAIMS_0221_COHORT, liveNames));
+  failures.push(...cohortFailures("#931 0301 claim allocation list", SEC_ALLOCATIONS_0301_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
   failures.push(...cohortFailures("#639 0216 fixed-asset acquisition lane", FA_ACQUISITION_0216_COHORT, liveNames));
   // #651 [0227] — bimodal like 0216's: wholly present once 0227 applies, wholly absent before it,
