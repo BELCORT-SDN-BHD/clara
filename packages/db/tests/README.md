@@ -593,14 +593,16 @@ Counterparty fixtures are planted as post-images: `clara.counterparties` carries
 trigger (CLR08) and `ck_counterparties_merge_retirement` admits retirement only as a merge, so a
 retired counterparty is inserted with both `merged_into` and `retired_at` set.
 
-## `client-birth-wall.test.mjs` (0287, #899)
+## `client-birth-wall.test.mjs` (0287/#899, 0316/#1038)
 
-Fourteen cells over the two granted doors `0287_client_birth_wall.sql` wires to the shared, ungranted
-`clara._client_birth_core`, plus a live catalogue census. Frontier-gated on the live catalog through
+Eleven cells over the two granted doors `0287_client_birth_wall.sql` wires to the shared, ungranted
+`clara._client_birth_core`. Frontier-gated on the live catalog through
 `client-birth-wall-preintegration-gate.mjs`: a package-wide run against a chain below 0287 SKIPS
 loudly, a focused run FAILS, and a PARTIAL cohort (some but not all of `_client_birth_core`,
 `open_client_onboarding` and the re-pointed `begin_client_onboarding` present) throws rather than
-skipping — the estate's "wholly present or wholly absent" rule.
+skipping — the estate's "wholly present or wholly absent" rule. A SEPARATE, SECOND group of four
+cells (the live catalogue census) lives in the same file, gated on ITS OWN stem — see "#1038 (0316)
+cells" below.
 
 - `p899.new_verb.*` — `clara.open_client_onboarding`, called with **no prior read**: arity 0
   creates; arity ≥ 2 refuses with the same CLR10 `name_family_collision` token and candidate rows
@@ -618,16 +620,41 @@ skipping — the estate's "wholly present or wholly absent" rule.
   `client-onboarding-identity.test.mjs`'s own `p649.identity.direct_birth_residual`); arity 0 and
   arity 1 are unchanged from before 0287 — the deliberate scope boundary the migration's own header
   argues for, proved here rather than left assumed.
-- `p899.census.*` — a live, catalogue-derived sweep of every granted human/agent/wake-reachable
-  body that mints a `clara.clients` row (directly, or by delegating to `_client_birth_core`), plus a
-  belt asserting `_client_birth_core` itself holds no application-role grant. **These cells BOUND
-  the one residual; they do not claim the ticket's census criterion is met, because it is not.**
-  `clara.create_client` is still granted and still unwalled, so the roster of unwalled granted
-  minters is asserted to be exactly `["create_client"]` — a new member is a regression and an empty
-  array means the residual was closed and both this census and the criterion should be rewritten.
-  `create_client_residual_is_bounded` then measures the reach: the catalogue comment marking the
-  verb superseded is live, no product tree calls it, and the single operator script that does runs
-  as the superuser rather than on the grant. See `packages/db/README.md`, "The client birth wall".
+### #1038 (0316) cells
+
+Four cells, gated on their own stem (`create_client_human_grant_withdrawn$`) rather than 0287's —
+the `firm-setup-applicability.test.mjs` / `TIN_REQUIRED_STEM` idiom (a database carrying 0287
+without 0316 skips these loudly instead of asserting a shape the catalogue can no longer
+produce), preloaded via `create-client-grant-withdrawn-preintegration-gate.mjs`:
+
+- `p899.census.no_unwalled_granted_client_minters` — the SAME live, catalogue-derived sweep of
+  every granted human/agent/wake-reachable body that mints a `clara.clients` row (directly, or by
+  delegating to `_client_birth_core`), plus the belt asserting `_client_birth_core` itself holds no
+  application-role grant, that the 0287-era `granted_client_minters_and_the_one_residual` cell
+  used to run. **The criterion is now MET, not merely bounded**: `clara.create_client` no longer
+  appears in the granted-minter sweep at all (0316 withdrew its only grant among the five roles
+  checked), so the unwalled-minter set is asserted EMPTY — a non-empty result is a regression.
+- `p899.census.create_client_residual_closed` — the catalogue comment names `#1038`/"withdrawn";
+  no product tree calls the verb (unchanged from 0287); the one non-test caller anywhere
+  (`scripts/onboard-rpr.mjs`) runs as the postgres superuser with a jwt GUC, unaffected by the
+  revoke; and a DIRECT `has_function_privilege('clara_authenticated', …) = false` re-measurement.
+- `p899.census.create_client_refuses_the_human_grant` — the vacuity control: the EXACT call shape
+  the 0287-era `create_client_documented_exception` cell once proved SUCCEEDING (two same-family
+  clients, no wall) now REFUSES `42501 insufficient_privilege`.
+- `p899.census.no_test_file_calls_create_client_directly` — AC1: sweeps every `.mjs` file under
+  `packages/db/tests` (test files included, unlike `sweepFor`'s PRODUCT_TREES sweep above) for the
+  literal `clara.create_client(`, exempting only `rig-fixtures.mjs` (the one fixture helper,
+  `createClientRaw`/`createClient`) and this file itself (whose own refusal cell above calls the
+  literal SQL on purpose). See `packages/db/README.md`, "`clara.create_client`'s human grant
+  withdrawn (0316, #1038)".
+
+Every OTHER `packages/db/tests` file that used to call `clara.create_client` directly (not through
+`rig-fixtures.mjs`'s shared helper) now calls `createClientRaw(sub, {name, opKey})` instead —
+`audit-actor-role.test.mjs`, `coa-template-pr-b-helpers.mjs`, `f-a7-pi.test.mjs`,
+`firm-commercial-settings.test.mjs`, `firm-portfolio-pack.test.mjs`, `rig-events.test.mjs` and
+`wave-b/wb-r3.test.mjs`. `wave-b/wb-g-opkeys.test.mjs`'s own `create_client` fixture entry was
+REMOVED (not repointed): the writer it tests drops out of that file's grant-derived inventory the
+moment the grant is gone, so a table entry for it would fail that file's own "stale" assertion.
 
 ## Batteries with their own frontier gate
 

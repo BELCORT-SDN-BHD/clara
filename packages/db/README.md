@@ -760,35 +760,27 @@ Two granted doors share this one core:
   party under one firm through this door, so the arity-≥-2 wall costs them nothing while the
   arity-1 boundary stays exactly where the owner's 2026-09-15 ruling put it.
 
-**`clara.create_client(text,text)` keeps its body and its grant, and is the one place 0287
-departs from the brief's literal "no granted role reaches an unwalled client-minting verb". It is
-an OPEN residual, not a closed question.** 0287 §C2 does give the brief's third per-verb answer —
-SUPERSEDED — where a reader of the catalogue can see it: a `comment on function` naming
-`open_client_onboarding` as the successor and saying in the same sentence that the gap is still
-open. The comment is the only thing about this verb 0287 changes; the prestate and the tail pin its
-body and its grant byte-for-byte. `rig-fixtures.mjs`'s shared `buildWorld()` (read by dozens of battery
-files) and `wave-b/wb-fixtures.mjs`'s `buildWaveBWorld()` both construct a THIRD same-leading-token
-client in one firm through `create_client`, and `name-only-guard.test.mjs` constructs six more
-through the same shared JS fixture helper; re-pointing `create_client`'s body would turn all of
-those red for a fixture-naming coincidence unrelated to what any of them test, and withdrawing its
-grant would meet the forty-eight-plus test files that call it through `rig-fixtures.mjs`'s
-`createClient()` helper with a bare 42501 on their very first fixture client. `create_client` has
-no product caller — this ticket's own triage measured that with a repo-wide grep. Closing this
-residual for real needs a dedicated migration of those call sites onto `open_client_onboarding` (or
-a rewrite of the fixture naming convention so it stops manufacturing same-family collisions by
-construction) first.
+**`clara.create_client(text,text)` kept its body and its grant, and was the one place 0287
+departed from the brief's literal "no granted role reaches an unwalled client-minting verb".** It
+was an OPEN residual, not a closed question, when this section was written. 0287 §C2 gave the
+brief's third per-verb answer — SUPERSEDED — where a reader of the catalogue can see it: a
+`comment on function` naming `open_client_onboarding` as the successor and saying in the same
+sentence that the gap was still open. The comment was the only thing about this verb 0287 changed;
+the prestate and the tail pinned its body and its grant byte-for-byte. `rig-fixtures.mjs`'s shared
+`buildWorld()` (read by dozens of battery files) and `wave-b/wb-fixtures.mjs`'s `buildWaveBWorld()`
+both construct a THIRD same-leading-token client in one firm through `create_client`, and
+`name-only-guard.test.mjs` constructs six more through the same shared JS fixture helper —
+re-pointing `create_client`'s body would have turned all of those red for a fixture-naming
+coincidence unrelated to what any of them test. **This residual is CLOSED by #1038 (migration
+0316) — see "`clara.create_client`'s human grant withdrawn (0316, #1038)" below**; the reasoning
+above is left in place because it explains WHY the closing migration only revokes a grant and
+never re-points the body.
 
-Three cells bound the gap rather than claiming it away.
-`p899.census.granted_client_minters_and_the_one_residual` sweeps the live catalogue and fails
-loudly the day a SECOND granted minter loses the wall — or the day the array empties, which would
-mean this section and the ticket's criterion both need rewriting.
-`p899.census.create_client_documented_exception` drives the residual so it is evidenced, not
-asserted. `p899.census.create_client_residual_is_bounded` proves the reach: the catalogue comment
-is live, **no product tree calls the verb at all** (`apps/web/app|components|lib` and every
-`packages/runtime` tree the operation census counts as production are swept and empty), and the one
-non-test caller anywhere — `scripts/onboard-rpr.mjs`, the beta onboarding operator — runs as the
-postgres superuser with a jwt GUC and never `SET ROLE`s to `clara_authenticated`, so it does not
-ride the grant this residual is about.
+Three cells bounded the gap rather than claiming it away, when this section was written; #1038
+rewrote all three onto the closed shape (see below), moving them onto their OWN stem separate
+from 0287's, so a database carrying 0287 without 0316 skips them loudly (an explicit
+pre-integration run) or fails loudly (a focused one) instead of asserting either the old,
+now-impossible OPEN shape or the new, not-yet-true CLOSED one.
 
 **Two guarantees the core carries that the doors above do not state.** (1) The wall is
 SERIALISED: `_client_birth_core` takes `pg_advisory_xact_lock(203005008, hashtext(firm || ':' ||
@@ -801,6 +793,59 @@ family), not the whole firm, so unrelated births never wait on each other. (2) `
 RECORDED, not only consulted: the core writes it into `clara.client_identifiers` under
 `clara.add_client_identifier`'s own normalisation, so a wall a caller cleared with an identifier
 also holds for the next caller. Both are re-asserted structurally by 0287's own tail (T.5b).
+
+## `clara.create_client`'s human grant withdrawn (0316, #1038)
+
+[0316_create_client_human_grant_withdrawn.sql](migrations/0316_create_client_human_grant_withdrawn.sql)
+closes the residual the section above bounded: `clara.create_client`'s `clara_authenticated`
+EXECUTE grant is **revoked**. Its body — unwalled, no identity check — is untouched (prestate and
+tail both pin it byte-for-byte), because the reasoning above still holds: `buildWorld()`,
+`buildWaveBWorld()` and `name-only-guard.test.mjs` still need to mint same-family clients by
+fixture convention, and re-pointing the body would break them for a naming coincidence unrelated
+to what any of them test. Only WHO can call it moved, never WHAT it does when called.
+
+**How the rig's own callers keep working with no grant at all.** Every caller that used to reach
+`create_client` through the `clara_authenticated` grant now reaches it the same way
+[`packages/db/scripts/onboard-rpr.mjs`](scripts/onboard-rpr.mjs) always has, for its own one
+non-test call site — the "HUMAN-CONTEXT IDIOM" that script's own header names, itself
+[`seeds/0002_core_seed.sql`](seeds/0002_core_seed.sql)'s house pattern: stay at the base
+connection identity (the postgres superuser, which bypasses EXECUTE-grant checks entirely — a
+plain PostgreSQL property, not something this ticket invented) and hand-set
+`request.jwt.claims` so `clara._human_ctx` resolves the same actor/firm/floor a granted
+`clara_authenticated` caller would have gotten. `packages/db/tests/rig-fixtures.mjs`'s
+`createClientRaw(sub, {name, opKey})` is the ONE place this idiom lives for the test rig
+(`withActor({ jwtSub: sub }, …)`, `rig-helpers.mjs`'s own `role: null` branch); `createClient()`
+wraps it and then drives the legacy activation bridge exactly as before. A dozen direct callers
+that used to inline `humanQuery(sub, "select clara.create_client(…)")` across
+`packages/db/tests` were moved onto `createClientRaw` in the same ticket, and a NEW census cell
+(`p899.census.no_test_file_calls_create_client_directly`, AC1) sweeps the whole `tests/` tree and
+fails loudly if a new direct caller ever reappears outside that one fixture.
+
+**The grant-matrix census.** `packages/db/tests/rig-meta.mjs`'s `WRITERS` array no longer lists
+`create_client` — the exact-match sweep `rig-isolation.test.mjs`'s T17 runs now expects
+`clara_authenticated` (and every other application-facing role) to hold **zero** EXECUTE on it,
+and fails loudly if the grant ever returns. `clara.open_client_onboarding` (already in
+`CLIENT_BIRTH_WALL_0287_COHORT`) is the granted human door in its place.
+
+**Two RBAC cells that used `create_client` as their example human writer were repointed to
+`open_client_onboarding`** — not a behavioural change to what either cell proves, since both
+subjects (a human writer ignoring a foreign wake credential; a non-authenticated role never
+reaching a real writer) are equally true of either door:
+`rig-isolation.test.mjs`'s "T16 CRITICAL-1" and `rig-runtime-catalog.test.mjs`'s agent-read-login
+writer-denial cell.
+
+**The three #899 census cells, rewritten and moved onto their own stem
+(`create_client_human_grant_withdrawn$`)**, separate from 0287's own gate — the
+`firm-setup-applicability.test.mjs` / `TIN_REQUIRED_STEM` idiom (see "The firm-setup TIN item"
+section elsewhere in this file):
+`p899.census.no_unwalled_granted_client_minters` now asserts the granted-minter sweep's unwalled
+set is EMPTY (the ticket's own criterion — "no granted human role can reach a client-minting verb
+that lacks the wall" — is MET, not merely bounded); `p899.census.create_client_residual_closed`
+asserts the catalogue comment names `#1038`/"withdrawn" and directly re-measures
+`has_function_privilege('clara_authenticated', …) = false`;
+`p899.census.create_client_refuses_the_human_grant` is the vacuity control — the EXACT call shape
+an earlier cell in this file's history once proved SUCCEEDING now REFUSES `42501`
+`insufficient_privilege`.
 
 ## Storage grant/policy battery
 
