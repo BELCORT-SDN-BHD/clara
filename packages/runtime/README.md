@@ -848,6 +848,31 @@ Adding a rule is one row in `FRONTIER_RULES`, and adding a marker is one entry i
 instead of lying to a preflight, and `tests/rollback-preflight.test.mjs` fails any rule that names
 a migration the chain does not contain.
 
+### The release runbook's step 9, since #1035
+
+Every wave's release runbook has a **step 9 — rollback preflight demonstration, READ ONLY**. Before
+#1035 that step could not cite this command as the authority for a runtime rollback: at the wave-2
+window it answered `ALLOWED` for an image that would misread `clara.create_document_intake`
+(`0254`), and the wave-3 runbook had to write the same caveat again by hand for
+`clara.run_depreciation_period` (`0279`) — "the preflight will say ALLOWED, because its rule table
+knows nothing about a door's return contract". It does now. **Step 9 cites the preflight as the
+authority again**, and the next runbook copies this paragraph rather than re-deriving it:
+
+> **9. Rollback preflight demonstration, READ ONLY, do NOT roll back.** Run
+> `node packages/runtime/scripts/rollback-preflight.mjs --target-bundle <the previous image's
+> extracted index.mjs>` (or `--target-build-info <that image's /api/build-info>`) through the LIVE
+> machine's DSN, with the bundle extracted from a SECOND probe on the old image, never from the live
+> machine. **THREE** gates, and say which is being demonstrated: (a) `FRONTIER_RULES`' body rules;
+> (b) `FRONTIER_RULES`' DOOR-CONTRACT rules — an image that declares no `clara.contract` marker is
+> refused `frontier_requires_contract`, and the refusal names the migration, the contract and the
+> frontier the database is at; (c) the stranded-body census. Exit 0 = ALLOWED, 1 = REFUSED, 2 =
+> could not answer, and 2 is never read as either of the others. A refused runtime rollback is the
+> command's answer, not an opinion to be weighed at 3 a.m.
+>
+> What step 9 still does NOT cover, and the runbook still says in its own words: a rollback BELOW
+> the migration frontier is a database ceremony this command does not speak to — it must be drafted
+> before a window, never during an incident.
+
 The other two are the censuses. Non-terminal `workflow.workflow_runs`,
 grouped by name with the parked body derived from the row itself; **and** live tasks bound to NO
 run, across both tables that carry that shape. The second is invisible to a run census by
