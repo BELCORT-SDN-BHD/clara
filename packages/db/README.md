@@ -2969,3 +2969,41 @@ re-creation of 0244's own trigger at 0244's spelling, so a database carrying the
 comes back), `create or replace function`, and an idempotent `comment on`. The prestate reports
 FIRST or REDO, and its pin for the ONE body this file recuts is two-valued by construction —
 0244's pre-image or 0272's own post-image, both measured.
+
+## 0273 — making the legacy vendor-bindings panel read-only (#921)
+
+`0273_vendor_binding_write_doors_revoked.sql` revokes `clara_authenticated`'s EXECUTE on three of
+the five vendor-binding doors 0028 created — `propose_vendor_identity_binding(jsonb,text)`,
+`sign_vendor_identity_binding(uuid,text,text)` and `decline_vendor_identity_binding(uuid,text,text)`
+— and nothing else. The blueprint retires the vendor-binding workflow (O37); D6 keeps only
+"historical receipts and in-flight legacy visibility" for this legacy lane, and the Client-KB /
+counterparty-identity lane (#647) is its replacement.
+
+**REVOKE, never DROP** — #921's own "Out of scope" line: "Removing the lane's tables, doors or
+historical rows (D6 keeps them)." These three bodies remain the only record of how a still-visible
+`proposed` / `live` / `declined` historical row came to exist; revoking rather than dropping keeps
+every one of those rows' provenance columns meaningful. `revoke_vendor_identity_binding(uuid,text,text)`,
+`list_vendor_bindings(uuid)` and `get_vendor_binding(uuid)` are UNTOUCHED — still granted to
+`clara_authenticated`, bodies byte-identical, pinned in both the prestate and the tail. Also
+untouched: the two wake/agent doors (0154), `reset_binding_decline` (0154 — it lifts a decline on
+an ALREADY-EXISTING historical row, exactly the visibility D6 keeps), and the lane's tables,
+triggers, policies and rows.
+
+**The web side moved in the same PR, not in this file** (frontend carries no schema):
+`components/firm-admin/vendor-bindings-panel.tsx` and `vendor-binding-ceremony.tsx` deleted the
+Propose and Sign controls outright (a "proposed" row is now display-only history; a "live" row
+still offers Revoke), `lib/firm/capabilities.ts` retired `canProposeVendorBinding` and
+`canSignVendorBinding` (a control no rank can use has no floor left to mirror), and
+`lib/firm-admin/vendor-bindings.ts` dropped the two wrapper functions whose call sites
+`operation-census.test.mjs`'s `called_ungranted` sweep would otherwise correctly refuse.
+
+**The migration triad**, in migration order in `packages/db/package.json`'s test script:
+`tests/vendor-binding-write-doors-revoked-preintegration-gate.mjs` (stem
+`vendor_binding_write_doors_revoked$`) and `tests/vendor-binding-write-doors-revoked.test.mjs`. In
+`tests/rig-meta.mjs`: `VENDOR_BINDING_0028_HUMAN_FNS` narrowed from all five names to the three D6
+keeps as human doors (the EXISTENCE cohort, renamed `VENDOR_BINDING_0028_ALL_FNS`, still names all
+five — a REVOKE never changes whether a function exists), and `BINDING_PROPOSAL_PR1_HUMAN_FNS`
+dropped `decline_vendor_identity_binding`. Unlike 0271's DROP, this needs no bimodal retirement
+window: `grantMatrixFailures()` judges every name it finds live in the catalog on every frontier, so
+an unlisted name simply reads as the correct `expected=false` on both sides of 0273, with no
+frontier arm to maintain and nothing scheduled for later deletion.
