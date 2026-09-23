@@ -1047,6 +1047,38 @@ database commit and the workflow checkpoint leaves the register row standing and
 engine returns the SAME asset id, and the runtime particulars door refuses a demoted initiator by
 name while writing no journal when it succeeds. It skips cleanly below migration 0216.
 
+### #933 — the proposal that question now carries (`lib/fa-particulars-proposal.ts`)
+
+#932 gave an enrolled fixed-asset account a person-set default depreciation policy: an acquisition
+on a covered account is born COMPLETE and no question opens. #883's second half is the account
+nobody has set a policy for, where the #639 question still parks the Work — and the owner's
+2026-09-18 ruling is that it no longer parks an EMPTY form. `deriveFaParticularsProposal` is that
+derivation, PURE (every fact is passed in) and tested on its own by
+`tests/fa-particulars-proposal-unit.test.mjs`:
+
+* **A person stays the author of every depreciation estimate.** A driver is proposed only where a
+  ground exists, in this order of authority: the **enrolment** (no accumulated-depreciation account
+  admits `none` alone — the door's own rule, not an estimate), a **recorded knowledge note**, this
+  account's own **retired default policy**, then the account's other **completed assets where they
+  agree**. A split account grounds nothing, and where nothing grounds a method the block carries
+  `method: null` and the reason SAYS so.
+* **The two facts that are not estimates are always proposed**: the in-service date is the
+  acquisition's own posting date and the residual is nil (both the owner's 2026-09-18 decisions on
+  #932, applied to the same question).
+* `reason` is ONE line of prose naming the ground, the account and the two facts — a proposal
+  nobody can check is a proposal nobody should confirm.
+* `proposalSourceRef` EXTENDS #639's `{kind:'fixed_asset', asset_id}` stanza with the block.
+  `clara.agent_interruptions.source_ref` is constrained to "null or an object" and nothing more
+  (0180:183), so this needs **no migration**; `packages/db/tests/fa-particulars-proposal.test.mjs`
+  drives that on a live database rather than reading it off the file.
+* The **knowledge ground is wired and unfed** on this frontier: `clara.knowledge_keys` is a closed,
+  code-populated catalogue and none of its fourteen keys is about depreciation, so no recorded
+  record can state one until a key is catalogued (a migration #933 does not own).
+
+The block is consumed by `apps/web/lib/registers/fa-particulars-proposal.ts` on all three answering
+surfaces. `claraWork_v6` is the cut that puts it on the wire; until then the derivation ships
+unwired, and this ticket's report carries the successor contract in full.
+
 ## Evaluation
 
 [Classifier fixtures](tests/fixtures/classify/README.md) explain the recall harness.
