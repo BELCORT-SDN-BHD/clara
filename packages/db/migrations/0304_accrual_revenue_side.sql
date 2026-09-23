@@ -1098,7 +1098,7 @@ $function$;
 --    it calls every collision "a document-sourced entry", and a bookkeeper reading "a bill
 --    arrived" about an accrued FEE is being told the wrong story.
 --
---    TWO EDITS, BOTH ADDITIVE, BOTH BY SPLICE ON THE INSTALLED BODY rather than by embedding a
+--    FIVE EDITS, ALL ADDITIVE, ALL BY SPLICE ON THE INSTALLED BODY rather than by embedding a
 --    recut copy — 0302's own idiom, for a reason this wave makes concrete: three other lanes are
 --    adding row kinds to this same body in this same wave, and a file that embedded its own copy
 --    would silently drop whichever arm landed at a LOWER migration number than this one.
@@ -1108,12 +1108,42 @@ $function$;
 --          `asset_id`/`advance_id`/`authority_id` idiom this body already uses three times, and
 --          the reason 0302 gives for it: an extra identity that is fully derivable from `id`
 --          never joins the 28-wide shared column vector, so no other arm is touched at all.
+--
+--    THE THREE THE FIX ROUND ADDED, each answering a finding the reviews drove:
+--      (c) THE AMOUNT IS THE FLAGGED PERIOD'S OWN (ADV-04). #937 (0303) changed what
+--          `accrual_adjustments.amount_cents` MEANS under the `stated_period_amount` rule -- it is
+--          the WINDOW TOTAL, and each due date posts its own stated figure -- after #938 had
+--          already written that column onto the row. A bookkeeper comparing a bill with "Accrual
+--          amount" was therefore being shown the whole window's total, which is not a number the
+--          period ever posted. The arm now resolves `clara._plan_accrual_period_line` -- the ONE
+--          body 0303 gives for "what does THIS due date accrue" -- and falls back to the column
+--          only where that body answers null, which is exactly the `stated_amount` rule it is
+--          still true for.
+--      (d) THE ROW CARRIES THE PLAN'S STATUS (ADV-03). Both remedies are plan-lane doors that
+--          refuse a plan that is not active (`plan_ended` / `plan_paused`), while the double
+--          count they were offered for is still on the books -- so ending a plan used to leave a
+--          permanent item offering two buttons that could never succeed. Dropping such a row
+--          would hide a live double count, so the row STAYS and says why instead: the surfaces
+--          render the remedies unavailable with the reason. Derived from the shared `id` the
+--          same way (b) is, so again no arm's column vector moves.
+--      (e) AN ISSUED INVOICE IS NOT A FILED DOCUMENT (AC3, SPEC-02). AC3 asks for "an issued
+--          invoice or receipt posting to the accrual's revenue account". MEASURED: a sales
+--          invoice admitted through the trade-invoice lane posts through
+--          `clara._record_journal_entry_core` (0225) with `origin='agent'` and a NULL
+--          `document_id`, so the filed-document predicate #938 wrote could never see one, and an
+--          accrued FEE double-counted its period unwarned. The REVENUE side therefore also admits
+--          an entry that IS a `sales_invoice` trade invoice's own posting, joined the one way the
+--          estate links them (`trade_invoices.work_id` -> the committed `operation_receipts` row
+--          whose `effects` names the entry). The EXPENSE side is deliberately unwidened: #938's
+--          own AC1 says "document-sourced journal entries", and a supplier bill reaches this
+--          estate AS a filed document. The residual (a supplier bill admitted through the
+--          trade-invoice lane) is named in the ticket report as a follow-up, not smuggled in here.
 -- =====================================================================================
 do $t942_lrq$
 declare
   v_sig text := 'clara.list_review_queue(jsonb,jsonb,integer)';
   v_def text; v_next text; v_code text; v_anchor text; v_repl text;
-  v_n int; v_raw_n int; r record;
+  v_n int; v_raw_n int; r record; v_vector_pre int;
   v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
   v_pre_sha text; v_post_sha text;
 begin
@@ -1129,11 +1159,14 @@ begin
       using errcode='CLR10';
   end if;
 
-  if position('accrual_side' in v_def) > 0 then
-    -- REDO (#957): this file's own marker is already in the body. The splice is skipped and the
-    -- postcheck below runs anyway, so a redo proves the same things an apply does.
-    raise notice '#942 splice: clara.list_review_queue already carries this file''s accrual_side marker -- redo, nothing spliced.';
-  else
+  -- EACH EDIT GUARDS ITSELF (fix round 1). The block used to test ONE marker for the whole
+  -- splice, which made it un-redoable the moment a later round added a second edit: under
+  -- `CLARA_MIGRATION_REDO` the body already carried `accrual_side` and the new edits would have
+  -- been skipped with it. Every edit below is now applied only when its OWN marker is absent, so a
+  -- redo converges on exactly the same body an apply produces, and the postcheck runs either way.
+  v_next := v_def;
+
+  if position($$'document-sourced invoice or receipt'$$ in v_next) = 0 then
     -- (a) THE SENTENCE.
     v_anchor :=
       '      format(''A document-sourced entry posted inside the accrued period %s to %s for "%s"'','
@@ -1149,8 +1182,10 @@ begin
       '        case when aa.side=''revenue'' then ''document-sourced invoice or receipt''' || chr(10) ||
       '             else ''document-sourced entry'' end,' || chr(10) ||
       '        to_char(o.period_key,''YYYY-MM-DD''),to_char(pw.period_end,''YYYY-MM-DD''),aa.purpose) question_text,';
-    v_next := replace(v_def, v_anchor, v_repl);
+    v_next := replace(v_next, v_anchor, v_repl);
+  end if;
 
+  if position($$'accrual_side'$$ in v_next) = 0 then
     -- (b) THE SIDE ON THE ROW.
     v_anchor := $$'authority_id',case when p.row_kind='depreciation_authority_pending' then p.id end,$$;
     v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
@@ -1161,10 +1196,61 @@ begin
     v_repl := v_anchor
       || $$'accrual_side',case when p.row_kind='accrual_bill_conflict' then (select aa942.side from clara.accrual_adjustments aa942 where aa942.plan_id=p.id order by aa942.revision desc limit 1) end,$$;
     v_next := replace(v_next, v_anchor, v_repl);
+  end if;
 
-    if v_next = v_def then
-      raise exception '#942 splice: no byte moved -- refusing a no-op apply' using errcode='CLR10';
+  if position('clara._plan_accrual_period_line(o.plan_id,o.due_date)' in v_next) = 0 then
+    -- (c) THE FLAGGED PERIOD'S OWN AMOUNT (ADV-04).
+    v_anchor := $$      aa.amount_cents,to_char(o.due_date,'YYYY-MM-DD') period,$$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#942 splice: the bill_rows amount anchor appears % time(s) (expected 1)', v_n
+        using errcode='CLR10';
     end if;
+    v_repl := $$      coalesce((clara._plan_accrual_period_line(o.plan_id,o.due_date)->>'amount_cents')::bigint,aa.amount_cents) amount_cents,to_char(o.due_date,'YYYY-MM-DD') period,$$;
+    v_next := replace(v_next, v_anchor, v_repl);
+  end if;
+
+  if position($$'accrual_plan_status'$$ in v_next) = 0 then
+    -- (d) THE PLAN'S STATUS ON THE ROW (ADV-03), appended to (b)'s own key so the two derived
+    --     identities sit together and neither touches the shared column vector.
+    v_anchor := $$'accrual_side',case when p.row_kind='accrual_bill_conflict' then (select aa942.side from clara.accrual_adjustments aa942 where aa942.plan_id=p.id order by aa942.revision desc limit 1) end,$$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#942 splice: the accrual_side key appears % time(s) (expected 1)', v_n
+        using errcode='CLR10';
+    end if;
+    v_repl := v_anchor
+      || $$'accrual_plan_status',case when p.row_kind='accrual_bill_conflict' then (select pl942.status from clara.accounting_plans pl942 where pl942.id=p.id) end,$$;
+    v_next := replace(v_next, v_anchor, v_repl);
+  end if;
+
+  if position('ti942.kind=''sales_invoice''' in v_next) = 0 then
+    -- (e) THE REVENUE SIDE'S ISSUED-INVOICE ROUTE (AC3, SPEC-02).
+    v_anchor :=
+      '      and je.status=''approved'' and je.origin=''document'' and je.document_id is not null'
+      || chr(10) || '      and je.reversed_by is null';
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#942 splice: the bill_rows document predicate appears % time(s) (expected 1)', v_n
+        using errcode='CLR10';
+    end if;
+    v_repl :=
+      '      and je.status=''approved'' and je.reversed_by is null' || chr(10) ||
+      '      and ((je.origin=''document'' and je.document_id is not null)' || chr(10) ||
+      '        or (aa.side=''revenue'' and je.origin=''agent'' and exists (' || chr(10) ||
+      '             select 1 from clara.trade_invoices ti942' || chr(10) ||
+      '               join clara.operation_receipts tr942 on tr942.work_id=ti942.work_id' || chr(10) ||
+      '                    and tr942.outcome=''committed''' || chr(10) ||
+      '              where ti942.client_id=o.client_id and ti942.kind=''sales_invoice''' || chr(10) ||
+      '                and (tr942.effects->>''entry_id'')::uuid=je.id)))';
+    v_next := replace(v_next, v_anchor, v_repl);
+  end if;
+
+  if v_next = v_def then
+    -- REDO (#957): every edit this file makes is already in the installed body. Nothing is
+    -- spliced and the postcheck below runs anyway, so a redo proves the same things an apply does.
+    raise notice '#942 splice: clara.list_review_queue already carries every edit this file makes -- redo, nothing spliced.';
+  else
     execute v_next;
 
     select p.proowner::regrole::text, p.proacl::text,
@@ -1196,7 +1282,10 @@ begin
       ($$'accrual_bill_conflict'::text row_kind$$, 1),
       ($$'document-sourced invoice or receipt'$$, 1),
       ($$'document-sourced entry'$$, 1),
-      ($$'accrual_side'$$, 1)
+      ($$'accrual_side'$$, 1),
+      ($$'accrual_plan_status'$$, 1),
+      ('clara._plan_accrual_period_line(o.plan_id,o.due_date)', 1),
+      ($$ti942.kind='sales_invoice'$$, 1)
       ) as t(marker, want) loop
     v_n := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
     if v_n <> r.want then
@@ -1204,16 +1293,22 @@ begin
         using errcode='CLR10';
     end if;
   end loop;
-  -- THE SHARED COLUMN VECTOR IS UNTOUCHED: 0302 left eleven arms carrying it, and this file adds
-  -- no arm and no column.
+  -- THE SHARED COLUMN VECTOR IS UNTOUCHED: this file adds no arm and no column, so the count is
+  -- whatever the body carried when this block read it -- MEASURED, never a literal (fix round 1,
+  -- ADV-01: a sibling lane of the same wave carries the same trailing column on its own arm, so
+  -- an absolute of eleven would have killed the integrated chain here too).
+  v_vector_pre := (length(regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g'))
+                   - length(replace(regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g'),
+                            'null::int open_proposal_count', '')))
+                  / length('null::int open_proposal_count');
   v_n := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
          / length('null::int open_proposal_count');
-  if v_n <> 11 then
-    raise exception '#942 postcheck: the shared column vector appears % time(s), expected 11', v_n
+  if v_n <> v_vector_pre or v_vector_pre < 11 then
+    raise exception '#942 postcheck: the shared column vector appears % time(s), expected the % this block read before it spliced (at least 11)', v_n, v_vector_pre
       using errcode='CLR10';
   end if;
 
-  raise notice '#942: clara.list_review_queue -- the accrual_bill_conflict sentence now names the side and the row carries accrual_side, derived from the shared id; all eleven row kinds survive at their exact marker counts and the shared column vector is unmoved.';
+  raise notice '#942: clara.list_review_queue -- the accrual_bill_conflict sentence names the side, the row carries accrual_side and accrual_plan_status (both derived from the shared id), the amount is the FLAGGED PERIOD''s own under #937''s per-period rule, and the revenue side also sees a sales invoice admitted through the trade-invoice lane; every row kind survives at its exact marker count and the shared column vector is unmoved at %.', v_n;
 end
 $t942_lrq$;
 
@@ -1377,6 +1472,15 @@ begin
      or has_function_privilege('public', 'clara.get_accrual_adjustment(uuid)'::regprocedure, 'execute')
      or has_function_privilege('clara_runtime', 'clara.get_accrual_adjustment(uuid)'::regprocedure, 'execute') then
     raise exception '#942 tail: the accrual detail read''s grant moved' using errcode='CLR10';
+  end if;
+  -- …and the THIRD externally-granted body this file recuts. It was missing from this census
+  -- (fix round 1, STD-942-01) although the corpus entry beside it claimed "every door grant it
+  -- must not have moved": a self-check that covers two of three is not the claim it makes.
+  if not has_function_privilege('clara_authenticated',
+        'clara.list_accrual_adjustments(uuid,date,date)'::regprocedure, 'execute')
+     or has_function_privilege('public', 'clara.list_accrual_adjustments(uuid,date,date)'::regprocedure, 'execute')
+     or has_function_privilege('clara_runtime', 'clara.list_accrual_adjustments(uuid,date,date)'::regprocedure, 'execute') then
+    raise exception '#942 tail: the accrual list read''s grant moved' using errcode='CLR10';
   end if;
   if not has_function_privilege('clara_runtime',
         'clara.create_accrual_adjustment_for(uuid,uuid,text,jsonb,jsonb,text,text,integer,text,date,date,text)'::regprocedure, 'execute')

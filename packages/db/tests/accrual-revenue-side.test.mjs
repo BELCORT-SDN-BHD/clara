@@ -35,6 +35,9 @@ import {
 import { approveEntry } from "./rig-fixtures.mjs";
 import { applyTemplate, newInterviewClient } from "./coa-template-pr-b-helpers.mjs";
 import { correctAccrualAdjustment } from "./accrual-correction-fixtures.mjs";
+import {
+  admitTradeInvoiceWork, customer, invoiceParticulars, invoiceBasis, TI_KIND, ROLES,
+} from "./trade-invoice-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 
 const STEM = "accrual_revenue_side$";
@@ -658,4 +661,101 @@ test("p942.standard_chart — a client born onto the CURRENT published platform 
     (await entryLines(entry)).map((l) => [l.account_code, Number(l.debit_cents), Number(l.credit_cents)]),
     [["1180", 250000, 0], ["4000", 0, 250000]],
     "Dr 1180 Accrued Income / Cr 4000 Sales — the ruling's own default, on the chart every new client gets");
+});
+
+// ===========================================================================================
+// FIX ROUND 1 — AC3's OTHER ROUTE.
+// ===========================================================================================
+
+test("p942.conflict.issued_invoice — a sales invoice ADMITTED THROUGH THE TRADE-INVOICE LANE (origin='agent', no document_id) posting to the accrual's revenue account inside the accrued period surfaces the same item (AC3, SPEC-02)", async (t) => {
+  if (await gate942(t)) return;
+
+  // AC3's words are "an ISSUED INVOICE or receipt". MEASURED before this cell was written: an
+  // invoice issued through clara.admit_trade_invoice_work posts through
+  // clara._record_journal_entry_core with origin='agent' and a NULL document_id, so #938's
+  // filed-document predicate could never see one — and an accrued FEE double-counted its period
+  // with no warning at all. This cell drives the real lane end to end.
+  const r = await configureRevenue({ tag: "issued", cents: 200000 });
+  await postPlanWork({ work: r.occurrence.work_id, client: r.client, author: BOB(), firm: FIRM_A() });
+
+  // The receivables control account this client's invoice debits (the same 3050 the refusal cell
+  // above proves an accrual may NOT use as its accrued-income leg), and a customer to owe it.
+  await upsertAccountClassed(ALICE(), {
+    client: r.client, code: RCHART.assetControl, name: "Trade Debtors (942)", type: "asset",
+    accountClass: "receivable", opKey: opk("p942-ti-coa"),
+  });
+  const party = await customer(ALICE(), { client: r.client, name: `Rome Properties ${opk("p942-ti")}` });
+
+  const invoiceDate = `${r.occurrence.due_date.slice(0, 8)}01`;
+  const TOTAL = 510000;
+  const admitted = await admitTradeInvoiceWork({
+    client: r.client, author: BOB(), kind: TI_KIND.sales, role: ROLES.runtime,
+    particulars: invoiceParticulars({
+      counterparty: party, documentDate: invoiceDate, totalCents: TOTAL, taxFacts: null,
+      reference: `ROME-${opk("p942-ti-ref")}`,
+    }),
+    basis: invoiceBasis({
+      postingDate: invoiceDate, totalCents: TOTAL, control: RCHART.assetControl,
+      memo: "942 rig: the fee finally invoiced, through the trade-invoice lane",
+      lines: [
+        { account_code: RCHART.assetControl, debit_cents: TOTAL, credit_cents: 0, description: "receivable" },
+        { account_code: RCHART.income, debit_cents: 0, credit_cents: TOTAL, description: "services" },
+      ],
+    }),
+  });
+  assert.ok(admitted.work_id, `the invoice was admitted (got ${JSON.stringify(admitted)})`);
+  const entry = await postPlanWork({
+    work: admitted.work_id, client: r.client, author: BOB(), firm: FIRM_A(),
+  });
+
+  // The entry really is the shape #938's predicate cannot see.
+  const je = (await rootQuery(
+    "select origin, document_id from clara.journal_entries where id = $1", [entry])).rows[0];
+  assert.equal(je.origin, "agent", "an issued invoice is agent-origin, not a filed document");
+  assert.equal(je.document_id, null, "…and carries no document_id at all");
+
+  const rows = conflictRows(await listReviewQueue(BOB(), { scope: { client_id: r.client } }));
+  assert.equal(rows.length, 1, `the issued invoice surfaces the item (got ${JSON.stringify(rows)})`);
+  assert.equal(rows[0].id, r.plan_id, "…on the plan, so both remedies still act on it");
+  assert.equal(rows[0].entry_id, entry, "…and it names the invoice that collided");
+  assert.equal(rows[0].accrual_side, "revenue");
+  assert.match(rows[0].question_text, /invoice or receipt/i);
+
+  // THE EXPENSE SIDE IS DELIBERATELY UNWIDENED. #938's AC1 says "document-sourced journal
+  // entries", and a supplier bill reaches this estate AS a filed document; widening the expense
+  // arm to the trade-invoice lane is a residual named in the ticket report, not smuggled in here.
+  const client = await freshAccrualClient(ALICE(), "issued-exp");
+  const ref = await instructionRef({ client, author: BOB() });
+  const s2 = await span(2);
+  const e = await createAccrualAdjustment(BOB(), {
+    client, authorityRef: ref,
+    accrual: accrual({ servicePeriodStart: s2.from, servicePeriodEnd: s2.to }),
+    frequency: "monthly", dayRule: "last_day_of_month",
+    effectiveFrom: s2.from, effectiveTo: s2.to, timezone: ACCRUAL_TZ, opKey: opk("p942-ti-exp"),
+  });
+  await postPlanWork({ work: e.occurrence.work_id, client, author: BOB(), firm: FIRM_A() });
+  await upsertAccountClassed(ALICE(), {
+    client, code: RCHART.assetControl, name: "Trade Debtors (942 exp)", type: "asset",
+    accountClass: "receivable", opKey: opk("p942-ti-coa2"),
+  });
+  const party2 = await customer(ALICE(), { client, name: `Alpha Ltd ${opk("p942-ti2")}` });
+  const billDate = `${e.occurrence.due_date.slice(0, 8)}01`;
+  const admitted2 = await admitTradeInvoiceWork({
+    client, author: BOB(), kind: TI_KIND.sales, role: ROLES.runtime,
+    particulars: invoiceParticulars({
+      counterparty: party2, documentDate: billDate, totalCents: 90000, taxFacts: null,
+      reference: `ALPHA-${opk("p942-ti-ref2")}`,
+    }),
+    basis: invoiceBasis({
+      postingDate: billDate, totalCents: 90000, control: RCHART.assetControl,
+      memo: "942 rig: an agent-origin entry hitting an EXPENSE accrual's own account",
+      lines: [
+        { account_code: RCHART.assetControl, debit_cents: 90000, credit_cents: 0, description: "receivable" },
+        { account_code: ACHART.expense, debit_cents: 0, credit_cents: 90000, description: "contra" },
+      ],
+    }),
+  });
+  await postPlanWork({ work: admitted2.work_id, client, author: BOB(), firm: FIRM_A() });
+  assert.equal(conflictRows(await listReviewQueue(BOB(), { scope: { client_id: client } })).length, 0,
+    "the EXPENSE arm still admits filed documents alone — this widening is the revenue side's");
 });
