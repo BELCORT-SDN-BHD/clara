@@ -1,0 +1,86 @@
+{
+  "axis": "standards",
+  "lane": "wave3-lane04",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head_checked": "c49ebd030",
+  "tickets": [932, 882, 975, 978],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (rules 1-10, wave-2 addendum, wave-3 addendum)",
+    "docs/plan/active/riders-2026-09-20/RIG.md (including the wave-2/wave-3 addenda)",
+    ".claude/skills/code-review/SKILL.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/db/README.md (0277/0278/0279 sections, house migration law, \"Redo (#957)\")",
+    "packages/runtime/README.md (the FA belt's fourth outcome section)",
+    "apps/web/README.md (\"one decision, one key\" / depreciation surfaces section)",
+    "gh issue view 932/882/975/978 --comments (owner rulings for #932, #882, #975; #978 has no comments, body is the whole spec)",
+    "reports/wave3-lane04-ticket932.md, ticket882.md, ticket975.md, ticket978.md"
+  ],
+  "verification_performed": [
+    "git status (clean) / git log ffe63a0dd08..HEAD --oneline --stat in the lane worktree (C:\\Users\\zhant\\Desktop\\clara-wt\\651): 21 commits across four tickets, matches all four reports; every commit carries 'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>' (checked programmatically, zero missing).",
+    "git diff ffe63a0dd08...HEAD --name-only: no PRD.md/ARCHITECTURE.md edit; only NEW migration files (0277/0278/0279), no applied (pre-base) migration touched.",
+    "node scripts/check-frozen-workflows.mjs: OK, 312 frozen files verified, no manifest diff. node packages/runtime/scripts/check-parts-parity.mjs: OK. packages/runtime/lib/depreciation-run.ts confirmed untouched (grep, zero hits) matching #975's frozen-successor-contract claim.",
+    "Read all three migrations (0277: 1352 lines, 0278: 279 lines, 0279: 1262 lines) in full or via targeted grep: prestate-pin do-blocks, 'security definer set search_path = clara, pg_temp' on every new/recut function, 'force row level security' on both new tables (fa_account_depreciation_policies, fa_arrears_resolutions), revoke-all-from-public + grant-to-clara_authenticated-only bulk loops (§D idiom), append-only/no-delete/no-truncate triggers, §T tail re-reading owner/definer/search_path/ACL for every touched function -- all present in all three files.",
+    "Independently recomputed sha256 of the three migration files (sha256sum) and confirmed they equal the values recorded in apps/web/tests/firm-scope-db-pins.corpus.ts's two new reviewed-dynamic-SQL-barrier entries for 0277 and 0279 -- both match exactly.",
+    "Confirmed clara.record_fa_arrears_resolution's bulk grant loop (0279 SD) grants EXECUTE to clara_authenticated only, never clara_runtime -- corroborates the #975 report's successor-contract claim that Clara may state the arrears question but never answer it (materiality is the accountant's judgement under IAS 8).",
+    "gh issue view 975 --comments: read in full; the owner's 2026-09-20 ruling and Agent Brief's six acceptance criteria all correspond one-to-one to what 0279 and the web/runtime changes implement (asks vs. parks, exactly two resolutions chosen by neither, durable record with author/timestamp, later-run honours the record, closed-year-arrears vs. locked-period-refusal both unchanged/distinct, migration at the next free number).",
+    "Re-ran (packages/db, PGHOST=127.0.0.1 PGPORT=55744 PGDATABASE=clara_l04, full 174-import gate chain, --test-concurrency=1): fa-depreciation-policy.test.mjs + fixed-asset-acquisition.test.mjs + fa-arrears-resolution.test.mjs + depreciation-history.test.mjs together -> 62/62 pass, 0 fail, 0 skipped (11+25+7+19, matches every individual ticket report's own count exactly).",
+    "Re-ran operation-census.test.mjs + rig-isolation.test.mjs with the same gate chain: 33 tests, 32 pass, 1 skipped (T19 poison-role, the known RIG.md-documented destructive skip; no CLARA_RIG_ALLOW_RESET/CLARA_RIG_ALLOW_ROLE_SWEEP was ever set by this reviewer).",
+    "Re-ran packages/runtime: node --test tests/reconcile-fa-unit.test.mjs -> 20/20 pass, matching the #975 report.",
+    "Re-ran apps/web unit files touched (lib/registers/fixed-assets.test.ts, fa-depreciation-policies.test.ts, depreciation.test.ts, components/registers/fa-row-actions.test.tsx, components/firm/fixed-asset-incomplete-affordance.test.tsx, components/registers/fa-run-preview.test.tsx) in one run: 47/47 pass, 0 fail.",
+    "pnpm typecheck (repo root): clean, apps/web + packages/runtime both Done. CI=true GITHUB_ACTIONS=true pnpm lint (repo root, as the runner sees it): clean across apps/web, packages/db, packages/runtime, packages/reporting-render.",
+    "npx eslint on the two packages/db test files the #932 report says it fixed for unused imports (fa-depreciation-policy-fixtures.mjs, fa-depreciation-policy.test.mjs) plus the #882/#975 test files: clean, 0 errors -- confirms the fix round actually landed and holds.",
+    "Read every non-test diff hunk under apps/web/components/registers, apps/web/components/firm, apps/web/lib/registers, packages/runtime/lib/reconciler-fa.mjs for the smell baseline (Mysterious Name, Duplicated Code, Feature Envy, Data Clumps, Primitive Obsession, Repeated Switches, Shotgun Surgery, Divergent Change, Speculative Generality, Message Chains, Middle Man, Refused Bequest)."
+  ],
+  "findings": [
+    {
+      "ticket": 978,
+      "severity": "minor",
+      "kind": "baseline_smell",
+      "smell": "Duplicated Code",
+      "title": "completeIntent duplicates reviseIntent's particulars-serialisation block verbatim, in the same file",
+      "file": "apps/web/lib/registers/fixed-assets.ts",
+      "lines": "326-331 (new) vs. 396-400 (pre-existing reviseIntent, unchanged by this diff)",
+      "evidence": "Both functions now contain the identical five-line shape:\n  const p = args.particulars as Record<string, unknown>;\n  const particulars = Object.keys(p)\n    .sort()\n    .map((k) => `${k}=${JSON.stringify(p[k] ?? null)}`)\n    .join(\",\");\ngrep -n \"Object.keys(p)\" apps/web/lib/registers/fixed-assets.ts returns exactly these two hits, both in this one file. completeIntent's own doc comment even says '...the same convention reviseIntent below uses,' naming the duplication it is choosing to repeat rather than share.",
+      "judgement": "A labelled judgement call per the smell baseline, not a hard violation -- the ticket's own brief asked for 'following the existing reviseIntent/authorityIntent pattern,' which this satisfies. Extracting a small `serializeParticulars(p: Record<string, unknown>): string` helper both functions call would remove the duplication without changing either intent tuple's shape or any test's expected string. No documented repo standard endorses the duplication, so the baseline is not overridden here.",
+      "required_fix": "Optional: extract the shared five-line block into one helper (e.g. serializeParticulars) called from both completeIntent and reviseIntent."
+    },
+    {
+      "ticket": 978,
+      "severity": "note",
+      "kind": "test_quality",
+      "title": "The disposeIntent test's title claims 'memo EXCLUDED' but memo is excluded structurally (not part of the type at all), so nothing in the test body demonstrates the exclusion at runtime",
+      "file": "apps/web/lib/registers/fixed-assets.test.ts",
+      "lines": "test named \"#978 disposeIntent: one decision while the money facts are unchanged, a new one the moment any of them move — memo EXCLUDED\"",
+      "evidence": "disposeIntent's own parameter type (apps/web/lib/registers/fixed-assets.ts) has no `memo` field at all, so no object literal that includes it can be passed without a TypeScript error (short of an `as any` cast the test does not use). The test asserts four 'a different X yields a different intent' cases (proceeds, date, cost portion, proceeds account) and ends with a code comment explaining the door's own memo-exclusion, but never constructs two calls that differ only by memo and asserts the resulting keys are equal -- because there is no runtime way to do so given the type. The behaviour the title claims to prove is real (confirmed by reading disposeIntent's signature and the door's own 0041:3667-3671 comment), but it is proven by the type system and documented by a comment, not demonstrated by this test's assertions.",
+      "judgement": "Not a test-quality defect in the /tdd sense (no tautology, no internal-collaborator seam, no mock of something the repo controls) -- it is a naming precision nit: the test name overstates what its own assertions show.",
+      "required_fix": "Optional: reword the test title to something like '...money facts drive the decision; memo has no field to test because the type excludes it' or drop the 'memo EXCLUDED' clause from the title and leave it to the comment."
+    }
+  ],
+  "house_law_compliance": {
+    "migrations_touched": ["0277_fa_default_depreciation_policy.sql", "0278_fa_belt_birth_convention.sql", "0279_fa_closed_year_arrears.sql"],
+    "checks": [
+      "Header + prestate + change + tail present in all three, verified by reading/grepping section markers (do $..._pre$ / §A.. / do $..._tail$).",
+      "Prestate pins for every recut/relied-upon body: MEASURED sha256(prosrc) pins present in all three files' prestate blocks (not carried over from 0216/0227, per the wave-3 addendum) -- spot-checked textually against the pins each ticket report separately claims to have measured.",
+      "Every new/recut function: 'language plpgsql[...] security definer set search_path = clara, pg_temp' -- confirmed via grep across all three files, zero exceptions.",
+      "Both new tables (fa_account_depreciation_policies, fa_arrears_resolutions): 'enable row level security' + 'force row level security' + owner-only + scoped-select policies + no-delete/no-truncate triggers -- confirmed.",
+      "Bulk ACL loop (revoke all from public / grant execute to clara_authenticated / alter owner to clara_fn_owner) present for every new door in 0277 (§D) and 0279 (§D); 0278 is comment-only and its own tail explicitly re-asserts neither function's ACL moved.",
+      "record_fa_arrears_resolution and set/retire_fa_depreciation_policy: clara_runtime holds no EXECUTE (confirmed by reading the grant loops -- clara_authenticated only), matching the owner rulings that materiality (and the policy set) are human-only judgements.",
+      "No applied (pre-base) migration edited: git diff --name-only under packages/db/migrations shows only the three new files.",
+      "Preintegration gate modules present and appended last, in migration order, in packages/db/package.json's gate chain for all three (fa-depreciation-policy-, fa-belt-birth-convention-, fa-arrears-resolution-preintegration-gate.mjs).",
+      "rig-meta.mjs cohorts present for 0277 (FA_DEFAULT_DEPRECIATION_POLICY_0277_COHORT) and 0279 (FA_CLOSED_YEAR_ARREARS_0279_COHORT), both bimodal per house convention; 0278 correctly claims and the reviewer confirms no cohort is owed (no function minted, no grant moved).",
+      "No PRD.md / ARCHITECTURE.md edit. No frozen-workflow manifest diff (check-frozen-workflows.mjs: OK). packages/runtime/lib/depreciation-run.ts (frozen, in frozen-workflows.json) confirmed untouched."
+    ]
+  },
+  "tdd_compliance": {
+    "verdict": "vertical slicing followed, with one documented and justified exception",
+    "notes": [
+      "git log --stat across all 21 commits shows migration + fixtures + tests landing together per slice, never a standalone battery of *.test.mjs files preceding any implementation -- no horizontal slicing found.",
+      "#975's guard in clara._fa_run_period_core shipped all three branches (unresolved/ask-or-park, answered-reopen_prior/ask-or-park, all-years-folded/proceed) in its first commit rather than one branch per test, which the report itself names and justifies ('a half-guard would have let the machine lane POST what the human lane is forbidden to post -- a wall with a hole -- for the length of a commit'). The two branches not driven by a red test at slice time (p975.reopen, p975.parks) were each given the rule-4 vacuity control instead (subject deliberately broken, cell seen to fail for the stated reason, migration restored byte-for-byte and redone) -- independently plausible from the report's own description of the break/restore/redone sequence and consistent with WORK-ORDER.md rule 4's own allowance for exactly this situation. This reviewer did not re-drive the vacuity break itself (it required editing an applied-then-rolled-back migration state this reviewer, being read-only, could not reproduce without applying destructive changes), so this item is corroborated by the report's internal consistency and the surrounding cells' behaviour, not independently re-proven.",
+      "Tests read at the public-interface seam throughout (door wrapper functions, component act()+mocked-fetch, SQL doors driven end to end) -- no test observed reaching a private function or an internal collaborator instead of the seam the brief names.",
+      "Mocking confined to system boundaries: fetch (web unit), a mocked Supabase REST/RPC surface (e2e), and the database itself for db tests (no mock of anything the repo controls)."
+    ]
+  },
+  "summary": "Reviewed the STANDARDS axis for riders wave 3, lane 04 (#932, #882, #975, #978 -- fixed assets) against AGENTS.md, CONTEXT.md, WORK-ORDER.md/RIG.md (including the wave-2 and wave-3 addenda), the /tdd skill, and the house migration law, over git diff ffe63a0dd08...HEAD. All three new migrations (0277/0278/0279) fully satisfy the documented house shape: measured prestate pins (never carried over from an older migration), SECURITY DEFINER/search_path/owner preserved and re-checked in the tail, FORCE ROW LEVEL SECURITY plus zero application-role DML on both new tables, preintegration gates and rig-meta cohorts present and correctly ordered, and independently-recomputed sha256 hashes match the values recorded in the shared firm-scope-db-pins corpus exactly. No applied migration was edited, no PRD/ARCHITECTURE edit, no frozen-workflow manifest diff, and the one frozen file this lane's #975 successor contract depends on (depreciation-run.ts) is confirmed untouched. Re-running the claimed test batteries (62/62 db focused files, 33 operation-census/rig-isolation with the one known T19 skip, 20/20 runtime, 47/47 web unit files touched) reproduced every count the four ticket reports claim exactly, and typecheck/CI-mode lint are both clean. TDD vertical slicing was followed at the commit level throughout, with one deliberate, reported, and rule-4-compensated exception in #975. Two minor findings survive review, both judgement calls rather than hard violations: a small Duplicated Code smell (completeIntent re-implements reviseIntent's particulars-serialisation logic verbatim in the same file) and a test-naming precision nit (a disposeIntent test title claims a runtime-verified 'memo EXCLUDED' behaviour that is actually enforced by the type system and only documented, not asserted, in the test body). Nothing found rises to a documented-standard violation."
+}

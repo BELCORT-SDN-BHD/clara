@@ -1,0 +1,135 @@
+{
+  "axis": "SPEC",
+  "lane": "wave 3 / lane 10",
+  "branch": "riders/w3-lane10",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\660",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD (33 files, +1094/-495)",
+  "head": "3f15508b4",
+  "commits": 21,
+  "tickets": [1015, 1016, 1018, 1023, 1028],
+  "spec_source": "GitHub issue bodies (gh issue view <n> --json number,title,state,body,comments). All five have zero comments; each issue body's own Agent Brief is therefore the newest and only contract. No owner ruling comment dated 2026-09-20 exists on any of the five.",
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "SPEC-1015-01",
+      "ticket": 1015,
+      "severity": "blocker",
+      "kind": "requirement implemented wrongly / evidence does not reproduce",
+      "title": "The new AC2 cell asserts the exact size of the WHOLE live document census, so it reds on any database that carries other live document-processing rows — the very contamination-dependence #1015 exists to remove. It is red on this lane's own database today.",
+      "file": "packages/runtime/tests/rollback-preflight.test.mjs:630",
+      "ticket_line": "\"A census call that explicitly asks for the full, unscoped document-processing picture still receives it.\" and (AC3) \"The existing test that discovered this gap ... passes against a database carrying unrelated queued document-processing tasks.\"",
+      "evidence": "The cell 637.pf: #1015 — an explicit ask for the FULL document picture (documentTaskIds: null) is honoured even alongside a task-id scope asserts `assert.equal(out.tasks.length, noise.length, ...)` where `out` is `censusUnboundTasks(query, { taskIds: [randomUUID()], documentTaskIds: null })` — an unscoped read of clara.document_processing_tasks. It is therefore green only on a database whose live document census is EMPTY apart from the 2 rows the cell plants. RE-RUN BY THIS REVIEW, twice, on a fresh clone of clara_l10 (CREATE DATABASE clara_rev1015 TEMPLATE clara_l10, World bootstrapped via `pnpm exec bootstrap`, dropped afterwards): `node --test tests/rollback-preflight.test.mjs` -> `# tests 33 / # pass 32 / # fail 1`, `not ok 19`, AssertionError `18 !== 2` (16 unrelated queued clara-classify-llm:v1 rows + the 2 planted). The report (docs/plan/active/riders-2026-09-20/reports/wave3-lane10-ticket1015.md) claims for this criterion 'Result: PASS' and a gate count of '33 / 33 pass, 0 fail, 0 skip'; neither reproduces on this branch against the lane's own database. The other two new cells (AC1, and the AC3 seeding of the pre-existing B3 cell) are contamination-tolerant and DID pass (ok 17, ok 18). Provenance of the contamination, measured: one run of packages/db/tests/delta-contract.test.mjs on this cluster leaves 4 additional live queued document_processing_tasks (LIVE BEFORE 16 -> LIVE AFTER 20, measured on the clone with the 84-flag gate chain); clara_l10 carries 12 such rows timestamped across the window in which ticket #1016's own report says it ran that exact file three times as its gate evidence. So #1015's AC2 cell and #1016's own required gate runs cannot both be green on one database — the two tickets in this same lane are mutually incompatible as written. CI exposure (plausible, not run here): 14 runtime test files that write clara.document_processing_tasks sort BEFORE rollback-preflight.test.mjs in `node --test --test-concurrency=1 \"tests/**/*.test.mjs\"`, so any one of them leaving a queued/running row reds this cell on the runner too.",
+      "required_fix": "Stop asserting the total. The loop immediately below (lines 631-633) already proves what the AC asks — that each planted noise row IS returned when the key is named. Either delete the `assert.equal(out.tasks.length, noise.length, ...)` line, or replace it with a comparison scoped to the planted ids (e.g. assert every planted id is present AND that the same call with the key ABSENT returns none of them, which is the real 'distinguishable' claim the brief makes). Then re-run the whole file against a database that already carries unrelated live document-processing rows and report that count, as AC3 requires for its neighbour cell."
+    },
+    {
+      "id": "SPEC-1018-01",
+      "ticket": 1018,
+      "severity": "major",
+      "kind": "requirement partial",
+      "title": "packages/runtime/tests/body-census-guard-db.test.mjs still carries its own independent LOCAL_HOSTS + ALLOWED_DB + parsed-DSN copy of the same gate; it spawns a real World and is CI-wired as a World leg, and the census test's documented exclusions never mention it.",
+      "file": "packages/runtime/tests/body-census-guard-db.test.mjs:38-67",
+      "ticket_line": "\"Every standalone World e2e driver that previously defined its own inline gate now calls the shared module instead, with no driver defining a second, independent copy.\" and \"Changing which database names are acceptable becomes a one-line change in the shared module, reflected by every driver without further edits.\"",
+      "evidence": "`git grep -l ALLOWED_DB <base> -- packages/runtime` returns 24 files; 23 of them are the *-e2e.mjs drivers the diff converts, and the 24th is body-census-guard-db.test.mjs, which is untouched by the diff and still declares `const LOCAL_HOSTS = new Set([\"127.0.0.1\", \"localhost\"])`, `const ALLOWED_DB = /^clara_(rt_test|wave_b_ci)$/` and its own `worldDsnAgrees()` re-implementation of dsnAgreesWithEnv. Its own file header says it is 'HARD-GATED like every other file in this suite that spawns a real world: a loopback host and a PGDATABASE in {clara_rt_test, clara_wave_b_ci}, with WORKFLOW_POSTGRES_URL parsed field by field'; it sets CLARA_START_WORLD=1 and spawns the built image (scripts/serve.mjs + .output/server/index.mjs); and CI runs it as a World leg exactly like the 23: `.github/actions/db-live-gates/action.yml:586` -> `node scripts/ci/world-gate.mjs --test tests/body-census-guard-db.test.mjs`. local-db-gate-drivers-census.test.mjs's header names shutdown-e2e.mjs and world-e2e.mjs as deliberate exclusions ('never carried this gate at all' — verified true: both only require WORKFLOW_POSTGRES_URL presence) but is silent about this file. packages/runtime/README.md's new #1018 section states 'so a driver can never again carry a second, disagreeing copy of the check', which is not true of this file. Consequence the ticket's Desired behaviour names directly: admitting a new database-name convention is still a two-place edit today.",
+      "required_fix": "Either convert it (it can keep its skip-not-throw shape by using isLoopbackHost + allowedDbPattern(...).dbRegex + dsnAgreesWithEnv from the shared module instead of its own three copies, and be added to the census roster with a note that it is a .test.mjs whose gate skips rather than throws), or — if the lane holds it out of scope — say so explicitly in local-db-gate-drivers-census.test.mjs's header beside shutdown-e2e/world-e2e with the reason, and soften the README's 'can never again' claim. Silence is the one option that leaves a reader believing the consolidation is complete when it is not."
+    },
+    {
+      "id": "SPEC-1018-02",
+      "ticket": 1018,
+      "severity": "minor",
+      "kind": "requirement partial",
+      "title": "AC3's census is a hand-maintained roster keyed on two specific identifier names, so a NEW driver that hand-rolls a gate, or an existing one that renames its constants, is not caught.",
+      "file": "packages/runtime/tests/local-db-gate-drivers-census.test.mjs:26-51",
+      "ticket_line": "\"...verified by a test that enumerates the driver files and confirms each imports the shared gate.\"",
+      "evidence": "DRIVERS is a frozen literal of 23 filenames, and censusDriverSource only rejects the literal identifiers `ALLOWED_DB` and `LOCAL_HOSTS = new Set`. The AC's own words ('enumerates the driver files') are satisfied literally, so this is a completeness observation rather than a breach: a driver added tomorrow is simply absent from the list, and a copy spelled `const ALLOWED = ...` passes. Re-run by this review: `node --test tests/local-db-gate.test.mjs tests/local-db-gate-drivers-census.test.mjs` -> 14/14 and the census's 4 cells green (18/18 total as the report claims).",
+      "required_fix": "Optional, and cheap: derive the roster instead of typing it — glob tests/*-e2e.mjs, subtract the two documented non-gate files, and assert the derived set equals DRIVERS, so a new driver reds the census on day one instead of being silently out of scope. (Left as a judgement call: the AC does not demand it.)"
+    },
+    {
+      "id": "SPEC-1028-01",
+      "ticket": 1028,
+      "severity": "minor",
+      "kind": "requirement implemented wrongly",
+      "title": "The new disjointness branch re-spells the estate's liveness predicate as a Work-status set only, dropping the committed-receipt arm of clara._intake_batch_live_children — so a parent the belt settled CORRECTLY can still red as 'the belt settled it prematurely'.",
+      "file": "packages/runtime/tests/intake-batch-e2e.mjs:690, 920-930",
+      "ticket_line": "\"The cancellation belt's per parent outcome and its blocked counter, and the estate's per parent report of a stop blocked by a canceller who has lost authority: these are what distinguish this race from a belt regression and their meaning must not change.\" and AC: \"A poisoned parent whose children the engine has finished is either prevented or reported as a correct outcome, never as an assertion failure that reads like a belt defect.\"",
+      "evidence": "TERMINAL_WORK = {completed, refused, failed, cancelled, expired} matches the status half of the estate's own definition exactly (read live off clara._intake_batch_live_children on clara_l10: `w.status not in ('completed','refused','failed','cancelled','expired')`), but that function has a SECOND arm the leg does not carry: `and not exists (select 1 from clara.operation_receipts o where o.work_id = m.work_id and o.outcome = 'committed')`. A child that is not live to the belt because it holds a committed receipt, while its Work status is still non-terminal, makes pChildrenAllTerminal false; the leg then throws \"firm P's parent was declared done while it still had a LIVE child — the belt settled it prematurely, which IS the defect this leg exists to catch\" about behaviour that is correct. Not observed in either run I made (both runs' firm-P children were straightforwardly failed or still live), so this is a latent false-red rather than a reproduced one.",
+      "required_fix": "Read the estate's own predicate rather than a second spelling of it: replace the status-set census with `select 1 from clara._intake_batch_live_children($1)` (or whatever door the leg is allowed to call) and branch on whether it returns rows. That is also what the ticket means by the estate's per-parent report being the discriminator."
+    },
+    {
+      "id": "SPEC-1023-01",
+      "ticket": 1023,
+      "severity": "minor",
+      "kind": "stale claim left contradicting the branch",
+      "title": "All three onboarded drills still assert in their own file headers that no CI leg exists for them — the claim #1023 just falsified, sitting directly beside the recipe it qualifies.",
+      "file": "packages/db/tests/checkout-convergence-upgrade.test.mjs:21, packages/db/tests/rig-runtime-upgrade.test.mjs:15, packages/db/tests/wave-a-upgrade.test.mjs:13",
+      "ticket_line": "Work order rule 9 ('Docs in the same commits: the module README your change affects'); the ticket's own out-of-scope covers only 'Changing the drills' own test bodies or the disposable-database guard's own logic', not a header comment.",
+      "evidence": "Verbatim on the branch: checkout-convergence-upgrade.test.mjs 'There is no CI leg for this file yet — see packages/db/tests/README.md's #845 section — so this recipe is the only place this drill's destructive path runs'; rig-runtime-upgrade.test.mjs '...documented no PGDATABASE recipe at all and has no CI leg'; wave-a-upgrade.test.mjs 'No CI leg exists for this file yet'. The implementer did update packages/db/tests/README.md's #845 section and reset-gate-routing.test.mjs's own header (commits 055bfd881, 90064494f) but not these three, so the README and the files it points at now disagree.",
+      "required_fix": "One-line edit per file: point the sentence at the #1023 step in .github/actions/closed-wave-upgrade-drills/action.yml instead of asserting the gap is open. No test body changes."
+    },
+    {
+      "id": "SPEC-1023-02",
+      "ticket": 1023,
+      "severity": "note",
+      "kind": "requirement not verifiable from the lane",
+      "title": "AC2 ('All three pass in CI') remains open — the report says so honestly, and the integrator has to close it.",
+      "file": ".github/actions/closed-wave-upgrade-drills/action.yml:373-458",
+      "ticket_line": "\"[ ] All three pass in CI.\"",
+      "evidence": "The wiring is verified and I re-ran the proof: `node --test --test-concurrency=1 $GATES tests/reset-gate-routing.test.mjs` on clara_l10 -> 8/8 pass, including the three new #1023 cells (right file, CLARA_RIG_ALLOW_RESET=1, CLARA_ALLOW_DESTRUCTIVE=1, the documented disposable name, that name passing lib/guard.mjs's own EPHEMERAL_DB, and a matching --drop-database cleanup step). The action is reached only from ci.yml:463's `closed-wave-drills` job, gated `if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'`, timeout-minutes 120, which already runs 10 drill pairs plus wave-e-contract-drills; the 0186 drill replays 0001->0185 then 0186 and its wall-clock cost is unmeasured (the report says so). Nothing about the destructive body actually completing on a runner is evidenced anywhere on this branch.",
+      "required_fix": "Integrator action, not a code change: dispatch the `closed-wave-drills` job once (workflow_dispatch) and record the three steps' results and durations before AC2 is ticked. If the job times out at 120 minutes with the three added, that is the finding, not the drills."
+    },
+    {
+      "id": "SPEC-1023-03",
+      "ticket": 1023,
+      "severity": "note",
+      "kind": "fragile evidence",
+      "title": "The #1023 cells locate a step by splitting the YAML on `- name:` and taking the first chunk that contains the drill's path — so a future comment block mentioning `tests/<file>` above a DIFFERENT step would silently point the assertion at the wrong step.",
+      "file": "packages/db/tests/reset-gate-routing.test.mjs:278-282",
+      "ticket_line": "\"Each of the three drills has a CI job or step that runs its destructive reset-and-re-migrate path against a database CI itself provisions as disposable.\"",
+      "evidence": "`yamlText.split(/\\n(?= {4}- name:)/).find((step) => step.includes(`tests/${file}`))` attaches each step's preceding comment block to the PREVIOUS step's chunk. It is correct today — the 8/8 run above includes the per-step `assert.equal(dbMatch[1], db)`, which would have failed on a wrong chunk — but the coupling is to comment prose, not to the step's `run:` block.",
+      "required_fix": "Optional: match on the invocation line itself (a line containing both `node --test` and `tests/<file>`) rather than on `step.includes(...)` over the whole chunk, or parse the action with js-yaml and read `steps[].run`, which the implementer already did once by hand to catch the YAML comment-truncation defect."
+    },
+    {
+      "id": "SPEC-1016-01",
+      "ticket": 1016,
+      "severity": "note",
+      "kind": "sibling gap the fix does not reach",
+      "title": "packages/db/tests/eta-behaviour-phase.mjs's CEREMONY_EXCLUDED_PAIRS still names only two of the three 'ships dark' evaluators, so that battery's blanket deploy sweep flips prepayment_schedule v1 as a side effect — the same 'some but not all' inconsistency #1016 fixed on the count side.",
+      "file": "packages/db/tests/eta-behaviour-phase.mjs:89-99",
+      "ticket_line": "\"The test's expected deployed count must match whatever the real verifier counts as deployed, in every witness shape the suite is meant to tolerate\" (out of scope: \"Changing which evaluators are registered or how deploy ceremonies work\").",
+      "evidence": "`const CEREMONY_EXCLUDED_PAIRS = \"(('evaluate_fs_pack_agent',1),('evaluate_metric',2))\"` and `ensureEvaluatorDeployed()` runs `update clara.evaluator_versions set deployed=true where not deployed and (evaluator_name, version) not in ${CEREMONY_EXCLUDED_PAIRS}`. delta-contract.test.mjs and epsilon-contract.test.mjs both carry a CEREMONY_EXCLUDED_V3 = prepayment_schedule v1; eta does not. This is strictly outside #1016's own ACs (it is a ceremony-flip, not the verifier's count) and predates the branch, so it is recorded, not charged to the ticket. Note it is also a plausible route by which prepayment_schedule@1 becomes deployed on a reused database — the exact witness #1016 exists to tolerate.",
+      "required_fix": "None required of #1016. Worth a needs-triage ticket so the three files' 'ships dark' sets are one answer."
+    },
+    {
+      "id": "SPEC-1028-02",
+      "ticket": 1028,
+      "severity": "note",
+      "kind": "accepted weakening, recorded",
+      "title": "The negative is now read as two sequential reads (parent state, then children), so a genuine premature settlement whose children terminalise in the gap passes.",
+      "file": "packages/runtime/tests/intake-batch-e2e.mjs:930-945",
+      "ticket_line": "\"...or the assertion is made precise: the poisoned parent must be unfinished while it still has live children\" — the option the ticket itself offers and the implementer chose.",
+      "evidence": "`const pFinal = await batchState(pBatch);` then, in the else branch, a second round trip reading clara.accounting_work. Between the two a live child can go terminal, and the leg then records the #1028 race rather than throwing. Inherent to the sanctioned 'make the assertion precise' option; the refusal-count and attribution assertions that run earlier are the belt-regression net and they are untouched (verified in both runs below).",
+      "required_fix": "None. Recorded so a later reader does not mistake the remaining window for an oversight."
+    }
+  ],
+  "verified_by_this_review": [
+    "#1015 AC1 — `637.pf: #1015 — a census scoped by task ids ignores unrelated document-processing tasks in other lanes and firms` PASSES (ok 18) on a World-bootstrapped clone of clara_l10 carrying 16 unrelated live document rows; both the taskIds and workIds shapes return exactly the caller's own task.",
+    "#1015 AC3 — the pre-existing `637.pf: B3 — two sources sharing one task_kind count the task ONCE` cell PASSES (ok 17) with the same contamination present, and no original assertion in it was removed or weakened (read off `git diff <base>...HEAD -- packages/runtime/tests/rollback-preflight.test.mjs`).",
+    "#1015 AC4 — preflight() has zero changed lines; its own scoped call already passed `documentTaskIds: scope.documentTaskIds ?? []` at every call site, so the new presence-of-key rule cannot reach it. 32 of the file's 33 cells pass (the 33rd is SPEC-1015-01).",
+    "#1016 AC2 — clara_l10 is exactly the witness the ticket describes (prepayment_schedule@1 deployed=true, evaluate_fs_pack_agent@1 and evaluate_metric@2 still false; clara.verify_evaluator_freeze() reads {\"verified_deployed\":6,\"verified_registered\":8}). With the fix, `node --test --test-concurrency=1 $GATES tests/delta-contract.test.mjs` -> 60/60 pass, `ok 18` on the freeze-verifier cell. Without it the hand-derived expectation would be 5 against a real 6, i.e. the reported red, confirmed arithmetically from the live read rather than by editing the file.",
+    "#1016 AC3 — the registered-count assertion and its own hand-derivation are untouched in the diff.",
+    "#1018 AC1 — `node --test tests/local-db-gate.test.mjs tests/local-db-gate-drivers-census.test.mjs` -> 18/18 pass (14 unit + 4 census).",
+    "#1018 AC2 (for the 23 *-e2e.mjs drivers) — `git grep -l 'ALLOWED_DB'` and `'LOCAL_HOSTS'` at HEAD return no *-e2e.mjs file; every one of the 23 imports ./local-db-gate.mjs and calls assertLocalDbGate. (The 24th file carrying the gate is SPEC-1018-01.)",
+    "#1018 AC4 — MECHANICALLY verified, not read: for each of the 23 drivers I evaluated the base commit's own `ALLOWED_DB` regex and the HEAD `allowedDbPattern(...)` composition side by side against a 22-name corpus (clara_rt_test, clara_wave_b_ci, clara_intake_ci, clara_l01/l10/l99/l1/l999, clara_12/123/1234/12345, the _world variants, clara_prod, prefix/suffix near-misses). Result: SAME on the corpus for all 23 — no driver gained or lost an admitted name. I also compared each base driver's PGDATABASE regex against its own base DSN string regex: no pair disagrees, which corroborates the report's claim that work-journal-e2e's historical drift was already resolved under #980 before this ticket. The per-driver DSN-check flags (checkDsnString / checkDsnParsed / neither) match each base file's own checks one for one, including work-knowledge-e2e keeping no DSN check at all.",
+    "#1023 AC1 and AC3 — `node --test --test-concurrency=1 $GATES tests/reset-gate-routing.test.mjs` on clara_l10 -> 8/8 pass (5 pre-existing #845 cells + 3 new #1023 cells). The three new steps follow the established 11-drill pattern (create database, drill with both flags, `if: always()` cluster cleanup with --sweep-roles), and no line of rig-reset-guard.mjs, lib/guard.mjs or the drills' own reset() routing is touched by the diff.",
+    "#1028 AC1/AC2/AC3/AC5(1 of 5) — RAN THE LEG TWICE under WSL (Linux, /opt/node/bin/node v22.23.2) against throwaway clones of clara_l10 with a freshly bootstrapped World, each dropped afterwards. Clean run (clara_711): exit 0, `[p636] LEG4 firm P refusals COUNTED: 2 refusal(s), blocked=1, door=canceller_not_active`, `[p636] LEG4 firm Q terminal after 1 sweep(s)`, `[p636] LEG4 firm P is honestly still stopping — a live child remains`, `ALL LEGS PASSED`. `CLARA_P636_LEG4_FAULT=engine_wins` run (clara_712): exit 0, `[p636] LEG4 FAULT engine_wins: firm P's children reached terminal after 5890ms — the World finished them before this leg ever checked`, then `[p636] LEG4 firm P's parent reached 'cancelled' because the World finished its own children first (the #1028 race, not a belt defect) — refusals were still COUNTED (2) and ATTRIBUTED (blocked=1, door read canceller_not_active during polling) before the engine got there.`, `ALL LEGS PASSED`. So the race is recorded as a correct outcome rather than thrown, and the three things the leg proved before are still asserted and still observed in both runs.",
+    "TERMINAL_WORK's status set matches the status half of clara._intake_batch_live_children exactly (read live); the missing half is SPEC-1028-01."
+  ],
+  "not_re_run_by_this_review": [
+    "#1028 AC4's other two halves — the pre-#1028 red under engine_wins and the deliberately-broken-belt red — would require editing tracked files, which this reviewer may not do. Accepted from the report (throwaway clara_704 and clara_705) as claimed, unverified here.",
+    "#1028 AC5's remaining 4 of 5 consecutive clean runs. One clean run reproduced.",
+    "`CI=true GITHUB_ACTIONS=true pnpm lint` and `pnpm typecheck` — gate claims, not spec criteria, and re-running them concurrently with the timing-sensitive World legs would have perturbed those. Left to the Standards axis and the integrator.",
+    "Any actual CI run of the three new closed-wave drill steps (SPEC-1023-02)."
+  ],
+  "rig_left_as_found": "Three throwaway databases were created on port 55750 for this review (clara_rev1015, clara_711, clara_712), each a TEMPLATE clone of clara_l10 with its own World bootstrap, and all three were dropped; `select datname from pg_database where datname like 'clara%'` now returns clara_l10 alone. CLARA_RIG_ALLOW_RESET and CLARA_RIG_ALLOW_ROLE_SWEEP were never set, and no second from-scratch chain was run. `git status --short` in the worktree is empty; no tracked file was edited and nothing was committed. Note for the integrator: running delta-contract.test.mjs on clara_l10 as part of this review's #1016 re-check added 4 live queued document_processing_tasks to the lane database (16 now), which is the same accumulation SPEC-1015-01 is about.",
+  "summary": "Four of the five tickets land what their briefs asked for, and the two biggest pieces of work hold up under re-running: #1018's conversion of all 23 World e2e drivers is provably name-for-name non-widening (checked mechanically against each driver's own base regex, not read), and #1028's new disjointness branch was reproduced twice on live clones, including its engine_wins fault, which records the race instead of failing. One blocker: #1015's new 'explicit full ask' cell asserts the exact size of the whole live document census, so it reds on any database carrying other live document-processing rows — it is red on this lane's own database right now (32/33, 18 !== 2, reproduced twice), and the rows that red it are consistent with #1016's own gate runs in the same lane. One major: #1018's consolidation misses body-census-guard-db.test.mjs, which keeps an independent copy of the identical gate, spawns a real World and is CI-wired as one, and is not named among the census test's documented exclusions. The rest are minor or notes: three drill headers still claim they have no CI leg after #1023 gave them one, #1023's AC2 ('all three pass in CI') is honestly open and needs an integrator dispatch, and #1028's leg re-spells the estate's liveness predicate without its committed-receipt arm."
+}

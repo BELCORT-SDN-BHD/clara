@@ -1,0 +1,103 @@
+{
+  "axis": "spec",
+  "lane": "wave3-lane03",
+  "branch": "riders/w3-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "base": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head": "cb8040d542c30d841adc5c3552fcc291c7793ec0",
+  "commits": [
+    "c8da2a830 docs(context): #958 name the bank tie-out's GL balance, forbid a cash label",
+    "529608478 feat(web): #1001 render the client home's cash composition, headlined by the closing balance",
+    "86f62fb4c feat(db): #1002 the second-pass cash-account-set membership editor's own read",
+    "ea9d22aed feat(web): #1002 type the membership door and its hydration",
+    "cb8040d54 feat(web): #1002 the second-pass cash-account-set membership editor"
+  ],
+  "spec_source": "GitHub issues #958, #1001, #1002 (gh issue view <n> --comments); in each case the single owner-ruling comment dated 2026-09-20 is also the newest Agent Brief and wins.",
+  "verdict": "accept-with-fixes",
+  "summary": "All three tickets are genuinely live-and-built, not stopped or hand-waved, and every 'already satisfied' claim I re-checked held. I re-ran the load-bearing cells myself: #958's census 7/7; #1001's client-financial-charts.test.tsx 15/15; #1002's client-cash-set-dialog.test.tsx 8/8 and packages/db cash-account-set-membership-read.test.mjs 6/6 with 0 skips at a focused (gate-free) invocation; the five-file money-band batch 34/34; home-board-walk 28 passed on the lane's own Playwright triple. I re-measured all five of #1002's prestate pins live on clara_l03: they match the report's table exactly, with 0276 applied at 2026-09-20T16:01:00.741Z directly after 0272. One MAJOR spec defect: #1001's new account-level truncation disclosure tells the reader the cut was 'largest first' when migration 0232 orders and caps the cash composition by account_code. The rest are minor/notes: #1002 decides which dialog face to show from the period-windowed pack.cashSet rather than from the authoritative published-version fact the new read returns; the editor's pre-check holds only on the first open per version; and the AC phrase 'only for a caller the publish door would admit' is enforced by the door at submit time, not at the entrance.",
+  "findings": [
+    {
+      "id": "SPEC-1001-A",
+      "ticket": 1001,
+      "kind": "implemented-but-wrong",
+      "severity": "major",
+      "title": "The cash table's account-level truncation disclosure says 'largest first'; the door cuts alphabetically by account code",
+      "evidence": "Ticket #1001 AC: '[ ] Both the account-level and entry-level truncation disclosures appear when they apply.' The disclosure appears, but it states something untrue about the cut. apps/web/messages/en.json:895 (new in 529608478) reads \"accountsTruncated\": \"Showing {shown} of {total} accounts, largest first.\", rendered by apps/web/components/firm/client-home/client-cash-trend.tsx in the compositionTruncated block via t(\"cashDrilldown.accountsTruncated\"). The door that produces those rows is packages/db/migrations/0232_client_financial_pack.sql:1210-1211 -- `order by a.account_code` then `limit 50`, inside `jsonb_agg(... order by y.account_code)` at :1152. So the 50 accounts shown are the alphabetically FIRST 50 by chart code, not the largest: a firm with 63 cash accounts is told the missing 13 are the small ones when they may hold the largest balances behind the headline. The entry-level key is fine -- entries really are ordered `abs(sum(...)) desc` (:1191-1196). The wording was copied verbatim from the pre-existing profit key at en.json:884, which is byte-identical at BASE and carries the same inaccuracy, so this ticket did not invent the error; it shipped a second, cash-side instance of it on the very surface whose own brief insists a table that would not add up to the figure above it must say so.",
+      "required_fix": "Reword ClientFinancial.cashDrilldown.accountsTruncated so it states the real cut (e.g. 'Showing {shown} of {total} cash accounts, by account code'), or leave the copy and reorder the cash composition by closing balance in a follow-up ticket -- but do not leave the face asserting an ordering the door does not use. Flag the pre-existing profit twin (en.json:884, ClientFinancial.drilldown.accountsTruncated) to the integrator and owner as the same defect, outside this lane's scope."
+    },
+    {
+      "id": "SPEC-1002-A",
+      "ticket": 1002,
+      "kind": "partial",
+      "severity": "minor",
+      "title": "Which dialog face opens is decided by the period-windowed pack.cashSet, not by the published-version fact the new read returns",
+      "evidence": "Ticket #1002 Desired behavior: 'For a client with a published set, the entrance opens a second-pass editor...'. Implementation: apps/web/components/firm/client-home/client-financial-summary.tsx:277 passes `hasPublishedSet={pack.cashSet !== null}`, and client-cash-set-dialog.tsx:137 sets `const isEdit = hasPublishedSet;`. `pack.cashSet` comes from 0232's WINDOWED select (0232:1051-1055: `where v.client_id = p_client and v.effective_from <= v_as_of and (v.effective_to is null or v.effective_to >= v_as_of)`), whereas the new read answers the authoritative question (0276: `where v.client_id = p_client and v.state = 'published'`). For a client with no approved entries and no finalized opening seed, the publish door stamps a first version at `v_today` (0232:625-628, `v_from := coalesce(p_effective_from, v_books, v_today)`); a human viewing an EARLIER period then gets `pack.cashSet === null`, the first-publish face opens, and submitting it sends `effectiveFrom: null` into a door that now finds `v_seen > 0` and raises `cash_set_version_raced` (0232:609-615) -- a dead end under a misleading name, which is the class of thing this ticket exists to remove. The membership read the ticket's own Key interfaces names ('A read enumerating the current published version's membership') already carries the right fact and is loaded in the same open.",
+      "required_fix": "Prefer the authoritative fact once loaded, e.g. `hasPublishedSet={pack.cashSet !== null || currentMembers.data?.publishedVersionId != null}`, keeping pack.cashSet as the zero-latency first answer so the face does not flicker; add a cell that mounts with `cashSet: null` plus a currentSet carrying a publishedVersionId and asserts the EDITOR face renders."
+    },
+    {
+      "id": "SPEC-1002-B",
+      "ticket": 1002,
+      "kind": "partial",
+      "severity": "minor",
+      "title": "The pre-check holds only on the first open per version; a reopen after closing shows stale dirty boxes and a diff built from them",
+      "evidence": "Ticket #1002 AC: '[ ] Opening the editor for a client with a published set pre-checks every current member, including one with no bank-registry candidacy.' client-cash-set-dialog.tsx:152-162 seeds `selection` inside a useEffect guarded by `seededForRef.current === currentSet.publishedVersionId`, and client-financial-summary.tsx mounts the dialog unconditionally (only `open` toggles), so `selection` survives a close. A human who unchecks members, closes without saving and reopens sees the SAME published version with boxes that no longer reflect it -- and the diff section (added/removed/unchanged, this ticket's own deliverable) is computed from that stale state with nothing on screen saying the boxes are a leftover draft. The report defends this with the file header's 'cancel restores nothing' rule, but that sentence is about restoring the BOARD ('its own cancel restores nothing either, because it committed nothing') and about 'dirty selections preserved on a refusal', not about carrying a draft across a close on a face whose purpose is to show the truth of the current version. Cell `ticket 1002.1` asserts the pre-check on a first open only; no cell drives close-then-reopen.",
+      "required_fix": "Either reseed from currentSet on every open (clear seededForRef when `open` goes false, or key the guard on publishedVersionId plus open), or keep the draft and say so on the face; then add a cell that closes and reopens and asserts whichever the product chose."
+    },
+    {
+      "id": "SPEC-1002-C",
+      "ticket": 1002,
+      "kind": "partial",
+      "severity": "note",
+      "title": "'Reachable only for a caller the publish door would admit' is enforced by the door at submit, not at the entrance",
+      "evidence": "Ticket #1002 AC: '[ ] The editor is reachable only for a client that already has a published set and only for a caller the publish door would admit; first publish is unchanged.' The published-set half is met. The caller half is not enforced where the AC puts it: client-financial-summary.tsx:152-156 withdraws the entrance only when the pack READ is denied ('A DENIED CALLER IS NOT OFFERED THE AUTHORING DOOR ... a refused READ is this board's only evidence the caller is below a floor'), and `get_client_financial_pack` floors at VIEWER while `publish_client_cash_account_set` floors at ADMIN (0232). A viewer or member on a client with a published set therefore reaches the editor, states a date, and meets CLR04 only on submit. This is byte-identical to the pre-existing first-publish posture and the ticket report says so plainly, so it is not a regression -- but the AC sentence is not satisfied as written, and 0276 is deliberately floored at viewer (its own header argues the case), which locks the behaviour in.",
+      "required_fix": "None required in this lane. Record for the owner: either accept the door-refuses-at-submit posture and reword the AC, or file a ticket to carry the caller's rank onto the board so an authoring entrance can be withdrawn for a below-admin caller on both faces."
+    },
+    {
+      "id": "SPEC-1002-D",
+      "ticket": 1002,
+      "kind": "report-accuracy",
+      "severity": "note",
+      "title": "The #1002 report misattributes a five-file batch count to a single test file",
+      "evidence": "wave3-lane03-ticket1002.md, Gates: 'components/firm/client-home/client-financial-charts.test.tsx -> 34 tests, 34 pass (unchanged -- regression check, this file never opens the dialog)'. I re-ran that file alone: 15 tests, 15 pass, 0 fail. 34 is the total of the FIVE-file money-band batch (charts 15 + cash-summary + money-a11y + money-keyboard + profit-summary), which I also re-ran: 34 tests, 34 pass, 0 fail -- and which the report's very next bullet states correctly. The gate was really run and really green; only the per-file attribution is wrong. No code defect.",
+      "required_fix": "Correct the line in the ticket report so the integrator's own count reconciles: charts 15/15, five-file batch 34/34."
+    },
+    {
+      "id": "SPEC-1001-B",
+      "ticket": 1001,
+      "kind": "scope",
+      "severity": "note",
+      "title": "'The existing money-band tests pass unchanged' -- one existing test file was edited, additively",
+      "evidence": "Ticket #1001 AC: '[ ] No change to what the pack computes, returns or refuses, and the existing client-home money-band tests pass unchanged.' apps/web/components/firm/client-home/client-home-money-keyboard.test.tsx gains a cash composition row in its shared `pack()` fixture and one extra assertion inside the pre-existing test 'the period control and the drilldown are both reachable...'. Every prior assertion in that test is intact and the file is 4/4 green (re-run), and the report discloses the edit in plain words rather than claiming the file was untouched. Raised only so the integrator does not read 'unchanged' as 'byte-identical'.",
+      "required_fix": "None. Keep the disclosure as written."
+    },
+    {
+      "id": "SPEC-1002-E",
+      "ticket": 1002,
+      "kind": "scope-boundary",
+      "severity": "note",
+      "title": "The edit face drops the petty-cash guidance and offers no way to add a non-candidate account",
+      "evidence": "Ticket #1002 Out of scope: 'Which accounts may be members: the candidate rule and the three member reasons stay as they are.' -- so the missing affordance is correctly out of scope. But the first-publish face's own copy (ClientFinancial.cashSet.pettyCashNote, 'Add them yourself if this client holds any.') is rendered only in the `else` arm of client-cash-set-dialog.tsx, so the second-pass editor shows neither the affordance nor the sentence explaining its absence. A firm whose petty-cash membership must change has no path and no explanation on that face. The ticket report already files this as a follow-up worth raising.",
+      "required_fix": "None in this lane. Worth a follow-up ticket, as the report says; consider carrying pettyCashNote (or an edit-face equivalent) into the editor so the gap is stated rather than silent."
+    },
+    {
+      "id": "SPEC-958-A",
+      "ticket": 958,
+      "kind": "coverage-boundary",
+      "severity": "note",
+      "title": "The census catches only an inline-JSX render of the tie-out balance; the boundary is documented, not hidden",
+      "evidence": "Ticket #958 AC: '[ ] A check in the repeatable suite fails when a surface renders that balance under a cash label, and passes on the tree as it stands.' Both halves verified: I re-ran apps/web/tests/gl-balance-cash-label-census.test.ts -> 7 tests, 7 pass, 0 fail, and its main cell asserts `totalSites >= 1` so the scan cannot pass vacuously. An independent grep of apps/web for gl_balance_cents / gl_prime_cents / glBalance confirms exactly one render site today (components/bank/reconciliation-section.tsx:154, under t(\"glBalance\")), which the census resolves through the real messages/en.json and clears. The stated limitation is real: a future surface that assigns the field to a local first and renders the local elsewhere escapes the AST walk, and lib/ (where lib/bank/matching-context-types.ts:121 carries tie.gl_balance_cents into Clara's matching context) is outside the scanned roots. Both are named in the test header and in apps/web/README.md's new '## #958' section, and neither is a human-facing surface today, so the AC holds on the tree as it stands.",
+      "required_fix": "None. Keep the limitation stated where it is; widen the walk only if a future surface takes that shape."
+    }
+  ],
+  "verified_by_rerun": [
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test tests/gl-balance-cash-label-census.test.ts -> 7 tests, 7 pass, 0 fail",
+    "apps/web: ... --test components/firm/client-home/client-financial-charts.test.tsx -> 15 tests, 15 pass, 0 fail",
+    "apps/web: ... --test components/firm/client-home/client-cash-set-dialog.test.tsx -> 8 tests, 8 pass, 0 fail",
+    "apps/web: five-file money-band batch (charts, cash-summary, money-a11y, money-keyboard, profit-summary) -> 34 tests, 34 pass, 0 fail",
+    "packages/db: node --test --test-concurrency=1 tests/cash-account-set-membership-read.test.mjs (focused, NO preintegration gate preloaded) against clara_l03 -> 6 tests, 6 pass, 0 fail, 0 skipped",
+    "clara_l03 catalog: clara.schema_migrations newest row 0276_cash_account_set_membership_read applied_at 2026-09-20T16:01:00.741Z, directly after 0272_document_capability_wall_completion",
+    "clara_l03 catalog: all five prestate pins re-measured live and matching the ticket report -- jwt_sub c4051473..., jwt_firm 43338e83..., actor_role_rank 9b011800..., role_rank(text) 5ced25ae..., propose_client_cash_accounts(uuid) c2d04e73...",
+    "worktree root: CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3520 CLARA_E2E_NEXT_PORT=3521 CLARA_E2E_RUNTIME_PORT=3522 pnpm --filter @clara/web e2e home-board-walk -> 28 passed, 0 failed",
+    "git status in the worktree is clean; the cut-off implementer's uncommitted #1002 work is fully committed across 86f62fb4c / ea9d22aed / cb8040d54"
+  ]
+}

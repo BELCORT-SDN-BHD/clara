@@ -1,0 +1,120 @@
+{
+  "axis": "spec",
+  "lane": "wave3-lane06",
+  "branch": "riders/w3-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\656",
+  "base": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "commits": [
+    "c9de7580a feat(web): #986 the re-read conflict stops being a dead end",
+    "cbc95e73b feat(runtime): #986 the way forward from source_reread_since_parse",
+    "951a56a8f feat(db): #986 a re-read opening document becomes re-parsable",
+    "0b6eefa0d docs(runtime): #919 stop the standalone-e2e list from drifting",
+    "855131eac feat(web): #919 render the corrected-term banner on the prepayment detail surface",
+    "33f184d3e feat(db): #919 prepayment schedule reads gain a term-liveness flag",
+    "cd8ac1a24 feat(web): #936 the accrual correction form and detail lineage",
+    "e1180d020 docs(context): #936 record the \"Accrual correction\" term",
+    "8c892526c feat(db): #936 a dedicated accrual-correction door"
+  ],
+  "spec_sources": [
+    "gh issue view 936 --comments (body only; no comments, no owner ruling)",
+    "gh issue view 919 --comments (body + Agent Brief + one AI-triage comment 2026-09-19; no owner ruling dated 2026-09-20)",
+    "gh issue view 986 --comments (body + Agent Brief; no comments)"
+  ],
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    "packages/db/tests/accrual-correction.test.mjs, full 87-flag gate chain on clara_l06 -> 7/7 pass (report claim confirmed)",
+    "packages/db/tests/prepayment-term-liveness.test.mjs, full gate chain -> 2/2 pass (confirmed)",
+    "packages/db/tests/opening-source-reread.test.mjs, full gate chain -> 5/5 pass (confirmed)",
+    "packages/db/tests/opening-ledger-source.test.mjs, full gate chain -> 12 tests, 0 pass, 12 SKIPPED (the report's own follow-up, confirmed)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/accruals/accrual-correction-form.test.tsx components/prepayments/prepayments-render-states.test.tsx components/registers/opening-parse-action.test.tsx lib/work/accrual-draft.test.ts -> 69/69 pass",
+    "find packages/runtime/tests -maxdepth 1 -name '*-e2e.mjs' | wc -l -> 25; grep -oE 'tests/[A-Za-z0-9._-]+-e2e[.]mjs' .github/actions/db-live-gates/action.yml | sort -u | wc -l -> 23; grep -c world-gate.mjs on that action -> 25 (the README's new grep instruction resolves; #919 AC4 confirmed)",
+    "clara.list_accounting_plans prosrc read from pg_proc on clara_l06 -> no kind predicate; every plan of the client is listed",
+    "grep -n 'term_live|term_superseded' on prepayments-list.tsx and prepayment-detail.tsx -> one hit, detail only",
+    "grep for opening_target_refreshes across the worktree -> 3 files, all inside packages/db (migration, README, its own test)"
+  ],
+  "findings": [
+    {
+      "id": "L06-SPEC-01",
+      "ticket": 936,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "#936 AC2's \"(and their reversals)\" is never driven; the cell's own title asserts a reversal it does not create",
+      "evidence": "Ticket line: \"A cell revises an accrual's amount and proves ... already-posted occurrences (and their reversals) are unchanged.\" The only cell is packages/db/tests/accrual-correction.test.mjs:169 p936.posted.untouched, whose title reads \"an occurrence already posted under the OLD revision, AND ITS OUTSTANDING REVERSAL, are byte-for-byte unmoved\". The scene never admits a reversal leg: line 172 asserts base.occurrence?.leg === 'primary', line 177 asserts before.length === 1, and the post-correction assertions are after.length === 1 plus deepEqual(after[0], beforeOcc). No clara.request_plan_catch_up call admits the reversal due event the way packages/db/tests/accrual-adjustments.test.mjs:450 p652.reversal.binds does, so no reversal occurrence row exists to compare. The cell proves the correction admits no NEW occurrence; it does not prove an already-admitted reversal survives a correction. The wave-3 WORK-ORDER addendum is explicit: \"A door's behaviour is asserted only after it was driven. Do not write ... a sentence on screen unless a cell drove that door and saw it.\" wave3-lane06-ticket936.md repeats the title's claim as AC2 evidence.",
+      "required_fix": "Extend p936.posted.untouched (or add a sibling) to admit the reversal leg through clara.request_plan_catch_up and post it, capture the reversal occurrence row before the correction, then assert it byte-for-byte unmoved afterwards. If the reversal cannot be admitted in that window, strike the reversal clause from the cell title and record the gap in the report instead of claiming it."
+    },
+    {
+      "id": "L06-SPEC-02",
+      "ticket": 936,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "#936's headline defect stays reachable: an accrual-backed plan still offers the generic \"Revise\" control",
+      "evidence": "Ticket line: \"Changing an accrual's amount no longer leaves the books contradicting themselves. Today the only way to change an accrual's amount is the generic plan revision door ... while the accrual's own detail row ... stays at the first revision.\" 0284's own header restates that divergence as the bug it closes. Measured on clara_l06: clara.list_accounting_plans carries no kind predicate (where p.client_id = p_client and p.firm_id = v_firm only), so an accrual's plan is listed; apps/web/components/plans/plans-list.tsx renders every kind (kindLabel falls through to the raw kind); apps/web/lib/plans/schedule.ts:233 planControls keys the revise control on STATUS alone; apps/web/components/plans/plan-detail.tsx:79-86 therefore still renders \"Revise\" for an accrual plan, linking to /plans/[planId]/revise -> PlanForm -> revisePlan -> clara.revise_accounting_plan (apps/web/lib/plans/api.ts:344). Nothing in the diff guards that route or that control. The DB half is legitimately constrained by lane 05/#908's pin on revise_accounting_plan, but the web layer is wholly this lane's, and no report line records the residual.",
+      "required_fix": "Either suppress or redirect the generic revise control for an accrual-backed plan at the web layer (planControls or plan-detail, with its own cell), or record the residual explicitly in wave3-lane06-ticket936.md under \"what was deliberately left\" with the follow-up ticket to file, so the integrator does not read AC3 as closing the defect the ticket's first sentence names."
+    },
+    {
+      "id": "L06-SPEC-03",
+      "ticket": 919,
+      "severity": "major",
+      "kind": "requirement-missing",
+      "title": "#919's list surface never renders the term-liveness flag, and the justification misreads the brief",
+      "evidence": "Agent Brief, Desired behavior: \"Both schedule reads carry a term-liveness flag ... the detail AND LIST SURFACES render it with the sentence that a corrected term needs a new schedule.\" Key interfaces: \"The prepayment detail AND LIST surfaces: render it.\" Measured: grep for term_live/term_superseded across apps/web/components/prepayments/ returns exactly one hit, prepayment-detail.tsx:155. apps/web/lib/prepayments/api.ts:44-46 adds term_live/term_superseded_by to PrepaymentListRow but nothing reads them, so the list row carries a dead field. wave3-lane06-ticket919.md's Follow-ups justifies the omission with the work order's \"No test at a seam the brief does not give you\" — but the brief gives that seam twice, in Desired behavior and in Key interfaces; only the four-line AC checklist omits it.",
+      "required_fix": "Render the flag on apps/web/components/prepayments/prepayments-list.tsx's ScheduleRow (a badge carrying the sentence or a short form of it) with its own cell in prepayments-render-states.test.tsx, or obtain an owner ruling that the AC checklist narrows the brief and record that ruling in the report."
+    },
+    {
+      "id": "L06-SPEC-04",
+      "ticket": 986,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#986 AC2's \"the basis's state shows which\" is shown only in the transient 202 banner; the receipt relation is surfaced nowhere",
+      "evidence": "Ticket line: \"The prior parse's targets are never left silently stale beside unread new content: they are retired and replaced, or explicitly re-pointed, AND THE BASIS'S STATE SHOWS WHICH.\" The retire-and-replace half is proved (p986.reread.refresh, re-run, pass). But clara.opening_target_refreshes appears in exactly three files on the branch: packages/db/migrations/0286_opening_source_reread.sql, packages/db/README.md and packages/db/tests/opening-source-reread.test.mjs. No read door returns it, apps/web/lib/registers/opening.ts does not select it (its column list at line 55 ends at created_at on opening_tb_targets), and no surface renders it. The only display of a refresh is the refreshedTitle/refreshedBody StateBanner in apps/web/components/registers/opening-parse-action.tsx:127-134, which lives in component state and is gone on reload. A person who refreshes and returns later sees only the current targets, with nothing on the basis saying an earlier reading was retired. The brief's out-of-scope line permits this work: it excludes only \"any UI redesign BEYOND showing the refreshed target state\".",
+      "required_fix": "Surface the refresh chain on the basis — a read of clara.opening_target_refreshes (SELECT is already granted to clara_authenticated and the policy is firm-scoped) rendered on the opening tab — or record in wave3-lane06-ticket986.md that AC2's \"shows which\" is met only at the moment of the act, with the follow-up to file."
+    },
+    {
+      "id": "L06-SPEC-05",
+      "ticket": 986,
+      "severity": "minor",
+      "kind": "evidence-quality",
+      "title": "AC3's regression net rests on one new cell while #656's whole opening battery is inert, and the report cites one of its skipped cells as evidence",
+      "evidence": "Ticket line: \"Parsing the exact same extraction twice with no re-read between attempts still refuses exactly as today (NO REGRESSION to the anti-double-parse guarantee).\" Re-run here under the full gate chain on clara_l06: packages/db/tests/opening-ledger-source.test.mjs -> # tests 12 / # pass 0 / # skipped 12. The lane's report names this as its highest-value follow-up and correctly leaves it out of scope under work-order rule 5, and p986.reread.no_regression does carry AC3 behaviourally plus a sha pin on record_opening_targets_parsed. But the same report's analysis section cites p656.tie.stale_extraction (\"already records the succeeding half of this, with a fresh opk() key\") as measured support for the \"a fresh op key is NOT the fix\" ruling; that cell is one of the twelve that skip, so it is not live evidence on this branch.",
+      "required_fix": "Re-label the p656.tie.stale_extraction citation in wave3-lane06-ticket986.md as a reading of a currently-skipping cell (the branch's driven evidence is p986's own cells), and carry the #656-battery skip to the integrator as a blocker for the opening lane rather than a follow-up at the end of one report."
+    },
+    {
+      "id": "L06-SPEC-06",
+      "ticket": 986,
+      "severity": "note",
+      "kind": "scope",
+      "title": "#986 restructures the pinned parse path (readOpeningParseSubject, openingTargetHandler) inside the delivery loop",
+      "evidence": "The ticket names the parse core and its (seed, document) key as \"a pinned, load-bearing idempotency shape, so recutting it is a change of record, not a refactor\", and asks only that the conflict stop being a dead end. The diff extracts readOpeningParseSubject out of parseOpeningTargets (packages/runtime/lib/opening-parse.mjs) and collapses both HTTP routes onto one openingTargetHandler factory (packages/runtime/src/openingRoutes.ts), rewriting every refusal return of the parse path into {refusal: ...} envelopes. WORK-ORDER rule 4: \"Refactoring is not part of the loop; it belongs to the review stage.\" The change reads behaviour-identical — the 403 string interpolates to the same text for label='parse', openingOpKey is byte-identical with its pin cell passing, and the 17 pre-existing cells in packages/runtime/tests/wave-b-opening-parse.test.mjs pass — so this is a process note, not a defect.",
+      "required_fix": "No code change required. Name the extraction explicitly in the report as a refactor of a pinned path with its own regression evidence, so the integrator reviews it as one rather than as incidental diff."
+    },
+    {
+      "id": "L06-SPEC-07",
+      "ticket": 936,
+      "severity": "note",
+      "kind": "behaviour-not-asked-for",
+      "title": "The correction form silently unsets a memo that happens to equal the purpose",
+      "evidence": "apps/web/components/accruals/accrual-correction-form.tsx draftFromAccrual seeds memo: basisMemo === row.purpose ? \"\" : basisMemo. clara._accrual_journal_basis defaults the derived basis memo to the purpose when none was stated, so a person who deliberately typed a memo equal to the purpose has it dropped from the successor row's stated particulars. The rendered basis memo is unchanged either way (the door re-derives it from the purpose), so the visible outcome matches, and the lane's own report flags the heuristic. Nothing in #936 asks for a memo heuristic.",
+      "required_fix": "None required at this altitude. Keep the follow-up the report already names (a top-level memo on clara.get_accrual_adjustment) so the pre-fill can stop guessing."
+    },
+    {
+      "id": "L06-SPEC-08",
+      "ticket": 936,
+      "severity": "note",
+      "kind": "acceptance-deferred",
+      "title": "\"From-scratch apply\" (#936 AC4) is deferred to the integrator for all three migrations",
+      "evidence": "Ticket line: \"From-scratch apply; the accrual and plan batteries stay green.\" The batteries half is met (accrual-adjustments 21/21 and accounting-plans 20/20 per the report; accrual-correction 7/7 re-run here). The from-scratch half is not run by the lane: all three reports state that RIG.md and the wave-3 addendum assign it to the integrator, which is correct under the addendum but leaves an AC line unproved at this altitude. 0286 was redone once (CLARA_MIGRATION_REDO=0286_opening_source_reread), so both its apply branches were exercised; 0284 and 0285 saw a first apply only.",
+      "required_fix": "Integrator: run the from-scratch chain 0001 -> 0286 on a disposable cluster covering 0284, 0285 and 0286 together, and record it against this AC."
+    }
+  ],
+  "satisfied": [
+    "#936 AC1 — clara.correct_accrual_adjustment(uuid,jsonb,text) is the only new object in 0284; the header states the dedicated-door choice and lane 05/#908's pin as the reason; 12 prestate pins, all re-hashed in the tail.",
+    "#936 AC2 (first half) — p936.basic proves the plan revision and the accrual detail agree and that corrects_accrual_id/corrected_by_accrual_id name each other in both directions. Re-run, pass.",
+    "#936 AC3 — /clients/:clientId/accruals/:accrualId/correct calls correctAccrual -> clara.correct_accrual_adjustment and never revisePlan; accrual-detail.tsx renders both lineage pointers as links. The pre-existing accrual form (#652) was create-only, so no accrual-lane edit path was left on the generic revision.",
+    "#919 AC1 and AC2 — p919.term.superseded and p919.term.live, re-run, 2/2 pass; both reads carry term_live/term_superseded_by and the superseded case is produced through clara.record_document_service_period, not a raw write.",
+    "#919 AC3 — the detail banner renders once for a superseded term and is absent for a live one, with a vacuity control recorded. Re-run as part of 69/69.",
+    "#919 AC4 — the runtime README no longer names a file or a count and points at .github/actions/db-live-gates/action.yml; the grep instruction it gives resolves (25 world-gate.mjs lines, 23 e2e paths wired, 25 e2e files on disk).",
+    "#986 AC1, AC3, AC4 — p986.reread.refresh, p986.reread.no_regression (behavioural replay plus the sha pin on record_opening_targets_parsed) and p986.reread.approve_end_to_end, re-run, 5/5 pass; the stuck approval is driven, not asserted.",
+    "#986 out-of-scope lines honoured — the once-per-extraction guarantee is untouched, the UI addition is one banner branch and one button, #985's chat tool is a successor contract rather than code."
+  ]
+}

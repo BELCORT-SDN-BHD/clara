@@ -1,0 +1,121 @@
+{
+  "axis": "SPEC",
+  "lane": "wave 3, lane 07",
+  "branch": "riders/w3-lane07",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "commits": 14,
+  "tickets": [899, 1012, 889],
+  "spec_sources": [
+    "gh issue view 899 --comments (body + AI-triage 2026-09-19 'Remaining scope' comment, newest and binding)",
+    "gh issue view 1012 --comments (body Agent Brief; zero comments, so the body is the whole contract)",
+    "gh issue view 889 --comments (Agent Brief + AI-triage note 2026-09-20 narrowing to the merge door)"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "#1012 and #889 are spec-clean: every acceptance criterion has a cell I re-ran green on clara_l07, and together they close the lane theme honestly. #899 does not close the ticket it was given. The newest triage comment names TWO still-open entrances and the diff closes one: clara.create_client keeps its EXECUTE grant to clara_authenticated and its unwalled insert into clara.clients, and the AC3 census cell is written to assert that residual rather than its absence. A third live browser creation path (OnboardingBeginCard, mounted by the Clara rail) still reaches begin_client_onboarding, whose arity-1 rung was deliberately left unwalled, so it can still create a same-family client silently. #899's migration also turns sandbox-marker.test.mjs sbm.3 red on this branch.",
+  "findings": [
+    {
+      "id": "SPEC-L07-01",
+      "ticket": 899,
+      "severity": "blocker",
+      "kind": "requirement-missing",
+      "title": "clara.create_client keeps its grant and its unwalled insert: the second of the two entrances the newest triage names is not closed, and the census cell asserts the residual instead of its absence",
+      "evidence": "The newest binding comment on #899 (AI triage 2026-09-19) says verbatim: '**Still open.** Two granted entrances bypass the wall. (1) The command palette ... (2) `clara.create_client(text,text)` (defined `0004_governed_fns.sql:343`) is still granted `EXECUTE` to `clara_authenticated` ... and no later migration revokes it.' Its remaining-scope bullets repeat it twice: '`begin_client_onboarding` and `create_client` are each superseded, re-pointed at the new verb, or have their grant withdrawn; the migration header says which, per verb' and 'A census cell, derived from the live catalogue, proves no granted human role can reach a client-minting verb that lacks the wall.' The original Agent Brief's Key interfaces say the same. MEASURED on clara_l07 (127.0.0.1:55747) with 0287/0288/0289 applied: a pg_proc x has_function_privilege sweep returns `create_client | p_name text, p_op_key text | auth_exec=t | direct_insert=t | via_core=f` -- still granted, still a direct `insert into clara.clients(`, still no delegation to clara._client_birth_core. packages/db/migrations/0287_client_birth_wall.sql:34-36 concedes it: 'clara.create_client(text,text) IS DELIBERATELY LEFT UNTOUCHED -- BODY AND GRANT BOTH -- and this is the one place this file departs from the brief's literal \"no granted human role can reach a client-minting verb that lacks the wall\".' The AC3 cell is named for the exception: I re-ran `node --test --test-concurrency=1 $GATES tests/client-birth-wall.test.mjs` (87-flag gate chain) -> 11/11 pass, with cells 10 and 11 being `p899.census.granted_client_minters_have_wall_except_create_client` and `p899.census.create_client_documented_exception -- the residual, named and evidenced rather than silent: create_client still creates without the wall`. So the census cell PROVES the negation of AC3 and passes.",
+      "required_fix": "Either close the entrance for real (withdraw the clara_authenticated grant, or re-point the body at clara._client_birth_core -- which the migration header correctly says first needs the ~48 test files reaching it through rig-fixtures.mjs's createClient() moved onto open_client_onboarding, or that fixture's naming convention changed so it stops manufacturing same-family collisions), or obtain the owner's explicit ruling that the grant stays and record it as a comment on #899 that narrows the AC. Until one of those, #899 is PARTIAL, not done, and the census cell must not be read as satisfying AC3."
+    },
+    {
+      "id": "SPEC-L07-02",
+      "ticket": 899,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "A third live browser creation path (OnboardingBeginCard in the Clara rail) still calls begin_client_onboarding, whose arity-1 rung is unwalled, so it can still create a same-family client silently",
+      "evidence": "#899's Agent Brief, Desired behavior: 'One birth verb enforces the wall structurally: it performs the same candidate resolution, refuses at two or more with the same typed collision token and rows, and at exactly one requires an acknowledgement naming that candidate before proceeding. Every granted human creation path goes through it ... it never creates silently.' apps/web/components/clara/OnboardingBeginCard.tsx:14,50 imports and calls `beginClientOnboarding(name.trim(), { session })` with no identity-candidate read (grep for client_identity_candidates in that file returns NONE) and no acknowledgement argument. It is live, not dead: apps/web/components/clara/OnboardingChecklistCard.tsx:93 `if (!clientId) return <BeginOnboardingCard session={session} />;`, and OnboardingChecklistCard is mounted by apps/web/components/clara/ClaraThreadView.tsx:437. The door it calls was re-pointed at the shared core with `p_require_ack_at_one = false` (0287 section C), and the branch's own cell names the consequence: `p899.legacy.arity_one_unchanged -- the deliberate scope boundary: at arity 1 the legacy door still creates` (PASS, cell 8 of client-birth-wall.test.mjs). Two consequences neither report mentions: (a) apps/web/lib/onboarding/api.ts:120-122 asserts of this card that it 'is this door's one remaining direct caller and needs no change: it already renders a `DoorRefusal` verbatim' -- at arity 1 there is no refusal to render, so the justification does not cover the case that matters; (b) both e2e fixtures were renamed to `/rest/v1/rpc/open_client_onboarding` (apps/web/e2e/e2e-fixture-ownership.test.ts:266 and :1529, apps/web/e2e/serve-built.mjs:158), and a grep of apps/web/e2e/*.mjs for a `begin_client_onboarding` HANDLER now returns nothing, so this card has no walk coverage at all and a walk that drove it would meet a 501.",
+      "required_fix": "Re-point BeginOnboardingCard at `openClientOnboarding` and give it the same candidate-read plus acknowledgement face AddClientControl has -- or, if it is to stay a bare write-and-report affordance, route it through open_client_onboarding with a null acknowledgement so the door's own arity-1 refusal surfaces. If it is left as-is, name it as a residual on #899 the way create_client is, and correct the claim in apps/web/lib/onboarding/api.ts."
+    },
+    {
+      "id": "SPEC-L07-03",
+      "ticket": 899,
+      "severity": "major",
+      "kind": "regression-on-branch",
+      "title": "0287's own comments turn sandbox-marker.test.mjs sbm.3 red on this branch",
+      "evidence": "Re-run on clara_l07 with the full 87-flag gate chain: `node --test --test-concurrency=1 $GATES tests/sandbox-marker.test.mjs` -> 3 tests, 2 pass, 1 FAIL. `not ok 3 - sbm.3 no production source reads the sandbox marker`, naming 'packages/db/migrations/0287_client_birth_wall.sql:58  -- in one firm (`${prefix}_A1`, `${prefix}_A2`) whose shared `SANDBOX_PREFIX` (\"rig_\",' and 'packages/db/migrations/0287_client_birth_wall.sql:77  -- same-family (\"rig_\"-prefixed) client in firm A through `clara.create_client` the moment'. The diff introduces it: the fixed point ffe63a0d carries no such migration. #1012's report names it as its own follow-up 1 and correctly refuses to edit another ticket's migration; #899's report does not mention it, and its gate table does not list sandbox-marker.test.mjs.",
+      "required_fix": "In #899's own fix round, reword the two comment lines in 0287_client_birth_wall.sql so they do not quote the literal rig marker (refer to SANDBOX_PREFIX / tests/fixtures/sandbox-marker.mjs by name instead), re-apply with CLARA_MIGRATION_REDO=0287_client_birth_wall on the lane database, and add sandbox-marker.test.mjs to the ticket's gate list."
+    },
+    {
+      "id": "SPEC-L07-04",
+      "ticket": 899,
+      "severity": "minor",
+      "kind": "doc-misstates-spec",
+      "title": "packages/db/README.md's new client-birth-wall section miscounts the entrances and understates the gap",
+      "evidence": "The new '## The client birth wall (0287, #899)' section says 'Two of the two granted entrances the ticket's triage measured are addressed; the third (`create_client`) is a documented, tested exception'. The triage comment measured exactly two still-open entrances, and `create_client` IS the second of them ('(2) `clara.create_client(text,text)` ... is still granted `EXECUTE`'). Calling it 'the third' makes the unaddressed entrance sound supernumerary. 0287's own header is honest about the same fact ('this is the one place this file departs from the brief's literal ...'), so the two documents disagree with each other.",
+      "required_fix": "Rewrite that sentence to say one of the two triage-measured entrances is closed and the other (create_client) is an open, named residual, matching the migration header."
+    },
+    {
+      "id": "SPEC-L07-05",
+      "ticket": 899,
+      "severity": "note",
+      "kind": "scope-creep",
+      "title": "open_client_onboarding's p_identifier parameter has no caller",
+      "evidence": "0287 section B: `create or replace function clara.open_client_onboarding(p_name text, p_op_key text, p_identifier jsonb default null, p_acknowledged_candidate uuid default null)`. The brief's Key interfaces name only 'folding in candidate resolution and the acknowledgement argument'. apps/web/lib/onboarding/api.ts:139-148 accepts `args.identifier` and forwards it as `p_identifier`, but no call site sets it: apps/web/lib/command/do-dispatch.ts:96 passes only `acknowledgedCandidate`, and apps/web/components/firm/add-client-control.tsx:165 sets only `identityAcknowledgedCandidate`. Defensible (it is the read's own second argument and feeds the op-key hash at 0287:208), but it is an unexercised parameter on a governed door.",
+      "required_fix": "Either drive it from a face, or record in the migration comment that it exists solely to keep _client_birth_core's call to client_identity_candidates total, so a later reader does not mistake it for a live feature."
+    },
+    {
+      "id": "SPEC-L07-06",
+      "ticket": 1012,
+      "severity": "note",
+      "kind": "dead-code",
+      "title": "mapSeedingDbError's new 410 branch is unreachable because the route that would have carried it is deleted",
+      "evidence": "#1012's Key interfaces offer a choice: 'The runtime seeding-prepare route: removed from the mounted set, or answering the door's own refusal.' The diff takes the first (packages/runtime/src/seedingRoutes.ts deleted, its import and `app.use(seedingRoutes())` removed from packages/runtime/src/index.ts) and ALSO adds the second (packages/runtime/lib/seeding-parse.mjs:338-342, `if (err.code === 'CLR34' && reason === 'seeding_lane_retired') return { http: 410, ... }`). With the route gone, `prepareSeeding` has no caller in the process -- verified by grepping apps/web/lib, apps/web/components, apps/web/app, apps/web/e2e, packages/runtime/src, packages/runtime/lib and packages/runtime/workflows for the three retired door names and `seeding/prepare`: comments only. So the mapping is exercised only by tests. The implementer names the same shape as follow-up 4. Not a violation (the brief offered either) but it is behaviour in the diff nothing asks for.",
+      "required_fix": "None required this wave. When #663 (Client KB) lands, either move seeding-parse.mjs's read half to that lane or delete the module with its mapping, as the implementer's own follow-up 4 proposes."
+    },
+    {
+      "id": "SPEC-L07-07",
+      "ticket": 1012,
+      "severity": "note",
+      "kind": "integration-risk",
+      "title": "0288 section D re-derives the registry VERSION but refuses rather than re-derives the prior_gl basis if a sibling lane republishes first",
+      "evidence": "#1012's Sequencing clause: 'This republishes `document_capabilities` rows for the same document kind #988 touches, under a monotone version wall shared with #782 and #990, so whichever lands second re-derives its update against the live rows and takes the next version rather than assuming a pinned one.' The version half is satisfied and verified: packages/db/migrations/0288_seeding_lane_retired.sql:546 is `update clara.document_capabilities set registry_version = registry_version + 1;` -- relative, no pinned number. The basis/limits half is not re-derived: 0288:449-462 raises CLR10 unless the 7 prior_gl rows still carry `limits.browser_entrance` AND 0228's exact basis sentence ('0228''s text has drifted, re-derive before republishing'), and 0288:471-473 raises if any row outside prior_gl carries browser_entrance. Live check confirms the intended post-state and that nothing outside prior_gl moved: all 12 prior_gl rows keep `business_operation = stored_only`, 7 carry `limits.seeding_lane = retired`, and no row anywhere carries browser_entrance. Refusing rather than adapting is house prestate practice, so this is a note for the integrator, not a defect.",
+      "required_fix": "If #988, #782 or #990 lands ahead of this lane and rewrites the prior_gl basis, 0288 sections A and D must be re-derived by hand before integration; the abort message says so itself."
+    }
+  ],
+  "already_satisfied_and_stopped_claims_checked": [
+    {
+      "claim": "#1012 report: 'Nothing on the branch had retired the lane ... All four measured before the first commit.'",
+      "verdict": "TRUE -- ffe63a0d carries no 0288, packages/runtime/src/seedingRoutes.ts exists at the base, and SeedingBatchesPanel renders Tick/Decline at the base (the diff removes both)."
+    },
+    {
+      "claim": "#889 report: tick_seeding_proposal's alias writer is moot because #1012 removed the insert.",
+      "verdict": "TRUE -- an independent regex sweep of the live catalogue (prosrc matching insert[[:space:]]+into[[:space:]]+clara.counterparty_aliases, so not dependent on the test's literal match) returns exactly add_counterparty_alias, merge_counterparties and rename_counterparty; tick_seeding_proposal is not among them."
+    },
+    {
+      "claim": "#889 report AC3: 'no writer reachable from an application role can still land legacy_unknown'.",
+      "verdict": "TRUE -- all three roster members stamp the literal 'human_ui' in their own insert (merge_counterparties and rename_counterparty read back from pg_proc; add_counterparty_alias unchanged). No UPDATE of clara.counterparty_aliases exists in 0289, so pre-existing rows keep theirs."
+    },
+    {
+      "claim": "#899 report AC5 and #1012 report AC8 first half: the from-scratch chain is the integrator's.",
+      "verdict": "ACCEPTED as delegated per RIG.md. 0287's section E tail and 0288's section E tail are present and the live catalogue matches them; not independently re-run."
+    },
+    {
+      "claim": "#1012 report: 'Browser walks: none touched ... no walk drives the panel or the retired row kind.'",
+      "verdict": "TRUE -- no apps/web/e2e/*.spec.ts hunk in the diff belongs to #1012."
+    },
+    {
+      "claim": "#1012 report: rig-meta.mjs's hunk is a comment because a retired door must keep its grant to answer a typed refusal rather than 42501.",
+      "verdict": "ACCEPTED -- the reasoning is sound and the two hunks (WAVE_B_HUMAN_FNS, WAVE_B_RUNTIME_FNS) are comment-only and minimal. The lane prompt's expectation of a matrix edit is an orchestration assumption, not a ticket requirement."
+    }
+  ],
+  "cells_i_re_ran": [
+    "packages/db tests/client-birth-wall.test.mjs (87-flag gate chain) -> 11 pass / 0 fail",
+    "packages/db tests/seeding-lane-retired.test.mjs + ninth-rowkind-seeding-proposal.test.mjs + merge-alias-lane.test.mjs -> 10 pass / 0 fail",
+    "packages/db tests/sandbox-marker.test.mjs -> 2 pass / 1 FAIL (sbm.3, finding SPEC-L07-03)",
+    "packages/db tests/operation-census.test.mjs + rig-isolation.test.mjs -> 32 pass / 0 fail / 1 skip (T19, reset flag correctly never set)",
+    "packages/runtime tests/wave-b-seeding-prepare.test.mjs -> 23 pass / 0 fail (includes AC6's replay cell 23)",
+    "apps/web lib/command/do-actions.test.ts + components/command/command-do.test.tsx -> 17 pass / 0 fail",
+    "apps/web seeding-batches-retired + reports-snapshots-seeding-a11y + reports-snapshots-seeding-keyboard + needs-you-affordances + needs-you-a11y + needs-you-links + reports/api + add-client-control + add-client-candidates + needs-you-row-facts -> 90 pass / 0 fail",
+    "apps/web e2e client-create-walk on the lane triple (3560/3561/3562) -> 4 passed, including the arity-1 identity walk AC4 cites",
+    "node scripts/check-frozen-workflows.mjs (OK, 312 frozen files, no manifest diff), packages/runtime/scripts/check-parts-parity.mjs (OK), scripts/check-dead-citations.mjs (clean), apps/web scripts/check-test-manifest.mjs (503 files) and check-message-keys.mjs (4310 keys)",
+    "live catalogue on clara_l07: client-minting verbs and their grants; the alias-writer roster by regex; document_capabilities prior_gl rows; merge_counterparties' spliced alias insert read back from pg_proc"
+  ],
+  "flake_observed_not_reported_as_a_finding": "rig-isolation.test.mjs T10a failed once when run in the SAME node --test process as operation-census.test.mjs and preintegration-gate-chain.test.mjs, and passed on both re-runs (alone, and paired with operation-census). Not reproducible and not attributable to this diff."
+}

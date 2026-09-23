@@ -1,0 +1,118 @@
+{
+  "lens": "adversarial",
+  "lane": "wave 3 lane 07",
+  "branch": "riders/w3-lane07",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "tickets": [899, 1012, 889],
+  "database": "127.0.0.1:55747/clara_l07 (270 migrations applied; 0287, 0288, 0289 live)",
+  "verdict": "accept-with-fixes",
+  "summary": "Three tickets, three migrations, all behaviourally sound on the happy paths I re-drove myself: the rank floors on clara.open_client_onboarding refuse a bookkeeper, a viewer and a removed admin (CLR04); the op-key replay with a different payload refuses (CLR10 'op_key reused with different args'); the three retired seeding doors answer one CLR34 seeding_lane_retired to every caller and the runtime creator is still 42501 for a human; a real merge now stamps recorded_via='human_ui' on the alias, on BOTH identity revisions and on the emitted counterparty.alias_added event; and EXPLAIN confirms LockRows sits above the Sort, so the README's lock-order/deadlock claim for the merge door is true. Four things break. (1) #899's central claim -- that the name-collision wall moved from a read a caller can skip to the door -- does NOT survive two concurrent sessions: I drove two real admin connections and produced THREE same-family clients in one firm, a state the same door refuses to reach sequentially (CLR10 name_family_collision at arity 3). The wall is a plain TOCTOU with no advisory lock, in an estate that already uses pg_advisory_xact_lock for exactly this class in eight migrations. (2) packages/db/tests/sandbox-marker.test.mjs cell sbm.3 is RED on this branch, introduced by 0287's own comments; I re-ran it. (3) the merge door #889 recut answers CLR23 cross_client for another firm's REAL counterparty ids and CLR11 for ids that exist nowhere -- a cross-tenant existence oracle against the estate's own stated CLR11 law. (4) #1012 re-pinned opening-ledger-source.test.mjs's premise constant to a literal 4 while leaving the fail-OPEN gate that silently retired that 12-cell battery between 0245 and 0288 exactly as it was, so the next registry republication silences it again.",
+  "evidence_of_work": {
+    "commands_run": [
+      "git diff ffe63a0dd08...HEAD --stat (61 files) and full diffs of the three migrations, the web/runtime hunks and the shared files",
+      "node --test --test-concurrency=1 <87 preintegration gates> tests/client-birth-wall.test.mjs tests/merge-alias-lane.test.mjs -> 13/13 pass",
+      "node --test --test-concurrency=1 <87 gates> tests/seeding-lane-retired.test.mjs tests/ninth-rowkind-seeding-proposal.test.mjs tests/sandbox-marker.test.mjs -> 11 tests, 10 pass, 1 FAIL (sbm.3)",
+      "two-connection race probe against clara_l07 (scratchpad/race2.mjs)",
+      "single-transaction, rolled-back probe battery against clara_l07 (scratchpad/probe2.mjs): rank floors, cross-firm isolation, op-key replay, retired-door refusals, merge cross-firm, alias lane, EXPLAIN of the merge lock order",
+      "catalogue probes: ACLs of every door the lane touched, RLS force flags, callers of merge_counterparties / _client_birth_core, document_capabilities rows and version"
+    ],
+    "rig_residue": "The race proof needed two COMMITTED sessions to be real, so clara_l07 now carries two throwaway firms named p899adv_<hex> (one with 3 same-family clients, one with only fixture rows from an aborted first attempt). Everything else I ran was inside a transaction I rolled back. No tracked file was edited and nothing was committed."
+  },
+  "findings": [
+    {
+      "id": "W3L07-ADV-01",
+      "ticket": 899,
+      "severity": "major",
+      "kind": "race",
+      "title": "The client birth wall is a TOCTOU: two concurrent sessions reach three same-family clients in one firm, a state the same door refuses sequentially",
+      "evidence": "0287_client_birth_wall.sql's header states the point of the file: 'MOVE THE NAME-COLLISION WALL FROM A READ A CALLER CAN SKIP TO THE DOOR THAT CREATES A CLIENT'. clara._client_birth_core does clara._reserve_op -> clara.client_identity_candidates (a STABLE read) -> insert into clara.clients, with no lock of any kind between the read and the insert. Driven on clara_l07 with two real connections (scratchpad/race2.mjs): firm p899adv_<hex> pre-loaded with ONE client 'Timur Public Advisory <sfx>'; session A (admin 1) and session B (admin 2) each read clara.client_identity_candidates -> arity 1, same single candidate id; each then called clara.open_client_onboarding acknowledging THAT candidate. A returned {client_id, plan_id}; B blocked late (pg_locks: ShareLock on transactionid 625625, while already holding RowExclusiveLock on clara.clients, clara.onboarding_plans, clara.onboarding_plan_revisions and clara.audit_log -- i.e. its wall had already passed and its client row was already inserted; the block is clara.firm_event_seq inside clara._append_event, AFTER the invariant guard). A committed, B unblocked and committed. Final state: 3 same-family clients ('Timur Public Advisory', 'Timur Ventures Alpha', 'Timur Ventures Beta'). A fourth, sequential clara.open_client_onboarding in the same firm then refused CLR10 name_family_collision, 'this name matches 3 existing clients or counterparties in your firm' -- proving the raced state is unreachable through the door one caller at a time. The same window also lets two arity-0 callers create a same-family pair with NOBODY ever acknowledging a collision, which is the acknowledgement gate the ticket's AC2 exists for. No cell in client-birth-wall.test.mjs drives two sessions.",
+      "required_fix": "Serialize the guard on the family, in the estate's own idiom: `perform pg_advisory_xact_lock(<new classid>, hashtext(p_firm::text || ':' || coalesce(clara.name_family_token(p_name),'')));` immediately before the clara.client_identity_candidates call in clara._client_birth_core (the shape 0006:952, 0007:1637-1761, 0009, 0011, 0015, 0016, 0017 and 0022 already use for firm-scoped invariant guards), and add a two-connection cell to client-birth-wall.test.mjs that holds session A open past its insert while session B runs the same wall."
+    },
+    {
+      "id": "W3L07-ADV-02",
+      "ticket": 899,
+      "severity": "major",
+      "kind": "test-red-on-branch",
+      "title": "sandbox-marker.test.mjs sbm.3 is RED on this branch: 0287's comments quote the rig's \"rig_\" marker inside a production source tree",
+      "evidence": "Re-run on clara_l07 with the full 87-gate chain: `node --test --test-concurrency=1 $GATES tests/sandbox-marker.test.mjs ...` -> `not ok` on 'sbm.3 no production source reads the sandbox marker', actual = ['packages/db/migrations/0287_client_birth_wall.sql:58  -- in one firm (`${prefix}_A1`, `${prefix}_A2`) whose shared `SANDBOX_PREFIX` (\"rig_\",', 'packages/db/migrations/0287_client_birth_wall.sql:77  -- same-family (\"rig_\"-prefixed) client in firm A through `clara.create_client` the moment'], expected = []. Both hits are new in this diff (0287 does not exist at ffe63a0d). The #1012 report already names this (follow-up 1) and declines to fix it on the ground that the work order forbids editing 'another ticket's new migration' -- but 0287 is THIS lane's own unmerged migration, and this lane has already exercised CLARA_MIGRATION_REDO seven times across 0288 and 0289, so the redo path that would let the two comment lines be reworded is the one the lane is already using. As it stands the branch ships a red db cell.",
+      "required_fix": "Reword 0287's two comment lines so the literal \"rig_\" does not appear (e.g. name the constant SANDBOX_PREFIX / fixtures/sandbox-marker.mjs instead of quoting its value), re-apply with CLARA_MIGRATION_REDO=0287_client_birth_wall, and re-run sandbox-marker.test.mjs to green. Do not weaken the census and do not exempt a migration by name."
+    },
+    {
+      "id": "W3L07-ADV-03",
+      "ticket": 889,
+      "severity": "major",
+      "kind": "tenant-isolation",
+      "title": "The recut merge door is a cross-tenant existence oracle: CLR23 cross_client for another firm's real counterparties vs CLR11 for ids that exist nowhere",
+      "evidence": "Driven inside one transaction I rolled back (scratchpad/probe2.mjs, section 5) with the SAME caller, a firm-B admin, and a firm-B client id: `clara.merge_counterparties(p_client => <firm B client>, p_survivor => <firm A counterparty>, p_merged => <firm A counterparty>, ...)` -> `CLR23 reason=cross_client :: counterparties are not in the same client`; the identical call with two freshly generated UUIDs -> `CLR11 :: counterparty not found`. Two distinguishable answers means a firm can test whether an arbitrary counterparty id is live somewhere else in the estate. packages/db/tests/rig-helpers.mjs's own CLR taxonomy states the law this breaks: `notFound: \"CLR11\", // not-found-in-your-firm (NO existence oracle)`. The cause is 0015's guard order, preserved byte-for-byte by 0289 (`select * into s from clara.counterparties where id=p_survivor;` carries no firm predicate, and clara_fn_owner is exempt from the FORCE ROW LEVEL SECURITY on clara.counterparties only because the definer runs as the owner), so this PREDATES #889 -- but #889 is the ticket that recut this body (0289 S1 executes a CREATE OR REPLACE of it), wrote its closed-world census, and documented its lock order in packages/db/README.md, and merge-alias-lane.test.mjs drives the door without a single cross-firm cell.",
+      "required_fix": "Either scope the two lookups to c.firm (`where id = p_survivor and firm_id = c.firm`) so a foreign id is indistinguishable from a missing one and both answer CLR11, or -- if the narrowed #889 scope forbids touching the guards -- file it as its own ticket naming this transcript, and add a cross-firm cell to merge-alias-lane.test.mjs that pins whichever answer is chosen so the oracle cannot widen unnoticed."
+    },
+    {
+      "id": "W3L07-ADV-04",
+      "ticket": 1012,
+      "severity": "major",
+      "kind": "quiet-pass",
+      "title": "opening-ledger-source.test.mjs's premise gate is re-armed, not fixed: a literal registry version that fails OPEN under the full-suite gate chain",
+      "evidence": "packages/db/tests/opening-ledger-source.test.mjs now carries `const PUBLISHED_REGISTRY_VERSION = 4;` with an exact-equality premise probe (`if (seen?.v !== PUBLISHED_REGISTRY_VERSION || seen?.n !== 1)`). It throws loudly only when CLARA_ALLOW_MISSING_OPENING_LEDGER_SOURCE is unset; packages/db/tests/opening-ledger-source-preintegration-gate.mjs sets it to \"1\" unconditionally, and packages/db/package.json's `test` script preloads all 87 gate modules -- which is the run CI performs. So on the full suite a version mismatch sets ready=false and the whole 12-cell battery SKIPS. That is exactly how the battery went dark between 0245 (version 3) and this ticket's 0288 (version 4), as the lane's own report documents (follow-up 2: 'a frontier gate keyed on a MUTABLE published value fails open'). The diff re-pins the literal from 2 to 4 and leaves the polarity untouched, so the very next migration that republishes the registry silences the same 12 cells again -- and the registry is republished routinely (0228 -> 2, 0245 -> 3, 0288 -> 4). Measured live: `select registry_version, count(*) from clara.document_capabilities group by 1` -> {registry_version: 4, n: 240}.",
+      "required_fix": "In the same file the ticket already edits, make the premise a FLOOR rather than an equality (`seen.v >= PUBLISHED_REGISTRY_VERSION && seen.n === 1`), or key the gate on the migration STEM ('0228_') the way client-birth-wall, seeding-lane-retired and merge-alias-lane's own gates key on a catalogue/behaviour frontier. The p656.registry cell's content assertions already pin what matters; the version number should not be able to retire the battery."
+    },
+    {
+      "id": "W3L07-ADV-05",
+      "ticket": 889,
+      "severity": "minor",
+      "kind": "weak-census",
+      "title": "The closed-world census proves recorded_via is NAMED, not that legacy_unknown can no longer be landed",
+      "evidence": "Ticket #889's AC3 asks for 'a census cell [that] asserts no writer reachable from an application role can still land legacy_unknown'. Both instruments -- 0289 S3 and merge-alias-lane.test.mjs's p889.census.no_legacy_writer -- check only that the substring 'recorded_via' appears in the comment-stripped column list between `into clara.counterparty_aliases(` and the following `values(`. A body that named the column and bound it to a variable, a parameter or the literal 'legacy_unknown' would pass. Two further gaps in the same instrument: `position('into clara.counterparty_aliases(' in v_code)` finds only the FIRST insert, so a second insert in the same body is never inspected; and the roster is closed on function NAME, so an overload would collapse into the same member.",
+      "required_fix": "Strengthen the census to read the VALUE at the recorded_via position (assert it is one of the three honest lanes and never 'legacy_unknown'), or -- better and cheaper -- back the structural cell with a behavioural one per roster member, since all three doors are already driven by existing batteries. Iterate every occurrence of the insert rather than the first."
+    },
+    {
+      "id": "W3L07-ADV-06",
+      "ticket": 899,
+      "severity": "minor",
+      "kind": "caller-controlled-guard-input",
+      "title": "p_identifier is a caller-controlled input to the wall that the door never records, so omitting it silently drops an identifier-based collision",
+      "evidence": "clara.open_client_onboarding(p_name, p_op_key, p_identifier jsonb, p_acknowledged_candidate uuid) forwards p_identifier straight into clara.client_identity_candidates, whose `idt` CTE adds every clara.client_identifiers row matching (kind, value_normalized) to the candidate set -- and then creates the client WITHOUT writing any identifier row. Because the caller chooses whether to pass it, a face that read candidates WITH an identifier (arity 1, an identifier-only match on a differently-named client) and then dispatched WITHOUT one reaches arity 0 and creates silently. That is exactly the web's shape today: apps/web/lib/onboarding/api.ts's openClientOnboarding accepts an `identifier` argument, do-dispatch.ts's beginClientOnboarding case never passes one, and apps/web/lib/command/do-actions.test.ts pins `body.p_identifier === null`. The parameter is therefore a guard input nobody supplies and a record nobody stores.",
+      "required_fix": "Either have the door PERSIST the identifier it was walled against (an add_client_identifier-equivalent inside the same transaction, which is what makes the argument load-bearing), or drop p_identifier from the new door's signature until a caller needs it, so the wall's inputs are not caller-selectable. Whichever is chosen, say it in 0287's header beside the arity ladder."
+    },
+    {
+      "id": "W3L07-ADV-07",
+      "ticket": 1012,
+      "severity": "note",
+      "kind": "deploy-ordering",
+      "title": "A web build deployed ahead of 0288 renders every open seeding row as \"Unrecognized item (seeding_proposal)\"",
+      "evidence": "apps/web/lib/firm/needs-you.ts drops 'seeding_proposal' from REVIEW_QUEUE_ROW_KINDS and apps/web/messages/en.json deletes NeedsYou.rowKind.seeding_proposal and NeedsYou.reviewSeedingProposals, while clara.list_review_queue only stops emitting the row once 0288 applies. Checked the degradation: apps/web/components/firm/needs-you-row.tsx:97-98 falls back to `t(\"rowKind.unknown\", { kind: row.row_kind })` and getNeedsYouAffordance returns undefined for an unregistered kind, so the failure is cosmetic, not a crash. It only bites if a release ships web before the migration; the house order (DB, then runtime, then web) avoids it.",
+      "required_fix": "None required. Worth one line in the release runbook for this wave: 0288 must land before the web build that drops the row kind."
+    },
+    {
+      "id": "W3L07-ADV-08",
+      "ticket": 1012,
+      "severity": "note",
+      "kind": "integration-fragility",
+      "title": "0288 hard-asserts 240 registry rows and a single pinned list_review_queue sha; both are integration-order fragile",
+      "evidence": "0288 sectionD's prestate raises unless `select count(*) from clara.document_capabilities` is exactly 240, and sectionC refuses unless clara.list_review_queue's prosrc sha is exactly 1641f99f4d295400bd39bd7b2cee3ac4cac2c34e7478078014e7305d99d9b570. The version number itself is correctly MEASURED rather than pinned (the file asserts measured+1), which is the right shape; the row count and the body sha are not. I grepped the other wave-3 lane reports for both subjects: only wave3-lane06-ticket986.md mentions document_capabilities, and only to describe the same skip defect (it publishes no rows), and no other wave-3 report mentions list_review_queue. So nothing collides today -- this is a forward hazard for wave 4 and for any sibling that adds a registry row.",
+      "required_fix": "None for this wave. If a later lane adds a document_capabilities row or recuts list_review_queue before 0288 is merged, 0288 must be re-derived rather than adapted, and the integrator should re-measure both premises on the integrated head before the from-scratch chain."
+    },
+    {
+      "id": "W3L07-ADV-09",
+      "ticket": 899,
+      "severity": "note",
+      "kind": "evidence-gap",
+      "title": "No clean full db-suite run exists for the branch's final state, and #899's fixture fallout was never swept",
+      "evidence": "The #1012 report states that run 1 of the full db suite (the only one against the freshly seeded lane database) was taken mid-ticket 'before the last four fixes', and that runs 2-4 are polluted by the one-way evaluator ceremony and append-only reference seeds, so no clean whole-suite measurement of the final branch exists. Its follow-up 3 also records that #899's name-family residue 'may not be exhausted' and proposes a sweep that was not run. I did that sweep statically: clara.name_family_token is `split_part(btrim(regexp_replace(lower(name),'[^a-z0-9]+',' ','g')),' ',1)`, so every fixture whose leading token is a constant shares one family. The shared-token call sites are qd6-close-seal-wall.test.mjs (2 clients per firm), x40-wave-c-c-tieout.test.mjs (2), firm-portfolio-pack.test.mjs (1), x41-0041-upgrade.test.mjs (up to 3 per firm, but that drill applies only 0001-0041 so no wall exists there), and packages/runtime/tests/interview-e2e.mjs + interview-kill-resume-e2e.mjs, which mint 'iv cancel/complete/sst/kill ...' but call rig.buildFirm() separately per scenario, so each client is alone in its firm. I found no third-same-family case on the full chain. #899 nevertheless changed a door that eight runtime test files drive, and its report records that packages/runtime was neither touched nor re-run.",
+      "required_fix": "The integrator should treat the db-suite evidence as partial and run one clean full suite on a fresh database for the integrated head, plus the runtime e2e spawners that call clara.begin_client_onboarding (interview-e2e.mjs, interview-kill-resume-e2e.mjs, kdoc-opening-tb-e2e.test.mjs, wave-b-opening-parse.test.mjs, wave-b-lint-belt.test.mjs), which this lane did not run."
+    }
+  ],
+  "verified_and_clean": [
+    "Rank floors on clara.open_client_onboarding: bookkeeper CLR04 'insufficient role', firm-B viewer CLR04, REMOVED admin CLR04 'actor has no active membership'.",
+    "Cross-firm isolation on the birth door: a firm-B admin's read of a name only firm A holds answers arity 0 with no rows, and a firm-B birth quoting firm A's client id as p_acknowledged_candidate creates in firm B only.",
+    "Idempotency: same op_key with a different name -> CLR10 'op_key reused with different args' (clara._reserve_op compares the request hash).",
+    "#1012 retired doors: a firm-B viewer and a firm-A admin both meet the identical CLR34 seeding_lane_retired on tick_seeding_proposal (no request-dependent answer, so no oracle), and clara.create_seeding_batch is still 42501 for clara_authenticated.",
+    "#889 alias lane, driven and read back: alias recorded_via='human_ui', BOTH counterparty_identity_revisions rows ('alias_added' and 'merged') recorded_via='human_ui' and agreeing, counterparty.alias_added event payload recorded_via='human_ui'.",
+    "#889 lock order (packages/db/README.md's new section, AC4): EXPLAIN (costs off) of the door's own `... where cp.id in (...) order by cp.id for update` gives LockRows -> Sort (Sort Key: id) -> Bitmap Heap Scan, so rows really are locked in id order and the AB/BA inversion the section names is genuinely avoided.",
+    "0287 leaves no granted body carrying the literal `insert into clara.clients(`: the only two are clara._client_birth_core (granted to nobody: proacl = clara_fn_owner=X/clara_fn_owner) and clara.create_client, and the only callers of _client_birth_core are the two doors.",
+    "clara.merge_counterparties is granted to clara_authenticated alone, so hard-coding 'human_ui' at the alias insert is not a provenance lie; no other clara function calls it.",
+    "Registry state after 0288: registry_version 4 across all 240 rows, the seven reader-backed prior_gl formats carry {seeding_lane: retired, seeding_lane_reason: client_kb_replaces_manual_pre_registration}, no row carries browser_entrance, every prior_gl row still business_operation='stored_only'.",
+    "No frozen workflow body calls clara.begin_client_onboarding: the mentions in clientOnboarding.v1-.v5 and interview.v4.known are comments saying the client and plan are born by the dashboard verb before the run starts, so the report's 'no successor contract owed' conclusion holds (its stated reason -- that the bodies 'still call' it -- does not).",
+    "Re-run of the lane's own batteries on clara_l07 with the full 87-gate chain: client-birth-wall + merge-alias-lane 13/13 pass; seeding-lane-retired 6/6 and ninth-rowkind-seeding-proposal 2/2 pass."
+  ]
+}

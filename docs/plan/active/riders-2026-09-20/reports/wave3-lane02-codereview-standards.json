@@ -1,0 +1,155 @@
+{
+  "axis": "standards",
+  "lane": "wave3-lane02",
+  "branch": "riders/w3-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "commits": [
+    "6629e2af5 feat(db): #982 a trade-invoice party resolves by its TIN (0274, slice 1)",
+    "e1a9ab635 feat(db): #982 a TIN two live parties hold refuses with both (0274, slice 2)",
+    "fdb266fdd feat(db): #982 a registration/TIN clash refuses with both sides (0274, slice 3+4)",
+    "536c5df5c feat(runtime): #982 the identifier conflict is the counterparty box's error (slice 5)",
+    "18a84e220 feat(web): #982 the chooser shows each candidate's TIN, and answers the identifier conflict",
+    "2b9ebd839 fix(web): #982 spell the ticket out in three test titles, so the colour rule stays strict",
+    "6acde36be feat(db): #1007 the trade-invoice duplicate probe, warn-only (0275, slices 1-5)",
+    "9e7750df2 feat(db): #1007 the chat lane's probe twin and the \"recorded anyway\" record (0275, slices 6-8)",
+    "b7ee16a48 test(db): #1007 rewrite #655's named residual to prove the warning (AC7)",
+    "3967ba183 feat(web,runtime): #1007 the form warns before it records, and keeps the choice (slices 9-11)"
+  ],
+  "tickets_reviewed": [982, 1007],
+  "reverifications_run": [
+    {
+      "claim": "0275 prestate pins on clara._trade_invoice_resolve_party and clara.admit_trade_invoice_work are accurate against the live lane database",
+      "command": "node -e \"...sha256(prosrc) for both signatures...\" against clara_l02 (port 55742)",
+      "result": "_trade_invoice_resolve_party: be2df90e5899a1692682d843e6967be828952b3e42f3b09fe317437677db7cf8; admit_trade_invoice_work: c1693503fa0221de53af2e1ddfe716c2baa9c3e3d82c14e02007a04c45d70f5c — both byte-identical to the migration's pinned values — CONFIRMED"
+    },
+    {
+      "claim": "clara.trade_invoice_duplicate_acks: RLS enabled AND forced, clara_authenticated holds SELECT-only, zero application-role DML",
+      "command": "direct query of pg_class.relrowsecurity/relforcerowsecurity and information_schema.role_table_grants on clara_l02",
+      "result": "relrowsecurity=true, relforcerowsecurity=true; clara_authenticated: SELECT only; clara_fn_owner: full DML (the append-only/no-truncate triggers, not a grant, are what block writes even for the owner's own callers) — CONFIRMED"
+    },
+    {
+      "claim": "packages/db/tests/trade-invoice-duplicate-probe.test.mjs — 9/9 pass, 0 skip, full gate chain",
+      "command": "node --test --test-concurrency=1 $GATES tests/trade-invoice-duplicate-probe.test.mjs (packages/db, clara_l02)",
+      "result": "9 tests, 9 pass, 0 fail, 0 skipped — CONFIRMED"
+    },
+    {
+      "claim": "packages/db/tests/trade-invoice.test.mjs + trade-invoice-party-tin.test.mjs + trade-invoice-duplicate-probe.test.mjs — 46 pass combined, 0 fail, 0 skip",
+      "command": "node --test --test-concurrency=1 $GATES tests/trade-invoice.test.mjs tests/trade-invoice-party-tin.test.mjs (37) + the duplicate-probe file above (9)",
+      "result": "37 + 9 = 46 tests, 46 pass, 0 fail, 0 skipped — CONFIRMED"
+    },
+    {
+      "claim": "apps/web/components/accounting/trade-invoice-form.test.tsx — the #1007 and #982 cells pass",
+      "command": "node --import ./test/bootstrap.mjs --import tsx --test components/accounting/trade-invoice-form.test.tsx (apps/web)",
+      "result": "18 tests, 18 pass, 0 fail — CONFIRMED"
+    },
+    {
+      "claim": "packages/runtime/tests/trade-invoice-unit.test.mjs (toAcknowledgedInvoiceIds) + work-routes-unit.test.mjs (party_identifier_conflict carrier) pass",
+      "command": "node --test tests/trade-invoice-unit.test.mjs tests/work-routes-unit.test.mjs (packages/runtime)",
+      "result": "55 tests, 55 pass, 0 fail — CONFIRMED"
+    },
+    {
+      "claim": "node scripts/check-frozen-workflows.mjs and node packages/runtime/scripts/check-parts-parity.mjs both clean — the frozen chat/Work closure was not touched",
+      "command": "node scripts/check-frozen-workflows.mjs ; node packages/runtime/scripts/check-parts-parity.mjs",
+      "result": "freeze-lint OK (312 frozen files, 55 workflow modules, no manifest diff); parts-parity OK (reader ⊇ emittable) — CONFIRMED"
+    },
+    {
+      "claim": "CI=true GITHUB_ACTIONS=true pnpm lint exits 0",
+      "command": "CI=true GITHUB_ACTIONS=true pnpm lint (worktree root)",
+      "result": "exit 0, all selftests PASS — CONFIRMED"
+    },
+    {
+      "claim": "no applied migration edited; only 0274 and 0275 are new; no PRD/ARCHITECTURE edit",
+      "command": "git diff <base>...HEAD --stat -- docs/PRD.md docs/ARCHITECTURE.md packages/db/migrations",
+      "result": "only 0274_trade_invoice_party_tin.sql and 0275_trade_invoice_duplicate_probe.sql (both new); zero PRD/ARCHITECTURE diff — CONFIRMED"
+    },
+    {
+      "claim": "apps/web/test/manifest.txt needed no new entry (trade-invoice-form.test.tsx pre-existed and was extended, not created)",
+      "command": "git diff <base>...HEAD -- apps/web/test/manifest.txt ; grep trade-invoice-form apps/web/test/manifest.txt",
+      "result": "manifest.txt has zero diff; trade-invoice-form.test.tsx (and its -a11y/-keyboard siblings) already listed — CONFIRMED, no rule-7 gap"
+    }
+  ],
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 1007,
+      "severity": "minor",
+      "category": "duplicated-code",
+      "smell": "Duplicated Code",
+      "title": "The new duplicate-warning banner hardcodes \"RM {total}\" with formatCents instead of reusing the house formatMyr(cents) helper every other MYR display in apps/web/components/bank/*.tsx already uses",
+      "file": "apps/web/components/accounting/trade-invoice-form.tsx",
+      "lines": "80, 514",
+      "compare_file": "apps/web/lib/bank/money.ts",
+      "compare_lines": "83-99 (formatCents vs formatMyr)",
+      "evidence": "trade-invoice-form.tsx imports `formatCents` (line 80) and calls `formatCents(m.totalCents)` (line 514) into an i18n string `\"entry\": \"{reference} · {date} · RM {total}\"` (apps/web/messages/en.json). Every other MYR display in the codebase (matching-candidates.tsx, matching-outcome.tsx, matching-residual.tsx, matching-section.tsx x4, reconciliation-section.tsx x6, settle-line-form.tsx, statements-section.tsx x3 — 15+ call sites, zero exceptions) instead calls `formatMyr(cents)`, which already returns \"RM 1,234.50\" (and correctly signs negatives, and returns \"—\" for null), and passes the whole formatted string into the translation as one interpolated value (e.g. matching-section.tsx:414 `{ctx.line.entry_date} · {ctx.line.description} · {formatMyr(...)}`) rather than hardcoding the currency prefix into the message string. This is the only \"RM {value}\" hardcode in en.json and the only formatCents call in this file.",
+      "how_to_fix": "Import formatMyr instead of formatCents, change the message to `\"{reference} · {date} · {total}\"`, and pass `total: formatMyr(m.totalCents)` — matching the exact pattern matching-section.tsx already uses for a structurally identical \"date · description · amount\" line.",
+      "judgement_call": true,
+      "overridden_by_repo_standard": false
+    },
+    {
+      "id": "STD-2",
+      "ticket": 1007,
+      "severity": "note",
+      "category": "mysterious-name",
+      "title": "Migration 0275's header comment repeats one sentence twice, a copy-paste artifact in the \"REDO-SAFE\" section",
+      "file": "packages/db/migrations/0275_trade_invoice_duplicate_probe.sql",
+      "lines": "93-94",
+      "evidence": "\"-- chain on which this file's own objects already exist (a\" appears verbatim on both line 93 and line 94, immediately before the line that continues \"`CLARA_MIGRATION_REDO=0275_trade_invoice_duplicate_probe` re-run over its own effects).\" It reads as a duplicated line left over from an edit.",
+      "how_to_fix": "Delete the duplicate line so the sentence reads once: \"...the prestate accepts a chain on which this file's own objects already exist (a `CLARA_MIGRATION_REDO=...` re-run over its own effects).\" Comment-only; no functional or catalog effect.",
+      "judgement_call": true,
+      "overridden_by_repo_standard": false
+    },
+    {
+      "id": "STD-3",
+      "ticket": 1007,
+      "severity": "note",
+      "category": "documentation-completeness",
+      "title": "packages/db/README.md's 0275 section understates the migration's own statement shapes when summarising redo-safety",
+      "file": "packages/db/README.md",
+      "lines": "the \"Redo-safe by construction\" paragraph of the ## 0275 section",
+      "evidence": "The README says \"every statement is `create or replace function` or a `revoke`/`grant` on one\", but 0275 also issues `create table if not exists clara.trade_invoice_duplicate_acks`, `create index if not exists`, `alter table ... enable/force row level security`, `create policy`, and `create trigger` statements (all correctly idempotent per the migration file's own header at lines 91-95, which is accurate). The README's own summary is the less complete of the two.",
+      "how_to_fix": "Align the README sentence with the migration header's own \"create table if not exists / create or replace function / create index if not exists, or guarded by a catalog probe\" phrasing so a reader of the README alone does not get a narrower picture than the migration file gives.",
+      "judgement_call": true,
+      "overridden_by_repo_standard": false
+    },
+    {
+      "id": "STD-4",
+      "ticket": 1007,
+      "severity": "minor",
+      "category": "process-rule",
+      "title": "The implementer killed three processes it did not start, which WORK-ORDER.md rule 1 (\"never kill processes you did not start\") states as a binding rule with no stated exception",
+      "file": "docs/plan/active/riders-2026-09-20/reports/wave3-lane02-ticket1007.md",
+      "lines": "\"Deviations and anything unverified\" section",
+      "evidence": "The implementer's own report states: \"I stopped three processes I did not start. The lane's Playwright triple (3510/3511/3512) was held by an orphaned e2e/serve-built.mjs and its next start child in this worktree... with a dead parent shell... I stopped exactly those three PIDs (43092, 45404, 46408) by id.\" WORK-ORDER.md rule 1 reads: \"Never kill processes you did not start (in particular never kill every node process).\" No exception for orphaned processes from a prior cut-off session is stated anywhere in WORK-ORDER.md or RIG.md.",
+      "how_to_fix": "Not a code defect and already fully disclosed with exact PIDs and justification (the lane's own ports were unusable otherwise, and the kill was scoped to three named PIDs rather than a sweep). Flagged because it is a literal breach of a documented, binding rule this same session's own instructions repeat verbatim; the work order or RIG.md should either state an explicit exception for orphaned processes bound to the lane's own reserved ports, or implementers should escalate rather than self-authorize a kill.",
+      "judgement_call": false,
+      "overridden_by_repo_standard": false
+    }
+  ],
+  "hard_violations": [],
+  "migration_house_law_check": {
+    "files": [
+      "packages/db/migrations/0274_trade_invoice_party_tin.sql",
+      "packages/db/migrations/0275_trade_invoice_duplicate_probe.sql"
+    ],
+    "header": "present on both — spec of record, what-was-true-before (measured), scope verbatim from the ticket, redo-safety argument",
+    "prestate_pins": "0274: 4 pins (the recut body's own pre-image, admit_trade_invoice_work, _canonical_counterparty, plus posture asserts) — re-measured independently. 0275: 2 pins (_trade_invoice_resolve_party post-0274, admit_trade_invoice_work) — INDEPENDENTLY RE-MEASURED on clara_l02 and found byte-identical to the migration's stated values (see reverifications_run)",
+    "tail_assertions": "present on both — body count/existence, owner/SECURITY DEFINER/search_path/stable posture preserved, ACL exact-match (ungranted internals, clara_authenticated-only human doors, clara_runtime-only actor-explicit doors), neighbour-body re-pin proving 0225/0274 did not move, plus (0275 only) RLS-enabled-and-forced + trigger-count + zero-DML assertions on the new table",
+    "preintegration_gate": "packages/db/tests/trade-invoice-party-tin-preintegration-gate.mjs (stem trade_invoice_party_tin$) and packages/db/tests/trade-invoice-duplicate-probe-preintegration-gate.mjs (stem trade_invoice_duplicate_probe$) — both present and wired",
+    "rig_meta_cohort": "TRADE_INVOICE_DUPLICATE_0275_COHORT added to packages/db/tests/rig-meta.mjs, wired into ALLOWED (both clara_authenticated and clara_runtime rows) and grantMatrixFailures; 0274 mints no function and moves no grant so correctly has no cohort",
+    "gate_chain_order": "packages/db/package.json's test script appends --import ...trade-invoice-party-tin-preintegration-gate.mjs then --import ...trade-invoice-duplicate-probe-preintegration-gate.mjs, in migration-number order (0274 before 0275) — present and correct",
+    "owner_security_definer_search_path_acl_preserved_on_recut_bodies": "0274 recuts exactly one body (clara._trade_invoice_resolve_party) and both its own tail and 0275's prestate independently confirm owner=clara_fn_owner, prosecdef=true, provolatile='s', search_path=clara,pg_temp, and zero application-role EXECUTE grant survived the recut",
+    "new_relations_force_rls_zero_application_role_dml": "0275 creates one new relation, clara.trade_invoice_duplicate_acks: RLS enabled AND forced (independently re-queried, see reverifications_run), clara_authenticated holds SELECT only, and INSERT/UPDATE/DELETE are additionally blocked by two triggers (_tf_append_only, _tf_no_truncate) even for a role that somehow held DML — belt and suspenders, confirmed",
+    "no_applied_migration_edited": true,
+    "no_frozen_manifest_diff": true,
+    "no_prd_or_architecture_edit": true
+  },
+  "tdd_test_quality_check": {
+    "vertical_slices": "Commit history (git log --stat --reverse) shows each #982 slice as its own test+implementation commit (slices 1 through 5, one commit each). #1007's first commit (6acde36be, 'slices 1-5') bundles five slices into one commit, but its own message documents why: it is the judged, trimmed, non-vacuity-proved landing of an earlier implementer's uncommitted, partially-applied work (recovering from a usage-limit cutoff), not a battery of red tests written ahead of any implementation — the RESUME NOTE explicitly describes measuring drift, removing the untested acknowledgement half, and re-landing it test-first in the next two commits (9e7750df2, with explicit 'measured red first: 42883 function does not exist' for each new door). WORK-ORDER.md rule 4 permits 'commit per green slice or per small group of slices' and the wave-3 addendum's deliberate-break-and-restore methodology is the stated substitute for a literal red-first cycle when recovering interrupted work. Not a horizontal-slicing violation.",
+    "public_seam_testing": "All new db cells drive one of the three new SQL doors (clara.probe_trade_invoice_duplicates, its runtime twin, or the acknowledgement writer/reader) via humanQuery/roleQuery — never an internal collaborator; the migration tail itself asserts the four internals (_trade_invoice_reference_key, _trade_invoice_duplicate_matches, _trade_invoice_probe_core, _trade_invoice_actor_firm) are ungranted, and the test file's own header states no cell calls them directly (independently confirmed: no such call found). Web/runtime unit tests inject `probe`/`toAcknowledgedInvoiceIds` as public seams matching the file's existing `submit` seam pattern.",
+    "independent_expected_values": "Assertions compare against literals stated in each test's own setup (e.g. exact invoice_id/work_id from a just-created fixture, 'inv001' as the expected normalised key, byte-equal CLR11 messages across two calls) rather than re-deriving the expected value from the code under test.",
+    "no_mocking_of_owned_system": "Db tests run against the real Postgres rig, not a mock. The one legitimate mock (apps/web/e2e/trade-invoice-mock.mjs, faking PostgREST/runtime HTTP responses for the browser walk) is the pre-existing, explicitly-documented boundary this lane's whole e2e suite already uses (\"What is faked is what sits behind them\"), and its 0275 addition (probe_trade_invoice_duplicates, transcribed verbatim from the migration's own jsonb_build_object shape) follows the file's own stated rule that every mocked body is transcribed from the real route/door, never invented.",
+    "structural_cells_present": "p1007.probe.is_a_read (catalog posture + row-census + concurrent for-update-nowait proof that the read holds no lock) and the migration's own tail (catalog re-reads rather than trusting the DO block ran as written) satisfy the house structural-cell requirement that overrides the plain /tdd preference where the two conflict."
+  }
+}

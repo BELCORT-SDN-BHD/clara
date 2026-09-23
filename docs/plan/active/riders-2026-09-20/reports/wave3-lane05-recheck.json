@@ -1,0 +1,74 @@
+{
+  "lens": "RECHECK",
+  "wave": 3,
+  "lane": "05",
+  "branch": "riders/w3-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "review_head": "72c2c6891",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave3-lane05-fix.md",
+  "recheck_head": "d8ff391a8",
+  "tickets": [908, 909, 927, 928, 929],
+  "verdict": "accept-with-fixes",
+  "summary": "All three review reports' findings were re-checked against the fix report and the current branch head (d8ff391a8). Every blocker-severity test regression is genuinely fixed and re-verified by this recheck: the 80-cell CI regression (L05-SPEC-01/ADV-L05-01) is 0 red across every file the reviews named plus a broader 50-file/354-test sweep of everything that imports the touched fixture helpers, and operation-census/rig-isolation, typecheck, lint (CI=true GITHUB_ACTIONS=true), check-frozen-workflows, check-parts-parity, check-message-keys, the runtime belt-isolation suite and the adjustments-retired-walk e2e (2/2, real built bundle) all pass on this recheck. L05-SPEC-04 (false runtime comments) and ADV-L05-05 (dead-end due banner) are fixed and independently re-verified in code and by re-run. ADV-L05-09 (stale page comments) is fixed. F1 (standards, commit-order disclosure) is satisfied by the fix report's own text. The fix round's own self-audit commit (d8ff391a8) found and correctly fixed two real defects in its first answer to ADV-L05-02 (a per-wake-kind blind spot in the containment tripwire, and a false claim about how the path is held shut) -- both re-verified here against the live catalog and the migration header/README/CONTEXT.md text, which now agree with each other and with what is actually measurable on clara_l05. No newly broken cell, migration or claim was found anywhere in the diff between the review head and the recheck head. What remains open is not a regression but three pre-existing majors/blockers the fix round could not close within lane scope and says so: the agent-lane prepayment path can still mint a 0045 template that no door can sign, run, sweep or warn about (still reachable, now contained by a tripwire test and documented in three places, but not closed -- closing it is a product-capability decision the lane is not authorized to make per WORK-ORDER rule 5); the sibling-plan advisory's self-exclusion-by-basis-identity still hides a total-overlap case this rig's own seed produces; and the advisory still has an unclosed concurrency window. All three are honestly disclosed, backed by a proposed fix and a named follow-up, and deliberately left for an owner/orchestrator ruling rather than coded around -- but per the recheck instruction to accept only when nothing above minor remains, they keep this from a clean accept.",
+  "regression_sweep": {
+    "db_touched_files_full_gate_chain": "19 files (every file the fix report's 80-red table names) -- 132 tests, 131 pass, 0 fail, 1 skip (x42-0045-b2-upgrade, reset-gated, correctly SKIPs)",
+    "db_broader_import_sweep": "50 files (every tests/*.test.mjs importing x42-adj-helpers.mjs, x42-s5-helpers.mjs or f-a4-pr2a-fixtures.mjs, plus plan-overlap-template-arm-retired/plan-overlap-sibling-arm/plan-schedule-yield-wall/accounting-plans) -- 354 tests, 344 pass, 0 fail, 10 skip (all named/pre-existing per RIG.md)",
+    "db_operation_census_and_rig_isolation": "33 tests, 32 pass, 0 fail, 1 skip (T19 poison-role, reset-gated)",
+    "runtime_reconcile_belt_isolation_unit": "24/24 pass",
+    "web_touched_render_states_file": "3/3 pass (includes the #927 due-banner retirement cell)",
+    "pnpm_typecheck": "PASS (apps/web, packages/runtime)",
+    "CI_lint": "CI=true GITHUB_ACTIONS=true pnpm lint -- exit 0",
+    "check_frozen_workflows": "OK -- 312 frozen, 55 use-workflow, 3 retired (unchanged from fix report)",
+    "check_parts_parity": "OK",
+    "check_message_keys": "OK -- 4303 static keys resolve",
+    "e2e_adjustments_retired_walk": "2/2 pass on triple 3540/3541/3542, real built bundle, mock now answers due:true",
+    "migration_checksum_reverify": "clara.schema_migrations on clara_l05: 0283_retire_plan_overlap_template_arm checksum 28e630178b35012c062d89c084844435d59896a951d6666236ab4f6f79ca3af7 -- matches the fix report's claimed newest value exactly; 271 total migrations"
+  },
+  "findings": [
+    {
+      "id": "RECHECK-01",
+      "source_ids": ["L05-SPEC-03", "ADV-L05-02"],
+      "ticket": 927,
+      "severity": "major",
+      "status": "still_open_by_design",
+      "title": "The agent-lane prepayment path can still mint an unreachable 0045 adjustment template; contained and disclosed, not closed",
+      "evidence": "Re-verified on clara_l05: clara._propose_adjustment_template_core is granted only to clara_fn_owner; clara.wake_establish_prepayment_schedule is granted to clara_wake_interactive and is the ONLY row in clara.wake_fn_allowlist for that function (array_agg = {close_prep}); clara.wake_engine_sources.close_prep.enabled = false. packages/db/tests/plan-overlap-template-arm-retired.test.mjs's p929.containment cell (re-run here, 4/4 pass in that file) asserts all three facts positively and proves each with a rolled-back mutant (widening the allowlist to a second kind, flipping the enabled flag). The commit d8ff391a8 in this same fix round found and fixed two real defects in the first answer to this finding: the tripwire originally counted the allowlist pair rather than reading it per wake kind (blind to a second-kind registration), and 0283's header / README.md / the cell's own message originally claimed 'no close_prep wake task is minted' when clara_l05 in fact carries 771 close_prep credentials minted by the batteries themselves and clara.mint_wake_credential_for_task never reads the flag -- the real gate is the runtime's claim step (packages/runtime/lib/wake-engine.mjs:392-397 and :801-804). Both corrections are now consistent across 0283's header, packages/db/README.md and the test file's own comments, and I independently confirmed each of the three underlying facts against the live catalog rather than trusting the prose. What is NOT true, and the fix report does not claim it is: the path is closed. A row can still be proposed today by any caller of the wake door with close_prep unparked, and #927/#928/#929 leave it un-signable, un-runnable, un-sweepable and un-advised.",
+      "why_it_stays_open": "Closing it means revoking a grant or refusing inside a core that a still-published successor door (clara.create_prepayment_schedule, 0223) exists for -- a product-capability retirement the #788 owner ruling never named, which WORK-ORDER rule 5 (\"no migration in a wave-1 lane... a ticket that needs one, stop... and go on\") and rule 5's scope-discipline reading put outside this fix round's authority. The fix round's own required_fix alternative (spec review's ADV-L05-02) explicitly allows leaving it open IF the reports state the residual in one sentence, which they now do in three places (migration header, README, CONTEXT.md _Avoid_ line) plus a named follow-up for the orchestrator.",
+      "required_fix": "Not a code fix owed to this lane. An owner/orchestrator ruling is owed: either retire or reroute clara.wake_establish_prepayment_schedule onto clara.create_prepayment_schedule (0223) in a ticket that owns that migration, or explicitly rule the residual acceptable and close the follow-up. Until that ruling lands, this stays a documented, tripwired, open item -- not a defect newly introduced by this fix round, and not silently dropped, but still open."
+    },
+    {
+      "id": "RECHECK-02",
+      "source_ids": ["ADV-L05-04"],
+      "ticket": 909,
+      "severity": "major",
+      "status": "still_open_by_design",
+      "title": "The plan-overlap advisory's concurrency window (two concurrent creations both see NULL) is unchanged; correctly stated where the claim lives, not fixed",
+      "evidence": "0283's header (re-read at HEAD) states the window explicitly and names the closing shape (the client-level pg_advisory_xact_lock pattern clara.retire_adjustment_template already uses). No code change addresses it. The three plan-creating doors (create_accounting_plan, revise_accounting_plan, _accrual_plan_core) are re-confirmed byte-unchanged in this recheck's own test run (plan-overlap-template-arm-retired.test.mjs's p929.tail cell re-derives all three shas and they match the pinned values). The fix report is honest that this is unfixed, not that it is fixed.",
+      "why_it_stays_open": "The honest fix recuts three function bodies that 0280/0281/0282/0283 all pin byte-unchanged, two of which are below the redo frontier and cannot be re-applied without a new migration -- explicitly a ticket per WORK-ORDER's migration and scope-discipline rules, not a fix-round edit.",
+      "required_fix": "File the follow-up (widen the three doors to take an advisory lock keyed on client_id, as 0283's header already specifies) as its own ticket; no action owed inside this lane's fix round."
+    },
+    {
+      "id": "RECHECK-03",
+      "source_ids": ["L05-SPEC-09", "ADV-L05-03"],
+      "ticket": 909,
+      "severity": "major",
+      "status": "still_open_by_design",
+      "title": "The sibling-plan advisory's self-exclusion by basis identity still hides the total-overlap case; the false justification is withdrawn but the behaviour is unchanged",
+      "evidence": "0283's header now states the measurement (7 (client_id, basis_digest) groups with 28 live byte-identical-basis plans on clara_l05) instead of the withdrawn 'coincidence' claim. clara._plan_overlap_warning's prosrc (re-derived in this recheck via plan-overlap-template-arm-retired.test.mjs's p929.tail cell) still carries the 'is distinct from p_basis' self-exclusion-by-value shape, unchanged from 0281.",
+      "why_it_stays_open": "The honest fix (self-exclude by the caller's own plan id, not by basis value) recuts the same three byte-pinned caller bodies as RECHECK-02, two of which are below the redo frontier -- a ticket, not a fix-round edit, per the same WORK-ORDER constraint.",
+      "required_fix": "File the follow-up (widen clara._plan_overlap_warning to take and self-exclude by the caller's own plan id) as its own ticket; no action owed inside this lane's fix round."
+    }
+  ],
+  "not_findings_confirmed_closed_or_legitimately_deferred": [
+    "L05-SPEC-01 / ADV-L05-01 (blocker) -- FIXED, re-verified by re-run: 0 red across all 19 named files plus a 50-file/354-test broader sweep.",
+    "L05-SPEC-02 (major) -- FIXED and correctly left unexecuted: node --check passes on x42-0045-b2-upgrade.test.mjs, RIG.md forbids CLARA_RIG_ALLOW_RESET on a lane cluster, matches the fix report's own disclosure.",
+    "L05-SPEC-04 (major) -- FIXED, re-verified: leader.mjs and reconciler.mjs comments now state the true residual (clara_runtime EXECUTE survives with no caller) instead of the false '#929 removes the DB surface' claim.",
+    "ADV-L05-05 (major) -- FIXED, re-verified in code (adjustment-run-due-banner.tsx dueRetired branch), in the unit test (3/3 pass) and in the e2e walk (2/2 pass, mock answers due:true).",
+    "ADV-L05-09 (note) -- FIXED, re-verified: both page headers now name the retirement and the ticket.",
+    "F1 (major, standards) -- satisfied: the fix report itself carries the disclosure the finding asked for.",
+    "L05-SPEC-05, L05-SPEC-06, L05-SPEC-07, L05-SPEC-08/ADV-L05-06, ADV-L05-07, ADV-L05-08 (minor/note) -- all documented, no fix owed, reasons for staying hold on inspection (Windows pg_dump absence, a checked navigation-tree substitution, a real judgement about which write door must stay for a live guard to be clearable, an operational note about a redo-refusal the fixtures cause and why cleanup would corrupt other cells' assertions, an immutable applied migration's citation error corrected in a later file, and a list of validations left dormant rather than dead).",
+    "F2, F3 (note, standards) -- no fix required; pre-existing duplication and a migration-house convention correctly not owed here, both confirmed against the house rule rather than the reports' own say-so."
+  ],
+  "newly_broken": []
+}

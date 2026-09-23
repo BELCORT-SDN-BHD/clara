@@ -1,0 +1,137 @@
+{
+  "axis": "SPEC",
+  "lane": "wave 3 / lane 11",
+  "branch": "riders/w3-lane11",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\int",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head": "3fc1bb17a",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "spec_source": "GitHub issues #1024, #897, #1021, #1022 (gh issue view <n> --json body,comments). #1024/#1021/#1022 have 0 comments, so the body is the newest Agent Brief; #897's newest ruling is the 2026-09-20 triage comment.",
+  "verdict": "accept-with-fixes",
+  "cells_rerun_by_the_reviewer": [
+    "lib/clara/use-clara-thread-stop.test.ts -> 27 tests, 27 pass",
+    "components/clara/thread-stop-reply.test.tsx -> 10 tests, 10 pass",
+    "components/clara/thread-revoked.test.tsx -> 4 pass; lib/clara/stream-revoked.test.ts -> 8 pass",
+    "lib/clara/threadStore.test.ts -> 16 pass",
+    "components/clara/interview-draft-persistence.test.tsx -> 2 pass",
+    "lib/clara/rail-focus-return.test.ts -> 6 pass",
+    "e2e/e2e-fixture-ownership.test.ts -> 44 pass",
+    "components/documents/documents-workbench-refresh.test.tsx -> 9 pass (isolated)",
+    "tests/invite-mail-transport.test.ts -> 47 pass",
+    "node scripts/run-tests.mjs (whole apps/web unit suite) -> 4870 tests, 4868 pass, 0 fail, 2 skipped, 219 s",
+    "pnpm --filter @clara/web e2e -- work-cancel-walk on triple 3600/3601/3602 -> 10 passed (1.1m), B7 green (2.4 s)",
+    "pnpm --filter @clara/web e2e -- --no-build agentic-finish-walk -> 10 passed (1.4m), the #897 arm green (8.2 s)"
+  ],
+  "findings": [
+    {
+      "id": "SPEC-1021-1",
+      "ticket": 1021,
+      "kind": "requirement implemented but wrong",
+      "severity": "major",
+      "title": "#1021's headline AC is contradicted on this branch: the cell failed once at HEAD, after the fix",
+      "evidence": "Ticket #1021 AC: \"The cell passes reliably (no flake) across repeated runs of the full `apps/web` unit suite under realistic concurrent load (for example, run alongside the rest of the suite, not in isolation).\" reports/wave3-lane11-ticket1021.md records ONE whole-suite pass and says so under \"Anything unverified\": \"I could not run 'repeated' (N>1) whole-suite passes inside this session's time budget\". The NEXT ticket's own whole-suite run at HEAD 3fc1bb17a then recorded that cell FAILING: reports/wave3-lane11-ticket1022.md, \"One pre-existing, unrelated failure in the whole-suite run\" -- \"`[633]: an UNSETTLED receipt keeps a bounded watch and says so; the poll's budget is finite` failed once (`grew > 0` false -- the poll never ticked before `settleUntilQuiet`'s 300ms quiet window elapsed)\". That failure is not unrelated: it is #1021's own cell failing through #1021's own new helper. My own whole-suite run at HEAD passed (4868/4870, 0 fail), so it is intermittent, which is precisely what the AC forbids.",
+      "required_fix": "Do not close #1021 on the current evidence. Prime the wait (see SPEC-1021-2), then re-measure over N>=5 whole-suite passes and record the counts."
+    },
+    {
+      "id": "SPEC-1021-2",
+      "ticket": 1021,
+      "kind": "requirement implemented but wrong",
+      "severity": "major",
+      "title": "settleUntilQuiet starts its quiet clock before the first read, adding a failure mode the fixed-count loop did not have",
+      "evidence": "apps/web/components/documents/documents-workbench-refresh.test.tsx, the new helper: `let last = countOf(); let quietSince = Date.now(); while (Date.now() - quietSince < QUIET_MS) { if (Date.now() >= deadline) throw ...; await h.settle(); const cur = countOf(); if (cur !== last) { last = cur; quietSince = Date.now(); } }` with `QUIET_MS = 300`. The clock starts BEFORE any settle, so one `h.settle()` costing >= 300 ms with no count change returns with `grew = 0` and `assert.ok(grew > 0)` fails -- exactly the observed failure. `FAST_POLL` is `{ baseDelayMs: 0, maxDelayMs: 0 }` (line 264) and `lib/documents/use-settle-poll.ts`'s `DEFAULT_MAX_TICKS = 12`, so every tick is a separate zero-delay macrotask hop and a hop can straddle the window under load. The same shape can also return MID-poll (1 <= grew < 12), where `grew <= 12` passes although the ceiling was never reached -- so the AC \"the cell still fails if the poll's bound is removed or widened\" holds for the measured `maxTicks: 1000` control but not for the contended case the ticket exists to fix. The replaced `for (let i = 0; i < 40; i++) await h.settle();` guaranteed 40 hops and could not exit at zero.",
+      "required_fix": "Make the wait two-phase: settle until `countOf() > mount` (or the deadline) first, and only then start the quiet window; keep the 10 s deadline as the outer bound."
+    },
+    {
+      "id": "SPEC-1022-1",
+      "ticket": 1022,
+      "kind": "claim not supported by the branch",
+      "severity": "major",
+      "title": "\"Every new handler censused as scoped\" is false: three of the four new mock handlers are invisible to the N5 census",
+      "evidence": "reports/wave3-lane11-ticket1022.md gates table: \"e2e mock ownership census ... 44 tests, 44 pass, 0 fail -- every new handler censused as `scoped`\"; apps/web/README.md and commit 3fc1bb17a repeat it (\"All scoped by `ours`, exactly like every other handler in that file\"). apps/web/e2e/e2e-fixture-ownership.test.ts defines `HANDLER_OPENER = /(?:path === \"(\\/(?:rest|api)\\/[^\"]+)\"|verb === \"([a-z0-9_]+)\")/`, which matches only `/rest/...`, `/api/...` or `verb === \"...\"`. Running that regex over apps/web/e2e/members-lifecycle-mock.mjs at HEAD yields 10 openers and NONE of `/auth/v1/admin/users`, `/auth/v1/admin/generate_link`, `/e2e-invite-mail-capture`. The census file's own header names this failure mode: \"A census that cannot see a handler cannot report it unscoped, which is this file's own failure mode, one level up.\" The 44/44 pass is therefore no evidence about the three new handlers.",
+      "required_fix": "Correct the claim in the report, the README paragraph and the mock's header. If the guarantee is wanted rather than the sentence, widening `HANDLER_OPENER` to `/auth/` and `/e2e-` paths is the census owner's call (it would also surface the pre-existing `/auth/v1/verify` handler)."
+    },
+    {
+      "id": "SPEC-1022-2",
+      "ticket": 1022,
+      "kind": "behaviour that contradicts what the diff says about itself",
+      "severity": "major",
+      "title": "The new /e2e-invite-mail-capture handler is unscoped, while the same commit states every new handler is scoped by `ours`",
+      "evidence": "apps/web/e2e/members-lifecycle-mock.mjs at HEAD: `if (request.method === \"POST\" && path === \"/e2e-invite-mail-capture\") { const body = await readCachedJson(request); state.capturedMail = {...}; sendJson(response, 200, {...}, cors); return true; }` -- no `if (!ours) return false;`, unlike its two sibling handlers added in the same hunk. The section comment above it says \"Scoped anyway, on the same principle every other handler in this file states: an unscoped admin-directory answer is a shared endpoint waiting to be claimed by whichever lane trips it next\"; the commit message says \"every handler scoped by `ours` like the rest of the file\"; the report says \"Every new handler scoped by `ours`, matching this file's own standing rule\". `CLARA_E2E_INVITE_MAIL_ENDPOINT` is now set for EVERY e2e run (apps/web/e2e/run.mjs), so the path is live for every lane, and it is not declared in `LANE_DECLARATIONS` as debt either -- the census cannot see it (SPEC-1022-1).",
+      "required_fix": "Add `if (!ours) return false;` to the mail-capture handler, the guard its two siblings carry, or declare it with its reason."
+    },
+    {
+      "id": "SPEC-897-1",
+      "ticket": 897,
+      "kind": "requirement partially performed",
+      "severity": "minor",
+      "title": "The triage comment's step 1 -- reproduce the draft loss IN A BROWSER WALK, before the fix -- was not done",
+      "evidence": "The 2026-09-20 triage comment on #897: \"1. Reproduce first: a browser walk on the mock lane that types into an open interview question, goes to full screen, and looks at the answer field. It must fail today for the reason above.\" Commit order on the branch is 40ae61f67 (store) -> 1bdcb32c4 (the InterviewRunCard fix) -> eedae0bd7 (the walk), so the walk did not exist while the defect did. reports/wave3-lane11-ticket897.md's \"Vacuity controls\" item 1 reverts InterviewRunCard.tsx and re-runs the COMPONENT cell (2/2 red), never the walk; the only browser red recorded in eedae0bd7's message is for the wrong runtime path and for the focus half.",
+      "required_fix": "Either run the landed walk once against a stashed InterviewRunCard.tsx and record the red, or state in the report that step 1 was satisfied at the component seam instead of the browser, and why that substitution is adequate."
+    },
+    {
+      "id": "SPEC-897-2",
+      "ticket": 897,
+      "kind": "requirement implemented differently from its wording",
+      "severity": "minor",
+      "title": "The draft is keyed by clientId alone, while the ruling asks for per-thread persistence that \"never leaks to ... another thread\"",
+      "evidence": "The 2026-09-20 triage comment: \"the interview answer draft gets the same per-thread persistence the Clara composer's own message draft already has ... It is cleared when the answer is submitted, and it never leaks to another Client or another thread.\" apps/web/lib/clara/threadStore.ts adds `interviewDrafts: Record<string, string>` keyed by `clientId` (its header argues it: `runId` is null on every remount, and `uq_onboarding_plans_one_open` allows one open plan per client). The composer's own `drafts` is `Record<string, Record<string, string>>` -- two axes. The new store cells (40ae61f67) pin \"ISOLATION BY CLIENT: two clients' interview drafts never share a value\"; no cell pins the other-thread half, because the key has no thread axis: two Clara threads at the same client altitude share one interview draft.",
+      "required_fix": "Accept the deviation explicitly (the source argument is sound) or add the thread axis; either way the report should say the \"another thread\" half is answered by the key's design, not by a cell."
+    },
+    {
+      "id": "SPEC-897-3",
+      "ticket": 897,
+      "kind": "scope",
+      "severity": "minor",
+      "title": "A second production change (the rail focus-return module) was self-authorized beyond the triage comment's step 2",
+      "evidence": "The 2026-09-20 triage comment scopes the product change to one step -- \"2. Make it true: the interview answer draft gets the same per-thread persistence ...\" -- and closes \"If it passes, the tracing was wrong: say so, keep the walk, and change no product code.\" The branch also adds the production module apps/web/lib/clara/rail-focus-return.ts (72 lines, a sessionStorage take-once marker) and changes apps/web/components/clara/ClaraRail.tsx (an escalate ref, an onClick that writes the marker, an effect with no dependency array, and a `takeRailReturnFocus` call made DURING render). The report argues it from the original Agent Brief's AC1 (\"asserts keyboard focus returns to the triggering control\"), which is fair, but it is a second, unratified product fix under a ticket the owner ratified for a narrow one (work-order rule 5: \"Do not widen a ticket\").",
+      "required_fix": "Integrator/owner call only: ratify the focus-return module on the ticket (AC1 does name focus return) or split it out. No code change is implied by this finding."
+    },
+    {
+      "id": "SPEC-897-4",
+      "ticket": 897,
+      "kind": "documentation contradicts the branch",
+      "severity": "minor",
+      "title": "apps/web/README.md still records #897 as \"Not delivered\" and says the reproduction cell \"should flip once #897 lands\"",
+      "evidence": "apps/web/README.md at HEAD, lines 1387-1410: \"## #897 -- the full-screen onboarding altitude leg (code-review fix round; still open)\", \"**Not delivered.**\", \"...no walk exists anywhere, so the note recreated exactly the false-coverage state #897 exists to remove\", \"...it is the test whose assertion should flip once #897 lands real persistence.\" All four are false on this branch: the walk exists at e2e/agentic-finish-walk.spec.ts:364 (green in my run), and the assertion was flipped in 1bdcb32c4. #1021's own report flags it (\"Follow-ups worth filing\", item 2). Work-order rule 9 asks for the module README in the same commits.",
+      "required_fix": "Overwrite that README section with the delivered state (house frame: overwrite, never append a ticket history), the way commit 3fc1bb17a overwrote the #874-era paragraphs."
+    },
+    {
+      "id": "SPEC-1024-1",
+      "ticket": 1024,
+      "kind": "requirement partially met",
+      "severity": "minor",
+      "title": "AC4 holds only on the stop re-attach path; a first attach still renders a 404 `not_found` as lost access",
+      "evidence": "#1024 AC: \"A reply whose read is refused because it no longer exists is never described to the reader as a loss of access.\" apps/web/lib/clara/useClaraThread.ts diverts a `revoked` seen before open ONLY when the caller passes `\"this-tab-cannot-resume\"`, and only `stopReply`'s re-attach does; `sendMessage`'s first attach and `retryConnection` keep the `\"revocation\"` default, so lib/clara/stream.ts's 403/404 arm still becomes `StreamAccessRevokedError` and renders \"You no longer have access to this reply\" -- pinned by components/clara/thread-revoked.test.tsx:226, which I re-ran 4/4 green. The report states this under AC4 and files it as follow-up 1, and the ticket's Out of scope names \"the first-attach revocation path and its copy\" -- so it is a scope carve-out, not a miss, but the AC as written is unconditional.",
+      "required_fix": "Integrator decision: close #1024 on the narrowed reading and file the first-attach existence-oracle follow-up the report proposes, or hold AC4 open."
+    },
+    {
+      "id": "SPEC-1024-2",
+      "ticket": 1024,
+      "kind": "documentation states an absolute the code does not hold",
+      "severity": "note",
+      "title": "The new CONTEXT.md entry's _Avoid_ line forbids what its own body says is unchanged",
+      "evidence": "CONTEXT.md (added by 8be379c48, inside the `<!-- #1024 -->` fence): the body says \"A revocation the runtime sends down an OPEN read, or one found on a tab's first attach, is unchanged\", and two lines later the _Avoid_ reads \"Any stream-route refusal read as 'you no longer have access'\". A first-attach 404 is a stream-route refusal that IS still read that way (SPEC-1024-1). CONTEXT.md is the shared house glossary, so the absolute reads as a rule for every surface.",
+      "required_fix": "Narrow the _Avoid_ line to the read a tab opens for its own benefit, matching the entry's own body."
+    },
+    {
+      "id": "SPEC-1022-3",
+      "ticket": 1022,
+      "kind": "coverage moved without a home being named",
+      "severity": "note",
+      "title": "The invite walk's `mail_not_configured` assertions were deleted and the report does not say where that coverage went",
+      "evidence": "apps/web/e2e/members-invite-walk.spec.ts lost `await expect(page.getByText(\"The invitation was not sent\")).toBeVisible();`, `await expect(page.getByText(/no invitation mail set up/)).toBeVisible();` and `await expect(page.getByText(\"another-hire@larkin.test\")).toHaveCount(0);` when the success path replaced them -- a necessary consequence of enabling the capability for AC2. The copy is still pinned at the component seam (apps/web/components/admin/members-walls.test.tsx:375), so nothing is actually uncovered, but the report does not say so.",
+      "required_fix": "One line in the report naming members-walls.test.tsx as the remaining home for the mail_not_configured banner."
+    }
+  ],
+  "checked_and_clean": [
+    "#1024 AC1: work-cancel-walk re-run by the reviewer at HEAD 3fc1bb17a (i.e. AFTER #1022 changed e2e/run.mjs globally) -> 10 passed, B7 green in 2.4 s. The report's 15/15 isolated-B7 block was measured at 3fbdb294c and was NOT re-measured here.",
+    "#1024 AC2/AC3/AC5/AC6/AC7: cells 26 and 27 of use-clara-thread-stop.test.ts and cell 10 of thread-stop-reply.test.tsx read as claimed. Cell 26 keeps `reattach === \"lost\"` and now pins `provisionalChunks.length === 1`, which covers the brief's \"discards the buffered parts of the answer\". Both re-decided cells are re-decided in place with their argument; nothing was deleted, and refusedStopText still seeds a chunk and asserts the Stop control before the press.",
+    "#1024: threadStore.ts is genuinely unchanged by this ticket, as the report states. The repo-wide grep for the revocation copy matches the report exactly.",
+    "#897 AC1-AC4: the mock-lane arm exists and asserts both halves; client C is navigated by no other test in the file; e2e-fixture-ownership 44/44 (N4's 2->3 is a fixture addition, not a weakening); interview-walk.spec.ts's header rewritten. Unlike #1022's, #897's two new runtime handlers ARE census-visible (`/api/interview/...`).",
+    "#897: interview-draft-persistence.test.tsx flips one cell and adds one; no cell deleted. The draft is cleared only on a CONFIRMED submit (`if (await run.submitAnswer(park, answer)) claraThreadStore.clearInterviewDraft(clientId)`), as the ruling asks.",
+    "#1022 AC1/AC3: the identity seam mirrors #874's shape exactly (optional, read last, never in `missing`, loopback-fenced by the shared `isLoopbackEndpointOverride`); invite-mail-transport.test.ts is +118/-0, so no pre-existing cell was touched; 47/47 green.",
+    "#1022: the walk's `/invite/<hashed_token>` assertion matches production (courier.ts:550 `buildInviteUrl(proof.origin, hashedToken, plaintext)`, invite-mail.ts:215), not a mock artefact.",
+    "#1022: the three new env values in e2e/run.mjs are consumed only by lib/members/invite-mail.ts (repo grep), so enabling the capability globally changes no other walk's code path -- confirmed by both walks I re-ran at HEAD.",
+    "No migration, and no packages/db or packages/runtime file touched by any of the four tickets -- correct for a web-only lane with no database."
+  ]
+}

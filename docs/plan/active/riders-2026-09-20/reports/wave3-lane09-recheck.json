@@ -1,0 +1,102 @@
+{
+  "lane": 9,
+  "wave": 3,
+  "lens": "RECHECK",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "reviewed_head": "2a6bae6f77ac79415bae8d939a31ccb695921bf0",
+  "fix_report_new_head": "bd6a8de4a408670296c27c2256d7ae57fae138f5",
+  "recheck_head_verified": "bd6a8de4a408670296c27c2256d7ae57fae138f5",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave3-lane09-fix.md",
+  "source_reviews": [
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane09-codereview-standards.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane09-codereview-spec.json"
+  ],
+  "tickets_in_lane": [970, 989, 864, 997, 1017],
+  "verification_performed": [
+    "git log ffe63a0dd084e99b84c1368119845be273c421ce..HEAD --oneline on bd6a8de4a — matches the fix report's 12-commit list exactly, working tree clean",
+    "apps/web $ node --import ./test/bootstrap.mjs --import tsx --test e2e/cell-budget-census.test.ts e2e/settle-before-scan-census.test.ts -> 9/9 pass (live)",
+    "Read the rewritten e2e/spec-census.ts and e2e/cell-budget-census.test.ts in full: rule 2 now resolves scans/settles/grants transitively through .analyze()/settleForScan/grantCellBudget call graphs rather than a literal `scan(` token, and callsSharedSignIn no longer exempts a file's other cells from scan/poll pricing (STD-1, SPEC-864-A, SPEC-864-B)",
+    "Confirmed live: signup-confirm-pending.spec.ts and money-input.spec.ts (the SPEC-864-A/STD-1 named files) get CELL_BUDGET.scan automatically via settleForScan's own grantCellBudget call (e2e/helpers.ts:135) with no per-file edit needed; interview-walk.spec.ts now carries explicit test.setTimeout(cellBudgetMs({ polls: N })) at each cell needing it",
+    "apps/web $ node scripts/check-ui-add-guard.selftest.mjs -> all cases pass (live); read scripts/ui-add.mjs:563-567, spawnAdd is wrapped in try/finally with restoreProtectedFiles in finally (SPEC-989-B)",
+    "apps/web $ node scripts/check-token-contrast.mjs -> 57 pairs pass, selected-row pair 14.32:1 (live)",
+    "apps/web $ node --import ./test/bootstrap.mjs --import tsx --test components/documents/documents-a11y.test.tsx -> 8/8 pass (live)",
+    "INDEPENDENT VACUITY RE-PROOF of SPEC-1017-A: reverted both conditional text-foreground expressions in components/documents/filed-document-list.tsx to plain text-muted-foreground, re-ran documents-a11y.test.tsx -> exactly 1 failure (the new selected-row cell), restored the file byte-for-byte (git diff clean afterward) — the regression guard the fix report claims is real, confirmed by this reviewer, not merely re-read",
+    "ls apps/web/components/ui/ -> popover.tsx present (SPEC-989-A), combobox.tsx absent (deliberately, reasoned in the report and in components/ui/README.md)",
+    "cat components/ui/README.md and e2e/README.md -> both corrected as claimed: README no longer claims checkout-gate-walk was 'the one file with that shape' and instead documents the false claim and the fix; popover.tsx's motion-safe re-cut is documented",
+    "apps/web $ pnpm typecheck (root) -> exit 0, apps/web and packages/runtime both Done (live, re-run)",
+    "CI=true GITHUB_ACTIONS=true pnpm lint (root) -> exit 0, whole chain including the 47-case ui-add-guard selftest inside the lint step (live, re-run)",
+    "apps/web $ node scripts/run-tests.mjs (whole unit suite) -> 4860 tests, 4858 pass, 0 fail, 2 skip — EXACT match to the fix report's own figure (live, re-run)",
+    "git diff eccc02578..bd6a8de4a --name-only -> exactly e2e/cell-budget-census.test.ts and e2e/settle-before-scan-census.test.ts, confirming the fix report's claim that the browser suite it ran is byte-identical to HEAD for everything Playwright exercises",
+    "pnpm --filter @clara/web e2e interview-walk (lane triple 3580/3581/3582) -> 3 passed, 4 skipped (skips are the pre-existing 'review/merge supplies the isolated fixture' test.skip guards, not a regression) (live)",
+    "pnpm --filter @clara/web e2e signup-confirm-pending -> 3 passed, 1 skipped, no timeout on the file with the most axe scans in one cell (live)",
+    "pnpm --filter @clara/web e2e money-input -> 1 passed, no timeout (live)",
+    "pnpm --filter @clara/web e2e staff-expense-claim-walk -> 13 passed (live)",
+    "pnpm --filter @clara/web e2e tax-compliance-watch-receipt-walk (#997's new spec) -> 1 passed (live)",
+    "pnpm --filter @clara/web e2e responsive-shell-walk (the classified flake, SPEC-864-C) -> 25/25 passed (37.4s), matching the fix report's isolated-run claim of 25/25 (40.0s) (live)"
+  ],
+  "findings": [
+    {
+      "id": "RECHECK-989-C",
+      "ticket": 989,
+      "severity": "note",
+      "status": "open by design, matches fix report's own disclosure",
+      "title": "scripts/ui-add.mjs's forced --overwrite still has no injected existence check, so a real run still silently rewrites already-vendored non-protected files (input.tsx/textarea.tsx/input-group.tsx for Combobox) without naming them",
+      "evidence": "Confirmed unchanged: scripts/ui-add.mjs's main() still has no filesystem existence-check seam before the forced overwrite. The fix report itself lists this in its 'Not fixed, with the reason' section and names #667 as the ticket that owns the re-cut; tests/focus-ring-contract.test.ts (re-run live, 22 carriers, green) still partially nets the specific /70-vs-/50 drift. No regression here — the finding was 'note' severity in the spec review and stays exactly as reasoned.",
+      "required_fix": "None required for this lane; carried forward to #667 as the fix report already records."
+    },
+    {
+      "id": "RECHECK-970-A",
+      "ticket": 970,
+      "severity": "note",
+      "status": "open, blocked by work-order scope (lane may not write GitHub)",
+      "title": "Button's dropped motion-fast + explicit transition-property list is still undocumented on the #970 issue itself and still has no asserting cell",
+      "evidence": "components/ui/button.tsx:57 still ships upstream's bare transition-all; no cell in apps/web/tests asserts the button's transition-property list or duration token. The fix report records this under 'Not fixed' and explains the lane cannot write to GitHub or edit the ticket report file; it is recorded in this one report file as the work order allows. Not a regression from this round.",
+      "required_fix": "Orchestrator/integrator acknowledges on #970 or adds the assertion; out of this lane's write scope."
+    },
+    {
+      "id": "RECHECK-970-B",
+      "ticket": 970,
+      "severity": "note",
+      "status": "open, recorded not fixed",
+      "title": "pnpm-lock.yaml still carries the incidental debug peer-context churn from the #970 install",
+      "evidence": "Not addressed in the fix round (not in scope of the fix list); recorded honestly in the fix report's 'Not fixed' section rather than silently left. No regression.",
+      "required_fix": "None required beyond the record already made; a lockfile regen is optional integrator cleanup."
+    },
+    {
+      "id": "RECHECK-997-A",
+      "ticket": 997,
+      "severity": "note",
+      "status": "open, blocked by work-order scope",
+      "title": "#997's AC2 line in its own ticket report still does not carry the spec file's own caveat about the three governed doors being in-process mock handlers",
+      "evidence": "wave3-lane09-ticket997.md was not edited (the lane may write only this one report file outside the worktree). The fix report records the caveat here instead, which is what the work order permits.",
+      "required_fix": "None required for this lane; the caveat is on record."
+    },
+    {
+      "id": "RECHECK-997-B",
+      "ticket": 997,
+      "severity": "note",
+      "status": "open, reasoned safe under today's config",
+      "title": "tax-boundary-mock.mjs's module-scope disposition state (receiptAck/receiptSnooze/receiptResolve) is still never reset between runs",
+      "evidence": "Confirmed unchanged live: e2e/tax-boundary-mock.mjs still declares the three module-level variables with no reset route. playwright.config.ts still sets retries: 0, workers: 1, reuseExistingServer: false (re-read, lines unchanged), so the walk (re-run live, 1 passed) is safe today. The fix report explains why this was not touched (a fixture-reset route is a new door on a shared mock, out of scope for this round). No regression.",
+      "required_fix": "None required now; a future retries/repeat-each change on this suite should add the reset route first, as the fix report already flags."
+    },
+    {
+      "id": "RECHECK-1017-B",
+      "ticket": 1017,
+      "severity": "note",
+      "status": "open, needs an owner decision (correctly deferred, not silently dropped)",
+      "title": "document-facts-table.tsx's selected row still renders the same 4.62:1 at-rest pair the #1017 triage comment called out; only filed-document-list.tsx was moved to the pinned high-margin pair",
+      "evidence": "Confirmed: scripts/check-token-contrast.mjs's muted-foreground-on-muted pair still measures 4.62:1 live, and document-facts-table.tsx's selected-row cells still carry the plain text-muted-foreground pair the fix report describes. This is explicitly deferred to an owner decision (whether the ruling's margin requirement reaches every carrier or only the filed-document row), listed as a follow-up in the fix report rather than closed unilaterally — the correct call for a product-scope question, not a code defect left unfixed.",
+      "required_fix": "Owner/orchestrator ruling on scope; if the ruling extends to every carrier, apply the same fg/bg swap to document-facts-table.tsx and add it to the same pinned-pair cell (the fix report notes the cell was written to make this a one-line extension)."
+    }
+  ],
+  "anything_newly_broken": [],
+  "gates_rerun_by_this_reviewer": {
+    "typecheck": "exit 0 (apps/web and packages/runtime both Done)",
+    "lint (CI=true GITHUB_ACTIONS=true pnpm lint)": "exit 0, whole chain",
+    "apps/web whole unit suite (node scripts/run-tests.mjs)": "4860 tests, 4858 pass, 0 fail, 2 skip — exact match to fix report",
+    "targeted e2e re-runs (lane triple 3580/3581/3582)": "interview-walk 3 passed/4 pre-existing skip, signup-confirm-pending 3 passed/1 skip, money-input 1 passed, staff-expense-claim-walk 13 passed, tax-compliance-watch-receipt-walk 1 passed, responsive-shell-walk 25/25 passed"
+  },
+  "verdict": "accept",
+  "summary": "All six major/minor findings from the standards and spec review reports (STD-1; SPEC-864-A, SPEC-864-B, SPEC-864-C, SPEC-989-A, SPEC-989-B, SPEC-1017-A) are genuinely fixed on bd6a8de4a, independently re-verified by this reviewer rather than taken on the fix report's word: the cell-budget census now resolves scans/settles/grants through a real transitive call graph instead of a literal `scan(` token and no longer exempts signed-in files from scan/poll pricing; the two previously-invisible files (signup-confirm-pending.spec.ts, money-input.spec.ts) now get their budget automatically through settleForScan's own grant, confirmed live with no timeout; ui-add.mjs's protected-file restore now runs inside a real try/finally; the SPEC-1017-A regression guard was proven load-bearing by this reviewer reverting the component and watching exactly one cell fail, then restoring it byte-for-byte; the one classified flake (responsive-shell-walk) reproduced green in isolation exactly as claimed. The unit suite, typecheck and lint gates were all re-run live and match or exceed the fix report's own figures. Six notes remain open (SPEC-989-C, SPEC-970-A, SPEC-970-B, SPEC-997-A, SPEC-997-B, SPEC-1017-B) — all were 'note' severity in the source reviews, all are honestly disclosed as not-fixed in the fix report with a reasoned scope argument (mostly the lane's own no-GitHub-write restriction or a product-scope decision correctly left to the owner), and none regressed or hid anything. Nothing above minor remains open and nothing new broke: ACCEPT."
+}

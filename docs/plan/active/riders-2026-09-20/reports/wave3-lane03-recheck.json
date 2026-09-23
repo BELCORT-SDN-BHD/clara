@@ -1,0 +1,43 @@
+{
+  "axis": "recheck",
+  "lane": "wave3-lane03",
+  "branch": "riders/w3-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "base": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head": "b9fe230d7a0f8eeedd453fee2ae2a9797c2ee3b3",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave3-lane03-fix.md",
+  "verdict": "accept",
+  "summary": "Every finding the fix report claims FIXED is fixed on the current head, verified by reading the code (not just trusting the report) and by re-running the cells: SPEC-1001-A (en.json:895 now reads 'Showing {shown} of {total} cash accounts, in account code order.', no more 'largest first'), SPEC-1002-A (client-cash-set-dialog.tsx:155 `const isEdit = hasPublishedSet || currentSet?.publishedVersionId != null;`), SPEC-1002-B (the seeding effect now keys off `open` and clears selection/date/refusal/op-key on close, guarded behind isEdit, first-publish face untouched), and STD-1 (new apps/web/components/firm/client-home/composition-cells.tsx holds CompositionAccountCell/CompositionEntriesCell/entryHref, imported by both client-cash-trend.tsx and client-income-expense-chart.tsx). The seven note-level findings left as-is (SPEC-1002-C, SPEC-1002-D, SPEC-1001-B, SPEC-1002-E, SPEC-958-A, STD-2, STD-3) still carry the same reasoning on this head and none is above minor, so none blocks acceptance. Nothing else broke: full gate chain re-run clean, including tests, typecheck, lint-as-CI-sees-it, and the lane's own Playwright triple.",
+  "findings": [],
+  "reverifications_run": [
+    { "claim": "SPEC-1001-A fixed", "check": "grep apps/web/messages/en.json:895", "result": "\"accountsTruncated\": \"Showing {shown} of {total} cash accounts, in account code order.\" — CONFIRMED, no longer 'largest first'" },
+    { "claim": "SPEC-1002-A fixed", "check": "read client-cash-set-dialog.tsx:155", "result": "const isEdit = hasPublishedSet || currentSet?.publishedVersionId != null; — CONFIRMED, reads the authoritative published-version fact, not just the windowed pack.cashSet" },
+    { "claim": "SPEC-1002-B fixed", "check": "read client-cash-set-dialog.tsx seeding useEffect (~lines 176-200)", "result": "effect now depends on `open`; on close (isEdit only, only if something was seeded) it clears selection/effectiveDate/refusal and renews the op key so a reopen reseeds from the current version — CONFIRMED" },
+    { "claim": "STD-1 fixed", "check": "read composition-cells.tsx + grep its imports", "result": "CompositionAccountCell/CompositionEntriesCell/entryHref extracted to composition-cells.tsx and imported by both client-cash-trend.tsx and client-income-expense-chart.tsx — CONFIRMED, no remaining duplicated JSX shape" },
+    { "claim": "client-financial-charts.test.tsx 16/16", "command": "node --import ./test/bootstrap.mjs --import tsx --test components/firm/client-home/client-financial-charts.test.tsx (apps/web)", "result": "16 tests, 16 pass, 0 fail — CONFIRMED" },
+    { "claim": "client-cash-set-dialog.test.tsx 12/12", "command": "same, components/firm/client-home/client-cash-set-dialog.test.tsx", "result": "12 tests, 12 pass, 0 fail — CONFIRMED" },
+    { "claim": "six-file money-band + dialog batch 47/47", "command": "same invocation, charts+cash-summary+money-a11y+money-keyboard+profit-summary+cash-set-dialog", "result": "47 tests, 47 pass, 0 fail — CONFIRMED" },
+    { "claim": "financial-pack.test.ts unaffected", "command": "same, lib/dashboard/financial-pack.test.ts", "result": "15 tests, 15 pass, 0 fail — CONFIRMED" },
+    { "claim": "gl-balance-cash-label-census.test.ts unaffected", "command": "same, tests/gl-balance-cash-label-census.test.ts", "result": "7 tests, 7 pass, 0 fail — CONFIRMED" },
+    { "claim": "e2e-fixture-ownership.test.ts unaffected (shared file, touched by this lane's diff)", "command": "same, e2e/e2e-fixture-ownership.test.ts", "result": "44 tests, 44 pass, 0 fail — CONFIRMED" },
+    { "claim": "whole apps/web unit suite: 4873/4871/0 fail/2 skip", "command": "node scripts/run-tests.mjs (apps/web)", "result": "4873 tests, 4871 pass, 0 fail, 2 skipped — CONFIRMED, exact match to fix report" },
+    { "claim": "typecheck clean", "command": "pnpm typecheck (worktree root)", "result": "apps/web typecheck: Done; packages/runtime typecheck: Done, exit 0 — CONFIRMED" },
+    { "claim": "lint as the runner sees it, exit 0", "command": "CI=true GITHUB_ACTIONS=true pnpm lint (worktree root)", "result": "exit 0; only output of note is a known Windows-only SKIP (#756, symlink EPERM), unrelated to this lane's changes — CONFIRMED" },
+    { "claim": "cash-account-set-membership-read.test.mjs 6/6, full gate chain", "command": "node --test --test-concurrency=1 $GATES tests/cash-account-set-membership-read.test.mjs (packages/db, clara_l03, all preintegration-gate imports from package.json's test script)", "result": "6 tests, 6 pass, 0 fail — CONFIRMED" },
+    { "claim": "operation-census.test.mjs 10/10, full gate chain", "command": "same $GATES, tests/operation-census.test.mjs", "result": "10 tests, 10 pass, 0 fail — CONFIRMED" },
+    { "claim": "rig-isolation.test.mjs 22/23, 1 skip (T19 destructive)", "command": "node --test --test-concurrency=1 tests/rig-isolation.test.mjs", "result": "23 tests, 22 pass, 1 skipped (T19 poison-role, correctly gated) — CONFIRMED" },
+    { "claim": "no migration re-applied since the fix round; 0276 still the newest, single apply", "check": "select * from clara.schema_migrations order by version desc limit 3 on clara_l03", "result": "newest row is 0276_cash_account_set_membership_read, applied_at 2026-09-20T16:01:00.741Z, checksum unchanged from the review's own measurement — CONFIRMED, no redo was run" },
+    { "claim": "home-board-walk e2e, 28/28 on the lane's own Playwright triple", "command": "CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3520 CLARA_E2E_NEXT_PORT=3521 CLARA_E2E_RUNTIME_PORT=3522 pnpm --filter @clara/web e2e home-board-walk (worktree root)", "result": "28 passed, 0 failed (1.4m) — CONFIRMED" },
+    { "claim": "git status clean at head, diff stat matches the fix report's 'apps/web only' claim for the three new commits", "command": "git status; git diff <base>...HEAD --stat", "result": "working tree clean; the fix round's three commits (64254d6db, ad7760d38, b9fe230d7) touch apps/web only; the full lane diff from base additionally carries the pre-existing #958/#1001/#1002 db migration and non-fix-round web changes, unchanged since the review — CONFIRMED" }
+  ],
+  "notes_left_as_is_still_hold": [
+    "SPEC-1002-C (note) — caller's rank still not carried onto the board; enforced at submit (CLR04), byte-identical posture to the pre-existing first-publish face. No regression introduced. Owner decision still pending, correctly deferred.",
+    "SPEC-1002-D (note) — report-accuracy only; fix report gives the correction inline since it cannot edit the ticket report from this worktree. No code defect, nothing to recheck in the code.",
+    "SPEC-1001-B (note) — client-home-money-keyboard.test.tsx edit disclosed in plain words; re-ran green (part of the whole-suite pass).",
+    "SPEC-1002-E (note) — petty-cash affordance still absent from the edit face; explicitly out of #1002's scope, filed as a follow-up in the fix report.",
+    "SPEC-958-A (note) — census AST-walk boundary still documented, not hidden; 7/7 re-run green above.",
+    "STD-2 (note) — isEdit still re-tested at four sites in client-cash-set-dialog.tsx; deliberately left because AC6 requires the first-publish branch stay byte-for-byte untouched. Judgement call recorded, not a regression.",
+    "STD-3 (note) — commit-per-slice-group is explicitly permitted by WORK-ORDER.md rule 4; overridden_by_repo_standard, correctly not treated as a violation."
+  ],
+  "nothing_newly_broken": true
+}

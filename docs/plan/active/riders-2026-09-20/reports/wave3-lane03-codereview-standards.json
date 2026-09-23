@@ -1,0 +1,129 @@
+{
+  "axis": "standards",
+  "lane": "wave3-lane03",
+  "branch": "riders/w3-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "commits": [
+    "c8da2a830 docs(context): #958 name the bank tie-out's GL balance, forbid a cash label",
+    "529608478 feat(web): #1001 render the client home's cash composition, headlined by the closing balance",
+    "86f62fb4c feat(db): #1002 the second-pass cash-account-set membership editor's own read",
+    "ea9d22aed feat(web): #1002 type the membership door and its hydration",
+    "cb8040d54 feat(web): #1002 the second-pass cash-account-set membership editor"
+  ],
+  "tickets_reviewed": [958, 1001, 1002],
+  "reverifications_run": [
+    {
+      "claim": "packages/db/tests/cash-account-set-membership-read.test.mjs — 6/6 pass, 0 skip, full gate chain",
+      "command": "node --test --test-concurrency=1 $GATES tests/cash-account-set-membership-read.test.mjs (packages/db, clara_l03)",
+      "result": "6 tests, 6 pass, 0 fail, 0 skipped — CONFIRMED"
+    },
+    {
+      "claim": "operation-census.test.mjs — 10/10 pass",
+      "command": "node --test --test-concurrency=1 $GATES tests/operation-census.test.mjs",
+      "result": "10 tests, 10 pass, 0 fail — CONFIRMED"
+    },
+    {
+      "claim": "rig-isolation.test.mjs — 22/23 pass, 1 skip (T19, destructive, correctly skipped)",
+      "command": "node --test --test-concurrency=1 tests/rig-isolation.test.mjs",
+      "result": "23 tests, 22 pass, 1 skipped (T19 poison-role, correct) — CONFIRMED"
+    },
+    {
+      "claim": "apps/web/tests/gl-balance-cash-label-census.test.ts — 7/7 pass (1 census + 6 fixture regressions)",
+      "command": "node --import ./test/bootstrap.mjs --import tsx --test tests/gl-balance-cash-label-census.test.ts",
+      "result": "7 tests, 7 pass — CONFIRMED"
+    },
+    {
+      "claim": "client-cash-set-dialog.test.tsx — 8/8 pass",
+      "command": "node --import ./test/bootstrap.mjs --import tsx --test components/firm/client-home/client-cash-set-dialog.test.tsx",
+      "result": "8 tests, 8 pass — CONFIRMED"
+    },
+    {
+      "claim": "client-financial-charts.test.tsx — 15/15 pass (11 pre-existing + 4 new)",
+      "command": "node --import ./test/bootstrap.mjs --import tsx --test components/firm/client-home/client-financial-charts.test.tsx",
+      "result": "15 tests, 15 pass — CONFIRMED"
+    },
+    {
+      "claim": "financial-pack.test.ts — 15/15 pass",
+      "command": "node --import ./test/bootstrap.mjs --import tsx --test lib/dashboard/financial-pack.test.ts",
+      "result": "15 tests, 15 pass — CONFIRMED"
+    },
+    {
+      "claim": "pnpm typecheck clean",
+      "command": "pnpm typecheck (worktree root)",
+      "result": "apps/web typecheck: Done; packages/runtime typecheck: Done — CONFIRMED"
+    },
+    {
+      "claim": "CI=true GITHUB_ACTIONS=true pnpm lint exit 0",
+      "command": "CI=true GITHUB_ACTIONS=true pnpm lint (worktree root)",
+      "result": "exit 0, all selftests PASS, no errors — CONFIRMED"
+    },
+    {
+      "claim": "no applied migration edited; only 0276 is new; no PRD/ARCHITECTURE edit; packages/runtime untouched",
+      "command": "git diff <base>...HEAD --stat -- docs/PRD.md docs/ARCHITECTURE.md packages/db/migrations packages/runtime",
+      "result": "only packages/db/migrations/0276_cash_account_set_membership_read.sql (new file); zero PRD/ARCHITECTURE/runtime diff — CONFIRMED"
+    }
+  ],
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 1001,
+      "severity": "minor",
+      "category": "duplicated-code",
+      "smell": "Duplicated Code",
+      "title": "The cash composition table in client-cash-trend.tsx duplicates the drilldown table JSX already shipped in client-income-expense-chart.tsx",
+      "file": "apps/web/components/firm/client-home/client-cash-trend.tsx",
+      "lines": "166-244",
+      "compare_file": "apps/web/components/firm/client-home/client-income-expense-chart.tsx",
+      "compare_lines": "166-220",
+      "evidence": "Both files render a near-identical shape: SectionHeader + DataTableCard + TableHeader/TableRow, one row per composition account with an account-code/name cell, a movement cell, an entries <ul> whose each <li> is a Link via entryHref(clientId, e.entryId) with formatDay/fmtCents/memo, a per-row entries-truncated <p>, and a compositionTruncated <p> below the table. client-cash-trend.tsx's version differs only by inserting a Balance cell (closingCents) and a Reason cell (memberReasonKey), and by using cashDrilldown.* message keys instead of drilldown.*. The two blocks were built independently (per the #1001 report, 'mirrors the profit side') rather than sharing a component.",
+      "how_to_fix": "Extract the shared row/table shape into one component (e.g. a `CompositionTable` taking `composition`, `clientId`, an optional list of extra leading/trailing cell renderers, and its own i18n namespace) and call it from both client-cash-trend.tsx and client-income-expense-chart.tsx, the same way entryHref itself was already extracted and reused rather than re-spelled.",
+      "judgement_call": true,
+      "overridden_by_repo_standard": false
+    },
+    {
+      "id": "STD-2",
+      "ticket": 1002,
+      "severity": "note",
+      "category": "repeated-switches",
+      "smell": "Repeated Switches",
+      "title": "isEdit is switched on at four separate sites in ClientCashSetDialog (title/description text, the whole DialogBody content, the submit() branch, and the footer button label)",
+      "file": "apps/web/components/firm/client-home/client-cash-set-dialog.tsx",
+      "lines": "roughly 218-411 (render) plus 186-193 (submit)",
+      "evidence": "`isEdit ? t(\"cashSet.editTitle\") : t(\"cashSet.dialogTitle\")`, `isEdit ? (loading...) : loading ? ... : ...` (the whole body), `isEdit ? {...} : {...}` inside submit(), and `isEdit ? (saving ? ... : ...) : (saving ? ... : ...)` in the footer button all re-test the same boolean across the file.",
+      "how_to_fix": "Fowler's fix is polymorphism or one shared map both sites read from; here that likely means splitting the two modes into two small render functions (or two sibling components sharing only the Dialog chrome) keyed off isEdit once, rather than re-branching on it at each of the four sites.",
+      "judgement_call": true,
+      "overridden_by_repo_standard": false,
+      "note": "The ticket's own AC6 requires the first-publish branch be literally untouched byte-for-byte, which is plausibly why the implementer kept it as an inline sibling branch inside the same file/JSX tree rather than refactoring into a shared abstraction — worth weighing against the smell rather than a blind extraction."
+    },
+    {
+      "id": "STD-3",
+      "ticket": 1002,
+      "severity": "note",
+      "category": "test-quality",
+      "title": "Commit cb8040d54 lands the whole 8-cell test file and the whole component implementation together, so red-before-green per slice is not independently auditable from git history",
+      "file": "apps/web/components/firm/client-home/client-cash-set-dialog.test.tsx",
+      "evidence": "git show --stat cb8040d54 shows client-cash-set-dialog.test.tsx (341 lines, new) and client-cash-set-dialog.tsx (255 lines changed) landing in the same commit, with no intermediate commits showing individual red/green cycles for the six new AC-named cells.",
+      "how_to_fix": "Not a correctness problem (the tests themselves are independent-literal, non-tautological, and drive the public component interface — verified by rerun, 8/8 pass) and the work order permits 'a small group of slices' per commit; flagged only because it removes the audit trail rule 4 asks for ('one test -> red -> minimal green -> next test'), distinct from the true anti-pattern (a battery of red tests committed before any implementation), which this is NOT.",
+      "judgement_call": true,
+      "overridden_by_repo_standard": true,
+      "overridden_by": "WORK-ORDER.md rule 4: 'Commit per green slice or per small group of slices' explicitly permits this shape."
+    }
+  ],
+  "hard_violations": [],
+  "migration_house_law_check": {
+    "file": "packages/db/migrations/0276_cash_account_set_membership_read.sql",
+    "header": "present, names spec of record, what/why/what-not sections",
+    "prestate_pins": "5 pins (jwt_sub, jwt_firm, actor_role_rank, role_rank(text), propose_client_cash_accounts) — re-measured independently on clara_l03 via a live test run rather than psql (psql not on PATH in this shell); the db test file itself re-derives and checks these at runtime and passed 6/6, which exercises the same pins",
+    "tail_assertions": "present — signature/count, owner/SECURITY INVOKER/STABLE/search_path, ACL exact-match, no model-lane EXECUTE, no is_active filter regex, neighbour-body re-pin",
+    "preintegration_gate": "packages/db/tests/cash-account-set-membership-read-preintegration-gate.mjs, added to packages/db/package.json's test script gate chain — present",
+    "rig_meta_cohort": "CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_COHORT added to packages/db/tests/rig-meta.mjs, wired into ALLOWED and grantMatrixFailures — present, and operation-census.test.mjs (10/10) + rig-isolation T17 rerun confirm the grant matrix",
+    "gate_chain_order": "new --import flag appended after retire-create-account-set-preintegration-gate.mjs, before the tests glob — present",
+    "owner_security_definer_search_path_acl_preserved_on_recut_bodies": "n/a — no existing function body is recut by this migration; the four RLS-helper bodies and propose_client_cash_accounts are pinned and re-pinned byte-identical, confirmed by the tail",
+    "new_relations_force_rls_zero_application_role_dml": "n/a — no new relation created; the function only SELECTs from already-FORCE-RLS relations from migration 0232",
+    "no_applied_migration_edited": true,
+    "no_frozen_manifest_diff": true,
+    "no_prd_or_architecture_edit": true
+  }
+}

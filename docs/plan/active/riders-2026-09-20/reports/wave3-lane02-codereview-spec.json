@@ -1,0 +1,96 @@
+{
+  "axis": "SPEC",
+  "lane": "wave 3 / lane 02",
+  "branch": "riders/w3-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "commits": [
+    "6629e2af5 feat(db): #982 a trade-invoice party resolves by its TIN (0274, slice 1)",
+    "e1a9ab635 feat(db): #982 a TIN two live parties hold refuses with both (0274, slice 2)",
+    "fdb266fdd feat(db): #982 a registration/TIN clash refuses with both sides (0274, slice 3+4)",
+    "536c5df5c feat(runtime): #982 the identifier conflict is the counterparty box's error (slice 5)",
+    "18a84e220 feat(web): #982 the chooser shows each candidate's TIN, and answers the identifier conflict",
+    "2b9ebd839 fix(web): #982 spell the ticket out in three test titles, so the colour rule stays strict",
+    "6acde36be feat(db): #1007 the trade-invoice duplicate probe, warn-only (0275, slices 1-5)",
+    "9e7750df2 feat(db): #1007 the chat lane's probe twin and the \"recorded anyway\" record (0275, slices 6-8)",
+    "b7ee16a48 test(db): #1007 rewrite #655's named residual to prove the warning (AC7)",
+    "3967ba183 feat(web,runtime): #1007 the form warns before it records, and keeps the choice (slices 9-11)"
+  ],
+  "spec_sources": [
+    "GitHub issue #982 (Agent Brief + owner's ruling comment of 2026-09-20)",
+    "GitHub issue #1007 (Agent Brief + the owner's ruling it quotes, 2026-09-20)"
+  ],
+  "verdict": "accept-with-fixes",
+  "cells_rerun_by_this_reviewer": [
+    "packages/db tests/trade-invoice-party-tin.test.mjs + tests/trade-invoice-duplicate-probe.test.mjs, full gate chain, clara_l02: 16/16 pass",
+    "packages/db tests/trade-invoice.test.mjs, full gate chain, clara_l02: 30/30 pass (p655.replay.* included)",
+    "apps/web components/accounting/trade-invoice-form.test.tsx: 18/18 pass",
+    "packages/runtime tests/trade-invoice-unit.test.mjs + tests/work-routes-unit.test.mjs: 55/55 pass",
+    "node scripts/check-frozen-workflows.mjs: OK, 312 frozen files, no manifest diff",
+    "direct call of clara._trade_invoice_probe_core on clara_l02 with the form's real camelCase payload vs the database's snake_case payload (see S-1)"
+  ],
+  "findings": [
+    {
+      "id": "S-1",
+      "ticket": 1007,
+      "severity": "blocker",
+      "kind": "requirement implemented but wrong",
+      "title": "The web form's duplicate probe sends camelCase particulars to a door that reads snake_case, so the 'same money on the same day' signal can never fire from the only shipped entrance",
+      "spec_line": "#1007 Agent Brief, Desired behavior: '2. Same money on the same day: same counterparty, same total and same document date. This is the signal for a missing or mistyped number.' and AC3: 'With no reference stated, the same counterparty, total and document date match; the same counterparty and total on a different date do not.' plus 'The web form shows the warning before admission'.",
+      "evidence": "apps/web/lib/work/api.ts:422-445 probeTradeInvoiceDuplicates posts input.invoice straight to PostgREST as p_particulars. Its caller, apps/web/components/accounting/trade-invoice-form.tsx:341 look(), passes toTradeInvoiceWire(draft, knownCodes).invoice, whose type (apps/web/lib/work/trade-invoice.ts:237-255) is camelCase: documentDate, totalCents, dueDate, taxFacts. The door reads the DATABASE spelling: packages/db/migrations/0275_trade_invoice_duplicate_probe.sql, clara._trade_invoice_probe_core, p_particulars->>'document_date' and p_particulars->>'total_cents'. Every other browser-to-door path on this lane goes through packages/runtime/src/workRoutes.ts toDbTradeInvoice (workRoutes.ts:753-763), which is what translates camelCase into snake_case; the probe is the one call that bypasses it. api.ts's own docstring ('The particulars are the SAME object the admission door is about to be sent') is therefore false. MEASURED on clara_l02 (lane 02 database, 0274 and 0275 applied), same client and counterparty, one posted bill ALPHA-2026-0042 / 2026-03-04 / 106000 sen: clara._trade_invoice_probe_core(client,'supplier_bill', <snake_case, no reference>) returned document_date 2026-03-04, total_cents 106000, match_count 1; the SAME call with the form's real camelCase payload returned document_date null, total_cents null, match_count 0. With a reference stated the camelCase payload returns signals ['same_reference'] only, never ['same_reference','same_total_and_date']. Consequences: (a) an unnumbered or mistyped-number duplicate bill is never warned about in the form, which is the exact case the ticket says signal 2 exists for; (b) TradeInvoice.duplicate.signals.both in apps/web/messages/en.json is unreachable from the form. No cell catches it: every web unit cell injects the probe seam (trade-invoice-form.test.tsx, probe: async () => [oneMatch()]) and the browser walk's mock answers a canned list without reading p_particulars (apps/web/e2e/trade-invoice-mock.mjs:333-341), so the real function's payload is driven by nothing on this branch.",
+      "required_fix": "Translate the probe payload into the database's spelling before the call, reusing the one translation the admission path already has rather than hand-writing a second one (either export the runtime's toDbTradeInvoice shape for the browser, or probe through the runtime route so the lane keeps one translation). Then add a cell that drives probeTradeInvoiceDuplicates against the door's real key contract, so the two spellings cannot drift again, and correct the api.ts docstring."
+    },
+    {
+      "id": "S-2",
+      "ticket": 982,
+      "severity": "minor",
+      "kind": "requirement implemented but wrong",
+      "title": "A TIN held by several parties refuses with party_ambiguous, and the screen then says 'More than one party answers to that name' although no name was submitted",
+      "spec_line": "#982 AC2: 'A TIN matching more than one live counterparty refuses with the candidates rather than choosing one.' AC5: 'The chooser shows each candidate's TIN, for the new refusal and for party_ambiguous.'",
+      "evidence": "0274's new TIN arm raises party_ambiguous with a TIN-specific database sentence and a matched_on:'tin' marker in the detail (packages/db/migrations/0274_trade_invoice_party_tin.sql: raise exception '% %s of this client hold the tax identification number %; say which one', detail jsonb_build_object('reason','party_ambiguous','tin',v_tin,'matched_on','tin',...)). The web surface does not read that marker: apps/web/components/accounting/trade-invoice-form.tsx renders t(`refusals.${outcome.reason}`), and apps/web/messages/en.json keeps TradeInvoice.refusals.party_ambiguous = 'More than one party answers to that name. Say which one.' So a submission whose only identifier was a TIN is answered on screen with a sentence about a name it never sent. The lane report (reports/wave3-lane02-ticket982.md:232-235) records this as deliberate ('the party_ambiguous sentence in particular must NOT be reworded'); the same report's AC4 row also claims 'the party_unresolved and party_ambiguous detail shapes are byte-identical to 0225's', which is true for the name branch but not for the new TIN branch, which carries tin and matched_on and no name.",
+      "required_fix": "Either give the TIN-ambiguous case its own on-screen sentence (the door already ships matched_on in the detail, so only the web mapping has to stop dropping it), or record on the ticket that the wrong sentence is accepted. Do not leave a screen naming something the submission did not contain."
+    },
+    {
+      "id": "S-3",
+      "ticket": 982,
+      "severity": "minor",
+      "kind": "claim not backed by the branch",
+      "title": "CONTEXT.md and the browser walk claim the chooser shows which identifier reached each candidate; nothing renders matched_on",
+      "spec_line": "#982 Agent Brief, Desired behavior: 'resolution stops with a typed refusal carrying the competing candidates so a person picks' - the brief asks for the candidates, not for an identifier label; the branch's own prose promises more than the branch does.",
+      "evidence": "CONTEXT.md (new 'Identifier conflict' entry, this diff): 'Clara stops and shows both, with the identifier that reached each one, so the person decides which party the document is about.' apps/web/e2e/trade-invoice-walk.spec.ts (new cell 'ticket 982 - an identifier conflict names what disagreed and offers BOTH parties'): 'each side says which identifier reached it'. But apps/web/components/accounting/trade-invoice-form.tsx renders only name, registration_no and tin per candidate; matched_on is declared on PartyCandidateWire in apps/web/lib/work/api.ts:141-144 with its own comment - 'Declared because the door raises it; no surface renders it yet' - and is mapped nowhere. The walk's assertions pass only because its two fixture candidates happen to carry disjoint identifiers (one a registration number and no TIN, the other the reverse), so nothing on the branch drove the claim. The wave-3 addendum in the work order forbids exactly this: no sentence on screen unless a cell drove the door and saw it.",
+      "required_fix": "Either render matched_on beside each candidate (the door carries it and the api.ts type already declares it), or correct the CONTEXT.md entry and the e2e comment to describe what the chooser actually shows."
+    },
+    {
+      "id": "S-4",
+      "ticket": 1007,
+      "severity": "minor",
+      "kind": "behaviour not asked for",
+      "title": "The never-posting filter adds 'expired' to the three states the brief names, so fewer duplicates are reported than the ticket asks for",
+      "spec_line": "#1007 Agent Brief, Desired behavior: 'Matches whose Work was refused, failed or cancelled, or whose entry has been reversed, do not count.' AC: 'An earlier invoice whose Work was refused, failed or cancelled, or whose entry was reversed, does not match.'",
+      "evidence": "packages/db/migrations/0275_trade_invoice_duplicate_probe.sql, clara._trade_invoice_duplicate_matches: and w.status not in ('refused','failed','cancelled','expired'). The file's header argues for it ('the estate's OWN closed terminal set ... expired is the fourth member of the class the brief described in prose, not a widening of it') and p1007.probe.never_posting asserts all four, so the widening is deliberate and documented. It is still a fourth state the ticket did not name, and it makes the probe warn LESS often, which is the direction that loses a duplicate rather than the direction that annoys somebody.",
+      "required_fix": "No code change required if the integrator accepts the header's argument; record it as an accepted deviation on the ticket rather than as an acceptance criterion met verbatim."
+    },
+    {
+      "id": "S-5",
+      "ticket": 1007,
+      "severity": "minor",
+      "kind": "requirement partial",
+      "title": "'So a reviewer can tell a knowing second recording from an accident' is satisfied at the door only; no screen reads the acknowledgement",
+      "spec_line": "#1007 Agent Brief, Desired behavior: 'When the person records anyway, that choice is kept with the new invoice (who, when, which earlier invoice was shown), so a reviewer can tell a knowing second recording from an accident.' AC: 'Choosing record anyway admits the Work exactly as today, and the acknowledgement is readable afterwards with who, when and which earlier invoice was shown.'",
+      "evidence": "clara.get_trade_invoice_duplicate_ack(uuid) exists, is granted to clara_authenticated and is driven green by p1007.ack.recorded_anyway (re-run by this reviewer: 16/16 across the two new db files). Nothing calls it: a grep over apps/web and packages/runtime returns no caller, and the lane report files it itself (reports/wave3-lane02-ticket1007.md, 'Follow-ups worth filing' 1: 'no surface calls it yet: a reviewer opening the Work still cannot see that the preparer was warned'). The AC as written is met - the acknowledgement IS readable - but the purpose clause behind it is not reachable by a reviewer in the product.",
+      "required_fix": "Accept as-is and file the follow-up web ticket the report proposes, or add the one read to the Work page's trade-invoice block. Do not report the purpose clause as delivered."
+    }
+  ],
+  "checked_and_clean": [
+    "#982 AC1/AC2/AC3: p982.tin.resolves, p982.tin.ambiguous, p982.tin.conflict re-run green on clara_l02; the conflict carries both sides' candidates with matched_on.",
+    "#982 AC4: 0274 carries 0225's id arm, its name/alias candidate set, its party_unresolved and its name-branch party_ambiguous over verbatim (diffed against 0225's extracted body); trade-invoice.test.mjs 30/30 green.",
+    "#982 AC5: the chooser now maps tin and renders 'Reg. {value}' / 'TIN {value}'; unit and walk cells added.",
+    "#982 AC6: 0274 is a new file; 0225 is untouched in this diff.",
+    "#982 AC7 and #1007 AC9: both successor contracts are in the ticket reports with tool name, zod describe text, door call with argument order, refusal tokens and part kind; check-frozen-workflows.mjs shows no manifest diff.",
+    "#1007 AC1/AC2/AC4/AC6/AC7/AC8: p1007.probe.same_reference, p1007.probe.normalised, p1007.probe.never_posting, p1007.probe.scoped, p1007.probe.is_a_read and the rewritten p655.duplicate.same_reference_is_probed_and_warns all re-run green; p655.replay.* untouched and green.",
+    "#1007 'a hard refusal never happens on these signals': the probe raises nothing on a match, and the form swallows a failed probe (look()'s catch) so a down read never blocks a lawful recording.",
+    "#1007 'nothing is admitted until the person chooses': proved at the submit seam in the unit cell and at the runtime's received list in the browser walk.",
+    "No frozen body edited; no applied migration edited; no PRD or ARCHITECTURE edit; the worktree is clean."
+  ]
+}

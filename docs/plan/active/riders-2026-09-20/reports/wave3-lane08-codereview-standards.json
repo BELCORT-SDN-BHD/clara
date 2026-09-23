@@ -1,0 +1,44 @@
+{
+  "axis": "standards",
+  "lane": 8,
+  "wave": 3,
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head": "4d9a5062b",
+  "tickets_reviewed": [857, 990, 1019, 1020],
+  "sources_read": [
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (incl. wave-2 and wave-3 addenda)",
+    "docs/plan/active/riders-2026-09-20/RIG.md (incl. wave-2 and wave-3 addenda)",
+    "AGENTS.md",
+    "CONTEXT.md",
+    ".claude/skills/code-review/SKILL.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane08-ticket{857,990,1019,1020}.md",
+    "packages/db/README.md (0290/0291 sections)"
+  ],
+  "method_note": "Diffed ffe63a0dd084e99b84c1368119845be273c421ce...HEAD, read every changed file (both migrations in full, all new/changed test files, all component/lib diffs, CONTEXT.md/README.md/messages/en.json/manifest.txt hunks). Re-ran cells that carried a claim: document-regions-field-path-check.test.mjs (8/8), bank-statement-line-citation.test.mjs (6/6), citation.test.ts + matching-context-types.test.ts + matching-outcome.test.tsx + matching-section.test.tsx + spec-discovery.test.ts (25/25 combined, matches per-file breakdown in the reports), operation-census.test.mjs with the full gate chain (10/10), rig-isolation.test.mjs with the full gate chain (22 pass/1 skip/23 total), x38-wave-c-b-match.test.mjs (33/33), bank-line-existing-booking.test.mjs (11/11), pnpm --filter @clara/web typecheck (exit 0), CI=true GITHUB_ACTIONS=true pnpm --filter @clara/web lint (exit 0, includes check-test-manifest and check-message-keys selftests), node scripts/check-frozen-workflows.mjs (clean, 0 manifest diff), and a byte-for-byte diff of the restored manifest header (lines 1-34) against `git show b43bef2fb:apps/web/test/manifest.txt` (identical) and the live clara_l08 schema_migrations row count (269, matching 267 base + 0290 + 0291).",
+  "summary": "The lane's four tickets are exceptionally well executed against this repo's documented standards: both migrations (0290, 0291) follow the migration house law precisely (header, prestate pins measured live on the lane database, redo-safety with the bimodal-pin trap correctly avoided, tail assertions naming every surviving neighbour object, rig-meta cohort disposition documented, REVIEWED_DYNAMIC_SQL_BARRIERS entry added where the P4 scope-view census demanded it); every new test drives a real public seam (a raw table insert for #857, the real persist_statement_facts_v2/get_bank_line_matching_context doors for #990, readFileSync-vs-readdirSync for #1019) with independently-sourced expected values, no internal-collaborator mocking, and vertical-slice commits (test+implementation together per commit, never a battery of red tests before any code); CONTEXT.md and packages/db/README.md both follow house shape and are accurate against the shipped code; the shared-file hunks (CONTEXT.md, manifest.txt, package.json, rig-meta.mjs) are minimal and at the sorted position. Independent re-runs of every gate this review checked matched the reports, with two exceptions: ticket #990's report states two gate/migration counts that do not match the live database or the live test file, both traceable to the same class of AGENTS.md rule-6 violation (\"claims need evidence\"). No hard standards violations were found in the shipped code itself; the two findings below are about the accuracy of ticket #990's evidence trail, which the wave's integrator relies on directly.",
+  "findings": [
+    {
+      "id": "SR-1",
+      "ticket": 990,
+      "severity": "major",
+      "kind": "standards-hard-violation",
+      "title": "Ticket #990's report overstates the post-apply migration count (291 vs. the actual 269)",
+      "file": "docs/plan/active/riders-2026-09-20/reports/wave3-lane08-ticket990.md",
+      "line": 128,
+      "evidence": "The report states: \"Applied with `pnpm db:migrate` originally, 291 total migrations after.\" Re-querying the live lane database (`select count(*), max(version) from clara.schema_migrations` on 127.0.0.1:55748/clara_l08) returns `{ n: 269, mx: '0291_bank_statement_line_citation' }`. RIG.md states every wave-3 lane database started at \"0001 to 0272 (267 files)\"; #857's own report (this lane's prior ticket) correctly states \"268 total migrations after\" for 0290 (267+1). Applying 0291 next should read 269 (268+1), not 291 — 291 is 0291's own migration NUMBER, not a migration COUNT, and looks like the two were conflated when the report was written.",
+      "required_fix": "Correct docs/plan/active/riders-2026-09-20/reports/wave3-lane08-ticket990.md line 128 to read 269 total migrations, or re-verify and correct to whatever the true count is at the time of the fix. This is a report-accuracy fix only; no code, test, or migration change is implicated — the migration itself applies correctly and was independently re-verified."
+    },
+    {
+      "id": "SR-2",
+      "ticket": 990,
+      "severity": "major",
+      "kind": "standards-hard-violation",
+      "title": "Ticket #990's report overstates rig-isolation.test.mjs's pass count (32 vs. the actual 22)",
+      "file": "docs/plan/active/riders-2026-09-20/reports/wave3-lane08-ticket990.md",
+      "line": 154,
+      "evidence": "The report states: \"`rig-isolation.test.mjs`: 32 pass, 1 skipped (T19, ...), 0 fail, full gate chain.\" `packages/db/tests/rig-isolation.test.mjs` contains exactly 23 top-level `test(...)` calls (`grep -cE '^\\s*test\\(' packages/db/tests/rig-isolation.test.mjs` = 23; the file is untouched by this lane's diff, so its test count did not change between tickets). Re-running it with the full preloaded gate chain against clara_l08 (`node --test --test-concurrency=1 $GATES tests/rig-isolation.test.mjs`) produces `# tests 23 / # pass 22 / # fail 0 / # skipped 1` — matching #857's own report for the SAME file (\"22 pass, 1 skipped ... 0 fail\") but not #990's. 22 (rig-isolation) + 10 (operation-census.test.mjs, also reported in the same Gates section) = 32, suggesting the two files' pass counts were summed and mislabeled as rig-isolation's own count.",
+      "required_fix": "Correct docs/plan/active/riders-2026-09-20/reports/wave3-lane08-ticket990.md line 154 to read 22 pass, 1 skipped, 23 total for rig-isolation.test.mjs (matching #857's own, independently-verified figure for the same untouched file)."
+    }
+  ]
+}

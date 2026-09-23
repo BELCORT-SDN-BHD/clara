@@ -1,0 +1,62 @@
+{
+  "lens": "RECHECK",
+  "wave": 3,
+  "lane": 10,
+  "branch": "riders/w3-lane10",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\660",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head_at_recheck": "c3cb533db6fb62a8ca7ce979d5bad7fe24dc5684",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave3-lane10-fix.md",
+  "review_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane10-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane10-codereview-standards.json"
+  ],
+  "verdict": "accept",
+  "summary": "All six findings from the SPEC and STANDARDS review reports (one blocker, one major, three minor, one minor evidence-accuracy) were independently re-verified as FIXED on the current head, by reading the changed code against each finding's required_fix and by re-running the underlying gate rather than trusting the fix report's own numbers. Two review notes (SPEC-1023-02, SPEC-1016-01) remain open exactly as the fix report discloses, for reasons outside this lane's authority (a GitHub workflow_dispatch only the integrator can run; a change to another test battery's evaluator set that is out of #1016's ACs) — both are 'note' severity, correctly disclosed as not fixed rather than silently dropped, and do not block accept. No gate that passed at fix-report time failed on recheck; nothing new broke. The rig's incidental state (five throwaway databases apparently left by an earlier, usage-limit-interrupted attempt at this same recheck: clara_l10_recheck, clara_rt_test, clara_leg4_a, clara_leg4_b, plus two more I created, clara_931/932) was dropped before finishing; clara_l10 itself is unchanged from the fix report's own 'left as found' state (no World, 16 live queued document_processing_tasks, clean git status).",
+  "findings": [
+    {
+      "id": "SPEC-1023-02",
+      "ticket": 1023,
+      "severity": "note",
+      "status": "still open, as disclosed",
+      "title": "AC2 ('All three onboarded drills pass in CI') remains unverified — the closed-wave-drills job is reached only by schedule or workflow_dispatch, which this lane may not trigger.",
+      "evidence": "Unchanged from the review and from the fix report's own 'Anything unverified' section: the wiring is proved structurally (SPEC-1023-01 fixed, the three CI steps exist and reset-gate-routing.test.mjs's 9 cells including the 3 #1023 coverage cells pass — independently re-run here, 9/9), but the destructive bodies have never run on a GitHub runner. This is an integrator action (a `workflow_dispatch` of `closed-wave-drills`), not a code defect, and is not something a lane worktree can produce evidence for.",
+      "blocks_accept": false
+    },
+    {
+      "id": "SPEC-1016-01",
+      "ticket": 1016,
+      "severity": "note",
+      "status": "deliberately not fixed, as disclosed",
+      "title": "eta-behaviour-phase.mjs's CEREMONY_EXCLUDED_PAIRS still names only two of the three 'ships dark' evaluators.",
+      "evidence": "Confirmed unchanged in the diff (no packages/db/tests/eta-behaviour-phase.mjs edit in ffe63a0dd08...HEAD). Correctly charged to no ticket per WORK-ORDER rule 5 (scope discipline: a lane does not widen a change into another battery's blanket sweep). Worth a needs-triage ticket per both the review and the fix report; not something #1015/#1016/#1018/#1023/#1028 were asked to fix.",
+      "blocks_accept": false
+    }
+  ],
+  "verification_runs": [
+    "git log ffe63a0dd084e99b84c1368119845be273c421ce..HEAD --oneline -> 26 commits (21 pre-review + 5 fix-round), matches the fix report's 'New head' exactly; git status --porcelain empty in the worktree throughout",
+    "SPEC-1015-01 (blocker, FIXED): read packages/runtime/tests/rollback-preflight.test.mjs's '#1015 — an explicit ask for the FULL document picture' cell -- the assert.equal(out.tasks.length, noise.length) total assertion is gone, replaced by a NAMED-vs-ABSENT documentTaskIds difference assertion, exactly as the review's required_fix asked. Re-ran on a fresh TEMPLATE clara_l10 clone with a freshly bootstrapped World (16 contaminating live queued document_processing_tasks present throughout, matching the lane's own database): node --test tests/rollback-preflight.test.mjs -> 33/33 pass, 0 fail (was 32/33, not ok 19, '18 !== 2' before the fix). Also re-ran queue-drain.test.mjs -> 6/6 pass.",
+    "SPEC-1018-01 (major, FIXED -- converted): read packages/runtime/tests/body-census-guard-db.test.mjs -- it now composes isLoopbackHost + allowedDbPattern(...).dbRegex + dsnAgreesWithEnv from local-db-gate.mjs instead of its own three copies, and does NOT call assertLocalDbGate (decline-not-throw, by design). Re-ran FOR REAL on a fresh clara_l10 clone named clara_rt_test (admitted name) with World bootstrapped and the built image present: node --test tests/body-census-guard-db.test.mjs -> 4/4 pass, 0 skipped. Re-ran the SAME file on a non-admitted database name -> all 4 cells SKIP with the documented reason (decline, not throw, confirmed). Re-ran local-db-gate-drivers-census.test.mjs -> 8/8 pass (was 4 before the fix; the file is now named in SKIP_GATED_WORLD_TESTS and censused).",
+    "SPEC-1018-02 (minor, FIXED): read tests/local-db-gate-drivers-census.test.mjs -- deriveDriverRoster(fileNames) and NON_GATE_E2ES are present and exported; a cell asserts the derived set equals the written DRIVERS constant. Covered by the same 8/8 census run above.",
+    "SPEC-1028-01 (minor, FIXED): read packages/runtime/tests/intake-batch-e2e.mjs's LEG 4 disjointness branch -- TERMINAL_WORK is gone; liveChildrenOf(batch) now runs `select member_id, work_id from clara._intake_batch_live_children($1::uuid)` and backs the engine_wins fault wait, the 'honestly still stopping' branch and the disjointness assertion. Independently read clara._intake_batch_live_children's live pg_get_functiondef on clara_l10 -- it matches the fix report's quoted SQL verbatim (status half AND the committed-receipt NOT EXISTS arm). Independently RAN the leg twice under WSL (Ubuntu, runner, /opt/node/bin/node v22.23.2) via node scripts/ci/world-gate.mjs tests/intake-batch-e2e.mjs on two fresh TEMPLATE clara_l10 clones with their own bootstrapped Worlds: (1) no fault -> ALL LEGS PASSED, exit 0, peak RSS 862 MB/2048 MB budget, log line '[p636] LEG4 firm P is honestly still stopping — 2 live child(ren) remain: [...]' printing the actual rows (the review's second, smaller ask); (2) CLARA_P636_LEG4_FAULT=engine_wins -> ALL LEGS PASSED, exit 0, peak RSS 888 MB, log line '[p636] LEG4 firm P's parent reached 'cancelled' with NO live child left by the estate's own reckoning (the #1028 race, not a belt defect) — refusals were still COUNTED (2) and ATTRIBUTED (blocked=1, door read canceller_not_active during polling)' -- matches the fix report's quoted line verbatim, both runs green with the correct diagnosis logged.",
+    "SPEC-1023-01 (minor, FIXED): read all three drill headers (checkout-convergence-upgrade.test.mjs, rig-runtime-upgrade.test.mjs, wave-a-upgrade.test.mjs) -- none asserts 'no CI leg exists' in the present tense any more; each names its CI step and database. Cross-checked .github/actions/closed-wave-upgrade-drills/action.yml -- all three steps and database names (clara_0186_upgrade_ci, clara_runtime_upgrade_ci, clara_waveA_upgrade_ci) are present and match. Re-ran the three drills under the full gate chain, no reset flags -> 6 skipped, 0 failed (matches claim).",
+    "SPEC-1023-03 (note, optional, FIXED): read packages/db/tests/reset-gate-routing.test.mjs's stepInvoking -- it now requires one line carrying both 'node --test' and 'tests/<file>' rather than a whole-chunk includes() scan; a new cell (#1023 a step is located by its INVOCATION line...) proves the discrimination. Re-ran packages/db/tests/reset-gate-routing.test.mjs on clara_l10 with the full $GATES chain -> 9/9 pass (matches claim).",
+    "STD-1018-01 (minor, evidence-accuracy, FIXED): read docs/plan/active/riders-2026-09-20/reports/wave3-lane10-ticket1018.md -- AC1's evidence line and the gates table are corrected to 10/10 for local-db-gate.test.mjs alone and now 18/18 (10 unit + 8 census) combined with the fix round's added census cells, each correction citing STD-1018-01, matching what I independently measured (10/10 unit, 8/8 census).",
+    "packages/db (from packages/db, PGDATABASE=clara_l10): node --test --test-concurrency=1 $GATES tests/reset-gate-routing.test.mjs -> 9/9 pass",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/operation-census.test.mjs tests/rig-isolation.test.mjs -> 33 tests, 32 pass, 0 fail, 1 skip (T19, the documented destructive-skip; matches claim exactly)",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/checkout-convergence-upgrade.test.mjs tests/rig-runtime-upgrade.test.mjs tests/wave-a-upgrade.test.mjs (no reset flags) -> 6 skipped, 0 failed",
+    "packages/runtime (from packages/runtime): node --test tests/rollback-preflight.test.mjs on a contaminated+World clone -> 33/33 pass; node --test tests/queue-drain.test.mjs -> 6/6 pass; node --test tests/local-db-gate.test.mjs -> 10/10 pass; node --test tests/local-db-gate-drivers-census.test.mjs -> 8/8 pass; node --test tests/body-census-guard-db.test.mjs on clara_rt_test -> 4/4 pass, on a non-admitted db -> 4/4 skip",
+    "runtime World legs (WSL): node scripts/ci/world-gate.mjs tests/intake-batch-e2e.mjs, twice (clean + CLARA_P636_LEG4_FAULT=engine_wins) -> ALL LEGS PASSED both times, exit 0, peak RSS 862/888 MB of the 2048 MB budget",
+    "worktree root: CI=true GITHUB_ACTIONS=true pnpm lint -> exit 0",
+    "worktree root: pnpm typecheck -> exit 0 (packages/runtime typecheck: Done, apps/web typecheck: Done)",
+    "worktree root: node scripts/check-frozen-workflows.mjs -> OK, 312 frozen file(s), no manifest diff, 3 retired entries",
+    "worktree root: node packages/runtime/scripts/check-parts-parity.mjs -> OK, reader superset of emittable",
+    "git status --porcelain (worktree) -> empty throughout and at the end",
+    "main checkout git status --porcelain -> unchanged from session start (same two pre-existing modified files, same pre-existing untracked paths; the STD-1018-01 correction inside reports/wave3-lane10-ticket1018.md is the only edit made there this round, confined to the reports/ directory the fix report itself made)",
+    "rig cleanup: dropped clara_l10_recheck, clara_rt_test, clara_leg4_a, clara_leg4_b (apparently created by an earlier, usage-limit-interrupted attempt at this same recheck), clara_931, clara_932 (created this round for the LEG 4 re-runs, no numeric-suffix name was available reused); select datname from pg_database where datname like 'clara%' on port 55750 now returns clara_l10 alone; clara_l10 itself: no World, 16 live queued document_processing_tasks (deliberately unchanged, as the fix report explains), never written to."
+  ],
+  "not_repeated": [
+    "The #1028 belt-regression vacuity control (fanOutCancel rewritten) and the five-consecutive-clean-runs AC5 restatement were not repeated this round -- the fix report itself discloses both as accepted-not-re-run, and this recheck's own two fresh LEG4 runs (one clean, one engine_wins) independently confirm the fixed predicate is correct on both branches, which is what SPEC-1028-01 required.",
+    "apps/web suites were not run -- confirmed again this round that the diff touches no apps/web file (git diff --stat unchanged, 37 files, all under packages/db, packages/runtime and .github/actions)."
+  ]
+}
