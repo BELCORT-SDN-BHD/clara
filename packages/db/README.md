@@ -4697,3 +4697,36 @@ override census equal to v1's row for row; S6 drives `clara.list_coa_templates()
 firm session and shows exactly ONE published `my_sme_starter` row — version 2, 146 accounts — with
 v1 retired, unmoved at 42/142 and still carrying 0150's own content hash. Each carries its own
 vacuity control (a rolled-back mutation of the exact fact under test).
+
+## #933 — the depreciation-particulars proposal rides `source_ref`, and needs no migration
+
+#883's second half puts Clara's proposed particulars (method, life or rate, residual, start date,
+and the one line she derived them from) into the #639 dependent particulars question, so the three
+answering surfaces can pre-fill from it. That looks like a new column and is not one:
+`clara.agent_interruptions.source_ref` is constrained to `null or jsonb_typeof(source_ref) =
+'object'` and nothing more (0180:183), and `clara.open_work_question` validates the FIELDS while
+passing `p_source_ref` through untouched (0180:579-589). So the proposal travels as an extra key
+inside #639's own `{kind:'fixed_asset', asset_id}` stanza, and **#933 adds no migration**.
+
+That is a claim about a live database, so `tests/fa-particulars-proposal.test.mjs` measures it
+rather than reading it off the file (frontier-gated on `fixed_asset_acquisition$` through the
+shared `fixed-asset-acquisition-fixtures.mjs`, so it is dormant below 0216):
+
+* `p933.wire.verbatim` — the extended `source_ref` is admitted, the Work parks exactly as #639
+  leaves it, and the human's own `clara.get_work_pending_question` returns the block KEY FOR KEY
+  (all nine keys, none added, none dropped by the jsonb round trip).
+* `p933.wire.answerable` — the question still ANSWERS, and the stored answer is the person's
+  EDITED values while the proposal stands unedited beside them on the same row, so "who decided 84
+  months, and against what" is answerable a year later.
+* `p933.read.by_asset` — the two register-side entrances hold an asset id and no question id (the
+  `fixed_asset_incomplete` queue row carries `asset_id` alone), so they find the question by
+  `source_ref->>'asset_id'` under `p_agent_interruptions_human`. The cell issues exactly the filter
+  PostgREST compiles for `apps/web/lib/registers/fa-particulars-proposal.ts`, as the human, so the
+  column grant and the policy are what is proven.
+* `p933.read.firm_walled` — a person of another firm reads NO row for the same asset id: the policy
+  is `firm_id = clara.jwt_firm()`, so the empty answer is indistinguishable from "no such asset".
+* `p933.wire.object_only` — an ARRAY `source_ref` is refused while the object form carrying the
+  extra key is admitted, which is what turns "no migration is needed" into a measurement.
+
+Vacuity control: with the fixture changed to park the question WITHOUT a proposal, cells 1–3 go
+red and 4–5 stay green; the fixture was then restored byte for byte.
