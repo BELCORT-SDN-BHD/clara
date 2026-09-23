@@ -49,12 +49,19 @@ const MIGRATION = "0228_opening_ledger_source.sql";
 const GATE_ENV = "CLARA_ALLOW_MISSING_OPENING_LEDGER_SOURCE";
 /** 0228's premise probe is NOT a `to_regprocedure` check — the file installs no function. It is
  *  the republication itself: the registry publishes version 2. */
-// The version this battery's own registry cell expects. 0228 (#656) published 2; #782's 0245
-// republished at 3 and ticket 1012's 0288 at 4, each for content outside this file's subject.
-// The number is re-based here rather than left behind, because the gate below SKIPS the whole
-// file when it does not match — a stale number silently retires this battery instead of redding
-// it (which is exactly what happened between 0245 and 0288: the file skipped on every lane).
-const PUBLISHED_REGISTRY_VERSION = 4;
+// A FLOOR, NOT AN EQUALITY, and that is the whole point (fix round 1, review finding
+// W3L07-ADV-04). The registry version is a MUTABLE published value: 0228 (#656) published 2,
+// #782's 0245 republished at 3, ticket 1012's 0288 at 4, and every later republication raises it
+// again for content that has nothing to do with this file. An EXACT-equality premise turned that
+// ordinary event into a silent retirement of all twelve cells below, because the gate module
+// preloaded by the full suite sets the skip variable unconditionally — which is exactly how this
+// battery went dark between 0245 and 0288 on every lane. A floor cannot fail that way: a
+// republication can only ever raise the number, so the battery keeps running and its own content
+// assertions (p656.registry.*) are what red when the registry says something new.
+//
+// The number is the version at which THIS file's registry expectations were last re-derived, so
+// it is still a real premise: a chain that predates 0228 publishes 1 and is refused.
+const MIN_PUBLISHED_REGISTRY_VERSION = 4;
 
 let ready = false;
 
@@ -65,11 +72,11 @@ before(async () => {
   // assertion under test.
   const seen = (await rootQuery(
     "select min(registry_version)::int as v, count(distinct registry_version)::int as n from clara.document_capabilities")).rows[0];
-  if (seen?.v !== PUBLISHED_REGISTRY_VERSION || seen?.n !== 1) {
+  if (!(Number.isInteger(seen?.v) && seen.v >= MIN_PUBLISHED_REGISTRY_VERSION) || seen?.n !== 1) {
     if (process.env[GATE_ENV] !== "1") {
       throw new Error(
         `opening-ledger-source premise ${MIGRATION} is not applied (clara.document_capabilities publishes `
-        + `version ${seen?.v} across ${seen?.n} distinct value(s), expected ${PUBLISHED_REGISTRY_VERSION} across 1) `
+        + `version ${seen?.v} across ${seen?.n} distinct value(s), expected at least ${MIN_PUBLISHED_REGISTRY_VERSION} across 1) `
         + `and ${GATE_ENV} is unset -- this is a FOCUSED run and must fail loudly, not skip. Preload `
         + "./tests/opening-ledger-source-preintegration-gate.mjs for an estate sweep against a pre-0228 chain.",
       );
@@ -207,7 +214,7 @@ const targetRows = (seed) => rootQuery(
 //       professional reads on `components/documents/capability-tiers.tsx`.
 // ---------------------------------------------------------------------------------------------
 
-test("p656.registry.prior_gl_operation: the corrected rows read back at version 2 with the capability they can actually deliver, and the missing browser entrance is NAMED", async (t) => {
+test("p656.registry.prior_gl_operation: the corrected rows read back, at one published registry version no older than this battery's own floor, with the capability they can actually deliver and the retired seeding lane NAMED", async (t) => {
   if (unready(t)) return;
   // rootQuery: `clara.document_capabilities` carries NO app-role write and the agent lane reads
   // it only through a DEFINER door; the table itself is a fixture-level read here. The
@@ -265,13 +272,18 @@ test("p656.registry.prior_gl_operation: the corrected rows read back at version 
       where business_operation='supported' and typed_facts<>'supported'`)).rows;
   assert.deepEqual(crossed, [], "no business operation may be promised over facts that do not exist");
 
-  // The whole registry publishes exactly one version, and it is 2.
+  // The whole registry publishes exactly ONE version at a time, and never a version older than
+  // the one this file's expectations were re-derived against. The NUMBER is deliberately not
+  // pinned exactly (fix round 1, W3L07-ADV-04): it is a mutable published value that any later
+  // republication raises for content outside this subject, and the facts this cell actually owns
+  // are the row content asserted above, not the counter.
   const v = (await rootQuery(
     `select count(*)::int as n, count(distinct registry_version)::int as versions,
             min(registry_version)::int as v from clara.document_capabilities`)).rows[0];
   assert.equal(v.n, 240, "0228 inserts and deletes nothing");
   assert.equal(v.versions, 1, "the registry publishes exactly one version at a time");
-  assert.equal(v.v, PUBLISHED_REGISTRY_VERSION);
+  assert.ok(v.v >= MIN_PUBLISHED_REGISTRY_VERSION,
+    `the registry publishes version ${v.v}, older than the ${MIN_PUBLISHED_REGISTRY_VERSION} this battery was re-derived against`);
 
   // A DOWNGRADE is still refused by 0207's wall — the republication rode the wall, it did not
   // step around it (#846: UPDATE that raises, never DELETE-then-INSERT).
