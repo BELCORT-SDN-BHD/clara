@@ -1051,6 +1051,158 @@ begin
   return clara._finish_op(v_firm, 'create_prepayment_schedule', p_op_key, v_result);
 end $$;
 
+-- =====================================================================================
+-- §E — clara.list_prepayment_attention — RECUT. Arm B's candidate predicate gains the roster
+-- question, and nothing else in this read moves: arm A, the cap, the ordering-before-cutting, the
+-- two truncation flags and #939's `term_carrier` / `has_live_term` / `next_step` projection are all
+-- as 0305 left them.
+--
+-- WHY THE BAND MUST ASK WHAT THE DOOR ASKS. Every arm-B row is an OFFER — the surface renders it
+-- with a "configure the schedule" action — so a row the door would refuse is an offer that wastes
+-- a person's time and teaches them to distrust the band. Before #940 the band advertised every
+-- deposit, inventory purchase and prepaid tax a firm posts; the roster is what makes the offer
+-- honest.
+-- =====================================================================================
+create or replace function clara.list_prepayment_attention(p_client uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare v_actor uuid; v_firm uuid; v_a jsonb; v_b jsonb;
+        v_a_trunc boolean := false; v_b_trunc boolean := false;
+begin
+  select a.actor, a.firm into v_actor, v_firm from clara._human_ctx(clara.role_rank('viewer')) a;
+  if not exists (select 1 from clara.clients c where c.id = p_client and c.firm_id = v_firm) then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+
+  -- THE PAGE IS ORDERED BEFORE IT IS CUT, and the envelope says when the cut bit. A `limit 50`
+  -- inside a select with NO ORDER BY hands back an ARBITRARY fifty and the ordering applied
+  -- afterwards only sorts the survivors -- so on a client with more candidates than the cap the
+  -- NEWEST refusal, which is the one this read exists to surface, could simply be absent with
+  -- nothing saying so. Measured by `p653.attention.window`.
+  with cand_a as (
+      select jsonb_build_object(
+        'arm', 'refusing', 'schedule_id', s.id, 'plan_id', s.plan_id, 'purpose', p.purpose,
+        'status', p.status, 'occurrence_id', o.id,
+        'due_date', to_char(o.due_date,'YYYY-MM-DD'),
+        'period_key', to_char(o.period_key,'YYYY-MM-DD'),
+        'attempt', o.attempt, 'work_id', o.work_id,
+        -- WHERE it stopped, because the operator's next move differs: an admission refusal is a
+        -- plan-lane fact (authority, window, period line), a posting refusal is a books fact
+        -- (closed period, withdrawn egress authority) recorded on the Work.
+        'stage', case when coalesce(o.outcome ->> 'state','') = 'refused' then 'admission'
+                      else 'posting' end,
+        'code', case when coalesce(o.outcome ->> 'state','') = 'refused' then o.outcome ->> 'code'
+                     else w.error ->> 'code' end,
+        'reason', case when coalesce(o.outcome ->> 'state','') = 'refused' then o.outcome ->> 'reason'
+                       else w.error ->> 'reason' end,
+        'message', case when coalesce(o.outcome ->> 'state','') = 'refused' then o.outcome ->> 'message'
+                        else w.error ->> 'message' end,
+        'work_status', w.status,
+        -- The catch-up window this period would need, so the surface can offer the EXISTING
+        -- window-only door rather than inventing a recovery of its own.
+        'catch_up_from', to_char(o.due_date,'YYYY-MM-DD'),
+        'catch_up_to', to_char(o.due_date,'YYYY-MM-DD')) as x,
+        o.due_date as sk
+        from clara.prepayment_schedules s
+        join clara.accounting_plans p on p.id = s.plan_id
+        cross join lateral (
+          select o2.* from clara.accounting_plan_occurrences o2
+           where o2.plan_id = s.plan_id
+           order by o2.due_date desc, o2.created_at desc limit 1) o
+        left join clara.accounting_work w on w.id = o.work_id
+       where s.client_id = p_client and s.firm_id = v_firm and p.status <> 'ended'
+         and (
+           coalesce(o.outcome ->> 'state','') = 'refused'
+           or (o.work_id is not null
+               and w.status in ('failed','refused','cancelled','expired')
+               and not exists (select 1 from clara.operation_receipts rc
+                                where rc.work_id = o.work_id and rc.outcome = 'committed')))
+    )
+  select coalesce(jsonb_agg(p.x order by p.sk desc, p.x ->> 'occurrence_id'), '[]'::jsonb),
+         (select count(*) from cand_a) > 50
+    into v_a, v_a_trunc
+    from (select c.x, c.sk from cand_a c order by c.sk desc, c.x ->> 'occurrence_id' limit 50) p;
+
+  with cand_b as (
+      select jsonb_build_object(
+        'arm', 'unscheduled', 'entry_id', je.id,
+        'posting_date', to_char(je.posting_date,'YYYY-MM-DD'), 'memo', je.memo,
+        'document_id', je.document_id,
+        'prepaid_account_code', x.account_code, 'amount_cents', x.debit_cents,
+        -- #939 — WHICH CARRIER this recognition's term lives in. A document-bound recognition's
+        -- term belongs to its document; a memo-only one's belongs to the person who states it.
+        'term_carrier', case when je.document_id is not null
+                             then 'document_service_period' else 'human_stated' end,
+        'has_live_term', case when je.document_id is not null
+          then exists (select 1 from clara.document_service_periods sp
+                        where sp.document_id = je.document_id and sp.superseded_at is null)
+          else exists (select 1 from clara.prepayment_stated_terms t
+                        where t.source_entry_id = je.id and t.superseded_at is null) end,
+        -- #939 — THE NEXT ACT, as a CLOSED TOKEN. The copy is the surface's; the fact is this
+        -- read's. Before this file a memo-only prepayment was not listed at all, so there was no
+        -- next act to name and a firm had no way to discover the gap.
+        'next_step', case
+          when (case when je.document_id is not null
+                then exists (select 1 from clara.document_service_periods sp
+                              where sp.document_id = je.document_id and sp.superseded_at is null)
+                else exists (select 1 from clara.prepayment_stated_terms t
+                              where t.source_entry_id = je.id and t.superseded_at is null) end)
+            then 'configure_schedule'
+          when je.document_id is not null then 'record_document_service_period'
+          else 'state_service_period' end) as y,
+        je.posting_date as sk
+        from clara.journal_entries je
+        cross join lateral (
+          select jl.account_code, jl.debit_cents, count(*) over () as legs
+            from clara.journal_lines jl
+            join clara.coa_accounts ca on ca.client_id = jl.client_id
+                                      and ca.account_code = jl.account_code
+           where jl.entry_id = je.id and jl.debit_cents > 0 and ca.account_type = 'asset') x
+       where je.client_id = p_client and je.status = 'approved'
+         -- #939 — THE `document_id is not null` FILTER IS GONE. It was not arbitrary: with no
+         -- other term carrier a memo-only recognition could never be configured, so listing it
+         -- would have offered an action that could only refuse. Now it can be, so the filter
+         -- hides exactly the prepayments this ticket exists to rescue.
+         and je.reversed_by is null
+         and x.legs = 1
+         and not exists (select 1 from clara.prepayment_schedules s
+                          where s.source_entry_id = je.id)
+         -- #940 — THE ROSTER, ASKED HERE BECAUSE THE DOOR ASKS IT. Arm B is an OFFER: every row
+         -- it carries is rendered with a "configure the schedule" action, so a row whose account
+         -- is not on the client's prepayment roster would be an offer that could only refuse.
+         -- The predicate is `clara._prepayment_account_enrolled`, the SAME function §D calls, so
+         -- the band and the door cannot drift apart — the brief's own "a cell proves the list
+         -- never advertises an entry the door would refuse".
+         --
+         -- IT IS ASKED BEFORE THE WALL, exactly as §D asks it, so the two orders match as well as
+         -- the two answers. (In a SQL predicate the order is the planner's; spelling them in the
+         -- door's order is for the reader.)
+         --
+         -- RETIRING AN ACCOUNT THEREFORE EMPTIES ITS ROWS FROM THIS ARM and touches no schedule
+         -- that already exists: arm B is "recognised, not yet amortised", and a schedule already
+         -- running is arm A's and the plan lane's business.
+         and clara._prepayment_account_enrolled(p_client, x.account_code, 'prepayment')
+         -- THE SAME ELIGIBILITY WALL THE DOOR APPLIES to the prepaid leg (§D), so the band cannot
+         -- advertise a recognition the door would refuse. Without it arm B lists every ordinary
+         -- sales invoice, documented bank receipt and fixed-asset purchase as "posted, not yet
+         -- amortised" with a "configure the schedule" action -- measured on the rig.
+         and clara._adj_line_eligibility_breach(p_client,
+               jsonb_build_array(jsonb_build_object('account_code', x.account_code,
+                 'debit_cents', 0, 'credit_cents', 1))) is null
+    )
+  select coalesce(jsonb_agg(q.y order by q.sk desc, q.y ->> 'entry_id'), '[]'::jsonb),
+         (select count(*) from cand_b) > 50
+    into v_b, v_b_trunc
+    from (select c.y, c.sk from cand_b c order by c.sk desc, c.y ->> 'entry_id' limit 50) q;
+
+  return jsonb_build_object('client_id', p_client, 'refusing', v_a, 'unscheduled', v_b,
+    -- THE CAP, SAID OUT LOUD. A band showing fifty of nine hundred without this reads as "nothing
+    -- else is failing", which is the exact misreading the whole read exists to prevent.
+    'refusing_truncated', v_a_trunc, 'unscheduled_truncated', v_b_trunc,
+    'cap', 50,
+    'attention', v_a || v_b);
+end $$;
+
 reset role;
 
 -- THE TWO HUMAN GRANTS, minted as the migration role rather than as clara_fn_owner (0305's own
@@ -1187,6 +1339,28 @@ begin
         'clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)'::regprocedure, 'execute') then
     raise exception '#940 tail: the recut moved clara.create_prepayment_schedule''s ACL -- this lane is human-only until #915'
       using errcode='CLR10';
+  end if;
+
+  -- 5c · THE SECOND RECUT BODY. Arm B asks the SAME predicate the door asks -- asserted by the
+  --      call site rather than by an attribution comment, because a band that kept the comment and
+  --      lost the predicate is exactly the drift the brief's "both ways" criterion is about.
+  select p.prosrc into v_posture from pg_proc p
+   where p.oid = 'clara.list_prepayment_attention(uuid)'::regprocedure;
+  if position('#940' in v_posture) = 0
+     or position('clara._prepayment_account_enrolled(p_client, x.account_code, ''prepayment'')' in v_posture) = 0 then
+    raise exception '#940 tail: clara.list_prepayment_attention does not ask the roster question the door asks -- the recut did not land'
+      using errcode='CLR10';
+  end if;
+  if not has_function_privilege('clara_authenticated',
+        'clara.list_prepayment_attention(uuid)'::regprocedure, 'execute')
+     or has_function_privilege('public', 'clara.list_prepayment_attention(uuid)'::regprocedure, 'execute')
+     or has_function_privilege('clara_runtime', 'clara.list_prepayment_attention(uuid)'::regprocedure, 'execute') then
+    raise exception '#940 tail: the recut moved clara.list_prepayment_attention''s ACL' using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_proc p
+                  where p.oid = 'clara.list_prepayment_attention(uuid)'::regprocedure
+                    and p.provolatile = 's') then
+    raise exception '#940 tail: clara.list_prepayment_attention is no longer STABLE' using errcode='CLR10';
   end if;
 
   -- 6 · THE SHARED NEGATIVE WALL IS EXACTLY WHERE 0042 LEFT IT, re-measured AFTER this file ran.

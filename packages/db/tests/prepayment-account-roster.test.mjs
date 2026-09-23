@@ -19,13 +19,14 @@ import {
   enrolPrepaymentAccount, retirePrepaymentAccount, enrolmentRow, enrolmentsFor,
   liveEnrolmentCount, roleCanExecute, reserveAsFixedAssetCost, bindBankAccount, nowhereRosterId,
   plainAssetRecognition, createPrepaymentSchedule, scheduleCountFor, ineligibleAssetEntry,
+  listPrepaymentAttention,
   PREPAY_REASON, PREPAID_NOT_ENROLLED_AXIS,
   ROSTER_REASON, ROSTER_AXIS, ROSTER_PURPOSE, ENROL_DOOR_SIG, RETIRE_DOOR_SIG,
 } from "./prepayment-account-roster-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 4;
 
 before(async () => {
   ready = await (async () => {
@@ -308,4 +309,65 @@ cell("p940.schedule.roster_gate — an eligible but UNENROLLED prepaid leg is re
   assert.equal(walled.detail.breach?.axis, "bank_account",
     `the breach is the SHARED helper's own answer: ${JSON.stringify(walled.detail)}`);
   assert.equal(await scheduleCountFor(later.entry), 0);
+});
+
+// ===========================================================================================
+// AC3 (second half) — THE BAND NEVER ADVERTISES A RECOGNITION THE DOOR WOULD REFUSE.
+// ===========================================================================================
+
+cell("p940.attention.arm_b_roster — arm B lists only recognitions whose debited asset account is enrolled, the list and the door agree BOTH ways (enrol makes a row appear, retire makes it vanish and the door refuse), and no row the band offers can be refused by the roster", async () => {
+  const scene = await statedTermScene("armb", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  const deposit = await plainAssetRecognition(scene, { code: "19000007", cents: 66000, tag: "armb" });
+
+  // BEFORE THE ENROLMENT: the band advertises the scene's own prepayment (its account is on the
+  // roster) and NOT the deposit — because "configure the schedule" on the deposit is an action
+  // that could only refuse, which is the exact reason #939 gave for arm B's earlier filter.
+  const before = await listPrepaymentAttention(scene.bob, scene.client);
+  assert.equal(before.unscheduled.filter((r) => r.entry_id === scene.entry).length, 1,
+    "the enrolled recognition is advertised");
+  assert.equal(before.unscheduled.filter((r) => r.entry_id === deposit.entry).length, 0,
+    "a recognition on an account nobody enrolled is not offered for configuration");
+
+  // ENROL, AND THE ROW APPEARS. The band reports the database's answer, not a cached one.
+  await enrolPrepaymentAccount(scene.bob, { client: scene.client, account: deposit.code });
+  const enrolled = await listPrepaymentAttention(scene.bob, scene.client);
+  assert.equal(enrolled.unscheduled.filter((r) => r.entry_id === deposit.entry).length, 1,
+    "enrolling the account makes its recognition appear in the band");
+
+  // RETIRE, AND THE ROW VANISHES — AND THE DOOR REFUSES IT. This is the "both ways" half: the two
+  // answers are the same predicate, so they cannot drift apart.
+  await retirePrepaymentAccount(scene.bob, { client: scene.client, account: deposit.code });
+  const retired = await listPrepaymentAttention(scene.bob, scene.client);
+  assert.equal(retired.unscheduled.filter((r) => r.entry_id === deposit.entry).length, 0,
+    "retiring the account closes it to NEW schedules, and the band stops offering one");
+  const refused = await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: deposit.entry, expenseAccount: scene.target,
+      authorityRef: scene.authorityRef,
+    }),
+    "configuring a schedule on a since-retired account");
+  assert.equal(refused.detail.axis, PREPAID_NOT_ENROLLED_AXIS);
+
+  // …AND THE SCENE'S OWN RECOGNITION GOES THE SAME WAY when ITS account is retired, so this is a
+  // property of the roster rather than of one fixture.
+  await retirePrepaymentAccount(scene.bob, { client: scene.client, account: scene.prepaid });
+  const none = await listPrepaymentAttention(scene.bob, scene.client);
+  assert.equal(none.unscheduled.length, 0,
+    "with no live enrolment at all, arm B advertises nothing — every action it could offer would refuse");
+
+  // THE AGREEMENT, MEASURED OVER THE WHOLE ARM rather than over the row this cell happens to know:
+  // re-enrol both accounts and assert that EVERY row the band offers survives the door's roster
+  // question. A band that advertised an entry the door refuses is the defect this cell exists for.
+  await enrolPrepaymentAccount(scene.bob, { client: scene.client, account: scene.prepaid });
+  await enrolPrepaymentAccount(scene.bob, { client: scene.client, account: deposit.code });
+  const both = await listPrepaymentAttention(scene.bob, scene.client);
+  assert.ok(both.unscheduled.length >= 2, "both recognitions are back");
+  for (const row of both.unscheduled) {
+    const live = await rootQuery(
+      `select count(*)::int as n from clara.prepayment_account_enrolments
+        where client_id = $1 and account_code = $2 and purpose = 'prepayment' and active`,
+      [scene.client, row.prepaid_account_code]);
+    assert.equal(live.rows[0].n, 1,
+      `the band offered ${row.prepaid_account_code}, which the door's roster question would refuse`);
+  }
 });
