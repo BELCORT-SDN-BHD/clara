@@ -113,6 +113,7 @@ components/common/route-error.test.tsx
 components/common/state.test.tsx
 components/common/table-scroll-region.test.tsx
 components/deferred-revenue/deferred-revenue-render-states.test.tsx
+components/deferred-revenue/deferred-revenue-roster-gate.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/correction-impact-sheet.test.tsx
