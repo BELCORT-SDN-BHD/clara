@@ -37,6 +37,9 @@ export const DRIVERS = Object.freeze([
   "two-build-cutover-e2e.mjs",
   "work-cancel-e2e.mjs",
   "work-question-e2e.mjs",
+  "chat-turn-v19-e2e.mjs",
+  "chat-turn-v20-e2e.mjs",
+  "chat-turn-v21-e2e.mjs",
 ]);
 
 /** Pure text-level census of one driver's source — no execution, no filesystem beyond the read
