@@ -110,6 +110,8 @@ const SCHEDULE_ROW = {
   total_cents: 100000,
   period_count: 12,
   basis_kind: "human_stated",
+  term_live: true,
+  term_superseded_by: null,
   created_at: "2026-01-15T00:00:00Z",
   effective_from: "2026-01-31",
   effective_to: "2026-12-31",
@@ -193,6 +195,8 @@ const DETAIL = {
   source_status: "approved",
   document_id: DOC,
   service_period_id: "sp-1",
+  term_live: true,
+  term_superseded_by: null,
   term_start: "2026-01-01",
   term_end: "2026-03-31",
   basis_kind: "human_stated",
@@ -394,6 +398,19 @@ test("prepayments.detail — the derived facts, the judged account WITH its stat
       assert.match(text, /Final period — carries the remainder/);
       assert.equal(byTestId(h.container, "prepayment-period-posted").length, 2);
       assert.equal(byTestId(h.container, "prepayment-period-refused").length, 1);
+      // #919 — a LIVE term renders no superseded-term banner.
+      assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 0);
+      assert.doesNotMatch(text, /a corrected term needs a new schedule/);
+    });
+  });
+});
+
+test("prepayments.detail — ticket 919: a schedule whose term row has since been superseded renders the corrected-term banner, naming that a new schedule (not a revision) is what a corrected term needs", async () => {
+  const SUPERSEDED = { ...DETAIL, term_live: false, term_superseded_by: "sp-2" };
+  await withMockedEnv(rpcRouter({ get_prepayment_schedule: SUPERSEDED }), async () => {
+    await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
+      assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 1);
+      assert.match(h.text(), /a corrected term needs a new schedule/);
     });
   });
 });

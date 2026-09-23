@@ -6768,6 +6768,7 @@
       "openWork": "Open the work",
       "pausedReason": "Paused: {reason}",
       "endedReason": "Ended: {reason}",
+      "termSupersededBody": "The service period this schedule was derived from has since been corrected on its document. Nothing above has moved — a corrected term needs a new schedule, not a revision of this one.",
       "allocationHeading": "Period-by-period charge",
       "allocationBody": "Derived from the recognition entry and the term the document states, exact to the cent, with the remainder wholly in the final period. It is a preview of what each period posts, not something to edit here.",
       "allocationTableLabel": "Derived amortisation periods",

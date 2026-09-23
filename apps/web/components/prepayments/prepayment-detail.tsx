@@ -149,6 +149,14 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
         {row.ended_reason === null ? null : (
           <StateBanner tone="neutral">{t("endedReason", { reason: row.ended_reason })}</StateBanner>
         )}
+        {/* #919 — the term row this schedule was DERIVED from (0223's own append-only design: the
+            stored allocation never moves) is not necessarily the one still live on the document.
+            Absent for a live term, rendered only once a bookkeeper has since recorded a correction. */}
+        {row.term_live ? null : (
+          <StateBanner tone="warning" data-testid="prepayment-term-superseded">
+            {t("termSupersededBody")}
+          </StateBanner>
+        )}
 
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Fact label={t("factTotal")}><Money cents={row.total_cents} /></Fact>

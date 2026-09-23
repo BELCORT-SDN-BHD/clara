@@ -41,6 +41,9 @@ export type PrepaymentListRow = {
   document_id: string;
   term_start: string;
   term_end: string;
+  /** #919 — the SAME term-liveness flag `PrepaymentDetail` carries, on the list row. */
+  term_live: boolean;
+  term_superseded_by: string | null;
   prepaid_account_code: string;
   expense_account_code: string;
   total_cents: number;
@@ -97,6 +100,13 @@ export type PrepaymentDetail = {
   source_status: string | null;
   document_id: string;
   service_period_id: string;
+  /** #919 — whether `service_period_id` still names the LIVE `document_service_periods` row.
+   *  false once a bookkeeper has recorded a corrected term on the same document: the stored
+   *  allocation does not move, so this is what tells a reader the schedule is riding a
+   *  since-superseded term. */
+  term_live: boolean;
+  /** The row that superseded it, when `term_live` is false; null while it is still live. */
+  term_superseded_by: string | null;
   term_start: string;
   term_end: string;
   basis_kind: string;
