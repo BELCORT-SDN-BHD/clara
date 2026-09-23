@@ -2236,6 +2236,16 @@ export const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT = [
   ...AUTHORITY_REF_HUMAN_INSTRUCTION_0250_UNGRANTED_FNS,
 ];
 
+// #1031 [0310, the financial-year-end pair wall in Knowledge] — its own cohort, the same "wholly
+// present or wholly absent" reason the two above carry: the `db-slice-frontiers` matrix runs this
+// package against databases pinned at earlier frontiers where 0240 has applied and 0310 has not.
+// `_knowledge_assert_fye_pair` is UNGRANTED like `_authority_ref_refusal` above: the main sweep
+// fails the moment a grant appears on it, this cohort fails if it ever DISAPPEARS from either of
+// the two write doors (`_knowledge_capture_core`, `correct_knowledge`) that must both call it —
+// see knowledgeFixtures.mjs's `fyePairWallCohortApplied`, the same three-flag marker probe.
+const FYE_PAIR_WALL_0310_UNGRANTED_FNS = ["_knowledge_assert_fye_pair"];
+export const FYE_PAIR_WALL_0310_COHORT = [...FYE_PAIR_WALL_0310_UNGRANTED_FNS];
+
 // #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
 // was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
 // the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:
@@ -3912,6 +3922,11 @@ export async function grantMatrixFailures() {
   const authorityRefRuleLive = AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT.filter((n) => liveNames.has(n));
   if (authorityRefRuleLive.length !== 0) {
     failures.push(...cohortFailures("#977 0250 authority-ref human-instruction rule", AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT, liveNames));
+  }
+  // #1031 [0310] — bimodal like 0250's: wholly present once 0310 applies, wholly absent before it.
+  const fyePairWallLive = FYE_PAIR_WALL_0310_COHORT.filter((n) => liveNames.has(n));
+  if (fyePairWallLive.length !== 0) {
+    failures.push(...cohortFailures("#1031 0310 knowledge fye pair wall", FYE_PAIR_WALL_0310_COHORT, liveNames));
   }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.

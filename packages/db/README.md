@@ -4697,3 +4697,76 @@ override census equal to v1's row for row; S6 drives `clara.list_coa_templates()
 firm session and shows exactly ONE published `my_sme_starter` row — version 2, 146 accounts — with
 v1 retired, unmoved at 42/142 and still carrying 0150's own content hash. Each carries its own
 vacuity control (a rolled-back mutation of the exact fact under test).
+
+## 0310 — Knowledge refuses a financial-year-end pair that cannot be a real calendar day (#1031, riders wave 4, lane 06)
+
+`0310_knowledge_fye_pair_wall.sql` closes the gap #898's own fix round pinned rather than closed
+(`wave2-lane02-fix.md`, cell `fd.06`): Knowledge's `financial_year_end_day` (0240) is typed against
+`range:day_1_31` alone — a whole number 1-31, with no awareness of the sibling
+`financial_year_end_month` row, because `clara._knowledge_assert_value(p_knowledge_key, p_value)`
+sees one key and one value and has no client to read a sibling answer from. `clara.clients`' own
+year-end door (`clara.set_client_fy_end`, 0041) DOES refuse the impossible pair (CLR37,
+`fa_particulars_invalid`/`fy_end`), so a firm could state day 31 for February into Knowledge while
+the client row it is meant to agree with refuses the identical pair outright.
+
+**The one new rule, and both write doors consult it.** `clara._knowledge_assert_fye_pair(p_client,
+p_knowledge_key, p_value)` is a no-op for every key but the two year-end keys and a no-op at firm
+scope (D8's own wall, `clara._tf_knowledge_firm_eligibility`, already refuses a firm-scope capture
+of either key before a live client-scoped sibling could exist to compare against). Given a client
+scope, it reads the OTHER key's live value for that client — absent means nothing to compare,
+0240's original posture for a lone month or day, unchanged — and judges the pair with
+`clara.set_client_fy_end`'s own calendar rule (0041:3255-3258), copied verbatim rather than
+re-derived, so the two doors can never disagree about what a real financial year end is. A refused
+pair carries the SAME typed reason the client-row door already uses ("reuse its reason, mint
+nothing new"), with the month and the day it judged named on the detail — the client-row door's own
+generic message does not carry either value, and the ticket's own "Desired behavior" asked for both.
+
+Grep-measured on the lane-06 rig (`select … from pg_proc where prosrc ilike
+'%_knowledge_assert_value(%'`): exactly two clara bodies can ever write either year-end key,
+`clara._knowledge_capture_core` (which `capture_knowledge` / `capture_knowledge_for` /
+`promote_plan_answers_to_knowledge` all nest) and `clara.correct_knowledge` (which calls
+`clara._knowledge_assert_value` directly, bypassing the core). Both are recut, each gaining ONE
+line immediately after its existing `_knowledge_assert_value` call — "the pair rule lives once and
+both keys consult it" is satisfied by both WRITE DOORS consulting the one rule, not by the two keys
+each carrying a copy.
+
+**The choice this file makes, named.** The catalogue has no existing mechanism for one key's
+capture to reach in and clear or rewrite a sibling key's own live record — every capture door
+either writes the one record it was asked to write or refuses. "Clear the day with a disclosed
+reason" would be new machinery invented for this one pair; refusal, in both directions, needs none
+— it reuses the exact posture `_knowledge_assert_value` already keeps for a syntactically-valid-
+but-out-of-range value. So: capturing (or *correcting*) the day against an already-live,
+incompatible month is refused and the month is untouched; capturing (or correcting) the month
+against an already-live, incompatible day is refused the same way and the day is untouched. A
+client with no live sibling yet keeps 0240's original, unconstrained-alone posture for whichever
+half is stated first.
+
+**What this file deliberately does not do.** It does not touch `clara.set_client_fy_end` or
+`clara.clients`' own `ck_clients_fy_end` CHECK (0041) — the ticket's own out-of-scope, and the
+prestate pins that body UNMOVED. It does not read `financial_year_end_day` out of Knowledge
+anywhere new — the rule reads the sibling row directly, inside the SECURITY DEFINER write path,
+never through a new read surface. It does not change `clara._knowledge_assert_value` itself —
+0240's "one key, one value" segregation stays exactly as it was; the pair rule is a second, later
+call in each caller, never a widened first one.
+
+**The negative census.** `clara._knowledge_assert_fye_pair` is a genuine (STABLE, ungranted) reader
+of `clara.knowledge_records`, so `knowledge-firm-defaults.test.mjs`'s closed-cohort census
+(`p654.census.not_a_posting_grant`) needed a new, bimodal, positively-verified exception —
+declared and measured the same way #658's five 0230 reads already are, present only once this
+battery's own frontier carries 0310.
+
+**Migration triad.** `tests/fye-pair-wall-preintegration-gate.mjs` (marker-probed, not
+existence-probed — both `_knowledge_capture_core` and `correct_knowledge` have existed since 0192,
+so a bare `to_regprocedure` would report this cohort applied estate-wide),
+`FYE_PAIR_WALL_0310_COHORT` in `tests/rig-meta.mjs` (its own bimodal `cohortFailures()` call, the
+0248/0249/0250 fold pattern) and `knowledgeFixtures.mjs`'s `fyePairWallCohortApplied` (the same
+three-flag marker probe), and the gate's `--import` token in `package.json`'s test script, last in
+migration order. Battery: cells `fd.06` (rewritten from #898's own pinned-gap cell to assert the
+closed outcome) through `fd.10`, inside `tests/knowledge-fye-day.test.mjs`, gated on 0310 ON TOP OF
+0240's own gate (`pairCell`/`pairGate`, layered beside the file's original `cell`/`gate`) — fd.01
+through fd.05 are unmoved and stay 0240-only.
+
+**Redo-safe by construction**: the one statement that changes the catalog is
+`create or replace function`; the grant/revoke pairs are idempotent. The prestate detects its own
+redo by the same signal 0248 uses — both recut bodies already calling the new rule — and refuses a
+PARTIAL signal (one caller updated, the other not) rather than guessing.
