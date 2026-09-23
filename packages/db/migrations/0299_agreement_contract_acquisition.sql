@@ -1806,3 +1806,419 @@ update clara.document_capabilities
  where registry_version <> 6;
 
 reset role;
+
+-- =====================================================================================
+-- §H  THE SIGNING DATE -- clara._agreement_signed_date(text) returns date.
+--
+--     The entry this lane posts is dated the day the agreement was SIGNED, because that is the
+--     day the asset and the liability come into existence -- not the day the pdf was uploaded.
+--     This body is the "establish" half: it turns the VERBATIM rendering the page printed into a
+--     date, or returns NULL, which §I turns into a named refusal and §L turns into a Needs-you
+--     row. It never guesses.
+--
+--     WHY IT PARSES AT ALL, rather than demanding ISO. This family's questionnaire asks the model
+--     to quote the signing date AS PRINTED, which is the never-infer-never-compute rule applied
+--     to a date. Something has to read that rendering and it must be this side of the boundary: a
+--     model that normalised the date would be computing.
+--
+--     THE ALL-NUMERIC TRIPLE, AND WHERE THIS BODY PARTS FROM clara._payroll_period_month. 0297
+--     refuses EVERY all-numeric triple, because a payslip month read the wrong way round is a
+--     whole period in the wrong place. That rule is too blunt for a signing date: `14/03/2026` is
+--     what a Malaysian agreement actually prints and it has exactly ONE reading, since 14 is not
+--     a month. So this body tries BOTH orderings and admits the rendering only when exactly one
+--     of them is a real date:
+--       14/03/2026   -> 2026-03-14   (only day-first is possible)
+--       03/14/2026   -> 2026-03-14   (only month-first is possible)
+--       03/04/2026   -> NULL         (3 April and 4 March are both real; ASKED, never guessed)
+--       31/02/2026   -> NULL         (neither ordering is a real date)
+--     A year-first ISO rendering is unambiguous by construction and is read directly.
+--
+--     MONTH NAMES IN BOTH LANGUAGES, for the same reason §D's classification roster carries
+--     `sewa beli` and `pajakan kewangan`: a Malaysian agreement prints `14 Mac 2026` as readily as
+--     `14 March 2026`, and refusing the one it actually printed would send a readable page to a
+--     person for no reason. Full name or three-letter prefix, in either language.
+--
+--     LOCALE-FREE BY CONSTRUCTION: the month names are this body's own arrays, never
+--     `to_date(..., 'Month YYYY')`, whose behaviour depends on the session. That is also what
+--     makes the function honestly IMMUTABLE.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._agreement_signed_date(p_raw text) returns date
+  language plpgsql immutable set search_path = pg_catalog, pg_temp as $asd$
+declare
+  v_s text; v_y int; v_a int; v_b int; v_name text; v_d int; v_m int; v_i int;
+  v_en text[] := array['january','february','march','april','may','june',
+                       'july','august','september','october','november','december'];
+  v_ms text[] := array['januari','februari','mac','april','mei','jun',
+                       'julai','ogos','september','oktober','november','disember'];
+  v_first date; v_second date; v_hits int;
+begin
+  v_s := btrim(coalesce(p_raw, ''));
+  if v_s = '' then return null; end if;
+  v_s := regexp_replace(v_s, '\s+', ' ', 'g');
+
+  -- 1 · YEAR FIRST. The only numeric shape that carries its own disambiguation.
+  if v_s ~ '^[0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2}$' then
+    v_y := (regexp_replace(v_s, '^([0-9]{4}).*$', '\1'))::int;
+    v_a := (regexp_replace(v_s, '^[0-9]{4}[-/.]0*([0-9]{1,2})[-/.][0-9]{1,2}$', '\1'))::int;
+    v_b := (regexp_replace(v_s, '^[0-9]{4}[-/.][0-9]{1,2}[-/.]0*([0-9]{1,2})$', '\1'))::int;
+    begin
+      return make_date(v_y, v_a, v_b);
+    exception when others then
+      return null;   -- '2026-02-31' is a rendering, not a date
+    end;
+  end if;
+
+  -- 2 · YEAR LAST, ALL NUMERIC. Both orderings are tried and the rendering is admitted only when
+  --     exactly one of them is a real date.
+  if v_s ~ '^[0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{4}$' then
+    v_a := (regexp_replace(v_s, '^0*([0-9]{1,2})[-/.][0-9]{1,2}[-/.][0-9]{4}$', '\1'))::int;
+    v_b := (regexp_replace(v_s, '^[0-9]{1,2}[-/.]0*([0-9]{1,2})[-/.][0-9]{4}$', '\1'))::int;
+    v_y := (regexp_replace(v_s, '^[0-9]{1,2}[-/.][0-9]{1,2}[-/.]([0-9]{4})$', '\1'))::int;
+    if v_y < 1900 or v_y > 2999 then return null; end if;
+    begin v_first := make_date(v_y, v_b, v_a); exception when others then v_first := null; end;   -- day first
+    begin v_second := make_date(v_y, v_a, v_b); exception when others then v_second := null; end; -- month first
+    v_hits := (case when v_first is null then 0 else 1 end) + (case when v_second is null then 0 else 1 end);
+    if v_hits <> 1 then
+      -- Two readings, or none. Either way the page has not told this lane a date.
+      return null;
+    end if;
+    return coalesce(v_first, v_second);
+  end if;
+
+  -- 3 · A DAY, A MONTH NAME AND A YEAR, in either of the two orders a page prints them.
+  if v_s ~* '^[0-9]{1,2}[ ,/-]+[A-Za-z]{3,9}[ ,/-]+[0-9]{4}$' then
+    v_d := (regexp_replace(v_s, '^0*([0-9]{1,2})[ ,/-]+[A-Za-z]{3,9}[ ,/-]+[0-9]{4}$', '\1'))::int;
+    v_name := lower(regexp_replace(v_s, '^[0-9]{1,2}[ ,/-]+([A-Za-z]{3,9})[ ,/-]+[0-9]{4}$', '\1'));
+    v_y := (regexp_replace(v_s, '^[0-9]{1,2}[ ,/-]+[A-Za-z]{3,9}[ ,/-]+([0-9]{4})$', '\1'))::int;
+  elsif v_s ~* '^[A-Za-z]{3,9}[ ,/-]+[0-9]{1,2}[ ,/-]+[0-9]{4}$' then
+    v_name := lower(regexp_replace(v_s, '^([A-Za-z]{3,9})[ ,/-]+[0-9]{1,2}[ ,/-]+[0-9]{4}$', '\1'));
+    v_d := (regexp_replace(v_s, '^[A-Za-z]{3,9}[ ,/-]+0*([0-9]{1,2})[ ,/-]+[0-9]{4}$', '\1'))::int;
+    v_y := (regexp_replace(v_s, '^[A-Za-z]{3,9}[ ,/-]+[0-9]{1,2}[ ,/-]+([0-9]{4})$', '\1'))::int;
+  else
+    return null;
+  end if;
+
+  v_m := null;
+  for v_i in 1 .. 12 loop
+    -- A three-letter prefix is the only abbreviation admitted, and it must be a prefix of the
+    -- month it names, in either language: 'mar'/'march'/'mac' resolve to March, 'ma' does not.
+    if v_name = v_en[v_i] or (length(v_name) = 3 and v_name = left(v_en[v_i], 3))
+       or v_name = v_ms[v_i] or (length(v_name) = 3 and v_name = left(v_ms[v_i], 3)) then
+      v_m := v_i;
+    end if;
+  end loop;
+  if v_m is null then return null; end if;
+  if v_y < 1900 or v_y > 2999 then return null; end if;
+  begin
+    return make_date(v_y, v_m, v_d);
+  exception when others then
+    return null;   -- '31 February 2026' is a rendering, not a date
+  end;
+end $asd$;
+
+revoke all on function clara._agreement_signed_date(text) from public;
+
+comment on function clara._agreement_signed_date(text) is
+  '#948: the day the agreement was signed, established from the rendering the page printed. Year-first ISO is read directly; an all-numeric YEAR-LAST triple is admitted ONLY where exactly one of the two orderings is a real date (14/03/2026 resolves, 03/04/2026 is ASKED rather than guessed, 31/02/2026 is neither); a day with a month NAME is admitted in English or Malay, full or three-letter prefix, in either order. Everything else returns NULL so the acquisition is asked rather than posted on a guess. Locale-free: the month names are this body''s own arrays, which is also what makes it honestly IMMUTABLE. Ungranted: reached only from clara._agreement_entry_plan.';
+
+reset role;
+
+-- =====================================================================================
+-- §I  THE DRAFTING BODY (AC4) -- clara._agreement_entry_plan(uuid, jsonb) returns jsonb.
+--
+--     An ESTABLISHED agreement fact state in; the entry the brief describes out. It takes the
+--     state rather than a document deliberately (0297 §C's own reason): the state is §D's output
+--     and the plan is a pure function of it plus this client's chart and enrolments, so the
+--     arithmetic can be driven and proved without a document, a filing or a task in the way.
+--
+--     IT DRAFTS FROM `established` ALONE. §D classifies every run-level question as `established`
+--     (both channels agree on a readable figure the page printed, and every cross-check it could
+--     run passed), `not_printed` (the page does not print it), or anything else (they disagree, a
+--     printed total contradicts the column sum, a rendering is not a figure). A figure that is
+--     not `established` produces no leg and, where the entry needs it, a NAMED refusal.
+--
+--     THE TWO TREATMENTS, AND WHY THEY DIFFER (AGENTS.md rule 6 -- checked against the standard).
+--       HIRE PURCHASE -- the GROSS method, which the estate's own standard chart already encodes
+--       by shipping an Interest Suspense account beside the Creditor: the whole amount payable is
+--       a liability at signing and the unexpired finance charge sits in suspense against it.
+--       FINANCE LEASE -- the NET method. MPERS Section 20.9 has the lessee recognise the asset and
+--       the lease liability at the LOWER of fair value and the present value of the minimum lease
+--       payments, with the finance charge allocated over the term as it accrues; the liability is
+--       recorded NET of the unexpired charge, and the chart agrees -- 2450 ships with no
+--       interest-suspense counterpart. Both entries balance on §D's own identity
+--       `deposit + financed = cash price`, which is exactly AC2's first check.
+--
+--     WHY THE DEPOSIT LEG CREDITS A PAYABLE AND NEVER A BANK ACCOUNT. Clara did not see the money
+--     move. The agreement STATES a deposit; it does not state which of this client's bank accounts
+--     paid it, and choosing one would be Clara choosing rather than reading. So the deposit is
+--     credited to 2010 Other Payables, named in the leg's description, and the bank line that
+--     actually paid it clears that payable through the ordinary matcher.
+--
+--     AN UNPRINTED LINE PRODUCES NO LEG, and neither does a printed zero: a line the page does not
+--     print is not a figure of zero, and a 0.00 deposit leg would assert a payment the document
+--     never mentioned.
+--
+--     WHICH ASSET ACCOUNT, AND WHY AMBIGUITY IS A REFUSAL RATHER THAN A GUESS. The page prints
+--     what was acquired as PROSE, and no reading of prose is an account code. The lane resolves
+--     the asset account from the CLIENT'S OWN ENROLMENTS (clara.fa_account_profiles, active):
+--     exactly one resolves; none or several is a NAMED refusal carrying the accounts it could not
+--     choose between, which a person clears by enrolling the account or by saying which one. That
+--     is the standing owner ruling applied verbatim, and it is also what makes
+--     clara._tf_fa_acquisition_birth's own precondition true by construction -- the entry debits
+--     an enrolled account, so the register row is born without this file calling anything
+--     fixed-asset-specific.
+--
+--     IT WRITES NO DEPRECIATION PARTICULAR OF ANY KIND. No accumulated-depreciation leg, no
+--     expense leg, no useful life, no rate. #932/#933 own the policy and the birth trigger reads
+--     it; this body could not invent one if it wanted to, because it never touches those columns.
+--
+--     EXACT BALANCE, NEVER ROUNDED. clara._validate_entry_lines tolerates a residual of up to 5
+--     cents and books it to the rounding account. This body refuses instead: an acquisition whose
+--     debits and credits differ AT ALL is an agreement whose printed figures did not hold, and
+--     smoothing it into the rounding account would hide exactly the defect the gate exists to
+--     catch. The balance is checked only when nothing above already refused, so a missing account
+--     reports itself as a missing account rather than as the imbalance it caused.
+--
+--     ACCOUNTS ARE RESOLVED BY CODE IN THIS CLIENT'S OWN CHART, and each leg carries the NAME it
+--     resolved to. A code the client does not hold (or holds inactive) is a NAMED refusal carrying
+--     the code -- never a silent substitution and never an account this lane creates.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._agreement_entry_plan(p_client uuid, p_state jsonb)
+  returns jsonb language plpgsql stable
+  set search_path = clara, pg_temp as $aep$
+declare
+  v_class text; v_financing boolean;
+  v_refusals jsonb := '[]'::jsonb; v_legs jsonb := '[]'::jsonb;
+  v_unprinted text[] := '{}'; v_missing text[] := '{}';
+  v_date_raw text; v_date_state text; v_posting date;
+  v_cash bigint; v_dep bigint; v_fin bigint; v_chg bigint; v_dep_printed boolean;
+  v_bad text[] := '{}';
+  v_asset_code text; v_asset_name text; v_enrol int; v_accounts text[];
+  v_desc text; v_memo_asset text;
+  v_dr bigint := 0; v_cr bigint := 0;
+  v_spec jsonb; r record; v_name text; v_price jsonb; v_recon jsonb;
+begin
+  if p_state is null or p_state->>'state_version' is distinct from 'v1' then
+    return jsonb_build_object('plan_version','v1','ready',false,'legs','[]'::jsonb,
+      'agreement_class',null,'financing',false,
+      'agreement_date_raw',null,'posting_date',null,
+      'asset_account_code',null,'asset_account_name',null,
+      'debit_cents',0,'credit_cents',0,'unprinted','[]'::jsonb,'missing_accounts','[]'::jsonb,
+      'refusals', jsonb_build_array(jsonb_build_object('reason','state_unreadable',
+        'detail', jsonb_build_object('state_version', p_state->>'state_version'))));
+  end if;
+
+  v_class := p_state->>'agreement_class';
+  v_financing := coalesce((p_state->>'financing')::boolean, false);
+  v_memo_asset := case when (p_state->'facts'->'contract.agreement.asset_description'->>'state') = 'established'
+                       then p_state->'facts'->'contract.agreement.asset_description'->>'printed_raw' end;
+
+  -- 1 · IS THERE AN ACQUISITION AT ALL (AC5). A tenancy, an operating lease or a supply contract
+  --     creates no asset and no liability on the day it is signed, so there is nothing for this
+  --     body to draft -- and nothing to complain about either. It returns HERE, with ONE named
+  --     refusal, rather than walking on and reporting a missing account or an unbalanced entry
+  --     about an entry that should never exist.
+  --
+  --     "We could not read what kind of page this is" and "it is a tenancy" are DIFFERENT
+  --     answers, and they get different reasons, because a person clears them differently: one by
+  --     checking the page, the other not at all.
+  if v_class is null or v_class = 'not_established' then
+    v_refusals := jsonb_build_array(jsonb_build_object('reason','agreement_kind_not_established',
+      'detail', jsonb_build_object('kind_state', p_state->'facts'->'contract.agreement.kind'->>'state',
+        'kind_raw', p_state->'facts'->'contract.agreement.kind'->>'printed_raw')));
+  elsif not v_financing then
+    v_refusals := jsonb_build_array(jsonb_build_object('reason','not_a_financing_agreement',
+      'detail', jsonb_build_object('agreement_class', v_class,
+        'class_basis', p_state->>'class_basis',
+        'kind_raw', p_state->'facts'->'contract.agreement.kind'->>'printed_raw')));
+  end if;
+  if jsonb_array_length(v_refusals) > 0 then
+    return jsonb_build_object('plan_version','v1','ready',false,'legs','[]'::jsonb,
+      'agreement_class', to_jsonb(v_class),'financing', v_financing,
+      'agreement_date_raw',null,'posting_date',null,
+      'asset_account_code',null,'asset_account_name',null,
+      'debit_cents',0,'credit_cents',0,'unprinted','[]'::jsonb,'missing_accounts','[]'::jsonb,
+      'refusals', v_refusals);
+  end if;
+
+  -- 2 · THE SIGNING DATE. Established from the rendering the page printed, never from today and
+  --     never from the upload.
+  v_date_state := p_state->'facts'->'contract.agreement.agreement_date'->>'state';
+  v_date_raw := p_state->'facts'->'contract.agreement.agreement_date'->>'printed_raw';
+  if v_date_state = 'established' then
+    v_posting := clara._agreement_signed_date(v_date_raw);
+  end if;
+  if v_posting is null then
+    v_refusals := v_refusals || jsonb_build_object('reason','agreement_date_not_established',
+      'detail', jsonb_build_object('date_state', v_date_state, 'date_raw', v_date_raw));
+  end if;
+
+  -- 3 · THE PRINTED MONEY THE ENTRY IS MADE OF.
+  v_cash := case when (p_state->'facts'->'contract.agreement.cash_price'->>'state') = 'established'
+                 then nullif(p_state->'facts'->'contract.agreement.cash_price'->>'printed_cents','')::bigint end;
+  v_fin := case when (p_state->'facts'->'contract.agreement.amount_financed'->>'state') = 'established'
+                then nullif(p_state->'facts'->'contract.agreement.amount_financed'->>'printed_cents','')::bigint end;
+  v_dep := case when (p_state->'facts'->'contract.agreement.deposit'->>'state') = 'established'
+                then nullif(p_state->'facts'->'contract.agreement.deposit'->>'printed_cents','')::bigint end;
+  v_dep_printed := (p_state->'facts'->'contract.agreement.deposit'->>'state') is distinct from 'not_printed';
+  v_chg := case when (p_state->'facts'->'contract.agreement.total_charges'->>'state') = 'established'
+                then nullif(p_state->'facts'->'contract.agreement.total_charges'->>'printed_cents','')::bigint end;
+
+  -- THE CASH PRICE AND THE AMOUNT FINANCED ARE THE ANCHOR: without either there is no entry at
+  -- all, not a partial one. A deposit the page PRINTS and this lane could not establish is the
+  -- same case -- the credit side would be short by a figure the page states.
+  if v_cash is null then v_bad := v_bad || 'contract.agreement.cash_price'::text; end if;
+  if v_fin is null then v_bad := v_bad || 'contract.agreement.amount_financed'::text; end if;
+  if v_dep is null and v_dep_printed then v_bad := v_bad || 'contract.agreement.deposit'::text; end if;
+  if coalesce(array_length(v_bad,1),0) > 0 then
+    v_refusals := v_refusals || jsonb_build_object('reason','price_terms_not_established',
+      'detail', jsonb_build_object('fields', to_jsonb(v_bad),
+        'cash_price_state', p_state->'facts'->'contract.agreement.cash_price'->>'state',
+        'amount_financed_state', p_state->'facts'->'contract.agreement.amount_financed'->>'state',
+        'deposit_state', p_state->'facts'->'contract.agreement.deposit'->>'state'));
+    return jsonb_build_object('plan_version','v1','ready',false,'legs','[]'::jsonb,
+      'agreement_class', to_jsonb(v_class),'financing', v_financing,
+      'agreement_date_raw', to_jsonb(v_date_raw),'posting_date', to_jsonb(v_posting),
+      'asset_account_code',null,'asset_account_name',null,
+      'debit_cents',0,'credit_cents',0,'unprinted','[]'::jsonb,'missing_accounts','[]'::jsonb,
+      'refusals', v_refusals);
+  end if;
+
+  -- 4 · AC2's TWO NAMED CHECKS, read off §D's own verdicts rather than re-computed here: one body
+  --     does the arithmetic and this one acts on it. `not_checkable` is not a failure -- an
+  --     agreement that prints no repayment schedule is a real agreement and posts.
+  v_price := p_state->'checks'->'price_identity';
+  if v_price->>'state' = 'fails' then
+    v_refusals := v_refusals || jsonb_build_object('reason','price_identity_failed', 'detail', v_price);
+  end if;
+  v_recon := p_state->'checks'->'schedule_reconciles';
+  if v_recon->>'state' = 'fails' then
+    v_refusals := v_refusals || jsonb_build_object('reason','schedule_does_not_reconcile', 'detail', v_recon);
+  end if;
+
+  -- 5 · THE ASSET ACCOUNT, from this client's own ACTIVE enrolments.
+  select count(*)::int, array_agg(p.asset_account_code order by p.asset_account_code)
+    into v_enrol, v_accounts
+    from clara.fa_account_profiles p
+   where p.client_id = p_client and p.active and p.retired_at is null;
+  if coalesce(v_enrol,0) <> 1 then
+    v_refusals := v_refusals || jsonb_build_object('reason','asset_account_unresolved',
+      'detail', jsonb_build_object('enrolments', coalesce(v_enrol,0),
+        'accounts', coalesce(to_jsonb(v_accounts), '[]'::jsonb)));
+  else
+    v_asset_code := v_accounts[1];
+  end if;
+
+  -- 6 · THE LEGS, in the order a reader wants them: what was acquired, then what it cost, then
+  --     what is owed. `a` is the account code, `side` the direction, `c` the cents, `f1`/`f2` the
+  --     printed terms the figure came from.
+  if v_class = 'hire_purchase' then
+    v_spec := jsonb_build_array(
+      jsonb_build_object('a', v_asset_code, 'side','debit', 'c', v_cash,
+        'f1','contract.agreement.cash_price','f2',null,
+        'd', 'Asset acquired under hire purchase' || coalesce(' -- ' || left(v_memo_asset, 120), '')),
+      jsonb_build_object('a','2440','side','debit', 'c', v_chg,
+        'f1','contract.agreement.total_charges','f2',null,
+        'd','Unexpired hire-purchase finance charge'),
+      jsonb_build_object('a','2430','side','credit','c', v_fin + coalesce(v_chg,0),
+        'f1','contract.agreement.amount_financed',
+        'f2', case when v_chg is not null then 'contract.agreement.total_charges' end,
+        'd','Hire purchase creditor'),
+      jsonb_build_object('a','2010','side','credit','c', v_dep,
+        'f1','contract.agreement.deposit','f2',null,
+        'd','Deposit stated in the agreement, payable to the financier'));
+  else
+    -- finance_lease: the NET method, so the unexpired charge is recognised nowhere at signing.
+    v_spec := jsonb_build_array(
+      jsonb_build_object('a', v_asset_code, 'side','debit', 'c', v_cash,
+        'f1','contract.agreement.cash_price','f2',null,
+        'd', 'Asset acquired under finance lease' || coalesce(' -- ' || left(v_memo_asset, 120), '')),
+      jsonb_build_object('a','2450','side','credit','c', v_fin,
+        'f1','contract.agreement.amount_financed','f2',null,
+        'd','Finance lease obligation'),
+      jsonb_build_object('a','2010','side','credit','c', v_dep,
+        'f1','contract.agreement.deposit','f2',null,
+        'd','Deposit stated in the agreement, payable to the lessor'));
+  end if;
+
+  for r in select (t.x->>'a') acc, (t.x->>'side') side,
+                  nullif(t.x->>'c','')::bigint cents,
+                  (t.x->>'f1') f1, (t.x->>'f2') f2, (t.x->>'d') d, t.ord
+             from jsonb_array_elements(v_spec) with ordinality as t(x, ord)
+            order by t.ord loop
+    -- WHAT THE PAGE WAS SILENT ABOUT, recorded by QUESTION and DISTINCT, so a reader sees which
+    -- term produced no leg. A term the page printed as 0.00 belongs here too: the plan drew no
+    -- figure from it either way.
+    if r.f1 is not null and coalesce(r.cents,0) = 0 and not (r.f1 = any(v_unprinted)) then
+      v_unprinted := v_unprinted || r.f1;
+    end if;
+
+    if coalesce(r.cents,0) = 0 then
+      continue;   -- an unprinted line, and a printed zero, produce no leg at all
+    end if;
+    if r.acc is null then
+      continue;   -- the asset account did not resolve; §5 already named that refusal
+    end if;
+
+    select a.name into v_name from clara.coa_accounts a
+     where a.client_id = p_client and a.account_code = r.acc and a.is_active;
+    if v_name is null then
+      if not (r.acc = any(v_missing)) then
+        v_missing := v_missing || r.acc;
+        v_refusals := v_refusals || jsonb_build_object('reason','account_missing',
+          'detail', jsonb_build_object('account_code', r.acc, 'for', r.d));
+      end if;
+      continue;
+    end if;
+    if r.acc = v_asset_code then v_asset_name := v_name; end if;
+
+    v_legs := v_legs || jsonb_build_object(
+      'account_code', r.acc, 'account_name', v_name, 'side', r.side,
+      'cents', r.cents,
+      'basis', concat_ws('+', r.f1, r.f2),
+      'description', r.d);
+    if r.side = 'debit' then v_dr := v_dr + r.cents; else v_cr := v_cr + r.cents; end if;
+  end loop;
+
+  -- 7 · EXACT BALANCE. Checked only when nothing above already refused.
+  if jsonb_array_length(v_refusals) = 0 and v_dr <> v_cr then
+    v_refusals := v_refusals || jsonb_build_object('reason','entry_unbalanced',
+      'detail', jsonb_build_object('debit_cents', v_dr, 'credit_cents', v_cr,
+        'difference_cents', v_dr - v_cr));
+  end if;
+
+  return jsonb_build_object(
+    'plan_version','v1',
+    'agreement_class', to_jsonb(v_class),
+    'financing', v_financing,
+    'agreement_date_raw', to_jsonb(v_date_raw),
+    'posting_date', to_jsonb(v_posting),
+    'asset_account_code', to_jsonb(v_asset_code),
+    'asset_account_name', to_jsonb(v_asset_name),
+    'asset_description', to_jsonb(v_memo_asset),
+    'financier', to_jsonb(case when (p_state->'facts'->'contract.agreement.financier'->>'state') = 'established'
+                               then p_state->'facts'->'contract.agreement.financier'->>'printed_raw' end),
+    'cash_price_cents', to_jsonb(v_cash),
+    'legs', v_legs,
+    'debit_cents', v_dr,
+    'credit_cents', v_cr,
+    'unprinted', to_jsonb(v_unprinted),
+    'missing_accounts', to_jsonb(v_missing),
+    'refusals', v_refusals,
+    'ready', jsonb_array_length(v_refusals) = 0);
+end $aep$;
+
+revoke all on function clara._agreement_entry_plan(uuid, jsonb) from public;
+
+comment on function clara._agreement_entry_plan(uuid, jsonb) is
+  '#948: THE DRAFTING BODY. An established agreement fact state (clara.evaluate_agreement_contract_state_v1''s output) plus this client''s own chart and fixed-asset enrolments in; the acquisition entry out -- the asset debited at the printed cash price to the account the client ENROLLED, the liability recognised against the financier (a hire purchase GROSS, with the unexpired charge in suspense; a finance lease NET, per MPERS 20.9), and the deposit the agreement states credited to a payable rather than to a bank account Clara never saw move. A non-financing agreement drafts NOTHING and says so by name. It writes no depreciation particular of any kind -- #932/#933 own the policy and clara._tf_fa_acquisition_birth reads it. Exact balance, never the rounding tolerance. Every failure is a named refusal in `refusals`; it writes nothing. Ungranted: reached from clara._agreement_posting_verdict.';
+
+reset role;

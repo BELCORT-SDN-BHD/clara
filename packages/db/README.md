@@ -5138,3 +5138,31 @@ form is redo-safe AND composes with another lane raising to the same literal in 
 same commit (that file's own instruction, and `af3b5955`/#779's precedent), and its lowering probe
 now raises to `PUBLISHED_REGISTRY_VERSION + 1` instead of the literal `5`, which had itself become
 a lowering.
+
+**§H the signing date** — `clara._agreement_signed_date(text)`. The entry is dated the day the
+agreement was SIGNED, because that is the day the asset and the liability exist. Where 0297's
+`_payroll_period_month` refuses EVERY all-numeric triple, this body admits one when exactly one of
+the two orderings is a real date: `14/03/2026` resolves (14 is not a month), `03/04/2026` is asked
+rather than guessed, `31/02/2026` is neither. Month names are admitted in English AND Malay, full or
+three-letter prefix, for the same reason §D's classification roster carries `sewa beli` — a
+Malaysian agreement prints `14 Mac 2026` as readily as `14 March 2026`, and refusing the rendering
+it actually printed would send a readable page to a person for no reason. Locale-free by
+construction, which is what makes it honestly IMMUTABLE.
+
+**§I the drafting body** — `clara._agreement_entry_plan(uuid, jsonb)`. An established fact state
+plus this client's chart and enrolments in; the acquisition entry out. Hire purchase is GROSS (the
+whole amount payable is a liability, the unexpired charge in suspense at 2440); a finance lease is
+NET (MPERS 20.9 — the liability is the present value of the minimum lease payments, and the chart
+ships 2450 with no suspense counterpart). Both balance on §D's own `deposit + financed = cash price`
+identity. The deposit credits **2010 Other Payables**, never a bank account: Clara did not see the
+money move, and the agreement states a deposit without saying which account paid it — the bank line
+that did clears the payable through the ordinary matcher. An unprinted line produces no leg and a
+printed zero produces none either. A NON-FINANCING agreement returns at once with ONE named refusal
+and no legs at all (AC5), and "we could not read what kind of page this is" gets a different reason
+from "it is a tenancy", because a person clears them differently. The asset account comes from the
+client's ACTIVE `fa_account_profiles` enrolments — exactly one resolves, none or several is a named
+refusal carrying the accounts it could not choose between — which is the standing owner ruling and
+also what makes `clara._tf_fa_acquisition_birth`'s own precondition true by construction. The body
+touches no depreciation column anywhere, so AC4's "never invented here" is structural. Balance is
+EXACT, never `clara._validate_entry_lines`' 5-cent rounding tolerance, and is checked only when
+nothing else already refused.

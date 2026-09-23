@@ -39,9 +39,11 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, ensureReady, endPool, buildWorld } from "./rig-fixtures.mjs";
+import { rootQuery, ensureReady, endPool, buildWorld, createClient, upsertAccount } from "./rig-fixtures.mjs";
+import { opk } from "./rig-helpers.mjs";
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, docTasks, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
+import { upsertFaProfile } from "./x41-fa-fixtures.mjs";
 
 let ready = false;
 let world = null;
@@ -1031,4 +1033,275 @@ test("S6 · the registry re-publishes at ONE new version, and nobody else's row 
   assert.equal(payroll.typed_facts, "supported");
   assert.equal(payroll.business_operation, "stored_only",
     "#946 left the payroll pair's operation axis at stored_only; #948 does not widen another ticket's row");
+});
+
+// ---------------------------------------------------------------------------
+// S7 — the drafting body (AC4's entry, AC5's non-financing branch)
+// ---------------------------------------------------------------------------
+
+/** This battery's OWN fixed-asset codes. Deliberately not x41-fa-fixtures' COST/ACCUM/EXPENSE:
+ *  those belong to that fixture's own world, and a shared rig is where borrowed codes collide. */
+const FA_COST = "200-948";
+const FA_ACCUM = "210-948";
+const FA_EXPENSE = "900-948";
+
+/** The four chart codes this lane posts to, all of them already on the estate's standard
+ *  template (0150_coa_template_pr_a.sql, families `borrowings_and_lease_liabilities` and
+ *  `trade_payables`). This file plants NO chart row; a test client gets them through the ordinary
+ *  writer, exactly as a real client's chart would carry them. */
+const AGREEMENT_ACCOUNTS = [
+  { code: "2430", name: "Hire Purchase Creditor", type: "liability" },
+  { code: "2440", name: "Hire Purchase Interest Suspense", type: "liability" },
+  { code: "2450", name: "Finance Lease Obligation", type: "liability" },
+  { code: "2010", name: "Other Payables", type: "liability" },
+];
+
+async function agreementChart(client, sub = world.users.alice) {
+  for (const a of AGREEMENT_ACCOUNTS) {
+    await upsertAccount(sub, { client, code: a.code, name: a.name, type: a.type, opKey: opk("coa-948") });
+  }
+}
+
+/** A client whose chart carries the four liability codes AND exactly one ACTIVE fixed-asset
+ *  enrolment — which is the only thing that makes an asset account resolvable, and the same
+ *  precondition clara._tf_fa_acquisition_birth needs before it will birth a register row. */
+async function enrolledClient(label) {
+  const sub = world.users.alice;
+  const client = await createClient(sub, { name: `${world.prefix}_948${label}`, opKey: opk("cli-948") });
+  await upsertAccount(sub, { client, code: "9990", name: "Rounding", type: "equity", special: "rounding", opKey: opk("coa-948") });
+  await upsertAccount(sub, { client, code: FA_COST, name: "Motor Vehicles — cost", type: "asset", opKey: opk("coa-948") });
+  await upsertAccount(sub, { client, code: FA_ACCUM, name: "Motor Vehicles — accumulated depreciation", type: "asset", opKey: opk("coa-948") });
+  await upsertAccount(sub, { client, code: FA_EXPENSE, name: "Depreciation", type: "expense", opKey: opk("coa-948") });
+  await agreementChart(client, sub);
+  await upsertFaProfile(sub, {
+    client, assetAccount: FA_COST, accumAccount: FA_ACCUM, expenseAccount: FA_EXPENSE, opKey: opk("enrol-948"),
+  });
+  return client;
+}
+
+const plan = async (client, state) =>
+  (await rootQuery("select clara._agreement_entry_plan($1,$2::jsonb) as p", [client, JSON.stringify(state)])).rows[0].p;
+
+const legOf = (p, code) => p.legs.find((l) => l.account_code === code);
+const reasons = (p) => p.refusals.map((r) => r.reason).sort();
+
+test("S7 · a hire purchase drafts the GROSS entry: the asset at cash price, the charge in suspense, the creditor at what is payable, the deposit to a payable", async (t) => {
+  if (unready(t)) return;
+
+  const client = await enrolledClient("hp");
+  const p = await plan(client, await evaluate(...bothChannels()));
+
+  assert.equal(p.ready, true, `every condition holds: ${JSON.stringify(p.refusals)}`);
+  assert.equal(p.agreement_class, "hire_purchase");
+  assert.equal(p.posting_date, "2026-03-14", "the day it was SIGNED, which is the day the asset and the liability exist");
+  assert.equal(p.asset_account_code, FA_COST, "the asset account came from the client's own enrolment");
+  assert.equal(p.asset_account_name, "Motor Vehicles — cost", "…carrying the name it resolved to in THIS client's chart");
+
+  assert.equal(p.legs.length, 4, `four legs: ${JSON.stringify(p.legs.map((l) => `${l.side} ${l.account_code} ${l.cents}`))}`);
+  // Figures checked BY HAND against the worked example at the top of this file:
+  //   Dr asset 120,000.00 + Dr suspense 8,400.00 = 128,400.00
+  //   Cr creditor (100,000.00 + 8,400.00) + Cr other payables 20,000.00 = 128,400.00
+  assert.equal(legOf(p, FA_COST).side, "debit");
+  assert.equal(Number(legOf(p, FA_COST).cents), 12000000);
+  assert.equal(legOf(p, "2440").side, "debit");
+  assert.equal(Number(legOf(p, "2440").cents), 840000, "the unexpired finance charge, in suspense — the GROSS method");
+  assert.equal(legOf(p, "2430").side, "credit");
+  assert.equal(Number(legOf(p, "2430").cents), 10840000, "the WHOLE amount payable under the agreement");
+  assert.equal(legOf(p, "2010").side, "credit");
+  assert.equal(Number(legOf(p, "2010").cents), 2000000, "the deposit the agreement states, credited to a payable");
+  assert.equal(Number(p.debit_cents), 12840000);
+  assert.equal(Number(p.credit_cents), 12840000);
+
+  // Every leg says which printed terms made it, so a reader can trace a figure back to the page.
+  assert.equal(legOf(p, "2430").basis, "contract.agreement.amount_financed+contract.agreement.total_charges");
+  assert.equal(legOf(p, FA_COST).basis, "contract.agreement.cash_price");
+
+  // Clara never invents a depreciation particular: the plan carries no accumulated-depreciation
+  // and no depreciation-expense leg at all, whatever the enrolment holds.
+  assert.equal(legOf(p, FA_ACCUM), undefined, "no accumulated-depreciation leg is drafted here");
+  assert.equal(legOf(p, FA_EXPENSE), undefined, "no depreciation-expense leg is drafted here");
+});
+
+test("S7 · a finance lease drafts the NET entry: the obligation carries no interest suspense at all", async (t) => {
+  if (unready(t)) return;
+
+  const client = await enrolledClient("fl");
+  const answers = { "contract.agreement.kind": value("Finance Lease Agreement") };
+  const p = await plan(client, await evaluate(...bothChannels({ answers })));
+
+  assert.equal(p.ready, true, `every condition holds: ${JSON.stringify(p.refusals)}`);
+  assert.equal(p.agreement_class, "finance_lease");
+  assert.equal(p.legs.length, 3, `three legs, not four: ${JSON.stringify(p.legs.map((l) => l.account_code))}`);
+  assert.equal(Number(legOf(p, FA_COST).cents), 12000000);
+  assert.equal(legOf(p, "2450").side, "credit");
+  assert.equal(
+    Number(legOf(p, "2450").cents),
+    10000000,
+    "MPERS 20.9: the lease liability is recognised NET of the unexpired finance charge",
+  );
+  assert.equal(Number(legOf(p, "2010").cents), 2000000);
+  assert.equal(legOf(p, "2440"), undefined, "a finance lease has no interest-suspense account — the chart itself ships none");
+  assert.equal(legOf(p, "2430"), undefined, "…and never touches the hire-purchase creditor");
+  assert.equal(Number(p.debit_cents), 12000000);
+  assert.equal(Number(p.credit_cents), 12000000);
+});
+
+test("S7 · an agreement that states NO deposit still balances, and draws no zero leg", async (t) => {
+  if (unready(t)) return;
+
+  const client = await enrolledClient("nodep");
+  // A page that finances the whole cash price: no deposit line at all, so financed = cash price.
+  const answers = {
+    "contract.agreement.deposit": notPrinted(),
+    "contract.agreement.amount_financed": value("120,000.00"),
+    "contract.agreement.total_charges": notPrinted(),
+    "contract.agreement.total_payable": notPrinted(),
+    "contract.agreement.instalment_amount": notPrinted(),
+  };
+  const p = await plan(client, await evaluate(...bothChannels({ answers, rows: [] })));
+
+  assert.equal(p.ready, true, `a page with no deposit and no schedule still posts: ${JSON.stringify(p.refusals)}`);
+  assert.equal(p.legs.length, 2, "an unprinted deposit produces NO leg — a line the page does not print is not a figure of zero");
+  assert.equal(Number(legOf(p, FA_COST).cents), 12000000);
+  assert.equal(Number(legOf(p, "2430").cents), 12000000, "with no printed charges the creditor is the financed amount alone");
+  assert.equal(legOf(p, "2010"), undefined);
+  assert.ok(p.unprinted.includes("contract.agreement.deposit"), "…and the silence is recorded by question");
+  assert.equal(Number(p.debit_cents), Number(p.credit_cents));
+});
+
+test("S7 · a tenancy agreement drafts NOTHING, by name — it creates no asset on the day it is signed", async (t) => {
+  if (unready(t)) return;
+
+  const client = await enrolledClient("ten");
+  const answers = { "contract.agreement.kind": value("Tenancy Agreement") };
+  const p = await plan(client, await evaluate(...bothChannels({ answers })));
+
+  assert.equal(p.ready, false);
+  assert.equal(p.agreement_class, "tenancy");
+  assert.equal(p.financing, false);
+  assert.deepEqual(p.legs, [], "not one leg is drafted for a non-financing agreement");
+  assert.deepEqual(reasons(p), ["not_a_financing_agreement"],
+    "ONE named refusal, and never an account or balance complaint about an entry that should not exist");
+  assert.equal(p.refusals[0].detail.agreement_class, "tenancy");
+
+  // A supply contract and a page whose rendering nothing recognises take the same branch.
+  for (const [kind, klass] of [["Supply Agreement", "supply"], ["Memorandum of Understanding", "other"]]) {
+    const q = await plan(client, await evaluate(...bothChannels({ answers: { "contract.agreement.kind": value(kind) } })));
+    assert.equal(q.ready, false, `${kind} drafts nothing`);
+    assert.equal(q.agreement_class, klass);
+    assert.deepEqual(q.legs, []);
+  }
+});
+
+test("S7 · the asset account is the client's own enrolment: none and several are each a NAMED refusal, never a guess", async (t) => {
+  if (unready(t)) return;
+
+  const sub = world.users.alice;
+
+  // NONE. A client with a chart but no active fixed-asset enrolment: the prose the page prints
+  // ("Isuzu NLR77 3.0 lorry…") is not an account code and this lane will not turn it into one.
+  const bare = await createClient(sub, { name: `${world.prefix}_948none`, opKey: opk("cli-948") });
+  await upsertAccount(sub, { client: bare, code: "9990", name: "Rounding", type: "equity", special: "rounding", opKey: opk("coa-948") });
+  await agreementChart(bare, sub);
+  const none = await plan(bare, await evaluate(...bothChannels()));
+  assert.equal(none.ready, false);
+  assert.deepEqual(reasons(none), ["asset_account_unresolved"]);
+  assert.equal(none.refusals[0].detail.enrolments, 0);
+  assert.equal(none.asset_account_code, null);
+  // The liability legs the chart DID resolve are still shown, so a person sees the whole shape of
+  // the entry they are one enrolment away from — but nothing is drafted against an asset account
+  // nobody enrolled, and with no debit the plan could never balance.
+  assert.equal(
+    none.legs.some((l) => l.account_code === FA_COST),
+    false,
+    "nothing is drafted against an account nobody enrolled",
+  );
+  assert.equal(Number(none.debit_cents), 840000,
+    "…so the only debit left is the finance charge, and this entry could never balance");
+
+  // SEVERAL. Two active enrolments and no way to tell which one the lorry belongs to — the
+  // standing owner ruling: Clara asks for the professional judgement rather than inventing it.
+  const many = await enrolledClient("many");
+  await upsertAccount(sub, { client: many, code: "201-948", name: "Plant and machinery — cost", type: "asset", opKey: opk("coa-948") });
+  await upsertFaProfile(sub, { client: many, assetAccount: "201-948", opKey: opk("enrol-948") });
+  const several = await plan(many, await evaluate(...bothChannels()));
+  assert.equal(several.ready, false);
+  assert.deepEqual(reasons(several), ["asset_account_unresolved"]);
+  assert.equal(several.refusals[0].detail.enrolments, 2);
+  assert.deepEqual(
+    several.refusals[0].detail.accounts.sort(),
+    ["201-948", FA_COST].sort(),
+    "…and the refusal NAMES the accounts it could not choose between, so a person can say which",
+  );
+});
+
+test("S7 · a missing chart account is a named refusal carrying the code, never a silent substitution", async (t) => {
+  if (unready(t)) return;
+
+  const sub = world.users.alice;
+  const client = await createClient(sub, { name: `${world.prefix}_948nochart`, opKey: opk("cli-948") });
+  await upsertAccount(sub, { client, code: "9990", name: "Rounding", type: "equity", special: "rounding", opKey: opk("coa-948") });
+  await upsertAccount(sub, { client, code: FA_COST, name: "Motor Vehicles — cost", type: "asset", opKey: opk("coa-948") });
+  await upsertFaProfile(sub, { client, assetAccount: FA_COST, opKey: opk("enrol-948") });
+  // 2430/2440/2010 are deliberately NOT in this chart.
+
+  const p = await plan(client, await evaluate(...bothChannels()));
+  assert.equal(p.ready, false);
+  assert.deepEqual(reasons(p), ["account_missing", "account_missing", "account_missing"]);
+  assert.deepEqual(p.missing_accounts.sort(), ["2010", "2430", "2440"]);
+  assert.equal(
+    p.refusals.every((r) => r.detail.account_code),
+    true,
+    "each refusal names the code a person must add",
+  );
+  assert.equal(legOf(p, FA_COST) !== undefined, true, "the legs that DID resolve are still shown, so a person sees the whole shape");
+});
+
+test("S7 · printed figures that do not hold stop the draft: the price identity, an unestablished term, an unreadable signing date", async (t) => {
+  if (unready(t)) return;
+
+  const client = await enrolledClient("bad");
+
+  // (a) deposit + financed ≠ cash price — AC2's first named check, refused at the draft.
+  const wrongPrice = await plan(client, await evaluate(...bothChannels({
+    answers: { "contract.agreement.deposit": value("15,000.00") },
+  })));
+  assert.equal(wrongPrice.ready, false);
+  assert.ok(reasons(wrongPrice).includes("price_identity_failed"));
+
+  // (b) a cash price the two channels read differently is not established, so there is no figure
+  //     to debit the asset with.
+  const contested = await plan(client, await evaluate(
+    envelope(),
+    envelope({ channel: "vision", answers: { "contract.agreement.cash_price": value("125,000.00") } }),
+  ));
+  assert.equal(contested.ready, false);
+  assert.ok(reasons(contested).includes("price_terms_not_established"));
+  assert.deepEqual(contested.legs, [], "no leg is drafted from a figure the two readings do not support");
+
+  // (c) an all-numeric signing date whose two readings cannot be told apart is ASKED, not guessed:
+  //     03/04/2026 is 3 April and 4 March, and posting it the wrong way round is a whole month.
+  const ambiguous = await plan(client, await evaluate(...bothChannels({
+    answers: { "contract.agreement.agreement_date": value("03/04/2026") },
+  })));
+  assert.equal(ambiguous.ready, false);
+  assert.deepEqual(reasons(ambiguous), ["agreement_date_not_established"]);
+  assert.equal(ambiguous.posting_date, null);
+
+  // …while 14/03/2026 has exactly one reading and is admitted, because 14 is not a month.
+  const unambiguous = await plan(client, await evaluate(...bothChannels({
+    answers: { "contract.agreement.agreement_date": value("14/03/2026") },
+  })));
+  assert.equal(unambiguous.posting_date, "2026-03-14");
+  assert.equal(unambiguous.ready, true);
+
+  // …and so are the renderings a Malaysian agreement actually prints.
+  for (const [raw, iso] of [["14 March 2026", "2026-03-14"], ["March 14, 2026", "2026-03-14"],
+    ["2026-03-14", "2026-03-14"], ["14 Mac 2026", "2026-03-14"], ["14 Disember 2026", "2026-12-14"],
+    ["Q1 2026", null], ["2026", null], ["31 February 2026", null]]) {
+    const q = await plan(client, await evaluate(...bothChannels({
+      answers: { "contract.agreement.agreement_date": value(raw) },
+    })));
+    assert.equal(q.posting_date, iso, `${raw} establishes ${iso === null ? "nothing" : iso}`);
+  }
 });
