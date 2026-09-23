@@ -379,9 +379,11 @@ Use session pooling for the durable engine and dedicated LISTEN/advisory-lock co
 | Bank wake | `CLARA_BANK_DATABASE_URL` | Lazy; fails on use without configuration |
 | Stripe webhook | `CLARA_STRIPE_WEBHOOK_DATABASE_URL` | Lazy |
 | Pre-session auth wall | `CLARA_AUTH_WALL_DATABASE_URL` | Lazy |
+| Signed-out invite preview (#871) | `CLARA_INVITE_PREVIEW_DATABASE_URL` | Lazy |
 
 The corresponding login roles, SET ROLE targets and probe roster are defined in
-`lib/pools.mjs`, `lib/freeform-read.mjs`, `lib/checkout-pools.mjs` and `lib/lane-probe.mjs`.
+`lib/pools.mjs`, `lib/freeform-read.mjs`, `lib/checkout-pools.mjs`,
+`lib/invite-preview-pool.mjs` and `lib/lane-probe.mjs`.
 Provision LOGIN/passwords before enabling the relevant lane. Pool maxima are configurable; measure
 actual connection headroom before increasing them, including engine, consumer and probe sessions.
 

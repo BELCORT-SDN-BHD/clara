@@ -12,6 +12,10 @@ import { interviewRoutes } from "./interviewRoutes.js";
 import { openingRoutes } from "./openingRoutes.js";
 import { stripeWebhookRoutes } from "./stripeRoutes.js";
 import { authWallRoutes } from "./authWallRoutes.js";
+// #871: the signed-out invite preview, the third pre-session router. Beside the auth wall for the
+// same reason the auth wall sits beside the webhook — it owns its own body parsing and may not
+// depend on middleware mounted below that line.
+import { invitePreviewRoutes } from "./invitePreviewRoutes.js";
 import { buildInfoRoutes } from "./buildInfoRoutes.js";
 
 // Clara agent-runtime HTTP surface (Slice 4). The durable chat loop, SSE, and the
@@ -64,6 +68,7 @@ app.use(intakeRoutes());
 // middleware mounted below this line.
 app.use(stripeWebhookRoutes());
 app.use(authWallRoutes());
+app.use(invitePreviewRoutes());
 
 app.use(express.json({ limit: "1mb" }));
 

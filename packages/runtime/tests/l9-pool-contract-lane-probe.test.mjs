@@ -23,6 +23,8 @@ import {
 } from "../lib/pool-error-contract.mjs";
 import { FREEFORM_LANE } from "../lib/freeform-read.mjs";
 import { AUTH_WALL_LANE, STRIPE_WEBHOOK_LANE } from "../lib/checkout-pools.mjs";
+// #871: the eighth lane, whose pool lives in its own module (see that module's header).
+import { INVITE_PREVIEW_LANE } from "../lib/invite-preview-pool.mjs";
 import {
   LANE_ROSTER,
   READINESS_CRITICAL_LANE,
@@ -129,9 +131,9 @@ test("H-48: LANE_ROSTER covers EVERY lane DSN variable the runtime source names"
   const rostered = new Set(LANE_ROSTER.map((d) => d.dsnVar));
   const missing = [...named].filter((n) => !rostered.has(n)).sort();
   assert.deepEqual(missing, [], `every lane DSN variable must be probed; unprobed: ${missing.join(", ")}`);
-  assert.equal(LANE_ROSTER.length, 7, "seven logins — four pools.mjs lanes, freeform, and the two checkout lanes");
-  assert.equal(new Set(LANE_ROSTER.map((d) => d.lane)).size, 7, "lane names are unique");
-  assert.equal(new Set(LANE_ROSTER.map((d) => d.role)).size, 7, "each lane SET ROLEs to its own distinct group role");
+  assert.equal(LANE_ROSTER.length, 8, "eight logins — four pools.mjs lanes, freeform, the two checkout lanes, and #871's invite-preview lane");
+  assert.equal(new Set(LANE_ROSTER.map((d) => d.lane)).size, 8, "lane names are unique");
+  assert.equal(new Set(LANE_ROSTER.map((d) => d.role)).size, 8, "each lane SET ROLEs to its own distinct group role");
 });
 
 test("H-48: the roster's four pools.mjs lanes are the descriptors pools.mjs itself derives", () => {
@@ -522,7 +524,7 @@ test("#617 drift guard: every DEDICATED-LOGIN LANE pool is COUNTED, under its ow
   // the labels together must be EXACTLY the roster's lane names — no more, no fewer, no
   // re-spelling. (`lib/db.ts`'s engine pool and relay.mjs's own pool are deliberately outside
   // this set: the first is the durable engine's, the second has its own `checks.relay_pool`.)
-  const laneModules = ["lib/pools.mjs", "lib/freeform-read.mjs", "lib/checkout-pools.mjs"];
+  const laneModules = ["lib/pools.mjs", "lib/freeform-read.mjs", "lib/checkout-pools.mjs", "lib/invite-preview-pool.mjs"];
   const labels = [];
   const uncounted = [];
   for (const rel of laneModules) {
@@ -545,12 +547,13 @@ test("#617 drift guard: every DEDICATED-LOGIN LANE pool is COUNTED, under its ow
     if (expr === "FREEFORM_LANE") return FREEFORM_LANE;
     if (expr === "STRIPE_WEBHOOK_LANE") return STRIPE_WEBHOOK_LANE;
     if (expr === "AUTH_WALL_LANE") return AUTH_WALL_LANE;
+    if (expr === "INVITE_PREVIEW_LANE") return INVITE_PREVIEW_LANE;
     throw new Error(`unrecognised pool-error label expression '${expr}' — a new lane must join this census deliberately`);
   });
   assert.deepEqual(
     [...resolved].sort(),
     LANE_ROSTER.map((d) => d.lane).sort(),
-    "the counted lanes and the probed lanes must be the SAME seven, by name",
+    "the counted lanes and the probed lanes must be the SAME eight, by name",
   );
 });
 
