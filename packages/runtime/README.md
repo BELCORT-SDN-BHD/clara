@@ -1477,10 +1477,55 @@ BELT REGRESSION, and firm P's children reading `failed` is not by itself the dis
 census appears when the belt stops counting refusals at all. Read the counters instead.
 `blocked >= 1` (and `cancel_blocked=canceller_not_active` at the moment of the red) means the belt
 DID refuse firm P's children, so a terminal parent means the World terminalised them first: the
-separate, unfixed defect. `refusals=0 blocked=0` means the belt is not counting firm P's refusals at
+#1028 race, below. `refusals=0 blocked=0` means the belt is not counting firm P's refusals at
 all: a regression, and exactly what this leg's vacuity control produces (measured: a `fanOutCancel`
 that records a CLR04 refusal as a success reds the P loop at its deadline after 11 sweeps in 5560 ms
 with `refusals=0 blocked=0`, throwaway clara_814).
+
+**#1028 — THE THIRD RACE: THE ENGINE CAN FINISH FIRM P'S CHILDREN BEFORE THIS LEG EVER LOOKS.**
+Firm P's two children are ordinary admitted Work; the World dispatches them the moment
+`seedChildren` returns, well before `applyPoison` even runs, and the recovery belt settles a
+running Work whose engine run it does not know (the same behaviour `postEntry`'s own comment
+documents) within seconds. Once both are terminal the parent has no live child left and the belt
+correctly settles it — `clara.sweep_intake_batch_cancellations` / `reconcileIntakeBatchCancellations`
+did nothing wrong. The leg used to read that as `assert.equal(pFinal.state, "cancelling", …)`
+unconditionally, so this read a genuine defect indistinguishable from a real one: a red that says
+"declared done" whether the belt actually swallowed a refusal or the World simply won a race with
+this leg's own final check. #1027 made the failure legible (both counters, both firms, the
+`cancel_blocked` verdict) but deliberately did not fix it — out of that ticket's own scope.
+
+**The fix does not depend on the engine being slower than the leg.** The disjointness check now
+branches on whether a live child remains, never on timing: `cancelling` is read once as before (a
+negative that converges is a negative that was never true, so it stays unpolled); any other state
+is accepted ONLY IF every one of firm P's children has independently reached a terminal Work status
+— in which case the leg logs it as the correct outcome it is and moves on — and still throws,
+exactly as before, if a live child remains while the parent reads terminal (the belt settling the
+estate prematurely, the one genuine regression this leg exists to catch). The refusal-counting and
+attribution assertions above (`pWatch.refusals >= 1`, `blocked >= 1`, `cancel_blocked=
+canceller_not_active`) are untouched and still run before this check, so a belt that stops counting
+refusals still reds there regardless of how firm P's children finish.
+
+**`CLARA_P636_LEG4_FAULT=engine_wins`** is the new, third fault value (`late_poison` and
+`slow_settle` are #1027's own two): it WAITS — a fixture action, never a belt one — for firm P's two
+children to reach a terminal Work status, then sweeps the belt once more so the parent's own
+settlement is visible before the disjointness check reads it. It manufactures deterministically what
+a slow host produces by accident, so the fix is proved against the exact scenario rather than hoped
+for. Measured on throwaway clones of a migrated database (WSL, Node 22, `/opt/node/bin/node`):
+against the PRE-#1028 disjointness check (throwaway clara_704), `engine_wins` reds after firm P's
+two children reached terminal in 6205 ms — `AssertionError: …and firm P's is honestly still
+stopping… actual: 'cancelled', expected: 'cancelling'` — the exact defect this ticket exists to
+close. Against the fixed check the same fault (throwaway clara_703) PASSES: children terminal after
+5051 ms, `LEG4 firm P's parent reached 'cancelled' because the World finished its own children
+first (the #1028 race, not a belt defect) — refusals were still COUNTED (2) and ATTRIBUTED
+(blocked=1, door read canceller_not_active during polling) before the engine got there.` The belt's
+own vacuity control (`fanOutCancel` rewritten so a CLR04 refusal records as a success, no
+`engine_wins`, throwaway clara_705) still reds at the P-loop's own refusal deadline —
+`refusals=0 blocked=0` after 9 sweeps in 5604 ms — because that assertion runs and fails BEFORE the
+disjointness check is ever reached: the fix adds no new way for a genuine regression to slip
+through. Five consecutive clean runs against fresh clones (clara_706…clara_710, no fault) all pass,
+each logging "firm P is honestly still stopping — a live child remains" (the ordinary, unpolled
+path is unchanged). `packages/runtime/lib/intake-batches.mjs`'s `fanOutCancel` was restored
+byte-for-byte after the vacuity control (`git status`/`git diff` clean, verified).
 
 ## #1026 — the live gates' heap budget
 
