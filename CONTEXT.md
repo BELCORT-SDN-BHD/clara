@@ -617,8 +617,8 @@ A value Clara read out of a document and persisted with its exact source: the do
 _Avoid_: Client Knowledge; a duplicated copy of an extraction value living in Knowledge; a value shown without its source version and region; a fact that failed or skipped its arithmetic check presented as validated.
 
 **Field path**:
-The canonical name of one value inside an extraction — dot-separated segments under a registered namespace, such as `invoice.total`, `myinvois.supplier_tin` or `pages.1.lines.0`. It is validated at the one write boundary that owns it, so a region can always be traced back to what it claims to be.
-_Avoid_: A free-text label; a display name; a path invented by a surface rather than written by a producer.
+The canonical name of one value inside an extraction — dot-separated segments under a registered namespace, such as `invoice.total`, `myinvois.supplier_tin` or `pages.1.lines.0`. It is validated by the one grammar function (`clara._assert_field_path`) both at the persist boundary that owns writing it and, since #857, by a table CHECK on `clara.document_regions` itself, so a region can always be traced back to what it claims to be even when a writer bypasses the persist door.
+_Avoid_: A free-text label; a display name; a path invented by a surface rather than written by a producer; assuming the grammar is enforced only where a producer writes through the persist door.
 
 **Arithmetic validation**:
 A named check run over persisted typed facts — the invoice totals identity, a statement's balance chain, its printed totals — recorded with its outcome and its terms. `unmeasured` means the terms the check needs were never persisted, and is deliberately not a pass.
@@ -931,10 +931,18 @@ a partial allocation of a line (a line belongs to at most one live group, always
 **Statement line**:
 One row of a bank statement as the bank stated it: its date, its description, its signed amount
 and its position in the running balance. It is evidence supplied from outside, never a figure
-the product computed, and it carries no page or region citation — the statement carries the
-provenance (its document, its digest and its filename), the line does not.
+the product computed. The statement itself always carries provenance (its document, its digest
+and its filename); the LINE additionally carries an optional _source citation_ (#990) — the
+printed page, an opaque reader-specific region locator, and which stored extraction it was read
+from — populated only on the machine (OCR/witness) intake lane, since the CSV import and the
+hand-keyed month have no page concept at all and never carry one. A citation is never a `Field
+path`/`Typed fact`: a statement line is not a `clara.document_regions` row, so its citation lives
+as three plain columns on the line itself rather than a link to one.
 _Avoid_: A journal line; a transaction the product created; an amount a human may edit to make
-something tie.
+something tie; treating an absent citation on the CSV/hand-keyed lanes as a defect rather than a
+structural fact about that lane; assuming a citation exists on every machine-lane line today —
+the persist door accepts one when a payload states it, but no live producer states one yet
+(0291's own residual, closed as a successor contract in #990's report).
 
 **Remaining capacity**:
 How much of one approved journal entry's movement on a given bank account is still unallocated,

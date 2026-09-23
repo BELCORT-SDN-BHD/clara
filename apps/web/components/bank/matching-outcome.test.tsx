@@ -31,12 +31,18 @@ const RECEIPT: MatchReceipt = {
   period_exceptions: 0,
 };
 
-function mount(receipt: MatchReceipt, filename: string | null = "maybank-2026-04.pdf", counterpartyName: string | null = "Sinaran Logistik Sdn Bhd") {
+function mount(
+  receipt: MatchReceipt,
+  filename: string | null = "maybank-2026-04.pdf",
+  counterpartyName: string | null = "Sinaran Logistik Sdn Bhd",
+  ingestMode: string | null = null,
+  citationPage: number | null = null,
+) {
   return renderComponent(
     createElement(NextIntlClientProvider, {
       locale: "en",
       messages,
-      children: createElement(MatchingOutcome, { receipt, filename, counterpartyName }),
+      children: createElement(MatchingOutcome, { receipt, filename, counterpartyName, ingestMode, citationPage }),
     }),
   );
 }
@@ -117,5 +123,25 @@ test("p657.web.outcome-op-key · the block names the operation key the decision 
       "a receipt with no key renders an honest em dash, never a raw JS value");
   } finally {
     await bare.unmount();
+  }
+});
+
+// #990 (owner ruling 2026-09-20): the outcome block renders the SAME source-citation sentence
+// the detail pane does (lib/bank/citation.ts's citationLabel is the one place that decides which
+// sentence), so the two surfaces can never render a different verdict for the same line.
+test("p990.web.outcome-citation · a witness-lane match with a citation_page states the page; a structured-lane match states its lane keeps none", async () => {
+  const withPage = await mount(RECEIPT, "maybank-2026-04.pdf", "Sinaran Logistik Sdn Bhd", "witness", 5);
+  try {
+    assert.match(withPage.text(), /Page 5 of the source document/, "the witness-lane citation page renders");
+  } finally {
+    await withPage.unmount();
+  }
+
+  const laneNone = await mount(RECEIPT, "maybank-2026-04.pdf", "Sinaran Logistik Sdn Bhd", "structured", null);
+  try {
+    assert.match(laneNone.text(), /This line's intake lane keeps no page or region citation\./,
+      "a structured-lane match states its own absence in words, never a blank control");
+  } finally {
+    await laneNone.unmount();
   }
 });

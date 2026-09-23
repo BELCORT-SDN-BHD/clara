@@ -3838,3 +3838,123 @@ absent, and there is no backfill and no data-dependent branch anywhere in the pr
 A `CLARA_MIGRATION_REDO` of this file was exercised during authoring; note that `create table if not
 exists` SKIPS an existing relation, so a redo that also changed the table's own definition would
 need the table dropped first — the redo used here changed only the function body.
+## 0290 — a table CHECK proves the field_path grammar at every writer, including a raw insert (#857)
+
+`0290_document_regions_field_path_check.sql` closes AC2 of #857, the half wave-1 (PR #1025,
+`ddb5a125`) explicitly left open. AC1 shipped there: `scripts/check-document-region-field-paths.mjs`
+is a repository LINT, scanning `packages/{db,runtime}/tests` for a `field_path` literal outside
+0191's grammar and refusing at commit time. A lint cannot see a value assembled at runtime, and it
+runs only when someone runs it; `clara._assert_field_path` (0191) is the runtime grammar, but it
+was reachable from exactly ONE writer, `clara.persist_document_extraction`'s region loop, so any
+RAW `insert into clara.document_regions` — which is most of the 71 the ticket's own triage
+counted — never ran it at all.
+
+0290 mints `clara._field_path_conforms(text) returns boolean`, an IMMUTABLE boolean sibling that
+does nothing but `perform clara._assert_field_path(p_path); return true;`, and adds
+`ck_document_regions_field_path_grammar check (clara._field_path_conforms(field_path))` to the
+table. Because a CHECK's boolean expression may call any function, and a function that RAISES
+instead of returning propagates its exception unchanged, an insert that fails this CHECK is
+refused with `_assert_field_path`'s own typed `(CLR10, detail.reason)` — never Postgres's generic
+`23514 check_violation` an inline regex CHECK would have produced. The sibling is deliberately
+UNGRANTED to every application role: `clara.document_regions` carries exactly one role with
+INSERT, `clara_fn_owner` (every application writer reaches the table through a `SECURITY DEFINER`
+function it owns), and an object's owner may always execute a function it owns regardless of ACL,
+so the CHECK fires on every real writer with no GRANT at all — the same disposition #984's 0239
+(`_admit_opening_work`) and #960's 0270 (`_firm_document_limit_ceiling`) carry, so no
+`packages/db/tests/rig-meta.mjs` cohort is owed (see the "#857 [0290]" comment there).
+
+**The two plural literals are untouched, by construction.** `opening_tb.line` and `prior_gl.line`
+(0201's own two partial-unique-index exclusions) are ordinary registered-namespace paths as far as
+the grammar is concerned. A CHECK is evaluated once PER ROW and carries no uniqueness concept, so
+a forty-row trial balance at ONE `(extraction_id, field_path)` is forty rows each independently
+passing the same per-row test a single invoice fact passes — proved live, with a REAL forty-row
+insert, in `packages/db/tests/document-regions-field-path-check.test.mjs`.
+
+**An empty table is a lawful apply state, and the row count is measured, not refused.** Every
+fresh database starts with zero regions: CI's `db-estate-suite` deploys main's chain and then HEAD's
+onto a throwaway `clara_ci` BEFORE anything seeds, `frontier-leg` migrates a fresh service
+database, and the integrator's from-scratch chain runs on a disposable cluster. An earlier draft of
+0290 RAISED on a zero-row `clara.document_regions`, which made it unappliable on all three
+(SPEC-L08-01, riders wave 3 lane 08); the prestate now reports the count in a NOTICE — the same
+shape 0291 beside it uses — and the tail takes an EMPTY branch that proves the same three claims
+through the CHECK's own expression (`clara._field_path_conforms`) rather than through a raw insert
+it has no FK-satisfiable row to make. Which branch ran is stated in the tail notice. The wall's
+POPULATED-row proof does not live at apply time at all: it lives in
+`packages/db/tests/document-regions-field-path-check.test.mjs`, which seeds its own regions and
+drives eight raw inserts through the CHECK. On the lane database the rig happened to be populated
+first — a preparatory script called `clara.persist_document_extraction` three times (THROUGH the
+real writer door, never a raw fixture insert), leaving 14 rows across 10 distinct `field_path`
+values, including five `opening_tb.line` rows from one real trial balance — so the tail took its
+POPULATED branch there. What the prestate DOES still refuse is a stored value the new CHECK would
+reject, named row by row. `packages/db/deploy/0290-field-path-check-census.sql` is the read-only
+preflight a release session runs on hosted first — the SAME predicate the prestate itself
+re-checks, so "census says clean" and "the migration will apply" can never disagree.
+
+**Redo-safe by construction (#957).** S1 is `create or replace function`; S2 is an unconditional
+`drop constraint if exists` before `add constraint` — never a guard-by-name, which would skip
+re-adding a body an edit changed. The prestate accepts two starting states, wholly absent (first
+apply) or wholly present (redo), and refuses only a half state.
+
+## 0291 — a bank-statement line can name its source citation, on the machine intake lane only (#990)
+
+Owner's ruling, 2026-09-20: build the per-line page/region citation now, overruling #990's own
+"accept the gap" recommendation (the #782 precedent this ticket's triage drew on). #990's Agent
+Brief describes "the OCR lane" as running two Azure readers under two engine ids — 0038's ORIGINAL
+design; the LIVE lane (`statementFacts_v3` → `persist_statement_facts_v2` →
+`clara._persist_statement_core_v2`) has since moved to the witness pair (two engine KINDS sharing
+one engine_id, 0098 §3.7/§3.9). "The OCR lane" in this section means `ingest_mode IN ('ocr',
+'witness')` — the core's own `v_two` flag — which is what the function actually gates its two-reader
+ladder on; the CSV/structured and hand-keyed lanes go through the untouched ancestor
+`clara._persist_statement_core` and never reach this column at all.
+
+`clara.bank_statement_lines` gains three nullable columns, all-or-nothing by CHECK:
+`citation_extraction_id` (FK into `clara.document_extractions`), `citation_page` (a 1-based printed
+page number) and `citation_region` (an opaque jsonb locator this table does not interpret, matching
+`clara.document_regions.locator`'s own posture). `citation_extraction_id` is NEVER caller-supplied —
+`clara._persist_statement_core_v2` stamps it with `v_ext1`, the `document_extractions` row the SAME
+transaction just banked reader1's own read into, so "which stored extraction it came from" is a fact
+the core proves about itself. The citation itself is read RAW off `p_payload #>
+'{readers,reader1,lines}'` — never through `clara._stmt_lines_norm` (untouched; it is a strict
+five-key allowlist that would otherwise silently drop `page`/`region`) — and joined back onto the
+chain-proven line set by `line_no`, a join that is provably 1:1 because `_stmt_lines_norm`'s own
+contiguous-1..N proof guarantees one raw element per persisted line. A citation supplied on a lane
+with no second reader (structured/human) is refused as a runtime wiring error, mirroring the
+function's existing sibling guard for a stray reader2 read; a malformed per-line shape (a page with
+no region, or vice versa) is refused whole-statement.
+
+**Why not a `clara.document_regions` row.** 0191 §S5 reserved a `statement` field_path namespace for
+exactly this future producer, which reads as an invitation — 0291 declines it. A `document_regions`
+row's `field_path` identifies which FIELD a value answers; a bank statement line is a table row this
+estate already persists in full (`clara.bank_statement_lines`), so minting a region row per cited
+line would duplicate storage and would additionally have to clear #857/0290's brand-new
+`ck_document_regions_field_path_grammar` CHECK for a namespace no producer yet uses. Three plain
+columns say the same fact without borrowing a wall built for a different shape of evidence; the
+`statement` namespace stays reserved and untouched.
+
+**Why no `packages/runtime` file changes.** Every module on the live statement-witness path —
+`statementFacts.v2.{dispatch,behavior,impl,prompts}` and `statementFacts.v3.{behavior,header,impl,
+prompts}` — is a FROZEN workflow body or a module in its frozen closure. Actually asking the witness
+model for a per-line citation index and mapping it back to a region (the mechanism
+`clara.witness_citation_regions` / `readStatementWitnessCitationRegions` already exists for — its own
+header states in so many words "no citation is asked back") needs an edit to that frozen prompt/
+behavior pair; #990's ticket report carries that edit as a successor contract. What ships here is the
+plumbing a future, unfrozen runtime change can populate without a second migration.
+
+`clara.get_bank_line_matching_context` (the Matching tab's own detail-pane door) is recut to add
+`citation_page` to the `line` object it already builds from `l.*` — a one-line addition since `l` is
+already `bank_statement_lines%rowtype`. `citation_region` is deliberately NOT surfaced to this read:
+a raw polygon locator is not something the Matching tab renders (out of scope, per the ticket: "OCR
+region-detection accuracy itself").
+
+**Populated rows, not an empty table.** `clara.bank_statement_lines` started EMPTY on a freshly
+migrated+seeded rig, so the live proof of the new guard/join/CHECK runs in
+`packages/db/tests/bank-statement-line-citation.test.mjs` (cells 990.a-e), driven through the real
+writer door (`clara.persist_statement_facts_v2`) immediately after the migration applies, never a
+raw fixture insert.
+
+**Redo-safe by construction (#957), the bimodal-pin trap named and avoided.** S1 (`add column if
+not exists` / unconditional drop-then-add for its constraints) is safe to re-run unconditionally.
+S2/S3's textual splice is NOT re-run on a redo — the first-apply anchor text no longer exists in an
+already-recut body — so the prestate instead proves, on the redo branch, that the live bodies already
+carry this file's own citation markers, and S2/S3 skip with a `NOTICE` rather than re-searching for
+an anchor that would never be found.

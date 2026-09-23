@@ -34,6 +34,17 @@ test("toBankLineMatchingContext · line, statement, coverage and basis all survi
   assert.equal(ctx.candidate_basis[0]?.counterparty_match, "id");
   assert.equal(ctx.exception, null);
   assert.equal(ctx.booking_block, null);
+  assert.equal(ctx.line.citation_page, null, "a wire line with no citation_page key stays null, never undefined");
+});
+
+test("toBankLineMatchingContext · a machine-lane line's citation_page survives the wire", () => {
+  const ctx = toBankLineMatchingContext({
+    line: { line_id: "l1", citation_page: 3 },
+    statement: { ingest_mode: "witness" },
+    coverage: {},
+  });
+  assert.ok(ctx);
+  assert.equal(ctx.line.citation_page, 3);
 });
 
 test("toBankLineMatchingContext · a missing tie is null rather than a zeroed object, and an unknown counterparty rung falls back to 'none'", () => {

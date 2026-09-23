@@ -14,26 +14,38 @@
 // which is a DIFFERENT act — this block says so in the same place, with the same prominence,
 // rather than repeating a reassurance that has stopped being true.
 //
-// WHAT IT DOES NOT CLAIM. Region/page citations: 0038's own lane contract states verbatim that
-// per-line region citations are not carried, and `bank_statement_lines` has no page or region
-// column — so this block names the STATEMENT and the FILENAME and stops. That residual is #657's
-// and is named in its report, not papered over with an invented page number.
+// #990 (owner ruling 2026-09-20): the outcome block ALSO names the line's own source citation —
+// the printed page, on the machine (OCR/witness) intake lane, when one is present — and an
+// explicit sentence (never a blank) on every other state. `lib/bank/citation.ts`'s
+// `citationLabel` is the ONE place that decides which sentence, shared with the detail pane
+// (`matching-section.tsx`'s `srcCitation` row) so the two surfaces can never render a different
+// verdict for the same line. Superseded: this block used to stop at the statement and filename
+// because `bank_statement_lines` carried no page/region column at all (0038's own residual);
+// migration 0291 closed that gap.
 
 import { useTranslations } from "next-intl";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { formatMyr } from "@/lib/bank/money";
+import { citationLabel } from "@/lib/bank/citation";
 import type { MatchReceipt } from "@/lib/bank/matching-context-types";
 
 export function MatchingOutcome({
   receipt,
   filename,
   counterpartyName,
+  ingestMode = null,
+  citationPage = null,
 }: {
   receipt: MatchReceipt;
   /** The statement's own filename, from the context read. Absent is rendered as absent. */
   filename?: string | null;
   /** The matched candidate's counterparty, when the candidate carried one. */
   counterpartyName?: string | null;
+  /** #990 — the matched line's own statement `ingest_mode`, from the same context read, so this
+   *  block can state the SAME citation verdict the detail pane already showed for this line. */
+  ingestMode?: string | null;
+  /** #990 — the matched line's own `citation_page`, from the same context read. */
+  citationPage?: number | null;
 }) {
   const t = useTranslations("ClientBank.matching");
   const created = Number(receipt.new_journal_entries ?? 0);
@@ -75,6 +87,9 @@ export function MatchingOutcome({
 
           <dt className="text-muted-foreground">{t("outcomeSource")}</dt>
           <dd className="break-all">{filename ?? "—"}</dd>
+
+          <dt className="text-muted-foreground">{t("outcomeCitation")}</dt>
+          <dd data-testid="matching-outcome-citation">{citationLabel(t, ingestMode, citationPage)}</dd>
 
           {/* The operation key this decision was submitted under (review A6). It is what a
               human quotes to name "the operation I already ran" — to a colleague, to support,

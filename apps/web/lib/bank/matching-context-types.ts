@@ -96,6 +96,11 @@ export type BankLineMatchingContext = {
     class_hint: string | null;
     group_status: string | null;
     match_id: string | null;
+    /** #990 — the printed page this line was read from, on the machine (OCR/witness) intake
+     *  lane only; null on every other lane and on a machine-lane line with no citation yet.
+     *  The raw region locator is NOT surfaced here: a polygon is not something this face
+     *  renders (out of scope for #990's surfaces). */
+    citation_page: number | null;
   };
   statement: {
     id: string | null;
@@ -185,6 +190,7 @@ export function toBankLineMatchingContext(raw: unknown): BankLineMatchingContext
       class_hint: s(line.class_hint),
       group_status: s(line.group_status),
       match_id: s(line.match_id),
+      citation_page: numOrNull(line.citation_page),
     },
     statement: {
       id: s(stmt.id),
