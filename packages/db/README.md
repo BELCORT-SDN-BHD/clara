@@ -4773,3 +4773,23 @@ commit) is what binds both.
 the freeze block is guarded by a presence test rather than an upsert. A redo after an edit to the
 v2 body therefore leaves a stale member hash and `verify_evaluator_freeze()` fails that apply —
 loudly, which is correct: once registered, a changed formula is a `_v3`, never an edit.
+
+**The door picks the lane, and only the lane is new.** `clara.create_prepayment_schedule` now reads
+the recognition entry once and branches on the one fact that decides it — whether it binds a
+document. The document lane is 0223's body unchanged: `clara.prepayment_schedule_v1`, its returned
+refusals re-raised, the `clara.document_service_periods` row re-read so the schedule names the exact
+term it rode. The memo-only lane asks v1's three fitness arms IN THE DOOR (posted; exactly one
+debited asset leg; a fiscal year that admits the term) with 0140's own tokens, sentences and payload
+keys, then calls `clara.prepayment_schedule_v2` with the leg it picked, the `'credit'` side a
+prepaid asset is released by, and the live stated term. v2 cannot ask those arms — it reads no table
+by design, which is what keeps its closure at one member — so the door asks them, which is the
+ticket's own line: the door, not the evaluator, picks the source leg and the term source. The
+prepaid-leg eligibility wall is asked AFTER the branch, so it guards both lanes.
+
+The refusal a memo-only prepayment used to get named `journal_entries.document_id`, which told a
+firm its prepayment could never be amortised at all. It now carries
+`missing: "prepayment_stated_terms"` and `remedy: "clara.record_prepayment_stated_term"` — 0140's
+"the refusal NAMES what to record and where", finally true for this lane too. `schedule_version`
+reads `v1` on a document-backed schedule and `v2` on a human-stated one, and
+`evaluator_version_id` resolves by the entrypoint signature the branch chose rather than by a
+literal.

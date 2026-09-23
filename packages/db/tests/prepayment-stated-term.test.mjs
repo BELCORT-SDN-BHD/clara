@@ -18,12 +18,13 @@ import {
   assertStatedTermLanePresent, endPool, rootQuery, CLR, assertPair, assertRaises,
   statedTermScene, recordStatedTerm, statedTermRow, statedTermsFor, roleCanExecute,
   functionsMatching, nowhereId, prepaymentScene, scheduleV1, scheduleV2, monthEndAfter, maxTermScene,
-  STATED_TERM_REASON, STATED_TERM_DOOR_SIG, EVALUATOR_V2_SIG,
+  STATED_TERM_REASON, STATED_TERM_DOOR_SIG, EVALUATOR_V2_SIG, PREPAY_REASON,
+  createPrepaymentSchedule, scheduleTermSource, scheduleCountFor, unapprovedEntry, ambiguousAssetEntry,
 } from "./prepayment-stated-term-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 4;
 
 before(async () => {
   ready = await (async () => {
@@ -302,4 +303,92 @@ cell("p939.evaluator.frozen — clara.prepayment_schedule_v2 is registered as it
         `${role} must not be able to execute ${sig}`);
     }
   }
+});
+
+// ===========================================================================================
+// AC3 — THE DOOR ADMITS A MEMO-ONLY SOURCE ONCE A TERM STANDS, AND NAMES THE STATING DOOR UNTIL
+//       ONE DOES.
+// ===========================================================================================
+
+cell("p939.create.memo_only — with no stated term the door refuses prepayment_term_underivable and the payload NAMES the stating door as the remedy; once a term is stated the SAME door configures the schedule off clara.prepayment_schedule_v2 with the same cent-exact straight line, and the row records that its term came from a person rather than a document — while a document-backed recognition is untouched and still rides v1", async () => {
+  const scene = await statedTermScene("create", {
+    cents: 100001, termMonthsBack: 4, termMonths: 3, memoCents: 100001 });
+
+  // ---- BEFORE A TERM STANDS. The refusal is the old one by token — no new vocabulary — but its
+  // payload now says what to do, and 0140's own line for the document lane ("the refusal NAMES
+  // what to record and where") is what this restates for the lane that had no such answer at all.
+  const refused = await assertPair(CLR.badRequest, PREPAY_REASON.termUnderivable,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.memoEntry,
+      expenseAccount: scene.target, authorityRef: scene.authorityRef }),
+    "configuring a memo-only prepayment before anybody has stated its term");
+  assert.equal(refused.detail.missing, "prepayment_stated_terms",
+    "the payload names the carrier the term is missing from");
+  assert.equal(refused.detail.remedy, "clara.record_prepayment_stated_term",
+    "…and the DOOR that fills it — the whole point of this ticket's third criterion");
+  assert.equal(await scheduleCountFor(scene.memoEntry), 0,
+    "a create-time refusal writes no schedule row");
+
+  // ---- THE TERM IS STATED, and the same door now goes through.
+  const stated = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd });
+  const created = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+
+  // The allocation is v2's, and v2's is v1's: 100,001 cents over three whole months is
+  // 33,333 / 33,333 / 33,335 with the remainder wholly in the final period.
+  assert.equal(created.period_count, 3);
+  assert.equal(created.total_cents, 100001);
+  assert.deepEqual(created.period_lines.map((l) => Number(l.amount_cents)), [33333, 33333, 33335],
+    "the same cent-exact straight line a document-backed term produces");
+  assert.equal(created.remainder_placement, "final_period");
+  assert.equal(created.schedule_version, "v2", "the memo-only lane rides the second evaluator");
+  assert.equal(created.term_source, "human_stated",
+    "the envelope says the term came from a person, not a document");
+  assert.equal(created.stated_term_id, stated.stated_term_id,
+    "…and names the exact statement it rode");
+  assert.equal(created.document_id, null);
+  assert.equal(created.service_period_id, null);
+  assert.equal(created.term_start, scene.termStart);
+  assert.equal(created.term_end, scene.termEnd);
+
+  // The STORED row says the same thing — read off the relation, not off the door whose projection
+  // is what a later cell is about.
+  const row = await scheduleTermSource(created.schedule_id);
+  assert.equal(row.term_source, "human_stated");
+  assert.equal(row.stated_term_id, stated.stated_term_id);
+  assert.equal(row.service_period_id, null);
+  assert.equal(row.document_id, null);
+  assert.equal(row.schedule_version, "v2");
+
+  // ---- THE DOCUMENT LANE IS UNTOUCHED. Same client, same door, the scene's own document-bound
+  // recognition: still v1, still naming its document_service_periods row.
+  const backed = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+  assert.equal(backed.schedule_version, "v1", "a document-backed term still rides the frozen v1");
+  assert.equal(backed.term_source, "document_service_period");
+  const backedRow = await scheduleTermSource(backed.schedule_id);
+  assert.equal(backedRow.term_source, "document_service_period");
+  assert.equal(backedRow.stated_term_id, null);
+  assert.ok(backedRow.service_period_id, "…and still names the document term row it rode");
+  assert.ok(backedRow.document_id);
+
+  // ---- A MEMO-ONLY SOURCE THAT IS NOT FIT IS STILL UNFIT, and by 0140's own token: the term is
+  // the LAST thing this lane asks about, so an unapproved entry and an ambiguous prepaid leg
+  // answer exactly as they did before this ticket.
+  const draftEntry = await unapprovedEntry(scene);
+  await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: draftEntry,
+      expenseAccount: scene.target, authorityRef: scene.authorityRef }),
+    "a memo-only recognition that never posted");
+  const twoLegs = await ambiguousAssetEntry(scene);
+  await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: twoLegs,
+      expenseAccount: scene.target, authorityRef: scene.authorityRef }),
+    "a memo-only recognition debiting two asset accounts");
 });

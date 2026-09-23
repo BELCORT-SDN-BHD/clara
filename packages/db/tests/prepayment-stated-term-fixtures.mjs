@@ -230,6 +230,16 @@ export async function scheduleTermSource(id) {
   return r.rows[0] ?? null;
 }
 
+/** How many schedules stand over one recognition entry — the instrument for "a create-time
+ *  refusal writes no schedule row", which is a claim about the RELATION and not about the door's
+ *  answer. */
+export async function scheduleCountFor(sourceEntry) {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.prepayment_schedules where source_entry_id = $1",
+    [sourceEntry]);
+  return r.rows[0].n;
+}
+
 /** Whether one application role can EXECUTE one signature. The instrument for "the machine role
  *  cannot reach it" — a POSITIVE read of the catalog, never the absence of a grant statement. */
 export async function roleCanExecute(role, signature) {

@@ -559,9 +559,17 @@ test("p653.census.grants — clara.prepayment_schedules is RLS-FORCED with a NUL
   assert.deepEqual(await functionGrants("clara.prepayment_schedule_v1(uuid,uuid)"), [],
     "clara.prepayment_schedule_v1 holds NO grant — the door reaches it as a definer");
   const freeze = await evaluatorFreezeMatches();
-  assert.equal(freeze.length, 1, "the registered closure is still single-member");
-  assert.equal(freeze[0].live, freeze[0].registered,
-    "the live evaluator body still hashes to its registered clara.evaluator_versions member");
+  // #939 registered `prepayment_schedule` v2 BESIDE v1 (0305: v1's formula with the amount and the
+  // term as arguments, for the memo-only lane). The reader returns every member of every version
+  // of this evaluator NAME, so the count is now one member per registered version rather than one
+  // outright — and the property this cell exists for is unchanged and asserted per row: each
+  // registration is single-member, and each live body still hashes to what was registered.
+  const v1Member = freeze.filter((r) => r.member_signature === "clara.prepayment_schedule_v1(uuid,uuid)");
+  assert.equal(v1Member.length, 1, "0140's registration is still single-member");
+  for (const m of freeze) {
+    assert.equal(m.live, m.registered,
+      `${m.member_signature}'s live body still hashes to its registered clara.evaluator_versions member`);
+  }
 });
 
 test("p653.census.floor — a VIEWER cannot create a schedule, and a schedule id belonging to another firm answers exactly as an id naming nothing does", async (t) => {
