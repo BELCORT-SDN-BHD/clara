@@ -23,11 +23,12 @@ import {
   rootQuery, humanQuery, roleQuery, namedCall, opk, ROLES,
   noteLane, markSkip, a21EnsureReady, idOf, mytMonthStart,
 } from "./a21-helpers.mjs";
-import { signAuthorityCompat, signTakesAuthorityRef, mintChatTaskRef, backdateAuthorityFloor }
-  from "./fa-authority-sign-compat.mjs";
+import { signAuthorityCompat, signTakesAuthorityRef, mintChatTaskRef, backdateAuthorityFloor,
+  reviseTakesChangeClass } from "./fa-authority-sign-compat.mjs";
 
 export * from "./a21-helpers.mjs";
-export { signAuthorityCompat, signTakesAuthorityRef, mintChatTaskRef, backdateAuthorityFloor };
+export { signAuthorityCompat, signTakesAuthorityRef, mintChatTaskRef, backdateAuthorityFloor,
+  reviseTakesChangeClass };
 
 // ---------------------------------------------------------------------------
 // Suite-scoped COA codes. Grammar '^[0-9]{4,8}$|^[0-9]{3}-[0-9A-Z]{2,4}$' (0009 O9).
@@ -271,13 +272,22 @@ export const completeParticulars = (sub, { client, asset, particulars, opKey = n
  *  ARITHMETIC. The requirement itself is proven against the real door by `p651.class.required`,
  *  and `policy` / `error` by `p651.class.policy_refused` / `p651.class.error_refused`. A cell may
  *  pass `changeClass: null` to drive the refusal. */
-export const reviseParticulars = (sub, {
+export const reviseParticulars = async (sub, {
   client, asset, particulars, effectiveFrom, opKey = null,
   changeClass = "estimate", changeReason = "x41 rig: prospective estimate revision",
 }) => {
   const p = { ...particulars };
-  if (changeClass !== null) p.change_class = changeClass;
-  if (changeReason !== null) p.change_reason = changeReason;
+  // [#1041] BOTH FRONTIERS, the same way `signAuthority` above already handles the arity move.
+  // `db-slice-frontiers` replays this corpus against a chain that stops at 0042, where the door
+  // refuses `CLR37 particulars carries an unknown key "change_class"` — 26 of d-b0's cells and the
+  // D-b3 drill died on exactly that in dispatch run 35893727271. Below 0227 the classification
+  // simply is not part of the grammar yet, so the rig sends the particulars alone and those cells
+  // go on measuring the supersede arithmetic. The switch reads APPLIED HISTORY, not this door
+  // (`fa-authority-sign-compat.mjs`'s `reviseTakesChangeClass`).
+  if (await reviseTakesChangeClass()) {
+    if (changeClass !== null) p.change_class = changeClass;
+    if (changeReason !== null) p.change_reason = changeReason;
+  }
   return humanCall(sub, "revise_fixed_asset_particulars", [
     { name: "p_client" }, { name: "p_asset" }, { name: "p_particulars", cast: "jsonb" },
     { name: "p_effective_from", cast: "date" }, { name: "p_op_key" },

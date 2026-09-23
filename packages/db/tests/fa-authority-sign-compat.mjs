@@ -71,6 +71,47 @@ export async function signTakesAuthorityRef() {
   return _four;
 }
 
+/** 0227's own STABLE STEM (`0227_depreciation_history.sql`), never its number: a number is
+ *  claimed at MERGE, a stem is not. Exported so the cross-check cell in
+ *  `fa-rig-frontier-compat.test.mjs` asks the chain the same question this module does. */
+export const DEPRECIATION_HISTORY_STEM = "depreciation_history$";
+
+/** `true` once 0227's classification grammar is the one the revise door speaks — i.e. once
+ *  `clara.revise_fixed_asset_particulars` ACCEPTS `change_class` / `change_reason` inside
+ *  `p_particulars` and REFUSES a revision without them (#651 AC1/D10, CLR37
+ *  `fa_change_class_required`).
+ *
+ *  WHY THE CHAIN AND NOT THE CATALOG. `signTakesAuthorityRef()` above can feature-detect off
+ *  `to_regprocedure` because 0227 moved that door's ARITY. This one moved a JSONB KEY: the
+ *  five-argument signature is identical on both sides of 0227, so there is nothing in
+ *  `pg_proc`'s signature to see, and probing the door's BODY for the key would be asking the
+ *  subject under test what it should be. The applied chain is the independent instrument, and
+ *  the stem is exactly what #651's own preintegration gate keys on. Cached per process; the
+ *  applied chain cannot move under a running test process.
+ *
+ *  WHAT IT IS FOR (#1041). `db-slice-frontiers` replays the CURRENT x41 corpus against a chain
+ *  that stops at 0042, and `x41-fa-fixtures.mjs`'s `reviseParticulars` sent the two keys
+ *  unconditionally — so 26 of d-b0's cells, and the D-b3 upgrade drill, died with
+ *  `CLR37 particulars carries an unknown key "change_class"` on dispatch run 35893727271. Below
+ *  0227 the fixture now sends the particulars alone, exactly as every pre-0227 x41 cell did, and
+ *  those cells go on measuring the SUPERSEDE ARITHMETIC they were written for. The requirement
+ *  itself is still proven against the real door by `p651.class.required` at a frontier that HAS
+ *  it. `fa-rig-frontier-compat.test.mjs` cross-checks this switch against the live door. */
+let _classKeys = null;
+export async function reviseTakesChangeClass() {
+  if (_classKeys === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [DEPRECIATION_HISTORY_STEM]);
+      _classKeys = r.rows[0].n > 0;
+    } catch {
+      _classKeys = false;
+    }
+  }
+  return _classKeys;
+}
+
 /** THE FIRM MEMBER a fixture stamps as an author — the first live active membership of this
  *  client's own firm. Null only for a firm with no active member at all, which every world
  *  builder in this package rules out. */
