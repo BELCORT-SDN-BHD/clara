@@ -883,6 +883,21 @@
         "truncated": "Showing {shown} of {total} entries.",
         "accountsTruncated": "Showing {shown} of {total} accounts, largest first."
       },
+      "cashDrilldown": {
+        "heading": "What book cash is made of",
+        "tableLabel": "Cash accounts behind this balance, with their entries",
+        "colAccount": "Account",
+        "colBalance": "Balance",
+        "colMovement": "Movement this period",
+        "colReason": "Why this is cash",
+        "colEntries": "Entries",
+        "truncated": "Showing {shown} of {total} entries.",
+        "accountsTruncated": "Showing {shown} of {total} cash accounts, in account code order.",
+        "reasonBankRegistry": "Registered bank account",
+        "reasonDeclaredCash": "Declared cash on hand",
+        "reasonDeclaredPettyCash": "Declared petty cash",
+        "reasonGeneric": "Marked as a cash account"
+      },
       "cashSet": {
         "missingTitle": "Nobody has said which accounts count as cash",
         "missingBody": "Book cash cannot be worked out until somebody chooses the cash and bank accounts for this client. This is not a figure of zero.",
@@ -901,7 +916,20 @@
         "publishing": "Publishing…",
         "cancel": "Cancel",
         "refused": "That could not be published",
-        "proposalFailed": "The account list could not be read"
+        "proposalFailed": "The account list could not be read",
+        "editTitle": "Change which accounts count as cash",
+        "editBody": "The current membership is pre-checked, each with its own recorded reason. Choose what changes and state when the new version takes effect — this supersedes the current version, it never edits it.",
+        "editCurrentBasis": "Currently {n} accounts, effective {date} (version {revision}).",
+        "membersLabel": "Members",
+        "membersFailed": "The current membership could not be read",
+        "diffHeading": "What changes",
+        "diffAdded": "Added",
+        "diffRemoved": "Removed",
+        "diffUnchanged": "{n} unchanged",
+        "diffNothing": "Nothing added or removed yet.",
+        "effectiveDateLabel": "New effective date",
+        "save": "Save changes",
+        "saving": "Saving…"
       },
       "denied": {
         "title": "You cannot see this client’s figures",

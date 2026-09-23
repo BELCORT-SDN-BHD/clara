@@ -17,8 +17,11 @@
 // an address that page already reads on the server (`journals/page.tsx:27-45`), so Back returns
 // the reader where they were. This build adds NO trial-balance or general-ledger surface; the
 // account-filtered ledger is #670's.
+//
+// THE ACCOUNT CELL, THE ENTRIES CELL AND `entryHref` LIVE IN `composition-cells.tsx`, shared with
+// the cash arm's own table. The COLUMNS stay here, spelled out, because the two tables genuinely
+// differ in them — only the cells that are the same cell twice moved.
 
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
@@ -33,20 +36,14 @@ import { SectionHeader } from "@/components/common/section-header";
 import { CENTS_UNAVAILABLE, fmtCents } from "@/lib/registers/money";
 import { usePrefersReducedMotion } from "@/lib/dashboard/financial-display";
 import type { CompositionRow, SeriesMonth } from "@/lib/dashboard/financial-pack";
-import { clientBase } from "@/lib/navigation/tree";
 import { monthLabel } from "./client-period-selector";
 import { formatDay } from "./client-financial-figure";
+import { CompositionAccountCell, CompositionEntriesCell } from "./composition-cells";
 
 const CHART_CONFIG = {
   income: { label: "Income", color: "var(--chart-1)" },
   expense: { label: "Expense", color: "var(--chart-2)" },
 } satisfies ChartConfig;
-
-/** The ONE address a composition entry opens. Built here once so the chart's table and any later
- *  caller cannot spell the same drilldown two ways. */
-export function entryHref(clientId: string, entryId: string): string {
-  return `${clientBase(clientId)}/journals?tab=posted&entry=${encodeURIComponent(entryId)}`;
-}
 
 export function ClientIncomeExpenseChart({
   clientId,
@@ -178,41 +175,17 @@ export function ClientIncomeExpenseChart({
             <TableBody>
               {composition.map((row) => (
                 <TableRow key={row.accountId}>
-                  <TableCell>
-                    <span className="font-medium">{row.accountCode}</span>{" "}
-                    <span className="text-muted-foreground">{row.name}</span>
-                  </TableCell>
+                  <CompositionAccountCell row={row} />
                   <TableCell className="text-right tabular-nums">
                     {row.movementCents === null
                       ? CENTS_UNAVAILABLE
                       : fmtCents(row.movementCents, tc("centsUnsafe"))}
                   </TableCell>
-                  <TableCell>
-                    <ul className="flex flex-col gap-1">
-                      {row.entries.map((e) => (
-                        <li key={e.entryId}>
-                          <Link
-                            href={entryHref(clientId, e.entryId)}
-                            className="text-primary underline-offset-4 hover:underline"
-                          >
-                            {formatDay(e.postingDate)}
-                            {" · "}
-                            {e.amountCents === null
-                              ? CENTS_UNAVAILABLE
-                              : fmtCents(e.amountCents, tc("centsUnsafe"))}
-                            {e.memo ? ` · ${e.memo}` : ""}
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                    {row.entriesTruncated ? (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t("drilldown.truncated", {
-                          shown: row.entries.length, total: row.entriesTotal ?? 0,
-                        })}
-                      </p>
-                    ) : null}
-                  </TableCell>
+                  <CompositionEntriesCell
+                    clientId={clientId}
+                    row={row}
+                    truncatedKey="drilldown.truncated"
+                  />
                 </TableRow>
               ))}
             </TableBody>

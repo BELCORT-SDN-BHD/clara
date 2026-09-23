@@ -1068,6 +1068,57 @@ most every 30 seconds while the tab is open, and here is the last successful rea
 "delayed" rule is IMPORTED from `lib/work/use-work-detail.ts` (C77.12: one contract, one owner,
 extended by reference rather than copied), and a source-reading cell refuses a second literal.
 
+**#1001 — the CASH arm renders `cash.composition` too, headlined by the CLOSING balance.** Both
+`cash.composition` and `profit.composition` shipped on every read from 0232 onward, but only
+`profit.composition` had a consumer (`client-income-expense-chart.tsx`) until #1001: the owner's
+ruling of 2026-09-20 built the cash side now, mirroring the profit side's readable-table-with-
+per-row-journal-links pattern rather than leaving the client home permanently asymmetric.
+`client-cash-trend.tsx` is that consumer — the cash arm's own chart-and-drilldown home, exactly as
+`client-income-expense-chart.tsx` is the profit arm's — with ONE deliberate difference: **the
+row's headline is `closingCents`, never `movementCents`.** Book cash is a BALANCE cumulative from
+inception (0232's `q.closing`, summed with no lower bound); the profit table's movement headline
+is right THERE because profit is itself a movement over the period, but a cash table built the
+same way would not sum to the figure above it. `movementCents` is still shown, beside the balance,
+never in place of it. Each row's `memberReason` (`bank_registry` / `declared_cash` /
+`declared_petty_cash`) is rendered through a new CLOSED lookup,
+`lib/dashboard/financial-display.ts`'s `memberReasonKey` — the same discipline
+`coverageReasonKey` already holds for coverage reasons, so a raw machine token never reaches the
+screen. NO NEW CASE FOR "no published cash account set" WAS WRITTEN: 0232 returns
+`composition: []` on the same `v_set_id is null` branch that leaves `points: []`, so
+`client-cash-trend.tsx`'s existing `if (points.length === 0) return null` already withdraws the
+composition table with it, and `client-cash-summary.tsx`'s own unpublished-set banner stays the
+only face for that state. The read (`clara.get_client_financial_pack`, migration 0232) is
+UNCHANGED — this is rendering only.
+
+**And the account-level cap disclosure names the cut the DOOR makes.** 0232 builds the cash
+composition `order by a.account_code … limit 50`, so the 50 rows a firm sees are the
+alphabetically first by chart code — NOT the largest. `ClientFinancial.cashDrilldown.
+accountsTruncated` therefore reads "Showing {shown} of {total} cash accounts, in account code
+order."; a sentence saying "largest first" would tell a firm with 63 cash accounts that the 13 it
+cannot see are the small ones, when they may hold the largest balances behind the headline — the
+same class of silent wrongness the cap disclosure exists to prevent, dressed as a disclosure.
+`client-financial-charts.test.tsx`'s own cell READS the ordering out of migration 0232 rather than
+restating it, so a later reorder of the door cannot leave this sentence behind. **The PROFIT twin
+(`ClientFinancial.drilldown.accountsTruncated`) still says "largest first" and 0232 orders that
+composition by `a.account_code` too** — the same defect, pre-existing since #660 and deliberately
+left to its own ticket rather than widened into #1001.
+
+**#1002 — the second-pass membership editor, and the two facts its face rests on.** The cash-set
+dialog has two faces: FIRST PUBLISH (#660, unchanged) and the SECOND-PASS EDITOR that restates a
+published version's membership. WHICH ONE OPENS is the publish door's own question — "does this
+client have a PUBLISHED cash account set?" — and `pack.cashSet` is not that question's answer:
+0232 resolves it through the PERIOD WINDOW, so a human reading an earlier month than the current
+version's `effective_from` gets `null` for a client that plainly has one. The first-publish face
+on such a client is a dead end, because it states no date at all and the publish door — whose own
+lock is `where v.client_id = p_client and v.state = 'published'`, with NO window — answers a null
+`p_effective_from` with `effective_from_required`. So `pack.cashSet` is the INSTANT answer and
+`get_client_cash_account_set_members` (migration 0276, the identical `state = 'published'`
+predicate) is the AUTHORITATIVE one; the face only ever moves from first-publish to editor, never
+back, so nothing flickers. And CLOSING the editor DISCARDS its draft: a reopen pre-checks the
+current version again rather than showing boxes a human abandoned, with the added/removed/
+unchanged diff computed from them. A REFUSAL is not a close — the dialog stays open and every
+dirty choice survives it, because the human's answer was not what was wrong.
+
 ### Recharts, and the table that is never a fallback
 
 `recharts@3.8.0` and `components/ui/chart.tsx` arrived through `pnpm --filter @clara/web ui:add
@@ -1461,3 +1512,30 @@ D12(a)'s list is read off `detail.candidates` and typed as a first-class field b
 `components/accounting/trade-invoice-form.tsx` RENDERS it inline as a choice; the rest of the
 door's sentence (the name it could not resolve, the counterparty kind it expected) is readable
 beside it now, where the route-specific fold used to throw it away.
+
+## #958 — cash is book cash; the tie-out's GL balance is never called cash
+
+Owner's ruling (2026-09-20): only governed book cash, over the published cash account set, is ever
+labelled cash on a human-facing surface. `list_bank_statements`' `tie.gl_balance_cents` and
+`get_bank_reconciliation`'s `gl_prime_cents` (the same DB key, mapped in `lib/bank/recon-types.ts`)
+are both the bank tie-out's own ledger-derived figure for ONE bank account — a THIRD figure,
+alongside the bank statement's closing balance (migration 0232) and book cash, on the same
+ledger-derived-but-different footing. It is a term of the tie-out, never a claim about how much
+cash the client holds, and CONTEXT.md now carries it as its own entry, "Tie-out GL balance".
+
+**Nothing changed on the tree.** Checked first: the one surface that renders it,
+`components/bank/reconciliation-section.tsx`'s `<dl>` row, already labels it "GL balance"
+(`ClientBank.reconciliation.glBalance`); the client home's cash tile already says "Book cash"
+(`ClientFinancial.cash.heading`). This ticket is the vocabulary ruling and its repeatable check,
+not a recut of the tie-out, matching, reconciliation or the client financial pack.
+
+**The backstop.** `apps/web/tests/gl-balance-cash-label-census.test.ts` walks every `.ts`/`.tsx`
+file under `app/` and `components/` for a `.gl_balance_cents`/`.gl_prime_cents` read rendered
+inside JSX, resolves the nearest preceding label element (a JSX text literal, a string literal, or
+a `t("KEY")`/`tc("KEY")` call traced to its `useTranslations` namespace and looked up in the real
+`messages/en.json`), and fails on a "cash" label OR on a label it cannot statically resolve
+(fail-closed). It is an AST check over source AND message copy together — a violation can come from
+a hardcoded JSX label or from reusing an existing cash-labelled i18n key next to this figure. Known
+limitation, documented in the file's own header: it only sees the balance rendered INLINE in JSX: a
+future surface that reads the field into a local variable first and renders that variable elsewhere
+would not be traced across that boundary.

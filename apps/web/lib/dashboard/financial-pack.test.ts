@@ -21,9 +21,12 @@ import { fileURLToPath } from "node:url";
 
 import {
   UNKNOWN_FIGURE,
+  EMPTY_CURRENT_CASH_SET,
+  getClientCashAccountSetMembers,
   getClientFinancialPack,
   hydrateCashProposal,
   hydrateClientFinancialPack,
+  hydrateCurrentCashSet,
   hydrateFigure,
 } from "./financial-pack";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -250,6 +253,39 @@ test("the proposal read keeps INACTIVE candidates and carries the never-proposed
   assert.deepEqual(p.neverProposed, ["declared_cash", "declared_petty_cash"]);
 });
 
+// #1002 — the second-pass editor's own read: the CURRENT PUBLISHED version's membership, each
+// member carrying its RECORDED reason.
+test("#1002 no published version hydrates to the frozen empty envelope, never a fabricated one", () => {
+  assert.deepEqual(hydrateCurrentCashSet(null), EMPTY_CURRENT_CASH_SET);
+  assert.deepEqual(
+    hydrateCurrentCashSet({ published_version_id: null, revision: null, effective_from: null, member_count: null, members: [] }),
+    EMPTY_CURRENT_CASH_SET,
+  );
+});
+
+test("#1002 a published version's membership carries EVERY recorded reason, an inactive member, and drops a memberless-of-identity row", () => {
+  const s = hydrateCurrentCashSet({
+    published_version_id: "vvvvvvvv-vvvv-4vvv-8vvv-vvvvvvvvvvvv",
+    revision: 2,
+    effective_from: "2026-03-01",
+    member_count: 2,
+    members: [
+      { account_id: ACCOUNT, account_code: "1090", name: "Petty Cash Tin", is_active: true, member_reason: "declared_petty_cash", ordinal: 0 },
+      { account_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", account_code: "1100", name: "Trade Debtors", is_active: false, member_reason: "declared_cash", ordinal: 1 },
+      { account_code: "9999", member_reason: "bank_registry" }, // no account_id — dropped
+    ],
+  });
+  assert.equal(s.publishedVersionId, "vvvvvvvv-vvvv-4vvv-8vvv-vvvvvvvvvvvv");
+  assert.equal(s.revision, 2);
+  assert.equal(s.effectiveFrom, "2026-03-01");
+  assert.equal(s.memberCount, 2);
+  assert.equal(s.members.length, 2, "the row with no account_id is dropped, not rendered as a dead entry");
+  assert.equal(s.members[0]?.memberReason, "declared_petty_cash",
+    "a member with NO bank-registry candidacy travels its own recorded reason");
+  assert.equal(s.members[1]?.isActive, false, "an inactive member is not filtered out");
+  assert.equal(s.members[1]?.memberReason, "declared_cash", "never rewritten to bank_registry");
+});
+
 /** The house door-wire harness (`lib/documents/reads.test.ts:22-31`): a stubbed `fetch` and the
  *  one env var `pgrestRpc` refuses to build a URL without. */
 function withMockedFetch(impl: typeof fetch, run: () => Promise<void>): Promise<void> {
@@ -288,6 +324,26 @@ test("the door is called with all three arguments, month-to-date sending EXPLICI
     async () => { await getClientFinancialPack(CLIENT, { month: "2026-03-01" }, { session }); },
   );
   assert.deepEqual(seenBody, { p_client: CLIENT, p_as_of: null, p_month: "2026-03-01" });
+});
+
+test("#1002 the membership door is called with ONLY p_client, and its response hydrates", async () => {
+  let seenUrl = "";
+  let seenBody: Record<string, unknown> | null = null;
+  await withMockedFetch(
+    async (url, init) => {
+      seenUrl = String(url);
+      seenBody = JSON.parse(String((init as { body?: string } | undefined)?.body));
+      return new Response(JSON.stringify({
+        published_version_id: null, revision: null, effective_from: null, member_count: null, members: [],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+    async () => {
+      const s = await getClientCashAccountSetMembers(CLIENT, { session });
+      assert.deepEqual(s, EMPTY_CURRENT_CASH_SET);
+    },
+  );
+  assert.match(seenUrl, /\/rpc\/get_client_cash_account_set_members/);
+  assert.deepEqual(seenBody, { p_client: CLIENT });
 });
 
 test("this module performs NO cents arithmetic — the comparison lives in the door, once", () => {

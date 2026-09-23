@@ -1862,6 +1862,17 @@ three, asserted door by door and role by role in 0232's own tail and again behav
   any account name or code: neither has a structural marker in this schema and `0121:4749` is house
   law — structure and declared facts only. A human declares them.
 
+- `clara.get_client_cash_account_set_members(p_client)` — (0276, #1002) STABLE SECURITY INVOKER,
+  **viewer** floor, the same inline floor `propose_client_cash_accounts` uses (copied rather than
+  shared). Enumerates the client's CURRENT PUBLISHED version's membership, each member carrying its
+  RECORDED `member_reason` — the complement `propose_client_cash_accounts` cannot give, since that
+  read flags `already_member` for bank-registry candidates only and never lists a member with no
+  bank-registry candidacy at all (a declared cash or petty cash account). NO `is_active` filter,
+  matching the rest of this family. A client with no published version answers
+  `published_version_id: null, members: []`, never a fabricated version. This is the second-pass
+  membership editor's own read (`apps/web/components/firm/client-home/client-cash-set-dialog.tsx`);
+  `publish_client_cash_account_set` is unrecut and reused unchanged as the editor's write.
+
 - `clara.get_client_financial_pack(p_client, p_as_of, p_month)` — STABLE SECURITY INVOKER,
   **viewer** floor, `plan_cache_mode` pinned. Book cash with six points, period profit with income
   and expense, a six-calendar-month series, per-account composition with capped entry lists, and a

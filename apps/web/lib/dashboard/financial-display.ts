@@ -47,6 +47,31 @@ export function coverageReasonKey(reason: string | null): string | null {
 }
 
 /**
+ * #1001 — a cash composition row's `member_reason`, as a CLOSED lookup onto message keys.
+ *
+ * `bank_registry` / `declared_cash` / `declared_petty_cash` (migration 0232's own check
+ * constraint, `packages/db/migrations/0232_client_financial_pack.sql:365`) are machine tokens, not
+ * sentences a reader should see verbatim. Unlike `coverageReasonKey`, this ALWAYS returns a key —
+ * never `null` — because every row this lookup is called on is already a member of the cash set:
+ * the row exists BECAUSE it is cash, so it always owes a reason, and a blank cell where a sentence
+ * belongs would read as a missing feature rather than as "nothing to say here" (`coverageReason`'s
+ * null case, by contrast, is a real absence: an `ok` figure with full coverage has no reason at
+ * all). An unrecognised or missing token falls back to the generic sentence rather than being
+ * printed raw — a newer door emitting a fourth reason is a reason this build has not been taught
+ * to explain, and printing it raw would look like a defect rather than read like one.
+ */
+export const MEMBER_REASON_KEYS: Record<string, string> = {
+  bank_registry: "cashDrilldown.reasonBankRegistry",
+  declared_cash: "cashDrilldown.reasonDeclaredCash",
+  declared_petty_cash: "cashDrilldown.reasonDeclaredPettyCash",
+};
+
+export function memberReasonKey(reason: string | null): string {
+  if (reason === null) return "cashDrilldown.reasonGeneric";
+  return MEMBER_REASON_KEYS[reason] ?? "cashDrilldown.reasonGeneric";
+}
+
+/**
  * `prefers-reduced-motion`, as a live subscription rather than a one-shot read.
  *
  * The chart is the only animated thing this band ships, and the setting can change mid-session on

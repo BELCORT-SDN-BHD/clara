@@ -422,6 +422,13 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // `publish_client_cash_account_set` is a WRITE this lane has nothing to write to; it echoes the
   // receipt shape and changes no state, and a walk that wants the published board overlays its own
   // pack with `page.route`.
+  // #1002 appends a FOURTH: `get_client_cash_account_set_members`, the second-pass editor's own
+  // read. Same shape as its two `p_client`-carrying siblings above — it COULD be scoped and is
+  // not, because its job is the same honest-default one: opening the dialog reads it
+  // unconditionally, and an unanswered 404 would grow the editor's own failure banner on every
+  // walk that merely opens it. It holds no fixture (a null version, zero members — the same
+  // no-published-set face `EMPTY_FINANCIAL_PACK`'s own `cash.set: null` already states), so there
+  // is nothing in it for a sibling walk to resolve as its own.
   "home-board-mock.mjs": {
     unscopeable: ["/rest/v1/rpc/get_firm_portfolio_pack"],
     debt: [
@@ -429,6 +436,7 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
       "/rest/v1/rpc/get_client_work_pack",
       "/rest/v1/rpc/propose_client_cash_accounts",
       "/rest/v1/rpc/publish_client_cash_account_set",
+      "/rest/v1/rpc/get_client_cash_account_set_members",
     ],
   },
   // #627's D4 lane. Every handler names its own client (five distinct ids, one per state)
