@@ -265,6 +265,30 @@ const BIRTH_WALL_0287_CLOCK_NAMES = ["_client_birth_core"];
 const SEEDING_LANE_RETIRED_0288_CLOCK_NAMES = [
   "create_seeding_batch", "decline_seeding_proposal", "tick_seeding_proposal",
 ];
+// (c) Riders wave 3, lane 04 — THREE FORWARD-GATED NAMES, born with their migration, found at
+// integration rather than in the lane (this battery reads the WHOLE catalog, and no lane runs the
+// whole estate suite). Each is gated on its OWN stem, so a `db-slice-frontiers` leg pinned below
+// it still measures exact.
+//
+// THE ADJUDICATION, the same one 0046's block below states: arm (D) catches a BARE clock token,
+// and a bare token is only a defect when the body derives a DATE from it. All three stamp
+// TIMESTAMPTZ columns and nothing else — measured on the live catalog, not read off the file:
+// `retired_at`, `superseded_at` and `effective_from` are all `timestamp with time zone`
+// (information_schema.columns on clara.fa_account_depreciation_policies and
+// clara.fa_arrears_resolutions), so there is no assignment cast to a date column anywhere in
+// them. They belong in the roster, not in a fix.
+//
+// #932 [0277_fa_default_depreciation_policy.sql]: the set door supersedes the live policy row
+// (`retired_at = now()`) and stamps the new row's `effective_from = now()`; the retire door
+// stamps `retired_at = now()`. 0292 (#932's fix round) pins BOTH bodies as unmoved, so the pair
+// reads the same from 0277 onward.
+const FA_DEPRECIATION_POLICY_0277_CLOCK_NAMES = [
+  "retire_fa_depreciation_policy", "set_fa_depreciation_policy",
+];
+// #975 [0279_fa_closed_year_arrears.sql]: the record door supersedes the live judgement
+// (`superseded_at = now()`). 0293 (#975's fix round) RECUTS this body, and the token survives the
+// recut — measured on a database at 0293 — so one forward gate is exact at both frontiers.
+const FA_ARREARS_RESOLUTION_0279_CLOCK_NAMES = ["record_fa_arrears_resolution"];
 
 // ---------------------------------------------------------------------------
 // 0046 [§7-A] — THE THREE NAMES THIS MIGRATION ADDS, AND WHY THE ROSTER IS BIMODAL.
@@ -1537,6 +1561,15 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("intake_refusal_record$")) names.push(...INTAKE_REFUSAL_RECORD_0254_CLOCK_NAMES);
   if (await appliedStem("firm_setup_education_tips$")) {
     names.push(...FIRM_SETUP_EDUCATION_TIPS_0259_CLOCK_NAMES);
+  }
+  // RIDERS WAVE 3, lane 04 (0277, 0279) - stem-gated, never number-gated, for the reason
+  // :207-214 gives, and doubly so here: 0277's and 0279's own fix-round siblings were RENUMBERED
+  // to 0292/0293 at merge, which a number gate would not have survived.
+  if (await appliedStem("fa_default_depreciation_policy$")) {
+    names.push(...FA_DEPRECIATION_POLICY_0277_CLOCK_NAMES);
+  }
+  if (await appliedStem("fa_closed_year_arrears$")) {
+    names.push(...FA_ARREARS_RESOLUTION_0279_CLOCK_NAMES);
   }
   return names.sort();
 }
