@@ -1,6 +1,12 @@
 {
   "version": 1,
   "evaluators": {
+    "clara.evaluate_agreement_contract_state_v1": {
+      "sha256": "bbddec2f7028bcf8d07d0cd1942495a29a327b28f125a81a09a8b0536f509543",
+      "migration": "packages/db/migrations/0299_agreement_contract_acquisition.sql",
+      "deployed": false,
+      "note": "#948, the agreement contract's deterministic evaluator: two channel envelopes in, one fact state out — which KIND of agreement the page calls itself (a closed ordered keyword roster over the printed rendering, so the model quotes and never classifies), each scheduled instalment's own principal-plus-interest identity, the three schedule column sums cross-checked against the printed totals, deposit plus amount financed against the cash price, the instalments reconciled to financed plus charges, and the text-vs-vision comparison. It is named clara.evaluate_* DELIBERATELY: this lint discovers only that spelling, so an underscore-named entrypoint would be catalog-frozen at apply and invisible to review, which is the half-freeze this manifest exists to close. Its clara.evaluator_versions closure is ONE member and that is structural, not stylistic — the body reads no table and calls no other clara function (asserted live by packages/db/tests/agreement-contract-acquisition.test.mjs's closure cell, both structurally and by a call-shape scan of prosrc), so the rendering-to-cents normalization is written inline rather than reaching for clara._normalize_invoice_cents or for 0296's own copy. UNDEPLOYED at birth: 0060's _tf_evaluator_deploy_once makes the flip a one-way ceremony act. The entry is hand-inserted rather than --update re-baselined so this change blesses ONE body and re-hashes nobody else's (0111's own recorded reason, 0296's own use)."
+    },
     "clara.evaluate_fs_pack_agent_v1": {
       "sha256": "d94696991276094afc02bd202ec1c0aa6c97479cdd5565c35042e5c3f9490ae5",
       "migration": "packages/db/migrations/0111_f_a5_reporting_agency_pr1.sql",

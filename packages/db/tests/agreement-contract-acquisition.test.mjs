@@ -284,3 +284,307 @@ test("S2 · the agreement answer vocabulary is closed: every question answered, 
   delete noRows.contract.rows;
   assert.equal(await answersOk(noRows, "text"), false, "a missing rows array is refused");
 });
+
+// ---------------------------------------------------------------------------
+// S3 — the deterministic evaluator (AC2)
+// ---------------------------------------------------------------------------
+
+/** The same document read twice, agreeing — the shape the persist door admits. */
+function bothChannels(opts = {}) {
+  return [envelope({ ...opts, channel: "text" }), envelope({ ...opts, channel: "vision" })];
+}
+
+async function evaluate(textEnv, visionEnv) {
+  const r = await rootQuery("select clara.evaluate_agreement_contract_state_v1($1::jsonb, $2::jsonb) as state", [
+    JSON.stringify(textEnv),
+    JSON.stringify(visionEnv),
+  ]);
+  return r.rows[0].state;
+}
+
+const cents = (v) => (v === null || v === undefined ? v : Number(v));
+
+test("S3a · a hire-purchase agreement with a printed schedule: every question established, the price identity holds, the schedule reconciles", async (t) => {
+  if (unready(t)) return;
+
+  const state = await evaluate(...bothChannels());
+
+  assert.equal(state.state_version, "v1");
+  assert.equal(state.agreement_class, "hire_purchase", "read off what the page calls itself");
+  assert.equal(state.financing, true);
+  assert.equal(state.class_basis, "printed_kind_matched:HIRE PURCHASE");
+
+  assert.deepEqual(state.disagreed, [], "nothing disagrees on a clean read");
+  assert.deepEqual(state.missing, [], "…and the page prints every question");
+  assert.equal(state.established.length, RUN_FIELDS.length, "all eleven established");
+
+  // The figures, by hand from the worked example.
+  assert.equal(cents(state.facts["contract.agreement.cash_price"].printed_cents), 12000000);
+  assert.equal(cents(state.facts["contract.agreement.deposit"].printed_cents), 2000000);
+  assert.equal(cents(state.facts["contract.agreement.amount_financed"].printed_cents), 10000000);
+  assert.equal(cents(state.facts["contract.agreement.total_charges"].printed_cents), 840000);
+  assert.equal(cents(state.facts["contract.agreement.total_payable"].printed_cents), 10840000);
+
+  // The three summable questions carry the schedule's own column sums and agree with them.
+  assert.equal(cents(state.facts["contract.agreement.amount_financed"].computed_cents), 10000000);
+  assert.equal(cents(state.facts["contract.agreement.total_charges"].computed_cents), 840000);
+  assert.equal(cents(state.facts["contract.agreement.total_payable"].computed_cents), 10840000);
+  for (const f of [
+    "contract.agreement.amount_financed",
+    "contract.agreement.total_charges",
+    "contract.agreement.total_payable",
+  ]) {
+    assert.equal(state.facts[f].basis, "printed_total_agrees_row_sum", `${f} was cross-checked`);
+  }
+  // The questions with no schedule counterpart say so rather than carrying a null silently.
+  assert.equal(state.facts["contract.agreement.cash_price"].basis, "printed_total_no_row_counterpart");
+  assert.equal(cents(state.facts["contract.agreement.cash_price"].computed_cents), null);
+
+  // The rows.
+  assert.equal(state.rows.text, 3);
+  assert.equal(state.rows.vision, 3);
+  assert.equal(state.rows.agreed, 3);
+  assert.equal(state.rows.balanced, 3);
+  assert.deepEqual(state.rows.contested, []);
+  assert.deepEqual(state.rows.unbalanced, []);
+  assert.deepEqual(state.rows.unchecked, []);
+
+  // AC2's two named checks.
+  assert.equal(state.checks.price_identity.state, "holds");
+  assert.equal(cents(state.checks.price_identity.difference_cents), 0);
+  assert.equal(state.checks.schedule_reconciles.state, "holds");
+  assert.equal(cents(state.checks.schedule_reconciles.instalment_sum_cents), 10840000);
+  assert.equal(cents(state.checks.schedule_reconciles.expected_cents), 10840000);
+
+  // The non-monetary questions are renderings, never figures.
+  assert.equal(state.facts["contract.agreement.financier"].printed_raw, "Maybank Islamic Berhad");
+  assert.equal(cents(state.facts["contract.agreement.financier"].printed_cents), null);
+  assert.equal(state.facts["contract.agreement.term_months"].printed_raw, "36");
+  assert.equal(cents(state.facts["contract.agreement.term_months"].printed_cents), null);
+});
+
+test("S3b · an agreement WITHOUT a printed schedule is still fully read: the unprinted lines say so, and the reconciliation is not checkable", async (t) => {
+  if (unready(t)) return;
+
+  const state = await evaluate(
+    ...bothChannels({
+      answers: {
+        "contract.agreement.total_charges": notPrinted(),
+        "contract.agreement.total_payable": notPrinted(),
+        "contract.agreement.instalment_amount": notPrinted(),
+      },
+      rows: [],
+    }),
+  );
+
+  assert.equal(state.agreement_class, "hire_purchase");
+  assert.deepEqual(state.missing.sort(), [
+    "contract.agreement.instalment_amount",
+    "contract.agreement.total_charges",
+    "contract.agreement.total_payable",
+  ]);
+  assert.deepEqual(state.disagreed, []);
+  assert.equal(state.facts["contract.agreement.total_charges"].state, "not_printed");
+  assert.equal(cents(state.facts["contract.agreement.total_charges"].printed_cents), null);
+  assert.equal(cents(state.facts["contract.agreement.total_charges"].computed_cents), null);
+
+  // The acquisition figures still stand, so the price identity still holds — which is what makes
+  // a schedule-less agreement postable at all.
+  assert.equal(state.checks.price_identity.state, "holds");
+  assert.equal(state.checks.schedule_reconciles.state, "not_checkable");
+  assert.equal(state.checks.schedule_reconciles.reason, "no_printed_schedule");
+  assert.equal(state.rows.agreed, 0);
+});
+
+test("S3c · deposit plus financed that does not equal the cash price is a NAMED failure carrying all three figures", async (t) => {
+  if (unready(t)) return;
+
+  // 20,000.00 + 100,000.00 = 120,000.00, but the page prints a cash price of 125,000.00.
+  const state = await evaluate(...bothChannels({ answers: { "contract.agreement.cash_price": value("125,000.00") } }));
+
+  assert.equal(state.checks.price_identity.state, "fails");
+  assert.equal(state.checks.price_identity.reason, "deposit_plus_financed_differs_from_cash_price");
+  assert.equal(cents(state.checks.price_identity.cash_price_cents), 12500000);
+  assert.equal(cents(state.checks.price_identity.deposit_cents), 2000000);
+  assert.equal(cents(state.checks.price_identity.financed_cents), 10000000);
+  assert.equal(cents(state.checks.price_identity.difference_cents), 500000);
+
+  // The individual questions are still ESTABLISHED — the page printed them, and the failure is a
+  // relationship between them, not a doubt about any one of them.
+  assert.equal(state.facts["contract.agreement.cash_price"].state, "established");
+  assert.equal(state.facts["contract.agreement.deposit"].state, "established");
+});
+
+test("S3d · a schedule row whose principal and interest do not make its instalment stops every column summing", async (t) => {
+  if (unready(t)) return;
+
+  const rows = SCHEDULE();
+  rows[1].cells["contract.schedule.interest"] = value("2,999.00"); // 35,000.00 + 2,999.00 <> 38,000.00
+  const state = await evaluate(...bothChannels({ rows }));
+
+  assert.deepEqual(state.rows.unbalanced, [2], "row 2 fails its own identity");
+  assert.equal(state.rows.balanced, 2);
+  for (const f of [
+    "contract.agreement.amount_financed",
+    "contract.agreement.total_charges",
+    "contract.agreement.total_payable",
+  ]) {
+    assert.equal(state.facts[f].state, "rows_unbalanced", `${f} does not sum over a page that contradicts itself`);
+    assert.equal(state.facts[f].reason, "row_identity_failed");
+  }
+  // A question with no schedule counterpart is unaffected — the cash price is printed once and
+  // no row speaks to it.
+  assert.equal(state.facts["contract.agreement.cash_price"].state, "established");
+  assert.equal(state.checks.schedule_reconciles.state, "not_checkable");
+  assert.equal(state.checks.schedule_reconciles.reason, "rows_not_summable");
+});
+
+test("S3e · a printed total the schedule contradicts is a totals mismatch, not a silent re-sum", async (t) => {
+  if (unready(t)) return;
+
+  // The schedule still sums to 108,400.00; the page's own total payable says 109,000.00.
+  const state = await evaluate(...bothChannels({ answers: { "contract.agreement.total_payable": value("109,000.00") } }));
+
+  assert.equal(state.facts["contract.agreement.total_payable"].state, "totals_mismatch");
+  assert.equal(state.facts["contract.agreement.total_payable"].reason, "printed_total_disagrees_row_sum");
+  assert.equal(cents(state.facts["contract.agreement.total_payable"].printed_cents), 10900000);
+  assert.equal(cents(state.facts["contract.agreement.total_payable"].computed_cents), 10840000);
+  assert.equal(state.facts["contract.agreement.amount_financed"].state, "established", "its neighbours are unaffected");
+
+  // The brief's OWN reconciliation is instalments vs financed-plus-charges, and total_payable is
+  // not one of its terms — so it still holds here, and the contradiction is caught once, by the
+  // cross-check above, rather than twice under two names. (The unattended gate's
+  // `arithmetic_holds` rung reads the per-question state, so this page does not post.)
+  assert.equal(state.checks.schedule_reconciles.state, "holds");
+
+  // A page whose instalments genuinely do not add up to financed plus charges fails the named
+  // check by name.
+  const rows = SCHEDULE();
+  rows[0].cells["contract.schedule.instalment"] = value("43,900.00");
+  rows[0].cells["contract.schedule.interest"] = value("3,900.00"); // the row identity still holds
+  const broken = await evaluate(...bothChannels({ rows }));
+  assert.equal(broken.rows.unbalanced.length, 0, "every row still balances on its own terms");
+  assert.equal(broken.checks.schedule_reconciles.state, "fails");
+  assert.equal(broken.checks.schedule_reconciles.reason, "instalments_do_not_reconcile_to_financed_plus_charges");
+  assert.equal(cents(broken.checks.schedule_reconciles.instalment_sum_cents), 10890000);
+  assert.equal(cents(broken.checks.schedule_reconciles.expected_cents), 10840000);
+});
+
+test("S3f · the two channels reading one question differently is a disagreement, and a row they read differently contests every sum", async (t) => {
+  if (unready(t)) return;
+
+  const textEnv = envelope({ channel: "text" });
+  const visionEnv = envelope({ channel: "vision", answers: { "contract.agreement.deposit": value("2,000.00") } });
+  let state = await evaluate(textEnv, visionEnv);
+  assert.equal(state.facts["contract.agreement.deposit"].state, "channels_disagree");
+  assert.equal(state.facts["contract.agreement.deposit"].text_raw, "20,000.00");
+  assert.equal(state.facts["contract.agreement.deposit"].vision_raw, "2,000.00");
+  assert.equal(cents(state.facts["contract.agreement.deposit"].printed_cents), null);
+  assert.equal(state.checks.price_identity.state, "not_checkable");
+  assert.equal(state.checks.price_identity.reason, "deposit_not_established");
+
+  // "1,000.00" and "1000.00" are the same figure read twice — typography is not a disagreement.
+  const spaced = envelope({ channel: "vision", answers: { "contract.agreement.cash_price": value("RM 120000.00") } });
+  state = await evaluate(textEnv, spaced);
+  assert.equal(state.facts["contract.agreement.cash_price"].state, "established", "compared on the FIGURE");
+
+  // A schedule row the two channels read differently contests every column sum: a partial sum is
+  // a figure no page states.
+  const visionRows = SCHEDULE();
+  visionRows[2].cells["contract.schedule.principal"] = value("25,500.00");
+  state = await evaluate(textEnv, envelope({ channel: "vision", rows: visionRows }));
+  assert.deepEqual(state.rows.contested, [3]);
+  assert.equal(state.facts["contract.agreement.amount_financed"].state, "rows_contested");
+  assert.equal(state.checks.schedule_reconciles.state, "not_checkable");
+});
+
+test("S3g · a rendering that is not a figure is unreadable, reported verbatim, never guessed", async (t) => {
+  if (unready(t)) return;
+
+  const state = await evaluate(...bothChannels({ answers: { "contract.agreement.deposit": value("Trade-in vehicle") } }));
+  assert.equal(state.facts["contract.agreement.deposit"].state, "unreadable");
+  assert.equal(state.facts["contract.agreement.deposit"].reason, "rendering_is_not_a_figure");
+  assert.equal(state.facts["contract.agreement.deposit"].printed_raw, "Trade-in vehicle");
+  assert.equal(cents(state.facts["contract.agreement.deposit"].printed_cents), null);
+  assert.equal(state.checks.price_identity.state, "not_checkable");
+});
+
+test("S3h · the evaluator says which agreement it read, and never guesses a page into a financing class", async (t) => {
+  if (unready(t)) return;
+
+  const cases = [
+    ["Hire Purchase Agreement", "hire_purchase", true],
+    ["PERJANJIAN SEWA BELI", "hire_purchase", true],
+    ["Master Finance Lease Agreement", "finance_lease", true],
+    ["Capital Lease Schedule 3", "finance_lease", true],
+    ["Tenancy Agreement", "tenancy", false],
+    ["Operating Lease Agreement", "operating_lease", false],
+    ["Supply Agreement", "supply", false],
+    ["Memorandum of Understanding", "other", false],
+  ];
+  for (const [raw, klass, financing] of cases) {
+    const state = await evaluate(...bothChannels({ answers: { "contract.agreement.kind": value(raw) } }));
+    assert.equal(state.agreement_class, klass, `"${raw}" reads as ${klass}`);
+    assert.equal(state.financing, financing, `"${raw}" financing=${financing}`);
+  }
+
+  // A page that does not say what it is is NOT guessed into a class.
+  let state = await evaluate(...bothChannels({ answers: { "contract.agreement.kind": notPrinted() } }));
+  assert.equal(state.agreement_class, "not_established");
+  assert.equal(state.financing, false);
+  assert.equal(state.class_basis, "kind_not_established");
+
+  // Neither is a page the two channels read differently.
+  state = await evaluate(
+    envelope({ channel: "text" }),
+    envelope({ channel: "vision", answers: { "contract.agreement.kind": value("Tenancy Agreement") } }),
+  );
+  assert.equal(state.agreement_class, "not_established");
+  assert.equal(state.class_basis, "kind_not_established");
+});
+
+test("S3i · a malformed pair is a typed refusal, not an exception", async (t) => {
+  if (unready(t)) return;
+
+  const r = await rootQuery(
+    "select clara.evaluate_agreement_contract_state_v1($1::jsonb, $2::jsonb) as state",
+    [JSON.stringify({ contract: { channel: "text" } }), JSON.stringify(envelope({ channel: "vision" }))],
+  );
+  assert.equal(r.rows[0].state.refusal, "agreement_envelope_malformed");
+});
+
+test("S3j · the evaluator's registered closure is exactly one member, and it calls nobody", async (t) => {
+  if (unready(t)) return;
+
+  const ver = (
+    await rootQuery(
+      `select ev.id, ev.entrypoint_signature, ev.migration_version, ev.deployed
+         from clara.evaluator_versions ev
+        where ev.evaluator_name = 'evaluate_agreement_contract_state' and ev.version = 1`,
+    )
+  ).rows;
+  assert.equal(ver.length, 1, "registered in the same migration that creates it");
+  assert.equal(ver[0].entrypoint_signature, "clara.evaluate_agreement_contract_state_v1(jsonb,jsonb)");
+  assert.equal(ver[0].migration_version, "0299_agreement_contract_acquisition");
+  assert.equal(ver[0].deployed, false, "the deploy flip is a ceremony act, never a migration's");
+
+  const members = (
+    await rootQuery("select member_signature from clara.evaluator_version_members where evaluator_version_id = $1", [
+      ver[0].id,
+    ])
+  ).rows;
+  assert.deepEqual(
+    members.map((m) => m.member_signature),
+    ["clara.evaluate_agreement_contract_state_v1(jsonb,jsonb)"],
+    "ONE member: an N-member registration is N bodies a later lane could never recut",
+  );
+
+  // …and that is structural, not stylistic: the body reaches for no other clara function.
+  const src = (
+    await rootQuery(
+      "select prosrc from pg_proc where oid = 'clara.evaluate_agreement_contract_state_v1(jsonb,jsonb)'::regprocedure",
+    )
+  ).rows[0].prosrc;
+  const calls = src.match(/clara\.[a-z_][a-z0-9_]*\s*\(/gi) ?? [];
+  assert.deepEqual(calls, [], `the evaluator calls no clara function: ${JSON.stringify(calls)}`);
+});
