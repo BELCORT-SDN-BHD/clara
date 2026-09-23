@@ -74,14 +74,27 @@
 --
 -- WHAT HOLDS IT SHUT, AND WHAT DOES NOT. `clara.wake_engine_sources.close_prep.enabled` is FALSE
 -- (measured; it has been since 0133, and 0138/0140/0159/0223 each pin it as a prestate or tail
--- tripwire), so no close_prep wake task is minted and no caller can reach the wrapper. That is a
--- parked feature flag, not a closed door. Retiring or rerouting the limb -- at
--- `clara.create_prepayment_schedule`, 0223's plan-lane successor -- would retire an agent-lane
--- PRODUCT capability, which the #788 split did not publish and no ticket of this lane owns, so it
--- is deliberately NOT done here. What IS done: the containment is now a live cell rather than a
--- sentence -- `tests/plan-overlap-template-arm-retired.test.mjs`'s `p929.containment` asserts the
--- core is ungranted, the wrapper is still wired, and the source is parked, and goes RED with the
--- remedy in its own message the day anyone unparks close_prep.
+-- tripwire). Be exact about where that flag bites, because it is NOT a wall in this database:
+-- `clara.mint_wake_credential_for_task` is granted to clara_runtime and never reads the flag,
+-- which is why clara_l05 carries 771 close_prep credentials its own batteries minted. The gate is
+-- the runtime's claim step, both halves of it -- `packages/runtime/lib/wake-engine.mjs:392-397`
+-- (wake_outbox, held -> running) and `:801-804` (direct_queue, queued -> running) promote a task
+-- only `... and exists (select 1 from clara.wake_engine_sources where source_key=$2 and enabled)`,
+-- under the same `wake_source_gate:<key>` advisory lock `clara.set_wake_source_enabled` takes. So
+-- while the flag is false no close_prep workflow ever RUNS and the wrapper is never called in
+-- production. The second thing holding it shut is the allowlist's shape: that function appears
+-- there under close_prep and under NO OTHER wake kind (measured), and every other kind IS live --
+-- `interactive_client` is minted from a chat turn by `clara.mint_chat_close_credential` and
+-- `clara.wake_engine_sources` holds no row for it at all, so the flag above could never speak for
+-- it. Both facts are a parked feature flag and a one-row table, not a closed door. Retiring or
+-- rerouting the limb -- at `clara.create_prepayment_schedule`, 0223's plan-lane successor --
+-- would retire an agent-lane PRODUCT capability, which the #788 split did not publish and no
+-- ticket of this lane owns, so it is deliberately NOT done here. What IS done: the containment is
+-- now a live cell rather than a sentence -- `tests/plan-overlap-template-arm-retired.test.mjs`'s
+-- `p929.containment` asserts the core is ungranted, the wrapper is still wired, the allowlist
+-- names it for close_prep AND FOR NO OTHER KIND, and the source is parked; two rolled-back mutants
+-- (flip the flag, widen the allowlist) prove both readers can say NO; and it goes RED with the
+-- remedy in its own message the day anyone unparks close_prep or widens that allowlist.
 --
 -- =====================================================================================
 -- 0281's SELF-EXCLUSION ARGUMENT, RE-MEASURED AND CORRECTED (fix round, 2026-09-23). ARM 2 below

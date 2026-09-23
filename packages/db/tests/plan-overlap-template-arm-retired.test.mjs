@@ -204,11 +204,20 @@ test("p929.tail -- outside-in re-proof of 0283's own tail: the template arm is g
 // (it would retire the agent-lane prepayment feature, whose successor door
 // `clara.create_prepayment_schedule` arrived at 0223), so it is NOT done here.
 //
-// What holds the path shut today is `clara.wake_engine_sources.close_prep.enabled = false`: no
-// close_prep wake task is minted, so no caller can ever reach the wrapper. That is a parked
-// feature flag, not a closed door -- which is precisely why this cell exists. It goes RED the day
-// someone unparks close_prep, and names what must happen first. Measured, not argued: the mutant
-// below flips the flag inside a rolled-back transaction and shows the same predicate firing.
+// What holds the path shut today is `clara.wake_engine_sources.close_prep.enabled = false`. Be
+// exact about WHERE that flag bites, because it is not a database wall: the DB-side minter
+// `clara.mint_wake_credential_for_task` is granted to clara_runtime and never reads the flag
+// (which is why THIS database carries hundreds of close_prep credentials -- the batteries mint
+// their own). The gate is the runtime's claim step, both halves of it:
+// `packages/runtime/lib/wake-engine.mjs:392-397` (wake_outbox, held -> running) and `:801-804`
+// (direct_queue, queued -> running) promote a close_prep task only
+// `... and exists (select 1 from clara.wake_engine_sources where source_key=$2 and enabled)`,
+// under the same `wake_source_gate:<key>` advisory lock `clara.set_wake_source_enabled` takes.
+// So while the flag is false no close_prep workflow ever RUNS, and the wrapper is never called in
+// production. That is a parked feature flag, not a closed door -- which is precisely why this
+// cell exists. It goes RED the day someone unparks close_prep, and names what must happen first.
+// Measured, not argued: the mutants below flip the flag, and widen the allowlist, inside
+// rolled-back transactions and show the same predicates firing.
 // ---------------------------------------------------------------------------------------------
 test("p929.containment -- the agent prepayment limb is the ONE path left into clara.adjustment_templates, and it is held shut by close_prep being parked; unparking it re-opens a lane #927 retired", async (t) => {
   if (unready(t)) return;
@@ -234,10 +243,37 @@ test("p929.containment -- the agent prepayment limb is the ONE path left into cl
   assert.equal(wrapper.rowCount, 1, "0140's prepayment wrapper resolves at exactly one signature");
   assert.match(wrapper.rows[0].acl, /clara_wake_interactive=X\/clara_fn_owner/,
     "the prepayment wrapper lost its clara_wake_interactive grant -- if the limb was retired, retire this cell with it");
-  const allow = await rootQuery(
-    `select count(*)::int as n from clara.wake_fn_allowlist
-      where wake_kind = 'close_prep' and function_name = 'wake_establish_prepayment_schedule'`);
-  assert.equal(allow.rows[0].n, 1, "the prepayment wrapper left clara.wake_fn_allowlist");
+  // `clara.assert_wake_allowed` -- the last gate inside `clara._close_wake_ctx` -- reads the
+  // allowlist PER WAKE KIND. Asserting only that close_prep still carries the row would leave the
+  // tripwire in (3) blind to the cheapest way to re-open this path: registering the SAME function
+  // under a wake kind that is not parked at all. `interactive_client` is exactly such a kind --
+  // it is minted from a live chat turn (`clara.mint_chat_close_credential`) and
+  // `clara.wake_engine_sources` holds NO row for it, so the flag in (3) could never speak for it.
+  // So the claim is the stronger one: this function is on the allowlist for EXACTLY ONE kind, and
+  // that kind is the parked one.
+  const allowKinds = async (q) => (await q(
+    `select coalesce(array_agg(wake_kind order by wake_kind), '{}'::text[]) as kinds
+       from clara.wake_fn_allowlist
+      where function_name = 'wake_establish_prepayment_schedule'`)).rows[0].kinds;
+  assert.deepEqual(await allowKinds(rootQuery), ["close_prep"],
+    "clara.wake_fn_allowlist admits wake_establish_prepayment_schedule for a kind other than the "
+    + "parked close_prep (or for none at all). Every other wake kind is LIVE, so the close_prep "
+    + "flag asserted below no longer holds this path shut. Retire or reroute the limb at "
+    + "clara.create_prepayment_schedule (0223) before widening this allowlist.");
+
+  // The mutant for (2), in a transaction that is rolled back: a widening really is visible to the
+  // reader above, so the assertion is watching something rather than restating a constant.
+  await withTxn(async (c) => {
+    await c.query(
+      `insert into clara.wake_fn_allowlist(wake_kind, function_name)
+       values ('interactive_client', 'wake_establish_prepayment_schedule')`);
+    assert.deepEqual(await allowKinds((t, p) => c.query(t, p)),
+      ["close_prep", "interactive_client"],
+      "the mutant could not widen the allowlist, so the assertion above is not proven to be "
+      + "watching anything");
+  }, { commit: false });
+  assert.deepEqual(await allowKinds(rootQuery), ["close_prep"],
+    "the allowlist mutant leaked -- interactive_client is left holding the prepayment wrapper");
 
   // (3) THE TRIPWIRE. The flag that keeps the path unreachable.
   const src = await rootQuery(

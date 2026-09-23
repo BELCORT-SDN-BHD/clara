@@ -3294,17 +3294,24 @@ wake_establish_prepayment_schedule)`) → `clara._agent_prepayment_schedule_core
 INSERTs a `proposed` template row. Driven, not read off the source: calling the core inside a
 rolled-back transaction on `clara_l05` answered `{"status":"proposed","template_id":…}` and left
 one row before the rollback. Such a row could never be signed, run, swept or named by the
-advisory — exactly the orphan 0282's live-template guard exists to prevent. What holds it shut is
-`clara.wake_engine_sources.close_prep.enabled = false` (parked since 0133; 0138/0140/0159/0223 each
-pin it), which is a feature flag, not a closed door. Retiring or rerouting the limb at
-`clara.create_prepayment_schedule` (0223) is a product act the #788 split did not publish, so it is
-deliberately not done here; instead the containment is a live cell —
-`tests/plan-overlap-template-arm-retired.test.mjs`'s `p929.containment`, whose own mutant flips the
-flag in a rolled-back transaction — which goes red with the remedy in its message the day anyone
-unparks `close_prep`. 0283's own header carries the same statement, together with the withdrawal of
+advisory — exactly the orphan 0282's live-template guard exists to prevent. Two things hold it
+shut, and neither is a wall in this database. First, `clara.wake_engine_sources.close_prep.enabled
+= false` (parked since 0133; 0138/0140/0159/0223 each pin it) — but the flag bites in the RUNTIME,
+not here: `clara.mint_wake_credential_for_task` is granted to `clara_runtime` and never reads it
+(hence the 771 `close_prep` credentials the batteries themselves minted on `clara_l05`), while
+`packages/runtime/lib/wake-engine.mjs:392-397` and `:801-804` promote a task to `running` only
+`… and exists (select 1 from clara.wake_engine_sources where source_key=$2 and enabled)`. Second,
+`clara.wake_fn_allowlist` names that wrapper for `close_prep` **and for no other wake kind** —
+which matters because every other kind is live, and `interactive_client` (minted from a chat turn
+by `clara.mint_chat_close_credential`) has no `wake_engine_sources` row the flag could speak for.
+Retiring or rerouting the limb at `clara.create_prepayment_schedule` (0223) is a product act the
+#788 split did not publish, so it is deliberately not done here; instead the containment is a live
+cell — `tests/plan-overlap-template-arm-retired.test.mjs`'s `p929.containment`, whose two
+rolled-back mutants flip the flag and widen the allowlist — which goes red with the remedy in its
+message the day anyone unparks `close_prep` or registers that wrapper under a live wake kind. 0283's own header carries the same statement, together with the withdrawal of
 0281's "a coincidence this estate has never produced" justification for the sibling arm's
 by-value self-exclusion (measured false on this rig: 7 `(client, basis_digest)` groups hold 28 live
 plans with byte-identical bases, and the advisory answers NULL for them), and the concurrency
 window the advisory cannot close from inside the creating transaction. The header edit was
 re-applied through `CLARA_MIGRATION_REDO=0283_retire_plan_overlap_template_arm`; the ledger
-checksum is now `927b34dafa66e5e42651cf06ed661a4a26fad8c8705b736d6c9e05fb14b90c36`.
+checksum is now `28e630178b35012c062d89c084844435d59896a951d6666236ab4f6f79ca3af7`.
