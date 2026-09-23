@@ -559,21 +559,31 @@ cellGrantWithdrawn("p899.census.create_client_refuses_the_human_grant — #1038'
   assert.equal(n.rows[0].n, 0, "a grant-level refusal creates nothing");
 });
 
-// The one legitimate call site for the raw, unwalled clara.create_client( verb -- everywhere
-// else in packages/db/tests reaches it, if at all, only through this fixture. This file itself
-// is the SECOND legitimate reference: its own p899.census.create_client_refuses_the_human_grant
-// cell above calls the literal SQL directly, on purpose, to prove the refusal.
+// THE TWO FIXTURE TREES THIS CENSUS WALKS. The first cut of this cell (#1038, before the lane's
+// own fix round) swept `packages/db/tests` ALONE, so `packages/runtime/tests/relay-fixtures.mjs`
+// -- the OTHER shared fixture that mints clients, referenced by ~90 runtime batteries -- kept
+// calling the verb through the withdrawn grant and failed 42501 on every database carrying 0316
+// while this census stayed green. Both fixture trees are swept now, so a call site outside
+// packages/db can never hide from it again.
+const CREATE_CLIENT_CENSUS_TREES = ["packages/db/tests", "packages/runtime/tests"];
+
+// The TWO legitimate call sites for the raw, unwalled clara.create_client( verb -- one shared
+// fixture per test tree, each reaching it as the base identity with a hand-set jwt claim (the
+// root+jwt idiom 0316's own header names), and everywhere else in either tree reaching it, if at
+// all, only through that tree's fixture. This file itself is the THIRD legitimate reference: its
+// own p899.census.create_client_refuses_the_human_grant cell above calls the literal SQL
+// directly, on purpose, to prove the refusal.
 const CREATE_CLIENT_CENSUS_EXEMPT = new Set([
   "packages/db/tests/rig-fixtures.mjs",
+  "packages/runtime/tests/relay-fixtures.mjs",
   "packages/db/tests/client-birth-wall.test.mjs",
 ]);
 
-/** Every packages/db/tests .mjs file naming `clara.create_client(` directly, as `path:line`,
- *  EXCLUDING the two exempt files above. Unlike `sweepFor` (PRODUCT_TREES only), this walks test
- *  files too -- `.test.mjs` names are the whole POINT of this sweep, not excluded by name. */
+/** Every .mjs file under CREATE_CLIENT_CENSUS_TREES naming `clara.create_client(` directly, as
+ *  `path:line`, EXCLUDING the exempt files above. Unlike `sweepFor` (PRODUCT_TREES only), this
+ *  walks test files too -- `.test.mjs` names are the whole POINT of this sweep, not excluded by
+ *  name. */
 function sweepTestsForCreateClient() {
-  const root = "packages/db/tests";
-  const abs = join(REPO_ROOT, root);
   const hits = [];
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
@@ -588,14 +598,25 @@ function sweepTestsForCreateClient() {
       });
     }
   };
-  walk(abs);
-  return hits;
+  for (const root of CREATE_CLIENT_CENSUS_TREES) walk(join(REPO_ROOT, root));
+  return hits.sort();
 }
 
-cellGrantWithdrawn("p899.census.no_test_file_calls_create_client_directly — AC1: the shared fixture (rig-fixtures.mjs's createClientRaw/createClient) is the ONE call site; every other packages/db/tests file reaches clara.create_client, if at all, only through it", async () => {
+// HOW AC1 IS MET, STATED PLAINLY (#1038's fix round, review finding L06-SPEC-09). AC1's letter is
+// "No test fixture calls the direct door". It is met by the brief's OWN PARENTHETICAL -- "or a
+// fixture-only door that no human role can execute" -- and NOT by the literal clause: the two
+// shared fixtures still name clara.create_client, but 0316 withdrew its clara_authenticated
+// grant, so it IS now a door no human role can execute, and the fixtures reach it only as the
+// base identity (the route every migration and seed file already takes). The OTHER route #899's
+// own follow-up named -- migrating 48+ batteries onto clara.open_client_onboarding -- is NOT
+// taken here and stays open; fixture-minted clients therefore still bypass the identity-collision
+// wall #899 put on the product entrance, which is why this file's own wall cells drive
+// open_client_onboarding directly rather than through a fixture.
+cellGrantWithdrawn("p899.census.no_test_file_calls_create_client_directly — AC1 (met by the brief's parenthetical, see the note above): one shared fixture per test tree (rig-fixtures.mjs, relay-fixtures.mjs) is the ONE call site; every other file in packages/db/tests and packages/runtime/tests reaches clara.create_client, if at all, only through it", async () => {
   const hits = sweepTestsForCreateClient();
   assert.deepEqual(hits, [],
-    "a packages/db/tests file calls clara.create_client( directly, outside the one designated fixture -- "
-    + "route it through createClientRaw()/createClient() (rig-fixtures.mjs) instead, or add it to "
-    + "CREATE_CLIENT_CENSUS_EXEMPT above if the direct call is deliberate (as this file's own refusal cell is)");
+    "a packages/db/tests or packages/runtime/tests file calls clara.create_client( directly, outside its tree's "
+    + "designated fixture -- route it through createClientRaw()/createClient() (rig-fixtures.mjs for the db "
+    + "batteries, relay-fixtures.mjs for the runtime ones) instead, or add it to CREATE_CLIENT_CENSUS_EXEMPT "
+    + "above if the direct call is deliberate (as this file's own refusal cell is)");
 });

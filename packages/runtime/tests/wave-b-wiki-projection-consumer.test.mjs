@@ -28,7 +28,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { rootQuery, humanQuery, asRuntime, asFnOwner, opk, buildFirm, headSeq, checkpointSeq, endPool } from "./relay-fixtures.mjs";
+import { rootQuery, humanQuery, asRuntime, asFnOwner, opk, buildFirm, createClientRaw, headSeq, checkpointSeq, endPool } from "./relay-fixtures.mjs";
 import { runWikiProjectionCycle, wikiProjectionRedrive, CONSUMERS, WIKI_PROJECTION_CONSUMER, WIKI_PROJECTION_MAX_ATTEMPTS } from "../lib/wiki-projection.mjs";
 import { wikiProjectionHealth } from "../lib/wiki-projection-ops.mjs";
 import { deadLetterCategory, relayFirmCategory } from "../lib/consumer-health.mjs";
@@ -279,8 +279,9 @@ test("already_projected on re-run: re-processing the same event mints no new ver
 
 test("skipped_inactive_client: an onboarding client's counterparty event projects nothing", { skip }, async () => {
   const { owner, firm } = await buildFirm("wpi");
-  const r = await humanQuery(owner, "select clara.create_client(p_name=>$1,p_op_key=>$2) as receipt", [`onb_${Date.now()}`, opk("onb")]);
-  const onb = r.rows[0].receipt.client_id;
+  // #1038: clara.create_client's clara_authenticated grant is withdrawn, so the raw, un-bridged
+  // onboarding client this cell needs comes from the ONE fixture that reaches the verb.
+  const onb = await createClientRaw(owner, { name: `onb_${Date.now()}`, opKey: opk("onb") });
   assert.equal((await rootQuery("select status from clara.clients where id=$1", [onb])).rows[0].status, "onboarding");
   const cp = randomUUID(); // never inserted — the lane skips before any publish/FK
   await emitEvent(firm, "counterparty.created", { client: onb, actor: owner, payload: { counterparty_id: cp } });
@@ -341,7 +342,8 @@ test("document.classified on a UNIQUELY filed document → deterministic publica
 // identity or count ever leaves the database.
 test("document.classified on an AMBIGUOUSLY filed document publishes nothing (skipped_ambiguous_client)", { skip: skip20 }, async () => {
   const { owner, firm, client } = await buildFirm("wpamb");
-  const other = (await humanQuery(owner, "select clara.create_client(p_name=>$1,p_op_key=>$2) as r", [`amb_${Date.now()}`, opk("amb")])).rows[0].r.client_id;
+  // #1038: through the ONE fixture that reaches the raw verb (the human grant is withdrawn).
+  const other = await createClientRaw(owner, { name: `amb_${Date.now()}`, opKey: opk("amb") });
   const s = sha256hex(randomUUID());
   const mk = (c) => rootQuery("select clara._seed_verified_document($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) as r",
     [firm, c, s, "amb.pdf", "application/pdf", 2048, `firms/${firm}/docs/${s}.pdf`, owner, 1, "invoice", null, null]);
