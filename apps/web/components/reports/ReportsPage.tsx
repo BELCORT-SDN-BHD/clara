@@ -43,9 +43,12 @@ export function ReportsPage({
       <SnapshotRegistryPanel clientId={clientId} session={sessionTokenAccessor} />
       {/* #614 D6 (spec §7): seeding, wiki curation and render jobs are Clara's
           own maintenance, not report navigation — grouped at the end, under
-          one heading, rather than mixed into the reports list above. Every
-          panel stays fully functional; `id` is the anchor
-          seeding-proposal-affordance.tsx's needs-you deep link targets. */}
+          one heading, rather than mixed into the reports list above. `id` is a
+          stable in-page anchor; the needs-you deep link that used to target it
+          is gone with its row kind (ticket 1012, 0288_seeding_lane_retired.sql),
+          and SeedingBatchesPanel below is READ-ONLY for the same reason — the
+          prior-GL seeding lane accepts no new work, and its history stays here
+          to be read and, while a batch is open, closed. */}
       <section id="internal-processing" aria-labelledby="reports-internal-processing" className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
           <SectionHeader level={2}>
