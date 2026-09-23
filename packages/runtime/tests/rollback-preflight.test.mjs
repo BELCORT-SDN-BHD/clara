@@ -624,13 +624,36 @@ test("637.pf: #1015 — an explicit ask for the FULL document picture (documentT
   // DISTINGUISHABLE and must behave differently — the Agent Brief's own words. A caller that wants
   // the whole document-processing picture alongside an unrelated task-id scope can still ask for it,
   // by naming the key at all.
+  //
+  // ASSERTED AS A DIFFERENCE BETWEEN TWO CALLS, NEVER AS A TOTAL (review SPEC-1015-01). An earlier
+  // shape of this cell pinned `tasks.length` to the number of rows it had just planted — a claim
+  // about the size of the WHOLE live document census, true only on a database carrying nothing
+  // else. That is the very contamination-dependence #1015 exists to remove, and it reds (18 !== 2)
+  // on this lane's own database and on any CI database where an earlier file left a queued
+  // document row behind. What the contract actually says is a DIFFERENCE between two calls that
+  // differ ONLY in whether the key is named, and that difference holds whatever else is live.
   const noise = await plantNoiseDocumentTasks(2);
+  const scopedToNothing = { taskIds: [randomUUID()] };
   try {
-    const out = await censusUnboundTasks(query, { taskIds: [randomUUID()], documentTaskIds: null });
-    assert.equal(out.tasks.length, noise.length, `an explicit documentTaskIds key (even null) asks for the FULL picture; got ${JSON.stringify(out.tasks)}`);
+    const asked = await censusUnboundTasks(query, { ...scopedToNothing, documentTaskIds: null });
     for (const id of noise) {
-      assert.ok(out.tasks.some((t) => t.id === id), `noise row ${id} must be present when the document scope was explicitly asked for in full`);
+      assert.ok(asked.tasks.some((t) => t.id === id), `noise row ${id} must be present when the document scope was explicitly asked for in full`);
     }
+    assert.ok(
+      asked.tasks.every((t) => t.table === "clara.document_processing_tasks"),
+      `naming documentTaskIds widens the DOCUMENT half only — the agent half stays scoped by taskIds; got ${JSON.stringify(asked.tasks)}`,
+    );
+
+    // THE SAME CALL WITH THE KEY LEFT OUT — the one difference under test. An agent-shaped scope
+    // naming nothing this cell owns comes back with NO document row at all: not the two just
+    // planted, and not anyone else's either.
+    const unasked = await censusUnboundTasks(query, scopedToNothing);
+    assert.deepEqual(
+      unasked.tasks, [],
+      `an ABSENT documentTaskIds key narrows the document half to none, whatever is live; got ${JSON.stringify(unasked.tasks)}`,
+    );
+    assert.equal(unasked.measured, true, "…and it still says it LOOKED — B1's lesson holds for the narrowed half too");
+
     // …and a fully OPEN call (no scope at all) is the same ask, made the other way — the shape
     // preflight()'s own GLOBAL census already relies on, unaffected by this fix.
     const open = await censusUnboundTasks(query, {});
