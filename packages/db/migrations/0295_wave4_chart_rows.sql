@@ -72,19 +72,42 @@
 -- because `clara._coa_template_for_edit` refuses ANY edit of a platform-scope template by name
 -- (`platform_template_not_editable`, 0150:810-812): the platform starter is authored by the
 -- migration ladder, never by an in-product door, and that is true of v2 exactly as it was of v1.
--- v1 is left EXACTLY as published -- this file issues no UPDATE, DELETE or INSERT against v1's
--- own rows anywhere -- so `coa-template-pr-a.test.mjs`'s C1/C2 and the whole
--- `coa-template-pr-b.test.mjs` apply battery, both of which pin v1 specifically (the latter's own
--- `platformStarter()` helper already reads `and version = 1`, coa-template-pr-b-helpers.mjs:198 --
--- precedent this file follows rather than invents), keep testing 0150's own fixed artifact
--- unchanged and need no edit. `coa-template-pr-a-helpers.mjs`'s sibling `platformTemplate()` had
--- no such filter (nothing needed one while only one platform row ever existed); this file adds
--- one line to it, `and version = 1`, in this same commit, matching the pattern already
--- established next door -- the smallest edit that keeps every existing pr-a assertion resolving
--- to the same row it always has. `dba-coding-lane-classification.test.mjs` already reads
--- `... order by version desc limit 1` (its own pre-existing convention for "whichever the CURRENT
--- one is") and needs no change at all -- it will pick v2 up automatically, exactly as its own
--- query says it should.
+-- v1's CONTENT is left exactly as published -- this file issues no INSERT, DELETE or content
+-- UPDATE against v1's own rows anywhere -- so `coa-template-pr-a.test.mjs`'s C1-C5 and its J4
+-- field-by-field comparison against the two research dossiers keep testing 0150's own fixed
+-- 42-family / 142-account artifact, unchanged. `coa-template-pr-a-helpers.mjs`'s
+-- `platformTemplate()` had no version filter (nothing needed one while only one platform row ever
+-- existed); this file adds `and version = 1` to it so those cells keep resolving to the row they
+-- always meant.
+--
+-- v1 IS RETIRED BY THIS FILE, AND THAT IS A PRODUCT DECISION, NOT A TIDY-UP. ORCHESTRATOR RULING
+-- 2026-09-24 under the owner's standing delegation, recorded on #941, answering the review finding
+-- that the four rows were reachable but not delivered. Two PUBLISHED platform starters carry the
+-- IDENTICAL title 'Malaysian SME Standard Chart of Accounts (starter)'; `clara.list_coa_templates`
+-- orders by version ASCENDING (0150:1286) so the 142-account v1 renders ABOVE the 146-account v2
+-- in `ApplyStandardChartControl`; nothing preselects either and nothing marks one as current
+-- (ApplyStandardChartControl.tsx:241,260-265 -- the select opens empty and confirm is disabled
+-- until a human picks). A bookkeeper who picks the first familiar option gets a client whose chart
+-- has NONE of the four rows all four wave-4 lanes then resolve BY NAME, with no refusal naming
+-- why. `update ... set state='retired', retired_at=now()` is the one transition
+-- `clara._tf_coa_template_freeze` admits out of `published` (0150:624-630) and it moves no
+-- content: neither `clara.get_coa_template` nor `clara.list_coa_templates` filters on state, so
+-- every firm that adopted v1 still reads exactly what it adopted, and `listPublishedCoaTemplates`
+-- (apps/web/lib/onboarding/coa.ts:137-149) simply stops offering it.
+--
+-- WHAT RETIRING v1 COSTS, MEASURED, NOT ASSUMED. Two doors refuse a template that is not
+-- published: `clara.apply_coa_template` rung 4 (0156:768, `template_not_published`) and
+-- `clara.fork_coa_template` (0150:869-872, `source_not_published`). So the two existing batteries
+-- that DRIVE those doors against the platform starter move to the published one, in this same
+-- commit: `coa-template-pr-b-helpers.mjs`'s `platformStarter()` now reads the highest PUBLISHED
+-- version (every one of its expectations is already derived from the template itself --
+-- `expectedChartMap`, `coreFamilies` -- so the battery follows the shipped starter), and
+-- `coa-template-pr-a.test.mjs` keeps `platform` pinned to v1 for its content census while a new
+-- `publishedPlatformStarter()` handle feeds its twelve fork sites. `dba-coding-lane-
+-- classification.test.mjs` already reads `... where state='published' order by version desc
+-- limit 1` and needed no change at all. No migration between 0150 and 0294 is affected: 0156 is
+-- the ONLY other file that names `my_sme_starter`, it asserts v1 published in its own prestate
+-- (0156:283-297), and it runs long before this one in the ladder.
 --
 -- EXISTING CLIENTS ARE NOT TOUCHED, BY CONSTRUCTION, NOT BY CONVENTION. A client's chart
 -- (`clara.coa_accounts`) is planted once, by `clara.apply_coa_template` (0156), which COPIES rows
@@ -94,9 +117,9 @@
 -- ask for one -- so none is invented here). A client who already adopted v1 (`coa_template_
 -- adoptions.template_id` naming v1's id) keeps exactly the 142-account chart they were given;
 -- nothing about this file's v2 row is reachable from an existing adoption, and this file writes
--- no row to `coa_template_adoptions` at all. A NEW client reaches the four rows only by a human
--- picking v2 (or a template forked from it) through the existing `list_coa_templates` /
--- `apply_coa_template` doors -- unchanged surfaces, no new door.
+-- no row to `coa_template_adoptions` at all. A NEW client reaches the four rows through the
+-- existing `list_coa_templates` / `apply_coa_template` doors -- unchanged surfaces, no new door --
+-- and since v1 is retired below, the ONE starter those doors offer is the one that carries them.
 --
 -- A NEW VERSION CARRIES FOUR TIERS, NOT TWO. clara.coa_template_entity_overrides (0156:388-412)
 -- is the THIRD child tier of a template and it is keyed BY template_id (0156:401,
@@ -122,7 +145,7 @@
 do $p295_pre$
 declare
   v1_id uuid; v1_version int; v1_state text; v1_fam int; v1_acc int; v1_hash text;
-  v2_id uuid; v_redo boolean := false; v_bad text; v_sha text;
+  v2_id uuid; v_redo boolean := false; v_bad text; v_sha text; v_n int;
   c_content_sha_pre constant text :=
     'd120669e12506c1a347729008e3f11785d62c914c3955f3dd6a099fd9b20baa7';
   c_freeze_pre constant text :=
@@ -139,7 +162,26 @@ begin
     raise exception '0295 prestate: the platform starter my_sme_starter v1 is absent -- 0150 has not landed on this database'
       using errcode = 'CLR10';
   end if;
-  if v1_state is distinct from 'published' then
+
+  -- IS THIS A REDO? my_sme_starter v2 is minted EXCLUSIVELY by this file, so its presence is this
+  -- data-only migration's own marker (there is no prosrc to embed one in). Decided HERE, before
+  -- v1's state is judged, because the two branches admit different states for v1.
+  select id into v2_id from clara.coa_templates
+   where scope = 'platform' and template_key = 'my_sme_starter' and version = 2;
+  v_redo := v2_id is not null;
+
+  -- v1's STATE. On a FIRST apply it is the published starter 0150 seeded and nothing else. On a
+  -- REDO it has ALREADY been retired by this file's own earlier apply, and a retired coa template
+  -- is immutable -- clara._tf_coa_template_freeze admits the draft -> published stamp and the
+  -- published -> retired stamp, and NO transition out of 'retired' (0150:604-633) -- so the redo
+  -- branch cannot and must not put it back. Both states are admitted there; nothing else is,
+  -- on either branch.
+  if v_redo then
+    if v1_state not in ('published', 'retired') then
+      raise exception '0295 prestate (REDO): my_sme_starter v1 is %, expected published or retired', v1_state
+        using errcode = 'CLR10';
+    end if;
+  elsif v1_state is distinct from 'published' then
     raise exception '0295 prestate: my_sme_starter v1 is %, not published', v1_state
       using errcode = 'CLR10';
   end if;
@@ -199,12 +241,18 @@ begin
   -- edit produces exactly what a first apply of the edited file would. Refused outright if v2
   -- somehow already has a client adoption (it should not -- this branch exists for an unmerged
   -- lane fixing its own mistake, never for real client data).
-  select id into v2_id from clara.coa_templates
-   where scope = 'platform' and template_key = 'my_sme_starter' and version = 2;
-  if v2_id is not null then
-    v_redo := true;
+  if v_redo then
     if exists (select 1 from clara.coa_template_adoptions where template_id = v2_id) then
-      raise exception '0295 redo: my_sme_starter v2 (%) already has a client adoption -- refusing to tear it down', v2_id
+      raise exception '0295 redo: my_sme_starter v2 (%) already has a client adoption -- refusing to tear it down. On a LANE database this is expected once the wave-4 battery (or dba-coding-lane-classification.test.mjs) has run: both plant real adoptions of the CURRENT published template. Delete those rig adoption rows before redoing; on any database carrying real client data, do not redo at all.', v2_id
+        using errcode = 'CLR10';
+    end if;
+    -- ...and refused, by NAME, if any other template was FORKED off v2. fk_coa_templates_
+    -- forked_from would otherwise raise a bare 23503 naming nothing, and a named prestate failure
+    -- beats a bare 23503 (0156's own words). Since this file retires v1, every new firm fork of
+    -- the platform starter comes off v2, so on a LANE database the pr-a battery produces dozens.
+    select count(*) into v_n from clara.coa_templates where forked_from = v2_id;
+    if v_n > 0 then
+      raise exception '0295 redo: % template(s) were forked off my_sme_starter v2 (%) -- refusing to tear it down, their lineage names it. On a LANE database this is expected once coa-template-pr-a.test.mjs has run (every fork of the platform starter now comes off v2, because this file retires v1): delete those rig firm templates before redoing.', v_n, v2_id
         using errcode = 'CLR10';
     end if;
     raise notice '0295 prestate: my_sme_starter v2 (%) already exists -- treating this as a #957 REDO of 0295 itself; its rows will be rebuilt from scratch.', v2_id;
@@ -225,8 +273,8 @@ begin
     alter table clara.coa_template_accounts enable trigger t_coa_template_accounts_freeze;
   end if;
 
-  raise notice '0295 prestate: clean (% apply) -- my_sme_starter v1 (%) is published, unmoved at 42 families / 142 accounts, hash %, carries none of 1180/2030/2040/2050, and the three functions this file depends on are at their pinned bodies.',
-    case when v_redo then 'REDO' else 'FIRST' end, v1_id, v1_hash;
+  raise notice '0295 prestate: clean (% apply) -- my_sme_starter v1 (%) is %, unmoved at 42 families / 142 accounts, hash %, carries none of 1180/2030/2040/2050, and the three functions this file depends on are at their pinned bodies.',
+    case when v_redo then 'REDO' else 'FIRST' end, v1_id, v1_state, v1_hash;
 end
 $p295_pre$;
 
@@ -239,7 +287,7 @@ set role clara_fn_owner;
 -- =====================================================================================
 do $p295_seed$
 declare
-  v1_id uuid; v2_id uuid; v_sha bytea;
+  v1_id uuid; v2_id uuid; v_sha bytea; v_retired int;
 begin
   select id into v1_id from clara.coa_templates
    where scope = 'platform' and template_key = 'my_sme_starter' and version = 1;
@@ -316,8 +364,33 @@ begin
      set state = 'published', published_at = now(), content_sha256 = v_sha
    where id = v2_id;
 
-  raise notice '0295 seed: my_sme_starter v2 (%) PUBLISHED -- 42 families / 146 accounts (142 carried over from v1 verbatim, 4 new: 1180 Accrued Income, 2030 Deferred Revenue, 2040 Salaries Payable, 2050 Rent Payable) and % entity override row(s) carried forward from v1, content_sha256 %.',
-    v2_id, (select count(*) from clara.coa_template_entity_overrides where template_id = v2_id), encode(v_sha, 'hex');
+  -- v1 IS RETIRED, in this same migration. ORCHESTRATOR RULING 2026-09-24 under the owner's
+  -- standing delegation, recorded on #941: two published platform starters carrying the IDENTICAL
+  -- title are a choice a bookkeeper cannot make correctly. clara.list_coa_templates() orders by
+  -- version ASCENDING (0150:1286), so the 142-account v1 renders ABOVE the 146-account v2 in
+  -- ApplyStandardChartControl, nothing marks either as current, and a human who picks the first
+  -- familiar option gets a client whose chart has NONE of the four rows the wave-4 lanes resolve
+  -- by name. Retiring v1 removes it from apps/web's published filter
+  -- (apps/web/lib/onboarding/coa.ts:137-149) without moving one row of it: a retired template is
+  -- still read by clara.get_coa_template and clara.list_coa_templates (neither filters on state),
+  -- so every existing adopter, every audit of what they adopted, and every fork already taken off
+  -- v1 are untouched.
+  --   CONDITIONAL on state='published' for two reasons, not one: clara._tf_coa_template_freeze
+  -- admits EXACTLY the published -> retired stamp and refuses every update to a retired row
+  -- (0150:604-633), and the REDO branch above finds v1 already retired by this file's own earlier
+  -- apply -- so this UPDATE must match zero rows there and raise nothing. That is what makes a
+  -- second apply after a redo byte-identical for v2 and a no-op for v1.
+  --   The freeze trigger stays ARMED for this statement (unlike the redo teardown, which disables
+  -- it to DELETE): published -> retired is the one transition it exists to admit, so letting it
+  -- run is the proof that this is that transition and not a disguised edit.
+  update clara.coa_templates
+     set state = 'retired', retired_at = now()
+   where id = v1_id and state = 'published';
+  get diagnostics v_retired = row_count;
+
+  raise notice '0295 seed: my_sme_starter v2 (%) PUBLISHED -- 42 families / 146 accounts (142 carried over from v1 verbatim, 4 new: 1180 Accrued Income, 2030 Deferred Revenue, 2040 Salaries Payable, 2050 Rent Payable) and % entity override row(s) carried forward from v1, content_sha256 %; my_sme_starter v1 % (its rows untouched), so the published platform starter is now v2 alone.',
+    v2_id, (select count(*) from clara.coa_template_entity_overrides where template_id = v2_id), encode(v_sha, 'hex'),
+    case when v_retired = 1 then 'RETIRED' else 'was already retired' end;
 end
 $p295_seed$;
 
@@ -328,16 +401,23 @@ reset role;
 -- =====================================================================================
 do $p295_tail$
 declare
-  v1_id uuid; v1_fam int; v1_acc int; v1_hash text;
+  v1_id uuid; v1_fam int; v1_acc int; v1_hash text; v1_state text; v1_has_retired_at boolean;
   v2_id uuid; v2_fam int; v2_acc int; v2_state text; v2_hash text;
   v2_created_by uuid; v2_published_by uuid; v2_forked_from uuid;
   v_bad text; v_n int; v_row record;
   c_v1_hash_pin constant text :=
     'd02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df';
 begin
-  -- T.1 v1 IS UNTOUCHED: same counts, same pinned hash, and it still reproduces its own hash.
-  select id into v1_id from clara.coa_templates
+  -- T.1 v1 IS RETIRED AND OTHERWISE UNTOUCHED: the retire stamp and NOTHING else -- same counts,
+  -- same pinned hash, and it still reproduces its own hash from its own rows. The retirement is a
+  -- STATE, never a content edit, so everyone who adopted v1 still reads exactly what they adopted.
+  select id, state, retired_at is not null into v1_id, v1_state, v1_has_retired_at
+    from clara.coa_templates
    where scope = 'platform' and template_key = 'my_sme_starter' and version = 1;
+  if v1_state <> 'retired' or not v1_has_retired_at then
+    raise exception '0295 tail T.1: my_sme_starter v1 is % (retired_at set: %) -- expected retired with its retire stamp', v1_state, v1_has_retired_at
+      using errcode = 'CLR10';
+  end if;
   select count(*) into v1_fam from clara.coa_template_families where template_id = v1_id;
   select count(*) into v1_acc from clara.coa_template_accounts where template_id = v1_id;
   select encode(content_sha256, 'hex') into v1_hash from clara.coa_templates where id = v1_id;
@@ -424,18 +504,23 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- T.6 EXACTLY TWO platform rows for my_sme_starter (v1, v2), BOTH published -- v1 was never
-  -- retired, so every existing adopter and every test that names it by version=1 is unaffected.
+  -- T.6 EXACTLY TWO platform rows for my_sme_starter (v1 retired, v2 published) and EXACTLY ONE
+  -- of them published -- the row the picker offers. Asserted against the base relation rather than
+  -- clara.list_coa_templates(), which is an INVOKER read whose answer depends on the caller's RLS
+  -- context; the function IS a straight projection of these rows (0150:1273-1287) and
+  -- wave4-chart-rows.test.mjs S6 drives it through a real firm session, which is the stronger
+  -- proof and the one the picker actually makes.
   select count(*) into v_n from clara.coa_templates
    where scope = 'platform' and template_key = 'my_sme_starter';
   if v_n <> 2 then
     raise exception '0295 tail T.6: my_sme_starter carries % platform rows, expected 2 (v1, v2)', v_n
       using errcode = 'CLR10';
   end if;
-  select count(*) into v_n from clara.coa_templates
-   where scope = 'platform' and template_key = 'my_sme_starter' and state = 'published';
-  if v_n <> 2 then
-    raise exception '0295 tail T.6: % of my_sme_starter''s platform rows are published, expected 2', v_n
+  select string_agg('v' || version || '/' || state, ', ' order by version) into v_bad
+    from clara.coa_templates
+   where scope = 'platform' and template_key = 'my_sme_starter';
+  if v_bad is distinct from 'v1/retired, v2/published' then
+    raise exception '0295 tail T.6: my_sme_starter''s platform rows read % -- expected exactly `v1/retired, v2/published`, one published starter and no choice between versions', v_bad
       using errcode = 'CLR10';
   end if;
 
@@ -499,7 +584,7 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice '0295 tail OK: my_sme_starter v1 (%) is unmoved at 42/142, hash %; v2 (%) is PUBLISHED, migration-authored, forked_from v1, at 42 families / 146 accounts with the four new rows exactly as specified, no code collision across the estate''s templates, the five special markers intact, 0156''s two society entity overrides carried forward row for row so a society client adopting v2 still gets 3900 as `Accumulated Fund` and no 3040, all three freeze triggers armed, and v2 itself now refuses a sixth account exactly as v1 does.',
+  raise notice '0295 tail OK: my_sme_starter v1 (%) is RETIRED with its retire stamp and otherwise unmoved at 42/142, hash %, so every existing adopter still reads exactly what they adopted and the picker now offers ONE starter; v2 (%) is PUBLISHED, migration-authored, forked_from v1, at 42 families / 146 accounts with the four new rows exactly as specified, no code collision across the estate''s templates, the five special markers intact, 0156''s two society entity overrides carried forward row for row so a society client adopting v2 still gets 3900 as `Accumulated Fund` and no 3040, all three freeze triggers armed, and v2 itself now refuses a sixth account exactly as v1 does.',
     v1_id, v1_hash, v2_id;
 end
 $p295_tail$;

@@ -7,34 +7,44 @@
 // are frozen -- clara.coa_template_accounts is FROZEN once its parent coa_templates row is
 // 'published' (t_coa_template_accounts_freeze / clara._tf_coa_template_child_freeze,
 // 0150:604-663), which is why 0295 mints a NEW template version (my_sme_starter v2) rather than
-// editing v1 in place: v1 stays published and untouched, forever.
+// editing v1 in place: v1's CONTENT is untouched forever, and 0295 then RETIRES v1 (orchestrator
+// ruling 2026-09-24 under the owner's standing delegation, recorded on #941) so the picker offers
+// ONE starter rather than a choice between two identically-titled ones -- a state stamp that
+// moves no row and that every reader of v1 (get_coa_template, list_coa_templates: neither filters
+// on state) still sees straight through.
 //
-// FOUR SEAMS, named up front (WORK-ORDER rule 4 -- the seams are the public interfaces the brief
+// SIX SEAMS, named up front (WORK-ORDER rule 4 -- the seams are the public interfaces the brief
 // names, and no test sits anywhere else):
 //   S1. THE TEMPLATE READ. The four rows are ABSENT from v1 (0150's own frozen seed, forever)
-//       and PRESENT on v2 (0295's own row), by code, name, type, family and every flag column --
-//       a direct read of clara.coa_template_accounts, the same RLS-gated relation
-//       clara.get_coa_template and clara.list_coa_templates already read from.
+//       and PRESENT on v2, by code, name, type, family and every flag column -- a direct read of
+//       clara.coa_template_accounts, the same RLS-gated relation clara.get_coa_template and
+//       clara.list_coa_templates already read from.
 //   S2. AN EXISTING CLIENT'S CHART IS NOT TOUCHED. clara.apply_coa_template COPIES rows out of
 //       whichever template_id the caller names (0156's own "copy-not-reference" header) into
 //       clara.coa_accounts, once, at apply time; no door in the estate re-syncs an already-
 //       planted chart against a template afterward ("publish template row to existing clients"
 //       is not a mechanism this estate has -- MEASURED: `grep -rn "publish.*existing client\|sync.*coa_accounts.*template\|backfill.*coa_accounts" packages/db packages/runtime apps/web`
-//       finds nothing, and none of the four rulings asks for one, so none is invented here). A
-//       client whose chart was built from v1 -- the only template that existed before this
-//       migration -- keeps exactly that chart; this cell drives clara.apply_coa_template against
-//       v1 for real and reads the planted chart back to prove it.
+//       finds nothing, and none of the four rulings asks for one, so none is invented here). 0295
+//       RETIRES v1 and the apply door refuses a template that is not published (0156:768), so the
+//       world in which a client could be born onto v1 is reconstructed inside a rolled-back
+//       transaction and the REAL door is driven there.
 //   S3. A NEW CLIENT GETS THE FOUR ROWS. Born through the REAL doors (clara.create_client, the
 //       onboarding plan's commit -- coa-template-pr-b-helpers.mjs's newInterviewClient, no
-//       surgery), then clara.apply_coa_template against the estate's CURRENT published template
-//       (the highest-version published my_sme_starter row -- the same
-//       `... order by version desc limit 1` convention dba-coding-lane-classification.test.mjs
-//       already uses for "whichever one is live"): the planted chart carries all four rows with
-//       the right types, and none is a control account.
+//       surgery), then clara.apply_coa_template against the estate's CURRENT published template:
+//       the planted chart carries all four rows with the right types, and none is a control
+//       account.
 //   S4. NO CODE COLLIDES ACROSS EVERY TEMPLATE THE ESTATE SHIPS. Each of the four new codes
 //       appears EXACTLY ONCE across the whole of clara.coa_template_accounts, scoped to
 //       scope='platform' templates (the shipped estate; a firm's own fork is that firm's
 //       business, never this migration's).
+//   S5. THE ENTITY OVERRIDES RIDE THE NEW VERSION. clara.coa_template_entity_overrides is a
+//       template's THIRD child tier and it is keyed by template_id (0156:401), so a new version
+//       carries none unless they are copied. v2's census equals v1's row for row, and a SOCIETY
+//       client driven through the same birth-and-apply doors gets 3900 relabelled `Accumulated
+//       Fund` and NO 3040 -- the mirror of coa-template-pr-b.test.mjs §5.1 on v2.
+//   S6. THE PICKER OFFERS ONE STARTER. clara.list_coa_templates(), driven through a REAL firm
+//       session (the read apps/web's listPublishedCoaTemplates makes), returns exactly ONE
+//       published my_sme_starter row -- version 2 -- with v1 retired and otherwise unmoved.
 //
 // Every positive read carries its own vacuity control (WORK-ORDER rule 4 / addendum): the
 // subject is broken once, inside a transaction opened and rolled back by withRolledBackTx
@@ -46,7 +56,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, ensureReady, buildWorld, endPool } from "./rig-fixtures.mjs";
-import { withRolledBackTx } from "./coa-template-pr-a-helpers.mjs";
+import { withRolledBackTx, listTemplates } from "./coa-template-pr-a-helpers.mjs";
 import {
   applyTemplate,
   newInterviewClient,
@@ -169,28 +179,44 @@ test("S2 · an existing client's chart, built from v1, carries none of the four 
   const admin = world.users.alice;
   const firm = world.firms.A;
 
-  // A client born and adopting v1 TODAY stands in for one born before 0295 ever existed:
-  // v1 is 0150's frozen artifact, unmoved by 0295 (S1 above, and 0295's own tail), so applying
-  // it now plants exactly the chart it would have planted before this migration landed.
+  // THE PREMISE, READ FIRST: v1 still carries exactly the 142 accounts it was published with and
+  // none of the four new codes (S1 above; 0295's own tail T.1 re-proves it from the catalog). So
+  // whatever a client copied out of v1 is still what v1 says.
+  const v1Acc = (await rootQuery("select count(*)::int n from clara.coa_template_accounts where template_id=$1", [v1.id])).rows[0].n;
+  assert.equal(v1Acc, 142, "mandatory setup: v1 is unmoved at 142 accounts");
+
+  // ...AND THE BEHAVIOUR, DRIVEN. 0295 RETIRES v1 (S6), and clara.apply_coa_template refuses a
+  // template that is not published (0156:768, `template_not_published`) -- so the world in which a
+  // client could be born onto v1 is one no door can reach any more. It is reconstructed here the
+  // way this estate reconstructs every state its doors cannot produce: inside a transaction
+  // withRolledBackTx guarantees is rolled back, v1 is put back to the state it was published in,
+  // the client is planted through the REAL door, and the rollback restores the retirement byte for
+  // byte. The client itself is born OUTSIDE the transaction, through clara.create_client and the
+  // onboarding commit door (coa-template-pr-b.test.mjs §5.2's own fixtures-outside/apply-inside
+  // discipline, because the helpers use the pool and the mutation is visible only on `c`).
   const client = await newInterviewClient(admin, firm, { tag: "s2" });
-  const receipt = await applyTemplate(admin, { client, template: v1.id, families: null, opKey: `w4-s2-${client}` });
-  assert.ok(receipt.accounts > 0, "mandatory setup: the chart was actually planted");
 
-  const chart = await clientChartMap(client);
-  for (const code of NEW_CODES) {
-    assert.equal(chart[code], undefined, `an existing (v1) client must not carry ${code} -- it is not on v1 at all`);
-  }
-  assert.equal(chart["2010"]?.name, "Other Payables", "mandatory setup: v1's own rows still plant normally");
+  const chart = await withRolledBackTx(async (c) => {
+    await c.query("set local role clara_fn_owner");
+    await c.query("alter table clara.coa_templates disable trigger t_coa_templates_freeze");
+    await c.query("update clara.coa_templates set state='published', retired_at=null where id=$1", [v1.id]);
+    await c.query("alter table clara.coa_templates enable trigger t_coa_templates_freeze");
+    await c.query("reset role");
+    const receipt = (await asHumanOn(c, admin, "select clara.apply_coa_template($1,$2,null::text[],$3) as r",
+      [client, v1.id, `w4-s2-${client}`])).rows[0].r;
+    assert.ok(receipt.accounts > 0, "mandatory setup: the chart was actually planted");
 
-  // No "publish template row to existing clients" mechanism exists in this estate (grepped: no
-  // hit for a backfill/sync door over coa_accounts against a template), and none of #941/#942/
-  // #946/#949's rulings asks for one -- so an existing client's chart staying exactly as it was
-  // adopted is the estate's actual, unmodified behaviour, not a gap this ticket leaves open.
+    const rows = (await c.query(
+      "select account_code, name from clara.coa_accounts where client_id=$1 order by account_code", [client])).rows;
+    const map = Object.fromEntries(rows.map((r) => [r.account_code, r.name]));
+    for (const code of NEW_CODES) {
+      assert.equal(map[code], undefined, `an existing (v1) client must not carry ${code} -- it is not on v1 at all`);
+    }
+    assert.equal(map["2010"], "Other Payables", "mandatory setup: v1's own rows still plant normally");
 
-  // VACUITY CONTROL: plant one of the new codes onto this SAME client's chart by hand (never
-  // through a door -- pure fixture surgery, inside a rolled-back transaction) and show the read
-  // above would have caught it.
-  await withRolledBackTx(async (c) => {
+    // VACUITY CONTROL, inside the same rolled-back transaction: plant one of the four codes onto
+    // this client's chart by hand (never through a door) and show the read above would have
+    // caught it.
     await c.query(
       `insert into clara.coa_accounts(client_id, firm_id, account_code, name, account_type, is_active, is_bank_account)
        values ($1, $2, '2030', 'sneak', 'liability', true, false)`,
@@ -198,7 +224,21 @@ test("S2 · an existing client's chart, built from v1, carries none of the four 
     );
     const broken = await c.query("select account_code from clara.coa_accounts where client_id=$1 and account_code='2030'", [client]);
     assert.equal(broken.rows.length, 1, "MUTANT: with 2030 planted by hand the read must find it");
+    return map;
   });
+  assert.ok(Object.keys(chart).length > 40, "the expectation itself is non-vacuous -- a real v1 chart was read");
+
+  // THE ROLLBACK RESTORED THE RETIREMENT, and the client has no chart at all: nothing this cell
+  // did survives it.
+  assert.equal((await rootQuery("select state from clara.coa_templates where id=$1", [v1.id])).rows[0].state,
+    "retired", "v1 is retired again after the rollback");
+  assert.equal((await rootQuery("select count(*)::int n from clara.coa_accounts where client_id=$1", [client])).rows[0].n,
+    0, "and the reconstructed chart was rolled back with it");
+
+  // No "publish template row to existing clients" mechanism exists in this estate (grepped: no
+  // hit for a backfill/sync door over coa_accounts against a template), and none of #941/#942/
+  // #946/#949's rulings asks for one -- so an existing client's chart staying exactly as it was
+  // adopted is the estate's actual, unmodified behaviour, not a gap this ticket leaves open.
 });
 
 // ---------------------------------------------------------------------------
@@ -349,4 +389,52 @@ test("S5 · a SOCIETY client applying the CURRENT template gets 3900 relabelled 
   assert.equal(mutated, "Retained Earnings",
     "MUTANT: delete the current template's relabel row and the society gets the mislabelled name back");
   assert.deepEqual(await census(current.id), onV1, "the shipping override rows survived the mutant");
+});
+
+// ---------------------------------------------------------------------------
+// S6 -- the picker shows ONE starter, and it is the one that carries the four rows
+// ---------------------------------------------------------------------------
+
+test("S6 · a firm session's own template list carries exactly ONE my_sme_starter row -- version 2, published -- and v1 is retired but unmoved", async (t) => {
+  if (unready(t)) return;
+
+  // THE READ THE PICKER MAKES, through the estate's own door and a real firm session -- not a
+  // root query. apps/web's ApplyStandardChartControl loads listPublishedCoaTemplates, which calls
+  // clara.list_coa_templates() and keeps the rows whose state is 'published'
+  // (apps/web/lib/onboarding/coa.ts:137-149); this drives that same door as a human and applies
+  // that same filter.
+  const listed = (await listTemplates(world.users.alice))
+    .filter((r) => r.scope === "platform" && r.template_key === "my_sme_starter");
+  const published = listed.filter((r) => r.state === "published");
+  assert.equal(published.length, 1,
+    `the picker must offer exactly ONE platform starter, not a choice between versions (saw ${JSON.stringify(published.map((r) => `v${r.version}/${r.state}`))})`);
+  assert.equal(published[0].version, 2, "and the one it offers is the version that carries the four new rows");
+  assert.equal(published[0].accounts, 146, "146 accounts -- v1's 142 plus the four");
+
+  // v1 IS STILL THERE, still readable, still exactly what 0150 seeded: retiring it removes it
+  // from the picker without moving a single row of the chart every existing adopter copied.
+  const one = listed.find((r) => r.version === 1);
+  assert.ok(one, "v1 must remain in the catalog -- a retired template is still read by everyone who adopted it");
+  assert.equal(one.state, "retired", "v1 is retired");
+  assert.notEqual(one.retired_at, null, "and carries its retire stamp");
+  assert.equal(one.families, 42, "v1 is unmoved at 42 families");
+  assert.equal(one.accounts, 142, "v1 is unmoved at 142 accounts");
+  assert.equal(one.content_sha256, "d02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df",
+    "v1's content hash is 0150's own, byte for byte");
+
+  // VACUITY CONTROL: put v1 back to published inside a rolled-back transaction and show the SAME
+  // read then offers two indistinguishable starters -- the state this fix exists to remove.
+  const twoRows = await withRolledBackTx(async (c) => {
+    await c.query("set local role clara_fn_owner");
+    await c.query("alter table clara.coa_templates disable trigger t_coa_templates_freeze");
+    await c.query("update clara.coa_templates set state='published', retired_at=null where id=$1", [v1.id]);
+    await c.query("alter table clara.coa_templates enable trigger t_coa_templates_freeze");
+    await c.query("reset role");
+    const r = await asHumanOn(c, world.users.alice,
+      "select version, title, state from clara.list_coa_templates() where scope='platform' and template_key='my_sme_starter' and state='published' order by version");
+    return r.rows;
+  });
+  assert.equal(twoRows.length, 2, "MUTANT: with v1 published again the picker offers two starters");
+  assert.equal(twoRows[0].title, twoRows[1].title,
+    "MUTANT: and the two carry the IDENTICAL title -- the reason one of them has to go");
 });

@@ -182,15 +182,31 @@ export async function humanAccountCodes(sub, template) {
 // ---------------------------------------------------------------------------
 
 /** Pinned to v1 explicitly -- 0295 (#941/#942/#946/#949's pre-step) mints my_sme_starter v2
- *  alongside it (a published template's rows are frozen, so a widened chart ships as a new
- *  version rather than an edit of v1; v1 stays published, untouched, forever). This whole file's
- *  battery is written to exercise 0150's OWN fixed 42-family / 142-account artifact, so it pins
- *  the row the same way coa-template-pr-b-helpers.mjs's sibling platformStarter() already does
- *  (`and version = 1`, coa-template-pr-b-helpers.mjs:198) rather than reading rows[0] off an
- *  unordered multi-row result once a second platform version exists. */
+ *  alongside it and RETIRES v1 (a published template's rows are frozen, so a widened chart ships
+ *  as a new version rather than an edit of v1, and two identically-titled published starters are
+ *  a choice a bookkeeper cannot make correctly). v1's own rows never move: the retirement is a
+ *  STATE stamp, and clara.get_coa_template / clara.list_coa_templates filter on no state at all.
+ *  This whole file's battery is written to exercise 0150's OWN fixed 42-family / 142-account
+ *  artifact -- J4 compares it to the research dossiers field by field, and names the only two
+ *  non-dossier accounts -- so it pins that row and keeps testing it exactly as before. The ONE
+ *  thing a retired template cannot do is be forked (`source_not_published`, 0150:869-872), so the
+ *  cells that need a forkable source take publishedPlatformStarter() below instead. */
 export async function platformTemplate() {
   const r = await rootQuery(
     "select * from clara.coa_templates where scope = 'platform' and template_key = 'my_sme_starter' and version = 1",
+  );
+  return r.rows[0] ?? null;
+}
+
+/** The platform starter the estate currently PUBLISHES -- the highest published version, which is
+ *  what clara.fork_coa_template admits as a source and what apps/web's picker offers. Since 0295
+ *  that is v2 (42 families / 146 accounts); before it, it was v1. Read by version rather than by
+ *  rows[0] off an unordered result, so it stays correct when a later migration mints v3. */
+export async function publishedPlatformStarter() {
+  const r = await rootQuery(
+    `select * from clara.coa_templates
+      where scope = 'platform' and template_key = 'my_sme_starter' and state = 'published'
+      order by version desc limit 1`,
   );
   return r.rows[0] ?? null;
 }
