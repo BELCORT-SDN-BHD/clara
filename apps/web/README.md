@@ -1408,36 +1408,61 @@ Three controls, each run and each reverted byte for byte:
 - **Non-vacuity.** `maxTicks: 1000`: red, `still reading after 400 settle passes (count 412)` — 412
   is 12 + 400, which is also the direct measurement of one read per hop.
 
-## #897 — the full-screen onboarding altitude leg (code-review fix round; still open)
+## #897 — the full-screen onboarding altitude leg
 
-**Not delivered.** #897's own AC1 asks for a mock-lane cell proving typed-but-unsubmitted
-interview answers and focus survive the rail-to-full-screen escalation; AC2/AC3 ask for the
-fixture and its ownership declaration. None of the three is built. This fix round did two things,
-neither of which counts as delivering the ticket:
+**Delivered**, in riders wave 3. This section is overwritten rather than appended to: the
+paragraphs it replaces described the state before the build and were still standing, contradicting
+the branch, until the code-review fix round (SPEC-897-4).
 
-**Fixed (SPEC-897-2): the AC4 header note no longer asserts coverage that does not exist.**
-`e2e/interview-walk.spec.ts`'s header used to say the arm is "proven without docker in a real
-built-app Playwright walk exactly like every other mock-lane spec in this directory" — no such
-walk exists anywhere, so the note recreated exactly the false-coverage state #897 exists to
-remove. Reworded to say plainly that the arm is not proven anywhere today and to name #897 as
-the open ticket.
+**The walk.** `e2e/agentic-finish-walk.spec.ts`'s #897 arm signs in, opens client C's rail, starts
+the interview, types an answer, escalates to full screen through the rail's own control, asserts
+the URL crossed the `(firm)` → `(full)` route-group boundary, re-attaches the run and reads the
+answer field back, then presses Back and asserts BOTH halves of AC1: the answer survived the
+second remount too, and keyboard focus is on the escalate control that opened it. Client C
+(`P6_5.clientC` / `threadC` / `planC` / `runC`, in `e2e/agentic-finish-mock.mjs`) is an OPEN,
+unanswered park no other cell in that file navigates to, which is AC2. N4's own-client-thread
+count moved 2 → 3 for it and `e2e/e2e-fixture-ownership.test.ts` passes with the two new runtime
+handlers censused as scoped, which is AC3. `e2e/interview-walk.spec.ts`'s header now records that
+the arm lives in the mock lane, which is AC4.
 
-**Reproduced (SPEC-897-1): the blocker is now backed by a runtime empirical result, not only a
-static trace.** `components/clara/interview-draft-persistence.test.tsx` (new) mounts a real
-`ClaraFullScreenThread` instance, types an unsubmitted answer, unmounts it without submitting,
-then mounts a second fresh instance against the identical server-side run and reads its answer
-field. Today it starts empty — confirming, by running the actual component rather than only
-reading its source, that `InterviewRunCard.tsx`'s `draft` (`useState("")`, two call sites total,
-no persistence) does not survive an unmount of the tree that held it. This is not #897's
-deliverable (it does not touch the rail, the route-group boundary or a mock fixture) and its own
-header says so; it is the cheapest empirical confirmation available before committing to the
-larger build, and it is the test whose assertion should flip once #897 lands real persistence.
+**The product change the walk needed.** The 2026-09-20 triage comment widened the ticket after
+tracing that a typed interview answer was not persisted anywhere. It is now:
+`claraThreadStore.interviewDrafts` (see that file's own header for why the key is `clientId`
+alone, and for why the ruling's "another thread" half is answered by the key's design rather than
+by a cell), read and written by `components/clara/InterviewRunCard.tsx` through
+`useSyncExternalStore`, and cleared only on a CONFIRMED submit — a refused park leaves the
+person's text where they can still fix and resend it.
 
-**Still needed, unchanged from the prior report:** an owner ruling on whether AC1's typed-data
-and focus-return criteria mean literal cross-route-group survival, and — if so — a new
-interview-runtime mock subsystem (an OPEN/unanswered park fixture plus
-`/api/runtime/interview/*` handlers reachable through the rail) that this lane scoped as a
-genuine multi-piece build, not a same-shape addition to an existing fixture.
+**And a second one, argued from AC1 rather than from the triage comment.** With draft persistence
+alone the walk still failed on `toBeFocused()`: the browser restores no focus across either leg of
+that navigation (`document.activeElement` was `<body>`). `lib/clara/rail-focus-return.ts` is the
+fix — the same best-effort, take-once `sessionStorage` marker idiom
+`lib/firm/portfolio-focus-return.ts` already established for the identical problem on Firm Home,
+scoped by client altitude so a marker from one client's escalate can never move focus on
+another's. It is a second production change under a ticket whose newest ruling named one, and the
+code review flagged it as such (SPEC-897-3): AC1's own words are "asserts keyboard focus returns
+to the triggering control", so it is inside the ticket as written, but whether it should have
+ridden this ticket or its own is the integrator's call, not this file's.
+
+**That focus fix shipped with a race, found and fixed in the code-review round.** `ClaraRail.tsx`
+took the one-shot marker DURING RENDER. React may render a component and throw the result away — a
+navigation is a transition, and a transition can be re-rendered — so the marker could be consumed
+by a render that never committed and be gone for the one that did. Measured, not reasoned: a
+traced run of this exact round trip showed two `ClaraRail` renders on the way back, the first
+taking the marker and matching, the second (whose effects actually ran, and which later rendered
+the escalate link) finding `null`. `--repeat-each=5` on the #897 arm was **4 red, 1 green**. The
+take now happens inside the effect, i.e. in the COMMIT phase, so only a render that survived can
+consume it; the `undefined` ref guard still makes it once-per-instance. `--repeat-each=10` after
+the fix: **10 green**, and the whole spec 10/10. `components/firm/firm-portfolio-section.tsx`
+carries the older render-phase form of the same idiom and the same hazard; nothing has reproduced
+it on that surface, so it is a follow-up rather than a change made here.
+
+**The component-level cells** (`components/clara/interview-draft-persistence.test.tsx`) keep the
+seam the wave-1 reproduction opened: one mounts a card, types, unmounts without submitting and
+mounts a fresh instance against the same run — its assertion is FLIPPED, the draft is back; the
+other proves clear-on-submit and preserve-on-refusal against two independent runs. What they
+cannot prove at this harness's altitude is the rendered, user-visible `.value` (the
+`HTMLTextAreaElementStub` gap that file's header documents); that is the browser walk's claim.
 
 ## #981 — the durable-Work refusal carrier, read once
 

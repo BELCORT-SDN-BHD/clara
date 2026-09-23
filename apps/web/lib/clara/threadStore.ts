@@ -162,7 +162,19 @@ interface ClaraStoreState {
    *  "Start / continue interview" again. `uq_onboarding_plans_one_open` (0017:1038-1039) means
    *  at most one OPEN plan, and therefore at most one live run, per client, so `clientId` alone
    *  is a real identity here — unlike the composer's draft, this has no second axis to nest
-   *  under. Memory-only, matching `drafts`'s own promise: no localStorage, no reload recovery. */
+   *  under. Memory-only, matching `drafts`'s own promise: no localStorage, no reload recovery.
+   *
+   *  THE RULING'S "ANOTHER THREAD" HALF IS ANSWERED BY THIS KEY, NOT BY A CELL, and that is a
+   *  deliberate deviation from its wording (#897's 2026-09-20 triage comment: the draft "never
+   *  leaks to another Client or another thread"). The CLIENT half is a real boundary and is
+   *  pinned by a cell (`threadStore.test.ts`, "ISOLATION BY CLIENT"). The THREAD half is not a
+   *  boundary at all here: `InterviewRunCard`'s only identity prop IS `clientId`
+   *  (`InterviewRunCard.tsx:43-50` — the component is never told which thread renders it), and
+   *  two Clara threads at one client's altitude show the SAME open plan's SAME run and its SAME
+   *  park. Nesting a thread axis under this key would not stop a leak; it would lose the draft
+   *  every time the reader switched threads at one client, which is the opposite of what the
+   *  ruling asks for. There is therefore no seam at which a "does not leak to another thread"
+   *  cell could be written without first inventing the axis it would test. */
   interviewDrafts: Record<string, string>;
 }
 
