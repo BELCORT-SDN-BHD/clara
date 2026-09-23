@@ -72,12 +72,16 @@ const RUNS = { client_id: "c1", runs: [] };
 const FA_PROFILES = [
   { id: "p1", asset_account_code: "1500", accum_depr_account_code: "1510", depr_expense_account_code: "6200", active: true, enrolled_at: "2026-01-01T00:00:00Z", retired_at: null },
 ];
+// #932 (migration 0277) — the panel now also reads the default depreciation policy relation;
+// empty here proves the "no policy set" happy path renders, not an unmocked-fetch error banner.
+const FA_POLICIES: unknown[] = [];
 
 const mockFetch = (async (u: RequestInfo | URL) => {
   const url = String(u);
   if (url.includes("/rpc/list_fixed_assets")) return jsonResponse(ASSETS_ENVELOPE);
   if (url.includes("/rest/v1/coa_accounts")) return jsonResponse(COA);
   if (url.includes("/rest/v1/fa_account_profiles")) return jsonResponse(FA_PROFILES);
+  if (url.includes("/rest/v1/fa_account_depreciation_policies")) return jsonResponse(FA_POLICIES);
   if (url.includes("/rpc/fa_register_tie")) return jsonResponse(TIE);
   if (url.includes("/rpc/get_depreciation_authority")) return jsonResponse(AUTHORITY);
   if (url.includes("/rpc/list_depreciation_runs")) return jsonResponse(RUNS);

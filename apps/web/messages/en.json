@@ -3616,6 +3616,7 @@
       "method": "Method",
       "incompleteNote": "{count} asset(s) have incomplete particulars.",
       "pendingParticulars": "Waiting on depreciation particulars",
+      "policyProvenance": "Particulars from {account} policy v{version}",
       "statuses": {
         "pending": "Pending",
         "active": "Active",
@@ -4596,6 +4597,30 @@
       "retireTrigger": "Retire",
       "retireTitle": "Retire this account profile",
       "retireDescription": "This does not free the account for any register row that already carries it — those rows keep the codes they were born with."
+    },
+    "policies": {
+      "heading": "Default depreciation policy",
+      "none": "No policy set — acquisitions still ask for particulars.",
+      "setTrigger": "Set default policy",
+      "changeTrigger": "Change policy",
+      "setTitle": "Set the default depreciation policy",
+      "setDescription": "Applied at every acquisition on this account that states no particulars, starting from that acquisition's own posting date. Changing this affects later acquisitions only — an asset already born keeps its own particulars.",
+      "methodLabel": "Method",
+      "methods": {
+        "straight_line": "Straight-line",
+        "reducing_balance": "Reducing balance",
+        "none": "None"
+      },
+      "usefulLifeLabel": "Useful life (months)",
+      "rateBpsLabel": "Annual rate (basis points)",
+      "residualLabel": "Residual value",
+      "reasonLabel": "Reason (optional)",
+      "summarySl": "{life} months",
+      "summaryRb": "{life} months at {rate}%/yr",
+      "versionLabel": "v{version}",
+      "retireTrigger": "Retire policy",
+      "retireTitle": "Retire the default depreciation policy",
+      "retireDescription": "New acquisitions on this account go back to asking for particulars. This does not touch any asset already born from this policy."
     },
     "tie": {
       "heading": "Register / GL tie-out",
