@@ -290,7 +290,7 @@ export const PAIR_SPECS = [
   // exact idiom `components/ui/command.tsx`'s own CommandItem selected state already uses on the
   // same `bg-muted` ground — which is why this row's fg is `foreground`, not `muted-foreground`.
   { id: "foreground-on-muted-selected-document-row", fg: (h) => h("foreground"), bg: (h) => h("muted"), threshold: 4.5,
-    source: "components/documents/filed-document-list.tsx's selected TableRow (data-selected -> bg-muted, its cells at text-foreground) — the row the wave-1/wave-2 axe flake measured, pinned on its own so a future regression back onto text-muted-foreground reds this specific id rather than silently sharing foreground-on-muted's citation" },
+    source: "components/documents/filed-document-list.tsx's selected TableRow (selectedId === document.id conditionally adds bg-muted; its cells then read text-foreground) — the row the wave-1/wave-2 axe flake measured, pinned on its own so a future regression back onto text-muted-foreground reds this specific id rather than silently sharing foreground-on-muted's citation" },
   { id: "foreground-on-clara-muted", fg: (h) => h("foreground"), bg: (h) => h("clara-muted"), threshold: 4.5,
     source: "components/clara/ClaraThreadView.tsx assistant chat bubble (bg-clara-muted, default/inherited text colour)" },
   { id: "secondary-ink-on-clara-muted", fg: (h) => h("secondary-ink"), bg: (h) => h("clara-muted"), threshold: 4.5,
