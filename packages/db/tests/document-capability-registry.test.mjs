@@ -107,10 +107,25 @@ const BUSINESS_OPERATION_LEVELS = Object.freeze([...LEVELS, "proposal_only"]);
  *  `business_operation` moves on NO row — `prior_gl` stays `stored_only`, exactly as #988's
  *  ruling above already settled — so the honesty cell at the foot of this file is unaffected.
  *
+ *  5 since #945's `0296_payroll_summary_typed_facts.sql`, which republished the WHOLE registry
+ *  again and changed CONTENT on the SIX `payroll_summary` rows the facts router now has a reader
+ *  for (heic/jpeg/pdf/png/tiff/webp — the pairs whose mime is application/pdf or image/*, which
+ *  is exactly the branch 0296's new `payroll_facts` arm sits on). `typed_facts` moves from
+ *  `stored_only` to `supported`, `limits` gains the two-key
+ *  `{"payroll_employee_detail":"accepted_limitation", "payroll_employee_detail_reason":
+ *  "quotes_are_summed_then_discarded"}` in #782's own shape, and the basis sentence that
+ *  described the router's dead end ("The facts router terminates this pair cleanly") is replaced
+ *  by one naming what is now read and what Clara still will not do. The verdict was DERIVED from
+ *  that dead end, so #926's owner ruling (2026-09-18, option G) removing it and this
+ *  republication are one change, not two. `business_operation` moves on NO row — #945 is the
+ *  READING half and #946 is the drafting one — so the honesty cell at the foot of this file is
+ *  unaffected, and the six csv/tsv/xlsx/docx/ofx/xml payroll rows keep their pre-#945 verdicts
+ *  because the router's payroll arm never reaches them.
+ *
  *  A future republication re-bases HERE, in one place, and says why beside the number — the
  *  precedent for editing this battery in the same commit as the migration is `af3b5955` (#779),
  *  which shipped 0207 and +147 lines of this file together. */
-const PUBLISHED_REGISTRY_VERSION = 4;
+const PUBLISHED_REGISTRY_VERSION = 5;
 
 let live = false;
 let executed = 0;
@@ -401,13 +416,24 @@ wallCompletionCell("the registry's OWN documentation of `limits` stops calling i
     "…with the sibling reason key that makes the limitation checkable");
 });
 
-cell("a payroll_summary PDF is stored and byte-extracted but NEVER facts- or operation-executable (skipped_kind is not executable)", async () => {
+// #945 (migration 0296) MOVED THIS CELL'S SUBJECT and the cell moved with it. Until then the
+// router terminated a payroll_summary as skipped_kind and this registry row was DERIVED from
+// that dead end. #926's owner ruling (2026-09-18, option G) reopened payroll reading, so the pdf
+// pair now has a reader. The half of the claim that was always the point — a pair whose facts
+// Clara does not post must never present as EXECUTABLE — is unchanged and still asserted.
+cell("a payroll_summary PDF is stored, byte-extracted and NOW facts-readable (#945), and still NEVER operation-executable", async () => {
   const c = await capability("pdf", "payroll_summary");
   assert.equal(c.custody, "supported");
   assert.equal(c.byte_extraction, "supported");
-  assert.equal(c.typed_facts, "stored_only", "the router's skipped_kind arm terminates this pair");
+  assert.equal(c.typed_facts, "supported", "the router's payroll_facts lane reads this pair (#945)");
   assert.notEqual(c.business_operation, "supported",
-    "a skipped_kind pair must never present as executable (ticket acceptance 1)");
+    "nothing is posted from a payroll read: #945 is the reading half, #946 the drafting one");
+  assert.equal(c.limits.payroll_employee_detail, "accepted_limitation",
+    "the per-employee detail is a named, permanent boundary — the persist door strips the quotes");
+  // A format the router's pdf/image branch never reaches keeps its pre-#945 verdict, which is
+  // what makes the six-row scope of the re-derivation checkable from outside the migration.
+  const csv = await capability("csv", "payroll_summary");
+  assert.equal(csv.typed_facts, "stored_only", "a csv payroll export has no reader on this lane");
 });
 
 cell("consent_evidence is facts-UNSUPPORTED and operation-UNSUPPORTED on every format (0014/H-53)", async () => {

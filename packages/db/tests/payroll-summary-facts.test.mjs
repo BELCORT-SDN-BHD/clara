@@ -31,6 +31,10 @@
 //       run's typed facts land as clara.document_regions rows with their source regions, a
 //       not-printed answer lands as a region that says so rather than as a zero, and NO
 //       employee-level figure is persisted anywhere.
+//   S6. THE CAPABILITY REGISTRY — clara._document_capability(text, text), the read every
+//       surface's promise about a (format, kind) pair is built from. The payroll summary's
+//       typed-facts axis stops being `stored_only` on the six formats the router now serves, its
+//       reason sentence says what is read, and the registry re-publishes at ONE new version.
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention).
 
@@ -849,4 +853,84 @@ test("S5 · the door refuses a malformed read at the write boundary, and the lan
     await rootQuery("select clara.fail_payroll_facts($1,$2) as receipt", [doc.taskId, "engine_error"])
   ).rows[0].receipt;
   assert.equal(again.replayed, true, "a second settle replays rather than re-failing");
+});
+
+// ---------------------------------------------------------------------------
+// S6 — the capability registry
+// ---------------------------------------------------------------------------
+
+/** The SIX formats the router's pdf/image arm actually serves — a pdf and the five raster
+ *  formats whose mime is image/*. Transcribed from the router's own mime test, not read back
+ *  out of the registry. */
+const PAYROLL_READ_FORMATS = ["heic", "jpeg", "pdf", "png", "tiff", "webp"];
+
+const capability = async (format, kind) =>
+  (await rootQuery("select clara._document_capability($1,$2) as c", [format, kind])).rows[0].c;
+
+test("S6 · the payroll summary's typed-facts axis stops being stored-only on the formats the router serves, and says what is read", async (t) => {
+  if (unready(t)) return;
+
+  for (const format of PAYROLL_READ_FORMATS) {
+    const c = await capability(format, "payroll_summary");
+    assert.equal(c.custody, "supported", `${format}: custody is unmoved by #945`);
+    assert.equal(c.byte_extraction, "supported", `${format}: byte extraction is unmoved by #945`);
+    assert.equal(c.typed_facts, "supported", `${format}: the pair now has a reader`);
+    assert.equal(c.business_operation, "stored_only",
+      `${format}: #945 is the READING half — nothing is posted from a payroll read yet, and the registry must not promise otherwise`);
+    assert.match(c.basis, /Typed facts are persisted with source regions by/,
+      `${format}: the reason sentence names the engine that reads it`);
+    assert.equal(/terminates this pair cleanly/.test(c.basis), false,
+      `${format}: the reason sentence must not still describe the dead end #945 removed`);
+    assert.match(c.basis, /never/i, `${format}: …and still says what Clara will not do`);
+    assert.equal(c.limits.payroll_employee_detail, "accepted_limitation",
+      `${format}: the per-employee detail is a named, permanent boundary, not a future build`);
+    assert.equal(c.limits.payroll_employee_detail_reason, "quotes_are_summed_then_discarded");
+  }
+
+  // The formats the router does NOT serve for this kind are untouched: a csv payroll export has
+  // no reader on this lane and the registry still says so.
+  for (const format of ["csv", "tsv", "xlsx", "docx", "ofx"]) {
+    const c = await capability(format, "payroll_summary");
+    assert.equal(c.typed_facts, "stored_only",
+      `${format}: the router's payroll arm is on the pdf/image branch only — this pair still has no reader`);
+    assert.equal(c.limits.payroll_employee_detail, undefined,
+      `${format}: a limit is only stated where the capability it bounds exists`);
+  }
+  const xml = await capability("xml", "payroll_summary");
+  assert.equal(xml.typed_facts, "unsupported", "xml x payroll_summary is unmoved — the local lane reads MyInvois UBL only");
+});
+
+test("S6 · the registry re-publishes at ONE new version, and nobody else's row moved", async (t) => {
+  if (unready(t)) return;
+
+  const r = (
+    await rootQuery(
+      `select count(distinct registry_version)::int as versions, min(registry_version)::int as v,
+              count(*)::int as rows from clara.document_capabilities`,
+    )
+  ).rows[0];
+  assert.equal(r.versions, 1, "the registry publishes exactly one version — a re-derivation is whole or it is drift");
+  assert.equal(r.v, 5, "…and it is 5 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5)");
+  assert.equal(r.rows, 240, "#945 inserts and deletes no registry row");
+
+  const drift = (
+    await rootQuery(
+      `select count(*)::int as n from clara.document_capabilities c
+         left join clara.document_capability_version_high_water h
+           on h.format = c.format and h.document_kind = c.document_kind
+        where h.format is null or h.registry_version is distinct from c.registry_version`,
+    )
+  ).rows[0].n;
+  assert.equal(drift, 0, "the high-water mark rose with the registry, every pair, through #846's ordinary writer path");
+
+  // Nothing but the twelve payroll_summary rows carries a payroll limit, and only six of those
+  // moved off stored_only.
+  const moved = (
+    await rootQuery(
+      `select format, document_kind from clara.document_capabilities
+        where limits ? 'payroll_employee_detail' order by format`,
+    )
+  ).rows;
+  assert.deepEqual(moved.map((x) => x.format), PAYROLL_READ_FORMATS);
+  assert.deepEqual([...new Set(moved.map((x) => x.document_kind))], ["payroll_summary"]);
 });

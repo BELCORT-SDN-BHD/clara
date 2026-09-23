@@ -151,10 +151,23 @@ begin
   end if;
 
   -- (e) THE CAPABILITY REGISTRY, which §G re-derives. It must publish exactly one version today,
-  -- and the twelve payroll_summary pairs must still carry the `stored_only` verdict §G replaces.
+  -- and that version must be the 4 this file raises FROM (first apply) or the 5 it raises TO
+  -- (redo) — anything else means another file republished between this file's two runs.
   select count(distinct registry_version)::int into v_n from clara.document_capabilities;
   if v_n <> 1 then
     raise exception '#945 prestate: the registry publishes % distinct registry_versions, not one', v_n
+      using errcode = 'CLR10';
+  end if;
+  select min(registry_version)::int into v_n from clara.document_capabilities;
+  if v_n not in (4, 5) then
+    raise exception '#945 prestate: the registry publishes version %, not the 4 this file raises from (nor the 5 it raises to on a redo)', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where document_kind = 'payroll_summary'
+     and (mime_type = 'application/pdf' or mime_type like 'image/%');
+  if v_n <> 6 then
+    raise exception '#945 prestate: % payroll_summary pair(s) sit on the router''s pdf/image branch, not the 6 measured on this rig', v_n
       using errcode = 'CLR10';
   end if;
   select count(*)::int into v_n from clara.document_capabilities;
@@ -2018,6 +2031,75 @@ grant execute on function clara.fail_payroll_facts(uuid, text) to clara_runtime;
 comment on function clara.fail_payroll_facts(uuid, text) is
   '#945: the terminal settle for a RUNNING payroll_facts task -- clara.fail_witness_facts'' shape exactly, with the payroll lane''s own admitted code vocabulary and its own lane-true event twin. clara_runtime only.';
 
+-- =====================================================================================
+-- §G  THE CAPABILITY REGISTRY IS RE-DERIVED (AC4, second half).
+--
+--     THE REGISTRY IS A DERIVED CLAIM, NOT AN OPINION. `stored_only` on the payroll summary's
+--     typed-facts axis was DERIVED from the router's own dead end — its reason sentence said so
+--     in words ("The facts router terminates this pair cleanly (skipped_kind / skipped_type):
+--     the document stays stored and readable and Clara derives no typed facts from it"). §E
+--     removed that dead end, so leaving the registry alone would not be conservatism, it would
+--     be a false statement about what this estate does. The two changes are one change.
+--
+--     SIX FORMATS MOVE, AND ONLY SIX. The router's payroll arm sits on the pdf/image mime
+--     branch, so exactly the pairs whose mime is application/pdf or image/* gain a reader: pdf,
+--     png, jpeg, tiff, webp, heic. csv/tsv/xlsx/docx and ofx keep `stored_only` — a spreadsheet
+--     payroll export has no reader on this lane and the registry must not imply one — and
+--     xml keeps `unsupported`, because the local lane reads MyInvois UBL only.
+--
+--     business_operation DOES NOT MOVE. #945 is the READING half; #946 is the drafting and
+--     posting half. A registry that promised an operation over facts nothing yet posts would be
+--     the exact overclaim this relation exists to prevent, and the live battery's own cell
+--     ("business_operation never claims supported where typed_facts is not supported") is
+--     one-directional precisely so that reading may run ahead of posting.
+--
+--     THE LIMIT IS NAMED, IN #782's OWN TWO-KEY SHAPE. The per-employee detail is not `planned`
+--     — it is a permanent boundary this lane is built to hold (§F strips the quotes inside the
+--     writer), so it is published as an `accepted_limitation` with a sibling reason key that
+--     says the checkable fact: the quotes are summed and then discarded.
+--
+--     UPDATE, NEVER DELETE-THEN-INSERT (#846's wall), and the version raise is REGISTRY-WIDE
+--     (0228's precedent, 0245's second use) because the registry's one-version law is enforced
+--     by both the live battery and 0244's deferred uniformity trigger.
+--
+--     REDO-SAFE, and this is the one place it took a decision: the raise is written as a
+--     SET-TO-LITERAL guarded by `where registry_version <> 5`, not as 0245's `+ 1`. A `+ 1`
+--     re-run would carry the registry to 6 and every later reader's expectation with it. The
+--     prestate accepts a registry at 4 (first apply) or already at 5 (redo) for the same reason
+--     every other pin in this file is bimodal.
+-- =====================================================================================
+set role clara_fn_owner;
+
+-- G1 · THE CONTENT. Additive on `limits` (0228's `limits || jsonb` idiom, which keeps any key a
+--      later file adds), and an outright rewrite of the two columns whose old values described
+--      the dead end. Scoped by MIME rather than by a transcribed format list, so it names the
+--      same six pairs the router's own branch does.
+update clara.document_capabilities
+   set typed_facts = 'supported',
+       basis = 'Bytes are sealed at intake and read by ' || engine_byte
+             || '. Typed facts are persisted with source regions by llm-openai:gpt-5.6-terra:payroll-witness-v1: '
+             || 'the run''s month and its printed totals for gross pay, employee and employer EPF, SOCSO and EIS, '
+             || 'PCB and any HRDF levy. Clara reports what the page prints and a deterministic evaluator does every sum — '
+             || 'she never adds anything up herself, never infers a rate or a threshold, and a figure the page does not '
+             || 'print is reported as not printed rather than filled with zero. The per-employee rows are quoted only so '
+             || 'the evaluator can sum and cross-check them and are never persisted. Nothing is posted from these facts '
+             || 'yet; the filing appears as work a person completes.',
+       limits = limits || jsonb_build_object(
+         'payroll_employee_detail', 'accepted_limitation',
+         'payroll_employee_detail_reason', 'quotes_are_summed_then_discarded')
+ where document_kind = 'payroll_summary'
+   and (mime_type = 'application/pdf' or mime_type like 'image/%')
+   and (typed_facts <> 'supported' or not (limits ? 'payroll_employee_detail'));
+
+-- G2 · THE REGISTRY-WIDE RAISE. One statement, every row, to the literal this file publishes at,
+--      so `count(distinct registry_version)` stays 1 — enforced by the live battery AND by
+--      0244's deferred constraint trigger. 0207's wall sees each row's transition and permits it
+--      because it is a raise; 0244's high-water writer raises every pair's mark in lockstep, as
+--      an AFTER trigger.
+update clara.document_capabilities
+   set registry_version = 5
+ where registry_version <> 5;
+
 reset role;
 
 -- =====================================================================================
@@ -2225,6 +2307,69 @@ begin
      and p.prosrc like '%''payroll'', jsonb_build_object(''channel'',''vision'',''answers'', v_vision_env->''payroll''->''answers'')%';
   if v_n <> 1 then
     raise exception '#945 tail: the persist door no longer builds BOTH stored envelopes from answers alone -- the per-employee strip is what keeps full payroll processing out of this estate'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 10 · THE REGISTRY RE-PUBLISHES, WHOLE, AT ONE NEW VERSION, and the six pairs that gained a
+  --      reader say what is read while nobody else's row moves.
+  select count(distinct registry_version)::int into v_n from clara.document_capabilities;
+  if v_n <> 1 then
+    raise exception '#945 tail: the registry publishes % distinct registry_versions -- the whole-registry raise is what keeps this at 1', v_n
+      using errcode = 'CLR10';
+  end if;
+  select min(registry_version)::int into v_n from clara.document_capabilities;
+  if v_n <> 5 then
+    raise exception '#945 tail: the registry publishes version %, not 5', v_n using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities;
+  if v_n <> 240 then
+    raise exception '#945 tail: the registry now holds % rows -- this file inserts and deletes nothing', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where document_kind = 'payroll_summary'
+     and (mime_type = 'application/pdf' or mime_type like 'image/%')
+     and typed_facts = 'supported'
+     and business_operation = 'stored_only'
+     and limits ->> 'payroll_employee_detail' = 'accepted_limitation'
+     and limits ->> 'payroll_employee_detail_reason' = 'quotes_are_summed_then_discarded'
+     and position('Typed facts are persisted with source regions by' in basis) > 0
+     and position('terminates this pair cleanly' in basis) = 0;
+  if v_n <> 6 then
+    raise exception '#945 tail: % of the 6 payroll pdf/image pairs carry the re-derived verdict, its named limit and a reason sentence that no longer describes the removed dead end', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where limits ? 'payroll_employee_detail' and document_kind <> 'payroll_summary';
+  if v_n <> 0 then
+    raise exception '#945 tail: % row(s) outside the payroll family carry a payroll limit', v_n using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where document_kind = 'payroll_summary' and typed_facts = 'supported'
+     and not (mime_type = 'application/pdf' or mime_type like 'image/%');
+  if v_n <> 0 then
+    raise exception '#945 tail: % payroll pair(s) OFF the router''s pdf/image branch claim a reader they do not have', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n
+    from clara.document_capabilities c
+    left join clara.document_capability_version_high_water h
+      on h.format = c.format and h.document_kind = c.document_kind
+   where h.format is null or h.registry_version is distinct from c.registry_version;
+  if v_n <> 0 then
+    raise exception '#945 tail: % pair(s) carry a high-water mark that disagrees with the published registry after the raise', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where business_operation = 'supported' and typed_facts <> 'supported';
+  if v_n <> 0 then
+    raise exception '#945 tail: % row(s) promise an operation over facts that do not exist', v_n using errcode = 'CLR10';
+  end if;
+  if pg_catalog.has_table_privilege('clara_authenticated','clara.document_capabilities','INSERT')
+     or pg_catalog.has_table_privilege('clara_authenticated','clara.document_capabilities','UPDATE')
+     or pg_catalog.has_table_privilege('clara_authenticated','clara.document_capabilities','DELETE')
+     or pg_catalog.has_table_privilege('clara_agent_ro','clara.document_capabilities','SELECT') then
+    raise exception '#945 tail: an application role gained a write grant (or the agent lane gained SELECT) on the registry'
       using errcode = 'CLR10';
   end if;
 
