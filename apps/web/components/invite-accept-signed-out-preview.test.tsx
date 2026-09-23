@@ -156,3 +156,53 @@ test("p871.web.signed_out: every failed read renders NOTHING extra and never tak
     assert.equal(/not valid|expired|revoked/i.test(text), false, `${label}: no verdict is printed`);
   }
 });
+
+test("p871.web.signed_out: the credential-holding reader is reachable ONLY from the server, and the client component imports it as a TYPE", async () => {
+  // THE PROPERTY THE OWNER'S RULING PUTS FIRST: "the web app never holds the credential" in
+  // anything a browser can reach. `lib/firm/invite-preview-public.ts` reads
+  // `CLARA_AUTH_WALL_SERVICE_TOKEN` at request time, so an import of it from a `"use client"`
+  // module would put that read into a client chunk. This is a source census rather than a bundle
+  // scan because it fails at the point a reviewer can act on — the import — instead of after a
+  // build, and because a bundle scan can only ever say "not in THIS build".
+  const { readFileSync, readdirSync, statSync } = await import("node:fs");
+  const { join, dirname, relative } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const webRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      if (entry === "node_modules" || entry === ".next") continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry)) files.push(full);
+    }
+  };
+  for (const dir of ["app", "components", "lib"]) walk(join(webRoot, dir));
+
+  const importers = files
+    .filter((f) => /from "[^"]*firm\/invite-preview-public"/.test(readFileSync(f, "utf8")))
+    .map((f) => relative(webRoot, f).replace(/\\/g, "/"))
+    .sort();
+  assert.deepEqual(
+    importers,
+    ["app/(entry)/invite/[token]/page.tsx", "components/invite-accept-form.tsx"],
+    "closed world: the server component that READS it, and the client component that names its TYPE",
+  );
+
+  const page = readFileSync(join(webRoot, "app/(entry)/invite/[token]/page.tsx"), "utf8");
+  assert.equal(/"use client"/.test(page), false, "the page that holds the credential must stay a SERVER component");
+
+  const form = readFileSync(join(webRoot, "components/invite-accept-form.tsx"), "utf8");
+  assert.match(form, /"use client"/, "the form is a client component -- which is why the next line matters");
+  assert.match(
+    form,
+    /import type \{[^}]*PublicInvitePreviewOutcome[^}]*\} from "@\/lib\/firm\/invite-preview-public"/,
+    "a TYPE-ONLY import, erased at build: the client chunk never pulls in the module that reads the service token",
+  );
+  assert.equal(
+    /CLARA_AUTH_WALL_SERVICE_TOKEN/.test(form),
+    false,
+    "and no client module names the credential at all",
+  );
+});
