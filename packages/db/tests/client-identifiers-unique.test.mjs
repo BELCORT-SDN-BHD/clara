@@ -624,16 +624,40 @@ test("ci-12 · the wall's STRUCTURE, read by property, and the prosrc-text write
       where p.pronamespace = 'clara'::regnamespace
         and p.prosrc ~* '(insert[[:space:]]+into|merge[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(clara[[:space:]]*\\.[[:space:]]*)?client_identifiers([^A-Za-z0-9_]|$)'
       order by 1`, [INDEX]);
+  // #899 (0287_client_birth_wall.sql) added a THIRD body to this census: clara._client_birth_core,
+  // the shared core behind open_client_onboarding / begin_client_onboarding. It carries NO
+  // unique_violation map, and that is correct rather than an omission — MEASURED, not assumed: the
+  // body MINTS its own client (`insert into clara.clients … returning id into v_client`) and only
+  // then writes the identifier, so this index's key (client_id, kind, value_normalized) is
+  // necessarily fresh on that write and 23505 on THIS index is unreachable from it. The
+  // cross-CLIENT duplicate the lane actually has to answer for is walled one level up, by
+  // clara.client_identity_candidates under the family advisory lock, with its own typed CLR10.
+  // The exemption is not taken on trust: its premise is pinned mechanically below, so a later edit
+  // that made this body write an identifier for a client it did not just create fails HERE.
+  const BIRTH = "clara._client_birth_core(uuid,uuid,text,jsonb,uuid,boolean,text,text)";
   assert.deepEqual(writers.rows.map((r) => r.sig).sort(), [
     "clara._add_bank_account_core(jsonb,uuid,text,text,text,text,uuid,text)",
+    BIRTH,
     "clara.add_client_identifier(uuid,text,text,text)",
-  ], "exactly two clara functions name a DML against clara.client_identifiers — a third needs the unique_violation map before it merges");
-  assert.ok(writers.rows.every((r) => r.maps),
-    `both writers must carry the NARROW re-raise guard for ${INDEX} — a comment naming the index does not count`);
+  ], "exactly three clara functions name a DML against clara.client_identifiers — a fourth needs the unique_violation map, or this one's measured freshness argument, before it merges");
+  assert.ok(writers.rows.filter((r) => r.sig !== BIRTH).every((r) => r.maps),
+    `every writer that can reach a pre-existing key must carry the NARROW re-raise guard for ${INDEX} — a comment naming the index does not count`);
   // One guard per guarded insert: add_client_identifier has one write, _add_bank_account_core has
   // two. A handler deleted from just ONE of the bank core's two inserts is caught here.
   const byName = new Map(writers.rows.map((r) => [r.sig, Number(r.guards)]));
   assert.equal(byName.get("clara.add_client_identifier(uuid,text,text,text)"), 1);
   assert.equal(byName.get("clara._add_bank_account_core(jsonb,uuid,text,text,text,text,uuid,text)"), 2,
     "_add_bank_account_core guards BOTH of its client_identifiers inserts, not just the first");
+  assert.equal(byName.get(BIRTH), 0,
+    "clara._client_birth_core has gained a guard line — if it can now collide, drop the exemption above and require the map of it too");
+
+  // THE EXEMPTION'S OWN PREMISE, read off the LIVE body rather than argued in prose: the client is
+  // minted in this same body, BEFORE the identifier write.
+  const birth = (await rootQuery(
+    "select p.prosrc from pg_proc p where p.oid = $1::regprocedure", [BIRTH])).rows[0].prosrc;
+  const mints = birth.indexOf("insert into clara.clients(firm_id, name, status)");
+  const writes = birth.indexOf("insert into clara.client_identifiers");
+  assert.ok(mints >= 0 && writes > mints,
+    "clara._client_birth_core no longer mints its own client before writing that client's identifier — "
+    + `the exemption from the ${INDEX} map rests on exactly that order, so re-argue it or give the body the map`);
 });
