@@ -412,7 +412,14 @@ export function reviseIntent(args: {
  *  lineage). One un-dead disposal draft per asset — a second call while one
  *  is outstanding refuses CLR39 `disposal_draft_outstanding`, named on the
  *  register row itself (`disposal_draft_outstanding`/`disposal_draft_entry_id`
- *  above) before the human ever opens this dialog. */
+ *  above) before the human ever opens this dialog.
+ *
+ *  #978 — ONE DECISION, ONE KEY, the same house shape #651 wired onto the run/authority/revise
+ *  doors. This wrapper used to mint `crypto.randomUUID()` inside itself, so a retry after a lost
+ *  response was a NEW operation to the door's own `_reserve_op` dedupe (0041:3662-3672) rather
+ *  than a replay of the disposal that had already earned its receipt. The caller now holds the
+ *  key for the life of the open decision (`disposeIntent` below is the tuple it is keyed on;
+ *  `useDepreciationDecisionKey`, lib/registers/depreciation.ts, is the holder). */
 export function disposeFixedAsset(
   session: SessionTokenAccessor,
   args: {
@@ -425,6 +432,7 @@ export function disposeFixedAsset(
     lossAccount: string;
     memo: string | null;
     costPortionCents?: number | null;
+    opKey: string;
   },
 ): Promise<unknown> {
   return callDoor(
@@ -438,9 +446,38 @@ export function disposeFixedAsset(
       p_gain_account: args.gainAccount,
       p_loss_account: args.lossAccount,
       p_memo: args.memo,
-      p_op_key: crypto.randomUUID(),
+      p_op_key: args.opKey,
       p_cost_portion_cents: args.costPortionCents ?? null,
     },
     { session },
   );
+}
+
+/** The intent tuple a DISPOSAL decision is identified by — exactly the tuple
+ *  `clara.dispose_fixed_asset` hashes into its own operation key (0041:3662-3672: `client`,
+ *  `asset`, `disposal_date`, `proceeds_cents`, `proceeds_account`, `gain_account`, `loss_account`,
+ *  `cost_portion_cents`). `memo` is DELIBERATELY EXCLUDED, following the door's own comment
+ *  there (0041:3667-3671): two calls sharing an op_key and differing only in their note are the
+ *  SAME disposal relabelled, so editing only the memo inside the open dialog stays ONE decision
+ *  rather than minting a new key for a relabel. */
+export function disposeIntent(args: {
+  clientId: string;
+  assetId: string;
+  disposalDate: string;
+  proceedsCents: number;
+  proceedsAccount: string | null;
+  gainAccount: string;
+  lossAccount: string;
+  costPortionCents?: number | null;
+}): string {
+  return [
+    args.clientId,
+    args.assetId,
+    args.disposalDate,
+    String(args.proceedsCents),
+    args.proceedsAccount ?? "",
+    args.gainAccount,
+    args.lossAccount,
+    args.costPortionCents == null ? "" : String(args.costPortionCents),
+  ].join("|");
 }
