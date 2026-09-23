@@ -1236,6 +1236,21 @@ form and, later, the v21 chat tool post through it, which is what makes ONE `cla
 the whole lane's admission. Its 202 carries `invoice_id`, the RESOLVED `counterparty_id` and the
 **derived** `due_date` / `due_date_source` — four facts the browser could not have computed.
 
+**#1007 — the probe sits beside the admission, over the admission's own translation.**
+`POST /api/work/trade-invoice/duplicates` takes `{ clientId, kind, invoice }` — the SAME wire
+`invoice` the admission takes — runs the SAME `toDbTradeInvoice`, and asks
+`clara.probe_trade_invoice_duplicates_for` (the actor-explicit twin; a `clara_runtime` connection
+carries no JWT claims, so `clara._human_ctx` cannot answer for one). It answers **200** with the
+door's whole answer: nothing is admitted here. A refusal rides the admission's own responder, so
+the browser reads one vocabulary either way, and the form treats any non-200 as "no warning".
+
+The route exists because the browser used to call the door directly with the WIRE spelling
+(`documentDate`, `totalCents`) while the door reads the database's (`document_date`,
+`total_cents`), so the "same money on the same day" signal could never fire from the shipped form.
+`apps/web` does not depend on this package, so one translation on the server is the alternative to
+two hand-written ones. `tests/trade-invoice-e2e.mjs` leg 8 drives the browser's own wire body
+through this route against a real database and sees that signal fire.
+
 **#1007 — the door also carries the choice a warned person made.** `POST /api/work/trade-invoice`
 takes one optional key, `acknowledgeDuplicates`: the ids of the earlier invoices the person was
 SHOWN and recorded anyway. `toAcknowledgedInvoiceIds` is the shape guard (a list of ids,

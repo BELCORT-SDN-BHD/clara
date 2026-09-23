@@ -655,11 +655,24 @@ render INLINE as a choice.
 never refuses.** The owner ruled on 2026-09-20: check at the recording step, warn, and let the
 person decide. So the submit path gained ONE state between validation and the write — `warned` —
 and **nothing is admitted while the form is in it**. The advisory read is
-`probeTradeInvoiceDuplicates` (`lib/work/api.ts`), a PostgREST call to
-`clara.probe_trade_invoice_duplicates` as the signed-in bookkeeper, injectable as the `probe`
-seam beside `submit` for the same reason that one is. A probe that cannot answer returns NOTHING
-TO SHOW and the recording goes through: a failed advisory read that blocked a lawful recording
-would be the refusal the owner ruled out, arriving by the back door.
+`probeTradeInvoiceDuplicates` (`lib/work/api.ts`), injectable as the `probe` seam beside `submit`
+for the same reason that one is. A probe that cannot answer returns NOTHING TO SHOW and the
+recording goes through: a failed advisory read that blocked a lawful recording would be the
+refusal the owner ruled out, arriving by the back door.
+
+**It rides the admission's own runtime route, not a door call of its own**, and that is load
+bearing rather than tidy. The first cut posted the form's wire body straight to PostgREST, and the
+wire's keys are the browser's (`documentDate`, `totalCents`) while
+`clara.probe_trade_invoice_duplicates` reads the database's (`document_date`, `total_cents`): the
+"same money on the same day" signal — the one that catches a MISSING or MISTYPED document number —
+could never fire from the only shipped entrance, so an unnumbered duplicate bill was never warned
+about at all. `apps/web` deliberately does not depend on `@clara/runtime`
+(`lib/registers/fa-refusal-field.ts` states that rule and mirrors a map by hand for it), so the
+choice was a second hand-written translation in the browser or ONE on the server.
+`POST /api/work/trade-invoice/duplicates` is that one: it runs the SAME `toDbTradeInvoice` the
+admission runs, on the same body, and then asks the actor-explicit twin the chat lane will use —
+so the form and the chat lane cannot be shown different answers, and the two spellings cannot
+drift apart again.
 
 The banner names each earlier document by what the BOOKS hold — its number, its document date,
 its total and which signal fired — with a link to the Work that recorded it, and offers exactly
@@ -673,11 +686,26 @@ and asserts on what the RUNTIME received, not on what the page painted.
 MyInvois requires the buyer TIN and BRN, so a Malaysian document carries both and the TIN is
 sometimes the only identifier that tells two candidates apart. The door has always carried each
 candidate's `tin`; this form mapped id, name and registration number and dropped it, so it never
-reached the screen. It now renders labelled (`Reg. …` / `TIN …`) beside the name. Migration 0274's
+reached the screen. It now renders labelled (`Reg. …` / `TIN …`) beside the name, and beside THAT,
+where the door says so, which identifier reached that candidate (`matched_on`) — which is what
+makes the chooser a choice between the document's identifiers rather than a list of names. A
+refusal whose candidates carry no `matched_on` renders no label: an invented one would be a
+sentence the door never said. `party_ambiguous` raised from a TIN also gets its own sentence,
+keyed on `detail.matched_on`; before that the screen answered a TIN-only submission with "More
+than one party answers to that name", a name it never sent. Migration 0274's
 `party_identifier_conflict` — the document's registration number and its TIN name two different
 live parties — renders through the SAME banner and the SAME chooser, because the remedy is the
 same act; it has its own sentence because the person is choosing between two identifiers the
 document carries, not between two parties one identifier reaches.
+
+**#1007 — and a reviewer can see the warning afterwards.** The Work detail's trade-invoice block
+reads `clara.get_trade_invoice_duplicate_ack` beside `clara.get_trade_invoice` and, when the
+preparer was warned and went ahead, says WHO chose it and WHICH earlier document they were shown
+(by the number the books hold, not the one that was retyped). A recording nobody was warned about
+says nothing at all, and a FAILED read is indistinguishable from that: the page never claims a
+recording was *not* a duplicate, and nothing on it is blocked by the read. Without this line the
+ticket's purpose clause — "so a reviewer can tell a knowing second recording from an accident" —
+was true of the database and of no screen.
 
 **AC5's mutual links**: ONE block on the Work detail, from `clara.get_trade_invoice` — the kind,
 the party, the two dates, the reference and, once posted, the entry, the open item and its

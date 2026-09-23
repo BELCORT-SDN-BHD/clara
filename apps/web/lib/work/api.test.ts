@@ -16,7 +16,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  cancelWork, probeWork, restateWork, retryWork, submitJournalWork, submitPeriodicAdjustmentWork,
+  cancelWork, probeTradeInvoiceDuplicates, probeWork, restateWork, retryWork, submitJournalWork,
+  submitPeriodicAdjustmentWork,
   submitStaffExpenseClaimWork, submitTradeInvoiceWork, takeOverWork,
   type JournalBasisWire,
 } from "./api";
@@ -788,4 +789,86 @@ test("981.web: `restateWork`'s 409 carries the carrier — `superseded_by` and a
       },
     );
   }
+});
+
+// ============================================================================================
+// #1007 (fix round, review finding S-1) — THE DUPLICATE PROBE'S TRANSPORT.
+//
+// The probe first shipped as a DIRECT PostgREST call carrying the browser's own wire body, whose
+// keys are camelCase (`documentDate`, `totalCents`), while `clara._trade_invoice_probe_core`
+// reads the database's spelling (`document_date`, `total_cents`). The "same money on the same
+// day" signal — the one that catches a missing or mistyped document number — could therefore
+// never fire from the only shipped entrance. The probe now rides the SAME runtime route the
+// admission rides, which translates the wire with the ONE `toDbTradeInvoice` the admission uses,
+// so the two spellings cannot drift apart again.
+// ============================================================================================
+
+test("1007.web: the duplicate probe rides the admission's own runtime route, carrying the WIRE body for the route to translate", async () => {
+  await withFetch(
+    () => json({
+      client_id: "c1", kind: "supplier_bill", counterparty_id: "cp1", match_count: 1,
+      matches: [{
+        invoice_id: "inv-1", work_id: "w-1", signals: ["same_total_and_date"],
+        reference: null, document_date: "2026-03-04", total_cents: 106000,
+      }],
+    }, 200),
+    async (seen) => {
+      const out = await probeTradeInvoiceDuplicates(auth, {
+        clientId: "c1", kind: "supplier_bill",
+        invoice: {
+          counterparty: { id: "cp1" }, documentDate: "2026-03-04", dueDate: null,
+          dueDateSource: "absent", reference: null, currency: "MYR", totalCents: 106_000,
+          taxFacts: null,
+        },
+      });
+      assert.equal(seen.length, 1, "one request");
+      const call = seen[0];
+      assert.ok(call, "…recorded");
+      assert.equal(call.url, "/api/runtime/work/trade-invoice/duplicates",
+        "…to the runtime route beside the admission, never to a door of its own");
+      const sent = JSON.parse(String(call.init?.body)) as Record<string, unknown>;
+      assert.equal(sent.clientId, "c1");
+      assert.equal(sent.kind, "supplier_bill");
+      assert.deepEqual((sent.invoice as Record<string, unknown>).documentDate, "2026-03-04",
+        "…carrying the WIRE spelling, because the route owns the ONE translation into the door's");
+      assert.equal((sent.invoice as Record<string, unknown>).totalCents, 106_000);
+      assert.deepEqual(out, [{
+        invoiceId: "inv-1", workId: "w-1", signals: ["same_total_and_date"],
+        reference: null, documentDate: "2026-03-04", totalCents: 106_000,
+      }]);
+    },
+  );
+});
+
+test("1007.web: a probe that cannot answer shows NO warning — it never becomes a refusal", async () => {
+  // The owner's ruling of 2026-09-20 is that Clara warns and the person decides. An advisory read
+  // that turned a 400, a 401 or an unreadable body into a blocked recording would be the refusal
+  // that ruling forbids, arriving by the back door.
+  for (const status of [400, 401, 404, 500]) {
+    await withFetch(
+      () => json({ error: "invalid_basis", reason: "party_unresolved" }, status),
+      async () => {
+        assert.deepEqual(await probeTradeInvoiceDuplicates(auth, {
+          clientId: "c1", kind: "supplier_bill", invoice: {},
+        }), [], `status ${status} shows nothing`);
+      },
+    );
+  }
+  await withFetch(
+    () => json({ match_count: 0 }, 200),
+    async () => {
+      assert.deepEqual(await probeTradeInvoiceDuplicates(auth, {
+        clientId: "c1", kind: "supplier_bill", invoice: {},
+      }), [], "a 200 with no matches key is no warning either");
+    },
+  );
+  await withFetch(
+    () => json({ matches: [] }, 200),
+    async (seen) => {
+      assert.deepEqual(await probeTradeInvoiceDuplicates(noSession, {
+        clientId: "c1", kind: "supplier_bill", invoice: {},
+      }), [], "and a lapsed session shows nothing");
+      assert.equal(seen.length, 0, "…without reaching the network at all");
+    },
+  );
 });

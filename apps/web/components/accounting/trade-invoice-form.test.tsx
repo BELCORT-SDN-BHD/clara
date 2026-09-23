@@ -520,3 +520,89 @@ test("1007 — a probe that cannot answer never blocks a recording, and a client
   assert.equal(/already recorded|looks like one/i.test(String(clean.text())), false,
     "…and no warning is painted");
 });
+
+// ============================================================================================
+// FIX ROUND (wave 3, lane 02) — review findings S-2 and S-3.
+// ============================================================================================
+
+test("ticket 982 — a TIN several parties hold is answered with a sentence about the TIN, never about a name the submission never carried", async () => {
+  // 0274 made `party_ambiguous` reachable from a TIN. The screen kept the one sentence the name
+  // branch has ever had — "More than one party answers to that name." — so a submission whose
+  // ONLY identifier was a tax number was answered about a name it never sent. The door says which
+  // identifier it was (`detail.matched_on`); this is the mapping that stops dropping it.
+  const h = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
+      detail: { reason: "party_ambiguous", matched_on: "tin", tin: "C13579246802" },
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: null, tin: "C13579246802", matched_on: "tin" },
+        { counterparty_id: BETA, name: "Beta Trading Sdn Bhd", registration_no: null, tin: "C13579246802", matched_on: "tin" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  assert.ok(String(h.text()).includes("holds that tax identification number"),
+    "the sentence is about the identifier that WAS submitted");
+  assert.equal(String(h.text()).includes("answers to that name"), false,
+    "…and never about a name the submission did not carry");
+  assert.ok(String(h.text()).includes("party_ambiguous"),
+    "…while the door's own CODE is unchanged, because the refusal is the same one");
+});
+
+test("ticket 982 — a name-branch `party_ambiguous` keeps 0225's own sentence, unchanged", async () => {
+  // The other half of the same claim: the mapping is a DEFAULT keyed on what the door said, never
+  // a rewrite. A refusal that names no identifier reads exactly as it always has.
+  const h = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
+      detail: { reason: "party_ambiguous", name: "Alpha Supplies" },
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001" },
+        { counterparty_id: BETA, name: "Alpha Supplies Trading", registration_no: "200101000002" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  assert.ok(String(h.text()).includes("More than one party answers to that name"),
+    "0225's sentence, byte for byte");
+});
+
+test("ticket 982 — the chooser says WHICH identifier reached each candidate, and says nothing where the door said nothing", async () => {
+  // CONTEXT.md's "Identifier conflict" entry promises exactly this, and the browser walk asserts
+  // it: "Clara stops and shows both, with the identifier that reached each one". Nothing rendered
+  // `matched_on` — the walk's two fixture candidates simply happened to carry disjoint
+  // identifiers, so the claim was never driven.
+  const h = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
+      detail: { reason: "party_ambiguous", matched_on: "tin", tin: "C13579246802" },
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: null, tin: "C13579246802", matched_on: "tin" },
+        { counterparty_id: BETA, name: "Beta Trading Sdn Bhd", registration_no: null, tin: null, matched_on: "name" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  assert.ok(String(h.text()).includes("Matched the tax identification number"),
+    "the candidate the TIN reached says so");
+  assert.ok(String(h.text()).includes("Matched the name"),
+    "…and the candidate the NAME reached says so, which is the whole point of showing both");
+
+  // A refusal whose candidates carry no `matched_on` renders no label at all — an invented one
+  // would be a sentence the door never said.
+  const quiet = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(quiet);
+  await submitForm(quiet);
+  assert.equal(String(quiet.text()).includes("Matched the"), false,
+    "no label where the door named no identifier");
+});

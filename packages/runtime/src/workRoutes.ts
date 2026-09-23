@@ -1384,6 +1384,71 @@ export function workRoutes(): express.Router {
   // posted entry. The trade-invoice ROW, however, is already durable when this returns — it is
   // written inside the admission transaction — which is why the 202 body carries `invoice_id`, the
   // resolved `counterparty_id` and the DERIVED `due_date` / `due_date_source`.
+  // ---- #1007 · THE DUPLICATE PROBE, BESIDE THE ADMISSION AND OVER ITS OWN TRANSLATION --------
+  //
+  // "Which already-recorded invoices of this client look like the one about to be recorded?" It
+  // WARNS; it refuses nothing and writes nothing (`clara.probe_trade_invoice_duplicates_for` is
+  // `stable`, so PostgreSQL will not let it write, and it takes no row lock).
+  //
+  // WHY THE PROBE LIVES HERE AND NOT IN THE BROWSER (fix round, review finding S-1). The form's
+  // first cut posted its wire body STRAIGHT to PostgREST, and the wire's keys are the browser's
+  // (`documentDate`, `totalCents`) while the door reads the database's (`document_date`,
+  // `total_cents`): the "same money on the same day" signal — the one that catches a MISSING or
+  // MISTYPED document number — could never fire from the only shipped entrance. `apps/web`
+  // deliberately does not depend on `@clara/runtime`, so the choice was a second hand-written
+  // translation in the browser or ONE on the server. This route is that one: it runs
+  // `toDbTradeInvoice` — the SAME call, on the SAME body, that the admission below runs — so the
+  // probe can only ever ask about the particulars the admission is about to be sent.
+  //
+  // IT IS THE ACTOR-EXPLICIT TWIN IT CALLS, not the session-scoped door: a `clara_runtime`
+  // connection carries no JWT claims (`lib/pools.mjs`), so `clara._human_ctx` cannot answer for
+  // one. The twin carries `clara.admit_trade_invoice_work`'s own authority preamble arm for arm,
+  // which is why the form is never warned about a recording the admission would refuse.
+  //
+  // 200 AND NOT 202: nothing is admitted here. A refusal rides the admission's own responder, so
+  // the browser reads one vocabulary either way — and the form treats ANY non-200 as "no
+  // warning", because an advisory read that blocked a lawful recording would be the refusal the
+  // owner ruled out.
+  router.post("/api/work/trade-invoice/duplicates", async (req, res) => {
+    if (shuttingDown()) {
+      res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
+      return;
+    }
+    const body = (req.body ?? {}) as { clientId?: unknown; kind?: unknown; invoice?: unknown };
+    if (typeof body.clientId !== "string" || !UUID_RE.test(body.clientId)) {
+      res.status(404).json({ error: "not_found", message: "not found" });
+      return;
+    }
+    if (typeof body.kind !== "string" || body.kind.trim() === "") {
+      res.status(400).json({ error: "invalid_basis", field: "kind", reason: "invalid_kind" });
+      return;
+    }
+    const invoice = toDbTradeInvoice(body.invoice);
+    if (!invoice.ok) {
+      res.status(400).json(invoice.error);
+      return;
+    }
+    try {
+      const answer = await withRuntime(async (c) => {
+        const p = await authenticate(c, req.header("authorization"));
+        const r = await c.query(
+          "select clara.probe_trade_invoice_duplicates_for($1::uuid, $2::uuid, $3::text, $4::jsonb) as probe",
+          [body.clientId, p.sub, (body.kind as string).trim(), JSON.stringify(invoice.invoice)],
+        );
+        return (r.rows[0]?.probe ?? null) as Record<string, unknown> | null;
+      });
+      if (!answer) {
+        res.status(500).json({ error: "internal" });
+        return;
+      }
+      res.status(200).json(answer);
+    } catch (err) {
+      if (sendAuthError(res, err)) return;
+      sendAdmissionError(res, err, "trade invoice duplicate probe",
+        { fieldDefaults: TRADE_INVOICE_FIELD_DEFAULTS });
+    }
+  });
+
   router.post("/api/work/trade-invoice", async (req, res) => {
     if (shuttingDown()) {
       res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });

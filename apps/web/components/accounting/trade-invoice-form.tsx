@@ -77,7 +77,7 @@ import {
   type SubmitTradeInvoiceWorkResult,
   type TradeInvoiceDuplicateMatch,
 } from "@/lib/work/api";
-import { formatCents } from "@/lib/bank/money";
+import { formatMyr } from "@/lib/bank/money";
 import {
   defaultDraftStorage,
   newIntentKey,
@@ -120,7 +120,28 @@ type PartyCandidate = {
   name?: unknown;
   registration_no?: unknown;
   tin?: unknown;
+  /** #982 · WHICH identifier reached this candidate — `registration`, `tin`, `name` or
+   *  `tin_and_name`. The door supplies it on the refusals where the person is choosing between
+   *  identifiers; where it does not, no label is rendered rather than a guessed one. */
+  matched_on?: unknown;
 };
+
+/** The four labels the door's `matched_on` vocabulary has. A value outside it renders NOTHING —
+ *  a label invented for an unknown token would be a sentence the door never said. */
+const MATCHED_ON = new Set(["registration", "tin", "name", "tin_and_name"]);
+
+/**
+ * #982 · A REFUSAL WHOSE SENTENCE DEPENDS ON WHICH IDENTIFIER WAS AMBIGUOUS. Data, not code, for
+ * the reason `TRADE_INVOICE_FIELD_DEFAULTS` is: a lane adds a row, never an arm.
+ *
+ * `party_ambiguous` used to answer with one sentence — "More than one party answers to that
+ * name." — and 0274 made the same reason reachable from a TIN no name was submitted beside, so
+ * the screen named something the submission never contained. The door already says which
+ * identifier it was; this is the mapping that stops dropping it.
+ */
+const REFUSAL_BY_MATCH: Readonly<Record<string, string>> = Object.freeze({
+  "party_ambiguous/tin": "party_ambiguous_tin",
+});
 
 type Outcome =
   | { kind: "idle" }
@@ -130,7 +151,8 @@ type Outcome =
    *  state: it exists precisely so that the recording waits for a human decision. */
   | { kind: "warned"; matches: TradeInvoiceDuplicateMatch[] }
   | { kind: "accepted"; workId: string; invoiceId: string | null; dueDate: string | null; dueDateSource: string | null }
-  | { kind: "refused"; reason: string; field: TradeInvoiceFieldId | null; candidates: PartyCandidate[] }
+  | { kind: "refused"; reason: string; matchedOn: string | null; field: TradeInvoiceFieldId | null;
+      candidates: PartyCandidate[] }
   | { kind: "conflict"; workId: string | null }
   | { kind: "sourceConflict"; entryId: string | null }
   | { kind: "denied" }
@@ -395,9 +417,16 @@ export function TradeInvoiceFormView({
           // that tells two candidates apart. The door has always put it in the refusal; this
           // mapping used to discard it, so it never reached the screen.
           tin: typeof c.tin === "string" ? c.tin : null,
+          matched_on: typeof c.matched_on === "string" ? c.matched_on : null,
         }))
         .filter((c) => c.counterparty_id !== "" && c.name !== "");
-      setOutcome({ kind: "refused", reason: res.reason ?? "invalid_basis", field, candidates });
+      // #982 · WHICH identifier the door found ambiguous, off the same generic carrier the
+      // candidates ride. Read defensively: absent means "the door said nothing about it", and the
+      // banner then keeps the reason's own plain sentence.
+      const matchedOn = typeof res.detail?.matched_on === "string" ? res.detail.matched_on : null;
+      setOutcome({
+        kind: "refused", reason: res.reason ?? "invalid_basis", matchedOn, field, candidates,
+      });
       focusField(field);
       return;
     }
@@ -511,7 +540,9 @@ export function TradeInvoiceFormView({
                   {t("duplicate.entry", {
                     reference: m.reference ?? t("duplicate.noReference"),
                     date: m.documentDate ?? "",
-                    total: formatCents(m.totalCents),
+                    // THE HOUSE MYR HELPER, as every other money display in apps/web uses it: the
+                    // currency belongs to the formatter, not to fifteen translation strings.
+                    total: formatMyr(m.totalCents),
                   })}
                 </span>
                 <span className="text-xs text-muted-foreground">
@@ -535,7 +566,7 @@ export function TradeInvoiceFormView({
       ) : null}
       {outcome.kind === "refused" ? (
         <StateBanner tone="error" title={t("refused.title")} code={outcome.reason}>
-          {t(`refusals.${outcome.reason}`)}
+          {t(`refusals.${REFUSAL_BY_MATCH[`${outcome.reason}/${outcome.matchedOn ?? ""}`] ?? outcome.reason}`)}
           {outcome.candidates.length > 0 ? (
             <ul className="mt-3 flex flex-col gap-2" aria-label={t("candidates.label")}>
               {outcome.candidates.map((c, i) => {
@@ -543,6 +574,8 @@ export function TradeInvoiceFormView({
                 const name = typeof c.name === "string" ? c.name : "";
                 const reg = typeof c.registration_no === "string" ? c.registration_no : null;
                 const tin = typeof c.tin === "string" ? c.tin : null;
+                const matched = typeof c.matched_on === "string" && MATCHED_ON.has(c.matched_on)
+                  ? c.matched_on : null;
                 return (
                   <li key={id ?? `candidate-${i}`} className="flex items-center gap-2">
                     <Button
@@ -566,6 +599,14 @@ export function TradeInvoiceFormView({
                     {tin ? (
                       <span className="text-xs text-muted-foreground">
                         {t("candidates.tin", { value: tin })}
+                      </span>
+                    ) : null}
+                    {/* #982 · WHICH identifier reached this candidate. The person is choosing
+                        between the identifiers the document itself carries, so a list that did
+                        not say which one reached which party would be a list of names. */}
+                    {matched ? (
+                      <span className="text-xs text-muted-foreground">
+                        {t(`candidates.matchedOn.${matched}`)}
                       </span>
                     ) : null}
                   </li>

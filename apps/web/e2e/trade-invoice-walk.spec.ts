@@ -145,6 +145,28 @@ test("#1007 — a bill this client already looks to have is WARNED about in the 
     "#1007: the admission names the earlier invoice the person was shown").toEqual([TI.invoiceId]);
 });
 
+test("#1007 — a bill stating NO document number is still warned about when the same money was recorded on the same day", async ({ page }) => {
+  // THE SIGNAL THAT CATCHES A MISSING OR MISTYPED NUMBER, driven from the only shipped entrance.
+  // It could not fire here before the fix round: the form posted its wire body straight to
+  // PostgREST, whose door reads `document_date` and `total_cents` while the wire spells them
+  // `documentDate` and `totalCents`, so the probe saw no date and no total at all. The probe now
+  // rides the runtime route, which translates the body with the SAME `toDbTradeInvoice` the
+  // admission uses, and the fixture derives its answer from what the browser actually sent.
+  await control(page, { op: "warn_next" });
+  await fillBill(page);
+  await field(page, "reference").fill("");
+  await page.getByRole("button", { name: "Record it" }).click();
+
+  await expect(page.getByText(/looks like the one you are about to record/i))
+    .toBeVisible({ timeout: CELL_BUDGET.poll });
+  await expect(page.getByText(/Same total on the same date/i)).toBeVisible();
+  // …naming the earlier document by what the BOOKS hold, number included, even though the one
+  // being recorded states none.
+  await expect(page.getByText(/ALPHA-2026-0042 · 2026-03-04 · RM 1,060\.00/)).toBeVisible();
+  const held = (await control(page, { op: "received" })) as { received: unknown[] };
+  expect(held.received, "#1007: nothing is admitted while the person is deciding").toEqual([]);
+});
+
 test("compose a bill → 202 → the Work page shows the persistent outcome, and a reload keeps the links", async ({ page }) => {
   await fillBill(page);
   await page.getByRole("button", { name: "Record it" }).click();

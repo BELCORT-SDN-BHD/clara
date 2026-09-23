@@ -1845,7 +1845,13 @@
     "candidates": {
       "label": "Which party do you mean?",
       "registration": "Reg. {value}",
-      "tin": "TIN {value}"
+      "tin": "TIN {value}",
+      "matchedOn": {
+        "registration": "Matched the registration number",
+        "tin": "Matched the tax identification number",
+        "name": "Matched the name",
+        "tin_and_name": "Matched the tax identification number and the name"
+      }
     },
     "duplicate": {
       "title": "This looks like something already recorded",
@@ -1855,7 +1861,7 @@
         "same_total_and_date": "Same total on the same date",
         "both": "Same document number, and the same total on the same date"
       },
-      "entry": "{reference} · {date} · RM {total}",
+      "entry": "{reference} · {date} · {total}",
       "noReference": "No document number",
       "open": "Open what is recorded",
       "recordAnyway": "Record it anyway",
@@ -1894,6 +1900,7 @@
     },
     "refusals": {
       "party_ambiguous": "More than one party answers to that name. Say which one.",
+      "party_ambiguous_tin": "More than one party of this client holds that tax identification number. Say which one this document is about.",
       "party_unresolved": "No party of this client answers to that.",
       "party_identifier_conflict": "The registration number and the tax identification number on this document name two different parties. Say which one it is.",
       "credit_shape_not_admitted": "A credit note is not recorded here. Record it as a credit against the invoice it corrects.",
@@ -1960,7 +1967,10 @@
       "outstanding": "Outstanding",
       "receipt": "Receipt",
       "document": "Source document",
-      "admitted": "Admitted — not posted yet"
+      "admitted": "Admitted — not posted yet",
+      "acknowledged": "{who} was warned this looked like {count, plural, =1 {a document} other {# documents}} already recorded, and recorded it anyway.",
+      "acknowledgedEntry": "Shown: {reference} · {date}",
+      "acknowledgedNoReference": "No document number"
     }
   },
   "WorkKnowledge": {

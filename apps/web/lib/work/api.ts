@@ -31,7 +31,6 @@
 // Work); this module reports, the composer decides. Same posture doors.ts takes
 // about a refusal.
 
-import { callDoor } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 /** The wire shape `POST /api/work/journal` accepts — camelCase, because this is
@@ -411,25 +410,35 @@ export type TradeInvoiceDuplicateMatch = {
 /**
  * "Which already-recorded invoices of this client look like the one about to be recorded?" (#1007)
  *
- * A READ, through PostgREST as the signed-in bookkeeper — `clara.probe_trade_invoice_duplicates`
- * (migration 0275), which writes nothing and takes no row lock. It is NOT a wall: the owner ruled
- * on 2026-09-20 that Clara warns and the person decides, so the ONLY thing this answer may do is
- * put a warning on the screen. The form treats a failure here as "no warning", never as a refusal.
+ * A READ, over the SAME runtime route the admission rides — `POST /api/work/trade-invoice/
+ * duplicates`, which translates this wire body with the ONE `toDbTradeInvoice` the admission
+ * uses and then asks `clara.probe_trade_invoice_duplicates_for` (migration 0275). That door
+ * writes nothing and takes no row lock.
  *
- * The particulars are the SAME object the admission door is about to be sent, so the party the
- * probe resolves is the party the admission would resolve.
+ * WHY THE ROUTE AND NOT A DOOR CALL OF ITS OWN (fix round, review finding S-1). The first cut
+ * posted this wire body STRAIGHT to PostgREST, and the wire's keys are the browser's
+ * (`documentDate`, `totalCents`) while the door reads the database's (`document_date`,
+ * `total_cents`). The consequence was not cosmetic: "same money on the same day" — the signal
+ * that catches a missing or mistyped document number — could never fire from the only shipped
+ * entrance. `apps/web` deliberately does not depend on `@clara/runtime`
+ * (`lib/registers/fa-refusal-field.ts` states that rule), so the choice is a second hand-written
+ * translation in the browser or ONE translation on the server. This is the second.
+ *
+ * IT IS NOT A WALL: the owner ruled on 2026-09-20 that Clara warns and the person decides, so the
+ * ONLY thing this answer may do is put a warning on the screen. Every failure — a lapsed session,
+ * a refusal, an unreadable body, a network fault — answers "nothing to show", and the recording
+ * goes through exactly as it would have.
  */
 export async function probeTradeInvoiceDuplicates(
   auth: SessionTokenAccessor,
   input: { clientId: string; kind: string; invoice: Record<string, unknown> },
   signal?: AbortSignal,
 ): Promise<TradeInvoiceDuplicateMatch[]> {
-  const out = await callDoor<Record<string, unknown> | null>(
-    "probe_trade_invoice_duplicates",
-    { p_client: input.clientId, p_kind: input.kind, p_particulars: input.invoice },
-    { session: auth, signal },
-  );
-  const raw = (out ?? {}).matches;
+  const token = await auth.getAccessToken();
+  if (token === null) return [];
+  const res = await runtimePost(`${WORK_BASE}/trade-invoice/duplicates`, token, input, signal);
+  if (res.status !== 200) return [];
+  const raw = ((await readBody(res)) ?? {}).matches;
   if (!Array.isArray(raw)) return [];
   return raw
     .map((row) => {
