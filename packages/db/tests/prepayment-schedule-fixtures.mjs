@@ -37,7 +37,7 @@ import {
   instructionRef, TZ,
 } from "./accounting-plans-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
-import { prepaidScene, recordPeriod, account } from "./f-a4-pr2a-fixtures.mjs";
+import { prepaidScene, recordPeriod, account, enrolPrepaidIfRostered, prepaymentRosterGateLive } from "./f-a4-pr2a-fixtures.mjs";
 // The document half, for the scenes that need a SECOND document-bound recognition of their own
 // (the ineligible-prepaid-leg cells and the arm-B paging cell). `f-a4-pr2a-fixtures.mjs` reaches
 // for the same two writers to build `prepaidScene`'s one document; these build the others.
@@ -51,6 +51,10 @@ export * from "./accounting-plans-fixtures.mjs";
 // …and the PREPAYMENT half. `account` is this module's only new spelling from that side; the plan
 // chain exports neither it nor the scene builders, so no name is shadowed.
 export { prepaidScene, recordPeriod, account, getPool };
+// #940 -- the prepayment-account roster's two shared instruments: its frontier probe and the
+// enrolment call `prepaidScene` itself makes. A cell whose expected REFUSAL differs either side of
+// 0306 asks the probe rather than the migration number.
+export { enrolPrepaidIfRostered, prepaymentRosterGateLive };
 
 // ===========================================================================================
 // 1 · The frontier gate.

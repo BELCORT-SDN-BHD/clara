@@ -64,6 +64,43 @@ export async function account(sub, { client, code, name, type }) {
   return code;
 }
 
+// #940 -- THE PREPAYMENT-ACCOUNT ROSTER GATES AMORTISATION AHEAD OF THE SHARED NEGATIVE WALL, so
+// from 0306 onward a scene whose prepaid account nobody enrolled can no longer configure a
+// schedule. Every prepayment battery in this package reaches its recognition through
+// `prepaidScene`, so the enrolment belongs HERE, once, rather than in each cell.
+//
+// FRONTIER-GUARDED BY EXACT SIGNATURE, like every other probe in this file: the
+// `db-slice-frontiers` matrix runs this package against databases pinned BEFORE 0306, where the
+// door does not exist and the schedule door asks no roster. Probed once per process.
+let _rosterDoor = null;
+export async function prepaymentRosterGateLive() {
+  if (_rosterDoor === null) {
+    try {
+      const r = await rootQuery(
+        "select to_regprocedure('clara.enrol_prepayment_account(uuid,text,text,text,text)') is not null as ok");
+      _rosterDoor = Boolean(r.rows[0].ok);
+    } catch {
+      _rosterDoor = false;
+    }
+  }
+  return _rosterDoor;
+}
+
+/** Enrol a scene's prepaid account on the #940 roster, through the REAL door, when the database
+ *  carries it. The reason is this fixture's own statement of what the account is for -- the door
+ *  refuses a blank one, and a scene that supplied none would measure that refusal instead of the
+ *  lane it means to. */
+export async function enrolPrepaidIfRostered(sub, { client, code }) {
+  if (!(await prepaymentRosterGateLive())) return false;
+  await humanQuery(sub,
+    `select clara.enrol_prepayment_account(p_client => $1::uuid, p_account => $2::text,
+       p_purpose => 'prepayment', p_reason => $3::text, p_op_key => $4::text) as r`,
+    [client, code,
+      "f-a4-pr2a battery: this account holds the client's prepaid subscriptions and nothing else",
+      opk("fa4p2a-enrol")]);
+  return true;
+}
+
 /** THE PREPAID SCENE: a closeable FY, a verified document, a dedicated prepaid-ASSET account and a
  *  dedicated EXPENSE target, and an APPROVED entry debiting the asset. Everything through governed
  *  doors -- a hand-built entry would prove the evaluator reads rows, not that it reads BOOKS. */
@@ -81,6 +118,10 @@ export async function prepaidScene(tag, { cents = 120000, startsOn = "2025-01-01
     client: fx.client, code: "19000001", name: `Prepayments (${u})`, type: "asset" });
   const target = await account(alice, {
     client: fx.client, code: "59000001", name: `Subscriptions (${u})`, type: "expense" });
+  // #940 -- the prepaid account is ENROLLED on the client's prepayment roster (no-op before 0306).
+  // Enrolled by ALICE rather than by the fixture role: the door is bookkeeper-floored and an
+  // owner clears it, and a scene that reached around the door would prove nothing about it.
+  await enrolPrepaidIfRostered(alice, { client: fx.client, code: prepaid });
   // Seeded at FIRM scope then FILED to the client through the governed door. Binding a document to
   // an entry needs the client attribution that filing establishes -- a document seeded straight at
   // client scope answers "client attribution not established" at draft time. Measured.

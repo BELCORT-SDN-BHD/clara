@@ -34,6 +34,7 @@ import {
   createAccountingPlan, reviseAccountingPlan, previewAccountingPlan,
   scheduleRow, scheduleRowsFor, relationPosture, functionGrants, evaluatorFreezeMatches,
   unapprovedEntry, ambiguousAssetEntry, ineligibleAssetEntry, nowhere,
+  enrolPrepaidIfRostered, prepaymentRosterGateLive,
   AMORTISATION_KIND, CONTROL_ASSET_CODE, PREPAY_REASON, TARGET_BASIS, TZ,
 } from "./prepayment-schedule-fixtures.mjs";
 
@@ -301,11 +302,30 @@ test("p653.schedule.prepaid_leg_ineligible — an APPROVED, document-bound entry
       authorityRef: scene.authorityRef,
     }),
     "a schedule whose prepaid leg is a receivable control account");
-  assert.equal(refused.detail.axis, "prepaid_account_ineligible",
-    "the refusal names the AXIS, so the surface can say which leg is wrong");
   assert.equal(refused.detail.prepaid_account_code, CONTROL_ASSET_CODE);
-  assert.equal(refused.detail.breach?.axis, "control_account",
-    `the breach is the SHARED helper's own answer, carried through: ${JSON.stringify(refused.detail)}`);
+
+  // #940 MOVED THE ANSWER ONE DOOR EARLIER, AND THIS CELL SAYS SO AT BOTH FRONTIERS. Migration
+  // 0306 asks the client's prepayment ROSTER before this wall (the brief's own order, and owner
+  // decision 6 behind it: every reason an account can never hold prepayments is stated at the
+  // ENROLMENT door, not here, where the person is doing something else). A receivable control
+  // account fails both, so after 0306 the person is told about the roster — and the WALL's
+  // judgement, which is what this cell exists to measure, is measured where it now speaks.
+  if (await prepaymentRosterGateLive()) {
+    assert.equal(refused.detail.axis, "prepaid_account_not_enrolled",
+      "the roster is asked BEFORE the wall, so an account failing both answers the roster");
+    assert.equal(refused.detail.remedy, "clara.enrol_prepayment_account",
+      "…and the refusal names the door that would fix it");
+    const atEnrolment = await assertPair("CLR37", "prepayment_account_enrolment_invalid",
+      () => enrolPrepaidIfRostered(scene.alice, { client: scene.client, code: CONTROL_ASSET_CODE }),
+      "enrolling the receivable control account as a prepayment account");
+    assert.equal(atEnrolment.detail.axis, "control_account",
+      `the wall's own judgement, carried through at the enrolment door: ${JSON.stringify(atEnrolment.detail)}`);
+  } else {
+    assert.equal(refused.detail.axis, "prepaid_account_ineligible",
+      "the refusal names the AXIS, so the surface can say which leg is wrong");
+    assert.equal(refused.detail.breach?.axis, "control_account",
+      `the breach is the SHARED helper's own answer, carried through: ${JSON.stringify(refused.detail)}`);
+  }
 
   assert.deepEqual(await scheduleRowsFor(scene.client), [], "the refusal wrote nothing");
 });

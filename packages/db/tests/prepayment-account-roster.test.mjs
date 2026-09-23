@@ -18,12 +18,14 @@ import {
   statedTermScene, account, opk, CONTROL_ASSET_CODE,
   enrolPrepaymentAccount, retirePrepaymentAccount, enrolmentRow, enrolmentsFor,
   liveEnrolmentCount, roleCanExecute, reserveAsFixedAssetCost, bindBankAccount, nowhereRosterId,
+  plainAssetRecognition, createPrepaymentSchedule, scheduleCountFor, ineligibleAssetEntry,
+  PREPAY_REASON, PREPAID_NOT_ENROLLED_AXIS,
   ROSTER_REASON, ROSTER_AXIS, ROSTER_PURPOSE, ENROL_DOOR_SIG, RETIRE_DOOR_SIG,
 } from "./prepayment-account-roster-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 2;
+const EXPECTED_CELLS = 3;
 
 before(async () => {
   ready = await (async () => {
@@ -232,4 +234,78 @@ cell("p940.enrol.refusals — an unknown, control-class, bank-bound, fixed-asset
   // NOT ONE OF THE REFUSALS ABOVE ENROLLED ANYTHING.
   assert.equal(await liveEnrolmentCount(scene.client), before,
     "every refusal above wrote no enrolment row");
+});
+
+// ===========================================================================================
+// AC3 — THE SCHEDULE DOOR ASKS THE ROSTER FIRST, AND THE EXISTING WALL AFTERWARDS.
+// ===========================================================================================
+
+cell("p940.schedule.roster_gate — an eligible but UNENROLLED prepaid leg is refused by name with the enrolment door and the panel as the remedy and writes nothing; the SAME call succeeds once the account is enrolled; the roster is asked BEFORE the shared wall, so an account that fails both answers the roster; and the wall is still live afterwards for an account enrolled while it was eligible", async () => {
+  const scene = await statedTermScene("gate", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  const deposit = await plainAssetRecognition(scene, { code: "19000006", cents: 66000, tag: "dep" });
+
+  // BEFORE #940 THIS CALL SUCCEEDED. Every one of the shared wall's five negative axes passes on
+  // this account — active, no class, no bank stamp, no bank binding, no reserved role — and
+  // `prepayment_schedule_v1` never asks WHICH asset, so a utility deposit was amortised into
+  // expense for a whole stated term with every entry balanced.
+  const refused = await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: deposit.entry, expenseAccount: scene.target,
+      authorityRef: scene.authorityRef,
+    }),
+    "configuring a schedule on an account nobody enrolled as a prepayment account");
+  assert.equal(refused.detail.axis, PREPAID_NOT_ENROLLED_AXIS,
+    "the ineligibility refusal gains a NOT-ENROLLED axis rather than a second token");
+  assert.equal(refused.detail.prepaid_account_code, deposit.code);
+  assert.equal(refused.detail.remedy, "clara.enrol_prepayment_account",
+    "the refusal names the DOOR that fixes it");
+  assert.equal(refused.detail.panel, "client_registers_prepayment_accounts",
+    "…and the PANEL a person goes to, which is what owner decision 6 asks the refusal to say");
+  assert.equal(await scheduleCountFor(deposit.entry), 0, "the refusal wrote no schedule row");
+
+  // THE SAME CALL, AFTER THE ENROLMENT. Nothing else about it changes.
+  await enrolPrepaymentAccount(scene.bob, { client: scene.client, account: deposit.code });
+  const created = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: deposit.entry, expenseAccount: scene.target,
+    authorityRef: scene.authorityRef,
+  });
+  assert.ok(created.schedule_id, "an enrolled account passes");
+  assert.equal(created.prepaid_account_code, deposit.code);
+  assert.equal(await scheduleCountFor(deposit.entry), 1);
+
+  // THE ROSTER IS ASKED FIRST (the brief's own order). An ordinary sales invoice's receivable
+  // control leg fails BOTH the roster and the wall; the answer a person gets is the roster's,
+  // because the reason it can never be enrolled is stated at the enrolment door (decision 6) and
+  // not here, where the person is doing something else.
+  const invoice = await ineligibleAssetEntry(scene, { cents: 77000 });
+  const control = await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: invoice.entry, expenseAccount: scene.target,
+      authorityRef: scene.authorityRef,
+    }),
+    "a schedule whose prepaid leg is a receivable control account");
+  assert.equal(control.detail.axis, PREPAID_NOT_ENROLLED_AXIS,
+    "the roster is asked BEFORE the wall, so an account failing both answers the roster");
+  assert.equal(await scheduleCountFor(invoice.entry), 0);
+
+  // …AND THE WALL IS STILL LIVE AFTERWARDS. An account may be eligible on the day it is enrolled
+  // and ineligible later: binding it as a registered bank account is the estate's own way of
+  // making that happen. The roster admits it; the wall refuses it, with the SHARED helper's own
+  // breach carried through, exactly as it did before this ticket.
+  const later = await plainAssetRecognition(scene, {
+    code: "17000010", name: "Maybank current (gate)", cents: 45000, tag: "later" });
+  await enrolPrepaymentAccount(scene.bob, { client: scene.client, account: later.code });
+  await bindBankAccount(scene.alice, {
+    client: scene.client, coaAccountCode: later.code, accountNumber: "5140940941" });
+  const walled = await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: later.entry, expenseAccount: scene.target,
+      authorityRef: scene.authorityRef,
+    }),
+    "a schedule on an enrolled account that has since been bound as a bank account");
+  assert.equal(walled.detail.axis, "prepaid_account_ineligible",
+    "the shared negative wall still guards the prepaid leg AFTER the roster admits it");
+  assert.equal(walled.detail.breach?.axis, "bank_account",
+    `the breach is the SHARED helper's own answer: ${JSON.stringify(walled.detail)}`);
+  assert.equal(await scheduleCountFor(later.entry), 0);
 });

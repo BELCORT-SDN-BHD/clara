@@ -129,6 +129,47 @@ export async function retirePrepaymentAccount(sub, {
   return r.rows[0].result;
 }
 
+/**
+ * AN APPROVED, DOCUMENT-BOUND RECOGNITION WHOSE ONE DEBITED ASSET LEG IS AN ORDINARY, ELIGIBLE,
+ * UNENROLLED account — the shape #940 exists for, and the one #653's battery has no fixture of.
+ *
+ * `ineligibleAssetEntry` proves the NEGATIVE wall on a receivable control account; this proves the
+ * gap that wall leaves open. The code below passes every one of the wall's five axes — active,
+ * no `account_class`, no bank stamp, no bank binding, no fixed-asset or staff-advance reservation —
+ * so before this ticket the door would derive a twelve-month amortisation of a deposit into expense
+ * and arm B would advertise it. Its document carries a live service period, so the refusal under
+ * test is the ROSTER rather than the absent-term one.
+ */
+export async function plainAssetRecognition(scene, {
+  code, name = "Utility deposit", cents = 66000, tag = "plain", recordTerm = true,
+} = {}) {
+  const { draftEntryV3, approveEntry, freshResolution } = await import("./wave-a-reads.mjs");
+  const { extraDocument, recordPeriod, account: mintAccount } =
+    await import("./prepayment-schedule-fixtures.mjs");
+  await mintAccount(scene.alice, { client: scene.client, code, name, type: "asset" });
+  const doc = await extraDocument(scene, { tag });
+  const d = await draftEntryV3(scene.alice, {
+    client: scene.client,
+    resolution: await freshResolution(scene.alice, scene.client,
+      { subjectKind: "document", subjectId: doc.documentId }),
+    memo: `#940 unenrolled prepaid leg ${randomUUID().slice(0, 8)}`,
+    postingDate: scene.postingDate,
+    document: doc.documentId, sha256: doc.sha256,
+    lines: [
+      { account_code: code, debit_cents: cents, credit_cents: 0, description: "deposit" },
+      { account_code: "170-C56", debit_cents: 0, credit_cents: cents, description: "paid" },
+    ],
+    opKey: opk("p940-plain"),
+  });
+  await approveEntry(scene.bob, {
+    entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("p940-plaina") });
+  if (recordTerm) {
+    await recordPeriod(scene.bob, {
+      document: doc.documentId, start: scene.termStart, end: scene.termEnd });
+  }
+  return { entry: d.entry_id, document: doc.documentId, code, cents };
+}
+
 /** Reserve an account in the FIXED-ASSET roster, through 0041's OWN door — the instrument for
  *  "an account reserved by the fixed-asset roster cannot be enrolled here" (owner decision 6).
  *  A hand-written `fa_account_profiles` row would prove this battery can write a row; the door
