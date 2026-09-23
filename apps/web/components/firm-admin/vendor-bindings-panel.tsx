@@ -1,11 +1,17 @@
 "use client";
 
 // The vendor identity bindings governance panel, under /admin (port-wave plan
-// §4 T10, §5's door-dialogs row). Every one of the five vendor-binding doors
-// is CLIENT-scoped (lib/firm-admin/vendor-bindings.ts's own header) — there is
+// §4 T10, §5's door-dialogs row). Every one of the vendor-binding doors is
+// CLIENT-scoped (lib/firm-admin/vendor-bindings.ts's own header) — there is
 // no firm-wide vendor-bindings read, so this panel carries its own client
 // picker (loadClientRegister, unchanged) rather than assuming a cross-client
 // listing the DB does not offer.
+//
+// #921 [0273]: RETIRED the Propose control outright — D6 keeps only
+// "historical receipts and in-flight legacy visibility", and migration 0273
+// revoked clara_authenticated's EXECUTE on propose_vendor_identity_binding
+// for every rank. See vendor-binding-ceremony.tsx's own header for the Sign
+// half of the same retirement.
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
@@ -18,9 +24,9 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { firmCapabilities, type FirmCapabilities } from "@/lib/firm/capabilities";
 import { loadClientRegister } from "@/lib/firm/reads";
-import { listVendorBindings, loadVendorCounterparties } from "@/lib/firm-admin/vendor-bindings";
+import { listVendorBindings } from "@/lib/firm-admin/vendor-bindings";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { VendorBindingRowActions, ProposeBindingDialog } from "./vendor-binding-ceremony";
+import { VendorBindingRowActions } from "./vendor-binding-ceremony";
 
 // E-7 (裁-187): the capabilities come from the FIRM LAYOUT's own positively-read
 // caller context, handed down by `FirmScopeProvider` — no second read of
@@ -76,27 +82,13 @@ function ClientVendorBindings({
 }) {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
   const { data: bindings, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (session) => listVendorBindings(session, clientId));
-  const counterpartiesState = useHydratedPart(sessionTokenAccessor, (session) => loadVendorCounterparties(session, clientId));
 
   return (
     <div className="flex flex-col gap-3">
-      <SectionHeader
-        level={2}
-        // F3(b) (independent review, fix-required, 2026-08-28): the trigger
-        // is ALWAYS rendered now — see ProposeBindingDialog's own header for
-        // why passing the FULL counterparties state (not just `.data`) is
-        // what lets it show a real read failure + retry instead of vanishing.
-        // E-7 (裁-187): `clara.propose_vendor_identity_binding` floors at
-        // bookkeeper (`0154_binding_proposal_pr_1.sql:2506`). A viewer, and a
-        // caller whose rank could not be read, get no trigger at all.
-        action={
-          capabilities.canProposeVendorBinding ? (
-            <ProposeBindingDialog clientId={clientId} counterpartiesState={counterpartiesState} busy={busy} act={act} />
-          ) : null
-        }
-      >
-        {t("heading")}
-      </SectionHeader>
+      {/* #921 [0273]: no `action` here any more — the Propose control is RETIRED, not
+          rank-gated. See vendor-bindings-panel.tsx's own module header and
+          vendor-binding-ceremony.tsx's for the migration and the ticket. */}
+      <SectionHeader level={2}>{t("heading")}</SectionHeader>
       {!bindings ? (
         err ? (
           <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>
@@ -120,7 +112,6 @@ function ClientVendorBindings({
                 key={b.binding_id}
                 binding={b}
                 busy={busy}
-                canSign={capabilities.canSignVendorBinding}
                 canRevoke={capabilities.canRevokeVendorBinding}
                 act={act}
               />

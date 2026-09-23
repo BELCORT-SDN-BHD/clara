@@ -30,6 +30,7 @@ import {
 } from "@/lib/registers/counterparty-doors";
 import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
+import type { DialogRefusal } from "@/components/common/dialog-refusal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -94,6 +95,12 @@ export function CounterpartyHygienePanel({
     onActed?.();
     return ok;
   };
+  // #890 — the SAME panel-scoped `refusal` shape counterparty-identity-panel.tsx already hands
+  // its own door dialogs (`refusalForThisDialog`, lib/parts/door-dialog-outcome.ts, gates it to
+  // the dialog that just settled a confirm, never a sibling's residue). Only RenameCounterpartyDialog
+  // takes it today — #890's own scope — so a refusal renders where the human is being asked to
+  // correct it, instead of only in the panel's standing banner behind the modal backdrop.
+  const refusal: DialogRefusal | undefined = err === null ? undefined : { err, clr };
 
   // F4 (independent review, fix-required): the sibling shape
   // (staff-advances-register.tsx) — before the FIRST successful load,
@@ -154,6 +161,7 @@ export function CounterpartyHygienePanel({
                       <RenameCounterpartyDialog
                         currentName={row.name}
                         busy={busy}
+                        refusal={refusal}
                         onSubmit={(newName) => act(() => renameCounterparty(clientId, row.id, newName, { session: sessionTokenAccessor }).then(() => undefined))}
                       />
                       <SetCounterpartyTermsDialog

@@ -2977,3 +2977,70 @@ re-creation of 0244's own trigger at 0244's spelling, so a database carrying the
 comes back), `create or replace function`, and an idempotent `comment on`. The prestate reports
 FIRST or REDO, and its pin for the ONE body this file recuts is two-valued by construction —
 0244's pre-image or 0272's own post-image, both measured.
+
+## 0273 — making the legacy vendor-bindings panel read-only (#921)
+
+`0273_vendor_binding_write_doors_revoked.sql` revokes `clara_authenticated`'s EXECUTE on three of
+the five vendor-binding doors 0028 created — `propose_vendor_identity_binding(jsonb,text)`,
+`sign_vendor_identity_binding(uuid,text,text)` and `decline_vendor_identity_binding(uuid,text,text)`
+— and nothing else. The blueprint retires the vendor-binding workflow (O37); D6 keeps only
+"historical receipts and in-flight legacy visibility" for this legacy lane, and the Client-KB /
+counterparty-identity lane (#647) is its replacement.
+
+**REVOKE, never DROP** — #921's own "Out of scope" line: "Removing the lane's tables, doors or
+historical rows (D6 keeps them)." These three bodies remain the only record of how a still-visible
+`proposed` / `live` / `declined` historical row came to exist; revoking rather than dropping keeps
+every one of those rows' provenance columns meaningful. `revoke_vendor_identity_binding(uuid,text,text)`,
+`list_vendor_bindings(uuid)` and `get_vendor_binding(uuid)` are UNTOUCHED — still granted to
+`clara_authenticated`, bodies byte-identical, pinned in both the prestate and the tail. Also
+untouched: the two wake/agent doors (0154), `reset_binding_decline` (0154 — it lifts a decline on
+an ALREADY-EXISTING historical row, exactly the visibility D6 keeps), and the lane's tables,
+triggers, policies and rows.
+
+**The web side moved in the same PR, not in this file** (frontend carries no schema):
+`components/firm-admin/vendor-bindings-panel.tsx` and `vendor-binding-ceremony.tsx` deleted the
+Propose and Sign controls outright (a "proposed" row is now display-only history; a "live" row
+still offers Revoke), `lib/firm/capabilities.ts` retired `canProposeVendorBinding` and
+`canSignVendorBinding` (a control no rank can use has no floor left to mirror), and
+`lib/firm-admin/vendor-bindings.ts` dropped the two wrapper functions whose call sites
+`operation-census.test.mjs`'s `called_ungranted` sweep would otherwise correctly refuse.
+
+**The migration triad**, in migration order in `packages/db/package.json`'s test script:
+`tests/vendor-binding-write-doors-revoked-preintegration-gate.mjs` (stem
+`vendor_binding_write_doors_revoked$`) and `tests/vendor-binding-write-doors-revoked.test.mjs`. In
+`tests/rig-meta.mjs`: `VENDOR_BINDING_0028_HUMAN_FNS` narrowed from all five names to the three D6
+keeps as human doors (the EXISTENCE cohort, renamed `VENDOR_BINDING_0028_ALL_FNS`, still names all
+five — a REVOKE never changes whether a function exists), and `BINDING_PROPOSAL_PR1_HUMAN_FNS`
+dropped `decline_vendor_identity_binding`. Unlike 0271's DROP, this needs no bimodal retirement
+window: `grantMatrixFailures()` judges every name it finds live in the catalog on every frontier, so
+an unlisted name simply reads as the correct `expected=false` on both sides of 0273, with no
+frontier arm to maintain and nothing scheduled for later deletion.
+
+**What the rig batteries did about it.** Six pre-existing `packages/db` batteries fixture or test a
+vendor binding by calling `propose` / `sign` / `decline`, and a bare REVOKE turns all of them 42501
+(57 cells, measured on a lane database before the fix): `x36-vendor-binding-ceremony`,
+`x36-vendor-binding-resolver`, `x30-f1-lcp`, `x31-autopost-lane-unify`,
+`x36-p-round-regressions` and `binding-proposal-pr-1`. None was retired. 0273 moves the GRANT and
+nothing else, and what those cells are about is the BODIES — the rank floors, 裁-18a's
+signer<>proposer wall, the loop brake, the sign-time drift and corpus re-runs, H5's roster window,
+H6's lock order, C3's post-time interlock and their mutants — which D6 keeps precisely so the
+ruling stays reversible. Retiring them would let a future restore of the grant ship unguarded.
+
+So the shared wrappers in `tests/x36-vendor-binding-helpers.mjs` are renamed `proposeAsFnOwner` /
+`signAsFnOwner` / `signLiveAsFnOwner` (and `declineBindingAsFnOwner` in
+`tests/binding-proposal-pr-1-helpers.mjs`, with `asRetiredWriteDoorSession` for the two-session
+lock-order cells and `retiredWriteDoorQuery` for the attestation drives). Each carries its call as
+`clara_fn_owner` — which still holds EXECUTE — with the SAME human actor in
+`request.jwt.claims`, so `clara._human_ctx` resolves the same person and every wall inside each
+body still runs. Measured on a lane database: `propose` as `clara_fn_owner` with an unknown `sub`
+raises CLR04 `actor has no active membership` (the body), while the same call as
+`clara_authenticated` raises 42501 (the ACL, before the body). `revoke` keeps its bare name and is
+still driven as a human, because 0273 did not move it.
+
+None of that shows a human can still call these doors: the opposite is what
+`tests/vendor-binding-write-doors-revoked.test.mjs` proves, driving `clara_authenticated` at all
+three doors and at every rank and seeing 42501. `bp1.F1`'s ACL invariant ("DROP destroys the ACL —
+the grant must have been re-made", 0154's own claim about the recreated 3-arg signer) is re-trued
+rather than deleted: the OWNER's EXECUTE is asserted at every frontier, and the HUMAN's EXECUTE is
+asserted to track the `vendor_binding_write_doors_revoked` ledger row, so the cell reads true on
+both sides of this migration.

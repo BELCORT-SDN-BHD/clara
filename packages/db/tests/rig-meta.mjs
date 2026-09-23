@@ -608,35 +608,55 @@ const EXTRACTION_0022_HUMAN_FNS = ["request_reextraction", "set_firm_high_stakes
 const FAIL_CLASSIFY_0024_RUNTIME_FNS = ["fail_classify"];
 export const FAIL_CLASSIFY_0024_COHORT = [...FAIL_CLASSIFY_0024_RUNTIME_FNS];
 
-// 0028 — the vendor identity binding ceremony (task #36). All five verbs are
-// clara_authenticated, role-floored in-body (bookkeeper for propose/revoke/reads,
-// admin for sign) — same posture as the 0016 autopost-rule ceremony. Its own
-// cohort per the "wholly present or wholly absent" discipline (see 0024's note
-// above): folding it into 0027's would make a 28-migration database report a
-// PARTIAL cohort one migration early.
-const VENDOR_BINDING_0028_HUMAN_FNS = [
+// 0028 — the vendor identity binding ceremony (task #36). All five bodies are real, resolvable
+// functions throughout — its own EXISTENCE cohort per the "wholly present or wholly absent"
+// discipline (see 0024's note above) still names all five, unconditionally, forever: folding it
+// into 0027's would make a 28-migration database report a PARTIAL cohort one migration early,
+// and #921 [0273] narrows a GRANT below, never this roster (D6 keeps every door; "Out of
+// scope: removing the lane's tables, doors or historical rows").
+const VENDOR_BINDING_0028_ALL_FNS = [
   "propose_vendor_identity_binding", "sign_vendor_identity_binding",
   "revoke_vendor_identity_binding", "list_vendor_bindings", "get_vendor_binding",
 ];
+export const VENDOR_BINDING_0028_COHORT = [...VENDOR_BINDING_0028_ALL_FNS];
 
-// 裁-18b PR-1 — the Clara vendor-binding PROPOSAL door. FOUR human doors join the
-// clara_authenticated surface: decline (the other half of the two-party shape), its named
-// reset (a decline suppresses BOTH proposal writers, so there must be a way out),
-// eligible_binding_signer_count (the sign dialog reads it to know whether to ask for 裁-32's
-// self-approval attestation) and binding_identity_review (a read-only review list; it revokes
-// nothing). Written down UNCONDITIONALLY, unlike the closed-world ROSTERS this PR also touches:
-// grantMatrixFailures sweeps the LIVE catalog and only judges functions that exist, so a name
-// here that a pinned-frontier chain has not got is simply never reached.
+// #921 [0273] (2026-09-20/21): NARROWED from all five to the three D6 keeps as human doors —
+// propose and sign are RETIRED for the human lane (migration 0273's own REVOKE; clara_authenticated
+// now gets 42501 on both, proven by vendor-binding-write-doors-revoked.test.mjs) but NEITHER is
+// DROPPED, so both stay in VENDOR_BINDING_0028_ALL_FNS's existence cohort above and simply drop
+// out of the clara_authenticated GRANT expectation here. UNLIKE #1003's [0271] retirement
+// window, this needs no bimodal arm: a REVOKE (not a DROP) never changes whether the function
+// EXISTS, only whether it is GRANTED, and grantMatrixFailures() below judges every name it finds
+// live in the catalog on EVERY frontier — an unlisted name simply reads as the correct
+// `expected=false` on both sides of 0273 once this file's own edit lands, with no frontier
+// window to hide behind. (No other lane's own local copy of this file yet knows about 0273 —
+// each lane discovers this same edit only when the wave integrates.)
+const VENDOR_BINDING_0028_HUMAN_FNS = [
+  "revoke_vendor_identity_binding", "list_vendor_bindings", "get_vendor_binding",
+];
+
+// 裁-18b PR-1 — the Clara vendor-binding PROPOSAL door. Human doors on the clara_authenticated
+// surface: its named reset (a decline suppresses BOTH proposal writers, so there must be a way
+// out — #921 leaves this door untouched: it lifts a decline on an ALREADY-EXISTING historical
+// row, exactly the "in-flight legacy visibility" D6 keeps), eligible_binding_signer_count (the
+// sign dialog reads it to know whether to ask for 裁-32's self-approval attestation) and
+// binding_identity_review (a read-only review list; it revokes nothing). `decline_vendor_
+// identity_binding` was REMOVED from this array by #921 [0273] — the third of the three doors
+// that migration revokes from clara_authenticated (propose and sign are 0028's own, above);
+// like them, it is retired-but-live, so it drops out of the GRANT expectation without leaving
+// this file's existence tracking (it carries none of its own here — see this block's own header:
+// "Written down UNCONDITIONALLY, unlike the closed-world ROSTERS"). Written down UNCONDITIONALLY,
+// unlike the closed-world ROSTERS this PR also touches: grantMatrixFailures sweeps the LIVE
+// catalog and only judges functions that exist, so a name here that a pinned-frontier chain has
+// not got is simply never reached.
 const BINDING_PROPOSAL_PR1_HUMAN_FNS = [
-  "decline_vendor_identity_binding", "reset_binding_decline",
-  "eligible_binding_signer_count", "binding_identity_review",
+  "reset_binding_decline", "eligible_binding_signer_count", "binding_identity_review",
 ];
 /** …and the two wake verbs, on `filing` AND `interactive` (G1 arm A) — the same chat-parity
  *  shape wake_file_document already set: one allowlist row per kind, the grant on both roles. */
 const BINDING_PROPOSAL_PR1_WAKE_FNS = [
   "wake_propose_vendor_identity_binding", "wake_list_binding_candidates",
 ];
-export const VENDOR_BINDING_0028_COHORT = [...VENDOR_BINDING_0028_HUMAN_FNS];
 
 // 0037 — the Wave C-a subledger (design: docs/plan/completed/wave-c-a-subledger-design.md §4.9).
 // Four human composites, clara_authenticated ONLY (bookkeeper floor in-body): which

@@ -28,18 +28,18 @@ import {
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
-  has28, has29, seedPayableAccount, propose, sign, revoke,
-  signLive, withPostTimeControl, postTimeControlLive, POST_TIME_MARKER,
-  recutApproveCore, restoreApproveCore, seedClientHardIdentifier
+  has28, has29, seedPayableAccount, proposeAsFnOwner, signAsFnOwner, revoke,
+  signLiveAsFnOwner, withPostTimeControl, postTimeControlLive, POST_TIME_MARKER,
+  recutApproveCore, restoreApproveCore, seedClientHardIdentifier, retiredWriteDoorQuery,
 } from "./x36-vendor-binding-helpers.mjs";
 import { insertUser, addMember, createClient, upsertAccount, COA } from "./rig-fixtures.mjs";
 import {
   bp1Live, failBp1, reasonOf, mintCred, MODEL, WAKE_ROLE,
-  proposeAsAgent, listCandidates, declineBinding, resetDecline,
+  proposeAsAgent, listCandidates, declineBindingAsFnOwner, resetDecline,
   derivedBasis, lawfulBasis, evidenceDocuments, foreignRegion,
   supersedeInvoiceFactsKeepingRegions, seedVendorNoRegistration, mergeAway,
   seedWindow, seedUniqueFamilyVendor, DATES_OK, withMutant, withoutConstraint,
-  plantRegistrationRegion, siblingFactsExtraction, twoSessions, asHumanSession, asWakeSession,
+  plantRegistrationRegion, siblingFactsExtraction, twoSessions, asRetiredWriteDoorSession, asWakeSession,
   waitBlockedByOrThrow, ageOutPriorDepartures,
 } from "./binding-proposal-pr-1-helpers.mjs";
 
@@ -599,7 +599,7 @@ test("bp1.W7b CROSS-PATH — human-then-agent and agent-then-human BOTH refuse b
   // re-pinned byte-identical in the migration tail) — the behaviour moved because the INDEX
   // moved, which is exactly the change G8 accepted knowingly.
   const a = await eligibleVendor("W7b-h");
-  const ph = await propose(w.users.bob, { client: w.clients.A1, counterparty: a.cp.id });
+  const ph = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: a.cp.id });
   assert.equal(ph.status, "proposed");
   const e1 = await assertRaises("CLR36",
     async () => proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: a.cp.id, basis: a.basis }),
@@ -610,7 +610,7 @@ test("bp1.W7b CROSS-PATH — human-then-agent and agent-then-human BOTH refuse b
   const b = await eligibleVendor("W7b-a");
   await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: b.cp.id, basis: b.basis });
   const e2 = await assertRaises("CLR36",
-    () => propose(w.users.bob, { client: w.clients.A1, counterparty: b.cp.id }),
+    () => proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: b.cp.id }),
     "human after agent");
   assert.match(e2.message, /binding_conflict/,
     "the human door surfaces the estate's EXISTING typed word — no new error vocabulary in the UI");
@@ -644,7 +644,7 @@ test("bp1.W8 a LIVE binding blocks a fresh proposal — and the refusal comes fr
   failBp1(live);
   const { cp, basis } = await eligibleVendor("W8");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await signLive(w.users.alice, { binding: p.binding_id });   // agent proposed ⇒ any admin may sign
+  await signLiveAsFnOwner(w.users.alice, { binding: p.binding_id });   // agent proposed ⇒ any admin may sign
   const err = await assertRaises("CLR36",
     async () => proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis }),
     "propose over a live binding");
@@ -683,7 +683,7 @@ test("bp1.W10 the honest label is BIDIRECTIONAL — neither lie is representable
   const { cp, basis } = await eligibleVendor("W10");
   const agent = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
   const human = await eligibleVendor("W10-h");
-  const hp = await propose(w.users.bob, { client: w.clients.A1, counterparty: human.cp.id });
+  const hp = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: human.cp.id });
 
   // THE PROBES ARE INSERT-SHAPED (FOLD-2). These three honesty CHECKs used to be driven by
   // UPDATEing the live row — but provenance is now frozen from the INSERT onward, so an UPDATE is
@@ -878,15 +878,15 @@ test("bp1.D1 decline — admin floor, reason required, proposed → declined, au
 
   // reason required
   await assertRaises("CLR36",
-    () => declineBinding(w.users.alice, { binding: p.binding_id, reason: "   " }), "blank reason");
+    () => declineBindingAsFnOwner(w.users.alice, { binding: p.binding_id, reason: "   " }), "blank reason");
   // bookkeeper floor
   await assertRaises(CLR.authz,
-    () => declineBinding(w.users.bob, { binding: p.binding_id }), "bookkeeper declining");
+    () => declineBindingAsFnOwner(w.users.bob, { binding: p.binding_id }), "bookkeeper declining");
   // another firm's admin
   await assertRaises(CLR.notFound,
-    () => declineBinding(w.users.dave, { binding: p.binding_id }), "cross-firm admin declining");
+    () => declineBindingAsFnOwner(w.users.dave, { binding: p.binding_id }), "cross-firm admin declining");
 
-  const r = await declineBinding(w.users.alice, { binding: p.binding_id, reason: "wrong vendor family" });
+  const r = await declineBindingAsFnOwner(w.users.alice, { binding: p.binding_id, reason: "wrong vendor family" });
   assert.equal(r.status, "declined");
   const b = await bindingRow(p.binding_id);
   assert.equal(b.status, "declined");
@@ -906,7 +906,7 @@ test("bp1.D1 decline — admin floor, reason required, proposed → declined, au
 
   // A declined row is terminal on this door: it cannot be declined twice.
   await assertRaises("CLR36",
-    () => declineBinding(w.users.alice, { binding: p.binding_id }), "declining twice");
+    () => declineBindingAsFnOwner(w.users.alice, { binding: p.binding_id }), "declining twice");
 });
 
 test("bp1.D2 ck_vib_declined — the status/stamp pair cannot lie in either direction", async () => {
@@ -927,7 +927,7 @@ test("bp1.D3 THE LOOP BRAKE — Clara never re-proposes what a human declined (w
   failBp1(live);
   const { cp, basis } = await eligibleVendor("D3");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await declineBinding(w.users.alice, { binding: p.binding_id, reason: "not this vendor" });
+  await declineBindingAsFnOwner(w.users.alice, { binding: p.binding_id, reason: "not this vendor" });
 
   // (a) the WALL in the door
   const err = await assertRaises("CLR36",
@@ -948,7 +948,7 @@ test("bp1.D3 THE LOOP BRAKE — Clara never re-proposes what a human declined (w
   //     adversarial pass's attack was one line — decline the card, then call the unchanged human
   //     door. `propose_vendor_identity_binding` is RECUT by this PR and now refuses the same way.
   const e2 = await assertRaises("CLR36",
-    () => propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id }),
+    () => proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id }),
     "the HUMAN door after a decline");
   assert.match(e2.message, /binding_declined/);
   assert.equal(reasonOf(e2), "binding_declined");
@@ -966,7 +966,7 @@ test("bp1.D3 THE LOOP BRAKE — Clara never re-proposes what a human declined (w
   assert.equal(after.declined_at, null, "…and the stamp clears, because ck_vib_declined pairs it with the status");
 
   // (e) both doors work again, and only now.
-  const again = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const again = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
   assert.equal(again.status, "proposed", "after an explicit reset the pair may be proposed again");
 });
 
@@ -974,7 +974,7 @@ test("bp1.D3m MUTANT — removing the declined brake lets Clara re-propose a ref
   failBp1(live);
   const { cp, basis } = await eligibleVendor("D3m");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await declineBinding(w.users.alice, { binding: p.binding_id, reason: "no" });
+  await declineBindingAsFnOwner(w.users.alice, { binding: p.binding_id, reason: "no" });
   // The suppression moved into clara._binding_suppression when the gate ruled it must cover
   // REVOKED as well and bind BOTH writers (B4) — so the mutant follows it there. withMutant
   // threw the moment the old needle went stale rather than running a silent no-op "mutant",
@@ -994,7 +994,7 @@ test("bp1.D4 B4 — a REVOKED binding suppresses too, in both writers and the re
   // binding, watched it work, and took it away), so it would be perverse to suppress less.
   const { cp, basis } = await eligibleVendor("D4");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await signLive(w.users.alice, { binding: p.binding_id });
+  await signLiveAsFnOwner(w.users.alice, { binding: p.binding_id });
   await revoke(w.users.bob, { binding: p.binding_id, reason: "wrong vendor after all" });
 
   const e1 = await assertRaises("CLR36",
@@ -1002,7 +1002,7 @@ test("bp1.D4 B4 — a REVOKED binding suppresses too, in both writers and the re
     "Clara re-proposing a revoked pair");
   assert.equal(reasonOf(e1), "binding_revoked");
   const e2 = await assertRaises("CLR36",
-    () => propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id }),
+    () => proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id }),
     "a human re-proposing a revoked pair");
   assert.equal(reasonOf(e2), "binding_revoked");
   const row = (await listCandidates(await filingActor(), w.clients.A1))
@@ -1024,7 +1024,7 @@ test("bp1.D4 B4 — a REVOKED binding suppresses too, in both writers and the re
   assert.ok(still.revoked_at, "…and its stamp is untouched — the reset never cleared it");
   // …and the pair really is still suppressed on both writers.
   await assertRaises("CLR36",
-    () => propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id }),
+    () => proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id }),
     "a human re-proposing after a refused reset");
 });
 
@@ -1032,7 +1032,7 @@ test("bp1.G7c M-11 — the reset lifts a DECLINE, and its receipt names every co
   failBp1(live);
   const { cp, basis } = await eligibleVendor("G7c");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await declineBinding(w.users.alice, { binding: p.binding_id, reason: "not this vendor family" });
+  await declineBindingAsFnOwner(w.users.alice, { binding: p.binding_id, reason: "not this vendor family" });
   const r = await resetDecline(w.users.alice, { binding: p.binding_id, reason: "confirmed by phone" });
   assert.equal(r.status, "expired");
   // THE RECEIPT. An audit line that names some of what it erased and not the rest is a summary,
@@ -1179,7 +1179,7 @@ test("bp1.E5 a LIVE binding — has_live_binding true", async () => {
   failBp1(live);
   const { cp, basis } = await eligibleVendor("E5");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await signLive(w.users.alice, { binding: p.binding_id });
+  await signLiveAsFnOwner(w.users.alice, { binding: p.binding_id });
   const row = (await listCandidates(await filingActor(), w.clients.A1))
     .find((x) => x.counterparty_id === cp.id);
   assert.equal(row.has_live_binding, true);
@@ -1614,7 +1614,7 @@ test("bp1.A5 the index covers 'live' — the propose-versus-sign race end state 
   failBp1(live);
   const { cp, basis } = await eligibleVendor("A5");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await signLive(w.users.alice, { binding: p.binding_id });
+  await signLiveAsFnOwner(w.users.alice, { binding: p.binding_id });
   // THE RACE'S END STATE, written directly: a live binding AND a fresh open proposal for one
   // pair. A `where status='proposed'` index cannot forbid it (only one row is proposed) and
   // uq_vib_one_live cannot either (only one row is live) — so a refusal here can ONLY be the
@@ -1646,7 +1646,7 @@ test("bp1.A6 裁-32 — directed_by is recorded and effective_proposer is DERIVE
     [r.binding_id, w.users.bob]), "writing effective_proposer directly");
   // A human proposal has no director, so the effective proposer is the human themself.
   const h = await eligibleVendor("A6-h");
-  const hp = await propose(w.users.bob, { client: w.clients.A1, counterparty: h.cp.id });
+  const hp = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: h.cp.id });
   const hb = await bindingRow(hp.binding_id);
   assert.equal(hb.directed_by, null);
   assert.equal(hb.effective_proposer, w.users.bob);
@@ -1676,7 +1676,7 @@ test("bp1.S1 裁-18a — Clara proposes, ANY admin signs; the wall passes BY CON
   failBp1(live);
   const { cp, basis } = await eligibleVendor("S1");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  const s = await signLive(w.users.alice, { binding: p.binding_id });
+  const s = await signLiveAsFnOwner(w.users.alice, { binding: p.binding_id });
   assert.equal(s.status, "live");
   const b = await bindingRow(p.binding_id);
   assert.equal(b.signed_by, w.users.alice);
@@ -1690,9 +1690,9 @@ test("bp1.S2 the wall is an ACTOR COMPARISON — a human self-propose+self-sign 
   // human" it would refuse S1 and strand every single-admin firm (design §3.4 / annex G-a).
   // Alice proposes as a human and tries to sign her own — refused, with the ruled words.
   const { cp } = await eligibleVendor("S2");
-  const hp = await propose(w.users.alice, { client: w.clients.A1, counterparty: cp.id });
+  const hp = await proposeAsFnOwner(w.users.alice, { client: w.clients.A1, counterparty: cp.id });
   const err = await assertRaises(CLR.authz,
-    () => sign(w.users.alice, { binding: hp.binding_id }), "human self-propose then self-sign");
+    () => signAsFnOwner(w.users.alice, { binding: hp.binding_id }), "human self-propose then self-sign");
   // N-4 (2026-08-30, fail-closed pending an owner ruling). 裁-32's relaxation is for the DIRECTED
   // path — "I asked Clara to propose this, and I am the only admin who could sign it". It is NOT
   // a licence for a human's OWN MANUAL proposal to be self-signed, which is exactly what 裁-18c
@@ -1702,7 +1702,7 @@ test("bp1.S2 the wall is an ACTOR COMPARISON — a human self-propose+self-sign 
   assert.match(err.message, /let Clara propose it, or add a second admin/);
   // …and an attestation buys NOTHING on this path. Without this the relaxation would be a
   // universal bypass wearing a text field.
-  const e2 = await assertRaises(CLR.authz, () => humanQuery(w.users.alice,
+  const e2 = await assertRaises(CLR.authz, () => retiredWriteDoorQuery(w.users.alice,
     "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
     [hp.binding_id, opk("s2att"), "Sole admin of this firm; I checked the three invoices myself."]),
     "an attestation on a MANUAL self-proposal");
@@ -1727,11 +1727,11 @@ test("bp1.S2b 裁-32 — the DIRECTED interactive path in a solo firm DOES open 
   assert.equal(before.effective_proposer, w.users.alice);
   // No attestation ⇒ the solo arm names the way out rather than refusing outright.
   const err = await assertRaises(CLR.authz,
-    () => sign(w.users.alice, { binding: p.binding_id }), "solo directed self-sign with no attestation");
+    () => signAsFnOwner(w.users.alice, { binding: p.binding_id }), "solo directed self-sign with no attestation");
   assert.equal(reasonOf(err), "self_attestation_required");
   assert.match(err.message, /state why you are signing your own/);
   // …and with one, it opens — through the real door, with PR-3's control present.
-  const signed = await withPostTimeControl(() => humanQuery(w.users.alice,
+  const signed = await withPostTimeControl(() => retiredWriteDoorQuery(w.users.alice,
     "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
     [p.binding_id, opk("s2batt"), "Sole admin of this firm; I checked the three invoices myself."]));
   assert.equal(signed.rows[0].result.status, "live");
@@ -1754,8 +1754,8 @@ test("bp1.S3 a bookkeeper cannot sign Clara's proposal; another firm's admin can
   failBp1(live);
   const { cp, basis } = await eligibleVendor("S3");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await assertRaises(CLR.authz, () => sign(w.users.bob, { binding: p.binding_id }), "bookkeeper signing");
-  await assertRaises(CLR.notFound, () => sign(w.users.dave, { binding: p.binding_id }), "other firm's admin signing");
+  await assertRaises(CLR.authz, () => signAsFnOwner(w.users.bob, { binding: p.binding_id }), "bookkeeper signing");
+  await assertRaises(CLR.notFound, () => signAsFnOwner(w.users.dave, { binding: p.binding_id }), "other firm's admin signing");
 });
 
 test("bp1.S4 proposal_drifted still fires over an AGENT-created row", async () => {
@@ -1766,7 +1766,7 @@ test("bp1.S4 proposal_drifted still fires over an AGENT-created row", async () =
   // A FOURTH approved invoice for the SAME vendor moves the window, so the re-derivation at
   // sign time differs from the one the proposal was hashed over.
   await seedWindow(w, "S4-fourth", { dates: ["2025-12-15"], vendor: cp });
-  const err = await assertRaises("CLR36", () => sign(w.users.alice, { binding: p.binding_id }), "signing a drifted proposal");
+  const err = await assertRaises("CLR36", () => signAsFnOwner(w.users.alice, { binding: p.binding_id }), "signing a drifted proposal");
   assert.match(err.message, /proposal_drifted/);
 });
 
@@ -1885,7 +1885,7 @@ test("bp1.O1 the retro census SEES a would-fail binding and REVOKES NOTHING", as
   // overruling a human's signature. What is owed instead is visibility, and this is it.
   const { cp, basis } = await eligibleVendor("O1");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await signLive(w.users.alice, { binding: p.binding_id });
+  await signLiveAsFnOwner(w.users.alice, { binding: p.binding_id });
   const before = await humanQuery(w.users.alice,
     "select count(*)::int c from clara.binding_identity_review() where binding_id=$1", [p.binding_id]);
   assert.equal(before.rows[0].c, 0, "a clean live binding is NOT a finding");
@@ -1955,10 +1955,28 @@ test("bp1.F1 the byte-frozen bodies are unmoved (prosrc sha256, the live catalog
       "clara.sign_vendor_identity_binding(uuid,text,text)"]);
   assert.equal(sigs.rows[0].old2, null, "the 2-arg signer overload must be DROPPED, not left shadow-reachable");
   assert.ok(sigs.rows[0].new3, "the 3-arg signer must resolve");
+  // THE ACL HALF, RE-TRUED FOR #921 (migration 0273). 0154's own claim was that a DROP destroys
+  // the ACL, so the recreated 3-arg signer had to have its grant re-made — and until 0273 that
+  // grant was `clara_authenticated`'s. 0273 revokes it again, deliberately: no human role may
+  // sign. The question is therefore asked at whichever frontier this battery runs on, by the
+  // ledger row rather than by assumption, and BOTH halves stay observable:
+  //   · the OWNER's EXECUTE is the half 0273 never touches — a DROP that had destroyed the ACL
+  //     outright would show here, at every frontier;
+  //   · the HUMAN's EXECUTE is present before 0273 and gone from 0273 on. The denial itself is
+  //     driven end-to-end, at every rank, in vendor-binding-write-doors-revoked.test.mjs
+  //     (vb921.2 / vb921.4, 42501 from the ACL layer); this cell only pins the catalog fact.
+  const revoked = (await rootQuery(
+    "select 1 from clara.schema_migrations where version ~ 'vendor_binding_write_doors_revoked$'"
+  )).rows.length > 0;
   const signerAcl = await rootQuery(
-    "select has_function_privilege('clara_authenticated', $1, 'EXECUTE') p",
+    `select has_function_privilege('clara_authenticated', $1, 'EXECUTE') as human,
+            has_function_privilege('clara_fn_owner', $1, 'EXECUTE') as owner`,
     ["clara.sign_vendor_identity_binding(uuid,text,text)"]);
-  assert.equal(signerAcl.rows[0].p, true, "DROP destroys the ACL — the grant must have been re-made");
+  assert.equal(signerAcl.rows[0].owner, true,
+    "DROP destroys the ACL — the recreated signer must still be EXECUTE-able by its own owner");
+  assert.equal(signerAcl.rows[0].human, !revoked, revoked
+    ? "#921 (0273) revoked the human grant on the signer — clara_authenticated must NOT hold EXECUTE"
+    : "DROP destroys the ACL — 0154 must have re-made the clara_authenticated grant");
 });
 
 test("bp1.F2 ONE derivation, TWO doors — the five content fields are byte-identical", async () => {
@@ -1967,7 +1985,7 @@ test("bp1.F2 ONE derivation, TWO doors — the five content fields are byte-iden
   const pa = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: a.cp.id, basis: a.basis });
   const ba = await bindingRow(pa.binding_id);
   const h = await eligibleVendor("F2-human");
-  const ph = await propose(w.users.bob, { client: w.clients.A1, counterparty: h.cp.id });
+  const ph = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: h.cp.id });
   const bh = await bindingRow(ph.binding_id);
   // Different vendors, so the VALUES differ — what must match is the SHAPE and the fact that
   // both rows' content came from the derivation. Prove it by re-deriving each and comparing.
@@ -2138,7 +2156,7 @@ test("bp1.S-postcontrol C3 — the gate refuses when the approve-path control is
   const { cp, basis } = await eligibleVendor("Spc");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
   const err = await assertRaises("CLR36",
-    () => sign(w.users.alice, { binding: p.binding_id }), "signing with no post-time control deployed");
+    () => signAsFnOwner(w.users.alice, { binding: p.binding_id }), "signing with no post-time control deployed");
   assert.equal(reasonOf(err), "post_time_control_absent");
   assert.equal((await bindingRow(p.binding_id)).status, "proposed", "nothing went live");
 
@@ -2147,7 +2165,7 @@ test("bp1.S-postcontrol C3 — the gate refuses when the approve-path control is
   // binding through the SAME door, and the gate opens — then the marker comes off and the body is
   // verified byte-identical again.
   const signed = await withPostTimeControl(
-    () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("spcok") }));
+    () => signAsFnOwner(w.users.alice, { binding: p.binding_id, opKey: opk("spcok") }));
   assert.equal(signed.status, "live", "with the control deployed the very same call succeeds");
   assert.equal(await postTimeControlLive(), false, "…and the marker is gone again afterwards");
 });
@@ -2193,7 +2211,7 @@ test("bp1.C3-identity — TEXT does not open the gate, in any of the three shape
     const { original, sha } = await recutApproveCore(edit);
     assert.notEqual(sha, baseSha, `${label}: the recut really changed the body`);
     const err = await assertRaises("CLR36",
-      () => sign(w.users.alice, { binding: p.binding_id, opKey: opk(label) }),
+      () => signAsFnOwner(w.users.alice, { binding: p.binding_id, opKey: opk(label) }),
       `${label}: the marker text is present and unwitnessed`);
     assert.equal(reasonOf(err), "post_time_control_absent", `${label}: refused for the control reason`);
     await restoreApproveCore(original, baseSha);
@@ -2207,7 +2225,7 @@ test("bp1.C3-identity — TEXT does not open the gate, in any of the three shape
     [POST_TIME_MARKER, "clara._approve_entry_core(jsonb,uuid,uuid,text,text)"]);
   try {
     const err = await assertRaises("CLR36",
-      () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("c3mismatch") }),
+      () => signAsFnOwner(w.users.alice, { binding: p.binding_id, opKey: opk("c3mismatch") }),
       "a witness whose sha does not match the live body");
     assert.equal(reasonOf(err), "post_time_control_absent");
   } finally {
@@ -2216,7 +2234,7 @@ test("bp1.C3-identity — TEXT does not open the gate, in any of the three shape
 
   // …and the positive control: recut AND witnessed, the same call opens.
   const signed = await withPostTimeControl(
-    () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("c3ok") }));
+    () => signAsFnOwner(w.users.alice, { binding: p.binding_id, opKey: opk("c3ok") }));
   assert.equal(signed.status, "live", "recut AND witnessed — the gate opens for the reviewed bytes");
 });
 
@@ -2245,7 +2263,7 @@ test("bp1.C3-wrong-proc FOLD-6 — a witness naming ANOTHER live function, with 
     assert.equal(consistent.rows[0].ok, true,
       "control: the wrong-proc witness is internally consistent — only the door's own pin can refuse it");
     const err = await assertRaises("CLR36",
-      () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("c3wp") }),
+      () => signAsFnOwner(w.users.alice, { binding: p.binding_id, opKey: opk("c3wp") }),
       "a witness pointing at the wrong function");
     assert.equal(reasonOf(err), "post_time_control_absent");
   } finally {
@@ -2276,7 +2294,7 @@ test("bp1.C3-spoof-under-stale FOLD-6 — the three marker shapes refuse under a
     ]) {
       const { original } = await recutApproveCore(edit);
       const err = await assertRaises("CLR36",
-        () => sign(w.users.alice, { binding: p.binding_id, opKey: opk(`c3su${label.slice(0, 6)}`) }),
+        () => signAsFnOwner(w.users.alice, { binding: p.binding_id, opKey: opk(`c3su${label.slice(0, 6)}`) }),
         `${label} under a stale witness`);
       assert.equal(reasonOf(err), "post_time_control_absent", `${label}: refused for the control reason`);
       await restoreApproveCore(original, baseSha);
@@ -2440,7 +2458,7 @@ test("bp1.S5a H7 — a family that becomes AMBIGUOUS between propose and sign RE
     [sib.id, `${cp.name.split(" ")[0]} OTHER SDN BHD`,
       `${cp.name.split(" ")[0]}othersdnbhd`.toLowerCase()]);
   const err = await assertRaises("CLR36",
-    () => signLive(w.users.alice, { binding: p.binding_id }), "signing into a newly ambiguous family");
+    () => signLiveAsFnOwner(w.users.alice, { binding: p.binding_id }), "signing into a newly ambiguous family");
   assert.match(err.message, /binding_name_family_ambiguous/);
   assert.equal((await bindingRow(p.binding_id)).status, "proposed");
 });
@@ -2456,7 +2474,7 @@ test("bp1.S5b H7 — a FOREIGN identifier landing on an evidence document before
   const docs = await evidenceDocuments(w.firms.A, w.clients.A1, cp.id);
   await plantRegistrationRegion(w.firms.A, docs[0], "199901019999");
   const err = await assertRaises("CLR36",
-    () => signLive(w.users.alice, { binding: p.binding_id }), "signing a corpus that now contradicts itself");
+    () => signLiveAsFnOwner(w.users.alice, { binding: p.binding_id }), "signing a corpus that now contradicts itself");
   assert.match(err.message, /binding_identifier_unproven/);
   assert.equal((await bindingRow(p.binding_id)).status, "proposed");
 });
@@ -2470,7 +2488,7 @@ test("bp1.S5m MUTANT — without the sign-time re-run the drifted corpus is sign
   await withPostTimeControl(() => withMutant(SIGN_SIG, [[
     "  if v_blocker is not null then", "  if false then",
   ]], async () => {
-    const s = await sign(w.users.alice, { binding: p.binding_id, opKey: opk("s5m") });
+    const s = await signAsFnOwner(w.users.alice, { binding: p.binding_id, opKey: opk("s5m") });
     assert.equal(s.status, "live",
       "without the re-run a proposal whose corpus stopped proving identity still goes live");
   }));
@@ -2487,7 +2505,7 @@ test("bp1.W14c C-1 — decline-vs-propose: the propose that unblocks after the d
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
 
   const outcome = await twoSessions(async (c1, c2) => {
-    const pid2 = await asHumanSession(c2, w.users.alice);
+    const pid2 = await asRetiredWriteDoorSession(c2, w.users.alice);
     await c2.query("begin");
     await c2.query("select set_config('request.jwt.claims', $1, true)",
       [JSON.stringify({ sub: w.users.alice, role: "authenticated" })]);
@@ -2495,7 +2513,7 @@ test("bp1.W14c C-1 — decline-vs-propose: the propose that unblocks after the d
       "select clara.decline_vendor_identity_binding(p_binding => $1, p_reason => $2, p_op_key => $3)",
       [p.binding_id, "race: not this vendor", opk("w14c-dec")]);
 
-    const pid1 = await asHumanSession(c1, w.users.bob);
+    const pid1 = await asRetiredWriteDoorSession(c1, w.users.bob);
     const t1 = c1.query(
       "select clara.propose_vendor_identity_binding(p_proposal => $1::jsonb, p_op_key => $2) as result",
       [JSON.stringify({ client_id: w.clients.A1, counterparty_id: cp.id }), opk("w14c-prop")])
@@ -2527,14 +2545,14 @@ test("bp1.D4c H6 — propose-vs-sign takes ONE key in ONE order: T2 waits, and N
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
 
   const outcome = await withPostTimeControl(() => twoSessions(async (c1, c2) => {
-    const pid1 = await asHumanSession(c1, w.users.alice);
+    const pid1 = await asRetiredWriteDoorSession(c1, w.users.alice);
     await c1.query("begin");
     await c1.query("select set_config('request.jwt.claims', $1, true)",
       [JSON.stringify({ sub: w.users.alice, role: "authenticated" })]);
     await c1.query("select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2)",
       [p.binding_id, opk("d4c-sign")]);
 
-    const pid2 = await asHumanSession(c2, w.users.bob);
+    const pid2 = await asRetiredWriteDoorSession(c2, w.users.bob);
     const t2 = c2.query(
       "select clara.propose_vendor_identity_binding(p_proposal => $1::jsonb, p_op_key => $2) as result",
       [JSON.stringify({ client_id: w.clients.A1, counterparty_id: cp.id }), opk("d4c-prop")])
@@ -2563,7 +2581,7 @@ test("bp1.D4d H6 — a second row-keyed writer on the same pair waits on the sam
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
 
   const outcome = await twoSessions(async (c1, c2) => {
-    const pid1 = await asHumanSession(c1, w.users.alice);
+    const pid1 = await asRetiredWriteDoorSession(c1, w.users.alice);
     await c1.query("begin");
     await c1.query("select set_config('request.jwt.claims', $1, true)",
       [JSON.stringify({ sub: w.users.alice, role: "authenticated" })]);
@@ -2571,7 +2589,7 @@ test("bp1.D4d H6 — a second row-keyed writer on the same pair waits on the sam
       "select clara.decline_vendor_identity_binding(p_binding => $1, p_reason => $2, p_op_key => $3)",
       [p.binding_id, "race: hold the key", opk("d4d-dec")]);
 
-    const pid2 = await asHumanSession(c2, w.users.bob);
+    const pid2 = await asRetiredWriteDoorSession(c2, w.users.bob);
     const t2 = c2.query(
       "select clara.propose_vendor_identity_binding(p_proposal => $1::jsonb, p_op_key => $2) as result",
       [JSON.stringify({ client_id: w.clients.A1, counterparty_id: cp.id }), opk("d4d-prop")])
@@ -2657,7 +2675,7 @@ test("bp1.W10c S-1 — the maker/checker principal is FROZEN by the signature", 
 
   // POSITIVE CONTROL: the freeze is not a blanket ban on UPDATE — the sign transition itself
   // writes the signature columns on this very row, and does so through the audited door.
-  await signLive(w.users.alice, { binding: p.binding_id });
+  await signLiveAsFnOwner(w.users.alice, { binding: p.binding_id });
   assert.equal((await bindingRow(p.binding_id)).signed_by, w.users.alice,
     "control: the SIGN transition still writes, so the freeze is scoped and not a wall on everything");
 
@@ -2810,7 +2828,7 @@ test("bp1.W10cm MUTANT — without the principal freeze, the maker/checker behin
   failBp1(live);
   const { cp, basis } = await eligibleVendor("W10cm");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await signLive(w.users.alice, { binding: p.binding_id });
+  await signLiveAsFnOwner(w.users.alice, { binding: p.binding_id });
   await withMutant(FREEZE_SIG, [[
     "  if old.signed_at is not null\n     and (new.signed_by is distinct from old.signed_by",
     "  if false\n     and (new.signed_by is distinct from old.signed_by",
@@ -2916,7 +2934,7 @@ test("bp1.B1-roster H5 — remove the second admin, self-sign, re-add: the windo
     "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
   assert.ok(counted.rows[0].n >= 2,
     `the DURABLE window still counts the departed admin, got ${counted.rows[0].n}`);
-  const err = await assertRaises(CLR.authz, () => humanQuery(w.users.alice,
+  const err = await assertRaises(CLR.authz, () => retiredWriteDoorQuery(w.users.alice,
     "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
     [p.binding_id, opk("h5sign"), "I am the only admin now"]),
     "self-signing after removing the only other admin");
@@ -2986,7 +3004,7 @@ test("bp1.B1-roster-m MUTANT — a LIVE headcount lets the remove/self-sign/re-a
       "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
     assert.equal(Number(live1.rows[0].n), 1,
       "control: the mutant really is the old live-headcount count");
-    const signed = await humanQuery(w.users.alice,
+    const signed = await retiredWriteDoorQuery(w.users.alice,
       "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
       [p.binding_id, opk("h5msign"), "I am the only admin now"]);
     assert.equal(signed.rows[0].result.status, "live",

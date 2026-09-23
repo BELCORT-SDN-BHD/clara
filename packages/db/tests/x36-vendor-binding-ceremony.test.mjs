@@ -1,6 +1,16 @@
 // Migration 0028 -- the vendor identity binding propose/sign/revoke ceremony (task #36).
+//
+// #921 (migration 0273): `clara_authenticated` no longer holds EXECUTE on propose/sign/decline,
+// so every propose/sign call below is carried by `clara_fn_owner` through the `…AsFnOwner`
+// wrappers — same bodies, same actor in request.jwt.claims, same walls, a different role on the
+// wire. Read x36-vendor-binding-helpers.mjs's header for why, and read
+// vendor-binding-write-doors-revoked.test.mjs for the proof that NO human session can reach
+// these three any more (42501, at every rank). `revoke` below IS still granted to
+// clara_authenticated and is still driven as a human, deliberately — that is the one write a
+// firm keeps under D6.
+//
 // Complements x36-vendor-binding-dwell.test.mjs (which proves the derivation's dwell gate in
-// isolation): this file drives the three GRANTED verbs themselves --
+// isolation): this file drives the three ceremony verbs themselves --
 //   x36c.1 propose_vendor_identity_binding happy path (bookkeeper floor) over a window that
 //     clears every _derive_vendor_binding_proposal gate (dwell+restated+F1+F2+F3).
 //   x36c.2 THE INTERLOCK -- sign_vendor_identity_binding refuses post_control_absent (CLR36)
@@ -23,8 +33,9 @@ import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import { insertUser, addMember } from "./rig-fixtures.mjs";
 import {
-  has28, has29, seedPayableAccount, seedPassingWindow, propose, sign, revoke, deriveOrError,
-  postTimeControlLive, withPostTimeControl, signLive, seedClientHardIdentifier,
+  has28, has29, seedPayableAccount, seedPassingWindow, proposeAsFnOwner, signAsFnOwner, revoke, deriveOrError,
+  postTimeControlLive, withPostTimeControl, signLiveAsFnOwner, seedClientHardIdentifier,
+  retiredWriteDoorQuery,
 } from "./x36-vendor-binding-helpers.mjs";
 
 let has0028 = false;
@@ -76,7 +87,7 @@ test("x36c readiness", () => { requireReady(); assert.ok(w, "world built"); });
 test("x36c.1 propose_vendor_identity_binding — bookkeeper happy path over a fully-qualifying window", async () => {
   requireReady();
   const cp = await seedPassingWindow(w, "C1");
-  const r = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const r = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
   assert.equal(r.status, "proposed");
   assert.ok(r.binding_id, "binding_id returned");
   // f1_vendor_name_norm comes from _binding_normalize (NFC + format-strip + whitespace-
@@ -100,16 +111,16 @@ test("x36c.2 THE INTERLOCK — signing is closed while the post-time CONTROL is 
   // is: it says a file ran once, never that its objects survived. The witness is now the approve
   // path's own BODY.
   const cp = await seedPassingWindow(w, "C2");
-  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const proposed = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
   assert.equal(has0029, true,
     "the LEDGER row is present — which is exactly why it cannot be the interlock's witness");
   if (postControl) {
-    const signed = await sign(w.users.alice, { binding: proposed.binding_id });
+    const signed = await signAsFnOwner(w.users.alice, { binding: proposed.binding_id });
     assert.equal(signed.status, "live", "with the control deployed the interlock is open");
     return;
   }
   try {
-    await sign(w.users.alice, { binding: proposed.binding_id, opKey: opk("vbsign2") });
+    await signAsFnOwner(w.users.alice, { binding: proposed.binding_id, opKey: opk("vbsign2") });
     assert.fail("sign_vendor_identity_binding must throw while the post-time control is absent");
   } catch (e) {
     assert.equal(e.code, "CLR36", `expected CLR36, got ${e.code}: ${e.message}`);
@@ -119,7 +130,7 @@ test("x36c.2 THE INTERLOCK — signing is closed while the post-time CONTROL is 
   // BOTH DIRECTIONS. Plant the ratified marker on the live approve path and the SAME call
   // succeeds — without this the cell above could be passing because the door refuses everything.
   const signed = await withPostTimeControl(
-    () => sign(w.users.alice, { binding: proposed.binding_id, opKey: opk("vbsign3") }));
+    () => signAsFnOwner(w.users.alice, { binding: proposed.binding_id, opKey: opk("vbsign3") }));
   assert.equal(signed.status, "live", "the interlock opens on the CONTROL, not on a ledger row");
   assert.equal(await postTimeControlLive(), false, "…and the marker is removed again afterwards");
 });
@@ -127,7 +138,7 @@ test("x36c.2 THE INTERLOCK — signing is closed while the post-time CONTROL is 
 test("x36c.3 revoke_vendor_identity_binding refuses binding_not_live against a still-proposed binding", async () => {
   requireReady();
   const cp = await seedPassingWindow(w, "C3");
-  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const proposed = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
   try {
     await revoke(w.users.bob, { binding: proposed.binding_id });
     assert.fail("revoke must refuse a proposed (never-signed) binding");
@@ -140,10 +151,14 @@ test("x36c.3 revoke_vendor_identity_binding refuses binding_not_live against a s
 test("x36c.4 propose_vendor_identity_binding floors at bookkeeper+ — a viewer is refused CLR04", async () => {
   requireReady();
   const cp = await seedPassingWindow(w, "C4");
-  // _human_ctx(role_rank('bookkeeper')) raises CLR04 'insufficient role' -- the GRANT itself
-  // admits clara_authenticated broadly; the floor is enforced inside the function body.
+  // _human_ctx(role_rank('bookkeeper')) raises CLR04 'insufficient role' -- the rank floor is
+  // enforced INSIDE the function body, which is what this cell is about and what #921 did not
+  // touch. Since 0273 the ACL layer refuses a human session before the body is ever entered
+  // (vendor-binding-write-doors-revoked.test.mjs vb921.1/.4 measure exactly that), so the call
+  // below is carried by clara_fn_owner to reach the floor at all: a viewer who tried this for
+  // real today would be stopped one layer earlier, by 42501.
   await assertRaises("CLR04",
-    () => propose(w.users.carol, { client: w.clients.A1, counterparty: cp.id }),
+    () => proposeAsFnOwner(w.users.carol, { client: w.clients.A1, counterparty: cp.id }),
     "viewer proposes a vendor identity binding");
 });
 
@@ -193,10 +208,10 @@ test("x36c.5 sign_vendor_identity_binding refuses the proposer signing their own
   // alice is firm A's owner (rank above admin), so she alone clears BOTH propose's
   // bookkeeper+ floor and sign's admin+ floor — the shape that used to be a legitimate
   // solo propose-then-sign path before this wall existed.
-  const proposed = await propose(w.users.alice, { client: w.clients.A1, counterparty: cp.id });
+  const proposed = await proposeAsFnOwner(w.users.alice, { client: w.clients.A1, counterparty: cp.id });
   const opKey = opk("c5sign");
   try {
-    await sign(w.users.alice, { binding: proposed.binding_id, opKey });
+    await signAsFnOwner(w.users.alice, { binding: proposed.binding_id, opKey });
     assert.fail("sign_vendor_identity_binding must refuse when the signer is also the proposer");
   } catch (e) {
     assert.equal(e.code, "CLR04", `expected CLR04, got ${e.code}: ${e.message}`);
@@ -230,13 +245,13 @@ test("x36c.6 sign_vendor_identity_binding succeeds when a DIFFERENT admin signs 
   // membership per user), so a fresh identity is required.
   const frank = await insertUser(w.prefix, "frank");
   await addMember(w.users.alice, { firm: w.firms.A, user: frank, role: "admin", opKey: opk("vbframk") });
-  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const proposed = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
   if (!postControl) {
     // The post-time control is not deployed on this frontier (裁-18b PR-1 finding C3; PR-3 mints
     // the marker). The wall must NOT be what refuses here — the interlock is, which is itself
     // evidence the different-signer case got PAST 裁-18a.
     try {
-      await sign(frank, { binding: proposed.binding_id });
+      await signAsFnOwner(frank, { binding: proposed.binding_id });
       assert.fail("sign must throw while the post-time control is absent");
     } catch (e) {
       assert.notEqual(reasonOf(e), "signer_is_proposer",
@@ -249,7 +264,7 @@ test("x36c.6 sign_vendor_identity_binding succeeds when a DIFFERENT admin signs 
   // signature actually succeeds. Without this the cell would only ever prove a refusal, which is
   // not what "positive control for 裁-18a" means.
   const signed = await withPostTimeControl(
-    () => sign(frank, { binding: proposed.binding_id, opKey: opk("vbc6ok") }));
+    () => signAsFnOwner(frank, { binding: proposed.binding_id, opKey: opk("vbc6ok") }));
   assert.equal(signed.status, "live", "a different admin's signature succeeds");
 });
 
@@ -301,7 +316,7 @@ test("x36c.8 sign_vendor_identity_binding admits an ADMIN signing an AGENT-creat
 
   if (!postControl) {
     try {
-      await sign(w.users.alice, { binding: bindingId });
+      await signAsFnOwner(w.users.alice, { binding: bindingId });
       assert.fail("sign must throw while the post-time control is absent");
     } catch (e) {
       assert.notEqual(reasonOf(e), "signer_is_proposer",
@@ -311,7 +326,7 @@ test("x36c.8 sign_vendor_identity_binding admits an ADMIN signing an AGENT-creat
     }
   }
   const signed = await withPostTimeControl(
-    () => sign(w.users.alice, { binding: bindingId, opKey: opk("vbc8ok") }));
+    () => signAsFnOwner(w.users.alice, { binding: bindingId, opKey: opk("vbc8ok") }));
   assert.equal(signed.status, "live",
     "an admin signs an agent-created proposal without hitting the signer<>proposer wall");
 });
@@ -319,14 +334,14 @@ test("x36c.8 sign_vendor_identity_binding admits an ADMIN signing an AGENT-creat
 test("x36c.7 sign_vendor_identity_binding's admin+ rank floor is UNTOUCHED by the new wall — a bookkeeper proposer is still refused by RANK, not by the wall", async () => {
   requireReady();
   const cp = await seedPassingWindow(w, "C7");
-  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const proposed = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
   // bob (bookkeeper) attempting to sign his OWN proposal hits _human_ctx(role_rank('admin'))
   // FIRST — before the function ever reaches the select that would let the new wall compare
   // b.created_by to c.actor. The refusal must be the PRE-EXISTING rank message, never the
   // wall's message, proving the two guards are independent and the wall did not weaken or
   // replace the rank floor.
   try {
-    await sign(w.users.bob, { binding: proposed.binding_id });
+    await signAsFnOwner(w.users.bob, { binding: proposed.binding_id });
     assert.fail("a bookkeeper must be refused by rank before the signer<>proposer wall is ever reached");
   } catch (e) {
     assert.equal(e.code, "CLR04", `expected CLR04, got ${e.code}: ${e.message}`);
@@ -339,7 +354,7 @@ test("x36c.7 sign_vendor_identity_binding's admin+ rank floor is UNTOUCHED by th
 test("x36c.9 sign_vendor_identity_binding still refuses a binding whose created_by is NULL (LOW-5, PROVEN BY EXECUTION, regression pin for the fail-open independent review measured for real)", async () => {
   requireReady();
   const cp = await seedPassingWindow(w, "C9null");
-  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const proposed = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
   // MEASURED (fix-round finding): created_by is CURRENTLY NOT NULL (0028's own table def) --
   // this rig-measured fact is exactly why the prestate's own attnotnull check exists (LOW-5
   // §0(6)). A "hypothetical future nullable-drift" therefore has to be SIMULATED by actually
@@ -374,7 +389,7 @@ test("x36c.9 sign_vendor_identity_binding still refuses a binding whose created_
       "select created_by from clara.vendor_identity_bindings where id=$1", [nulled]);
     assert.equal(check.rows[0].created_by, null, "fixture: the row really carries a NULL principal");
     try {
-      await sign(w.users.alice, { binding: nulled, opKey: opk("c9null") });
+      await signAsFnOwner(w.users.alice, { binding: nulled, opKey: opk("c9null") });
       assert.fail("sign_vendor_identity_binding must refuse a NULL created_by, not silently sign it live (the fail-open this cell regression-pins)");
     } catch (e) {
       assert.equal(e.code, "CLR04", `expected CLR04, got ${e.code}: ${e.message}`);
@@ -412,9 +427,9 @@ test("x36c.5b 裁-32 — with TWO eligible signers the STRICT 裁-18c refusal is
   assert.ok(count.rows[0].n >= 2, `fixture: firm A must now carry >=2 eligible signers, got ${count.rows[0].n}`);
 
   const cp = await seedPassingWindow(w, "C5b");
-  const proposed = await propose(w.users.alice, { client: w.clients.A1, counterparty: cp.id });
+  const proposed = await proposeAsFnOwner(w.users.alice, { client: w.clients.A1, counterparty: cp.id });
   try {
-    await sign(w.users.alice, { binding: proposed.binding_id, opKey: opk("c5bsign") });
+    await signAsFnOwner(w.users.alice, { binding: proposed.binding_id, opKey: opk("c5bsign") });
     assert.fail("with two eligible signers a self-sign must still refuse");
   } catch (e) {
     assert.equal(e.code, "CLR04");
@@ -425,7 +440,7 @@ test("x36c.5b 裁-32 — with TWO eligible signers the STRICT 裁-18c refusal is
   // …and an attestation does NOT buy a way past it: the solo arm is reachable only when the
   // firm genuinely has nobody else. Without this the relaxation would be a universal bypass.
   try {
-    await humanQuery(w.users.alice,
+    await retiredWriteDoorQuery(w.users.alice,
       "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
       [proposed.binding_id, opk("c5batt"), "I am in a hurry"]);
     assert.fail("an attestation must not buy past the strict arm when another signer exists");
@@ -435,7 +450,7 @@ test("x36c.5b 裁-32 — with TWO eligible signers the STRICT 裁-18c refusal is
   }
   // The genuine way out still works: the OTHER admin signs. (Through the real door, with PR-3's
   // post-time control present — see x36c.2 for why the interlock is now a catalog witness.)
-  const signed = await signLive(secondAdmin, { binding: proposed.binding_id, opKey: opk("c5bok") });
+  const signed = await signLiveAsFnOwner(secondAdmin, { binding: proposed.binding_id, opKey: opk("c5bok") });
   assert.equal(signed.status, "live");
   assert.equal(signed.self_approved, false, "a two-party signature is not a self-approval");
 });
