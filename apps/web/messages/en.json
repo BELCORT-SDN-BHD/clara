@@ -6925,6 +6925,25 @@
       "stateTermIssueReason": "Say why that period before recording it.",
       "stateTermRefusalTitle": "The service period was not recorded"
     },
+    "PrepaymentAccounts": {
+      "heading": "Prepayment accounts",
+      "subheading": "Only an account enrolled here can be amortised. Enrolling is a judgement about this client's chart, so it is recorded with the reason a person gave.",
+      "empty": "No account is enrolled as a prepayment account for this client yet. Until one is, no prepayment here can be amortised.",
+      "loading": "Reading the prepayment roster\u2026",
+      "enrolTrigger": "Enrol an account",
+      "enrolTitle": "Enrol an account as a prepayment account",
+      "enrolDescription": "The account must be one of this client's own active, non-control, non-bank asset accounts, and must not already be reserved by the fixed-asset or staff-advance registers.",
+      "accountLabel": "Account",
+      "accountChoose": "Choose an account",
+      "reasonLabel": "Why this account holds prepayments",
+      "reasonHint": "One sentence. It is the whole audit trail a later reader has for this decision.",
+      "reasonRequired": "Say why before enrolling this account.",
+      "retireTrigger": "Retire",
+      "retireTitle": "Retire this prepayment account",
+      "retireDescription": "This closes the account to NEW schedules. A schedule already running keeps posting to the end of its term, and nothing already on the books moves.",
+      "enrolledOn": "Enrolled {date}",
+      "reasonPrefix": "Why"
+    },
   "WorkRestate": {
     "body": "If the instruction itself was wrong — a different date, a different amount, a different account — this answer cannot change it. The admitted basis is frozen. Say what it should be instead and Clara records a new Work, with this one cancelled and linked to it.",
     "label": "What should the instruction say instead?",
