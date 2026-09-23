@@ -1015,6 +1015,13 @@ async function main() {
   // the NEXT CI leg's (#636 intake-batch-e2e.mjs) fresh engine finds and re-attempts it — the
   // measured ~1.27M-line cross-leg noise this ticket fixes. tests/queue-drain.mjs's own header says
   // why this belongs at the END of THIS leg rather than at the START of the next one.
+  //
+  // ON A RIG CLONE, THE FIRST RUN FAILS HERE AND THAT IS EXPECTED (#877, fix round 2). The first
+  // leader cycle of every process runs the SST compliance-watch belt, and each watch it CREATES
+  // mints a `held` `notification` wake this window never settles — so the run that burns those
+  // one-shot creations exits 1 here with all 8 legs green. The order is run -> settle -> run, not
+  // settle -> run; the recipe, the two-clone measurement and the CI risk it names are in
+  // packages/runtime/README.md beside this file's own section. Do not widen the deadline.
   const { waitForQueueDrain } = await import("./queue-drain.mjs");
   await waitForQueueDrain(rig, { log: (m) => console.log(m) });
 

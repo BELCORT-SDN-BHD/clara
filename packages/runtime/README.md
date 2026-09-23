@@ -1196,25 +1196,68 @@ well under a second. `tests/intake-batch-e2e.mjs` deliberately does NOT call it:
 on this database in the CI job and its own §5 scope ends with live rows on purpose (a declared-fact
 wait, a quota wait, an unassigned failed upload) that nothing downstream needs drained.
 
-**Running it against a REUSED database: drain the WAKE state first, or the drain fails on somebody
-else's rows (#877 fix round).** CI builds this file's database fresh in the same job, so the point
-only arises on a rig. A `clara.wakes_outbox` row left `held` by an earlier ticket's session is
-turned into a `held` `clara.agent_tasks` wake row by `lib/drain.mjs`'s wake phase the moment ANY
-full server boots against that database — including this leg's own — and `censusUnboundTasks` then
-counts it, so `waitForQueueDrain` times out at the last step with rows no leg here created (and
-cancelling only the tasks does not help: the next boot re-creates them from the outbox). On a
-DISPOSABLE clone, settle the source first, through the estate's own lawful transition:
+**Running it against a REUSED database: the FIRST boot is a PRIME run whose drain WILL fail, so the
+order is run -> settle -> run, never settle -> run (#877, fix round 2).** CI builds this file's
+database fresh in the same job, so the point only arises on a rig. TWO different things put `held`
+rows in front of `waitForQueueDrain`, and only the first of them is residue:
+
+1. **Residue, which a settle does clear.** A `clara.wakes_outbox` row left `held` by an earlier
+   ticket's session is projected as a `held` `clara.agent_tasks` wake row by `lib/drain.mjs`'s wake
+   phase the moment ANY full server boots against that database — including this leg's own — and
+   `censusUnboundTasks` counts it.
+2. **What the first run mints ITSELF — the reason a settle-then-run on a fresh clone still exits
+   1.** The first leader cycle of EVERY process runs the SST compliance-watch belt
+   (`lib/reconciler-sst.mjs`; `lastSstRun` starts null, so `sstReconcileDue` is true at boot and
+   daily thereafter). Every active client that qualifies for a watch and has none yet takes that
+   belt's `created` branch, which appends a `compliance.watch_transition` domain event; the relay
+   routes each to a `notification` wake decision, and the drain projects each as a `held`
+   `clara.agent_tasks` wake row plus a `held` `clara.wakes_outbox` row. Nothing settles a
+   `notification` wake inside the 30 s window, so the leg exits 1 at `waitForQueueDrain` on rows
+   that existed nowhere when the clone was taken. It is ONE-SHOT per client: once the watch rows
+   exist, no later boot mints them again.
+
+On a DISPOSABLE clone, therefore:
+
+1. **Prime run** — `node tests/intake-admission-e2e.mjs`. All 8 legs PASS and it still exits 1 at
+   `waitForQueueDrain`. That is expected; this run is what burns the one-shot watch creations.
+2. **Settle**, through the estate's own lawful transitions (the outbox rows cannot be deleted at
+   all):
 
 ```
 update clara.wakes_outbox set status='cancelled' where status='held';
 update clara.agent_tasks set status='cancelled' where status in ('queued','held','running','awaiting_input');
 ```
 
-Measured, lane 07, 2026-09-24, on a `clara_l07` clone: before that, all 8 legs PASS and the run
-still exits 1 on four re-created `held` wake tasks; after it, the same run prints
-`INTAKE ADMISSION E2E: PASS (8 legs …)` and exits **0**, on Windows and again under WSL as `runner`
-(`/opt/node/bin/node tests/intake-admission-e2e.mjs`, the shape the integrator re-runs new runtime
-tests in).
+3. **The real run**, and every run after it, exits **0**.
+
+Measured, lane 07, 2026-09-24, on TWO INDEPENDENT clones of `clara_l07` (`clara_881`, `clara_882`),
+each settled BEFORE its first run — so that the settle-then-run recipe this section used to give was
+itself the thing under test:
+
+| clone | state entering the run | run | result |
+|---|---|---|---|
+| `clara_881` | settled; `clara.compliance_watches` **empty** | 1, Windows | 8/8 legs PASS, **exit 1** — `TIMED OUT after 30000ms (polls=141)` on **8** `held` unbound `kind='wake'` tasks. The run had just written the database's first 8 `clara.compliance_watches` rows and its first 8 `compliance.watch_transition` events (both counts were 0 on the clone and on `clara_l07`). |
+| `clara_881` | settled again; the 8 watches now exist | 2, Windows | `INTAKE ADMISSION E2E: PASS (8 legs …)`, **exit 0**, `[queue-drain] drained (polls=4, waited=796ms)` |
+| `clara_882` | settled; `clara.compliance_watches` **empty** | 1, Windows | same shape: **exit 1**, `polls=143`, the same 8 `held` wake rows |
+| `clara_882` | settled again; the 8 watches now exist | 2, Windows | **exit 0**, `drained (polls=5, waited=1131ms)` |
+| `clara_882` | the settle now cancels **0** rows — run 2 left nothing `held` | 3, **WSL as `runner`** (`/opt/node/bin/node tests/intake-admission-e2e.mjs`, the shape the integrator re-runs runtime tests in) | **exit 0**, `drained (polls=4, waited=813ms)` |
+
+What this section said in fix round 1 — settle first and the run passes — did not survive an
+independent re-run: two fresh clones, settled and run once, exited 1 both times on exactly those
+eight rows. It also mis-named the mechanism ("the next boot re-creates them from the outbox"): the
+new rows come from NEW `clara.wake_intents` for NEW `compliance.watch_transition` events, not from
+the cancelled outbox rows, whose own intents are already `consumed` and are never re-drained.
+
+**WHAT THIS MAY MEAN FOR CI — NAMED, AND UNVERIFIED HERE.** On the prime run the belt examined 181
+active clients (`clara.compliance_eval_runs`) and created exactly 8 watch rows; none of the eight
+belonged to a client this database was SEEDED with — all eight were created hours after the
+database's earliest rows, by earlier e2e runs against it. In the `db-live-gates` job
+`tests/intake-e2e.mjs` runs first against the same fresh `clara_intake_ci`, so any client IT leaves
+behind that qualifies for a watch would have that watch created by THIS leg's own first boot, and
+this leg's drain would then see the same `held` `notification` wakes. Nothing here settles that
+either way — that job is dispatch-only and was not dispatched for this branch (#1041) — so it is
+named rather than asserted: a drain timeout there listing `kind='wake'`, `status='held'` rows is
+this, not a flake.
 
 **RELEASE RISK, NAMED RATHER THAN DISCOVERED LATER (L06-967-C, fix round 1):** the drain converts
 today's noisy-but-passing CI run into a RED one on exactly the input #967 was filed about. A capped
