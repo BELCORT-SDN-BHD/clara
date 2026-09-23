@@ -16,25 +16,53 @@
 
 import { useTranslations } from "next-intl";
 import { shaShort } from "@/lib/registers/opening-source";
-import type { OpeningSeedRow, OpeningTbTargetRow } from "@/lib/registers/opening-types";
+import type {
+  OpeningSeedRow, OpeningTargetRefreshRow, OpeningTbTargetRow,
+} from "@/lib/registers/opening-types";
 
 export function OpeningSourceHeader({
   seed,
   targets,
+  refreshes = [],
 }: {
   seed: OpeningSeedRow;
   targets: readonly OpeningTbTargetRow[];
+  /** #986 — every refresh this basis has stood through, newest first. Empty for a basis that was
+   *  read once, which is every basis until a document is genuinely read again. */
+  refreshes?: readonly OpeningTargetRefreshRow[];
 }) {
   const t = useTranslations("OpeningCarryDown.source");
 
   if (seed.tie_document_id) {
     const read = targets.filter((x) => x.provenance_kind === "document").length;
+    // #986 — THE REFRESH, ON THE BASIS ITSELF AND NOT ONLY IN THE MOMENT.
+    //
+    // The 202 banner says "5 read, 3 retired" to the person who pressed the button and is gone on
+    // reload. A colleague opening the basis an hour later saw a target set with nothing on it
+    // saying an earlier reading had been retired from under it — which is the half of AC2 a
+    // reader can check ("the basis's state shows WHICH"). The newest receipt is named here,
+    // beside the provenance line, in the same "mints nothing" spirit as the rest of this
+    // component: the counts and the date are the database's, and the plural count of readings is
+    // `refreshes.length + 1` because the FIRST reading left no receipt — it retired nothing.
+    const latest = refreshes[0] ?? null;
     return (
-      <p className="text-xs text-muted-foreground" data-testid="opening-source-header">
-        {read > 0
-          ? t("headerDocumentRead", { sha: shaShort(seed.tie_document_sha256), n: read })
-          : t("headerDocumentUnread", { sha: shaShort(seed.tie_document_sha256) })}
-      </p>
+      <div className="flex flex-col gap-0.5">
+        <p className="text-xs text-muted-foreground" data-testid="opening-source-header">
+          {read > 0
+            ? t("headerDocumentRead", { sha: shaShort(seed.tie_document_sha256), n: read })
+            : t("headerDocumentUnread", { sha: shaShort(seed.tie_document_sha256) })}
+        </p>
+        {latest === null ? null : (
+          <p className="text-xs text-muted-foreground" data-testid="opening-source-refreshed">
+            {t("headerRefreshed", {
+              retired: latest.retired_count,
+              recorded: latest.recorded_count,
+              at: latest.refreshed_at.slice(0, 10),
+              readings: refreshes.length + 1,
+            })}
+          </p>
+        )}
+      </div>
     );
   }
 

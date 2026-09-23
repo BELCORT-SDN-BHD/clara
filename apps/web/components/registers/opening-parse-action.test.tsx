@@ -325,6 +325,43 @@ test("ticket 986: the re-read conflict is the ONE refusal that carries the act, 
   });
 });
 
+test("ticket 986 / ADV-05: each refusal the REFRESH door mints reaches the professional in words, never as a machine token", async () => {
+  // `no_reread_to_refresh` is the single likeliest outcome of the new act — a colleague, or a
+  // second tab, refreshed the basis first — and the earlier build rendered it as
+  // "Refused · CLR31 · no_reread_to_refresh". The reason itself is a WORD, not a sentence, so
+  // rendering it verbatim (which is right for the producer's own named refusals) told nobody
+  // anything. Each of the three tokens 0286 adds is checked here, token ABSENT and sentence
+  // PRESENT, because a build that printed both would still be leaking the vocabulary.
+  const cases: Array<[string, RegExp]> = [
+    ["no_reread_to_refresh", /already come from the reading this document stands on/],
+    ["stale_extraction_version", /no longer the one the document stands on/],
+    ["refresh_extraction_mixed", /one reading of the document/],
+  ];
+  for (const [reason, sentence] of cases) {
+    await withRoute((url) => {
+      if (url.endsWith("/parse-targets")) {
+        return jsonResponse({ status: "conflict", reason: "source_reread_since_parse" }, 409);
+      }
+      return jsonResponse({ status: "refused", code: "CLR31", reason }, 409);
+    }, async () => {
+      const { h } = await mount();
+      try {
+        await click(h);
+        const refresh = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Refresh from the new reading"));
+        assert.ok(refresh, "the re-read conflict still carries the act");
+        await h.fireEvent(refresh, "click");
+        for (let i = 0; i < 8; i++) await h.settle();
+        const text = h.text();
+        assert.match(text, sentence, `${reason} must be said in words; got: ${text}`);
+        assert.doesNotMatch(text, new RegExp(reason),
+          `${reason} is the database's vocabulary, never a person's`);
+      } finally {
+        await h.unmount();
+      }
+    });
+  }
+});
+
 test("ticket 986: another refusal offers NO refresh — a control that cannot work is never shown", async () => {
   await withRoute(() => jsonResponse({ status: "conflict", reason: "registry_not_open" }, 409), async () => {
     const { h } = await mount();

@@ -177,6 +177,38 @@ export function OpeningParseOutcomeBanner({
         </StateBanner>
       );
     }
+    // #986 / ADV-05 — THE THREE REFUSALS THE REFRESH DOOR ITSELF MINTS, IN WORDS.
+    //
+    // `o.reason` is rendered verbatim below because most refusals on this lane carry the
+    // DATABASE'S own sentence, and paraphrasing one would throw away the only thing that tells a
+    // person what to look at. The three tokens 0286 adds are not sentences — they are machine
+    // words, and `no_reread_to_refresh` is the single likeliest outcome of the new act (a
+    // colleague, or a second tab, refreshed the basis first). A professional meeting
+    // "Refused · CLR31 · no_reread_to_refresh" has been told nothing at all.
+    //
+    // Each is its own branch with its own literal key, never a computed one: a lookup table over
+    // `t()` would compile while a key was missing and fail in the face.
+    if (o.reason === "no_reread_to_refresh") {
+      return (
+        <StateBanner tone="info" title={t("outcome.noRereadTitle")} code={o.code ?? undefined}>
+          <p className="break-words">{t("outcome.noRereadBody")}</p>
+        </StateBanner>
+      );
+    }
+    if (o.reason === "stale_extraction_version") {
+      return (
+        <StateBanner tone="warning" title={t("outcome.staleReadingTitle")} code={o.code ?? undefined}>
+          <p className="break-words">{t("outcome.staleReadingBody")}</p>
+        </StateBanner>
+      );
+    }
+    if (o.reason === "refresh_extraction_mixed") {
+      return (
+        <StateBanner tone="warning" title={t("outcome.mixedReadingTitle")} code={o.code ?? undefined}>
+          <p className="break-words">{t("outcome.mixedReadingBody")}</p>
+        </StateBanner>
+      );
+    }
     return (
       <StateBanner tone="warning" title={t("outcome.refusedTitle")} code={o.code ?? undefined}>
         <p className="break-words">{o.reason}</p>

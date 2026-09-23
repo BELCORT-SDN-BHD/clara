@@ -83,6 +83,22 @@ export type OpeningTbTargetRow = {
   created_at: string;
 };
 
+/** #986 — ONE REFRESH OF A BASIS'S DOCUMENT TARGETS, as `clara.opening_target_refreshes`
+ *  records it. Read-only for every application role; written by the refresh door alone. The
+ *  retired rows themselves are on the receipt too (`retired_targets`), which is what makes
+ *  "retired and replaced" an honest sentence rather than a euphemism for deleted — this surface
+ *  reads the counts and the dates only. */
+export type OpeningTargetRefreshRow = {
+  id: string;
+  seed_id: string;
+  document_id: string;
+  from_extraction_id: string;
+  to_extraction_id: string;
+  retired_count: number;
+  recorded_count: number;
+  refreshed_at: string;
+};
+
 export type OpeningEntryRevisionRow = {
   id: string;
   revision_token: string;
