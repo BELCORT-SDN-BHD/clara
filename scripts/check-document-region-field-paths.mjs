@@ -40,7 +40,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -51,25 +51,62 @@ const REPO_ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { encodi
 export const SCAN_ROOTS = ["packages/db/tests", "packages/runtime/tests"];
 
 const MIGRATION_REL = "packages/db/migrations/0191_document_capability_registry.sql";
+const MIGRATIONS_DIR = "packages/db/migrations";
+
+/**
+ * WHICH FILE CARRIES THE GRAMMAR TODAY. 0191 MINTED `clara._assert_field_path`, and for a long
+ * time it was also the only file that ever defined it — so this script read 0191 by name. #945's
+ * `0296_payroll_summary_typed_facts.sql` is the first migration to RECUT it (one namespace,
+ * `payroll`, joins the closed roster), and a lint still reading 0191 would refuse every lawful
+ * `payroll.*` literal in the estate's own tests. The source of truth was never "0191" — it was
+ * "whatever `clara._assert_field_path` is TODAY", and the chain's own order is what says which
+ * file that is. So: scan the migration directory, take every file that defines the function in
+ * the shape below, and read the HIGHEST-numbered one. 0191 stays the FLOOR (it must still be
+ * there, in that shape, or this script is reasoning about the wrong thing) and is never edited.
+ * @param {string} repoRoot
+ */
+function grammarSourceFile(repoRoot) {
+  const files = readdirSync(join(repoRoot, MIGRATIONS_DIR))
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
+  let latest = null;
+  for (const name of files) {
+    const text = readFileSync(join(repoRoot, MIGRATIONS_DIR, name), "utf8");
+    if (/function\s+clara\._assert_field_path\s*\(/.test(text)
+        && /split_part\(p_path,\s*'\.',\s*1\)\s*not in\s*\(/.test(text)) {
+      latest = { rel: `${MIGRATIONS_DIR}/${name}`, text };
+    }
+  }
+  return latest;
+}
 
 /**
  * Reads `clara._assert_field_path`'s own grammar (length bound, syntax regex,
- * namespace roster) straight from migration 0191's applied source text — never
- * duplicated by hand. Throws if the shape moves (0191 is applied and immutable;
- * a mismatch means this script is reasoning about the wrong thing, the same
- * failure posture role-census-reset.mjs's `pinnedRoleCount` uses for 0154).
+ * namespace roster) straight from the applied source text of the migration that
+ * defines it LAST in chain order — never duplicated by hand. Throws if the shape
+ * moves, the same failure posture role-census-reset.mjs's `pinnedRoleCount` uses
+ * for 0154.
  * @param {string} repoRoot
  */
 export function readFieldPathGrammar(repoRoot = REPO_ROOT) {
-  const text = readFileSync(join(repoRoot, MIGRATION_REL), "utf8");
+  const floor = readFileSync(join(repoRoot, MIGRATION_REL), "utf8");
+  if (!/split_part\(p_path,\s*'\.',\s*1\)\s*not in\s*\(/.test(floor)) {
+    throw new Error(
+      `${MIGRATION_REL} no longer carries clara._assert_field_path in the shape ` +
+        "check-document-region-field-paths.mjs expects — 0191 must never be edited; if this " +
+        "is a false alarm, update the three regexes here, never the migration.",
+    );
+  }
+  const source = grammarSourceFile(repoRoot);
+  const text = source ? source.text : floor;
   const lengthMatch = text.match(/length\(p_path\)\s*=\s*0\s*or\s*length\(p_path\)\s*>\s*(\d+)/);
   const syntaxMatch = text.match(/p_path\s*!~\s*'(\^[^']+\$)'/);
   const namespaceMatch = text.match(/split_part\(p_path,\s*'\.',\s*1\)\s*not in\s*\(([^)]+)\)/s);
   if (!lengthMatch || !syntaxMatch || !namespaceMatch) {
     throw new Error(
-      `${MIGRATION_REL} no longer carries clara._assert_field_path in the shape ` +
-        "check-document-region-field-paths.mjs expects — 0191 must never be edited; if this " +
-        "is a false alarm, update the three regexes here, never the migration.",
+      `${source ? source.rel : MIGRATION_REL} no longer carries clara._assert_field_path in the ` +
+        "shape check-document-region-field-paths.mjs expects — if this is a false alarm, update " +
+        "the three regexes here, never the migration.",
     );
   }
   const maxLength = Number(lengthMatch[1]);

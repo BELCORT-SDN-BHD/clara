@@ -113,7 +113,7 @@ test("[the honest unknown arm] a path from a lane this app has never seen render
 // clara.persist_payroll_facts writes that row at all is so a person can tell "the page is silent
 // about the HRDF levy" from "the levy is zero" — and a blank cell, or a 0.00, would throw that
 // distinction away at the last step.
-test("#945 · a payroll fact renders its human label, its raw path and the DB's own integer", async () => {
+test("ticket 945 · a payroll fact renders its human label, its raw path and the DB's own integer", async () => {
   const h = await renderComponent(App(createElement(DocumentFactsTable, {
     facts: [
       region({ id: "r1", field_path: "payroll.run.gross_pay", text_content: "5,000.00", monetary_cents: 500_000 }),
@@ -137,7 +137,7 @@ test("#945 · a payroll fact renders its human label, its raw path and the DB's 
   }
 });
 
-test("#945 · a payroll answer the page did not print reads NOT PRINTED — never 0.00, never a blank", async () => {
+test("ticket 945 · a payroll answer the page did not print reads NOT PRINTED — never 0.00, never a blank", async () => {
   const h = await renderComponent(App(createElement(DocumentFactsTable, {
     facts: [
       // What clara.persist_payroll_facts writes for `state: not_printed`: a region with no
@@ -157,7 +157,7 @@ test("#945 · a payroll answer the page did not print reads NOT PRINTED — neve
   }
 });
 
-test("#945 · `not printed` is the PAYROLL lane's reading, not a new meaning for every empty region", async () => {
+test("ticket 945 · `not printed` is the PAYROLL lane's reading, not a new meaning for every empty region", async () => {
   // An invoice-lane region with no value is a different thing: the invoice writer only ever
   // writes a region for an answered field, so an empty one there is a fact with no rendering, not
   // a reading that the page is silent. Saying "not printed" about it would be this UI asserting

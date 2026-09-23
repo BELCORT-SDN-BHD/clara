@@ -68,13 +68,18 @@ const grammar = readFieldPathGrammar();
 // The grammar itself, read from migration 0191's real source text.
 // ---------------------------------------------------------------------------
 
-testCase("grammar: reads the real maxLength (128) and namespace roster from 0191", () => {
+// #945 — the roster is read from the migration that defines `clara._assert_field_path` LAST in
+// chain order, not from 0191 by name. 0191 MINTED the function and was the only file that defined
+// it until 0296 recut it (one namespace, `payroll`, joins the closed set), and a lint still
+// reading 0191 would have refused every lawful `payroll.*` literal in the estate's own tests. The
+// source of truth was never "0191" — it was "whatever the function is today".
+testCase("grammar: reads the real maxLength (128) and the roster from the migration that defines it last", () => {
   assertEqual(grammar.maxLength, 128, "maxLength");
-  for (const ns of ["invoice", "statement", "myinvois", "opening_tb", "prior_gl",
+  for (const ns of ["invoice", "statement", "myinvois", "opening_tb", "prior_gl", "payroll",
     "pages", "tables", "rows", "sheets", "paragraphs"]) {
     if (!grammar.namespaces.has(ns)) throw new Error(`namespace roster missing "${ns}"`);
   }
-  assertEqual(grammar.namespaces.size, 10, "exactly the ten registered namespaces, no more");
+  assertEqual(grammar.namespaces.size, 11, "exactly the eleven registered namespaces, no more");
 });
 
 testCase("fieldPathViolation: null passes (field_path is nullable by design)", () => {
