@@ -423,9 +423,13 @@ test("936.correction.form: an overlap warning is persistent, and it does NOT blo
   const h = await renderComponent(App({
     submit: async () => ({
       ...CORRECTED,
+      // #929/0283 (lane 05) retired the 0045 adjustment-template arm and re-keyed every entry by
+      // `plan_id`: `template_id` cannot appear any more, and `accounting_plan_overlap` is the only
+      // kind that can still fire (lib/plans/api.ts, PlanOverlapWarning). This cell is about the
+      // warning being PERSISTENT and NOT blocking, which is unchanged by which arm produced it.
       overlap_warning: {
-        kind: "adjustment_template_overlap",
-        templates: [{ template_id: "t1", name: "Monthly rent template", cadence: "monthly", accounts: ["6100"] }],
+        kind: "accounting_plan_overlap",
+        templates: [{ plan_id: "t1", name: "Monthly rent template", cadence: "monthly", accounts: ["6100"] }],
       },
     }),
   }));
