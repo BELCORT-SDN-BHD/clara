@@ -41,9 +41,16 @@ export type PrepaymentListRow = {
   document_id: string;
   term_start: string;
   term_end: string;
-  /** #919 — the SAME term-liveness flag `PrepaymentDetail` carries, on the list row. */
+  /** #919 — the SAME term-liveness fields `PrepaymentDetail` carries, on the list row. */
   term_live: boolean;
   term_superseded_by: string | null;
+  /** TRUE only when the term row was superseded AND the term that stands today states DIFFERENT
+   *  dates. The term door supersedes unconditionally, so `term_live` alone goes false on a
+   *  re-record that changed nothing — this is the fact a surface may act on (ADV-02). */
+  term_moved: boolean;
+  /** The term in force on the document today; null only if the document carries none. */
+  term_current_start: string | null;
+  term_current_end: string | null;
   prepaid_account_code: string;
   expense_account_code: string;
   total_cents: number;
@@ -107,6 +114,11 @@ export type PrepaymentDetail = {
   term_live: boolean;
   /** The row that superseded it, when `term_live` is false; null while it is still live. */
   term_superseded_by: string | null;
+  /** TRUE only when the term row was superseded AND the term that stands today states DIFFERENT
+   *  dates — the fact the corrected-term banner is keyed on (ADV-02). */
+  term_moved: boolean;
+  term_current_start: string | null;
+  term_current_end: string | null;
   term_start: string;
   term_end: string;
   basis_kind: string;

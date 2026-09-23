@@ -114,6 +114,17 @@ function ScheduleRow({ clientId, row }: { clientId: string; row: PrepaymentListR
       </TableCell>
       <TableCell className="text-muted-foreground">
         {row.term_start} – {row.term_end}
+        {/* #919 — THE SAME FACT THE DETAIL BANNER CARRIES, where a person first meets the schedule.
+            The brief asks both surfaces for it, and a list that showed a stale term beside eleven
+            healthy ones with no mark is the misreading this whole lane exists to prevent. It is a
+            WORD, not a colour (appendix D, Badge), and it is keyed on `term_moved === true` for
+            the two reasons the detail surface states: a re-record that changed nothing is not a
+            correction, and an absent field must paint nothing. */}
+        {row.term_moved === true ? (
+          <span className="mt-1 block" data-testid="prepayment-row-term-corrected">
+            <Badge variant="outline">{t("termCorrectedBadge")}</Badge>
+          </span>
+        ) : null}
       </TableCell>
       <TableCell>
         <Money cents={row.total_cents} />

@@ -151,12 +151,24 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
         )}
         {/* #919 — the term row this schedule was DERIVED from (0223's own append-only design: the
             stored allocation never moves) is not necessarily the one still live on the document.
-            Absent for a live term, rendered only once a bookkeeper has since recorded a correction. */}
-        {row.term_live ? null : (
+            Rendered only once the term ITSELF has moved.
+
+            KEYED ON `term_moved`, NEVER ON `term_live` (ADV-02). `clara._record_document_service_period_core`
+            supersedes the live row unconditionally — it compares no dates — so `term_live` goes
+            false on a re-record that restates the term byte for byte. This banner says the term
+            "has since been corrected" and that the schedule needs rebuilding; on an unchanged term
+            that is a false statement of fact and wrong advice about a running amortisation.
+
+            `=== true`, NEVER a truthiness test. The field arrives as unvalidated jsonb from
+            `clara.get_prepayment_schedule`, and an ABSENT one — a web build ahead of its database,
+            or a rolled-back migration under a live runtime — is falsy: a truthiness test would
+            paint this warning on EVERY prepayment in the firm. The sibling accrual surface tests
+            `corrected_by_accrual_id !== null` for the same reason. */}
+        {row.term_moved === true ? (
           <StateBanner tone="warning" data-testid="prepayment-term-superseded">
             {t("termSupersededBody")}
           </StateBanner>
-        )}
+        ) : null}
 
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Fact label={t("factTotal")}><Money cents={row.total_cents} /></Fact>
