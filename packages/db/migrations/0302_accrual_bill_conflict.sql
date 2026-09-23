@@ -162,11 +162,40 @@ begin
   -- THE SPLICE TARGET'S PRE-IMAGE, measured off pg_proc.prosrc on THIS rig moments before this
   -- file was written -- this body is a splice (0016 -> 0017 -> 0036 -> 0041 -> 0043 -> 0146(retired
   -- by 0288) -> 0168 -> 0180 -> 0260), never any one migration's own CREATE text.
+  --
+  -- BIMODAL, NOT A HARD PIN (fix round 1, ADV-01). A single exact sha on THIS body collides with
+  -- the rest of its own wave: several lanes splice their own `row_kind` onto
+  -- clara.list_review_queue at the same time, and whichever of them carries a LOWER migration
+  -- number applies FIRST -- after which a hard pin here can never be satisfied and the integrated
+  -- chain dies at this file (measured: lane 01's 0297 recuts this body from this file's own
+  -- pre-image to a315367fbd897e9422a6d809ae00c5d446a2c387cedcba4b73268c68ad44565e). The pin is
+  -- kept as the RECOGNISED baseline; a body that has merely gained a SIBLING arm is admitted on
+  -- its STRUCTURE instead -- this file's own row kind absent, and the two CTE seams it splices
+  -- between unique -- with §A's own witness roster (every kind this file must not disturb, at its
+  -- exact count) as the second half of the same proof. The row-kind marker is searched in the
+  -- COMMENT-STRIPPED body for the 0146/0180/0260 HIGH-1 reason: a marker hiding inside a comment
+  -- must not count.
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
     from pg_proc p where p.oid='clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure;
-  if v_sha is distinct from 'f4a34c72e567bf825d4376d043ea23cc3d8bcd2d4f0caaee3a5d052bf8a25d69' then
-    raise exception '#938 prestate: clara.list_review_queue has DRIFTED from its pinned pre-image (measured %) -- re-derive this splice against the LIVE body before applying', v_sha
-      using errcode='CLR10';
+  if v_sha = 'f4a34c72e567bf825d4376d043ea23cc3d8bcd2d4f0caaee3a5d052bf8a25d69' then
+    raise notice '#938 prestate: clara.list_review_queue is at this file''s own measured pre-image (%).', v_sha;
+  else
+    select pg_get_functiondef(p.oid) into v_def from pg_proc p
+      where p.oid='clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure;
+    v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+    if position($$'accrual_bill_conflict'::text row_kind$$ in v_code) <> 0 then
+      raise exception '#938 prestate: clara.list_review_queue ALREADY carries this file''s own row kind -- 0302 is not re-appliable in place'
+        using errcode='CLR10';
+    end if;
+    for r in select * from (values ('  ), all_rows as ('), ('  ), keyed as (')) as t(seam) loop
+      v_n := (length(v_code) - length(replace(v_code, r.seam, ''))) / length(r.seam);
+      v_raw_n := (length(v_def) - length(replace(v_def, r.seam, ''))) / length(r.seam);
+      if v_n <> 1 or v_raw_n <> v_n then
+        raise exception '#938 prestate: the CTE seam "%" appears % time(s) IN CODE / % in RAW text (expected 1/1) -- this file cannot splice into a body it cannot locate', r.seam, v_n, v_raw_n
+          using errcode='CLR10';
+      end if;
+    end loop;
+    raise notice '#938 prestate: clara.list_review_queue is NOT at this file''s pinned pre-image (measured %) -- a sibling lane of the same wave spliced its own arm first. Admitted on STRUCTURE: this file''s own row kind is absent and both CTE seams are unique.', v_sha;
   end if;
 
   -- THE NINE BODIES clara.skip_plan_occurrence DEPENDS ON AND MUST NOT CHANGE, pinned the same way.
@@ -227,7 +256,7 @@ begin
     end if;
   end loop;
 
-  raise notice '#938 prestate: clean -- clara.list_review_queue is pinned at its measured pre-image, clara.skip_plan_occurrence is absent, and the nine bodies the new door depends on are all at their measured pre-images.';
+  raise notice '#938 prestate: clean -- clara.list_review_queue is at this file''s pinned pre-image OR admitted on structure (see the branch notice above), clara.skip_plan_occurrence is absent, and the nine bodies the new door depends on are all at their measured pre-images.';
 end
 $t938_pre$;
 
@@ -236,15 +265,18 @@ set local lock_timeout = '5s';
 
 -- =====================================================================================
 -- §A THE SPLICE — clara.list_review_queue gains row_kind='accrual_bill_conflict'. Additive only:
---    reads the INSTALLED definition, splices the new CTE + union arm in ONE replace(), and
---    re-verifies every one of the eleven pre-existing markers plus the new one, in code AND raw
---    text (the 0146/0180/0260 HIGH-1 guard: a marker hiding inside a comment must not count).
+--    reads the INSTALLED definition, splices the new CTE and its union arm at the body's own two
+--    CTE seams (never at a literal block that names the arms that happened to exist when this file
+--    was written -- fix round 1, ADV-01), and re-verifies every one of the ten pre-existing row
+--    kinds plus the new one, in code AND raw text (the 0146/0180/0260 HIGH-1 guard: a marker
+--    hiding inside a comment must not count), with the shared column vector asserted as a MEASURED
+--    +1 delta rather than an absolute count.
 -- =====================================================================================
 do $t938_lrq$
 declare
   v_sig text := 'clara.list_review_queue(jsonb,jsonb,integer)';
-  v_def text; v_next text; v_code text; v_anchor text; v_repl text;
-  v_n int; v_raw_n int; r record;
+  v_def text; v_next text; v_code text; v_repl text;
+  v_n int; v_raw_n int; r record; v_vector_pre int; v_open text; v_keyed text;
   v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
   v_pre_sha text; v_post_sha text;
 begin
@@ -261,8 +293,7 @@ begin
       ($$'open_question'::text row_kind$$, 1), ($$'coding_task'::text row_kind$$, 1),
       ($$'compliance_watch'::text row_kind$$, 1), ($$'lint_finding'::text row_kind$$, 1),
       ($$'fixed_asset_incomplete'::text row_kind$$, 1), ($$'staff_advance_incomplete'::text row_kind$$, 1),
-      ($$'work_question'::text row_kind$$, 1), ($$'depreciation_authority_pending'::text row_kind$$, 1),
-      ('null::int open_proposal_count', 10)
+      ($$'work_question'::text row_kind$$, 1), ($$'depreciation_authority_pending'::text row_kind$$, 1)
       ) as t(marker, want) loop
     v_n := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
     if v_n <> r.want then
@@ -276,20 +307,38 @@ begin
     end if;
   end loop;
 
-  -- THE ANCHOR: the whole all_rows union block, exactly as authority_rows (0260) left it.
-  v_anchor :=
-    '  ), all_rows as (' || chr(10) ||
-    '    select * from draft_rows union all select * from filing_rows' || chr(10) ||
-    '    union all select * from question_rows union all select * from task_rows' || chr(10) ||
-    '    union all select * from compliance_rows union all select * from lint_rows' || chr(10) ||
-    '    union all select * from fa_rows union all select * from adv_rows' || chr(10) ||
-    '    union all select * from work_question_rows' || chr(10) ||
-    '    union all select * from authority_rows' || chr(10) ||
-    '  ), keyed as (';
-  v_n := (length(v_code) - length(replace(v_code, v_anchor, ''))) / length(v_anchor);
-  v_raw_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
-  if v_n <> 1 or v_raw_n <> v_n then
-    raise exception '#938 splice: the all_rows union anchor appears % time(s) IN CODE / % in RAW text (expected 1/1) -- re-derive against the live body', v_n, v_raw_n
+  -- THE SHARED COLUMN VECTOR, MEASURED rather than pinned at a literal (fix round 1, ADV-01).
+  -- Every arm of this body ends in the same trailing column, so a SIBLING lane's arm moves the
+  -- count. What this file asserts is therefore the DELTA -- exactly one more afterwards -- never
+  -- an absolute. The floor of ten is the ten arms the ten row kinds above guarantee.
+  v_vector_pre := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
+                  / length('null::int open_proposal_count');
+  v_raw_n := (length(v_def) - length(replace(v_def, 'null::int open_proposal_count', '')))
+             / length('null::int open_proposal_count');
+  if v_vector_pre < 10 or v_raw_n <> v_vector_pre then
+    raise exception '#938 splice prestate: the shared column vector appears % time(s) IN CODE / % in RAW text (expected at least 10, and equal)', v_vector_pre, v_raw_n
+      using errcode='CLR10';
+  end if;
+
+  -- THE TWO SEAMS, NOT A LITERAL BLOCK (fix round 1, ADV-01). The old anchor was the whole
+  -- `all_rows` union list, which NAMES every arm that existed when this file was written -- so a
+  -- sibling lane's arm landing at a LOWER migration number made it match zero times and killed the
+  -- integrated chain at this file. The insertion is derived from the two seams instead: the CTE is
+  -- placed immediately BEFORE the `all_rows` opener and the union arm immediately BEFORE the
+  -- `keyed` opener. That composes with any number of sibling arms in either order and produces
+  -- the BYTE-IDENTICAL body the literal anchor produced on a clean base.
+  v_open := '  ), all_rows as (';
+  v_keyed := '  ), keyed as (';
+  for r in select * from (values (v_open), (v_keyed)) as t(seam) loop
+    v_n := (length(v_code) - length(replace(v_code, r.seam, ''))) / length(r.seam);
+    v_raw_n := (length(v_def) - length(replace(v_def, r.seam, ''))) / length(r.seam);
+    if v_n <> 1 or v_raw_n <> v_n then
+      raise exception '#938 splice: the CTE seam "%" appears % time(s) IN CODE / % in RAW text (expected 1/1) -- re-derive against the live body', r.seam, v_n, v_raw_n
+        using errcode='CLR10';
+    end if;
+  end loop;
+  if position(v_open in v_def) >= position(v_keyed in v_def) then
+    raise exception '#938 splice: the all_rows seam does not precede the keyed seam -- this is not the body this file knows how to splice'
       using errcode='CLR10';
   end if;
 
@@ -337,18 +386,13 @@ begin
                        where ro.plan_id=o.plan_id and ro.leg='reversal' and ro.period_key=o.period_key
                          and ro.work_id is not null)
     order by o.plan_id,o.due_date,je.posting_date,je.id
-  ), all_rows as (
-    select * from draft_rows union all select * from filing_rows
-    union all select * from question_rows union all select * from task_rows
-    union all select * from compliance_rows union all select * from lint_rows
-    union all select * from fa_rows union all select * from adv_rows
-    union all select * from work_question_rows
-    union all select * from authority_rows
-    union all select * from bill_rows
-  ), keyed as ($bill$;
-  v_next := replace(v_def, v_anchor, v_repl);
-  if position('union all select * from bill_rows' in v_next) = 0 then
-    raise exception '#938 splice: the all_rows anchor did not rewrite' using errcode='CLR10';
+$bill$;
+  v_next := replace(v_def, v_open, v_repl || v_open);
+  v_next := replace(v_next, v_keyed,
+    '    union all select * from bill_rows' || chr(10) || v_keyed);
+  if position('union all select * from bill_rows' in v_next) = 0
+     or position('  ), bill_rows as (' in v_next) = 0 then
+    raise exception '#938 splice: the two seams did not rewrite' using errcode='CLR10';
   end if;
 
   if v_next = v_def then
@@ -386,16 +430,17 @@ begin
         using errcode='CLR10';
     end if;
   end loop;
-  -- The shared column vector gains ONE more `open_proposal_count` occurrence (bill_rows' own
-  -- trailing column) -- 10 pre-existing + this file's own = 11.
+  -- The shared column vector gains EXACTLY ONE more `open_proposal_count` occurrence (bill_rows'
+  -- own trailing column) -- a DELTA against what was measured before the splice, never a literal
+  -- (fix round 1, ADV-01: a sibling lane's arm carries the same column).
   v_n := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
          / length('null::int open_proposal_count');
-  if v_n <> 11 then
-    raise exception '#938 postcheck: the shared column vector appears % time(s), expected 11', v_n
+  if v_n <> v_vector_pre + 1 then
+    raise exception '#938 postcheck: the shared column vector appears % time(s), expected % (one more than the % measured before the splice)', v_n, v_vector_pre + 1, v_vector_pre
       using errcode='CLR10';
   end if;
 
-  raise notice '#938: clara.list_review_queue spliced -- one bill_rows CTE (needs_you/needs_you, active-client-guarded, at most one row per plan), one union arm; the ten pre-existing row kinds survive at their EXACT pre-splice marker counts; owner (%) and ACL byte-unchanged. prosrc sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  raise notice '#938: clara.list_review_queue spliced -- one bill_rows CTE (needs_you/needs_you, active-client-guarded, at most one row per plan), one union arm; the ten pre-existing row kinds survive at their EXACT pre-splice marker counts and the shared column vector went % -> % (+1, measured); owner (%) and ACL byte-unchanged. prosrc sha256: % -> %.', v_vector_pre, v_n, v_post_owner, v_pre_sha, v_post_sha;
 end
 $t938_lrq$;
 

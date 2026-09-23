@@ -4770,6 +4770,30 @@ replace function`; `clara.skip_plan_occurrence`'s create/grant/revoke are idempo
 asserts nothing about the splice marker or the door's own absence beyond what a redo already
 tolerates.
 
+**Composable with its own wave (fix round 1).** This file's first draft pinned
+`clara.list_review_queue` at an EXACT `sha256(prosrc)` and anchored its splice on the whole
+`all_rows` union block, naming every arm that existed when it was written. Both are collisions with
+the rest of the wave: several lanes splice their own `row_kind` onto this one function, and
+whichever carries a LOWER migration number applies first — measured, lane 01's `0297` recuts this
+body from `f4a34c72…` to `a315367f…`, after which the pin could never be satisfied and the literal
+anchor matched zero times. The pin is now BIMODAL: the recognised pre-image, OR a body admitted on
+its STRUCTURE (this file's own row kind absent, both CTE seams unique, and §A's witness roster of
+the ten kinds it must not disturb at their exact counts). The insertion is derived from the two
+seams — the CTE immediately before the `all_rows` opener, the union arm immediately before the
+`keyed` opener — which composes with any number of sibling arms in either order and produces the
+BYTE-IDENTICAL body the literal anchor produced on a clean base. The shared column vector is
+asserted as a measured `+1` delta, never an absolute. Both branches were driven on `clara_l03`
+inside one rolled-back transaction: the pre-image reconstructed from the live body (hashing to
+`f4a34c72…`) took the pinned branch and reproduced the shipped body byte for byte, and the same
+pre-image carrying a payroll-shaped sibling arm took the structure branch, kept BOTH arms and moved
+the vector 11 → 12.
+
+**The reason sits outside the idempotency key.** `clara.skip_plan_occurrence`'s dedupe hash is
+`{plan, after_due}`: a replay under the same op key with a DIFFERENT reason returns the first
+receipt verbatim and keeps the first reason, while a changed plan or a changed `after_due` raises
+`op_key reused with different args`. Both web callers mint a fresh key per click, so the shape is
+reachable only by a retrying agent or a resent form.
+
 ## 0303 — an accrual may carry a person-stated amount per period (#937, riders wave 4, lane 03)
 
 `0303_accrual_period_amounts.sql` gives an accrual a second selection rule, `stated_period_amount`:
@@ -4951,3 +4975,39 @@ the live database, and the FIRST-APPLY branch of the CURRENT file inside a trans
 all ten pre-images (each re-created from 0222's or 0303's own statement and verified by sha against
 the pin), un-spliced the queue, dropped the column and the two functions, ran the whole file and
 rolled back.
+
+### Fix round 1 — what the reviews moved
+
+**The splice is now FIVE guarded edits, each idempotent on its own marker.** The block used to test
+ONE marker (`accrual_side`) for the whole splice, which made it un-redoable the moment a later round
+added a second edit: under `CLARA_MIGRATION_REDO` the body already carried that marker and the new
+edits would have been skipped with it. Every edit applies only when its own marker is absent, so a
+redo converges on exactly the body an apply produces. The three the fix round added:
+
+* **The amount is the FLAGGED PERIOD's own, not the window total** (ADV-04). #937 (0303) changed
+  what `accrual_adjustments.amount_cents` MEANS under `stated_period_amount` — it is the window
+  total, and each due date posts its own stated figure — AFTER #938 had already written that column
+  onto the row, so a bookkeeper comparing a document with "Accrual amount" was shown a number the
+  period never posted. The arm now resolves `clara._plan_accrual_period_line(o.plan_id, o.due_date)`
+  — 0303's own "what does THIS due date accrue" body — and falls back to the column only where that
+  answers null, which is the `stated_amount` rule it is still true for.
+* **The row carries the plan's status** (ADV-03). Both remedies are plan-lane doors that refuse a
+  plan which is not active (`plan_ended` / `plan_paused`) while the double count they were offered
+  for is still on the books, so ending a plan used to leave a permanent item offering two buttons
+  that could never succeed. Dropping such a row would hide a live double count: the row STAYS and
+  says why, and the surfaces render the remedies unavailable with the reason. Derived from the
+  shared `id`, so no arm's column vector moves.
+* **An issued invoice is not a filed document** (AC3). A sales invoice admitted through the
+  trade-invoice lane posts through `clara._record_journal_entry_core` (0225) with `origin='agent'`
+  and a NULL `document_id`, so #938's filed-document predicate could never see one and an accrued
+  FEE double-counted its period unwarned. The REVENUE side now also admits an entry that IS a
+  `sales_invoice` trade invoice's own posting, joined the one way the estate links them
+  (`trade_invoices.work_id` → the committed `operation_receipts` row whose `effects` names the
+  entry). The EXPENSE side is deliberately unwidened: #938's AC1 says "document-sourced journal
+  entries" and a supplier bill reaches this estate AS a filed document. The residual — a supplier
+  bill admitted through the trade-invoice lane — is a follow-up, named rather than smuggled in.
+
+**The shared column vector's postcheck is measured** rather than pinned at eleven, for 0302's own
+reason above, and the tail now re-checks `clara.list_accrual_adjustments`'s grant beside
+`correct_accrual_adjustment`'s and `get_accrual_adjustment`'s: it recuts three externally-granted
+doors and the census covered two (STD-942-01).

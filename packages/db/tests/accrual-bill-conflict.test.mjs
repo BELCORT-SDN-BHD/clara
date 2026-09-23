@@ -26,6 +26,7 @@ import {
   humanQuery, namedCall, CLR, assertPair,
   freshAccrualClient, accrual, createAccrualAdjustment, reviseAccountingPlan, postPlanWork,
   requestPlanCatchUp, wakeDuePlanOccurrences, occurrenceRows, occurrenceCount, instructionRef,
+  endAccountingPlan, pauseAccountingPlan, filedDocumentWithTerm,
   todayInPlanZone, shiftMonths, todayDayOfMonth, ACHART, ACCRUAL_TZ,
 } from "./accrual-adjustments-fixtures.mjs";
 import { filedDocument, draftEntryV3, billLines, freshResolution } from "./s6-helpers.mjs";
@@ -33,6 +34,11 @@ import { approveEntry } from "./rig-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 
 const STEM = "accrual_bill_conflict$";
+/** #942's own migration (0304) is a SECOND frontier on this battery. Two claims below are about
+ *  what 0304 spliced onto the arm 0302 added -- the flagged period's OWN amount under #937's
+ *  per-period rule, and the plan status the two remedies depend on -- so they gate independently:
+ *  a chain carrying 0302 and not 0304 must still run the rest of this file in full. */
+const STEM_0304 = "accrual_revenue_side$";
 
 let _ready = null;
 async function laneReady() {
@@ -58,6 +64,35 @@ async function gate938(t) {
   }
   markSkip();
   t.skip(`#938 accrual-bill-conflict lane absent (no ${STEM} migration applied)`);
+  return true;
+}
+
+let _ready0304 = null;
+async function lane0304Ready() {
+  if (_ready0304 === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [STEM_0304]);
+      _ready0304 = r.rows[0].n > 0;
+    } catch {
+      _ready0304 = false;
+    }
+  }
+  return _ready0304;
+}
+
+/** `if (await gate0304(t)) return;` -- the same shape as gate938, on 0304's own stem. */
+async function gate0304(t) {
+  if (await gate938(t)) return true;
+  if (await lane0304Ready()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_ACCRUAL_REVENUE_SIDE !== "1") {
+    assert.fail(
+      `#942 migration (${STEM_0304}) is NOT applied to this database, and this is a FOCUSED run. `
+      + "A skip is not evidence: apply the migration, or preload "
+      + "tests/accrual-revenue-side-preintegration-gate.mjs for a package-wide sweep.");
+  }
+  markSkip();
+  t.skip(`#942 accrual revenue side lane absent (no ${STEM_0304} migration applied)`);
   return true;
 }
 
@@ -100,6 +135,30 @@ async function skipPlanOccurrence(sub, { plan, afterDue, reason = "938 rig: vend
 }
 
 const conflictRows = (env) => env.rows.filter((r) => r.row_kind === "accrual_bill_conflict");
+
+/** WHAT THE BOOKS ARE LEFT CARRYING on one account of one client, computed from the ledger rather
+ *  than from the entries a cell happens to remember -- the SAME reader #942's own battery uses
+ *  (accrual-revenue-side.test.mjs), applied here to AC3's "exactly one live expense for the
+ *  period". Debit-positive, because this side of the lane is an expense. */
+async function liveExpenseOnAccount(client, account) {
+  const r = await rootQuery(
+    `select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as net
+       from clara.journal_lines jl
+       join clara.journal_entries je on je.id = jl.entry_id
+      where je.client_id = $1 and jl.account_code = $2
+        and je.status = 'approved' and je.reversed_by is null`, [client, account]);
+  return Number(r.rows[0].net);
+}
+
+/** Every `last_day_of_month` due date inside a window, oldest first -- computed in Postgres
+ *  rather than re-derived in JS (accrual-period-amounts.test.mjs's own reader). */
+async function monthEndsBetween(from, to) {
+  const r = await rootQuery(
+    `select ((date_trunc('month', d) + interval '1 month' - interval '1 day')::date)::text as due
+       from generate_series($1::date, $2::date, interval '1 month') d
+      order by 1`, [from, to]);
+  return r.rows.map((x) => x.due).filter((d) => d >= from && d <= to);
+}
 
 /** `clara._plan_reversal_date(p_due)` (0193:837), mirrored client-side the same way
  *  `lib/accruals/api.ts`'s own `accrualReversalDate` does for the web layer's "reverse now": the
@@ -370,4 +429,228 @@ test("p938.role_floor — a caller with no part in the accrual, at the queue's e
   const env = await listReviewQueue(world.users.carol, { scope: { client_id: a.client } });
   assert.equal(conflictRows(env).length, 1,
     "reaches exactly the callers who could already read the queue -- no new floor, no new gap");
+});
+
+// ===========================================================================================
+// FIX ROUND 1 — the claims review found uncelled. Each names the finding it answers.
+// ===========================================================================================
+
+test("p938.remedy.reverse_now_leaves_one_expense — after 'reverse now' the period's own expense account carries the BILL and nothing else (AC3, SPEC-03)", async (t) => {
+  if (await gate938(t)) return;
+  const a = await postedAccrual({ tag: "netreverse" });
+  const BILL = 95000;
+  await postedBill({
+    client: a.client, account: a.expenseAccount, postingDate: a.dueDate.slice(0, 8) + "01",
+    cents: BILL,
+  });
+
+  // BEFORE: the accrual's estimate AND the bill are both live on the same expense account --
+  // the double count the ticket exists to notice. 120000 is accrual()'s own stated amount.
+  assert.equal(await liveExpenseOnAccount(a.client, a.expenseAccount), 120000 + BILL,
+    "before the remedy the account carries the estimate and the bill together");
+  assert.equal(conflictRows(await listReviewQueue(BOB(), { scope: { client_id: a.client } })).length, 1);
+
+  const opened = await requestPlanCatchUp(BOB(), {
+    plan: a.plan_id, from: a.dueDate, to: await reversalDateOf(a.dueDate),
+  });
+  assert.ok(opened.admitted >= 1, "the reversal is admitted");
+  // The reversal's own Work must POST for money to move -- an admitted Work is not an entry.
+  for (const o of await occurrenceRows(a.plan_id)) {
+    if (o.leg === "reversal" && o.work_id) {
+      await postPlanWork({ work: o.work_id, client: a.client, author: BOB(), firm: FIRM_A() });
+    }
+  }
+
+  assert.equal(await liveExpenseOnAccount(a.client, a.expenseAccount), BILL,
+    "AC3: exactly ONE live expense is left for the period -- the bill, not the estimate as well");
+  assert.equal(conflictRows(await listReviewQueue(BOB(), { scope: { client_id: a.client } })).length, 0,
+    "…and the row cleared itself on the next read");
+});
+
+test("p938.remedy.skip_is_about_the_NEXT_period — skipping leaves this period's ledger and this period's row exactly as they were, and that is what the surface says (ADV-02)", async (t) => {
+  if (await gate938(t)) return;
+  const a = await widenedAccrual({ tag: "netskip" });
+  const BILL = 95000;
+  await postedBill({
+    client: a.client, account: a.expenseAccount, postingDate: a.dueDate.slice(0, 8) + "01",
+    cents: BILL,
+  });
+  const before = await liveExpenseOnAccount(a.client, a.expenseAccount);
+  assert.equal(conflictRows(await listReviewQueue(BOB(), { scope: { client_id: a.client } })).length, 1);
+
+  const skip = await skipPlanOccurrence(BOB(), { plan: a.plan_id, afterDue: a.dueDate });
+  assert.equal(skip.due_date, a.nextDue, "the skip names the NEXT due date, never the flagged one");
+
+  // THE MEASURED TRUTH, PINNED RATHER THAN WISHED FOR. "Skip this period's next occurrence" is a
+  // FORWARD-LOOKING remedy: it stops the schedule raising another estimate now that the vendor
+  // bills directly. It cannot un-post an accrual that already stands, so the flagged period keeps
+  // both amounts and keeps its row until its own reversal is admitted. Both surfaces say exactly
+  // that (NeedsYou.accrualBillConflictRemedyHint / Accruals.billConflictRemedyHint); a cell that
+  // let the two drift is how the wrong promise reached the screen in the first place.
+  assert.equal(await liveExpenseOnAccount(a.client, a.expenseAccount), before,
+    "the flagged period's ledger is untouched by a skip");
+  assert.equal(conflictRows(await listReviewQueue(BOB(), { scope: { client_id: a.client } })).length, 1,
+    "…and its row is still there, because the double count it names is still there");
+
+  // …and the NEXT period is the one the remedy acted on: the scan will never raise it.
+  await wakeDuePlanOccurrences({ limit: 100 });
+  const marker = (await occurrenceRows(a.plan_id)).find((r) => r.due_date === a.nextDue);
+  assert.equal(marker.work_id, null, "the next period accrues nothing -- exactly one expense will be left for IT");
+  assert.equal(marker.outcome?.state, "skipped");
+});
+
+test("p938.read.service_period — a bill posted OUTSIDE the accrued period whose recorded service period overlaps it surfaces; superseding that term with one outside the period clears it (AC1, SPEC-05)", async (t) => {
+  if (await gate938(t)) return;
+  const a = await postedAccrual({ tag: "serviceperiod" });
+  // The accrual's own period is the calendar month of its due date.
+  const periodStart = a.dueDate.slice(0, 8) + "01";
+  const outsideDate = await monthEndBack(-2); // two months AFTER the flagged period: not in it
+
+  const term = await filedDocumentWithTerm(BOB(), {
+    firm: FIRM_A(), client: a.client, start: periodStart, end: a.dueDate,
+  });
+  const sha = (await rootQuery("select sha256 from clara.documents where id=$1", [term.document]))
+    .rows[0].sha256;
+  const d = await draftEntryV3(BOB(), {
+    client: a.client,
+    resolution: freshResolution(BOB(), a.client, { subjectKind: "document", subjectId: term.document }),
+    document: term.document, sha256: sha,
+    lines: billLines(a.expenseAccount, ACHART.liability, 50000, { desc: "938-term-bill" }),
+    memo: "938 rig: billed late, for the accrued month", postingDate: outsideDate,
+    opKey: opk("p938-term-draft"),
+  });
+  await approveEntry(ALICE(), {
+    entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("p938-term-approve"),
+  });
+
+  const rows = conflictRows(await listReviewQueue(BOB(), { scope: { client_id: a.client } }));
+  assert.equal(rows.length, 1,
+    "AC1's second route: the document's own service period puts the bill inside the accrued period");
+  assert.equal(rows[0].entry_id, d.entry_id);
+  assert.equal(rows[0].period, a.dueDate);
+
+  // SUPERSEDE the term with one that does NOT overlap: the live row is the only one the read
+  // reads, so the same bill stops surfacing with nothing else changed.
+  await filedDocumentWithTerm(BOB(), {
+    firm: FIRM_A(), client: a.client, start: outsideDate.slice(0, 8) + "01", end: outsideDate,
+  });
+  await humanQuery(BOB(), namedCall("record_document_service_period", [
+    { name: "p_document", cast: "uuid" }, { name: "p_period_start", cast: "date" },
+    { name: "p_period_end", cast: "date" }, { name: "p_basis", cast: "text" },
+    { name: "p_op_key", cast: "text" },
+  ]), [term.document, outsideDate.slice(0, 8) + "01", outsideDate,
+    "938 rig: the supplier restated the term on a corrected invoice", opk("p938-term2")]);
+
+  assert.equal(conflictRows(await listReviewQueue(BOB(), { scope: { client_id: a.client } })).length, 0,
+    "a SUPERSEDED term is not a term: the read takes the live row alone");
+});
+
+test("p938.read.two_flagged_periods — a plan with two flagged periods surfaces ONE row, and it names the EARLIEST (ADV-08)", async (t) => {
+  if (await gate938(t)) return;
+  const a = await postedAccrual({ tag: "twoperiods", monthsBack: 3 });
+  // Catch the SECOND period up and post it, so the plan carries two posted, unreversed accruals.
+  const second = await monthEndBack(1);
+  await reviseAccountingPlan(BOB(), {
+    plan: a.plan_id, frequency: "monthly", dayRule: "last_day_of_month", dayOfMonth: null,
+    timezone: ACCRUAL_TZ, effectiveFrom: monthStart(await shiftMonths(today, -3)),
+    effectiveTo: second,
+    basis: {
+      posting_date: a.dueDate, memo: "938 rig two-period accrual", currency: "MYR",
+      lines: [
+        { account_code: a.expenseAccount, debit_cents: 120000, credit_cents: 0 },
+        { account_code: ACHART.liability, debit_cents: 0, credit_cents: 120000 },
+      ],
+    },
+    reversalDayRule: "next_period_first_day", opKey: opk("p938-two-widen"),
+  });
+  await requestPlanCatchUp(BOB(), { plan: a.plan_id, from: second, to: second });
+  for (const o of await occurrenceRows(a.plan_id)) {
+    if (o.leg === "primary" && o.work_id && o.due_date === second) {
+      await postPlanWork({ work: o.work_id, client: a.client, author: BOB(), firm: FIRM_A() });
+    }
+  }
+  await postedBill({ client: a.client, account: a.expenseAccount, postingDate: a.dueDate.slice(0, 8) + "01" });
+  await postedBill({ client: a.client, account: a.expenseAccount, postingDate: second.slice(0, 8) + "01" });
+
+  const rows = conflictRows(await listReviewQueue(BOB(), { scope: { client_id: a.client } }));
+  assert.equal(rows.length, 1, "at most ONE row per plan, however many of its periods are flagged");
+  assert.equal(rows[0].period, a.dueDate,
+    "…and it names the EARLIEST flagged period, because that is the one whose reversal is owed first");
+});
+
+test("p938.read.plan_not_active — ending the plan leaves the row on screen carrying the plan's status, so the surface can say the two remedies are gone rather than offer what refuses (ADV-03)", async (t) => {
+  if (await gate0304(t)) return;
+  const a = await postedAccrual({ tag: "planended" });
+  await postedBill({ client: a.client, account: a.expenseAccount, postingDate: a.dueDate.slice(0, 8) + "01" });
+  const live = conflictRows(await listReviewQueue(BOB(), { scope: { client_id: a.client } }));
+  assert.equal(live.length, 1);
+  assert.equal(live[0].accrual_plan_status, "active", "while the plan runs, the row says so");
+
+  const ended = await endAccountingPlan(BOB(), { plan: a.plan_id, opKey: opk("p938-end") });
+  assert.equal(ended.status, "ended");
+
+  const rows = conflictRows(await listReviewQueue(BOB(), { scope: { client_id: a.client } }));
+  assert.equal(rows.length, 1,
+    "the double count did not go away when the standing instruction did -- the warning must not either");
+  assert.equal(rows[0].accrual_plan_status, "ended",
+    "…and the row carries WHY both remedies will refuse, so the surface can render them unavailable");
+
+  // Both plan-lane doors do refuse, typed -- which is exactly what the status is for.
+  const revTo = await reversalDateOf(a.dueDate);
+  await assertPair(CLR.badRequest, "plan_ended",
+    () => requestPlanCatchUp(BOB(), { plan: a.plan_id, from: a.dueDate, to: revTo }),
+    "reverse-now on an ended plan");
+  await assertPair(CLR.badRequest, "plan_ended",
+    () => skipPlanOccurrence(BOB(), { plan: a.plan_id, afterDue: a.dueDate }),
+    "skip-next on an ended plan");
+
+  // A PAUSED plan is the same dead end under its own reason, and the row says THAT instead --
+  // the two are different sentences on screen, because a paused plan can be resumed.
+  const b = await postedAccrual({ tag: "planpaused" });
+  await postedBill({ client: b.client, account: b.expenseAccount, postingDate: b.dueDate.slice(0, 8) + "01" });
+  await pauseAccountingPlan(BOB(), { plan: b.plan_id, opKey: opk("p938-pause") });
+  const paused = conflictRows(await listReviewQueue(BOB(), { scope: { client_id: b.client } }));
+  assert.equal(paused.length, 1, "a paused plan's double count is still on the books, so its row is still on screen");
+  assert.equal(paused[0].accrual_plan_status, "paused");
+});
+
+test("p938.read.per_period_amount — under #937's per-period rule the row carries the FLAGGED period's own amount, never the window total (ADV-04)", async (t) => {
+  if (await gate0304(t)) return;
+  const client = await freshAccrualClient(ALICE(), "perperiodrow");
+  const ref = await instructionRef({ client, author: BOB() });
+  const s = await span(2);
+  const dues = await monthEndsBetween(s.from, s.to);
+  assert.equal(dues.length, 2, "the rig window must hold exactly two month-end due dates");
+  const FIRST = 300000;
+  const SECOND = 350000;
+
+  const c = await createAccrualAdjustment(BOB(), {
+    client, authorityRef: ref,
+    accrual: accrual({
+      cents: FIRST + SECOND, servicePeriodStart: s.from, servicePeriodEnd: s.to,
+      method: { rule: "stated_period_amount" },
+      periodAmounts: [
+        { due_date: dues[0], amount_cents: FIRST },
+        { due_date: dues[1], amount_cents: SECOND }],
+    }),
+    frequency: "monthly", dayRule: "last_day_of_month",
+    effectiveFrom: s.from, effectiveTo: s.to, timezone: ACCRUAL_TZ, opKey: opk("p938-pp"),
+  });
+  // Post BOTH periods, then reverse the FIRST, so the flagged period is the SECOND one — the one
+  // whose own stated amount differs from both the total and the first period's.
+  await postPlanWork({ work: c.occurrence.work_id, client, author: BOB(), firm: FIRM_A() });
+  await requestPlanCatchUp(BOB(), { plan: c.plan_id, from: dues[1], to: dues[1] });
+  for (const o of await occurrenceRows(c.plan_id)) {
+    if (o.leg === "primary" && o.work_id && o.due_date === dues[1]) {
+      await postPlanWork({ work: o.work_id, client, author: BOB(), firm: FIRM_A() });
+    }
+  }
+  await requestPlanCatchUp(BOB(), { plan: c.plan_id, from: dues[0], to: await reversalDateOf(dues[0]) });
+
+  await postedBill({ client, account: ACHART.expense, postingDate: dues[1].slice(0, 8) + "01", cents: 295000 });
+  const rows = conflictRows(await listReviewQueue(BOB(), { scope: { client_id: client } }));
+  assert.equal(rows.length, 1, `exactly one flagged period (got ${JSON.stringify(rows)})`);
+  assert.equal(rows[0].period, dues[1]);
+  assert.equal(Number(rows[0].amount_cents), SECOND,
+    "the bookkeeper is comparing the bill with what THAT period accrued, never with the window total");
 });

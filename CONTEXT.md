@@ -954,6 +954,10 @@ period" row (`clara.list_review_queue`, row_kind `accrual_bill_conflict`) is a N
 same Needs-you roster that reuses the mechanics — derived, stores nothing, self-clearing — without
 being a member of the settlement-candidate FAMILY itself: it offers no candidate to choose, only
 two remedies (skip the next occurrence, or reverse now) that act on the accrual plan directly.
+A derived row outlives its own REMEDIES: when the plan those remedies act on is ended or paused
+they both refuse, while the fact that produced the row is still on the books — so the row stays and
+the surface renders the remedies unavailable with the reason, rather than the row disappearing or
+offering a control whose only possible outcome is a refusal.
 _Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row
 that survives the fact that produced it; a suggestion the product acts on by itself.
 
