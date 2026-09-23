@@ -172,6 +172,9 @@ function faMock(seen: Record<string, number>, opts: { runRefuses?: boolean; slow
     if (url.includes("/rest/v1/coa_accounts")) { bump("coa"); return jsonResponse([{ account_code: "1500", name: "Motor vehicles", account_type: "asset", account_class: null, special_acc_type: null, is_active: true }]); }
     if (url.includes("/rest/v1/rpc/upsert_fa_account_profile")) { bump("upsert_profile"); return jsonResponse({ id: "p1", asset_account_code: "1500" }); }
     if (url.includes("/rest/v1/fa_account_profiles")) { bump("profiles"); return jsonResponse([]); }
+    // #932 (migration 0277) — the account-profiles panel now also reads the default
+    // depreciation policy relation; empty here keeps this suite's happy path unchanged.
+    if (url.includes("/rest/v1/fa_account_depreciation_policies")) return jsonResponse([]);
     if (url.includes("/rpc/complete_fixed_asset_particulars") || url.includes("/rpc/revise_fixed_asset_particulars")) {
       bump("revise");
       return jsonResponse({ code: "CLR37", message: "the register already carries an approved balance", details: '{"reason":"fa_already_approved"}' }, 400);

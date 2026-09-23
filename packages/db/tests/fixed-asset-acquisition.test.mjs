@@ -22,9 +22,10 @@ import {
   acqWorld, acqClient, acqBasis, armedAcquisition, postAcquisition, workLaneAcquisition,
   completeParticularsFor, openWorkQuestion, answerWorkQuestion, pendingQuestion,
   assetForEntry, triggerOrderOnJournalEntries, approvePathBodies, faHookCallers,
-  documentLaneAcquisition,
+  documentLaneAcquisition, sameTxnRetireAndApprove,
   subledgerHookCallers, entryCountOf, committedReceiptCountOf, assetCountOf,
   buyAsset, completeParticulars, getFixedAsset, listFixedAssets, upsertFaProfile,
+  profileRows,
   reverseAndSettle, approvedEntry, faRow, entryRowOf, eventCount,
   workRow, receiptsForWork, mintClientObo, wakeRecordJournalEntry,
   withActor, ROLES,
@@ -609,6 +610,183 @@ test("p639.settle.clr40_classification a commit-time CLR40 carries the SQLSTATE 
     + "'invariant' -> the Work settles FAILED with error.code='CLR40', "
     + "agent_tasks.error_code='internal', recoverable:false. Asserted against the deployed "
     + "classifier in packages/runtime/tests/fixed-asset-acquisition.test.mjs.");
+});
+
+// ===========================================================================================
+// 5b · #882(b) — THE SAME-TRANSACTION RETIRE-AND-APPROVE INSTANT. Owner ruling (2026-09-18): no
+//     trigger change. `clara._tf_fa_movement_belt` reads a CLOSED `approved_at` interval;
+//     `clara._tf_fa_acquisition_birth` reads the CURRENT `fp.active` flag. The two agree for every
+//     ordinary case and disagree at exactly one instant — an entry approved in the SAME
+//     transaction that retires its cost account's enrolment profile — and that instant stays
+//     refused. Migration 0278 (comment-only) pins the convention on both trigger bodies'
+//     `comment on function`; this cell pins the BEHAVIOUR from scratch, driving the production
+//     Work lane (`wake_record_journal_entry`), the only lane 0216's birth trigger exists for.
+// ===========================================================================================
+
+test("p639.belt.same_txn_retire_approve an entry approved in the SAME transaction that retires its cost account's enrolment profile is refused CLR40 fa_belt_unregistered_movement, and the whole transaction — including the retirement — rolls back", async (t) => {
+  if (await gate(t)) return;
+  const w = await acqWorld();
+  const client = await acqClient("same_txn_retire_approve");
+  const before = {
+    entries: await entryCountOf(client),
+    receipts: await committedReceiptCountOf(client),
+    assets: await assetCountOf(client),
+  };
+  const activeBefore = (await profileRows(client))
+    .filter((p) => p.active && p.asset_account_code === COST);
+  assert.equal(activeBefore.length, 1,
+    "same_txn_retire_approve: mandatory setup — the client's COST account starts enrolled");
+
+  // The Work lane is the ONLY lane that reaches this instant: it approves with a raw
+  // `update ... set status='approved'` and relies ENTIRELY on the deferred birth trigger to
+  // register the row (0216's whole premise) — never `clara._fa_on_approve`'s statement-time hook,
+  // which the document lane's `approve_entry` would call instead and which would have already
+  // birthed the row (under the STILL-active profile) before the retire even ran.
+  const a = await armedAcquisition({ client, author: w.users.bob });
+  const err = await sameTxnRetireAndApprove({ sub: w.users.bob, client, assetAccount: COST, a });
+
+  assert.ok(err,
+    "same_txn_retire_approve: the COMMIT was expected to refuse — the transaction must NOT succeed");
+  assert.equal(err.code, "CLR40",
+    "same_txn_retire_approve: the deferred belt's SQLSTATE, at COMMIT");
+  assert.equal(reasonToken(err), ACQ.beltUnregistered,
+    "same_txn_retire_approve: the belt's closed approved_at interval still matches at the equality "
+    + "instant and finds no register row — the birth trigger's fp.active read declined to leave one");
+
+  // THE WHOLE TRANSACTION ROLLED BACK — including the retirement itself, which shared it.
+  assert.equal(await entryCountOf(client), before.entries,
+    "same_txn_retire_approve: no journal entry survives the refused commit");
+  assert.equal(await committedReceiptCountOf(client), before.receipts,
+    "same_txn_retire_approve: …and no committed operation receipt");
+  assert.equal(await assetCountOf(client), before.assets,
+    "same_txn_retire_approve: …and no register row — the birth trigger truly declined to insert one");
+  const activeAfter = (await profileRows(client))
+    .filter((p) => p.active && p.asset_account_code === COST);
+  assert.equal(activeAfter.length, 1,
+    "same_txn_retire_approve: the profile is untouched — its retirement rolled back WITH the refused entry");
+  assert.equal(activeAfter[0].id, activeBefore[0].id,
+    "same_txn_retire_approve: …the SAME row, never a phantom re-enrolment");
+
+  noteLane(
+    "same_txn_retire_approve: clara._tf_fa_acquisition_birth (fires first, alphabetically) read "
+    + "fp.active=false at COMMIT and declined to register the row; clara._tf_fa_movement_belt "
+    + "(fires second) still matched the closed approved_at interval at the equality instant, found "
+    + "no register act, and raised fa_belt_unregistered_movement — pinning the owner ruling "
+    + "(2026-09-18, #882) behaviourally, from scratch, on the production Work lane.");
+});
+
+// ===========================================================================================
+// 5c · #882(b) — THE CONVENTION, IN THE CATALOG. Migration 0278 gives both trigger bodies a
+//     `comment on function` stating the SAME convention `p639.belt.same_txn_retire_approve` just
+//     drove — so a reader who consults `pg_proc`/`\df+` and never opens this test file, or the
+//     migration, still finds the reason the two triggers disagree, on EITHER function.
+// ===========================================================================================
+
+const FA_BELT_BIRTH_CONVENTION_STEM = "fa_belt_birth_convention$";
+let _conventionReady = null;
+async function conventionReady() {
+  if (_conventionReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [FA_BELT_BIRTH_CONVENTION_STEM]);
+      _conventionReady = r.rows[0].n > 0;
+    } catch {
+      _conventionReady = false;
+    }
+  }
+  return _conventionReady;
+}
+
+async function gateConvention(t) {
+  if (await conventionReady()) return false;
+  // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud (work order rule 4 / L09-ADV-08's
+  // house convention). The package-wide sweep preloads this ticket's OWN pre-integration gate
+  // module (named in the refusal below), which sets the flag below to declare "a database below
+  // this migration is an expected pre-integration state". A worker running this file directly
+  // preloads nothing, so a chain missing the convention comment fails HERE rather than reporting a
+  // green run over a cell that quietly executed no assertion.
+  if (process.env.CLARA_ALLOW_MISSING_FA_BELT_BIRTH_CONVENTION !== "1") {
+    throw new Error(
+      `#882 belt/birth convention comment absent (no ${FA_BELT_BIRTH_CONVENTION_STEM} row in `
+      + "clara.schema_migrations) and CLARA_ALLOW_MISSING_FA_BELT_BIRTH_CONVENTION is unset -- "
+      + "this is a FOCUSED run and must fail loudly, not skip. Preload "
+      + "./tests/fa-belt-birth-convention-preintegration-gate.mjs for an estate sweep against a "
+      + "pre-PR chain.");
+  }
+  t.skip(`#882 belt/birth convention comment absent (no ${FA_BELT_BIRTH_CONVENTION_STEM} migration applied)`);
+  return true;
+}
+
+test("p639.belt.convention_comment both trigger bodies carry the belt/birth convention in the catalog, the birth's is a byte-exact accretion onto 0277's own text, the belt's body is byte-unchanged and the birth's has lost no earlier marker", async (t) => {
+  if (await gate(t) || await gateConvention(t)) return;
+
+  const belt = (await rootQuery(
+    "select p.prosrc, obj_description(p.oid, 'pg_proc') as comment from pg_proc p "
+    + "where p.oid = 'clara._tf_fa_movement_belt()'::regprocedure")).rows[0];
+  const birth = (await rootQuery(
+    "select p.prosrc, obj_description(p.oid, 'pg_proc') as comment from pg_proc p "
+    + "where p.oid = 'clara._tf_fa_acquisition_birth()'::regprocedure")).rows[0];
+
+  assert.ok(belt.comment, "convention_comment: the belt carries a catalog comment");
+  for (const term of ["#882 (0278)", "fa_belt_unregistered_movement", "fp.active", "CLOSED interval"]) {
+    assert.ok(belt.comment.includes(term),
+      `convention_comment: the belt's comment names "${term}"`);
+  }
+
+  assert.ok(birth.comment, "convention_comment: the birth trigger carries a catalog comment");
+  // BYTE-EXACT ACCRETION, independently re-derived here (never trusting the migration's own tail
+  // alone): 0277's own text, read live from `0277_fa_default_depreciation_policy.sql` at the
+  // moment this file was written, is a PREFIX of the birth's live comment — never rewritten.
+  const p977Text = "#639: the LANE-AGNOSTIC fixed-asset acquisition birth. A deferred constraint "
+    + "trigger on clara.journal_entries, named to fire before t_je_fa_movement_belt (deferred "
+    + "triggers fire in alphabetical trigger-name order -- measured on clara_639, PG 17.11). "
+    + "Idempotent against clara._fa_on_approve arm 4 through the same on conflict "
+    + "(acquisition_line_id) do nothing. #972 (0247): the join carries the 0041 §1.2 enrolment "
+    + "watermark as the exact negation of clara.fa_register_tie's own pre-enrolment test. #932 "
+    + "(0277): when the account carries a live clara.fa_account_depreciation_policies row, the "
+    + "register row is born COMPLETE from it (method, life-or-rate, residual, and a "
+    + "depreciation_start_date of the acquisition's OWN posting date) and stamps the policy's id "
+    + "and version; an account with no policy still births the pending row exactly as before.";
+  assert.equal(birth.comment.slice(0, p977Text.length), p977Text,
+    "convention_comment: 0277's own text is an untouched PREFIX of the birth's live comment");
+  assert.ok(birth.comment.length > p977Text.length,
+    "convention_comment: …and the comment grew past it");
+  for (const term of ["#882 (0278)", "fa_belt_unregistered_movement", "CLOSED approved_at interval", "_tf_fa_movement_belt"]) {
+    assert.ok(birth.comment.includes(term),
+      `convention_comment: the birth's new sentence names "${term}"`);
+  }
+  for (const marker of ["#639", "#972 (0247)", "#932 (0277)"]) {
+    assert.ok(birth.comment.includes(marker),
+      `convention_comment: the birth's EARLIER provenance marker "${marker}" survived the accretion`);
+  }
+
+  // #882 IS DOCUMENTATION-ONLY, AND THE BELT'S BODY PROVES IT BY BYTE. The belt has not been
+  // recut since 0041 and 0278 did not touch it, so its sha is a durable pin and stays one.
+  const crypto = await import("node:crypto");
+  const sha256 = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
+  assert.equal(sha256(belt.prosrc),
+    "be97ea51a8db4d69a32da6986a1f0ab7b136c7dc8432913fe783354a3e4c8b5a",
+    "convention_comment: clara._tf_fa_movement_belt's body is byte-unchanged");
+
+  // THE BIRTH'S BODY IS NOT BYTE-FROZEN BY THIS TICKET, and a cell that pinned it here would
+  // claim it was. #882 asserts that 0278 moved nothing; whether the body is at 0277's bytes is a
+  // fact each RECUTTING migration pins in its own prestate and tail (0277's, then 0280's, which
+  // lawfully recut both birth sites to decline a policy that no longer fits its enrolment). What
+  // survives every such recut — and what this cell therefore asserts — is that no earlier
+  // marker was lost along the way.
+  for (const marker of [
+    "if new.is_opening_balance then return null; end if;",
+    "if new.reversal_of is not null then return null; end if;",
+    "if new.flags ? 'fa_disposal' then return null; end if;",
+    "if new.origin = 'scheduled_run' then return null; end if;",
+    "coalesce(new.approved_at, new.created_at) >= fp.enrolled_at",
+    "from clara.fa_account_depreciation_policies",
+    "on conflict (acquisition_line_id) do nothing",
+  ]) {
+    assert.equal(birth.prosrc.split(marker).length - 1, 1,
+      `convention_comment: the birth body still carries "${marker}" exactly once`);
+  }
 });
 
 // ===========================================================================================

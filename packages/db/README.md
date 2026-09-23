@@ -3313,3 +3313,297 @@ carrying 0225 and 0274 and not 0275 still runs #655's and #982's batteries in fu
 `trade_invoice_duplicate_probe$`, and its `--import` token in `package.json`'s test script in
 migration order. `TRADE_INVOICE_DUPLICATE_0275_COHORT` in [tests/rig-meta.mjs](tests/rig-meta.mjs)
 attributes the new names.
+## 0277 — a default depreciation policy per enrolled fixed-asset account (#932, riders wave 3 lane 04)
+
+`0277_fa_default_depreciation_policy.sql` mints `clara.fa_account_depreciation_policies` (append-
+only, version-forward, keyed on the same `(client_id, asset_account_code)` pair
+`clara.fa_account_profiles` already uses — no finer class, one live policy per account by a partial
+unique index) and its two bookkeeper+ doors, `clara.set_fa_depreciation_policy` /
+`clara.retire_fa_depreciation_policy`. Setting a policy never mutates a prior version: it retires
+the live row (if any) and inserts a fresh one at `version + 1`, mirroring
+`clara.upsert_fa_account_profile`'s own law for the enrolment it is keyed on.
+
+**BOTH birth sites, not one — measured, not assumed.** `clara._fa_on_approve` arm 4 fires
+SYNCHRONOUSLY inside the approve statement (through `clara._subledger_on_approve`, every approve
+writer's own call); `clara._tf_fa_acquisition_birth` is a DEFERRED constraint trigger that fires at
+COMMIT, after arm 4 already ran. Both target the same conflict key
+(`on conflict (acquisition_line_id) do nothing`), and 0247's own comment on the trigger already
+says which one wins for an ordinary acquisition. Driven on the lane-04 rig before this file's final
+cut: a policy planted only in the deferred trigger (0247's own scope) left an ordinary
+`buyAsset`-shaped approve still birthing the pre-0277 pending row, because arm 4 got there first
+with no policy logic of its own. 0277 therefore recuts BOTH sites with the SAME policy lookup and
+the same two-branch column choice — the trigger for the Work lane (where arm 4 is never reached)
+and arm 4 for every other lane (where the trigger's own insert is absorbed by the conflict target).
+It also recuts `clara._fa_asset_json` (0216's recut, the one source both `clara.list_fixed_assets`
+and `clara.get_fixed_asset` read a row through) to surface the two new provenance columns,
+`depreciation_policy_id` / `depreciation_policy_version`, on `clara.fixed_assets`.
+
+**The ticket's own triage comment is stale — its sequencing note is superseded here.** The comment
+on #932 was checked against `origin/main` at 0233 / `dc9acfe1`, before riders existed, and pins
+0227's text for `clara._fa_validate_particulars` and the two completion doors. Wave 2 already
+recut all three (0249's fold) and 0247 already recut `clara._tf_fa_acquisition_birth` on top of
+0216. 0277's own prestate pins the LIVE text of every body it touches or relies on, MEASURED on the
+lane-04 database moments before the file was written (267 files / 0272), never transcribed from an
+earlier migration's own header — the riders wave-3 addendum's own rule (RIG.md).
+
+**What 0277 does NOT touch**, pinned unmoved in its prestate/tail: `clara.upsert_fa_account_profile`
+/ `clara.retire_fa_account_profile` and the enrolment belt watermark (AC1's own requirement);
+`clara._fa_validate_particulars`, either completion door, `clara._fa_assert_completion_not_a_change`,
+`clara._fa_assert_particulars_completable` (a policy-born row is populated directly from the
+policy's own already-validated columns, never through the validator, and a SUBSEQUENT change still
+goes through `clara.revise_fixed_asset_particulars`, the existing prospective revision door);
+`clara._fa_compute_charges`, `clara._fa_asset_charges`, `clara.fa_register_tie` (the depreciation
+engine needs no change — AC4's "picked up on its next run" is a consequence of the row being
+COMPLETE, not a new arithmetic path).
+
+**"Stated particulars always win" (AC2) has nothing to override, today.** There is no mechanism yet
+for an acquisition entry itself to carry particulars at posting time (grepped, none exists), so a
+policy can never have anything stated to override; `packages/db/tests/fa-depreciation-policy.test.mjs`
+(`p932.frozen`) drives the one way this estate CAN prove the law — a policy-born row is a COMPLETE
+row like any other, so `complete_fixed_asset_particulars` refuses it `fa_particulars_already_complete`
+exactly as it would a hand-completed one, and `revise_fixed_asset_particulars` still reaches it.
+
+**Redo-safe by construction**: every schema/door section is naturally redo-safe
+(`create table if not exists`, guarded `alter table ... add column/constraint`,
+`create or replace function/trigger`); only the three recut bodies' prestate pins need a redo
+branch, keyed on `clara.set_fa_depreciation_policy`'s own presence as the "this is a redo of 0277
+itself" signal.
+
+Frontier gate: `tests/fa-depreciation-policy-preintegration-gate.mjs`, keyed on the stem
+`fa_default_depreciation_policy$` (never the migration number, claimed at merge). Rig-meta cohort:
+`FA_DEFAULT_DEPRECIATION_POLICY_0277_COHORT` in `tests/rig-meta.mjs`, bimodal like 0270's (the
+`db-slice-frontiers` matrix runs this package against earlier frontiers). Both new doors are
+`clara_authenticated`-only, `_human_ctx`-floored at bookkeeper — `clara_runtime` and every agent/wake
+lane gain zero.
+
+## 0278 — the belt and the birth trigger disagree on purpose, and now the catalog says so (#882(b), riders wave 3 lane 04)
+
+`0278_fa_belt_birth_convention.sql` is a comment-only migration: two `comment on function`
+statements, no row moved, no function minted. #882 triaged that `clara._tf_fa_movement_belt`
+(0041) and `clara._tf_fa_acquisition_birth` (0216, recut by 0247 then 0277) read an account's
+enrolment with two DIFFERENT signals — the belt a CLOSED `approved_at` interval, the birth the
+CURRENT `fp.active` flag — and that the two only ever disagree at one instant: an entry approved
+in the SAME transaction that retires its cost account's enrolment profile. `now()` being
+transaction-constant means that transaction stamps `retired_at` EXACTLY EQUAL to `approved_at`; the
+belt's closed interval still matches at that equality instant while the birth's `fp.active` reads
+false by the time it fires, so the birth declines to register the row and the belt then refuses the
+whole transaction CLR40 `fa_belt_unregistered_movement`.
+
+**The owner ruling (2026-09-18) was already settled: no trigger change.** The same-transaction
+retire-and-approve instant is reachable by NO production door — `clara.retire_fa_account_profile`
+is human-only and always its own transaction — so today's refusal stays. What #882(b) actually owed
+was that the convention lived only in triage prose and in 0041's own in-body `--` comment
+(2680-2689), never in either function's catalog `comment on function`, and never naming the OTHER
+trigger's differing signal. 0278 writes it on both sides: the belt's comment (its first ever) states
+its own closed-interval design AND names the birth's `fp.active` reading; the birth's comment
+(already accretive across `#639`/0216, `#972`/0247, `#932`/0277) gains one more sentence doing the
+same from the other direction.
+
+**The birth's accretion is a proven byte-exact prefix, never a rewrite.** `comment on function`
+replaces the whole comment, so 0278's literal for `clara._tf_fa_acquisition_birth` opens with
+0277's own text copied VERBATIM from `0277_fa_default_depreciation_policy.sql:601-609` — never
+retyped from a printed value — and the tail hashes the first 842 characters (0277's own measured
+`comment_len`) against 0277's measured pre-image sha256, so a single mistyped character in the
+copied prefix would fail the tail rather than silently corrupting the earlier provenance. Both
+bodies' `prosrc` are pinned in the prestate and re-pinned in the tail at the SAME sha256 — this
+file recuts neither.
+
+**No new function, no new grant, no rig-meta cohort.** Both trigger bodies are already granted
+exactly as 0041/0216 left them (`revoke all ... from public`); `tests/rig-meta.mjs`'s
+`cohortFailures()` / `grantMatrixFailures()` need no new roster entry — the same finding 0265
+(#839) and 0266 (#880) each recorded above for their own comment/projection-only migrations.
+
+**Redo-safe by construction**: `comment on function ... is '<literal>'` is a flat SET, so applying
+this file twice sets the identical final text both times; no branch is needed in the change section
+itself. The prestate is still bimodal on the one thing a redo could otherwise hide (accepts either
+the pre-#882 catalog state or 0278's own already-applied text) — this run on `clara_l04` was a
+GENUINE FIRST APPLY, so the prestate's first-apply branch was exercised directly, not merely
+asserted.
+
+Frontier gate: `tests/fa-belt-birth-convention-preintegration-gate.mjs`, keyed on the stem
+`fa_belt_birth_convention$` (never the migration number). The frontier-gated cells are
+`p639.belt.same_txn_retire_approve` (drives the production Work lane — `wake_record_journal_entry`
+— through a hand-opened transaction that also retires the profile, and pins the refusal from
+scratch, gated only by 0216/0041's own stems since the BEHAVIOUR predates 0278) and
+`p639.belt.convention_comment` (reads `pg_proc`/`obj_description` and pins the catalog text itself,
+gated on 0278's own stem) in `tests/fixed-asset-acquisition.test.mjs`.
+
+## 0279 — the closed-year arrears question (#975, riders wave 3 lane 04)
+
+`0279_fa_closed_year_arrears.sql` closes the half of the locked-period law that #651 (0227) left
+open. 0227 refuses a charge **dated** into a closing or closed fiscal year and teaches the due
+oracle to skip such a period. It says nothing about the months **inside** that year which the next
+OPEN period's charge folds forward — `clara._fa_asset_charges` charges every uncharged month up to
+the period end — so a closed year's depreciation rode into the next entry with nobody asked.
+
+**Owner ruling 2026-09-20, checked against IAS 8.** A MATERIAL prior-period error is restated in
+the year it belongs to; only an IMMATERIAL one is folded into the current period. Which of the two
+this is turns on materiality, a professional judgement Clara may not default. So the run states the
+amount and the year and asks for one of exactly two resolutions — `fold_current` or `reopen_prior`
+— and chooses neither. The ruling also records that 0227's own comment calling arrears "the
+ordinary accounting treatment" overstates the standard, and that the correction goes in
+`CONTEXT.md` ("Closed-year arrears resolution"), never into the applied migration file.
+
+**What it installs.**
+
+- `clara.fa_arrears_resolutions` — one live answer per `(client_id, fiscal_year_id)` by partial
+  unique index, append-only (a change of mind supersedes and mints a fresh row), carrying the
+  amount that was judged, the choice, the run's period, the author and the timestamp. RLS
+  enabled+forced; `clara_authenticated` holds SELECT and nothing else.
+- `clara._fa_closed_arrears(uuid,date)` — an UNGRANTED internal (no role holds EXECUTE; both doors
+  reach it from their own DEFINER bodies). It reads a closed year's share as a PREFIX DIFFERENCE
+  over the estate's own arithmetic: `charged(year end) − charged(the day before it opened)`, where
+  `charged(X)` is `clara._fa_compute_charges(client, X, X) ->> 'charged_cents'`. That is exact
+  because `_fa_compute_charges` passes only its period END to `_fa_asset_charges`, so `charged` is
+  a prefix sum over the same forward month walk the poster runs. Measured before the cut: a charge
+  BLOCK is closed at a fiscal-year boundary only on the reducing-balance arm, so a straight-line
+  block may straddle a year and the share can **not** be read off the blocks — the prefix
+  difference needs no apportionment at all. The year's END is measured first and a zero ends the
+  year there: `charged` is monotone and never negative, so the second computation would only
+  re-confirm it, and the steady state (closed years with nothing uncharged) costs one computation
+  per year inside the belt's own probe.
+- `clara.record_fa_arrears_resolution(...)` — bookkeeper+, the SAME floor `run_depreciation_manual`
+  takes. It RE-MEASURES the figure and refuses (`arrears_changed`) if it moved since the question
+  was asked: a materiality judgement is made about an amount, and filing it against a stale one
+  would put a ruling on the file that was never made. No machine role holds EXECUTE.
+
+**What it recuts, and nothing else.** `clara._fa_run_period_core` (the question, between 0227's
+locked-period wall and the first write); `clara._fa_oldest_unmet_period` and
+`clara.preview_depreciation_run` (one sibling key, `closed_arrears`, beside `skipped_closed` —
+whose own entries keep every key #651 gave them); `clara.run_depreciation_period_for` (one word in
+its loop exit: a parked period ends the chase as a noop does).
+`clara._agent_depreciation_catchup_core` has the same loop and is deliberately NOT recut: its wake
+source `close_prep` is registered-and-disabled, so no lane can drive it, and the tail pins its body
+unmoved. Its safety property holds regardless — it runs under the verb `run_depreciation_period`,
+so it parks and never posts.
+
+**Two renderings of one guard, discriminated by the verb.** `run_depreciation_manual` RAISES
+(`CLR38`, reason `arrears_resolution_required` or `arrears_awaiting_reopen`, axis
+`closed_year_arrears`); every other verb returns a receipted `parked` status with the same facts.
+Nothing is switched off: both doors stay callable, every branch stays testable, and
+`clara.reopen_fiscal_year` — the destination of the restatement choice — is untouched and pinned.
+
+**Redo-safe by construction**: `create table if not exists` with every constraint inside the
+statement, `create index if not exists`, `drop policy if exists` + `create policy`,
+`create or replace function`, `create or replace trigger`. The prestate reports FIRST or REDO and
+skips only the four RECUT pre-image pins on a redo; §T re-proves the whole post-state either way.
+This lane applied it FIRST (a genuine first apply, the prestate's first-apply branch exercised for
+real) and then re-applied it through the supported `CLARA_MIGRATION_REDO` path several times while
+the slices landed.
+
+Frontier gate: `tests/fa-arrears-resolution-preintegration-gate.mjs`, keyed on the stem
+`fa_closed_year_arrears$` (never the migration number). The battery is
+`tests/fa-arrears-resolution.test.mjs` (`p975.ask`, `p975.fold`, `p975.reopen`, `p975.parks`,
+`p975.probe`, `p975.no_closed`, `p975.work_lane`), and `p651.period.closed_belt_skips` in
+`tests/depreciation-history.test.mjs` is BIMODAL on this file's stem: once the fold is recorded,
+everything #651 measured is unchanged.
+
+## 0280 — a default depreciation policy applies only while it still fits its enrolment (#932 fix round, riders wave 3 lane 04)
+
+`0280_fa_policy_enrolment_congruence.sql` closes the blocker the lane's adversarial review drove
+(ADV-L04-1). `clara.set_fa_depreciation_policy` refuses every method but `none` on a
+NON-depreciable enrolment (0277 §B), but that is a wall at SET time only, and
+`clara.upsert_fa_account_profile` is version-forward and reads no policy (0277 pins it unmoved, and
+so does this file). ONE ordinary re-enrolment with `accum_depr_account_code = null` therefore left a
+`straight_line` policy live; the next acquisition was born COMPLETE from it while taking its
+accumulated and expense codes from the NEW profile — i.e. NULL. `clara.preview_depreciation_run`
+then offered two legs with `account_code: null` and `clara.run_depreciation_manual` died on an
+untyped `23502` (`journal_lines.account_code`), which no door can rescue —
+`complete_fixed_asset_particulars` refuses `fa_particulars_already_complete` and
+`revise_fixed_asset_particulars` refuses the `depreciation_method` key — and which
+`packages/runtime/lib/reconciler-fa.mjs` isolates per client, silently stopping that client's
+depreciation for good.
+
+**The change is one line in each of the two birth sites**, plus the comment that names it: the
+policy-covered branch is entered only when `not (l.accum_code is null and v_pol.method <> 'none')`.
+A declined policy falls through to 0247's own UNCOVERED branch, so the row births exactly as an
+uncovered non-depreciable acquisition does — method `none`, no start date, no provenance, the
+"particulars pending" description — and a person is asked, which is what the estate already does
+for every account carrying no policy at all. The enrolment door keeps accumulated and expense a
+PAIR (`0041:2785-2789`), so the accumulated code alone decides it.
+
+**Why a separate file rather than an edit to 0277.** 0278's prestate pins 0277's post-image of
+`clara._tf_fa_acquisition_birth` by `sha256(prosrc)` and accretes onto its 842-character comment,
+and #957's redo path re-applies only the HIGHEST applied version — so editing 0277 in place would
+have broken 0278's prestate on a from-scratch chain and could not have been re-applied to the rig
+at all. The number is provisional and claimed at MERGE; the battery gates on the stable stem
+`fa_policy_enrolment_congruence$`.
+
+**Shape.** Prestate pins both recut bodies at their measured 0277 post-images
+(`c2c62b29…`, `ea7499ae…`) with a redo branch keyed on this file's own marker, pins four bodies it
+does NOT touch (`clara.upsert_fa_account_profile`, `clara._fa_particulars_complete`,
+`clara.set_fa_depreciation_policy`, `clara._fa_asset_json`), and hashes the birth's catalog comment
+at 0278's own 1553 characters before accreting one sentence onto it. The tail re-reads both bodies
+for the guard marker AND for every marker 0277's own tail pinned (0247's four exclusions, the #972
+watermark, the single conflict-targeted insert, both description literals, the three untouched arms
+of `clara._fa_on_approve`), proves the UNGUARDED form is gone from both, re-checks
+owner/definer/search_path/ACL and the deferred trigger's binding, and re-reads the four unmoved
+bodies. It creates no relation, mints no function and moves no grant, so it owes no `rig-meta.mjs`
+cohort (0278 makes the same claim for the same reason) and no
+`apps/web/tests/firm-scope-db-pins.corpus.ts` barrier entry — it contains no dynamic SQL at all.
+
+**Cells.** `p932.drift` in `tests/fa-depreciation-policy.test.mjs`, gated on this file's own stem
+through `gate932c` (`tests/fa-depreciation-policy-fixtures.mjs`) and
+`tests/fa-policy-enrolment-congruence-preintegration-gate.mjs`: set a `straight_line` policy,
+re-issue the enrolment as non-depreciable through the real door, acquire, and see the row born
+pending with no provenance — then drive `liveAuthority` + the due ladder and see no `23502`.
+
+## 0281 — a materiality judgement licenses the figure it was made about (#975 fix round, riders wave 3 lane 04)
+
+`0281_fa_arrears_judgement_scope.sql` closes three defects the lane's review drove against 0279.
+0279 asks the right question; what it got wrong is the answer's SCOPE. It recuts exactly two
+bodies — `clara.record_fa_arrears_resolution` and `clara._fa_run_period_core` — and contains no
+dynamic SQL at all.
+
+**(1) A judgement about one amount authorised folding any later amount** (ADV-L04-2 blocker,
+SPEC-975-2). The record door already enforces "a materiality judgement is made ABOUT an amount": it
+re-measures the year and refuses CLR37 `arrears_changed` when the figure moved between the question
+and the answer. `clara._fa_run_period_core` applied no such test at FOLD time — it read the
+CURRENTLY measured arrears and the STORED choice and never compared them. DRIVEN: a `fold_current`
+recorded about 10,000 sen proceeded to fold 20,000, and the receipt named the very record whose own
+stored figure was 10,000. The guard now splits the affected years THREE ways — no live resolution,
+a live resolution made about a different figure, or a `reopen_prior` at the figure that still
+stands — and the middle bucket refuses (or parks) on its own reason
+`arrears_changed_since_judgement`, naming `judged_cents` and `arrears_cents` both. AC2's "a later
+run proceeds on the record without asking again" is untouched for an unmoved figure, which is what
+AC2 is about.
+
+**(2) The refusal stated the client-wide TOTAL as the named year's amount** (ADV-L04-3,
+SPEC-975-1). 0279 raised and parked with the sum over every closing/closed year carrying arrears —
+including years already answered — while naming only the first unresolved year. It compounded: the
+record door re-measures PER YEAR, so a caller answering with the number the refusal had just stated
+was refused `arrears_changed` and the run stayed blocked. The web panel escaped it only because it
+passes its own per-year figure. Every sentence and every `detail.arrears_cents` now carries the
+NAMED year's own amount, and the client-wide total rides beside it under `total_arrears_cents`.
+
+**(3) `reopen_prior` was admitted on a year that is only CLOSING** (ADV-L04-4).
+`clara._tf_fiscal_years_lifecycle` admits `open|reopened → closing`, `closing → open|closed` and
+`closed → reopened`; there is no `closing → reopened` edge, and `clara.reopen_fiscal_year` is the
+`closed → reopened` verb. DRIVEN: the judgement was admitted, the run then refused
+`arrears_awaiting_reopen` with remedy `reopen_fiscal_year`, and that remedy's own write was refused
+CLR10 `fy_lifecycle_edge_invalid`. The record door now refuses `reopen_prior` while the year is
+still closing, on its own axis `year_still_closing`, naming `clara.finalize_close`. `fold_current`
+stays open on a closing year: this refuses one unreachable remedy, never the question. The run core
+also derives its awaiting-remedy from the named year's own status, for the one path that can still
+reach a closing year carrying a live `reopen_prior` (`closed → reopened → closing` after the
+judgement was made).
+
+**Not touched, and pinned in both the prestate and the tail:** `clara._fa_closed_arrears` (the
+arithmetic was never wrong — only the scope the refusal quoted it at), the due oracle, the preview,
+both run verbs, the Work lane's run door, `clara._fa_assert_period_open`,
+`clara.reopen_fiscal_year` and `clara.finalize_close`. It mints no function and moves no grant, so
+it owes no `rig-meta.mjs` cohort, and being free of dynamic SQL it needs no barrier entry in
+`apps/web/tests/firm-scope-db-pins.corpus.ts`. Its ACL section is three literal statements rather
+than 0279's bulk `execute format` loop, for exactly that reason.
+
+**Cells** (`tests/fa-arrears-resolution.test.mjs`, gated on the stable stem
+`fa_arrears_judgement_scope$` through `gate975b` and
+`tests/fa-arrears-judgement-scope-preintegration-gate.mjs`): `p975.two_years` builds the first
+TWO-closed-year state the battery ever had and answers the first year with the number the refusal
+stated; `p975.stale.park` drives the swept lane over a moved figure; `p975.closing_reopen` drives
+the closing-year refusal and then shows `fold_current` still admitted; and `p975.fold`'s later-run
+segment — which previously MEASURED the silent larger fold — now drives the re-ask and the
+re-judgement.
+
+**Why a separate file rather than an edit to 0279.** #957's redo path re-applies only the HIGHEST
+applied version, and 0279 is no longer it. The number is provisional and claimed at MERGE.

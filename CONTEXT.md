@@ -739,6 +739,18 @@ journal entry.
 _Avoid_: A depreciation authority (that is the firm's permission to run it); a schedule (that is
 what these produce); a policy the product infers from the evidence; a second accounting entry.
 
+**Default depreciation policy**:
+A person-set, versioned default for ONE enrolled fixed-asset account — method, useful life or
+rate, and residual — signed once and applied at every later acquisition on that account which
+states no particulars of its own. A covered acquisition is born with complete depreciation
+particulars, never pending ones, and the register row carries the policy's own version so its
+provenance is a read, never a guess. Setting a policy again never mutates the one it replaces: the
+live row retires and a fresh one is minted one version higher, and only acquisitions AFTER that
+change are born from it — an asset a prior version already birthed keeps its own particulars.
+_Avoid_: A rule the product infers from an asset's own evidence (that is exactly what Depreciation
+particulars is not); a class finer than the account; a back-fill of an asset already waiting; a
+value an acquisition itself states (that always wins, because a policy fills only what is absent).
+
 **Depreciation change class**:
 What KIND of change a revision to an asset's depreciation particulars is, recorded on the generation
 the revision MINTED and never on the one it superseded. Three are recognised — an *estimate* change
@@ -757,6 +769,35 @@ unattended belt runs forward only and a signature is not permission to charge ev
 period earlier than the floor is charged only by an explicit catch-up a person performs.
 _Avoid_: Reading a signature as permission to charge every past period; a window a later edit can
 move; a floor derived from the machine's clock rather than the book's calendar.
+
+**Closed-year arrears resolution**:
+The accountant's recorded answer to one question: a depreciation run is about to charge months that
+belong to a fiscal year which is closing or closed, and somebody must say whether that omission is
+material. Under IAS 8 a material prior-period error is **restated in the year it belongs to**, and
+only an immaterial one is **folded into the current period**; which of the two this is turns on
+materiality, and materiality is a professional judgement. So Clara states the amount and the year,
+offers exactly those two resolutions, and chooses neither. A question names ONE year and states
+THAT year's own arrears; where several closed years carry arrears the client-wide total is a
+separate figure and never stands in for a year's. The answer is recorded against the client, the
+fiscal year and the period of the run that raised it, with the figure that was judged, who judged it
+and when. **A judgement licenses the figure it was made about, and nothing else**: a later run for
+the same client and year proceeds on the record while the arrears still stand at that figure, and
+asks again — naming both figures — once they do not, because deciding that a ruling about one amount
+still holds at another would be Clara making the materiality judgement herself. A change of mind
+supersedes the record rather than editing it, so both judgements keep their author and their
+timestamp. The human run door asks; the swept run parks with the reason stated and completes once an
+answer exists. Choosing restatement does not reopen anything by itself: the year is reopened through
+its own formal path, and only then is its period run in its own right — and while a year is still
+CLOSING that path does not exist yet, so restatement is refused there and the close is finalised
+first.
+_Avoid_: Calling the fold "the ordinary accounting treatment" — the phrase migration 0227's comment
+uses, and an overstatement of the standard this entry corrects (an applied migration's bytes are
+immutable, so the correction lives here); a materiality threshold the product picks; folding as a
+silent default; a run that posts a prior year's charge into the current period without a recorded
+ruling, or one that posts an amount larger than the amount anybody ruled on; quoting a client-wide
+arrears total as one year's figure; treating the locked-period refusal (a charge DATED into a closed year, refused outright) as
+the same thing as this question (months INSIDE a closed year that a later, lawful period's charge
+would carry).
 
 **Depreciation run preview**:
 What the NEXT depreciation run would do, read before anything is written: the exact period the

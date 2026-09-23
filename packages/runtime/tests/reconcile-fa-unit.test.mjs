@@ -80,7 +80,7 @@ function recordingClient({ surface = true, ids = [], dueFor = () => ({ due: fals
 test("feature-detect absent (pre-0041): a clean no-op, never a failure — no client discovery at all", async () => {
   const client = recordingClient({ surface: false });
   const out = await reconcileFaRuns(client, { log: () => {} });
-  assert.deepEqual(out, { faOk: true, faExamined: 0, faPosted: 0, faNoop: 0, faFailed: 0, dormant: true });
+  assert.deepEqual(out, { faOk: true, faExamined: 0, faPosted: 0, faNoop: 0, faParked: 0, faFailed: 0, dormant: true });
   assert.equal(client.queries.filter((q) => /to_regprocedure/.test(q.sql)).length, 1, "the feature-detect probe itself still runs, every cycle");
   assert.ok(!client.queries.some((q) => /from clara\.clients/.test(q.sql)), "no client discovery when the surface is absent");
 });
@@ -219,6 +219,51 @@ test("a THROWN run_depreciation_period call (a refusal) is isolated: that client
   assert.equal(out.faOk, true, "per-client refusals do not gate the daily cadence");
 });
 
+// #975 [0279] A 'parked' run is the belt meeting a question it may not answer. The DB stops the
+// run before the first write when the period's charge would fold a CLOSING or CLOSED fiscal
+// year's months forward and nobody has judged their materiality yet (IAS 8: only an immaterial
+// omission is folded into the current period). The belt must read that the way it reads a noop —
+// NOT a post, NOT a failure, and it must END the chase: the due probe still answers due:true for
+// that period, honestly, so chasing on would call the run verb FA_PERIOD_CAP times and record
+// one parked receipt per call.
+test("a 'parked' run is counted on its own axis, is neither a post nor a failure, and STOPS the chase — the period is still due, and re-asking would spin", async () => {
+  const client = recordingClient({
+    ids: ["c1"],
+    dueFor: () => ({ due: true, period_start: "2026-01-01", period_end: "2026-01-31" }),
+    runFor: () => ({
+      status: "parked", reason: "arrears_resolution_required", client_id: "c1",
+      period_start: "2026-01-01", period_end: "2026-01-31", arrears_cents: 10000,
+      resolutions: ["fold_current", "reopen_prior"], chosen: null,
+    }),
+  });
+  const out = await reconcileFaRuns(client, { log: () => {} });
+  assert.equal(out.faParked, 1, "the park is counted on its own axis");
+  assert.equal(out.faPosted, 0, "…and never as a post — nothing was persisted");
+  assert.equal(out.faNoop, 0, "…nor as a noop: a noop had nothing to do, a park has something it may not do");
+  assert.equal(out.faFailed, 0, "…it is not a failure either: the belt did exactly the right thing");
+  assert.equal(out.faOk, true, "…so the daily cadence is not gated by it");
+  assert.equal(
+    client.queries.filter((q) => /^select clara\.run_depreciation_period\(/.test(q.sql)).length, 1,
+    "the run verb is called EXACTLY once — a park breaks the per-client chase instead of burning the 24-call cap",
+  );
+});
+
+// THE REASON REACHES THE LOG. A park nobody can see is the same defect as a silent post: the
+// belt is the only thing that met the question, and the sweep log is where a person finds out.
+test("a 'parked' run names its reason in the sweep log, so the question is visible to whoever reads the belt", async () => {
+  const lines = [];
+  const client = recordingClient({
+    ids: ["c1"],
+    dueFor: () => ({ due: true, period_start: "2026-01-01", period_end: "2026-01-31" }),
+    runFor: () => ({ status: "parked", reason: "arrears_resolution_required", arrears_cents: 10000 }),
+  });
+  await reconcileFaRuns(client, { log: (m) => lines.push(String(m)) });
+  const parked = lines.find((l) => /status=parked/.test(l));
+  assert.ok(parked, `the sweep log names the park (got ${JSON.stringify(lines)})`);
+  assert.match(parked, /arrears_resolution_required/, "…and the reason it was parked for");
+  assert.ok(lines.some((l) => /parked=1/.test(l)), "…and the belt's own summary line counts it");
+});
+
 // [ROUND-3 fold] A 'noop' is a NON-FAILURE but it is NOT a post: it persists nothing — no
 // entry, no receipt, no ledger row — so the period it was asked for is still unmet when the
 // probe is re-asked. Counting it as a post reported N "posts" for N acts that changed nothing,
@@ -257,7 +302,7 @@ test("client discovery throw: faOk:false, a whole-belt failure", async () => {
   };
   const logs = [];
   const out = await reconcileFaRuns(client, { log: (m) => logs.push(m) });
-  assert.deepEqual(out, { faOk: false, faExamined: 0, faPosted: 0, faNoop: 0, faFailed: 0, dormant: false });
+  assert.deepEqual(out, { faOk: false, faExamined: 0, faPosted: 0, faNoop: 0, faParked: 0, faFailed: 0, dormant: false });
   assert.ok(logs.some((m) => /fa runs client discovery error/.test(m)));
 });
 

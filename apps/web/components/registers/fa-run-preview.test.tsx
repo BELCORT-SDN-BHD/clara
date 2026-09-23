@@ -19,18 +19,21 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 
-import { renderComponent, textOf } from "../../test/hookHarness";
+import { renderComponent, textOf, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { FaRunPreviewBody } from "./fa-run-preview";
 import { intlApp, faPreview, findAll, tid, attr } from "./fa-depreciation-test-fixtures";
 
 enableDomInspection();
 
-const render = (props: { preview?: unknown; loading?: boolean; error?: string | null }) =>
+const render = (props: {
+  preview?: unknown; loading?: boolean; error?: string | null; onRecordArrears?: unknown;
+}) =>
   renderComponent(intlApp(createElement(FaRunPreviewBody, {
     preview: (props.preview ?? null) as never,
     loading: props.loading ?? false,
     error: props.error ?? null,
+    onRecordArrears: props.onRecordArrears as never,
   })));
 
 test("preview.figures the period is the DATABASE'S, the amounts and both legs render exactly, and the dialog says what it will do", async () => {
@@ -180,8 +183,186 @@ test("preview.closed a period the oracle skipped for a CLOSED financial year is 
     assert.match(text, /2026-05-01/);
     assert.match(text, /2026-06-30/);
     assert.match(text, /\(2026\)/, "…and the year is NAMED");
-    assert.match(text, /arrears are charged by the next open period/i,
+    assert.match(text, /never run in its own right/i,
       "…and the reader is told the money is not gone: `skipped_closed` means 'never run in its own right'");
+    // #975 — THE SENTENCE MUST NOT PROMISE THE FOLD. Before 0279 this note said the arrears "are
+    // charged by the next open period", full stop. They are not: the next run STOPS and asks
+    // whether the omission is immaterial (IAS 8), and a machine run parks until somebody answers.
+    // A surface that still promised the fold would be telling a professional that a charge is
+    // automatic when it is a question addressed to them.
+    assert.doesNotMatch(text, /arrears are charged by the next open period/i,
+      "the note no longer promises a fold the run will not make on its own");
+    assert.match(text, /IAS 8/, "…it names the standard the two resolutions come from");
+    assert.match(text, /immaterial/i, "…and the judgement being asked for");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("preview.closed_arrears the amount the next run would fold forward is STATED with its year, and the standing answer once one exists", async () => {
+  const skipped = [
+    { period_start: "2026-05-01", period_end: "2026-05-31", fiscal_year_id: "fy1", fy_label: "2026", fy_status: "closed" },
+  ];
+  const h = await render({
+    preview: faPreview({
+      skipped_closed: skipped,
+      closed_arrears: {
+        arrears_cents: 123_456,
+        fiscal_years: [{
+          fiscal_year_id: "fy1", fy_label: "2026", fy_status: "closed",
+          fy_starts_on: "2026-01-01", fy_ends_on: "2026-06-30",
+          arrears_cents: 123_456, resolution: null,
+        }],
+      },
+    }),
+  });
+  try {
+    for (let i = 0; i < 3; i++) await h.settle();
+    const text = textOf(h.find((n) => tid(n) === "fa-preview-skipped-closed")!);
+    assert.match(text, /RM 1,234\.56/, "the AMOUNT the next run would fold forward is stated");
+    assert.match(text, /2026/, "…beside the year it belongs to");
+    assert.match(text, /not been answered|waiting/i,
+      "…and that nobody has judged its materiality yet");
+  } finally {
+    await h.unmount();
+  }
+
+  const answered = await render({
+    preview: faPreview({
+      skipped_closed: skipped,
+      closed_arrears: {
+        arrears_cents: 123_456,
+        fiscal_years: [{
+          fiscal_year_id: "fy1", fy_label: "2026", fy_status: "closed",
+          fy_starts_on: "2026-01-01", fy_ends_on: "2026-06-30",
+          arrears_cents: 123_456,
+          resolution: { id: "r1", choice: "fold_current", arrears_cents: 123_456, decided_by: "u1", decided_at: "2026-07-01T00:00:00Z", reason: null },
+        }],
+      },
+    }),
+  });
+  try {
+    for (let i = 0; i < 3; i++) await answered.settle();
+    const text = textOf(answered.find((n) => tid(n) === "fa-preview-skipped-closed")!);
+    assert.match(text, /folded into the current period/i,
+      "once answered, the STANDING RULING is what the surface states — not the question again");
+    assert.doesNotMatch(text, /not been answered/i);
+  } finally {
+    await answered.unmount();
+  }
+});
+
+// #975 — THE QUESTION MUST BE ANSWERABLE FROM THE SCREEN. The run now REFUSES until a person has
+// judged the closed year's arrears, so a surface that only stated the question would have made
+// depreciation unrunnable for that client: a wall, not a prompt. The two resolutions are two
+// controls, neither preselected, and the handler is given exactly what the door needs.
+test("preview.closed_arrears_answer the two resolutions are offered as controls, neither preselected, and each hands the door its own choice with the year and the amount", async () => {
+  const calls: Array<{ fiscalYearId: string; choice: string; arrearsCents: number; reason: string }> = [];
+  const h = await render({
+    preview: faPreview({
+      skipped_closed: [],
+      closed_arrears: {
+        arrears_cents: 25_000,
+        fiscal_years: [{
+          fiscal_year_id: "fy9", fy_label: "2025", fy_status: "closed",
+          fy_starts_on: "2025-01-01", fy_ends_on: "2025-12-31",
+          arrears_cents: 25_000, resolution: null,
+        }],
+      },
+    }),
+    onRecordArrears: async (a: { fiscalYearId: string; choice: string; arrearsCents: number; reason: string }) => {
+      calls.push(a);
+    },
+  });
+  try {
+    for (let i = 0; i < 3; i++) await h.settle();
+    const fold = h.find((n) => tid(n) === "fa-arrears-fold-fy9");
+    const restate = h.find((n) => tid(n) === "fa-arrears-restate-fy9");
+    assert.ok(fold && restate, "both resolutions are reachable, and neither is chosen for the person");
+
+    await h.act(() => { clickButton(fold as never); });
+    for (let i = 0; i < 3; i++) await h.settle();
+    assert.equal(calls.length, 1);
+    assert.deepEqual(
+      { fiscalYearId: calls[0]!.fiscalYearId, choice: calls[0]!.choice, arrearsCents: calls[0]!.arrearsCents },
+      { fiscalYearId: "fy9", choice: "fold_current", arrearsCents: 25_000 },
+      "the door is handed the YEAR it is about and the AMOUNT that was judged, never a recomputed one",
+    );
+
+    await h.act(() => { clickButton(restate as never); });
+    for (let i = 0; i < 3; i++) await h.settle();
+    assert.equal(calls[1]!.choice, "reopen_prior", "…and the other control is the other resolution");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// #975 FIX ROUND (adversarial review ADV-L04-2) — A JUDGEMENT LICENSES THE FIGURE IT WAS MADE
+// ABOUT. `clara._fa_run_period_core` now refuses (or parks) on `arrears_changed_since_judgement`
+// when the year's arrears no longer match the amount the standing ruling was made about, so a
+// surface that kept saying "you judged it immaterial" and withheld the controls would leave the
+// person reading a settled sentence beside a run nobody could unblock.
+test("preview.closed_arrears_moved a standing ruling made about ANOTHER amount states both figures and offers the two controls again", async () => {
+  const calls: Array<{ fiscalYearId: string; choice: string; arrearsCents: number }> = [];
+  const h = await render({
+    preview: faPreview({
+      skipped_closed: [],
+      closed_arrears: {
+        arrears_cents: 40_000,
+        fiscal_years: [{
+          fiscal_year_id: "fy9", fy_label: "2025", fy_status: "closed",
+          fy_starts_on: "2025-01-01", fy_ends_on: "2025-12-31", arrears_cents: 40_000,
+          resolution: { id: "r9", choice: "fold_current", arrears_cents: 25_000, decided_by: "u1", decided_at: "2026-01-01T00:00:00Z", reason: null },
+        }],
+      },
+    }),
+    onRecordArrears: async (a: { fiscalYearId: string; choice: string; arrearsCents: number }) => {
+      calls.push(a);
+    },
+  });
+  try {
+    for (let i = 0; i < 3; i++) await h.settle();
+    const text = textOf(h.find((n) => tid(n) === "fa-preview-skipped-closed")!);
+    assert.match(text, /RM 250\.00/, "the amount that WAS judged is stated…");
+    assert.match(text, /RM 400\.00/, "…beside the amount that now stands");
+    assert.doesNotMatch(text, /folded into the current period/i,
+      "the stale ruling is NOT presented as the settled answer");
+
+    const fold = h.find((n) => tid(n) === "fa-arrears-fold-fy9");
+    assert.ok(fold, "the two controls are offered again, so the person can judge the amount that will move");
+    assert.ok(h.find((n) => tid(n) === "fa-arrears-restate-fy9"));
+    await h.act(() => { clickButton(fold as never); });
+    for (let i = 0; i < 3; i++) await h.settle();
+    assert.deepEqual(
+      { fiscalYearId: calls[0]!.fiscalYearId, choice: calls[0]!.choice, arrearsCents: calls[0]!.arrearsCents },
+      { fiscalYearId: "fy9", choice: "fold_current", arrearsCents: 40_000 },
+      "…and the door is handed the CURRENT amount, which is the one it re-measures",
+    );
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("preview.closed_arrears_answered an ANSWERED year offers no controls — the standing ruling replaces the question", async () => {
+  const h = await render({
+    preview: faPreview({
+      skipped_closed: [],
+      closed_arrears: {
+        arrears_cents: 25_000,
+        fiscal_years: [{
+          fiscal_year_id: "fy9", fy_label: "2025", fy_status: "closed",
+          fy_starts_on: "2025-01-01", fy_ends_on: "2025-12-31", arrears_cents: 25_000,
+          resolution: { id: "r9", choice: "fold_current", arrears_cents: 25_000, decided_by: "u1", decided_at: "2026-01-01T00:00:00Z", reason: null },
+        }],
+      },
+    }),
+    onRecordArrears: async () => {},
+  });
+  try {
+    for (let i = 0; i < 3; i++) await h.settle();
+    assert.equal(h.find((n) => tid(n) === "fa-arrears-fold-fy9"), null,
+      "a judgement already made is not asked for again");
+    assert.equal(h.find((n) => tid(n) === "fa-arrears-restate-fy9"), null);
   } finally {
     await h.unmount();
   }

@@ -65,6 +65,11 @@ export const FA = {
   costAccount: "1510",
   accumAccount: "1519",
   expenseAccount: "6510",
+  /** #932 (migration 0277) — the default depreciation policy the walk sets, and the asset it
+   *  births. */
+  policyId: "63906001-6390-4639-8639-639063906001",
+  policyBornAssetId: "63901005-6390-4639-8639-639063901005",
+  policyBornEntryId: "63902006-6390-4639-8639-639063902006",
 };
 
 const RPC_VERBS = new Set([
@@ -74,11 +79,13 @@ const RPC_VERBS = new Set([
   "get_depreciation_authority",
   "list_depreciation_runs",
   "complete_fixed_asset_particulars",
+  "set_fa_depreciation_policy",
+  "retire_fa_depreciation_policy",
 ]);
 
 /** The walk's own mutable state. Per-SERVER, not per-test — one server serves every walk — so the
  *  cell that completes the particulars asserts its precondition rather than assuming it. */
-const state = { completed: false };
+const state = { completed: false, policySet: false };
 
 const CLIENT = {
   id: FA.clientId,
@@ -185,6 +192,30 @@ const completeRow = () => ({
   acquisition_line_id: "63902104-6390-4639-8639-639063902104",
 });
 
+/** #932 (migration 0277) — THE POLICY-BORN ASSET. Present in the register ONLY once the walk sets
+ *  the default policy: this mock simulates the NEXT acquisition on the enrolled account landing
+ *  already-complete, with the policy's own id and version stamped — `state.policySet` standing
+ *  in for "an acquisition posted after the policy existed", the same append-after-the-write shape
+ *  `answerableRow()` above uses for a completed particulars answer. */
+const policyBornRow = () => ({
+  ...BASE_ROW,
+  id: FA.policyBornAssetId,
+  description: "Fixed asset - 1510 RM3600.00",
+  particulars_complete: true,
+  acquired_date: "2026-09-01",
+  cost_cents: 360000,
+  residual_cents: 0,
+  nbv_cents: 350000,
+  accumulated_cents: 10000,
+  method: "straight_line",
+  useful_life_months: 36,
+  start_date: "2026-09-01",
+  acquisition_entry_id: FA.policyBornEntryId,
+  acquisition_line_id: "63902106-6390-4639-8639-639063902106",
+  depreciation_policy_id: FA.policyId,
+  depreciation_policy_version: 1,
+});
+
 const reversedRow = () => ({
   ...BASE_ROW,
   id: FA.reversedAssetId,
@@ -204,7 +235,10 @@ const reversedRow = () => ({
 const register = () => ({
   client_id: FA.clientId,
   as_of: "2026-09-16",
-  assets: [pendingRow(), answerableRow(), completeRow(), reversedRow()],
+  assets: [
+    pendingRow(), answerableRow(), completeRow(), reversedRow(),
+    ...(state.policySet ? [policyBornRow()] : []),
+  ],
   incomplete_count: state.completed ? 1 : 2,
 });
 
@@ -318,7 +352,8 @@ const historyFor = (assetId) => {
 };
 
 const rowFor = (assetId) =>
-  [pendingRow(), answerableRow(), completeRow(), reversedRow()].find((r) => r.id === assetId) ?? null;
+  [pendingRow(), answerableRow(), completeRow(), reversedRow(), ...(state.policySet ? [policyBornRow()] : [])]
+    .find((r) => r.id === assetId) ?? null;
 
 const detailFor = (assetId) => {
   const row = rowFor(assetId);
@@ -397,6 +432,31 @@ export async function handleFixedAssetSupabase(request, response, path, url, sen
       return true;
     }
     return false;
+  }
+
+  // #932 (migration 0277) — the default depreciation policy relation. Empty until the walk sets
+  // one, exactly like fa_account_profiles's own always-empty-until-enrolled shape.
+  if (request.method === "GET" && path === "/rest/v1/fa_account_depreciation_policies") {
+    if (clientFilter !== FA.clientId) return false;
+    if (!state.policySet) {
+      sendJson(response, 200, [], cors);
+      return true;
+    }
+    sendJson(response, 200, [{
+      id: FA.policyId,
+      asset_account_code: FA.costAccount,
+      version: 1,
+      method: "straight_line",
+      useful_life_months: 36,
+      rate_bps: null,
+      residual_cents: 0,
+      active: true,
+      effective_from: "2026-09-16T00:00:00.000Z",
+      reason: null,
+      created_at: "2026-09-16T00:00:00.000Z",
+      retired_at: null,
+    }], cors);
+    return true;
   }
 
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
@@ -507,6 +567,37 @@ export async function handleFixedAssetSupabase(request, response, path, url, sen
     if (body.p_asset === FA.answerableAssetId) state.completed = true;
     sendJson(response, 200, {
       asset_id: body.p_asset, client_id: FA.clientId, particulars_complete: true,
+    }, cors);
+    return true;
+  }
+
+  // #932 (migration 0277) — SET the default depreciation policy. One reachable success arm: the
+  // form's own client-side gate (SetPolicyDialog) already blocks an incomplete driver pair, so the
+  // walk drives the success path, exactly like the account-profiles panel's own upsert mock.
+  if (verb === "set_fa_depreciation_policy") {
+    if (body.p_client !== FA.clientId) return false;
+    state.policySet = true;
+    sendJson(response, 200, {
+      policy_id: FA.policyId, client_id: FA.clientId, asset_account_code: body.p_asset_account,
+      version: 1, method: body.p_method, useful_life_months: body.p_useful_life_months,
+      rate_bps: body.p_rate_bps, residual_cents: body.p_residual_cents ?? 0, active: true,
+    }, cors);
+    return true;
+  }
+
+  if (verb === "retire_fa_depreciation_policy") {
+    if (body.p_client !== FA.clientId) return false;
+    if (!state.policySet) {
+      sendJson(response, 400, {
+        code: "CLR37",
+        message: `no active depreciation policy is set on ${body.p_asset_account} for this client`,
+        details: JSON.stringify({ reason: "fa_policy_invalid", axis: "not_set" }),
+      }, cors);
+      return true;
+    }
+    state.policySet = false;
+    sendJson(response, 200, {
+      policy_id: FA.policyId, client_id: FA.clientId, asset_account_code: body.p_asset_account, active: false,
     }, cors);
     return true;
   }

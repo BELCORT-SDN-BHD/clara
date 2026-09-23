@@ -26,10 +26,12 @@ import {
 import {
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry,
   acceptPublishedLegal, workRow, receiptsForWork, settleWorkRun,
+  authoriseWorkEgress, BUNDLE_DIGEST, RATIONALE,
 } from "./work-journal-fixtures.mjs";
 import { draftEntryV3 as s6DraftEntry, filedDocument } from "./s6-helpers.mjs";
 import { approveEntry as rigApproveEntry, freshResolution as rigFreshResolution }
   from "./rig-fixtures.mjs";
+import { getPool } from "./rig-helpers.mjs";
 
 export * from "./x41-fa-world.mjs";
 export {
@@ -229,6 +231,57 @@ export async function documentLaneAcquisition(sub, {
     entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("p639-docapr"),
   });
   return { ...doc, entry: draft.entry_id };
+}
+
+// ===========================================================================================
+// 3b · #882(b) — the ONE same-transaction schedule the belt and the birth trigger read
+//      differently, driven by hand rather than through the fixture's own pooled connections.
+//      `armedAcquisition` + `postAcquisition` each own (and commit) their OWN connection, so
+//      "retire the profile, then approve, in the SAME transaction" cannot be built by composing
+//      them — the retire and the wake call must share one manually-opened transaction, exactly
+//      the `recordJournalEntryOn` idiom `journal-work-evidence-fixtures.mjs`'s race schedules use
+//      for the identical reason.
+// ===========================================================================================
+
+/** Retire `assetAccount`'s enrolled profile AND drive `wake_record_journal_entry` for an ARMED
+ *  Work-lane acquisition (`armedAcquisition`'s return value) inside ONE hand-opened transaction,
+ *  then commit — the shape #882's owner ruling (2026-09-18) pins. Egress is dispatched BEFORE the
+ *  transaction opens, exactly as the ordinary `wakeRecordJournalEntry` path does on its own
+ *  connection (`work-journal-fixtures.mjs`). Both doors run over the SAME backend, so `now()` is
+ *  transaction-constant across them: the retire's `retired_at` lands EXACTLY EQUAL to the wake
+ *  call's `approved_at`, never before or after it.
+ *
+ *  Returns the error the COMMIT raised (deferred triggers fire there), or throws if the
+ *  transaction committed clean — a caller always expects a refusal here; a clean commit is itself
+ *  the finding. */
+export async function sameTxnRetireAndApprove({ sub, client, assetAccount, a, opKey = null }) {
+  await authoriseWorkEgress({ work: a.work_id, runId: a.runId });
+  const c = await getPool().connect();
+  try {
+    await c.query(`set role ${ROLES.authenticated}`);
+    await c.query("begin");
+    await c.query("select set_config('request.jwt.claims', $1, true)",
+      [JSON.stringify({ sub, role: "authenticated" })]);
+    await c.query(namedCall("retire_fa_account_profile", [
+      { name: "p_client" }, { name: "p_asset_account" }, { name: "p_op_key" },
+    ]), [client, assetAccount, opKey ?? opk("p882-retire")]);
+    await c.query(`set role ${ROLES.wakeInteractive}`);
+    await c.query("select set_config('clara.wake_secret', $1, true)", [a.cred.secret]);
+    await c.query(
+      "select clara.wake_record_journal_entry(p_client => $1::uuid, p_work => $2::uuid,"
+      + " p_logical_op_id => $3::text, p_basis => $4::jsonb, p_bundle_digest => $5::text,"
+      + " p_run_id => $6::text, p_rationale => $7::text) as result",
+      [a.client, a.work_id, a.logical_op_id, JSON.stringify(a.basis), BUNDLE_DIGEST, a.runId, RATIONALE]);
+    await c.query("commit");
+    return null;
+  } catch (e) {
+    return e;
+  } finally {
+    await c.query("rollback").catch(() => {});
+    await c.query("reset role").catch(() => {});
+    await c.query("reset all").catch(() => {});
+    c.release();
+  }
 }
 
 // ===========================================================================================

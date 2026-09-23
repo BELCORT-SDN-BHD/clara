@@ -337,4 +337,59 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
     await otherTrigger.click();
     await expect(page.getByRole("dialog").getByLabel("Useful life (months)")).toHaveValue("");
   });
+
+  // #932 (migration 0277) — setting a default depreciation policy on the enrolled account, and
+  // seeing the register carry a policy-born asset with its provenance. Placed LAST and cleaned up
+  // (the policy is retired again at the end): `state.policySet` is per-SERVER, shared with every
+  // other cell in this file, and none of them expects a fifth register row to exist.
+  test("setting a default depreciation policy shows it beside the enrolled account, and the register carries a policy-born asset naming it", async ({ page }) => {
+    await signInTo(page, LIST_URL);
+    await expect(page.getByRole("link", { name: FA.assetName })).toBeVisible({ timeout: 20_000 });
+
+    // BEFORE: the enrolled account carries no policy, said in words.
+    await expect(page.getByText("No policy set", { exact: false })).toBeVisible();
+
+    // SET IT. The trigger is scoped to the enrolled account's own row, not a bare role query —
+    // the panel could in principle carry more than one enrolled account.
+    const setTrigger = page.getByRole("button", { name: "Set default policy" });
+    await expect(setTrigger).toBeVisible();
+    await setTrigger.click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Method")).toHaveValue("straight_line");
+    await dialog.getByLabel("Useful life (months)").fill("36");
+    const confirm = dialog.getByRole("button", { name: "Set default policy" });
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await expect(dialog).toBeHidden({ timeout: 20_000 });
+
+    // AFTER, RE-READ: the panel names the version, never a client-side guess.
+    await expect(page.getByText("v1", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Change policy" })).toBeVisible();
+
+    // …AND THE REGISTER CARRIES THE POLICY-BORN ASSET, already complete, naming the account and
+    // the version beside its particulars — a READ, never a client-side inference (AC3). Setting a
+    // policy never births an asset by itself (only a LATER acquisition does); the mock stands
+    // that acquisition in by keying the register's own `list_fixed_assets` fixture off
+    // `state.policySet`. Nothing on this page subscribes to that relation, so — exactly as this
+    // file's own header says of a completion, "the register must SWITCH … because the surface
+    // re-read, not because it painted its own optimistic answer" — this reloads the page, the
+    // same re-read a bookkeeper gets by revisiting Fixed Assets after that later acquisition
+    // posted, rather than asserting an in-session push this app never promises.
+    await page.reload();
+    await expect(page.getByRole("link", { name: FA.assetName })).toBeVisible({ timeout: 20_000 });
+    const bornRow = page.getByRole("row").filter({ hasText: "RM 3,600.00" });
+    await expect(bornRow).toBeVisible({ timeout: 20_000 });
+    await expect(bornRow.getByText("Particulars from 1510 policy v1")).toBeVisible();
+    await expect(bornRow.getByText("Waiting on depreciation particulars")).toHaveCount(0);
+
+    // CLEAN UP: retire the policy so no other cell in this shared-server file inherits the extra
+    // row or the changed panel state.
+    await page.getByRole("button", { name: "Retire policy" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.getByRole("dialog").getByRole("button", { name: "Retire policy" }).click();
+    await expect(page.getByRole("dialog")).toBeHidden({ timeout: 20_000 });
+    await expect(page.getByText("No policy set", { exact: false })).toBeVisible({ timeout: 20_000 });
+  });
 });

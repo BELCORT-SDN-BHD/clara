@@ -96,6 +96,7 @@ export const DEP = {
 const RPC_VERBS = new Set([
   "preview_depreciation_run",
   "run_depreciation_manual",
+  "record_fa_arrears_resolution",
   "sign_depreciation_authority",
   "get_fixed_asset",
   "get_depreciation_authority",
@@ -108,7 +109,7 @@ const RPC_VERBS = new Set([
  *  cell that runs a period asserts its precondition rather than assuming it. The LOCKED client has
  *  no state at all: its door always refuses, so no ordering can make its "nothing was written"
  *  assertion pass for the wrong reason. */
-const state = { runsPosted: 0, lastOpKeys: [] };
+const state = { runsPosted: 0, lastOpKeys: [], /** #975 — the closed year's arrears judgement, once a person has made it. */ arrearsChoice: null };
 
 const CLIENTS = {
   [DEP.clientId]: { id: DEP.clientId, name: DEP.clientName, status: "active", created_at: "2026-01-01T00:00:00.000Z" },
@@ -337,6 +338,28 @@ const PREVIEW = (clientId) => ({
     fy_label: DEP.fyLabel,
     fy_status: "closed",
   }],
+  // #975 [0279] — and what those skipped months come to, which the next run may not fold forward
+  // until a person has judged it material or not (IAS 8). Unanswered here, so the walk sees the
+  // question rather than a ruling.
+  closed_arrears: {
+    arrears_cents: 25000,
+    fiscal_years: [{
+      fiscal_year_id: DEP.fiscalYearId,
+      fy_label: DEP.fyLabel,
+      fy_status: "closed",
+      fy_starts_on: DEP.closedPeriodStart,
+      fy_ends_on: DEP.closedPeriodEnd,
+      arrears_cents: 25000,
+      resolution: state.arrearsChoice === null ? null : {
+        id: "97597597-9759-4975-8975-975097597597",
+        choice: state.arrearsChoice,
+        arrears_cents: 25000,
+        decided_by: "97500000-9750-4975-8975-975097500000",
+        decided_at: "2026-08-01T02:00:00.000Z",
+        reason: null,
+      },
+    }],
+  },
   charges: [{
     asset_id: DEP.assetId,
     description: DEP.assetName,
@@ -510,6 +533,26 @@ export async function handleDepreciationSupabase(request, response, path, url, s
     sendJson(response, 200, {
       authority_id: body.p_authority, client_id: body.p_client, status: "live", cadence: "monthly",
       authority_ref: ref, authority_from: DEP.authorityFrom,
+    }, cors);
+    return true;
+  }
+
+  // #975 [0279] — the accountant's own answer to the closed-year arrears question. The real door
+  // re-measures the figure and refuses when it has moved; this mock keeps the figure fixed and
+  // records the choice, which is what the walk drives.
+  if (verb === "record_fa_arrears_resolution") {
+    if (!OURS(body.p_client)) return false;
+    state.arrearsChoice = String(body.p_choice ?? "");
+    sendJson(response, 200, {
+      status: "recorded",
+      resolution_id: "97597597-9759-4975-8975-975097597597",
+      client_id: body.p_client,
+      fiscal_year_id: body.p_fiscal_year,
+      fy_label: DEP.fyLabel,
+      choice: state.arrearsChoice,
+      arrears_cents: 25000,
+      supersedes: null,
+      remedy: state.arrearsChoice === "reopen_prior" ? "reopen_fiscal_year" : null,
     }, cors);
     return true;
   }

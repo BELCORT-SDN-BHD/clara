@@ -3673,6 +3673,7 @@
       "method": "Method",
       "incompleteNote": "{count} asset(s) have incomplete particulars.",
       "pendingParticulars": "Waiting on depreciation particulars",
+      "policyProvenance": "Particulars from {account} policy v{version}",
       "statuses": {
         "pending": "Pending",
         "active": "Active",
@@ -4654,6 +4655,30 @@
       "retireTitle": "Retire this account profile",
       "retireDescription": "This does not free the account for any register row that already carries it — those rows keep the codes they were born with."
     },
+    "policies": {
+      "heading": "Default depreciation policy",
+      "none": "No policy set — acquisitions still ask for particulars.",
+      "setTrigger": "Set default policy",
+      "changeTrigger": "Change policy",
+      "setTitle": "Set the default depreciation policy",
+      "setDescription": "Applied at every acquisition on this account that states no particulars, starting from that acquisition's own posting date. Changing this affects later acquisitions only — an asset already born keeps its own particulars.",
+      "methodLabel": "Method",
+      "methods": {
+        "straight_line": "Straight-line",
+        "reducing_balance": "Reducing balance",
+        "none": "None"
+      },
+      "usefulLifeLabel": "Useful life (months)",
+      "rateBpsLabel": "Annual rate (basis points)",
+      "residualLabel": "Residual value",
+      "reasonLabel": "Reason (optional)",
+      "summarySl": "{life} months",
+      "summaryRb": "{life} months at {rate}%/yr",
+      "versionLabel": "v{version}",
+      "retireTrigger": "Retire policy",
+      "retireTitle": "Retire the default depreciation policy",
+      "retireDescription": "New acquisitions on this account go back to asking for particulars. This does not touch any asset already born from this policy."
+    },
     "tie": {
       "heading": "Register / GL tie-out",
       "subheading": "Whether the fixed-asset register agrees with the general ledger, as of today.",
@@ -4761,7 +4786,16 @@
       "floor": "This authority reaches periods from {from} onward. Anything earlier needs an explicit catch-up run by a bookkeeper.",
       "skippedHeading": "{count} asset(s) will be skipped",
       "skippedClosedHeading": "{count} period(s) were skipped because their financial year is closed",
-      "skippedClosedNote": "A closed period is never run in its own right. Its arrears are charged by the next open period, and each charge row still carries the month it belongs to.",
+      "skippedClosedNote": "A closed period is never run in its own right, and its months are not lost. Before the next open period's run posts them, Clara states what they come to and asks you whether the omission is immaterial — IAS 8 permits folding it into the current period only then; a material one is restated in the year it belongs to. Each charge row still carries the month it belongs to.",
+      "arrearsAmount": "{amount} belongs to financial year {year}.",
+      "arrearsChangedSinceJudged": "You judged {judged} for this year, and it now stands at {amount} — so the run is waiting for you to judge the amount that would actually move.",
+      "arrearsUnanswered": "This has not been answered yet, so the run is waiting for you.",
+      "arrearsFolded": "You judged it immaterial, so it is folded into the current period.",
+      "arrearsRestated": "You judged it material, so it is restated in that year once the year is reopened.",
+      "arrearsNoteLabel": "Why you judged it this way (optional)",
+      "arrearsNotePlaceholder": "Why you judged it this way (optional)",
+      "arrearsFoldAction": "It is immaterial — fold it into this period",
+      "arrearsRestateAction": "It is material — restate it in that year",
       "skip": {
         "incomplete": "waiting on depreciation particulars",
         "not_in_service": "not yet in service",

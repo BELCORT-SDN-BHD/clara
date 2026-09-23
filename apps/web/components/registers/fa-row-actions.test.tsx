@@ -22,7 +22,7 @@ import { createElement } from "react";
 import { renderComponent, textOf, setFieldValue, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
-import { ReviseParticularsDialog } from "./fa-row-actions";
+import { ReviseParticularsDialog, CompleteParticularsDialog, DisposeDialog } from "./fa-row-actions";
 import {
   intlApp, faRow, findAll, tid, jsonResponse, FA_CLIENT, FA_COA, type StubNode,
 } from "./fa-depreciation-test-fixtures";
@@ -113,6 +113,110 @@ async function openDialog(opts: { fail?: boolean } = {}) {
   };
   return { h, calls, trigger: trigger!, teardown };
 }
+
+// #978 — the same mount/open shape as `openDialog` above, generalised over WHICH dialog
+// component and WHICH trigger label, so `CompleteParticularsDialog` and `DisposeDialog` share it
+// rather than duplicating the harness plumbing.
+async function openNamedDialog(
+  Component: typeof CompleteParticularsDialog | typeof DisposeDialog,
+  triggerText: string,
+  opts: { fail?: boolean } = {},
+) {
+  const calls: Call[] = [];
+  const impl = (async (u: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(u), body: init?.body ? JSON.parse(String(init.body)) : {} });
+    if (opts.fail) {
+      return jsonResponse({ code: "CLR37", message: "refused", details: JSON.stringify({ reason: "x" }) }, 400);
+    }
+    return jsonResponse({ asset_id: "a1", client_id: "c1" });
+  }) as typeof fetch;
+
+  const act = async (fn: () => Promise<void>) => {
+    try {
+      await fn();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = impl;
+  configureSessionTokenSource(async () => "tok");
+
+  const h = await renderComponent(intlApp(createElement(Component, {
+    clientId: FA_CLIENT, asset: faRow() as never, accounts: FA_COA as never,
+    busy: false, act, error: undefined,
+  })));
+  bodyNode().appendChild(h.container);
+  for (let i = 0; i < 4; i++) await h.settle();
+  const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).trim() === triggerText);
+  assert.ok(trigger, `the ${triggerText} trigger renders`);
+  await h.fireEvent(trigger!, "click");
+  for (let i = 0; i < 6; i++) await h.settle();
+
+  const teardown = async () => {
+    await h.unmount();
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    resetSessionTokenSource();
+  };
+  return { h, calls, trigger: trigger!, teardown };
+}
+
+test("complete.posts a caller-held op_key that reaches the door and SURVIVES a refused retry unchanged", async () => {
+  const { h, calls, teardown } = await openNamedDialog(CompleteParticularsDialog, "Complete particulars", { fail: true });
+  try {
+    // method "none" needs only a start date (`particularsReadyToSubmit`).
+    await h.fireEvent(byIdSuffix(bodyNode(), "-method")! as never, "change", (n) => setFieldValue(n, "none"));
+    await h.fireEvent(byIdSuffix(bodyNode(), "-start")! as never, "change", (n) => setFieldValue(n, "2026-09-01"));
+    for (let i = 0; i < 4; i++) await h.settle();
+
+    await clickButton(dialogConfirm("Complete particulars") as never);
+    for (let i = 0; i < 8; i++) await h.settle();
+    // CB-AE2E-004: the refusal above keeps the dialog OPEN — the decision has not ended, so a
+    // second press is the SAME decision, not a new one.
+    await clickButton(dialogConfirm("Complete particulars") as never);
+    for (let i = 0; i < 8; i++) await h.settle();
+
+    const posts = calls.filter((c) => c.url.includes("/rpc/complete_fixed_asset_particulars"));
+    assert.equal(posts.length, 2, "two attempts at the same decision");
+    assert.equal(typeof posts[0]!.body.p_op_key, "string", "ticket 978 — the caller supplies a key; the door mints nothing");
+    assert.ok((posts[0]!.body.p_op_key as string).length > 0);
+    assert.equal(posts[0]!.body.p_op_key, posts[1]!.body.p_op_key,
+      "the retry carries the SAME key — a lost response replays the same completion, not a second one");
+  } finally {
+    await teardown();
+  }
+});
+
+test("dispose.posts a caller-held op_key that reaches the door and SURVIVES a refused retry unchanged", async () => {
+  const { h, calls, teardown } = await openNamedDialog(DisposeDialog, "Dispose", { fail: true });
+  try {
+    await h.fireEvent(byIdSuffix(bodyNode(), "fa-disp-date-")! as never, "change", (n) => setFieldValue(n, "2026-09-01"));
+    for (let i = 0; i < 4; i++) await h.settle();
+    await h.fireEvent(byIdSuffix(bodyNode(), "fa-disp-gain-")! as never, "change", (n) => setFieldValue(n, "4900"));
+    await h.fireEvent(byIdSuffix(bodyNode(), "fa-disp-loss-")! as never, "change", (n) => setFieldValue(n, "5900"));
+    for (let i = 0; i < 4; i++) await h.settle();
+
+    await clickButton(dialogConfirm("Dispose") as never);
+    for (let i = 0; i < 8; i++) await h.settle();
+    await clickButton(dialogConfirm("Dispose") as never);
+    for (let i = 0; i < 8; i++) await h.settle();
+
+    const posts = calls.filter((c) => c.url.includes("/rpc/dispose_fixed_asset"));
+    assert.equal(posts.length, 2, "two attempts at the same decision");
+    assert.equal(typeof posts[0]!.body.p_op_key, "string", "ticket 978 — the caller supplies a key; the door mints nothing");
+    assert.ok((posts[0]!.body.p_op_key as string).length > 0);
+    assert.equal(posts[0]!.body.p_op_key, posts[1]!.body.p_op_key,
+      "the retry carries the SAME key — a lost response replays the same disposal, not a second one");
+  } finally {
+    await teardown();
+  }
+});
 
 test("revise.class_options `estimate` is the only selectable class; the other two are VISIBLY DISABLED and the note names the restatement ticket and its lock law", async () => {
   const { teardown } = await openDialog();

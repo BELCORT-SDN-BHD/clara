@@ -131,6 +131,13 @@ export function FixedAssetsRegister({ clientId }: { clientId: string }) {
                       {!a.particulars_complete && (a.status === "pending" || a.status === "active") ? (
                         <Badge variant="outline">{t("pendingParticulars")}</Badge>
                       ) : null}
+                      {/* #932 (migration 0277) — provenance for a policy-born row, read straight
+                          off the register row, never a client-side inference. */}
+                      {a.depreciation_policy_version != null ? (
+                        <span className="text-xs text-muted-foreground">
+                          {t("policyProvenance", { account: a.asset_account ?? "—", version: a.depreciation_policy_version })}
+                        </span>
+                      ) : null}
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{statusLabels[a.status] ?? a.status}</TableCell>

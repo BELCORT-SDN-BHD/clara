@@ -774,6 +774,14 @@ next run WOULD do before anything is written: the period the register chose, the
 both general-ledger legs, every skipped asset with its reason in words, whether the run will post or
 wait for approval, and any period the oracle skipped for a closed financial year. Confirm runs it.
 
+**A judgement licenses the figure it was made about** (#975 fix round, ADV-L04-2). The run door now
+refuses — or parks — on `arrears_changed_since_judgement` when a closed year's arrears no longer
+match the amount the standing ruling was made about, so the preview stops presenting that ruling as
+the settled answer: it states both figures ("you judged RM 250.00 … it now stands at RM 400.00") and
+offers the two controls again, handing the door the CURRENT amount, which is the one it re-measures.
+A surface that kept saying "you judged it immaterial" would have left a person reading a settled
+sentence beside a run nobody could unblock.
+
 **Every skip reason was MEASURED, and an unknown one degrades rather than vanishing.** The five the
 database can emit are `incomplete`, `not_in_service`, `fully_depreciated`, `none_method` and
 `disposal_draft_outstanding` — the fifth is written by `clara._fa_compute_charges` itself and the
@@ -788,11 +796,33 @@ with a refusal instead of the receipt it had already earned. `lib/registers/depr
 `useDepreciationDecisionKey` mints one key per OPEN DECISION, keyed on the intent tuple, and holds
 it until the decision changes or ends — on `components/work/work-cancel-dialog.tsx:95`'s shape. The
 tuples are `depreciationIntent` (client, period start, period end), `authorityIntent` (the act, the
-authority, the value being decided) and `reviseIntent` (every value the revision door is asked to
-write, particulars key-sorted). **Signing is where a person actually meets this**: the sign door's
-replay identity is {client, authority}, so a second key reaches 0227's `authority_already_live` arm
-and refuses. `completeFixedAssetParticulars` and `disposeFixedAsset` still mint their own key —
-#639's original shape, untouched by this branch and carried as a follow-up.
+authority, the value being decided), `reviseIntent` (every value the revision door is asked to
+write, particulars key-sorted), `completeIntent` and `disposeIntent` (#978 — each exactly the tuple
+its own door's `_reserve_op` dedupe hashes into its operation key; `disposeIntent` deliberately
+EXCLUDES the memo, following `clara.dispose_fixed_asset`'s own comment that a relabel is the same
+disposal). **Signing is where a person actually meets this**: the sign door's replay identity is
+{client, authority}, so a second key reaches 0227's `authority_already_live` arm and refuses.
+`completeFixedAssetParticulars` and `disposeFixedAsset` (`lib/registers/fixed-assets.ts`) took the
+LAST two follow-up call sites: `CompleteParticularsDialog`/`DisposeDialog`
+(`components/registers/fa-row-actions.tsx`) and the needs-you inline
+`FixedAssetIncompleteAffordance` (`components/firm/fixed-asset-incomplete-affordance.tsx`, which has
+no `FaDoorDialog` of its own — its own open/close IS the decision boundary) all hold a key now;
+#639's original mint-per-call shape is gone. `completeIntent` and `reviseIntent` share ONE
+`serializeParticulars` helper rather than carrying the key-sorted block twice, so the convention
+cannot drift between them.
+
+**…and the two DEFAULT-POLICY doors hold one too** (#932 fix round, adversarial review ADV-L04-5).
+`setFaDepreciationPolicy` and `retireFaDepreciationPolicy`
+(`lib/registers/fa-depreciation-policies.ts`) shipped in this same wave still minting the key
+inside the wrapper — the very class the paragraph above exists to close. One human decision sent
+twice then left TWO policy versions (v2 active, v1 retired "superseded by
+set_fa_depreciation_policy v2"), and a register row born between the calls carried v1 while the
+account read v2. Both now take a required `opKey`, their tuples are `setPolicyIntent` (client,
+asset account, method, useful life, rate, residual — exactly what
+`clara.set_fa_depreciation_policy`'s own `_reserve_op` hashes, with `p_reason` outside it the way
+`p_memo` is outside the disposal's) and `retirePolicyIntent` (client, asset account), and
+`SetPolicyDialog`/`RetirePolicyDialog` (`components/registers/fa-account-profiles-panel.tsx`) hold
+the key with `useDepreciationDecisionKey` and renew it on close.
 
 **Five readings of one asset, addressable.** `fixed-asset-detail.tsx`' tab id lives in `?tab=`, so a
 pasted link lands on the reading it names and Back leaves the page rather than walking five tabs.
