@@ -150,7 +150,7 @@ test("F4: after list_adjustment_runs fails, Run History and Pair-Reversal Ledger
 // `run_adjustment_manual` and #928 deleted the daily sweep, so there is no mechanism left that
 // could post it. The old copy ("An adjustment run is due for …") is an invitation to an act the
 // product can no longer perform — a dead end for exactly the firm D6 exists to protect.
-test("#927 a due period on the retired tab is reported as a dead end with its successor, never as an adjustment run that is due", async () => {
+test("ticket 927: a due period on the retired tab is reported as a dead end with its successor, never as an adjustment run that is due", async () => {
   await withMockedEnv(
     (async (url: RequestInfo | URL) => {
       const u = String(url);
@@ -174,7 +174,7 @@ test("#927 a due period on the retired tab is reported as a dead end with its su
         assert.doesNotMatch(
           text,
           /An adjustment run is due/,
-          "the retired tab still tells the firm a run is DUE — after #927 and #928 no act anywhere can satisfy it",
+          "the retired tab still tells the firm a run is DUE — after tickets 927 and 928 no act anywhere can satisfy it",
         );
         assert.match(
           text,

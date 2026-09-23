@@ -9,7 +9,6 @@ import test, { before } from "node:test";
 import assert from "node:assert/strict";
 import { noteLane } from "./rig-runtime-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
-import { humanQuery } from "./rig-helpers.mjs";
 import {
   ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught,
   receiptsForTask, templateById, derivedOpKey, VERB12, uniq, account, MODEL, mintTemplate,

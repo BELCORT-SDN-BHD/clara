@@ -41,7 +41,7 @@ import {
   x42EnsureReady, skip42, caught, reasonToken,
   EXPA, EXPB, ACCR, ACCR2, FACOST, FAACC, CLR38, mon,
   runOccurrence, retireTemplate, proposeTemplate, signTemplate, adjustmentRunDue,
-  insertTemplateRaw, x42TemplatesRetiredReady, noteLane,
+  x42TemplatesRetiredReady, noteLane,
   accrualLines, adjWorld, freshAdjClient, liveTemplate, approveDraft, glNet,
   upsertFaProfile, templateRow,
 } from "./x42-adj-helpers.mjs";
@@ -448,7 +448,7 @@ test("x42.r10o1g an ancient start date never trips the scan guard (the walk retu
 
   // (a) THE CASE THE OLD COMMENT CLAIMED: it does not reach the guard at all.
   const c1 = await freshAdjClient("r10o1g1");
-  const ancient = await liveTemplate({
+  await liveTemplate({
     client: c1, name: `r10o1g ancient ${Date.now()}`, start: "0001-01-01",
     lines: accrualLines(100_000, { debit: EXPA, credit: ACCR }), memo: "ancient" });
   const due = await adjustmentRunDue(c1);
