@@ -58,21 +58,45 @@
 //   * `/api/build-info`'s `bodies` on a running target, which is the registry's own roster.
 //   Measured on the current build, the two agree exactly (49 bodies).
 //
-// AND THE DATABASE HAS A VOTE OF ITS OWN — THE FRONTIER RULE (wave-3, #815). Both censuses above
-// ask "is anything IN FLIGHT that the target cannot run". They cannot see a rule that lives in the
-// SCHEMA and needs a body in the image. Migration 0195 is the first: its recut
-// `clara._record_journal_entry_core` refuses an accounting write whose run holds no consumed
-// `accounting_work` egress authorisation, and the FIRST body that can obtain one is `claraWork_v3`
-// (`prepare_work_egress_dispatch`/`consume_egress_dispatch` are called from
-// `workflows/claraWork.v3.impl.ts`, and from `claraWork.v4.impl.ts` since the wave 2026-09-15 cut —
-// from no body before v3). 0195 GRANDFATHERS runs claimed under a
-// pre-v3 bundle so a forward cutover finishes honestly — which means a rollback to a pre-v3 image
-// would run the whole Work lane through the grandfather arm, i.e. WITHOUT the egress wall, on a
-// database whose frontier says the wall is in force. That is not something a parked run can tell
-// you about: with the lane fully drained the run census is clean and every other leg says
-// ALLOWED. So the rule is measured directly — the database's own frontier against the target's
-// body roster — and it is GLOBAL: it refuses regardless of scope, because a scope narrows which
-// ROWS are counted and this rule counts no rows at all.
+// AND THE TARGET DECLARES ONE MORE THING ABOUT ITSELF (#1035): which DOOR CONTRACTS it
+// understands. `supportedContractsFromBundle(bundleText)` reads the `clara.contract` markers
+// `lib/runtime-contracts.mjs` puts in the artifact, and `/api/build-info`'s `contracts` is the same
+// roster on a running target. A body roster answers "can this image RUN the parked work"; this
+// answers "does it READ what the doors now return", which is the question a schema change to a
+// door's return contract poses and no census can reach.
+//
+// AND THE DATABASE HAS A VOTE OF ITS OWN — THE FRONTIER RULES (wave-3, #815; widened by #1035).
+// Both censuses above ask "is anything IN FLIGHT that the target cannot run". They cannot see a
+// rule that lives in the SCHEMA. There are two kinds, in one table, and the second is the one that
+// cost two hosted windows.
+//
+//   (a) A BODY THE SCHEMA REQUIRES. Migration 0195 is the first: its recut
+//       `clara._record_journal_entry_core` refuses an accounting write whose run holds no consumed
+//       `accounting_work` egress authorisation, and the FIRST body that can obtain one is
+//       `claraWork_v3` (`prepare_work_egress_dispatch`/`consume_egress_dispatch` are called from
+//       `workflows/claraWork.v3.impl.ts`, and from `claraWork.v4.impl.ts` since the wave
+//       2026-09-15 cut — from no body before v3). 0195 GRANDFATHERS runs claimed under a pre-v3
+//       bundle so a forward cutover finishes honestly — which means a rollback to a pre-v3 image
+//       would run the whole Work lane through the grandfather arm, i.e. WITHOUT the egress wall,
+//       on a database whose frontier says the wall is in force. Reason `frontier_requires_body`.
+//
+//   (b) A DOOR CONTRACT THE SCHEMA CHANGED. From `0254_intake_refusal_record`,
+//       `clara.create_document_intake` COMMITS a ceiling-refused intake and returns `refused: true`
+//       instead of raising CLR18; from `0279_fa_closed_year_arrears`,
+//       `clara.run_depreciation_period` answers `parked` instead of posting. An image from before
+//       either one carries every body, strands nothing, and MISREADS the answer — 201 to an
+//       uploader whose file the ceiling turned away, or a park counted as a post and re-driven on
+//       every sweep. The rule refuses a target that does not DECLARE the contract; reason
+//       `frontier_requires_contract`, and neither of a census refusal's two answers reaches it —
+//       retaining a body teaches the target nothing about what the door returns, and there is no
+//       queue to drain.
+//
+// NEITHER IS SOMETHING A PARKED RUN CAN TELL YOU ABOUT: with the lane fully drained the run census
+// is clean and every other leg says ALLOWED — which is exactly what was recorded at two hosted
+// windows for (b) (docs/plan/active/riders-2026-09-20/RELEASE-W2-RUNBOOK.md § RESULTS step 9, and
+// RELEASE-W3-RUNBOOK.md step 9). So both are measured directly — the database's own frontier
+// against the target's own two rosters — and both are GLOBAL: they refuse regardless of scope,
+// because a scope narrows which ROWS are counted and these rules count no rows at all.
 //
 // FAIL-CLOSED. A read that throws is not "allowed": `preflight()` lets the error out, and the CLI
 // exits 2 rather than 1. The one thing this module must never do is answer "go ahead" because it
