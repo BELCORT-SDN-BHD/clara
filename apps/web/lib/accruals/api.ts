@@ -372,6 +372,65 @@ export async function correctAccrual(input: CorrectAccrualInput, o: Opts = {}): 
   );
 }
 
+// ── #938 — the two remedies for "a bill posted inside an accrued period" ───────────────────
+
+/**
+ * `clara._plan_reversal_date(p_due)` (0193:837), MIRRORED here the same way `accrualDueNth`
+ * above mirrors `clara._plan_due_nth`: the first day of the month AFTER `due`'s. This is the
+ * schedule's own fixed rule for a `reversing_journal` plan — one calendar month, regardless of
+ * the plan's frequency — and "reverse now" needs it to build the catch-up window; the database
+ * is still the sole authority over whether that date has actually arrived.
+ */
+export function accrualReversalDate(dueIso: string): string {
+  const year = Number(dueIso.slice(0, 4));
+  const month = Number(dueIso.slice(5, 7)); // 1-based; Date.UTC's 0-based month IS "next month"
+  const d = new Date(Date.UTC(year, month, 1));
+  return `${String(d.getUTCFullYear()).padStart(4, "0")}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
+
+/**
+ * "Reverse now" — the EXISTING `clara.request_plan_catch_up` door (0193), never a new one: the
+ * window runs from the flagged occurrence's own due date through its scheduled reversal date.
+ * When the reversal is already due, this admits it and the accrual_bill_conflict row clears on
+ * the next read; while it genuinely is not yet due, the door's own `catch_up_in_future` refusal
+ * (DoorRefusal) surfaces verbatim — never pretended away.
+ */
+export async function reverseAccrualNow(
+  planId: string,
+  dueDate: string,
+  o: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "request_plan_catch_up",
+    {
+      p_plan: planId,
+      p_from: dueDate,
+      p_to: accrualReversalDate(dueDate),
+      p_op_key: crypto.randomUUID(),
+    },
+    opts(o),
+  );
+}
+
+/**
+ * "Skip this period's next occurrence" — `clara.skip_plan_occurrence` (#938, 0302): removes
+ * exactly ONE future due date from the plan's schedule, named as the occurrence AFTER the
+ * flagged one's own due date. bookkeeper+; never touches the already-posted flagged occurrence
+ * itself.
+ */
+export async function skipNextAccrualOccurrence(
+  planId: string,
+  afterDue: string,
+  reason: string,
+  o: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "skip_plan_occurrence",
+    { p_plan: planId, p_after_due: afterDue, p_reason: reason, p_op_key: crypto.randomUUID() },
+    opts(o),
+  );
+}
+
 /** The two derived journal lines an accrual posts, for the DISABLED preview the form renders. It
  *  mirrors `clara._accrual_journal_basis` (0222) exactly; the database derives its own and is the
  *  authority, so nothing computed here is ever sent. */

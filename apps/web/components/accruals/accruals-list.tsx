@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AccrualBoundaryStatement } from "./accrual-statement";
+import { AccrualBillConflicts } from "./accrual-bill-conflicts";
 import { loadAccruals, type AccrualListRow } from "@/lib/accruals/api";
 import { accrualCreateHref, accrualDetailHref } from "@/lib/navigation/tree";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
@@ -39,6 +40,10 @@ export function AccrualsList({ clientId }: { clientId: string }) {
   return (
     <div className="flex flex-col gap-6">
       <AccrualBoundaryStatement />
+      {/* #938 — "a bill posted inside an accrued period", ABOVE the configured-accruals table:
+          it names an action the person should take now, the table below is the standing
+          register. */}
+      <AccrualBillConflicts clientId={clientId} />
       <section className="flex flex-col gap-2">
         <SectionHeader
           level={2}

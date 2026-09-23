@@ -163,6 +163,19 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // authority's own id (the asset_id/advance_id idiom, not seeding_proposal's aggregation —
   // a client carries at most one proposed authority at a time).
   "depreciation_authority_pending",
+  // #938 (0302_accrual_bill_conflict.sql, riders wave 4 lane 03): ONE row per accrual PLAN
+  // (never per occurrence) whose most recent posted, unreversed accrual occurrence has a
+  // document-sourced, approved journal entry hitting the SAME expense account inside that
+  // occurrence's own period. Section `needs_you`, lane `needs_you`. DERIVED — computed from
+  // live facts on every read, no stored lifecycle, clears itself the moment a reversal is
+  // admitted for the same period (CONTEXT.md's "Settlement candidate row" shape, applied to a
+  // bill finding an open accrual rather than a bank line finding an open item). `id` is the
+  // PLAN's own id (NOT the occurrence's, unlike asset_id/advance_id/authority_id which mirror
+  // the shared `id`): the two remedies this row offers both act on the plan
+  // (clara.skip_plan_occurrence, and clara.request_plan_catch_up for "reverse now"). `period`
+  // carries the flagged occurrence's own due date as ISO `YYYY-MM-DD` text — never a formatted
+  // month — because a remedy must name the exact occurrence back, byte for byte.
+  "accrual_bill_conflict",
 ] as const;
 
 export type ReviewQueueRowKind = (typeof REVIEW_QUEUE_ROW_KINDS)[number];

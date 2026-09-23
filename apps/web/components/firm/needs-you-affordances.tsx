@@ -31,6 +31,7 @@ import { CodingTaskAffordance } from "./coding-task-affordance";
 import { LintFindingAffordance } from "./lint-finding-affordance";
 import { ComplianceWatchAffordance } from "./compliance-watch-affordance";
 import { WorkQuestionAffordance } from "./work-question-affordance";
+import { AccrualBillConflictAffordance } from "./accrual-bill-conflict-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -120,6 +121,11 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // whole affordance, and the fix round made it name the view that mounts those controls
     // (`/registers?tab=fixedAssets`) rather than the workbench's default aging view.
     depreciation_authority_pending: null,
+    // #938 (0302, riders wave 4 lane 03): "reverse now" (clara.request_plan_catch_up, the
+    // EXISTING plan-lane door) and "skip this period's next occurrence"
+    // (clara.skip_plan_occurrence, this ticket's own new door) — see
+    // ./accrual-bill-conflict-affordance.tsx's own header for the grounding.
+    accrual_bill_conflict: AccrualBillConflictAffordance,
   } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
 
