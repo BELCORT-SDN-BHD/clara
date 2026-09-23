@@ -142,7 +142,10 @@ const ACCOUNTANT_NOTES = {
   address: "The registered address as filed with SSM, not the office you work from.",
   mia: "Optional. The firm's MIA registration number, if it has one; skip with a reason if none.",
   turnover: "The firm's own annual turnover band. It decides whether the TIN question below is required.",
-  tin: "The firm's MyInvois TIN. Required when annual turnover is RM1 million or more; otherwise skip with a reason.",
+  // #1032 (riders wave 4, lane 06): recut by 0311_firm_setup_tin_required.sql's own backfill --
+  // "skip with a reason" is no longer true (tin is answerable, never inapplicable, once #1032
+  // lands), so the sentence changed with the behaviour it describes.
+  tin: "The firm's MyInvois TIN. Required once the firm's turnover makes MyInvois mandatory (RM1 million or more); optional below that, and you may still record it if the firm has registered for MyInvois voluntarily.",
   fye: "The month the firm's own financial year ends, 1 to 12. Clients keep their own year-end on their client record.",
   mpers_eligibility: "Applies to a Sdn Bhd only: whether the CA 2016 s.244 private-entity test lets the firm apply MPERS. Skip with a reason if the firm is not a Sdn Bhd.",
   framework: "MPERS or MFRS. This becomes the firm-wide default framework; a client can keep its own exception in Knowledge.",

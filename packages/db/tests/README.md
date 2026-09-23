@@ -400,26 +400,57 @@ no new relation or grant to independently anchor a cell to.
 
 `firm-setup-applicability.test.mjs` is frontier-gated on its own stable stem
 (`firm_setup_applicability$`), the `firm_setup_polish$` idiom, and preloads
-`firm-setup-applicability-preintegration-gate.mjs` in the package run. Four cells, one per
-acceptance criterion, all through `humanQuery`: `p891.mpers.entity_type` seeds a Sdn Bhd and a
-sole proprietorship through the doors and shows the eligibility item seeded (`pending`) for the
-first and permanently unseeded for the second, even after a later reconciliation; `p891.tin.
-turnover` does the same for the TIN item against the turnover answer, including the unanswered
-(`'undetermined'`) case before either firm states a turnover band; `p891.counter.excludes` answers
-turnover above the exemption threshold, reconciles (TIN joins `counter.required_total` at 9,
-unanswered), answers TIN (joins `required_answered` too), then RE-answers turnover back under the
-threshold and shows TIN drop out of BOTH sides of the counter on the very next read while its own
-recorded answer is untouched — the regression this file's own migration header measured and
-guarded against (`p648.commit.outstanding`'s `required_total=8` invariant, which answers
-`entity_type` as `'sdn_bhd'` without ever re-seeding, stays true only because a conditional item's
-counter contribution requires it to be ACTUALLY SEEDED, not merely live-applicable); `p891.answer.
-survives` answers `mpers_eligibility` while `entity_type='sdn_bhd'`, then corrects `entity_type`
-away and shows the item's own `state`/`answer` untouched while its reported `applicability` and
-`required` flip live. All four cells were run against a deliberately broken variant of the
-migration (seed's applicability filter removed, `get_firm_setup`'s applicability/counter/`v_unseeded`
+`firm-setup-applicability-preintegration-gate.mjs` in the package run. Two cells still describe
+#891's own subject, untouched: `p891.mpers.entity_type` seeds a Sdn Bhd and a sole proprietorship
+through the doors and shows the eligibility item seeded (`pending`) for the first and permanently
+unseeded for the second, even after a later reconciliation; `p891.answer.survives` answers
+`mpers_eligibility` while `entity_type='sdn_bhd'`, then corrects `entity_type` away and shows the
+item's own `state`/`answer` untouched while its reported `applicability` and `required` flip live.
+The other two of #891's original four cells — `p891.tin.turnover` and `p891.counter.excludes` —
+pinned TIN's old seeded-or-not shape and were REWRITTEN by **#1032** (below) to the new
+required-or-optional one; the "Firm setup TIN required-or-optional" section that follows owns their
+replacements. All four ORIGINAL cells were run, at the time, against a deliberately broken variant
+of 0257 (seed's applicability filter removed, `get_firm_setup`'s applicability/counter/`v_unseeded`
 guards reverted, applied via the `CLARA_MIGRATION_REDO` mechanism on this lane's own rig) and failed
 for the reasons this file's own assertions name, then re-run green after restoring the migration
 byte-for-byte — the vacuity control.
+
+## Firm setup TIN required-or-optional (#1032, `0311_firm_setup_tin_required.sql`)
+
+Owner's ruling 2026-09-23 (Option A, #1032, citing #891's own remainder): the TIN item is seeded
+for every firm now, required once the turnover answer makes MyInvois mandatory and optional
+otherwise, never seeded-or-not. Its cells live INSIDE `firm-setup-applicability.test.mjs` (the
+door under test, `clara._firm_setup_applicability`, is the same one), gated on their OWN stable
+stem (`firm_setup_tin_required$`, never 0257's — the `activity-feed.test.mjs` multi-stem-in-one-
+file idiom, "0183, gated on its OWN stem rather than 0181's": a database carrying 0257 but not yet
+0311 must skip these cells loudly rather than assert a shape `tin` can no longer take) and preload
+`firm-setup-tin-required-preintegration-gate.mjs` in the package run. Three cells:
+`p1032.tin.always_seeded_required_or_optional` seeds three firms (turnover unanswered, answered
+`'<RM1M'`, answered `'RM1M-5M'`) and shows TIN seeded (`pending`, never `unseeded`) in all three,
+reading `optional`/`false` in the first two and `required`/`true` in the third, with
+`counter.required_total` moving from 8 to 9 only in the third and the counter/`required_outstanding`
+arithmetic invariant holding throughout; a sub-threshold firm is also shown ABLE to volunteer an
+answer anyway. `p1032.tin.flip_keeps_answer_both_ways` answers TIN while optional, then answers
+turnover mandatory (TIN flips to required, answer untouched) then answers turnover back exempt
+(TIN flips back to optional, answer STILL untouched) — AC3's "both ways". `p1032.commit.
+refuses_until_tin_answered_when_required` answers every statically-required item plus a mandatory
+turnover, leaves TIN pending, and shows BOTH `defer_firm_setup_item` (`CLR10
+firm_setup_item_required`) and `commit_firm_setup` (`CLR10 required_items_outstanding` naming
+`tin`) refuse it — then answers TIN and commits; a second, separate firm with turnover below the
+threshold commits with TIN left pending and unanswered, on purpose, proving the ticket's own "the
+commit door ignores it" for the optional branch. `mpers_eligibility`'s own branch of
+`_firm_setup_applicability` and the unconditional `else` for the other ten rows are asserted
+byte-identical to 0257 in the migration's own tail, which is why its two cells above needed no
+change at all.
+
+`firm-setup-user-notes.test.mjs`'s `p934.notes.accountant_text` pins `tin`'s `user_note` literally
+(an INDEPENDENT source of truth transcribed from its own owner ruling, never re-derived from the
+migration) and was updated to 0311's new sentence — "otherwise skip with a reason" stopped being
+true the moment TIN became answerable rather than inapplicable. `firm-setup.test.mjs`'s
+`p648.seed.reconcile` / `p648.seed.empty` needed their literal seeded-row counts moved too (10→11,
+13→14 respectively): TIN is now among the rows a first reconciliation inserts even when its
+dependency (`turnover`) is unanswered, where before #1032 it was held back the same way
+`mpers_eligibility` still is.
 
 `firm-setup.test.mjs` (#648) and `firm-setup-polish.test.mjs` (#895) both needed narrow, direct
 consequences of #891's seed-time change fixed alongside it: `p648.seed.reconcile` /

@@ -869,8 +869,8 @@ to `clara_authenticated` alone.
 |---|---|---|
 | `clara.seed_firm_setup_plan(p_op_key)` | admin | RECONCILES the firm plan against `clara.firm_setup_keys`: inserts only the catalogue rows the plan is missing and never touches an existing item, so an answer `firmInterview_v3` already wrote is neither rewritten nor re-asked. Rotates the CAS token and appends a revision snapshot. |
 | `clara.answer_firm_setup_item(p_plan, p_expected_revision, p_item_key, p_answer, p_op_key)` | admin, then the catalogue row's `min_role` | Validates the answer against the catalogue's declared shape, records it with its author, and — for the three firm-defaultable keys only — captures a firm-scope `clara.knowledge_records` row through the live `clara.capture_knowledge`. CAS mismatch is `CLR06` + `detail.reason='stale_plan'`. It is also the journey's CORRECTION PATH: it sets `state='answered'` from any non-committed state and replaces `answer` wholesale, so a recorded fact is corrected and a deferral is un-skipped by the same act (no deferral reason survives beside the new value). The one exception is a key that already carries a LIVE firm-scope knowledge record — the second capture is refused `knowledge_already_live`, and correction belongs to `clara.correct_knowledge`. |
-| `clara.defer_firm_setup_item(p_plan, p_expected_revision, p_item_key, p_reason, p_op_key)` | admin, then `min_role` | Skips an item that is NOT `required_for_commit`, parking the stated reason in the item's `answer` as `{"deferred_reason": …}` (`clara.onboarding_plan_items` has no `reason` column and its deferred CHECK arm constrains none). Refuses a required item and an already-answered one. |
-| `clara.commit_firm_setup(p_plan, p_expected_revision, p_op_key)` | admin | Commits the plan once every **catalogue** row that is `required_for_commit` is answered, resolved or deferred; otherwise `CLR10 required_items_outstanding`, naming them. It reads the catalogue, not the plan row's own flag, so a foreign plan item (`bookkeeper_email` → #625, `first_client_onboarding` → #649) cannot block this journey. |
+| `clara.defer_firm_setup_item(p_plan, p_expected_revision, p_item_key, p_reason, p_op_key)` | admin, then `min_role` | Skips an item that is not required — the catalogue's own `required_for_commit`, OR (#1032, 0311) a LIVE `'required'` verdict off `clara._firm_setup_applicability` — parking the stated reason in the item's `answer` as `{"deferred_reason": …}` (`clara.onboarding_plan_items` has no `reason` column and its deferred CHECK arm constrains none). Refuses a required item (static or dynamic) and an already-answered one. |
+| `clara.commit_firm_setup(p_plan, p_expected_revision, p_op_key)` | admin | Commits the plan once every row that is required — the catalogue's own `required_for_commit`, OR (#1032, 0311) a live `'required'` verdict — is answered, resolved or deferred; otherwise `CLR10 required_items_outstanding`, naming them. It reads the catalogue plus the applicability door, not the plan row's own flag, so a foreign plan item (`bookkeeper_email` → #625, `first_client_onboarding` → #649) cannot block this journey. |
 | `clara.get_firm_setup()` | admin | The journey's ONE production-facing read: plan identity and CAS token, every catalogue row with its plan state, the required-answered/required-total counter, the outstanding required keys, and the confirmed firm-scope facts with scope, source, actor and an authority verdict taken from the author's CURRENT membership rank. |
 | `clara.dismiss_firm_setup_tip(p_plan, p_item_key, p_action)` | admin, then `min_role` | #935 — the ONLY door that may settle an `item_kind='education'` row (`p_action` is `'acknowledged'` or `'deferred'`). No `p_op_key`, no `p_expected_revision`: it writes no audit row, emits no domain event, never rotates the plan's CAS token, and is idempotent by construction (a repeat call on an already-settled tip echoes its actual state rather than re-writing or erroring). Refuses a non-education item by name (`CLR10 firm_setup_item_not_a_tip`). |
 
@@ -978,6 +978,37 @@ because until this file no `education` row existed to expose it: without the gua
 door would happily record an AUDITED "accounting item" against a tip, which is exactly the
 invariant the ticket's two hard properties forbid. The new door itself,
 `clara.dismiss_firm_setup_tip`, is the table above's own row.
+
+**#1032 (0311, riders wave 4: TIN becomes required-or-optional, not seeded-or-not)** takes the
+follow-up 0257's own header proposed and #891's paragraph above restates ("deciding that a seeded,
+applicable TIN should block a commit") and settles it the owner's way (ruling 2026-09-23, Option
+A): the TIN item is now asked of EVERY firm, whatever the turnover answer. Only `tin`'s own branch
+of `clara._firm_setup_applicability` changes — `mpers_eligibility`'s branch and the unconditional
+`else` for the other ten rows are byte-identical to 0257 — and it now returns `'required'` or
+`'optional'`, never `'inapplicable'`/`'undetermined'`: required once turnover makes MyInvois
+mandatory, optional otherwise, including while turnover is itself still unanswered (the ruling's
+own "otherwise ... optional", not a third undetermined state — unreachable in practice regardless,
+since `turnover` and `tin` are always seeded together in the same reconciliation).
+`seed_firm_setup_plan`'s guard widens from `= 'applicable'` to `not in ('inapplicable',
+'undetermined')`, so `tin` is now always seed-eligible while `mpers_eligibility`'s own
+seeded-or-not behaviour is unchanged. Required-ness becomes ONE PREDICATE —
+`k.required_for_commit or clara._firm_setup_applicability(p.id, k.item_key) = 'required'` — used
+at every site that ever asked "is this required": `get_firm_setup`'s `items[].required`,
+`required_outstanding` and both `counter` sides (four sites, one recut), `commit_firm_setup`'s
+outstanding-items gate (its FIRST recut ever — 0257 and 0259 both left it a measured, untouched
+baseline), and `defer_firm_setup_item`'s required-refusal guard (not named in the ticket's own Key
+Interfaces, recut anyway: without it the database would admit a skip the web surface's Required
+badge already hides the control for, the same "two notions disagreeing" defect class 0259's fix
+round exists because of, closed here before it could recur). `mpers_eligibility` is a no-op under
+this predicate everywhere it appears, because its branch never returns the literal `'required'` —
+so `#891`'s own "eligibility item keeps its present behaviour" holds by construction, re-verified
+byte-for-byte rather than merely claimed. One data cell moves: `tin`'s `user_note`
+(0258/0259_firm_setup_user_notes.sql's own accountant sentence), backfilled through the SAME
+disable/enable-append-only-trigger shape 0258 established, since "otherwise skip with a reason" is
+no longer true once tin is answerable rather than inapplicable. No new function is minted and no
+grant changes, so — like 0257 itself, and like `rig-meta.mjs`'s own `#979` precedent ("NO COHORT,
+NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed") — this file adds no
+`rig-meta.mjs` cohort.
 
 At frontier 0222 the accrual lane adds four public names to that boundary:
 `create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on
