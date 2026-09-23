@@ -3169,6 +3169,31 @@ export const PREPAYMENT_ACCOUNT_ROSTER_0306_COHORT = [
   ...PREPAYMENT_ACCOUNT_ROSTER_0306_HUMAN_FNS, ...PREPAYMENT_ACCOUNT_ROSTER_0306_UNGRANTED_FNS,
 ];
 // #940 END
+// #915 [0307, #653's chat entrance stops at a grant wall — create_prepayment_schedule has no
+// clara_runtime twin] — its own cohort, the same "wholly present or wholly absent" reason 0306's
+// carries: the `db-slice-frontiers` matrix runs this package against databases pinned at earlier
+// frontiers where 0223/0305/0306 have applied and 0307 has not.
+//
+//   the ONE OBO door and the ONE machine-lane read — clara_runtime ONLY, and a NEW NAME rather
+//   than a widened grant, because clara.create_prepayment_schedule (in the human roster above)
+//   must never reach a machine principal: an OBO configuration names the human it acts for, and a
+//   runtime grant on the human door would be one that names nobody. The agent role and both wake
+//   roles gain ZERO — a lane that could configure its own amortisation schedule would be the agent
+//   deciding what it is allowed to do. The read carries no document bytes and no human grant: its
+//   consumer is claraWork's term park, and the human lane already has clara.get_prepayment_schedule.
+const PREPAYMENT_SCHEDULE_OBO_0307_RUNTIME_FNS = [
+  "create_prepayment_schedule_for", "read_prepayment_source_for",
+];
+//   …and the UNGRANTED closure: the ONE body both entrances run, and the OBO lane's plan step. The
+//   core is granted to NOBODY — it is reached only from the two doors' definer bodies (the
+//   one-ungranted-core law, 0004:6-12), exactly as clara._accrual_plan_core is.
+const PREPAYMENT_SCHEDULE_OBO_0307_UNGRANTED_FNS = [
+  "_prepayment_schedule_core", "_prepayment_plan_core",
+];
+export const PREPAYMENT_SCHEDULE_OBO_0307_COHORT = [
+  ...PREPAYMENT_SCHEDULE_OBO_0307_RUNTIME_FNS, ...PREPAYMENT_SCHEDULE_OBO_0307_UNGRANTED_FNS,
+];
+// #915 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -3650,6 +3675,11 @@ export const ALLOWED = {
     // [#1007, 0275] the actor-explicit probe twin and the acknowledgement writer — clara_runtime
     // ONLY, the same lane clara.admit_trade_invoice_work sits in, acting OBO a named human.
     ...TRADE_INVOICE_DUPLICATE_0275_RUNTIME_FNS,
+    // [#915, 0307] the prepayment-schedule OBO twin and the machine-lane read of the RECORDED
+    // term — clara_runtime ONLY, the same lane clara.create_accrual_adjustment_for sits in, acting
+    // OBO a named human whose membership the door re-checks LIVE. Declared here so any wider grant
+    // FAILS the matrix.
+    ...PREPAYMENT_SCHEDULE_OBO_0307_RUNTIME_FNS,
     // [#636, 0229] the intake-batch write doors and the cancellation sweep — clara_runtime ONLY,
     // the same lane clara.create_document_intake sits in. The sweep is the pool's ONLY way to see
     // a cancelling parent: it holds no SELECT on clara.intake_batches and none on
@@ -4061,6 +4091,13 @@ export async function grantMatrixFailures() {
   if (rosterLive.length !== 0) {
     failures.push(...cohortFailures("#940 0306 prepayment-account roster",
       PREPAYMENT_ACCOUNT_ROSTER_0306_COHORT, liveNames));
+  }
+  // #915 [0307] — bimodal, same reasoning as 0306's above: wholly present once 0307 applies,
+  // wholly absent before it.
+  const oboLive = PREPAYMENT_SCHEDULE_OBO_0307_COHORT.filter((n) => liveNames.has(n));
+  if (oboLive.length !== 0) {
+    failures.push(...cohortFailures("#915 0307 prepayment-schedule OBO twin",
+      PREPAYMENT_SCHEDULE_OBO_0307_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
