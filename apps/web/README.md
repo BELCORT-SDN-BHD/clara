@@ -1034,6 +1034,19 @@ composition table with it, and `client-cash-summary.tsx`'s own unpublished-set b
 only face for that state. The read (`clara.get_client_financial_pack`, migration 0232) is
 UNCHANGED — this is rendering only.
 
+**And the account-level cap disclosure names the cut the DOOR makes.** 0232 builds the cash
+composition `order by a.account_code … limit 50`, so the 50 rows a firm sees are the
+alphabetically first by chart code — NOT the largest. `ClientFinancial.cashDrilldown.
+accountsTruncated` therefore reads "Showing {shown} of {total} cash accounts, in account code
+order."; a sentence saying "largest first" would tell a firm with 63 cash accounts that the 13 it
+cannot see are the small ones, when they may hold the largest balances behind the headline — the
+same class of silent wrongness the cap disclosure exists to prevent, dressed as a disclosure.
+`client-financial-charts.test.tsx`'s own cell READS the ordering out of migration 0232 rather than
+restating it, so a later reorder of the door cannot leave this sentence behind. **The PROFIT twin
+(`ClientFinancial.drilldown.accountsTruncated`) still says "largest first" and 0232 orders that
+composition by `a.account_code` too** — the same defect, pre-existing since #660 and deliberately
+left to its own ticket rather than widened into #1001.
+
 ### Recharts, and the table that is never a fallback
 
 `recharts@3.8.0` and `components/ui/chart.tsx` arrived through `pnpm --filter @clara/web ui:add

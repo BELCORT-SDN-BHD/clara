@@ -892,7 +892,7 @@
         "colReason": "Why this is cash",
         "colEntries": "Entries",
         "truncated": "Showing {shown} of {total} entries.",
-        "accountsTruncated": "Showing {shown} of {total} accounts, largest first.",
+        "accountsTruncated": "Showing {shown} of {total} cash accounts, in account code order.",
         "reasonBankRegistry": "Registered bank account",
         "reasonDeclaredCash": "Declared cash on hand",
         "reasonDeclaredPettyCash": "Declared petty cash",

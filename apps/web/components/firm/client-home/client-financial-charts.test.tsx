@@ -12,6 +12,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
@@ -147,6 +150,26 @@ function text(h: { container: unknown }): string {
     return (node.childNodes ?? []).map(collect).join(" ");
   };
   return collect(h.container).replace(/\s+/g, " ");
+}
+
+/** THE CUT THE DOOR ACTUALLY MAKES, read from the door rather than restated here. Migration 0232
+ *  builds the cash composition and caps it at 50 accounts; the ORDER BY immediately above that cap
+ *  decides WHICH 50 survive, and the sentence the face shows about the cap must name that
+ *  ordering. Read from the SQL so a later reorder cannot leave the copy behind — which is exactly
+ *  how the profit twin of this sentence came to say something untrue. */
+function cashCompositionCut(): string {
+  const sql = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..",
+      "packages", "db", "migrations", "0232_client_financial_pack.sql"),
+    "utf8",
+  );
+  const start = sql.indexOf("into v_cash_comp, v_cash_comp_n");
+  assert.ok(start > 0, "migration 0232 no longer builds the cash composition where this cell looks");
+  const end = sql.indexOf("limit 50) y;", start);
+  assert.ok(end > start, "migration 0232's cash composition no longer ends in a LIMIT 50");
+  const m = /order\s+by\s+([a-z_.]+)\s*\r?\n\s*limit\s+50\)\s*y;/.exec(sql.slice(start, end + 12));
+  assert.ok(m, "migration 0232's cash composition no longer carries ONE ordering above its cap");
+  return m[1] as string;
 }
 
 function hrefs(h: { container: unknown }): string[] {
@@ -480,7 +503,45 @@ test("ticket 1001 — both truncation disclosures appear on the cash arm when th
   try {
     const body = text(h);
     assert.match(body, /Showing 1 of 41 entries/, "the entry-level cap on the cash arm said nothing about it");
-    assert.match(body, /Showing 1 of 63 accounts/, "the account-level cap on the cash arm said nothing about it");
+    assert.match(body, /Showing 1 of 63 cash accounts/, "the account-level cap on the cash arm said nothing about it");
+  } finally { await h.unmount(); }
+});
+
+// ===========================================================================================
+// THE ACCOUNT-LEVEL DISCLOSURE MUST NAME THE CUT THE DOOR ACTUALLY MADE.
+//
+// A sentence saying "largest first" when the door cut ALPHABETICALLY tells a firm with 63 cash
+// accounts that the 13 it cannot see are the small ones. They may hold the largest balances
+// behind the headline — the same class of silent wrongness the cap disclosure exists to prevent,
+// now dressed as a disclosure. The expected ordering is READ FROM MIGRATION 0232 rather than
+// restated here, so a later reorder of the door moves this cell with it.
+// ===========================================================================================
+test("ticket 1001 — the account-level cash disclosure names the cut the DOOR makes, never 'largest first'", async () => {
+  assert.equal(cashCompositionCut(), "a.account_code",
+    "migration 0232's cash composition cut moved — the sentence this cell pins must move with it");
+  const h = await mount({
+    load: async () => pack({
+      cash: group({
+        composition: [{
+          accountId: ACCOUNT, accountCode: "1010", name: "Maybank Current",
+          memberReason: "bank_registry", accountType: null,
+          openingCents: 0, movementCents: 500_000, closingCents: 500_000,
+          entries: [], entriesTotal: 0, entriesTruncated: false,
+        }],
+        compositionTotal: 63,
+        compositionTruncated: true,
+      }),
+    }),
+  });
+  try {
+    const node = h.find((n) => (n as unknown as { getAttribute?: (k: string) => string | null })
+      .getAttribute?.("data-testid") === "client-cash-accounts-truncated");
+    assert.ok(node, "the account-level cash disclosure is not queryable");
+    const sentence = textOf(node as never).replace(/\s+/g, " ").trim();
+    assert.equal(sentence, "Showing 1 of 63 cash accounts, in account code order.",
+      `the cash cap disclosure does not name the door's own ordering: "${sentence}"`);
+    assert.equal(/largest/i.test(sentence), false,
+      "the cash cap disclosure claims an ordering by size that migration 0232 does not use");
   } finally { await h.unmount(); }
 });
 
