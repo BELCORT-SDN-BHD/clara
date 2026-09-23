@@ -158,8 +158,8 @@ about the reader’s access: the refusal the door gave the reader stays on scree
 stays as it was, and the Stop control does not depend on how a background read resolved. A revocation
 the runtime sends down an OPEN read, or one found on a tab’s first attach, is unchanged — it still
 retires the clock and withdraws the parked question.
-_Avoid_: Any stream-route refusal read as "you no longer have access"; an existence fact rendered as
-an access fact; a live turn retired by a sentence about access.
+_Avoid_: A refusal on a read a tab re-opens for its OWN benefit read as "you no longer have access";
+an existence fact rendered as an access fact; a live turn retired by a sentence about access.
 <!-- #1024 -->
 
 **Work batch**:
