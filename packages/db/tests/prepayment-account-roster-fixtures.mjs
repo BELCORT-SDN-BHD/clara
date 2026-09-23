@@ -129,6 +129,31 @@ export async function retirePrepaymentAccount(sub, {
   return r.rows[0].result;
 }
 
+/** Reserve an account in the FIXED-ASSET roster, through 0041's OWN door — the instrument for
+ *  "an account reserved by the fixed-asset roster cannot be enrolled here" (owner decision 6).
+ *  A hand-written `fa_account_profiles` row would prove this battery can write a row; the door
+ *  proves the reservation is the estate's. */
+export async function reserveAsFixedAssetCost(sub, { client, assetAccount, opKey = null }) {
+  const r = await humanQuery(sub, namedCall("upsert_fa_account_profile", [
+    { name: "p_client" }, { name: "p_asset_account" }, { name: "p_accum_account" },
+    { name: "p_depr_expense_account" }, { name: "p_op_key" },
+  ]), [client, assetAccount, null, null, opKey ?? opk("p940-fa")]);
+  return r.rows[0].result;
+}
+
+/** Bind a chart account as a REGISTERED BANK ACCOUNT, through 0038's own door — the instrument
+ *  for the shared wall's `bank_account` axis, and for the one cell that proves the wall still
+ *  guards the prepaid leg AFTER the roster gate admits it. */
+export async function bindBankAccount(sub, {
+  client, coaAccountCode, bankCode = "MBB", accountNumber, opKey = null,
+}) {
+  const r = await humanQuery(sub, namedCall("add_bank_account", [
+    { name: "p_client" }, { name: "p_bank_code" }, { name: "p_account_number" },
+    { name: "p_coa_account_code" }, { name: "p_op_key" },
+  ]), [client, bankCode, accountNumber, coaAccountCode, opKey ?? opk("p940-bank")]);
+  return r.rows[0].result;
+}
+
 // ===========================================================================================
 // 4 · Readers. `rootQuery` ONLY — each inspects a row the assertion is ABOUT, never the door
 //     under test.
