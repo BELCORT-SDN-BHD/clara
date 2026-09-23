@@ -3018,3 +3018,43 @@ same plan) blocks on that lock and, once it proceeds, is refused by name
 **Redo-safe by construction**: the one statement that changes the catalog is
 `create or replace function`; the grant/revoke pair is idempotent. The prestate asserts nothing
 about this file's own function being absent.
+
+## 0285 — the prepayment schedule reads gain a term-liveness flag (#919, riders wave 3, lane 06)
+
+`0285_prepayment_term_liveness.sql` closes the gap #919's Agent Brief names: `clara.
+prepayment_schedules.service_period_id` (0223) echoes the `clara.document_service_periods` row a
+schedule was DERIVED from, but neither `clara.get_prepayment_schedule` nor
+`clara.list_prepayment_schedules` ever said whether that row was still the LIVE one on its
+document. 0223's own header already states the design in full — a corrected term supersedes the
+row and the stored allocation never moves, because a re-derived schedule is a NEW schedule on a
+NEW plan — but nothing on the read side made "this schedule is riding a since-superseded term"
+visible without a person already holding that rule as tribal knowledge.
+
+**What the file adds, and what it does not.** `term_live` (boolean) and `term_superseded_by`
+(uuid, null while live), joined from `clara.document_service_periods` on `service_period_id`, on
+BOTH reads — no new argument, no floor change, no new relation, no new grant, no recut of
+`clara.record_document_service_period` or any other 0140/0223 body. The join is safe inside each
+definer body without minting one: both reads already run as `clara_fn_owner`, and
+`document_service_periods` carries the same RLS-forced, owner-exempt-nothing-but-the-owner-policy
+posture `prepayment_schedules` does (`p_dsp_owner … for all to clara_fn_owner using (true)`,
+0140), pinned in this file's own prestate and re-measured in its tail.
+
+**Why a join, never a stored column.** `clara.prepayment_schedules` is APPEND-ONLY IN FULL
+(`_tf_prepayment_schedules_append_only`) precisely because every column on it is a fact derived at
+creation. Whether the term row it names is *still* live is not such a fact — it can change at any
+later moment a bookkeeper corrects the term on the same document — so it is computed against the
+CURRENT catalog on every read rather than stored and left to go stale on a row this estate has
+already promised never to touch again.
+
+**Migration triad.** `tests/prepayment-term-liveness-preintegration-gate.mjs` (stem
+`prepayment_term_liveness$`) and the gate's `--import` token in `package.json`'s test script, last
+in migration order. No `rig-meta.mjs` cohort: this file mints no new function and changes no
+grant, so there is nothing for `ALLOWED`/`cohortFailures()` to track — the `0257_firm_setup_
+applicability.sql` precedent (a same-shape recut of an existing read) carries none either. Battery:
+`tests/prepayment-term-liveness.test.mjs`, frontier-gated on the same stem, reusing
+`tests/prepayment-schedule-fixtures.mjs`'s own scene builder and verb wrappers rather than building
+a second world.
+
+**Redo-safe by construction**: the two statements that change the catalog are
+`create or replace function`; the prestate asserts nothing about this file's own additions being
+absent.
