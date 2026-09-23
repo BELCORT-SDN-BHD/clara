@@ -87,8 +87,19 @@ function Body({ clientId, row }: { clientId: string; row: AccrualDetailRow }) {
             note={t("factTermSource")}
           />
           <Fact label={t("factMethod")} value={methodLabel(t, row.method?.rule ?? "")} />
-          <Fact label={t("factExpenseLeg")} value={row.expense_account_code} />
-          <Fact label={t("factLiabilityLeg")} value={row.liability_account_code} />
+          {/* #942 — THE SIDE, AND THE TWO LEGS LABELLED BY IT. `expense_account_code` is the
+              profit-and-loss leg and `liability_account_code` the balance-sheet one; on a revenue
+              accrual those are an income account and the accrued-income asset, so the stored
+              column names would tell a reader the opposite of what posts. */}
+          <Fact label={t("factSide")} value={row.side === "revenue" ? t("sideRevenue") : t("sideExpense")} />
+          <Fact
+            label={row.side === "revenue" ? t("fieldIncomeLeg") : t("factExpenseLeg")}
+            value={row.expense_account_code}
+          />
+          <Fact
+            label={row.side === "revenue" ? t("fieldAssetLeg") : t("factLiabilityLeg")}
+            value={row.liability_account_code}
+          />
           <Fact
             label={t("factWindow")}
             value={t("windowFromTo", { from: row.effective_from, to: row.effective_to })}

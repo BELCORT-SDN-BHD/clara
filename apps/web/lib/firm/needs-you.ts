@@ -280,6 +280,15 @@ export type ReviewQueueRow = {
    *  column (the asset_id/advance_id idiom), because a client carries at most one
    *  proposed authority at a time and needs no aggregation. */
   authority_id: string | null;
+  /** #942 (0304)+: accrual_bill_conflict rows only — WHICH WAY the accrual it flags runs
+   *  (`expense` | `revenue`), derived from the shared `id` (the plan) at json-build time, the
+   *  same idiom as `authority_id` above. Null on every other row kind.
+   *
+   *  OPTIONAL ON THIS TYPE ON PURPOSE, for `work_questions` own stated reason: every fixture in
+   *  this app that constructs a row would otherwise stop compiling for a key one affordance
+   *  renders as `?? "expense"`, and a required key would be a claim that a pre-0304 database
+   *  sends one. It does not. */
+  accrual_side?: string | null;
 };
 
 export type ReviewQueueCounts = {

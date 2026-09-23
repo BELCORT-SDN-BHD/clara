@@ -33,6 +33,22 @@ const opts = (o: Opts) => ({ session: o.session ?? sessionTokenAccessor, signal:
 
 // ── the shapes the doors answer with ────────────────────────────────────────
 
+/** WHICH WAY ONE ACCRUAL RUNS (#942, 0304) — the closed set `clara._accrual_sides()` answers and
+ *  `ck_accrual_adjustments_side` carries.
+ *
+ *  `expense` — Dr the expense account / Cr a non-control accrued-liability account: a cost the
+ *  period incurred that nobody has billed yet. `revenue` — Dr a non-control asset (accrued income)
+ *  / Cr the income account: a service delivered that nobody has invoiced yet, reversed on the
+ *  first of the following month so the invoice and the estimate net to ONE revenue amount.
+ *
+ *  THE TWO ACCOUNT KEYS ARE HISTORICAL, and this is the one place the web layer says so out loud:
+ *  `expense_account_code` is the PROFIT-AND-LOSS leg (an expense account under `expense`, an
+ *  income account under `revenue`) and `liability_account_code` is the BALANCE-SHEET leg (a
+ *  non-control liability, or the accrued-income asset). They keep 0222's spelling because the
+ *  FROZEN `start_accrual_work` tool sends exactly those keys. */
+export const ACCRUAL_SIDES = ["expense", "revenue"] as const;
+export type AccrualSide = (typeof ACCRUAL_SIDES)[number];
+
 /** The CLOSED selection-rule set migration 0222's `method` CHECK admits, widened by #937 (0303).
  *  It names WHICH amount a human already stated the schedule uses; it computes nothing, which is
  *  why this is an enum and not a registered evaluator closure (0222's header argues it in full).
@@ -65,6 +81,9 @@ export type AccrualListRow = {
   plan_id: string;
   revision: number;
   purpose: string;
+  /** #942 — which way this accrual runs. A reader that does not know it cannot tell whether
+   *  `expense_account_code` names an expense or an income account. */
+  side: AccrualSide;
   expense_account_code: string;
   liability_account_code: string;
   amount_cents: number;
@@ -156,6 +175,9 @@ export type AccrualDetail = AccrualListRow & {
 
 /** The typed particulars, in the DATABASE's own field spelling — `p_accrual`. */
 export type AccrualParticulars = {
+  /** #942 — omitted means `expense`, which is what every caller that predates the revenue side
+   *  means. This surface always states it. */
+  side: AccrualSide;
   expense_account_code: string;
   liability_account_code: string;
   amount_cents: number;
@@ -481,6 +503,8 @@ export async function skipNextAccrualOccurrence(
  *  mirrors `clara._accrual_journal_basis` (0222) exactly; the database derives its own and is the
  *  authority, so nothing computed here is ever sent. */
 export function derivedAccrualLines(input: {
+  /** #942 — which leg is debited. Omitted means `expense`, the same silence the door reads. */
+  side?: AccrualSide;
   expenseAccountCode: string;
   liabilityAccountCode: string;
   amountCents: number;
@@ -492,6 +516,29 @@ export function derivedAccrualLines(input: {
    *  line the ledger will not write. Omitted under `stated_amount`. */
   periodDueDate?: string | null;
 }): { account_code: string; debit_cents: number; credit_cents: number; description: string }[] {
+  // THE PROFIT-AND-LOSS LEG CARRIES THE TERM SENTENCE ON BOTH SIDES, and the side decides only
+  // which leg is debited — `clara._accrual_journal_basis`'s own shape. On the revenue side the
+  // balance-sheet leg comes FIRST because that is the debit, and `clara._plan_occurrence_basis`
+  // reverses by exchanging each line's own two amounts rather than by position.
+  const profitAndLoss = {
+    account_code: input.expenseAccountCode.trim(),
+    debit_cents: 0,
+    credit_cents: input.amountCents,
+    description: input.periodDueDate
+      ? `the accrual period ending ${input.periodDueDate}`
+      : `one period of the accrual term ${input.servicePeriodStart} to ${input.servicePeriodEnd}`,
+  };
+  if (input.side === "revenue") {
+    return [
+      {
+        account_code: input.liabilityAccountCode.trim(),
+        debit_cents: input.amountCents,
+        credit_cents: 0,
+        description: "accrued income",
+      },
+      profitAndLoss,
+    ];
+  }
   return [
     {
       account_code: input.expenseAccountCode.trim(),

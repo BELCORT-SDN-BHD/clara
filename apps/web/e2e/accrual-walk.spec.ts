@@ -469,3 +469,49 @@ test("accrual.walk.billConflict: a bill posted inside the accrued period is name
   // derived conflict row alone.
   await expect(page.getByRole("row").filter({ hasText: ACC.purpose })).toContainText("Posted");
 });
+
+// ===========================================================================================
+// accrual.walk.revenue — #942: the SIDE, in a real browser.
+//
+// The DB battery owns what each side posts; this cell owns what the BROWSER does with a lane that
+// now runs two ways: the register says which way each accrual runs and can be narrowed to one, and
+// the form's side control re-labels both account legs and changes which accounts they offer — so a
+// preparer cannot choose an expense account for an accrued fee at all.
+// ===========================================================================================
+
+test("accrual.walk.revenue: the register names each accrual's side and filters to one, and the form's side control changes which accounts each leg offers", async ({ page }) => {
+  await signInTo(page, LIST_URL);
+
+  // THE REGISTER CARRIES BOTH SIDES AT ONCE, and each row says which it is.
+  const expenseRow = page.getByRole("row").filter({ hasText: ACC.purpose });
+  const revenueRow = page.getByRole("row").filter({ hasText: ACC.revenuePurpose });
+  await expect(expenseRow).toContainText("Expense");
+  await expect(revenueRow).toContainText("Revenue");
+  // THE LEGS READ IN POSTING ORDER: a revenue accrual debits the accrued-income asset.
+  await expect(revenueRow).toContainText("Dr 1180 / Cr 4000");
+  await expect(expenseRow).toContainText("Dr 6100 / Cr 2020");
+
+  await scan(page, "accruals register carrying both sides");
+
+  // AND IT NARROWS TO ONE SIDE.
+  await page.getByLabel("Show").selectOption("revenue");
+  await expect(revenueRow).toHaveCount(1);
+  await expect(expenseRow).toHaveCount(0);
+  await page.getByLabel("Show").selectOption("");
+  await expect(expenseRow).toHaveCount(1);
+
+  // THE FORM. Choosing the revenue side re-labels both legs and re-fills both pickers.
+  await page.goto(NEW_URL);
+  await expect(page.getByLabel("Expense account")).toBeVisible();
+  await page.getByLabel("Which way this accrues").selectOption("revenue");
+  await expect(page.getByLabel("Expense account")).toHaveCount(0);
+  const income = page.getByLabel("Revenue account");
+  await expect(income).toBeVisible();
+  await expect(income.locator("option")).toHaveText(["Choose an account", "4000 Sales / Fees Income"]);
+  const asset = page.getByLabel("Accrued income account");
+  await expect(asset.locator("option")).toHaveText([
+    "Choose an account", "1150 Maybank current", "1180 Accrued Income",
+  ]);
+
+  await scan(page, "accrual form on the revenue side");
+});

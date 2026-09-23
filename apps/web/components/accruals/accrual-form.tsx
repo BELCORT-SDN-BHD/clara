@@ -56,7 +56,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { isDoorRefusal } from "@/lib/doors";
 import {
-  ACCRUAL_DAY_OF_MONTH_MAX, ACCRUAL_DAY_RULES, ACCRUAL_FREQUENCIES, ACCRUAL_METHODS,
+  ACCRUAL_DAY_OF_MONTH_MAX, ACCRUAL_DAY_RULES, ACCRUAL_FREQUENCIES, ACCRUAL_METHODS, ACCRUAL_SIDES,
   accrualScheduleDues, createAccrual, derivedAccrualLines, type AccrualCreated,
 } from "@/lib/accruals/api";
 import { AccrualPeriodAmountsBlock } from "./accrual-period-amounts";
@@ -193,8 +193,10 @@ export function AccrualFormView({
   const previewPeriod = draft.method === "stated_period_amount"
     ? [...draft.periodAmounts].sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0] ?? null
     : null;
+  const revenueSide = draft.side === "revenue";
   const lines = useMemo(
     () => derivedAccrualLines({
+      side: draft.side,
       expenseAccountCode: draft.expenseAccountCode,
       liabilityAccountCode: draft.liabilityAccountCode,
       amountCents: previewPeriod === null ? draft.amountCents : previewPeriod.amountCents,
@@ -202,7 +204,7 @@ export function AccrualFormView({
       servicePeriodEnd: draft.servicePeriodEnd,
       periodDueDate: previewPeriod?.dueDate ?? null,
     }).map((l) => ({ ...l, description: l.description })),
-    [draft.expenseAccountCode, draft.liabilityAccountCode, draft.amountCents,
+    [draft.side, draft.expenseAccountCode, draft.liabilityAccountCode, draft.amountCents,
       draft.servicePeriodStart, draft.servicePeriodEnd, previewPeriod],
   );
 
@@ -250,6 +252,20 @@ export function AccrualFormView({
     // A CHANGED PARTICULAR IS A DIFFERENT DECISION, so it gets a different identity. Sending the
     // old key with new figures is an `op_key reused with different args` refusal, which is the
     // database telling the truth about a mistake this form can simply not make.
+    setOpKey(newOpKey());
+    setResent(false);
+    if (phase.kind === "rejected" || phase.kind === "failed" || phase.kind === "lost") {
+      setPhase({ kind: "editing" });
+    }
+  };
+
+  /** #942 — WHICH WAY THIS ACCRUAL RUNS. Changing it CLEARS both account legs, because the two
+   *  they were chosen from are of the wrong TYPE for the new side: an expense account cannot be a
+   *  revenue accrual's profit-and-loss leg, and keeping it would leave a code on screen that the
+   *  door can only refuse (`accrual_account_relationship`). The preparer re-chooses from the two
+   *  lists the new side offers. */
+  const setSide = (side: AccrualDraft["side"]) => {
+    setDraft((current) => ({ ...current, side, expenseAccountCode: "", liabilityAccountCode: "" }));
     setOpKey(newOpKey());
     setResent(false);
     if (phase.kind === "rejected" || phase.kind === "failed" || phase.kind === "lost") {
@@ -522,6 +538,29 @@ export function AccrualFormView({
 
       <section className="flex flex-col gap-3">
         <h3 className="text-sm font-medium">{t("amountHeading")}</h3>
+        {/* #942 — THE SIDE COMES FIRST IN THIS SECTION because it decides which accounts the two
+            legs below may offer and which of them is debited. */}
+        <Field
+          id={accrualFieldElementId("side")}
+          label={t("fieldSide")}
+          error={message("side")}
+          hint={revenueSide ? t("sideRevenueHint") : t("sideExpenseHint")}
+          className="min-w-40"
+        >
+          <NativeSelect
+            id={accrualFieldElementId("side")}
+            ref={(node) => registerField("side", node)}
+            value={draft.side}
+            disabled={busy}
+            aria-invalid={message("side") === null ? undefined : true}
+            aria-describedby={`${accrualFieldElementId("side")}-error`}
+            onChange={(e) => setSide(e.target.value as AccrualDraft["side"])}
+          >
+            {ACCRUAL_SIDES.map((side) => (
+              <option key={side} value={side}>{sideOption(t, side)}</option>
+            ))}
+          </NativeSelect>
+        </Field>
         <div className="flex flex-wrap gap-3">
           <Field
             id={accrualFieldElementId("amountCents")}
@@ -552,7 +591,7 @@ export function AccrualFormView({
           </Field>
           <Field
             id={accrualFieldElementId("expenseAccountCode")}
-            label={t("fieldExpenseLeg")}
+            label={revenueSide ? t("fieldIncomeLeg") : t("fieldExpenseLeg")}
             error={message("expenseAccountCode")}
             className="min-w-40 flex-1"
           >
@@ -566,16 +605,16 @@ export function AccrualFormView({
               onChange={(e) => set("expenseAccountCode", e.target.value)}
             >
               <option value="">{t("accountChoose")}</option>
-              {accounts.filter((a) => a.is_active && a.account_type === "expense").map((a) => (
+              {accounts.filter((a) => a.is_active && a.account_type === (revenueSide ? "income" : "expense")).map((a) => (
                 <option key={a.account_code} value={a.account_code}>{a.account_code} {a.name}</option>
               ))}
             </NativeSelect>
           </Field>
           <Field
             id={accrualFieldElementId("liabilityAccountCode")}
-            label={t("fieldLiabilityLeg")}
+            label={revenueSide ? t("fieldAssetLeg") : t("fieldLiabilityLeg")}
             error={message("liabilityAccountCode")}
-            hint={t("liabilityHint")}
+            hint={revenueSide ? t("assetHint") : t("liabilityHint")}
             className="min-w-40 flex-1"
           >
             <NativeSelect
@@ -588,7 +627,7 @@ export function AccrualFormView({
               onChange={(e) => set("liabilityAccountCode", e.target.value)}
             >
               <option value="">{t("accountChoose")}</option>
-              {accounts.filter((a) => a.is_active && a.account_type === "liability").map((a) => (
+              {accounts.filter((a) => a.is_active && a.account_type === (revenueSide ? "asset" : "liability")).map((a) => (
                 <option key={a.account_code} value={a.account_code}>{a.account_code} {a.name}</option>
               ))}
             </NativeSelect>
@@ -804,6 +843,16 @@ function Field({
 }
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
+
+function sideOption(t: Translate, side: string): string {
+  // #942 — the same honest raw-value fallback `methodOption` uses: a side this build has not
+  // enumerated prints as itself, never as a key path.
+  const labels: Record<string, string> = {
+    expense: t("sideExpense"),
+    revenue: t("sideRevenue"),
+  };
+  return labels[side] ?? side;
+}
 
 function methodOption(t: Translate, rule: string): string {
   // TWO RULES (#937), and an HONEST raw-value fallback for anything outside them (the

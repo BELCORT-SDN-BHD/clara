@@ -54,12 +54,15 @@ const ACCOUNTS: CoaAccountRow[] = [
   { client_id: CLIENT, account_code: "6100", name: "Office Rent", account_type: "expense", is_active: true },
   { client_id: CLIENT, account_code: "2020", name: "Accruals", account_type: "liability", is_active: true },
   { client_id: CLIENT, account_code: "1150", name: "Maybank current", account_type: "asset", is_active: true },
+  { client_id: CLIENT, account_code: "4000", name: "Sales / Fees Income", account_type: "income", is_active: true },
+  { client_id: CLIENT, account_code: "1180", name: "Accrued Income", account_type: "asset", is_active: true },
 ];
 
 /** The row being corrected — `clara.get_accrual_adjustment`'s own shape, with the authority window
  *  FIXED at 2026-07-01..2026-07-31, the same span the term must sit inside. */
 const ROW: AccrualDetail = {
   accrual_id: ACCRUAL,
+  side: "expense",
   plan_id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
   revision: 1,
   purpose: "Monthly office rent accrual",
@@ -177,6 +180,11 @@ function focusedId(): string | null {
 }
 
 const F = (field: string) => `accrual-${field}`;
+
+function optionValues(node: Stub): string[] {
+  const kids = (node as { children?: Stub[] }).children ?? [];
+  return kids.map((k) => (k as { getAttribute?: (a: string) => string | null }).getAttribute?.("value") ?? "");
+}
 
 async function clickSubmit(h: Awaited<ReturnType<typeof renderComponent>>): Promise<void> {
   const button = h.find((n) => n.tagName === "BUTTON" && /Record the correction|Recording/.test(String((n as { textContent?: string }).textContent ?? "")));
@@ -518,6 +526,61 @@ test("937.correct: a restated set that no longer adds up to the total is refused
     assert.match(h.text(), /The stated periods do not add up to the total accrued over the window/);
     assert.equal(focusedId(), `${F("periodAmounts")}-amount-0`,
       "…and the focus lands on the block that holds the mistake");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ==============================================================================================
+// #942 — A CORRECTION RESTATES AN ACCRUAL; IT NEVER TURNS ONE SIDE INTO THE OTHER.
+// `clara.correct_accrual_adjustment` refuses a side change by name (`accrual_side_immutable`), so
+// this form does not offer the change at all: the side is SHOWN, the two legs are labelled and
+// filtered by it, and it crosses the wire exactly as recorded.
+// ==============================================================================================
+
+const REVENUE_ROW: AccrualDetail = {
+  ...ROW,
+  side: "revenue",
+  purpose: "Unbilled advisory fees",
+  expense_account_code: "4000",
+  liability_account_code: "1180",
+  plan: {
+    ...ROW.plan,
+    basis: {
+      posting_date: "2026-07-01",
+      memo: "Unbilled advisory fees",
+      currency: "MYR",
+      lines: [
+        { account_code: "1180", debit_cents: 120000, credit_cents: 0 },
+        { account_code: "4000", debit_cents: 0, credit_cents: 120000 },
+      ],
+    },
+  },
+};
+
+test("942.correct: a revenue accrual's correction form shows the side, labels both legs by it, and offers NO way to change it", async () => {
+  const sent: { accrualId: string; accrual: { side?: string }; opKey: string }[] = [];
+  const h = await renderComponent(App({
+    row: REVENUE_ROW,
+    submit: async (input) => { sent.push(input as never); return CORRECTED; },
+  }));
+  try {
+    assert.match(h.text(), /Income earned, not yet invoiced/,
+      "the side is stated on the form, because it decides what the two legs below even mean");
+    assert.equal(
+      h.find((n) => (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("id") === F("side")),
+      null,
+      "a control whose only possible outcome is accrual_side_immutable is not rendered at all");
+    assert.match(h.text(), /Revenue account/);
+    assert.match(h.text(), /Accrued income account/);
+    assert.deepEqual(optionValues(byId(h, F("expenseAccountCode"))), ["", "4000"]);
+    assert.deepEqual(optionValues(byId(h, F("liabilityAccountCode"))), ["", "1150", "1180"]);
+
+    await h.fireEvent(byId(h, F("amountCents")), "change", (n) => setFieldValue(n, "1,100.00"));
+    await h.settle();
+    await clickSubmit(h);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.accrual.side, "revenue", "the side crosses the wire exactly as recorded");
   } finally {
     await h.unmount();
   }

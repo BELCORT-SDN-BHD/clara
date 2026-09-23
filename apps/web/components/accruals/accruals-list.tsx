@@ -17,6 +17,7 @@
 // the dates come back from the door as `YYYY-MM-DD` and are printed as they arrived.
 
 import Link from "next/link";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { DataState } from "@/components/firm/data-state";
@@ -27,7 +28,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AccrualBoundaryStatement } from "./accrual-statement";
 import { AccrualBillConflicts } from "./accrual-bill-conflicts";
-import { loadAccruals, type AccrualListRow } from "@/lib/accruals/api";
+import { NativeSelect } from "@/components/common/native-select";
+import { ACCRUAL_SIDES, loadAccruals, type AccrualListRow, type AccrualSide } from "@/lib/accruals/api";
 import { accrualCreateHref, accrualDetailHref } from "@/lib/navigation/tree";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { formatCents } from "@/lib/bank/money";
@@ -35,7 +37,13 @@ import { formatCents } from "@/lib/bank/money";
 export function AccrualsList({ clientId }: { clientId: string }) {
   const t = useTranslations("Accruals");
   const accruals = useAsyncRead(() => loadAccruals(clientId));
-  const rows = accruals.data ?? [];
+  const all = accruals.data ?? [];
+  // #942 — THE SIDE FILTER IS A VIEW OF WHAT WAS ALREADY READ, not a second round trip:
+  // `clara.list_accrual_adjustments` takes a client and a date window and answers with every
+  // accrual of that client, so narrowing here shows exactly the rows the register already holds
+  // and can never disagree with the count beside it.
+  const [side, setSide] = useState<AccrualSide | "">("");
+  const rows = side === "" ? all : all.filter((r) => r.side === side);
 
   return (
     <div className="flex flex-col gap-6">
@@ -60,6 +68,22 @@ export function AccrualsList({ clientId }: { clientId: string }) {
           {t("listHeading")}
         </SectionHeader>
         <p className="max-w-prose text-sm text-muted-foreground">{t("listBody")}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-sm text-muted-foreground" htmlFor="accruals-side-filter">
+            {t("filterSide")}
+          </label>
+          <NativeSelect
+            id="accruals-side-filter"
+            className="w-auto min-w-40"
+            value={side}
+            onChange={(e) => setSide(e.target.value as AccrualSide | "")}
+          >
+            <option value="">{t("filterSideAll")}</option>
+            {ACCRUAL_SIDES.map((s) => (
+              <option key={s} value={s}>{sideLabel(t, s)}</option>
+            ))}
+          </NativeSelect>
+        </div>
         <DataState
           loading={accruals.loading}
           error={accruals.error}
@@ -70,6 +94,7 @@ export function AccrualsList({ clientId }: { clientId: string }) {
             <TableHeader>
               <TableRow>
                 <TableHead>{t("colPurpose")}</TableHead>
+                <TableHead>{t("colSide")}</TableHead>
                 <TableHead>{t("colTerm")}</TableHead>
                 <TableHead>{t("colAmount")}</TableHead>
                 <TableHead>{t("colSchedule")}</TableHead>
@@ -99,10 +124,16 @@ function AccrualRow({ clientId, row }: { clientId: string; row: AccrualListRow }
         >
           {row.purpose}
         </Link>
+        {/* #942 — THE LEGS READ IN POSTING ORDER. A revenue accrual debits the accrued-income
+            asset and credits the revenue account, so printing the two columns in their stored
+            order would say the opposite of what the ledger will do for half the register. */}
         <span className="block text-xs text-muted-foreground">
-          {t("legs", { expense: row.expense_account_code, liability: row.liability_account_code })}
+          {row.side === "revenue"
+            ? t("legs", { expense: row.liability_account_code, liability: row.expense_account_code })
+            : t("legs", { expense: row.expense_account_code, liability: row.liability_account_code })}
         </span>
       </TableCell>
+      <TableCell className="text-muted-foreground">{sideLabel(t, row.side)}</TableCell>
       <TableCell className="text-muted-foreground">
         <span className="block">{t("termRange", { from: row.service_period_start, to: row.service_period_end })}</span>
         <span className="block text-xs">{methodLabel(t, row.method?.rule ?? "")}</span>
@@ -132,6 +163,15 @@ type Translate = (key: string, values?: Record<string, string | number>) => stri
  *  admitted set (the adjustments-register N10 idiom): a rule this build has not enumerated prints
  *  as itself, never as a key path and never as a silent blank. One rule is admitted because one is
  *  performed (migration 0222's FOURTH MEASUREMENT). */
+/** #942 — the side, in one word, with the same honest raw-value fallback `methodLabel` uses. */
+export function sideLabel(t: Translate, side: string): string {
+  const labels: Record<string, string> = {
+    expense: t("sideShortExpense"),
+    revenue: t("sideShortRevenue"),
+  };
+  return labels[side] ?? side;
+}
+
 export function methodLabel(t: Translate, rule: string): string {
   const labels: Record<string, string> = {
     stated_amount: t("methodStatedAmount"),

@@ -22,6 +22,7 @@ import { SectionHeader } from "@/components/common/section-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCents } from "@/lib/bank/money";
+import { sideLabel } from "./accruals-list";
 import { journalEntryHref } from "@/lib/navigation/tree";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
 import { reverseAccrualNow, skipNextAccrualOccurrence } from "@/lib/accruals/api";
@@ -96,6 +97,10 @@ function AccrualBillConflictItem({
     <li className="flex flex-col gap-2 rounded-md border p-3">
       <p className="text-sm">{row.question_text}</p>
       <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+        {/* #942 — WHICH ACCRUAL THIS IS ABOUT. The two remedies read differently on the two
+            sides (reversing an accrued FEE releases income, not a cost), so the item says which
+            one it is rather than leaving it to the sentence alone. */}
+        <span>{t("billConflictSide", { side: sideLabel(t, row.accrual_side ?? "expense") })}</span>
         <span>{t("billConflictPeriod", { period: dueDate })}</span>
         {row.amount_cents !== null ? (
           <span>{t("billConflictAmount", { amount: formatCents(row.amount_cents) })}</span>

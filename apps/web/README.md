@@ -1868,3 +1868,49 @@ scrolling sideways, and every control is a real `<select>`, `<input>` or `<butto
 order with its own `<label for>`. `accrual-form.test.tsx` runs the shared `test/a11yRules.ts` scan
 over the form with the block mounted and asserts every rule clean but `heading-order`, which is an
 artefact of mounting the VIEW without its route's own h1/h2 and predates this lane.
+
+## #942 — an accrual runs one of two ways, and every surface says which
+
+The accrual lane gained a **side** (migration 0304): `expense` — Dr the expense account / Cr a
+non-control accrued liability — or `revenue` — Dr a non-control asset (accrued income) / Cr the
+income account, for a service delivered and not yet invoiced. One lane with a side, not a second
+lane, which is the owner's own decision. Everything below follows from one fact about the database
+this file states once, in `lib/accruals/api.ts`'s `ACCRUAL_SIDES` doc comment: **the two account
+keys are historical**. `expense_account_code` is the PROFIT-AND-LOSS leg (an expense account on one
+side, an income account on the other) and `liability_account_code` is the BALANCE-SHEET leg (a
+non-control liability, or the accrued-income asset). They keep 0222's spelling because the FROZEN
+`start_accrual_work` tool sends exactly those two words.
+
+**The side is the first thing the amount-and-accounts section asks**, because it decides which
+accounts the two legs may even offer. Choosing it re-labels both controls (`Expense account` /
+`Liability account` become `Revenue account` / `Accrued income account`), re-filters both pickers
+by `account_type` (expense+liability, or income+asset) and **clears both chosen codes**: the code
+a preparer picked for the other side is of the wrong TYPE for this one, and leaving it on screen
+would leave a value the door can only refuse (`accrual_account_relationship`). The disabled preview
+flips with it — `derivedAccrualLines` now mirrors `clara._accrual_journal_basis` on both sides, so
+what is previewed is still exactly what the door will build.
+
+**A correction shows the side and offers no way to change it.** `clara.correct_accrual_adjustment`
+refuses a side change by name (`accrual_side_immutable`), so a control for it could only ever
+produce that refusal — the same reasoning that already keeps the METHOD off that form. The side is
+stated in words above the two legs, which are labelled and filtered by it, and it crosses the wire
+exactly as recorded.
+
+**The register carries both sides at once**, so two things had to change or it would have printed
+the opposite of what posts for half its rows: a `Side` column, and the two legs rendered in POSTING
+order (`Dr 1180 / Cr 4000` for a revenue accrual, not the stored column order). The side filter is a
+VIEW of what was already read rather than a second round trip —
+`clara.list_accrual_adjustments` takes a client and a date window and answers with every accrual of
+that client, so narrowing here can never disagree with the rows the register holds.
+
+**The "a document arrived inside an accrued period" item names its side too.** The database's own
+sentence now says "a document-sourced invoice or receipt" for a revenue accrual and keeps #938's
+words for an expense one, and the row carries `accrual_side` (derived from the shared `id`, the
+`authority_id` idiom). It is OPTIONAL on `ReviewQueueRow` for `work_questions`' own stated reason:
+every fixture in the app would otherwise stop compiling for a key one affordance renders as
+`?? "expense"`, and a required key would claim a pre-0304 database sends one.
+
+**One locale.** This app ships `messages/en.json` alone — there is no `zh.json`, and
+`i18n/request.ts` records that adding a locale is a routing.ts + middleware change. #942's
+acceptance names "en and zh"; the en half is here, and the zh half is an i18n lane's work rather
+than a string this ticket could have added to a file that does not exist.

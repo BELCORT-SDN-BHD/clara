@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
-import { renderComponent } from "../../test/hookHarness";
+import { renderComponent, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import messages from "../../messages/en.json";
@@ -66,6 +66,7 @@ function rpcRouter(answers: Record<string, unknown>): typeof fetch {
 
 const ROW = {
   accrual_id: ACCRUAL,
+  side: "expense",
   plan_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
   revision: 1,
   purpose: "Monthly office rent accrual",
@@ -153,4 +154,64 @@ test("652.list.rows — one recorded accrual renders its term, its legs and the 
       for (let i = 0; i < 3; i++) await h.settle();
     }
   });
+});
+
+// ==============================================================================================
+// #942 — THE SIDE ON THE REGISTER. Two accruals of one client can now run opposite ways, so a row
+// that did not say which way it ran would be printing its two legs in the wrong order for half of
+// them.
+// ==============================================================================================
+
+const REVENUE_ROW = {
+  ...ROW,
+  accrual_id: "dddddddd-dddd-4ddd-8ddd-ddddddddddde",
+  side: "revenue",
+  purpose: "Unbilled advisory fees",
+  expense_account_code: "4000",
+  liability_account_code: "1180",
+};
+
+test("942.list.side — each row names its side and prints its two legs in POSTING order", async () => {
+  await withMockedEnv(
+    rpcRouter({ list_accrual_adjustments: { client_id: CLIENT, accruals: [ROW, REVENUE_ROW] } }),
+    async () => {
+      const h = await renderComponent(app(createElement(AccrualsList, { clientId: CLIENT })));
+      try {
+        for (let i = 0; i < 6; i++) await h.settle();
+        const text = h.text();
+        assert.match(text, /Dr 6100 \/ Cr 2020/, "an expense accrual debits its expense account");
+        assert.match(text, /Dr 1180 \/ Cr 4000/,
+          "a revenue accrual debits the accrued-income asset and credits the revenue account");
+        assert.match(text, /Expense/);
+        assert.match(text, /Revenue/);
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+test("942.list.filter — the register can be narrowed to one side, and says so rather than looking empty", async () => {
+  await withMockedEnv(
+    rpcRouter({ list_accrual_adjustments: { client_id: CLIENT, accruals: [ROW, REVENUE_ROW] } }),
+    async () => {
+      const h = await renderComponent(app(createElement(AccrualsList, { clientId: CLIENT })));
+      try {
+        for (let i = 0; i < 6; i++) await h.settle();
+        const filter = h.find((n) => (n as { getAttribute?: (k: string) => string | null })
+          .getAttribute?.("id") === "accruals-side-filter");
+        assert.ok(filter, "the register offers a side filter");
+        await h.fireEvent(filter, "change", (n) => setFieldValue(n, "revenue"));
+        for (let i = 0; i < 3; i++) await h.settle();
+        const text = h.text();
+        assert.match(text, /Unbilled advisory fees/);
+        assert.doesNotMatch(text, /Monthly office rent accrual/,
+          "the expense accrual is filtered out, not hidden behind a scroll");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
 });

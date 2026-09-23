@@ -60,6 +60,10 @@ const ACCOUNTS: CoaAccountRow[] = [
   { client_id: CLIENT, account_code: "6100", name: "Office Rent", account_type: "expense", is_active: true },
   { client_id: CLIENT, account_code: "2020", name: "Accruals", account_type: "liability", is_active: true },
   { client_id: CLIENT, account_code: "1150", name: "Maybank current", account_type: "asset", is_active: true },
+  // #942 — the revenue side's own two legs, in the chart every new client gets: 4000 is 0150's
+  // own revenue row and 1180 Accrued Income is 0295's.
+  { client_id: CLIENT, account_code: "4000", name: "Sales / Fees Income", account_type: "income", is_active: true },
+  { client_id: CLIENT, account_code: "1180", name: "Accrued Income", account_type: "asset", is_active: true },
 ];
 
 // THE DOOR'S OWN ROW SHAPE (`lib/work/work-list.ts`'s `WorkListRow`), not the deleted direct
@@ -668,6 +672,66 @@ test("937.form: the per-period block passes the structural a11y scan, and every 
         && String((n as { textContent?: string }).textContent ?? "") === label);
       assert.ok(button, `"${label}" is a real button, reachable by Tab and fired by Enter/Space`);
     }
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ==============================================================================================
+// #942 — THE SIDE. It is the first thing the form asks, because it decides which accounts the two
+// legs may even offer and which way the preview posts.
+// ==============================================================================================
+
+async function chooseSide(h: Awaited<ReturnType<typeof renderComponent>>, side: string): Promise<void> {
+  await h.fireEvent(byId(h, F("side")), "change", (n) => setFieldValue(n, side));
+  await h.settle();
+}
+
+test("942.form: the side is a REAL choice, and it decides which accounts each leg offers and what they are called", async () => {
+  const h = await renderComponent(App({}));
+  try {
+    const select = byId(h, F("side"));
+    assert.equal(select.tagName, "SELECT", "a choice that changes which way the entry posts is chosen, not announced");
+    assert.deepEqual(optionValues(select), ["expense", "revenue"]);
+
+    // THE EXPENSE SIDE, unchanged: an expense account and a plain liability.
+    assert.deepEqual(optionValues(byId(h, F("expenseAccountCode"))), ["", "6100"]);
+    assert.deepEqual(optionValues(byId(h, F("liabilityAccountCode"))), ["", "2020"]);
+    assert.match(h.text(), /Expense account/);
+    assert.match(h.text(), /Liability account/);
+
+    await chooseSide(h, "revenue");
+    // THE REVENUE SIDE: an income account and the non-control assets, and both legs re-labelled.
+    assert.deepEqual(optionValues(byId(h, F("expenseAccountCode"))), ["", "4000"],
+      "only income accounts can be the profit-and-loss leg of a revenue accrual");
+    assert.deepEqual(optionValues(byId(h, F("liabilityAccountCode"))), ["", "1150", "1180"],
+      "…and the balance-sheet leg offers this client's assets");
+    assert.match(h.text(), /Revenue account/);
+    assert.match(h.text(), /Accrued income account/);
+    assert.doesNotMatch(h.text(), /Expense account/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("942.form: a revenue accrual crosses the wire with its side, and the preview shows Dr accrued income / Cr revenue", async () => {
+  const sent: CreateAccrualInput[] = [];
+  const h = await renderComponent(App({
+    submit: async (input) => { sent.push(input); return ACCEPTED; },
+  }));
+  try {
+    await chooseSide(h, "revenue");
+    await fill(h, { expenseAccountCode: "4000", liabilityAccountCode: "1180" });
+    // THE DISABLED PREVIEW IS WHAT THE DOOR WILL BUILD: the asset leg is debited and the revenue
+    // account credited, in that order.
+    const preview = h.text();
+    assert.match(preview, /accrued income/i);
+
+    await clickSubmit(h);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.accrual.side, "revenue");
+    assert.equal(sent[0]?.accrual.expense_account_code, "4000");
+    assert.equal(sent[0]?.accrual.liability_account_code, "1180");
   } finally {
     await h.unmount();
   }

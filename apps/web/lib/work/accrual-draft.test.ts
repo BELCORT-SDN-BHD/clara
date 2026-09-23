@@ -358,6 +358,7 @@ test("652.valid: the first invalid field is the first control in reading order",
 
 function goodCorrectionDraft(over: Partial<AccrualCorrectionDraft> = {}): AccrualCorrectionDraft {
   return {
+    side: "expense",
     expenseAccountCode: "6100",
     liabilityAccountCode: "2020",
     amountCents: 120000,
@@ -404,7 +405,7 @@ test("936.correction: the two legs, their roles and their distinctness — the s
 
 test("936.correction: no purpose, authority or schedule issue exists to raise — an EMPTY draft names only what this draft carries", () => {
   const issues = validateAccrualCorrectionDraft(
-    { expenseAccountCode: "", liabilityAccountCode: "", amountCents: 0, servicePeriodStart: "",
+    { side: "expense", expenseAccountCode: "", liabilityAccountCode: "", amountCents: 0, servicePeriodStart: "",
       servicePeriodEnd: "", method: "stated_amount", periodAmounts: [], instruction: "", memo: "",
       sourceDocumentId: "" },
     CORRECTION_WINDOW, KNOWN);
@@ -428,6 +429,7 @@ test("936.correction: a corrected term that would fall outside the FIXED authori
 test("936.correction: toAccrualParticulars accepts the correction draft structurally — no second wire mapping", () => {
   const particulars = toAccrualParticulars(goodCorrectionDraft({ memo: "Restated memo", sourceDocumentId: "  " }));
   assert.deepEqual(particulars, {
+    side: "expense",
     expense_account_code: "6100",
     liability_account_code: "2020",
     amount_cents: 120000,
@@ -449,7 +451,7 @@ test("652.wire: toAccrualParticulars emits the DATABASE's own spelling and nothi
   const out = toAccrualParticulars(goodDraft());
   assert.deepEqual(Object.keys(out).sort(), [
     "amount_cents", "currency", "expense_account_code", "instruction", "liability_account_code",
-    "method", "service_period_end", "service_period_start", "term_source",
+    "method", "service_period_end", "service_period_start", "side", "term_source",
   ]);
   assert.equal(out.currency, "MYR");
   assert.deepEqual(out.method, { rule: "stated_amount" });
@@ -683,4 +685,36 @@ test("937.periods: a CORRECTION restates the set against the LIVE revision's own
       window, KNOWN).map((i) => i.code),
     ["periodAmountsUnbalanced", "periodAmountMissing"],
     "…and dropping August leaves the set short of the total, with August unstated");
+});
+
+// ==============================================================================================
+// #942 — THE SIDE. It is a particular like any other: it crosses the wire in the database's own
+// spelling, it survives a storage round trip, and a stored value this lane does not perform seeds
+// nothing (the `method` rule, applied to the other closed set the draft now carries).
+// ==============================================================================================
+
+test("942.wire: the side crosses the wire, and a draft that states none is an expense accrual", () => {
+  const out = toAccrualParticulars(goodDraft());
+  assert.equal(out.side, "expense", "the empty draft starts on the side every existing accrual is on");
+  const revenue = toAccrualParticulars(goodDraft({
+    side: "revenue", expenseAccountCode: "4000", liabilityAccountCode: "1180",
+  }));
+  assert.equal(revenue.side, "revenue");
+  assert.equal(revenue.expense_account_code, "4000",
+    "the profit-and-loss leg carries the income account, under the key 0222 minted");
+  assert.equal(revenue.liability_account_code, "1180",
+    "…and the balance-sheet leg carries the accrued-income asset");
+});
+
+test("942.parse: a stored draft naming a side this lane does not perform seeds nothing", () => {
+  const storage = memoryStorage();
+  writeAccrualDraft(SCOPE, { opKey: "op-942", draft: goodDraft({ side: "revenue" }) }, storage);
+  assert.equal(readAccrualDraft(SCOPE, storage)?.draft.side, "revenue", "a round trip restores it");
+
+  const key = accrualDraftKey(SCOPE);
+  const stored = JSON.parse(storage.map.get(key) as string);
+  stored.draft.side = "income";
+  storage.map.set(key, JSON.stringify(stored));
+  assert.equal(readAccrualDraft(SCOPE, storage), null,
+    "a half-understood draft is worse than none — the same answer the method rule gets");
 });

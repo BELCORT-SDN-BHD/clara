@@ -74,6 +74,10 @@ const ACCRUAL_WRITE_FLOOR = { minimumRole: "bookkeeper" } as const;
 function draftFromAccrual(row: AccrualDetail): AccrualCorrectionDraft {
   const basisMemo = row.plan.basis?.memo ?? "";
   return {
+    // #942 — the side is CARRIED, never chosen: clara.correct_accrual_adjustment refuses a
+    // correction that asks for the other side (accrual_side_immutable), so this draft can only
+    // ever hold the one the accrual was configured with.
+    side: row.side ?? "expense",
     expenseAccountCode: row.expense_account_code,
     liabilityAccountCode: row.liability_account_code,
     amountCents: row.amount_cents,
@@ -214,7 +218,9 @@ export function AccrualCorrectionFormView({
   const previewPeriod = draft.method === "stated_period_amount"
     ? [...draft.periodAmounts].sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0] ?? null
     : null;
+  const revenueSide = draft.side === "revenue";
   const lines = derivedAccrualLines({
+    side: draft.side,
     expenseAccountCode: draft.expenseAccountCode,
     liabilityAccountCode: draft.liabilityAccountCode,
     amountCents: previewPeriod === null ? draft.amountCents : previewPeriod.amountCents,
@@ -420,6 +426,15 @@ export function AccrualCorrectionFormView({
           <h4 className="text-sm font-medium">{t("fieldMethod")}</h4>
           <p className="text-sm">{methodLabel(t, draft.method)}</p>
         </div>
+        {/* #942 — THE SIDE IS SHOWN, NOT OFFERED, for the same reason the method is and one more:
+            the door refuses a side change BY NAME (accrual_side_immutable), so a control for it
+            could only ever produce that refusal. It is stated here because the two account legs
+            below mean different things on the two sides. */}
+        <div className="flex flex-col gap-1">
+          <h4 className="text-sm font-medium">{t("fieldSide")}</h4>
+          <p className="text-sm">{revenueSide ? t("sideRevenue") : t("sideExpense")}</p>
+          <p className="text-sm text-muted-foreground">{revenueSide ? t("sideRevenueHint") : t("sideExpenseHint")}</p>
+        </div>
       </section>
 
       <section className="flex flex-col gap-3">
@@ -447,7 +462,7 @@ export function AccrualCorrectionFormView({
           </Field>
           <Field
             id={accrualFieldElementId("expenseAccountCode")}
-            label={t("fieldExpenseLeg")}
+            label={revenueSide ? t("fieldIncomeLeg") : t("fieldExpenseLeg")}
             error={message("expenseAccountCode")}
             className="min-w-40 flex-1"
           >
@@ -461,16 +476,16 @@ export function AccrualCorrectionFormView({
               onChange={(e) => set("expenseAccountCode", e.target.value)}
             >
               <option value="">{t("accountChoose")}</option>
-              {accounts.filter((a) => a.is_active && a.account_type === "expense").map((a) => (
+              {accounts.filter((a) => a.is_active && a.account_type === (revenueSide ? "income" : "expense")).map((a) => (
                 <option key={a.account_code} value={a.account_code}>{a.account_code} {a.name}</option>
               ))}
             </NativeSelect>
           </Field>
           <Field
             id={accrualFieldElementId("liabilityAccountCode")}
-            label={t("fieldLiabilityLeg")}
+            label={revenueSide ? t("fieldAssetLeg") : t("fieldLiabilityLeg")}
             error={message("liabilityAccountCode")}
-            hint={t("liabilityHint")}
+            hint={revenueSide ? t("assetHint") : t("liabilityHint")}
             className="min-w-40 flex-1"
           >
             <NativeSelect
@@ -483,7 +498,7 @@ export function AccrualCorrectionFormView({
               onChange={(e) => set("liabilityAccountCode", e.target.value)}
             >
               <option value="">{t("accountChoose")}</option>
-              {accounts.filter((a) => a.is_active && a.account_type === "liability").map((a) => (
+              {accounts.filter((a) => a.is_active && a.account_type === (revenueSide ? "asset" : "liability")).map((a) => (
                 <option key={a.account_code} value={a.account_code}>{a.account_code} {a.name}</option>
               ))}
             </NativeSelect>

@@ -7,7 +7,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accrualReversalDate, reverseAccrualNow, skipNextAccrualOccurrence } from "./api";
+import {
+  accrualReversalDate, derivedAccrualLines, reverseAccrualNow, skipNextAccrualOccurrence,
+} from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 function fakeSession(token: string | null): SessionTokenAccessor {
@@ -89,4 +91,58 @@ test("skipNextAccrualOccurrence: POSTs skip_plan_occurrence with p_plan/p_after_
   assert.equal(seenBody.p_after_due, "2026-01-31");
   assert.equal(seenBody.p_reason, "vendor now bills directly");
   assert.ok(typeof seenBody.p_op_key === "string" && seenBody.p_op_key.length > 0);
+});
+
+// ── derivedAccrualLines — the preview mirrors clara._accrual_journal_basis ON BOTH SIDES (#942) ──
+
+test("derivedAccrualLines: an expense accrual previews Dr the expense account / Cr the accrued liability", () => {
+  assert.deepEqual(
+    derivedAccrualLines({
+      side: "expense",
+      expenseAccountCode: "6100",
+      liabilityAccountCode: "2020",
+      amountCents: 120000,
+      servicePeriodStart: "2026-07-01",
+      servicePeriodEnd: "2026-07-31",
+    }),
+    [
+      { account_code: "6100", debit_cents: 120000, credit_cents: 0,
+        description: "one period of the accrual term 2026-07-01 to 2026-07-31" },
+      { account_code: "2020", debit_cents: 0, credit_cents: 120000, description: "accrual" },
+    ],
+  );
+});
+
+test("derivedAccrualLines: a revenue accrual previews Dr accrued income / Cr the revenue account", () => {
+  assert.deepEqual(
+    derivedAccrualLines({
+      side: "revenue",
+      expenseAccountCode: "4000",
+      liabilityAccountCode: "1180",
+      amountCents: 120000,
+      servicePeriodStart: "2026-07-01",
+      servicePeriodEnd: "2026-07-31",
+    }),
+    [
+      { account_code: "1180", debit_cents: 120000, credit_cents: 0, description: "accrued income" },
+      { account_code: "4000", debit_cents: 0, credit_cents: 120000,
+        description: "one period of the accrual term 2026-07-01 to 2026-07-31" },
+    ],
+  );
+});
+
+test("derivedAccrualLines: under a stated period amount the PROFIT-AND-LOSS leg names the period, on either side", () => {
+  const expense = derivedAccrualLines({
+    side: "expense", expenseAccountCode: "6100", liabilityAccountCode: "2020",
+    amountCents: 90000, servicePeriodStart: "2026-07-01", servicePeriodEnd: "2026-08-31",
+    periodDueDate: "2026-07-31",
+  });
+  assert.equal(expense[0]?.description, "the accrual period ending 2026-07-31");
+  const revenue = derivedAccrualLines({
+    side: "revenue", expenseAccountCode: "4000", liabilityAccountCode: "1180",
+    amountCents: 90000, servicePeriodStart: "2026-07-01", servicePeriodEnd: "2026-08-31",
+    periodDueDate: "2026-07-31",
+  });
+  assert.equal(revenue[1]?.description, "the accrual period ending 2026-07-31");
+  assert.equal(revenue[0]?.description, "accrued income");
 });

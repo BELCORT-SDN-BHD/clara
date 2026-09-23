@@ -319,4 +319,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "181460d90c55555b6119bf541bd3b344d2617f078c4f687c45c2003990a9e73f",
     },
   ],
+  // #942 [0304] (riders wave 4, lane 03) — the SAME 0146/0168/0180/0260/0288/0302 splice family
+  // over clara.list_review_queue, appended at the sorted position: this time the arm 0302 added
+  // gains the SIDE of the accrual it flags.
+  [
+    "0304_accrual_revenue_side.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at a literal signature and re-installed with TWO additive edits inside the accrual_bill_conflict arm 0302 added: the question sentence gains a `case` that names the accrual’s side, and the row-json builder gains one derived-from-`id` key (accrual_side) — the same asset_id/advance_id/authority_id idiom, so no arm’s column vector moves. Each anchor is counted and must occur EXACTLY once; the block is a guarded no-op under the #957 redo path when the body already carries the accrual_side marker; and its own postcheck re-derives all ELEVEN row-kind markers at their prestate counts, both new literals exactly once, and the shared column vector at its unchanged count of eleven. The block emits no view definition at all, so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) can be a target, by construction rather than by inspection of a rendered string. Same family as 0146’s, 0168’s, 0180’s, 0260’s, 0288’s and 0302’s splices of the same queue function. Every other section of this migration is STATIC DDL the lexer inspects directly: one `alter table … add column if not exists` with its CHECK and column comment on clara.accrual_adjustments, two new ungranted internals (clara._accrual_sides, clara._accrual_side) and ten whole recut function bodies at literal signatures, each EMBEDDED in full rather than spliced. The prestate pins every recut body at its measured pre-image OR at this file’s own output and refuses anything else; the tail re-reads the committed bodies, the column’s default, the CHECK (driven on a temporary table carrying the byte-identical predicate) and every door grant it must not have moved.",
+      sha256: "9fb4a552be19b1bd6263331ed924f1b28918f503773aa53172e43fad6822f735",
+    },
+  ],
 ]);

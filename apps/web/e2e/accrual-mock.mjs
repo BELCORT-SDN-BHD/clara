@@ -65,6 +65,12 @@ export const ACC = {
   // id, and this is the same plan the walk already drives.
   billEntryId: "65ffffff-6500-4650-8650-650650650650",
   billDocumentId: "6500eeee-6500-4650-8650-650650650650",
+  // #942 — a REVENUE accrual of the same client: fees delivered and not yet invoiced, accrued
+  // Dr 1180 Accrued Income / Cr 4000 Sales. It exists so the register can be seen carrying both
+  // sides at once, which is the only state in which a side column and a side filter mean anything.
+  revenueAccrualId: "65cccccc-6500-4650-8650-650650650650",
+  revenuePlanId: "65dddddd-6500-4650-8650-650650650650",
+  revenuePurpose: "Unbilled advisory fees",
 };
 
 /** The ONLY RPC verbs this lane's dispatch chain recognises — the allow-list `readCachedJson`'s own
@@ -148,6 +154,11 @@ const ACCOUNTS = [
   // between what the form can know and what the database knows, rather than a contrived payload.
   { client_id: ACC.clientId, account_code: "2050", name: "Trade Creditors", account_type: "liability", is_active: true },
   { client_id: ACC.clientId, account_code: "1150", name: "Maybank current", account_type: "asset", is_active: true },
+  // #942 — the revenue side's own two legs: an income account and the standard chart's own
+  // accrued-income asset (0295's 1180). 1150 above is an asset too, so the asset picker offers a
+  // real CHOICE rather than one row that could pass by accident.
+  { client_id: ACC.clientId, account_code: "4000", name: "Sales / Fees Income", account_type: "income", is_active: true },
+  { client_id: ACC.clientId, account_code: "1180", name: "Accrued Income", account_type: "asset", is_active: true },
 ];
 
 /** The authority picker's rows — `clara.accounting_work` of THIS client, which is what
@@ -240,6 +251,7 @@ const PLAN = () => ({
 
 const POSTED = {
   accrual_id: ACC.accrualId,
+  side: "expense",
   plan_id: ACC.planId,
   revision: 1,
   purpose: ACC.purpose,
@@ -332,9 +344,23 @@ const CORRECTABLE_SUCCESSOR = {
   created_at: "2026-07-05T02:00:00.000Z",
 };
 
+const REVENUE = {
+  ...POSTED,
+  accrual_id: ACC.revenueAccrualId,
+  plan_id: ACC.revenuePlanId,
+  side: "revenue",
+  purpose: ACC.revenuePurpose,
+  expense_account_code: "4000",
+  liability_account_code: "1180",
+  amount_cents: 96000,
+  created_at: "2026-07-03T02:00:00.000Z",
+  occurrence_count: 1,
+  posted: false,
+};
+
 const LIST = () => [
   ...(state.created ? [CREATED] : []),
-  UNPOSTED, POSTED, CORRECTABLE, CORRECTED_ORIGINAL,
+  UNPOSTED, POSTED, REVENUE, CORRECTABLE, CORRECTED_ORIGINAL,
   ...(state.corrected ? [CORRECTABLE_SUCCESSOR] : []),
   CORRECTED_SUCCESSOR,
 ];
@@ -554,7 +580,7 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
       auto: false, rule_backed: false, high_stakes: false, aged_since: "2026-07-31T02:05:00.000Z",
       amount_cents: 120000, period: "2026-07-31",
       question_text: `A document-sourced entry posted inside the accrued period 2026-07-01 to 2026-07-31 for "${ACC.purpose}"`,
-      created_at: "2026-07-31T02:05:00.000Z", id: ACC.planId,
+      created_at: "2026-07-31T02:05:00.000Z", id: ACC.planId, accrual_side: "expense",
       coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null,
       advance_id: null, autodraft: null, client_name: null, batch_ids: null,
       open_proposal_count: null,

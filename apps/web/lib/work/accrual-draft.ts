@@ -31,12 +31,14 @@ import {
 } from "./journal-draft";
 import {
   ACCRUAL_METHODS,
+  ACCRUAL_SIDES,
   ACCRUAL_FREQUENCIES,
   ACCRUAL_DAY_RULES,
   accrualScheduleDues,
   accrualScheduleYields,
   type AccrualMethod,
   type AccrualPeriodAmount,
+  type AccrualSide,
 } from "@/lib/accruals/api";
 
 /** #937 — one row of the per-period amounts block. `dueDate` is a date the SCHEDULE produces, and
@@ -49,6 +51,9 @@ export type AccrualPeriodAmountDraft = { dueDate: string; amountCents: number };
 export type AccrualDraft = {
   purpose: string;
   authorityWorkId: string;
+  /** #942 — which way this accrual runs. It decides which TYPES the two account controls may
+   *  offer, which leg the preview debits, and the words beside both of them. */
+  side: AccrualSide;
   expenseAccountCode: string;
   liabilityAccountCode: string;
   amountCents: number;
@@ -78,6 +83,9 @@ export function emptyAccrualDraft(): AccrualDraft {
   return {
     purpose: "",
     authorityWorkId: "",
+    // THE SIDE EVERY EXISTING ACCRUAL IS ON. A form that opened on the revenue side would be
+    // offering the rarer act first.
+    side: "expense",
     expenseAccountCode: "",
     liabilityAccountCode: "",
     amountCents: 0,
@@ -128,6 +136,7 @@ function parseDraft(raw: string): StoredAccrualDraft | null {
   const d = stored.draft as Record<string, unknown>;
 
   if (!ACCRUAL_METHODS.includes(d.method as never)) return null;
+  if (!ACCRUAL_SIDES.includes(d.side as never)) return null;
   if (!ACCRUAL_FREQUENCIES.includes(d.frequency as never)) return null;
   if (!ACCRUAL_DAY_RULES.includes(d.dayRule as never)) return null;
   const texts = [
@@ -157,6 +166,7 @@ function parseDraft(raw: string): StoredAccrualDraft | null {
   draft.amountCents = d.amountCents;
   draft.periodAmounts = periodAmounts;
   draft.method = d.method as AccrualMethod;
+  draft.side = d.side as AccrualSide;
   draft.frequency = d.frequency as AccrualDraft["frequency"];
   draft.dayRule = d.dayRule as AccrualDraft["dayRule"];
 
@@ -214,7 +224,7 @@ export function clearAccrualDraft(
 // ── the field mapper ────────────────────────────────────────────────────────
 
 export type AccrualFieldId =
-  | "purpose" | "authorityWorkId" | "expenseAccountCode" | "liabilityAccountCode"
+  | "purpose" | "authorityWorkId" | "side" | "expenseAccountCode" | "liabilityAccountCode"
   | "amountCents" | "servicePeriodStart" | "servicePeriodEnd" | "method" | "instruction"
   | "memo" | "frequency" | "dayRule" | "dayOfMonth" | "effectiveFrom" | "effectiveTo"
   | "sourceDocumentId" | "periodAmounts";
@@ -223,7 +233,9 @@ export type AccrualFieldId =
  *  `detail.field` appears here and nothing else does: a mapper that promised to focus a control for
  *  a refusal that cannot arrive would be a promise the database never keeps. */
 const ACCRUAL_FIELDS = new Set<string>([
-  "purpose", "authorityWorkId", "expenseAccountCode", "liabilityAccountCode", "amountCents",
+  // #942 — 0304 names `accrual.side` in two refusals (an unsupported side at the configuration
+  // door, an attempted side flip at the correction door), so both must reach a real control.
+  "purpose", "authorityWorkId", "side", "expenseAccountCode", "liabilityAccountCode", "amountCents",
   "servicePeriodStart", "servicePeriodEnd", "method", "instruction", "memo",
   "frequency", "dayRule", "dayOfMonth", "effectiveFrom", "effectiveTo", "sourceDocumentId",
   // #937. Migration 0303 can name this one INDEXED — `accrual.period_amounts[2].amount_cents` —
@@ -525,7 +537,7 @@ export function accrualFieldElementId(field: AccrualFieldId): string {
  *  structurally and a correction needs no second copy of this mapping. */
 type AccrualParticularsSource = Pick<
   AccrualDraft,
-  "expenseAccountCode" | "liabilityAccountCode" | "amountCents" | "servicePeriodStart"
+  "side" | "expenseAccountCode" | "liabilityAccountCode" | "amountCents" | "servicePeriodStart"
   | "servicePeriodEnd" | "method" | "instruction" | "memo" | "sourceDocumentId" | "periodAmounts"
 >;
 
@@ -533,6 +545,7 @@ type AccrualParticularsSource = Pick<
  *  0222 reads: the schedule, the window and the authority are the door's OWN arguments, and a key
  *  the database never reads could carry no refusal. */
 export function toAccrualParticulars(draft: AccrualParticularsSource): {
+  side: AccrualSide;
   expense_account_code: string;
   liability_account_code: string;
   amount_cents: number;
@@ -547,6 +560,9 @@ export function toAccrualParticulars(draft: AccrualParticularsSource): {
   source_document_id?: string;
 } {
   const out = {
+    // #942 — ALWAYS STATED, never left to the door's default: a surface that sends silence is
+    // asking the database to guess what the preparer chose.
+    side: draft.side,
     expense_account_code: draft.expenseAccountCode.trim(),
     liability_account_code: draft.liabilityAccountCode.trim(),
     amount_cents: draft.amountCents,
