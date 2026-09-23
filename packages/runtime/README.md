@@ -1097,7 +1097,7 @@ pressing anything. It starts where `intake-e2e.mjs` stops: that one owns the tra
 (CORS, the streaming PUT, the token lock, the upload capability never crossing workflow
 step IO); this one owns the chain AFTER the bytes are read.
 
-Seven legs. **Leg 1** has three arms and ZERO `clara.request_autodraft` anywhere in the
+Eight legs. **Leg 1** has three arms and ZERO `clara.request_autodraft` anywhere in the
 automatic lane — asserted from the source of `intake.mjs`, `intake-lanes.mjs`,
 `intake-recovery.mjs`, `autodraft.mjs`, `facts-gate.mjs` and `intakeRoutes.ts`, with a
 control proving the door exists (it is #614's RECOVERY act, not a gate):
@@ -1116,11 +1116,24 @@ control proving the door exists (it is #614's RECOVERY act, not a gate):
   it opened itself (origin `sweep`; the door's own CLR10 makes a run-bound `one_click`
   impossible). The door's verdict is read back and printed VERBATIM.
 
-**Residual, named.** Arm (c) proves the door is REACHED, not that a coding task is
-admitted: `_coding_lane_core` refuses this fixture's document (`tier_a_fails`,
-`direction_unresolved`, `vendor_unresolved`, `no_consent` — measured on clara_633) and
-routes it to `needs_you`. A Tier-A-complete document needs counterparty resolution, a
-resolved direction and coding consent — the autodraft lane's own fixture, not this one's.
+**Residual, named — and #877's correction.** Arm (c) proves the door is REACHED on ITS
+OWN document, not that a coding task is admitted THERE: that fixture's real MyInvois
+invoice states no tax breakdown, so `_coding_lane_core` refuses it (`tier_a_fails`,
+measured on clara_l07; the leg prints the door's exact reasons, never a fixed list) and
+routes it to `needs_you`. #633 owns exactly that reach-and-skip claim. **Leg 8 (#877)**
+closes the remaining gap in its own leg: a Tier-A-complete fixture — an explicit type 01,
+a net/tax tie, a tax breakdown that sums (migration 0023 §A's structured arm) — plus a
+name-only vendor counterparty already in the client's books (`clara.draft_entry` +
+`clara.approve_entry`, mirroring `packages/db/tests/wave-a-fixtures.mjs`'s
+`primeReadyFiling`, read for the preconditions and not duplicated), a resolved purchase
+direction and a live LEGACY coding-lane consent (`clara.grant_client_egress` — distinct
+from arm (b)'s TYPED `document_processing` purpose grant), driven through the SAME
+automatic chain. `clara.admit_autodraft_task` answers `admitted` BY NAME — read off its
+own durable idempotency receipt in `clara.op_receipts` (keyed
+`autodraft:<filing>:sweep`), because `clara.sweep_run_items.outcome` is a DIFFERENT,
+later fact written only once the minted task SETTLES and whose CHECK-constrained enum has
+no `admitted` member — and the minted task reads back from `clara.agent_tasks` (via
+`clara.autodraft_attempts`) tied to the document's own live filing.
 
 Legs 2–7: (2) a failed extraction yields `awaiting_extraction` and never a kind (0177's
 router); (3) duplicate bytes adopt onto the EXISTING document while the same name with
