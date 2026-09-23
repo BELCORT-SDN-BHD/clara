@@ -151,7 +151,38 @@ function enhanceElement(node: Stub): Stub {
   node.removeAttribute = (name: string) => {
     attrs.delete(name);
   };
+  // #970 — `toggleAttribute(name, force?)`, the standard DOM method (MDN: absent
+  // `force` toggles presence and returns the resulting state; `force` pins it).
+  // Needed for `@shadcn/react`'s message-scroller primitive, which calls it
+  // directly on a scroll-container ref inside a layout effect
+  // (`node_modules/@shadcn/react/dist/message-scroller/index.js`, the `ce`
+  // closure) to flag `data-scrollable`/`data-autoscrolling` — structural
+  // attribute bookkeeping, not layout, so it is the same class of gap as
+  // `setAttribute`/`removeAttribute` two lines up, never the real-geometry wall
+  // this file's own header names for axe-core.
+  node.toggleAttribute = (name: string, force?: boolean) => {
+    const present = force ?? !attrs.has(name);
+    if (present) attrs.set(name, "");
+    else attrs.delete(name);
+    return present;
+  };
   node.getAttributeNames = () => [...attrs.keys()];
+  // #970 — `scrollTo({top, behavior})`, an HONEST NO-OP in the SAME spirit as
+  // the `ResizeObserver` stub below ("never invents a size, and nothing in
+  // this repo asserts on one"): there is no layout engine here, so
+  // `scrollTop`/`scrollHeight`/`clientHeight` are already meaningless zeros,
+  // and this file's own header explains why FAKING real scroll geometry is
+  // the wrong move (the axe-core spike's false positive). Recording the
+  // requested position on the plain `scrollTop` property — a normal,
+  // unenhanced read/write field on the stub node, never a getter this
+  // overrides — is enough for `@shadcn/react`'s message-scroller to call it
+  // without throwing; nothing here reads it back as a real scroll amount.
+  if (typeof node.scrollTo !== "function") {
+    node.scrollTo = (opts?: { top?: number } | number) => {
+      if (typeof opts === "number") node.scrollTop = opts;
+      else if (opts && typeof opts.top === "number") node.scrollTop = opts.top;
+    };
+  }
   Object.defineProperty(node, "id", {
     configurable: true,
     get: () => attrs.get("id") ?? "",
@@ -358,6 +389,30 @@ export function enableDomInspection(): void {
   if (typeof g.requestAnimationFrame !== "function") {
     g.requestAnimationFrame = ((cb: (t: number) => void) => setTimeout(() => cb(Date.now()), 0)) as unknown;
     g.cancelAnimationFrame = ((id: unknown) => clearTimeout(id as Parameters<typeof clearTimeout>[0])) as unknown;
+  }
+  // #970 — MIRRORED onto `window` too, never a second implementation. `@shadcn/
+  // react`'s message-scroller primitive calls `window.cancelAnimationFrame`
+  // (a property access on hookHarness.ts:248's own `win` object literal, the
+  // stub `globalThis.window` was assigned to) rather than the bare identifier
+  // the block above already covers. `win` is a plain object distinct from
+  // `globalThis`, so setting the bare name there does not put it on `win` —
+  // the same reason `win` needed its own `HTMLElement`/`navigator` copies
+  // (hookHarness.ts's own comment on that block). Read after the block above,
+  // never before: `win` must already exist (`enableDomInspection()`'s own
+  // guard a few lines up already requires `document`, installed alongside it).
+  // #970 — the timer quartet too, same reasoning: `win.setTimeout(...)` (an
+  // explicit property access `@shadcn/react`'s message-scroller also makes,
+  // scheduling its own `data-autoscrolling` clear) resolves against `win`,
+  // not `globalThis`, and Node's bare `setTimeout`/`clearTimeout` are never
+  // own-properties of `win`'s plain object literal either.
+  const winForRaf = g.window as Stub | undefined;
+  if (winForRaf && typeof winForRaf.requestAnimationFrame !== "function") {
+    winForRaf.requestAnimationFrame = g.requestAnimationFrame;
+    winForRaf.cancelAnimationFrame = g.cancelAnimationFrame;
+    winForRaf.setTimeout = setTimeout;
+    winForRaf.clearTimeout = clearTimeout;
+    winForRaf.setInterval = setInterval;
+    winForRaf.clearInterval = clearInterval;
   }
 
   // next/link's prefetch-on-visible hook (use-intersection.tsx) falls back to

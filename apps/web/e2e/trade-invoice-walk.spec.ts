@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget, signInTo } from "./helpers";
+import { CELL_BUDGET, settleForScan, signInTo } from "./helpers";
 import { TI } from "./trade-invoice-mock.mjs";
 
 // #655 — "完整记录发票、账单及对应应收应付".
@@ -51,19 +51,17 @@ async function control(page: Page, body: Record<string, unknown>): Promise<unkno
 
 /** Wait for every FINITE animation before measuring colour or geometry. Infinite animations (a
  *  skeleton's pulse) are excluded, or this would never resolve on a loading page. */
+/** #1017 — delegates to the shared settle-before-scan contract (./helpers) instead of this file's
+ *  own animations-only wait, which never checked the enter/mount opacity fade settleForScan also
+ *  covers. Dropping the (0,0) mouse park too: settleForScan's own header records why it is no
+ *  longer needed — the hover-state contrast it used to dodge is fixed at the token now. */
 async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
+  await settleForScan(page);
 }
 
 async function scan(page: Page, what: string): Promise<void> {
-  grantCellBudget(CELL_BUDGET.scan);
+  // #864 (fix round) — the scan grant moved into `settleForScan` (./helpers), which `settle` above
+  // delegates to; keeping a copy here would double-count it.
   await settle(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.passes.length, `${what}: axe must actually have inspected the page`).toBeGreaterThan(0);

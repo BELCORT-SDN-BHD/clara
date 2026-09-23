@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget, signInTo } from "./helpers";
+import { CELL_BUDGET, grantCellBudget, settleForScan, signInTo } from "./helpers";
 import { SEC } from "./staff-expense-claim-mock.mjs";
 
 // #638 — "完整处理员工报销、垫款与应付明细".
@@ -50,22 +50,18 @@ async function control(page: Page, body: Record<string, unknown>): Promise<unkno
 
 /** Wait for every FINITE animation before measuring colour or geometry. Infinite animations (a
  *  Skeleton's pulse) are excluded, or this would never resolve on a loading page. */
+/** #1017 — delegates to the shared settle-before-scan contract (./helpers) instead of this file's
+ *  own animations-only wait, which never checked the enter/mount opacity fade settleForScan also
+ *  covers. Dropping the (0,0) mouse park too: settleForScan's own header records why it is no
+ *  longer needed — the hover-state contrast it used to dodge is fixed at the token now. */
 async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
+  await settleForScan(page);
 }
 
 async function scan(page: Page, what: string): Promise<void> {
-  // #706 — one full-page `AxeBuilder.analyze()` is 14.4 s alone and 33 s under load, and two cells
-  // below scan three faces each. The grant is additive, so the budget grows with the number of
-  // scans that actually run (`identity-finish.spec.ts:28`).
-  grantCellBudget(CELL_BUDGET.scan);
+  // #864 (fix round) — `settleForScan` itself now grants `CELL_BUDGET.scan` per call, so the
+  // hand-written grant this wrapper used to carry would double-count. The budget still grows with
+  // the number of scans that actually run; it just does so for every file, not only this one.
   await settle(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.passes.length, `${what}: axe must actually have inspected the page`).toBeGreaterThan(0);

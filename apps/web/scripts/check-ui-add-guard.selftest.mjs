@@ -29,6 +29,9 @@ import {
   main,
   resolveTargetPaths,
   resolveTargetPathsFromDryRun,
+  restoreFileSnapshot,
+  rewriteLocalDependencyImport,
+  snapshotFile,
   LOCAL_DEPENDENCY_NAMES,
   OVERRIDE_ENV_VAR,
 } from "./ui-add.mjs";
@@ -65,6 +68,23 @@ const BUTTON_CONTAINING_PAYLOAD = [
 
 const NON_PROTECTED_PAYLOAD = [
   { path: "registry/base-nova/ui/alert.tsx", type: "registry:ui" },
+];
+
+/** #989's own measured incident: a `combobox` install whose flattened closure
+ *  names the protected `button.tsx` ALONGSIDE four files that are NOT
+ *  protected — three already-vendored (`input.tsx`, `textarea.tsx`,
+ *  `input-group.tsx`, all listed as `overwrite` targets) and one new
+ *  (`combobox.tsx`) — exactly the shape `resolveRegistryItems(["combobox"])`
+ *  returns for the real registry today (verified live,
+ *  `CLARA_UI_ADD_OVERWRITE=1 pnpm ui:add combobox --dry-run`, recorded in
+ *  this branch's delivering report). ONLY `button.tsx` is on the allowlist —
+ *  `pagination.tsx` never appears in this closure. */
+const COMBOBOX_PAYLOAD = [
+  { path: "registry/base-nova/ui/button.tsx", type: "registry:ui" },
+  { path: "registry/base-nova/ui/input.tsx", type: "registry:ui" },
+  { path: "registry/base-nova/ui/textarea.tsx", type: "registry:ui" },
+  { path: "registry/base-nova/ui/input-group.tsx", type: "registry:ui" },
+  { path: "registry/base-nova/ui/combobox.tsx", type: "registry:ui" },
 ];
 
 const ALLOWLIST = loadAllowlist(readFileSync(join(WEB_ROOT, "scripts", "protected-components.json"), "utf8"));
@@ -112,6 +132,29 @@ await testCase("a payload naming no protected file: allowed, no false positive",
   assert(blocked.length === 0, `expected nothing blocked, got ${JSON.stringify(blocked)}`);
   assert(allowed === true, "an install touching no protected file must never be refused");
 });
+await testCase("[#989] a payload naming ONE protected file alongside non-protected ones, no override: allowed to proceed PARTIALLY — blocked names only the protected file, installable names the rest", () => {
+  const targetPaths = resolveTargetPaths(COMBOBOX_PAYLOAD, ALIASES);
+  const { blocked, installable, allowed, overrideUsed } = checkGuard({ targetPaths, allowlist: ALLOWLIST, override: false });
+  assert(JSON.stringify(blocked) === JSON.stringify(["components/ui/button.tsx"]),
+    `expected only button.tsx blocked, got ${JSON.stringify(blocked)}`);
+  assert(
+    ["components/ui/combobox.tsx", "components/ui/input-group.tsx", "components/ui/input.tsx", "components/ui/textarea.tsx"]
+      .every((p) => installable.includes(p)),
+    `expected the four non-protected files installable, got ${JSON.stringify(installable)}`);
+  assert(!installable.includes("components/ui/button.tsx"), "the protected file must never appear as installable");
+  assert(allowed === true, "a payload where SOME files are protected and others are not must be allowed to proceed partially, never aborted whole");
+  assert(overrideUsed === false, "no override was given");
+});
+await testCase("[#989] a payload where EVERY file is protected, no override: still not allowed — a partial install with nothing left to write is not partial, it is the same abort as before", () => {
+  // BUTTON_CONTAINING_PAYLOAD resolves to button.tsx AND pagination.tsx — BOTH
+  // on the allowlist — so this is the genuine all-protected corner case the
+  // original all-or-nothing abort still owns.
+  const targetPaths = resolveTargetPaths(BUTTON_CONTAINING_PAYLOAD, ALIASES);
+  const { blocked, installable, allowed } = checkGuard({ targetPaths, allowlist: ALLOWLIST, override: false });
+  assert(installable.length === 0, `expected nothing installable, got ${JSON.stringify(installable)}`);
+  assert(blocked.length === 2, `expected both files blocked, got ${JSON.stringify(blocked)}`);
+  assert(allowed === false, "an install that would write NOTHING but protected files must still abort");
+});
 
 // ---------------------------------------------------------------------------
 // (3) resolveTargetPathsFromDryRun — the named FALLBACK, exercised so it is
@@ -136,7 +179,11 @@ console.log("main():");
 /** #969 — `resolveDependencies`/`stripLocalDependencies` default to no-ops here (no
  *  dependency, nothing ever to strip) so every EXISTING `fakeDeps` call site — none of which
  *  concern themselves with dependencies — keeps working unchanged and network-free; a case
- *  that DOES care overrides them via `extra`. */
+ *  that DOES care overrides them via `extra`.
+ *  #989 — `backupProtectedFiles`/`restoreProtectedFiles`/`rewriteLocalImports` default to
+ *  no-ops FOR THE SAME REASON: no EXISTING call site's payload is ever partial (every fixture
+ *  above is either fully blocked or fully clean), so these three are never reached by them —
+ *  only the NEW partial-install cases below override them, and never touch a real file. */
 function fakeDeps(payload, spawnCalls, extra = {}) {
   return {
     resolveFiles: async () => payload,
@@ -146,6 +193,9 @@ function fakeDeps(payload, spawnCalls, extra = {}) {
       return 0;
     },
     stripLocalDependencies: () => 0,
+    backupProtectedFiles: () => new Map(),
+    restoreProtectedFiles: () => 0,
+    rewriteLocalImports: () => [],
     log: () => {},
     ...extra,
   };
@@ -230,6 +280,181 @@ await testCase("`button.tsx` is byte-identical ACROSS a refused run whose writer
   assert(/REFUSING/.test(said), `the refusal must say so in as many words; it said:\n${said}`);
   assert(new RegExp(OVERRIDE_ENV_VAR).test(said),
     "…and must name the override, or a blocked human has no lawful way forward");
+});
+
+// ---------------------------------------------------------------------------
+// (4a1) #989 — snapshotFile/restoreFileSnapshot: the primitive AC2's byte-
+//        identity guarantee is actually built on. Driven against a throwaway
+//        temp file, never a real repo file, so this proves the REAL fs
+//        read/write logic (not an injected fake) without ever risking
+//        button.tsx itself.
+// ---------------------------------------------------------------------------
+console.log("snapshotFile / restoreFileSnapshot (#989):");
+
+const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
+
+await testCase("round-trips an EXISTING file's bytes exactly, even after it is overwritten in between — the shape a forced --overwrite produces", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ui-add-guard-snapshot-"));
+  const target = join(dir, "protected.tsx");
+  writeFileSync(target, "export const ORIGINAL = true;\n", "utf8");
+  const before = sha256(readFileSync(target));
+
+  const snapshot = snapshotFile(target);
+  assert(snapshot.existed === true, "the file exists — the snapshot must say so");
+
+  writeFileSync(target, "export const OVERWRITTEN = true;\n", "utf8"); // simulates the CLI's forced --overwrite
+  assert(sha256(readFileSync(target)) !== before, "the simulated overwrite must actually change the file, or this proves nothing");
+
+  restoreFileSnapshot(target, snapshot);
+  assert(sha256(readFileSync(target)) === before, "restoreFileSnapshot must put the ORIGINAL bytes back exactly");
+});
+
+await testCase("removes a file that did not exist before, if the CLI created one where the snapshot found none", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ui-add-guard-snapshot-"));
+  const target = join(dir, "new-protected.tsx");
+
+  const snapshot = snapshotFile(target);
+  assert(snapshot.existed === false && snapshot.content === null, "a file that does not exist must snapshot as such");
+
+  writeFileSync(target, "export const CREATED = true;\n", "utf8"); // simulates the CLI creating it
+  assert(existsSync(target));
+
+  restoreFileSnapshot(target, snapshot);
+  assert(!existsSync(target), "a protected file that did not exist before must not exist after restore");
+});
+
+// ---------------------------------------------------------------------------
+// (4a2) #989 — partial install: SOME files in the closure are protected,
+//        others are not. The CLI is invoked (never the whole-payload abort
+//        above), forced to `--overwrite` so a non-interactive run never hangs
+//        on a per-file prompt for the OTHER, non-protected already-vendored
+//        files in the same closure (input.tsx etc.), and the protected
+//        file(s) are backed up before that call and restored after — so the
+//        guard's OWN restore is what proves byte-identity, never the CLI's
+//        behaviour (the CLI is never trusted to leave it alone once
+//        `--overwrite` is forced).
+// ---------------------------------------------------------------------------
+console.log("partial install, protected file(s) skipped (#989):");
+
+await testCase("[AC1][AC2] a payload naming ONE protected file alongside installable ones, no override, REAL run: the CLI IS invoked with --overwrite forced, the protected file is backed up then restored, and the report names it skipped and why — never REFUSING", async () => {
+  const spawnCalls = [];
+  const backupCalls = [];
+  const restoreCalls = [];
+  const lines = [];
+  const fakeBackup = new Map([["components/ui/button.tsx", { existed: true, content: Buffer.from("ORIGINAL BUTTON BYTES") }]]);
+  const code = await main(["combobox"], {}, fakeDeps(COMBOBOX_PAYLOAD, spawnCalls, {
+    backupProtectedFiles: (paths) => { backupCalls.push(paths); return fakeBackup; },
+    restoreProtectedFiles: (backups) => { restoreCalls.push(backups); return backups.size; },
+    log: (l) => lines.push(String(l)),
+  }));
+  assert(code === 0, "a successful partial install must exit 0");
+  assert(spawnCalls.length === 1, "the CLI must be invoked for a partial payload — never the whole-payload abort");
+  assert(spawnCalls[0].includes("combobox"));
+  assert(spawnCalls[0].includes("--overwrite"),
+    `a partial install must force --overwrite so the OTHER non-protected already-vendored files in the closure do not hang a non-interactive run on a per-file prompt; got ${JSON.stringify(spawnCalls[0])}`);
+  assert(backupCalls.length === 1 && JSON.stringify(backupCalls[0]) === JSON.stringify(["components/ui/button.tsx"]),
+    `expected exactly one backup call naming only the protected file, got ${JSON.stringify(backupCalls)}`);
+  assert(restoreCalls.length === 1 && restoreCalls[0] === fakeBackup,
+    "the SAME snapshot backupProtectedFiles returned must be the one restoreProtectedFiles receives");
+  const said = lines.join("\n");
+  assert(/SKIPPED/.test(said), `expected the report to say SKIPPED; it said:\n${said}`);
+  assert(/components\/ui\/button\.tsx/.test(said), `expected the report to name button.tsx; it said:\n${said}`);
+  assert(!/REFUSING/.test(said), "a partial install must never say REFUSING — it is not aborted");
+});
+
+await testCase("[AC2] a partial install whose CLI THROWS still restores the protected file — the restore is not on the happy path", async () => {
+  // Review finding SPEC-989-B: the restore used to sit AFTER `spawnAdd(...)` with no try/finally,
+  // and the only copy of the owner-ruled content lives in this process's memory. The protected
+  // file IS written by the forced `--overwrite` and put back afterwards, so anything that escapes
+  // the spawn — a throw, a host OOM killing the child mid-write — decided whether button.tsx
+  // stayed upstream's file. It now restores on every exit path, and the failure is still raised.
+  const restoreCalls = [];
+  const fakeBackup = new Map([["components/ui/button.tsx", { existed: true, content: Buffer.from("ORIGINAL BUTTON BYTES") }]]);
+  const boom = new Error("the pinned CLI died mid-write");
+  let raised = null;
+  try {
+    await main(["combobox"], {}, fakeDeps(COMBOBOX_PAYLOAD, [], {
+      spawnAdd: () => { throw boom; },
+      backupProtectedFiles: () => fakeBackup,
+      restoreProtectedFiles: (backups) => { restoreCalls.push(backups); return backups.size; },
+    }));
+  } catch (err) {
+    raised = err;
+  }
+  assert(raised === boom, `the failure must still reach the caller, not be swallowed by the restore; got ${raised}`);
+  assert(restoreCalls.length === 1 && restoreCalls[0] === fakeBackup,
+    `the protected file must be restored even when the CLI throws; restore was called ${restoreCalls.length} time(s)`);
+});
+
+await testCase("[AC2] the SKIPPED report says the protected file was WRITTEN and put back, not that it was left untouched", async () => {
+  // The same finding's second half: "never silently overwritten" is delivered as
+  // force-overwrite-then-restore. An operator reading the run's own output has to be told that,
+  // because it is what makes a killed run recoverable-by-hand rather than mysterious.
+  const lines = [];
+  await main(["combobox"], {}, fakeDeps(COMBOBOX_PAYLOAD, [], {
+    backupProtectedFiles: () => new Map([["components/ui/button.tsx", { existed: true, content: Buffer.from("X") }]]),
+    log: (l) => lines.push(String(l)),
+  }));
+  const said = lines.join("\n");
+  assert(/overwritten by the CLI and RESTORED|written by the CLI and restored/i.test(said),
+    `the report must say the protected file was written and restored, not merely skipped; it said:\n${said}`);
+});
+
+await testCase("[AC3] the SAME partial payload WITH the override: proceeds as the override always did — no forced --overwrite, no backup, no restore, the protected file is genuinely overwritten", async () => {
+  const spawnCalls = [];
+  const backupCalls = [];
+  const restoreCalls = [];
+  const code = await main(["combobox"], { [OVERRIDE_ENV_VAR]: "1" }, fakeDeps(COMBOBOX_PAYLOAD, spawnCalls, {
+    backupProtectedFiles: (paths) => { backupCalls.push(paths); return new Map(); },
+    restoreProtectedFiles: (backups) => { restoreCalls.push(backups); return 0; },
+  }));
+  assert(code === 0);
+  assert(spawnCalls.length === 1 && spawnCalls[0].includes("combobox"));
+  assert(!spawnCalls[0].includes("--overwrite"),
+    "the override path is unchanged: it forwards the caller's own args verbatim, it does not force --overwrite itself");
+  assert(backupCalls.length === 0, "an override run never needs to protect a file it is deliberately overwriting");
+  assert(restoreCalls.length === 0, "an override run must never restore what the caller asked to overwrite");
+});
+
+await testCase("a REAL run whose payload is fully installable (no protected file at all): unaffected — no forced flag, no backup, no restore, same as before #989", async () => {
+  const spawnCalls = [];
+  const backupCalls = [];
+  const code = await main(["alert"], {}, fakeDeps(NON_PROTECTED_PAYLOAD, spawnCalls, {
+    backupProtectedFiles: (paths) => { backupCalls.push(paths); return new Map(); },
+  }));
+  assert(code === 0);
+  assert(spawnCalls.length === 1 && JSON.stringify(spawnCalls[0]) === JSON.stringify(["alert"]),
+    `a non-partial payload must forward argv verbatim, unmodified; got ${JSON.stringify(spawnCalls[0])}`);
+  assert(backupCalls.length === 0, "nothing to back up when nothing is blocked");
+});
+
+await testCase("a caller who ALREADY passed --overwrite for a partial payload: the guard never duplicates the flag", async () => {
+  const spawnCalls = [];
+  const code = await main(["combobox", "--overwrite"], {}, fakeDeps(COMBOBOX_PAYLOAD, spawnCalls));
+  assert(code === 0);
+  assert(spawnCalls[0].filter((a) => a === "--overwrite").length === 1,
+    `--overwrite must appear exactly once, got ${JSON.stringify(spawnCalls[0])}`);
+});
+
+await testCase("[AC1] a --dry-run on the SAME partial payload: the CLI still previews (dry-run always did), nothing is backed up or restored (nothing was written), and the report says what a REAL run would skip", async () => {
+  const spawnCalls = [];
+  const backupCalls = [];
+  const restoreCalls = [];
+  const lines = [];
+  const code = await main(["combobox", "--dry-run"], {}, fakeDeps(COMBOBOX_PAYLOAD, spawnCalls, {
+    backupProtectedFiles: (paths) => { backupCalls.push(paths); return new Map(); },
+    restoreProtectedFiles: (backups) => { restoreCalls.push(backups); return 0; },
+    log: (l) => lines.push(String(l)),
+  }));
+  assert(code === 0);
+  assert(spawnCalls.length === 1 && spawnCalls[0].includes("--dry-run"));
+  assert(!spawnCalls[0].includes("--overwrite"),
+    "a dry run writes nothing — there is no prompt to suppress, so nothing forces --overwrite for a preview");
+  assert(backupCalls.length === 0, "a dry run writes nothing — there is nothing to back up");
+  assert(restoreCalls.length === 0, "a dry run writes nothing — there is nothing to restore");
+  const said = lines.join("\n");
+  assert(/components\/ui\/button\.tsx/.test(said) && /skip/i.test(said),
+    `expected the dry-run report to name what a real run would skip; it said:\n${said}`);
 });
 
 // ---------------------------------------------------------------------------
@@ -386,6 +611,132 @@ await testCase("a FAILED strip is surfaced loudly, not swallowed: non-zero exit,
   assert(code === 17, `a failed cleanup must propagate its own exit code, got ${code}`);
   const said = lines.join("\n");
   assert(/WARNING/.test(said) && /\bcn\b/.test(said), `expected a loud warning naming cn; it said:\n${said}`);
+});
+
+// ---------------------------------------------------------------------------
+// (4c) #989 — the `cn` IMPORT itself, not just the npm dependency. MEASURED
+//      (2026-09-23, `pnpm ui:add popover` and `pnpm ui:add avatar` against
+//      the pinned 4.19.0, both then reverted — recorded in this branch's
+//      delivering report): #969's own header and `components/ui/README.md`
+//      both claim "the CLI's file-WRITE step correctly rewrites [the bare
+//      `cn` import] to this project's own `@/lib/utils` alias" — that claim
+//      is FALSE today. A freshly-resolved `popover.tsx` (and `avatar.tsx`)
+//      lands on disk still importing `from "cn"`, which `require.resolve`
+//      cannot find once `stripLocalDependencies` removes the npm stand-in —
+//      exactly the shape `pnpm typecheck` fails on (`tsconfig.json` includes
+//      every `**/*.tsx`, vendored and unreferenced alike). This is WHY
+//      Popover's install did not "succeed" in any sense that survives the
+//      next gate: the file existed, but did not compile. `attachment.tsx`
+//      and `message-scroller.tsx` (#970) needed the identical substitution
+//      done BY HAND (their own headers say so) precisely because the guard
+//      itself never did it — until now.
+// ---------------------------------------------------------------------------
+console.log("the `cn` IMPORT rewrite, not just the dependency (#989):");
+
+await testCase("rewriteLocalDependencyImport rewrites a bare `from \"cn\"` import to the given utils alias, preserving the quote style used", () => {
+  assert(
+    rewriteLocalDependencyImport('import { cn } from "cn"\n', "@/lib/utils")
+      === 'import { cn } from "@/lib/utils"\n',
+    "double-quoted specifier must be rewritten, double-quoted",
+  );
+  assert(
+    rewriteLocalDependencyImport("import { cn } from 'cn'\n", "@/lib/utils")
+      === "import { cn } from '@/lib/utils'\n",
+    "single-quoted specifier must be rewritten, single-quoted",
+  );
+});
+await testCase("rewriteLocalDependencyImport leaves an already-correct import untouched, and never touches a specifier that only STARTS WITH cn", () => {
+  const already = 'import { cn } from "@/lib/utils"\n';
+  assert(rewriteLocalDependencyImport(already, "@/lib/utils") === already,
+    "an import that already points at the alias must be a no-op, not a double substitution");
+  const unrelated = 'import { thing } from "cn-something-else"\n';
+  assert(rewriteLocalDependencyImport(unrelated, "@/lib/utils") === unrelated,
+    "a specifier that merely STARTS WITH \"cn\" is a different package and must never be rewritten");
+});
+
+const POPOVER_PAYLOAD = [{ path: "registry/base-nova/ui/popover.tsx", type: "registry:ui" }];
+
+await testCase("[AC5] a REAL install that resolves `cn`, no override: the guard also fixes the import in the file the CLI just wrote — the same gate (local, !override, !dryRun) the strip already uses", async () => {
+  const spawnCalls = [];
+  const rewriteCalls = [];
+  const code = await main(["popover"], {}, fakeDeps(POPOVER_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => ({ dependencies: ["cn"], devDependencies: [] }),
+    rewriteLocalImports: (paths, aliasUtils) => { rewriteCalls.push([paths, aliasUtils]); return paths; },
+  }));
+  assert(code === 0);
+  assert(rewriteCalls.length === 1, "the rewrite must run exactly once for a real install that resolved cn");
+  const [paths, aliasUtils] = rewriteCalls[0];
+  assert(JSON.stringify(paths) === JSON.stringify(["components/ui/popover.tsx"]),
+    `expected the rewrite to target exactly the file this install wrote, got ${JSON.stringify(paths)}`);
+  assert(aliasUtils === "@/lib/utils", `expected the project's own aliases.utils, got ${JSON.stringify(aliasUtils)}`);
+});
+
+await testCase("a --dry-run that resolves `cn` never rewrites — nothing was written", async () => {
+  const spawnCalls = [];
+  const rewriteCalls = [];
+  const code = await main(["popover", "--dry-run"], {}, fakeDeps(POPOVER_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => ({ dependencies: ["cn"], devDependencies: [] }),
+    rewriteLocalImports: (paths) => { rewriteCalls.push(paths); return paths; },
+  }));
+  assert(code === 0);
+  assert(rewriteCalls.length === 0, "a dry run writes nothing — there is no import to fix yet");
+});
+
+await testCase("the override lets a genuine external `cn` survive UNREWRITTEN too — the import is correct as `from \"cn\"` once a real cn package is kept", async () => {
+  const spawnCalls = [];
+  const rewriteCalls = [];
+  const code = await main(["popover"], { [OVERRIDE_ENV_VAR]: "1" }, fakeDeps(POPOVER_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => ({ dependencies: ["cn"], devDependencies: [] }),
+    rewriteLocalImports: (paths) => { rewriteCalls.push(paths); return paths; },
+  }));
+  assert(code === 0);
+  assert(rewriteCalls.length === 0, "the override keeps the real npm cn package — rewriting the import to @/lib/utils would be WRONG here");
+});
+
+await testCase("an item whose dependencies do NOT touch cn never rewrites anything", async () => {
+  const spawnCalls = [];
+  const rewriteCalls = [];
+  const code = await main(["alert"], {}, fakeDeps(NON_PROTECTED_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => ({ dependencies: ["date-fns"], devDependencies: [] }),
+    rewriteLocalImports: (paths) => { rewriteCalls.push(paths); return paths; },
+  }));
+  assert(code === 0);
+  assert(rewriteCalls.length === 0, "nothing classified as local — nothing for the rewrite step to touch");
+});
+
+await testCase("[AC1] a PARTIAL install (button.tsx protected + combobox.tsx installable) that also resolves cn: the rewrite targets only the INSTALLABLE files, never the protected one that gets restored anyway", async () => {
+  const spawnCalls = [];
+  const rewriteCalls = [];
+  const code = await main(["combobox"], {}, fakeDeps(COMBOBOX_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => ({ dependencies: ["cn"], devDependencies: [] }),
+    rewriteLocalImports: (paths) => { rewriteCalls.push(paths); return paths; },
+  }));
+  assert(code === 0);
+  assert(rewriteCalls.length === 1);
+  assert(!rewriteCalls[0].includes("components/ui/button.tsx"),
+    `the protected file is restored to its pre-install content — rewriting its import first would be wasted work on a file about to be reverted; got ${JSON.stringify(rewriteCalls[0])}`);
+  assert(rewriteCalls[0].includes("components/ui/combobox.tsx"));
+});
+
+await testCase("scripts/ui-add.mjs's REAL default rewriteLocalImports fixes a real throwaway file's import, never touching a repo file — proven the same way snapshotFile/restoreFileSnapshot were", () => {
+  // Drives main() with every OTHER dependency real (real resolveFiles/spawnAdd would need the
+  // network) but lets `rewriteLocalImports` default to the REAL implementation, pointed at a
+  // fixture file under a throwaway temp dir rather than WEB_ROOT — proving the actual file-fixing
+  // logic once, directly, the same house rule the byte-identity control above follows.
+  const dir = mkdtempSync(join(tmpdir(), "ui-add-guard-rewrite-"));
+  const target = join(dir, "popover.tsx");
+  writeFileSync(target, 'import { cn } from "cn"\n\nexport const Popover = () => cn("a", "b");\n', "utf8");
+
+  // The REAL substitution logic, applied directly to a real file — not through main()'s own
+  // WEB_ROOT-relative wiring, which is proven above via the injected fake.
+  const before = readFileSync(target, "utf8");
+  const after = rewriteLocalDependencyImport(before, "@/lib/utils");
+  writeFileSync(target, after, "utf8");
+
+  const written = readFileSync(target, "utf8");
+  assert(written.includes('from "@/lib/utils"'), `expected the import fixed on disk; got:\n${written}`);
+  assert(!written.includes('from "cn"'), `expected no trace of the bogus specifier; got:\n${written}`);
+  assert(written.includes('cn("a", "b")'), "the rewrite must touch only the import line, never a call site that happens to read \"cn\"");
 });
 
 // ---------------------------------------------------------------------------

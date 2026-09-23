@@ -1,14 +1,17 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, signInTo } from "./helpers";
+import { ensureRealFocus, settleForScan, signInTo } from "./helpers";
 
 const CLIENT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CLIENT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const THREAD_A = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
+/** #1017 — settles the shared contract (opacity AND animations, ./helpers) before every scan
+ *  this function runs; it previously scanned directly with no settle at all. */
 async function expectAccessible(page: Page, face: string): Promise<void> {
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, `${face} axe violations`).toEqual([]);
 }

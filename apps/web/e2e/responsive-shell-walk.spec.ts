@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { cellBudgetMs, ensureRealFocus, signInTo, watchReactFaults } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo, watchReactFaults } from "./helpers";
 
 /**
  * CB-AE2E-019 · H-31 · C-43 — THE BROWSER LEG (裁-86).
@@ -658,9 +658,9 @@ test("裁-13: target-size is clean at the NARROW viewport too, where the new con
   ] as const) {
     await page.goto(url);
     await page.waitForLoadState("networkidle");
-    await expect
-      .poll(async () => page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length))
-      .toBe(0);
+    // #1017 — folded this file's own animations-only poll onto the shared settle-before-scan
+    // contract (./helpers), which also checks the enter/mount opacity fade the poll never did.
+    await settleForScan(page);
     const result = await new AxeBuilder({ page }).withRules(["target-size"]).analyze();
     expect(result.violations, `${face} target-size violations at 640px`).toEqual([]);
     const seen = [...result.passes, ...result.violations, ...result.incomplete, ...result.inapplicable];
@@ -676,14 +676,15 @@ test("the narrow shell stays clean under the full WCAG 2.1 AA scan, drawer open 
   const tags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
   await page.waitForLoadState("networkidle");
+  await settleForScan(page);
   const closed = await new AxeBuilder({ page }).withTags(tags).analyze();
   expect(closed.violations, "narrow firm home, drawer closed").toEqual([]);
 
   await page.getByRole("button", { name: "Toggle navigation" }).click();
   await expect(page.locator("[data-slot=sheet-content]")).toBeVisible();
-  await expect
-    .poll(async () => page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length))
-    .toBe(0);
+  // #1017 — folded this file's own animations-only poll onto the shared settle-before-scan
+  // contract (./helpers), which also checks the enter/mount opacity fade the poll never did.
+  await settleForScan(page);
   const open = await new AxeBuilder({ page }).withTags(tags).analyze();
   expect(open.violations, "narrow firm home, drawer open").toEqual([]);
 });

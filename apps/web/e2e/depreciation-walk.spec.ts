@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, signInTo } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { DEP } from "./depreciation-mock.mjs";
 
 /**
@@ -36,15 +36,12 @@ const LOCKED_LIST_URL = `/clients/${DEP.lockedClientId}/registers?tab=fixedAsset
 const RETIRED_LIST_URL = `/clients/${DEP.retiredClientId}/registers?tab=fixedAssets`;
 const DETAIL_URL = `/clients/${CLIENT}/registers/assets/${DEP.assetId}`;
 
+/** #1017 — delegates to the shared settle-before-scan contract (./helpers) instead of this file's
+ *  own animations-only wait, which never checked the enter/mount opacity fade settleForScan also
+ *  covers. Dropping the (0,0) mouse park too: settleForScan's own header records why it is no
+ *  longer needed — the hover-state contrast it used to dodge is fixed at the token now. */
 async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
+  await settleForScan(page);
 }
 
 async function scan(page: Page, what: string): Promise<void> {
@@ -61,6 +58,7 @@ async function openTab(page: Page, name: string): Promise<void> {
 
 test.describe("#651 · depreciation under an explicit policy", () => {
   test("the authority card names its window and its instruction, and the preview shows the period the DATABASE chose before anything is written", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 4 }));
     await signInTo(page, LIST_URL);
 
     // THE WINDOW, ON THE SURFACE. A person reading "nothing is due" on a client with old
@@ -120,6 +118,7 @@ test.describe("#651 · depreciation under an explicit policy", () => {
   });
 
   test("a CLOSED period is refused BEFORE anything is drafted, and the refusal names the year and the way back in", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     // A SEPARATE CLIENT, not a toggle on the one above: this cell's claim is an ABSENCE, and an
     // absence cannot be asserted on a world a sibling cell may have moved.
     await signInTo(page, LOCKED_LIST_URL);
@@ -186,6 +185,7 @@ test.describe("#651 · depreciation under an explicit policy", () => {
   });
 
   test("the asset detail separates the revision timeline from the charge ledger, and ?tab= survives Back", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 4 }));
     await signInTo(page, DETAIL_URL);
     await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
 
@@ -235,6 +235,7 @@ test.describe("#651 · depreciation under an explicit policy", () => {
   });
 
   test("keyboard reaches the preview and focus RETURNS to the trigger; 320px and 200% zoom keep the reading; the axe scan is clean under reduced motion", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await page.emulateMedia({ reducedMotion: "reduce" });
     await signInTo(page, LIST_URL);
     await ensureRealFocus(page);

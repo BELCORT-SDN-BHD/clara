@@ -273,6 +273,24 @@ export const PAIR_SPECS = [
     source: "text-muted-foreground inside an explicit muted box — components/bank/exceptions-section.tsx, components/bank/settle-line-form.tsx, components/bank/write-off-form.tsx (bg-muted/30) and components/ui/table.tsx header row (bg-muted/50); also components/parts/PartBadge.tsx's neutral chip variant (bg-muted text-muted-foreground)" },
   { id: "foreground-on-muted", fg: (h) => h("foreground"), bg: (h) => h("muted"), threshold: 4.5,
     source: "the active-tab state — components/client-workspace-nav.tsx (bg-muted text-foreground); the P3-polished components/ui/command.tsx CommandItem's own selected state (data-selected:bg-muted data-selected:text-foreground, moved off accent tokens). registers-workbench.tsx's former copy of the active-tab pattern moved onto the shared components/common/section-tabs.tsx (a border-primary indicator, not a muted fill), which does not render this pair." },
+  // #1017 — kept SEPARATE from the row above rather than folded into it, for the token-drift reason
+  // this file applies throughout (clara-on-card/clara-on-background, sidebar-accent-foreground-on-
+  // sidebar-accent): it resolves to the same tokens as foreground-on-muted today but is its own real
+  // consumer (components/documents/filed-document-list.tsx's selected row), and this specific pair
+  // is the one two independent full-browser-suite runs (wave 1: 4.36:1 once, then clean twice alone;
+  // wave 2: 4.49:1, twice, deterministically) caught mid-transition against the RESTING pair that
+  // sat closest to the 4.5:1 floor of anything this scan ever measured. The owner's triage ruling
+  // (2026-09-20) named the mechanism directly: "the selected row's resting contrast ... sits on the
+  // threshold itself, and anti-aliasing decides which side a scan lands on" — so #1017's fix is not
+  // only settling the scan (settle-before-scan-census.test.ts), it is giving this ONE pair enough
+  // REST margin that anti-aliasing at a glyph edge can never plausibly flip it. Before the fix the
+  // row's cells carried `text-muted-foreground` on the same `bg-muted` (muted-foreground-on-muted,
+  // 4.62:1 — the tightest MEASURED margin above 4.5 in this whole file after the identity-canvas
+  // block's own 4.636); the fix moves the selected row's cells onto `text-foreground` instead — the
+  // exact idiom `components/ui/command.tsx`'s own CommandItem selected state already uses on the
+  // same `bg-muted` ground — which is why this row's fg is `foreground`, not `muted-foreground`.
+  { id: "foreground-on-muted-selected-document-row", fg: (h) => h("foreground"), bg: (h) => h("muted"), threshold: 4.5,
+    source: "components/documents/filed-document-list.tsx's selected TableRow (selectedId === document.id conditionally adds bg-muted; its cells then read text-foreground) — the row the wave-1/wave-2 axe flake measured. THIS ROW IS TOKEN MATH ONLY: it records WHICH pair that row is supposed to render and proves the pair clears the floor with a real margin; it cannot see the component, so reverting the row to text-muted-foreground would leave this id green. What catches that regression is components/documents/documents-a11y.test.tsx's \"the SELECTED filed-document row renders the pair the contrast lint pins for it\", which renders the real component with a row selected and reads the two token names back out of THIS spec" },
   { id: "foreground-on-clara-muted", fg: (h) => h("foreground"), bg: (h) => h("clara-muted"), threshold: 4.5,
     source: "components/clara/ClaraThreadView.tsx assistant chat bubble (bg-clara-muted, default/inherited text colour)" },
   { id: "secondary-ink-on-clara-muted", fg: (h) => h("secondary-ink"), bg: (h) => h("clara-muted"), threshold: 4.5,

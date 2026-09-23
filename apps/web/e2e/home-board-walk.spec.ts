@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { cellBudgetMs, signInTo } from "./helpers";
+import { cellBudgetMs, settleForScan, signInTo } from "./helpers";
 
 // The Home boards' browser leg (裁-86): Firm Home -> a tile -> the surface that owns it -> back,
 // then the client board for an ACTIVE and an ONBOARDING client, each at 1440 and at 1024 with
@@ -329,11 +329,15 @@ function workbench(page: Page) {
 
 /** Wait for the entrance transition before measuring COLOUR or GEOMETRY — a scan started
  *  mid-fade reads composited values (a11y-finish-walk.spec.ts's own measured lesson). */
+/** #1017 — delegates the paint half to the shared contract (./helpers): the networkidle wait here
+ *  is real (this file drives many `page.route()` mocks that resolve after navigation) and stays,
+ *  but the old animations-only poll never checked the enter/mount opacity fade itself, the exact
+ *  gap `settleForScan` closes. Registered as a verified wrapper in
+ *  `settle-before-scan-census.test.ts` — called ahead of a scan from dozens of sites in this file,
+ *  not always the immediately preceding line. */
 async function settled(page: Page): Promise<void> {
   await page.waitForLoadState("networkidle");
-  await expect.poll(async () =>
-    page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length),
-  ).toBe(0);
+  await settleForScan(page);
 }
 
 test("Firm Home names the firm, scores the queue from the envelope, and every tile links to the surface that owns it", async ({ page }) => {

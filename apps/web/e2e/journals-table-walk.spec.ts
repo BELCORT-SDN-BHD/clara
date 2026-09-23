@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { signInTo } from "./helpers";
+import { settleForScan, signInTo } from "./helpers";
 import { JOURNALS } from "./journals-table-mock.mjs";
 
 /**
@@ -160,12 +160,10 @@ test("axe is clean on all three journals tabs", async ({ page }) => {
   for (const tab of ["Drafts & review queue", "Posted", /Clarifications/] as const) {
     await page.getByRole("tab", { name: tab }).click();
     await page.waitForLoadState("networkidle");
-    // Wait out `enter-content`'s fade: an axe colour-contrast read started
-    // mid-transition measures the COMPOSITED mid-fade colour and reports a
-    // violation that does not exist (a11y-finish-walk.spec.ts's own note).
-    await expect
-      .poll(async () => page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length))
-      .toBe(0);
+    // #1017 — this used to wait out `enter-content`'s fade with its own animations-only poll
+    // (never checking the fade's own opacity, the gap settleForScan closes); folded onto the
+    // shared contract (./helpers).
+    await settleForScan(page);
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
     expect(result.violations, `journals tab ${String(tab)} axe violations`).toEqual([]);
   }
@@ -376,6 +374,7 @@ test("#719: the addressed entry at 320px — keyboard-reachable, no page-wide ho
   await expect(reopened).toBeVisible();
   await expect(reopened).toBeFocused();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "the addressed journals entry at 320px").toEqual([]);
 });

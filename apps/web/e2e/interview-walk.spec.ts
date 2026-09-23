@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+import { cellBudgetMs, settleForScan } from "./helpers";
+
 import { CLIENT_SEG_KEYS } from "../lib/interview/api";
 
 /**
@@ -207,6 +209,7 @@ async function completeAccountingBasis(page: Page): Promise<void> {
 }
 
 test("client interview completes every tracked segment, unlocks Commit, and passes an axe scan", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 18 }));
   const target = fixture("COMPLETE");
   test.skip(!target, "review/merge supplies the isolated COMPLETE client/thread fixture");
   await establishSession(page);
@@ -229,6 +232,7 @@ test("client interview completes every tracked segment, unlocks Commit, and pass
   await expect(commitConfirm).toBeEnabled({ timeout: 30_000 });
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page })
     .include('[aria-label="Client onboarding interview"]')
     .withTags(WCAG_TAGS)
@@ -237,6 +241,7 @@ test("client interview completes every tracked segment, unlocks Commit, and pass
 });
 
 test("a separate interview run performs typed runtime-then-DB cancellation", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 8 }));
   const target = fixture("CANCEL");
   test.skip(!target, "review/merge supplies the isolated CANCEL client/thread fixture");
   await establishSession(page);
@@ -253,6 +258,7 @@ test("a separate interview run performs typed runtime-then-DB cancellation", asy
 });
 
 test("two browser contexts answering the same park converge on confirmed state without a false success or refusal", async ({ browser, context, page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 10 }));
   const target = fixture("RACE");
   test.skip(!target, "review/merge supplies the isolated RACE client/thread fixture");
 
@@ -308,6 +314,7 @@ test("two browser contexts answering the same park converge on confirmed state w
 });
 
 test("the Tax tab is reachable by nav-click and by ⌘K, and its three honest notes render (FS-8, P6-T IA shell)", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 2 }));
   const target = fixture("COMPLETE");
   test.skip(!target, "review/merge supplies the isolated COMPLETE client/thread fixture");
   await establishSession(page);

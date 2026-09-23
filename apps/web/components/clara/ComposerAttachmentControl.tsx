@@ -42,10 +42,58 @@ import { useTranslations } from "next-intl";
 
 import { StateBanner } from "@/components/common/state";
 import { Button } from "@/components/ui/button";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
+import {
+  MessageScroller,
+  MessageScrollerContent,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
 import { queueStateLabelKey } from "@/lib/documents/copy";
 import { useUploadQueue, type QueueRejection, type QueueState } from "@/lib/documents/useUploadQueue";
 import type { AttachmentPart } from "@/lib/parts/types";
 import type { SessionTokenAccessor } from "@/lib/session";
+
+// #970 — THE TRAY ROW, MIGRATED ONTO shadcn's `Attachment` FAMILY. #642's own AC2 called
+// this the named residual ("behaviour done, component migration is the named residual") —
+// the queue/state/refusal logic below is unchanged; only the row's PRESENTATION now comes
+// from components/ui/attachment.tsx rather than a hand-rolled `<span>` stack. The `<li>`
+// wrapper stays (composer-attachment.test.tsx:213 counts exactly five of them for the
+// six-file cap), and `Attachment` renders INSIDE it, not instead of it — a semantic list
+// of attachable rows is still what a screen reader announces.
+//
+// `Attachment`'s own `state` prop only knows five values; `QueueState` has nine.
+// `attachmentDisplayState` is the one narrowing, exported so it is testable against this
+// source directly (composer-attachment-control.test.tsx's own [970] cell), the same
+// discipline `COMPOSER_IN_FLIGHT_STATES` below already follows.
+export function attachmentDisplayState(
+  state: QueueState,
+): "idle" | "uploading" | "processing" | "error" | "done" {
+  switch (state) {
+    case "queued":
+    case "starting":
+    case "stopped":
+      return "idle";
+    case "uploading":
+      return "uploading";
+    case "verifying":
+    case "filing":
+      return "processing";
+    case "ready":
+      return "done";
+    case "error":
+    case "failed":
+      return "error";
+  }
+}
 
 /** `clara._tf_validate_chat_attachments`'s own bound (0007_document_pipeline.sql:617),
  *  and the number the old surface capped at too (apps/dashboard/app/shared/intake.ts:99
@@ -143,57 +191,103 @@ export function ComposerAttachmentControl({
             </StateBanner>
           ) : null}
           {queue.items.length > 0 ? (
-            <ul className="flex flex-col gap-1.5" aria-label={t("trayLabel")}>
-              {queue.items.map((item) => (
-                <li key={item.localId} className="enter-panel flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2 text-xs">
-                  <Paperclip aria-hidden className="size-3.5 text-muted-foreground" />
-                  <span className="max-w-48 truncate font-medium text-card-foreground" title={item.name}>{item.name}</span>
-                  <span className="min-w-24 flex-1 text-muted-foreground">{tDocuments(queueStateLabelKey(item))}</span>
-                  {item.state === "error" || item.state === "failed" ? (
-                    <Button
-                      type="button"
-                      size="icon-xs"
-                      variant="outline"
-                      aria-label={t("retry", { filename: item.name })}
-                      disabled={disabled}
-                      onClick={() => queue.retry(item.localId)}
-                    >
-                      <RotateCcw aria-hidden />
-                    </Button>
-                  ) : null}
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={t("remove", { filename: item.name })}
-                    disabled={disabled}
-                    onClick={() => queue.remove(item.localId)}
-                  >
-                    <X aria-hidden />
-                  </Button>
-                  {/* The intake's OWN refusal, by the status it actually sent — the three
-                      the runtime can produce on the begin leg (intake.mjs:92-102 →
-                      400 bad_request / 413 too_large / 415 bad_type). Anything else falls
-                      through to the operational message VERBATIM, never a guessed cause. */}
-                  {item.state === "error" ? (
-                    <StateBanner
-                      tone="error"
-                      title={t("runtimeRefusalTitle")}
-                      code={item.errorStatus !== null ? String(item.errorStatus) : undefined}
-                      className="w-full"
-                    >
-                      {item.errorStatus === 413
-                        ? t("runtimeTooLarge")
-                        : item.errorStatus === 415
-                          ? t("runtimeBadType")
-                          : item.errorStatus === 400
-                            ? t("runtimeBadRequest")
-                            : item.error ?? t("runtimeUnknown")}
-                    </StateBanner>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
+            // #970 — BOUNDED, rather than growing the composer without limit: up to
+            // CHAT_MAX_ATTACHMENTS (5) rows, each an Attachment card, would otherwise
+            // push the rail composer's footer taller with every file queued.
+            // message-scroller's own Provider/Root/Viewport/Content are required
+            // ancestors (each calls the primitive's `useMessageScroller` internally
+            // and throws without one — measured against the pinned
+            // node_modules/@shadcn/react/dist/message-scroller/index.js). The `<ul>`/
+            // `<li>` list is UNCHANGED inside Content — `MessageScrollerItem` is
+            // always a bare `<div>` with no `render`/`asChild` escape hatch, so
+            // wrapping each row in one would put a `<div>` between `<ul>` and `<li>`,
+            // breaking the "listitem is a direct child of list" structure this same
+            // tray's own six-file-cap cell (composer-attachment.test.tsx) already
+            // pins at five `<li>`s. That trade means the vendor's own scroll-anchor/
+            // auto-follow-newest tracking (which watches Content's DIRECT children,
+            // and here sees only the one `<ul>`) does not activate — this is a bounded,
+            // styled scroll viewport, not an anchored one, and no prop here claims
+            // otherwise. Content keeps its own default `role="log"` (new attachments
+            // are additions worth announcing); the per-row error banner below opts out
+            // of ITS OWN announcement (`silent`) so the two do not double-speak.
+            <MessageScrollerProvider>
+              <MessageScroller className="max-h-48">
+                <MessageScrollerViewport aria-label={t("trayLabel")}>
+                  <MessageScrollerContent>
+                    <ul className="flex flex-col gap-1.5" aria-label={t("trayLabel")}>
+                      {queue.items.map((item) => (
+                        <li key={item.localId} className="enter-panel">
+                          <Attachment
+                            state={attachmentDisplayState(item.state)}
+                            size="sm"
+                            className="w-full"
+                          >
+                            <AttachmentMedia variant="icon">
+                              <Paperclip aria-hidden className="size-3.5" />
+                            </AttachmentMedia>
+                            <AttachmentContent>
+                              <AttachmentTitle title={item.name}>{item.name}</AttachmentTitle>
+                              <AttachmentDescription>{tDocuments(queueStateLabelKey(item))}</AttachmentDescription>
+                            </AttachmentContent>
+                            <AttachmentActions>
+                              {item.state === "error" || item.state === "failed" ? (
+                                <AttachmentAction
+                                  type="button"
+                                  variant="outline"
+                                  aria-label={t("retry", { filename: item.name })}
+                                  disabled={disabled}
+                                  onClick={() => queue.retry(item.localId)}
+                                >
+                                  <RotateCcw aria-hidden />
+                                </AttachmentAction>
+                              ) : null}
+                              <AttachmentAction
+                                type="button"
+                                aria-label={t("remove", { filename: item.name })}
+                                disabled={disabled}
+                                onClick={() => queue.remove(item.localId)}
+                              >
+                                <X aria-hidden />
+                              </AttachmentAction>
+                            </AttachmentActions>
+                          </Attachment>
+                          {/* The intake's OWN refusal, by the status it actually sent — the three
+                              the runtime can produce on the begin leg (intake.mjs:92-102 →
+                              400 bad_request / 413 too_large / 415 bad_type). Anything else falls
+                              through to the operational message VERBATIM, never a guessed cause. */}
+                          {item.state === "error" ? (
+                            <StateBanner
+                              tone="error"
+                              title={t("runtimeRefusalTitle")}
+                              code={item.errorStatus !== null ? String(item.errorStatus) : undefined}
+                              className="mt-1.5 w-full"
+                              // #970 — SILENT: this banner now sits inside message-scroller's
+                              // Content, which keeps the vendor's own `role="log"` (an
+                              // announcement boundary for new attachments, test/a11yRules.ts's
+                              // `nested-live-region`). components/common/state.tsx's own
+                              // "one-announcement-owner" note is exactly this shape: the log
+                              // already speaks for what changed inside it, so a `role="alert"`
+                              // box in here would double-announce (or worse, be attributed to
+                              // the wrong region). The text is unchanged and still on screen —
+                              // only the announcement is dropped, never the content.
+                              silent
+                            >
+                              {item.errorStatus === 413
+                                ? t("runtimeTooLarge")
+                                : item.errorStatus === 415
+                                  ? t("runtimeBadType")
+                                  : item.errorStatus === 400
+                                    ? t("runtimeBadRequest")
+                                    : item.error ?? t("runtimeUnknown")}
+                            </StateBanner>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </MessageScrollerContent>
+                </MessageScrollerViewport>
+              </MessageScroller>
+            </MessageScrollerProvider>
           ) : null}
         </div>
       ) : null}

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, signInTo } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { PREPAY } from "./prepayments-mock.mjs";
 
 /**
@@ -40,15 +40,12 @@ const LIST_URL = `/clients/${CLIENT}/prepayments`;
 const DETAIL_URL = `/clients/${CLIENT}/prepayments/${PREPAY.scheduleId}`;
 const NEW_URL = `/clients/${CLIENT}/prepayments/new`;
 
+/** #1017 — delegates to the shared settle-before-scan contract (./helpers) instead of this file's
+ *  own animations-only wait, which never checked the enter/mount opacity fade settleForScan also
+ *  covers. Dropping the (0,0) mouse park too: settleForScan's own header records why it is no
+ *  longer needed — the hover-state contrast it used to dodge is fixed at the token now. */
 async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
+  await settleForScan(page);
 }
 
 async function scan(page: Page, what: string): Promise<void> {
@@ -102,6 +99,7 @@ test("prepayments.walk.attention: both persistent statements render, the attenti
 // ===========================================================================================
 
 test("prepayments.walk.refusal: a refused configure keeps every field, prints the database's own words, says the prepayment is STILL posted, and the retry succeeds and shows the derived allocation", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 2 }));
   await signInTo(page, NEW_URL);
 
   await expect(page.getByText(/never initiates a bank payment/)).toBeVisible();
@@ -248,6 +246,7 @@ test("prepayments.walk.geometry: the list and the detail hold at 320 CSS px with
 });
 
 test("prepayments.walk.motion_and_back: under prefers-reduced-motion nothing animates indefinitely, the URL is stable, and Back returns from the detail to the list", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await page.emulateMedia({ reducedMotion: "reduce" });
   await signInTo(page, LIST_URL);
   await settle(page);

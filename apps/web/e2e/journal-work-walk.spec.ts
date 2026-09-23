@@ -499,6 +499,7 @@ test("EDIT AS A NEW DRAFT lands on a composer already holding these figures, und
 });
 
 test("a LOST acknowledgement resolves to the SAME Work, because the re-post carries the SAME intent key", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 2 }));
   await page.goto(COMPOSER_URL);
   await fillBalancedBasis(page);
 

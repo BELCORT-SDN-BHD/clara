@@ -66,14 +66,24 @@ export function FiledDocumentList({
             <TableCell className="max-w-64 truncate font-medium text-foreground">
               {document.original_filename ?? document.id}
             </TableCell>
-            <TableCell className="text-muted-foreground">
+            {/* #1017 — the selected row's caption cells switch from text-muted-foreground to
+                text-foreground, the same idiom components/ui/command.tsx's own CommandItem
+                selected state already uses on the same bg-muted ground. muted-foreground-on-muted
+                measured only 4.62:1 at rest (the tightest margin above 4.5:1 in this file outside
+                the identity-canvas block) — close enough that anti-aliasing at a glyph edge
+                measured 4.49:1 and 4.36:1 on two independent full-browser-suite runs, on an
+                UNCHANGED token and an unchanged spec file. foreground-on-muted measures 14.32:1;
+                pinned as its own id, foreground-on-muted-selected-document-row, in
+                scripts/check-token-contrast.mjs (tests/token-contrast.test.ts asserts the margin,
+                not just the pass). Unselected rows are unaffected and unchanged. */}
+            <TableCell className={cn("text-muted-foreground", selectedId === document.id && "text-foreground")}>
               <span className="flex flex-wrap items-center gap-1">
                 {t(extractionStatusKey(document.extraction_status))}
                 {document.legal_hold && <Badge variant="destructive">{t("legalHold")}</Badge>}
                 {isEInvoice(document) && <Badge variant="outline">{t("eInvoiceBadge")}</Badge>}
               </span>
             </TableCell>
-            <TableCell className="text-muted-foreground">
+            <TableCell className={cn("text-muted-foreground", selectedId === document.id && "text-foreground")}>
               {/* THE ONE-CLOCK LAW (lib/business-date.ts). `toLocaleDateString()`
                   renders in the VIEWER's timezone: a reviewer outside UTC+8 saw a
                   filing date that could disagree with the DB's own business day by

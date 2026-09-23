@@ -207,7 +207,9 @@ test("#625: a REFUSED act keeps its dialog open with the DB's own sentence insid
 });
 
 test("#625: the roster and both confirmations scan clean, and the row menu drops its movement under reduced motion", async ({ page }) => {
-  grantCellBudget(CELL_BUDGET.scan * 2 + CELL_BUDGET.poll);
+  // #864 (fix round) — the two scans below are granted by `settleForScan` itself now; what remains
+  // for this cell to declare is its own fixture poll.
+  grantCellBudget(CELL_BUDGET.poll);
   await signInToMembers(page);
 
   await settleForScan(page);

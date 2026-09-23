@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { cellBudgetMs, ensureRealFocus, signIn } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signIn } from "./helpers";
 
 // #626 (refresh spec #612, journey D1) — `/settings/account`'s real content.
 // Mocks are installed with `page.route`, per firm-navigation-walk.spec.ts's own
@@ -74,6 +74,7 @@ test("loaded -> dirty -> save -> reload persists", async ({ page }) => {
   await page.reload();
   await expect(motionRadio(page, /Always reduce motion/)).toBeChecked();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/account, loaded and saved").toEqual([]);
 });
@@ -156,6 +157,7 @@ test("denied: a signed-out read renders the honest denied state, never a crash",
   await page.goto("/settings/account");
   await expect(page.getByText("Signed out")).toBeVisible();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/account, denied").toEqual([]);
 });
@@ -180,6 +182,7 @@ test("a saved 'always reduce motion' sets data-motion=reduced regardless of the 
   await page.goto("/settings/account");
   await expect(page.locator("html")).toHaveAttribute("data-motion", "reduced");
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/account with reduced motion applied").toEqual([]);
 });
@@ -269,6 +272,7 @@ test("narrow settings navigation (320px) stays usable and axe-clean", async ({ p
   const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
   expect(scrollWidth, "no page-wide horizontal scroll at 320px").toBeLessThanOrEqual(clientWidth + 1);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/account at 320px").toEqual([]);
 });

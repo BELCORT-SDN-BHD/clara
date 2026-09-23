@@ -5,6 +5,12 @@ in several cases, hand-patched with an owner-ruled fix the generator does not kn
 offset focus ring and destructive-variant focus unification (see that file's own header), and
 `pagination.tsx`'s corrected `PaginationLink` semantics (#771, that file's own header).
 
+`attachment.tsx` and `message-scroller.tsx` (#970) are the native-chat family's last two
+installs — `message`, `bubble`, `marker` and `avatar` (#642) resolved cleanly and are not here
+because nothing consumes them yet. Both hand-adapt two small, mechanical things the pinned CLI
+gets wrong for THIS repo (a bare `cn` import, a generated `/50` ring instead of the declared
+`/70`) — see each file's own header, never repeated here.
+
 ## The install guard (#772)
 
 **Never run `shadcn add` (or `npx shadcn add`) directly against this workspace.** Use:
@@ -19,10 +25,37 @@ changes on disk, it resolves the full set of files the install would write — i
 `registryDependency` the named component pulls in (this is exactly how a `pagination` install once
 also tried to overwrite `button.tsx`: `pagination`'s registry item names `button` as a dependency) —
 and compares that set against `scripts/protected-components.json`, a checked-in JSON array of
-project-relative paths. If any of them is in the payload, the wrapper aborts with a non-zero exit
-and names the file(s), **before invoking the real CLI at all** — regardless of `--overwrite`,
-`--yes`, `--all`, or whether stdin is a terminal, because none of those ever get a chance to matter
-once the wrapper has already decided not to call the CLI.
+project-relative paths.
+
+**If EVERY file the payload would write is protected** (nothing left to gain from installing at
+all — the original `pagination` incident, where `pagination.tsx` itself later joined the
+allowlist too), the wrapper aborts with a non-zero exit and names the file(s), **before invoking
+the real CLI at all** — regardless of `--overwrite`, `--yes`, `--all`, or whether stdin is a
+terminal, because none of those ever get a chance to matter once the wrapper has already decided
+not to call the CLI.
+
+**If SOME of the payload is protected and some is not (#989)** — Combobox's own closure today:
+`button.tsx` protected, `input.tsx`/`textarea.tsx`/`input-group.tsx`/`combobox.tsx` not — the
+wrapper installs everything that is not protected and leaves the protected file(s) BYTE-IDENTICAL
+across the run, rather than refusing the whole payload. Byte-identical, not untouched: the
+protected file is genuinely written by the CLI and put back by this guard immediately afterwards
+(the restore is in a `finally`, so a throw or a host OOM out of the CLI cannot leave upstream's
+file in place). The one window that leaves is the process being killed outright between the write
+and the restore; the run says so before it starts, and every protected file is tracked in git, so
+`git checkout -- <path>` is the recovery. It does this by forcing the pinned CLI's own
+`-o/--overwrite` (never duplicated if the caller already passed it) so a non-interactive run does
+not hang on a per-file "already exists, overwrite?" prompt for the OTHER, non-protected
+already-vendored files in the same closure — MEASURED (2026-09-23): with stdin closed, that
+prompt reads EOF and defaults to "N" (skip), which would silently skip every already-existing
+file, protected or not, and defeat "installs every other file" — and snapshots each protected
+file's exact bytes (or the fact that it did not exist) BEFORE that call, restoring them
+immediately after, so the guard's own restore — never the CLI's behaviour — is what makes the
+protected file byte-identical across the run. A `--dry-run` on a partial payload still only
+previews (nothing is backed up or restored, since nothing is written); the report names what a
+real run would install and what it would skip, the same "report every run" posture `cn` below
+uses. **The override, below, is unchanged**: `CLARA_UI_ADD_OVERWRITE=1` still forwards the
+caller's own arguments verbatim and genuinely overwrites the protected file(s) — it does not force
+`--overwrite` itself, so a non-interactive override run still needs the caller to pass it.
 
 ### What the allowlist protects
 
@@ -38,6 +71,21 @@ When a fix lands in a vendored `components/ui/*.tsx` file that a future `shadcn 
 `scripts/protected-components.json` in the SAME change that lands the fix. No other step is
 required — `scripts/ui-add.mjs` reads the file fresh on every run.
 
+**Not every hand edit earns a place on the list.** The `/50` → `/70` ring-alpha re-cut every fresh
+vendor install needs (`tests/focus-ring-contract.test.ts`'s own census — `tabs.tsx`, `switch.tsx`,
+`toggle.tsx`, `field.tsx`, `input.tsx`, `input-group.tsx`, `radio-group.tsx`, `select.tsx`,
+`textarea.tsx`, `toast.tsx` and `badge.tsx` all carry it, and none of them is on the allowlist) and
+the bare-`cn`-import fix (#969's own registry-authoring quirk) are routine INSTALL HYGIENE, applied
+the same way on every future add — not an owner ruling a regeneration would silently undo. So is
+the `motion-safe:` re-cut every vendored POPUP needs (`dialog.tsx`, `dropdown-menu.tsx`,
+`select.tsx`, `tooltip.tsx` and now `popover.tsx`): upstream ships the side slides and the
+open/close zoom unprefixed, and `tests/reduced-motion-contract.test.ts` reds on sight — which is
+how `popover.tsx`'s own copy was found the day it was vendored, at `pnpm test` rather than at
+review. Only a
+BEHAVIOURAL correction (an owner-ruled focus treatment, a corrected semantics) goes on the list.
+`attachment.tsx` and `message-scroller.tsx` (#970) carry the routine class only, so neither joined
+the allowlist.
+
 ### What makes an override legitimate
 
 `CLARA_UI_ADD_OVERWRITE=1 pnpm ui:add <component>` lets a deliberate, reviewed overwrite proceed —
@@ -47,21 +95,38 @@ what would be overwritten (`pnpm ui:add <component> --dry-run` first, or `--diff
 change) and confirmed the protected file's owner-ruled fix is being deliberately superseded or
 re-applied afterward — never as a way to get past the abort without reading it.
 
-### The `cn` dependency stand-in (#969)
+**#970 is this knob's first real use** (every mention of it before was descriptive; #642's own
+report recorded `attachment`/`message-scroller` refusing rather than forcing it). The owner ruled
+2026-09-20 that upstream's `button.tsx` wins the overwrite outright — settling the ticket's own
+"diff first, override only if reconcilable" question in advance — and `button.tsx`'s three
+owner-ruled behaviours (the offset ring, the `/90` hover, the destructive variant's ring
+unification) are re-applied on top of the fresh file in the SAME commit, with their reasoning
+carried over (that file's own header). `pnpm ui:add pagination --dry-run` still refuses afterward,
+naming both `button.tsx` and `pagination.tsx`, unchanged by this.
 
-Several registry items (the message/bubble/marker/avatar family, and others) import a `cn()`
-helper from a bare specifier `"cn"` — a registry-authoring placeholder, never a real published
-package this repo has used (`lib/utils.ts` exports its own). The pinned CLI's file-WRITE step
-correctly rewrites that import to this project's own `@/lib/utils` alias; its dependency-INSTALL
-step does not know that and installs a real `cn` npm package regardless, which then needs a hand
-revert of `package.json` and the lockfile (#642's own `ui:add --dry-run` finding).
+### The `cn` dependency stand-in (#969), and the import itself (#989)
 
-`pnpm ui:add` now handles this itself: it reports every dependency the item would add — on a
-`--dry-run` too, since a dry run writes nothing for the next step to act on — and, after a real
-install, automatically removes anything classified as a local stand-in (`cn`, and nothing else
-today) from `package.json` and the lockfile via `pnpm remove`, no manual revert needed. The same
-`CLARA_UI_ADD_OVERWRITE=1` knob above lets a genuine external `cn` package survive deliberately,
-instead of a second refusal vocabulary for this one name.
+Several registry items (the message/bubble/marker/avatar/popover family, and others) import a
+`cn()` helper from a bare specifier `"cn"` — a registry-authoring placeholder, never a real
+published package this repo has used (`lib/utils.ts` exports its own). **#969's own claim that
+"the CLI's file-WRITE step correctly rewrites that import to this project's own `@/lib/utils`
+alias" was MEASURED FALSE by #989** (`pnpm ui:add popover` and `pnpm ui:add avatar`, both reverted
+after — recorded in that branch's delivering report): a freshly-resolved file lands on disk still
+importing `from "cn"`. Its dependency-INSTALL step separately installs a real `cn` npm package
+regardless, which then needs a hand revert of `package.json` and the lockfile (#642's own
+`ui:add --dry-run` finding) — this part of the claim was accurate. `attachment.tsx` and
+`message-scroller.tsx` (#970) needed the import substitution done BY HAND for exactly this reason
+(their own headers record it); the guard itself never did it before #989.
+
+`pnpm ui:add` now handles both itself: it reports every dependency the item would add — on a
+`--dry-run` too, since a dry run writes nothing for the next two steps to act on — and, after a
+real install, automatically fixes the bare `cn` import in every file THIS run wrote (never a
+protected file being skipped and restored — see the partial-install section above, which reverts
+it anyway) to `aliases.utils`, and removes anything classified as a local stand-in (`cn`, and
+nothing else today) from `package.json` and the lockfile via `pnpm remove`, no manual revert
+needed for either. The same `CLARA_UI_ADD_OVERWRITE=1` knob above lets a genuine external `cn`
+package survive deliberately, import UNREWRITTEN, instead of a second refusal vocabulary for this
+one name.
 
 **The ordering, and the window it leaves (L05-S07, 2026-09-20 fix round).** This is a drop AFTER
 the pinned CLI writes, never a pre-filter BEFORE it: `ui-add.mjs`'s `main()` runs `spawnAdd` (the
@@ -94,15 +159,49 @@ names the CLI's own exit code in what it logs either way. Only a genuine interru
 own process between the two spawns — not a CLI failure the guard's own `main()` gets to run
 after — still needs the hand-revert above.
 
+### `message-scroller`'s runtime dependency, and the test harness it needed (#970)
+
+`message-scroller.tsx` is the first file here to import a REAL runtime package the registry
+declares (`@shadcn/react`, subpath `@shadcn/react/message-scroller`) rather than a dev-time-only
+one — #642 named costing it for the Workers bundle before merge, since it had never been
+installed. MEASURED (2026-09-20, this package's pinned `0.3.1`): the subpath's own two files —
+`dist/message-scroller/index.js` (18,862 bytes) and the shared `dist/chunk-HBS6WEDP.js` it imports
+(1,190 bytes) — are 20,052 bytes raw, 6,484 bytes gzipped, combined; nothing else in the package
+ships (`exports` in its own `package.json` scopes every other subpath, e.g. `./questionnaire`,
+away from this one). A real `next build` on this branch compiles and completes; its own client
+chunk carrying both new files (bundled together with `attachment.tsx`/`ComposerAttachmentControl`'s
+own code, so it is not an isolated figure) is 131,219 bytes raw / 35,616 gzipped. No bundle-size
+budget is declared anywhere in this repo to check either figure against.
+
+Rendering it in a `node:test` unit tree needed three small, ADDITIVE fixes to
+`apps/web/test/domInspect.ts` (`Element.toggleAttribute`, `window.{request,cancel}AnimationFrame`
++ the timer quartet mirrored onto the harness's own `window` stub, and an honest no-op
+`Element.scrollTo`) — see that file's own `#970` comments for exactly what broke and why each fix
+is structural, never the real-layout-geometry class of problem that file's header names as the
+wall axe-core hit. A future vendor install that reaches another modern scroll/observer-based
+primitive should expect the same class of gap, not a new one.
+
 ### Proof
 
 `scripts/check-ui-add-guard.selftest.mjs` (wired into `pnpm lint`) is this guard's own positive
 control: it drives the guard's decision logic against fixture payloads with no network, proving the
-abort, the override, the no-false-positive case, and the `cn` classification/report/strip flow
-together. The live rehearsal against the real, pinned registry — `pnpm ui:add pagination` refusing
-because the payload still contains `button.tsx`, hash-identical before and after; separately,
-`pnpm ui:add avatar` installing `cn` as a real dependency and this guard then removing it from both
-`package.json` and `pnpm-lock.yaml` with no trace left, `avatar.tsx` itself reverted afterward since
-adding a real component is outside this fix's own scope — is recorded in the delivering change's
-own report rather than run on every CI build, since a gate every PR runs must not depend on the
-network.
+whole-payload abort, the partial install (#989), the override, the no-false-positive case, and the
+`cn` classification/report/strip/import-fix flow together. The live rehearsal against the real,
+pinned registry — `pnpm ui:add pagination` refusing because the payload still contains
+`button.tsx`, hash-identical before and after; `pnpm ui:add avatar` installing `cn` as a real
+dependency and this guard then removing it from both `package.json` and `pnpm-lock.yaml` with no
+trace left, `avatar.tsx` itself reverted afterward since adding a real component is outside that
+fix's own scope; separately (#989), `pnpm ui:add combobox` installing `input.tsx`/`textarea.tsx`/
+`input-group.tsx`/`combobox.tsx` while `button.tsx` stays byte-identical, and `node
+scripts/ui-add.mjs popover` producing a `popover.tsx` whose `cn` import already points at
+`@/lib/utils` with no `cn` residue left in `package.json`/`pnpm-lock.yaml` — is recorded in the
+delivering change's own report rather than run on every CI build, since a gate every PR runs must
+not depend on the network.
+
+**`popover.tsx` is that run's own output, kept** (#989 fix round, 2026-09-23; review finding
+SPEC-989-A asked for the artifact the acceptance criterion names, not only a narrated rehearsal).
+It is vendored exactly as the CLI wrote it, unused by any surface yet — #667 is the ticket that
+consumes it — so the next `add` of Popover diffs against upstream cleanly. Combobox is NOT
+vendored: its closure also rewrites `input.tsx`/`textarea.tsx`/`input-group.tsx`, which each carry
+the hand-applied `focus-visible:ring-ring/70` re-cut this file documents below, and re-applying
+that hygiene belongs to the ticket that ships Combobox.

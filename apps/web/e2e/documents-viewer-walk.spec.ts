@@ -23,7 +23,7 @@
 import { expect, test, type ConsoleMessage, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { DOCS } from "./documents-viewer-mock.mjs";
-import { cellBudgetMs, ensureRealFocus, signIn } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signIn } from "./helpers";
 
 const DOCUMENTS_URL = `/clients/${DOCS.clientId}/documents`;
 
@@ -104,6 +104,7 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
   });
 
   test("D2: the page overlay draws real polygons, skips malformed geometry, and a fact click highlights its own region", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 4 }));
     await signIn(page);
     await page.goto(DOCUMENTS_URL);
     await selectDocument(page, /invoice-april\.pdf/);
@@ -152,6 +153,7 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
   });
 
   test("[MAJOR 1] the polygon layer stays on the page after a width change — the canvas is not pinned to a fixed pixel box", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 5 }));
     // THE DEFECT: `renderPdfPageToCanvas` used to set `canvas.style.width/height`
     // inline, which beats the host's `w-full` class. The <svg> overlay is sized
     // to the HOST (`absolute inset-0`), so the moment the host moved — most
@@ -286,6 +288,7 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
   });
 
   test("C-07 ROW B: the report-only CSP is on the wire, and the browser reports what enforcing it would cost", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 2 }));
     const violations: string[] = [];
     const onConsole = (message: ConsoleMessage) => {
       const text = message.text();
@@ -340,6 +343,7 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
   // =====================================================================================
 
   test("#624: the four states render INDEPENDENTLY, and a failed arithmetic check is named without hiding the fact", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 2 }));
     await signIn(page);
     await page.goto(DOCUMENTS_URL);
     await selectDocument(page, /invoice-april\.pdf/);
@@ -471,6 +475,7 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
   });
 
   test("axe: the documents tab with the overlay open has no WCAG A/AA violations", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 2 }));
     await signIn(page);
     await page.goto(DOCUMENTS_URL);
     await selectDocument(page, /invoice-april\.pdf/);
@@ -488,6 +493,7 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     await page.locator("details", { hasText: "Raw engine output (JSON)" }).first().locator("summary").click();
     await expect(page.locator("pre", { hasText: "schema_version" })).toBeVisible();
 
+    await settleForScan(page);
     const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
 
     // NO CARVE-OUT. It is deleted with #549 (`90b59cc1`), which fixed
@@ -643,6 +649,7 @@ async function horizontalOverflow(page: Page) {
 
 test.describe("#620 — source custody: preview, download and the state ladder (journey evidence against a mock, never permission evidence)", () => {
   test("DOWNLOAD: the original is fetched with disposition=attachment, handed to a save, and the object URL released", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     const requests: string[] = [];
     page.on("request", (r) => { if (r.url().includes("/api/runtime/documents/")) requests.push(r.url()); });
     await instrumentDownloads(page);
@@ -751,6 +758,7 @@ test.describe("#620 — source custody: preview, download and the state ladder (
   });
 
   test("RETRY restores the read: the second attempt reaches the wire and the failure clears", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     const byteReads: string[] = [];
     page.on("request", (r) => { if (/\/api\/runtime\/documents\/[^/]+\/bytes/.test(r.url())) byteReads.push(r.url()); });
     await instrumentDownloads(page);
@@ -773,6 +781,7 @@ test.describe("#620 — source custody: preview, download and the state ladder (
   });
 
   test("URL: ?document= survives a reload, and the browser's own Back button closes the detail", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signIn(page);
     await page.goto(DOCUMENTS_URL);
     await expect(page.getByText("Select a document to see its evidence")).toBeVisible();
@@ -801,6 +810,7 @@ test.describe("#620 — source custody: preview, download and the state ladder (
   });
 
   test("URL: a well-formed id this client cannot show renders the not-available state and CLEARS the parameter", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 5 }));
     await signIn(page);
     await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docUnknown}`);
     await expect(page.getByTestId("document-not-available")).toBeVisible({ timeout: 20_000 });
@@ -815,6 +825,7 @@ test.describe("#620 — source custody: preview, download and the state ladder (
   });
 
   test("KEYBOARD ONLY: open a document, read it, go back, and download — without a mouse", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 7 }));
     await signIn(page);
     await page.goto(DOCUMENTS_URL);
     await ensureRealFocus(page);
@@ -927,6 +938,7 @@ test.describe("#620 — source custody: preview, download and the state ladder (
   });
 
   test("RESPONSIVE: no horizontal page scroll at 320px, nor at 200% zoom, with a document open", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signIn(page);
 
     await page.setViewportSize({ width: 320, height: 720 });
@@ -956,6 +968,7 @@ test.describe("#620 — source custody: preview, download and the state ladder (
   });
 
   test("REDUCED MOTION: the source panel moves nothing when the OS asks it not to", async ({ browser }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     // MOVEMENT ONLY. A colour or opacity transition under reduced motion is not what the preference
     // is about; a control that slides, grows or repositions is. Two samples a frame apart around
     // the click, and the assertion is that no measured box CHANGED POSITION.
@@ -993,12 +1006,14 @@ test.describe("#620 — source custody: preview, download and the state ladder (
   });
 
   test("axe: the documents tab with a document open and a refusal standing has no WCAG A/AA violations", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signIn(page);
     await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docIntegrity}`);
     await expect(page.getByTestId("document-download-original")).toBeVisible({ timeout: 20_000 });
     await page.getByTestId("document-download-original").click();
     await expect(page.getByText(/no longer matches the record Clara holds/)).toBeVisible({ timeout: 15_000 });
 
+    await settleForScan(page);
     const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
     expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
   });

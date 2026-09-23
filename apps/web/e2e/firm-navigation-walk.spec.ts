@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ACTIVITY_CLIENTS } from "./activity-mock.mjs";
-import { signIn } from "./helpers";
+import { settleForScan, signIn } from "./helpers";
 import { WORK_LIST_CLIENTS } from "./work-list-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -158,6 +158,7 @@ test("a bookkeeper reaches /settings/members by URL and is offered NO role menu 
   await expect(page.getByText("Admin or owner can invite someone")).toHaveCount(0);
   await expect(page.getByText("Remove from firm")).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/members as a bookkeeper").toEqual([]);
 });
@@ -168,6 +169,7 @@ test("an owner IS offered the role menu on the same page — the gate shapes by 
   await expect(page.getByRole("button", { name: /^Actions for / })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Invite someone", exact: true })).toBeVisible();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/members as an owner").toEqual([]);
 });
@@ -189,6 +191,7 @@ test("the high-stakes threshold control is GONE from /settings/firm for every ra
     await expect(page.getByText(/Change-threshold control is retired/)).toBeVisible();
     await expect(page.getByText(/still refuses a solo approval on a high-stakes entry/)).toBeVisible();
 
+    await settleForScan(page);
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
     expect(result.violations, `/settings/firm as ${email}`).toEqual([]);
     await page.context().clearCookies();
@@ -348,6 +351,7 @@ test("a Needs-you row answers WHAT, WHY, NEXT and WHEN on the built app", async 
   await expect(page.getByText(/never produced by the agent runtime/)).toBeVisible();
   await expect(page.getByText("acknowledge the run there")).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/work?view=needs-you").toEqual([]);
 });
@@ -385,6 +389,7 @@ test("/activity is an audit trail again — no agent-task panel, no Details butt
   await expect(page.getByRole("button", { name: "Details", exact: true })).toHaveCount(0);
   await expect(page.getByText("Agent task detail")).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/activity").toEqual([]);
 });
@@ -433,6 +438,7 @@ test("/work opens the agent-task drawer and logs NO MISSING_MESSAGE", async ({ p
   await expect(page.getByRole("link", { name: "Open the client" })).toBeVisible();
   await expect(page.getByText(/no read joins a task id to the receipts/)).toBeVisible();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/work with the task drawer open").toEqual([]);
 
@@ -498,6 +504,7 @@ test("the client register is a named table whose population is EXACTLY this firm
   await expect(page.getByText("PENANG SPICE TRADING")).toHaveCount(0);
   await expect(page.getByText("ROME PUBLIC ADVISORY")).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/clients, populated").toEqual([]);
 });
@@ -512,6 +519,7 @@ test("an empty firm's client register shows the labelled empty state, never an e
   await expect(page.getByText("No clients are visible to this firm yet.")).toBeVisible();
   await expect(page.getByRole("table", { name: "Clients" })).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/clients, empty firm").toEqual([]);
 });

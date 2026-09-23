@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget, settleForScan, signIn } from "./helpers";
+import { settleForScan, signIn } from "./helpers";
 
 /**
  * P6-6's 裁-86 browser leg — the identity finish, walked in a real browser
@@ -23,10 +23,10 @@ const LEDGER_FOLD = "/brand/logo/clarabook-ledger-fold-brand-ink-v1.0.png";
 const MASCOT = "/brand/clara/clara-quiet-clerk-neutral-v1.0.png";
 
 async function scan(page: Page, face: string): Promise<void> {
-  // #706 — this walk scans SEVEN entry faces from one cell, so the budget grows with the number
-  // of scans that actually run rather than being guessed at the top of each test.
-  grantCellBudget(CELL_BUDGET.scan);
   // #760 — settle the arrival fade before measuring colour; see `settleForScan`.
+  // #864 (fix round) — the `grantCellBudget(CELL_BUDGET.scan)` this wrapper used to carry by hand
+  // now lives inside `settleForScan` itself, so every scanning cell in the suite gets it, not only
+  // the three files that remembered. This walk's seven-face cell is still granted seven scans.
   await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, `${face} axe violations`).toEqual([]);
