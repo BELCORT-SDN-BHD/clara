@@ -14,7 +14,7 @@ import {
   noteLane, endPool, printLaneNotes, printSkipCount,
   x42EnsureReady, skip42, caught, refuses, T, CLR38,
   EXPA, EXPB, ACCR2, PREP, mon,
-  runManual, adjustmentRunDue, adjustmentRunDueAsHuman, accrualLines, prepaymentLines,
+  runOccurrence, adjustmentRunDue, adjustmentRunDueAsHuman, accrualLines, prepaymentLines,
   enrolAdvance, adjWorld, freshAdjClient, liveTemplate, approveDraft, runAndSettle,
   rlsFlagsOf, indexDefs, tableExists,
 } from "./x42-adj-helpers.mjs";
@@ -95,7 +95,7 @@ test("x42.d1 adjustment_run_due names the OLDEST unmet (template, period) among 
   assert.equal(due1.period_end, mon(-3).end, "…period_end alongside it");
   assert.deepEqual(due1.blocked, [], "…and nothing is blocked yet");
 
-  const first = await runManual(w.users.bob, {
+  const first = await runOccurrence({
     client, template: a.id, periodStart: mon(-3).start, periodEnd: mon(-3).end });
   const due2 = await adjustmentRunDue(client);
   assert.equal(due2.due, true, "A is blocked by its own outstanding draft, so the oracle moves to B");
@@ -121,7 +121,7 @@ test("x42.d1 adjustment_run_due names the OLDEST unmet (template, period) among 
   for (const p of [mon(-2), mon(-1)]) await runAndSettle({ client, template: b.id, period: p });
   assert.equal((await adjustmentRunDue(client)).due, false,
     "once every ENDED period is met nothing is due — mon(0) is still in progress");
-  assert.ok(await caught(() => runManual(w.users.bob, {
+  assert.ok(await caught(() => runOccurrence({
     client, template: a.id, periodStart: mon(0).start, periodEnd: mon(0).end })),
   "…and running the month in progress is refused rather than silently posted");
 });
@@ -164,7 +164,7 @@ test("x42.d2 the oracle never advertises a period the poster is GUARANTEED to re
   // THE ORACLE AND THE VERB AGREE — the whole point of the advisory. Running the period the
   // oracle used to advertise refuses CLR38, every time, with no self-limiting state to stop
   // a daily sweep from re-attempting it forever.
-  await refuses(() => runManual(w.users.bob, {
+  await refuses(() => runOccurrence({
     client, template: tpl.id, periodStart: p.start, periodEnd: p.end }),
   T.templateLineIneligible, "running the period the oracle used to advertise", { code: CLR38 });
 

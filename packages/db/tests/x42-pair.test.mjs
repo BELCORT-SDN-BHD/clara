@@ -16,7 +16,7 @@ import {
   opk, endPool, printLaneNotes, printSkipCount, noteLane, CLR,
   x42EnsureReady, skip42, caught, reasonToken,
   EXPA, EXPB, ACCR, ACCR2, mon, addDays, occurrenceMemo, mirrorMemo,
-  runManual, reversePair, reverseEntry, cancelPairReversal, accrualLines,
+  runOccurrence, reversePair, reverseEntry, cancelPairReversal, accrualLines,
   adjWorld, freshAdjClient, soloAdjClient, freshAdjFirm, liveTemplate, approveDraft,
   withdrawAs, setFirmThreshold, firmThresholdOf,
   entryRowOf, entryLinesOf, mirrorOf, receiptForEntry, runRowsForTemplate, stampedEntries,
@@ -48,7 +48,7 @@ async function bornPair(label, { period = mon(-3), cents = 60_000, memo = "Accru
   const client = await freshAdjClient(label);
   const tpl = await liveTemplate({
     client, label, start: period.start, cents, memo, autoReverse: true, ...over });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   assert.equal(r.status, "drafted", `${label}: the occurrence drafts before the single approving act`);
   await approveDraft(w.users.alice, r.entry_id);
@@ -195,7 +195,7 @@ test("x42.r3 the signer-approves-own HIGH-STAKES cell: in a solo firm the signer
   const tpl = await liveTemplate({
     client, label: "r3", start: period.start, cents, autoReverse: true, memo: "Accrued bonus",
     lines: accrualLines(cents), proposer: sub, signer: sub });
-  const r = await runManual(sub, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   assert.equal(r.status, "drafted", "a high-stakes occurrence always drafts (WCA-R7)");
 
@@ -253,7 +253,7 @@ test("x42.r5 a NON-auto_reverse occurrence has no pair at all: no mirror is born
   const client = await freshAdjClient("r5");
   const period = mon(-3);
   const tpl = await liveTemplate({ client, label: "r5", start: period.start, cents: 39_000 });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   await approveDraft(w.users.alice, r.entry_id);
 
@@ -283,7 +283,7 @@ async function threeEarned(label, { autoReverse, client, cents = 52_000, lines =
     backdateSignTo: mon(-6).end, proposer, signer });
   const runs = [];
   for (const [i, p] of periods.entries()) {
-    const r = await runManual(proposer ?? w0.users.bob, {
+    const r = await runOccurrence({
       client, template: tpl.id, periodStart: p.start, periodEnd: p.end });
     if (i === 0) {
       assert.equal(r.status, "drafted", `${label}: occurrence #1 drafts — the one-time ramp`);
@@ -311,14 +311,14 @@ test("x42.k1 the PAIR reset: a completed pair correction un-earns autonomy — t
     "every occurrence approved BEFORE completed_at stops counting — the clock reset (design §2.3)");
 
   // The CORRECTED period is unmet again, and its re-run must DRAFT.
-  const again = await runManual(w.users.bob, {
+  const again = await runOccurrence({
     client, template: tpl.id, periodStart: target.period.start, periodEnd: target.period.end });
   assert.equal(again.status, "drafted", "the corrected period's re-run DRAFTS, never posts");
   await withdrawAs(w.users.bob, again.entry_id, "x42 k1: park the re-run to probe the next period");
 
   // …and so does the NEXT period, which was never touched by the correction.
   const next = mon(-2);
-  const forward = await runManual(w.users.bob, {
+  const forward = await runOccurrence({
     client, template: tpl.id, periodStart: next.start, periodEnd: next.end });
   assert.equal(forward.status, "drafted",
     "the NEXT period drafts too — a reversal un-earns until a fresh reviewed run passes");
@@ -345,7 +345,7 @@ test("x42.k2 the SOLO reset: a plain reverse_entry on a non-auto_reverse occurre
   assert.equal((await rampClock(tpl.id)).earned, false, "…and the clock reset");
 
   const next = mon(-2);
-  const forward = await runManual(w.users.bob, {
+  const forward = await runOccurrence({
     client, template: tpl.id, periodStart: next.start, periodEnd: next.end });
   assert.equal(forward.status, "drafted",
     "the next run DRAFTS — the unified clock reads BOTH correction lanes (design §2.3)");
@@ -366,7 +366,7 @@ test("x42.k3 a CANCELLED pair receipt never resets the clock: after cancel the t
     proposer: users.keeper, signer: users.admin });
 
   for (const p of periods) {
-    const r = await runManual(users.keeper, {
+    const r = await runOccurrence({
       client, template: tpl.id, periodStart: p.start, periodEnd: p.end });
     assert.equal(r.status, "drafted", `${p.key}: a high-stakes occurrence always drafts`);
     await approveDraft(users.owner, r.entry_id);
@@ -389,7 +389,7 @@ test("x42.k3 a CANCELLED pair receipt never resets the clock: after cancel the t
   await setFirmThreshold(firm, cents * 10);
   assert.ok((await firmThresholdOf(client)) > cents, "the dedicated firm's floor is now above the charge");
   const next = mon(-3);
-  const forward = await runManual(users.keeper, {
+  const forward = await runOccurrence({
     client, template: tpl.id, periodStart: next.start, periodEnd: next.end });
   assert.equal(forward.status, "posted",
     "the next occurrence AUTO-POSTS — a cancelled pair receipt never reset the clock");
@@ -424,10 +424,10 @@ test("x42.k4 ramp isolation: correcting template A never touches template B's cl
     "…and B's receipt count is untouched by A's correction");
 
   const next = mon(-2);
-  const aNext = await runManual(w.users.bob, {
+  const aNext = await runOccurrence({
     client, template: a.tpl.id, periodStart: next.start, periodEnd: next.end });
   assert.equal(aNext.status, "drafted", "A's next occurrence drafts");
-  const bNext = await runManual(w.users.bob, {
+  const bNext = await runOccurrence({
     client, template: b.tpl.id, periodStart: next.start, periodEnd: next.end });
   assert.equal(bNext.status, "posted", "…while B's still auto-posts — the clock is per-template");
   assert.equal((await runRowsForTemplate(b.tpl.id)).length, bReceiptsBefore + 1,

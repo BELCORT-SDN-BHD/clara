@@ -17,7 +17,7 @@ import {
   opk, endPool, printLaneNotes, printSkipCount, noteLane,
   x42EnsureReady, skip42, refuses, refusesCode, caught,
   T, CLR38, CLR39, CLR10, EXPA, ACCR, mon, mytToday,
-  runManual, reversePair, approvePairReversal, cancelPairReversal, reverseEntry,
+  runOccurrence, reversePair, approvePairReversal, cancelPairReversal, reverseEntry,
   reviseEntry, withdrawDraft, accrualLines,
   adjWorld, freshAdjClient, liveTemplate, approveDraft,
   entryRowOf, entryLinesOf, mirrorOf, pairRows, pairRow, eventsOfEntry,
@@ -50,7 +50,7 @@ async function bornPair(label, { cents = 60_000, period = mon(-3), client = null
   const tpl = await liveTemplate({
     client, label, start: period.start, cents, autoReverse: true,
     lines: accrualLines(cents), memo: "Accrued rent" });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   assert.equal(r.status, "drafted", `${label}: the occurrence drafts before the single approving act`);
   await approveDraft(w.users.alice, r.entry_id);
@@ -234,7 +234,7 @@ test("x42.c5 reverse_adjustment_pair on a SOLO occurrence refuses not_an_auto_pa
   const client = await freshAdjClient("c5");
   const period = mon(-3);
   const tpl = await liveTemplate({ client, label: "c5", start: period.start, cents: 36_000 });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   await approveDraft(w.users.alice, r.entry_id);
   assert.equal(await mirrorOf(r.entry_id), null, "the solo occurrence has no mirror");
@@ -270,7 +270,7 @@ test("x42.c7 revise_entry refuses both D-b shapes: any draft carrying a recurrin
   const period = mon(-3);
   const tpl = await liveTemplate({
     client, label: "c7", start: period.start, cents: 47_000, autoReverse: true });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   const draft = await entryRowOf(r.entry_id);
   const newLines = accrualLines(47_001);

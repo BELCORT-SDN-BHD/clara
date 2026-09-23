@@ -7,8 +7,8 @@
 // never reads 0042's SQL, and every object below is built THROUGH the audited verbs
 // (the x37 dog-fooding law) except the four surgeries named next.
 //
-// FIXTURE SURGERY. Four shapes in this wave are produced by real TIME, or by a verb
-// that (correctly) refuses them, and by nothing else a rig can reach:
+// FIXTURE SURGERY. Five shapes in this wave are produced by real TIME, by a verb that
+// (correctly) refuses them, by a door #927 closed, or by nothing else a rig can reach:
 //
 //   1. a template SIGNED BEFORE the period it now runs. WDB-G4 forces a DRAFT for
 //      every occurrence whose period ENDED BEFORE the signature; real books leave
@@ -24,6 +24,19 @@
 //   4. an INACTIVE coa account. MEASURED (the x41.b6 finding, re-measured by the cell
 //      before use): no COA deactivation door exists anywhere; `upsert_account` is the
 //      only writer and it always upserts `is_active = true`.
+//   5. [#927] A PROPOSED, LIVE or RETIRED adjustment_templates ROW OF ANY KIND. #927
+//      turned `propose_adjustment_template` and `sign_adjustment_template` into
+//      unconditional refusals (D6: the row SHAPE this whole battery still needs to
+//      read, correct and reverse is retained; only the two doors that could ever WRITE
+//      a fresh one are gone). `insertTemplateRaw` below is the one remaining way to
+//      mint a row of this shape on a rig, and it is what `liveTemplate` now calls —
+//      every existing fixture and cell keeps the SAME shape it always produced, minted
+//      by direct INSERT instead of by the retired ceremony. This is not a new idiom:
+//      `plan-overlap-sibling-arm.test.mjs`'s own fixture (0281:247) already inserts a
+//      `status='live'` row directly for the identical reason (proving the OTHER side of
+//      an integration without driving the retired ceremony), and D6's whole premise —
+//      that a firm's PRE-#927 templates are still real, readable rows — makes a direct
+//      INSERT the historically honest shape for a fixture, not merely a workaround.
 //
 // Each surgery is confined to a fixture and carries a comment saying why. Where a user
 // trigger would refuse the staging write, `session_replication_role='replica'` silences
@@ -36,7 +49,7 @@ import {
   createClient, createFirm, seedAdmission, insertUser, addMember,
   upsertAccountClassed, freshResolution, approveEntry, withdrawDraft,
   CHART, EXPA, ACCR, PREP, uniqTag,
-  runOccurrence, adjustmentRunDue, proposeTemplate, signTemplate,
+  runOccurrence, adjustmentRunDue,
 } from "./x42-adj-core.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 
@@ -392,6 +405,58 @@ export async function deactivateAccountRaw(client, code) {
   assert.equal(r.rows[0].is_active, false, `${code} is now inactive`);
 }
 
+/** SURGERY 5 [#927] — mint one `clara.adjustment_templates` row of ANY status by direct
+ *  INSERT: `propose_adjustment_template`/`sign_adjustment_template` are retired doors as of
+ *  #927 (see this file's header). `content_hash` and the stored line canon are computed
+ *  through the DB's own `clara._adj_canon_lines`/`clara._adj_template_hash` — the same
+ *  bodies the retired propose door used to call — so a fixture built this way is byte-for-
+ *  byte the row a real proposal would have produced, never a hand-shaped approximation.
+ *  No trigger silencing is needed: the transition trigger only fires on UPDATE/DELETE, and
+ *  this is a plain INSERT. */
+export async function insertTemplateRaw({
+  client, status = "live", label = "tpl", cadence = "monthly", lines = null, cents = 120_000,
+  autoReverse = false, start, end = null, memo = "x42 accrual",
+  proposer = null, signer = null, retiredReason = "x42 raw retire",
+}) {
+  assert.ok(["proposed", "live", "retired"].includes(status), `insertTemplateRaw: unknown status '${status}'`);
+  const w = await adjWorld();
+  const firm = await firmOfClient(client);
+  const name = `x42 ${label} ${uniqTag()}`;
+  const body = lines ?? accrualLines(cents);
+  const canon = (await rootQuery(
+    "select clara._adj_canon_lines($1::jsonb) as l", [JSON.stringify(body)])).rows[0].l;
+  const hash = (await rootQuery(
+    "select clara._adj_template_hash($1,$2,$3::date,$4::date,$5,$6::jsonb,$7,null) as h",
+    [name, cadence, start, end, autoReverse, JSON.stringify(canon), memo])).rows[0].h;
+
+  const signed = status === "live" || status === "retired";
+  const retired = status === "retired";
+  const proposedBy = proposer ?? w.users.bob;
+  const signedBy = signed ? (signer ?? w.users.hana) : null;
+  const retiredBy = retired ? (signer ?? w.users.hana) : null;
+
+  const r = await rootQuery(
+    `insert into clara.adjustment_templates(
+       firm_id, client_id, status, name, cadence, start_date, end_date, auto_reverse, lines,
+       memo_template, content_hash, proposed_by, proposed_op_key,
+       signed_by, signed_at, signed_op_key, retired_by, retired_at, retired_reason, retired_op_key)
+     values (
+       $1, $2, $3, $4, $5, $6::date, $7::date, $8, $9::jsonb, $10, $11, $12, $13,
+       $14, case when $14::uuid is not null then now() else null end, $15,
+       $16, case when $16::uuid is not null then now() else null end, $17, $18)
+     returning *`,
+    [firm, client, status, name, cadence, start, end, autoReverse, JSON.stringify(canon), memo, hash,
+      proposedBy, opk("x42rawprop"),
+      signedBy, signed ? opk("x42rawsign") : null,
+      retiredBy, retired ? retiredReason : null, retired ? opk("x42rawret") : null]);
+  const row = r.rows[0];
+  assert.equal(row.status, status, `insertTemplateRaw: the row really landed at status '${status}'`);
+  return {
+    id: row.id, name, cadence, memo, lines: canon, autoReverse, cents,
+    signedBy: row.signed_by, contentHash: row.content_hash, row,
+  };
+}
+
 /** Raise or lower a firm's high-stakes floor. Only ever called on a DEDICATED firm
  *  minted by `freshAdjFirm`, never on the shared world's firms. `clara.firms` carries
  *  no update trigger, so this is a plain superuser UPDATE. */
@@ -407,30 +472,24 @@ export async function setFirmThreshold(firm, cents) {
 // Higher-level fixtures.
 // ---------------------------------------------------------------------------
 
-/** Propose + sign a LIVE template. Signing is admin+ (WD-R9), so the default signer is
- *  hana. `backdateSignTo` moves the signature into the past (SURGERY 1) so the periods
- *  under test are NOT catch-up. Returns the ids the cells assert on. */
+/** A LIVE template. [#927] Built by direct INSERT (SURGERY 5 above) rather than by
+ *  propose+sign — those two doors are retired; every caller of this fixture keeps the exact
+ *  same return shape it always got. `backdateSignTo` moves the signature into the past
+ *  (SURGERY 1) so the periods under test are NOT catch-up. `signer` names who
+ *  `signed_by` reads (the default is hana, matching the pre-#927 default signer). */
 export async function liveTemplate({
   client, label = "tpl", cadence = "monthly", lines = null, cents = 120_000,
   autoReverse = false, start, end = null, memo = "x42 accrual",
   proposer = null, signer = null, backdateSignTo = null,
 }) {
-  const w = await adjWorld();
-  const name = `x42 ${label} ${uniqTag()}`;
-  const body = lines ?? accrualLines(cents);
-  const proposed = await proposeTemplate(proposer ?? w.users.bob, {
-    client, name, cadence, start, end, autoReverse, lines: body, memo,
+  const t = await insertTemplateRaw({
+    client, status: "live", label, cadence, lines, cents, autoReverse, start, end, memo,
+    proposer, signer,
   });
-  const id = idOf(proposed, "template_id", "id");
-  assert.ok(id, `propose_adjustment_template names the template (got ${JSON.stringify(proposed)})`);
-  await signTemplate(signer ?? w.users.hana, { client, template: id });
-  if (backdateSignTo) await backdateSignedAt(id, backdateSignTo);
-  const row = await templateRow(id);
-  assert.equal(row.status, "live", "the signed template is LIVE");
-  return {
-    id, name, cadence, memo, lines: body, autoReverse, cents,
-    signedBy: row.signed_by, contentHash: proposed.content_hash, row,
-  };
+  if (backdateSignTo) await backdateSignedAt(t.id, backdateSignTo);
+  const row = await templateRow(t.id);
+  assert.equal(row.status, "live", "the raw-inserted template is LIVE");
+  return { ...t, row };
 }
 
 /** Approve a draft as `sub`, always re-reading the CURRENT revision token first (the

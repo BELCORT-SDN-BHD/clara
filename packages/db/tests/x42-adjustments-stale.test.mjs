@@ -20,7 +20,7 @@ import {
   noteLane, x42EnsureReady, skip42, refuses, refusesAxis, caught, reasonToken,
   T, CLR39, STALE_AXES,
   EXPA, EXPB, ACCR, PREP, FAACC, FAEXP, mon, addDays, dayIn,
-  runManual, enrolAdvance, upsertFaProfile, accrualLines, prepaymentLines,
+  runOccurrence, enrolAdvance, upsertFaProfile, accrualLines, prepaymentLines,
   adjWorld, freshAdjClient, liveTemplate, approveDraft,
   entryRowOf, mirrorOf, receiptForEntry, stampedEntries, runRowsForTemplate, eventCount, firmOfClient,
   firmThresholdOf, templateRow, retireTemplateRaw, forgeEntryColumns, forgeStamp,
@@ -44,11 +44,14 @@ after(async () => {
 const skipHere = (t) => skip42(t, live, "the Wave-D-b approve-time staleness battery");
 
 /** A live template plus ONE outstanding occurrence draft for `period` — the shape every
- *  arm-(2) cell tampers with. Returns everything a forge needs. */
+ *  arm-(2) cell tampers with. Returns everything a forge needs. [#927] run_adjustment_manual
+ *  is retired, so every draft here is minted through the surviving MACHINE door — the entry's
+ *  own flags stamp still carries the issuing op_key regardless of which door wrote it, which
+ *  is the only thing this fixture reads back. */
 async function stagedDraft(label, { period = mon(-3), start = mon(-3).start, ...over } = {}) {
   const client = await freshAdjClient(label);
   const tpl = await liveTemplate({ client, label, start, ...over });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   assert.equal(r.status, "drafted", `${label}: the staged occurrence really is a DRAFT`);
   const e = await entryRowOf(r.entry_id);
@@ -149,7 +152,7 @@ test("x42.s3 arm (2) axis 6: a mode='post' stamp is refused when the forced-draf
   const tpl = await liveTemplate({
     client, label: "s3hs", start: mon(-4).start, cents,
     lines: accrualLines(cents, { debit: EXPB, credit: ACCR }), backdateSignTo: mon(-5).end });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: mon(-4).start, periodEnd: mon(-4).end });
   assert.equal(r.status, "drafted", "a high-stakes occurrence drafts even off the catch-up path");
   await forgeStamp(r.entry_id, { mode: "post" });
@@ -170,7 +173,7 @@ test("x42.s4 arm (2) axis 7: an account reserved DURING the draft window refuses
   const tpl = await liveTemplate({
     client, label: "s4auto", start: mon(-3).start, cents: 65_000,
     lines: prepaymentLines(65_000, { asset: PREP, expense: EXPA }), autoReverse: true });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: mon(-3).start, periodEnd: mon(-3).end });
   assert.equal(r.status, "drafted", "the auto_reverse occurrence drafts (ramp + catch-up)");
 
@@ -207,7 +210,7 @@ test("x42.s4 arm (2) axis 7: an account reserved DURING the draft window refuses
   const t2 = await liveTemplate({
     client: c2, label: "s4solo", start: mon(-3).start, cents: 44_000,
     lines: prepaymentLines(44_000, { asset: PREP, expense: EXPA }) });
-  const r2 = await runManual(w.users.bob, {
+  const r2 = await runOccurrence({
     client: c2, template: t2.id, periodStart: mon(-3).start, periodEnd: mon(-3).end });
   await upsertFaProfile(w.users.alice, {
     client: c2, assetAccount: PREP, accumAccount: FAACC, expenseAccount: FAEXP });
@@ -221,30 +224,32 @@ test("x42.s4 arm (2) axis 7: an account reserved DURING the draft window refuses
 // x42.z — THE TWO D-a DEFECT CLASSES, hunted by name (design §8).
 // ===========================================================================
 
-/** Two human sessions run the SAME (template, period) on a forced schedule: A takes its
- *  locks and holds them, B blocks behind them, A commits, B resolves. A poster that
- *  snapshots its admission reads BEFORE its rung would let B mint a second occurrence
- *  for a pair A has already taken — the frozen-snapshot class. */
-async function racePoster({ client, template, period, subA, subB }) {
-  const call = namedCall("run_adjustment_manual", [
+/** Two MACHINE-role sessions run the SAME (template, period) on a forced schedule: A takes
+ *  its locks and holds them, B blocks behind them, A commits, B resolves. A poster that
+ *  snapshots its admission reads BEFORE its rung would let B mint a second occurrence for a
+ *  pair A has already taken — the frozen-snapshot class. [#927] `run_adjustment_manual` is
+ *  retired, so this race is now driven through `clara.run_adjustment_occurrence` (the SAME
+ *  core, `clara._adj_run_occurrence_core`, the race is about) as `clara_runtime` on both
+ *  connections rather than as two distinct humans — the race is a property of the shared
+ *  core's own locking, not of which door reached it. */
+async function racePoster({ client, template, period }) {
+  const call = namedCall("run_adjustment_occurrence", [
     { name: "p_client" }, { name: "p_template" },
     { name: "p_period_start", cast: "date" }, { name: "p_period_end", cast: "date" },
     { name: "p_op_key" }]);
   const c1 = await getPool().connect();
   const c2 = await getPool().connect();
   const out = { a: null, b: null };
-  const open = async (c, sub) => {
-    await c.query(`set role ${ROLES.authenticated}`);
+  const open = async (c) => {
+    await c.query(`set role ${ROLES.runtime}`);
     await c.query("begin");
     await c.query("set local statement_timeout = '15000ms'"); // a genuine deadlock surfaces, never hangs
-    await c.query("select set_config('request.jwt.claims', $1, true)",
-      [JSON.stringify({ sub, role: "authenticated" })]);
   };
   try {
-    await open(c1, subA);
+    await open(c1);
     await c1.query(call, [client, template, period.start, period.end, opk("x42raceA")]);
     out.a = { ok: true };
-    await open(c2, subB);
+    await open(c2);
     const p2 = c2.query(call, [client, template, period.start, period.end, opk("x42raceB")])
       .then(() => { out.b = { ok: true }; })
       .catch((e) => { out.b = { ok: false, code: e.code, reason: reasonToken(e), message: e.message }; });
@@ -268,8 +273,7 @@ test("x42.z1 the FROZEN-SNAPSHOT class: two concurrent posters on one (template,
   const tpl = await liveTemplate({ client, label: "z1", start: mon(-3).start, cents: 51_000 });
   const period = mon(-3);
 
-  const race = await racePoster({
-    client, template: tpl.id, period, subA: w.users.bob, subB: w.users.grace });
+  const race = await racePoster({ client, template: tpl.id, period });
   assert.equal(race.a?.ok, true, "the first session posted its occurrence");
   assert.equal(race.b?.ok, false,
     `the second session must be REFUSED, not admitted (it reported ${JSON.stringify(race.b)})`);
