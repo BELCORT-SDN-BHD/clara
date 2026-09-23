@@ -11,7 +11,7 @@
 // needed (P2 fold round 3). `auth` defaults to the blessed `sessionTokenAccessor`
 // singleton (`@/lib/session-accessor`); a caller (tests included) may still override it.
 
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -24,6 +24,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { useClaraRailOpen, useFocusRailSubscription } from "@/lib/clara/useClaraThread";
 import { claraThreadStore } from "@/lib/clara/threadStore";
+import { rememberRailReturnFocus, takeRailReturnFocus } from "@/lib/clara/rail-focus-return";
 // CB-AE2E-019 — the rail's CHROME (presence, the collapsed launcher, the class
 // string and the two viewport arms) lives in these three siblings; this file
 // keeps the rail's CONTENT. See rail-chrome.tsx's header for the split.
@@ -48,6 +49,27 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
     menuToggleRef.current?.focus();
   }, []);
   useFocusRailSubscription(); // P2 FOLD SEAM C: ⌘K "Ask" -> this rail's composer
+
+  // #897 — FOCUS RETURNS TO THE ESCALATE CONTROL, the way back from the full-screen thread.
+  // This whole `<ClaraRail>` is a FRESH instance on that return ((firm)/(full) are sibling route
+  // groups, rail-mount.tsx's own note — even a same-client round trip remounts it), so the
+  // marker is taken once, on the instance's first render, and held until the escalate link this
+  // altitude renders actually exists (`threadId` resolves async — see the effect below).
+  // `lib/clara/rail-focus-return.ts`'s own header is the fuller account, mirroring
+  // `lib/firm/portfolio-focus-return.ts`'s established idiom for the same class of problem.
+  const escalateRef = useRef<HTMLAnchorElement>(null);
+  const pendingReturnFocus = useRef<boolean | undefined>(undefined);
+  if (pendingReturnFocus.current === undefined) pendingReturnFocus.current = takeRailReturnFocus(clientId);
+  useEffect(() => {
+    if (!pendingReturnFocus.current) return;
+    const el = escalateRef.current;
+    // No dependency array: re-checked on every render of this instance until the escalate
+    // link exists (its own `{threadId && ...}` guard above) or this instance itself unmounts —
+    // mirroring firm-portfolio-section.tsx's own "held until it appears" comment.
+    if (el === null) return;
+    pendingReturnFocus.current = false;
+    el.focus();
+  });
 
   const escalateBase = clientId ? `/clients/${clientId}/clara/${threadId}` : `/clara/${threadId}`;
   const escalateHref = `${escalateBase}?from=${encodeURIComponent(pathname)}`;
@@ -132,9 +154,14 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
           </Button>
           {threadId && (
             <Link
+              ref={escalateRef}
               href={escalateHref}
               aria-label={t("escalate")}
               className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+              // #897 — ENTER ON AN ANCHOR IS DISPATCHED AS A CLICK, so one handler covers
+              // pointer and keyboard. Remembered by ALTITUDE (`clientId`), so only a return to
+              // THIS SAME client's (or the firm's) fresh rail claims the marker.
+              onClick={() => rememberRailReturnFocus(clientId)}
             >
               {t("escalateShort")}
             </Link>

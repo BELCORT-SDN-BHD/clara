@@ -134,8 +134,10 @@ test("N4 · no lane fixture may claim the FIRM ALTITUDE for the shared subject",
 
   // The counter-half: this lane's client rows SHOULD carry the shared subject, or its own walk
   // resolves nothing. Without this, deleting every row would satisfy the assertion above.
+  // THREE, not two, since #897 — client C's own thread (`P6_5.threadC`, the OPEN-park fixture
+  // its #897 mock-lane walk arm needs) joined threadA's and threadB's.
   const own = P6_5_SESSIONS.filter((r) => r.client_id !== null && r.created_by === subject);
-  assert.equal(own.length, 2, "the lane's two CLIENT threads are still the caller's own");
+  assert.equal(own.length, 3, "the lane's three CLIENT threads are still the caller's own");
 });
 
 /**

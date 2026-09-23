@@ -341,6 +341,7 @@ lib/clara/api.test.ts
 lib/clara/intentKey.test.ts
 lib/clara/liveClarify.test.ts
 lib/clara/liveTools.test.ts
+lib/clara/rail-focus-return.test.ts
 lib/clara/rail-presence.test.ts
 lib/clara/stream-revoked.test.ts
 lib/clara/thread-resolution.test.ts

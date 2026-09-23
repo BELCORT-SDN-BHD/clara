@@ -9,6 +9,9 @@
 // JOURNEY and the client's own wire shapes — it proves NOTHING about whether Postgres would
 // accept them. `clara.apply_coa_template`'s nine rungs, `clara.resolve_onboarding_plan_item`'s
 // CLR10s and `clara._human_ctx`'s floors are not exercised here, only the calls made to them.
+// #897 adds client C's durable-interview run (`/api/runtime/interview/client/start`,
+// `/api/runtime/interview/state`) to that same faked list — the runtime's own park/answer
+// ledger is not exercised, only what `InterviewRunCard` does with a park it is handed.
 //
 // THE CALLER'S ROLE IS NOT MOCKED HERE, and that is deliberate. `serve-built.mjs` already owns
 // `/rest/v1/caller_context` and keys it on the LOGIN EMAIL (`owner@` -> owner/rank 3,
@@ -33,6 +36,25 @@ export const P6_5 = {
   templateId: "70707070-7777-4777-8777-777777777777",
   newClientId: "9c9c9c9c-9999-4999-8999-999999999999",
   question: "Which financial year does this invoice belong to?",
+  // #897 — CLIENT C, its own thread and its own OPEN plan, entirely apart from A's and B's.
+  // The full-screen altitude arm needs an interview run PARKED OPEN AND UNANSWERED, and
+  // reusing client A would have made that park just another row an EARLIER arm in this same
+  // file might mutate (the bank amendment, the chart adoption) — "independent of any other
+  // arm's state" (the ticket's own AC2) is a fixture-identity fact, not only a behavioural
+  // one, so it gets a client no other test() in this file ever navigates to.
+  clientC: "c3c3c3c3-3333-4333-8333-333333333333",
+  threadC: "c0c0c0c0-3333-4333-8333-333333333333",
+  planC: "d3d3d3d3-3333-4333-8333-333333333333",
+  /** The durable interview's own run id for client C. A plain string, not a UUID — the
+   *  runtime's `run_id` is opaque to the client (`normalizeInterviewState` only checks it is
+   *  a non-empty string), and every other run id already recorded in this file's neighbour
+   *  fixtures (`ITEMS_B`'s `"run-b-1"`) is spelled the same readable way. */
+  runC: "run-c-open-1",
+  /** The FIRST client segment (`CLIENT_SEG_KEYS[0]`, lib/interview/api.ts) — chosen because
+   *  it is unambiguously an OPEN, unanswered park: parkIndex 0, no prior activity, nothing
+   *  this run could be mistaken for a resumed or later question. */
+  interviewCSeg: "legal_name",
+  interviewCQuestion: "What is the client's legal registered name?",
 };
 
 /** THIS LANE'S THREE THREADS, exported so `serve-built.mjs` can APPEND them to its ONE shared
@@ -59,6 +81,9 @@ export const P6_5_SESSIONS = [
   { id: "f0f0f0f0-0000-4000-8000-000000000000", firm_id: "33333333-3333-3333-3333-333333333333", client_id: null, created_by: "5e55e55e-5555-4555-8555-555555555555", visibility: "private", title: "P6-5 firm (unreachable by design)", created_at: "2026-09-01T00:00:00.000Z" },
   { id: "a0a0a0a0-1111-4111-8111-111111111111", firm_id: "33333333-3333-3333-3333-333333333333", client_id: "c1c1c1c1-1111-4111-8111-111111111111", created_by: "11111111-1111-1111-1111-111111111111", visibility: "private", title: "P6-5 A", created_at: "2026-09-01T00:00:00.000Z" },
   { id: "b0b0b0b0-2222-4222-8222-222222222222", firm_id: "33333333-3333-3333-3333-333333333333", client_id: "c2c2c2c2-2222-4222-8222-222222222222", created_by: "11111111-1111-1111-1111-111111111111", visibility: "private", title: "P6-5 B", created_at: "2026-09-01T00:00:00.000Z" },
+  // #897 — client C's own thread, the rail's escalate control has nothing to link to
+  // without one (`ClaraRail`'s `{threadId && <Link .../>}` guard).
+  { id: "c0c0c0c0-3333-4333-8333-333333333333", firm_id: "33333333-3333-3333-3333-333333333333", client_id: "c3c3c3c3-3333-4333-8333-333333333333", created_by: "11111111-1111-1111-1111-111111111111", visibility: "private", title: "P6-5 C", created_at: "2026-09-01T00:00:00.000Z" },
 ];
 
 /** This lane's own mutable fixture state — see the header for why the caller's role is not
@@ -86,6 +111,8 @@ const CLIENTS = () => [
   // 0017_wave_b.sql:2825). A committed plan on an "onboarding" client would be a state the
   // database cannot produce, and a walk built on one proves nothing about the real face.
   { id: P6_5.clientB, name: "ROME SECRETARY", status: "active", created_at: "2026-01-02T00:00:00.000Z" },
+  // #897 — client C, onboarding, an OPEN plan with nothing answered yet.
+  { id: P6_5.clientC, name: "ROME ADVISORY (OPEN PARK)", status: "onboarding", created_at: "2026-01-03T00:00:00.000Z" },
 ];
 
 const PLAN = () => ({
@@ -114,6 +141,17 @@ const ITEMS = () => ([
     created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-01T00:00:00.000Z",
   },
 ]);
+
+/** #897 — client C's plan. OPEN, static (nothing in this file ever amends it), so the fixture
+ *  stays an OPEN, unanswered park independent of A's and B's own mutable state. */
+const PLAN_C = () => ({
+  id: P6_5.planC, firm_id: P6_5.firmId, scope_kind: "client", client_id: P6_5.clientC,
+  state: "open", revision_token: "rev-c-1", revision_n: 1,
+  committed_at: null, committed_by: null, review_maker: null, reviewed_at: null,
+  contributors: [], commit_attestation: null, cancelled_at: null, cancelled_by: null,
+  cancel_reason: null, created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-01T00:00:00.000Z",
+  opened_by_agent: false, opener_model: null, opened_from_question: null,
+});
 
 /** CB-AE2E-023 — client B's COMMITTED plan and its items. A separate plan id and a separate
  *  client id, so every handler below stays scoped exactly as it was: client A's live-plan
@@ -179,6 +217,9 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
     // register, so the unfiltered case falls through to whoever owns it.
     if (idFilter === `eq.${P6_5.clientA}`) { sendJson(response, 200, [CLIENTS()[0]], cors); return true; }
     if (idFilter === `eq.${P6_5.clientB}`) { sendJson(response, 200, [CLIENTS()[1]], cors); return true; }
+    // #897 — client C, the OPEN-park fixture. `getOnboardingClient` (OnboardingChecklistCard's
+    // own mount) reads this by id before InterviewRunCard ever mounts.
+    if (idFilter === `eq.${P6_5.clientC}`) { sendJson(response, 200, [CLIENTS()[2]], cors); return true; }
     return false;
   }
 
@@ -233,6 +274,7 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
     // its client has no plan.
     if (clientFilter === `eq.${P6_5.clientA}`) { sendJson(response, 200, [PLAN()], cors); return true; }
     if (clientFilter === `eq.${P6_5.clientB}`) { sendJson(response, 200, [PLAN_B()], cors); return true; }
+    if (clientFilter === `eq.${P6_5.clientC}`) { sendJson(response, 200, [PLAN_C()], cors); return true; }
     return false;
   }
 
@@ -242,6 +284,9 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
   if (request.method === "GET" && path === "/rest/v1/onboarding_plan_items") {
     if (planFilter === `eq.${P6_5.planA}`) { sendJson(response, 200, ITEMS(), cors); return true; }
     if (planFilter === `eq.${P6_5.planB}`) { sendJson(response, 200, ITEMS_B(), cors); return true; }
+    // #897 — client C's plan carries no items at all: the fixture exists only to give
+    // `InterviewRunCard` an OPEN plan to bind to, never to exercise the checklist rows.
+    if (planFilter === `eq.${P6_5.planC}`) { sendJson(response, 200, [], cors); return true; }
     return false;
   }
 
@@ -252,7 +297,7 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
   }
 
   if (request.method === "GET" && path === "/rest/v1/opening_seed_registry") {
-    if (planFilter !== `eq.${P6_5.planA}` && planFilter !== `eq.${P6_5.planB}`) return false;
+    if (planFilter !== `eq.${P6_5.planA}` && planFilter !== `eq.${P6_5.planB}` && planFilter !== `eq.${P6_5.planC}`) return false;
     sendJson(response, 200, [], cors);
     return true;
   }
@@ -385,7 +430,10 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
 
   if (request.method === "GET" && path === "/rest/v1/chat_sessions") {
     const wanted = idFilter?.replace("eq.", "");
-    const map = { [P6_5.threadA]: P6_5.clientA, [P6_5.threadB]: P6_5.clientB, [P6_5.threadFirm]: null };
+    const map = {
+      [P6_5.threadA]: P6_5.clientA, [P6_5.threadB]: P6_5.clientB, [P6_5.threadFirm]: null,
+      [P6_5.threadC]: P6_5.clientC,
+    };
     if (!wanted || !(wanted in map)) return false;
     sendJson(response, 200, [{
       id: wanted, firm_id: P6_5.firmId, client_id: map[wanted], created_by: P6_5.userId,
@@ -434,6 +482,51 @@ export async function handleP6_5Runtime(request, response, url) {
       }));
       return true;
     }
+  }
+
+  // #897 — client C's durable interview run, ID-SCOPED like everything else in this lane.
+  // `startClientInterview` (lib/interview/api.ts) is idempotent by contract ("Starting again
+  // safely returns the run already bound to this plan") and this mock is stateless in the
+  // same spirit: EVERY call for client C's own (clientId, planId) pair answers 202 with the
+  // SAME `run_id`, so a card that re-attaches after losing its local `runId` (a remount —
+  // exactly what the full-screen altitude change does, InterviewRunCard.tsx's own header)
+  // resumes the identical run rather than minting a second one.
+  // STRIPPED, not the browser's own `/api/runtime/...` path: `app/api/runtime/[...path]/route.ts`
+  // forwards to `${CLARA_RUNTIME_URL}/api/${path.join("/")}` — the fixed `runtime` route segment
+  // is consumed by Next's own catch-all before this mock runtime ever sees the request (measured:
+  // an unstripped path here left the card reading `serve-built.mjs`'s own "unhandled e2e runtime
+  // route" alert instead of a park).
+  if (request.method === "POST" && path === "/api/interview/client/start") {
+    const body = await readJson(request);
+    if (body.clientId !== P6_5.clientC || body.planId !== P6_5.planC) return false;
+    response.writeHead(202, { "content-type": "application/json" });
+    response.end(JSON.stringify({ run_id: P6_5.runC }));
+    return true;
+  }
+
+  // THE OPEN, UNANSWERED PARK ITSELF. `useInterviewRun`'s poll (`refresh`, POLL_MS = 3000)
+  // re-reads this on an interval and after every mount, and this fixture never advances it —
+  // the SAME parkIndex 0 question comes back for as long as this walk runs, which is what
+  // "OPEN and unanswered" means for a fixture instead of a running server. Scoped by `runId`
+  // alone: it is a plain opaque string this mock alone mints, so no other lane's poll (using
+  // its own run id) can ever match it.
+  if (request.method === "GET" && path === "/api/interview/state") {
+    if (url.searchParams.get("runId") !== P6_5.runC) return false;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      run_id: P6_5.runC,
+      scope: "client",
+      status: "awaiting_input",
+      pending_park: {
+        parkIndex: 0,
+        seg: P6_5.interviewCSeg,
+        phase: "q",
+        question: P6_5.interviewCQuestion,
+      },
+      activity: [],
+      items: [],
+    }));
+    return true;
   }
 
   return false;
