@@ -370,3 +370,31 @@ runs:
       run: |
         PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
           node tests/rig-cluster-reset.mjs --drop-database=clara_hrd_b_upgrade_ci --sweep-roles
+
+    # #1023 — the 0186 backfill drill (#628's "THE 0186 BACKFILL DRILL", same false-green
+    # protection as every step above): checkout-convergence-upgrade.test.mjs applies 0001->0185,
+    # builds checkout intents in every pre-0186 shape the estate can hold, THEN applies 0186 onto
+    # them and proves the status backfill — the one statement in that migration touching live,
+    # money-adjacent data inside a quiesce window. Reset-gated (drops schema clara), so it SKIPS in
+    # the concurrent all-packages sweep and had no CI leg anywhere (packages/db/tests/README.md's
+    # #845 section, "no CI leg at all"): its destructive path had only ever run on a worker's own
+    # machine, by hand, per the file's own header recipe. Run it FOR REAL here, ALONE, in its OWN
+    # throwaway database — the exact name (`clara_0186_upgrade_ci`) that header recipe already
+    # documents, so a worker's by-hand run and this CI leg exercise the identical target.
+    - name: 0186 checkout-convergence upgrade drill (isolated DB, #1023)
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_0186_upgrade_ci'
+        PGDATABASE=clara_0186_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          CLARA_ALLOW_DESTRUCTIVE=1 node --test tests/checkout-convergence-upgrade.test.mjs
+
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same mechanism,
+    # this step's own database.
+    - name: Cluster cleanup — drop clara_0186_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_0186_upgrade_ci --sweep-roles

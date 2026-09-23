@@ -65,9 +65,11 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { EPHEMERAL_DB } from "../lib/guard.mjs";
 
 const TESTS_DIR = fileURLToPath(new URL(".", import.meta.url));
 const SELF = path.basename(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.join(TESTS_DIR, "..", "..", "..");
 
 /** Every module under packages/db/tests (recursive) that ends in .mjs. */
 function walk(dir) {
@@ -250,3 +252,52 @@ test("#845 env buffer restored after the poisoned-target probe — every key is 
     assert.equal(process.env[k], AMBIENT[k], `${k} must be back to its pre-probe value (was ${AMBIENT[k]})`);
   }
 });
+
+// #1023 — the CI-coverage gap #845's own comment above named plainly: "checkout-convergence-
+// upgrade.test.mjs, rig-runtime-upgrade.test.mjs and wave-a-upgrade.test.mjs have no CI leg at
+// all — their destructive path has never run anywhere but a worker's own machine, by hand". Each
+// entry pairs a drill with the PGDATABASE name ITS OWN header comment already documents
+// (checkout-convergence-upgrade.test.mjs:16, rig-runtime-upgrade.test.mjs:9,
+// wave-a-upgrade.test.mjs:8) — the CI step must target the SAME name a worker running the file by
+// hand would, not an invented one, so the two recipes are provably the same drill.
+const CLOSED_WAVE_ACTION = path.join(REPO_ROOT, ".github", "actions", "closed-wave-upgrade-drills", "action.yml");
+
+const NEWLY_COVERED = [
+  { file: "checkout-convergence-upgrade.test.mjs", db: "clara_0186_upgrade_ci" },
+];
+
+/** The composite-action step (its `- name:` line through the next step's, or EOF) whose `run:`
+ *  block invokes `tests/<file>` — the same step-splitting shape a human reading the YAML uses,
+ *  never a full-file search that could match a comment or an unrelated step. Step boundaries in
+ *  this file are always a 4-space-indented `- name:` (verified against the file's own steps). */
+function stepInvoking(yamlText, file) {
+  return yamlText
+    .split(/\n(?=    - name:)/)
+    .find((step) => step.includes(`tests/${file}`));
+}
+
+for (const { file, db } of NEWLY_COVERED) {
+  test(`#1023 CI coverage: ${file} has a closed-wave-upgrade-drills step that runs its destructive path on a disposable database`, () => {
+    const yamlText = readFileSync(CLOSED_WAVE_ACTION, "utf8");
+    const step = stepInvoking(yamlText, file);
+    assert.ok(step, `no step in .github/actions/closed-wave-upgrade-drills/action.yml invokes tests/${file} — `
+      + "packages/db/tests/README.md's #845 section says this file has no CI leg; #1023 closes that gap");
+    assert.match(step, /CLARA_RIG_ALLOW_RESET=1/,
+      `${file}'s CI step must set CLARA_RIG_ALLOW_RESET=1 — the flag its own header recipe documents, without which it only skips`);
+    assert.match(step, /CLARA_ALLOW_DESTRUCTIVE=1/,
+      `${file}'s CI step must set CLARA_ALLOW_DESTRUCTIVE=1 — lib/guard.mjs's assertDestructiveAllowed requires it before reset() may run at all`);
+    // Not the FIRST `PGDATABASE=` in the step — that one is `PGDATABASE=postgres` on the `create
+    // database` line, the same admin connection every drill in this file provisions from. The
+    // drill's own target is the `PGDATABASE=` immediately followed by `CLARA_RIG_ALLOW_RESET=1` on
+    // the same line, the invocation line's own shape.
+    const dbMatch = step.match(/PGDATABASE=(\S+)\s+CLARA_RIG_ALLOW_RESET=1/);
+    assert.ok(dbMatch, `${file}'s CI step must create and target its own PGDATABASE, like every other drill in this action`);
+    assert.equal(dbMatch[1], db,
+      `${file}'s CI step should target ${db} — the exact name the file's own header recipe documents, so a worker running it by hand and CI running it exercise the identical target`);
+    assert.match(dbMatch[1], EPHEMERAL_DB,
+      `${dbMatch[1]} does not look disposable to the SAME guard rig-reset-guard.mjs's guardedReset enforces (imported here from lib/guard.mjs, never re-spelled) — `
+      + "a CI leg whose own database name the guard itself would refuse proves nothing about the destructive path running safely");
+    assert.match(yamlText, new RegExp(`rig-cluster-reset\\.mjs --drop-database=${db} --sweep-roles`),
+      `no cluster-cleanup step drops ${db} — every closed-wave-upgrade-drills step must clean up its own throwaway database and any roles its chain minted (review-518 D1/D2), the same as the 11 drills already in this file`);
+  });
+}
