@@ -72,6 +72,9 @@ declare
     '234e5c4c71ce2e20739bd2f197726c1cdab8b7cf90b1cb78766d30673c9dda1c';
   c_preview_pre constant text :=
     'f76126612c9cba1a3aee42ec9ca4e3a6b287883ed921a4ffdd2383cb5a32fcf7';
+  -- The Work lane's own run door, whose loop exit gains the parked status (§B5).
+  c_run_for_pre constant text :=
+    '051112ecd71e2c0c3fe70b91757f03c74054bff0665a41c57045e2e257dba1e5';
 begin
   if to_regclass('clara.fixed_assets') is null or to_regclass('clara.fiscal_years') is null then
     raise exception '#975 prestate: the fixed-asset register or the close model is absent -- 0041 and 0056 must apply first'
@@ -105,6 +108,7 @@ begin
       ('clara._fa_run_period_core(uuid,date,date,text,uuid,uuid,text)', c_run_core_pre, 'recut'),
       ('clara._fa_oldest_unmet_period(uuid)', c_due_oracle_pre, 'recut'),
       ('clara.preview_depreciation_run(uuid)', c_preview_pre, 'recut'),
+      ('clara.run_depreciation_period_for(uuid,date,text,uuid)', c_run_for_pre, 'recut'),
       -- NON-REGRESSION: the locked-period wall this file must not move (AC4), the two run doors
       -- whose bodies only delegate, the reopen path the restatement choice points at, and every
       -- arithmetic body the new helper leans on.
@@ -618,6 +622,106 @@ end $function$
 ;
 
 -- =====================================================================================
+-- §B5 clara.run_depreciation_period_for, RECUT. 0227's body, byte for byte, plus ONE word in
+--     its loop exit: a PARKED period ends the chase exactly as a noop does. Every admission
+--     rung (the on-behalf-of member, the bookkeeper floor, the client status, the op key and
+--     its dedupe) is untouched, and the periods still come from the oracle's own arithmetic.
+--
+--     THE AGENT CATCH-UP LANE (clara._agent_depreciation_catchup_core) HAS THE SAME LOOP AND IS
+--     DELIBERATELY NOT RECUT HERE. Its wake source `close_prep` is registered-and-disabled
+--     (0133:915-917, re-asserted 0138:2939-2941, 0223:247-248 and 0227 §I T.10), so this lane
+--     could not drive it to see the behaviour, and the wave-3 rule is that a door's behaviour is
+--     asserted only after it was driven. The SAFETY property holds there regardless: it runs
+--     under the verb `run_depreciation_period`, so it PARKS and never posts; what it would lose
+--     is only a quiet receipt, twelve dedupe replays of one parked answer. Named as a follow-up
+--     in this ticket's report rather than shipped unproven.
+-- =====================================================================================
+CREATE OR REPLACE FUNCTION clara.run_depreciation_period_for(p_client uuid, p_through date, p_op_key text, p_obo uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $function$
+declare v_firm uuid; v_role text; v_status text; v_client_status text;
+        v_dedupe jsonb; v_through date; v_due jsonb; v_result jsonb;
+        v_ran jsonb := '[]'::jsonb; v_guard int := 0;
+begin
+  if p_obo is null then
+    raise exception 'the human this operation acts for is required' using errcode = 'CLR04',
+      detail = '{"reason":"obo_not_active"}';
+  end if;
+  select cl.firm_id, cl.status into v_firm, v_client_status
+    from clara.clients cl where cl.id = p_client;
+  if v_firm is null then
+    raise exception 'client not found' using errcode = 'CLR11',
+      detail = '{"reason":"client_not_found"}';
+  end if;
+  perform 1 from clara.firms f where f.id = v_firm for key share;
+  select m.role, m.status into v_role, v_status from clara.firm_memberships m
+   where m.user_id = p_obo and m.firm_id = v_firm
+   order by (m.status = 'active') desc, m.created_at desc limit 1
+     for share;
+  if v_role is null or v_status <> 'active' then
+    raise exception 'the initiating member is no longer active in this firm' using errcode = 'CLR04',
+      detail = jsonb_build_object('reason', 'obo_not_active', 'obo', p_obo)::text;
+  end if;
+  if clara.role_rank(v_role) < clara.role_rank('bookkeeper') then
+    raise exception 'the initiating member no longer holds the bookkeeper floor'
+      using errcode = 'CLR04',
+        detail = jsonb_build_object('reason', 'insufficient_role', 'obo', p_obo)::text;
+  end if;
+  if v_client_status is distinct from 'active' then
+    raise exception 'client is not active' using errcode = 'CLR10',
+      detail = '{"reason":"client_inactive"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  v_dedupe := clara._reserve_op(v_firm, 'run_depreciation_period_for', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'through', p_through, 'obo', p_obo)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  v_through := coalesce(p_through, clara._fa_today());
+
+  -- THE PERIODS ARE THE ORACLE'S OWN ARITHMETIC, never this body's -- the same law
+  -- `_agent_depreciation_catchup_core` (0138:2386-2404) states for the agent lane, applied here.
+  -- The finite guard is the belt's own posture: at most twelve periods clear per call, so a
+  -- mis-answering oracle cannot spin this loop forever.
+  loop
+    v_guard := v_guard + 1;
+    exit when v_guard > 12;
+    v_due := clara._depreciation_run_due_core(p_client, v_firm);
+    exit when v_due is null or jsonb_typeof(v_due) <> 'object'
+      or not coalesce((v_due ->> 'due')::boolean, false)
+      or (v_due ->> 'period_end') is null
+      or (v_due ->> 'period_end')::date > v_through;
+    v_result := clara._fa_run_period_core(p_client, (v_due ->> 'period_start')::date,
+      (v_due ->> 'period_end')::date,
+      p_op_key || ':' || (v_due ->> 'period_end'), p_obo, v_firm, 'run_depreciation_period_for');
+    v_ran := v_ran || jsonb_build_array(jsonb_build_object(
+      'period_start', v_due ->> 'period_start', 'period_end', v_due ->> 'period_end',
+      'result', v_result));
+    -- #975 (0279): A PARKED PERIOD ENDS THE CHASE, exactly as a noop does. Parking means the
+    -- period's charge folds a closed year forward and nobody has judged its materiality yet
+    -- (IAS 8); the oracle still answers due:true for it, honestly, so a loop that kept going
+    -- would re-present the SAME period to the SAME guard for the rest of its twelve turns --
+    -- and, because the derived op key is the period's own end, collect eleven dedupe replays of
+    -- one parked receipt. Measured before this exit existed: periods_run = 12 for one period.
+    exit when (v_result ->> 'status') in ('noop', 'parked');
+  end loop;
+
+  perform clara._audit(v_firm, p_obo, null, null, 'run_depreciation_period_for', null,
+    jsonb_build_object('client', p_client, 'through', v_through, 'op_key', p_op_key,
+      'periods_run', jsonb_array_length(v_ran)));
+  return clara._finish_op(v_firm, 'run_depreciation_period_for', p_op_key,
+    jsonb_build_object('client_id', p_client, 'through', v_through,
+      'periods_run', jsonb_array_length(v_ran), 'periods', v_ran,
+      'still_due', clara._depreciation_run_due_core(p_client, v_firm)));
+end $function$
+
+
+;
+
+-- =====================================================================================
 -- §C clara._fa_run_period_core, RECUT. The body 0041 shipped and 0042/0227/0248 have each
 --    spliced, byte for byte, PLUS the closed-year arrears question between 0227's locked-period
 --    wall and the first write. Nothing above the wall moves; nothing below it moves except the
@@ -1095,6 +1199,31 @@ begin
      and 'search_path=clara, pg_temp' = any(p.proconfig);
   if v_n <> 1 then
     raise exception '#975 tail T.3g: clara.preview_depreciation_run lost its stable/definer/owner/search_path shape' using errcode='CLR10';
+  end if;
+
+  -- T.3h THE RECUT WORK-LANE DOOR exits on a parked period as well as a noop, and every
+  -- admission rung it walks before the loop is untouched.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.run_depreciation_period_for(uuid,date,text,uuid)'::regprocedure;
+  for v_pin in select * from (values
+      ($$(v_result ->> 'status') in ('noop', 'parked')$$, 1),
+      ($$"reason":"obo_not_active"$$, 1),
+      ($$'reason', 'insufficient_role'$$, 1),
+      ($$"reason":"client_inactive"$$, 1),
+      ('clara._depreciation_run_due_core(p_client, v_firm)', 2),
+      ('exit when v_guard > 12;', 1)) as t(marker, want) loop
+    v_n := (length(v_src) - length(replace(v_src, v_pin.marker, ''))) / length(v_pin.marker);
+    if v_n <> v_pin.want then
+      raise exception '#975 tail T.3h: the recut clara.run_depreciation_period_for carries "%" % time(s), expected %', v_pin.marker, v_n, v_pin.want
+        using errcode='CLR10';
+    end if;
+  end loop;
+  -- …and the agent catch-up lane is UNTOUCHED, by sha, for the reason §B5 states.
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._agent_depreciation_catchup_core(jsonb,uuid,date,text,jsonb,text)'::regprocedure;
+  if v_sha is distinct from 'c354db4e234e58ac5213a81751522f256562b9b484153b8e7570f33a3bf9d1fc' then
+    raise exception '#975 tail T.3i: clara._agent_depreciation_catchup_core MOVED (measured %) -- this file deliberately leaves the parked agent lane alone', v_sha
+      using errcode='CLR10';
   end if;
 
   -- T.4 NON-REGRESSION, re-read: the locked-period wall, both run doors, the reopen path and

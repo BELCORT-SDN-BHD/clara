@@ -32,7 +32,9 @@ import {
   buyAsset, completeSL, mon, dayIn, opk,
   refuses, noteLane, printLaneNotes, printSkipCount, endPool, x41EnsureReady,
 } from "./fa-arrears-resolution-fixtures.mjs";
-import { previewRun, draftDepreciationEntries, depreciationEntries } from "./depreciation-history-fixtures.mjs";
+import {
+  previewRun, runPeriodFor, draftDepreciationEntries, depreciationEntries,
+} from "./depreciation-history-fixtures.mjs";
 
 let live = false;
 before(async () => { live = await x41EnsureReady(); });
@@ -391,4 +393,32 @@ test("p975.no_closed a client with NO closed year behaves exactly as it did befo
   assert.equal(String(run.charged_cents), String(MONTHLY));
   assert.equal(run.arrears_folded, null, "nothing was folded, and the receipt says so");
   assert.equal((await resolutionRows(client)).length, 0, "nobody was asked anything");
+});
+
+// ===========================================================================================
+// 6 · THE WORK LANE (AC3, the other machine door). `clara.run_depreciation_period_for` clears
+//     periods in a loop; a parked period must END that loop, not be re-asked twelve times.
+// ===========================================================================================
+
+test("p975.work_lane the on-behalf-of run door stops its chase at a parked period instead of re-asking it to the guard, and clears the period once a choice is recorded", async (t) => {
+  if (await gate(t)) return;
+  const { w, client, fy, open } = await closedYearArrears("work_lane");
+
+  const parked = await runPeriodFor({ client, through: open.end, obo: w.users.bob });
+  assert.equal(parked.periods_run, 1,
+    `the chase STOPS at the parked period (got ${parked.periods_run} attempts at the same one)`);
+  assert.equal(parked.periods[0].result.status, "parked");
+  assert.equal(parked.periods[0].result.reason, "arrears_resolution_required");
+  assert.equal(parked.still_due.due, true, "…and the period is still honestly due");
+  assert.deepEqual(await depreciationEntries(client), [], "nothing was posted");
+
+  await recordResolution(w.users.bob, {
+    client, fiscalYear: fy, choice: "fold_current", arrearsCents: MONTHLY,
+    periodStart: open.start, periodEnd: open.end, reason: "immaterial",
+  });
+  const cleared = await runPeriodFor({ client, through: open.end, obo: w.users.bob, opKey: opk("p975wl2") });
+  assert.ok(cleared.periods_run >= 1, "the same door now clears the period");
+  assert.notEqual(cleared.periods[0].result.status, "parked");
+  assert.equal(cleared.periods[0].result.arrears_folded[0].choice, "fold_current",
+    "…and its receipt names the ruling it proceeded under");
 });
