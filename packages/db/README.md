@@ -4763,8 +4763,12 @@ the auth-wall pattern instead.
 * `clara_invite_preview` (NOLOGIN group, holds the one EXECUTE and no relation privilege anywhere)
   and `clara_invite_preview_login` (NOLOGIN shell, member of it) — 0163's role pair, one lane over.
   **No LOGIN attribute and no password is in this file**; the credential is an out-of-band operator
-  ceremony, and the migration's own tail REFUSES `rolcanlogin` on either role so one cannot arrive
-  by migration. See the release runbook for the ceremony.
+  ceremony — [deploy/invite-preview-login-ceremony.sql](deploy/invite-preview-login-ceremony.sql),
+  on `read-logins-ceremony.sql`'s own shape — and the migration's tail REFUSES `rolcanlogin` on
+  either role so one cannot arrive by migration. That ceremony's verification block prints the
+  login shell's WHOLE effective EXECUTE surface in schema `clara` (expected: exactly
+  `preview_invite_by_token`) and ends with a smoke call that returns the door's single refusal for
+  a token that names nothing — the whole chain proven with no real token and nothing disclosed.
 * `clara.invite_preview_attempts` — the wall's evidence: the token's sha256, the peppered origin
   digest, a timestamp. Forced RLS with a single owner policy, append-only, no truncate, no
   application grant, mirroring `clara.confirmation_attempts` (0163 §3).
