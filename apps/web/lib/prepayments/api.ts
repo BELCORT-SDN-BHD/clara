@@ -32,13 +32,32 @@ const opts = (o: Opts) => ({ session: o.session ?? sessionTokenAccessor, signal:
 
 // ── the shapes the doors answer with ────────────────────────────────────────
 
-export type PrepaymentListRow = {
+/** #939 — WHERE a schedule's term came from. A prepayment recognised with NO document is
+ *  amortised over a period a named person stated (`clara.prepayment_stated_terms`); one that binds
+ *  a document rides the document's own service period. The two behave identically afterwards — the
+ *  same straight line, the same remainder, the same monthly Work — so PROVENANCE is the whole
+ *  difference, and a surface that could not tell them apart would let "a person said so" read as
+ *  "the invoice says so". */
+export type PrepaymentTermSource = "document_service_period" | "human_stated";
+
+/** The provenance trio every read carries on the stated lane, and NULL on the document lane —
+ *  never filled from the document's own recorder, because the two are different claims. */
+export type StatedTermFacts = {
+  term_source: PrepaymentTermSource;
+  stated_term_id: string | null;
+  term_stated_by: string | null;
+  term_stated_at: string | null;
+  term_reason: string | null;
+};
+
+export type PrepaymentListRow = StatedTermFacts & {
   schedule_id: string;
   plan_id: string;
   purpose: string;
   status: string;
   source_entry_id: string;
-  document_id: string;
+  /** NULL on the memo-only lane: that recognition binds no document at all. */
+  document_id: string | null;
   term_start: string;
   term_end: string;
   /** #919 — the SAME term-liveness fields `PrepaymentDetail` carries, on the list row. */
@@ -93,7 +112,7 @@ export type PrepaymentOccurrence = {
  *  reached. This is the per-occurrence link, made explicit by the read rather than re-derived. */
 export type PrepaymentPeriod = PeriodLine & { occurrence: PrepaymentOccurrence | null };
 
-export type PrepaymentDetail = {
+export type PrepaymentDetail = StatedTermFacts & {
   schedule_id: string;
   client_id: string;
   plan_id: string;
@@ -105,8 +124,11 @@ export type PrepaymentDetail = {
   source_posting_date: string | null;
   source_memo: string | null;
   source_status: string | null;
-  document_id: string;
-  service_period_id: string;
+  /** Both NULL on the memo-only lane. `term_source` says which carrier to read, and
+   *  `ck_ps_term_source_carrier` (migration 0305) makes the pairing structural, so a row can never
+   *  claim a provenance it cannot point at. */
+  document_id: string | null;
+  service_period_id: string | null;
   /** #919 — whether `service_period_id` still names the LIVE `document_service_periods` row.
    *  false once a bookkeeper has recorded a corrected term on the same document: the stored
    *  allocation does not move, so this is what tells a reader the schedule is riding a
@@ -185,12 +207,21 @@ export type AttentionUnscheduled = {
   entry_id: string;
   posting_date: string;
   memo: string | null;
-  document_id: string;
+  /** NULL for a memo-only recognition. #939 removed arm B's `document_id is not null` filter:
+   *  with no second carrier such a recognition could never be configured, so listing it would have
+   *  offered an action that could only refuse — and with one, the filter hid exactly the
+   *  prepayments that needed rescuing. */
+  document_id: string | null;
   prepaid_account_code: string;
   amount_cents: number;
-  /** Whether the document already states a term — so the surface names the NEXT act: record the
-   *  service period, or configure the schedule. */
+  /** WHICH carrier this recognition's term lives in. A document-bound recognition's term belongs
+   *  to its document; a memo-only one's belongs to the person who states it. */
+  term_carrier?: PrepaymentTermSource;
+  /** Whether THAT carrier already holds a live term. */
   has_live_term: boolean;
+  /** The person's next act, as the database's own closed token — the copy is this surface's, the
+   *  fact is the read's. Optional because a database at an earlier frontier answers without it. */
+  next_step?: "configure_schedule" | "record_document_service_period" | "state_service_period";
 };
 
 export type PrepaymentAttention = {
@@ -205,6 +236,8 @@ export type PrepaymentAttention = {
 };
 
 export type PrepaymentCreated = {
+  term_source: PrepaymentTermSource;
+  stated_term_id: string | null;
   schedule_id: string;
   plan_id: string;
   revision_id: string;
@@ -213,8 +246,8 @@ export type PrepaymentCreated = {
   kind: string;
   client_id: string;
   source_entry_id: string;
-  document_id: string;
-  service_period_id: string;
+  document_id: string | null;
+  service_period_id: string | null;
   basis_kind: string;
   term_start: string;
   term_end: string;
@@ -308,6 +341,57 @@ export async function createPrepaymentSchedule(
     p_expense_basis: input.expenseAccountBasis,
     p_purpose: input.purpose,
     p_authority_ref: input.authorityRef,
+    p_op_key: input.opKey,
+  }, opts(o));
+}
+
+// ── #939 · the one write that makes a memo-only prepayment schedulable ──────
+
+export type RecordStatedTermInput = {
+  clientId: string;
+  /** The POSTED recognition entry. The term is anchored to the ENTRY, not to a document, because
+   *  the entry is the only durable thing a memo-only term is about. */
+  sourceEntryId: string;
+  periodStart: string;
+  periodEnd: string;
+  /** REQUIRED, and the door refuses a blank one by name. A term stated with no grounds is the
+   *  unexplained judgement the whole fact-with-a-basis discipline exists to prevent. */
+  reason: string;
+  opKey: string;
+};
+
+export type StatedTermRecorded = {
+  stated_term_id: string;
+  client_id: string;
+  source_entry_id: string;
+  period_start: string;
+  period_end: string;
+  reason: string;
+  stated_by: string;
+  /** The statement this one superseded, or null when it is the first. A correction is a NEW row;
+   *  it never moves a running schedule, which keeps naming the statement it was derived from. */
+  superseded_id: string | null;
+};
+
+/**
+ * State the service period of a prepayment recognised with no document.
+ *
+ * BOOKKEEPER FLOOR, human lane only: `clara.record_prepayment_stated_term` holds no agent grant
+ * and has no wake wrapper, because a period a model supplied would be a model-generated value
+ * entering a durable artifact. Clara may ask the two-date question; she never answers it.
+ *
+ * HYDRATE-NEVER-TRUST binds this like every other write: the returned envelope is a REPORT of what
+ * the database did, and the caller re-reads rather than painting it as state.
+ */
+export async function recordPrepaymentStatedTerm(
+  input: RecordStatedTermInput, o: Opts = {},
+): Promise<StatedTermRecorded> {
+  return callDoor<StatedTermRecorded>("record_prepayment_stated_term", {
+    p_client: input.clientId,
+    p_source_entry: input.sourceEntryId,
+    p_period_start: input.periodStart,
+    p_period_end: input.periodEnd,
+    p_reason: input.reason,
     p_op_key: input.opKey,
   }, opts(o));
 }

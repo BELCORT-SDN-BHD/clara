@@ -177,6 +177,13 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
           <Fact label={t("factTermBasis")}>
             {row.basis_kind === "human_stated" ? t("factBasisHuman") : t("factBasisExtracted")}
           </Fact>
+          {/* #939 — WHICH CARRIER the term came from. `basis_kind` above says how the term was
+              ARRIVED AT (stated by a person versus read off a page by an extraction); this says
+              WHERE IT LIVES, which is the fact that decides whether there is a document to open at
+              all. Two different questions, so two facts rather than one overloaded word. */}
+          <Fact label={t("factTermSource")}>
+            {row.term_source === "human_stated" ? t("termSourceStated") : t("termSourceDocument")}
+          </Fact>
           <Fact label={t("factPrepaid")}>{row.prepaid_account_code}</Fact>
           <Fact label={t("factExpense")}>{row.expense_account_code}</Fact>
           {/* THE JUDGEMENT'S OWN GROUNDS, rendered rather than stored and forgotten. It is the one
@@ -190,6 +197,28 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
           <Fact label={t("factEvaluator")}>{row.schedule_version}</Fact>
         </dl>
 
+        {/* #939 — WHO STATED THE TERM, WHEN AND WHY. On the memo-only lane this trio IS the
+            evidence: there is no invoice to open behind it, so the reason a named person gave is
+            the whole audit trail a reviewer has. It is rendered as its own block rather than three
+            more cells in the grid above, because it is a statement by a person and reads as one.
+            `=== "human_stated"` rather than a truthiness test on `term_reason`, for the reason the
+            corrected-term banner states: an absent field must paint nothing. */}
+        {row.term_source === "human_stated" ? (
+          <div
+            className="flex flex-col gap-2 rounded-md border border-info/30 bg-info-muted/40 p-3"
+            data-testid="prepayment-term-stated"
+          >
+            <p className="max-w-prose text-sm">{t("termStatedNote")}</p>
+            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Fact label={t("factTermStatedBy")}>{row.term_stated_by ?? "—"}</Fact>
+              <Fact label={t("factTermStatedAt")}>
+                {row.term_stated_at === null ? "—" : row.term_stated_at.slice(0, 10)}
+              </Fact>
+              <Fact label={t("factTermReason")} wide>{row.term_reason ?? "—"}</Fact>
+            </dl>
+          </div>
+        ) : null}
+
         <span className="flex flex-wrap gap-2">
           <Link
             className={buttonVariants({ variant: "outline", size: "sm" })}
@@ -197,12 +226,17 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
           >
             {t("openEntry")}
           </Link>
-          <Link
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-            href={activityDocumentsHref(clientId, row.document_id)}
-          >
-            {t("openDocument")}
-          </Link>
+          {/* #939 — NO DOCUMENT, NO LINK. A memo-only schedule's `document_id` is NULL, and a
+              button leading to `?document=null` is worse than no button: it promises evidence that
+              does not exist. */}
+          {row.document_id === null ? null : (
+            <Link
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              href={activityDocumentsHref(clientId, row.document_id)}
+            >
+              {t("openDocument")}
+            </Link>
+          )}
           <Link
             className={buttonVariants({ variant: "outline", size: "sm" })}
             href={planDetailHref(clientId, row.plan_id)}

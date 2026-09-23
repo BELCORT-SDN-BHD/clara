@@ -115,6 +115,35 @@ an extracted or inferred period; a term the product derived from an invoice's ow
 a date range it saw, or a conversation it summarised; treating a corrected term as something a
 revision re-derives — a re-derived allocation is a new schedule.
 
+**Stated service period**:
+A Service period a named person states for a prepayment that evidences NO document — the client
+paid a year of insurance and said so, the payment was recorded as a memo journal, and no invoice
+ever arrived. It is the same fact as a service period and carries the same discipline (a required
+reason, a recorded actor, supersede-never-mutate, one live statement per recognition entry, the
+same 120-month cap), but it is anchored to the RECOGNITION ENTRY rather than to a document,
+because the entry is the only durable thing it is about. A schedule derived from one behaves
+exactly like a document-backed schedule — the same whole-calendar-month straight line, the same
+remainder, the same monthly Work — so the only difference is the Term source, and the surface
+says which. It is human-stated by law for the same reason a document's period is: there is no
+agent grant and no wake wrapper, and Clara may ask the fixed two-date question but never answers
+it.
+_Avoid_: A period read off anything — a memo line, a filename, a bank narrative, a conversation
+Clara summarised; a default term; a nullable document on the document-grain carrier — the two
+carriers are separate relations and the document one is shared with the accrual lane; correcting a
+stated term by moving a running schedule — a correction supersedes the statement and a re-derived
+allocation is a new schedule.
+
+**Term source**:
+WHICH carrier a prepayment schedule's term came from: the document's own service period, or a
+person's stated service period. It is a recorded column on the schedule, paired structurally with
+the carrier it names, so a schedule can never claim a provenance it cannot point at. It is not
+the same fact as HOW the term was arrived at (stated by a person versus read off a page by an
+extraction) — that is the term's own basis kind, and a document's period can be human-stated
+while its source is still the document.
+_Avoid_: Inferring the source from the absence of a document id; treating a human-stated term as
+weaker evidence than a document's — both are a named person's statement with recorded grounds, and
+what differs is what the statement is anchored to.
+
 **Corrected term**:
 A service period a person has RE-STATED with different dates, so what the document is taken to say
 about the span it buys has changed. It is not the same fact as a superseded term ROW: recording a

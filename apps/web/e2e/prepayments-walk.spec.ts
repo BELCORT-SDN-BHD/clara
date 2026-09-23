@@ -83,9 +83,17 @@ test("prepayments.walk.attention: both persistent statements render, the attenti
   await expect(page.getByText(/Work was created on 2026-03-31 and the books refused it/)).toBeVisible();
 
   // ARM B — and it names the NEXT act rather than offering a form that can only refuse.
-  await expect(page.getByText(/Posted, not yet amortised/)).toBeVisible();
+  // #939 — THE BAND NOW CARRIES TWO CANDIDATES, one per term carrier, so the shared badge text is
+  // no longer unique on the page. The count is asserted rather than the uniqueness relied on: a
+  // strict-mode failure would have been this cell noticing the new row by accident, and the row is
+  // the point.
+  await expect(page.getByTestId("prepayment-attention-unscheduled")).toHaveCount(2);
+  await expect(page.getByText(/Posted, not yet amortised/).first()).toBeVisible();
   await expect(page.getByText(/states no service period yet/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Open the document" })).toBeVisible();
+  // …and the memo-only one names the OTHER act, because it has no document to send anyone to.
+  await expect(page.getByText(/This prepayment binds no document/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "State the service period" })).toBeVisible();
 
   // POSTED IS NOT ADMITTED, as a number: two of three periods reached the books.
   await expect(page.getByText("2 of 3 periods")).toBeVisible();
@@ -134,6 +142,73 @@ test("prepayments.walk.refusal: a refused configure keeps every field, prints th
   await expect(page).toHaveURL(new RegExp(`/prepayments/${PREPAY.scheduleId}$`), { timeout: 30_000 });
   await expect(page.getByText("Period-by-period charge")).toBeVisible();
   await expect(page.getByText(/Final period — carries the remainder/)).toBeVisible();
+});
+
+// ===========================================================================================
+// prepayments.walk.memo_only — #939, end to end: a prepayment posted with NO document is found in
+// the band, its service period is stated by the person at the screen, the schedule is configured
+// off that statement, and every surface afterwards says the term came from a person.
+// ===========================================================================================
+
+test("prepayments.walk.memo_only: a prepayment with no document is found in the band, a person states its service period, the schedule is configured off that statement, and the detail and the list both say the term came from a person rather than a document", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
+  await signInTo(page, LIST_URL);
+
+  // THE BAND FINDS IT. Before #939 this prepayment was not listed at all: posted, unamortised, and
+  // nothing on any screen saying so.
+  await expect(page.getByText(/This prepayment binds no document/)).toBeVisible();
+  await page.getByRole("link", { name: "State the service period" }).click();
+  await expect(page).toHaveURL(new RegExp(`entry=${PREPAY.memoEntryId}$`), { timeout: 30_000 });
+
+  // THE FORM SAYS WHY IT IS ASKING. The option itself carries "(no document)", so a person meets
+  // the reason before the question.
+  await expect(page.getByLabel("Recognised prepayment")).toHaveValue(PREPAY.memoEntryId);
+  await expect(page.getByRole("option", { name: /no document/ })).toBeAttached();
+  await expect(page.getByText(/A person states the service period for this prepayment/)).toBeVisible();
+
+  // THE STATEMENT ITSELF — two dates and the grounds, all typed by the person. Clara may ask the
+  // question; she never answers it, and this form prefills none of it.
+  await page.getByLabel("First day covered").fill("2026-05-01");
+  await page.getByLabel("Last day covered").fill("2026-07-31");
+  await page.getByLabel("Why that period").fill(
+    "the client paid twelve months of cover by bank transfer and confirmed the dates by e-mail");
+  await scan(page, "prepayments form with the stated-term statement open");
+  await page.getByRole("button", { name: "State the service period" }).click();
+
+  // THE PROMPT IS GONE BECAUSE THE DATABASE SAYS A TERM STANDS, not because the form decided so:
+  // the attention read runs again after the write and the surface renders its answer.
+  await expect(page.getByText(/A person states the service period for this prepayment/)).toBeHidden();
+
+  // …AND THE SCHEDULE CONFIGURES OFF THAT STATEMENT, through the same door and the same form.
+  await page.getByLabel("The instruction that authorises this schedule").selectOption(PREPAY.workId);
+  await page.getByLabel("Expense account").selectOption("59000002");
+  await page.getByLabel("Why that account").fill("an insurance premium is charged to insurance");
+  await page.getByLabel("Purpose", { exact: true }).fill("Prepaid insurance, no invoice");
+  await page.getByRole("button", { name: "Configure the schedule" }).click();
+  await expect(page).toHaveURL(new RegExp(`/prepayments/${PREPAY.memoScheduleId}$`), { timeout: 30_000 });
+
+  // THE DETAIL SAYS WHERE THE TERM CAME FROM, WHO SAID SO AND WHY — and offers no link to a
+  // document that does not exist.
+  await expect(page.getByText("A person's statement")).toBeVisible();
+  await expect(page.getByText(/confirmed the dates by e-mail/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open the document" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Open the entry" })).toBeVisible();
+  // The memo-only lane rides the second evaluator, and the surface reports which one derived it.
+  await expect(page.getByText("v2", { exact: true })).toBeVisible();
+  await scan(page, "prepayment detail, human-stated term");
+
+  // THE LIST MARKS IT, AND THE FILTER NARROWS TO IT.
+  await page.goto(LIST_URL);
+  await expect(page.getByTestId("prepayment-row-term-stated")).toHaveCount(1);
+  await expect(page.getByText("Prepaid insurance, no invoice")).toBeVisible();
+  await expect(page.getByText("Annual software subscription").first()).toBeVisible();
+  await page.getByLabel("Term came from").selectOption("human_stated");
+  await expect(page.getByText("Prepaid insurance, no invoice")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Annual software subscription" })).toHaveCount(0);
+  await page.getByLabel("Term came from").selectOption("document_service_period");
+  await expect(page.getByRole("link", { name: "Prepaid insurance, no invoice" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Annual software subscription" })).toBeVisible();
+  await scan(page, "prepayments list filtered by term source");
 });
 
 // ===========================================================================================

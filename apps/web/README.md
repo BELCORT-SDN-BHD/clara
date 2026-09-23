@@ -1004,6 +1004,37 @@ is the second half of the same discipline: the field arrives as unvalidated json
 — a web build ahead of its database, or a rolled-back migration under a live runtime — is falsy,
 which would paint the warning on every prepayment in the firm.
 
+## #939 — where a prepayment's term came from
+
+A prepayment recognised with NO document is amortised over a service period a named person states
+(`clara.prepayment_stated_terms`, migration 0305). The resulting schedule behaves exactly like a
+document-backed one — the same whole-calendar-month straight line, the same cent remainder, the same
+monthly Work — so PROVENANCE is the whole difference, and every surface has to carry it rather than
+let "a person said so" read as "the invoice says so".
+
+- **The list** marks the row with a word (**Term stated by a person**, never a colour) and offers a
+  **Term came from** filter. The filter runs over the rows the list already holds: both lanes arrive
+  in one `clara.list_prepayment_schedules` answer, so re-reading to narrow would be a second answer
+  to one question.
+- **The detail** renders the stated trio — who stated the term, when and WHY — as its own block,
+  because on this lane there is no invoice behind it and the reason a named person gave is the whole
+  audit trail a reviewer has. It renders NO "open the document" link when `document_id` is null: a
+  button leading to `?document=null` promises evidence that does not exist.
+- **The attention band** takes its next act from the read's own `next_step` token
+  (`configure_schedule` / `record_document_service_period` / `state_service_period`) and never infers
+  it from the absence of a document id. The fallback, for a database at an earlier frontier,
+  reproduces the pre-0305 behaviour exactly and never guesses "state the period" — on such a
+  frontier there is no door to state one through.
+- **The form** carries the act itself. `clara.record_prepayment_stated_term` is bookkeeper-floored,
+  human-lane only, with no agent grant and no wake wrapper, so every value is typed by the person at
+  the screen and none is prefilled from anything a model produced. The write runs inside
+  `attention.act`, so the prompt disappears because the DATABASE reports a live term, never because
+  the component decided it had succeeded.
+
+Every one of these tests `term_source === "human_stated"` rather than the absence of a document id,
+for the reason #919's own discipline states: the field arrives as unvalidated jsonb, and a web build
+ahead of its database must paint nothing rather than infer a lane.
+
 **The coverage footer is not the tie.** Mapped/unmapped counts and cents live in the target panel,
 labelled as coverage, with no percentage — and deliberately OUTSIDE `OpeningDryrunStrip`, whose own
 law is that it mints no numeral and re-derives no tie. C-25's defect was exactly a coverage figure

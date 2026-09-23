@@ -60,7 +60,7 @@ import { listPlanAuthorityWork } from "@/lib/plans/api";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import {
-  createPrepaymentSchedule, loadPrepaymentAttention,
+  createPrepaymentSchedule, loadPrepaymentAttention, recordPrepaymentStatedTerm,
   type AttentionUnscheduled, type PrepaymentCreated,
 } from "@/lib/prepayments/api";
 import {
@@ -113,6 +113,12 @@ export function PrepaymentForm({
 
   const unscheduled: readonly AttentionUnscheduled[] = attention.data?.unscheduled ?? [];
   const chosen = unscheduled.find((r) => r.entry_id === draft.sourceEntryId) ?? null;
+  // #939 -- WHICH CARRIER the chosen recognition's term lives in. The read says so; the fallback
+  // reproduces the pre-0305 answer for a database at an earlier frontier, where a recognition with
+  // no document could not be chosen at all.
+  const chosenCarrier = chosen === null
+    ? null
+    : chosen.term_carrier ?? (chosen.document_id === null ? "human_stated" : "document_service_period");
 
   const expenseAccounts = useMemo(
     () => (accounts.data ?? []).filter((a) => a.is_active && a.account_type === "expense"),
@@ -256,17 +262,36 @@ export function PrepaymentForm({
               onChange={(e) => patch({ sourceEntryId: e.target.value })}
             >
               <option value="">{t("sourceChoose")}</option>
+              {/* #939 -- A MEMO-ONLY RECOGNITION SAYS SO IN THE OPTION ITSELF. Without it the two
+                  lanes look identical in this list and the term question that follows arrives with
+                  no explanation. */}
               {unscheduled.map((row) => (
                 <option key={row.entry_id} value={row.entry_id}>
-                  {`${(row.amount_cents / 100).toFixed(2)} on ${row.posting_date} — ${row.prepaid_account_code}`}
+                  {`${(row.amount_cents / 100).toFixed(2)} on ${row.posting_date} — ${row.prepaid_account_code}`
+                    + (row.document_id === null ? ` (${t("sourceOptionNoDocument")})` : "")}
                 </option>
               ))}
             </NativeSelect>
           </DataState>
-          {/* THE TERM IS NOT THIS FORM'S TO STATE. When the chosen recognition's document carries
-              no service period, say so HERE rather than letting the door refuse after a submit. */}
-          {chosen !== null && !chosen.has_live_term ? (
+          {/* THE TERM IS NOT THIS FORM'S TO DERIVE. When the chosen recognition has no live term,
+              say so HERE rather than letting the door refuse after a submit -- and say which act
+              produces one, because the two lanes have different answers. A DOCUMENT-bound
+              recognition's term is recorded on its document, somewhere else entirely. A MEMO-ONLY
+              one has nowhere else: the term is a statement by the person in front of the screen,
+              so the act belongs on this page and is offered here. */}
+          {chosen !== null && !chosen.has_live_term && chosenCarrier === "document_service_period" ? (
             <StateBanner tone="warning">{t("sourceNeedsTerm")}</StateBanner>
+          ) : null}
+          {chosen !== null && !chosen.has_live_term && chosenCarrier === "human_stated" ? (
+            <>
+              <StateBanner tone="warning">{t("sourceNeedsStatedTerm")}</StateBanner>
+              <StatedTermStatement
+                clientId={clientId}
+                entryId={chosen.entry_id}
+                busy={busy || attention.busy}
+                act={attention.act}
+              />
+            </>
           ) : null}
           <FieldError id={`${prepaymentFieldElementId("sourceEntry")}-error`}>
             {message("sourceEntry")}
@@ -429,6 +454,138 @@ function DerivedAllocation({ created }: { created: PrepaymentCreated }) {
           </TableBody>
         </DataTableCard>
       </fieldset>
+    </section>
+  );
+}
+
+/**
+ * #939 — THE ONE ACT THAT MAKES A MEMO-ONLY PREPAYMENT SCHEDULABLE.
+ *
+ * It lives on the configure form rather than behind its own page because it is not a separate
+ * errand: the person is here to amortise this prepayment, and stating the period is the first half
+ * of that. `clara.record_prepayment_stated_term` is a bookkeeper-floored human door with NO agent
+ * grant and no wake wrapper — Clara may ask the two-date question and never answers it — so every
+ * value below is typed by the person, and none of them is prefilled from anything a model produced.
+ *
+ * THE REASON IS REQUIRED, and this form refuses a blank one before the door does. A term with no
+ * stated grounds is the unexplained judgement the whole fact-with-a-basis discipline exists to
+ * prevent, and the door's own `prepayment_stated_term_reason_missing` is the backstop rather than
+ * the first line.
+ *
+ * HYDRATE-NEVER-TRUST: the write runs inside `attention.act`, which re-reads the attention band
+ * unconditionally afterwards. The prompt above disappears because the DATABASE now reports a live
+ * term, never because this component decided it had succeeded.
+ *
+ * ONE OP KEY PER STATEMENT, renewed whenever a field changes — a retry of the SAME dates replays
+ * through `clara._reserve_op`; a different statement is a different decision.
+ */
+function StatedTermStatement({
+  clientId, entryId, busy, act,
+}: {
+  clientId: string;
+  entryId: string;
+  busy: boolean;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
+}) {
+  const t = useTranslations("Prepayments");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [reason, setReason] = useState("");
+  const [attempted, setAttempted] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const keyRef = useRef<string | null>(null);
+  const opKey = () => {
+    if (keyRef.current === null) keyRef.current = crypto.randomUUID();
+    return keyRef.current;
+  };
+  const renew = () => { keyRef.current = null; };
+
+  const issues: string[] = [];
+  if (start.trim() === "" || end.trim() === "") issues.push(t("stateTermIssueDates"));
+  else if (end < start) issues.push(t("stateTermIssueOrder"));
+  if (reason.trim() === "") issues.push(t("stateTermIssueReason"));
+
+  const submit = async () => {
+    setAttempted(true);
+    if (issues.length > 0) return;
+    const ok = await act(async () => {
+      try {
+        await recordPrepaymentStatedTerm({
+          clientId, sourceEntryId: entryId,
+          periodStart: start, periodEnd: end, reason: reason.trim(), opKey: opKey(),
+        });
+      } catch (e) {
+        setFailure(e);
+        throw e;
+      }
+    });
+    if (ok) { setFailure(null); setAttempted(false); }
+  };
+
+  return (
+    <section
+      className="flex flex-col gap-3 rounded-md border border-border p-3"
+      aria-labelledby="prepayment-stated-term-heading"
+      data-testid="prepayment-state-term"
+    >
+      <h3 id="prepayment-stated-term-heading" className="text-sm font-semibold">
+        {t("stateTermHeading")}
+      </h3>
+      <p className="max-w-prose text-xs text-muted-foreground">{t("stateTermBody")}</p>
+      {failure === null ? null : (
+        <StateBanner tone="error" title={t("stateTermRefusalTitle")}>
+          <ErrorMessage error={failure} />
+        </StateBanner>
+      )}
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium" htmlFor="prepayment-stated-term-start">
+          {t("stateTermStart")}
+        </label>
+        <Input
+          id="prepayment-stated-term-start"
+          type="date"
+          value={start}
+          disabled={busy}
+          onChange={(e) => { renew(); setStart(e.target.value); }}
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium" htmlFor="prepayment-stated-term-end">
+          {t("stateTermEnd")}
+        </label>
+        <Input
+          id="prepayment-stated-term-end"
+          type="date"
+          value={end}
+          disabled={busy}
+          onChange={(e) => { renew(); setEnd(e.target.value); }}
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium" htmlFor="prepayment-stated-term-reason">
+          {t("stateTermReason")}
+        </label>
+        <Textarea
+          id="prepayment-stated-term-reason"
+          value={reason}
+          disabled={busy}
+          required
+          onChange={(e) => { renew(); setReason(e.target.value); }}
+        />
+      </div>
+      {!attempted || issues.length === 0 ? null : (
+        <p className="text-xs text-error" role="alert">{issues[0]}</p>
+      )}
+      <div>
+        <Button
+          id="prepayment-stated-term-submit"
+          size="sm"
+          disabled={busy}
+          onClick={() => void submit()}
+        >
+          {busy ? t("stateTermSaving") : t("stateTermSubmit")}
+        </Button>
+      </div>
     </section>
   );
 }

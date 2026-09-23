@@ -54,8 +54,17 @@ export const PREPAY = {
   documentId: "65555555-6536-4653-8653-653653653653",
   workId: "65666666-6536-4653-8653-653653653653",
   postedEntryId: "65777777-6536-4653-8653-653653653653",
+  // #939 — THE MEMO-ONLY LANE. A prepayment posted with NO document: the ledger admits the memo
+  // journal, nothing can read a term off it, and until a named person states the service period
+  // there is no schedule to configure. Same id space, same tail, so the ownership census still
+  // sees one lane.
+  memoEntryId: "65888888-6536-4653-8653-653653653653",
+  memoScheduleId: "65999999-6536-4653-8653-653653653653",
+  memoPlanId: "65aaaaaa-6536-4653-8653-653653653653",
+  statedTermId: "65bbbbbb-6536-4653-8653-653653653653",
   purpose: "Annual software subscription",
   refusingPurpose: "Annual software subscription",
+  memoPurpose: "Prepaid insurance, no invoice",
 };
 
 /** The ONLY RPC verbs this lane's dispatch chain recognises — the allow-list `readJson`'s own call
@@ -66,19 +75,29 @@ export const PREPAY_RPC_VERBS = new Set([
   "get_prepayment_schedule",
   "list_prepayment_attention",
   "create_prepayment_schedule",
+  "record_prepayment_stated_term",
   "pause_accounting_plan",
   "resume_accounting_plan",
   "end_accounting_plan",
   "request_plan_catch_up",
 ]);
 
-const state = { paused: false, created: false, refusedOnce: false, catchUps: 0 };
+const state = {
+  paused: false, created: false, refusedOnce: false, catchUps: 0,
+  // #939 — THE MEMO-ONLY LANE'S OWN TWO TRANSITIONS, and both are the walk's journey rather than
+  // canned answers: a person states the service period, and only then can the schedule be
+  // configured. Making them real transitions is what proves the surface RE-READS after each write
+  // instead of painting its own optimistic answer.
+  statedTerm: false, memoCreated: false,
+};
 
 export function resetPrepayments() {
   state.paused = false;
   state.created = false;
   state.refusedOnce = false;
   state.catchUps = 0;
+  state.statedTerm = false;
+  state.memoCreated = false;
 }
 
 export function prepaymentCatchUps() {
@@ -167,6 +186,16 @@ const DETAIL = () => {
     source_status: "approved",
     document_id: PREPAY.documentId,
     service_period_id: "65e1e1e1-6536-4653-8653-653653653653",
+    term_source: "document_service_period",
+    stated_term_id: null,
+    term_stated_by: null,
+    term_stated_at: null,
+    term_reason: null,
+    term_live: true,
+    term_superseded_by: null,
+    term_moved: false,
+    term_current_start: "2026-01-01",
+    term_current_end: "2026-03-31",
     term_start: "2026-01-01",
     term_end: "2026-03-31",
     basis_kind: "human_stated",
@@ -208,13 +237,25 @@ const DETAIL = () => {
   };
 };
 
-const LIST = () => [{
+const LIST = () => [...(state.memoCreated ? [MEMO_LIST_ROW()] : []), {
   schedule_id: PREPAY.scheduleId,
   plan_id: PREPAY.planId,
   purpose: PREPAY.purpose,
   status: status(),
   source_entry_id: PREPAY.entryId,
   document_id: PREPAY.documentId,
+  // #939 — this schedule's term came from the document's own service period, which is what the
+  // list marker and the term-source filter distinguish it by.
+  term_source: "document_service_period",
+  stated_term_id: null,
+  term_stated_by: null,
+  term_stated_at: null,
+  term_reason: null,
+  term_live: true,
+  term_superseded_by: null,
+  term_moved: false,
+  term_current_start: "2026-01-01",
+  term_current_end: "2026-03-31",
   term_start: "2026-01-01",
   term_end: "2026-03-31",
   prepaid_account_code: "19000001",
@@ -231,6 +272,158 @@ const LIST = () => [{
   occurrence_count: 3,
   next_due: null,
 }];
+
+/** #939 — THE STATED TERM this lane's memo-only recognition is amortised over, once a person has
+ *  stated it. Three whole months, so its allocation is the same 33,333 / 33,333 / 33,335 the
+ *  document-backed schedule shows — provenance is the ONLY difference, which is the ticket's own
+ *  sentence and the thing the walk reads off the screen. */
+const STATED = {
+  start: "2026-05-01",
+  end: "2026-07-31",
+  reason: "the client paid twelve months of cover by bank transfer and confirmed the dates by e-mail",
+  statedAt: "2026-04-20T02:00:00.000Z",
+  statedBy: "11111111-1111-1111-1111-111111111111",
+};
+
+const MEMO_LINES = () => [
+  { period_start: "2026-05-01", period_end: "2026-05-31", debit_cents: 0, credit_cents: 33333,
+    account_code: "19000001", amount_cents: 33333,
+    prepaid_account_code: "19000001", expense_account_code: "59000002" },
+  { period_start: "2026-06-01", period_end: "2026-06-30", debit_cents: 0, credit_cents: 33333,
+    account_code: "19000001", amount_cents: 33333,
+    prepaid_account_code: "19000001", expense_account_code: "59000002" },
+  { period_start: "2026-07-01", period_end: "2026-07-31", debit_cents: 0, credit_cents: 33335,
+    account_code: "19000001", amount_cents: 33335,
+    prepaid_account_code: "19000001", expense_account_code: "59000002" },
+];
+
+const MEMO_LIST_ROW = () => ({
+  schedule_id: PREPAY.memoScheduleId,
+  plan_id: PREPAY.memoPlanId,
+  purpose: PREPAY.memoPurpose,
+  status: "active",
+  source_entry_id: PREPAY.memoEntryId,
+  // NULL, and that is the point: there is no document, so the surface must not offer one.
+  document_id: null,
+  term_source: "human_stated",
+  stated_term_id: PREPAY.statedTermId,
+  term_stated_by: STATED.statedBy,
+  term_stated_at: STATED.statedAt,
+  term_reason: STATED.reason,
+  term_live: true,
+  term_superseded_by: null,
+  term_moved: false,
+  term_current_start: STATED.start,
+  term_current_end: STATED.end,
+  term_start: STATED.start,
+  term_end: STATED.end,
+  prepaid_account_code: "19000001",
+  expense_account_code: "59000002",
+  total_cents: 100001,
+  period_count: 3,
+  basis_kind: "human_stated",
+  created_at: "2026-04-20T02:10:00.000Z",
+  effective_from: "2026-05-31",
+  effective_to: "2026-07-31",
+  posted_periods: 0,
+  occurrence_count: 0,
+  next_due: "2026-05-31",
+});
+
+const MEMO_DETAIL = () => ({
+  schedule_id: PREPAY.memoScheduleId,
+  client_id: PREPAY.clientId,
+  plan_id: PREPAY.memoPlanId,
+  revision: 1,
+  kind: "amortisation_schedule",
+  status: "active",
+  purpose: PREPAY.memoPurpose,
+  source_entry_id: PREPAY.memoEntryId,
+  source_posting_date: "2026-04-20",
+  source_memo: "annual insurance premium, paid in advance, no invoice received",
+  source_status: "approved",
+  document_id: null,
+  service_period_id: null,
+  term_source: "human_stated",
+  stated_term_id: PREPAY.statedTermId,
+  term_stated_by: STATED.statedBy,
+  term_stated_at: STATED.statedAt,
+  term_reason: STATED.reason,
+  term_live: true,
+  term_superseded_by: null,
+  term_moved: false,
+  term_current_start: STATED.start,
+  term_current_end: STATED.end,
+  term_start: STATED.start,
+  term_end: STATED.end,
+  basis_kind: "human_stated",
+  prepaid_account_code: "19000001",
+  expense_account_code: "59000002",
+  expense_account_basis: "an insurance premium is charged to insurance",
+  total_cents: 100001,
+  period_count: 3,
+  remainder_placement: "final_period",
+  // v2, because the memo-only lane rides clara.prepayment_schedule_v2 — the same formula with the
+  // amount and the term supplied rather than read.
+  schedule_version: "v2",
+  created_by: STATED.statedBy,
+  created_at: "2026-04-20T02:10:00.000Z",
+  authority_kind: "explicit_instruction",
+  authority_ref: { kind: "accounting_work", id: PREPAY.workId },
+  authorised_by: STATED.statedBy,
+  authorised_at: "2026-04-20T02:10:00.000Z",
+  authority_from: "2026-05-31",
+  covered_through: null,
+  paused_at: null, paused_by: null, paused_reason: null,
+  ended_at: null, ended_by: null, ended_reason: null,
+  live_revision: {
+    revision: 1, frequency: "monthly", day_rule: "last_day_of_month", day_of_month: null,
+    timezone: "Asia/Kuala_Lumpur", effective_from: "2026-05-31", effective_to: "2026-07-31",
+    basis: {
+      posting_date: "2026-05-31", memo: "Prepayment amortisation: Prepaid insurance, no invoice",
+      currency: "MYR",
+      lines: [
+        { account_code: "59000002", debit_cents: 33333, credit_cents: 0, description: "amortisation charge" },
+        { account_code: "19000001", debit_cents: 0, credit_cents: 33333, description: "prepaid release" },
+      ],
+    },
+    basis_digest: "d".repeat(64),
+  },
+  periods: MEMO_LINES().map((l) => ({ ...l, occurrence: null })),
+  occurrences: [],
+  configuration_only: true,
+});
+
+const MEMO_CREATED = () => ({
+  ...MEMO_DETAIL(),
+  revision_id: "65cccccc-6536-4653-8653-653653653653",
+  period_lines: MEMO_LINES(),
+  frequency: "monthly",
+  day_rule: "last_day_of_month",
+  day_of_month: null,
+  timezone: "Asia/Kuala_Lumpur",
+  effective_from: "2026-05-31",
+  effective_to: "2026-07-31",
+  next_occurrences: [],
+  overlap_warning: null,
+});
+
+/** #939 — the memo-only lane's own create-time refusal: no document AND no stated term, so the
+ *  payload names the CARRIER and the DOOR that fills it rather than `journal_entries.document_id`,
+ *  which is what the old answer named and which told a firm its prepayment could never be
+ *  amortised at all. */
+const STATED_TERM_REFUSAL = {
+  code: "CLR10",
+  message: "this recognition binds no document and nobody has stated its service period",
+  details: JSON.stringify({
+    reason: "prepayment_term_underivable",
+    reason_text: "this recognition binds no document and nobody has stated its service period",
+    missing: "prepayment_stated_terms",
+    remedy: "clara.record_prepayment_stated_term",
+    source_entry: PREPAY.memoEntryId,
+  }),
+  hint: null,
+};
 
 /** ARM A — the live schedule whose most recent period charged nothing, at the POSTING core. */
 const ATTENTION_REFUSING = () => (state.paused ? [] : [{
@@ -256,16 +449,35 @@ const ATTENTION_REFUSING = () => (state.paused ? [] : [{
 /** ARM B — the posted prepayment nothing amortises. Its document states NO term until the walk's
  *  first create attempt has been refused; that is what makes the two halves of the arm visible
  *  in one journey. */
-const ATTENTION_UNSCHEDULED = () => (state.created ? [] : [{
-  arm: "unscheduled",
-  entry_id: PREPAY.unscheduledEntryId,
-  posting_date: "2026-04-14",
-  memo: "annual insurance premium, paid in advance",
-  document_id: PREPAY.documentId,
-  prepaid_account_code: "19000001",
-  amount_cents: 240000,
-  has_live_term: state.refusedOnce,
-}]);
+const ATTENTION_UNSCHEDULED = () => [
+  ...(state.created ? [] : [{
+    arm: "unscheduled",
+    entry_id: PREPAY.unscheduledEntryId,
+    posting_date: "2026-04-14",
+    memo: "annual insurance premium, paid in advance",
+    document_id: PREPAY.documentId,
+    // #939 — this one's term belongs to its document, so its next act is that document.
+    term_carrier: "document_service_period",
+    prepaid_account_code: "19000001",
+    amount_cents: 240000,
+    has_live_term: state.refusedOnce,
+    next_step: state.refusedOnce ? "configure_schedule" : "record_document_service_period",
+  }]),
+  // #939 — THE MEMO-ONLY CANDIDATE. Before this ticket arm B filtered `document_id is not null`,
+  // so this prepayment was invisible: posted, unamortised, and nothing on any screen saying so.
+  ...(state.memoCreated ? [] : [{
+    arm: "unscheduled",
+    entry_id: PREPAY.memoEntryId,
+    posting_date: "2026-04-20",
+    memo: "annual insurance premium, paid in advance, no invoice received",
+    document_id: null,
+    term_carrier: "human_stated",
+    prepaid_account_code: "19000001",
+    amount_cents: 100001,
+    has_live_term: state.statedTerm,
+    next_step: state.statedTerm ? "configure_schedule" : "state_service_period",
+  }]),
+];
 
 const CREATED = () => ({
   schedule_id: PREPAY.scheduleId,
@@ -278,6 +490,8 @@ const CREATED = () => ({
   source_entry_id: PREPAY.unscheduledEntryId,
   document_id: PREPAY.documentId,
   service_period_id: "65e2e2e2-6536-4653-8653-653653653653",
+  term_source: "document_service_period",
+  stated_term_id: null,
   basis_kind: "human_stated",
   term_start: "2026-01-01",
   term_end: "2026-03-31",
@@ -443,13 +657,48 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
   }
 
   if (verb === "get_prepayment_schedule") {
+    if (body.p_schedule === PREPAY.memoScheduleId) {
+      sendJson(response, 200, MEMO_DETAIL(), cors);
+      return true;
+    }
     if (body.p_schedule !== PREPAY.scheduleId) return false;
     sendJson(response, 200, DETAIL(), cors);
     return true;
   }
 
+  // #939 — THE ONE HUMAN DOOR that makes a memo-only prepayment schedulable. Bookkeeper floor,
+  // no agent grant, no wake wrapper: every value here was typed by the person at the screen.
+  if (verb === "record_prepayment_stated_term") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    if (body.p_source_entry !== PREPAY.memoEntryId) return false;
+    state.statedTerm = true;
+    sendJson(response, 200, {
+      stated_term_id: PREPAY.statedTermId,
+      client_id: PREPAY.clientId,
+      source_entry_id: PREPAY.memoEntryId,
+      period_start: body.p_period_start,
+      period_end: body.p_period_end,
+      reason: body.p_reason,
+      stated_by: STATED.statedBy,
+      superseded_id: null,
+    }, cors);
+    return true;
+  }
+
   if (verb === "create_prepayment_schedule") {
     if (body.p_client !== PREPAY.clientId) return false;
+    // #939 — THE MEMO-ONLY LANE. With no stated term the door refuses and the payload names the
+    // stating door as the remedy; once a term stands the SAME door configures the schedule off
+    // clara.prepayment_schedule_v2.
+    if (body.p_source_entry === PREPAY.memoEntryId) {
+      if (!state.statedTerm) {
+        sendJson(response, 400, STATED_TERM_REFUSAL, cors);
+        return true;
+      }
+      state.memoCreated = true;
+      sendJson(response, 200, MEMO_CREATED(), cors);
+      return true;
+    }
     // THE DOOR RESOLVES THE AUTHORITY FIRST, so this fixture does too: a payload citing anything
     // but this client's own instruction Work is answered `authority_ref_unresolved`, which is what
     // the real door answers and the only thing a fabricated authority could ever get.
