@@ -68,7 +68,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { FieldDescription, FieldLegend, FieldSet } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { listCoaAccounts } from "@/lib/journals/api";
-import { getStaffAdvanceSummary, type StaffAdvanceSummary } from "@/lib/registers/staff-advances-doors";
+import {
+  getStaffAdvanceSummary, isOutstandingAdvance, type StaffAdvanceSummary,
+} from "@/lib/registers/staff-advances-doors";
 import { StaffAdvanceAllocationsEditor } from "@/components/registers/staff-advance-allocations-editor";
 import { fmtCents } from "@/lib/registers/money";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
@@ -254,17 +256,14 @@ export function StaffExpenseClaimFormView({
     [enrolments],
   );
   /** #930 — the CLAIMANT's own outstanding, unvoided advances: `staff_advance_summary`'s
-   *  `advances`, narrowed to this account_code with `outstanding_cents > 0 && !voided` — the EXACT
-   *  predicate `staff-advances-register.tsx`'s own `outstandingAdvances` filters its allocation
-   *  editor's candidates by (that file's own line), so the two surfaces never disagree about what
-   *  "still outstanding" means. `[]` while the claimant is blank or the read has not resolved: no
-   *  candidate is ever guessed. */
+   *  `advances`, narrowed to this account_code by `isOutstandingAdvance` — the very SYMBOL
+   *  `staff-advances-register.tsx` filters its own allocation editor's candidates by, so the two
+   *  surfaces cannot disagree about what "still outstanding" means. `[]` while the claimant is
+   *  blank or the read has not resolved: no candidate is ever guessed. */
   const advanceCandidates = useMemo(() => {
     const code = draft.claimantAccountCode.trim();
     if (code === "" || advancesRead.data === null) return [];
-    return advancesRead.data.advances.filter(
-      (a) => a.account_code === code && a.outstanding_cents > 0 && !a.voided,
-    );
+    return advancesRead.data.advances.filter((a) => a.account_code === code && isOutstandingAdvance(a));
   }, [advancesRead.data, draft.claimantAccountCode]);
   /** #931 — the draft's allocation list in the shared editor's own row shape. The claim form keeps
    *  camelCase and the register keeps snake_case; this is the ONE place they meet, rather than one

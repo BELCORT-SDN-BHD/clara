@@ -1835,10 +1835,12 @@ it is named changes.
 **The control is now a `NativeSelect`, fed by `getStaffAdvanceSummary`** — the SAME
 `staff_advance_summary` read `staff-advance-allocations-editor.tsx`'s own candidates come from,
 called once (as of today) and narrowed CLIENT-SIDE to the chosen claimant's own rows as the
-claimant changes: `account_code` equal to `claimantAccountCode`, `outstanding_cents > 0`, `!voided`
-— the exact predicate `staff-advances-register.tsx`'s own `outstandingAdvances` filters its
-allocation editor's candidates by, so the two surfaces can never disagree about what "still
-outstanding" means. Each option names its booking date and outstanding amount
+claimant changes: `account_code` equal to `claimantAccountCode`, and
+`isOutstandingAdvance(lib/registers/staff-advances-doors.ts)` — the very SYMBOL
+`staff-advances-register.tsx`'s own `outstandingAdvances` filters its allocation editor's
+candidates by, so the two surfaces cannot disagree about what "still outstanding" means. (Both
+sides first wrote `outstanding_cents > 0 && !voided` out in full, with a comment on one asserting
+they were identical; a comment is a promise, not a wall.) Each option names its booking date and outstanding amount
 (`fmtCents`/`Common.centsUnsafe`, the allocations editor's own formatter). Choosing one still only
 writes `draft.advanceId`, so `validateClaimDraft`, `toClaimWire` and the refusal→control mapping in
 `lib/work/staff-expense-claim.ts` are BYTE-IDENTICAL to before — proved by the pre-existing submit

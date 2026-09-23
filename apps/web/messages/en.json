@@ -1716,7 +1716,6 @@
     "advanceAccountCodeHelp": "The enrolled account the advance was paid from.",
     "advanceId": "Which advance",
     "advanceIdHelp": "Choose the advance this claim discharges. Only the claimant's own advances that still carry a balance are offered; the register never guesses.",
-    "advanceIdPlaceholder": "Choose an advance…",
     "advanceIdOutstandingSuffix": "outstanding",
     "advanceIdEmpty": "This claimant has no open advance.",
     "advanceSuggestByDate": "Suggest by date",
