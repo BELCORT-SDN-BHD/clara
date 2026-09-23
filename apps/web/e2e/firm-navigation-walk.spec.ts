@@ -200,11 +200,20 @@ test("the high-stakes threshold control is GONE from /settings/firm for every ra
 // keeps only historical receipts (list/get) and the ability to close an in-flight LIVE binding
 // (revoke). Unlike the threshold control above (a rank-shaped retirement), this one is
 // UNCONDITIONAL: an owner, who used to clear both the propose AND the sign floor, is asserted
-// identically to a bookkeeper. `page.route` stubs `list_vendor_bindings`/`get_vendor_binding`
-// the same way the E-3/E-2 block below stubs its own reads — the shared mock never carried this
-// RPC (the panel is client-scoped and no walk drove it before this cell).
+// identically to a bookkeeper. `page.route` stubs `list_vendor_bindings` the same way the
+// E-3/E-2 block below stubs its own reads — the shared mock never carried this RPC (the panel is
+// client-scoped and no walk drove it before this cell). `get_vendor_binding` is NOT stubbed
+// because nothing here reaches it: it is read from inside the Revoke dialog, which this walk
+// never opens; whoever teaches this walk to open Revoke has to add that stub.
+//
+// TWO ROWS, deliberately. Sign only ever rendered on a `proposed` row
+// (`binding.status === "proposed" && canSign`, vendor-binding-ceremony.tsx at the base commit),
+// so a fixture carrying only a `live` row would assert an absence that was already absent before
+// #921 — the assertion could not fail, in either direction. The `proposed` row is the one that
+// makes the Sign half load-bearing; the `live` row is what keeps Revoke (D6's other half)
+// asserted at the same time.
 test("the vendor-bindings panel offers NO propose or sign control at any rank — the doors are revoked, not merely rank-gated", async ({ page }) => {
-  const bindingRow = {
+  const liveRow = {
     binding_id: "22222222-2222-4222-8222-222222222222",
     counterparty_id: "33333333-3333-4333-8333-333333333333",
     counterparty_name: "Example Supplier Sdn Bhd",
@@ -219,8 +228,22 @@ test("the vendor-bindings panel offers NO propose or sign control at any rank �
     resolution_count: 1,
     divergence_documents: 0,
   };
+  // A HISTORICAL 'proposed' row — the shape D6 keeps visible and the only shape Sign ever
+  // rendered on. A different counterparty name from the live row's, because the name assertion
+  // below is an exact-text match and two rows sharing one name would violate strict mode.
+  const proposedRow = {
+    ...liveRow,
+    binding_id: "55555555-5555-4555-8555-555555555555",
+    counterparty_id: "66666666-6666-4666-8666-666666666666",
+    counterparty_name: "Legacy Vendor Sdn Bhd",
+    status: "proposed",
+    f1_vendor_name_norm: "legacy vendor sdn bhd",
+    f2_invoice_prefix: "INV-L",
+    signed_by: null,
+    signed_at: null,
+  };
   await page.route("**/e2e-supabase/rest/v1/rpc/list_vendor_bindings", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([bindingRow]) }));
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([liveRow, proposedRow]) }));
 
   for (const email of ["owner@example.test", "bookkeeper@example.test"]) {
     await signIn(page, email);
@@ -231,13 +254,18 @@ test("the vendor-bindings panel offers NO propose or sign control at any rank �
     // `Vendor name "example supplier sdn bhd" · invoice prefix …`, and Playwright's getByText is
     // a case-insensitive substring match by default, so the un-exact query hits both.
     await expect(page.getByText("Example Supplier Sdn Bhd", { exact: true })).toBeVisible();
+    // The 'proposed' row really did render — otherwise the Sign assertions below would be
+    // asserting the absence of a control on a row that is not on the page at all.
+    await expect(page.getByText("Legacy Vendor Sdn Bhd", { exact: true })).toBeVisible();
 
     // BY ROLE and BY TEXT, both personas — #921's own retirement, not a rank floor.
     await expect(page.getByRole("button", { name: "Propose binding", exact: true })).toHaveCount(0);
     await expect(page.getByText("Propose binding")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Sign", exact: true })).toHaveCount(0);
     await expect(page.getByText("Sign this vendor identity binding")).toHaveCount(0);
-    // D6 keeps the ability to close an in-flight LIVE binding — Revoke stays offered.
+    // D6 keeps the ability to close an in-flight LIVE binding — Revoke stays offered, on the
+    // LIVE row and only there: exactly one, not one per row.
+    await expect(page.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Revoke", exact: true })).toBeVisible();
 
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
