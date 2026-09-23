@@ -45,6 +45,7 @@ function row(id: string): ReviewQueueRow {
     client_name: null,
     batch_ids: null,
     open_proposal_count: null,
+    authority_id: null,
   };
 }
 

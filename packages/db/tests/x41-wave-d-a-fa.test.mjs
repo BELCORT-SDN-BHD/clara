@@ -37,6 +37,8 @@ import {
   freshFaClient, approvedEntry, buyAsset, completeSL, liveAuthority, earnRamp, runAndSettle,
   kSeededFaClient, buildFaChart, wb,
 } from "./x41-fa-world.mjs";
+// #972 (0247): the ONE assertion in x41.b3 below that a chain predating that migration cannot make.
+import { faBirthWatermarkEnforced } from "./fa-birth-watermark-fixtures.mjs";
 
 let live = false;
 let w = null;
@@ -433,6 +435,16 @@ test("x41.b3 the enrolled_at watermark: enrolling an account that already has hi
   const rev = await entryRowOf(historic);
   assert.ok(rev.reversed_by, "a PRE-ENROLMENT entry on a now-enrolled account is still reversible");
   assert.equal(rev.status, "approved", "…and the reversed ORIGINAL stays 'approved' (the house reversal law)");
+  // #972 — LOOK AT THE REGISTER AGAIN. Until this cell was extended it stopped at
+  // `reversed_by`, and that is exactly why the defect lived here for months: the
+  // `reversed_by` UPDATE leaves the original 'approved', so it re-fires the BIRTH trigger
+  // (`t_je_fa_acquisition_birth`, 0216 §B), whose join carried NO watermark — and a register
+  // row was born from a PRE-ENROLMENT entry, the retroactive birth §1.2 exists to forbid.
+  // x41.s4 then read that row as an unexplained cost difference at every as-of.
+  if (await faBirthWatermarkEnforced("x41.b3's post-reversal register re-look")) {
+    assert.equal((await faRows(client)).length, 0,
+      "…and the reversal births NOTHING either: the watermark holds on EVERY firing of the birth trigger, not only the first approve (#972)");
+  }
 });
 
 test("x41.b4 door (a) is status-blind: the acquisition reversal that flips the row to 'unwound' does not trip the belt on the original entry's own reversed_by update", async (t) => {

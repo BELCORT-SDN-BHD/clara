@@ -11,12 +11,12 @@ import { EmptyState } from "@/components/common/state";
 import { queueRecoveryLabelKey, queueStateLabelKey, readErrorKey } from "@/lib/documents/copy";
 import { renderFileSize } from "@/lib/documents/file-size";
 import { renderKindLabel } from "@/lib/documents/kind-label";
+import { intakeFailureAdvice } from "@/lib/documents/failure-advice";
 import { useCapabilityRegistry } from "@/lib/documents/use-capability-registry";
 import { useUploadQueue, type QueueItem, type QueueRejection } from "@/lib/documents/useUploadQueue";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { CapabilityTiers } from "./capability-tiers";
 import { DocumentKindControl } from "./document-kind-control";
-import type { IntakeFailureCode } from "@/lib/documents/types";
 import type { CapabilityIndex } from "@/lib/documents/capability-registry";
 
 /**
@@ -188,20 +188,9 @@ function QueueAnnouncer({ items }: { items: QueueItem[] }) {
   );
 }
 
-/** The DB's own failure code as a NEXT STEP (AC6). `queueRecoveryLabelKey`'s idiom:
- *  a closed map with an HONEST default — a code this app has not met yet names itself
- *  inside a sentence rather than borrowing another code's advice. */
-const FAILURE_CODES: ReadonlySet<string> = new Set<IntakeFailureCode>([
-  "too_large", "bad_type", "limit", "checksum_mismatch", "storage_error",
-  "expired", "malware_detected", "quarantined", "internal",
-]);
-
-function failureAdvice(
-  code: string,
-  t: (key: string, params?: Record<string, string | number>) => string,
-): string {
-  return FAILURE_CODES.has(code) ? t(`queueFailure.${code}`) : t("queueFailureUnknown", { code });
-}
+/** The DB's own failure code as a NEXT STEP (AC6). The closed map and its honest default moved to
+ *  `lib/documents/failure-advice.ts` when #965's 0254 made the DURABLE receipts list a second
+ *  surface over the same nine codes (L05-SPEC-07): two views of one vocabulary, one map. */
 
 function QueueRow({
   item, capabilityIndex, rowRef, onCancel, onRetry, onRemove, onClassified,
@@ -246,7 +235,7 @@ function QueueRow({
           <span>{t(queueStateLabelKey(item))}</span>
           {item.state === "failed" && item.failureCode ? (
             <Alert variant="destructive" data-testid="queue-failure-advice">
-              <AlertDescription>{failureAdvice(item.failureCode, t)}</AlertDescription>
+              <AlertDescription>{intakeFailureAdvice(item.failureCode, t)}</AlertDescription>
             </Alert>
           ) : null}
           {item.state === "error" && item.errorKind ? (

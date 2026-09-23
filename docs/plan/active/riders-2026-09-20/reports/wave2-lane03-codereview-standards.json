@@ -1,0 +1,57 @@
+{
+  "axis": "standards",
+  "lane": "wave2-lane03",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head_checked": "019506782e027a46d5714cda7bbd47bf1d613775",
+  "tickets": [846, 782, 988],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/db/README.md (house migration law, \"Redo (#957)\")",
+    "packages/db/tests/README.md",
+    "reports/wave2-lane03-ticket846.md, ticket782.md, ticket988.md"
+  ],
+  "verification_performed": [
+    "git log/diff/show against fixed point 23cfad94 in the lane worktree (C:\\Users\\zhant\\Desktop\\clara-wt\\642)",
+    "Read all three new migrations in full: 0244, 0245, 0246",
+    "Re-ran packages/db/tests/document-capability-high-water.test.mjs with the full gate chain: 7/7 pass (matches report)",
+    "Re-ran packages/db/tests/document-capability-registry.test.mjs with the full gate chain: 22/22 pass (matches report)",
+    "Re-ran operation-census.test.mjs + rig-isolation.test.mjs together: 32 pass / 1 skip (T19 poison-role, RIG.md-forbidden), matches both tickets' individually-reported counts",
+    "Ran pnpm lint at worktree root: exit 0 (matches)",
+    "Ran pnpm typecheck at worktree root: exit 0 (matches the #988 report's claim that the unblock fix cleared the inherited TS2552/TS7006)",
+    "Ran node scripts/check-frozen-workflows.mjs: OK, 312 files, no manifest diff",
+    "Re-ran pnpm --filter @clara/web e2e documents-viewer-walk on the lane's own Playwright triple (3520/3521/3522): 22/22 pass (matches #988 report exactly)",
+    "Queried the live lane DB directly (node+pg, since psql is not on PATH on this rig): clara.schema_migrations has 232 rows; document_capabilities is uniformly at registry_version=3 across 240 rows; document_capabilities_business_operation_check reads the 5-value form",
+    "Verified all three migrations' sha256 file checksums match clara.schema_migrations byte-for-byte (no applied-migration-edited violation)",
+    "Confirmed no diff touches docs/PRD.md or docs/ARCHITECTURE.md",
+    "Confirmed every commit message ends with the required 'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>' line",
+    "Confirmed CONTEXT.md's 'Document capability' section was overwritten in place (not appended) and the two new terms follow the house term/_Avoid_ shape",
+    "Confirmed first commit for #846 (ea336b33c) added exactly one test cell alongside the migration slice it proves -- vertical slicing, not a red battery upfront"
+  ],
+  "findings": [
+    {
+      "id": "S1",
+      "ticket": 988,
+      "severity": "minor",
+      "category": "primitive-obsession",
+      "title": "capability-tiers.tsx's TONE map is Record<string,string>, not Record<CapabilityLevel,string> -- no compile-time exhaustiveness when a level is added",
+      "file": "apps/web/components/documents/capability-tiers.tsx",
+      "line": 30,
+      "hunk": "const TONE: Record<string, string> = {\n  supported: \"text-success\",\n  stored_only: \"text-muted-foreground\",\n  unsupported: \"text-warning\",\n  planned: \"text-muted-foreground\",\n  proposal_only: \"text-info\",\n};\n\nfunction tierTone(tier: TierState): string {\n  return tier.state === \"level\" ? (TONE[tier.level] ?? \"\") : \"text-muted-foreground\";\n}",
+      "verdict": "PLAUSIBLE",
+      "failure_scenario": "CapabilityLevel (document-state.ts) is the closed set this map is meant to mirror, and it is exported. Because TONE is keyed by the widened but still-generic string type, TypeScript raises nothing when a level is missing from the map -- exactly the situation this commit was in a moment before it added the `proposal_only` line by hand. A future sixth level (or a rename of an existing one) can land in CapabilityLevel/CAPABILITY_LEVELS without the compiler ever flagging that TONE has fallen out of sync; the only symptom is a silently unstyled badge (`tierTone` falls through to `\"\"`), caught only if someone happens to look at the rendered page or writes a component test -- and the ticket's own report says explicitly that no component test exists for this file for ANY of its five levels today.",
+      "required_fix": "Type TONE as `Record<CapabilityLevel, string>` (or build it via a `satisfies Record<CapabilityLevel, string>` object) so the compiler enforces the map is exhaustive over the same closed set `CapabilityLevel` already names, the same way `isCapabilityLevel`/`CAPABILITY_LEVELS` already treat that set as closed. This is a design deepening, not a behavior change for this ticket, and was true before #988 touched this file -- #988 had the map open for editing and extended the existing pattern rather than hardening it. Judgement call, not a hard violation: nothing in this repo's documented standards mandates it, and the smell (a documented repo standard) can be waived by the next editor of this file."
+    }
+  ],
+  "non_findings_considered_and_rejected": [
+    "Repeated sha256(prosrc) prestate/tail pin blocks across 0244/0245/0246 read as Duplicated Code at a glance, but this is the wave-2 addendum's OWN documented house law (\"prestate with sha256(prosrc) pins MEASURED on your lane database now ... never transcribed\") -- a documented repo standard the smell baseline explicitly yields to. Not reported.",
+    "rig-meta.mjs's #846/#782/#988 cohort comments are inserted immediately after #779's (0207) entry rather than at the file's true chronological tail (after #1008/0234, the highest-numbered entry before this wave) -- the file's own pre-existing ordering is chronological-by-landing, not by migration number, so this is a placement choice, not a violation of a stated rule. It does not create any test or tooling failure (cohortFailures/governedRlsFailures do not depend on comment position), and multiple lanes editing this same shared file this wave will need manual integration regardless of where any one lane appends. Not reported as a finding.",
+    "The document-kind-dialog.tsx 'unblock' fix (commits 1e7565e2f, 019506782) is scope outside ticket #988's own text, but the work order's scope-discipline rule is about widening a TICKET's deliverable, not about leaving a gate permanently un-runnable; the fix is minimal (one identifier swap to the file's OWN already-established filtered-roster convention), is committed separately from the #988 feature commits precisely so the orchestrator can evaluate or drop it independently, is accompanied by a documented dead-end (the alternative fix #782's own report had 'verified' but never shipped, which the lane discovered was a real regression against a hardened test), and was independently re-verified here (documents-viewer-walk 22/22, typecheck exit 0). Judgement call in the lane's favor, not reported as a violation.",
+    "TDD process: checked for horizontal slicing (a whole battery of red tests committed before any implementation) via git log --stat -- the first #846 commit adds exactly ONE test cell (165 lines, 1 `cell(...)`) alongside the migration slice it proves, and each subsequent commit adds one more cell paired with the migration section it exercises. Genuine vertical slicing, not the anti-pattern the work order names.",
+    "Test quality: spot-checked and re-ran document-capability-high-water.test.mjs and document-capability-registry.test.mjs's new/edited cells -- expected values are independent literals (SQLSTATEs, named detail.reason strings, exact row counts measured from the live catalog), not recomputed the way the code computes them; every probe writes through a rolled-back transaction or a real COMMIT the sibling rollback-hygiene cell re-verifies; no internal collaborator or private function is mocked or reached around. No tautological or implementation-coupled test found."
+  ],
+  "summary": "Diff since 23cfad94 (5 ticket-bearing feature commits + 2 same-session unblock/fix-round commits across tickets #846, #782, #988) is exceptionally rigorous against this repo's documented migration house law: every one of the three new migrations (0244, 0245, 0246) carries a measured-not-transcribed prestate, a behavioural (not merely structural) tail with a rolled-back probe, correct SECURITY DEFINER/search_path/ACL hygiene, FORCE RLS with zero application-role grant on the one new relation, and redo-safety where used. #782 followed #846's own successor contract (UPDATE, never delete-then-insert) to the letter. No applied migration was edited (checksums verified byte-for-byte against the live ledger), no PRD/ARCHITECTURE edit, frozen-workflow check is clean, and every commit carries the required co-author trailer. TDD process is genuine vertical slicing (verified via git log --stat, not just the report's own narrative). Re-running the cells that carry claims (7/7, 22/22, 32/33, lint exit 0, typecheck exit 0, documents-viewer-walk 22/22, and direct DB queries for migration count/registry version/CHECK definition) reproduced every number the three ticket reports assert. One minor, judgement-call-level smell found (a non-exhaustive TONE map in capability-tiers.tsx); no hard standards violations."
+}

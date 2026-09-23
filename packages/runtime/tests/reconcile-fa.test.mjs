@@ -48,9 +48,22 @@ async function signAuthorityFor(owner, { client, authority, reachBack }) {
     return;
   }
   const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [client])).rows[0].firm_id;
+  // #977 [0250]: the reference must name A PERSON'S INSTRUCTION -- a `chat_turn` task carrying an
+  // author -- not merely a row of clara.agent_tasks. It was an `autodraft` while the door
+  // resolved by a bare existence test; that arm is exactly what #977 closed. A chat_turn needs a
+  // real clara.chat_sessions row (its trigger arm derives the task's firm and client from the
+  // session), so the fixture mints one, authored by a live active member of the client's firm.
+  // packages/db/tests/fa-authority-sign-compat.mjs does the same for the four SQL-lane call
+  // sites; this lane keeps its own pool, so it is inlined rather than imported across packages.
+  const author = (await rootQuery(
+    "select user_id from clara.firm_memberships where firm_id=$1 and status='active' order by created_at limit 1",
+    [firm])).rows[0].user_id;
+  const session = (await rootQuery(
+    "insert into clara.chat_sessions(firm_id, client_id, created_by) values ($1,$2,$3) returning id",
+    [firm, client, author])).rows[0].id;
   const task = (await rootQuery(
-    `insert into clara.agent_tasks(firm_id, client_id, kind, status, model_snapshot)
-       values ($1,$2,'autodraft','queued','p651-fa-belt-rig') returning id`, [firm, client])).rows[0].id;
+    `insert into clara.agent_tasks(session_id, kind, status, model_snapshot, created_by)
+       values ($1,'chat_turn','queued','p651-fa-belt-rig',$2) returning id`, [session, author])).rows[0].id;
   await humanQuery(owner,
     "select clara.sign_depreciation_authority(p_client=>$1,p_authority=>$2,p_op_key=>$3,p_authority_ref=>$4::jsonb) as r",
     [client, authority, opk("sign"), JSON.stringify({ kind: "chat_task", id: task })]);

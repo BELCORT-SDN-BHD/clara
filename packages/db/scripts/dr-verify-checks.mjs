@@ -230,11 +230,27 @@ export async function checkGrantsAndRls(ctx) {
   ).rows[0].bad;
   record("4.6", "target clara functions all owned by clara_fn_owner", badFn === 0 ? "PASS" : "FAIL", badFn === 0 ? "" : `${badFn} function(s) NOT owned by clara_fn_owner — a SECURITY DEFINER escalation`);
 
-  // Relation ACLs incl SEQUENCES ('S') + is_grantable + grantor (HIGH-4).
+  // Relation ACLs incl SEQUENCES ('S') + is_grantable + grantor (HIGH-4). EFFECTIVE
+  // grants, not raw bytes (#1014/#1029): `relacl` is NULL until the FIRST grant/revoke
+  // ever touches a relation, at which point Postgres MATERIALISES the owner's implicit
+  // privileges into an explicit ACL — even when that statement is a semantic no-op (a
+  // `revoke all ... from public` on a table PUBLIC never held anything on, first seen on
+  // 0235_opening_binding_claim.sql's `clara.document_binding_claims`). `pg_dump` emits
+  // nothing for an ACL that equals the object's default, so a restored target comes back
+  // with `relacl` NULL again — same effective grants, a different catalog spelling.
+  // `coalesce(c.relacl, acldefault(...))` reads a NULL ACL as the very default a
+  // materialised owner-only ACL already equals, so the two sides agree; any REAL
+  // difference (a grant to another role, a different grantor, an owner privilege
+  // actually missing on one side) still produces a real row and still FAILs. The
+  // `acldefault()` type char is NOT `c.relkind` itself: sequences take lowercase `s`
+  // (uppercase `S` silently resolves to an unrelated object kind), and views/matviews/
+  // partitioned tables ('v'/'m'/'p') are not valid type chars at all — they share the
+  // plain-table `r` default (measured against a live cluster + `pg_dump`; see
+  // tests/dr-verify-grant-matrix.test.mjs and packages/db/README.md's DR section).
   await diffCheck(
     "4.6",
     "relation-grant matrix (4 schemas, incl sequences, grantor/grantable)",
-    "select n.nspname, c.relname, c.relkind::text kind, coalesce(gr.rolname,'PUBLIC') grantee, a.privilege_type, a.is_grantable, coalesce(g.rolname,'') grantor from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(c.relacl) a left join pg_roles gr on gr.oid=a.grantee left join pg_roles g on g.oid=a.grantor where n.nspname = any($1) and c.relkind in ('r','v','m','p','S') order by 1,2,4,5",
+    "select n.nspname, c.relname, c.relkind::text kind, coalesce(gr.rolname,'PUBLIC') grantee, a.privilege_type, a.is_grantable, coalesce(g.rolname,'') grantor from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(coalesce(c.relacl, acldefault((case when c.relkind='S' then 's' else 'r' end)::\"char\", c.relowner))) a left join pg_roles gr on gr.oid=a.grantee left join pg_roles g on g.oid=a.grantor where n.nspname = any($1) and c.relkind in ('r','v','m','p','S') order by 1,2,4,5",
     [AUTHORITATIVE_SCHEMAS],
   );
   // Column-level ACLs (HIGH-4): 0006 grants column UPDATE on wake_intents.status/consumed_by.

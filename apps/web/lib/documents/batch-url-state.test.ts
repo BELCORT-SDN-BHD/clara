@@ -70,15 +70,34 @@ test("the five facets are the door's own populations plus `all` — the card nev
   assert.deepEqual([...BATCH_FACETS], ["all", "waiting", "failed", "unassigned", "settled"]);
 });
 
-test("the capacity copy says 08:00 and never 'midnight' or 'tomorrow'", async () => {
+test("the capacity copy names the DOOR's own reset moment, and promises no resume the record cannot keep", async () => {
+  // RECUT (#964 / L05-SPEC-05, ADV-W2L05-09). This cell used to be titled "the capacity copy says
+  // 08:00 …" and its failure message asserted "the daily window is a UTC day, which is 08:00 MYT".
+  // #964's 0252 retired that wall: the window is an Asia/Kuala_Lumpur day and the reset is MYT
+  // midnight. What survives the move is the REASON the original cell existed — the moment is the
+  // door's `resets_at_local`, never a constant this app keeps a second copy of.
+  //
   // The STRING, read from the shipped message catalogue rather than from a component render, so
   // this cell fails if the copy is edited even when no component test happens to mount that state.
   const messages = (await import("../../messages/en.json", { with: { type: "json" } })).default as unknown as
-    { IntakeBatch: { capacity: { body: string }; residual: { preIntakeRefusal: string } } };
-  const body = messages.IntakeBatch.capacity.body;
-  assert.match(body, /\{at\}/, "the reset moment comes from the DOOR, never from a local constant");
-  assert.ok(!/midnight/i.test(body), "the daily window is a UTC day, which is 08:00 MYT — never midnight");
-  assert.ok(!/tomorrow/i.test(body), "…and never 'tomorrow', which is wrong for most of the day");
-  assert.match(messages.IntakeBatch.residual.preIntakeRefusal, /never joins a batch/,
+    { IntakeBatch: { capacity: { reset: string; body: string }; residual: { preIntakeRefusal: string } } };
+  const { reset, body } = messages.IntakeBatch.capacity;
+  assert.match(reset, /\{at\}/, "the reset moment comes from the DOOR, never from a local constant");
+  assert.match(reset, /\{zone\}/, "…and so does its zone");
+  for (const [label, text] of [["reset", reset], ["body", body]] as const) {
+    assert.ok(!/\d{1,2}:\d{2}/.test(text),
+      `capacity.${label} hardcodes a clock time — the wall belongs to the door, which already reports it`);
+  }
+  // ADV-W2L05-03: nothing in the estate re-drives a quota-refused file, so the banner must not
+  // say it continues on its own.
+  assert.ok(!/continue after the reset/i.test(body),
+    "capacity.body promises an automatic resume nothing performs");
+  assert.match(body, /upload it again/i, "…it states the remedy the firm actually has");
+  // L05-SPEC-02 / ADV-W2L05-02: the residual sentence must state what 0254 does, not what the
+  // pre-#965 door did.
+  const residual = messages.IntakeBatch.residual.preIntakeRefusal;
+  assert.ok(!/never joins a batch/i.test(residual),
+    "the retired claim is still in the shipped catalogue — #965 made it false");
+  assert.match(residual, /keeps its record/i,
     "the named residual is on the SURFACE, not only in a report");
 });

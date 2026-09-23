@@ -198,4 +198,54 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "ed995a59f88e4369dc02c654ea1ebb2dcdfc7f7e3bec4dedbdd802acb4ccec25",
     },
   ],
+  // #898 [0240] — the financial year-end DAY, appended at the sorted position. Same splice family
+  // as 0146/0177/0191/0201/0226: one pg_get_functiondef recut of ONE named FUNCTION, read at its
+  // exact signature.
+  [
+    "0240_financial_year_end_day.sql",
+    {
+      reason:
+        "Reviewed: the ONLY dynamic SQL in 0240 is a single do-block that recuts ONE named function, clara._knowledge_assert_value(text,jsonb), harvested from the LIVE catalog with pg_get_functiondef at its exact regprocedure literal spelled in this file and re-installed with ONE counted anchor (the `shape_only` arm) replaced by the new `range:day_1_31` arm in front of it. That function RETURNS VOID and its body contains no CREATE VIEW of any spelling (measured on the live catalog, not argued), and the file itself contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. The block counts its anchor and refuses unless it occurs EXACTLY once, and it is a guarded no-op under the #957 redo path when the body already carries the marker, so a redo cannot duplicate the arm. §0 pins the pre-image prosrc sha256 the splice assumes, and §Z re-reads the COMMITTED body to prove the prestate sha is gone, that `range:day_1_31` occurs exactly once, that every prior label's arm survived at its own original occurrence count, and that SECURITY DEFINER, the pinned search_path and the ACL (revoked from PUBLIC, granted to no application role) are byte-identical to prestate. Every other object this migration creates (one clara.knowledge_keys row, one clara.knowledge_plan_item_map row and their tail censuses) is static DML the lexer inspects directly.",
+      sha256: "c75d8d8e388452174af4227c2773fc4a65b69245fefc6a1fbdf4e43529bcd67d",
+    },
+  ],
+  // riders wave 2, lane 05 (document intake) — three files of the SAME 0177/0191/0201/0226/0234
+  // splice family, appended at the sorted position. Added in this lane's fix round: the first
+  // generation shipped all three without an entry, so this census threw
+  // "unreviewed dynamic-SQL barrier at 0252_document_ingest_window_myt.sql" and the walk stopped
+  // there — which is also why only 0252 was named while all three needed one.
+  [
+    "0252_document_ingest_window_myt.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly FIVE named functions, each read at its own literal regprocedure spelled in this file — clara._reserve_document_ingest(uuid,uuid,integer,timestamptz), clara._resize_document_reservation(uuid,uuid,integer), clara._settle_document_reservation(uuid,uuid,integer) and clara.settle_ingest_reservation(uuid,integer,text) each on ONE anchor (the daily window clause, moved from a UTC calendar day to Asia/Kuala_Lumpur), and clara.get_intake_batch(uuid,integer) on TWO (its capacity descriptor's explanatory comment and the jsonb literal beside it). Four return uuid, void or jsonb and the fifth returns jsonb, so none can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. Every block asserts the split at the AS $function$ boundary, counts its anchor and refuses unless it occurs EXACTLY once, then re-reads the COMMITTED body and applies the REVERSE substitution, requiring the remainder to hash to the pinned pre-image byte for byte. The file creates no relation, no function and no grant: its only other statements are one `comment on function` and its prestate/tail assertion blocks, which additionally census every clara body reading document_ingest_reservations and pages_per_day for either spelling of the retired UTC idiom and require that set to be empty.",
+      sha256: "44f6326f5d528702e7319192b1ebfdd8c7cc6c794ed1933f2a549424f164b728",
+    },
+  ],
+  [
+    "0253_batch_cancel_reissue.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE named function, clara.cancel_intake_batch(uuid,uuid,text), read at its own literal regprocedure spelled in this file, on TWO counted anchors — the refusal-on-duplicate guard, which gains one named exception for a stopping batch whose stored canceller holds no active bookkeeper-or-above membership OF THAT FIRM, and the state-transition block, which gains the re-issue's own elsif branch. It returns jsonb, so it cannot emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. The block asserts the split at the AS $function$ boundary, counts both anchors and refuses unless each occurs EXACTLY once, then re-reads the COMMITTED body and applies the REVERSE substitution, requiring the remainder to hash to the pinned 0229 pre-image byte for byte. The file creates no relation, no function and no grant: its only other statements are one `comment on function` and its prestate/tail assertion blocks, which re-read the ACL byte-identically and prove exactly one batch_already_cancelling raise site survives.",
+      sha256: "c8ad1b9c5645f660f4f80fb711a10b71b9a9457a155357cfc358c7603520a462",
+    },
+  ],
+  [
+    "0254_intake_refusal_record.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE named function, clara.create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamptz,text), read at its own literal regprocedure spelled in this file, on TWO counted anchors — the declare line, which gains the refusal flag, and the single clara._reserve_document_ingest call, which gains an `exception when sqlstate 'CLR18'` arm committing the already-inserted intake row at failed/limit and returning a refusal outcome. It returns jsonb, so it cannot emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. The block asserts the split at the AS $function$ boundary, counts both anchors and refuses unless each occurs EXACTLY once, then re-reads the COMMITTED body and applies the REVERSE substitution, requiring the remainder to hash to the pinned 0007 pre-image byte for byte. The file creates no relation, no function and no grant: its only other statements are one `comment on function` and its prestate/tail assertion blocks, which re-read the ACL byte-identically, count the audit calls and prove the reservation helper and the batch read are untouched.",
+      sha256: "e233d61e67d33c19a339b15612f6973e0461da88bd10af4f18c51af420e1f3ef",
+    },
+  ],
+  // #974 [0260] (riders wave 2, lane 07) — the eleventh Needs-you row kind, the same
+  // 0146/0168/0180 splice family: ONE pg_get_functiondef splice of the SAME queue function.
+  [
+    "0260_depreciation_authority_pending_rowkind.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at a literal signature and re-installed with one added CTE (authority_rows), one union arm and one row-json builder gate (authority_id, the asset_id/advance_id case-when idiom). The block emits no view definition at all, so neither P4 scope view can be a target, and its own postcheck re-derives every one of the ten pre-existing row-kind markers at their prestate counts. Same family as 0146's, 0168's and 0180's splices of the same queue function. The file's separate tail (a second do-block) runs a behavioural probe through the real propose/retire doors inside a forced-rollback subtransaction — no dynamic SQL of its own, just direct calls to already-reviewed functions.",
+      sha256: "d84659c80b4aee33f46038660ee97e2f322a7e6861cdc5874ebfb79507cde81f",
+    },
+  ],
 ]);

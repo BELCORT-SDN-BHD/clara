@@ -1,0 +1,156 @@
+{
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "L09-RC-01",
+      "ticket": "885",
+      "severity": "minor",
+      "title": "CONTEXT.md's new \"Source-corrected work\" entry still describes the PRE-FIX mechanism: it promises a successor and a `superseded` refusal for EVERY retired Work, which is false on two of the three retire arms",
+      "evidence": "The entry was written in the lane's FIRST #885 commit `63358cd19` and was never revisited by the fix round: `git log --oneline 23cfad94..HEAD -- CONTEXT.md` returns `63358cd19` alone, while `git log --name-only c5d3bec54^..HEAD -- CONTEXT.md apps/web/messages/en.json` shows the fix round touching `en.json` TWICE (`894d2dd6c`, `e4d742151`) and CONTEXT.md never. Its committed text (CONTEXT.md, `<!-- #885 -->`) reads: \"every work of that firm still waiting on a question about that document -- and holding no committed receipt -- is restated: cancelled with the reason source corrected and SUPERSEDED BY A FRESH WORK on the same admitted basis... The retired question can no longer be answered; the answer door refuses it as SUPERSEDED AND NAMES THE SUCCESSOR.\" MEASURED on clara_l09, both clauses are false for the no-successor arms. Probe 1 (clara.revise_document_fact driven in a transaction that was then ROLLED BACK; rollback control re-read every row afterwards and found all six unmoved): the `clara_interpreted` Work went awaiting_input -> stopping with `superseded_by = NULL`, no successor row (`select ... where supersedes = <work>` empty), and its `work.cancelled` domain event carried `outcome: \"cancelled\"`, `superseded_by: null` -- not `superseded`. Probe 2 (committed) drove the answer door on the equally successorless `source_already_posted` arm: `answer_work_question` refused CLR13 with `detail.reason = \"cancelled\"`, `detail.current.superseded_by = null`. This is the SAME false universal the fix round removed from `WorkQuestion.convergeSuperseded` under L09-ADV-02/L09-SPEC-01 (\"the sentence says what is true of every path that reaches it\"); AGENTS.md names CONTEXT.md as the source of truth for naming concepts, so the stale copy is the one future work will read.",
+      "required_fix": "Reword the CONTEXT.md `#885` entry to the shipped mechanism, applying the fix round's own rule: every affected Work is RETIRED; a successor is admitted only when `basis_origin = 'user_direct'` AND the restatement door accepts it; otherwise the Work is cancelled with no successor, `superseded_by` stays null and the answer door says `cancelled`. One paragraph; no code change."
+    },
+    {
+      "id": "L09-RC-02",
+      "ticket": "885",
+      "severity": "minor",
+      "title": "The ruling's \"re-admitted ON THE CORRECTED FACTS\" is delivered on NO arm: the `user_direct` successor is admitted carrying the retired basis verbatim, cannot post the corrected figure, and CAN post the pre-correction one -- measured end to end -- and no successor contract names who re-derives a corrected basis",
+      "evidence": "MEASURED on clara_l09, probe 3 (committed). A Work parked on a question about document `0422a84b`, `basis_origin = 'user_direct'`, basis lines 64000 cents, against a document reading RM 640.00. `clara.revise_document_fact` corrects `invoice.total` to RM 999.00 (facts_version 2; the live `clara.document_regions` row for `invoice.total` now reads `text_content 'RM 999.00', monetary_cents 99900`). The door admits successor `d45cdaf3` with `basis cents = 64000` and `basis_digest 43c7e6481376` -- BYTE-IDENTICAL to the retired Work's (probe 1 asserts the same equality on its own pair). Driving the successor's run through the real wake lane: posting the CORRECTED figure 99900 is REFUSED `CLR10 {\"reason\":\"basis_mismatch\"}`; posting the STALE figure 64000 is ACCEPTED, `posted=true`, entry `186c1947-028e-44d7-8a0a-6dd05f44bdfc`, status `approved`, `clara.journal_lines` = [6100 dr 64000][1150 cr 64000], and `clara.entry_evidence_links` binds that entry to document `0422a84b`, whose live `invoice.total` is RM 999.00. So the exact shape of adversarial blocker L09-ADV-01 -- a successor structurally able to post ONLY the pre-correction figure against the corrected document -- survives on the `user_direct` arm; the fix removed it from the `clara_interpreted` arm only. This is NOT a regression of the blocker's own remedy (L09-ADV-01's `required_fix` says in terms \"A `user_direct` basis is the human's own instruction and may be carried forward\"), and it is disclosed at the two surfaces that meet it (`WorkQuestion.convergeSuperseded`: \"The replacement carries the same admitted instruction... a figure that has to change needs a new restatement\"; `ClientDocuments.factsRevisionWorkReplaced`: \"One continued as new work carrying the same instruction.\"). What is missing is the RECORD: neither the 0268 header, nor `packages/db/README.md`'s 0268 section, nor `wave2-lane09-fix.md` §6's three successor contracts names the re-derivation step, and `git diff 23cfad94..HEAD | grep -i 'claraWork_v6|chatTurn_v22|wave 4|re-derive'` returns only unrelated prestate-drift messages. §6's contracts are (1) a first-class cancellation reason on 0199's door, (2) a better sentence keyed on it, (3) the `SupersededWork` type -- all about the REASON and the SENTENCE, none about deriving a corrected basis. Nothing forces a human to look at the successor before it runs either: probe 3's successor was `queued` with `pending_question_id = null`, and `clara.list_review_queue` for that client returned 3 rows, none naming the retired Work or the successor (`row_kind` present: `uncoded_filing` only) -- so the brief's line \"Needs-you shows the replacement\" is measurably not delivered (the lane records this as L09-SPEC-08, deliberately left).",
+      "required_fix": "Do not close #885 as DONE. Close it PARTIAL (or leave it open) with the remainder stated in the ticket's own words, and add the missing successor contract to `wave2-lane09-fix.md` §6 and to 0268's \"WHAT THAT SHAPE DOES NOT GIVE\" paragraph: WHO re-derives a basis from corrected facts, at which cut (the wave-4 `chatTurn_v22` / `claraWork_v6` shared cut is the only lane that can interpret a document), and what the door should do in the meantime with a `user_direct` successor whose admitted figures were never re-confirmed after the correction. No code change is required from this lane."
+    },
+    {
+      "id": "L09-RC-03",
+      "ticket": "885",
+      "severity": "minor",
+      "title": "A pending question about the corrected document is STILL ANSWERABLE when its Work holds a committed receipt -- measured ACCEPTED -- and neither a cell nor the report says so",
+      "evidence": "MEASURED on clara_l09, probe 2 (committed), built through the real verbs exactly as the lane's own `w885.posted.untouched` cell builds it: Work `56aba783` parked on question `c6f13bb6` citing document D, then posting through `wake_record_journal_entry` (1 committed receipt; the Work stays `awaiting_input` with the question `pending`). `clara.revise_document_fact` then corrects `invoice.total` to RM 999.00: `superseded_work` is `[]` for that Work and `[{replaced:false, not_replaced_reason:'source_already_posted'}]` for its unposted sibling, as carve-out (c) intends. The residue: answering the POSTED Work's question afterwards SUCCEEDS -- `clara.answer_work_question` returned `{status:'answered', answered_role:'bookkeeper', question_version:1}` -- i.e. a person answered a question asked about a reading that had just been corrected, which is the literal thing the owner's 2026-09-20 ruling says must never happen. The carve-out is the Agent Brief's own (\"Works already holding a committed receipt are untouched (#676's territory)\") and the ruling says that brief \"stands unchanged\", so the two halves of the owner's own ruling contradict each other here. The lane never surfaces it: `w885.posted.untouched` asserts the Work's status, `superseded_by`, receipts and the absence of a successor, but never re-drives the answer door, and `wave2-lane09-fix.md` does not list this among the paths it leaves open.",
+      "required_fix": "Add one assertion to `w885.posted.untouched` pinning that the question is still answerable after the correction (so the carve-out is visible in the evidence rather than discoverable only by probing), and put the contradiction to the owner on #885 in one line: the brief carves out a posted Work, the ruling says nobody may answer against a corrected reading, and today the carve-out wins."
+    },
+    {
+      "id": "L09-RC-04",
+      "ticket": "905",
+      "severity": "note",
+      "title": "The out-of-lane build-unblock commit 9df3f0df5 is still on the branch; lane 03 reports the same one-line fix",
+      "evidence": "`git log --oneline 23cfad94..HEAD` still carries `9df3f0df5 fix(web): unblock the build -- SelectValue's kind roster used the wrong constant` (apps/web/components/documents/document-kind-dialog.tsx), a file no lane-09 ticket names, with `Co-Authored-By: Claude Sonnet 5` rather than this lane's trailer. Recorded as L09-ADV-10 / L09-SPEC-11 / STD-4 and deliberately not re-attributed; `reports/wave2-lane03-ticket846.md` reports the same break. Unchanged since the review, so it is still open for the integrator.",
+      "required_fix": "Integrator: keep exactly one copy of this hunk across lanes 03 and 09 when integrating. No lane action."
+    }
+  ],
+  "summary": "PART 1 -- every finding above note severity in the three reports is fixed on head 3a4e34315, re-verified by running rather than from the fix report's prose, and nothing else broke. Adversarial: L09-ADV-01 closed at the admission seam (the interpreted arm admits nothing; probe 1 re-measured it under a rolled-back correction) and at the surface (`SourceRevisionWorkEffect` renders the receipt's `superseded_work` on the correcting page); ADV-02/SPEC-01 the `convergeSuperseded` sentence now asserts no source correction and no corrected figures; ADV-03 CLR10/CLR13 are caught per Work in a subtransaction and the correction commits (probe 2 re-measured a sibling's posted entry no longer refusing a bookkeeper's correction, facts_version 1 -> 2); ADV-04 `client-work-pack.ts:307` now sends `status: dates === null ? [\"completed\"] : []`; ADV-05/06 and SPEC-03/10 `WorkCards.tsx` has exactly ONE restate mount left (line 232, `offerRestate = bookkeeperPlus && !onOwnWorkDetail`, the duplicate `RestateWorkPanel` deleted); ADV-07 `workRowClaimLabel` tests `typeof claim !== \"string\" || claim === \"\"`; ADV-08 both gate modules exist and both are in `packages/db/package.json`'s chain in migration order; ADV-09/10 kept as argued. Spec: SPEC-04 AC2 has a render cell, SPEC-05 the claim label is on the always-visible `work-row-wide-line`, SPEC-06/07/08/09 recorded, SPEC-12 `grep 'reader contract' 0268` returns 0. Standards: STD-1a/1b/1c `packages/db/README.md` gains `## 0265`, `## 0266`, `## 0267`; STD-2 falls with the deleted mount. Gates re-run here: db battery (work-question-admitted-basis + work-list + client-work-pack + work-source-correction-supersede + rig-docs-source-revision + preintegration-gate-chain + operation-census + rig-isolation) under the exact 54-module gate chain on clara_l09 = 110 tests, 109 pass, 0 fail, 1 skipped (rig-isolation T19, which needs CLARA_RIG_ALLOW_RESET); the 12 touched web unit files = 148/148 pass, exit 0; the WHOLE apps/web suite (the lane edits shared harness `test/hookHarness.ts`, so this is the real regression check) = 4772 tests, 4770 pass, 0 fail, 2 skipped, exit 0, no flake this run; `pnpm typecheck` exit 0; `pnpm lint` exit 0; `CI=true GITHUB_ACTIONS=true pnpm lint` exit 1 on EXACTLY one case -- the freeze-lint selftest's `--retire` under CI case -- and `git diff BASE..HEAD -- scripts/check-frozen-workflows.selftest.mjs scripts/check-frozen-workflows.mjs` is empty, so it is not this lane's (already fixed on the integration branch by f6d828b2c). `git status --porcelain` is empty and HEAD is unmoved at 3a4e34315. PART 2 -- #885 as built honours the ruling's non-negotiable half for the population the rule names, and honours the second half (\"re-admitted on the corrected facts\") on no arm at all. Two stale paths remain, both measured by driving the real doors: a `user_direct` successor posted the pre-correction RM 640.00 against a document whose live reading is RM 999.00 and was accepted, and a person answered a pending question about the corrected document on a Work holding a committed receipt. The first is the shape the adversarial blocker described, narrowed to the arm that blocker's own required_fix blessed; the second is the brief's own #676 carve-out contradicting the ruling's absolute sentence. Neither is a regression this lane introduced and both are disclosed to the person at the surfaces that meet them, so the code is mergeable; what is not honest is closing #885 as DONE. Four findings open, all minor or note: a CONTEXT.md entry left describing the pre-fix mechanism, the unrecorded successor contract for basis re-derivation, the unpinned answerable carve-out, and the out-of-lane commit the integrator must dedupe.",
+  "ruling_885": {
+    "truth_table": [
+      {
+        "kind": "Parked on a pending question about the CORRECTED document; basis_origin = user_direct; no committed receipt; document does not back any posted entry",
+        "state_before": "awaiting_input, question pending, basis 64000 cents, digest 43c7e6481376",
+        "cancelled": "YES -- awaiting_input -> stopping; the pending question goes to cancelled by the cancel cascade; the work.cancelled event carries outcome 'superseded'",
+        "successor": "YES -- admitted queued by clara.restate_accounting_work through 0268 A3 ARM 1",
+        "successor_basis_and_figures": "THE RETIRED BASIS VERBATIM: basis lines 64000 cents and basis_digest 43c7e6481376, byte-identical to the retired Work's, while the corrected document now reads RM 999.00 / 99900. MEASURED: posting 99900 under the successor is REFUSED CLR10 basis_mismatch; posting 64000 is ACCEPTED (entry 186c1947, approved, 6100 dr 64000 / 1150 cr 64000, evidence-linked to the corrected document).",
+        "cancelled_work_points_at": "superseded_by = the successor's id; the successor's supersedes points back; the successor's intent_key is source_corrected:<revision>:<old work>",
+        "work_detail_shows": "The Work detail page reads clara.accounting_work directly (ACCOUNTING_WORK_SELECT in apps/web/lib/work/types.ts includes supersedes,superseded_by), so the retired Work renders 'Superseded by <short id>' as a link (work-detail.tsx:1014) and the successor renders 'Supersedes <short id>' (:1003). NOTE: clara.get_accounting_work_row -- the LIST/addressed-row door -- projects neither key (measured: 27 keys, no supersedes/superseded_by).",
+        "needs_you_shows": "NOTHING at the moment of correction. MEASURED: clara.list_review_queue for that client returned 3 rows, none naming the retired Work or the successor; the successor is queued with pending_question_id null. The old row simply disappears; a new one appears only if the successor's own run later asks.",
+        "if_they_answer_the_old_question": "REFUSED CLR13, detail.reason = 'superseded', detail.current.superseded_by = the successor -> WorkQuestion.convergeSuperseded: 'This Work was replaced by a newer one, so this question is closed. The replacement carries the same admitted instruction and will ask again if it needs to; a figure that has to change needs a new restatement.'",
+        "what_they_must_do_next": "Nothing is required of them -- and that is the exposure. The successor is queued and will be picked up by the runtime carrying the pre-correction figure. To make the corrected figure postable they must restate the successor by hand (#721, clara.restate_accounting_work), which the sentence tells them but nothing enforces."
+      },
+      {
+        "kind": "Parked on a pending question about the CORRECTED document; basis_origin = clara_interpreted",
+        "state_before": "awaiting_input, question pending, basis 64000 cents derived from the reading that was corrected",
+        "cancelled": "YES -- awaiting_input -> stopping; question cancelled; but the work.cancelled event carries outcome 'cancelled', superseded_by null (MEASURED in probe 1)",
+        "successor": "NO -- 0268 A3 takes ARM 2: clara.cancel_accounting_work with no successor. The receipt entry reads replaced:false, new_work_id:null, not_replaced_reason:'interpreted_basis'.",
+        "successor_basis_and_figures": "n/a -- nothing carries the retired figure. MEASURED: select count(*) from clara.accounting_work where supersedes = <work> is 0, and the lane's own w885.interpreted.not_carried additionally pins that no Work with the retired basis_digest was created since the correction started.",
+        "cancelled_work_points_at": "NOWHERE. superseded_by is NULL. The only durable trace of WHY is the derived op key source_corrected:<revision>:<work> on clara.op_receipts, the clara._audit row and the correction's own _finish_op receipt -- not a first-class cancellation reason (clara.cancel_accounting_work(uuid,uuid,text) takes none).",
+        "work_detail_shows": "A stopped/cancelled Work with NO supersession link and no reason on the row -- the detail page's supersededBy block is skipped because superseded_by is null.",
+        "needs_you_shows": "NOTHING -- a retired Work with no successor adds no row anywhere.",
+        "if_they_answer_the_old_question": "REFUSED CLR13, detail.reason = 'cancelled', superseded_by null -> WorkQuestion.convergeCancelled: 'This Work was stopped, so its question is closed.' True, but it names neither the correction nor a next step.",
+        "what_they_must_do_next": "State the instruction again from scratch. The ONLY place they are told this is the correcting surface, at the moment of correction: ClientDocuments.factsRevisionWorkNotReplaced -- 'One was not replaced: its figures were read from the value you just corrected, so somebody has to give the instruction again.' That banner is transient state in DocumentFactsTable and is durable nowhere."
+      },
+      {
+        "kind": "Parked on a pending question about the CORRECTED document; no committed receipt of its own; but the document ALREADY BACKS ANOTHER Work's posted entry (or the restatement door refuses CLR10/CLR13 for any other payload/world reason)",
+        "state_before": "awaiting_input, question pending",
+        "cancelled": "YES -- awaiting_input -> stopping; question cancelled; and, the point of the ADV-03 fix, the human's correction STILL COMMITS (MEASURED: facts_version 1 -> 2)",
+        "successor": "NO -- ARM 1 is entered, clara.restate_accounting_work raises CLR13, the subtransaction discards it, and ARM 2 retires the Work. Receipt: replaced:false, not_replaced_reason:'source_already_posted'.",
+        "successor_basis_and_figures": "n/a",
+        "cancelled_work_points_at": "NOWHERE -- superseded_by NULL, same as the interpreted arm",
+        "work_detail_shows": "Same as the interpreted arm: a stopped Work, no link, no reason",
+        "needs_you_shows": "NOTHING",
+        "if_they_answer_the_old_question": "REFUSED CLR13, detail.reason = 'cancelled', superseded_by null (MEASURED in probe 2) -> convergeCancelled",
+        "what_they_must_do_next": "State the instruction again. The correcting surface's banner counts them in the same 'not replaced' sentence as the interpreted arm, whose wording ('their figures were read from the value you just corrected') is the WRONG reason for this arm -- the figures were fine, the door refused for a sibling's posting."
+      },
+      {
+        "kind": "Parked on a pending question about the CORRECTED document AND holding a committed receipt (#676 carve-out (c))",
+        "state_before": "awaiting_input, question pending, 1 committed receipt",
+        "cancelled": "NO -- untouched. receipt.superseded_work is [] for it.",
+        "successor": "NO",
+        "successor_basis_and_figures": "n/a",
+        "cancelled_work_points_at": "n/a -- superseded_by stays null, status unmoved, the committed receipt byte-unchanged",
+        "work_detail_shows": "Unchanged. The Work is still awaiting_input and still carries its pending question.",
+        "needs_you_shows": "The SAME pending question it showed before the correction -- unchanged.",
+        "if_they_answer_the_old_question": "ACCEPTED. MEASURED in probe 2: clara.answer_work_question returned {status:'answered', answered_role:'bookkeeper', question_version:1} AFTER the document's reading had moved to RM 999.00. This is the stale answer the ruling's absolute sentence forbids, kept open by the ruling's own brief.",
+        "what_they_must_do_next": "Nothing stops them. Correcting the posted result is #676's territory and docs/PRD.md parks the automation."
+      },
+      {
+        "kind": "Parked on a pending question about ANOTHER document, same client",
+        "state_before": "awaiting_input, question pending, cites D2 not D1",
+        "cancelled": "NO",
+        "successor": "NO",
+        "successor_basis_and_figures": "n/a",
+        "cancelled_work_points_at": "n/a",
+        "work_detail_shows": "Unchanged",
+        "needs_you_shows": "Unchanged -- its question is still pending",
+        "if_they_answer_the_old_question": "ACCEPTED -- the lane's own w885.unrelated.untouched drives it, and probe 1 re-measured the row staying awaiting_input/pending",
+        "what_they_must_do_next": "Answer normally; the correction was somebody else's document"
+      },
+      {
+        "kind": "RUNNING on the corrected document with no question open",
+        "state_before": "running, claimed, no pending interruption",
+        "cancelled": "NO -- rule term (a) requires a PENDING question, and probe 1 measured the row unmoved (running -> running)",
+        "successor": "NO",
+        "successor_basis_and_figures": "n/a",
+        "cancelled_work_points_at": "n/a",
+        "work_detail_shows": "Unchanged",
+        "needs_you_shows": "n/a",
+        "if_they_answer_the_old_question": "n/a -- there is no question",
+        "what_they_must_do_next": "Nothing. NOTE: this run is mid-flight against a reading that just moved and is told nothing; it will post its admitted basis and be accepted, exactly as the user_direct successor is. Out of this ticket's named scope, but it is the same seam."
+      },
+      {
+        "kind": "QUEUED on the corrected document with no question open",
+        "state_before": "queued, never claimed",
+        "cancelled": "NO -- same term (a); probe 1 measured queued -> queued",
+        "successor": "NO",
+        "successor_basis_and_figures": "n/a",
+        "cancelled_work_points_at": "n/a",
+        "work_detail_shows": "Unchanged",
+        "needs_you_shows": "n/a",
+        "if_they_answer_the_old_question": "n/a",
+        "what_they_must_do_next": "Nothing"
+      },
+      {
+        "kind": "Sibling Work of the same client that cites NO document, parked on a question",
+        "state_before": "awaiting_input, question pending, source_refs []",
+        "cancelled": "NO -- rule term (b) requires this document in the Work's own source_refs; probe 1 measured awaiting_input -> awaiting_input, question pending",
+        "successor": "NO",
+        "successor_basis_and_figures": "n/a",
+        "cancelled_work_points_at": "n/a",
+        "work_detail_shows": "Unchanged",
+        "needs_you_shows": "Unchanged",
+        "if_they_answer_the_old_question": "ACCEPTED",
+        "what_they_must_do_next": "Nothing"
+      },
+      {
+        "kind": "Pending-question RESIDUE on a TERMINAL Work citing the corrected document",
+        "state_before": "failed, with a planted pending interruption",
+        "cancelled": "NO -- rule term (d) restricts to queued/running/awaiting_input, so a dead Work's residue never turns a professional's correction into a refusal (lane cell w885.terminal_residue.ignored; the correction still commits)",
+        "successor": "NO",
+        "successor_basis_and_figures": "n/a",
+        "cancelled_work_points_at": "n/a",
+        "work_detail_shows": "Unchanged, still failed",
+        "needs_you_shows": "n/a",
+        "if_they_answer_the_old_question": "Refused on the Work's terminal state",
+        "what_they_must_do_next": "Nothing"
+      }
+    ],
+    "stale_path_left": true,
+    "delivered": "The ruling's NON-NEGOTIABLE half is delivered for the population the rule names: every Work of the firm that is queued/running/awaiting_input, holds a pending question, cites the corrected document in its own source_refs and holds no committed receipt is RETIRED inside the correcting transaction, its question closes, and answering it is refused CLR13. That is real and re-measured here, including the ADV-03 fix that stops a sibling Work's refusal aborting the human's correction. The ruling's SECOND half -- 're-admitted ON THE CORRECTED FACTS' -- is delivered on NO arm. On the clara_interpreted arm there is no successor at all. On the user_direct arm there IS a successor, but it is re-admitted on the OLD facts: its basis and basis_digest are byte-identical to the retired Work's, so it may post ONLY the pre-correction figure (MEASURED: 99900 refused CLR10 basis_mismatch, 64000 accepted and committed as entry 186c1947 against a document now reading RM 999.00). The ruling's third clause -- 'the cancelled Work points at its successor' -- is delivered on the user_direct arm only; on the two no-successor arms superseded_by is NULL and the reason survives only inside a derived op-key string. The brief's 'Needs-you shows the replacement' is delivered on no arm (measured: zero rows for either the retired Work or the successor).",
+    "replaced_by": "On the clara_interpreted arm and on every arm where clara.restate_accounting_work refuses CLR10/CLR13, 're-admitted on the corrected facts' is replaced by 'RETIRED, and the person restates': the Work is cancelled with no successor, the receipt carries replaced:false plus not_replaced_reason ('interpreted_basis' or the door's own reason such as 'source_already_posted'), and the only telling is a transient banner on the correcting surface -- ClientDocuments.factsRevisionWorkNotReplaced, 'its figures were read from the value you just corrected, so somebody has to give the instruction again.' On the user_direct arm it is replaced by 'RE-ADMITTED ON THE SAME INSTRUCTION against the corrected document', with the consequence stated at the answering surface only ('a figure that has to change needs a new restatement') and nothing enforcing it.",
+    "honest_minimum": "For the clara_interpreted arm: YES, retiring is the honest minimum, and both alternatives are closed at the SQL seam by measurement rather than by argument. (1) Re-deriving the basis is not constructible in SQL: packages/runtime/workflows/claraWork.v1.tools.ts journalBasisSchema is posting_date + memo + currency + lines of integer cents with no back-link from a line to a document field_path, so mapping a corrected invoice.total onto debit/credit lines is an interpretation act, not a projection. (2) The adversarial reviewer's own second option -- 'admit it in a state that cannot post until a human re-states' -- is ALSO not constructible: parking the successor on a confirmation question needs clara.open_work_question, whose step (4) is a conditional transition `update clara.agent_tasks set status='awaiting_input' where id = p_task and status = 'running'` and which raises CLR13 task_not_running otherwise (0184_work_cancel_ordering.sql:1641-1653); a freshly admitted successor's task is queued, and only the runtime's clara.claim_work_run moves it to running. So the correcting door genuinely could not have re-admitted on corrected facts without reaching into a frozen body or minting a fake run claim, and `node scripts/check-frozen-workflows.mjs` in the lint chain confirms no frozen body was touched. BUT the same reasoning is NOT applied consistently: it justifies retiring a derived basis, and the lane then auto-admits a user_direct successor that carries an unreviewed pre-correction figure and can post it. The honest minimum for that arm would have been either the same retirement, or an explicit owner ruling that a human's stated figure survives a correction of the document it was read from. The lane took the second position without asking, and recorded it only inside the migration header's prose.",
+    "close_as": "partial",
+    "remainder": "(1) RE-ADMISSION ON CORRECTED FACTS for a clara_interpreted basis -- nobody derives a corrected basis today; the estate has no seam for it below the runtime. This belongs to the wave-4 shared cut (chatTurn_v22 / claraWork_v6), and the lane recorded NO contract for it: wave2-lane09-fix.md §6's three contracts are a first-class cancellation reason on 0199's door, a better convergeCancelled sentence keyed on it, and the SupersededWork web type -- none names the derivation. §6 is therefore NOT enough to finish the ruling at wave 4; the contract that is missing is 'on a source correction, who re-reads the corrected document and proposes the corrected basis, and what the retired Work is linked to while that is pending'. (2) THE user_direct SUCCESSOR carries a pre-correction figure no human re-confirmed after the correction, can post it, and cannot post the corrected one -- owner ruling needed on whether that is intended, and if it is, a durable record on the successor (not just a sentence on the answering surface) that its figures predate the correction. (3) THE #676 CARVE-OUT leaves a question about the corrected document answerable when the Work already posted -- measured ACCEPTED; the brief carves it out and the ruling forbids it, so the owner must say which sentence wins. (4) 'NEEDS-YOU SHOWS THE REPLACEMENT' (Agent Brief, Desired behavior) is not delivered on any arm and has no cell. (5) A FIRST-CLASS RETIREMENT REASON (L09-SPEC-07) so #840's feed and the answering surface can say WHY a Work was retired instead of string-parsing source_corrected:<revision>:<work>. Items (1), (4) and (5) are already visible in the lane's records; (2) and (3) are new here and are the two reasons #885 cannot close as DONE."
+  }
+}

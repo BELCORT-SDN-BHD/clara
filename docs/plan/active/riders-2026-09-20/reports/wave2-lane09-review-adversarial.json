@@ -1,0 +1,124 @@
+{
+  "lens": "adversarial",
+  "wave": 2,
+  "lane": 9,
+  "branch": "riders/w2-lane09",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\659",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "database": "127.0.0.1:55749/clara_l09 (ledger head 0268_work_source_correction_supersede, 233 files)",
+  "tickets": [839, 880, 905, 885],
+  "verdict": "reject",
+  "summary": "Tenant isolation, rank floors, the no-oracle refusals, the ungranted helper closure, the lock order and the two-session race all held under attack; the lane's own 70 db cells re-ran green. Five defects the lane's cells cannot see: (1) #885's replacement Work carries the retired basis verbatim, so it can post ONLY the pre-correction figure and does so without complaint against the corrected document - measured end to end; (2) the en.json sentence a person reads asserts the opposite; (3) clara.revise_document_fact, a human door, is now refused outright by an unrelated sibling Work's posting - measured; (4) #905's recent-success tile still counts Works its drilldown does not show, and the disclosure sentence that used to say so was deleted; (5) #839 mounts a second restate control on the Work detail route (the rail IS in that layout) and ignores the bookkeeper floor the same card applies to Cancel Work.",
+  "findings": [
+    {
+      "id": "L09-ADV-01",
+      "ticket": 885,
+      "severity": "blocker",
+      "kind": "accounting-correctness",
+      "title": "The replacement Work carries the retired basis verbatim, so it can post ONLY the pre-correction figure - and does, against the corrected document",
+      "evidence": "MEASURED on clara_l09 (probe E). Parked Work with basis_origin='clara_interpreted' and lines 64000/64000 derived from a document reading RM 640.00; clara.revise_document_fact corrects invoice.total to RM 999.00. The successor admitted by clara._supersede_source_corrected_work (migrations/0268...sql:357, restate_accounting_work(v_id, p_actor, v_key, w.basis, w.basis_origin, w.source_refs, ...)) comes back with basis lines 64000/64000 and basis_digest 9b3e9023ef1d - byte-identical to the retired Work's - while clara.document_regions for the live facts extraction reads text_content 'RM 999.00', monetary_cents 99900. Posting the CORRECTED RM 999.00 under the successor through wake_record_journal_entry is REFUSED: CLR10 'the posted basis is not the admitted basis for this work' (clara._record_journal_entry_core line 370: `if v_digest is distinct from w.basis_digest`). Posting the RETIRED RM 640.00 under the successor is ACCEPTED: 1 committed receipt, journal lines [6100 64000 dr][1150 0 64000 cr], with the corrected document as the entry's evidence link. Nothing in _record_journal_entry_core compares the posted amount to the document's facts (grepped: only _journal_document_filed and _document_posting_entry). basis_digest is set once at admission, so the successor's instruction is structurally incapable of carrying the correction, and the question that would have prompted a human restatement has just been cancelled. The lane's own cell pins the stale behaviour as intended (work-source-correction-supersede.test.mjs, w885.supersede.cancels: `assert.deepEqual(newRow.basis, oldRow.basis)`), and the ticket report restates the AC as 'a new Work is admitted with the corrected facts'.",
+      "required_fix": "Distinguish the two basis origins in clara._source_corrected_work / _supersede_source_corrected_work. A `user_direct` basis is the human's own instruction and may be carried forward. A `clara_interpreted` basis was DERIVED from the reading that was just corrected and must not be re-admitted as if it were still true: either do not auto-admit a successor for it (cancel and leave the restatement to a human, which is what #721's door is for), or admit it in a state that cannot post until a human re-states. Add a cell that corrects a figure a clara_interpreted basis was derived from and asserts the successor cannot commit the pre-correction amount."
+    },
+    {
+      "id": "L09-ADV-02",
+      "ticket": 885,
+      "severity": "major",
+      "kind": "false-user-facing-claim",
+      "title": "convergeSuperseded tells the person the replacement is running on the corrected figures; it is running on the retired ones",
+      "evidence": "apps/web/messages/en.json:6133 - \"The source this question was asked about has been corrected, so this Work was replaced. A new Work is already running on the corrected figures and will ask again if it needs to.\" L09-ADV-01 measures the successor carrying the retired Work's basis and basis_digest unchanged, and posting the pre-correction amount successfully. This is the ONE sentence a professional meets at the moment their answer is refused (work-question-form.tsx convergeKeyFor -> case \"superseded\"), so it is the sentence that decides whether they go and check.",
+      "required_fix": "Reword to what is true of the shipped mechanism - the replacement re-reads the corrected document and carries the SAME instruction, and a figure that has to change needs a new restatement - or fix L09-ADV-01 first and keep the sentence."
+    },
+    {
+      "id": "L09-ADV-03",
+      "ticket": 885,
+      "severity": "major",
+      "kind": "regression-of-a-human-door",
+      "title": "clara.revise_document_fact is now hostage to restate_accounting_work's refusals: an unrelated sibling Work's posting blocks a bookkeeper's correction outright",
+      "evidence": "MEASURED on clara_l09 (probe B). Control: a correction with nothing parked succeeds (facts_version 1 -> 2, superseded_work []). Trap: W1 and W2 both admitted citing document D; W2 claimed and parked on a question; W1 then posts (1 committed receipt). Correcting D as the same bookkeeper is REFUSED with CLR13 'that document already backs a posted journal entry', detail {\"reason\":\"source_already_posted\",\"entry_id\":...} - a refusal about a DIFFERENT Work - and facts_version stays 1, i.e. the human correction is blocked outright. The refusal originates in clara._admit_accounting_work_core reached from 0268's own supersede call (migrations/0268...sql:612 -> :357). 0217's pinned pre-image of revise_document_fact names clara.accounting_work nowhere (the lane's own prestate pin b89a01ba...), so before 0268 this correction succeeded. The revision dialog shows the door message VERBATIM (apps/web/components/documents/document-revision-dialog.tsx:100-103), so the bookkeeper is told about an entry they were not acting on and given no way forward. The same class covers `not_restatable_purpose` (a periodic_stock_adjustment or payroll_obligation Work parked on such a question - the lane's own report lists it as follow-up 2 and states no cell drives it) and `client_inactive`. packages/db/README.md's new 0268 section documents this as 'fail-closed' but the ticket asked for the Work to be retired, not for the correcting door to stop working.",
+      "required_fix": "A Work the restatement door cannot replace must be SKIPPED and reported on the receipt (e.g. superseded_work entries with a refusal reason, or a `not_retired` array), not allowed to abort the whole correction. Narrow clara._source_corrected_work by `w.purpose = 'journal_entry'` and by `clara._document_posting_entry(w.client_id, p_document) is null`, and add cells for each of the three arms (purpose, source_already_posted, client_inactive) that assert the correction still commits."
+    },
+    {
+      "id": "L09-ADV-04",
+      "ticket": 905,
+      "severity": "major",
+      "kind": "tile-and-drilldown-disagree",
+      "title": "The recent-success tile still counts Works its drilldown does not show - and the sentence that disclosed it was deleted",
+      "evidence": "MEASURED on clara_l09 (probe A). A Work parked on a question that then POSTS keeps status 'awaiting_input' and holds 1 committed receipt (the lane's own #885 report measures the same state). clara.get_client_work_pack facet 2 counts `count(distinct o.work_id)` over clara.operation_receipts inside the seven MYT dates with NO term on clara.accounting_work.status, so the tile reads 1. workAttentionHref (apps/web/lib/work/client-work-pack.ts:292) sends `status=completed&receiptSince&receiptUntil`, and clara.list_accounting_work over the SAME receipt window returns []. The same receipt window with no status filter returns the Work, status awaiting_input - so the residue is the status axis, not the date axis. AC5's mitigation was removed everywhere at once: `recentSuccessListBasis` deleted from apps/web/messages/en.json, the band in client-work-attention.tsx, the cell in client-work-attention.test.tsx, the assertion in packages/db/tests/client-work-pack.test.mjs (p650.pack.recent_success_drilldown now asserts `deepEqual(listIds, tileIds)`) and the walk assertion in apps/web/e2e/home-board-walk.spec.ts (now `toHaveCount(0)`). None of the four can catch this: every fixture row in the db cell and in the walk's LIST_ROWS/RECEIPT_COMMITTED_AT map is `status: \"completed\"`.",
+      "required_fix": "Make the claim true rather than deleting its disclaimer. Either add the status term to facet 2's count in clara.get_client_work_pack (count only Works the drilldown's `status=completed` would return), or drop `status: [\"completed\"]` from workAttentionHref and let the receipt window carry the whole meaning. Then add a cell whose Work holds a committed receipt at a status other than `completed` and assert the two populations agree."
+    },
+    {
+      "id": "L09-ADV-05",
+      "ticket": 839,
+      "severity": "major",
+      "kind": "acceptance-criterion-broken",
+      "title": "AC3 (no duplicate restate UI): the Clara rail IS mounted on the Work detail route, so the new card control sits beside work-detail's own RestateWorkPanel",
+      "evidence": "apps/web/components/parts/WorkCards.tsx:192-196 justifies turning `offerRestate` on unconditionally with 'this card is never mounted on the Work detail itself, so there is no second restate control to collide with'. That is wrong about the app shell: apps/web/app/(firm)/layout.tsx:8,165 renders `<RailMount />` unconditionally for the whole (firm) group, and apps/web/app/(firm)/clients/[clientId]/work/[workId]/page.tsx is inside it; apps/web/components/clara/rail-mount.tsx:96-98 renders `<ClaraRail>` with no route exclusion (its own header says only the app/(full)/ escalation group is excluded). So a person on the Work detail with the rail open on the thread that admitted that Work sees work-detail.tsx:1389's `<RestateWorkPanel work={work} .../>` and, in the rail, WorkCards.tsx:196 (WorkAcceptedCard -> WorkQuestionPanel offerRestate) and/or WorkCards.tsx:336-342 (WorkQuestionCard -> RestateWorkPanel) for the same Work. The lane's AC3 evidence only checks that work-detail.tsx was not edited, which does not test co-presence.",
+      "required_fix": "Gate the card's offer on not being on that Work's own detail route (the rail already knows the route through useParams in rail-mount; pass it down, or have WorkQuestionPanel/WorkCards read the current workId segment), or reuse the panel's opt-in so only one surface per Work offers it. Add a cell that renders the card and the detail panel together and asserts exactly one 'Restate as a new instruction' control."
+    },
+    {
+      "id": "L09-ADV-06",
+      "ticket": 839,
+      "severity": "major",
+      "kind": "rank-floor-not-applied",
+      "title": "The rail's new restate control ignores the bookkeeper floor the SAME card applies to Cancel Work",
+      "evidence": "apps/web/components/parts/WorkCards.tsx:153-159 computes `bookkeeperPlus` and gates CancelWorkDialog on it, with its own stated rule: 'clara.cancel_accounting_work floors at bookkeeper, so a viewer or clerk pressing this could only ever be handed a 403 - a destructive control shown to people who can never use it'. The new restate mounts at :196 and :336 carry no such conjunct: `offersRestateFor` (apps/web/components/work/work-question-panel.tsx:54) tests only `offerRestate && record.work_status === 'awaiting_input' && Boolean(record.basis)`. clara.restate_accounting_work reaches clara._work_door_ctx, which raises CLR04 'restating accounting work requires a bookkeeper or above' for a lower rank (read from the live body on clara_l09) - exactly the floor the sibling control respects. A restatement cancels the Work, so it is at least as destructive as the control the rule was written for.",
+      "required_fix": "Add `&& bookkeeperPlus` to the WorkAcceptedCard mount and an equivalent `useFirmScopeOrNull()` rank check to the WorkQuestionCard mount (both helpers are already imported in the file), and pin it with a cell that renders the card at viewer rank and asserts no restate control."
+    },
+    {
+      "id": "L09-ADV-07",
+      "ticket": 880,
+      "severity": "minor",
+      "kind": "defensive-degrade-inverted",
+      "title": "workRowKindLabel labels EVERY row 'Staff expense claim' when the wire answer omits claim_id",
+      "evidence": "MEASURED: `workRowKindLabel({ purpose: 'journal_entry' } as any, t)` returns 'Staff expense claim - ' (ran under apps/web's own harness, node --import ./test/bootstrap.mjs --import tsx). apps/web/components/work/accounting-work-list.tsx:145 tests `row.claim_id !== null`, and `undefined !== null` is true. apps/web/lib/work/work-list.ts:127 uses `callDoor<WorkListPage>` with no runtime validation and passes `out.rows` straight through, so the key really can be absent - from a door below the 0266 frontier during a deploy window, or from the 'malformed wire answer' the function's own doc comment names as the case the `?? \"\"` exists for. The degrade it produces is the opposite of the file's own rule: it invents a claim origin the estate does not have. The same lane declares the sibling 0265 field defensively (`basis?: WorkBasis | null` in apps/web/lib/work/questions.ts) - the two are inconsistent. The lane's four new cells only cover claim_id explicitly null or explicitly set.",
+      "required_fix": "Use `row.claim_id != null` (or `typeof row.claim_id === 'string' && row.claim_id !== ''`) and add the missing-key case to the workRowKindLabel cells."
+    },
+    {
+      "id": "L09-ADV-08",
+      "ticket": 905,
+      "severity": "minor",
+      "kind": "work-order-migration-shape",
+      "title": "Migrations 0266 and 0267 ship with no preintegration gate module and no gate-chain entry, so their cells skip silently instead of failing a focused run",
+      "evidence": "packages/db/package.json's \"test\" script gains exactly two --import entries in this lane's diff: work-question-admitted-basis (#839/0265) and work-source-correction-supersede (#885/0268). `ls packages/db/tests/*preintegration-gate.mjs` shows no module for work_list_claim_label (0266) or work_list_receipt_window (0267). The wave-2 work-order addendum requires 'a preintegration gate module with a stable stem, a rig-meta cohort, the gate-chain entry in migration order' for a ticket that needs a schema or function change. Instead work-list.test.mjs and client-work-pack.test.mjs hand-roll `gateClaimLabel`/`gateReceiptWindow`, which always `t.skip()`; #839's and #885's gates `assert.fail()` on a focused run below the frontier ('a skip is not evidence'). So wl.29/wl.30/wl.31/wl.32 and p650.pack.recent_success_drilldown pass silently on a database that never applied 0266/0267.",
+      "required_fix": "Add the two gate modules with their stable stems and env escapes, append both to the gate chain in migration order, and have the inline gates delegate to them so a focused run without the module fails."
+    },
+    {
+      "id": "L09-ADV-09",
+      "ticket": 885,
+      "severity": "note",
+      "kind": "lock-amplification",
+      "title": "The Work-row locks are taken before the document tenancy check and before the idempotency reservation, so every refused call and every replay now blocks on them",
+      "evidence": "migrations/0268...sql:423 places `v_locked := clara._lock_source_corrected_work(p_document, c.firm)` above the `select * into d from clara.documents ... for update` (:426) and above `clara._reserve_op` (:437). Consequences read off the body: a lost-response REPLAY under the same op_key now takes FOR UPDATE locks on every affected Work, its task and its pending interruptions before returning the cached receipt; so does every call that then refuses for a reason unrelated to Work (field_path_not_revisable, value_not_scalar, CLR19 stale_source_version, live_bank_statement_present). No isolation break: the finder is filtered by c.firm, so a foreign document id matches nothing (probe C: clara._source_corrected_work(docA, FIRM_B) -> []), and the refusal for a foreign document is byte-identical to the one for a random uuid. Reported as a latency/contention note, not a defect.",
+      "required_fix": "Consider moving the lock call below the document tenancy check and the _reserve_op replay branch - the ABBA argument in the header is about clara.documents, not about those two - or record why the current position is required."
+    },
+    {
+      "id": "L09-ADV-10",
+      "ticket": 885,
+      "severity": "note",
+      "kind": "out-of-lane-edit",
+      "title": "Commit 9df3f0df5 fixes another lane's file; the integrator should expect a duplicate fix",
+      "evidence": "git log 23cfad94..HEAD shows `9df3f0df5 fix(web): unblock the build - SelectValue's kind roster used the wrong constant`, touching apps/web/components/documents/document-kind-dialog.tsx:95, a file named by none of this lane's four tickets. The fix itself is right: CLASSIFIABLE_DOCUMENT_KINDS is already imported at :33 and is what SelectContent maps at :115, so the two rosters now agree. The break is recorded as a follow-up in reports/wave2-lane03-ticket846.md ('blocks the typecheck gate for every wave-2 lane'), so more than one lane is likely to carry the same one-line change.",
+      "required_fix": "Integrator: expect the same hunk from lane 03 and keep exactly one."
+    }
+  ],
+  "held_under_attack": [
+    "Tenant isolation: firm B's owner correcting firm A's document and answering firm A's question both refuse CLR11 with detail byte-identical to the refusal for a random uuid - no existence oracle (probe C).",
+    "Rank floor: a firm A viewer correcting is CLR04 'insufficient role'; a REMOVED member is CLR04 'actor has no active membership' (probe C).",
+    "The three new bodies are ungranted: clara_authenticated, clara_runtime and clara_agent_ro all get 42501 on clara._lock_source_corrected_work; proacl on all three is clara_fn_owner only (probe C).",
+    "The ONE rule is firm-filtered on both sides: clara._source_corrected_work(docA, FIRM_A) returns the parked Work, (docA, FIRM_B) returns [] (probe C).",
+    "Two-session race: with session 1 holding the correction open, session 2's answer_work_question BLOCKS on the interruption lock (57014 after 1200ms), and after the commit it refuses CLR13 reason 'superseded' with current.superseded_by naming the successor (probe D). No lost update, no deadlock.",
+    "Replay semantics: a second correction of the same document returns superseded_work [] rather than re-retiring the queued successor (probe D).",
+    "Joined relations are RLS-forced with firm_id = clara.jwt_firm() SELECT policies (clara.staff_expense_claims, clara.operation_receipts), and 0266/0267 state the firm term on both sides of each join.",
+    "Calendar days: both the admission and the receipt axis convert an Asia/Kuala_Lumpur calendar day to a half-open [businessDayStart, businessDayEnd) instant range, and the SQL predicates are `>= since` / `< until` on both - the pack's own window uses the same construction (0214 lines 50-53).",
+    "0267's drop-and-create left exactly ONE clara.list_accounting_work in the catalog (11 args, all defaulted), so a nine-positional caller still resolves and no ambiguous overload exists.",
+    "All five bodies 0268 touches keep owner clara_fn_owner, SECURITY DEFINER and their pre-image ACLs.",
+    "The lane's own db batteries re-run green on clara_l09: work-source-correction-supersede + work-list + client-work-pack + work-question-admitted-basis + rig-docs-source-revision = 70 tests, 70 pass, 0 fail, 0 skipped, with the full 52-module gate chain."
+  ],
+  "not_measured": [
+    "The periodic_stock_adjustment / payroll_obligation arm of L09-ADV-03 (CLR10 not_restatable_purpose) - read off clara.restate_accounting_work's committed body, not driven end to end; the lane's own report says the same.",
+    "Whether a Work can carry a pending interruption on a task other than current_task_id (clara._source_corrected_work's 'parked' term is looser than answer_work_question's). retry_accounting_work only runs from terminal statuses, so no reachable constructor was found.",
+    "L09-ADV-05's rendered duplicate: the rail MOUNT on the Work detail route is proven from the layout files; the two controls were not rendered together in a browser.",
+    "No browser walk was run - this lens touched no spec file."
+  ]
+}

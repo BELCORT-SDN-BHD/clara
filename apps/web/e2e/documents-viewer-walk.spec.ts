@@ -362,7 +362,13 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     // room they move in — verbatim, with its version.
     await expect(page.getByText(/version 1 · 4 region/)).toBeVisible();
     await expect(page.getByText(/capability registry v1/)).toBeVisible();
-    await expect(page.getByText(/Per-line invoice facts are planned/)).toBeVisible();
+    // #782: no "planned"/"coming" wording for line items remains — the limit is a standing
+    // limitation, with its reason rendered as its own line. Both the limit's NAME and its VALUE
+    // are rendered through their own message keys, so what a professional reads is a sentence,
+    // never the registry's machine tokens.
+    await expect(page.getByText(/Per-line invoice facts: an accepted limitation/)).toBeVisible();
+    await expect(page.getByText(/Reason: nothing Clara posts through reads a per-line fact/)).toBeVisible();
+    await expect(page.getByText(/accepted_limitation|no_consumer_reads_line_facts/)).toHaveCount(0);
 
     // …AND THE FACT STILL LINKS TO ITS SOURCE REGION. A document that failed a check must not
     // lose its evidence trail — that is the half of acceptance 2 a state badge cannot carry.

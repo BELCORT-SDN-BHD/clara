@@ -19,8 +19,11 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, clickButton, setFieldValue } from "../../test/hookHarness";
 import { configureSessionTokenSource } from "../../lib/session-accessor";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
-import { WorkQuestionForm } from "./work-question-form";
-import { workAnswerDraftKey, writeWorkAnswerDraft, type WorkQuestionRecord } from "../../lib/work/questions";
+import { WorkQuestionForm, convergeKeyFor } from "./work-question-form";
+import {
+  workAnswerDraftKey, writeWorkAnswerDraft,
+  type AnswerRefusal, type WorkQuestionRecord,
+} from "../../lib/work/questions";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -913,5 +916,126 @@ test("two forms on one page do not share a control id — Needs-you expands more
   } finally {
     await h.unmount();
     s.restore();
+  }
+});
+
+// #885 --------------------------------------------------------------------------------------
+// A question retired because its Work was REPLACED gets its own sentence. Before this, the
+// database's new `superseded` reason fell through `convergeKeyFor`'s default onto
+// "This Work is no longer waiting on this question." — true, and useless: it does not tell the
+// person there IS a replacement to go to. Driven through the exported reducer the rendered card
+// itself calls (line 381), never through a copy of the switch.
+//
+// AND THE SENTENCE MAY NOT OVERCLAIM. The same reason is reached by a #721 restatement, so the
+// copy says what is true of every path — there is a newer Work carrying the same instruction — and
+// never asserts that a document was corrected (fix round, review finding L09-SPEC-01).
+test("885 a SUPERSEDED convergence gets its own sentence, and a plain cancellation keeps its own", () => {
+  const cancelled = record({ status: "cancelled", work_status: "cancelled" });
+  const converge = (reason: string, current: Record<string, unknown> | null = null): AnswerRefusal =>
+    ({ kind: "converge", reason, current, message: "refused" });
+
+  const key = convergeKeyFor(converge("superseded", { superseded_by: WORK }), cancelled);
+  assert.equal(key, "convergeSuperseded",
+    "the door's `superseded` reason maps to its OWN copy key");
+  assert.notEqual(key, convergeKeyFor(converge("state_changed"), cancelled),
+    "…and not to the generic state-changed fallback it used to land on");
+
+  const messageFor = (k: string): unknown =>
+    (messages as unknown as { WorkQuestion: Record<string, unknown> }).WorkQuestion[k];
+  const sentence = messageFor(key);
+  assert.equal(typeof sentence, "string",
+    "…and that key really resolves in en.json — an unresolved key renders as MISSING_MESSAGE");
+  // THE SENTENCE MAY NOT ASSERT A CAUSE (fix round, review finding L09-SPEC-01). The SAME reason is
+  // raised for a #721 restatement, where nothing was corrected at all, so copy that told the person
+  // their source had been corrected was simply false on that path.
+  assert.doesNotMatch(String(sentence), /correct/i,
+    "the superseded sentence claims no source correction: a plain ticket-721 restatement reaches this exact reason");
+
+  assert.equal(convergeKeyFor(converge("cancelled"), cancelled), "convergeCancelled",
+    "a cancellation with no successor keeps the sentence it already had");
+  assert.equal(convergeKeyFor(null, cancelled), "convergeCancelled",
+    "…and so does a form mounted straight onto a settled cancelled record, with no refusal to read");
+});
+
+// #885 (second fix round, recheck finding L09-RC-03) ------------------------------------------
+//
+// A question whose SOURCE was corrected after it was asked is not answerable, whatever state its
+// Work is in. The door refuses it (CLR13 source_corrected) even while the question is still
+// PENDING -- that is how the #676 carve-out, which leaves a POSTED Work exactly where it is, and
+// the ruling's absolute sentence can both hold. This surface must not ask a person to type an
+// answer it already knows will be refused, so the record carries the fact too
+// (`source_corrected_at`, migration 0268) and the form opens CONVERGED on it.
+test("885 a question whose source was corrected is not asked again: the sentence, not the form", () => {
+  const converge = (reason: string, current: Record<string, unknown> | null = null): AnswerRefusal =>
+    ({ kind: "converge", reason, current, message: "refused" });
+  const corrected = record({ source_corrected_at: "2026-09-20T02:00:00.000Z" } as never);
+
+  assert.equal(convergeKeyFor(converge("source_corrected", { source_corrected_at: "2026-09-20T02:00:00.000Z" }), corrected),
+    "convergeSourceCorrected", "the door's own reason maps to its OWN copy key");
+  assert.equal(convergeKeyFor(null, corrected), "convergeSourceCorrected",
+    "…and so does a form mounted on a PENDING record that already carries the correction instant, with no refusal to read: the person is told BEFORE they type");
+  assert.equal(convergeKeyFor(null, record({})), "convergeStateChanged",
+    "…while an ordinary pending record is untouched by the new arm");
+  assert.equal(convergeKeyFor(null, record({ status: "answered", source_corrected_at: "2026-09-20T02:00:00.000Z" } as never)),
+    "convergeAnswered",
+    "…and a question that was ALREADY ANSWERED still says so: a later correction does not rewrite what happened");
+
+  const messageFor = (k: string): unknown =>
+    (messages as unknown as { WorkQuestion: Record<string, unknown> }).WorkQuestion[k];
+  const sentence = String(messageFor("convergeSourceCorrected"));
+  assert.match(sentence, /corrected/i, "the sentence names what changed — the source, not the Work's state");
+  assert.match(sentence, /again/i, "…and says what the person has to do next");
+  assert.doesNotMatch(sentence, /replacement|new Work is (already )?running/i,
+    "…and promises no successor, because no arm admits one");
+});
+
+// #885 (third fix round, recheck finding L09-RC2-03) ------------------------------------------
+//
+// ONE SENTENCE PER ARM, AND EACH NAMES AN EXIT THAT WORKS. A source correction RETIRES the Work
+// parked on it, and that person restates the instruction on the corrected document. But a Work
+// holding a committed receipt is carved out of the retirement (#676) and is NOT retired -- and
+// `clara.restate_accounting_work` refuses it CLR13 `not_restatable`, because a Work that has
+// posted reads as completed. Telling that person to 'give the instruction again' points them at a
+// door that can only refuse. The record carries `work_posted` so the two arms can be told apart.
+test("885 the source-corrected sentence names the exit that actually works on each arm", async () => {
+  const converge = (reason: string, current: Record<string, unknown> | null = null): AnswerRefusal =>
+    ({ kind: "converge", reason, current, message: "refused" });
+  const CORRECTED = "2026-09-20T02:00:00.000Z";
+  const messageFor = (k: string): unknown =>
+    (messages as unknown as { WorkQuestion: Record<string, unknown> }).WorkQuestion[k];
+
+  // ARM A · the RETIRED Work: its question is cancelled and restating is the way back.
+  const retired = record({ status: "cancelled", work_status: "cancelled",
+    source_corrected_at: CORRECTED, work_posted: false } as never);
+  assert.equal(convergeKeyFor(converge("source_corrected"), retired), "convergeSourceCorrected");
+  const sentenceA = String(messageFor("convergeSourceCorrected"));
+  assert.match(sentenceA, /given again on the corrected document/i,
+    "the retired arm is told to state the instruction again, which is what ticket-721's door admits");
+
+  // ARM B · the CARVE-OUT: the Work is untouched, still awaiting_input, and has already posted.
+  const posted = record({ source_corrected_at: CORRECTED, work_posted: true } as never);
+  assert.equal(convergeKeyFor(converge("source_corrected"), posted), "convergeSourceCorrectedPosted",
+    "a Work that has already posted gets its OWN sentence");
+  assert.equal(convergeKeyFor(null, posted), "convergeSourceCorrectedPosted",
+    "…including with no refusal to read, which is how the surface opens");
+  const sentenceB = String(messageFor("convergeSourceCorrectedPosted"));
+  assert.match(sentenceB, /cannot be restated|can no longer be restated/i,
+    "it says the door that would refuse will refuse");
+  assert.match(sentenceB, /Cancel Work/,
+    "…and names the exit the doors really allow (clara.cancel_agent_task is ACCEPTED here)");
+
+  // …AND BOTH ARE RENDERED, not merely mapped.
+  for (const [label, rec, needle] of [
+    ["retired", retired, /given again on the corrected document/i],
+    ["posted", posted, /Cancel Work/],
+  ] as const) {
+    const h = await renderComponent(App({ record: rec }));
+    try {
+      await h.settle();
+      assert.ok(byTestId(h, "work-question-converged"), label + ": the card opens on the sentence, not the form");
+      assert.match(h.text(), needle, label + ": …and it is THIS arm's sentence");
+    } finally {
+      await h.unmount();
+    }
   }
 });

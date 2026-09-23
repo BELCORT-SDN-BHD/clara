@@ -483,14 +483,35 @@ test("p651.authority.retire_unsigned a NEVER-SIGNED authority can still be WITHD
     + "(coalesce), so ck_fa_authorities_window reads true of every non-proposed row forever");
   assert.ok(after.signed_at, "…exactly as 0041's own coalesce already invents a signature stamp");
 
+  // …and the READ tells this apart from "never had one" (#979, 0251). Until 0251 this cell
+  // pinned the OPPOSITE: `env.authority === null`, a retired-only client sharing the
+  // 'none proposed' state with a fresh one. The owner's 2026-09-20 ruling on #979 reversed that
+  // deliberately — a bookkeeper deciding whether to propose a new authority needs to see that a
+  // prior one existed and was withdrawn — so the read now answers THREE states, and this cell
+  // pins the third one on the very row this cell withdrew.
   const env = await authorityEnvelope(w.users.bob, client);
-  assert.equal(env.authority, null,
-    "…and the READ is honest: a retired-only client shares the 'none proposed' state with a fresh "
-    + "one, which is what the surface already renders (lib/registers/depreciation.ts's F6 note)");
+  assert.ok(env.authority,
+    "the READ is honest about a withdrawal: a retired-only client no longer shares the "
+    + "'none proposed' state with a fresh one (#979 / 0251)");
+  assert.equal(env.authority.id, auth, "…and it is THIS authority, the one just withdrawn");
+  assert.equal(env.authority.status, "retired", "…reported as retired, not as absent");
+  assert.equal(env.authority.retired_reason, "p651 wrong cadence, withdrawn before signature",
+    "…carrying the reason the admin gave at the door");
+  assert.equal(env.authority.retired_by, after.retired_by,
+    "…and the retiring author the table itself recorded");
+  assert.equal(env.authority.authority_from, mon(0).start,
+    "…and the window floor the retire door coalesced in, the same value the table carries");
 
   const again = await proposeAuthority(w.users.bob, { client, cadence: "annual" });
   assert.ok(again && again !== auth,
-    "THE RECOVERY: the lane REOPENS — the corrected cadence can be proposed once the wrong one is gone");
+    "THE RECOVERY, which is what this cell has always been about: the lane REOPENS — the "
+    + "corrected cadence can be proposed once the wrong one is gone. #979 changed what the READ "
+    + "says about the withdrawn row; it changed nothing about whether the lane reopens");
+  const reopened = await authorityEnvelope(w.users.bob, client);
+  assert.equal(reopened.authority.id, again,
+    "…and the read now prefers the freshly PROPOSED authority over the retired one (0041's "
+    + "live-or-proposed preference is what 0251 falls back FROM, never past)");
+  assert.equal(reopened.authority.status, "proposed");
 });
 
 test("p651.authority.floor_frozen once stamped, the window floor and the instruction reference never move again — not on the retire transition, not by a direct UPDATE", async (t) => {

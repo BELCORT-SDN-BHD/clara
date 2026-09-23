@@ -51,11 +51,30 @@ import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { PartRenderer, FALLBACK_UNSUPPORTED_PREFIX } from "./PartRenderer";
 import { FirmScopeProvider } from "../firm-scope-provider";
-import { WORK_CARD_POLL_MS } from "./WorkCards";
+import { WORK_CARD_POLL_MS, onWorkDetailRoute } from "./WorkCards";
 import type { ClaraPart } from "../../lib/parts/types";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
+
+// #839 (fix round) — THE ONE LIVE HANDLE THIS FILE HAS TO REFUSE. `getSessionIdentity()` builds the
+// app's REAL `@supabase/ssr` browser client (see `stubBackend`'s anon-key note), and auth-js opens a
+// `BroadcastChannel` — the channel a real browser uses to tell its OTHER TABS that this one signed
+// in or out — as soon as that client initialises, and never closes it. Node 22 has that global, and
+// its implementation is a `MessagePort` that keeps the event loop alive: measured, the file ran
+// 16/16 cells green and then never exited, which is a HANG of the whole suite rather than a failure
+// in it. A node cell is one tab; it has no siblings to tell. So auth-js is handed an inert channel,
+// and the `@supabase/ssr` singleton it caches for the rest of the process holds THAT.
+class InertBroadcastChannel {
+  onmessage: unknown = null;
+  onmessageerror: unknown = null;
+  constructor(readonly name: string) {}
+  postMessage(): void {}
+  addEventListener(): void {}
+  removeEventListener(): void {}
+  close(): void {}
+}
+(globalThis as Record<string, unknown>).BroadcastChannel = InertBroadcastChannel;
 
 type Stub = Record<string, unknown>;
 
@@ -137,7 +156,14 @@ function stubBackend(handler: (call: Call) => { status: number; body: unknown })
   const calls: Call[] = [];
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const originalKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  // #839 (fix round) — AND THE ANON KEY. `getSessionIdentity()` calls `createClient()`, which
+  // hands both env values to `createBrowserClient`; with the key missing the constructor THROWS,
+  // the panel's whole hydrate rejects, and every cell below reached the door-unreachable arm no
+  // matter what the door answered. Supplying a placeholder key lets that read resolve to "no
+  // session" — the honest harness state, and the one arm the restate control has to survive.
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = originalKey ?? "test-anon-key";
   globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: string }) => {
     const url = String(input);
     const fn = url.slice(url.lastIndexOf("/") + 1).split("?")[0] ?? "";
@@ -160,6 +186,8 @@ function stubBackend(handler: (call: Call) => { status: number; body: unknown })
       globalThis.fetch = originalFetch;
       if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
       else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+      if (originalKey === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = originalKey;
       resetSessionTokenSource();
     },
   };
@@ -574,6 +602,238 @@ test("630 the rail card's poll never unmounts an OPEN cancel decision", async ()
   } finally {
     globalThis.setInterval = realSet;
     await h.unmount();
+    backend.restore();
+  }
+});
+
+// #839 (fix round, review finding L09-ADV-05) ------------------------------------------------
+// THE RAIL IS MOUNTED ON THE WORK DETAIL ROUTE. `app/(firm)/layout.tsx` renders `<RailMount />`
+// for the whole group and the Work detail page is inside it, so a card that offered restate
+// unconditionally put a SECOND restate control beside the one `work-detail.tsx` already mounts.
+// The decision is a pure function for the reason `offersRestateFor` is one: `useParams()` is an
+// App-Router context read this harness has no seam for.
+test("839 onWorkDetailRoute: the rail knows when it is sitting on the Work's own detail page", () => {
+  const WORK_ID = "11111111-1111-4111-8111-111111111111";
+  assert.equal(onWorkDetailRoute({ workId: WORK_ID, clientId: "c" }, WORK_ID), true,
+    "same work in the route segment: B3 already offers restate here");
+  assert.equal(onWorkDetailRoute({ workId: "22222222-2222-4222-8222-222222222222" }, WORK_ID), false,
+    "a DIFFERENT Work's detail page is not this card's page");
+  assert.equal(onWorkDetailRoute({ clientId: "c" }, WORK_ID), false,
+    "no work segment at all: an ordinary (firm) route, where the rail is the only offer");
+  assert.equal(onWorkDetailRoute(null, WORK_ID), false,
+    "outside the router entirely (a node cell), the rail is the only offer");
+  assert.equal(onWorkDetailRoute({ workId: [WORK_ID] }, WORK_ID), true,
+    "a catch-all segment arrives as an array, and its first element is still the id");
+  assert.equal(onWorkDetailRoute({ workId: WORK_ID }, ""), false,
+    "an unaddressable part never matches a real route segment");
+});
+
+// #839 (fix round) — THE RENDER PROOF AC2 ASKS FOR, AND THE TWO GATES AC3 NEEDS ----------------
+//
+// AC2 is "a cell proves the rail's affordance OFFERS the restate action". Round 1 proved only the
+// pure predicate and a direct `RestateWorkPanel` mount, because `WorkQuestionPanel` would not
+// render anything at all until `getSessionIdentity()` resolved — a real `@supabase/ssr` browser
+// read this harness has no seam for (see this file's own header). Restating never needed that
+// read: it needs the question RECORD and the caller's session token, so the offer now renders on
+// every arm of the panel that has a record, and these cells drive the REAL card.
+//
+// The door is made to ANSWER here (unlike the "PARKED mounts the panel" cell above, which makes it
+// fail on purpose): a record carrying the Work's admitted `basis` (migration 0265) is exactly the
+// input `offersRestateFor` reads, and the identity read still comes back empty, which is precisely
+// the arm that used to swallow the control.
+
+/** `clara.get_work_pending_question`'s own row shape, enough of it for the restate gate. */
+function pendingQuestionWire(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    question_id: "33333333-3333-4333-8333-333333333333",
+    work_id: PARKED_WORK,
+    client_id: PARKED_CLIENT,
+    task_id: "44444444-4444-4444-8444-444444444444",
+    firm_id: "55555555-5555-4555-8555-555555555555",
+    question_version: 1,
+    status: "pending",
+    question: "Which date should this post on?",
+    context: null,
+    reason: null,
+    fields: [],
+    source_ref: null,
+    basis_digest: "d",
+    expires_at: "2026-09-15T00:00:00.000Z",
+    created_at: "2026-09-01T00:00:00.000Z",
+    answer: null,
+    answered_by: null,
+    answered_at: null,
+    answered_role: null,
+    delivery_state: "pending",
+    delivery_attempts: 0,
+    work_status: "awaiting_input",
+    work_basis_digest: "d",
+    basis: {
+      posting_date: "2026-09-01",
+      memo: "Office rent, September",
+      currency: "MYR",
+      lines: [
+        { account_code: "6100", debit_cents: 120_000, credit_cents: 0, description: "rent" },
+        { account_code: "1100", debit_cents: 0, credit_cents: 120_000, description: null },
+      ],
+    },
+    ...over,
+  };
+}
+
+function parkedBackend(question: Record<string, unknown> | null = pendingQuestionWire()): ReturnType<typeof stubBackend> {
+  return stubBackend((call) => {
+    if (call.fn === "accounting_work") {
+      return { status: 200, body: [{ id: PARKED_WORK, client_id: PARKED_CLIENT, status: "awaiting_input" }] };
+    }
+    if (call.fn === "get_work_pending_question" || call.fn === "get_work_question") {
+      return { status: 200, body: question };
+    }
+    return { status: 404, body: {} };
+  });
+}
+
+/** Every node carrying `data-testid="id"`, in document order — AC3 is a COUNT, not a presence. */
+function allByTestId(container: Stub, id: string): Stub[] {
+  const out: Stub[] = [];
+  const walk = (n: Stub) => {
+    if ((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("data-testid") === id) out.push(n);
+    for (const c of (n.childNodes as Stub[] | undefined) ?? []) walk(c);
+  };
+  walk(container);
+  return out;
+}
+
+test("839 (AC2) a parked work_accepted card RENDERS the restate control for a bookkeeper", async () => {
+  const backend = parkedBackend();
+  try {
+    const h = await renderComponent(ScopedApp(PARKED, 1));
+    try {
+      await settleUntil(
+        h,
+        () => byTestId(h.container, "work-restate") !== null,
+        "the rail card offers Restate as a new instruction once the record carries a basis",
+      );
+      const submit = byTestId(h.container, "work-restate-submit");
+      assert.ok(submit, "…as a real control, not a sentence");
+      assert.match(h.text(), /Restate as a new instruction/);
+      // §5, one announcement owner: the transcript already has one.
+      assert.deepEqual(liveRegions(h.container), []);
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    backend.restore();
+  }
+});
+
+test("839 (fix round, L09-ADV-06) the SAME card withholds restate below the bookkeeper floor", async () => {
+  // `clara.restate_accounting_work` reaches `clara._work_door_ctx`, which raises CLR04 for a lower
+  // rank — the identical floor this card already applies to Cancel Work, with the identical
+  // argument: a destructive control shown to people who can never use it is a 403 dressed as an
+  // affordance. A restatement cancels the Work, so it is at least as destructive as that one.
+  //
+  // THE ABSENCE IS THE SAME WAIT AS THE CELL ABOVE, INVERTED, rather than a fixed number of hops:
+  // the cell above measures the control appearing in ~20ms, so a viewer's card is settled for 75
+  // TIMES that and the control must never appear. (A blind `await h.settle()` or two would be the
+  // weaker shape twice over: it could assert an absence the hydrate had simply not reached yet,
+  // and against a subject that DOES offer the control it hangs instead of failing — this harness
+  // cannot keep settling once base-ui's `<Textarea>` inside `RestateWorkPanel` is mounted.)
+  const backend = parkedBackend();
+  try {
+    const h = await renderComponent(ScopedApp(PARKED, 0));
+    try {
+      await assert.rejects(
+        settleUntil(h, () => byTestId(h.container, "work-restate") !== null,
+          "a restate control a viewer must never be offered", 1_500),
+        /timed out/,
+        "a viewer is offered no restate control at all",
+      );
+      // …AND THE CARD REALLY DID HYDRATE, so that absence is measured rather than a card that
+      // never got as far as deciding: the panel read the question door for THIS Work.
+      assert.ok(backend.calls.some((c) => c.fn === "get_work_pending_question" && c.body.p_work === PARKED_WORK),
+        "positive control: the question door was read, so the panel had its record and withheld the offer");
+      assert.match(h.text(), /Clara accepted/, "…and the card itself is on screen");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    backend.restore();
+  }
+});
+
+test("839 (AC3) a transcript carrying BOTH work cards for one Work offers EXACTLY ONE restate control", async () => {
+  // THE DUPLICATE AC3 FORBIDS, driven rather than argued. `work_accepted` is durable and
+  // `work_question` is the live-stream face of the SAME Work in the SAME conversation, and before
+  // this both mounted a restate control on exactly the same condition (a Work parked on a pending
+  // question). The durable card is the one owner.
+  const questionPart: ClaraPart = {
+    type: "work_question",
+    work_id: PARKED_WORK,
+    client_id: PARKED_CLIENT,
+    question_id: "33333333-3333-4333-8333-333333333333",
+    question_version: 1,
+    status: "pending",
+  } as ClaraPart;
+  const backend = parkedBackend();
+  try {
+    const h = await renderComponent(createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages,
+      timeZone: "Asia/Kuala_Lumpur",
+      children: createElement(FirmScopeProvider, {
+        scope: { role_rank: 1, is_operator: false } as never,
+        children: createElement(
+          "div",
+          null,
+          createElement(PartRenderer, { part: PARKED }),
+          createElement(PartRenderer, { part: questionPart }),
+        ),
+      }),
+    }));
+    try {
+      await settleUntil(
+        h,
+        () => allByTestId(h.container, "work-restate").length > 0,
+        "the durable card's restate control appears",
+      );
+      await h.settle();
+      await h.settle();
+      assert.equal(allByTestId(h.container, "work-restate").length, 1,
+        "exactly one restate control for one Work, however many cards describe it");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    backend.restore();
+  }
+});
+
+// #885 (third fix round, recheck finding L09-RC2-03) — THE RAIL WITHHOLDS RESTATE ON A WORK THAT
+// HAS ALREADY POSTED. `clara.restate_accounting_work` refuses one CLR13 `not_restatable` (a
+// committed receipt reads as completed to that door), so the card that offers it would be offering
+// a 403 — the same rule the bookkeeper-floor cell above was fixed under. The shared question record
+// carries the fact (`work_posted`, migration 0268) and the pure gate reads it; this drives the REAL
+// card, at bookkeeper rank, off the Work's own detail route, so nothing else can explain the
+// absence.
+test("885 the rail withholds restate on a Work that has already posted, where the door would refuse", async () => {
+  const backend = parkedBackend(pendingQuestionWire({ work_posted: true }));
+  try {
+    const h = await renderComponent(ScopedApp(PARKED, 1));
+    try {
+      await assert.rejects(
+        settleUntil(h, () => byTestId(h.container, "work-restate") !== null,
+          "a restate control the door would refuse", 1_500),
+        /timed out/,
+        "no restate control is offered for a Work that has already posted",
+      );
+      assert.ok(backend.calls.some((c) => c.fn === "get_work_pending_question" && c.body.p_work === PARKED_WORK),
+        "positive control: the question door was read, so the panel had its record and withheld the offer");
+      assert.match(h.text(), /Clara accepted/, "…and the card itself is on screen");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
     backend.restore();
   }
 });

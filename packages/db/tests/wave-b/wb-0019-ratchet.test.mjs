@@ -440,6 +440,11 @@ test("[R1-4] a SECURITY INVOKER helper reading wiki_pages IS caught by the live 
 
 test("[R1-5] the live catalog pins the COMPLETE acquisition chain of both authority bodies, not merely 'before the UPDATE'", async () => {
   fail0019(live);
+  // `approve_wrong_client_correction`'s chain is pinned in BOTH generations, selected on whether
+  // #914's migration is applied, so this ratchet stays true on a chain below 0238 as well.
+  const rungOrderLive = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^0238_"])).rows[0].n > 0;
   const chains = {
     retire_document_filing: [
       ["the filing row FOR UPDATE", "select*intoffromclara.document_filingswhereid=p_filing_idforupdate"],
@@ -449,14 +454,35 @@ test("[R1-5] the live catalog pins the COMPLETE acquisition chain of both author
       ["the journal-entry live blocker", "fromclara.journal_entriesjewhereje.filing_id=f.id"],
       ["the retirement UPDATE", "updateclara.document_filingssetretired_at"],
     ],
-    approve_wrong_client_correction: [
-      ["the filing_corrections row FOR UPDATE", "select*intoxfromclara.filing_correctionswhereid=p_correctionforupdate"],
-      ["the document_filings rows FOR UPDATE", "perform1fromclara.document_filingsfwheref.document_id=x.document_idandf.firm_id=c.firmorderbyf.idforupdate"],
-      ["the CLR19 source-filing guard", "raiseexception'sourcefilingisnolongeractive'usingerrcode='clr19'"],
-      ["the client row FOR UPDATE", "perform1fromclara.clientsclwherecl.id=x.from_clientandcl.firm_id=c.firmforupdate"],
-      ["the entry locks", "forupdateofje"],
-      ["the retirement UPDATE", "updateclara.document_filingssetretired_at"],
-    ],
+    approve_wrong_client_correction: rungOrderLive
+      // AFTER #914 (migration 0238_correction_client_rung_order). This door was the only one in
+      // the estate that took a `clara.clients` ROW before the client advisory rung 203005004.
+      // 0238 fixes that by moving the ROW DOWN below the rung -- NOT by hoisting the rung, which
+      // 0037 SECTION K forbids (this door and `clara.reverse_entry` must take a pre-existing
+      // journal_entries row before 203005004, because `clara._approve_entry_core` does). So the
+      // client row now follows the entry locks instead of preceding them, and this ratchet is
+      // re-measured to that order rather than relaxed: every one of the six links is still here,
+      // still ordered, and the hazard the cell exists for -- a client lock hoisted ABOVE the
+      // filing lock -- is still refused, because the client row still sits after BOTH filing
+      // locks. The rung's own position (after `for update of je`, before the client row, taken
+      // exactly once for every correction) is proven by correction-client-rung-order.test.mjs
+      // and by 0238's tail; it is not restated here.
+      ? [
+        ["the filing_corrections row FOR UPDATE", "select*intoxfromclara.filing_correctionswhereid=p_correctionforupdate"],
+        ["the document_filings rows FOR UPDATE", "perform1fromclara.document_filingsfwheref.document_id=x.document_idandf.firm_id=c.firmorderbyf.idforupdate"],
+        ["the CLR19 source-filing guard", "raiseexception'sourcefilingisnolongeractive'usingerrcode='clr19'"],
+        ["the entry locks", "forupdateofje"],
+        ["the client row FOR UPDATE", "perform1fromclara.clientsclwherecl.id=x.from_clientandcl.firm_id=c.firmforupdate"],
+        ["the retirement UPDATE", "updateclara.document_filingssetretired_at"],
+      ]
+      : [
+        ["the filing_corrections row FOR UPDATE", "select*intoxfromclara.filing_correctionswhereid=p_correctionforupdate"],
+        ["the document_filings rows FOR UPDATE", "perform1fromclara.document_filingsfwheref.document_id=x.document_idandf.firm_id=c.firmorderbyf.idforupdate"],
+        ["the CLR19 source-filing guard", "raiseexception'sourcefilingisnolongeractive'usingerrcode='clr19'"],
+        ["the client row FOR UPDATE", "perform1fromclara.clientsclwherecl.id=x.from_clientandcl.firm_id=c.firmforupdate"],
+        ["the entry locks", "forupdateofje"],
+        ["the retirement UPDATE", "updateclara.document_filingssetretired_at"],
+      ],
   };
 
   for (const [fn, chain] of Object.entries(chains)) {

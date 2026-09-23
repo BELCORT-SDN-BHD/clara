@@ -47,6 +47,7 @@ components/admin/members-a11y.test.tsx
 components/admin/members-dates.test.tsx
 components/admin/members-keyboard.test.tsx
 components/admin/members-single-fire.test.tsx
+components/admin/members-tables.test.tsx
 components/admin/members-walls.test.tsx
 components/app-shell/app-breadcrumb.test.tsx
 components/app-shell/app-sidebar.test.tsx
@@ -133,6 +134,7 @@ components/documents/intake-batch-a11y.test.tsx
 components/documents/intake-batch-cancel.test.tsx
 components/documents/intake-batch-card.test.tsx
 components/documents/intake-batch-keyboard.test.tsx
+components/documents/intake-receipts.test.tsx
 components/documents/lint-finding-detail.test.tsx
 components/documents/upload-panel.test.tsx
 components/e2e/money-input-harness-route.test.tsx
@@ -154,12 +156,14 @@ components/entry/signup-legal-stage.test.tsx
 components/firm-admin/accept-legal-dialog.test.tsx
 components/firm-admin/ai-usage-card.test.tsx
 components/firm-admin/commercial-state-card.test.tsx
+components/firm-admin/compliance-register-panel.test.tsx
 components/firm-admin/firm-admin-a11y.test.tsx
 components/firm-admin/firm-admin-keyboard.test.tsx
 components/firm-admin/firm-admin-pages-a11y.test.tsx
 components/firm-admin/firm-settings-a11y.test.tsx
 components/firm-admin/firm-settings-panel.test.tsx
 components/firm-admin/legal-standing-card.test.tsx
+components/firm-admin/processing-capacity-card.test.tsx
 components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm-setup/firm-setup-a11y.test.tsx
 components/firm-setup/firm-setup-checklist.test.tsx
@@ -189,6 +193,7 @@ components/firm/compliance-watch-receipt.test.tsx
 components/firm/documents/unassigned-sources.test.tsx
 components/firm/firm-home/firm-home-board.test.tsx
 components/firm/firm-home/firm-home-states.test.tsx
+components/firm/firm-home/firm-legal-standing-tile.test.tsx
 components/firm/firm-home/firm-portfolio.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
@@ -246,6 +251,7 @@ components/registers/counterparty-hygiene-keyboard.test.tsx
 components/registers/counterparty-hygiene-kinds.test.tsx
 components/registers/counterparty-identity-correct.test.tsx
 components/registers/counterparty-identity-panel.test.tsx
+components/registers/fa-authority-ceremony.test.tsx
 components/registers/fa-charge-ledger.test.tsx
 components/registers/fa-detail-tab-url.test.tsx
 components/registers/fa-particulars-fields.test.tsx
@@ -304,6 +310,7 @@ components/work/work-diagnostics.test.tsx
 components/work/work-knowledge-block.test.tsx
 components/work/work-question-drift-banner.test.tsx
 components/work/work-question-form.test.tsx
+components/work/work-question-panel.test.tsx
 components/work/work-restate.test.tsx
 components/work/work-saved-views.test.tsx
 e2e/e2e-fixture-ownership.test.ts
@@ -380,6 +387,7 @@ lib/firm-admin/settings.test.ts
 lib/firm-admin/vendor-bindings.test.ts
 lib/firm/activity.test.ts
 lib/firm/capabilities.test.ts
+lib/firm/capacity-doors.test.ts
 lib/firm/commercial-format.test.ts
 lib/firm/commercial-reads.test.ts
 lib/firm/home-facts.test.ts
@@ -392,7 +400,6 @@ lib/firm/portfolio-focus-return.test.ts
 lib/firm/portfolio-url-state.test.ts
 lib/firm/reads.test.ts
 lib/firm/receipt-kinds.test.ts
-lib/firm/timeline.test.ts
 lib/firm/usage-csv.test.ts
 lib/firm/usage-period.test.ts
 lib/firm/use-async-read.test.ts

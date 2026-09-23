@@ -170,9 +170,15 @@ describe("rung 0 — the live bodies this module cites are still the live bodies
     assert.match(migration("0003_books_core.sql"), /cannot demote\/remove the last active owner/);
   });
 
-  it("both views have ONE live body, at 0141", () => {
+  it("firm_members_visible has ONE live body, at 0141", () => {
     assert.deepEqual(viewDefiners("firm_members_visible"), [M0141]);
-    assert.deepEqual(viewDefiners("firm_invites_visible"), [M0141]);
+  });
+
+  // #872 (migration 0269) recuts firm_invites_visible's status CASE (a fifth, read-time-only
+  // `issuer_lapsed` arm) without moving its ten-column projection — see the two-view split below,
+  // rather than a stale "both … at 0141" claim this file's own header says a comment cannot keep.
+  it("firm_invites_visible's live body is 0269, over 0141 -- the OUTER column list did not move", () => {
+    assert.deepEqual(viewDefiners("firm_invites_visible"), [M0141, "0269_invite_issuer_lapsed_status.sql"]);
   });
 });
 

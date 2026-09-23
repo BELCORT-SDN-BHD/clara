@@ -17,6 +17,7 @@ import {
 import { NativeSelect } from "@/components/common/native-select";
 import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { workDetailHref } from "@/lib/navigation/tree";
+import { businessDateTime } from "@/lib/business-date";
 import { FaDoorDialog } from "./FaDoorDialog";
 import {
   proposeDepreciationAuthority,
@@ -29,14 +30,11 @@ import {
 } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 
-// F6 (independent review, fix-required, 2026-08-28): only `proposed`/`live`
-// ever reach this component — see lib/registers/depreciation.ts's
-// `FaDepreciationAuthority.status` for why `retired` was dead code here (a
-// retired-only client's `get_depreciation_authority` returns
-// `authority: null`, which the `!au` branch below already renders
-// correctly as "none proposed" — the same honest state a fresh client and a
-// just-retired client share).
-const STATUS_VARIANT = { proposed: "outline", live: "default" } as const;
+// #979 (0251): `retired` is no longer dead code here — see lib/registers/depreciation.ts's
+// `FaDepreciationAuthority.status` for why. The `secondary` variant matches the house style a
+// retired counterparty alias already uses (components/registers/counterparty-identity-panel.tsx's
+// own `aliasRetired` badge), so "retired" reads the same way everywhere it appears.
+const STATUS_VARIANT = { proposed: "outline", live: "default", retired: "secondary" } as const;
 
 export function AuthorityCeremony({
   clientId,
@@ -75,14 +73,36 @@ export function AuthorityCeremony({
           {au.status === "live" ? (
             <p className="text-xs text-muted-foreground">{data.ramp_earned ? t("rampEarned") : t("rampNotEarned")}</p>
           ) : null}
+          {/* #979 (0251) — THE RETIREMENT'S OWN FACTS, so a bookkeeper deciding whether to
+              propose a new authority sees that a prior one existed and was deliberately
+              withdrawn, rather than a state indistinguishable from "never had one" (the owner's
+              ruling on this ticket, verbatim). Shape borrowed from
+              counterparty-identity-panel.tsx's own "{who} · {date}" line (AliasItem). */}
+          {au.status === "retired" ? (
+            <>
+              <p className="text-xs text-muted-foreground" data-testid="fa-authority-retired-reason">
+                {t("retiredReason", { reason: au.retired_reason ?? "" })}
+              </p>
+              <p className="text-xs text-muted-foreground" data-testid="fa-authority-retired-by">
+                <span className="font-mono" title={au.retired_by ?? undefined}>
+                  {(au.retired_by ?? "").slice(0, 8)}
+                </span>
+                {au.retired_at ? <>{" · "}{businessDateTime(au.retired_at)}</> : null}
+              </p>
+            </>
+          ) : null}
           {/* #651 [0227] — THE WINDOW, AND THE HONEST SENTENCE UNDER IT. `authority_from` is the
               first day of the month this authority was signed and it never moves: the belt runs
               forward only from there, and anything earlier needs an explicit catch-up by hand.
               A person reading "nothing is due" on a client with two years of uncharged assets must
-              be able to find that out HERE rather than from a refusal. */}
-          {au.status === "live" && au.authority_from ? (
+              be able to find that out HERE rather than from a refusal. #979 (0251): a RETIRED
+              authority's own window floor renders too, in the past tense — it no longer reaches
+              anything, but it is still the range it once governed. */}
+          {(au.status === "live" || au.status === "retired") && au.authority_from ? (
             <p className="text-xs text-muted-foreground" data-testid="fa-authority-window">
-              {t("windowFrom", { from: au.authority_from })}
+              {au.status === "retired"
+                ? t("retiredWindowFrom", { from: au.authority_from })
+                : t("windowFrom", { from: au.authority_from })}
             </p>
           ) : null}
           {/* …and the instruction it was signed under, as a link to the row that carries it. */}
@@ -106,7 +126,15 @@ export function AuthorityCeremony({
           ) : null}
           <div className="flex gap-2">
             {au.status === "proposed" ? <SignDialog clientId={clientId} authorityId={au.id} busy={busy} act={act} error={error} /> : null}
-            <RetireDialog clientId={clientId} authorityId={au.id} busy={busy} act={act} />
+            {/* #979 (0251) — a RETIRED authority offers Propose (a fresh one), never a second
+                Retire: `clara.retire_depreciation_authority` refuses CLR38 `authority_not_live`
+                on an already-retired row (0041:3388-3391), so retiring twice was always a
+                refusal waiting to happen — it just could not be REACHED before this ticket,
+                because `status: "retired"` never reached this component (see this file's
+                header). */}
+            {au.status === "retired"
+              ? <ProposeDialog clientId={clientId} busy={busy} act={act} />
+              : <RetireDialog clientId={clientId} authorityId={au.id} busy={busy} act={act} />}
           </div>
         </div>
       )}

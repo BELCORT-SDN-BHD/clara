@@ -1,0 +1,111 @@
+{
+  "lane": "wave2-lane02",
+  "lens": "adversarial",
+  "branch": "riders/w2-lane02",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "database": "127.0.0.1:55742/clara_l02",
+  "tickets": [898, 913, 993, 912, 991],
+  "verdict": "accept-with-fixes",
+  "summary": "Eight findings, one blocker. The blocker is a cell that is green only on THIS database: ar.02(a) asserts clara.audit_log carries more than 60000 NULL actor_role rows, and that database held 680 audit rows at the moment 0240 applied -- the 66.9k are the lane's own test traffic, so the cell goes red on the integrator's from-scratch proof. Two majors: a two-connection race (driven live) lets a promotion that commits while a door is parked on a row lock be stamped onto the act as the actor's role 'at the instant', inflating recorded authority; and #898's new financial_year_end_day admits 31 against a February month key, which clara.clients' own ck_clients_fy_end refuses, so the same fact disagrees between the client row and Knowledge. Tenant isolation, firm pinning, lock order, idempotency and the index all held under probing; #913 and #993 produced no finding.",
+  "gates_rerun_by_this_review": [
+    "node --test --test-concurrency=1 <full gate chain from packages/db/package.json> tests/audit-actor-role.test.mjs tests/knowledge-fye-day.test.mjs tests/knowledge-scope-default-drop.test.mjs tests/knowledge-key-grammar.test.mjs tests/pack-shaped-knowledge-read-census.test.mjs -> 30 pass / 0 fail on clara_l02"
+  ],
+  "findings": [
+    {
+      "id": "ADV-01",
+      "ticket": 912,
+      "severity": "blocker",
+      "kind": "test-not-portable",
+      "title": "ar.02(a) pins a row count that only this database has; it goes red on a from-scratch apply",
+      "file": "packages/db/tests/audit-actor-role.test.mjs",
+      "evidence": "The cell reads `select count(*) from clara.audit_log where actor_role is null` and asserts `nulls > 60000`. Measured on clara_l02 now: clara.schema_migrations.applied_at is 2026-09-20T05:18:08Z for 0240_financial_year_end_day and 2026-09-20T07:05:29Z for 0243_audit_actor_role; count(*) filter (where at <= applied_at(0240)) = 680, filter (where at <= applied_at(0234)) = 27, against 66906 NULL rows today. The 66.9k are the batteries this lane ran between applying 0240 and applying 0243, not anything migrate+seed produces. On the disposable cluster the integrator uses for the from-scratch proof (and on the db-slice-frontiers matrix) the chain applies 0001..0243 and the seed runs after 0243, so every seeded act is STAMPED and the NULL population is in the hundreds. assert.ok(680 > 60000) fails. 0243's own §A notice ('all 66879 pre-existing row(s) stay NULL') is the same rig-history number, not a property of the migration.",
+      "required_fix": "Make the claim about the mechanism rather than about this rig's history: capture the NULL count at the start of the cell, write one fresh act, and assert the pre-existing NULL rows did not move and the new act is stamped. Do not swap 60000 for another environment-specific constant."
+    },
+    {
+      "id": "ADV-02",
+      "ticket": 912,
+      "severity": "major",
+      "kind": "race",
+      "title": "A role change that commits while a door is parked on a lock is credited to the act; the stamp reads the roster at audit-write time, not at admission",
+      "file": "packages/db/migrations/0243_audit_actor_role.sql",
+      "evidence": "Driven with two real connections on clara_l02. (1) a bookkeeper captures default_currency for clientA -> audit row actor_role='bookkeeper'. (2) connection B: begin; select 1 from clara.knowledge_records where record_id=$1 and firm_id=$2 and superseded_at is null for update. (3) connection A: the SAME bookkeeper calls clara.correct_knowledge(...) -- clara._human_ctx(clara.role_rank('bookkeeper')) admits the call, then clara._knowledge_live_revision parks on B's row lock. (4) B runs update clara.firm_memberships set role='owner' for that caller and commits. (5) A resumes, the correction lands, and the audit row for revision c70ae16b-bf6b-4bca-8b34-30e31806d020 reads actor_role='owner'. The caller was a bookkeeper when the door admitted the call. clara._tf_audit_actor_role resolves the role in a statement of its own, after any blocking wait, so the column is the role at the AUDIT WRITE, not 'the role the actor held at that instant'. The inflation direction is the one #912's brief puts out of scope ('No authority is back-dated'), and clara.list_firm_knowledge prints it to the firm under 'Their role at the time'.",
+      "required_fix": "Resolve the role once, at admission, and carry it to the write -- a txn-local GUC set by clara._human_ctx and read by the trigger costs no per-door edit and keeps clara._audit frozen -- or say plainly in the migration header, the column comment and the CONTEXT.md term that the column is the role at the audit write and that a concurrent promotion can raise it."
+    },
+    {
+      "id": "ADV-03",
+      "ticket": 898,
+      "severity": "major",
+      "kind": "accounting-correctness",
+      "title": "Knowledge accepts a financial year end the client row's own CHECK refuses (31 February)",
+      "file": "packages/db/migrations/0240_financial_year_end_day.sql",
+      "evidence": "Run live on clara_l02 through the governed door, as a bookkeeper: clara.capture_knowledge(financial_year_end_month => 2) -> 'captured', then clara.capture_knowledge(financial_year_end_day => 31) -> 'captured'; clara.knowledge_records now holds both live for the same client. The estate's own rule for the same fact is clara.clients' ck_clients_fy_end (0041): CHECK (... AND NOT (fy_end_month = 2 AND fy_end_day > 29) AND NOT (fy_end_month = ANY (ARRAY[4,6,9,11]) AND fy_end_day > 30)). 0240's new label is range:day_1_31 with no month awareness, and the header delegates the month-dependent bound to the interview's validateFyeDay and to ck_clients_fy_end -- but clara.capture_knowledge is a door of its own, reachable without the interview, and it does not write the client row. #898's Desired behavior is 'a client's day on the client row and in Knowledge never disagree silently'. Any read that derives a year-end date from month+day now has an impossible one to derive it from.",
+      "required_fix": "Either refuse the impossible pair at capture time where both keys are in scope (a cross-key check against the live financial_year_end_month record for the same client, the same bound the interview and ck_clients_fy_end already use), or get an owner ruling that Knowledge may hold a day the client row would refuse and say so in the key's description and in CONTEXT.md."
+    },
+    {
+      "id": "ADV-04",
+      "ticket": 912,
+      "severity": "minor",
+      "kind": "rank-floor",
+      "title": "The recut register hands a viewer a clara.audit_log fact that audit_log's own RLS gives only to a bookkeeper",
+      "file": "packages/db/migrations/0243_audit_actor_role.sql",
+      "evidence": "Measured on clara_l02. Policy p_audit_log_human is ((firm_id = clara.jwt_firm()) AND (COALESCE(clara.actor_role_rank(), -1) >= clara.role_rank('bookkeeper'))), and a viewer's direct select count(*) from clara.audit_log where firm_id = <own firm> returns 0. The same viewer calling clara.list_firm_knowledge() receives \"promoter_role_at_act\":\"owner\" -- read from clara.audit_log inside a SECURITY DEFINER body owned by clara_fn_owner, whose p_audit_log_owner policy is qual true. The register's own floor is clara._human_ctx(clara.role_rank('viewer')). The lane's ar.03/ar.04 assert this through w.viewer, so it is intended, but neither #912's brief nor the 2026-09-18 owner ruling adjudicated lowering an audit-log fact from the bookkeeper floor to the viewer floor, and the standing ruling is that access control is never loosened.",
+      "required_fix": "Either gate the key on the audit log's own floor (emit promoter_role_at_act only when clara.actor_role_rank() >= clara.role_rank('bookkeeper') -- which then needs a third surface word so a viewer is not told the rule predates the mechanism), or record an explicit owner ruling on #912 that this one datum sits at the viewer floor."
+    },
+    {
+      "id": "ADV-05",
+      "ticket": 912,
+      "severity": "minor",
+      "kind": "honesty",
+      "title": "'none' is stamped on 39272 rows that have no actor at all, which is not what 'none' is defined to mean",
+      "file": "packages/db/migrations/0243_audit_actor_role.sql",
+      "evidence": "clara.audit_log.actor is nullable, and the trigger's new.actor_role := coalesce(v_role, 'none') runs unconditionally for an act happening now. Measured on clara_l02: of 40369 rows carrying 'none', 39272 have actor is null; only 1097 have a real actor with no active membership. The column comment and the migration header define 'none' as 'the mechanism looked and the actor held no active membership in this firm', and the CONTEXT.md term this lane added calls it 'the measured fact that the actor held no active membership -- the agent identity on a wake act'. For 97% of that population there was no actor to look up, so the recorded fact is not the one the file says it is -- the same conflation the three-way design exists to prevent.",
+      "required_fix": "Leave actor_role NULL when new.actor is null and widen the NULL wording, or add a fourth token under the CHECK (e.g. 'no_actor'); correct the column comment and the CONTEXT.md term either way."
+    },
+    {
+      "id": "ADV-06",
+      "ticket": 912,
+      "severity": "minor",
+      "kind": "forgery",
+      "title": "A writer that backdates `at` keeps whatever actor_role it supplies, so the column is unforgeable only for clara._audit",
+      "file": "packages/db/migrations/0243_audit_actor_role.sql",
+      "evidence": "Proved inside a transaction that was rolled back, on clara_l02. As clara_fn_owner (the identity EVERY SECURITY DEFINER body in this estate runs as): insert into clara.audit_log(firm_id, actor, fn, args, at, actor_role) values (<firm>, <user with no active membership anywhere>, 'adv_probe_forged', '{}', now() - interval '1 second', 'owner') commits with actor_role='owner'; the identical insert without the backdated `at` is overwritten to 'none'. The trigger's first line, if new.at is null or new.at < now() then return new; end if;, returns the row UNCHANGED rather than clearing the column, so the history-reload escape doubles as a forgery escape and ck_audit_log_actor_role admits the value. The header's claim -- 'that frozen body is also what makes the column unforgeable: clara._audit's INSERT column list does not name actor_role and now can never be made to' -- holds for clara._audit only, not for the table's write path, which is what this file chose to defend. Secondary: the `new.at is null` arm is unreachable in effect, since clara.audit_log.at is NOT NULL and such an insert dies with 23502.",
+      "required_fix": "In the history arm set new.actor_role := null before returning, rather than passing the caller's value through, and re-word the header's unforgeability claim to name the condition under which it actually holds."
+    },
+    {
+      "id": "ADV-07",
+      "ticket": 912,
+      "severity": "note",
+      "kind": "census-fragility",
+      "title": "The sole-writer census that carries the ruling's 'no per-door change' criterion matches on one exact spelling",
+      "file": "packages/db/tests/audit-actor-role.test.mjs",
+      "evidence": "ar.05(a) is p.prosrc like '%insert into clara.audit_log%' and asserts the result is exactly ['clara._audit']; 0243's §Z tail uses the same idiom. Every definer body in this estate carries set search_path = clara, pg_temp, so a future door writing insert into audit_log(...), or INSERT INTO clara.audit_log, or an insert with a newline after insert, would write the row and still pass the census. The stamp itself still fires (it is attached to the table), so this is a hole in the PROOF, not in the mechanism.",
+      "required_fix": "Match case-insensitively on a regex tolerating whitespace and an optional schema qualifier, e.g. p.prosrc ~* 'insert[[:space:]]+into[[:space:]]+(clara[[:space:]]*[.][[:space:]]*)?audit_log'."
+    },
+    {
+      "id": "ADV-08",
+      "ticket": 991,
+      "severity": "note",
+      "kind": "census-scope",
+      "title": "The pack-shaped-read census enumerates only roles whose name begins with 'clara'",
+      "file": "packages/db/tests/pack-shaped-knowledge-read-census.test.mjs",
+      "evidence": "executors() filters pg_roles on r.rolname like 'clara%'. The file's own header claims 'A role this file has never heard of, born in a migration written after #991 landed, is caught exactly like one of the eight the original hand list named' -- that holds only for clara-prefixed names. A grant to PUBLIC is still caught (has_function_privilege reports it for every clara role) and grants inherited through role membership are caught, but a future application role not named clara_* is not. Every role in the estate is clara-prefixed today, so nothing is presently wrong; the claim is simply wider than the probe.",
+      "required_fix": "Either drop the like 'clara%' filter and exclude the known non-application roles by name, or narrow the header's claim to the naming convention it depends on."
+    }
+  ],
+  "probed_and_clean": [
+    "Tenant isolation: the stamp is firm-pinned (m.firm_id = new.firm_id) and the register's promoter_role_at_act subquery is pinned to a.firm_id = r.firm_id = c.firm. No cross-firm read found.",
+    "The roster lookup's bare limit 1 is deterministic: uq_membership_active_user is UNIQUE (user_id) WHERE status = 'active', so a user holds at most one active membership estate-wide.",
+    "RLS: clara.firm_memberships and clara.audit_log both FORCE row security, but each carries a p_*_owner policy with qual true for clara_fn_owner, so the definer trigger and the definer register read the full set -- no silent under-read that would stamp 'none' for a real member.",
+    "The new index is used: EXPLAIN ANALYZE of the promoter_role_at_act lookup on a 188866-row clara.audit_log gives Index Scan using ix_audit_log_knowledge_revision with both columns in the Index Cond. Plain (non-concurrent) CREATE INDEX is house practice here (67 migrations use it, 1 uses CONCURRENTLY), so no deviation.",
+    "No back-fill: count(*) filter (where actor_role is not null) over rows predating 0243 is 0, and clara.audit_log's append-only trigger refuses an UPDATE even as clara_fn_owner (CLR08, 'audit_log is append-only').",
+    "Idempotency under replay: clara.capture_knowledge and clara.correct_knowledge reserve the op before any write, so a same-key replay returns the cached receipt and writes no second audit row -- the first act's role stands, and a different payload under the same key is refused by the hash.",
+    "No false 'predates the mechanism' on the register through any live path: clara._knowledge_insert_revision is the ONLY function inserting into clara.knowledge_records, it always audits with the revision's own id in args.revision_id, and it audits under p_asserted_by -- exactly what the subquery re-checks against r.asserted_by.",
+    "#993 / 0242 would not abort on a database with real rows: no function inserts into clara.knowledge_keys, every function touching clara.client_fact_keys only READS it (clara.record_client_fact refuses an unknown key with CLR10 fact_key_unknown), and neither catalog is INSERT-granted to an application role, so hosted cannot hold a non-conforming key.",
+    "#913 / 0241: no function in the clara schema references scope_default (prosrc census returns none), and the drop is ordered after 0192's and 0240's inserts, so a from-scratch replay is unaffected.",
+    "#898 splice anchor: the shape_only anchor is counted and refused unless it occurs exactly once, the redo path is guarded by a marker check, and the tail re-counts every prior label's arm at its original occurrence count -- it can neither match twice nor zero times silently.",
+    "Lock order: this lane takes no new lock; the doors it rides keep 0192's single for-update on the live revision, and the member doors' firm lock is untouched.",
+    "Asia/Kuala_Lumpur: the register's only calendar derivation is 0220's own (now() at time zone 'Asia/Kuala_Lumpur')::date, unchanged; the trigger's bare now() is an instant comparison and derives no date.",
+    "apps/web/components/registers/knowledge-firm-panel.test.tsx is an existing file (manifest.txt:262), so the shared-manifest rule is not in play."
+  ]
+}

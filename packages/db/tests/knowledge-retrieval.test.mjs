@@ -936,6 +936,17 @@ cell("p658.drift.isolation — another firm's revision never moves this Work's d
 // =============================================================================================
 
 cell("p658.census.no_recut — the eight pinned bodies are byte-identical and get_context_pack has one overload", async () => {
+  // ONE OF THE EIGHT IS PINNED IN BOTH GENERATIONS (riders wave 2, 2026-09-20). The cell's claim
+  // is "0230 recuts nothing", and that is still exactly what it asserts — but #885 (migration
+  // 0268, `work_source_correction_supersede`) later recuts clara.answer_work_question in scope:
+  // it gains the narrow (cancelled AND superseded_by) -> superseded word, the source_corrected
+  // word on both the cancelled and the still-pending arms, and the successor and correction
+  // instant on detail.current, keeping every refusal 0180/0200 gave it. 0268's own tail proves
+  // the recut committed and work-source-correction-supersede.test.mjs carries the behavioural
+  // proof; this cell only has to stop calling that verified recut a drift of 0230's.
+  const sourceCorrectionLive = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["work_source_correction_supersede$"])).rows[0].n > 0;
   const pins = [
     ["clara.get_knowledge_pack(uuid,text,uuid)", "2deb725f00229f60a2fbbcc158fe656c5635cd220ec11727c182c39dc6c693fb"],
     ["clara.list_client_knowledge(uuid)", "32999fef181b09989994d40a9c12956f6107798b55eae0b45fce2806d2e7b691"],
@@ -946,13 +957,16 @@ cell("p658.census.no_recut — the eight pinned bodies are byte-identical and ge
     ["clara.capture_knowledge(text,jsonb,text,text,text,uuid,text,jsonb,date,date,jsonb)",
       "b9f1cf6b4aa54c9b26dfad6d8a256d5812f3660bf5b65a39e399bbca9be1009e"],
     ["clara.get_context_pack(uuid,text)", "1a0312c9b80555a6e3cf41347b65ac52fa4e45d6a714e23d65ad6646336de81b"],
-    ["clara.answer_work_question(uuid,integer,jsonb,text)", "15a82c080d102e61ebdead2280577072a87c21720375174e83c86a7198fb07a7"],
+    ["clara.answer_work_question(uuid,integer,jsonb,text)",
+      sourceCorrectionLive
+        ? "86454f7fb95b8ad82e679ed28acf7d0954bf0aaa3543d101f96e8e1eeb829966"
+        : "15a82c080d102e61ebdead2280577072a87c21720375174e83c86a7198fb07a7"],
   ];
   for (const [sig, want] of pins) {
     const r = await rootQuery(
       "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid = $1::regprocedure",
       [sig]);
-    assert.equal(r.rows[0].sha, want, `${sig} is NOT at its measured pre-0230 body -- 0230 recuts nothing`);
+    assert.equal(r.rows[0].sha, want, `${sig} is NOT at its measured pre-0230 body -- 0230 recuts nothing, and only #885's own named recut (0268) is tolerated`);
   }
   const overloads = await rootQuery(
     `select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace

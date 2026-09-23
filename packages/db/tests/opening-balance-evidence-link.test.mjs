@@ -15,6 +15,7 @@
 // door's own answer.
 
 import { test, before, after } from "node:test";
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import {
   rootQuery, opk, endPool, printLaneNotes, printSkipCount,
@@ -24,6 +25,8 @@ import {
   gateOpeningWall,
   // #854 — the two-session driver (see the section-4 header there for `isolation`/`commitOrCapture`)
   humanHoldThenContend,
+  // #1014 — the binding-claim frontier this file's repaired race cells stand on
+  BINDING_CLAIM_STEM, gateBindingClaim, ROLES,
 } from "./coding-lane-evidence-link-fixtures.mjs";
 import { approveEntry, createClient, freshResolution } from "./rig-fixtures.mjs";
 import {
@@ -31,8 +34,23 @@ import {
   approveOpeningSeed, approveOpeningSeedOn, planRevision, WB_COA,
 } from "./wave-b/wb-fixtures.mjs";
 
+const CLAIM_MIGRATION = "0235_opening_binding_claim.sql";
+
 let world = null;
 before(async () => {
+  // #1014 — A FOCUSED RUN MUST NEVER SKIP SILENTLY. The estate sweep preloads
+  // ./tests/opening-binding-claim-preintegration-gate.mjs and every claim cell then skips,
+  // counted; a focused invocation against a chain below 0235 fails HERE instead.
+  const at = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [BINDING_CLAIM_STEM]);
+  if (at.rows[0].n === 0 && process.env.CLARA_ALLOW_MISSING_OPENING_BINDING_CLAIM !== "1") {
+    throw new Error(
+      `opening-balance-evidence-link premise ${CLAIM_MIGRATION} is not applied (no `
+      + `${BINDING_CLAIM_STEM} row in clara.schema_migrations) and `
+      + "CLARA_ALLOW_MISSING_OPENING_BINDING_CLAIM is unset -- this is a FOCUSED run and must fail "
+      + "loudly, not skip. Preload ./tests/opening-binding-claim-preintegration-gate.mjs for an "
+      + "estate sweep against a pre-PR chain.");
+  }
   world = await buildWaveBWorld();
 });
 after(async () => {
@@ -190,79 +208,57 @@ test("obw.siblings_ok a multi-item seed on ONE tie document still approves every
 });
 
 // ===========================================================================================
-// 4 · #854 — THE TWO-SESSION RACE. Every cell above drives obw.evidence_first sequentially, in
-// ONE session: the loser's refusal is real, but nothing PROVES the winner's lock is what stopped
-// it (a schedule that never blocked proves nothing about a race — the same standard
-// coding-lane-evidence-link.test.mjs's `cle.race.*` cells hold themselves to). `humanHoldThenContend`
-// drives both arrival orders for real, each proving the contender genuinely BLOCKED on a LOCK.
+// 4 · THE TWO-SESSION RACE — #854 measured it, #1014 repaired it.
 //
-// THE LOCK-ORDER PARAGRAPH, restated once here (0213's own header, and 0037:2414 / 0197 §B/§C
-// before it): the opening approver reaches the evidence wall holding the entry's OWN row lock
-// first (`select ... for update` on the opening item, 0037:2414), then takes the document lock —
-// the SAME order the coding lane's `approve_entry` already takes (0197 §B/§C), so #854 adds no
-// new lock pair to the estate. `attach_entry_evidence` takes the document lock directly, with no
-// entry-row lock ahead of it. ACCEPTED OUTCOME: with that shared order, the two doors only ever
-// contend on ONE lock (`clara.documents`, `for update`, `clara._lock_document_binding`), never on
-// each other's row locks in reverse — a genuine DEADLOCK between them is not reachable, so no
-// side's abort is ever "a deadlock's documented outcome".
+// Every cell above drives obw.evidence_first sequentially, in ONE session: the loser's refusal is
+// real, but nothing PROVES the winner's lock is what stopped it (a schedule that never blocked
+// proves nothing about a race — the same standard coding-lane-evidence-link.test.mjs's `cle.race.*`
+// cells hold themselves to). `humanHoldThenContend` drives both arrival orders for real, each
+// proving the contender genuinely BLOCKED on a LOCK.
 //
-// WHAT #854 FOUND, MEASURED TWICE ON THIS RIG (below): `clara.documents` is locked FOR UPDATE by
-// both lanes PURELY for serialization — neither lane's body ever changes a column on that row.
-// BOTH sides commit: `attach_entry_evidence` (plain, holds first) commits a document it only
-// LOCKED (never wrote); the blocked `approve_opening_seed` (SERIALIZABLE, contends) is then
-// granted the SAME, byte-identical row, sees no reason to abort, and evaluates
-// `clara._document_posting_entry` against a snapshot taken BEFORE the attachment committed —
-// which does not see the evidence link at all. The reverse order does not have this hole, because
-// there the contender (`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads
-// fresh per statement once unblocked — no isolation trick is needed or possible for it to see
-// what committed while it waited.
+// THE LOCK-ORDER PARAGRAPH, RESTATED ONCE HERE WITH #1014'S RULE (it supersedes the #854 wording
+// this block replaced; 0213's own header and 0037:2414 / 0197 §B/§C stand behind it):
 //
-// MECHANISM (this lane's OWN READING of the measurement above, not a cited fact — flagged per
-// L04-S07): a plausible account is that PostgreSQL's SERIALIZABLE "second updater" protection
-// (the one thing that would force a re-read after waiting out a FOR UPDATE) fires only when the
-// row waited on was ACTUALLY updated or deleted by the lock holder, never merely locked and
-// released — that would explain why a lock-only commit does not force the waiter to re-evaluate.
-// An at-least-equally-plausible alternative this lane did NOT rule out: SSI aborts a transaction
-// only when it sits at the PIVOT of a dangerous structure (an incoming AND an outgoing
-// rw-antidependency, PostgreSQL docs, "Serializable Isolation Level"); a single rw-conflict here
-// may simply not be the shape SSI polices at all, which has nothing to do with the second-updater
-// rule. Either way, the MEASUREMENT above (both sides commit, reproduced twice, deterministic)
-// stands on its own; a successor ticket repairing this should not assume either causal account
-// without checking the PostgreSQL source or asking a core committer.
+//   * The opening approver reaches the wall holding the OPENING ITEM'S OWN row lock first
+//     (`select ... for update`, 0037:2414), then takes the document — the SAME order the coding
+//     lane's `approve_entry` already takes (0197 §B/§C). `attach_entry_evidence` takes the
+//     document directly, with no entry-row lock ahead of it.
+//   * THE DOCUMENT IS NOW TWO ACQUISITIONS, NOT ONE, AND THEY ARE ORDERED:
+//     `clara._lock_document_binding` takes `clara.documents ... for update` FIRST and then upserts
+//     that document's row in `clara.document_binding_claims` (0235). Both lanes take both, in that
+//     order, through that one helper — so the two doors still contend on the document and nothing
+//     else, and a transaction binding two documents takes A.doc, A.claim, B.doc, B.claim: the
+//     relative order of the two documents is the one `clara.documents` already imposed.
+//   * ACCEPTED OUTCOME, UNCHANGED: with that shared order a genuine DEADLOCK between these two
+//     doors is not reachable, so no side's abort is ever "a deadlock's documented outcome". The
+//     estate's own ladder (`accounting_plans -> accounting_work -> agent_tasks ->
+//     agent_interruptions`, ARCHITECTURE §6) is untouched: no body on it takes the claim, and the
+//     claim takes nothing on it.
 //
-// obw.race.evidence_then_opening below is written to PROVE this defect, not to paper over it —
-// #854's own brief anticipates exactly this ("if both sides can commit, that is a new defect for
-// its own ticket") and puts repairing either wall, either approver or the document lock helper
-// explicitly OUT OF SCOPE for this ticket. Filed as a follow-up in this ticket's final report; the
-// cell stands as the regression sentinel until that follow-up lands.
+// WHAT #854 MEASURED, AND WHY THE OBVIOUS REPAIR WAS NOT AVAILABLE. `clara.documents` was locked
+// FOR UPDATE by both lanes PURELY for serialization — neither lane's body ever changed a column on
+// that row — and a lock that is only taken and released forces nothing on a waiter under a
+// snapshot isolation level. So `attach_entry_evidence` (plain, holds first) committed a document
+// it had only LOCKED, and the blocked `approve_opening_seed` (SERIALIZABLE since 0171) was granted
+// the SAME byte-identical row and evaluated `clara._tf_source_binding_wall`'s opening arm against
+// its pre-attachment snapshot, which never saw the link. BOTH SIDES COMMITTED. #854's report
+// guessed the repair would be "a fresh re-read of entry_evidence_links under the document lock":
+// it cannot be. A SERIALIZABLE transaction cannot READ what committed after its snapshot at all —
+// that is the isolation level, not a defect in the wall.
 //
-// CLOSING NOTES, code-review round 2 (findings recorded here rather than answered with new code —
-// neither changes an assertion):
+// WHAT 0235 DOES INSTEAD (and the three measurements it rests on, taken on this rig, PostgreSQL 17,
+// before the migration was written): a holder that only LOCKS a row lets a SERIALIZABLE waiter
+// proceed; a holder that UPDATES a row the waiter can see gives it 40001; a holder that INSERTS a
+// row the waiter's snapshot cannot see gives the same 40001 to a waiter upserting that key with ON
+// CONFLICT DO UPDATE. The claim is that upsert. It is arbitrated by an index rather than by
+// anyone's snapshot, so the blocked side meets a real write conflict where it used to find an
+// unchanged row — and the helper re-raises that failure as the walls' own CLR13
+// source_already_posted, so no raw 40001 reaches a person.
 //
-// L04B-SPEC-04 — AC2's literal wording is "reads standing postings off committed rows and asserts
-// exactly ONE". Neither race cell asserts a bare 1: `obw.race.opening_then_evidence` asserts
-// `s.drafts.all.length` (>= 3 by the seed's own mandatory multi-item setup, `obw.siblings_ok`) and
-// `obw.race.evidence_then_opening` asserts `s.drafts.all.length + 1`. This is a deliberate
-// reinterpretation, not an oversight: #821's whole carve-out is that MANY opening items legitimately
-// share one tie document, so "exactly one" can only mean "exactly the seed's own item count and
-// nothing else" — a single-item opening seed is not a shape this battery (or wb-fixtures.mjs's own
-// multi-item seed builder) can construct without weakening the multi-item coverage the ticket also
-// asks for. In the second arrival order, the count that actually stands (`+ 1`) IS the measured
-// defect this file's finding section names and L04B-SPEC-01 tracks — it is not a looser reading of
-// AC2, it is AC2's own assertion catching the regression it exists to catch.
-//
-// L04B-SPEC-07 — `approve_opening_correction`, named beside `approve_opening_seed` in the brief's
-// "Key interfaces" as one of "the contending doors", is never driven by either race cell; both call
-// `approveOpeningSeedOn` only. One-line check of whether the correction door reaches the SAME lock
-// path: `clara.approve_opening_correction` (0017:4162) loops over its draft correction entries and
-// calls `clara._approve_opening_entry(p_seed, e.id, ...)` for each one (0017:4241) — the EXACT SAME
-// helper `clara.approve_opening_seed` calls per item (0017:3962). `_approve_opening_entry`'s own
-// UPDATE into `journal_entries` (status -> approved) is what fires `t_source_binding_wall_upd`
-// (0213), which takes `clara._lock_document_binding` FIRST regardless of which approver's UPDATE
-// tripped it. So YES: the correction door shares the exact lock path the seed door does, and the
-// double-posting hole L04B-SPEC-01 measures on the seed door is architecturally reachable from the
-// correction door too — untested here, and named explicitly in GitHub issue #1014
-// (L04B-SPEC-01's required_fix), the residual this ticket's report asked the integrator to file.
+// The reverse arrival order never had the hole and is unchanged: its contender
+// (`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads fresh per statement
+// once unblocked, so it needs no claim to notice what committed while it waited — the claim only
+// changes WHERE it blocks, never what it decides.
 
 /** Asserts the loser's refusal against `expectedShape`, one of the two shapes #854's brief
  *  names: `"CLR13"` (the wall's own `source_already_posted`, a statement-time refusal, same as
@@ -336,8 +332,9 @@ test("obw.race.opening_then_evidence the opening approval holds; the evidence at
     "race.opening_then_evidence: no evidence link was written — the loser wrote nothing");
 });
 
-test("obw.race.evidence_then_opening #854 FINDING: the evidence attachment holds and the opening approval BLOCKS on it, proves it, then BOTH commit — a double posting this ticket did not repair (out of scope: see the file header)", async (t) => {
+test("obw.race.evidence_then_opening #1014: the evidence attachment holds, the opening approval BLOCKS on it and LOSES — exactly one side commits in THIS arrival order too", async (t) => {
   if (await gateOpeningWall(t)) return;
+  if (await gateBindingClaim(t)) return;
   const s = await stagedSeed("race-eo");
   const host = await postedDocumentless(s.client);
   const rev = await planRevision(s.plan);
@@ -361,34 +358,244 @@ test("obw.race.evidence_then_opening #854 FINDING: the evidence attachment holds
     "race.evidence_then_opening: the opening approval must WAIT on the attachment's document lock "
     + `— a schedule that never blocked proves nothing (wait_event_type ${out.waitEventType}/${out.waitEvent})`);
   assert.equal(out.waitEventType, "Lock", "race.evidence_then_opening: …on a LOCK (waitEvent "
-    + `${out.waitEvent} — "transactionid" on this rig: waiting on a still-open FOR UPDATE holder,`
-    + " never a serialization-safe re-read)");
+    + `${out.waitEvent} — "transactionid" on this rig: waiting on a still-open FOR UPDATE holder)`);
 
-  // THE FINDING, asserted rather than hidden: the opening approval is NOT refused. It BLOCKED
-  // (proved above), then — once granted `clara.documents`' FOR UPDATE lock unchanged in content —
-  // committed against its OWN pre-attachment snapshot, which never saw the live link. If a future
-  // fix (successor ticket) makes it lose instead, this assertion is the one to update; a
-  // regression back to "both commit" after that fix is what this cell exists to catch too.
-  assert.equal(out.b.ok, true,
-    `race.evidence_then_opening: MEASURED, not a repair target here — the opening approval also `
-    + `commits (${JSON.stringify(out.b)}). #854's brief: "if both sides can commit, that is a new `
-    + `defect for its own ticket" — filed in this ticket's report, repair explicitly out of scope.`);
+  // THE REPAIR, asserted as OUTCOME rather than as mechanism: the side that took the document
+  // binding FIRST keeps it, and the side that blocked on it does NOT commit. #854 measured the
+  // opposite here (both committed); the shape of the loser's refusal is pinned by
+  // obw.race.typed_refusal below, so this cell stays about WHO WINS.
+  assert.equal(out.b.ok, false,
+    "race.evidence_then_opening: the opening approval LOSES — it blocked on a document whose "
+    + "binding another session had already taken, and the evidence wall exists so that exactly "
+    + `one of the two can stand on it (${JSON.stringify(out.b)})`);
+  assertLoserRefusal(out.b, "race.evidence_then_opening", "CLR13");
 
   const standing = await postedEntriesOnDocument(s.doc.documentId);
-  assert.equal(standing.length, s.drafts.all.length + 1,
-    `race.evidence_then_opening: DOUBLE POSTING — the host entry (via its evidence link) AND `
-    + `every opening item all stand on the ONE tie document (got ${JSON.stringify(standing)}); `
-    + "the wall this migration (0213) exists to enforce did not hold in this arrival order");
-  assert.ok(standing.some((r) => r.id === host.entry_id && r.linked === true),
-    "race.evidence_then_opening: the host entry's link is live and counted");
+  assert.equal(standing.length, 1,
+    "race.evidence_then_opening: ONE posted entry stands on the tie document, not the host entry "
+    + `AND every opening item (got ${JSON.stringify(standing)})`);
+  assert.equal(standing[0].id, host.entry_id,
+    "race.evidence_then_opening: …and it is the winner — the host entry, through the evidence "
+    + "link the attaching session committed first");
+  assert.equal(standing[0].linked, true, "race.evidence_then_opening: …counted through its LIVE link");
   for (const d of s.drafts.all) {
-    assert.ok(standing.some((r) => r.id === d.entry_id),
-      "race.evidence_then_opening: every opening item ALSO posted, not merely drafted — the "
-      + "batch was not refused");
-    assert.equal((await entryStatus(d.entry_id)).status, "approved",
-      "race.evidence_then_opening: …approved, not draft (contrast obw.evidence_first's sequential "
-      + "cell, where the SAME shape correctly leaves the batch a draft)");
+    assert.equal((await entryStatus(d.entry_id)).status, "draft",
+      "race.evidence_then_opening: the refused batch is ATOMIC — every opening item is still a "
+      + "draft, exactly as the sequential obw.evidence_first cell leaves it");
   }
   assert.equal((await linksForDocument(s.doc.documentId)).length, 1,
-    "race.evidence_then_opening: the evidence link ALSO stands, live");
+    "race.evidence_then_opening: the winner's evidence link stands, live and alone");
+});
+
+test("obw.race.typed_refusal the loser of the repaired race is refused in the WALL'S OWN VOICE — CLR13 source_already_posted, never a raw 40001", async (t) => {
+  if (await gateOpeningWall(t)) return;
+  if (await gateBindingClaim(t)) return;
+
+  // THE RACE, driven exactly as obw.race.evidence_then_opening drives it. That cell owns WHO
+  // wins; this one owns WHAT THE LOSER IS TOLD, which is a separate promise: a person meets this
+  // refusal in the opening approve dialog, and Postgres's own 40001 says nothing they can act on.
+  const raced = await stagedSeed("typed-eo");
+  const racedHost = await postedDocumentless(raced.client);
+  const racedRev = await planRevision(raced.plan);
+  const out = await humanHoldThenContend({
+    a: {
+      jwtSub: BOB(),
+      run: (c) => attachEntryEvidenceOn(c, { entry: racedHost.entry_id, document: raced.doc.documentId,
+        expectedRevision: racedHost.revision_token, opKey: opk("w1014-typed-attach") }),
+    },
+    b: {
+      jwtSub: HANA(), isolation: "serializable",
+      run: (c) => approveOpeningSeedOn(c, {
+        seed: raced.seed, planRevision: racedRev, tieSha256: raced.doc.sha256,
+        entryRevisions: raced.revMap, opKey: opk("w1014-typed-opening") }),
+    },
+  });
+  assert.equal(out.a.ok, true, `typed_refusal: the attachment holds (${JSON.stringify(out.a)})`);
+  assert.equal(out.provedBlocked, true,
+    `typed_refusal: the opening approval genuinely BLOCKED (${out.waitEventType}/${out.waitEvent})`);
+  assert.equal(out.b.ok, false, `typed_refusal: …and lost (${JSON.stringify(out.b)})`);
+
+  assert.notEqual(out.b.code, "40001",
+    `typed_refusal: NOT Postgres's own serialization failure — "could not serialize access due to `
+    + "concurrent update\" is the mechanism, not something a person can act on "
+    + `(${JSON.stringify(out.b)})`);
+  assert.equal(out.b.code, CLR.conflict, "typed_refusal: the estate's own conflict code");
+  assert.equal(out.b.detail.reason, EVIDENCE_REASON.sourceAlreadyPosted,
+    "typed_refusal: …with the token the sequential cells raise, not a new one minted for a race");
+  assert.equal(out.b.detail.document_id, raced.doc.documentId,
+    "typed_refusal: …naming the document that was refused");
+  assert.equal(out.b.detail.conflict, true, "typed_refusal: …flagged a conflict, as 0182's arms are");
+
+  // THE COMPARAND: the SAME refusal reached sequentially, where the wall can see the link it is
+  // refusing for. One spelling, raised from two places — the standard obw.same_spelling holds the
+  // opening arm to against the evidence lane's own.
+  const seq = await stagedSeed("typed-seq");
+  const seqHost = await postedDocumentless(seq.client);
+  await attachEntryEvidence(BOB(), { entry: seqHost.entry_id, document: seq.doc.documentId,
+    expectedRevision: seqHost.revision_token });
+  const sequential = await assertPair(CLR.conflict, EVIDENCE_REASON.sourceAlreadyPosted,
+    async () => approveOpeningSeed(HANA(), {
+      seed: seq.seed, planRevision: await planRevision(seq.plan), tieSha256: seq.doc.sha256,
+      entryRevisions: seq.revMap, opKey: opk("w1014-typed-seq") }),
+    "obw.race.typed_refusal.sequential");
+
+  assert.equal(out.b.message, sequential.err.message,
+    "typed_refusal: the raced refusal's message is byte-identical to the sequential one — a person "
+    + "reading it cannot tell which schedule produced it, and should not have to");
+  assert.deepEqual(Object.keys(out.b.detail).sort(), Object.keys(sequential.detail).sort(),
+    "typed_refusal: the same detail KEYS — no wire token grows for the concurrent arm");
+
+  // THE ONE HONEST DIFFERENCE, pinned so it stays deliberate: the sequential arm NAMES the entry
+  // standing on the document; the raced one cannot. The winner committed after this transaction's
+  // snapshot, and no read inside a SERIALIZABLE transaction can reach it — that is the isolation
+  // level, not a gap in the wall. The key is present and null rather than absent, which is what
+  // keeps the key-set assertion above true.
+  assert.equal(sequential.detail.entry_id, seqHost.entry_id,
+    "typed_refusal: sequentially the wall names the entry standing there");
+  assert.equal(out.b.detail.entry_id, null,
+    "typed_refusal: in the race it names the document and answers null for the entry, rather than "
+    + "inventing one it cannot see");
+});
+
+// ===========================================================================================
+// 5 · #1014 — THE CLAIM ITSELF, READ OFF THE CATALOG.
+//
+// The migration's own tail asserts all of this once, at apply time. This cell asserts it on
+// EVERY rig and on every restored or DR target the tail never ran against — the same reason
+// `cle.wall` exists beside 0197's tail. It is deliberately structural: the claim answers no
+// question, so there is no door to drive it through; what a later change could silently break is
+// its POSTURE (who may read a serialization token) and the ORDER inside the helper, and those are
+// catalog facts.
+// ===========================================================================================
+
+test("obw.claim the binding claim is a locked-down serialization token, and the helper takes the document BEFORE it claims", async (t) => {
+  if (await gateOpeningWall(t)) return;
+  if (await gateBindingClaim(t)) return;
+
+  const rel = await rootQuery(
+    `select r.rolname as owner, c.relrowsecurity as rls, c.relforcerowsecurity as forced
+       from pg_class c join pg_namespace n on n.oid = c.relnamespace
+       join pg_roles r on r.oid = c.relowner
+      where n.nspname = 'clara' and c.relname = 'document_binding_claims'`);
+  assert.equal(rel.rows.length, 1, "claim: clara.document_binding_claims exists");
+  assert.equal(rel.rows[0].owner, ROLES.fnOwner, "claim: owned by clara_fn_owner, like every governed relation");
+  assert.equal(rel.rows[0].rls, true, "claim: RLS is ENABLED");
+  assert.equal(rel.rows[0].forced, true,
+    "claim: \u2026and FORCED \u2014 clara_fn_owner is not BYPASSRLS, so a token table without FORCE would "
+    + "be the one relation in the estate its own owner could read past");
+
+  const pol = await rootQuery(
+    `select p.polname, r.rolname
+       from pg_policy p left join pg_roles r on r.oid = any(p.polroles)
+      where p.polrelid = 'clara.document_binding_claims'::regclass order by 1`);
+  assert.deepEqual(pol.rows.map((x) => `${x.polname}:${x.rolname}`),
+    ["p_document_binding_claims_owner:clara_fn_owner"],
+    "claim: exactly ONE policy, the owner's \u2014 the definer that writes the token is the only thing "
+    + "that may see it");
+
+  for (const role of ["public", ROLES.authenticated, ROLES.runtime, ROLES.agentRo]) {
+    const g = await rootQuery(
+      `select coalesce(bool_or(has_table_privilege($1, 'clara.document_binding_claims', priv)), false) as any
+         from unnest(array['select','insert','update','delete']) as priv`, [role]);
+    assert.equal(g.rows[0].any, false,
+      `claim: ${role} holds NO grant on the token \u2014 it carries no domain meaning and answers no `
+      + "question, so a reader would only be a new oracle to keep honest");
+  }
+
+  const fn = await rootQuery(
+    `select r.rolname as owner, p.prosecdef, p.proconfig::text as cfg, p.prosrc,
+            has_function_privilege('public', p.oid, 'execute') as public_exec
+       from pg_proc p join pg_roles r on r.oid = p.proowner
+      where p.oid = 'clara._lock_document_binding(uuid)'::regprocedure`);
+  assert.equal(fn.rows.length, 1, "claim: the helper resolves");
+  assert.equal(fn.rows[0].owner, ROLES.fnOwner, "claim: still a clara_fn_owner body");
+  assert.equal(fn.rows[0].prosecdef, true, "claim: still SECURITY DEFINER");
+  assert.match(fn.rows[0].cfg, /search_path=clara, pg_temp/, "claim: still a pinned search_path");
+  assert.equal(fn.rows[0].public_exec, false, "claim: PUBLIC holds no EXECUTE \u2014 it is trigger-only");
+  for (const role of [ROLES.authenticated, ROLES.runtime, ROLES.agentRo]) {
+    const r = await rootQuery(
+      "select has_function_privilege($1, 'clara._lock_document_binding(uuid)'::regprocedure, 'execute') as x",
+      [role]);
+    assert.equal(r.rows[0].x, false, `claim: ${role} cannot EXECUTE the helper either`);
+  }
+
+  // THE ORDER IS THE MECHANISM, and it is positional: the document row must stay the first
+  // contention point, so the two race cells' `wait_event_type = 'Lock'` keeps meaning what it
+  // meant before 0235.
+  const src = fn.rows[0].prosrc;
+  assert.ok(src.includes("for update") && src.includes("clara.documents"),
+    "claim: the helper still takes clara.documents FOR UPDATE \u2014 0197's own tail assertion");
+  assert.ok(src.includes("document_binding_claims"), "claim: \u2026and then claims");
+  assert.ok(src.indexOf("for update") < src.indexOf("document_binding_claims"),
+    "claim: it LOCKS BEFORE IT CLAIMS \u2014 reversed, the contention point moves off clara.documents");
+  assert.ok(src.includes("on conflict") && !src.includes("on conflict do nothing"),
+    "claim: the claim is an UPSERT, never ON CONFLICT DO NOTHING \u2014 DO NOTHING takes no row lock "
+    + "against a VISIBLE conflicting row, which would leave the race open from a document's "
+    + "second binding onwards");
+  assert.ok(src.includes("serialization_failure") && src.includes("source_already_posted"),
+    "claim: the upsert's serialization failure is re-raised in the walls' own voice");
+
+  // …AND THE RECUT BODY REALLY RUNS. A structural read alone cannot tell a replaced function from
+  // one that is never reached, so this drives a plain sequential opening approval and reads the
+  // token the approval's own wall must have written for the tie document.
+  const s = await stagedSeed("claim");
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.document_binding_claims where document_id=$1",
+    [s.doc.documentId])).rows[0].n, 0,
+  "claim: nothing has bound the fresh tie document yet");
+  const receipt = await approveOpeningSeed(HANA(), {
+    seed: s.seed, planRevision: await planRevision(s.plan), tieSha256: s.doc.sha256,
+    entryRevisions: s.revMap, opKey: opk("w1014-claim") });
+  assert.equal(receipt.status, "finalized", `claim: the ordinary approval still finalizes (${JSON.stringify(receipt)})`);
+  const claimed = await rootQuery(
+    "select claim_seq from clara.document_binding_claims where document_id=$1", [s.doc.documentId]);
+  assert.equal(claimed.rows.length, 1, "claim: the approval left exactly one claim row for the tie document");
+  assert.ok(Number(claimed.rows[0].claim_seq) >= s.drafts.all.length,
+    "claim: every opening item of the batch passed through the helper \u2014 the seq counts the "
+    + `upserts, one per item (seq ${claimed.rows[0].claim_seq}, items ${s.drafts.all.length})`);
+});
+
+// ===========================================================================================
+// 6 · #1014 FIX ROUND (ADV-L01-02) — 0197'S TOLERANCE, WHOLE.
+//
+// 0197 §B's contract for `clara._lock_document_binding` is three words long: an id that names no
+// document "locks nothing and RAISES NOTHING". 0235 appended a claim to the same body and argued
+// the omitted foreign key PRESERVED that tolerance — but an unconditional upsert kept the third
+// half of it open: the helper wrote a token row for an id that names no document at all. That is
+// a row nothing can ever delete, on a key no document owns, and (measured by the adversarial
+// lens) a second contention point two sessions can deadlock on OUTSIDE the `clara.documents`
+// ordering that is supposed to serialise them.
+//
+// WHY THE HELPER IS DRIVEN DIRECTLY HERE. This is a SEAM contract, not a door's behaviour: no
+// door can pass an unknown document id (both lanes' writes are foreign-keyed to
+// `clara.documents`), so the only interface the contract lives at is the helper itself — the same
+// interface 0197's own tail and section 5's census read. The estate's doors are what the rest of
+// this file drives.
+// ===========================================================================================
+
+test("obw.claim.unknown_document an id that names no document locks nothing, raises nothing — and claims nothing", async (t) => {
+  if (await gateOpeningWall(t)) return;
+  if (await gateBindingClaim(t)) return;
+
+  const ghost = randomUUID();
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.documents where id=$1", [ghost])).rows[0].n, 0,
+  "unknown_document: the id names no document — the premise of 0197's tolerance");
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.document_binding_claims where document_id=$1",
+    [ghost])).rows[0].n, 0, "unknown_document: and no claim stands on it yet");
+
+  // RAISES NOTHING — the call itself is the assertion; a throw fails the cell.
+  await rootQuery("select clara._lock_document_binding($1)", [ghost]);
+
+  const claimed = (await rootQuery(
+    "select count(*)::int as n from clara.document_binding_claims where document_id=$1",
+    [ghost])).rows[0].n;
+  // The rig keeps no ghost token either way: read first, then clean, then judge.
+  await rootQuery("delete from clara.document_binding_claims where document_id=$1", [ghost]);
+  assert.equal(claimed, 0,
+    "unknown_document: the helper CLAIMED an id that names no document — 0197's contract says it "
+    + "locks nothing and raises nothing, and a token on a key no document owns is neither a lock "
+    + "nor a refusal, only an unreachable row and a contention point outside clara.documents' own "
+    + "ordering");
 });

@@ -294,7 +294,7 @@ export async function handleWorkListSupabase(request, response, path, url, sendJ
         engine_id: "llm-openai:gpt-5.6-terra:v2", engine_byte: "azure-di:prebuilt-layout:2024-11-30",
         registry_version: 1,
         basis: "Bytes are sealed at intake and read by azure-di:prebuilt-layout:2024-11-30. Typed facts are persisted with source regions by llm-openai:gpt-5.6-terra:v2. A filed document of this kind carries a business operation Clara can drive from those facts.",
-        limits: { invoice_line_items: "planned" }, known_pair: true, kind_known: true,
+        limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" }, known_pair: true, kind_known: true,
       },
       custody: {
         state: "verified", sha256: "c".repeat(64), byte_size: 18432,
@@ -311,7 +311,7 @@ export async function handleWorkListSupabase(request, response, path, url, sendJ
         }],
       },
       facts: {
-        capability: "supported", limits: { invoice_line_items: "planned" },
+        capability: "supported", limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
         extractions: [{
           id: "c641c641-9999-4777-8777-c641c6410801", engine_kind: "llm_text_facts",
           engine_id: "llm-openai:gpt-5.6-terra:v2", version_n: 1, status: "done",

@@ -1,0 +1,162 @@
+{
+  "lane": "wave2-lane08",
+  "lens": "RECHECK",
+  "branch": "riders/w2-lane08",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "base": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave2-lane08-fix.md",
+  "head_checked": "f8770aa1add02952ade381e13e4d9cad527fcd87",
+  "database": "127.0.0.1:55748/clara_l08, 232 ledger rows (migrate() reports {applied:0, total:232}, no drift)",
+  "tickets": [840, 843, 861],
+  "verdict": "accept",
+  "summary": "Every finding raised across the three wave2-lane08 review lenses (spec, standards, adversarial) is either fixed and independently re-verified on the current head, or its stay-as-is reason still holds when re-measured. The two 'FIXED' claims (ADV-L08-1 lock order, ADV-L08-2 description pin) were re-verified by re-reading the migration source and, for ADV-L08-1, by re-driving three real concurrent connections against clara_l08 rather than trusting the report's prose. All re-run gates match the fix report's claimed counts exactly. One transient false failure (checkout-convergence.test.mjs, 23/36 fail) was traced to this reviewer's own lock-order probe committing a real capacity change (setCapacity is not transactional/rolled-back) — not a defect in the reviewed diff; a clean rerun matched the report's claimed 36/0. One pre-existing red was found outside this lane's scope (CI-flavoured lint) and is reported below for visibility only; it does not name any of this lane's tickets and packages/runtime has a zero-line diff on this branch, so it predates this round and is not this lane's to fix.",
+  "reruns": [
+    {
+      "target": "ADV-L08-1 fix (lock order on clara.set_admission_capacity)",
+      "method": "Re-read 0263 \u00a72/\u00a7T (append now precedes the advisory lock; tail asserts v_pos_append < v_pos_advisory) AND re-drove 3 live connections on clara_l08 (S1 holds the operator firm's clara.firm_event_seq row, S2 calls set_admission_capacity, S3 probes pg_try_advisory_xact_lock on the same key)",
+      "claimed": "S2 still waits for the peer's seq row; S3 now takes the admission-capacity lock immediately",
+      "measured": "S2 settled within 1.5s? false (blocks on S1, expected -- same serialisation 0186 always had); S3 pg_try_advisory_xact_lock while S1 still holds the seq row: true; after S1 released, S2 completed with status 'set'",
+      "agrees": true
+    },
+    {
+      "target": "ADV-L08-2 fix (description pin in 0263's tail)",
+      "method": "grep -n description packages/db/migrations/0263_operator_support_timeline_events.sql",
+      "claimed": "\u00a7T now selects et.description for both new event types and raises CLR10-shaped text naming a foreign sentence on mismatch",
+      "measured": "lines 693/695 and 796/798 confirm both selects and both raise exception clauses are present",
+      "agrees": true
+    },
+    {
+      "target": "ledger + prosrc pins after the redo dance",
+      "method": "live query against clara_l08: clara.schema_migrations checksum for 0263/0264, count(*), and sha256(prosrc) for clara.set_admission_capacity",
+      "claimed": "0263 checksum 35e1cb9e...c2f776; 0264 checksum 47eb464c...abde7c2; 232 total; set_admission_capacity sha a5209aca...220228c1",
+      "measured": "identical on all four values",
+      "agrees": true
+    },
+    {
+      "target": "packages/db/tests/activity-feed.test.mjs, full gate chain",
+      "claimed": "41 pass / 0 fail / 0 skipped",
+      "measured": "41 pass / 0 fail / 0 skipped",
+      "agrees": true
+    },
+    {
+      "target": "packages/db/tests/operator-support.test.mjs, full gate chain",
+      "claimed": "22 pass / 0 fail / 0 skipped",
+      "measured": "22 pass / 0 fail / 0 skipped",
+      "agrees": true
+    },
+    {
+      "target": "packages/db/tests/checkout-convergence.test.mjs, full gate chain",
+      "claimed": "36 pass / 0 fail",
+      "measured": "First attempt (immediately after this reviewer's own lock-order probe, which had committed a real max_firms=77 capacity change via the live setCapacity door): 13 pass / 23 fail -- traced to reviewer-induced pollution, not a defect in the diff. Capacity self-healed to max_firms=null via the suite's own teardown; clean rerun: 36 pass / 0 fail, matching the report exactly.",
+      "agrees": true
+    },
+    {
+      "target": "packages/db/tests/firm-setup.test.mjs",
+      "claimed": "17 pass / 0 fail",
+      "measured": "17 pass / 0 fail",
+      "agrees": true
+    },
+    {
+      "target": "packages/db/tests/operation-census.test.mjs",
+      "claimed": "10 pass / 0 fail",
+      "measured": "10 pass / 0 fail (run twice, stable)",
+      "agrees": true
+    },
+    {
+      "target": "packages/db/tests/rig-isolation.test.mjs (no reset flags)",
+      "claimed": "22 pass / 0 fail / 1 skipped",
+      "measured": "22 pass / 0 fail / 1 skipped (run twice, stable)",
+      "agrees": true
+    },
+    {
+      "target": "apps/web unit: client-work-pack + tree + app-sidebar + firm-home-board",
+      "claimed": "59 pass / 0 fail",
+      "measured": "59 pass / 0 fail",
+      "agrees": true
+    },
+    {
+      "target": "apps/web tests/firm-scope-db-pins.test.ts",
+      "claimed": "22 pass / 0 fail",
+      "measured": "22 pass / 0 fail",
+      "agrees": true
+    },
+    {
+      "target": "apps/web e2e/e2e-fixture-ownership.test.ts",
+      "claimed": "44 pass / 0 fail",
+      "measured": "44 pass / 0 fail",
+      "agrees": true
+    },
+    {
+      "target": "e2e activity-feed-walk on 3570/3571/3572",
+      "claimed": "19 passed",
+      "measured": "19 passed (46.7s)",
+      "agrees": true
+    },
+    {
+      "target": "e2e firm-navigation-walk on 3570/3571/3572",
+      "claimed": "10 passed (42.9s)",
+      "measured": "10 passed (33.9s)",
+      "agrees": true
+    },
+    {
+      "target": "e2e home-board-walk on 3570/3571/3572",
+      "claimed": "27 passed (1.3m)",
+      "measured": "27 passed (1.1m)",
+      "agrees": true
+    },
+    {
+      "target": "pnpm typecheck (worktree root)",
+      "claimed": "exit 0",
+      "measured": "exit 0, apps/web Done, packages/runtime Done",
+      "agrees": true
+    },
+    {
+      "target": "pnpm lint (worktree root)",
+      "claimed": "exit 0",
+      "measured": "exit 0",
+      "agrees": true
+    },
+    {
+      "target": "L08-SPEC-02 (one migration vs two) recorded in packages/db/tests/README.md",
+      "claimed": "commit f8770aa1a adds the paragraph",
+      "measured": "git show f8770aa1a -- packages/db/tests/README.md confirms an 11-line addition stating the wave-2 addendum overrides the ticket line and why 0264 composes with 0262",
+      "agrees": true
+    },
+    {
+      "target": "L08-SPEC-03 (activityKindResidual removal, no other lane touching the surface)",
+      "claimed": "grep -rn activityKindResidual apps packages returns nothing; only lane 07's report mentions firm-recent-activity.tsx, as a deliberate no-op",
+      "measured": "identical: zero hits for the key; grep across all wave-2 reports for firm-recent-activity.tsx returns only wave2-lane07-ticket998.md plus this lane's own reports",
+      "agrees": true
+    },
+    {
+      "target": "L08-SPEC-04 (document-kind-dialog.tsx one-liner)",
+      "claimed": "commit a60a3f40d fixes the undefined DOCUMENT_KINDS reference, still in place",
+      "measured": "apps/web/components/documents/document-kind-dialog.tsx imports and uses only CLASSIFIABLE_DOCUMENT_KINDS; no DOCUMENT_KINDS reference remains; consistent with a clean pnpm typecheck",
+      "agrees": true
+    }
+  ],
+  "findings": [],
+  "out_of_scope_observation": {
+    "title": "CI-flavoured lint chain (CI=true GITHUB_ACTIONS=true pnpm lint) is red on this branch, in packages/runtime, unrelated to any lane-08 ticket",
+    "evidence": "check-frozen-workflows.selftest.mjs case 'L05-STD-02 fix round' expects a MISSING-RULING refusal from `--retire --ruling --child-os` but instead gets the CI ceremony refusal ('freeze-lint: --retire is REFUSED under CI'), because CI env vars leak into the child CLI the selftest spawns -- exactly the class of defect RIG.md's addendum warns about (PR #1025). `git diff 23cfad947b...HEAD --stat -- packages/runtime` is EMPTY: lane 08 touches nothing under packages/runtime, so this red is not introduced by this lane and predates the base commit. Not filed as a lane-08 finding because it names no lane-08 ticket (#840/#843/#861); it looks like unfinished business from a different lane's L05-STD-02 fix (packages/runtime frozen-workflow selftest) and belongs to the integrator, not this recheck.",
+    "action": "None owed by lane 08. Flagged for the orchestrator/integrator's awareness only."
+  },
+  "note_on_reviewer_conduct": "This reviewer's own ADV-L08-1 re-probe used the real (non-test-isolated) clara.set_admission_capacity door and committed a capacity change (max_firms=77) on clara_l08, which transiently broke an unrelated test file (checkout-convergence.test.mjs) until that suite's own teardown reset the singleton. Confirmed self-inflicted and self-healed; a clean rerun matches the fix report exactly. Recorded here for the integrator's evidence trail, not as a defect in the branch.",
+  "gates_rerun": {
+    "packages/db tests/activity-feed.test.mjs": "41 pass / 0 fail / 0 skipped",
+    "packages/db tests/operator-support.test.mjs": "22 pass / 0 fail / 0 skipped",
+    "packages/db tests/checkout-convergence.test.mjs": "36 pass / 0 fail (after excluding reviewer-induced pollution, see note above)",
+    "packages/db tests/firm-setup.test.mjs": "17 pass / 0 fail",
+    "packages/db tests/operation-census.test.mjs": "10 pass / 0 fail",
+    "packages/db tests/rig-isolation.test.mjs (no reset flags)": "22 pass / 0 fail / 1 skipped",
+    "apps/web unit (client-work-pack + tree + app-sidebar + firm-home-board)": "59 pass / 0 fail",
+    "apps/web tests/firm-scope-db-pins.test.ts": "22 pass / 0 fail",
+    "apps/web e2e/e2e-fixture-ownership.test.ts": "44 pass / 0 fail",
+    "e2e activity-feed-walk (3570/3571/3572)": "19 passed",
+    "e2e firm-navigation-walk (3570/3571/3572)": "10 passed",
+    "e2e home-board-walk (3570/3571/3572)": "27 passed",
+    "pnpm typecheck": "exit 0",
+    "pnpm lint": "exit 0",
+    "migrate() on clara_l08": "{ applied: 0, total: 232 }, no drift"
+  }
+}

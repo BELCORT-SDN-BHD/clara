@@ -276,7 +276,11 @@ function firmRuleRow(key, promoted) {
     authority: {
       promoter: "644-user-owner", promoter_name: "E2E Owner", recorded_via: "human_ui",
       recorded_at: "2026-09-16T02:00:00.000Z", reason: promoted.basis,
-      required_role: "admin", promoter_role_now: "owner", promoter_active: true,
+      // #912: the role the act ran under, beside the promoter's current role. The walk's
+      // promoter is still an owner, so the two agree here -- the surface renders them as two
+      // facts regardless, and the db battery (ar.03/ar.04) is where they disagree.
+      required_role: "admin", promoter_role_at_act: "owner", promoter_role_now: "owner",
+      promoter_active: true,
     },
     exception_count: exceptions.length,
     exceptions,

@@ -26,16 +26,27 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { CapabilityIndex, ResolvedCapability, TierState } from "@/lib/documents/capability-registry";
 import { resolveCapability, tierStateKey } from "@/lib/documents/capability-registry";
+import { capabilityLimitLevelKey, type BusinessOperationLevel } from "@/lib/documents/document-state";
 
-const TONE: Record<string, string> = {
+/** KEYED BY THE CLOSED SET ITSELF, not by `string`. `BusinessOperationLevel` is the widest of the
+ *  four axes' level sets, so this map must be total over it — and typing it that way is what
+ *  makes the compiler say so. A map keyed by `string` silently falls through to an unstyled badge
+ *  when a level is added or renamed, which is exactly the state this file was in for one commit
+ *  before `proposal_only` was added to it by hand. */
+const TONE: Record<BusinessOperationLevel, string> = {
   supported: "text-success",
   stored_only: "text-muted-foreground",
   unsupported: "text-warning",
   planned: "text-muted-foreground",
+  // #988 — Clara proposes, a person confirms: real work happened (unlike `stored_only`'s "Clara
+  // derives nothing"), but nothing posted on Clara's own authority (unlike `supported`'s green).
+  // Its own tone, rather than falling through to the unmatched-key default, so the fifth level
+  // reads as a distinct tier rather than a blank one.
+  proposal_only: "text-info",
 };
 
 function tierTone(tier: TierState): string {
-  return tier.state === "level" ? (TONE[tier.level] ?? "") : "text-muted-foreground";
+  return tier.state === "level" ? TONE[tier.level] : "text-muted-foreground";
 }
 
 export function CapabilityTiers({
@@ -70,12 +81,19 @@ export function CapabilityTiers({
           <li key={label} className="flex flex-wrap items-baseline gap-1 text-xs">
             <span className="text-muted-foreground">{label}</span>
             <span className={cn("font-medium", tierTone(tier))}>{t(tierStateKey(tier))}</span>
+            {/* #782 — the limit's VALUE goes through its own message key here too, or the same
+                registry tokens the detail panel stopped showing would still reach an accountant
+                on every intake row. The NAME is still the registry's own key: naming each limit
+                for a badge is #633's surface, not this fix round's. */}
             {tier.state === "level"
-              ? Object.entries(tier.limits).map(([name, value]) => (
-                  <Badge key={name} variant="outline" className="text-[0.65rem]">
-                    {t("capabilityLimitUnknown", { name, level: String(value) })}
-                  </Badge>
-                ))
+              ? Object.entries(tier.limits).map(([name, value]) => {
+                  const levelKey = capabilityLimitLevelKey(String(value));
+                  return (
+                    <Badge key={name} variant="outline" className="text-[0.65rem]">
+                      {t("capabilityLimitUnknown", { name, level: levelKey ? t(levelKey) : String(value) })}
+                    </Badge>
+                  );
+                })
               : null}
           </li>
         ))}

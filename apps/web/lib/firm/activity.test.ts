@@ -26,6 +26,7 @@ import {
   ACTIVITY_MAX_LIMIT,
   type ActivityUrlState,
 } from "./activity";
+import messages from "../../messages/en.json";
 import { fixedTokenAccessor } from "../supabase/server-session";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -156,10 +157,35 @@ test("getActivityEvent: posts p_source/p_id verbatim, including an agent_receipt
 
 // ── the closed kind vocabulary ─────────────────────────────────────────────────
 
-test("isActivityKind: exactly the six declared groups, nothing else", () => {
+test("isActivityKind: exactly the declared groups, nothing else", () => {
   for (const k of ACTIVITY_KINDS) assert.ok(isActivityKind(k));
   assert.equal(isActivityKind("receipts"), false);
   assert.equal(isActivityKind(""), false);
+});
+
+// #861 — THE VOCABULARY IS THE DOOR'S, NOT THIS MODULE'S. `clara.list_activity` refuses CLR10
+// invalid_kind for anything outside its own closed roster, so a value here the door does not
+// carry is a filter chip that answers an error, and a value the door carries that is missing here
+// is a kind no bookmark can name and no chip can reach. The expected list is transcribed from
+// migration 0264's roster (itself the owner's ruling of 2026-09-18 on #861, appended to 0181's
+// original six) — never read back off this module.
+test("ACTIVITY_KINDS is the door's closed roster, in the door's own order", () => {
+  assert.deepEqual([...ACTIVITY_KINDS], [
+    "documents", "journal", "close", "report", "agent", "work",
+    "people", "assets", "counterparties", "clients", "firm",
+  ]);
+});
+
+test("every activity kind has a non-empty label, so no chip and no row badge can render a raw key", () => {
+  const labels = (messages as { Activity: { kindLabels: Record<string, string> } }).Activity.kindLabels;
+  for (const kind of ACTIVITY_KINDS) {
+    const label = labels[kind];
+    assert.equal(typeof label, "string", `Activity.kindLabels.${kind} is missing`);
+    assert.ok(label!.trim().length > 0, `Activity.kindLabels.${kind} is blank`);
+  }
+  // …and nothing extra, so a retired kind cannot leave a label behind that suggests a filter the
+  // door would refuse.
+  assert.deepEqual(Object.keys(labels).sort(), [...ACTIVITY_KINDS].sort());
 });
 
 // ── the `?event=` param, including the double-colon agent_receipt shape ───────
@@ -424,4 +450,18 @@ test("describeActivity: an operation_receipt row prefers `purpose` over `event_t
 
   const unregistered = { source: "operation_receipt" as const, description: null, event_type: "some_future_purpose", id: "r2" };
   assert.equal(describeActivity(unregistered, tActivity, tReceipt), "some_future_purpose", "an unregistered purpose renders itself, not a guess");
+});
+
+// #984 — the fourth purpose. Migration 0239 gives an approved opening batch a real
+// `clara.accounting_work` row and a real `clara.operation_receipts` row, so the firm Activity feed
+// now carries a row this build must have a SENTENCE for: without one it would render the database's
+// own `opening_balance` token to a person, which is the fallback for values this build has not
+// learned, not the answer for one it ships.
+test("describeActivity: an opening-balance operation_receipt gets its own registered sentence, from either field", () => {
+  const listRow = { source: "operation_receipt" as const, description: null, event_type: "opening_balance", id: "r3" };
+  assert.equal(describeActivity(listRow, tActivity, tReceipt), "Activity.workPurposes.opening_balance");
+
+  const detailRow = { ...listRow, event_type: null, purpose: "opening_balance" };
+  assert.equal(describeActivity(detailRow, tActivity, tReceipt), "Activity.workPurposes.opening_balance",
+    "the detail door's own `purpose` field reaches the same sentence");
 });

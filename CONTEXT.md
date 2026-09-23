@@ -12,6 +12,28 @@ _Avoid_: An optional automation mode; a synonym for unrestricted user permission
 The recorded facts, instructions and sources supporting an accounting action. It may include explicit user-provided facts as well as documents, with their origin kept clear.
 _Avoid_: A mandatory file attachment; a claim that every user statement is independently verified.
 
+<!-- #977 -->
+**Authorising instruction**:
+The recorded instruction a governed act cites as its authority — an Accounting work, or one turn of
+a Clara conversation. It is admitted only when it is PROVED to come from a person rather than from a
+process: a Work is proof as it stands, because a Work can never exist without naming who initiated
+it; a conversation turn is proof only when it is a turn taken through the chat ingress AND that
+ingress named a firm member as its author. A run the workspace started for itself — a wake, an
+autodraft, a close preparation, an agent run over a Work — is not an instruction, even when it
+names the person it was started for. "There is no such record here" and "that record is not a
+person's instruction" are two different refusals, and each says which it is.
+
+What is proved is the AUTHOR the ingress recorded, not the keystroke: the rule reads the task's
+kind and its author, and the chat ingress admits an author only as an active member of the firm.
+It does not separately ask whether that member is a person rather than an agent account, which is
+a distinction the estate carries elsewhere. Today nothing can exploit the gap — no agent account
+holds an active firm membership — so this is a limit of the proof, stated, not a hole to route
+around.
+_Avoid_: A preference, a calculation policy or a repeated bank debit as a source of authority; an
+agent run, or the conversation turn a run was started from, as the instruction that authorises the
+run's own act; the record merely existing as proof that a person asked.
+<!-- #977 -->
+
 **Accounting work**:
 A client-attributed job with an intended accounting outcome, its evidence, progress and outstanding decisions. Its identity continues when a conversation is reset or replaced.
 _Avoid_: Chat session, chat message, journal entry as synonyms for the whole job.
@@ -25,6 +47,11 @@ _Avoid_: Rollback, reversal as synonyms for cancellation.
 A reply that changes the admitted basis does not edit that work; it becomes a new work carrying the revised instruction, while the original is cancelled with the outcome *superseded*. The two are linked in both directions: the new work *supersedes* the old, the old is *superseded by* the new.
 _Avoid_: Edit, amend, correction as synonyms — a correction acts on a posted outcome, a restatement replaces an instruction that never posted.
 <!-- #721 -->
+
+**Source-corrected work**:
+Work that a *source revision* retired. When a human corrects what a document says, every work of that firm still waiting on a question about that document — and holding no committed receipt — is cancelled inside the correcting transaction, with the reason *source corrected* carried on the correction's own receipt and on the cancellation's key. NOTHING IS RE-ADMITTED IN ITS PLACE: a basis nobody has re-derived from the corrected document is not the corrected facts, whoever first stated it, so the instruction has to be given again — a *restated work*, by a person, on the corrected reading. The retired work therefore points at no successor. A revision that leaves the recorded value where it was is not a correction at all and is refused: nothing is retired and no question reads as corrected. Its question can no longer be answered, and neither can a question about the corrected document on a work the rule deliberately left alone (one holding a committed receipt): the answer door refuses both as *source corrected* and says when the source moved.
+_Avoid_: Re-evaluation, re-assessment as synonyms — those act on recorded experience or on a posted outcome and are parked; this one retires an instruction that never posted. Calling it a supersession: *superseded by* is what a restatement (a person's own act) writes, and a source correction writes none.
+<!-- #885 -->
 
 **Accounting plan**:
 An explicitly authorised schedule for future accounting. It records what it posts, the schedule it
@@ -232,6 +259,17 @@ tie-out compares the books against, never a posting in its own right.
 _Avoid_: Calling an unmapped target an error — it is work a person has still to do; calling a
 target a journal line.
 
+**Opening Work**:
+The Work record an approved opening batch carries: one per approval — the seed batch, then one per
+correction batch — under the `opening_balance` purpose, so the opening appears on the Work list,
+the Work detail and the firm Activity feed like every other accounting act. It is deterministic and
+human-approved, so it has no model run, no agent task and no journal basis: its entries were
+approved and tied out before it was written, and what it records is which batch of which seed was
+approved, by whom, and how many entries it carried.
+_Avoid_: Calling it the opening basis or the opening receipt — the basis is the versioned set of
+balances and the receipt is the per-entry approval record; treating it as work still to be done (it
+is written only once the batch is already finalized); expecting it to name a single posted entry.
+
 **Provenance (document / keyed)**:
 Whether a target came from stored evidence on the bound document — a named extraction region whose
 text the database re-derives the figure from — or from a named professional's keying. Every target
@@ -250,6 +288,18 @@ _Avoid_: Resending the same invitation; a pending invitation shown as a member; 
 creation of a new firm as a synonym for joining one; a per-firm seat count as a reason to refuse
 one (see **Admission capacity**).
 
+**Issuer lapsed**:
+The fifth effective status a still-`pending` invitation can read, computed at READ TIME by one
+expression the invitee's preview and the admin roster BOTH carry, when the invitation's issuer no
+longer holds an ACTIVE membership at admin rank or above (demoted, or removed from the firm
+entirely). It is reversible — re-promoting the issuer restores `pending` on the very next read, no
+write anywhere — and it does not by itself refuse acceptance: `clara.accept_invite`'s own,
+unrelated wall (the invited role must not outrank the issuer's CURRENT rank) is what may still
+refuse, so an issuer-lapsed invitation for a low-enough role accepts normally.
+_Avoid_: A sixth stored value on `firm_invites.status` (it is never written there); a synonym for
+`revoked` or `expired`, which are settled outcomes this status never overrides; assuming the
+invitation itself is unusable — only accept_invite's own rank wall decides that.
+
 **Membership / Roster**:
 The firm's live list of who holds access and at what role, read at two different floors: the
 roster from bookkeeper upward, and the invitations from admin upward. It is the authority a
@@ -265,6 +315,21 @@ last-owner trigger that refuses the demotion or removal leaving a firm with none
 is re-read inside the door, after its lock, rather than trusted from the request.
 _Avoid_: A client-side rank check as the wall; treating a control the interface shapes away as a
 permission; assuming a rank observed at page load is still the caller's.
+
+**Role at the act**:
+The role an actor held in a firm when the database recorded a governed act, written on the act's own
+audit row by the database that witnessed it and readable afterwards however the roster has moved
+since. Distinct from the actor's role *now* and from the authority the door *required*: the three
+are separate facts and a surface that shows one must not show it as another. It is measured at the
+moment the act is recorded, not at the moment the door admitted the call, so a role change that
+lands between the two is what the act then carries. An act recorded before Clara kept this is
+**unknown**, said in that word; a firm can also read `none`, the measured fact that a named actor
+held no active membership — the agent identity on a wake act — and `no actor`, the measured fact
+that the act names nobody at all. Neither marker is a rank, and neither is the same thing as
+unknown.
+_Avoid_: Reading the current roster as the authority a past act ran under; back-dating or inferring
+a historical role; treating `unknown` as "no role" or "no actor"; re-evaluating work already run
+under an authority later found insufficient.
 
 **Access history**:
 Granting, changing and withdrawing access are receipted, append-only facts: each writes an audit
@@ -325,6 +390,18 @@ _Avoid_: Promising a reversal; presenting a pre-lineage merge as correctable; re
 The resumable list of facts a firm must state about itself, derived from the real required items on the firm's own setup record. Progress is the count of those required items that are settled; an item already answered is never asked again, an optional item may be set aside with a stated reason, and the rest of the workspace stays usable throughout.
 _Avoid_: A progress bar with no required items behind it; an onboarding approval ritual; treating optional education as a prerequisite.
 
+**Firm setup applicability**:
+Whether a firm-setup catalogue item is asked of this firm at all, derived live from an earlier answer already on the same setup record rather than stored as a flag of its own: applicable, inapplicable, or not-yet-determined while the answer it depends on is still unanswered. An inapplicable item is never asked and is excluded from the required count on both sides; an item answered before it became inapplicable keeps that answer and is reported inapplicable rather than deleted.
+_Avoid_: A stored applicability flag that can drift from the answer it depends on; asking or counting an item whose predicate is not yet determined; deleting an answer because its item became inapplicable.
+
+**Firm setup catalogue note**:
+The one accountant-readable sentence a firm-setup catalogue item shows under its question — what the answer is used for and Clara's stated boundary, never an accounting conclusion. It is what the checklist renders; the catalogue's separate engineer note (file names, line numbers, provenance) is never shown to a user. A catalogue item can also be retired, which removes it from every firm's checklist, its counters and its required set without editing or deleting the append-only row itself — today that is a migration-time act: the catalogue carries the retire mark, but no door sets it, so retiring an item is still a reviewed schema change rather than something a person does from a screen.
+_Avoid_: The engineer's provenance note as something a firm admin should ever see; treating a retired item as deleted, or as still asked of a firm that has not yet answered it; describing retirement as something a firm can do for itself.
+
+**Firm setup education tip**:
+A short optional item on the firm-setup checklist that carries a title and a body and offers only "Got it" or "Later" — never an answer form, never counted toward the required total, never a blocker and never a nag from the firm home. Reading or skipping one settles it the same way ("read-or-later", not "remind me later"): either action makes it disappear from the checklist on the next read, and neither one writes an audit row or emits a domain event, because a tip is product guidance, never an accounting position. It is seeded and grouped exactly like every other catalogue item; only its kind and its own narrow settlement door set it apart from the twelve accounting facts.
+_Avoid_: Treating "Later" as a snooze that brings the tip back; recording a tip's dismissal as an accounting act or letting it appear in Activity; answering or deferring a tip through the doors the twelve accounting facts use.
+
 **Firm profile fact**:
 A firm-scope knowledge record about the accounting firm's own circumstances, carrying its source, its actor and its revision history like any other knowledge record. Distinct from a client fact, which belongs to one client, and from a **Firm knowledge default**, which is a cross-client instruction rather than a statement about the firm. The firm's registration identity — its registered name, registration number, tax identifier, registered address and professional-body number — is recorded on the firm's setup record with its author rather than as a knowledge record.
 _Avoid_: Recording a firm fact as a client fact; reading a firm profile fact as authority to post.
@@ -384,6 +461,10 @@ _Avoid_: A second question status; proof that the Work advanced.
 **Evidence link**:
 The append-only record that one client document is the source behind one posted journal entry: which Work and operation identity bound it, who bound it, when, and whether it was bound as the entry was recorded or attached afterwards. A document backs at most one live posted entry; a reversal releases the link so the corrected entry may cite the same document. Evidence is optional — an entry recorded without a document is a complete accounting fact.
 _Avoid_: A column rewritten on the posted entry; a claim that the document was independently verified; "unsourced" as a synonym for "wrong".
+
+**Document binding claim**:
+The serialization token behind “one document, one posted entry” when two people act on the same document at the same moment: whoever takes a document’s binding first keeps it, and the other is refused with the wall’s ordinary conflict. It records no accounting fact and answers no question — the evidence wall and the opening wall still decide what is a conflict.
+_Avoid_: Evidence link, tie document or “document lock” as synonyms — an evidence link is the durable record of which document backs which posted entry, a tie document is the one document an opening seed binds its items to, and a claim is neither of those and is never shown to a person.
 
 **Document filing**:
 One live placement of a document into one client's books, with the attribution act that authorised it. A document may be filed to more than one client of the firm at once, and a filing is *retired* rather than deleted — a retired filing stays readable, names its reason and, when a wrong-client correction retired it, the correction that did so.
@@ -478,13 +559,29 @@ _Avoid_: Conflating a source read with reading the extracted facts or overlay dr
 One observable, attributable change in the firm's books or work — a domain event, an agent receipt or a committed operation receipt — with its actor and delegation, client, time, status and links to its Work, object, source and replacement outcome.
 _Avoid_: An internal task name or private model reasoning; a pending question (Work owns those); a substitute for the object's own current state.
 
+**Activity kind**:
+The one closed group an Activity event is filed under, computed at read time from the event's own family and used as both the feed's filter vocabulary and its row badge: documents, journal, close, report, agent, work, people, assets, counterparties, clients or firm. A family the ladder does not name rides a stated default rather than inventing a group, and the browser's vocabulary is the door's, never a second list.
+_Avoid_: A per-event label chosen in the browser; a stored column on the event; "documents" as a place to put anything unclassified.
+
 **Kept sweep receipt**:
 A `sweep.run_completed` event whose run drafted or posted at least one item, and so remains in the Activity feed as an attributed agent act. A run that changed nothing is excluded rather than shown as unattributed noise.
 _Avoid_: Every sweep run; a refusal or a skip counted as "effect".
 
 **Document capability**:
-What Clara can actually do with an admitted upload, stated per (file format × document type) on four independent levels: custody (the bytes are sealed and retrievable), byte extraction (a reader turned them into stored, inspectable content), typed facts (a lane can persist typed values with their source regions) and business operation (the pair can drive an accounting operation). Each level is `supported`, `stored_only`, `unsupported` or `planned`, and a level is published with the reason for it.
-_Avoid_: "Supported" as one word about a file type; a promise inferred from a filename or an extension; permission — an egress consent gate remains the authority over whether a read may happen at all.
+What Clara can actually do with an admitted upload, stated per (file format × document type) on four independent axes: custody (the bytes are sealed and retrievable), byte extraction (a reader turned them into stored, inspectable content), typed facts (a lane can persist typed values with their source regions) and business operation (whether, and how, the pair can drive an accounting operation). Custody, byte extraction and typed facts each read `supported`, `stored_only`, `unsupported` or `planned`; business operation admits one more level besides, `proposal_only` (#988). A level is always published with the reason for it.
+_Avoid_: "Supported" as one word about a file type; a promise inferred from a filename or an extension; permission — an egress consent gate remains the authority over whether a read may happen at all; treating business operation's vocabulary as the same closed four as the other three axes.
+
+<!-- #846 -->
+**Capability registry version**:
+The one integer the whole document-capability registry publishes at a time, so a surface can say WHICH registry it rendered. It only ever rises: a pair's version cannot be undercut by an update, by re-keying a row onto that pair, or by retiring the row and publishing it again, because the highest version each (format × document type) pair has ever carried is remembered separately, outlives the row, and can itself be neither deleted, lowered, re-keyed nor truncated away. A publish is all-or-nothing across the table — a change that would leave two versions on the registry at once is refused. A change to the registry's VOCABULARY (widening an axis's allowed values) is not itself a publish and does not raise the version unless it also republishes a row's content (#988).
+_Avoid_: A per-row version; a version that identifies a document's own revision; a re-publication at a lower number described as a correction; assuming every migration that touches the registry raises this integer; reading "cannot be undercut" as a guarantee against a superuser who drops a trigger — that is the estate's standing honesty boundary, not a route.
+<!-- #846 -->
+
+<!-- #988 -->
+**Business operation: proposal-only**:
+A `business operation` level where Clara reads a document deterministically and derives a real proposal — the counterparty, account or date it would use — but never carries that proposal into a posted operation on its own authority; a person confirms it first. Distinct from `stored_only`, where Clara derives nothing at all, and from `supported`, where a posted operation follows without that confirmation step. No document kind is classified at this level until a migration explicitly names it: `prior_gl` fits the description but stays `stored_only` by owner ruling, pending the Client Knowledge Base's own prior-GL ingestion path.
+_Avoid_: Treating it as a synonym for `stored_only` ("Clara does nothing either way"); treating it as `supported` ("the proposal is already a posted fact"); assuming any row carries this level without checking — none does yet.
+<!-- #988 -->
 
 **Typed fact**:
 A value Clara read out of a document and persisted with its exact source: the document's own version, the page/region it was read from, the field path naming it, and the engine and model version that produced it. A typed fact is a reading of a source, never a confirmed fact about the client. Client Knowledge LINKS to a typed fact — by extraction, region and field path — and never copies it: a document fact becomes a client fact only through Knowledge's own confirmation, with its own actor, scope and status.
@@ -537,6 +634,10 @@ _Avoid_: An unrestricted shortcut for changing the total without its supporting 
 **Operator support case**:
 One thing on the estate's admission surface that needs BELCORT's operator firm: an undecided firm registration with no payment against it, a registration payment that has not opened a firm, or a payment-provider event the estate could not act on. Each case names its affected entity and its current state.
 _Avoid_: Any view of another firm's books; a support ticket; a paid registration presented as awaiting an operator's approval.
+
+**Operator support act**:
+A decision BELCORT's operator firm takes on the admission surface and nowhere else: rejecting a firm registration, changing the estate's admission capacity, or resolving a payment-provider problem. Each leaves an attributable audit row AND one domain event under the operator firm, so the act is readable on that firm's own Activity and on no other firm's; a repeat under the same operation key replays its receipt and writes neither again. Approving a registration is the same shape, except that it also mints a firm and is recorded under that new firm.
+_Avoid_: Any act on a firm's books; an estate-wide audit read; a support ticket.
 
 **Support receipt**:
 Who decided an operator support case, when, and the reason they gave — the registration's own decision or the provider problem's resolution stamp, read back through the same queue that offered the act.
@@ -690,8 +791,16 @@ One admitted source's membership of an intake batch, carrying up to three identi
 _Avoid_: Calling an unattributed source a Work; calling a processing task a child; a percentage; a total; a page length.
 
 **Member dependency**:
-The DECLARED reason a batch member is waiting: `awaiting_fact` (a question is open), `awaiting_attribution` (the document is in custody with no live filing), `awaiting_capacity` (the firm's daily document quota, which resets at 08:00 `Asia/Kuala_Lumpur`). The read unions the declaration with the signals it can derive and says which is which, so the batch's waiting number can be explained against any other number over the same relation.
+The DECLARED reason a batch member is waiting: `awaiting_fact` (a question is open), `awaiting_attribution` (the document is in custody with no live filing), `awaiting_capacity` (the firm's daily document quota, which resets at MYT midnight in `Asia/Kuala_Lumpur`). The read unions the declaration with the signals it can derive and says which is which, so the batch's waiting number can be explained against any other number over the same relation.
 _Avoid_: Treating a quota block as a failure; treating the declared value as the only source of "waiting".
+
+**Batch cancellation re-issue**:
+A second, genuinely new decision to stop an intake batch, admitted only while it is still `cancelling` and its stored canceller no longer holds an active bookkeeper-or-above membership **of this firm** — the same fact the batch board names as `cancel_blocked: canceller_not_active`. A different, currently active bookkeeper decides it under its own fresh operation key; the original decision is never mutated, replayed under the new identity, or re-keyed onto the new actor's children, so both decisions stay independently readable. A batch whose stored canceller is still active, or one already terminal, refuses a second decision exactly as before.
+_Avoid_: A retry of the original decision; a remedy for a terminal (`cancelled`) batch, which has nothing left to decide; treating the block as cleared by anything other than a new decision actually being admitted; reading "no longer active" as estate-wide — a canceller who left this firm for another one is blocked HERE and the re-issue is exactly what that case needs.
+
+**Refused intake record**:
+The durable, committed intake a file leaves behind when the firm's daily document or page ceiling turns it away at upload time. It stands at the intake lane's ordinary `failed` status with its ordinary `limit` failure reason, carries the firm, the attempted file's own declared name, type and size, and and the moment of the attempt. WHICH of the two ceilings refused it lives in the append-only audit trail (and in the operation receipt the attempt returned), never as a column of the record itself — the record carries the lane's ordinary `limit` reason and nothing that separates documents from pages. It is a record OF the refusal, not an admitted file: it holds no reservation, no capability and no bytes, and it consumed none of the quota that refused it, so nothing re-reads it on its own and the file has to be uploaded again. The person uploading sees exactly the refusal they always saw; the record is what lets the firm answer "was my receipt turned away, and when" afterwards.
+_Avoid_: Calling it a failed upload (nothing was uploaded); treating it as consuming quota; a separate log or table of refusals; expecting one for a refusal that happened before this record existed; expecting the intake row alone to say which ceiling, or expecting the queue to resume it after the reset.
 
 **Unassigned source**:
 An adopted document with no live filing: the firm holds it and its bytes are sealed and readable, but no client's shelf has claimed it. It is firm-visible, awaits exactly ONE attribution act, and leaves the population the moment that act lands. A document that is unassigned is not a document that failed — it is a document nobody has answered a question about yet.
@@ -778,3 +887,8 @@ _Avoid_: A timestamp (two transactions with the same clock reading can be on eit
 **Definition version / 定义版本**:
 The named rule a published figure was computed under, carried on the figure itself so a number and the definition behind it travel together. A change of rule is a new version rather than a silent recomputation of old answers.
 _Avoid_: Metric definition version — that belongs to the delta-metric lane and is a different object; a schema or migration number; an API version.
+
+<!-- #960 -->
+**Processing cap / 处理上限**:
+One of the four per-firm document-processing limits a firm sets for itself — documents per day, pages per day, documents processed at once, model readings at once. The firm's own owner or admin sets each one independently, receipted and audited; a cap nobody has set is ABSENT rather than zero, and the enforcing doors fall back to their own built-in figures until the firm's first write. The estate's own ceiling sits above whatever a firm sets and no firm can raise it.
+_Avoid_: A quota a firm has bought; an operator-granted allowance (the operator sets no firm's caps); treating an unset cap as zero, or as the value a first write would land.

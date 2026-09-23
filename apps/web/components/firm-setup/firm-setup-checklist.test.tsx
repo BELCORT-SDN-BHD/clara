@@ -132,9 +132,11 @@ function mock(handlers: {
   answer?: (call: number, body: unknown) => Response;
   commit?: () => Response;
   defer?: () => Response;
+  dismiss?: (call: number, body: unknown) => Response;
 }, calls: Call[] = []): typeof fetch {
   let setupCalls = 0;
   let answerCalls = 0;
+  let dismissCalls = 0;
   return (async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url);
     const body = init?.body ? JSON.parse(String(init.body)) : null;
@@ -150,6 +152,14 @@ function mock(handlers: {
     }
     if (u.includes("/rest/v1/rpc/commit_firm_setup")) return (handlers.commit ?? (() => jsonResponse({ state: "committed" })))();
     if (u.includes("/rest/v1/rpc/defer_firm_setup_item")) return (handlers.defer ?? (() => jsonResponse({ item_key: "mia" })))();
+    if (u.includes("/rest/v1/rpc/dismiss_firm_setup_tip")) {
+      dismissCalls += 1;
+      const record = body as Record<string, unknown>;
+      return (handlers.dismiss ?? (() => jsonResponse({
+        plan_id: ENVELOPE.plan_id, item_key: record.p_item_key,
+        state: record.p_action === "deferred" ? "deferred" : "answered", tip_action: record.p_action,
+      })))(dismissCalls, body);
+    }
     throw new Error(`unexpected fetch: ${u}`);
   }) as typeof fetch;
 }
@@ -417,17 +427,30 @@ test("fs.web.07 a group with more than one pending fact walks a bounded stepper,
 });
 
 test("fs.web.08 the not-started face is distinct from completion, and the seed action says accepted facts are kept", async () => {
+  // #935 fix round (review L06-SPEC-06) — the catalogue holds a tip, so `catalogue_total` is SIX.
+  // The banner counts FACTS, and a tip is not one: "There are {count} facts to state about this
+  // firm" must read five. Measured on clara_l06 the real numbers are 15 and 12.
   const NOT_SEEDED = {
     ...ENVELOPE,
     seeded: false,
+    catalogue_total: 6,
     counter: { required_answered: 0, required_total: 3 },
-    items: ENVELOPE.items.map((i) => ({ ...i, state: "unseeded" })),
+    items: [
+      ...ENVELOPE.items.map((i) => ({ ...i, state: "unseeded" })),
+      item({
+        item_key: "tip_invite_colleagues", kind: "education", group_key: "tips", sort_order: 130,
+        question: "Invite your colleagues", note: "Settings -> Members sends an invitation.",
+        required: false, state: "unseeded", answer_shape: "text",
+      }),
+    ],
   };
   await withMockedEnv(mock({ setup: () => jsonResponse(NOT_SEEDED) }), async () => {
     const h = await renderComponent(App());
     try {
       await settleUntil(h, () => byTestId(h, "firm-setup-not-started") !== null, "the not-started face");
       assert.match(h.text(), /Firm setup has not started/);
+      assert.match(h.text(), /There are 5 facts to state about this firm/,
+        "the not-started banner counted the education tip as a fact to state");
       assert.equal(byTestId(h, "firm-setup-completed"), null,
         "the not-started face and the completion face are the same box");
       assert.ok(byTestId(h, "firm-setup-seed"), "the not-started face offers no way to start");
@@ -438,9 +461,19 @@ test("fs.web.08 the not-started face is distinct from completion, and the seed a
     } finally { await h.unmount(); }
   });
 
+  const STILL_PENDING_TIP = "tip_invite_colleagues";
   const COMMITTED = { ...ENVELOPE, state: "committed", committed_at: "2026-09-16T02:00:00Z",
     counter: { required_answered: 3, required_total: 3 }, required_outstanding: [],
-    items: ENVELOPE.items.map((i) => ({ ...i, state: "answered", answer: "recorded" })) };
+    items: [
+      ...ENVELOPE.items.map((i) => ({ ...i, state: "answered", answer: "recorded" })),
+      // #935 — a tip nobody ever dismissed before the checklist was committed. There is no reopen
+      // door to answer it through, so it must not appear at all rather than showing dead buttons.
+      item({
+        item_key: STILL_PENDING_TIP, kind: "education", group_key: "tips", sort_order: 130,
+        question: "Invite your colleagues", note: "Settings -> Members sends an invitation.",
+        required: false, state: "pending", answer_shape: "text",
+      }),
+    ] };
   await withMockedEnv(mock({ setup: () => jsonResponse(COMMITTED) }), async () => {
     const h = await renderComponent(App());
     try {
@@ -449,6 +482,11 @@ test("fs.web.08 the not-started face is distinct from completion, and the seed a
       assert.equal(byTestId(h, "firm-setup-commit"), null, "a committed plan still offered Finish");
       assert.equal(byTestId(h, "firm-setup-answer-legal_name-action"), null,
         "a committed plan still offered an Answer control");
+      // #935 — a still-pending tip on a COMMITTED plan renders nothing: no title, no Got it, no
+      // Later. Every other write control on this surface disappears on commit; a tip is no
+      // exception, and there is no reopen door to act on it through once it is stuck here.
+      assert.equal(byTestId(h, `firm-setup-tip-${STILL_PENDING_TIP}`), null,
+        "a pending tip on a committed plan rendered its title and buttons");
     } finally { await h.unmount(); }
   });
 });
@@ -654,6 +692,301 @@ test("fs.web.12 `_reserve_op`'s bare CLR10 is reported as ALREADY RECORDED, not 
       assert.equal(byTestId(h, "firm-setup-error-legal_name"), null,
         "a receipt-level refusal was painted as a field error on the typed value");
       assert.doesNotMatch(h.text(), /The database refused this value/);
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.13 an item never asked (inapplicable or undetermined) is hidden; one answered before it became inapplicable stays visible, marked, with no form", async () => {
+  const WITH_APPLICABILITY = {
+    ...ENVELOPE,
+    items: [
+      ...ENVELOPE.items,
+      // #891 — never seeded, and never will be while the predicate reads this way: hidden.
+      item({
+        item_key: "mpers_eligibility", sort_order: 90, group_key: "accounting", kind: "capture",
+        question: "Is the firm eligible to apply MPERS?", required: false, state: "unseeded",
+        applicability: "inapplicable",
+      }),
+      // #891 — the dependency it reads is itself unanswered: also hidden, for a different reason.
+      item({
+        item_key: "tin", sort_order: 70, group_key: "tax", kind: "capture",
+        question: "What is the firm's MyInvois TIN?", required: false, state: "unseeded",
+        applicability: "undetermined",
+      }),
+      // #891 — answered while applicable, then its dependency changed: the answer survives, and
+      // this surface marks it inapplicable rather than hiding it or offering a form to redo it.
+      item({
+        item_key: "framework", sort_order: 100, group_key: "accounting", kind: "must_ask",
+        question: "On which reporting framework are the firm's financial statements prepared?",
+        required: true, state: "answered", answer: { framework_label: "MFRS" }, answer_field: "framework_label",
+        answered_by: "u1", answered_by_name: "Aisyah Rahman", answered_at: "2026-09-01T00:00:00Z",
+        applicability: "inapplicable",
+      }),
+    ],
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(WITH_APPLICABILITY) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+
+      assert.equal(byTestId(h, "firm-setup-item-mpers_eligibility"), null,
+        "an inapplicable, never-answered item was rendered");
+      assert.equal(byTestId(h, "firm-setup-item-tin"), null,
+        "an undetermined item was rendered before its dependency is even answered");
+
+      const row = byTestId(h, "firm-setup-item-framework");
+      assert.ok(row, "an item answered before it became inapplicable was hidden -- its answer would be lost from view");
+      assert.ok(byTestId(h, "firm-setup-inapplicable-framework"), "the inapplicable badge did not render");
+      assert.equal(textOf(byTestId(h, "firm-setup-inapplicable-framework") as never), "Not applicable");
+      assert.equal(textOf(byTestId(h, "firm-setup-answer-framework") as never), "MFRS",
+        "the earlier answer must still be shown");
+      assert.equal(byTestId(h, "firm-setup-change-framework-action"), null,
+        "an inapplicable item still offered a form to change its answer");
+      assert.equal(byTestId(h, "firm-setup-answer-framework-action"), null);
+      assert.equal(byTestId(h, "firm-setup-skip-framework"), null);
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.14 an education tip renders a title, a body, Got it and Later with NO answer form, never counts, and disappears once acted on — both actions", async () => {
+  const calls: Call[] = [];
+  const TIP_A = "tip_invite_colleagues";
+  const TIP_B = "tip_knowledge_page";
+  const tip = (key: string, question: string, note: string, sort: number) =>
+    item({
+      item_key: key, kind: "education", group_key: "tips", sort_order: sort,
+      question, note, required: false, state: "pending", answer_shape: "text",
+    });
+  const BOTH_PENDING = {
+    ...ENVELOPE,
+    items: [
+      ...ENVELOPE.items,
+      tip(TIP_A, "Invite your colleagues", "Settings -> Members sends an invitation by email.", 130),
+      tip(TIP_B, "Where Clara keeps what it knows", "Every client has a Knowledge page.", 140),
+    ],
+  };
+  const AFTER_A = {
+    ...BOTH_PENDING,
+    items: BOTH_PENDING.items.map((i) =>
+      i.item_key === TIP_A ? { ...i, state: "answered", answer: { tip_action: "acknowledged" } } : i),
+  };
+  const AFTER_BOTH = {
+    ...AFTER_A,
+    items: AFTER_A.items.map((i) =>
+      i.item_key === TIP_B ? { ...i, state: "deferred", answer: { tip_action: "deferred" } } : i),
+  };
+  await withMockedEnv(mock({
+    setup: (n) => jsonResponse(n === 1 ? BOTH_PENDING : n === 2 ? AFTER_A : AFTER_BOTH),
+  }, calls), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+
+      // A TIP DOES NOT MOVE THE COUNTER — still the fixture's own 2 of 3, unrelated to the tips.
+      assert.equal(textOf(byTestId(h, "firm-setup-counter") as never), "2 of 3 required facts recorded");
+
+      const tipRow = byTestId(h, `firm-setup-tip-${TIP_A}`);
+      assert.ok(tipRow, "the tip did not render");
+      assert.match(textOf(tipRow as never), /Invite your colleagues/);
+      assert.match(textOf(tipRow as never), /Settings -> Members/);
+      // NO answer form and NO accounting-item controls for a tip.
+      assert.equal(byTestId(h, `firm-setup-answer-${TIP_A}-action`), null, "a tip offered an answer control");
+      assert.equal(byTestId(h, `firm-setup-skip-${TIP_A}`), null, "a tip offered the accounting skip control");
+      // TWO tips sharing one group must NOT trigger the bounded-walk mechanism built for facts.
+      assert.equal(byTestId(h, "firm-setup-answer-group-tips"), null,
+        "two tips triggered the accounting bounded-walk stepper");
+
+      // "Got it" on the first tip.
+      await press(h, byTestId(h, `firm-setup-tip-gotit-${TIP_A}`), "Got it");
+      await settleUntil(h, () => byTestId(h, `firm-setup-tip-${TIP_A}`) === null, "tip A's disappearance");
+      const sentA = calls.find((c) => c.url.includes("dismiss_firm_setup_tip"));
+      assert.ok(sentA, "Got it never reached the door");
+      assert.equal((sentA?.body as Record<string, unknown>).p_item_key, TIP_A);
+      assert.equal((sentA?.body as Record<string, unknown>).p_action, "acknowledged");
+      // The second tip is untouched and still offers both controls.
+      assert.ok(byTestId(h, `firm-setup-tip-${TIP_B}`), "the untouched tip disappeared too");
+
+      // "Later" on the second tip.
+      await press(h, byTestId(h, `firm-setup-tip-later-${TIP_B}`), "Later");
+      await settleUntil(h, () => byTestId(h, `firm-setup-tip-${TIP_B}`) === null, "tip B's disappearance");
+      const sentB = calls.filter((c) => c.url.includes("dismiss_firm_setup_tip"))[1];
+      assert.ok(sentB, "Later never reached the door");
+      assert.equal((sentB?.body as Record<string, unknown>).p_item_key, TIP_B);
+      assert.equal((sentB?.body as Record<string, unknown>).p_action, "deferred");
+
+      // Neither dismissal moved the required counter.
+      assert.equal(textOf(byTestId(h, "firm-setup-counter") as never), "2 of 3 required facts recorded");
+
+      // #935 fix round (review L06-SPEC-05) — and the CARD goes with the last tip. "Reading or
+      // skipping a tip is remembered so it stops appearing" is not satisfied by an empty
+      // "A few things worth knowing" box that stays on the page for the life of the firm.
+      // `assert.ok(x === null)` rather than `assert.equal(x, null)`: on failure the latter asks
+      // node to diff a live DOM node and dies formatting it ("Array buffer allocation failed"),
+      // which hides the real reason the cell is red.
+      assert.ok(byTestId(h, "firm-setup-group-tips") === null,
+        "the tips card stayed on the page with every tip dismissed");
+      assert.doesNotMatch(h.text(), /A few things worth knowing/,
+        "the empty tips card still prints its heading and purpose");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.15 a PENDING item that has become inapplicable is kept out of the bounded group walk, not offered a form inside it", async () => {
+  // #891 fix round (review L06-SPEC-01). `isNowInapplicable` guarded only the PER-ITEM control;
+  // the group's own pending set counted the row, so a group holding two answerable facts and one
+  // now-inapplicable pending row offered "Answer these 3 together" and built a three-step form
+  // whose first step asked the question the same screen marks "Not applicable". Reachable on the
+  // real doors: answer turnover >= RM1M, reconcile (TIN is seeded pending), then correct turnover
+  // back under the threshold -- measured on clara_l06, tax then holds [tin(inapplicable), fye].
+  const WITH_PENDING_INAPPLICABLE = {
+    ...ENVELOPE,
+    items: [
+      ...ENVELOPE.items,
+      item({
+        item_key: "turnover", sort_order: 60, group_key: "tax", kind: "must_ask",
+        question: "What is the firm's annual turnover band?", required: true, state: "pending",
+        answer_shape: "choice", answer_options: ["<RM1M", "RM1M-5M"], applicability: "applicable",
+      }),
+      item({
+        item_key: "tin", sort_order: 70, group_key: "tax", kind: "capture",
+        question: "What is the firm's MyInvois TIN?", required: false, state: "pending",
+        applicability: "inapplicable",
+      }),
+    ],
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(WITH_PENDING_INAPPLICABLE) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+
+      // The row itself still renders, marked, with no control of its own (fs.web.13's rule, on a
+      // PENDING row rather than an answered one).
+      assert.ok(byTestId(h, "firm-setup-item-tin"), "a seeded, pending, inapplicable row was hidden");
+      assert.ok(byTestId(h, "firm-setup-inapplicable-tin"), "the inapplicable badge did not render");
+      assert.equal(byTestId(h, "firm-setup-answer-tin-action"), null,
+        "a pending inapplicable item offered its own answer control");
+
+      // …and the GROUP counts only the two answerable facts.
+      const walkTrigger = byTestId(h, "firm-setup-answer-group-tax");
+      assert.ok(walkTrigger, "the tax group offered no bounded walk for its two answerable facts");
+      assert.equal(textOf(walkTrigger as never), "Answer these 2 together",
+        "the bounded walk counted the inapplicable row");
+
+      await press(h, walkTrigger, "the bounded walk trigger");
+      assert.match(h.text(), /Question 1 of 2/, "the walk built a step for the inapplicable row");
+      // …and the form itself never carries the inapplicable question (the ROW still shows it,
+      // marked; the FORM must not ask it).
+      const form = byTestId(h, "firm-setup-item-form");
+      assert.ok(form, "the bounded walk rendered no form");
+      assert.doesNotMatch(textOf(form as never), /MyInvois TIN/,
+        "the walk asked the question the same screen marks Not applicable");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.16 the Finish sentence and the Finish button always say the same thing: a pending TIP (or a pending optional fact) never claims completion is unavailable", async () => {
+  // #935 fix round (review L06-SPEC-04). The sentence was driven by "no item anywhere is still
+  // pending" while the button was driven by the envelope's `required_outstanding` — the door's own
+  // gate. One pending tip, or one pending optional fact, split the two: the screen read
+  // "Finishing becomes available once every required fact is recorded or deliberately skipped."
+  // beside a working Finish button. The owner's ruling on #935 is explicit — "a tip never counts
+  // toward the required total or blocks completion".
+  const SETTLED_BUT_FOR_A_TIP = {
+    ...ENVELOPE,
+    counter: { required_answered: 3, required_total: 3 },
+    required_outstanding: [],
+    items: [
+      ...ENVELOPE.items.map((i) =>
+        i.item_key === "mia" || i.item_key === "currency"
+          ? i                                    // still pending, and OPTIONAL: never a gate
+          : { ...i, state: "answered", answer: "recorded" }),
+      item({
+        item_key: "tip_invite_colleagues", kind: "education", group_key: "tips", sort_order: 130,
+        question: "Invite your colleagues", note: "Settings -> Members sends an invitation.",
+        required: false, state: "pending", answer_shape: "text",
+      }),
+    ],
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(SETTLED_BUT_FOR_A_TIP) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => byTestId(h, "firm-setup-commit") !== null, "the Finish section");
+      assert.ok(byTestId(h, `firm-setup-tip-tip_invite_colleagues`), "the fixture's tip is not on screen");
+      assert.match(h.text(), /Every required fact has been recorded or skipped/,
+        "a pending tip suppressed the ready sentence");
+      assert.doesNotMatch(h.text(), /Finishing becomes available once/,
+        "the screen said finishing was unavailable beside a working Finish button");
+      assert.notEqual(byTestId(h, "firm-setup-commit")?.getAttribute?.("disabled"), "",
+        "the Finish control was disabled although nothing required is outstanding");
+    } finally { await h.unmount(); }
+  });
+
+  // …and the sentence still refuses when the DOOR would: one required fact outstanding.
+  const ONE_REQUIRED_LEFT = { ...SETTLED_BUT_FOR_A_TIP, required_outstanding: ["legal_name"] };
+  await withMockedEnv(mock({ setup: () => jsonResponse(ONE_REQUIRED_LEFT) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => byTestId(h, "firm-setup-commit") !== null, "the Finish section");
+      assert.match(h.text(), /Finishing becomes available once/,
+        "an outstanding required fact did not say finishing is unavailable");
+      assert.doesNotMatch(h.text(), /Every required fact has been recorded or skipped/);
+      assert.equal(byTestId(h, "firm-setup-commit")?.getAttribute?.("disabled"), "",
+        "the Finish control was enabled with a required fact outstanding");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.17 a half-seeded checklist keeps its Finish section and calls the reconcile control an UPDATE, never 'Start firm setup' again", async () => {
+  // #891 fix round (review L06-SPEC-09). `seeded` means "every catalogue row this firm can still
+  // be asked has a plan item", and 0257 made a conditional row count as unseeded until its
+  // dependency is answered — so `seeded` is FALSE for a brand-new firm from the very first
+  // reconcile until both entity_type and turnover are settled. Measured on clara_l06: right after
+  // the first `seed_firm_setup_plan`, `seeded` reads false with thirteen rows already on the plan.
+  // The surface read that as "not started": it printed the big "Start firm setup" button over a
+  // half-answered checklist and hid the whole Finish section.
+  const HALF_SEEDED = {
+    ...ENVELOPE,
+    seeded: false,
+    items: [
+      ...ENVELOPE.items,
+      item({
+        item_key: "tin", sort_order: 70, group_key: "tax", kind: "capture",
+        question: "What is the firm's MyInvois TIN?", required: false, state: "unseeded",
+        applicability: "applicable",
+      }),
+    ],
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(HALF_SEEDED) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+
+      assert.ok(byTestId(h, "firm-setup-not-started") === null,
+        "a checklist with answers on it rendered the not-started face");
+      const seedControl = byTestId(h, "firm-setup-seed");
+      assert.ok(seedControl, "there is no way to pick up the newly applicable question");
+      assert.equal(textOf(seedControl as never), "Update the checklist",
+        "a half-answered checklist still offered to 'Start firm setup'");
+
+      // …and finishing does not disappear mid-walk.
+      assert.ok(byTestId(h, "firm-setup-commit"), "the Finish section vanished from a started checklist");
+      assert.match(h.text(), /Finish setup/);
+    } finally { await h.unmount(); }
+  });
+
+  // A genuinely untouched plan still says "Start firm setup" — the two labels are not one label.
+  const UNTOUCHED = {
+    ...ENVELOPE, seeded: false,
+    counter: { required_answered: 0, required_total: 3 },
+    items: ENVELOPE.items.map((i) => ({ ...i, state: "unseeded" })),
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(UNTOUCHED) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => byTestId(h, "firm-setup-not-started") !== null, "the not-started face");
+      assert.equal(textOf(byTestId(h, "firm-setup-seed") as never), "Start firm setup");
+      assert.ok(byTestId(h, "firm-setup-commit") === null,
+        "a plan with no items on it offered Finish");
     } finally { await h.unmount(); }
   });
 });

@@ -1,0 +1,46 @@
+{
+  "axis": "standards",
+  "wave": 2,
+  "lane": 7,
+  "branch": "riders/w2-lane07",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commits_reviewed": [
+    "c7b434584 db(depreciation): #974 splice list_review_queue for a depreciation_authority_pending row",
+    "d50857c08 web(firm): #974 wire depreciation_authority_pending into the Needs-you closed world",
+    "a980f8c4f web(firm): #995 retire Firm Home's status tally, keep the header's client count",
+    "cbbc594c2 test(web): #995 fix round — reword ticket references so the raw-colour lint selector doesn't trip",
+    "756cdc484 web(firm): #1009 Firm Home names an outstanding agreement and links the owner to accept it",
+    "ca4576b3c web(firm): #1009 the non-owner, failed-read and mode-copy faces of the legal prompt",
+    "53edba470 web(firm): #1009 mount the legal-standing prompt on Firm Home, beside Finish firm setup",
+    "37e33380a web(firm),test(e2e): #1009 browser walk for the owner path, and a props-typing fix",
+    "b2eb3f9fb db(activity): #998 migration 0261 retires clara.list_firm_timeline and its wrapper",
+    "ea890fd41 test(db): #998 web-reads-and-doors sheds list_firm_timeline's cohort flag and cells",
+    "8ef4596a3 test(db): #998 f-a7-pi's web-reads witness moves off the retired function"
+  ],
+  "verification_performed": [
+    "Re-ran migration 0260's own claimed sha256 pins against the actual migration file and the live clara_l07 rig: sha256(0260 file content) matches firm-scope-db-pins.corpus.ts's registered barrier hash d84659c8... exactly.",
+    "Queried clara_l07 (127.0.0.1:55747) directly: clara.list_firm_timeline is absent (0261 applied), clara.firm_timeline_visible survives with clara_authenticated SELECT, clara.list_review_queue's live prosrc contains 'depreciation_authority_pending' exactly twice (CTE + json-builder gate), owner=clara_fn_owner/SECURITY DEFINER/STABLE as claimed.",
+    "Ran packages/db/tests/depreciation-authority-pending-rowkind.test.mjs focused (no gate) against the lane rig: 6/6 pass, all through real doors (propose/sign/retire_depreciation_authority) and the real list_review_queue read.",
+    "Ran packages/db/tests/web-reads-and-doors.test.mjs + f-a7-pi.test.mjs with the full preintegration-gate chain: 44/44 pass (22+22), matching both tickets' reports.",
+    "Ran packages/db/tests/operation-census.test.mjs with the full gate chain: 10/10 pass.",
+    "Ran apps/web unit tests for firm-legal-standing-tile.test.tsx + firm-home-board.test.tsx: 22/22 pass.",
+    "Ran apps/web/tests/firm-scope-db-pins.test.ts (the reviewed-dynamic-SQL-barrier census): 22/22 pass.",
+    "Ran pnpm --filter @clara/web lint: clean, exit 0.",
+    "Ran npx tsc --noEmit on apps/web directly: confirmed exactly the two pre-existing, out-of-scope errors in components/documents/document-kind-dialog.tsx (unchanged by this diff, present byte-for-byte at the fixed point) and nothing else — no new typecheck errors from this lane's diff.",
+    "Confirmed via git diff that docs/PRD.md, docs/ARCHITECTURE.md and CONTEXT.md are untouched, and node scripts/check-frozen-workflows.mjs is clean.",
+    "Grepped apps/web and packages/runtime for any remaining list_firm_timeline/timeline.ts call site: none found outside migration history and explanatory comments."
+  ],
+  "summary": "Lane 07's four-ticket diff (#974, #995, #1009, #998) is exceptionally well-disciplined against this repo's documented standards. Both migrations (0260, 0261) follow the house law precisely: prestate pins measured on the rig (independently re-verified), correct dependency census before the drop in 0261, additive-splice idiom matching direct precedents (0146/0180) in 0260, tail assertions that behaviourally exercise the real doors, and correctly-reasoned omission of a rig-meta cohort/preintegration-gate module in both files with named precedent (0118, 0129, 0146, 0180). TDD vertical-slicing is genuinely followed — each ticket's report documents a real red-before-green cycle (independently spot-checked and reproduced for #974's DB test and the whole #998 gate chain), and #1009's four commits are cleanly sliced one seam at a time. Test quality is high throughout: components are driven through an injected loader (an established seam in this codebase), DB behaviour is proven through real doors (propose/sign/retire_depreciation_authority) rather than raw inserts, and the one e2e cell mocks only the network RPC boundary. Shared files (rig-meta.mjs, package.json's gate chain, test/manifest.txt, firm-scope-db-pins.corpus.ts) are touched with minimal, correctly-sorted hunks per work-order rule 7. Docs (README, CONTEXT.md) are updated or explicitly, correctly left alone with stated reasoning. No PRD/ARCHITECTURE edits, no applied-migration edits, no frozen-workflow touch. The only standards-relevant issue found is a pre-existing, self-acknowledged Duplicated Code smell (not newly introduced, but deepened by one field) — see the single finding below. A pre-existing, unrelated typecheck defect in document-kind-dialog.tsx (predating the wave-2 base commit) blocks e2e builds repo-wide; all three touching reports (974, 995, 998, 1009) correctly diagnosed it, proved it pre-existing and out of scope, and flagged it as a cross-lane follow-up — this is not a lane-07 standards violation.",
+  "findings": [
+    {
+      "ticket": 974,
+      "severity": "minor",
+      "kind": "smell",
+      "title": "Duplicated Code: FULL_ROW_KEYS review-queue-row key roster is hand-maintained in two files",
+      "evidence": "packages/db/tests/ninth-rowkind-seeding-proposal.test.mjs:43-46 and packages/db/tests/work-question-reads.test.mjs:52-57 both define an identical FULL_ROW_KEYS array pinning clara.list_review_queue's full row-json key set. #974's commit c7b434584 edits BOTH copies by hand to add 'authority_id' (see needs-you.ts's own 'EXTENSION POINT' comment, which explicitly names this: '#629 restated pin (3) as a second file-local copy rather than importing the first; #974 keeps both in sync, but a future addition should collapse them to one shared const'). This is a Shotgun-Surgery risk for the next row kind: a twelfth addition that updates only one copy would silently desync the two censuses rather than fail loudly.",
+      "required_fix": "Extract FULL_ROW_KEYS into one shared exported const (e.g. in a small shared test-support module) that both files import, so a future row-kind addition is a single edit instead of two hand-kept copies. Not required for #974's own acceptance — the ticket kept both in sync correctly and this is pre-existing duplication (born at #629) that #974 only deepened by one key — but worth doing before a thirteenth row kind adds a third copy.",
+      "note": "Already self-identified by the implementer in needs-you.ts's own comment and listed as a follow-up in reports/wave2-lane07-ticket974.md. Reported here per this review's own mandate to name baseline smells in the diff regardless of whether the author already flagged them."
+    }
+  ]
+}

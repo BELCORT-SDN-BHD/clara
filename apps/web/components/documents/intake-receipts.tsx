@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { businessDate } from "@/lib/business-date";
 import { renderFileSize } from "@/lib/documents/file-size";
 import { renderKindLabel, needsClassification } from "@/lib/documents/kind-label";
+import { intakeFailureAdvice } from "@/lib/documents/failure-advice";
 import type { CapabilityIndex } from "@/lib/documents/capability-registry";
 import type { IntakeReceipt, IntakeReceiptsLoad } from "@/lib/documents/receipts";
 import { CapabilityTiers } from "./capability-tiers";
@@ -149,8 +150,14 @@ function ReceiptRow({
               back, not remembered. An unrecognised status renders itself rather than
               borrowing another status's phrase. */}
           <span>{statusKey ? t(statusKey) : intake.status}</span>
+          {/* THE DB's CODE AS A NEXT STEP, never the raw token. #965's 0254 made this list a
+              surface for ceiling refusals (the refused intake is now committed at
+              `failed`/`limit` instead of vanishing with its transaction), and it arrived
+              rendering the literal word `limit`. The phrasing already existed for the live upload
+              queue; `lib/documents/failure-advice.ts` is the one map both surfaces read
+              (L05-SPEC-07). */}
           {intake.status === "failed" && intake.failure_code ? (
-            <span className="text-xs text-error">{intake.failure_code}</span>
+            <span className="text-xs text-error">{intakeFailureAdvice(intake.failure_code, t)}</span>
           ) : null}
           {!receipt.filedHere ? (
             <Badge variant="outline">{t("receiptUnassigned")}</Badge>

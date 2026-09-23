@@ -7,9 +7,19 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadComplianceRegister, ackComplianceWatch, snoozeComplianceWatch, resolveComplianceWatch } from "./compliance";
+import {
+  loadComplianceRegister,
+  ackComplianceWatch,
+  snoozeComplianceWatch,
+  resolveComplianceWatch,
+  complianceWatchIdsFromRows,
+  loadComplianceWatchIdsForClient,
+  loadComplianceWatchDispositions,
+  type ComplianceClientWatch,
+} from "./compliance";
 import { isDoorRefusal } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
+import type { ReviewQueueRow } from "@/lib/firm/needs-you";
 
 function fakeSession(token: string | null = "tok"): SessionTokenAccessor {
   return { getAccessToken: async () => token };
@@ -154,5 +164,241 @@ test("a governed refusal (CLR04, the admin-only not_liable_documented conclusion
         return true;
       },
     );
+  });
+});
+
+// ===========================================================================
+// #996 — the register's own disposition read: `compliance.clients` deliberately
+// carries no watch id (this module's own header); `complianceWatchIdsFromRows`
+// is the pure extraction of THAT id from `list_review_queue`'s own
+// `row_kind==='compliance_watch'` rows, which the same door already returns.
+// ===========================================================================
+
+function makeRow(overrides: Partial<ReviewQueueRow>): ReviewQueueRow {
+  return {
+    row_kind: "compliance_watch",
+    section: "needs_review",
+    client_id: "c1",
+    counterparty_id: null,
+    filing_id: null,
+    entry_id: null,
+    question_id: null,
+    task_id: null,
+    document_id: null,
+    lane: null,
+    auto: false,
+    rule_backed: false,
+    high_stakes: false,
+    aged_since: "2026-07-01T00:00:00Z",
+    amount_cents: null,
+    period: "2026-07-31",
+    question_text: "SST registration threshold watch (digital_services)",
+    created_at: "2026-07-01T00:00:00Z",
+    id: "w1",
+    coding_kind: null,
+    watch_id: "w1",
+    tier: "crossed",
+    finding_id: null,
+    asset_id: null,
+    advance_id: null,
+    client_name: null,
+    batch_ids: null,
+    open_proposal_count: null,
+    // #974 (0260) widened ReviewQueueRow with the depreciation authority id while #996 was
+    // being written in another lane; a compliance_watch row names no authority, so null.
+    authority_id: null,
+    ...overrides,
+  };
+}
+
+test("complianceWatchIdsFromRows: a compliance_watch row's watch_id is extracted; every other row_kind is ignored", () => {
+  const rows = [
+    makeRow({ row_kind: "draft", watch_id: null, id: "e1" }),
+    makeRow({ row_kind: "compliance_watch", watch_id: "w1", id: "w1" }),
+    makeRow({ row_kind: "compliance_watch", watch_id: "w2", id: "w2", client_id: "c2" }),
+  ];
+  assert.deepEqual(complianceWatchIdsFromRows(rows), ["w1", "w2"]);
+});
+
+test("complianceWatchIdsFromRows: no compliance_watch rows yields an empty list, not an error", () => {
+  assert.deepEqual(complianceWatchIdsFromRows([makeRow({ row_kind: "open_question", watch_id: null })]), []);
+});
+
+test("loadComplianceWatchIdsForClient posts to list_review_queue scoped to the client with p_limit=500", async () => {
+  const { impl, seen } = captureFetch({
+    ...ENVELOPE_BASE,
+    rows: [makeRow({ watch_id: "w1", id: "w1" }), makeRow({ row_kind: "draft", watch_id: null, id: "e1" })],
+  });
+  await withMockedFetch(impl, async () => {
+    const ids = await loadComplianceWatchIdsForClient(fakeSession(), "c1");
+    assert.deepEqual(ids, ["w1"]);
+  });
+  const s = seen.first();
+  assert.match(s.url, /\/rpc\/list_review_queue$/);
+  assert.deepEqual(s.body, { p_scope: { client_id: "c1" }, p_cursor: null, p_limit: 500 });
+});
+
+// ===========================================================================
+// loadComplianceWatchDispositions — folding both doors into one lookup keyed
+// exactly the way ComplianceClientWatch rows are keyed (client_id + service_group).
+// ===========================================================================
+
+function watchRow(clientId: string, watchId: string): ReviewQueueRow {
+  return makeRow({ client_id: clientId, watch_id: watchId, id: watchId });
+}
+
+function acknowledgedDisposition(clientId: string, watchId: string, serviceGroup: string) {
+  return {
+    watch_id: watchId, client_id: clientId, service_group: serviceGroup, watch_kind: "sst_registration", state: "crossed",
+    acknowledged_by: "u1", acknowledged_at: "2026-09-18T00:00:00Z", snoozed_until: null,
+    resolved_conclusion: null, resolved_by: null, resolved_at: null, resolved_evidence: null,
+    updated_at: "2026-09-18T00:00:00Z",
+    events: [
+      { event_kind: "created", state_before: null, state_after: "monitored", actor: null, rationale: null, created_at: "2026-07-01T00:00:00Z" },
+      { event_kind: "acknowledged", state_before: "crossed", state_after: "crossed", actor: "u1", rationale: "Registration in progress.", created_at: "2026-09-18T00:00:00Z" },
+    ],
+  };
+}
+
+function unacknowledgedDisposition(clientId: string, watchId: string, serviceGroup: string) {
+  return {
+    ...acknowledgedDisposition(clientId, watchId, serviceGroup),
+    acknowledged_by: null,
+    acknowledged_at: null,
+    events: [{ event_kind: "created", state_before: null, state_after: "monitored", actor: null, rationale: null, created_at: "2026-07-01T00:00:00Z" }],
+  };
+}
+
+function clientWatch(overrides: Partial<ComplianceClientWatch>): ComplianceClientWatch {
+  return {
+    client_id: "c1",
+    service_group: "digital_services",
+    state: "crossed",
+    confirmed_included_cents: 0,
+    unknown_or_mixed_cents: 0,
+    screening_proxy_cents: 0,
+    earliest_crossing_month: null,
+    application_due: null,
+    future_method_status: null,
+    ...overrides,
+  };
+}
+
+function mockDispositionFetch(opts: {
+  queueRowsByClient: Record<string, ReviewQueueRow[]>;
+  dispositionsByWatch: Record<string, unknown | { code: string; message: string; status?: number }>;
+}) {
+  const calls: { url: string; body: Record<string, unknown> }[] = [];
+  const impl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    calls.push({ url: u, body });
+    if (u.includes("/rpc/list_review_queue")) {
+      const scope = body.p_scope as { client_id?: string } | undefined;
+      const rows = opts.queueRowsByClient[scope?.client_id ?? ""] ?? [];
+      return jsonResponse({ ...ENVELOPE_BASE, rows }, 200);
+    }
+    if (u.includes("/rpc/get_compliance_watch_disposition")) {
+      const watchId = body.p_watch as string;
+      const answer = opts.dispositionsByWatch[watchId];
+      if (answer && typeof answer === "object" && "code" in (answer as Record<string, unknown>) && "message" in (answer as Record<string, unknown>)) {
+        const a = answer as { code: string; message: string; status?: number };
+        return jsonResponse({ code: a.code, message: a.message }, a.status ?? 400);
+      }
+      return jsonResponse(answer, 200);
+    }
+    throw new Error(`unexpected fetch: ${u}`);
+  }) as typeof fetch;
+  return { impl, calls };
+}
+
+test("loadComplianceWatchDispositions: a resolvable watch with a recorded act is keyed by client_id:service_group", async () => {
+  const clients = [clientWatch({})];
+  const { impl } = mockDispositionFetch({
+    queueRowsByClient: { c1: [watchRow("c1", "w1")] },
+    dispositionsByWatch: { w1: acknowledgedDisposition("c1", "w1", "digital_services") },
+  });
+  await withMockedFetch(impl, async () => {
+    const out = await loadComplianceWatchDispositions(fakeSession(), clients);
+    assert.equal(out.flooredBelowBookkeeper, false);
+    const d = out.byKey.get("c1:digital_services");
+    assert.ok(d, "the disposition must be keyed exactly as the aggregate row is");
+    assert.equal(d.watchId, "w1");
+    assert.equal(d.acknowledgedBy, "u1");
+  });
+});
+
+test("loadComplianceWatchDispositions: a watch id the scoped queue read never returns leaves the row absent from byKey", async () => {
+  const clients = [clientWatch({})];
+  const { impl } = mockDispositionFetch({ queueRowsByClient: {}, dispositionsByWatch: {} });
+  await withMockedFetch(impl, async () => {
+    const out = await loadComplianceWatchDispositions(fakeSession(), clients);
+    assert.equal(out.byKey.size, 0);
+    assert.equal(out.flooredBelowBookkeeper, false);
+  });
+});
+
+test("loadComplianceWatchDispositions: a resolvable watch with nothing recorded yet (only the evaluator's own `created` row) leaves the row absent from byKey", async () => {
+  const clients = [clientWatch({})];
+  const { impl } = mockDispositionFetch({
+    queueRowsByClient: { c1: [watchRow("c1", "w1")] },
+    dispositionsByWatch: { w1: unacknowledgedDisposition("c1", "w1", "digital_services") },
+  });
+  await withMockedFetch(impl, async () => {
+    const out = await loadComplianceWatchDispositions(fakeSession(), clients);
+    assert.equal(out.byKey.has("c1:digital_services"), false);
+    assert.equal(out.flooredBelowBookkeeper, false);
+  });
+});
+
+test("loadComplianceWatchDispositions: a CLR04 refusal (below the bookkeeper floor) is named ONCE, and adds nothing to byKey", async () => {
+  const clients = [clientWatch({})];
+  const { impl } = mockDispositionFetch({
+    queueRowsByClient: { c1: [watchRow("c1", "w1")] },
+    dispositionsByWatch: { w1: { code: "CLR04", message: "insufficient role" } },
+  });
+  await withMockedFetch(impl, async () => {
+    const out = await loadComplianceWatchDispositions(fakeSession(), clients);
+    assert.equal(out.flooredBelowBookkeeper, true);
+    assert.equal(out.byKey.size, 0);
+  });
+});
+
+test("loadComplianceWatchDispositions: a non-floor refusal (CLR11 watch not found) never sets flooredBelowBookkeeper", async () => {
+  const clients = [clientWatch({})];
+  const { impl } = mockDispositionFetch({
+    queueRowsByClient: { c1: [watchRow("c1", "w1")] },
+    dispositionsByWatch: { w1: { code: "CLR11", message: "watch not found" } },
+  });
+  await withMockedFetch(impl, async () => {
+    const out = await loadComplianceWatchDispositions(fakeSession(), clients);
+    assert.equal(out.flooredBelowBookkeeper, false);
+    assert.equal(out.byKey.size, 0);
+  });
+});
+
+test("loadComplianceWatchDispositions: two clients with two service groups each resolve independently", async () => {
+  const clients = [
+    clientWatch({ client_id: "c1", service_group: "G" }),
+    clientWatch({ client_id: "c1", service_group: "I" }),
+    clientWatch({ client_id: "c2", service_group: "G" }),
+  ];
+  const { impl } = mockDispositionFetch({
+    queueRowsByClient: {
+      c1: [watchRow("c1", "w1"), watchRow("c1", "w2")],
+      c2: [watchRow("c2", "w3")],
+    },
+    dispositionsByWatch: {
+      w1: acknowledgedDisposition("c1", "w1", "G"),
+      w2: unacknowledgedDisposition("c1", "w2", "I"),
+      w3: acknowledgedDisposition("c2", "w3", "G"),
+    },
+  });
+  await withMockedFetch(impl, async () => {
+    const out = await loadComplianceWatchDispositions(fakeSession(), clients);
+    assert.ok(out.byKey.has("c1:G"));
+    assert.ok(!out.byKey.has("c1:I"), "unacknowledged stays absent even alongside an acknowledged sibling");
+    assert.ok(out.byKey.has("c2:G"));
+    assert.equal(out.flooredBelowBookkeeper, false);
   });
 });

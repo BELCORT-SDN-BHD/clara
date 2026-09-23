@@ -1,0 +1,82 @@
+{
+  "axis": "standards",
+  "lane": 10,
+  "wave": 2,
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commit_log_command": "git log 23cfad947b5598214168ba9c43d391b4e16aa745..HEAD --oneline",
+  "tickets_reviewed": [871, 872, 996, 960, 1003],
+  "reviewer_role": "read-only reviewer, no edits or commits made",
+  "verification_performed": [
+    "Re-ran packages/db/tests/firm-document-limits-writer.test.mjs with the full gate chain: 9/9 pass (matches ticket #960 report).",
+    "Re-ran packages/db/tests/preview-invite.test.mjs with the full gate chain: 15/15 pass (matches ticket #872 report).",
+    "Re-ran packages/db/tests/client-financial-pack.test.mjs with the full gate chain: 36/36 pass (matches ticket #1003 report).",
+    "Re-ran packages/db/tests/operation-census.test.mjs: 10/10 pass on this lane's own database (already at 0271; does not exercise the cross-lane frontier concern in finding L10-STD-02).",
+    "Re-ran packages/db/tests/rig-isolation.test.mjs: 20 pass / 3 skip (matches ticket #960 report; skips are the documented T10b/T10b-AC2/T19 rig conditions).",
+    "Re-ran apps/web unit tests for lib/firm/capacity-doors.test.ts, components/firm-admin/processing-capacity-card.test.tsx, lib/firm-admin/compliance.test.ts, components/firm-admin/compliance-register-panel.test.tsx: 29/29 pass combined (5+16+4+4), matching per-file counts in the #960 and #996 reports.",
+    "Ran `pnpm typecheck` at the worktree root: clean (apps/web, packages/runtime both Done).",
+    "Ran `CI=true GITHUB_ACTIONS=true pnpm lint` at the worktree root (the exact runner invocation RIG.md asks for): ONE failure, in packages/runtime's freeze-lint selftest (`(L05-STD-02 fix round) --ruling followed by another flag ...`), unrelated to lane 10 -- see note below.",
+    "Ran `pnpm --filter @clara/web e2e firm-commercial-walk` on this lane's Playwright triple (3590/3591/3592): 10/10 pass (matches ticket #960 report), including the new processing-cap cell driven against a stateful mock server."
+  ],
+  "out_of_scope_note": "packages/db/tests/rig-meta.mjs, packages/runtime, and the freeze-lint selftest failure: `git diff 23cfad9...HEAD --stat -- packages/runtime` is empty -- lane 10 touches zero packages/runtime files. The `pnpm lint` failure under CI=true/GITHUB_ACTIONS=true (freeze-lint selftest case 'L05-STD-02 fix round') therefore predates this lane's branch and is not caused by any of its five tickets; it is reported here only so the orchestrator does not mistake it for a lane-10 regression, and is NOT filed as one of the findings below because it names no ticket in this lane.",
+  "findings": [
+    {
+      "id": "L10-STD-01",
+      "ticket": 996,
+      "kind": "hard-violation",
+      "category": "documented-standard",
+      "title": "WatchDispositionLine mounts useMemberNames per row on a page built to list many rows",
+      "file": "apps/web/components/firm/compliance-watch-affordance.tsx",
+      "lines": "127 (the useMemberNames call inside the extracted WatchDispositionLine)",
+      "also_see": [
+        "apps/web/lib/members/use-member-names.ts:33-35",
+        "apps/web/components/firm-admin/compliance-register-panel.tsx:220-222 (the new .map() call site)"
+      ],
+      "evidence": "apps/web/lib/members/use-member-names.ts's own header states the standard in as many words: 'ONE READ PER MOUNT of whatever component holds this hook. The roster is small and firm-scoped; callers that show many actors on one page should hold the hook ONCE at the panel level and pass `resolve` down, rather than mounting it per row.' Ticket #996's own commit daa9bacaf extracts `WatchDispositionLine` out of `WatchDispositionReceipt` specifically so `compliance-register-panel.tsx` can reuse it, and that panel renders it inside `ComplianceClientRow`, which is itself mapped once per (client, service_group) row in `ComplianceRegisterPanel`'s `rows.map(...)` (compliance-register-panel.tsx:149-157). `WatchDispositionLine` calls `useMemberNames(sessionTokenAccessor)` directly (compliance-watch-affordance.tsx:127), so every row on the firm-wide compliance register that has a recorded disposition mounts its own `useMemberNames` instance and therefore fires its own independent `loadFirmMembers` network read -- exactly the per-row mount the hook's own header calls out as the wrong shape, extended by this diff to a page that, unlike the needs-you inbox (bounded to items needing attention), is a firm-wide register that can legitimately list many clients at once.",
+      "failure_scenario": "A firm with several open compliance watches across different clients, each carrying a recorded disposition, opens /settings/compliance: the register renders N rows, and N independent GETs of the firm's member roster fire (one per WatchDispositionLine instance) instead of one held at the panel and passed down -- the exact multiplication the hook's header was written to prevent.",
+      "required_fix": "Have `WatchDispositionLine` accept a `MemberNameResolver` (or its `resolve` function) as a prop instead of calling `useMemberNames` itself, and hoist ONE `useMemberNames(sessionTokenAccessor)` call in `ComplianceRegisterPanel` (or in `ComplianceWatchAffordance`, and thread it down to `WatchDispositionLine` from both call sites). This also removes the hook from `WatchDispositionReceipt`'s own render path without changing its behaviour, since the needs-you inbox and Tax-tab mounts already sit inside a single-affordance-per-page shape today.",
+      "note": "The identical smell already existed before this diff at the needs-you inbox mount (`needs-you-inbox.tsx` maps `ComplianceWatchAffordance`, hence `WatchDispositionReceipt`, hence this same hook, once per row) -- so this is not a smell #996 invented from nothing. It is flagged as a hard violation rather than a baseline judgement call because (a) the rule is written down verbatim in the hook's own file header, naming exactly this shape, and (b) this diff's own new code (the extraction plus the new register-panel call site) is what carries the violation onto a THIRD, firm-wide surface, when the extraction was the natural moment to fix it by accepting a resolver instead of re-deriving one."
+    },
+    {
+      "id": "L10-STD-02",
+      "ticket": 1003,
+      "kind": "hard-violation",
+      "category": "documented-standard",
+      "title": "Migration 0271 ships without the work order's mandated preintegration-gate / rig-meta-cohort / gate-chain triad, and the implementer's own self-flagged mitigation is unresolved",
+      "file": "packages/db/migrations/0271_retire_create_account_set_v1.sql",
+      "lines": "whole file (no companion *-preintegration-gate.mjs, no rig-meta.mjs cohort entry, no package.json gate-chain entry for 0271)",
+      "also_see": [
+        "packages/db/tests/rig-meta.mjs:141-150 (METRICS_0058_HUMAN_FNS/METRICS_0058_COHORT, a static, non-bimodal array)",
+        "docs/plan/active/riders-2026-09-20/WORK-ORDER.md addendum, 'Migrations' bullet: 'a preintegration gate module with a stable stem, a rig-meta cohort, the gate-chain entry in migration order'"
+      ],
+      "evidence": "The work order's addendum states the migration house shape without carving out an exception for a migration that removes rather than adds a capability: 'A ticket that needs a schema or function change writes EXACTLY ONE new migration file ... House shape: header, prestate ..., the change, tail assertions, a preintegration gate module with a stable stem, a rig-meta cohort, the gate-chain entry in migration order.' Migration 0271 (a DROP FUNCTION, unambiguously a function change) ships none of the three. The implementer's own report (docs/plan/active/riders-2026-09-20/reports/wave2-lane10-ticket1003.md, section 'Deviation from the house migration shape, flagged for review') argues the gate pattern exists only for additive migrations and explicitly identifies the residual risk it leaves open: `rig-meta.mjs`'s `METRICS_0058_HUMAN_FNS`/`METRICS_0058_COHORT` is a static, import-time constant with no way to be bimodal across a migration frontier (unlike the `FIRM_DOCUMENT_LIMITS_0270_COHORT` this SAME lane added for #960, which IS bimodal). If the wave's cross-lane integration ever runs `operation-census.test.mjs`/`rig-isolation.test.mjs` (both floor-only, no frontier ceiling) against a combined database that has landed some other lane's migrations but not yet 0271, `create_account_set_v1` would still be live-granted while the static roster no longer lists it -- the exact-match grant census (T17, 'no PUBLIC leak' / opcen.7 'unattributed') would report it as an unattributed extra grant and fail, not skip.",
+      "failure_scenario": "The orchestrator's cross-lane integration merges lane 10 alongside a lane whose migrations land after lane 10's frontier in the combined chain but the merge order or a partial apply leaves the combined database short of 0271 momentarily; `operation-census.test.mjs` or `rig-isolation.test.mjs` runs at that point and hard-fails on `create_account_set_v1` as an unattributed grant, in a package-wide sweep that has no lane-10-specific label pointing at the cause.",
+      "required_fix": "Either (a) add a `*-preintegration-gate.mjs` that sets an env var the static roster or the two sweep tests can consult to tolerate `create_account_set_v1` still being present below 0271's frontier (the removal-shaped mirror of the addition-shaped bimodal pattern 0270 and 0234 already use in this same file), or (b) confirm with the actual integration tooling (`.github/actions/db-estate-suite/action.yml` and however the orchestrator builds its cross-lane combined database) that every path always applies migrations in full numeric order before running any package-wide `packages/db` test, which would make the gap structurally unreachable and should then be recorded as a checked fact rather than left as 'Unverified' in the ticket's own report.",
+      "note": "This is the implementer's own, honestly self-flagged residual risk (their report already carries it under 'Unverified'), not a defect they tried to hide. It is reported here at the STANDARDS axis because the work order's migration house shape is a documented repo standard this file departs from, and the departure's own stated justification does not fully hold (0270, in the SAME lane, shows the bimodal pattern generalizes to a migration that recuts existing bodies too, not only to one that adds a brand new function)."
+    },
+    {
+      "id": "L10-STD-03",
+      "ticket": 872,
+      "kind": "judgement-call",
+      "category": "duplicated-code",
+      "title": "The same includes()-over-cast-array check for a non-blocking preview status is repeated three times",
+      "file": "apps/web/components/invite-accept-form.tsx",
+      "lines": "around 533-536, 757-760, and 853 (three separate `(INVITE_PREVIEW_NON_BLOCKING_STATUSES as readonly string[]).includes(...)` expressions)",
+      "evidence": "`invite-accept-form.tsx` casts `INVITE_PREVIEW_NON_BLOCKING_STATUSES` to `readonly string[]` and calls `.includes(status)` on it at three separate call sites (the stage-transition check, the blocked-face gate, and the preview-section gate), each with the same cast and the same shape.",
+      "failure_scenario": "None today -- this is a readability/maintenance smell, not a correctness risk. A future status added to the non-blocking set correctly updates all three sites together today because they all read the same constant, so this is a judgement call rather than a hard violation.",
+      "required_fix": "Extract a single `isNonBlockingPreviewStatus(status: InvitePreviewStatus): boolean` helper beside `INVITE_PREVIEW_NON_BLOCKING_STATUSES` in `lib/firm/invite-preview.ts`, and call it at all three sites instead of repeating the cast."
+    },
+    {
+      "id": "L10-STD-04",
+      "ticket": 960,
+      "kind": "judgement-call",
+      "category": "duplicated-code",
+      "title": "readCaps / readPrevious / readChanged share a near-identical per-field validation loop",
+      "file": "apps/web/lib/firm/capacity-doors.ts",
+      "lines": "98-131",
+      "evidence": "`readCaps`, `readPrevious` and `readChanged` each iterate `PROCESSING_CAPS`, look up a key, validate a shape (integer, nullable integer, or a reverse name lookup) and either bail to `null` on the first bad field or accumulate into a typed record. The three functions are structurally the same shape with a different per-field predicate.",
+      "failure_scenario": "None today -- each function is independently well-tested (capacity-doors.test.ts covers all five broken shapes). This is a structure smell, not a behavioural risk.",
+      "required_fix": "Optional: factor the common 'walk PROCESSING_CAPS, apply a per-cap predicate, bail to null on the first failure' shape into one small generic helper the three call with different predicates. Given the three have different failure semantics (positive-integer vs nullable-integer vs reverse-name-lookup), this is a minor judgement call and not required."
+    }
+  ]
+}

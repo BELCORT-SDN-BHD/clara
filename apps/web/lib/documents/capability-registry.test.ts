@@ -18,8 +18,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  CAPABILITY_REGISTRY_COLS, buildCapabilityIndex, capabilityRegistryPath,
-  readCapabilityRegistry, resolveCapability, type CapabilityRegistryRow,
+  CAPABILITY_REGISTRY_COLS, TIER_STATE_KEYS, buildCapabilityIndex, capabilityRegistryPath,
+  readCapabilityRegistry, resolveCapability, tierStateKey, type CapabilityRegistryRow,
 } from "./capability-registry";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -42,7 +42,7 @@ const ROWS: CapabilityRegistryRow[] = [
     format: "pdf", document_kind: "invoice", mime_type: "application/pdf",
     typed_facts: "supported", business_operation: "supported",
     engine_id: "llm-openai:gpt-5.6-terra:v2", engine_byte: "azure-di:prebuilt-layout:2024-11-30",
-    limits: { invoice_line_items: "planned" },
+    limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
   }),
   row({
     format: "pdf", document_kind: "payroll_summary", mime_type: "application/pdf",
@@ -68,6 +68,14 @@ const ROWS: CapabilityRegistryRow[] = [
     format: "xlsx", document_kind: "management_account",
     mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     typed_facts: "stored_only", business_operation: "unsupported", engine_byte: "clara-structured:v1",
+  }),
+  // #988 — business_operation's own fifth level: Clara reads deterministically and proposes,
+  // but never posts on its own authority. Reuses the `pdf` format (never a new one) so the
+  // one-canonical-mime-per-format cell below stays exact.
+  row({
+    format: "pdf", document_kind: "agreement_contract", mime_type: "application/pdf",
+    typed_facts: "supported", business_operation: "proposal_only",
+    engine_byte: "azure-di:prebuilt-layout:2024-11-30",
   }),
 ];
 
@@ -139,6 +147,22 @@ test("resolveCapability: OFX publishes its HONEST store-only byte extraction the
     state: "level", level: "unsupported", limits: { opening_balance: "absent_in_format" },
   });
   assert.deepEqual(statement.businessOperation, { state: "level", level: "stored_only", limits: {} });
+});
+
+// #988 — business_operation's fifth level. `resolveCapability` is a pure pass-through of
+// whatever the registry publishes; this cell pins that the fifth value survives the trip and
+// reads DISTINCT from `stored_only` at both the tier value and its message key, which is what
+// "every reader ... treats the new level as distinct from the store-only level" (the ticket's
+// own acceptance criterion) rests on at this layer.
+test("resolveCapability: business_operation's proposal_only survives the read distinct from stored_only", () => {
+  const index = buildCapabilityIndex(ROWS);
+  const r = resolveCapability(index, "application/pdf", "agreement_contract");
+  assert.deepEqual(r.businessOperation, { state: "level", level: "proposal_only", limits: {} });
+  assert.notDeepEqual(r.businessOperation, { state: "level", level: "stored_only", limits: {} });
+  assert.equal(tierStateKey(r.businessOperation), "capabilityTier.proposal_only");
+  assert.notEqual(tierStateKey(r.businessOperation), "capabilityTier.stored_only");
+  assert.ok(TIER_STATE_KEYS.includes("capabilityTier.proposal_only"),
+    "the message-key manifest names the new tier so a completeness check over it would catch a missing translation");
 });
 
 test("resolveCapability: an UNKNOWN mime claims nothing at all — four honest unknowns, never a guessed tier", () => {

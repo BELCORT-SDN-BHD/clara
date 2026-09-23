@@ -35,6 +35,14 @@ const CLR04 = "CLR04";
 const CLR10 = "CLR10";
 const CLR11 = "CLR11";
 const STEM = "client_financial_pack$";
+/** #1003's own frontier, INSIDE this file's #660 battery (2026-09-20 fix round: standards
+ *  L10-STD-02, spec S-1003-1, adversarial ADV-L10-03). `p660.census.pins_unmoved` asserts that
+ *  `clara.create_account_set_v1` no longer resolves, which is true only ABOVE 0271; on a chain
+ *  carrying 0232 but not 0271 the body is still live and the assertion hard-fails. The probe is
+ *  the migration's STEM, never its number (numbers are claimed at merge) and never the function's
+ *  ABSENCE (a chain below 0059 is also absent, because the body was never created there — only
+ *  the ledger row tells "retired" from "not yet born"). */
+const RETIRE_STEM = "retire_create_account_set_v1$";
 
 /** The ten fields every figure group owes, and the closed status vocabulary. */
 const ENVELOPE_KEYS = [
@@ -67,6 +75,20 @@ async function gate(t) {
   return true;
 }
 
+let _retired = null;
+async function retirementReady() {
+  if (_retired === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [RETIRE_STEM]);
+      _retired = r.rows[0].n > 0;
+    } catch {
+      _retired = false;
+    }
+  }
+  return _retired;
+}
+
 let world = null;
 before(async () => {
   // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud. The package-wide sweep preloads
@@ -80,6 +102,17 @@ before(async () => {
       + "CLARA_ALLOW_MISSING_CLIENT_FINANCIAL_PACK is not set. Apply "
       + "0232_client_financial_pack.sql, or preload "
       + "tests/client-financial-pack-preintegration-gate.mjs if a lane-less database is expected here.",
+    );
+  }
+  // #1003's frontier, on the same terms: a FOCUSED run against a rig that is supposed to carry
+  // 0271 must fail loudly rather than quietly skip the one cell that proves the retirement.
+  if (!(await retirementReady()) && process.env.CLARA_ALLOW_MISSING_RETIRE_CREATE_ACCOUNT_SET !== "1") {
+    throw new Error(
+      `#1003: no migration matching /${RETIRE_STEM}/ is applied to this database, and `
+      + "CLARA_ALLOW_MISSING_RETIRE_CREATE_ACCOUNT_SET is not set. Apply "
+      + "0271_retire_create_account_set_v1.sql, or preload "
+      + "tests/retire-create-account-set-preintegration-gate.mjs if a pre-retirement database is "
+      + "expected here.",
     );
   }
   world = await buildWorld();
@@ -1079,15 +1112,13 @@ test("p660.pack.no_agent_reach — clara_runtime, clara_agent_ro and every clara
   }
 });
 
-test("p660.census.pins_unmoved — the five pinned dependency bodies are byte-identical after 0232", async (t) => {
+test("p660.census.pins_unmoved — the four pinned dependency bodies are byte-identical after 0232", async (t) => {
   if (await gate(t)) return;
   const PINS = {
     "clara.trial_balance_as_of(uuid,date)":
       "51f18cba8b3d1fb4e225b83773803ea340b7b492a7647d50304589a86922c63c",
     "clara._metric_selector_account_ids(uuid,jsonb)":
       "c8f32cd986403f94c0943e147a1ffe207b7e770843b9b6fbb2b9765cec04b1e9",
-    "clara.create_account_set_v1(uuid,text,text,jsonb,boolean,date,text)":
-      "25f9274792b14c054f1633e4518f689084a8e6548d10e3079cec4e760fd28495",
     "clara.finalize_close(uuid,text,text)":
       "59ebaa4fe7ff49c90ff6f3d5c9a73d7c6b853b042368f0c20b8c2ce2c8173bf4",
     "clara.reopen_fiscal_year(uuid,text,jsonb,text,text)":
@@ -1098,6 +1129,31 @@ test("p660.census.pins_unmoved — the five pinned dependency bodies are byte-id
       "select encode(sha256(convert_to(prosrc, 'UTF8')), 'hex') as sha from pg_proc "
       + "where oid = $1::regprocedure", [sig]);
     assert.equal(r.rows[0].sha, expected, `${sig} moved — 0232 claims to recut nothing`);
+  }
+  // #1003 (2026-09-20) RETIRED clara.create_account_set_v1 (0271 dropped it outright): this
+  // census pinned its body ONLY to prove 0232 recut nothing of it, per this file's own header
+  // (0232:27, 0232:57) explaining why 0232 built a separate relation family rather than riding
+  // it. A pin on a body that no longer exists is not a drift check any more — it is a cast that
+  // raises `does not exist` on every future run — so the fifth PINS entry is removed rather than
+  // left to fail, and the retirement is asserted here directly instead: the signature no longer
+  // resolves at all, and 0232's own two doors (which never called it) are unaffected by its
+  // absence.
+  // FRONTIER-GATED ON 0271'S OWN STEM, not on 0232's: below 0271 the body is still live and still
+  // granted, so an ungated assertion here would hard-fail on every chain between 0232 and 0271
+  // (fix round 2026-09-20 — L10-STD-02 / S-1003-1 / ADV-L10-03). The grant-matrix half of the
+  // same frontier is `RETIRED_0271_HUMAN_FNS` in rig-meta.mjs.
+  if (await retirementReady()) {
+    assert.equal(
+      (await rootQuery(
+        "select to_regprocedure('clara.create_account_set_v1(uuid,text,text,jsonb,boolean,date,text)') is null as ok",
+      )).rows[0].ok,
+      true,
+      "clara.create_account_set_v1 still resolves — #1003/0271 claims to have dropped it",
+    );
+  } else {
+    markSkip();
+    t.diagnostic(`#1003 retirement not on this chain (no ${RETIRE_STEM} migration applied) — the `
+      + "create_account_set_v1 assertion is skipped; the four 0232 pins above still ran");
   }
   // 0232 installs exactly four functions and NO overload of any of them.
   const census = await rootQuery(

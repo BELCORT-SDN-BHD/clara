@@ -22,15 +22,37 @@
 // layout is UNCHANGED: at 320px it already reads without any horizontal
 // scroll (no genuinely two-dimensional table exists here to need the
 // labelled-viewport treatment `components/ui/table.tsx` provides elsewhere).
+//
+// #996 — mounts the SAME disposition read the needs-you inbox row and the client Tax tab already
+// carry (C88.10's `get_compliance_watch_disposition`) on THIS register too. `compliance.clients`
+// above deliberately carries no watch id, so `loadComplianceWatchDispositions`
+// (lib/firm-admin/compliance.ts) resolves it from `list_review_queue`'s own
+// `row_kind==='compliance_watch'` rows first — a SECOND, independent `useAsyncRead`, because a
+// viewer below the bookkeeper floor can read this whole register but not one watch's
+// acknowledge/snooze/resolve history: that read's own refusal must never turn into
+// `registerState`'s error banner and blank the aggregate this section IS allowed to show. Its
+// loader depends on `register` (the FIRST read's own result), which `useAsyncRead`'s mount effect
+// cannot see yet on this component's very first render — `reload()` is called explicitly once
+// `register` arrives, the same explicit-reload-on-dependency-change shape
+// components/registers/aging-register.tsx already uses for its AR/AP toggle.
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { ErrorMessage } from "@/components/firm/data-state";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
-import { loadComplianceRegister, type ComplianceClientWatch, type ComplianceWatchState } from "@/lib/firm-admin/compliance";
+import {
+  loadComplianceRegister,
+  loadComplianceWatchDispositions,
+  type ComplianceClientWatch,
+  type ComplianceWatchState,
+  type ComplianceWatchDispositions,
+} from "@/lib/firm-admin/compliance";
+import { lastDispositionAct, type WatchDisposition } from "@/lib/firm/compliance-disposition";
+import { WatchDispositionLine } from "@/components/firm/compliance-watch-affordance";
+import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
 import { loadClientRegister, type ClientRow } from "@/lib/firm/reads";
 import { fmtCents } from "@/lib/firm-admin/money";
 import { classifyTaxReadOutcome } from "@/lib/tax/read-state";
@@ -68,6 +90,15 @@ export function ComplianceRegisterPanel() {
     isEmpty: rows.length === 0,
   });
 
+  // #996 — see this file's own header. `register` is null on this component's first render (its
+  // OWN useAsyncRead mount effect has not resolved yet), so the dispositions loader starts from
+  // `register?.clients ?? []` and this effect explicitly re-reads once the aggregate arrives.
+  const dispositionsState = useAsyncRead(() => loadComplianceWatchDispositions(sessionTokenAccessor, register?.clients ?? []));
+  useEffect(() => {
+    if (register) void dispositionsState.reload();
+  }, [register]);
+  const dispositions: ComplianceWatchDispositions | null = dispositionsState.data;
+
   const clientsById = useMemo(() => {
     const map = new Map<string, ClientRow>();
     for (const c of clientsState.data ?? []) map.set(c.id, c);
@@ -79,6 +110,16 @@ export function ComplianceRegisterPanel() {
       ? clientsState.error.message
       : String(clientsState.error)
     : null;
+
+  // ONE ROSTER READ FOR THE WHOLE REGISTER (fix round 2026-09-20, standards L10-STD-01, spec
+  // S-996-1). `lib/members/use-member-names.ts`'s own header states the rule: "callers that show
+  // many actors on one page should hold the hook ONCE at the panel level and pass `resolve` down,
+  // rather than mounting it per row." This register is exactly that page — one row per (client,
+  // service_group) across the whole firm — and each row's `WatchDispositionLine` names an actor.
+  // The hook has no cache and no shared context, so before this fix a firm with N dispositioned
+  // watches issued N identical `clara.firm_members_visible` reads. The count is pinned by
+  // `compliance-register-panel.test.tsx`'s five-row cell.
+  const memberNames = useMemberNames(sessionTokenAccessor);
 
   return (
     <div className="flex flex-col gap-3">
@@ -107,10 +148,23 @@ export function ComplianceRegisterPanel() {
           <EmptyState>{t("empty")}</EmptyState>
         </div>
       ) : null}
+      {/* #996 AC3 — the floor is stated ONCE for the whole register, never per row: a viewer's
+          role does not change from one watch to the next, and this is an honest sentence, never
+          the ErrorMessage banner registerState's own refusal would render (that refusal belongs
+          to a DIFFERENT read, the aggregate above, which this session CAN read in full). */}
+      {outcome === "ok" && dispositions?.flooredBelowBookkeeper ? (
+        <StateBanner tone="warning">{t("dispositionsFloored")}</StateBanner>
+      ) : null}
       {outcome === "ok" ? (
         <ul className="flex flex-col divide-y divide-border rounded-lg border border-border">
           {rows.map((row) => (
-            <ComplianceClientRow key={`${row.client_id}:${row.service_group}`} row={row} clientName={clientsById.get(row.client_id)?.name ?? null} />
+            <ComplianceClientRow
+              key={`${row.client_id}:${row.service_group}`}
+              row={row}
+              clientName={clientsById.get(row.client_id)?.name ?? null}
+              disposition={dispositions?.byKey.get(`${row.client_id}:${row.service_group}`) ?? null}
+              resolver={memberNames}
+            />
           ))}
         </ul>
       ) : null}
@@ -118,8 +172,23 @@ export function ComplianceRegisterPanel() {
   );
 }
 
-function ComplianceClientRow({ row, clientName }: { row: ComplianceClientWatch; clientName: string | null }) {
+function ComplianceClientRow({
+  row,
+  clientName,
+  disposition,
+  resolver,
+}: {
+  row: ComplianceClientWatch;
+  clientName: string | null;
+  disposition: WatchDisposition | null;
+  /** The PANEL's one resolver, threaded down — never a per-row `useMemberNames`. */
+  resolver: MemberNameResolver;
+}) {
   const t = useTranslations("FirmAdminCompliance.compliance");
+  // #996 AC2 — a watch with nothing recorded yet and a watch whose id this panel could not
+  // resolve are indistinguishable here (lib/firm-admin/compliance.ts's own header): both leave
+  // `act` null, and the row renders exactly as it did before this ticket.
+  const act = lastDispositionAct(disposition);
   return (
     <li className="flex flex-col gap-1 p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -163,6 +232,15 @@ function ComplianceClientRow({ row, clientName }: { row: ComplianceClientWatch; 
           </dd>
         </div>
       </dl>
+      {/* #996 AC1 — the SAME rendering the needs-you inbox row and the client Tax tab already
+          use for a recorded act, reused rather than a second copy of the wording. */}
+      {act !== null ? (
+        <WatchDispositionLine
+          act={act}
+          resolvedEvidence={disposition?.resolvedEvidence ?? null}
+          resolver={resolver}
+        />
+      ) : null}
     </li>
   );
 }

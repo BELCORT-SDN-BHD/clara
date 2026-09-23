@@ -1,0 +1,181 @@
+{
+  "axis": "spec",
+  "wave": 2,
+  "lane": 10,
+  "branch": "riders/w2-lane10",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\660",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commits": [
+    "73cca9c8d test(db): #1003 retarget the delta fixture off the retired human door",
+    "3e5bdedb2 db: #1003 retire clara.create_account_set_v1 (migration 0271)",
+    "6f5b708c8 test(web): #960 a browser walk over the firm's own cap control",
+    "8ba1e046c feat(web): #960 the firm sets its own processing caps from /settings/firm",
+    "015ce968f feat(web): #960 the firm's processing-cap write door",
+    "e5852b443 docs(db): #960 the migration's full header, prestate pins and tail census",
+    "122bd3b2b feat(db): #960 the estate's ceiling, the floor mirror and the no-cap-named refusal",
+    "6649a4f42 feat(db): #960 the receipt and the audit row carry both sides of every changed cap",
+    "5fcac5852 feat(db): #960 a first write door for the firm's own processing caps",
+    "ae4c6a88d fix(web): #996 lint - drop unused imports, reword test titles off the raw-colour trap",
+    "2db4a9383 feat(web): #996 mount the compliance watch disposition read on /settings/compliance",
+    "daa9bacaf refactor(web): #996 extract WatchDispositionLine from the C88.10 receipt",
+    "df403845e test(web): #996 cover loadComplianceWatchIdsForClient and loadComplianceWatchDispositions",
+    "c02200ad8 feat(web): #996 extract compliance_watch ids from list_review_queue rows",
+    "1a260af98 fix(web): correct undefined DOCUMENT_KINDS reference in kind dialog",
+    "ba14c5a5a feat(web): #872 render issuer_lapsed as a notice, never a block",
+    "f4da314ee feat(db): #872 read-time issuer_lapsed effective status for invites"
+  ],
+  "verdict": "accept-with-fixes",
+  "verification_runs": [
+    "packages/db: node --test --test-concurrency=1 $GATES tests/firm-document-limits-writer.test.mjs -> 9 pass / 0 fail",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/operation-census.test.mjs tests/preview-invite.test.mjs tests/firm-document-limits.test.mjs tests/client-financial-pack.test.mjs -> 70 pass / 0 fail",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/delta-contract.test.mjs -> 58 pass / 2 fail (run twice, identical; see S-1003-2)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test <the 9 touched test files> -> 138 pass / 0 fail",
+    "scratch probe against clara_l10 reproducing apps/web processingCapsOpKey over the real door (see S-960-1)"
+  ],
+  "findings": [
+    {
+      "id": "S-960-1",
+      "ticket": 960,
+      "severity": "blocker",
+      "kind": "requirement-implemented-wrongly",
+      "title": "The deterministic op key turns a genuine later re-set of a cap into a silent no-op that renders a stale 'Saved' receipt",
+      "spec_line": "#960 Agent Brief AC: \"Every accepted write produces a readable receipt and an audit entry naming the actor, the firm, and the before and after value of every changed cap\"; owner ruling 2026-09-20: \"every change must be receipted and audited as usage-billing evidence ... complete and attributable, not best-effort logging.\"",
+      "evidence": "apps/web/lib/firm/capacity-doors.ts:183 processingCapsOpKey(callerId, edits) returns `op-caps-${callerId}-${spelled}`, a PURE function of the actor and the four values, and apps/web/components/firm-admin/firm-settings-panel.tsx:240 is its only caller. packages/db/migrations/0004_governed_fns.sql:46-59 clara._reserve_op replays the STORED receipt whenever (firm, fn, op_key) already exists with the same request hash. Probe run against clara_l10 through the shipped fixtures (packages/db/tests/firm-document-limits-writer-fixtures.mjs): (1) an admin sets docs_per_day=500 with the web layer's own key; (2) the owner lowers it to 100; (3) the SAME admin sets 500 again, so the web layer mints the SAME key. Output: receipt3 = {\"caps\":{\"docs_per_day\":500,...},\"status\":\"set\",\"changed\":[all four],\"created\":true,\"previous\":{all null}}; stored docs_per_day after the third call = 100; audit rows for this firm = 2. The card (processing-capacity-card.tsx, outcome.kind === 'set' -> StateBanner capacityReceipt) then renders 'Saved. This firm now processes up to ... 500 ...' while the firm's cap is still 100 and no audit row was written. The same branch also clears the typed overlay (setTyped({})), so the field snaps back to 100 and the person is told the opposite of what happened.",
+      "required_fix": "Mint a fresh op key per user-initiated save - crypto.randomUUID(), which is this repo's own documented rule for every other web door (apps/web/lib/firm/needs-you.ts:289 'A fresh op_key per call (crypto.randomUUID()) - never reused across a retry', lib/firm-admin/compliance.ts:206, lib/firm-admin/chat-sharing.ts:55). If replay-on-a-lost-response is wanted, hold ONE minted key for the lifetime of a single in-flight submit and re-mint on the next click; do not derive it from the edit values."
+    },
+    {
+      "id": "S-871-1",
+      "ticket": 871,
+      "severity": "major",
+      "kind": "requirement-missing",
+      "title": "#871 delivers none of its four acceptance criteria - the ticket is STOPPED with zero commits",
+      "spec_line": "#871 Agent Brief: \"A cell proves the route returns firm name, role, effective status and masked email for a live token, signed out.\" (plus the three other unchecked boxes)",
+      "evidence": "git log 23cfad947b..HEAD contains no #871 commit; docs/plan/active/riders-2026-09-20/reports/wave2-lane10-ticket871.md records the stop. I re-ran the load-bearing claims and they hold: `grep -rl service_role packages/db/migrations` returns 0 files across the whole tree; packages/db/migrations/0224_preview_invite.sql:240-244 states the signed-out preview is 'a named residual needing a server route, not a wider grant'; apps/web/package.json carries no `pg` dependency (only packages/db and packages/runtime do) and the only SUPABASE_SERVICE_ROLE_KEY use in apps/web is apps/web/lib/members/invite-mail.ts, a GoTrue Admin API caller, not a PostgREST one; README.md's lane table reserves '#871 (none)' for migrations. The brief's premise - 'no new client-reachable database grant' on 'the existing service-key courier pattern' - therefore has no reachable data source without new DDL.",
+      "required_fix": "Orchestrator or owner decision, not an implementer's: either reserve a migration number and re-issue #871 naming the new token-only read plus the non-client-reachable credential a server route would hold (the clara_auth_wall shape is the in-repo precedent), or rule explicitly that the service-role key may bypass grants for this one read, which reverses the disqualification recorded in docs/plan/active/refresh-wave-2026-09-14/brief-620.md."
+    },
+    {
+      "id": "S-996-1",
+      "ticket": 996,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "/settings/compliance now issues one firm-roster read PER register row, because useMemberNames moved into the per-row component",
+      "spec_line": "#996 Agent Brief: \"Show each compliance watch's disposition ... using the read that already serves the other two mount points. No new door, no second query implementation\"; \"The panel's existing loading, error and empty state model wraps the new read as it wraps the register read today.\"",
+      "evidence": "apps/web/components/firm/compliance-watch-affordance.tsx: the extraction moved `const memberNames = useMemberNames(sessionTokenAccessor);` out of WatchDispositionReceipt (one instance per mount) and into WatchDispositionLine (one instance PER RENDERED ACT). apps/web/components/firm-admin/compliance-register-panel.tsx renders <WatchDispositionLine> inside ComplianceClientRow, i.e. once per register row that has a disposition. apps/web/lib/members/use-member-names.ts:69-99 has no cache and no shared context: every hook instance fires its own loadFirmMembers() on mount. So a firm with N dispositioned watches issues N identical clara.firm_members_visible reads, on top of one scoped list_review_queue per client (lib/firm-admin/compliance.ts loadComplianceWatchIdsForClient, p_limit 500) and one get_compliance_watch_disposition per watch. The new panel test never exercises this: compliance-register-panel.test.tsx's fixture carries exactly one client and one watch.",
+      "required_fix": "Hoist the roster resolver to ComplianceRegisterPanel (one useMemberNames per panel) and pass the resolver into WatchDispositionLine as a prop, or give useMemberNames a shared per-session cache. Add a cell that pins the roster-read COUNT for a multi-row register."
+    },
+    {
+      "id": "S-996-2",
+      "ticket": 996,
+      "severity": "minor",
+      "kind": "out-of-scope-behaviour",
+      "title": "The extraction changed the Needs-You inbox mount, which the brief put out of scope",
+      "spec_line": "#996 Agent Brief, Out of scope: \"Any change to the Needs-You inbox or the client tax page mount.\"",
+      "evidence": "apps/web/components/firm/compliance-watch-affordance.tsx: before this diff WatchDispositionReceipt called useMemberNames unconditionally on every mount, including the `act === null` branch that returns t('receiptNone'); after it, the hook lives in WatchDispositionLine, which is only rendered when act !== null. So on the Needs-You inbox and the client Tax tab a watch with nothing recorded yet no longer issues its firm_members_visible read at all. The rendered output is unchanged; the mount's network behaviour is not.",
+      "required_fix": "None required if the orchestrator accepts it as a benign refactor consequence - but say so explicitly in the ticket report rather than leaving an out-of-scope mount silently altered."
+    },
+    {
+      "id": "S-872-1",
+      "ticket": 872,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "The brief's ARCHITECTURE.md key interface is not delivered; the ruling is recorded in CONTEXT.md and packages/db/README.md instead",
+      "spec_line": "#872 Agent Brief, Key interfaces: \"docs/ARCHITECTURE.md's invite section: records the fifth status and that R1 (DECISIONS 3.0, 2026-09-15) is superseded by this ruling.\" AC: \"The migration applies from scratch; ARCHITECTURE carries the note.\"",
+      "evidence": "git diff 23cfad947b...HEAD --stat -- docs/ is EMPTY: docs/ARCHITECTURE.md is untouched. `grep -ic invit docs/ARCHITECTURE.md` returns 0, so the brief's 'invite section' does not exist to carry the note. The implementer recorded the reversal in CONTEXT.md (a new 'Issuer lapsed' term with its _Avoid_ list) and in packages/db/README.md, and named the deviation in docs/plan/active/riders-2026-09-20/reports/wave2-lane10-ticket872.md:214-242. The deviation is also forced: WORK-ORDER.md rule 5 reads 'Never edit docs/PRD.md, docs/ARCHITECTURE.md'.",
+      "required_fix": "Orchestrator call: either accept CONTEXT.md + packages/db/README.md as the house home for a feature-level invite ruling and amend the ticket, or file the ARCHITECTURE invites subsection as a Wayfinder follow-up. Do not close the AC as met while the named file was never touched."
+    },
+    {
+      "id": "S-1003-1",
+      "ticket": 1003,
+      "severity": "minor",
+      "kind": "house-shape-incomplete",
+      "title": "0271 ships without the work order's three migration-shape artefacts, and the rig-meta removal is not frontier-bimodal",
+      "spec_line": "WORK-ORDER.md addendum (wave 2), Migrations: \"House shape: header, prestate with sha256(prosrc) pins ..., the change, tail assertions, a preintegration gate module with a stable stem, a rig-meta cohort, the gate-chain entry in migration order.\"",
+      "evidence": "packages/db/migrations/0271_retire_create_account_set_v1.sql has the header, pins, change and tail, but no *-preintegration-gate.mjs was added for it, no cohort was added to packages/db/tests/rig-meta.mjs for it, and packages/db/package.json's gate chain gained only 0270's entry (firm-document-limits-writer-preintegration-gate.mjs). The related hazard is real and self-disclosed (wave2-lane10-ticket1003.md:220-248): grantMatrixFailures() in packages/db/tests/rig-meta.mjs iterates the LIVE catalog and compares each name against the static ALLOWED set with no frontier guard, so on any chain carrying 0059 but not 0271 the removal of 'create_account_set_v1' from METRICS_0058_HUMAN_FNS/ALLOWED yields `clara_authenticated EXECUTE clara.create_account_set_v1: expected false, got true`. I confirmed the scheduled db-slice-frontiers matrix is NOT exposed (its four legs are wave-D slices, all below 0059, and tests/split-lists/*.txt names none of the four touched files), so the exposure is confined to the orchestrator's own integration ordering.",
+      "required_fix": "Apply 0271 among the first migrations layered on at integration time (the implementer's own simpler option), or add a create_account_set_v1-specific skip to the four affected assertions. Either way record the choice in the integration as-run."
+    },
+    {
+      "id": "S-1003-2",
+      "ticket": 1003,
+      "severity": "note",
+      "kind": "gate-claim-not-reproducible",
+      "title": "The report's 'delta suite 60/60 pass' is not reproducible on the lane database; re-runs give 58/2",
+      "spec_line": "#1003 Agent Brief AC: \"The delta metrics suite passes end to end, with its account-set fixture no longer calling the human door and its readiness roster no longer requiring it.\"",
+      "evidence": "I re-ran `node --test --test-concurrency=1 $GATES tests/delta-contract.test.mjs` against clara_l10 twice; both runs: 58 pass / 2 fail. The single leaf red is delta-catalog-phase.mjs:633 'freeze verifier positively reads registered live bodies' - AssertionError expected 5, actual 6, on result.verified_deployed. It is NOT attributable to this diff: the cell's arithmetic is `fresh ? 0 : 5 + (fsPackDeployed?1:0) + (card1V2Deployed?1:0)`, and a direct read of clara.evaluator_versions on clara_l10 shows SIX deployed closures (assess_metric_cell_independent v1, evaluate_metric v1, evaluate_witness_fact_state v1 and v2, evaluate_witness_identity v1, prepayment_schedule v1) with evaluate_fs_pack_agent and evaluate_metric v2 both undeployed - i.e. the literal 5 does not account for prepayment_schedule. The suite's own top-level cell is named 'delta contract requires a fresh disposable DB and runs its one-way ceremony in order', so the implementer's green run was that database's FIRST, un-ceremonied pass. The account-set retargeting itself is green in both runs.",
+      "required_fix": "None on this lane. Two things for the integrator: (a) clara_l10 is now ceremonied, so the delta contract suite cannot be re-proved there - use a fresh database; (b) the stale literal 5 in packages/db/tests/delta-catalog-phase.mjs:654 is worth its own ticket."
+    },
+    {
+      "id": "S-960-2",
+      "ticket": 960,
+      "severity": "minor",
+      "kind": "requirement-implemented-wrongly",
+      "title": "The op key's caller half collapses to the empty string when the firm scope has not resolved a user_id",
+      "spec_line": "#960 Agent Brief, Key interfaces: \"an idempotent operation returning a durable receipt plus an audit entry.\"",
+      "evidence": "apps/web/components/firm-admin/firm-settings-panel.tsx:240 calls processingCapsOpKey(scope.user_id ?? '', e). apps/web/components/firm-scope-provider.tsx:50 types the scope as Partial<Pick<CallerContextRow, 'firm_name' | 'role' | 'firm_id' | 'user_id'>>, so user_id really can be undefined while the caller context is still half-typed. In that window two DIFFERENT admins making the same edit produce the identical key `op-caps--<values>`, which is exactly the collision the callerId argument was added to prevent (capacity-doors.ts:175-181) - the second admin then meets op_key_conflict or a replay instead of an honest answer.",
+      "required_fix": "Falls out of S-960-1's fix (a fresh uuid per save needs no caller id at all). If the deterministic shape is kept for some reason, refuse to submit while scope.user_id is undefined rather than substituting an empty string."
+    },
+    {
+      "id": "S-960-3",
+      "ticket": 960,
+      "severity": "note",
+      "kind": "behaviour-not-asked-for",
+      "title": "Two behaviours beyond the AC list, both disclosed and both defensible",
+      "spec_line": "#960 Agent Brief acceptance criteria (eight boxes) - neither of these is one of them.",
+      "evidence": "packages/db/migrations/0270_firm_document_limits_writer.sql: (1) a call naming no cap at all is refused CLR10 detail.reason=no_cap_named rather than ridden through ('riding it through would mint a receipt and an audit row for a change that did not happen, in a trail the estate means to bill from'); (2) a per-firm pg_advisory_xact_lock is taken before the read-then-write, so two concurrent admins cannot both receipt the same before-value. Both are named in the migration header and in wave2-lane10-ticket960.md. Neither widens the door's reach and both serve the owner's 'complete and attributable' ruling.",
+      "required_fix": "None. Flagged only so the orchestrator sees the door's surface is slightly larger than the eight boxes."
+    },
+    {
+      "id": "S-LANE-1",
+      "ticket": null,
+      "severity": "minor",
+      "kind": "out-of-scope-behaviour",
+      "title": "One commit on the branch belongs to none of the lane's five tickets",
+      "spec_line": "WORK-ORDER.md rule 2: \"One ticket = its own commits, whose messages name it\"; rule 5: \"Scope discipline. Do not widen a ticket.\"",
+      "evidence": "1a260af98 'fix(web): correct undefined DOCUMENT_KINDS reference in kind dialog' changes apps/web/components/documents/document-kind-dialog.tsx:95 from the undefined DOCUMENT_KINDS to the already-imported CLASSIFIABLE_DOCUMENT_KINDS. I verified the defect is pre-existing at the lane base: `git show 23cfad947b:apps/web/components/documents/document-kind-dialog.tsx` line 95 names DOCUMENT_KINDS while only CLASSIFIABLE_DOCUMENT_KINDS is imported (line 35). The commit message discloses it as out of scope, explains that it blocks pnpm typecheck and next build for any lane touching apps/web, and says it is revertible on its own.",
+      "required_fix": "Integrator decision only. Expect the same one-line fix on several other wave-2 branches (every lane touching apps/web hit the same blocker), so de-duplicate rather than resolving it as a conflict."
+    },
+    {
+      "id": "S-872-2",
+      "ticket": 872,
+      "severity": "note",
+      "kind": "dead-export",
+      "title": "isKnownInviteStatus has no production caller left after the widening",
+      "spec_line": "#872 Agent Brief: \"Both reads derive issuer_lapsed from the same shared expression.\"",
+      "evidence": "apps/web/components/admin/members-tables.tsx now calls isKnownInviteEffectiveStatus; `grep -rn isKnownInviteStatus apps/web` shows the narrow predicate is referenced only from apps/web/lib/members/members-doors.test.ts:498-499. The module header (lib/members/reads.ts:283-289) says this is deliberate - INVITE_STATUSES stays tied byte-for-byte to firm_invites.status's own CHECK so the census cell keeps working.",
+      "required_fix": "None. Recorded so a later cleanup does not delete the narrow predicate and silently weaken the CHECK-derived census."
+    }
+  ],
+  "already_satisfied_or_stopped_claims_checked": [
+    {
+      "claim": "#871 STOPPED - needs a migration the plan did not reserve",
+      "verdict": "upheld",
+      "how": "grep -rl service_role packages/db/migrations -> 0 files; 0224_preview_invite.sql:240-244 read verbatim; apps/web has no pg dependency; README.md lane table reads '#871 (none)'."
+    },
+    {
+      "claim": "#872 'the four existing statuses are unchanged (existing cells green)'",
+      "verdict": "upheld",
+      "how": "preview-invite.test.mjs re-run green as part of a 70/70 batch on clara_l10."
+    },
+    {
+      "claim": "#1003 'the granted-name roster and the security cohort no longer report this function, and neither fails on its absence'",
+      "verdict": "upheld",
+      "how": "operation-census.test.mjs and client-financial-pack.test.mjs re-run green in the same 70/70 batch."
+    },
+    {
+      "claim": "#1003 'delta metrics suite 60/60 pass'",
+      "verdict": "not reproducible on this database",
+      "how": "see finding S-1003-2."
+    },
+    {
+      "claim": "#960 'the enforcing doors keep their fallback' and 'the read grant is unmoved'",
+      "verdict": "upheld",
+      "how": "firm-document-limits-writer.test.mjs cell 9 re-run green (9/9), and 0270's prestate and tail both re-pin the nine untouched bodies by sha256."
+    },
+    {
+      "claim": "#872 / #1003 'the migration applies from scratch'",
+      "verdict": "unverified by design",
+      "how": "RIG.md defers the from-scratch proof to the integrator's disposable cluster; no lane ran it and none could without a second from-scratch chain on its own cluster."
+    }
+  ],
+  "summary": "Four of five tickets landed real work and every cell I re-ran inside the diff is green (9/9 db writer, 70/70 db batch, 138/138 web unit). One blocker: #960's web layer derives its op key from the caller and the edit values, so a legitimate later re-set of a cap replays a stale receipt, writes nothing, and tells the person the opposite of what happened - proved by a live probe against clara_l10. #871 shipped nothing and needs an orchestrator or owner decision. #996's component extraction fans out one firm-roster read per register row. #872's ARCHITECTURE.md key interface was not delivered (and could not be, under work-order rule 5). #1003 is sound but ships outside the house migration shape and carries an integration-ordering hazard its own report names."
+}

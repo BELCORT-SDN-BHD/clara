@@ -99,6 +99,22 @@ export function commitFirmSetup(
   }, opts);
 }
 
+/** `clara.dismiss_firm_setup_tip` — admin+. #935's narrow door for an education tip alone (never
+ *  one of the twelve accounting rows, which this door refuses by name). Unlike every other write
+ *  above, it takes NO `opKey` and NO `expectedRevision`: a tip's settlement writes no audit row and
+ *  emits no domain event, rides neither the idempotency ledger nor the plan's CAS token, and is
+ *  idempotent by construction on the server (0259_firm_setup_education_tips.sql's own header). */
+export function dismissFirmSetupTip(
+  args: { plan: string; itemKey: string; action: "acknowledged" | "deferred" },
+  opts: CallOpts = {},
+): Promise<{ plan_id: string; item_key: string; state: string; tip_action: string }> {
+  return callDoor("dismiss_firm_setup_tip", {
+    p_plan: args.plan,
+    p_item_key: args.itemKey,
+    p_action: args.action,
+  }, opts);
+}
+
 // ---------------------------------------------------------------------------------------------
 // DRAFTS. Preserved per user / firm / item — deliberately NOT per revision.
 //

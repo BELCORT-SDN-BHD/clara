@@ -154,7 +154,6 @@
     "seeAgentActivity": "See all agent activity",
     "activityHeading": "Recent activity",
     "activityEmpty": "No firm activity recorded yet.",
-    "activityKindResidual": "Some events are still filed under the wrong kind by the activity door (#861). The sentence and the person are right; the category may not be.",
     "portfolio": {
       "heading": "Client portfolio",
       "seeRegister": "Open the client register",
@@ -202,9 +201,16 @@
     },
     "seeInbox": "See the full inbox",
     "seeActivity": "See all activity",
-    "clientsEmpty": "No clients yet.",
-    "clientsLine": "{active} active · {onboarding} onboarding · {archived} archived",
-    "clientsOther": "{count, plural, one {# client has another status} other {# clients have another status}}",
+    "legalPrompt": {
+      "heading": "Legal standing",
+      "bodyPrompt": "This firm's agreements are not all accepted at their current versions. During the beta this does not stop Clara working on your clients' books — it will be required before the official launch.",
+      "bodyEnforce": "Clara cannot use a model on any client's books until an owner of this firm accepts the current versions of its agreements.",
+      "agreementLine": "{kind} — version {version}, effective {date}",
+      "agreementLineNoDate": "{kind} — version {version}, no effective date recorded",
+      "action": "Accept on firm settings",
+      "ownerHint": "An owner of this firm needs to accept.",
+      "readFailed": "This firm's legal standing could not be read."
+    },
     "notBuilt": "A firm-wide close status per client is still not built: close readiness is read one client at a time, on that client's Close tab. Statutory deadlines are not recorded yet, so nothing here reminds you of one. And organising work in batches across clients does not exist at this altitude — the portfolio counts Work per client and links into the list that owns it."
   },
   "NeedsYou": {
@@ -233,6 +239,7 @@
       "staff_advance_incomplete": "Staff advance — particulars incomplete",
       "seeding_proposal": "Seeding proposals awaiting review",
       "work_question": "Clara is waiting on an answer",
+      "depreciation_authority_pending": "Depreciation authority awaiting signature",
       "unknown": "Unrecognized item ({kind})"
     },
     "openClient": "Open client",
@@ -244,7 +251,8 @@
       "compliance_watch": "Open the tax tab",
       "lint_finding": "Open the journals tab",
       "fixed_asset_incomplete": "Open the registers tab",
-      "staff_advance_incomplete": "Open the registers tab"
+      "staff_advance_incomplete": "Open the registers tab",
+      "depreciation_authority_pending": "Open the fixed assets register"
     },
     "askClara": "Ask Clara about this",
     "askPrefill": "About this {kind} in my Needs-you inbox — what should I look at first?",
@@ -550,7 +558,9 @@
     "seed": {
       "action": "Start firm setup",
       "working": "Preparing…",
-      "help": "This adds only the questions that are missing. An answer already on this firm's plan is kept exactly as it was and is never asked again."
+      "help": "This adds only the questions that are missing. An answer already on this firm's plan is kept exactly as it was and is never asked again.",
+      "again": "Update the checklist",
+      "againHelp": "An answer you have already given makes another question apply to this firm. This adds only what is missing; everything already recorded is kept."
     },
     "commit": {
       "heading": "Finish setup",
@@ -572,7 +582,15 @@
       "accounting": {
         "heading": "Accounting policy",
         "purpose": "How the firm's own accounts are prepared. Three of these are recorded as firm defaults in the Knowledge register."
+      },
+      "tips": {
+        "heading": "A few things worth knowing",
+        "purpose": "Optional reading, never a requirement. Reading or skipping one just gets it out of the way."
       }
+    },
+    "tip": {
+      "gotIt": "Got it",
+      "later": "Later"
     },
     "item": {
       "required": "Required",
@@ -581,6 +599,7 @@
       "change": "Change this answer",
       "answerNow": "Answer this now",
       "correctOnRegister": "This fact is on the Knowledge register. Correct or withdraw it under \u201cFacts confirmed in setup\u201d below.",
+      "notApplicable": "Not applicable",
       "skip": "Not now",
       "skippedBecause": "Skipped — {reason}",
       "recordedBy": "Recorded by {who}",
@@ -722,6 +741,8 @@
       "statusExpired": "Expired",
       "statusAccepted": "Accepted",
       "statusRevoked": "Revoked",
+      "statusIssuerLapsed": "Issuer lapsed",
+      "issuerLapsedNote": "The person who sent this is no longer admin or owner here",
       "revoke": "Revoke",
       "issue": "Invite someone",
       "issued": "The invitation to {email} was sent.",
@@ -799,7 +820,6 @@
     "partialUndated": "{n, plural, one {# completed Work carries no receipt, so it cannot be dated and is not counted} other {# completed Works carry no receipt, so they cannot be dated and are not counted}}.",
     "partialGeneric": "Part of this answer is not being made.",
     "retryNotFilterable": "The list cannot filter by retrying — open a row to see its runs.",
-    "recentSuccessListBasis": "The list behind this number is dated by when each Work started, not when it posted — the same seven days, not always the same Works.",
     "recentSuccessListUndated": "The dates behind this number could not be read, so the link opens every completed Work for this client — not only the last seven days.",
     "needsYouSourceNote": "The same number is also chipped under Needs your attention below; it is read once, from the review queue.",
     "needsYouListFloor": "Opening the Work list needs a bookkeeper role, so this number may be all of it you can see.",
@@ -1328,6 +1348,7 @@
         "purposeJournalEntry": "Journal entry",
         "purposePeriodicStockAdjustment": "Periodic stock adjustment",
         "purposePayrollObligation": "Supplied payroll obligation",
+        "purposeOpeningBalance": "Opening balances",
         "workLabel": "work",
         "operationLabel": "operation identity",
         "note": "Clara accepted this as durable work. It runs in the background; its own page keeps the current state, the basis and the receipt.",
@@ -2068,6 +2089,8 @@
     "basisHeading": "What was asked for",
     "basisNote": "The basis this work was admitted with. It never changes, so a refusal can be read against exactly what was submitted.",
     "basisUnreadable": "The basis of this work could not be read.",
+    "basisNoLines": "This work's basis carries no journal lines.",
+    "basisNoLinesOpening": "This work's basis carries no journal lines. Its entries were approved and posted before the work itself was recorded.",
     "basisTableLabel": "Requested journal entry lines",
     "postingDate": "Posting date",
     "memo": "Memo",
@@ -2198,6 +2221,7 @@
     "columnActions": "Row actions",
     "untitledWork": "Untitled work",
     "unknownClient": "Unknown client",
+    "claimLabel": "Staff expense claim — {claimant}",
     "postingDate": "Posting date {date}",
     "noPostingDate": "No posting date recorded",
     "rowMenuLabel": "More actions for this work",
@@ -2246,7 +2270,8 @@
     "purposeLabels": {
       "journal_entry": "Journal entry",
       "periodic_stock_adjustment": "Periodic stock adjustment",
-      "payroll_obligation": "Supplied payroll obligation"
+      "payroll_obligation": "Supplied payroll obligation",
+      "opening_balance": "Opening balances"
     },
     "filterClient": "Client",
     "filterClientAll": "All clients",
@@ -2674,6 +2699,7 @@
       "stored_only": "Stored, not read",
       "unsupported": "Not supported",
       "planned": "Planned",
+      "proposal_only": "Proposed, needs confirmation",
       "needs_classification": "Needs classification",
       "unknown": "Not published"
     },
@@ -2833,6 +2859,7 @@
     "stateOperationLabel": "Operation",
     "stateOperation": {
       "notApplicable": "Not applicable to this type",
+      "awaitingConfirmation": "Proposed, needs your confirmation",
       "uncoded": "Not coded yet",
       "coded": "Coded, draft",
       "posted": "Posted",
@@ -2841,12 +2868,23 @@
     "stateOperationDetail": "{entries} journal entry/entries · {statements} statement(s)",
     "stateOperationEntryLink": "Open the {status} journal entry",
     "stateOperationNotApplicableDetail": "Clara never posts an entry from this type of document.",
+    "stateOperationAwaitingConfirmationDetail": "Clara reads this type and can put a proposal in front of you, but never posts it on her own. Nothing is booked until you confirm.",
     "capabilityRegistryVersion": "capability registry v{version}",
     "capabilityLimit": {
-      "invoiceLineItems": "Per-line invoice facts are {level}: Clara records the header totals with their source regions, not the individual lines.",
+      "invoiceLineItems": "Per-line invoice facts: {level}. Clara records the header totals with their source regions; the questionnaire, autodraft and posting all work from those header facts alone.",
+      "invoiceLineItemsReason": "Reason: {level}.",
       "openingBalance": "The opening balance is {level} from this file format, so the statement’s own balance chain can never be closed.",
       "reader": "Reader limit: {level}.",
       "router": "Routing limit: {level}."
+    },
+    "capabilityLimitLevel": {
+      "absent": "absent",
+      "absentInFormat": "absent",
+      "acceptedLimitation": "an accepted limitation",
+      "myinvoisUblOnly": "MyInvois UBL documents only",
+      "noConsumerReadsLineFacts": "nothing Clara posts through reads a per-line fact",
+      "parseSucceedsCorroborationCannot": "the file is read, but its figures cannot be corroborated against anything else in it",
+      "tabSeparatedMimeNotRouted": "tab-separated files are not routed to a reader"
     },
     "capabilityLimitUnknown": "{name}: {level}",
     "checkName": {
@@ -2876,6 +2914,8 @@
     "reviseUseCurrentVersion": "Use version {version}",
     "factsVersionNote": "Typed facts, source version {version}.",
     "factsRevisionUnavailable": "Revising a typed fact needs bookkeeper access, so no revision controls are shown here.",
+    "factsRevisionWorkStopped": "This correction stopped {count, plural, =1 {one piece of accounting work that was waiting} other {# pieces of accounting work that were waiting}} on a question about this document.",
+    "factsRevisionWorkRestate": "Nothing was started in their place, because nobody has re-read the corrected document yet: the instruction has to be given again on the corrected document.",
     "bandRevisionAcceptedHeading": "Source revision accepted",
     "bandRevisionAcceptedBody": "{count} recorded revision(s) of what this document says. The current source version is {version}; the most recent revision was recorded {at}.",
     "bandImpactPendingHeading": "Accounting impact pending",
@@ -3755,6 +3795,9 @@
     "authorityHeading": "Authority",
     "authorityPromoter": "Promoted by",
     "authorityRequiredRole": "Authority the act required",
+    "authorityRoleAtAct": "Their role at the time",
+    "authorityRoleAtActNone": "No membership in this firm when the rule was recorded",
+    "authorityRoleAtActUnknown": "Not recorded — this rule predates the record of authority",
     "authorityRoleNow": "Their role now",
     "authorityRoleUnknown": "No current membership",
     "authorityRevoked": "This person is no longer an active member of this firm. The rule they recorded still stands; review it before relying on it.",
@@ -4113,6 +4156,7 @@
       "roleLabel": "Role",
       "emailLabel": "Invited address",
       "roleNote": "Your role decides what you can do in this firm. An admin there can change it later.",
+      "issuerLapsedNote": "Whoever sent this invitation is no longer an admin or owner there. You can still continue: the firm re-checks who may accept this invitation when you finish, and it may ask an admin there to send you a fresh one.",
       "indefiniteNote": "We couldn't show which firm this invitation is for just now. You can still continue: the firm checks the invitation itself when you finish.",
       "expiredTitle": "This invitation has expired",
       "expiredDescription": "The invitation to {firm} was open for a limited time and that time has passed. There is no resend: ask an admin there to revoke it and invite you again, which issues a fresh link.",
@@ -4581,7 +4625,8 @@
       "none": "No depreciation authority has been proposed for this client yet.",
       "status": {
         "proposed": "Proposed",
-        "live": "Live"
+        "live": "Live",
+        "retired": "Retired"
       },
       "cadenceLabel": "Cadence",
       "cadence": {
@@ -4591,12 +4636,14 @@
       "rampEarned": "Autopost ramp earned — a reviewed run has posted under this authority.",
       "rampNotEarned": "Autopost ramp not yet earned — the next run posts as a draft.",
       "fyEndFallback": "No fiscal year end is on file for this client — defaulting to 31 December.",
+      "retiredReason": "Retired: {reason}",
       "proposeTrigger": "Propose authority",
       "proposeTitle": "Propose a depreciation authority",
       "proposeDescription": "An admin must sign this before any period can be run.",
       "signTrigger": "Sign",
       "signTitle": "Sign this depreciation authority",
       "windowFrom": "This authority reaches periods from {from} onward. Anything earlier needs an explicit catch-up run by a bookkeeper.",
+      "retiredWindowFrom": "Before it was retired, this authority reached periods from {from} onward.",
       "instructionKindLabel": "Where the instruction lives",
       "instructionKindHelp": "The Work or chat task in this client that carries the firm's instruction to depreciate.",
       "instructionKind": {
@@ -5658,6 +5705,7 @@
       "loading": "Loading the compliance register…",
       "empty": "No open compliance watches for this firm.",
       "clientNamesUnavailable": "Client names could not be loaded — the client column below shows raw ids",
+      "dispositionsFloored": "Your role can read this register, but not a watch's acknowledgement, snooze or resolution history — that needs bookkeeper access or higher.",
       "state": {
         "monitored": "Monitored",
         "early_warning": "Early warning",
@@ -6130,6 +6178,9 @@
     "convergeStale": "This question was asked again while you were typing, so this answer is for an older version of it. Open the Work to see the current question.",
     "convergeExpired": "This question expired before it was answered. The Work can be retried, which asks it again.",
     "convergeCancelled": "This Work was stopped, so its question is closed.",
+    "convergeSuperseded": "This Work was replaced by a newer one, so this question is closed. The replacement carries the same admitted instruction and will ask again if it needs to; a figure that has to change needs a new restatement.",
+    "convergeSourceCorrected": "The source this question was asked about has been corrected since it was asked, so an answer now would stand on a reading that has changed. Nothing was started on the corrected figures — the instruction has to be given again on the corrected document.",
+    "convergeSourceCorrectedPosted": "The source this question was asked about has been corrected since it was asked, so this question can no longer be answered. This Work has already posted an entry, so it cannot be restated — use Cancel Work to stop it, and start a new one on the corrected document if it is still needed.",
     "convergeBasisChanged": "What this Work is recording has changed since the question was asked, so the answer no longer applies.",
     "convergeStateChanged": "This Work is no longer waiting on this question.",
     "inFlight": "Your previous send is still going through. Wait a moment and send again — it will not be recorded twice.",
@@ -6179,7 +6230,12 @@
       "close": "Close",
       "report": "Reports",
       "agent": "Agent",
-      "work": "Work"
+      "work": "Work",
+      "people": "People",
+      "assets": "Assets",
+      "counterparties": "Counterparties",
+      "clients": "Clients",
+      "firm": "Firm"
     },
     "statusLabels": {
       "approved": "Approved",
@@ -6190,7 +6246,8 @@
     "workPurposes": {
       "journal_entry": "Recorded a journal entry",
       "periodic_stock_adjustment": "Recorded a periodic stock adjustment",
-      "payroll_obligation": "Recorded a supplied payroll obligation"
+      "payroll_obligation": "Recorded a supplied payroll obligation",
+      "opening_balance": "Approved an opening balance batch"
     },
     "columnActor": "Actor",
     "columnClient": "Client",
@@ -6200,6 +6257,7 @@
     "noClient": "No client",
     "linksToOriginal": "Links to the original entry it replaced.",
     "linksToReplacement": "Links to the entry that replaced it.",
+    "linksToSuccessor": "Links to the Work that superseded it.",
     "viewWork": "View Work",
     "viewObject": "View in books",
     "loading": "Loading activity…",
@@ -6226,6 +6284,7 @@
     "eventStatus": "Status",
     "eventOriginal": "Original",
     "eventReplacement": "Replacement",
+    "eventSuccessor": "Successor Work",
     "eventReceiptId": "Receipt",
     "eventBasisOrigin": "Basis origin"
   },
@@ -6282,6 +6341,7 @@
       "purposeJournalEntry": "Journal entry",
       "purposePeriodicStockAdjustment": "Periodic stock adjustment",
       "purposePayrollObligation": "Supplied payroll obligation",
+      "purposeOpeningBalance": "Opening balances",
       "basisOrigin": "Basis",
       "basisUserDirect": "Typed by a person",
       "basisClaraInterpreted": "Interpreted by Clara",
@@ -6998,7 +7058,7 @@
     "uncountedCompletions": "{n} finished without a receipt this read could date",
     "waitingBasis": "Waiting: {question} on an open question, {fact} awaiting a fact, {attribution} awaiting attribution, {capacity} awaiting the daily quota, {unfiled} not yet filed to a client.",
     "residual": {
-      "preIntakeRefusal": "A file refused by the daily quota before it was accepted never joins a batch — look for it in the upload list above, which shows the database's own message and remedy."
+      "preIntakeRefusal": "A file the daily quota turned away keeps its record and shows here as waiting for the quota, but none of its bytes were stored — upload it again after the reset. The upload list above carries the database's own message and remedy."
     },
     "state": {
       "open": "open",
@@ -7027,7 +7087,7 @@
     },
     "cancelBlocked": {
       "title": "This batch cannot finish stopping",
-      "body": "The person who stopped it is no longer an active member of this firm, so the remaining operations cannot be asked to stop under that decision. An owner or admin needs to restore their membership, or stop each remaining work item from its own page."
+      "body": "The person who stopped it is no longer an active member of this firm, so the remaining operations cannot be asked to stop under that decision. Any other bookkeeper, admin or owner of this firm can press Stop again to take the decision over. Restoring that person's membership, or stopping each remaining work item from its own page, also works."
     },
     "cancelled": {
       "title": "This batch was stopped",
@@ -7035,7 +7095,8 @@
     },
     "capacity": {
       "title": "Waiting for the daily document quota",
-      "body": "The firm's daily document allowance resets at {at} {zone}. Sources blocked by the quota keep their place and continue after the reset."
+      "reset": "The firm's daily document allowance resets at {at} {zone}.",
+      "body": "A source the quota turned away keeps its place on this board with the database's own reason, but nothing re-reads it on its own — upload it again after the reset."
     },
     "column": {
       "file": "File",
@@ -7166,14 +7227,21 @@
     "commercialSupport": "Write to support about a commercial arrangement",
     "commercialDenied": "Plan and payment are shown to admins and owners.",
     "capacityHeading": "Processing capacity",
-    "capacitySubheading": "The per-firm processing caps the operator sets. There is no control here.",
+    "capacitySubheading": "The four processing caps this firm sets for itself.",
     "capacityDocsPerDay": "Documents per day",
     "capacityPagesPerDay": "Pages per day",
     "capacityOcrConcurrency": "Documents processed at once",
     "capacityWitnessConcurrency": "Model readings at once",
     "capacityNone": "No per-firm processing caps are recorded for this firm. The processing lanes apply their own built-in limits.",
-    "capacitySourceNote": "Processing caps are set by the operator. There is no way to change them from Clara — write to support.",
+    "capacitySourceNote": "An owner or admin of this firm sets these. Every change is receipted and recorded against the person who made it. Clara's own estate ceiling stands above whatever you set here.",
     "capacitySeatsNote": "There is no per-firm seat count. Seats are accepted product direction with no delivery date.",
+    "capacityEditHint": "Whole numbers above zero. Change only what you mean to move — a field you leave alone keeps the cap it has. Clearing a field leaves that cap alone too.",
+    "capacityFieldInvalid": "Each cap is a whole number from 1 to 2,147,483,647. Clear a field to leave that cap as it is.",
+    "capacitySave": "Save processing caps",
+    "capacitySaving": "Saving…",
+    "capacityRefusedTitle": "That change was refused",
+    "capacityUnavailable": "That change could not be sent, so nothing was saved. Try again.",
+    "capacityReceipt": "Saved. This firm now processes up to {docs} documents and {pages} pages a day, {ocr} documents at once and {witness} model readings at once.",
     "usageHeading": "Model usage",
     "usageSubheading": "What Clara's models were asked to do for this firm, by month.",
     "usagePeriodLabel": "Month",

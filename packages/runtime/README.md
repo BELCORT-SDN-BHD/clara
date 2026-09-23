@@ -179,7 +179,15 @@ names below are therefore the contracts' ORIGINAL addressees, kept as written; t
 
 * **`chatTurn_v20` — `start_prepayment_schedule_work`.** Four lines: the tool, the local refusal,
   a `stableOpKey`, one `clara.create_prepayment_schedule` call with `{kind:"chat_task", id:
-  ctx.taskId}` as the authority, and a `prepayment_schedule_configured` part. It mints no
+  ctx.taskId}` as the authority, and a `prepayment_schedule_configured` part. Since **#977
+  (migration 0250)** that authority carries a REQUIREMENT rather than a convention: the door
+  (through `clara.create_accounting_plan`, which it passes the reference to) resolves a `chat_task`
+  reference only when the named `clara.agent_tasks` row is of kind `chat_turn` AND carries an
+  author, and refuses anything else with `authority_ref_not_human_instruction` (CLR10), distinct
+  from `authority_ref_unresolved`. A chat-lane `ctx.taskId` IS such a row — `clara.begin_chat_turn`
+  stamps `created_by` from an author it has already checked is a live active member (`0006:988`) —
+  so the contract stands as written; a successor that called this door from a WAKE or autodraft run
+  would be refused, and that is the ruling, not a defect. It mints no
   `accounting_work.purpose` and no claraWork bundle — an amortisation occurrence is an ordinary
   `journal_entry` Work the existing frozen body runs byte for byte.
 * **`claraWork_v4` — the TERM PARK.** #653's AC5 and historical row C55.13 are NOT CLAIMED by this
@@ -1382,9 +1390,28 @@ path to `awaiting_capacity`: CLR18 only, actor from the upload sidecar's `upload
 route carries a capability token and no principal), and its own refusal swallowed into a log line
 so the route's honest 429 never becomes a 500.
 
+**The at-CREATION refusal — #965 (migration 0254).** A ceiling refusal at `create_document_intake`
+is no longer an exception: the door COMMITS the refused intake at `failed`/`limit` and RETURNS
+`refused: true` with its ceiling (`documents`/`pages`), firm, filename, moment and the database's
+own sentence. `beginDocumentIntake` hands that outcome UP rather than throwing — it mints no upload
+capability and writes NO sidecar, so `recoverPendingDocumentIntakes` never re-drives a refused
+intake — and the ONE place it becomes the uploader's answer is `POST /api/intake/documents`, via
+`intakeLimitRefusal()`, which `mapIntakeError` maps to exactly the `429 {error:"limit",
+message:"intake limit reached"}` the raised CLR18 produced before (pinned by
+`p965.runtime.uploader_answer_unchanged`). In a BATCH, `beginIntakeInBatch` must not roll back —
+the record is the point — so `commitRefusedMember` attaches the refused intake, declares
+`awaiting_capacity` through the governed `set_intake_batch_member_dependency` door with that same
+verbatim reason, and COMMITS. Both door calls sit under SAVEPOINTs: they answer typed on a refusal,
+but the failed statement has already aborted the transaction and `commit` on an aborted transaction
+is a ROLLBACK, which would take the refusal record with it. A batch that closed between the upload
+and the refusal therefore costs the membership (`member_id`/`dependency` come back null) and never
+the record. `mapIntakeError`'s CLR18 arm is untouched — the post-custody resize refusal above still
+raises and still maps there.
+
 **The World leg.** `tests/intake-batch-e2e.mjs` is standalone (not collected by `node --test`) and
 needs the world bootstrapped first (`pnpm --filter @clara/runtime exec bootstrap`). Its N is
-MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one UTC day. It records,
+MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one daily window — an
+`Asia/Kuala_Lumpur` calendar day since #964's 0252, not the UTC day this line used to name. It records,
 rather than hides, children lost to a Windows-only EPERM race between the reconciler's sidecar
 reads and `writeIntakeMeta`'s `rename` (the #693 family). Runs THIRD on the same shared
 `clara_intake_ci` database and world `intake-e2e.mjs` and `intake-admission-e2e.mjs` build (#967) —

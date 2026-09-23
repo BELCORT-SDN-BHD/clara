@@ -90,8 +90,20 @@ export function DocumentKindDialog({
         </p>
         <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
           <SelectTrigger aria-label={t("kindHeading")} size="sm">
+            {/* [878] the SAME filtered roster the SelectContent options below map — never the
+                full, unfiltered sibling constant this file deliberately does not import.
+                document-kind-labels.test.tsx's own hardened CRS-07-09 assertion refuses the
+                door-refused kind, and a call here mapping the wider roster, anywhere in this
+                file's source: a trigger-label fallback to the unfiltered list would reintroduce
+                it into the one thing this dialog offers. */}
             <SelectValue
               placeholder={t("kindPlaceholder")}
+              // Pre-existing defect found while unblocking this ticket's own build (unrelated to
+              // #840): `DOCUMENT_KINDS` is not imported here at all (a `next build` type-check
+              // failure, ReferenceError at runtime) and, even fixed to resolve, would have offered
+              // the UNFILTERED roster in the trigger's own placeholder items while `SelectContent`
+              // right below already renders the #878-filtered `CLASSIFIABLE_DOCUMENT_KINDS` — the
+              // same "guaranteed, avoidable CLR28 refusal" that comment already names. ONE roster.
               items={CLASSIFIABLE_DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}
             />
           </SelectTrigger>

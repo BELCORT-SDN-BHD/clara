@@ -20,6 +20,7 @@ import {
   listOperationReceipts,
   loadWorkDetail,
 } from "./reads";
+import type { OperationReceiptRow } from "./types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 const session: SessionTokenAccessor = { getAccessToken: async () => "tok" };
@@ -141,6 +142,33 @@ test("receipts are scoped to the work AND the client, newest first", async () =>
       assert.match(urls[0]!, new RegExp(`work_id=eq\\.${WORK}`));
       assert.match(urls[0]!, new RegExp(`client_id=eq\\.${CLIENT}`));
       assert.match(urls[0]!, /order=created_at\.desc/);
+    },
+  );
+});
+
+// FIX ROUND (ADV-L01-05) — THE SHAPE AN OPENING RECEIPT REALLY HAS. Migration 0239 drops
+// `clara.operation_receipts.task_id`'s NOT NULL behind a purpose-keyed CHECK: the three
+// model-served purposes still REQUIRE a task and an `opening_balance` receipt REFUSES one,
+// because a human approval owns no run. `OPERATION_RECEIPT_SELECT` asks for the column, so this
+// read returns null in it — and the row type said `string`. Nothing dereferenced it, so it was a
+// silent type lie rather than a crash; the annotation on the literal below is what makes it a
+// compile error instead.
+test("an opening receipt carries NO task, and the row type says so", async () => {
+  const openingReceipt: OperationReceiptRow = {
+    id: "receipt-9", client_id: CLIENT, work_id: WORK, purpose: "opening_balance",
+    logical_op_id: `work:${WORK}:opening_balance:1`, payload_digest: "d", acting_actor: "user-1",
+    on_behalf_of: "user-1", via_wake_kind: "opening_approval", bundle_digest: "bd",
+    run_id: "op-key-1", task_id: null, outcome: "committed",
+    effects: null, refusal: null, created_at: "2026-09-01T02:00:00Z",
+  };
+  await withFetch(
+    () => json([openingReceipt]),
+    async () => {
+      const rows = await listOperationReceipts(CLIENT, WORK, { session });
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]?.task_id, null,
+        "the read carries the null through — an opening approval owns no run to name");
+      assert.equal(rows[0]?.purpose, "opening_balance");
     },
   );
 });

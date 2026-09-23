@@ -15,8 +15,18 @@
 // THE STRUCTURAL CLAIM THE WHOLE BATTERY LEANS ON, asserted in its own cell (`p638.core.no_regression`):
 // **#638 recuts NOTHING shared.** A staff expense claim is a `journal_entry`-purpose Work with
 // `adjustment_basis` NULL, so it posts through the UNCHANGED `clara._record_journal_entry_core`,
-// and both purpose CHECKs keep their exact 0194 three-valued text. If a later hand widens a purpose
+// and both purpose CHECKs carry their exact expected text. If a later hand widens a purpose
 // or edits the posting core to make a claim "cleaner", that cell goes red.
+//
+// #984 RE-DERIVED THAT EXPECTED TEXT ONCE, DELIBERATELY. Migration 0239 widened both purpose
+// CHECKs to a FOURTH value, `opening_balance`, on the owner's ruling of 2026-09-20 (issue #984):
+// an approved opening batch now carries a real Work and operation receipt. The cell was NOT
+// deleted and NOT skipped — the literal below is the four-value text, the three prior values are
+// asserted individually so a widening that dropped one still goes red, and the POSTING CORE's
+// half is untouched, because that is exactly what #984 promised not to move: an opening Work's
+// entries are approved by `clara._approve_opening_entry` before the Work exists, so it never
+// reaches `clara._record_journal_entry_core` at all. The claim lane is unaffected either way: a
+// claim is still a `journal_entry` Work and still posts through that core.
 //
 // WHY EVERY POSITIVE FIXTURE RUNS UNDER A REAL `interactive_client` CREDENTIAL: #623's reason,
 // unchanged. The whole point of this lane is that role, client, period, chart and the claim's own
@@ -275,10 +285,16 @@ test("p638.claim.settled an already-settled claim posts the expense debits again
 // 2 · p638.core.no_regression — #638 recuts nothing shared.
 // ===========================================================================================
 
-test("p638.core.no_regression both purpose CHECKs and the six pinned bodies are byte-identical after 0221", async (t) => {
+test("p638.core.no_regression both purpose CHECKs and the six pinned bodies are byte-identical after 0221, and the CHECKs are 0239's four with the three prior values unmoved", async (t) => {
   if (await gateSec(t)) return;
+  // #984 · RE-DERIVED ONCE, ON THE OWNER'S RULING. This literal was the 0194 three-value text
+  // until migration 0239; it is now the four-value text, and the loop under it re-asserts each of
+  // the three PRIOR values by name so a widening that also dropped one cannot hide behind a
+  // single string comparison. `opening_balance` is the opening lane's Work purpose (#984); the
+  // claim lane is still a `journal_entry` Work and is unaffected.
+  const PRIOR_VALUES = ["journal_entry", "periodic_stock_adjustment", "payroll_obligation"];
   const EXPECT = "CHECK ((purpose = ANY (ARRAY['journal_entry'::text, "
-    + "'periodic_stock_adjustment'::text, 'payroll_obligation'::text])))";
+    + "'periodic_stock_adjustment'::text, 'payroll_obligation'::text, 'opening_balance'::text])))";
   for (const [table, name] of [
     ["clara.accounting_work", "accounting_work_purpose_check"],
     ["clara.operation_receipts", "operation_receipts_purpose_check"],
@@ -287,7 +303,11 @@ test("p638.core.no_regression both purpose CHECKs and the six pinned bodies are 
       "select pg_get_constraintdef(oid) d from pg_constraint where conrelid=$1::regclass and conname=$2",
       [table, name]);
     assert.equal(r.rows[0].d, EXPECT,
-      `core.no_regression: ${name} is NOT the 0194 three-valued CHECK — #638 widened a purpose`);
+      `core.no_regression: ${name} is NOT the 0239 four-valued CHECK — somebody widened or narrowed a purpose`);
+    for (const v of PRIOR_VALUES) {
+      assert.ok(r.rows[0].d.includes(`'${v}'::text`),
+        `core.no_regression: ${name} no longer admits ${v} — 0239 was a widening, and the three prior values are untouched`);
+    }
   }
   // The six bodies #638 edits none of. The migration's own §H pins them by sha; this cell proves
   // they are still REACHABLE and unchanged from the outside, so a later recut in another branch
@@ -312,6 +332,12 @@ test("p638.core.no_regression both purpose CHECKs and the six pinned bodies are 
     "core.no_regression: the posting core's purpose IN-list is no longer the 0195 three");
   assert.equal(src.includes("staff_expense_claim"), false,
     "core.no_regression: the posting core names the claim lane — #638 was supposed to recut nothing");
+  // #984 · THE OTHER HALF OF THE SAME PROMISE. The CHECKs grew a fourth value; the posting core's
+  // lookup did NOT, and an opening Work must never reach it (its entries are already approved by
+  // clara._approve_opening_entry before the Work row is written). A `work_not_found` for the
+  // opening purpose is therefore the CORRECT answer here, and this is the assertion that keeps it.
+  assert.equal(src.includes("opening_balance"), false,
+    "core.no_regression: the posting core names the opening purpose — #984 widened the vocabulary, not the posting lane");
 });
 
 // ===========================================================================================

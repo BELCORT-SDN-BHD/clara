@@ -16,6 +16,8 @@ import assert from "node:assert/strict";
 
 import {
   INVITE_PREVIEW_STATUSES,
+  INVITE_PREVIEW_NON_BLOCKING_STATUSES,
+  isNonBlockingPreviewStatus,
   isInvitePreviewRow,
   readInvitePreview,
   PREVIEW_INVITE_DOOR,
@@ -78,8 +80,37 @@ test("p625.lib.wire: the door is called by SIGNATURE — one argument, named p_t
   );
 });
 
-test("p625.lib.wire: the four invite statuses the DB can report are the four this module admits", () => {
-  assert.deepEqual([...INVITE_PREVIEW_STATUSES].sort(), ["accepted", "expired", "pending", "revoked"]);
+test("p625.lib.wire: the invite statuses the DB can report are the ones this module admits", () => {
+  assert.deepEqual(
+    [...INVITE_PREVIEW_STATUSES].sort(),
+    ["accepted", "expired", "issuer_lapsed", "pending", "revoked"],
+  );
+});
+
+test("p872.lib.wire: `issuer_lapsed` is a valid, non-blocking preview row -- read-time colour, not a sixth unknown value", () => {
+  assert.equal(isInvitePreviewRow({ ...GOOD, status: "issuer_lapsed" }), true);
+});
+
+test("p872.lib.non_blocking: exactly `pending` and `issuer_lapsed` do not block the password form -- the other three are DEFINITE negatives", () => {
+  assert.deepEqual([...INVITE_PREVIEW_NON_BLOCKING_STATUSES].sort(), ["issuer_lapsed", "pending"]);
+  for (const s of INVITE_PREVIEW_NON_BLOCKING_STATUSES) {
+    assert.ok((INVITE_PREVIEW_STATUSES as readonly string[]).includes(s), `${s} must still be an admitted status`);
+  }
+});
+
+test("p872.lib.non_blocking: the PREDICATE answers for every admitted status, and for a value outside the domain", () => {
+  // Standards review L10-STD-03 (2026-09-20) extracted this out of three repeated casts in
+  // `invite-accept-form.tsx`. The expected answers come from the spec, not from the constant:
+  // #625's four faces are DEFINITE negatives, and #872's owner ruling keeps `issuer_lapsed` open.
+  assert.equal(isNonBlockingPreviewStatus("pending"), true);
+  assert.equal(isNonBlockingPreviewStatus("issuer_lapsed"), true);
+  assert.equal(isNonBlockingPreviewStatus("accepted"), false);
+  assert.equal(isNonBlockingPreviewStatus("revoked"), false);
+  assert.equal(isNonBlockingPreviewStatus("expired"), false);
+  // A value this app does not understand is not non-blocking. It cannot arrive through
+  // `isInvitePreviewRow` (which denies a sixth status outright), so this is the predicate's own
+  // fail-closed answer rather than a reachable path.
+  assert.equal(isNonBlockingPreviewStatus("some_future_status"), false);
 });
 
 // ---------------------------------------------------------------------------

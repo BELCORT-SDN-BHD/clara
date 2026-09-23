@@ -69,7 +69,66 @@ refusal, the authz-before-lifecycle ordering, the replay contract and a two-sess
 byte-identical no-oracle refusal, the three non-pending effective statuses, the grant posture, and
 the six non-regression `prosrc` pins that prove 0224 recut nothing. Its gate is
 `preview-invite-preintegration-gate.mjs`; a focused run leaves `CLARA_ALLOW_MISSING_PREVIEW_INVITE`
-unset and must count zero skips.
+unset and must count zero skips. The SAME file also drives #872's fifth, read-time-only effective
+status, `issuer_lapsed` (migration 0269): a demoted or removed issuer makes a still-pending invite
+read `issuer_lapsed` on BOTH `clara.preview_invite` and `clara.firm_invites_visible` (one shared
+CASE expression, so the two cannot disagree), reversibly, with `clara.accept_invite`'s own
+issuer-rank wall left unchanged — an `issuer_lapsed` invite still accepts whenever the invited
+role does not outrank the issuer's current rank. Its OWN gate,
+`invite-issuer-lapsed-preintegration-gate.mjs`, is detected off a `clara.schema_migrations` row
+matching `'^0269_'` rather than a function's existence, because 0269 recuts two EXISTING bodies
+and adds no new catalog object; a focused run leaves `CLARA_ALLOW_MISSING_ISSUER_LAPSED` unset and
+must also count zero skips.
+
+`subledger-hook-caller-roster.test.mjs` reads `clara._subledger_on_approve`'s catalog comment
+(0236, #868): all six live callers named with the migration each arrived in, the historical
+four-name pin (0037) stated as stale, and the AC3 non-regression pins (`prosrc` sha, owner,
+`SECURITY DEFINER` flag, grant, trigger reachability) that prove 0236 changed nothing but the
+comment. Its gate is `subledger-hook-caller-roster-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_SUBLEDGER_HOOK_ROSTER` unset and must count zero skips.
+
+`journal-basis-zero-total-unreachable.test.mjs` calls `clara._assert_journal_basis` directly
+(0237, #906): its catalog comment names the `nonzero_total` arm unreachable and names both
+guarding arms (`at_least_two`, `exactly_one_side`), the AC2 non-regression pins (`prosrc` sha,
+owner, `SECURITY DEFINER` flag, owner-only ACL) prove 0237 changed nothing but the comment, and two
+direct calls prove an all-zero basis lands on `exactly_one_side` while an all-credit
+(zero-debit-total) basis lands on `balanced` — never on `nonzero_total` either way. Its gate is
+`journal-basis-zero-total-unreachable-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_JOURNAL_BASIS_ZERO_TOTAL_ARM` unset and must count zero skips.
+
+`correction-client-rung-order.test.mjs` drives `clara.approve_wrong_client_correction` under forced
+two- and three-session schedules (0238, #914): an adversary in the rung-first order every sibling
+door uses no longer deadlocks against a concurrent correction (the 40P01 SQLSTATE is the oracle,
+and the door is proven blocked on the rung with `pg_blocking_pids` first, so the schedule really
+interleaved); a catalogue census over every `clara` body proves no door is left that takes a
+`clara.clients` row before the client rung `203005004`; and the source client is still serialised
+against wiki publication in both directions, measured on a SECOND document filed to the same
+client so the only shared object is that client, with the blocked side's own `pg_locks` read to
+say which lock it is queued behind. Its gate is
+`correction-client-rung-order-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_CORRECTION_CLIENT_RUNG_ORDER` unset and must count zero skips — and against a
+pre-0238 chain it fails on the deadlock, which is the evidence.
+
+`opening-balance-work.test.mjs` drives both opening approval doors through the wave-B fixture
+(0239, #984) and asserts what the approval now leaves behind: exactly one `clara.accounting_work`
+row and one `clara.operation_receipts` row of the new `opening_balance` purpose per approved batch,
+with no `clara.agent_tasks` row for the client and none pointing at the Work, `task_id` null on the
+receipt, `effects` naming the seed and NOT an entry, and `clara.opening_seed_approvals` unchanged;
+a correction batch mints a SECOND Work and leaves the seed's byte-for-byte. Its counts are
+client-scoped so an estate sweep cannot move them, and the same predicate is what sees the Work,
+so the scoping is not vacuous. It also carries the catalogue census of the four places the columns
+close the purpose vocabulary, the two admission cores (only the sibling learned the value) and
+`clara._record_journal_entry_core`'s untouched three-value lookup — which is AC5's own wording for
+how the posting core is proven unchanged. Its gate is
+`opening-balance-work-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_OPENING_BALANCE_WORK` unset and must count zero skips, and against a pre-0239
+chain the premise check throws rather than skipping. `obw984.zero_entry` (fix round) pins the one ordering that block depends on: each door's own
+"has no draft entries" arm refuses an empty batch BEFORE the loop that builds the Work's entry
+array, so no `entry_count = 0` Work is reachable and a later recut that hoists the minting above
+that arm is a red cell. The sibling pin lives in
+`staff-expense-claim.test.mjs`'s `p638.core.no_regression`, whose CHECK literal #984 re-derived to
+the four-value text (deliberately, with each prior value re-asserted by name) rather than deleting
+or skipping the cell.
 
 ## Freshness and split chains
 
@@ -161,7 +220,7 @@ skip — clone a sibling first (`create database <sibling> template <source>`, n
 on the source) and bootstrap the World only on the sibling. `RIG.md` in an active wave plan
 restates this per-lane; this section is the durable copy.
 
-## The opening-balance evidence-link race, and a measured gap (#854)
+## The opening-balance evidence-link race, measured (#854) and repaired (#1014)
 
 `coding-lane-evidence-link.test.mjs`'s `cle.race.*` cells and `opening-balance-evidence-link.test.mjs`'s
 `obw.race.*` cells share ONE two-session driver, `humanHoldThenContend`
@@ -170,51 +229,70 @@ fires and must be PROVEN blocked (`wait_event_type = 'Lock'` and `pg_blocking_pi
 backend — a schedule that never blocked proves nothing about a race) before `a` commits and `b`
 resolves against `a`'s committed state.
 
+`obw.claim.unknown_document` (fix round) sits beside them and is not a race cell: it drives
+`clara._lock_document_binding` directly with an id that names no document, because 0197's
+"locks nothing and RAISES NOTHING" tolerance is a SEAM contract no door can express (both lanes'
+writes are foreign-keyed to `clara.documents`). The claim is gated on the document existing, so
+the helper writes no token on a key no document owns.
+
 `clara.approve_opening_seed` / `clara.approve_opening_correction` refuse `CLR31 not_serializable`
 outside a genuinely SERIALIZABLE transaction, so driving the opening lane through this helper needs
 `side.isolation = "serializable"` — the ONLY level it accepts. A SERIALIZABLE side can also lose at
 **commit** rather than at the statement its `run()` awaited (PostgreSQL defers a `40001`
-serialization failure discovery to `COMMIT` in this shape); `commitOrCapture` folds that outcome
+serialization failure discovery to `COMMIT` in some shapes); `commitOrCapture` folds that outcome
 into the same `out.a`/`out.b` shape a statement-level refusal already uses, so a cell asserts one
 shape regardless of where Postgres actually raised it.
 
-**What `obw.race.evidence_then_opening` measured, twice, reproducibly:** `clara.documents` is
-locked `FOR UPDATE` by both the coding lane and the opening lane purely for serialization
-(`clara._lock_document_binding`) — neither lane's body ever changes a column on that row. When
-`attach_entry_evidence` (plain, holds first) commits a document it only locked, the blocked
-`approve_opening_seed` (SERIALIZABLE, contends) is granted the SAME, byte-identical row, sees no
-reason to abort, and evaluates its own conflict probe against a snapshot taken BEFORE the
-attachment committed — which never saw the live link. **Both sides commit.** The reverse arrival
-order (`obw.race.opening_then_evidence`) does not have this hole: the contender there
-(`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads fresh per statement once
-unblocked.
+**What #854 measured, twice, reproducibly — and what 0235 changed.** `clara.documents` was locked
+`FOR UPDATE` by both lanes purely for serialization (`clara._lock_document_binding`) and neither
+lane's body ever wrote a column on that row. A row lock that is only TAKEN AND RELEASED forces
+nothing on a waiter under a snapshot isolation level: when `attach_entry_evidence` (plain READ
+COMMITTED, holds first) committed a document it had only locked, the blocked `approve_opening_seed`
+(SERIALIZABLE since 0171) was granted the SAME byte-identical row, found no reason to abort, and
+evaluated its conflict probe against a snapshot taken BEFORE the attachment committed — which never
+saw the live link. **Both sides committed.** The reverse arrival order
+(`obw.race.opening_then_evidence`) never had this hole: its contender is plain READ COMMITTED,
+which always re-reads fresh per statement once unblocked.
 
-**Mechanism — this lane's own reading, not a cited fact (L04-S07):** a plausible account is that
-PostgreSQL's SERIALIZABLE "second updater" protection fires only when the row a transaction waited
-on was actually **updated or deleted** by the transaction that held the lock, never when it was
-merely locked and released, which would explain why a lock-only commit does not force the waiter
-to re-evaluate. An at-least-equally-plausible alternative this lane did not rule out: SSI aborts a
-transaction only at the PIVOT of a dangerous structure (an incoming AND an outgoing
-rw-antidependency — PostgreSQL docs, "Serializable Isolation Level"), and a single rw-conflict here
-may simply not be the shape SSI polices, which has nothing to do with the second-updater rule.
-Either mechanism is consistent with the measurement; neither is confirmed against the PostgreSQL
-source or a core committer. A successor fix should verify the actual mechanism before assuming
-either account, since the two point at different repairs.
+Migration `0235_opening_binding_claim` (#1014) closes it. `clara._lock_document_binding` keeps its
+`FOR UPDATE` on `clara.documents`, unmoved and still first, and then upserts that document's row in
+`clara.document_binding_claims` — a serialization token, one row per document, written by that
+helper alone and read by nothing. An `ON CONFLICT DO UPDATE` is arbitrated by the index, not by
+anyone's snapshot, so the blocked SERIALIZABLE session now hits a real write conflict where before
+it saw an unchanged row. `ON CONFLICT DO NOTHING` would not do: against a VISIBLE conflicting row
+it takes no lock at all, which would leave the race open from a document's second binding onwards.
+The walls themselves are untouched — they still decide from their own probes.
 
-This is a genuine double-posting gap in migration 0213's opening-lane wall, MEASURED by the two
-`obw.race.*` cells and left UNREPAIRED here — #854's own brief puts "repair either wall, either
-approver or the document lock helper" and "any repair if both sides can commit" explicitly out of
-scope, since fixing it needs either a new migration (a wave-1 lane may not cut one) or a change to
-`clara._lock_document_binding`/`clara.approve_opening_seed`, both named out of scope in the ticket.
-`obw.race.evidence_then_opening` asserts the CURRENT (double-posting) outcome as a regression
-sentinel; a future repair updates that one assertion, deliberately, rather than the test going red
-by surprise. **Filed as GitHub issue #1014** ("Opening-balance evidence wall: a concurrent evidence
-attachment and opening approval can both commit", state OPEN, labels `bug` + `ready-for-agent`):
-recorded as a follow-up in
-`docs/plan/active/riders-2026-09-20/reports/wave1-lane04-final.md` and
-`docs/plan/active/riders-2026-09-20/reports/wave1-lane04-fixround-1.md`; repro is
-`obw.race.evidence_then_opening` verbatim, and the issue body also names the correction door's
-shared exposure (L04B-SPEC-07, below).
+**The mechanism, measured rather than reasoned (this is what #854's own note asked a successor to
+settle).** Three outcomes, re-measured on three throwaway relations on a rig PostgreSQL 17 before
+0235 was written: a holder that only LOCKS a row lets a SERIALIZABLE waiter proceed (the defect); a
+holder that UPDATES a row the waiter can see gives the waiter `40001 could not serialize access due
+to concurrent update`; and a holder that INSERTS a row the waiter's snapshot cannot see gives the
+same `40001` to a waiter upserting that key with `ON CONFLICT DO UPDATE`. The repair rests on those
+three measurements, not on either causal account #854 floated — and note that neither of those
+accounts pointed at a reachable repair: a SERIALIZABLE transaction cannot READ what committed after
+its snapshot at all, so "re-read the evidence links under the lock" was never available. What was
+available is a CONFLICT.
+
+**What the loser is told.** The upsert's `serialization_failure` is caught in the helper and
+re-raised as the walls' own `CLR13` / `source_already_posted` — 0182's shape, naming the document
+and flagging the conflict — so a raw `40001 could not serialize access due to concurrent update`
+never reaches a person. The handler wraps THE UPSERT ALONE: a serialization failure on the
+`clara.documents` row itself would mean the document row changed (the legacy bytes/storage upgrade
+is its only writer), which is a different fact and keeps its own spelling. **`detail.entry_id` is
+null on this arm and that is a documented limit, not a gap:** the winner committed after the losing
+transaction's snapshot, and nothing inside a SERIALIZABLE transaction can read it. The key is
+present-and-null rather than absent, so the detail's KEY SET is unchanged. A caller that wants the
+standing entry's name re-reads the document's links in a fresh transaction.
+
+**The gates.** `obw.race.evidence_then_opening` asserts the repaired outcome (exactly one commit,
+the tie document carrying ONE posted entry, the refused batch still wholly draft, and the loser
+refused `CLR13`), and `obw.race.typed_refusal` pins what the loser sees against the SAME refusal
+reached sequentially — byte-identical message, same detail keys, and the one honest difference
+(`entry_id`) asserted explicitly in both directions. Both are frontier-gated on the
+`opening_binding_claim$` stem (`gateBindingClaim`), so a leg pinned between 0213 and 0235 skips
+cleanly; a FOCUSED run below 0235 fails loudly in the battery's `before` unless
+`opening-binding-claim-preintegration-gate.mjs` is preloaded.
 
 **AC2's "exactly one", reinterpreted (L04B-SPEC-04):** the brief's literal wording is "asserts
 exactly one". Neither race cell pins a bare `1` — `obw.race.opening_then_evidence` asserts
@@ -268,13 +346,91 @@ maker-checker distinctness, so a one-member firm cannot produce the foreign fixt
 contrasts against.
 
 `firm-setup.test.mjs` (#648, journey A5) needs the 0218 cohort — `clara.firm_setup_keys`, the four
-firm setup doors, `clara.get_firm_setup()` and `uq_onboarding_plans_one_open_firm`. A focused run
-against a chain below that frontier FAILS by name; the package run preloads
+firm setup doors, `clara.get_firm_setup()` and `uq_onboarding_plans_one_firm` (RENAMED from
+`uq_onboarding_plans_one_open_firm` by #894, `0255_onboarding_plan_firm_uniqueness.sql` — see
+below). A focused run against a chain below that frontier FAILS by name; the package run preloads
 `firm-setup-preintegration-gate.mjs`, which turns the same absence into a loud skip. Its world is
 planted through the root connection because the subject is the setup doors rather than firm
 creation, but every assertion under test runs through a least-privileged persona (`humanQuery`) —
 the one deliberate root write is the `ck_onboarding_plan_items_answer` mechanism probe in
-`p648.defer.reason`, whose subject is the CHECK itself and which no door owns. Two of its cells exist to pin what the WEB surface is allowed to assume about the doors rather than to test a new body: `p648.answer.correct` (answering again is the correction path, and a live firm default is corrected on the knowledge register instead) and `p648.opkey.attempt` (one op key names one request, so an op key derived from the answer VALUE can never be re-sent).
+`p648.defer.reason`, whose subject is the CHECK itself and which no door owns. Two of its cells exist to pin what the WEB surface is allowed to assume about the doors rather than to test a new body: `p648.answer.correct` (answering again is the correction path, and a live firm default is corrected on the knowledge register instead) and `p648.opkey.attempt` (one op key names one request, so an op key derived from the answer VALUE can never be re-sent). Its cell `p648.plans.one_firm` proves only the ORIGINAL open-vs-open case that motivated 0218, now under the new name — the full any-state regression, including a CLOSED first plan, lives in `onboarding-plan-firm-uniqueness.test.mjs` below.
+
+## Onboarding plan firm uniqueness (#894, `0255_onboarding_plan_firm_uniqueness.sql`)
+
+`onboarding-plan-firm-uniqueness.test.mjs` is frontier-gated on its own stable stem
+(`onboarding_plan_firm_uniqueness$`), the `legal_acceptance$` / `checkout_convergence$` idiom, and
+preloads `onboarding-plan-firm-uniqueness-preintegration-gate.mjs` in the package run. It proves
+the widened index — `uq_onboarding_plans_one_firm`, partial UNIQUE on `(firm_id)` where
+`scope_kind='firm'` alone, no `state` term — three ways: the committed definition read off
+`pg_index` (root, by construction: it probes the catalog directly), a second firm-scope plan
+refused for the same firm in ANY state including when the FIRST is already CLOSED (cancelled;
+again root, since no door ever closes a firm plan), and `clara.claim_paid_firm`'s replay arm still
+answering the ORIGINAL `firm_id`/`plan_id` once a real firm is claimed through the live checkout
+doors — that one driven end-to-end through `checkout-convergence-fixtures.mjs`'s own
+`liveCheckout` / `deliver` / `claimPaidFirm`, the same helpers `checkout-convergence.test.mjs`
+drives, so this file adds no second implementation of that world.
+
+## Firm setup polish (#895, `0256_firm_setup_polish.sql`)
+
+`firm-setup-polish.test.mjs` is frontier-gated on its own stable stem (`firm_setup_polish$`), the
+`onboarding_plan_firm_uniqueness$` idiom, and preloads `firm-setup-polish-preintegration-gate.mjs`
+in the package run. Three cells, one per recut defect: `p895.seed.noop` seeds a fully-empty plan
+(bumps, seeded=10 as of #891 below — `mpers_eligibility`/`tin` are UNDETERMINED on a plan whose
+`entity_type`/`turnover` are still unanswered, so neither of the twelve is seeded yet), then seeds
+again under a DIFFERENT op_key once every DETERMINABLE catalogue row is already present (adds
+nothing) and asserts the plan's `revision_token`/`revision_n`/revision-history count
+are BYTE-UNCHANGED by the no-op call while `clara.audit_log` and `clara.domain_events` still gained
+a row each (seeded=0); `p895.read.honest_no_plan` plants a firm with NO firm-scope plan at all
+(root, by construction — no door ever creates one on its own) and asserts `get_firm_setup()` reads
+`counter={required_answered:0,required_total:0}` rather than the catalogue's constant borrowed as
+if it were progress; `p895.facts.state_filter` answers one firm-defaultable key and withdraws it,
+answers a second and CORRECTS it, and asserts `confirmed_facts` excludes the withdrawn revision and
+the pre-correction (superseded) revision while including only the corrected (live) one — cross-
+checked directly against `clara.knowledge_records` by `id`/`state`/`superseded_at`, independent of
+the door's own answer. `record_id` (the STABLE thread identity `clara._knowledge_row_json` exposes)
+is shared by every revision of one fact; `revision_id` (`clara.knowledge_records.id`) is what a
+capture, a correction and a withdrawal each mint fresh — the cells assert on `revision_id`, never on
+`record_id`, for exactly that reason. All three cells were run against the recut migration's OWN
+pre-image (the pre-#895 `create or replace function` text, applied by hand outside the migration
+ledger) and failed for the reason the header names, then re-run green after restoring the exact
+post-#895 bodies — the vacuity control, since #895's whole deliverable is three SQL-level fixes with
+no new relation or grant to independently anchor a cell to.
+
+## Firm setup applicability (#891, `0257_firm_setup_applicability.sql`)
+
+`firm-setup-applicability.test.mjs` is frontier-gated on its own stable stem
+(`firm_setup_applicability$`), the `firm_setup_polish$` idiom, and preloads
+`firm-setup-applicability-preintegration-gate.mjs` in the package run. Four cells, one per
+acceptance criterion, all through `humanQuery`: `p891.mpers.entity_type` seeds a Sdn Bhd and a
+sole proprietorship through the doors and shows the eligibility item seeded (`pending`) for the
+first and permanently unseeded for the second, even after a later reconciliation; `p891.tin.
+turnover` does the same for the TIN item against the turnover answer, including the unanswered
+(`'undetermined'`) case before either firm states a turnover band; `p891.counter.excludes` answers
+turnover above the exemption threshold, reconciles (TIN joins `counter.required_total` at 9,
+unanswered), answers TIN (joins `required_answered` too), then RE-answers turnover back under the
+threshold and shows TIN drop out of BOTH sides of the counter on the very next read while its own
+recorded answer is untouched — the regression this file's own migration header measured and
+guarded against (`p648.commit.outstanding`'s `required_total=8` invariant, which answers
+`entity_type` as `'sdn_bhd'` without ever re-seeding, stays true only because a conditional item's
+counter contribution requires it to be ACTUALLY SEEDED, not merely live-applicable); `p891.answer.
+survives` answers `mpers_eligibility` while `entity_type='sdn_bhd'`, then corrects `entity_type`
+away and shows the item's own `state`/`answer` untouched while its reported `applicability` and
+`required` flip live. All four cells were run against a deliberately broken variant of the
+migration (seed's applicability filter removed, `get_firm_setup`'s applicability/counter/`v_unseeded`
+guards reverted, applied via the `CLARA_MIGRATION_REDO` mechanism on this lane's own rig) and failed
+for the reasons this file's own assertions name, then re-run green after restoring the migration
+byte-for-byte — the vacuity control.
+
+`firm-setup.test.mjs` (#648) and `firm-setup-polish.test.mjs` (#895) both needed narrow, direct
+consequences of #891's seed-time change fixed alongside it: `p648.seed.reconcile` /
+`p648.seed.empty` / `p895.seed.noop`'s literal seeded-row counts (9→7, 12→10, 12→10 respectively —
+`mpers_eligibility`/`tin` are UNDETERMINED on a freshly-seeded plan and are no longer among the rows
+a first reconciliation inserts), and `p648.capture.ineligible`'s loop — which answers `entity_type`
+and `turnover` as part of proving the OTHER nine items capture no knowledge record — now
+reconciles again immediately after each dependency answer (so `tin`/`mpers_eligibility` are
+actually seedable before the loop tries to answer them) and answers `turnover` with `'RM1M-5M'`
+rather than its own `sampleAnswer` helper's first option (`'<RM1M'`, which would make TIN
+permanently exempt and refuse this very loop's later attempt to answer it).
 
 ## Firm knowledge defaults (#654, `0220_firm_knowledge_defaults.sql`)
 
@@ -877,6 +1033,78 @@ later file in the same sweep does not inherit this one's arrangement.
 `legal-enforcement-mode-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
 does not preload it and fails loudly on a database without 0234, because a skip is not evidence.
 
+## `document-capability-high-water.test.mjs` — #846 / migrations 0244 and 0272
+
+Ten cells over `clara.document_capabilities` and its new high-water relation. Gated on the LIVE
+CATALOG (the relation, the four trigger bodies, the five triggers and the deferred `pg_constraint`
+row), never on a migration number; a PARTIAL cohort THROWS. 0244 and 0272 are ONE cohort because
+they land in one pull request: no shipped chain sits between them, so a database carrying one and
+not the other is a half-applied migration, which is what the cohort reports. Its gate module is
+`document-capability-high-water-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_DOCUMENT_CAPABILITY_HIGH_WATER`), and the focused run with that variable
+UNSET is the acceptance shape — zero skips.
+
+- **The two refusals**: a pair's published version survives DELETE (re-inserting below it raises
+  `CLR08` / `registry_version_high_water` carrying the mark and the attempted version), and the
+  mark itself is append-only (DELETE and any lowering raise `CLR08` /
+  `registry_version_high_water_append_only`, a raise is admitted).
+- **The uniformity wall**, from both sides: a transaction raising ONE pair is refused **at a real
+  COMMIT**, and the registry is re-read afterwards to prove nothing was written; a whole-registry
+  raise passes the same wall, forced early with `set constraints
+  clara.t_document_capabilities_version_uniform immediate` so the probe can roll back instead of
+  republishing the live registry. **The commit cell is the only cell in this file that commits**,
+  and its safety rests on the gate: the deferred constraint trigger is proven present before the
+  transaction opens. With the wall absent the same transaction commits and leaves the registry
+  publishing two versions — measured while writing it.
+- **The three routes the first cut left open** (0272, the fix round after the adversarial lens
+  drove them as `clara_fn_owner` on the lane database): **TRUNCATE** of the mark ledger, which no
+  ROW trigger sees, refused by 0003's `clara._tf_no_truncate` armed `before truncate … for each
+  statement` (`CLR08`, and no `detail.reason` — the estate's single truncate guard carries none);
+  a **RE-KEYING UPDATE** of the registry onto a published pair's key, refused by the same
+  high-water body armed a second time as `t_document_capabilities_version_high_water_rekey`,
+  `before update … when` the key changes (`CLR08` / `registry_version_high_water`, naming the
+  DESTINATION); and a **backwards `recorded_at`** on the mark, refused by one more case arm in the
+  append-only body. Each cell FAILED against 0244 alone before 0272 closed it. The re-key wall is
+  a SECOND trigger with a `when` clause rather than a wider event list on 0244's, because BEFORE
+  ROW triggers fire in name order: the wide cut was applied and measured to re-label an ordinary
+  in-place lowering from 0207's `registry_version_monotone` to `registry_version_high_water`, and
+  `document-capability-registry.test.mjs` caught it.
+- **The three positive controls** — re-publishing a retired pair at and above its mark, the first
+  publication of a never-seen pair (which mints its mark in the same statement), and rollback
+  hygiene over both tables — exist because a refusal that refuses everything would pass the two
+  cells above and fail the estate. Proven non-vacuous: with
+  `clara._tf_document_capabilities_version_high_water` recut to refuse every insert, cells 1, 5 and
+  6 go red; the body is restored byte for byte through the redo path and re-measured by
+  `sha256(prosrc)`.
+
+`document-capability-registry.test.mjs` (0191/0207's own battery) is untouched by 0244 — every
+probe in the new file is rolled back, which is what keeps that file's registry-wide invariants
+true.
+
+**#782 (migration 0245)** edits that same battery in place rather than adding a cell: `PUBLISHED_
+REGISTRY_VERSION` re-bases 2 → 3 (its own doc comment says why, in the one place a future
+republication re-bases), and the invoice-shaped-PDF / monotone-probe / rollback-hygiene cells' pins
+move from `limits.invoice_line_items = "planned"` to `{ invoice_line_items: "accepted_limitation",
+invoice_line_items_reason: "no_consumer_reads_line_facts" }`. This file's own rollback-hygiene cell
+(above) pins the SAME row's limits and needed the identical edit — a reminder that a value pinned
+in two batteries over one table moves in both or the second one reds after the first migration
+that changes it. See `packages/db/README.md`'s "#782" section for the migration itself.
+
+**#988 (migration 0246)** adds three cells to the registry battery, behind their own catalog
+frontier (`proposalLevelApplied()` greps `pg_get_constraintdef` for the `proposal_only` token,
+never a migration number), with its own `EXPECTED_CELLS_PRE_988`.
+
+**The fix round (migration 0272)** adds three cells to the high-water battery and one to the
+registry battery — the registry's own `comment on column … limits` stops calling invoice line
+items planned (#782's AC2), behind `wallCompletionApplied()`, which reads 0272's truncate trigger
+rather than the comment it asserts.
+
+**Counts, measured on the lane database with the whole chain applied:** 10/10 for
+`document-capability-high-water.test.mjs` and 23/23 for `document-capability-registry.test.mjs`
+(17 below 0207, 20 below 0246, 22 below 0272 — each named by its own `EXPECTED_CELLS_*` constant,
+and the `after` hook asserts whichever the live frontier makes true, so forgetting to bump one
+reds the battery).
+
 ## `operator-support.test.mjs` `os.19` — #844
 
 os.14 (#774) pins the arm-1 lateral's SECOND ordering key (a money-carrying intent status beats a
@@ -926,6 +1154,200 @@ from both a simulated id-removed variant and a simulated id-reversed variant (ch
 against the live catalog and against string variants of it, not merely reasoned about).
 
 `EXPECTED_CELLS` (this file's own `os.VACUITY CONTROL`) is 19, one more than before this ticket.
+
+## `operator-support.test.mjs` `os.20` / `os.21` — #843 / migration 0263
+
+The operator console offers THREE support acts and, until this ticket, only one of them was
+readable anywhere: `clara.reject_firm_registration` has appended `firm_registration.rejected`
+since 0145 §D, while `clara.set_admission_capacity` and `clara.resolve_stripe_event_problem`
+stamped `clara.audit_log` and nothing else — and no door in the estate reads that table (os.13's
+firm-scoped SELECT is the only human reach). 0263 gives the two silent acts one
+`clara._append_event` each, registering `admission.capacity_set` and
+`stripe_event.problem_resolved` firm-level and routing both `context_update` at the active
+taxonomy version.
+
+**The read is `clara.list_activity`, not `clara.list_firm_timeline`.** #843's own 2026-09-20
+correction records that the latter (and `apps/web/lib/firm/timeline.ts`) retire under #998 and
+that #659 already swapped Firm Home's "Recent activity" band onto `clara.list_activity`. Both
+doors page the SAME `clara.firm_timeline_visible` view at the same bookkeeper floor, so only the
+read moved — the mechanism (one event under the operator firm, inside the reservation) is
+unaffected.
+
+**os.20** drives all three acts and reads them back by type, asserting actor, a null `client_id`,
+the registered description sentence and the KIND each lands on; then that another firm's owner
+reads none of the three; then that an operator-firm VIEWER meets CLR04 rather than an empty page.
+`firm_registration.rejected` is asserted FIRST as the control: it has been appended since 0145, so
+a page that cannot find it is a broken read rather than a missing event type.
+
+**The kind is the door's STATED DEFAULT (`documents`), decided rather than inherited.**
+`clara.list_activity`'s ladder (0202) recognises `sweep.run_completed`, `entry.%`, `document.%`,
+`close.%` and `work.%` and files everything else under `documents`. #843's correction asks the
+acceptance cell to settle this with #861 (the open recut of the same ladder) and say which: all
+three operator acts ride the default TOGETHER. The owner's #861 ruling fixes five new kinds —
+`people`, `assets`, `counterparties`, `clients`, `firm` (`firm.*`) — and none covers an admission
+act; `firm_registration.rejected` is not matched by `firm.%` either (its fifth character is `_`,
+and `.` is a literal in a LIKE pattern), so the already-visible act stays on the default after
+that recut too. A sixth kind would be new user-visible vocabulary, which is the owner's call. If
+#861 ever does give the operator acts a kind, os.20's `SUPPORT_EVENT_KIND` moves with it — the
+constant is spelled once, in `operator-support-fixtures.mjs`.
+
+**os.21** proves the replay half: the same op_key on both doors returns the original receipt and
+appends no second line, counted in `clara.domain_events` as root and then read back through the
+door. That is the reason both appends sit between `_reserve_op` and `_finish_op`, and 0263's tail
+asserts the POSITION (not merely the presence) of each one.
+
+**Frontier**: stem `operator_support_timeline_events$`, gate module
+`operator-support-timeline-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_OPERATOR_SUPPORT_TIMELINE=1`), wired into `package.json`'s `test` script in
+migration order after `activity-successor-link-preintegration-gate.mjs`. The FIRST #843 cell uses
+the LOUD discriminator (`assertSupportTimelineCohortPresent`) and the second the quiet
+`gateSupportTimeline`, the double-gate idiom `accrual-adjustments-fixtures.mjs` documents. Both
+cells ride 0188's stem as well, because every one of them builds its world through the #615
+fixtures.
+
+**`EXPECTED_CELLS` stays 19** and the two new cells are counted separately
+(`EXPECTED_TIMELINE_CELLS`), added to the expected total only when `supportTimelineLaneReady()` is
+true — so a database pinned between 0188 and 0263 reports a clean vacuity control instead of a
+false finding. (The four #776 name cells predate that shape and are still counted
+unconditionally; a database carrying 0188 and not 0206 would red the control. Untouched here,
+worth a follow-up.)
+
+**No new rig-meta cohort, and that is measured rather than omitted.** Both doors keep their
+existing cohorts (`CHECKOUT_CONVERGENCE_0186_COHORT`, `CHECKOUT_GATE_C2_HUMAN_FNS`): no new
+function name, no signature change, no grant change, each re-read by 0263's own §T. The file's
+other effect is reference data — two `clara.event_types` rows and their `clara.trigger_taxonomy`
+routing — which no cohort here enumerates; the estate's coverage law over the catalog lives in
+`rig-events-structure.test.mjs` §7, and 0263's tail re-reads that anti-join for itself. A `#843` /
+`#843 END` bracketed note beside the cohort records it, the same shape #840's note carries.
+
+**Where the capacity act's append sits, and why it is not beside its audit row (fix round,
+ADV-L08-1).** `clara._append_event` opens by taking the acting firm's `clara.firm_event_seq` row
+and holds it to commit. Three peer operator acts take that same OPERATOR-firm row and take no
+advisory lock (`reject_firm_registration`, `approve_firm_registration`, and 0263's own recut of
+`resolve_stripe_event_problem`), while `clara.set_admission_capacity` also holds
+`pg_advisory_xact_lock(hashtextextended('clara.admission-capacity', 0))` — the key
+`clara.claim_paid_firm` takes for a paid applicant's firm claim. Appending INSIDE that critical
+section made the estate's admission lock wait on an unrelated operator act: measured with three
+connections on the rig, S1 holding the operator firm's seq row, S2 inside the capacity door on a
+`Lock/transactionid` wait with the advisory lock already taken, S3's `pg_try_advisory_xact_lock`
+returning FALSE — i.e. a firm claim queueing behind a support act, which `claim_paid_firm`'s own
+comment refuses ("no business queueing behind the estate's admission lock"). The append therefore
+runs BEFORE the advisory lock (still inside the reservation, so os.21's replay proof is unmoved),
+and 0263 §T pins the order in the committed body. No cycle is created by taking the seq row first:
+`claim_paid_firm`, the only other holder of that key, appends under the firm it is CREATING in the
+same transaction, never under the operator firm. `resolve_stripe_event_problem` takes no advisory
+lock, so its append stays beside its audit row.
+
+**The registered sentence is pinned, not just the name (fix round, ADV-L08-2).** §1 registers both
+types with `on conflict (name) do nothing` — which is what makes a redo idempotent, and also what
+would silently KEEP a colliding registration written by someone else. `clara.firm_timeline_visible`
+projects `clara.event_types.description` as `event_description` and both activity doors return it,
+so that column IS the line the operator reads. 0263 §T now asserts the exact text of both
+descriptions alongside `client_scoped` and the taxonomy routing, so a collision refuses the
+migration instead of being left to a human glance at integration time. Control: with the
+append-only guard (`t_event_types_append_only`) suspended inside a rolled-back transaction, each
+description was replaced in turn and §T refused with CLR10 naming the foreign sentence; the
+subject was restored byte for byte.
+
+**Why #840's and #861's door recuts landed in TWO migrations and not one.** #840's triage comment
+and #861's owner ruling each asked for ONE migration if both were in flight together. They were —
+in this lane — but the wave-2 work-order addendum (`docs/plan/active/riders-2026-09-20`) overrides
+it: one implementer per ticket, and "a ticket that needs a schema or function change writes EXACTLY
+ONE new migration file at the number reserved for it". So 0262 (#840) and 0264 (#861) each recut
+`clara.list_activity` and `clara.get_activity_event` in turn, and they compose because 0264's
+prestate pins 0262's OUTPUT shas rather than 0202/0184's and its body was rebuilt from 0262's
+committed text. A chain that applies 0262 then 0264 therefore reaches the same body a single
+migration would have written; the two files are never applied out of order because migration
+numbers are a total order.
+
+## `activity-feed.test.mjs` `af.33`–`af.39b` — #861 / migration 0264
+
+Both activity doors computed a row's `kind` from a five-rung ladder — `sweep.run_completed`,
+`entry.%`, `document.%`, `close.%`, `work.%` — and swept everything else into `else 'documents'`.
+Six wave-2026-09-15 tickets (#625, #633, #639, #646, #647, #650) each hit the same residual and
+DECISIONS D13 deferred it rather than let six lanes patch one shared ladder mid-wave. The owner's
+ruling of 2026-09-18 on #861 fixes the vocabulary, and 0264 recuts BOTH bodies and the door's
+closed `p_kinds` roster in one transaction:
+
+| prefix(es) | kind |
+|---|---|
+| `member.%`, `invite.%` | `people` |
+| `asset.%` | `assets` |
+| `counterparty.%` | `counterparties` |
+| `client.%`, `knowledge.%` | `clients` |
+| `firm.%` | `firm` |
+
+Everything else still rides the STATED DEFAULT, `documents`.
+
+**`firm.%` is written with the dot on purpose.** In a SQL LIKE pattern `.` is an ordinary
+character but `_` is a single-character WILDCARD, so the natural-looking `firm_%` would also have
+swallowed `firm_registration.*` (the operator admission surface, three types) and `firm_setup.*`
+(the setup checklist, four) — two families the ruling does not name, and one of which os.20 pins
+on the stated default two commits earlier on this same branch. **os.20's own reading survives
+0264 unchanged**: all three operator support acts still ride `documents`, and af.37 asserts the
+`firm_registration.*` half of that from the other side.
+
+**The five cells that name a family** are af.33 (people), af.34 (assets), af.35 (counterparties),
+af.36 (clients) and af.37 (firm). Each proves the same three things and nothing more: the door's
+filter ADMITS the kind (before 0264 every one of them answered `CLR10 invalid_kind` — that is the
+red each cell was first seen in), `clara.list_activity` files the family's event type under it,
+and `clara.get_activity_event` answers the same kind for the same row. af.34 adds the departure
+half (the acquisition has LEFT the documents rung) and af.37 adds the look-alike negative above.
+
+**Real rows where the world has them, appended rows where it does not.** af.33's `member.added`
+and af.37's `firm.created` are written by `clara.add_member`/`clara.create_firm` when
+`buildWorld()` runs, so those two cells read product-written rows. The rest go through `mkEvent`,
+the same direct `clara._append_event` idiom `mkSweepEvent` uses: the ladder reads `event_type` and
+nothing else, so a row a real door would write and a row this writes are indistinguishable to it.
+One finding came out of drawing that line — **`client.created` is a REGISTERED but UNEMITTED event
+type** on this estate (measured on `clara.domain_events`: `client.activated`,
+`client.onboarding_started` and `client.resolved` are written, `client.created` never is), so
+af.36's first cut, which looked for a real one, was waiting for a row no door writes.
+
+**af.38 is the stated default**, driven through three families the ruling does not name
+(`bank.statement_ingested`, `egress.purpose_activated`, `open_item.created`) so the claim is about
+the `else` arm and not one lucky prefix. It is green before the recut as well as after, so it
+carries the vacuity control the house asks of such a cell: both installed bodies were hand recut
+on the rig with `else 'documents'` replaced by `else 'clients'` and af.38 failed; the bodies were
+restored by reversing that one replacement and re-applying 0264 through `CLARA_MIGRATION_REDO`.
+
+**af.39a and af.39b are the ticket's "the two ladders agree for EVERY event type" criterion, from
+both sides.** af.39a reads both INSTALLED bodies out of `pg_proc`, slices each one's ladder from
+the sweep rung to the stated default, drops comment lines and normalises whitespace, and asserts
+the two are the same sentence — comments are dropped because the two doors document identical
+rungs at different lengths, and what must match is the DECISION, not the prose. It then compares
+that sentence to `EXPECTED_LADDER`, written out once in the test from #728/#630 and the owner's
+ruling rather than re-derived from the SQL under test. af.39b is the behavioural half: it appends
+ONE event of every registered `clara.event_types` name, pages the feed until every one is seen,
+and asserts both doors answer the kind an independent prefix table predicts, then asks the door
+for each kind it saw so "correctly labelled" and "reachable" are one claim. `sweep.run_completed`
+is the single excluded name, with its reason: #728 keeps an effectless heartbeat out of the feed
+entirely, so a bare append of one could never reach a page; af.15 owns that rung behaviourally and
+af.39a covers it structurally. Both cells were shown red by hand-recutting the detail door's
+`assets` rung to `documents`, which makes the two ladders disagree for exactly one family.
+
+**Frontier**: stem `activity_kind_ladder$`, gate module
+`activity-kind-ladder-preintegration-gate.mjs` (`CLARA_ALLOW_MISSING_ACTIVITY_KIND_LADDER=1`),
+wired into `package.json`'s `test` script in migration order after
+`operator-support-timeline-preintegration-gate.mjs`. af.33 uses the LOUD discriminator
+(`assertKindLadderCohortPresent`); af.34–af.39b use the quiet `gateKindLadder` — the double-gate
+idiom `accrual-adjustments-fixtures.mjs` documents, and the same shape #840's af.31/af.32 use one
+frontier earlier in this file.
+
+**No new rig-meta cohort, measured rather than omitted.** `clara.list_activity` and
+`clara.get_activity_event` are still 0181's same two doors at their same signatures and grant
+(`ACTIVITY_FEED_0181_HUMAN_FNS` already covers them; 0183, 0202 and 0262 each recut these bodies
+before). 0264 changes body text only — no parameter, no new function, no widened or narrowed ACL —
+and its own tail re-reads owner, `SECURITY`, both pinned settings and the exact ACL for both names
+and refuses on drift. A `#861` / `#861 END` bracketed note beside the cohort records it, the same
+shape #840's and #843's notes carry.
+
+**The browser half is a separate contract kept in two places.** `apps/web/lib/firm/activity.ts`'s
+`ACTIVITY_KINDS` must equal the door's roster exactly — a value there the door refuses is a filter
+chip that answers CLR10, and a value the door carries that is missing there is a kind no bookmark
+can name. `lib/firm/activity.test.ts` pins the roster and the label map; the URL parser needed no
+change, because it already drops an unrecognised token (which is what makes a bookmark naming a
+retired kind degrade to "no filter on that axis").
 
 ## `reset-gate-routing.test.mjs` — #845
 
@@ -1012,3 +1434,311 @@ row ties to the opening entry (`acquisition_entry_id`), and it is the SAME id `s
 own receipt named — the behavioural proof that `_tf_fa_acquisition_birth`'s
 `if new.is_opening_balance then return null; end if;` guard actually prevented a second birth,
 rather than a `prosrc` string match proving only that the guard's TEXT exists.
+
+## The fixed-asset birth-watermark battery (#972)
+
+`fa-birth-watermark.test.mjs` is frontier-gated on the `fa_birth_watermark$` stem (migration 0247)
+— never on a number — and shares `fa-birth-watermark-fixtures.mjs`. Five `p972.*` cells:
+`p972.law` reads the recut birth body off the CATALOG (the watermark expression present exactly
+once, 0216's watermark-free join gone, NO bare clock token — arm (D)'s own detector, imported from
+`x42-s5-helpers.mjs` rather than restated — and `clara.fa_register_tie` still phrasing the
+pre-enrolment test the watermark negates, twice; `t_je_fa_acquisition_birth` still the deferred
+insert-or-update constraint trigger whose re-firing is the mechanism); `p972.retro` drives the
+defect's own shape at the door seam and then through `clara.fa_register_tie` at `x41.s4`'s three
+as-ofs, classified by `x41.s4`'s own `isRed`/`isExplained`; `p972.refire` proves the narrowed join
+did not close the lane 0216 opened; `p972.source` drives the assumption the predicate rests on
+instead of asserting it — an approved entry can never carry a NULL `approved_at`, because
+`clara._tf_entry_immutable` refuses the draft→approved transition without one and its
+approved→approved allow-list is exactly `{reversed_by, reversal_reason, updated_at}`;
+`p972.sites` records the SECOND birth site rather than aligning it.
+
+**Why the predicate is the TIE's, negated, and not the BELT's.** The belt
+(`clara._tf_fa_movement_belt`, 0041 §S2.6) spells its own watermark
+`coalesce(new.approved_at, now()) >= fp.enrolled_at`, and the first cut of 0247 copied it. That
+session clock is wrong here and the review caught it twice over: the whole finding is that this
+trigger RE-FIRES in a LATER transaction (`clara.reverse_entry`'s `reversed_by` stamp), where
+`now()` is the REVERSING transaction's instant — always at or after enrolment — so the fallback
+would re-admit exactly the entry the file excludes; and the clock read reddened `x42.r7.s5c.5` and
+`x42.s5c.6`, whose arm (D) roster (`FA_ACQUISITION_0216_CLOCK_NAMES`) says in prose that this body
+"takes its dates from the entry it fires for". The shipped predicate is
+`coalesce(new.approved_at, new.created_at) >= fp.enrolled_at` — the exact negation of
+`clara.fa_register_tie`'s own pre-enrolment test (`coalesce(j.approved_at, j.created_at) <
+v_enrolled`, once per column), so the instrument that BIRTHS a register row and the instrument
+`x41.s4` reads to AUDIT it cannot disagree about scope. It spends no clock read, so arm (D)'s
+roster stays true unwidened, and 0247's own tail (T.8) re-proves that off the catalog.
+
+**The second birth site is PINNED, not aligned (`p972.sites`).** `clara._fa_on_approve` arm 4
+makes the same insert with the same conflict target, and 0247 deliberately leaves its join
+watermark-free — two birth sites that now differ in text is exactly the condition that produced
+#972's defect, so the reasons it is safe here are measured off the catalog instead of argued.
+Three facts, and the cell reds if any moves. (1) The DIVERGENCE is real: arm 4 carries its
+watermark-free join exactly once and no copy of the trigger's watermark — an absence nothing
+checks is not an absence. (2) Arm 4's own guard still reads `not e.is_opening_balance and
+e.reversal_of is null and not (e.flags ? 'fa_disposal')`, which excludes the reversal MIRROR —
+the only entry arm 4 sees during a reversal, since `clara.reverse_entry` hands its hook
+`v_mirror`, never the original. That is the precise difference from the trigger, which the house
+reversal law re-fires on the ORIGINAL. (3) `clara._fa_on_approve`'s caller set is exactly
+`{_subledger_on_approve}`: every approve writer reaches arm 4 through that one function, in the
+same statement run that flips the entry to approved, so arm 4 only ever sees an entry whose
+`approved_at` is this transaction's instant. A caller reaching `_fa_on_approve` DIRECTLY would
+not, and reds this cell. The OUTER rung of that ladder — `_subledger_on_approve`'s own caller set
+— is `x41.a3`'s frontier-gated census and is deliberately not restated here. The behavioural half
+is already driven by `p972.retro`, whose reversal runs `reverse_entry`'s own hook call inside the
+same transaction. VACUITY CONTROL RUN (twice, before and after the cell was simplified to the
+inner rung): a throwaway `clara._p972_vacuity_probe(uuid)` calling `clara._fa_on_approve` was
+created on the lane rig, the cell went RED on the caller-set assertion (5 tests, 4 pass, 1 fail),
+and the probe was dropped, its absence re-measured at 0 `pg_proc` rows, and the file re-run 5/5.
+
+**`x41.s4` and the pre-0247 residue: the reproducible measurement.** On a long-lived rig the two
+register rows the PRE-0247 body birthed survive — `clara.fixed_assets` forbids DELETE (CLR13) —
+so `x41.s4` keeps reporting them as one unexplained difference per client at its settled as-of,
+and #972 puts cleaning them out of scope. That made #972's AC5 green unreproducible, because it
+was taken on a throwaway clone that was then dropped. The recipe, and the figure it produced,
+re-taken 2026-09-20 on the lane rig and recorded here so the integrator can repeat it:
+
+1. `create database clara_l04_s4fix template clara_l04` (a template copy, NOT a second
+   from-scratch chain — no migration runs, so 0154's cluster-wide role census is untouched).
+2. On the clone only: `alter table clara.fixed_assets disable trigger
+   t_fixed_assets_immutable_0017`, `delete from clara.fixed_assets f using clara.clients cl
+   where cl.id = f.client_id and cl.name like 'x41_b3%'`, then `enable trigger` again and
+   re-read `pg_trigger.tgenabled` to prove it is back on (`O`).
+3. Run `x41-round35-tie.test.mjs` and `x41-wave-d-a-fa.test.mjs` against the clone on the full
+   gate chain, then `drop database clara_l04_s4fix`.
+
+Measured: 2 rows deleted; **16 tests, 16 pass, 0 fail, 0 skip — `x41.s4` GREEN**, with
+`ALLOWED_RED` untouched at its single `/^x41_r3_/` entry (the file is byte-identical to the
+wave-2 base). The attribution is independently checkable on the lane rig itself without any
+surgery: 14 `x41_b3_…` clients have been created there, and only TWO carry a register row — both
+created at 04:36:37 and 04:37:42 on 2026-09-20, before 0247 first applied at 04:53:08. Every
+`x41.b3` run since has birthed none, which is also what #972's own
+`faRows(client).length === 0` assertion inside `x41.b3` now asserts on every run.
+
+`fa-birth-watermark-preintegration-gate.mjs` is the package-wide sweep's escape
+(`CLARA_ALLOW_MISSING_FA_BIRTH_WATERMARK=1`), registered in `packages/db/package.json`'s `"test"`
+chain at its MIGRATION-order position (last, after `legal-enforcement-mode-preintegration-gate.mjs`,
+0234). A FOCUSED run does not preload it and FAILS LOUDLY below 0247; final acceptance is exactly
+that focused shape counting ZERO skips.
+
+**The gate also covers one assertion in a cell older than it.** `x41.b3`
+(`x41-wave-d-a-fa.test.mjs`) gained the post-reversal register re-look #972's AC2 asks for, and
+that one `assert` is wrapped in `faBirthWatermarkEnforced()` — the inline half of the same gate,
+which returns a boolean instead of calling `t.skip()` so the rest of the host cell still runs.
+
+**Its clients are `p972_…`, outside the x41 family, on purpose.** Every fixture here is a
+deliberate pre-enrolment shape, and `x41.s4` holds each EXPLAINED difference among `x41_…` clients
+to an allow-list pinned at exactly one entry. Naming them `x41_…` would put pressure on that list;
+the classification law is still the sweep's own, imported rather than restated.
+
+**What 0247 changed about `x41.s4`'s reading of `x41.b3`, and why no allow-list moved.** Before
+0247 the reversal birthed a phantom register row whose cost netted the GL out at the two earlier
+as-ofs and left one UNEXPLAINED difference at the settled one. After it the register is empty, and
+the difference the two earlier as-ofs now show is pre-enrolment GL the register can never hold —
+which `x41.s4` classifies as an **A6 correction window** (derived from the data, not from a name:
+an approved entry the GL still carries at that as-of whose approved mirror is dated LATER), a class
+that has provably closed by the settled as-of and never reaches `ALLOWED_RED` at all. Both
+allow-lists are therefore untouched by #972; `ALLOWED_RED` is still its single `/^x41_r3_/` entry.
+
+A register row born by the PRE-0247 body does survive on a long-lived rig — the `fixed_assets`
+immutability trigger forbids DELETE (CLR13) — so a rig that ran the defect keeps reading those
+clients as one UNEXPLAINED difference at the settled as-of until it is rebuilt. #972 puts cleaning
+them out of scope explicitly, and the count drifts run to run; it is not a number to quote.
+
+## The depreciation leg-pairing fold (#973)
+
+`fa-depreciation-leg-fold.test.mjs` is frontier-gated on the `fa_depreciation_leg_fold$` stem
+(migration 0248) — never on a number — and shares `fa-depreciation-leg-fold-fixtures.mjs`, which
+itself re-exports the whole `depreciation-history-fixtures.mjs` world (`p651Client`, `faWorld`,
+`buyAsset`, `completeSL`, `liveAuthorityWithRef`, `previewRun`, `runManual`, …) rather than forking
+a second copy of it: #973 changes nothing about what a preview or a run MEANS, only where the leg
+pairing they agree on lives. Four `p973.*` cells: `p973.core.shape` reads the new routine
+`clara._fa_depreciation_leg_pairing(jsonb)` off the catalog — owned by `clara_fn_owner`, `stable`,
+SECURITY DEFINER, UNGRANTED (PUBLIC and every named application role denied EXECUTE) — the vacuity
+anchor, red against 0227 alone; `p973.core.pairs` calls the routine directly (root, since it is
+ungranted) with a synthetic charge set spanning TWO account pairs and asserts the four legs against
+an independent, hand-computed expectation; `p973.callers.recut` re-reads both `_fa_run_period_core`
+and `preview_depreciation_run` off the catalog and asserts each now calls the shared core, neither
+still carries the raw duplicated fragment, and the fragment survives in exactly one clara function
+afterwards; `p973.behaviour.two_pairs` is the behavioural proof at the public seam neither #651
+cell reaches — #651's own `p651.preview.matches_run` uses a single account pair throughout, which
+cannot tell "grouped by the pair" from "grouped by the expense account alone" — a client with two
+chargeable assets under two different account pairs proves the preview's four legs, hand-computed,
+and the run that follows posts the identical four.
+
+**The two splices `_fa_run_period_core` already carried, and the mistake of forgetting them.**
+Neither 0042 §S5.15d (the re-run admission gate, `clara._wdb_rerun_breach`) nor 0227 §E (the
+locked-period wall, `clara._fa_assert_period_open`) re-declares `clara._fa_run_period_core` with a
+`create or replace` in its own migration file — both install their change at RUNTIME, via a
+`pg_get_functiondef` read plus a string-replace, so neither shows up in a plain `grep` of the
+migrations directory for the function's name. A first draft of 0248 recut the poster against
+0041's ORIGINAL file text alone and silently dropped both, which reddened `p651.period.closed_refused`
+and `p651.census.rerun_gate` — an existing regression this ticket's own gates caught before it
+shipped. Both are restored, in their original positions, and 0248's own tail (T.8, T.9) now proves
+each survives independently: present exactly once, phrased identically, and ordered correctly
+relative to the arithmetic and the first write, so a future recut of this body cannot lose either
+silently again.
+
+`fa-depreciation-leg-fold-preintegration-gate.mjs` is the package-wide sweep's escape
+(`CLARA_ALLOW_MISSING_FA_DEPRECIATION_LEG_FOLD=1`), registered in `packages/db/package.json`'s
+`"test"` chain at its MIGRATION-order position (last, after
+`fa-birth-watermark-preintegration-gate.mjs`, 0247). A FOCUSED run does not preload it and FAILS
+LOUDLY below 0248; final acceptance is exactly that focused shape counting ZERO skips.
+
+**0227's own tail assertion T.13 is untouched.** An applied migration is immutable, and T.13 (the
+normalized-fragment agreement it enforced by text comparison) is not this file's to edit. It still
+passes at its own point in a from-scratch chain, against the pre-fold bodies the chain has built up
+to that point; what replaces its JOB going forward is 0248's own tail (T.2–T.4).
+
+## The fixed-asset particulars completion-wall fold (#976)
+
+`fa-particulars-completion-fold.test.mjs` is frontier-gated on the `fa_particulars_completion_fold$`
+stem (migration 0249) — never on a number — and shares `fa-particulars-completion-fold-fixtures.mjs`,
+which itself re-exports the whole `depreciation-history-fixtures.mjs` world (`p651Client`,
+`faWorld`, `buyAsset`, `completeWith`, `completeForWith`, `refuses`, `caught`, `reasonToken`, …)
+rather than forking a second copy of it: #976 changes nothing about what a completion MEANS, only
+where the wall it enforces lives. Four `p976.*` cells: `p976.core.shape` reads BOTH new routines
+— `clara._fa_assert_completion_not_a_change(uuid,jsonb)` and
+`clara._fa_assert_particulars_completable(uuid,clara.fixed_assets,jsonb)` — off the catalog, each
+owned by `clara_fn_owner`, SECURITY DEFINER, UNGRANTED (PUBLIC and every named application role
+denied EXECUTE), with the volatility its reads earn (`immutable` for the payload-only guard,
+`stable` for the post-lock core) — the vacuity anchor, red against 0248 alone;
+`p976.callers.recut` re-reads both `complete_fixed_asset_particulars` and
+`_fa_complete_particulars_core` off the catalog and asserts each now calls BOTH shared routines,
+neither still carries EITHER raw duplicated fragment (the change-class check and the
+already-complete-onward check are censused independently), and each fragment survives in exactly
+one clara function afterwards; `p976.wall.before_reserve` drives the PRECEDENCE 0227 wrote down
+twice ("Refused BEFORE the op key is reserved, so a retry is clean") through both doors on two
+shapes that can only answer it if the guard really does run first — a change-class payload
+carrying an already-spent `op_key`, and a change-class payload naming an asset outside the client
+— then re-reads both bodies to prove the guard's call offset precedes `clara._reserve_op`'s;
+`p976.behaviour.already_complete_both_doors`
+is the behavioural proof at the public seam NOTHING in this repo's existing suite ever reached —
+measured: `grep -rln fa_particulars_already_complete packages/db/tests` before this ticket names
+only the two fixture files that DEFINE the token string, never a test that drives the refusal
+through either door. A client completes one asset through the human door, then a second completion
+attempt on the SAME asset through the human door is refused `fa_particulars_already_complete`; a
+second asset completes through the runtime door, then a second attempt on IT through the runtime
+door is refused the same way — same code, same detail shape.
+
+**Why the wall could not be lifted as ONE contiguous fragment, and why it is TWO routines.** The
+two bodies' "already complete onward" text (the lifecycle check, the validator call, the
+non-depreciable/residual bounds) sits immediately AFTER their "first completion is not a change"
+check in BOTH bodies, but the text BETWEEN the two checks — `_reserve_op`, the firm-membership
+check, the advisory lock, the select-for-update — is NOT identical (the human door resolves
+`c := clara._human_ctx(...)` and reserves under a literal verb name with no DETAIL on its
+CLR10/CLR11 refusals; the core takes `p_firm`/`p_actor`/`p_door` as arguments and carries a DETAIL
+on the same two refusals). The fold therefore lifts TWO separate fragments — `FRAG_CHANGE_CLASS`
+and `FRAG_ALREADY_COMPLETE` in `fa-particulars-completion-fold-fixtures.mjs`, copied from the
+migration's own prestate/tail constants so a drift in either file is visible as a diff — into TWO
+new functions, each called where its own fragment already ran. That is still exactly one place per
+check, which is what #976 asks for.
+
+**The first cut of this fold put both halves in the post-lock routine, and that was wrong.** The
+change-class check reads nothing but the payload, and 0227 therefore anchored it ahead of
+`clara._reserve_op` in both bodies and said why, twice, in its splice text: "Refused BEFORE the op
+key is reserved, so a retry is clean." Folding it in with the post-lock half moved it behind the
+reservation, the firm-membership check, the advisory lock and the row lock, and deleted the
+sentence. Two observable consequences, both since MEASURED at the door seam and now driven by
+`p976.wall.before_reserve`: a change-class payload carrying an already-spent `op_key` answered
+CLR10 "op_key reused with different args" (because `_reserve_op` compares request hashes before
+the wall ran), and a change-class payload naming an asset outside the client answered CLR11
+`asset_not_found`. Both told the caller about a collision instead of about the mistake that is
+theirs to fix. The transaction-rollback argument the first cut made is true and is not the point:
+the refusal a caller SEES is a contract, and it had changed. 0249's tail T.2d now proves the
+ordering off the catalog, by call offset, in both bodies.
+
+`fa-particulars-completion-fold-preintegration-gate.mjs` is the package-wide sweep's escape
+(`CLARA_ALLOW_MISSING_FA_PARTICULARS_COMPLETION_FOLD=1`), registered in
+`packages/db/package.json`'s `"test"` chain at its MIGRATION-order position (last, after
+`fa-depreciation-leg-fold-preintegration-gate.mjs`, 0248). A FOCUSED run does not preload it and
+FAILS LOUDLY below 0249; final acceptance is exactly that focused shape counting ZERO skips.
+
+## What counts as a person's instruction, for both authority doors (#977)
+
+`authority-ref-human-instruction.test.mjs` is frontier-gated on the
+`authority_ref_human_instruction$` stem (migration 0250). It is the estate's first CROSS-LANE
+battery: it drives BOTH `clara.sign_depreciation_authority` (the fixed-asset lane, CLR38, ADMIN+)
+and `clara.create_accounting_plan` (the plan lane, CLR10, BOOKKEEPER+) in one file, because #977's
+whole claim is that the two stop holding two meanings for one word. It therefore imports each
+lane's OWN world rather than building a third — `depreciation-history-fixtures.mjs` for the
+fixed-asset half, `accounting-plans-fixtures.mjs` for the plan half — and both sit on the same
+`rig-helpers.mjs` pool, so one `endPool()` closes it. `authority-ref-human-instruction-fixtures.mjs`
+holds only what the cross-lane claim needs: the frontier gate, the two reason tokens, `refusedWith`
+(a STRICTER assertion than `x41-fa-fixtures.mjs`'s `refuses`, which falls back to matching a token
+anywhere in the message text — #977's claim is that two refusals are TOLD APART by their token, so
+a cell that accepted the token in prose could not see the defect), and the catalog constants.
+
+Six `p977.*` cells:
+
+* `p977.sign.machine_task_refused` / `p977.plan.machine_task_refused` — a `wake` task (no author by
+  construction) and an `autodraft` run that DOES carry a named author are both refused, at each
+  door's own error class, with `authority_ref_not_human_instruction`; the authority stays
+  `proposed` with no window floor and no recorded instruction, and no plan row is written. Each
+  cell also drives a reference naming NO row, which still answers `authority_ref_unresolved` — the
+  two tokens are the point.
+* `p977.definition.shape` — the house shape cell for a new ungranted internal:
+  `clara._authority_ref_refusal(text,uuid,uuid,uuid)` exists, `stable`, SECURITY DEFINER, owned by
+  `clara_fn_owner`, `search_path` pinned, EXECUTE held by nobody (not PUBLIC, not
+  `clara_authenticated`/`clara_runtime`/`clara_agent_ro`).
+* `p977.definition.one` — the catalog census: both doors READ the shared definition, neither still
+  carries its own inline chat-lane existence test, that inline test now survives in EXACTLY ONE
+  `clara` function (`_accrual_plan_core`, the accrual lane's copy, which the owner's ruling
+  deliberately leaves alone), and EXACTLY the two doors the ruling names read the one definition.
+  Normalized in JS by the same rule 0250's tail normalizes `prosrc` in SQL, so the cell and the
+  migration cannot disagree about what "the fragment" is.
+* `p977.both.unauthored_chat_turn_refused` — the cell that forces the rule to be a CONJUNCTION:
+  `clara.agent_tasks.created_by` is nullable for every kind, so a `chat_turn` nobody signed is
+  refused too.
+* `p977.both.person_instruction_accepted` and `p977.both.accounting_work_ref_unchanged` — the
+  "unmoved" half. A `chat_turn` carrying an author still signs and still creates a plan, with the
+  same receipts; an `accounting_work` reference is accepted by both doors exactly as before (and
+  the cell reads `clara.accounting_work.initiator`'s NOT NULL off the catalog first, because that
+  column is what the owner's ruling rests on), while another client's Work still resolves to
+  nothing.
+
+**The fixture that had to move.** `fa-authority-sign-compat.mjs`'s `mintChatTaskRef` minted an
+`autodraft` task — the cheapest arm to mint while ANY kind resolved, and #651's own comment named
+that as the residual this ticket closes. It now mints a `chat_turn` carrying an author, through a
+real `clara.chat_sessions` row, which also removes the trigger-off fallback the old helper needed
+for a not-yet-active client (a chat session only asks that its client be IN the firm).
+`mintAgentTaskRef` beside it mints the four shapes the refusal cells need — `chat_turn` with and
+without an author, `autodraft`, and `wake` (that last one as LABELLED fixture DML with the insert
+trigger off for exactly one statement, inside one transaction, because a wake task's firm and
+client are stamped FROM its intent's event and the cell needs the row to land on a named client).
+`packages/runtime/tests/reconcile-fa.test.mjs` inlines the same change for the belt rig's own
+signature.
+
+`authority-ref-human-instruction-preintegration-gate.mjs` is the package-wide sweep's escape
+(`CLARA_ALLOW_MISSING_AUTHORITY_REF_HUMAN_INSTRUCTION=1`), registered in
+`packages/db/package.json`'s `"test"` chain at its MIGRATION-order position (last, after
+`fa-particulars-completion-fold-preintegration-gate.mjs`, 0249). A FOCUSED run does not preload it
+and FAILS LOUDLY below 0250; final acceptance is exactly that focused shape counting ZERO skips.
+
+## The depreciation authority retired-read fallback (#979)
+
+`fa-authority-retired-read.test.mjs` is frontier-gated on the `fa_authority_retired_read$` stem
+(migration 0251) via `fa-authority-retired-read-fixtures.mjs`, which re-exports the whole
+`x41-fa-world.mjs` world (`proposeAuthority`, `signAuthority`, `retireAuthorityVerb`,
+`getAuthority`, `freshFaClient`, …) rather than forking a second copy of it — this ticket changes
+a READ, not the shape of what gets written, so its clients need no ties out of the `x41_…` family
+the way `fa-birth-watermark-fixtures.mjs` (#972) did for a deliberately pre-enrolment, defect-shaped
+fixture. Four `p979.*` cells: `p979.none` pins AC1 (a client with no authority at all still reads
+back a bare `authority: null`); `p979.retired` is AC2's behavioural proof — propose, sign and
+retire one authority, then read it back through `clara.get_depreciation_authority` at the `viewer`
+floor and assert its `status`, `retired_reason`, the now-populated `retired_by`, `retired_at` (to
+the second, cross-checked against a direct table read cast to `epoch` so the assertion never
+depends on the pg driver's own timezone parsing) and `authority_from`, all against the SAME row
+read directly off `clara.fa_depreciation_authorities` as an independent source of truth;
+`p979.recent` proves the fallback picks the MOST RECENT of two retired authorities, never the
+first; `p979.preferred` is AC3/AC5 — a live authority still wins over an older retired one, and
+its returned object carries NONE of the three keys the retired arm adds (asserted by key absence,
+not by an empty value).
+
+`fa-authority-retired-read-preintegration-gate.mjs` is the package-wide sweep's escape
+(`CLARA_ALLOW_MISSING_FA_AUTHORITY_RETIRED_READ=1`), registered in `packages/db/package.json`'s
+`"test"` chain at its MIGRATION-order position (last, after
+`authority-ref-human-instruction-preintegration-gate.mjs`, 0250). A FOCUSED run does not preload it
+and FAILS LOUDLY below 0251; final acceptance is exactly that focused shape counting ZERO skips.
+
+No CONTEXT.md change: `retired` is already this estate's vocabulary (filings, counterparty
+aliases), and 0251 coins no new domain term — it only widens which existing authority state one
+existing read surfaces, matching #973's and #976's own conclusion for their sibling folds.

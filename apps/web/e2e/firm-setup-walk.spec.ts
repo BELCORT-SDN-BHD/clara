@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 import { ensureRealFocus, signInTo } from "./helpers";
-import { FIRM_SETUP_COOKIE } from "./firm-setup-mock.mjs";
+import { FIRM_SETUP_COOKIE, TIP_KEY, TIP_KEY_READ } from "./firm-setup-mock.mjs";
 
 /**
  * #648 · THE BROWSER LEG for journey A5 — "Resume setup → answer only missing firm facts → saved
@@ -89,6 +89,11 @@ test.describe.serial("#648 · A5 firm setup", () => {
     await expect(tile).toBeVisible();
     await expect(page.getByTestId("firm-home-setup-counter")).toContainText("of 3 required facts recorded");
     await expect(tile).toContainText("does not hold up anything else");
+    // AC935 — THE TILE IGNORES TIPS. Two education tips are pending in this fixture's envelope;
+    // the tile names neither, because it reads `required_outstanding` and a tip is never
+    // `required_for_commit` (review L06-SPEC-13 asked for this to be evidence, not a corollary).
+    await expect(tile).not.toContainText("Invite your colleagues");
+    await expect(tile).not.toContainText("Where Clara keeps what it knows");
     await expect(page.getByRole("link", { name: "Clients" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Work" })).toBeVisible();
 
@@ -109,8 +114,37 @@ test.describe.serial("#648 · A5 firm setup", () => {
     await expect(page.getByTestId("firm-setup-counter")).toHaveText("0 of 3 required facts recorded");
     await scan(page, "the seeded checklist");
 
+    // AC935 — AN EDUCATION TIP: a title, a body, "Got it" and "Later", no answer form, and it
+    // never touches the required counter. BOTH actions are walked here, because AC4 asks for
+    // "reading and skipping a tip" and either one settles it (read-or-later, not "remind me
+    // later"): the tip disappears from the list on the very next render whichever is pressed.
+    const tip = page.getByTestId(`firm-setup-tip-${TIP_KEY}`);
+    await expect(tip).toContainText("Invite your colleagues");
+    await expect(tip).toContainText("Settings");
+    await expect(page.getByTestId(`firm-setup-answer-${TIP_KEY}-action`)).toHaveCount(0);
+    await expect(page.getByTestId(`firm-setup-skip-${TIP_KEY}`)).toHaveCount(0);
+    await page.getByTestId(`firm-setup-tip-later-${TIP_KEY}`).click();
+    await expect(tip).toHaveCount(0);
+    await expect(page.getByTestId("firm-setup-counter")).toHaveText("0 of 3 required facts recorded");
+
+    // …AND READING ONE. "Got it" on the second tip settles it the same way, and with the last tip
+    // gone the card itself goes with it rather than staying as a heading over an empty box
+    // (review L06-SPEC-05/-07).
+    const tipRead = page.getByTestId(`firm-setup-tip-${TIP_KEY_READ}`);
+    await expect(tipRead).toContainText("Where Clara keeps what it knows");
+    await expect(page.getByTestId(`firm-setup-tip-gotit-${TIP_KEY_READ}`)).toBeVisible();
+    await page.getByTestId(`firm-setup-tip-gotit-${TIP_KEY_READ}`).click();
+    await expect(tipRead).toHaveCount(0);
+    await expect(page.getByTestId("firm-setup-group-tips")).toHaveCount(0);
+    await expect(page.getByTestId("firm-setup-counter")).toHaveText("0 of 3 required facts recorded");
+
     // ONE FACT — a single Field, submitted from there.
     await page.getByTestId("firm-setup-answer-fye-action").click();
+    // #934 — the form shows the owner-approved ACCOUNTANT sentence under the question, never the
+    // engineer's own provenance note that rendered here before this ticket.
+    await expect(page.getByTestId("firm-setup-item-form")).toContainText(
+      "The month the firm's own financial year ends, 1 to 12. Clients keep their own year-end on their client record.",
+    );
     await page.getByRole("textbox").first().fill("6");
     await page.getByTestId("firm-setup-submit").click();
     await expect(page.getByTestId("firm-setup-answer-fye")).toHaveText("6");
@@ -248,6 +282,10 @@ test.describe.serial("#648 · A5 firm setup", () => {
     await answer.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("firm-setup-item-form")).toBeVisible();
+    // #934 — a second item, the owner-approved ACCOUNTANT sentence again, never the engineer note.
+    await expect(page.getByTestId("firm-setup-item-form")).toContainText(
+      "The firm's MyInvois TIN. Required when annual turnover is RM1 million or more; otherwise skip with a reason.",
+    );
     await page.getByTestId("firm-setup-cancel").click();
     await expect(page.getByTestId("firm-setup-item-form")).toHaveCount(0);
     await expect(answer).toBeFocused();

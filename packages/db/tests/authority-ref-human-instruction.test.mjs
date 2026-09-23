@@ -1,0 +1,344 @@
+// #977 [0250] — AN `authority_ref` INTO THE CHAT LANE IS ACCEPTED ONLY WHEN IT NAMES A HUMAN-
+// AUTHORED CHAT TURN, IN BOTH DOORS THAT RESOLVE ONE.
+//
+// THE DEFECT, IN ONE SENTENCE: `clara.sign_depreciation_authority` and
+// `clara.create_accounting_plan` both resolved a `{kind:'chat_task', id}` reference by a bare
+// EXISTENCE test — a row with that id, in the same firm and client — never reading the named
+// row's own kind or author, so a task the estate enqueued FOR ITSELF satisfied the same check as
+// an instruction somebody actually typed.
+//
+// EVERY ASSERTION UNDER TEST RUNS THROUGH A PERSONA (`signWithRef` / `createAccountingPlan`, both
+// `humanQuery` at their own floor). `rootQuery` appears only as a READBACK, or as LABELLED
+// fixture DML minting the agent task a reference names — and that minting says what it is in
+// `fa-authority-sign-compat.mjs`'s own comment.
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import {
+  gate977, NOT_HUMAN, UNRESOLVED, refusedWith,
+  REFUSAL_CALL, INLINE_CHAT_LANE_EXISTENCE, normalizedBody, normalizeSrc,
+  REFUSAL_FN_SIG, AUTHORITY_REF_HUMAN_INSTRUCTION_STEM,
+} from "./authority-ref-human-instruction-fixtures.mjs";
+import { mintAgentTaskRef } from "./fa-authority-sign-compat.mjs";
+import {
+  faWorld, p651Client, proposeAuthority, signWithRef, authorityRows,
+  printLaneNotes, printSkipCount, endPool, x41EnsureReady, rootQuery,
+  EXPENSE, BANK,
+} from "./depreciation-history-fixtures.mjs";
+import {
+  buildWorkWorld, freshWorkClient, createAccountingPlan, basis, todayInPlanZone,
+  PLAN_KIND, gatePlans, instructionRef, admitJournalWork,
+} from "./accounting-plans-fixtures.mjs";
+
+let live = false;
+before(async () => { live = await x41EnsureReady(); });
+after(async () => {
+  printLaneNotes("authority-ref-human-instruction");
+  printSkipCount("authority-ref-human-instruction");
+  await endPool();
+});
+
+/** Every cell needs 0041/0227 (the fixed-asset lane and its signing door), 0193/0223 (the plan
+ *  door) and 0250 (this ruling). */
+async function gate(t) {
+  if (!live) {
+    t.skip("0041 is not applied — the #977 battery is dormant");
+    return true;
+  }
+  return gate977(t);
+}
+
+// ===========================================================================================
+// 1 · THE FIXED-ASSET LANE'S DOOR — clara.sign_depreciation_authority (CLR38 axis, ADMIN+).
+// ===========================================================================================
+
+test("p977.sign.machine_task_refused clara.sign_depreciation_authority refuses a chat_task reference naming a task the estate made for itself — a wake task, which carries no author at all, and an autodraft run, which DOES carry one — with a reason token distinct from the unresolved-reference one, and signs nothing", async (t) => {
+  if (await gate(t)) return;
+  const w = await faWorld();
+  const client = await p651Client("sign_machine");
+  const authority = await proposeAuthority(w.users.bob, { client });
+
+  const stillProposed = async (label) => {
+    const row = (await authorityRows(client)).find((a) => a.id === authority);
+    assert.equal(row.status, "proposed", `${label}: NOTHING is signed`);
+    assert.equal(row.authority_from, null, `${label}: …and no window floor is stamped`);
+    assert.equal(row.authority_ref, null, `${label}: …and no instruction is recorded on the row`);
+  };
+
+  for (const [kind, author, label] of [
+    ["wake", false, "a wake task — the estate enqueuing work for itself, no author by construction"],
+    ["autodraft", true, "an autodraft run that DOES carry a named author — a run is not an instruction"],
+  ]) {
+    const ref = await mintAgentTaskRef(client, { kind, author });
+    const detail = await refusedWith(
+      () => signWithRef(w.users.hana, { client, authority, ref }),
+      { code: "CLR38", reason: NOT_HUMAN }, `p977.sign.${kind}`);
+    assert.notEqual(detail.reason, UNRESOLVED,
+      `${label}: "that row is not a person's instruction" is told apart from "there is no such row"`);
+    assert.equal(detail.kind, "chat_task", `${label}: the refusal names the reference's own kind`);
+    assert.equal(detail.id, ref.id, `${label}: …and the row it refused`);
+    await stillProposed(label);
+  }
+
+  // …AND THE OTHER REFUSAL IS STILL ITSELF. A reference naming no row at all keeps 0227's own
+  // token, so the two answers cannot be collapsed into one by a future edit.
+  const detail = await refusedWith(
+    () => signWithRef(w.users.hana, {
+      client, authority, ref: { kind: "chat_task", id: "00000000-0000-4000-8000-0000000000fe" } }),
+    { code: "CLR38", reason: UNRESOLVED }, "p977.sign.nonexistent");
+  assert.equal(detail.kind, "chat_task");
+  await stillProposed("a reference naming no row at all");
+});
+
+// ===========================================================================================
+// 2 · THE PLAN LANE'S DOOR — clara.create_accounting_plan (CLR10 axis, BOOKKEEPER+).
+//
+//     THE SAME RULE, THE SAME DEFINITION, A DIFFERENT ERROR CLASS. #977's point is that the two
+//     doors stop maintaining two copies of the answer; what each does with that answer stays its
+//     own business, and this cell pins that the plan lane keeps its CLR10 axis while the
+//     fixed-asset lane keeps its CLR38 one.
+// ===========================================================================================
+
+/** A plan-lane world and a fresh client on it, built once for this file. */
+let planWorld = null;
+async function planClient(tag) {
+  planWorld ??= await buildWorkWorld();
+  return { w: planWorld, client: await freshWorkClient(planWorld.users.alice, tag) };
+}
+
+const planRowCount = async (client) =>
+  Number((await rootQuery(
+    "select count(*)::int as n from clara.accounting_plans where client_id = $1", [client])).rows[0].n);
+
+test("p977.plan.machine_task_refused clara.create_accounting_plan refuses the SAME machine-created chat_task references, on its OWN error class, with the SAME new reason token, and writes no plan", async (t) => {
+  if (await gate(t)) return;
+  if (await gatePlans(t)) return;
+  const { w, client } = await planClient("p977plan");
+  const today = await todayInPlanZone();
+  const effectiveFrom = `${today.slice(0, 7)}-01`;
+
+  const create = (ref) => createAccountingPlan(w.users.alice, {
+    client, kind: PLAN_KIND.recurring, purpose: "p977 monthly rent",
+    authorityRef: ref, effectiveFrom, basis: basis({ postingDate: effectiveFrom }),
+  });
+
+  for (const [kind, author, label] of [
+    ["wake", false, "a wake task — no author by construction"],
+    ["autodraft", true, "an autodraft run that DOES carry a named author"],
+  ]) {
+    const ref = await mintAgentTaskRef(client, { kind, author });
+    const before = await planRowCount(client);
+    const detail = await refusedWith(() => create(ref),
+      { code: "CLR10", reason: NOT_HUMAN }, `p977.plan.${kind}`);
+    assert.notEqual(detail.reason, UNRESOLVED,
+      `${label}: told apart from "there is no such row"`);
+    assert.equal(detail.kind, "chat_task", `${label}: the refusal names the reference's own kind`);
+    assert.equal(detail.id, ref.id, `${label}: …and the row it refused`);
+    assert.equal(await planRowCount(client), before, `${label}: NOTHING is written`);
+  }
+
+  const before = await planRowCount(client);
+  const detail = await refusedWith(
+    () => create({ kind: "chat_task", id: "00000000-0000-4000-8000-0000000000fd" }),
+    { code: "CLR10", reason: UNRESOLVED }, "p977.plan.nonexistent");
+  assert.equal(detail.kind, "chat_task");
+  assert.equal(await planRowCount(client), before, "a reference naming no row writes nothing either");
+});
+
+// ===========================================================================================
+// 3 · THE ONE DEFINITION, OFF THE CATALOG — the structural standard this repo documents for a
+//     recut body (a prestate pin, a tail assertion, a catalog census). Work order rule 4: where
+//     the repo's own documented standard asks for a structural cell, that standard wins.
+// ===========================================================================================
+
+test("p977.definition.shape clara._authority_ref_refusal(text,uuid,uuid,uuid) exists, is owned by clara_fn_owner, stable, and UNGRANTED — PUBLIC and every named application role are denied EXECUTE", async (t) => {
+  if (await gate(t)) return;
+
+  const mig = await rootQuery(
+    "select version from clara.schema_migrations where version ~ $1",
+    [AUTHORITY_REF_HUMAN_INSTRUCTION_STEM]);
+  assert.equal(mig.rows.length, 1,
+    `exactly one applied ${AUTHORITY_REF_HUMAN_INSTRUCTION_STEM} migration (got ${mig.rows.map((x) => x.version).join(",")})`);
+
+  const fn = await rootQuery(
+    `select p.provolatile, p.prosecdef, p.proowner::regrole::text as owner,
+            'search_path=clara, pg_temp' = any(p.proconfig) as pinned_path
+       from pg_proc p where p.oid = $1::regprocedure`, [REFUSAL_FN_SIG]);
+  assert.equal(fn.rows.length, 1, `${REFUSAL_FN_SIG} exists`);
+  assert.equal(fn.rows[0].provolatile, "s", "…and is STABLE — the language itself refuses to let it write");
+  assert.ok(fn.rows[0].prosecdef, "…SECURITY DEFINER, like every other ungranted internal core");
+  assert.equal(fn.rows[0].owner, "clara_fn_owner", "…owned by clara_fn_owner, like its siblings");
+  assert.ok(fn.rows[0].pinned_path, "…and its search_path is pinned");
+
+  const acl = await rootQuery(
+    `select count(*)::int as n from pg_proc p, unnest(coalesce(p.proacl, '{}'::aclitem[])) as a
+      where p.oid = $1::regprocedure and a::text not like 'clara_fn_owner=%'`, [REFUSAL_FN_SIG]);
+  assert.equal(acl.rows[0].n, 0, "no grant beyond the owner's own — an INTERNAL, granted to nobody");
+
+  for (const role of ["clara_authenticated", "clara_runtime", "clara_agent_ro"]) {
+    const has = await rootQuery(
+      "select has_function_privilege($1, $2::regprocedure, 'EXECUTE') as ok", [role, REFUSAL_FN_SIG]);
+    assert.equal(has.rows[0].ok, false, `${role} does NOT hold EXECUTE on the shared definition`);
+  }
+});
+
+test("p977.definition.one both doors READ clara._authority_ref_refusal and neither still carries its own inline chat-lane existence test; that inline test now survives in exactly one clara function — the accrual lane's core, which the owner's ruling deliberately leaves alone", async (t) => {
+  if (await gate(t)) return;
+
+  const SIGN = "clara.sign_depreciation_authority(uuid,uuid,text,jsonb)";
+  const PLAN = "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)";
+
+  for (const sig of [SIGN, PLAN]) {
+    const src = await normalizedBody(sig);
+    assert.ok(src.includes(REFUSAL_CALL.toLowerCase()),
+      `${sig} reads the shared definition ${REFUSAL_CALL}`);
+    assert.ok(!src.includes(INLINE_CHAT_LANE_EXISTENCE),
+      `${sig} no longer carries its own inline chat-lane existence test — the fold is real`);
+  }
+
+  // Normalized in JS by the SAME rule the migration's tail uses in SQL, so this cell and the
+  // migration can never disagree about what "the fragment" is.
+  const bodies = await rootQuery(
+    "select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+    + "where n.nspname = 'clara' order by p.proname");
+  const carriers = bodies.rows
+    .filter((r) => normalizeSrc(r.prosrc).includes(INLINE_CHAT_LANE_EXISTENCE))
+    .map((r) => r.proname);
+  assert.deepEqual(carriers, ["_accrual_plan_core"],
+    "the inline existence test survives in exactly the one body the ruling leaves alone "
+    + "(the accrual lane's core) — never in either door, and never in a third place");
+
+  const readers = bodies.rows
+    .filter((r) => r.proname !== "_authority_ref_refusal" && r.prosrc.includes(REFUSAL_CALL))
+    .map((r) => r.proname);
+  assert.deepEqual(readers,
+    ["create_accounting_plan", "sign_depreciation_authority"],
+    "…and exactly the two doors the ruling names read the one definition");
+});
+
+// ===========================================================================================
+// 4 · THE OTHER HALF OF THE CLAIM — AUTHORSHIP.
+//
+//     Kind alone is not the rule. `clara.agent_tasks.created_by` is nullable for every kind, and
+//     the chat ingress is what stamps it; a `chat_turn` row with no author is a turn nobody
+//     signed, and it is not a person's instruction either. This cell is what forces the
+//     predicate to be a CONJUNCTION rather than a kind test.
+// ===========================================================================================
+
+test("p977.both.unauthored_chat_turn_refused a chat_turn task carrying NO author is refused by both doors with the same new token — authorship is half the rule, not a consequence of the kind", async (t) => {
+  if (await gate(t)) return;
+
+  const w = await faWorld();
+  const faClient = await p651Client("sign_unauthored");
+  const authority = await proposeAuthority(w.users.bob, { client: faClient });
+  const faRef = await mintAgentTaskRef(faClient, { kind: "chat_turn", author: false });
+  const faDetail = await refusedWith(
+    () => signWithRef(w.users.hana, { client: faClient, authority, ref: faRef }),
+    { code: "CLR38", reason: NOT_HUMAN }, "p977.sign.unauthored_chat_turn");
+  assert.equal(faDetail.id, faRef.id);
+  assert.equal(
+    (await authorityRows(faClient)).find((a) => a.id === authority).status, "proposed",
+    "NOTHING is signed");
+
+  if (await gatePlans(t)) return;
+  const { w: pw, client } = await planClient("p977unauth");
+  const today = await todayInPlanZone();
+  const effectiveFrom = `${today.slice(0, 7)}-01`;
+  const planRef = await mintAgentTaskRef(client, { kind: "chat_turn", author: false });
+  const before = await planRowCount(client);
+  const planDetail = await refusedWith(
+    () => createAccountingPlan(pw.users.alice, {
+      client, kind: PLAN_KIND.recurring, purpose: "p977 unauthored turn",
+      authorityRef: planRef, effectiveFrom, basis: basis({ postingDate: effectiveFrom }),
+    }),
+    { code: "CLR10", reason: NOT_HUMAN }, "p977.plan.unauthored_chat_turn");
+  assert.equal(planDetail.id, planRef.id);
+  assert.equal(await planRowCount(client), before, "NOTHING is written");
+});
+
+// ===========================================================================================
+// 5 · WHAT MUST NOT HAVE MOVED — the other side of the ruling.
+//
+//     A ruling that refused everything would pass every cell above. These two cells are the
+//     estate's "unmoved" discipline applied to BEHAVIOUR: the two shapes that were accepted
+//     before #977 and must still be accepted, at both doors, with the same receipts.
+// ===========================================================================================
+
+test("p977.both.person_instruction_accepted a chat_turn task carrying a named author is accepted by both doors, exactly as before the ruling — the signature goes live carrying the instruction it resolved, and the plan is created active", async (t) => {
+  if (await gate(t)) return;
+
+  const w = await faWorld();
+  const faClient = await p651Client("sign_authored");
+  const authority = await proposeAuthority(w.users.bob, { client: faClient });
+  const faRef = await mintAgentTaskRef(faClient, { kind: "chat_turn", author: true });
+  const signed = await signWithRef(w.users.hana, { client: faClient, authority, ref: faRef });
+  assert.equal(signed.status, "live", "the signature goes through");
+  assert.deepEqual(signed.authority_ref, faRef, "…and the receipt carries the instruction it resolved");
+  const row = (await authorityRows(faClient)).find((a) => a.id === authority);
+  assert.deepEqual(row.authority_ref, faRef, "…and so does the row");
+  assert.ok(row.authority_from, "…and the window floor is stamped, exactly as before");
+
+  if (await gatePlans(t)) return;
+  const { w: pw, client } = await planClient("p977authored");
+  const today = await todayInPlanZone();
+  const effectiveFrom = `${today.slice(0, 7)}-01`;
+  const planRef = await mintAgentTaskRef(client, { kind: "chat_turn", author: true });
+  const plan = await createAccountingPlan(pw.users.alice, {
+    client, kind: PLAN_KIND.recurring, purpose: "p977 authored turn",
+    authorityRef: planRef, effectiveFrom, basis: basis({ postingDate: effectiveFrom }),
+  });
+  assert.equal(plan.status, "active", "the plan is created");
+  assert.equal(plan.revision, 1);
+  const stored = await rootQuery(
+    "select authority_ref from clara.accounting_plans where id = $1", [plan.plan_id]);
+  assert.deepEqual(stored.rows[0].authority_ref, planRef,
+    "…and the row carries the instruction it resolved");
+});
+
+test("p977.both.accounting_work_ref_unchanged an accounting_work reference is accepted by both doors exactly as today — a Work row cannot exist without an initiator, so its existence IS the proof, and this arm of the resolution did not move", async (t) => {
+  if (await gate(t)) return;
+  if (await gatePlans(t)) return;
+
+  // THE COLUMN THE OWNER'S RULING RESTS ON, read off the catalog rather than taken on trust.
+  const initiator = await rootQuery(
+    `select a.attnotnull from pg_attribute a
+      where a.attrelid = 'clara.accounting_work'::regclass and a.attname = 'initiator'`);
+  assert.equal(initiator.rows[0]?.attnotnull, true,
+    "clara.accounting_work.initiator is NOT NULL — a Work cannot exist without naming who asked");
+
+  // The fixed-asset lane, on an FA client, with a Work admitted on that same client.
+  const w = await faWorld();
+  const faClient = await p651Client("sign_work_ref");
+  const authority = await proposeAuthority(w.users.bob, { client: faClient });
+  const work = await admitJournalWork({
+    client: faClient, author: w.users.bob,
+    basis: basis({ debitAccount: EXPENSE, creditAccount: BANK }),
+  });
+  const faRef = { kind: "accounting_work", id: work.work_id };
+  const signed = await signWithRef(w.users.hana, { client: faClient, authority, ref: faRef });
+  assert.equal(signed.status, "live", "the signing door accepts a Work reference, unchanged");
+  assert.deepEqual(signed.authority_ref, faRef);
+
+  // The plan lane, through its own established instruction-Work fixture.
+  const { w: pw, client } = await planClient("p977workref");
+  const planRef = await instructionRef({ client, author: pw.users.alice });
+  assert.equal(planRef.kind, "accounting_work");
+  const today = await todayInPlanZone();
+  const effectiveFrom = `${today.slice(0, 7)}-01`;
+  const plan = await createAccountingPlan(pw.users.alice, {
+    client, kind: PLAN_KIND.recurring, purpose: "p977 work-authorised plan",
+    authorityRef: planRef, effectiveFrom, basis: basis({ postingDate: effectiveFrom }),
+  });
+  assert.equal(plan.status, "active", "the plan door accepts a Work reference, unchanged");
+
+  // …and a Work of ANOTHER client still resolves to nothing here: the ladder is firm AND client,
+  // and #977 did not loosen it.
+  const other = await freshWorkClient(pw.users.alice, "p977workother");
+  const foreign = await instructionRef({ client: other, author: pw.users.alice });
+  await refusedWith(
+    () => createAccountingPlan(pw.users.alice, {
+      client, kind: PLAN_KIND.recurring, purpose: "p977 foreign work",
+      authorityRef: foreign, effectiveFrom, basis: basis({ postingDate: effectiveFrom }),
+    }),
+    { code: "CLR10", reason: UNRESOLVED }, "p977.plan.foreign_work");
+});

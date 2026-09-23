@@ -1,0 +1,118 @@
+{
+  "lane": "wave2-lane03",
+  "branch": "riders/w2-lane03",
+  "lens": "ADVERSARIAL",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head": "019506782",
+  "tickets": [846, 782, 988],
+  "verdict": "accept-with-fixes",
+  "summary": "Three migrations (0244/0245/0246) apply clean on the lane database and every cell I re-ran is green: 29/29 db cells across document-capability-high-water.test.mjs (7) and document-capability-registry.test.mjs (22), 71 tests / 58 pass / 0 fail / 13 frontier skips across rig-isolation, operation-census, rig-docs-isolation-grants, rig-runtime-visibility, opening-ledger-source and document-intake-capabilities, 36/36 web unit cells, and pnpm typecheck exit 0. Tenant isolation and grants are clean and measured: clara.document_capability_version_high_water is enable+force RLS with one clara_fn_owner policy and ZERO privilege for clara_authenticated, clara_agent_ro or PUBLIC; the lane opens no new door, so there is no new rank floor, no existence oracle and no cross-firm surface. A two-connection race on the deferred uniformity wall came out CLEAN (both transactions refused CLR08 / registry_version_uniform, registry byte-identical afterwards), which is stronger evidence than the lane report's own 'not exercised' caveat. What I did break: #846's central promise, stated as an absolute in the migration header, packages/db/README.md and CONTEXT.md - 'a version once published for a pair can never be undercut by ANY route' - is false by two routes I drove inside rolled-back transactions as clara_fn_owner, the exact role every migration runs as and the only writer this table has: a re-keying UPDATE (the INSERT-side wall never fires) and a one-statement TRUNCATE of the mark ledger (a BEFORE UPDATE OR DELETE row trigger does not fire on TRUNCATE). On #988, operationVerdict() folds proposal_only into the same verdict as stored_only, so the filed-document detail panel renders the two identically and the ticket's 'every reader treats the new level as distinct from the store-only level' is unmet at the one reader a professional actually opens. On #782 the user-visible copy now interpolates the registry's machine tokens verbatim ('Per-line invoice facts: accepted_limitation.' / 'Reason: no_consumer_reads_line_facts.') and an e2e walk pins the regression.",
+  "gates_rerun_by_reviewer": [
+    "packages/db: node --test --test-concurrency=1 $GATES tests/document-capability-high-water.test.mjs tests/document-capability-registry.test.mjs -> 29 pass / 0 fail / 0 skipped",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/rig-isolation.test.mjs tests/operation-census.test.mjs tests/rig-docs-isolation-grants.test.mjs tests/rig-runtime-visibility.test.mjs tests/opening-ledger-source.test.mjs tests/document-intake-capabilities.test.mjs -> 71 tests, 58 pass / 0 fail / 13 skipped",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test lib/documents/capability-registry.test.ts lib/documents/document-state.test.ts components/documents/document-state-panel.test.tsx -> 36 pass / 0 fail",
+    "worktree root: pnpm typecheck -> exit 0, which also confirms the 1e7565e2f unblock is real (apps/web/components/documents/document-kind-dialog.tsx does NOT compile at base 23cfad94)"
+  ],
+  "attack_surface_checked_clean": [
+    "Tenant isolation and grants on every new object: clara.document_capability_version_high_water is enable+force RLS with exactly one policy (p_document_capability_high_water_owner, clara_fn_owner, using true). Measured has_table_privilege for SELECT/INSERT/UPDATE/DELETE/TRUNCATE = false for clara_authenticated, clara_agent_ro and PUBLIC.",
+    "No new door: the lane adds no SECURITY DEFINER function granted to an application role, no API route and no server action, so there is no rank floor to jump, no viewer/suspended-member path and no runtime-role path to attack.",
+    "Existence oracle: the CLR08 refusals carry only global catalogue facts (format, document_kind, registry_version). clara.document_capabilities is a global registry, not firm data, so the detail payload leaks nothing tenant-scoped.",
+    "Race, two real connections, READ COMMITTED, disjoint row slices (A raises format='pdf' to 4, B raises format='xlsx' to 4): BOTH commits refused with CLR08 / reason=registry_version_uniform / versions=[3,4]; registry left at 240 rows, one distinct version 3, marks unchanged. The deferred whole-table predicate is self-serialising because any conflicting writer touches the same rows.",
+    "Concurrent first publication of the same pair: the BEFORE INSERT wall reads the mark with a fresh snapshot and the registry primary key serialises the second writer, so there is no silent admission.",
+    "Migration-on-real-rows: 0244's prestate refuses a registry that is not already uniform; 0245's refuses anything but 240 rows / version 2 / 28 planned rows / marks in agreement; 0246's refuses a drifted CHECK name or body. All three are redo-safe as claimed and all three are applied on this lane database, leaving registry = 240 rows at v3 and marks = 240 at v3.",
+    "Integer cents, Asia/Kuala_Lumpur calendar days, idempotency keys under replay, and lock order over plans / Work / tasks / interruptions: not touched by this lane, nothing to attack.",
+    "The out-of-lane edit to apps/web/components/documents/document-kind-dialog.tsx is a genuine unblock, not scope creep: base 23cfad94 references an unimported DOCUMENT_KINDS at line 95. Switching the trigger label to CLASSIFIABLE_DOCUMENT_KINDS changes no behaviour, because the dialog's kind state starts at '' (or the test-only initialKind) and never from the document's current kind, so the trigger can only ever label a value the user just picked from that same filtered roster."
+  ],
+  "findings": [
+    {
+      "id": "ADV-846-1",
+      "ticket": 846,
+      "severity": "major",
+      "kind": "invariant-bypass",
+      "title": "The high-water floor is INSERT-side only: a re-keying UPDATE republishes a pair BELOW its mark and every wall in 0244 passes it",
+      "evidence": "0244 arms clara._tf_document_capabilities_version_high_water as a BEFORE INSERT trigger only (0244:242-245). The registry's only BEFORE UPDATE wall is 0207's, whose body compares nothing but the version (`if new.registry_version < old.registry_version`, 0207:125-138) and never the key. 0244's own section B.3 reasons that 'RE-KEYING IS A DELETE IN DISGUISE' and walls it on the MARK table (0244:260-264, 286-290); the registry's own key is left unguarded. Driven as clara_fn_owner on clara_l03 in one transaction, rolled back: (1) delete all 240 registry rows - no wall refuses a DELETE, by design; (2) insert a never-seen pair ('zzzprobe','zzzkind') at registry_version 1 - admitted, since it has no mark; (3) `update clara.document_capabilities set format='pdf', document_kind='invoice' where format='zzzprobe'`. Measured result: pdf x invoice published at registry_version 1 while clara.document_capability_version_high_water still reads 3 for that pair, and `set constraints clara.t_document_capabilities_version_uniform immediate` PASSED (one distinct version). Post-rollback re-read: 240 rows, min version 3. This falsifies three shipped claims written as absolutes: 0244:24-25 ('a version once published for a pair can never be undercut BY ANY ROUTE'), packages/db/README.md's 0244 section, and CONTEXT.md's new 'Capability registry version' entry ('a pair's version can never be undercut, not by an update and not by retiring the row and publishing it again'). Precondition stated honestly: the deferred uniformity wall forces the whole registry below the marks, so the route is the full retire-and-republish-low workflow, which is precisely the workflow #846's own rationale deliberately keeps open.",
+      "required_fix": "Either extend the registry's BEFORE UPDATE wall to treat a change of (format, document_kind) as a first publication and re-read the target key's high-water mark, or move the high-water check onto a BEFORE INSERT OR UPDATE trigger keyed on `new`. Until then, soften the three absolute claims (migration header, packages/db/README.md, CONTEXT.md) to name the residual the way 0207's own header named its two."
+    },
+    {
+      "id": "ADV-846-2",
+      "ticket": 846,
+      "severity": "major",
+      "kind": "invariant-bypass",
+      "title": "TRUNCATE erases the append-only mark ledger without firing its wall, reopening #846's exact reproducer in two statements",
+      "evidence": "clara._tf_document_capability_high_water_monotone is a BEFORE UPDATE OR DELETE row trigger (0244:312-315); PostgreSQL fires no row-level trigger on TRUNCATE. Measured: clara_fn_owner holds TRUNCATE on the relation (has_table_privilege = true, because it owns it, and every section B block of every registry migration runs under `set role clara_fn_owner`). Driven on clara_l03 in one transaction, rolled back: `truncate clara.document_capability_version_high_water` took 240 marks to 0 with no refusal; then `delete from clara.document_capabilities` plus a re-insert of pdf x invoice at registry_version 1 was ADMITTED, `set constraints ... immediate` passed, and the AFTER INSERT writer re-minted the mark DOWNWARD at 1. Post-rollback re-read: 240 registry rows at 3, 240 marks at 3. The migration, packages/db/tests/README.md and document-capability-high-water.test.mjs all describe the relation as append-only 'as a REFUSAL rather than as a habit' (0244:255-258), and the battery's own cell probes only DELETE and a lowering UPDATE, never TRUNCATE. This is not privilege escalation: it is the same role, and therefore the same threat model (a migration that gets it wrong), that #846 exists to wall.",
+      "required_fix": "Add `create trigger ... before truncate on clara.document_capability_version_high_water for each statement` raising CLR08 / registry_version_high_water_append_only, plus a cell proving a TRUNCATE is refused. For the record: `session_replication_role = replica` also disables every wall here, but that needs superuser (measured: clara_fn_owner gets 42501) and is an explicit act, unlike a bare TRUNCATE."
+    },
+    {
+      "id": "ADV-988-1",
+      "ticket": 988,
+      "severity": "major",
+      "kind": "acceptance-criterion-unmet",
+      "title": "operationVerdict() folds proposal_only into the same verdict as stored_only, so the filed-document detail panel renders the two identically",
+      "evidence": "apps/web/lib/documents/document-state.ts:228-236 branches on the business_operation level exactly once (`if (state.operation.capability === 'unsupported') return 'not_applicable'`) and sends every other level down the same entries/statements path. Executed against the shipped module with tsx: supported -> uncoded, stored_only -> uncoded, planned -> uncoded, proposal_only -> uncoded, unsupported -> not_applicable. document-state-panel.tsx:285-289 renders that verdict as the Operation row and never renders the business_operation LEVEL at all, so on the surface a professional opens for a filed document the fifth level is invisible and indistinguishable from the store-only level. #988's AC is explicit: 'Every reader that renders or branches on business_operation, including the Documents workbench, treats the new level as distinct from the store-only level.' The only surface that renders it distinctly is CapabilityTiers (capability-tiers.tsx), whose two call sites are upload-panel.tsx:307 and intake-receipts.tsx:167, both INTAKE surfaces. The new packages/db/README.md text ('No reader anywhere branches on business_operation === \"supported\" in a way that would silently fold the new level into an existing one') is literally true and substantively misleading: the fold happens at the `=== 'unsupported'` branch. The lane's own wave2-lane03-ticket988.md follow-up 2 concedes the gap but files it as out of scope.",
+      "required_fix": "Give proposal_only its own OperationVerdict value and branch in operationVerdict(), its own OPERATION_KEY message and its own StateRow tone, with a document-state.test.ts cell asserting it is not equal to the stored_only verdict. If the owner accepts the gap instead, correct the README sentence so it names the fold rather than stepping around it."
+    },
+    {
+      "id": "ADV-782-1",
+      "ticket": 782,
+      "severity": "major",
+      "kind": "user-visible-copy",
+      "title": "The document detail now shows the registry's machine tokens verbatim to the accountant, and an e2e walk pins the regression",
+      "evidence": "apps/web/messages/en.json:2847-2848 - 'Per-line invoice facts: {level}. Clara records the header totals...' and 'Reason: {level}.' - where {level} is the raw registry value. document-state-panel.tsx:326-328 interpolates capabilityLimits() output, which document-state.ts:263-267 returns as raw `String(limits[key])`. The rendered strings are therefore 'Per-line invoice facts: accepted_limitation.' and 'Reason: no_consumer_reads_line_facts.', asserted as the expected UI text in apps/web/e2e/documents-viewer-walk.spec.ts:365-368 and in document-state-panel.test.tsx:296-301. The previous copy read as English ('Per-line invoice facts are planned: ...'), so this is a regression in the one user-visible deliverable #782 has, whose AC is 'The document detail for an invoice-family document shows the limitation sentence and its reason'. A snake_case identifier is neither a sentence nor a reason a professional can act on, and document-state.ts:262-263's own stated standard is that the limits exist as [name, level] pairs 'so the panel can render each one with its own message key instead of interpolating raw JSON'.",
+      "required_fix": "Render the limit's VALUE through its own message key too (a capabilityLimitLevel.* / capabilityLimitReason.* map beside capabilityTier.*), so the panel reads as a sentence, and move the e2e and component assertions onto that sentence."
+    },
+    {
+      "id": "ADV-988-2",
+      "ticket": 988,
+      "severity": "minor",
+      "kind": "type-widening",
+      "title": "CapabilityLevel widened for all four axes, so the wire guard now admits a value custody / byte_extraction / typed_facts can never legitimately carry",
+      "evidence": "apps/web/lib/documents/document-state.ts:29-36 adds 'proposal_only' to the single shared CapabilityLevel union and to CAPABILITY_LEVELS, which is what isCapabilityLevel() checks, and document-state.test.ts:72 now asserts the guard accepts it for every tier. Measured on the lane database: document_capabilities_custody_check, document_capabilities_byte_extraction_check and document_capabilities_typed_facts_check all still read the four-value form and only document_capabilities_business_operation_check admits the fifth, exactly as 0246 intends and its tail proves. The module comment argues the asymmetry away by analogy to 'custody never reads planned in practice either', but planned IS in those columns' CHECK and proposal_only is not, so the guard has stopped mirroring the database for three of the four axes and a drifted or hand-built payload carrying custody: 'proposal_only' now passes validation into the panel. The db battery got this right with its own BUSINESS_OPERATION_LEVELS constant rather than widening LEVELS.",
+      "required_fix": "Either give business_operation its own union (BusinessOperationLevel = CapabilityLevel | 'proposal_only'), mirroring BUSINESS_OPERATION_LEVELS in document-capability-registry.test.mjs, or state in the comment that the widening is knowingly looser than three of the four CHECKs."
+    },
+    {
+      "id": "ADV-988-3",
+      "ticket": 988,
+      "severity": "minor",
+      "kind": "acceptance-criterion-partial",
+      "title": "The new level's honesty invariant never refuses anything at write time: the database accepts a proposal_only row over typed facts it does not have",
+      "evidence": "Driven as clara_fn_owner on clara_l03 inside a rolled-back transaction: `update clara.document_capabilities set business_operation='proposal_only' where format='ofx' and document_kind='bank_statement'` (that row's typed_facts is 'unsupported') was ACCEPTED, and `set constraints all immediate` passed it too. 0246's own tail states this outright (0246:287-299, 'The CHECK has no opinion on typed_facts... so this UPDATE succeeds'), and the rule lives only in document-capability-registry.test.mjs's new cell. #988's AC reads 'An honesty-invariant check asserts the new level's own rule and fails if a row at that level claims typed facts it does not have' - nothing fails except a later test run. The choice is defensible, because the pre-existing 'supported over unsupported facts' rule lives in the same place and the migration argues the point explicitly, so this is recorded as a knowingly-accepted residual rather than a defect of implementation.",
+      "required_fix": "Either accept it and say so on the ticket, or add the cross-column CHECK the AC's wording implies (business_operation not in ('supported','proposal_only') or typed_facts = 'supported') in a later migration - it validates clean against the live 240 rows today."
+    },
+    {
+      "id": "ADV-846-3",
+      "ticket": 846,
+      "severity": "minor",
+      "kind": "stale-doc-claim",
+      "title": "packages/db/tests/README.md states the registry battery 'stays at 19/19' and 'Still 19/19 and 7/7'; it runs 22 cells",
+      "evidence": "packages/db/tests/README.md:910 and :920 were written for #846/#782 and were not re-based when #988 added three cells to the same file. document-capability-registry.test.mjs now declares EXPECTED_CELLS = 22 (EXPECTED_CELLS_PRE_988 = 20, EXPECTED_CELLS_PRE_0207 = 17), and my re-run measured 29 passing cells across the two files (7 high-water + 22 registry). A count in a README is a checkable claim, and this one is false in the shipped tree.",
+      "required_fix": "Update both sentences to 22/22 and 7/7."
+    },
+    {
+      "id": "ADV-846-4",
+      "ticket": 846,
+      "severity": "minor",
+      "kind": "invariant-gap",
+      "title": "recorded_at on the high-water mark is unwalled and can be rewritten backwards, although its column comment says it only moves upward",
+      "evidence": "clara._tf_document_capability_high_water_monotone (0244:286-290) computes v_what from the key, first_seen_at and registry_version only; recorded_at is not in the case expression. Driven as clara_fn_owner on clara_l03 and rolled back: `update clara.document_capability_version_high_water set recorded_at = '1999-01-01' where format='pdf' and document_kind='invoice'` succeeded and returned 1998-12-31T16:00:00Z. 0244:169-170 comments the column as 'Moves only upward with registry_version.' The mark's integrity does not depend on recorded_at, which is why this is minor, but it is a falsifiable claim the wall does not back.",
+      "required_fix": "Add `when new.recorded_at < old.recorded_at then 'recorded_at'` to the case, or soften the column comment to 'set by the writer whenever the version rises'."
+    },
+    {
+      "id": "ADV-846-5",
+      "ticket": 846,
+      "severity": "note",
+      "kind": "test-blast-radius",
+      "title": "The one committing cell in document-capability-high-water.test.mjs has no repair path if the wall it assumes is ever absent",
+      "evidence": "The cell 'a transaction that ends with TWO distinct registry_versions is refused AT COMMIT' really opens a transaction, raises pdf x invoice by one and COMMITS, relying on the commit to be refused; the trailing `await c.query('rollback').catch(() => {})` is a no-op after a successful commit. cohortApplied() proves the deferred constraint trigger EXISTS in pg_constraint, not that its body enforces, so a recut or disabled body would leave the shared lane or CI database publishing two registry_versions permanently, which then reds document-capability-registry.test.mjs and every later battery that reads the registry. The file's own header acknowledges the dependency ('its safety rests on the gate above').",
+      "required_fix": "After the expected refusal, re-read count(distinct registry_version) and either repair with a whole-registry raise or fail loudly naming the database, before the battery continues."
+    },
+    {
+      "id": "ADV-988-4",
+      "ticket": 988,
+      "severity": "note",
+      "kind": "fragile-catalog-probe",
+      "title": "0246 selects the CHECK to replace with an unordered ilike and SELECT INTO, which silently takes one arbitrary row if a second CHECK ever names the column",
+      "evidence": "0246:89-91 (prestate) and 0246:220-222 (tail) both run `select c.conname, pg_get_constraintdef(c.oid) into v_conname, v_def from pg_constraint c where ... and pg_get_constraintdef(c.oid) ilike '%business_operation%'`, with no ORDER BY and no multiplicity check; plpgsql's SELECT INTO takes the first row and raises nothing. Exactly one CHECK matches today (measured on clara_l03), so the file is correct as shipped - but the cross-column honesty CHECK that ADV-988-3 proposes is itself a CHECK naming business_operation, and a redo of 0246 after it would be a coin flip.",
+      "required_fix": "Pin the constraint by conname and assert count(*) = 1 over the ilike predicate instead of selecting INTO from it."
+    }
+  ]
+}

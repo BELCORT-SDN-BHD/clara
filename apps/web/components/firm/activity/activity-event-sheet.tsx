@@ -29,6 +29,7 @@ import { businessDateTime } from "@/lib/business-date";
 import {
   activityJournalsHref,
   activityProvenance,
+  activityWorkHref,
   describeActivity,
   getActivityEvent,
   isKnownActivityStatus,
@@ -168,6 +169,26 @@ export function ActivityEventSheet({
                       </Link>
                     ) : (
                       t("linksToReplacement")
+                    )}
+                  </dd>
+                </>
+              ) : null}
+
+              {/* #840 — the successor Work link, additive (0262): #721's ruling of 2026-09-12
+                  (point 3) puts it on the feed's detail record too, not only on the row. */}
+              {detail.successor_work_id ? (
+                <>
+                  <dt className="text-muted-foreground">{t("eventSuccessor")}</dt>
+                  <dd className="text-card-foreground">
+                    {detail.client_id ? (
+                      <Link
+                        href={activityWorkHref(detail.client_id, detail.successor_work_id)}
+                        className="text-primary underline-offset-4 hover:underline"
+                      >
+                        {t("linksToSuccessor")}
+                      </Link>
+                    ) : (
+                      t("linksToSuccessor")
                     )}
                   </dd>
                 </>

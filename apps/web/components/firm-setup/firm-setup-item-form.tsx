@@ -424,10 +424,10 @@ function FirmSetupField({
           {serverMessage ?? t(`form.constraint.${problem}` as "form.constraint.required")}
         </FieldError>
       ) : null}
-      {/* The catalogue's own note: why this fact is asked, what the interview asked verbatim, and
-          every honest boundary it carries. Rendered rather than hidden, because those boundaries
-          (an unverified registration format, a Sdn-Bhd-only statutory screen) are exactly what a
-          practitioner needs before answering. */}
+      {/* #934 — the accountant-readable sentence `clara.get_firm_setup()` prefers: what the
+          answer is used for and Clara's stated boundary. This is the same `item.note` field as
+          before; only what the door puts in it changed (the engineer's own provenance note no
+          longer renders here). */}
       <p className="text-xs text-muted-foreground">{item.note}</p>
     </Field>
   );

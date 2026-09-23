@@ -57,12 +57,41 @@ export const PREVIEW_INVITE_DOOR = "preview_invite";
  *  database enforces rather than a hopeful copy. */
 export const PREVIEW_INVITE_KEYS = ["firm_name", "role", "status", "masked_email"] as const;
 
-/** The four values `clara.firm_invites.status` admits (`0141:181`'s CHECK), which is also the
- *  closed set the effective-status expression can produce: `pending` becomes `expired` when
- *  `expires_at` has passed, and the other three are reported as stored. A fifth value is a DB
- *  the app does not understand, and it denies rather than guessing. */
-export const INVITE_PREVIEW_STATUSES = ["pending", "accepted", "revoked", "expired"] as const;
+/** The FIVE values `clara.preview_invite`'s effective-status expression can produce. Four come
+ *  straight from `clara.firm_invites.status` (`0141:181`'s CHECK) or are synthesised live off
+ *  `expires_at` (`pending` -> `expired`); the fifth, `issuer_lapsed` (#872, migration 0269), is
+ *  ALSO synthesised live — never written to the base column — when a still-`pending` invite's
+ *  issuer no longer holds an active admin-or-above membership. It is reversible (re-promoting the
+ *  issuer restores `pending` on the next read). A SIXTH value is a DB fact this app does not
+ *  understand, and it denies rather than guessing. */
+export const INVITE_PREVIEW_STATUSES = ["pending", "accepted", "revoked", "expired", "issuer_lapsed"] as const;
 export type InvitePreviewStatus = (typeof INVITE_PREVIEW_STATUSES)[number];
+
+/** THE TWO STATUSES THAT DO NOT BLOCK THE PASSWORD FORM. `pending` obviously; `issuer_lapsed`
+ *  (#872) by the owner's own ruling ("an invite in that state can still be accepted; the preview
+ *  shows the notice and the accept door is unchanged") — it is read-time colour on a still-open
+ *  invitation, not a fourth dead-invitation face. Every other value is a DEFINITE negative: there
+ *  is nothing left to accept, and `BlockedInvitationFace` is what renders it
+ *  (`components/invite-accept-form.tsx`).
+ *
+ *  NON-BLOCKING IS NOT "WILL BE ACCEPTED" (fix round 2026-09-20, adversarial ADV-L10-02). An
+ *  `issuer_lapsed` invite whose issuer was REMOVED is refused by `clara.accept_invite` at every
+ *  role, and one whose issuer was demoted is refused whenever the invited role outranks the
+ *  issuer's current rank — the same third wall this module's header already names as a residual
+ *  the preview cannot see. Keeping the form open is right (the door is the authority, and this
+ *  read is not a verdict); promising the outcome is not, so the notice this status renders claims
+ *  nothing about acceptance. */
+export const INVITE_PREVIEW_NON_BLOCKING_STATUSES = ["pending", "issuer_lapsed"] as const;
+
+/** THE PREDICATE, written once (standards review L10-STD-03, 2026-09-20). `invite-accept-form.tsx`
+ *  asked the same question at three places — the stage transition, the blocked face's own gate and
+ *  the preview section's — each repeating the same `as readonly string[]` cast, which is the cast
+ *  that exists only because `INVITE_PREVIEW_NON_BLOCKING_STATUSES` is a two-member tuple and the
+ *  value being tested is the five-member union. A caller should ask the question, not re-derive
+ *  how to ask it. */
+export function isNonBlockingPreviewStatus(status: InvitePreviewStatus | string): boolean {
+  return (INVITE_PREVIEW_NON_BLOCKING_STATUSES as readonly string[]).includes(status);
+}
 
 /** The four roles `clara.firm_invites.role` admits (`0141:179`, the same CHECK
  *  `clara.firm_memberships.role` carries at `0002:215`), in ladder order. A role outside it is

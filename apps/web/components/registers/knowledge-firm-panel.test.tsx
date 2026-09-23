@@ -90,6 +90,7 @@ function firmRow(over: Partial<FirmKnowledgeRow> = {}): FirmKnowledgeRow {
       recorded_at: "2026-09-16T02:00:00Z",
       reason: "Partner meeting 2026-09-16: ringgit presentation is the firm's default",
       required_role: "admin",
+      promoter_role_at_act: "admin",
       promoter_role_now: "admin",
       promoter_active: true,
     },
@@ -486,4 +487,80 @@ test("[1005]: the kind filter trigger shows 'All kinds' on first render, never t
     // "All kinds" (capital A) must not be mistaken for it.
     assert.doesNotMatch(text, /\ball\b/, "the raw 'all' sentinel value must never render as trigger text");
   });
+});
+
+// =============================================================================
+// 6 — #912: the role at the act is a SECOND fact, never a restatement of the first
+// =============================================================================
+
+test("kf.12 a demoted promoter's rule shows the role the act ran under BESIDE the role they hold now", async () => {
+  await mount(
+    okFetch([firmRow({
+      authority: {
+        ...firmRow().authority,
+        promoter_role_at_act: "owner",
+        promoter_role_now: "bookkeeper",
+      },
+    })]),
+    async (h) => {
+      const text = h.text();
+      assert.match(text, /Their role at the time/,
+        "the authority the act ran under must be labelled as its own fact");
+      assert.match(text, /owner/, "…and carry the role the promoter actually held");
+      assert.match(text, /Their role now/);
+      assert.match(text, /bookkeeper/,
+        "…beside the CURRENT role, which the demotion moved -- two facts, not one");
+    },
+  );
+});
+
+test("kf.13 a rule recorded before Clara kept the role says UNKNOWN, and says why, rather than borrowing the current one", async () => {
+  await mount(
+    okFetch([firmRow({
+      authority: {
+        ...firmRow().authority,
+        promoter_role_at_act: null,
+        promoter_role_now: "admin",
+      },
+    })]),
+    async (h) => {
+      const text = h.text();
+      assert.match(text, /Not recorded — this rule predates the record of authority/,
+        "an unknown historical role is said plainly, with the reason it is unknown");
+      assert.match(text, /Their role now/,
+        "…and the current role is still shown, as the separate fact it is");
+    },
+  );
+});
+
+test("kf.14 a promoter who held NO membership when the act was recorded is said in words, not as the database's own marker", async () => {
+  // 'none' is not a rank and must never read as one. clara.audit_log.actor_role carries it when
+  // the stamp looked a NAMED actor up and found no active membership: on this register that is
+  // the narrow case where a membership is withdrawn while the act is still parked on a lock (the
+  // role is resolved at the audit write -- 0243's header, CONTEXT.md "Role at the act", db
+  // battery ar.07), so the value is rare but reachable, and rendering it raw would put the bare
+  // token "none" under "Their role at the time" as if it were a rank the person held.
+  //
+  // The register's OTHER marker, 'no_actor', is unreachable here and deliberately gets no
+  // wording: clara.knowledge_records.asserted_by is NOT NULL and the authority subquery matches
+  // `a.actor is not distinct from r.asserted_by`, so an audit row with no actor can never be the
+  // one this block cites.
+  await mount(
+    okFetch([firmRow({
+      authority: {
+        ...firmRow().authority,
+        promoter_role_at_act: "none",
+        promoter_role_now: "bookkeeper",
+      },
+    })]),
+    async (h) => {
+      const text = h.text();
+      assert.match(text, /No membership in this firm when the rule was recorded/,
+        "'none' is a measured fact about a person, and the register must say it in words");
+      assert.doesNotMatch(text, /Their role at the times*none/,
+        "…never the database's own marker rendered as if it were a rank");
+      assert.match(text, /Their role now/,
+        "…and the current role is still shown, as the separate fact it is");
+    },
+  );
 });

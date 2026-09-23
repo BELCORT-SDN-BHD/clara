@@ -18,7 +18,7 @@ function row(id: string, agedSince: string | null): ReviewQueueRow {
     lane: null, auto: false, rule_backed: false, high_stakes: false, aged_since: agedSince,
     amount_cents: null, period: null, question_text: null, created_at: "2026-01-01T00:00:00Z",
     id, coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null,
-    advance_id: null, client_name: null, batch_ids: null, open_proposal_count: null,
+    advance_id: null, client_name: null, batch_ids: null, open_proposal_count: null, authority_id: null,
   };
 }
 

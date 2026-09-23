@@ -38,6 +38,15 @@ export const DEP = {
    *  may have flipped the world underneath it. */
   lockedClientId: "65165166-6516-4651-8651-651651651652",
   lockedClientName: "TANJUNG MANUFACTURING (locked year)",
+  /** #979 (0251) — A THIRD client whose ONLY depreciation authority has been WITHDRAWN. Before
+   *  0251 `get_depreciation_authority` selected `where status in ('live','proposed')`, so this
+   *  client read back `authority: null` and the surface rendered "none proposed" — the same
+   *  state a client that never had one shows. 0251 falls back to the most recent RETIRED
+   *  authority, and this fixture is what lets a browser walk see that. A separate client, for
+   *  the reason the locked one is separate: the thing under test is what ONE authority state
+   *  renders, and a toggle would make two cells order-dependent. */
+  retiredClientId: "65165167-6516-4651-8651-651651651653",
+  retiredClientName: "TANJUNG MANUFACTURING (authority withdrawn)",
   /** The asset the walk charges: in service, particulars complete, and REVISED once — so the
    *  revision timeline has two real generations and the charge ledger has real rows. */
   assetId: "65101001-6510-4651-8651-651065101001",
@@ -53,6 +62,12 @@ export const DEP = {
   frozenAssetName: "Forklift (disposal draft outstanding)",
   authorityId: "65106001-6510-4651-8651-651065106001",
   proposedAuthorityId: "65106002-6510-4651-8651-651065106002",
+  /** #979 (0251) — the withdrawn authority and the three facts 0251 appends on its arm. */
+  retiredAuthorityId: "65106003-6510-4651-8651-651065106003",
+  retiredBy: "65100003-6510-4651-8651-651065100003",
+  retiredReason: "Annual cadence was proposed by mistake; withdrawn before the first run",
+  retiredAt: "2026-06-15T03:20:00.000Z",
+  retiredAuthorityFrom: "2026-02-01",
   workId: "65103001-6510-4651-8651-651065103001",
   runEntryId: "65102001-6510-4651-8651-651065102001",
   chargeEntryId: "65102002-6510-4651-8651-651065102002",
@@ -98,8 +113,9 @@ const state = { runsPosted: 0, lastOpKeys: [] };
 const CLIENTS = {
   [DEP.clientId]: { id: DEP.clientId, name: DEP.clientName, status: "active", created_at: "2026-01-01T00:00:00.000Z" },
   [DEP.lockedClientId]: { id: DEP.lockedClientId, name: DEP.lockedClientName, status: "active", created_at: "2026-01-01T00:00:00.000Z" },
+  [DEP.retiredClientId]: { id: DEP.retiredClientId, name: DEP.retiredClientName, status: "active", created_at: "2026-01-01T00:00:00.000Z" },
 };
-const OURS = (id) => id === DEP.clientId || id === DEP.lockedClientId;
+const OURS = (id) => id === DEP.clientId || id === DEP.lockedClientId || id === DEP.retiredClientId;
 
 const ACCOUNTS = (clientId) => [
   { client_id: clientId, account_code: DEP.costAccount, name: "Plant & machinery", account_type: "asset", is_active: true },
@@ -213,7 +229,35 @@ const CHARGES = [
   { id: "65104004-6510-4651-8651-651065104004", period_start: "2026-06-01", period_end: "2026-06-30", amount_cents: 100000, effective_date: "2026-06-30", entry_id: DEP.unwindEntryId, run_id: null, unwind_of: "65104003-6510-4651-8651-651065104003" },
 ];
 
-const AUTHORITY = (clientId) => ({
+/** #979 (0251) — THE WITHDRAWN AUTHORITY, in the shape the real read actually returns.
+ *
+ *  Transcribed from `clara.get_depreciation_authority`'s own live body: the base object is
+ *  exactly {id, status, cadence, proposed_by, signed_by, retired_by, created_at} (0041), and
+ *  0251 appends {retired_reason, retired_at, authority_from} — and ONLY those three, and ONLY on
+ *  `au.status = 'retired'`. It carries no `authority_kind` and no `authority_ref`, because the
+ *  door returns neither. (The LIVE arm below does return both, which the real read never has;
+ *  that divergence is #651's, it predates this fixture, and it is filed as a follow-up rather
+ *  than widened further here.) */
+const RETIRED_AUTHORITY = (clientId) => ({
+  client_id: clientId,
+  authority: {
+    id: DEP.retiredAuthorityId,
+    status: "retired",
+    cadence: "annual",
+    proposed_by: "65100001-6510-4651-8651-651065100001",
+    signed_by: "65100002-6510-4651-8651-651065100002",
+    retired_by: DEP.retiredBy,
+    created_at: "2026-02-10T00:00:00.000Z",
+    retired_reason: DEP.retiredReason,
+    retired_at: DEP.retiredAt,
+    authority_from: DEP.retiredAuthorityFrom,
+  },
+  ramp_earned: false,
+  fy_end: { month: 12, day: 31, fallback: false },
+  high_stakes_threshold_cents: 1000000,
+});
+
+const AUTHORITY = (clientId) => (clientId === DEP.retiredClientId ? RETIRED_AUTHORITY(clientId) : {
   client_id: clientId,
   authority: {
     id: DEP.authorityId,
@@ -234,8 +278,9 @@ const AUTHORITY = (clientId) => ({
 
 const RUNS = (clientId) => {
   // The LOCKED client has never had a lawful period, so its runs list is empty — and stays empty,
-  // which is exactly what the refusal cell asserts.
-  if (clientId === DEP.lockedClientId) return { client_id: clientId, runs: [] };
+  // which is exactly what the refusal cell asserts. The WITHDRAWN-authority client has none
+  // either: nothing ever ran under the authority that was retired before its first run.
+  if (clientId === DEP.lockedClientId || clientId === DEP.retiredClientId) return { client_id: clientId, runs: [] };
   const rows = [
     {
       id: "65105003-6510-4651-8651-651065105003",

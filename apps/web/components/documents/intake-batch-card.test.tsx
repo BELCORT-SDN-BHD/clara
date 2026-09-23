@@ -59,7 +59,8 @@ function body(overrides: Record<string, unknown> = {}): Record<string, unknown> 
       by_dependency: { awaiting_fact: 1, awaiting_attribution: 0, awaiting_capacity: 1 },
       by_unfiled: 1, by_capacity_failure: 0,
     },
-    capacity: { window: "utc_day", resets_at_local: "08:00", timezone: "Asia/Kuala_Lumpur" },
+    // #964: the daily window moved from a UTC day (utc_day/08:00) to an Asia/Kuala_Lumpur day.
+    capacity: { window: "myt_day", resets_at_local: "00:00", timezone: "Asia/Kuala_Lumpur" },
     ...overrides,
   };
 }
@@ -245,20 +246,63 @@ test("p636.card.child_addresses — UI-30/UI-31: every preview row names its OWN
   await h.unmount();
 });
 
-test("intake batch card: the capacity sentence says 08:00 and never 'midnight' or 'tomorrow'", async () => {
+test("intake batch card: the capacity sentence says 00:00 and never 'midnight' or 'tomorrow'", async () => {
   const h = await render(ready());
   const text = textOf(h.container as never);
-  assert.match(text, /resets at 08:00 Asia\/Kuala_Lumpur/);
-  assert.ok(!/midnight/i.test(text), "the window is a UTC day, which is 08:00 MYT — never midnight");
+  assert.match(text, /resets at 00:00 Asia\/Kuala_Lumpur/);
+  assert.ok(!/midnight/i.test(text), "the window is an Asia/Kuala_Lumpur day, reset at 00:00 MYT — never the word 'midnight'");
   assert.ok(!/tomorrow/i.test(text), "…and never 'tomorrow', which is wrong for half the day");
   await h.unmount();
 });
 
 test("intake batch card: the NAMED RESIDUAL is on the surface, not only in a report", async () => {
+  // RECUT (L05-SPEC-02 / ADV-W2L05-02). This cell used to pin "a file refused by the daily quota
+  // before it was accepted never joins a batch" — true until #965's 0254, which commits the
+  // refused intake so the runtime can attach it as an `awaiting_capacity` wait. The card now
+  // LISTS such a file, so the old sentence was a claim the same card disproved.
   const h = await render(ready());
   const text = textOf(h.container as never);
-  assert.match(text, /refused by the daily quota before it was accepted never joins a batch/);
+  assert.ok(!/never joins a batch/i.test(text), "the retired claim is gone from the surface");
+  assert.match(text, /keeps its record and shows here as waiting for the quota/);
+  assert.match(text, /none of its bytes were stored/, "…and the firm is told nothing was kept");
   assert.match(text, /upload list above/, "…and it points at the list that DOES render the database's own message and remedy");
+  await h.unmount();
+});
+
+/** A batch holding a file the ceiling refused AT CREATION — the shape #965's 0254 made possible.
+ *  The refusal commits its intake at failed/limit, the runtime attaches it and declares
+ *  `awaiting_capacity`, so the member sets BOTH of the banner's triggers at once. */
+const refusedAtCreation = () => ready({
+  facets: {
+    ...(body().facets as Record<string, unknown>),
+    waiting: {
+      status: "ok", count: 1, coverage: "ok", coverage_reason: null, rows: [
+        { member_id: "m9", intake_id: "i9", document_id: null, work_id: null, client_id: null,
+          dependency: "awaiting_capacity", dependency_reason: "document daily limit reached (docs)",
+          filename: "over-quota.pdf", intake_status: "failed", intake_failure_code: "limit",
+          has_open_question: false, created_at: "2026-04-05T01:30:00Z" },
+      ],
+    },
+  },
+  waiting_basis: {
+    by_question: 0,
+    by_dependency: { awaiting_fact: 0, awaiting_attribution: 0, awaiting_capacity: 1 },
+    by_unfiled: 0, by_capacity_failure: 1,
+  },
+});
+
+test("intake batch card: a quota-refused source is never promised an automatic resume (ADV-W2L05-03)", async () => {
+  // NOTHING in the estate re-drives such a file: the refusal takes no reservation and mints no
+  // capability, `beginDocumentIntake` returns before any sidecar is written, and
+  // `recoverPendingDocumentIntakes` only re-drives the six RECOVERABLE_STATES — `failed` is not
+  // one of them. A banner promising it will "continue after the reset" is a promise the record
+  // cannot keep.
+  const h = await render(refusedAtCreation());
+  const text = textOf(h.container as never);
+  assert.match(text, /resets at 00:00 Asia\/Kuala_Lumpur/, "the door's own reset moment is still stated");
+  assert.ok(!/continue after the reset/i.test(text),
+    "the card must not promise a resume nothing in the estate performs");
+  assert.match(text, /upload it again/i, "…it states the remedy the firm actually has");
   await h.unmount();
 });
 
@@ -281,8 +325,14 @@ test("intake batch card: a STOPPING batch whose canceller lost authority NAMES w
   assert.match(text, /This batch cannot finish stopping/,
     "a parent that can never settle says so, instead of showing 'stopping' for ever");
   assert.match(text, /no longer an active member/);
-  assert.match(text, /stop each remaining work item from its own page/,
-    "…and names what a person can actually do about it");
+  // #968 (fix round) shipped a remedy AT THE DOOR: while the batch is still stopping and the
+  // stored canceller holds no active bookkeeper+ membership of this firm, a different active
+  // bookkeeper may press Stop again and the door admits it as a genuinely new decision. The
+  // banner named only the two pre-#968 workarounds, so it sent the firm the long way round.
+  assert.match(text, /press Stop again/i,
+    "…and names the remedy this product actually ships (ticket 968), first");
+  assert.match(text, /remaining work item from its own page/,
+    "…without dropping the fallbacks that still work");
   assertNoDenominator(h, "cancel blocked");
   await h.unmount();
 });

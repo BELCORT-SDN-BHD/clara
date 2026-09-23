@@ -1,0 +1,116 @@
+{
+  "axis": "SPEC",
+  "lane": "wave 2 lane 02",
+  "branch": "riders/w2-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commits": [
+    "164c3ac5f test(db): #991 the pack-shaped-read ownership rule as a class, with its own census",
+    "f9d755c97 test(db): #912 declare _tf_audit_actor_role on the S5.25 arm (D) clock roster",
+    "0622e3352 docs(db): #912 the battery's header names the trigger, not a recut of _audit",
+    "3290dcfe1 feat(web): #912 the firm register renders the role at the act as its own fact",
+    "72cc5e0f6 test(db): #912 ar.05 -- the census that makes every governed door mean something",
+    "80a491e63 test(db): #912 ar.04 -- a record the mechanism never saw reports unknown",
+    "20f603461 feat(db): #912 the firm register cites the role at the act beside the role now",
+    "b4402905e test(db): #912 ar.02 -- history keeps its unknown and nothing can back-fill it",
+    "f839ad1ea feat(db): #912 record the actor's role at the instant on clara.audit_log",
+    "363054f2e test(db): #993 kg.04/kg.05 -- existing catalog keys and the recorder's own check are unmoved",
+    "84febd087 feat(db): #993 tighten knowledge-key catalog CHECKs to the recorder's grammar",
+    "041c28846 test(db): #913 sd.03/sd.04 -- firm-eligibility and floor unchanged by the drop",
+    "c40fc04b7 feat(db): #913 drop the dead clara.knowledge_keys.scope_default column",
+    "4dae88baf test(db): #898 fd.04/fd.05 -- firm refusal and promotion-equals-client-row",
+    "c8cc4cf5a feat(db): #898 financial_year_end_day knowledge key beside its month"
+  ],
+  "cells_rerun_by_this_review": {
+    "packages/db: knowledge-fye-day + knowledge-scope-default-drop + knowledge-key-grammar + audit-actor-role + pack-shaped-knowledge-read-census, full gate chain, clara_l02": "30 tests, 30 pass, 0 fail",
+    "packages/db: p4t1-add-member-regression + p4t1-invite + knowledge-firm-defaults (the member-door and firm-knowledge batteries the #912 ruling names)": "59 tests, 59 pass, 0 fail",
+    "apps/web: components/registers/knowledge-firm-panel.test.tsx": "14 tests, 14 pass, 0 fail",
+    "live grant census on clara_l02 (has_function_privilege over every clara% role)": "get_knowledge_pack / retrieve_knowledge / read_knowledge_record_for / read_knowledge_history_for = {clara_fn_owner, clara_runtime}; get_context_pack = {clara_agent_ro, clara_authenticated, clara_fn_owner}",
+    "clara.metric_input_producer_version_members on clara_l02": "clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb) is a pinned member -- the #912 freeze justification is real, not merely asserted",
+    "base-commit typecheck defect": "git show 23cfad94:apps/web/components/documents/document-kind-dialog.tsx already calls DOCUMENT_KINDS.map while importing only CLASSIFIABLE_DOCUMENT_KINDS -- every report's 'inherited red' claim checks out"
+  },
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "SPEC-L02-01",
+      "ticket": 993,
+      "severity": "major",
+      "kind": "requirement-verified-vacuously",
+      "title": "#993 AC4 (record_work_knowledge_read's grammar check is untouched) is claimed proven by a prosrc measurement that compares against nothing",
+      "evidence": "Ticket line: '- [ ] `clara.record_work_knowledge_read`'s own grammar check is untouched'. The migration header of 0242_knowledge_key_grammar.sql claims 'the tail re-measures its live `prosrc` sha256 against 0898's own prestate pin to prove that positively rather than by omission alone', and the tail's own AC4 comment repeats 'Re-measured here rather than argued from that grep alone: any accidental recut of this function would change its prosrc and this assertion would catch it'. The tail code does only: select encode(sha256(prosrc::bytea),'hex') into v_prosrc_sha ... ; if v_prosrc_sha is null then raise ... -- there is no comparison against any pin, and the value is otherwise only interpolated into the closing notice. The companion cell kg.05 (packages/db/tests/knowledge-key-grammar.test.mjs) carries the comment \"0230's own body, byte-identical ... proving no byte of it moved\" and then asserts only assert.match(r.rows[0].sha, /^[0-9a-f]{64}$/), which passes against ANY body. The report repeats the claim verbatim (reports/wave2-lane02-ticket993.md:93: 'the migration's own tail re-measures its live prosrc sha256 as the positive proof rather than relying on the grep alone'). The requirement itself IS met -- I read the whole of 0242 and it contains no `create or replace function clara.record_work_knowledge_read` -- but the evidence offered does not exist, and neither cell would catch a future recut. AGENTS.md working protocol 6: no evidence, no claim.",
+      "required_fix": "Either pin the measured sha256 of clara.record_work_knowledge_read as a hard literal in kg.05 (the better home; a hard pin inside the migration tail is fragile across chains), or delete the claim: reword the 0242 header comment, the 0242 tail comment, kg.05's comment and the report line to say plainly that the proof is the absence of any CREATE OR REPLACE for that function in the file, measured by grep, and that kg.05 pins only the signature's continued resolution."
+    },
+    {
+      "id": "SPEC-L02-02",
+      "ticket": 912,
+      "severity": "minor",
+      "kind": "named-key-interface-substituted",
+      "title": "#912's owner ruling names clara._audit as the interface that gains the rank; the lane stamped the column from a BEFORE INSERT trigger instead",
+      "evidence": "Owner ruling (issue #912, 2026-09-18 comment): 'The shared audit writer records the actor's role at write time on `clara.audit_log`' and '**Key interfaces:** `clara._audit` (the shared writer) gains the actor's rank'. The diff leaves clara._audit byte-identical (0243 sections 0 and Z both pin prosrc sha256 000c730cd29d6544b014ecb0635fc30d9a238f23cdbd8d224ae8f4331086e2f1) and installs clara._tf_audit_actor_role() plus the t_audit_actor_role BEFORE INSERT row trigger on clara.audit_log instead. I verified the stated reason rather than accepting it: select ordinal, member_signature from clara.metric_input_producer_version_members on clara_l02 returns clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb) as a pinned member, so a recut trips clara.verify_metric_input_producer_freeze() and scripts/migrate.mjs's FREEZE_GUARDS. Every acceptance clause of the ruling is still met on the branch (ar.01-ar.05 green on re-run; the member-door and firm-knowledge batteries 59/59 green on re-run), and the trigger is strictly wider than the recut would have been. This is a deviation from an explicitly owner-named interface, not a defect.",
+      "required_fix": "No rebuild. Surface the substitution to the owner for ratification before release, and record it on the ticket in the ruling's own vocabulary -- the stamp lives on clara.audit_log's write path because clara._audit is a frozen metric-input-producer member -- so the next reader of the ruling does not go looking for a recut that must never happen."
+    },
+    {
+      "id": "SPEC-L02-03",
+      "ticket": 912,
+      "severity": "minor",
+      "kind": "unasked-behaviour-with-surface-gap",
+      "title": "#912's invented 'none' sentinel goes beyond the ruling's two-way and reaches the firm register untranslated",
+      "evidence": "Owner ruling: 'new nullable column; pre-mechanism rows stay null and read as unknown' -- a two-way. 0243 section B stores the literal 'none' whenever the actor holds no active membership (new.actor_role := coalesce(v_role, 'none')), and ck_audit_log_actor_role admits it. The design is argued in the migration header and in CONTEXT.md's new 'Role at the act' entry, but it is not carried to the surface the same ruling names: apps/web/components/registers/knowledge-firm-panel.tsx:221 renders row.authority.promoter_role_at_act ?? t(\"authorityRoleAtActUnknown\"), so a 'none' value renders as the bare token `none` beside the label 'Their role at the time'. apps/web/messages/en.json carries only authorityRoleAtAct and authorityRoleAtActUnknown; no key covers 'none', and no cell in knowledge-firm-panel.test.tsx exercises it. Reachability is narrow but not proved zero: both firm-knowledge assertion paths require the asserter to hold an active membership (0192:1193-1196 for capture_knowledge_for's asserted_by_rank_insufficient guard; _human_ctx for capture_knowledge), so on today's doors a firm record's promoter always has a role. Latent surface gap rather than a live defect.",
+      "required_fix": "Either add a message key for 'none' on this surface (for example 'No membership at the time') with a cell beside kf.12/kf.13, or record in the #912 report that 'none' is unreachable on this register by construction, citing the two door guards that make it so."
+    },
+    {
+      "id": "SPEC-L02-04",
+      "ticket": 898,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#898's desired behaviour 'a client's day on the client row and in Knowledge never disagree silently' is not delivered, and the report does not record it as owed",
+      "evidence": "Ticket line (Desired behavior): '... and a client's day on the client row and in Knowledge never disagree silently.' Nothing in the diff links the two. 0240 says so itself: 'A knowledge value that is a syntactically valid day but wrong for the SAME client's stated month is a cross-record disagreement the two live rows can show a reader, not a write this migration refuses.' clara.capture_knowledge('financial_year_end_day', 15) against a client whose clara.clients.fy_end_day is 20 is accepted with no signal, and no read in the diff shows both facts side by side. fd.05 proves only that the PROMOTION path yields equality; it does not close the direct-capture path. The ticket's own 'Out of scope' (the setter and the client row's year-end check) is why this cannot be fixed inside #898 -- but the report's 'Out of scope, honored', 'Follow-ups worth filing' and 'Anything unverified' sections never mention the clause (grepped reports/wave2-lane02-ticket898.md for 'disagree' and 'silently': two unrelated hits only).",
+      "required_fix": "Record the clause as unmet in the #898 report and file a follow-up: either set_client_fy_end and a financial_year_end_day capture reconcile, or a read surfaces the disagreement. The same gap already exists for financial_year_end_month, so the follow-up should cover both keys rather than the day alone."
+    },
+    {
+      "id": "SPEC-L02-05",
+      "ticket": 991,
+      "severity": "minor",
+      "kind": "already-satisfied-claim-half-true",
+      "title": "#991's last acceptance criterion is marked 'already satisfied' but only its first half is; nothing marks the issue queued for the Wayfinder pass",
+      "evidence": "Ticket line: '- [ ] The owner's answer is recorded on this issue in the words the Wayfinder pass will carry, and the issue is queued for that pass'. The report (reports/wave2-lane02-ticket991.md:56) marks the whole line 'already satisfied' on the strength of the owner ruling comment alone. The first half checks out: the 'Owner's ruling (2026-09-20)' comment is on #991 (gh issue view 991 --json comments, authored 2026-09-19T19:48:58Z). The second half does not: gh issue view 991 --json labels,milestone,state returns state OPEN, labels ['enhancement','ready-for-agent'], milestone null -- no milestone, label or cross-reference marks it queued for a Wayfinder or to-spec pass. Work order rule 2 correctly bars the lane from any GitHub write, so this is owed by the orchestrator or the owner and not by the lane -- but it is owed, and the report closes it.",
+      "required_fix": "Change the report verdict on that line to 'owed, not mine to do -- work order rule 2 forbids the GitHub write', and have the orchestrator queue #991 for the Wayfinder pass (a milestone, or the #683 cross-reference the ticket's own out-of-scope names)."
+    },
+    {
+      "id": "SPEC-L02-06",
+      "ticket": 991,
+      "severity": "note",
+      "kind": "control-narrower-than-the-requirement",
+      "title": "#991's leak control exercises one function and two roles; the criterion says any enumerated function to a human, agent-read or wake role",
+      "evidence": "Ticket line: '- [ ] Granting EXECUTE on any enumerated function to a human, agent-read or wake role fails the cell with a message naming the function and the role'. pkc.3 issues one real GRANT -- clara_authenticated on PACK_SHAPED_KNOWLEDGE_READS[0] (clara.get_knowledge_pack) -- inside a rolled-back transaction; pkc.4's negative half adds clara_agent_ro but only via get_context_pack's own standing grants, never on an enumerated function. No wake role (clara_wake_interactive, clara_wake_proactive, clara_wake_bank, clara_wake_filing) is exercised in either direction. The detector's role set is catalog-derived (rolname like 'clara%' through has_function_privilege), which I confirmed covers every non-superuser role on clara_l02 -- all eighteen begin with 'clara' -- so the logic is genuinely uniform and the narrower control is a coverage judgement rather than a hole.",
+      "required_fix": "Optional: parameterise pkc.3 over a small matrix (one human role, one agent-read role, one wake role, against two different enumerated functions) so the criterion's own words are exercised rather than argued from the detector's uniformity."
+    },
+    {
+      "id": "SPEC-L02-07",
+      "ticket": 912,
+      "severity": "note",
+      "kind": "unasked-behaviour",
+      "title": "#912 adds a partial index on clara.audit_log that neither the brief nor the ruling asked for",
+      "evidence": "0243 section C creates ix_audit_log_knowledge_revision on clara.audit_log (firm_id, (args ->> 'revision_id')) where args ->> 'revision_id' is not null. Neither the brief's 'Key interfaces' nor the owner ruling names an index. The file argues it as a consequence of the new citation ('this rig alone already holds ~66.9k rows ... without this one, each firm-scope rule on the register costs a sequential scan of the whole audit log'), which is a fair reading of what the recut register needs, and section Z asserts the index exists. Flagged only because it is a new physical object on the estate's largest append-only table, landed under a ticket whose spec does not mention one.",
+      "required_fix": "None required. Name the index explicitly in the release notes and the as-run so the hosted apply is not surprised by DDL on clara.audit_log."
+    },
+    {
+      "id": "SPEC-L02-08",
+      "ticket": 898,
+      "severity": "note",
+      "kind": "stale-evidence-citation",
+      "title": "#898's report cites an fd.01 assertion that no longer exists on the branch",
+      "evidence": "reports/wave2-lane02-ticket898.md, AC1 row: \"cell fd.01 -- kind='assertion', value_shape='number', validated_against='range:day_1_31', allowed_values=null, scope_default='client', authority_bearing=false, min_role='bookkeeper'\". On HEAD, fd.01 (packages/db/tests/knowledge-fye-day.test.mjs) no longer reads scope_default at all -- the cell's own comment explains that #913's 0241_knowledge_scope_default_drop.sql dropped the column and that the scope half moved to sd.03. The ticket's words ('typed and validated the same way, at the same scope and floor') are still satisfied, by fd.01 plus fd.04 plus sd.03, but the report's evidence line describes a cell state the lane's own later ticket removed.",
+      "required_fix": "Update the #898 report's AC1 evidence row to cite the cell as it now stands (fd.01 for type and floor, fd.04 plus sd.03 for the scope half) and say that #913 moved the scope assertion."
+    }
+  ],
+  "no_findings_raised_for": [
+    "#913 -- every acceptance criterion is met and evidenced: sd.01 (the column and its own CHECK are gone; ck_knowledge_keys_policy_authority survives by name and by definition), sd.02 and sd.04 (14 keys, kind census {assertion 11, policy 2, preference 1}, the five 0192-pinned clara._knowledge_floor probes unchanged), sd.03 (the firm-eligibility wall still refuses financial_year_end_month and still admits default_currency, reporting_framework and accounting_basis, through the real capture_knowledge door). The out-of-scope list is honoured: the eligibility relation, its two guard triggers, the seeded keys and the plan-item map are untouched.",
+    "#993's first three acceptance criteria -- kg.01 (both grammar CHECKs live under their own names; both btrim-only CHECKs gone), kg.02 and kg.03 (uppercase, hyphen, leading digit and 64 characters each refused by the named constraint on the right table; a 63-character key admitted and rolled back, so the bound is not off by one), kg.04 (14 plus 5 live keys all still conform). Renaming the constraints is what a drop-and-add requires, not scope creep. The out-of-scope list is honoured in the diff: no key renamed, no merged migration edited, no recut of record_work_knowledge_read.",
+    "#912's behavioural acceptance -- ar.03 (an owner promotes, a second owner demotes through the real clara.set_member_role door, and the register reports promoter_role_at_act='owner' beside promoter_role_now='bookkeeper' and required_role='admin'), ar.04 (a 400-day-old revision and its audit row report null, and the register does not substitute the promoter's current role), ar.05 (sole writer = {clara._audit}, one overload, unmoved identity arguments, at least 300 callers, and clara.create_client from an untouched lane inherits the stamp), ar.02 (history stays null; an fn_owner UPDATE is refused CLR08 'audit_log is append-only'; a past-dated row is never stamped, with a live control beside it proving the stamp was armed). kf.12 and kf.13 render the two facts as two facts and say the unknown in words. I re-ran all of these plus the member-door and firm-knowledge batteries the ruling names: 30/30 and 59/59 green.",
+    "#991's first five acceptance criteria -- pkc.1 (four seeded identities; [] findings against the live grants, which I re-measured independently), pkc.2 (a positive runtime assertion separate from pkc.1's combined one), pkc.3 (a real rolled-back GRANT produces a finding naming both the function and the role, and a clean read after rollback is [] again), pkc.4 (a fifth runtime-only entry passes through the unmodified detector, while get_context_pack through the same detector IS flagged, so the exclusion is curation and not blindness), pkc.5 (get_context_pack keeps clara_authenticated and clara_agent_ro and is never a member of the enumeration). The report's vacuity control -- break the negative branch, watch pkc.3 and pkc.4 go red for the right reason, restore the subject byte for byte -- is the discipline work order rule 4 asks of a test-only ticket.",
+    "The from-scratch acceptance line on #898, #913, #993 and #912 -- each report marks it unverified by the lane and cites RIG.md's rule that a lane never runs a second from-scratch chain on its own cluster. That is the correct posture, not a finding; the integrator owes the proof."
+  ],
+  "summary": "Five tickets, eight findings, one major. The major is #993: AC4 (record_work_knowledge_read's own grammar check is untouched) is met in fact -- 0242 contains no CREATE OR REPLACE for that function -- but the proof offered for it is vacuous in three places at once (the migration header, the migration tail and kg.05), and the report repeats the claim; kg.05 would pass against any body of that function. Everything else is minor or a note: #912 substituted a BEFORE INSERT trigger for the ruling's named clara._audit recut (verified justified, since _audit is a pinned metric-input-producer member, but it needs owner ratification) and invented a 'none' sentinel the register surface renders untranslated; #898 does not deliver the brief's 'never disagree silently' clause and does not record it as owed; #991's last criterion is only half satisfied while the report marks it 'already satisfied'. No requirement is missing outright, no behaviour in the diff is unjustified, and every cell I re-ran is green: 30/30 on the five lane db batteries with the full gate chain, 59/59 on the member-door and firm-knowledge batteries the #912 ruling names, 14/14 on the web firm-panel battery."
+}

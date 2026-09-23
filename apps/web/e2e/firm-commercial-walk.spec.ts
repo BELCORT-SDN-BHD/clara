@@ -143,6 +143,52 @@ async function installCommercial(page: Page, answer: { status: number; body: unk
     fulfillJson(route, answer.status, answer.body));
 }
 
+/** #960 — a STATEFUL processing-cap pair: the commercial read and the write door, wired to each
+ *  other the way the database wires them. The fixture behaves like migration 0270 rather than
+ *  echoing a canned success:
+ *   · a cap the body does not name is PRESERVED (0196's column-preserving trigger);
+ *   · a value above the estate ceiling is refused with 0270's own sentence and detail.reason;
+ *   · an accepted write moves the number the NEXT commercial read reports, which is what makes
+ *     "the page shows the new cap" a statement about the re-read rather than about the receipt.
+ *  Registered AFTER nothing else routes the commercial read in the cells that use it. */
+async function installCapacityPair(page: Page, initial: Record<string, number>) {
+  const caps = { ...initial };
+  const CEILING: Record<string, number> = {
+    p_docs_per_day: 10000, p_pages_per_day: 100000,
+    p_ocr_concurrency: 16, p_llm_witness_concurrency: 16,
+  };
+  const COLUMN: Record<string, string> = {
+    p_docs_per_day: "docs_per_day", p_pages_per_day: "pages_per_day",
+    p_ocr_concurrency: "ocr_concurrency", p_llm_witness_concurrency: "llm_witness_concurrency",
+  };
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_commercial_state", (route) =>
+    fulfillJson(route, 200, { ...COMMERCIAL, capacity: { ...caps, source: "firm_document_limits" } }));
+  await page.route("**/e2e-supabase/rest/v1/rpc/set_firm_document_limits", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    const previous = { ...caps };
+    const changed: string[] = [];
+    for (const [arg, column] of Object.entries(COLUMN)) {
+      const asked = body[arg];
+      const ceiling = CEILING[arg] as number;
+      if (typeof asked !== "number") continue;
+      if (asked > ceiling) {
+        await fulfillJson(route, 400, {
+          code: "CLR10",
+          message: `${column} may not exceed the estate ceiling of ${ceiling}`,
+          details: JSON.stringify({ reason: "cap_above_ceiling" }),
+        });
+        return;
+      }
+      if (asked !== caps[column]) { caps[column] = asked; changed.push(column); }
+    }
+    await fulfillJson(route, 200, {
+      status: "set", firm_id: FIRM_ID, caps: { ...caps }, previous, changed, created: false,
+      updated_at: "2026-09-20T04:00:00.000Z",
+    });
+  });
+  return caps;
+}
+
 async function installUsage(page: Page, byMonth: Record<string, unknown>, fallback: unknown = []) {
   await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_ai_usage", (route) => {
     const body = route.request().postDataJSON() as { p_period?: string } | null;
@@ -349,6 +395,10 @@ test("a bookkeeper sees the legal standing but no commercial or usage figures, a
   await expect(page.getByText("Clara Beta")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Download CSV" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Accept for this firm" })).toHaveCount(0);
+  // #960 — and no cap control either. The card's figures and its control ride the SAME
+  // admin-floored read, so a rank that cannot read the numbers cannot see the fields.
+  await expect(page.getByRole("button", { name: "Save processing caps" })).toHaveCount(0);
+  await expect(page.getByLabel("Documents per day")).toHaveCount(0);
   // The DATABASE's own sentence, verbatim, with its code.
   await expect(page.getByText("insufficient role").first()).toBeVisible();
   await expect(page.getByText("CLR04").first()).toBeVisible();
@@ -503,4 +553,40 @@ test("320px and 200% zoom carry no horizontal page scroll, and focus returns to 
   expect(zoomed.scrollWidth, "no horizontal PAGE scroll at 200%").toBeLessThanOrEqual(zoomed.clientWidth + 1);
   result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/firm at 200% zoom").toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// (11) #960 — the owner sets one of the firm's own processing caps, and the estate's ceiling
+//      refuses a number above it by name.
+// ---------------------------------------------------------------------------
+test("an owner changes one processing cap, the page reports the new number, and the estate ceiling refuses a bigger one", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
+  await installStandingPair(page, liveStanding);
+  await installUsage(page, {});
+  await installCapacityPair(page, {
+    docs_per_day: 100, pages_per_day: 1000, ocr_concurrency: 2, llm_witness_concurrency: 2,
+  });
+  await signIn(page, OWNER);
+  await page.goto("/settings/firm");
+
+  const pages = page.getByLabel("Pages per day");
+  await expect(pages).toHaveValue("1000");
+
+  // ONE CAP MOVES. The other three are never sent, and the page's figures come from the RE-READ,
+  // not from the receipt.
+  await pages.fill("4000");
+  await page.getByRole("button", { name: "Save processing caps" }).click();
+  await expect(page.getByText(/This firm now processes up to 100 documents and 4,000 pages a day/)).toBeVisible();
+  await expect(pages).toHaveValue("4000");
+
+  // THE CEILING, NAMED. 0270's own sentence, verbatim, with its code and reason.
+  await pages.fill("999999");
+  await page.getByRole("button", { name: "Save processing caps" }).click();
+  await expect(page.getByText("pages_per_day may not exceed the estate ceiling of 100000")).toBeVisible();
+  await expect(page.getByText(/CLR10 · cap_above_ceiling/)).toBeVisible();
+  // NOTHING WAS WRITTEN, and the person's own number is still in the field to edit down.
+  await expect(pages).toHaveValue("999999");
+
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "/settings/firm with the cap control").toEqual([]);
 });

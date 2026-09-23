@@ -1,0 +1,515 @@
+// #846 — THE CAPABILITY REGISTRY'S VERSION HIGH-WATER MARK, and the cross-row uniformity of a
+// publish. Migration: 0244_document_capability_version_high_water.sql.
+//
+// WHAT THIS BATTERY IS FOR. #779's 0207 made `registry_version` monotonicity a database refusal
+// for UPDATE transitions, and named TWO residuals in its own header rather than closing them:
+//   1. a DELETE-then-INSERT at a lower version is a FIRST PUBLICATION to the database, so the
+//      transition wall never sees it and the version silently goes backwards;
+//   2. "every row published together carries the same integer" stayed a CONVENTION — a test-time
+//      observation in document-capability-registry.test.mjs, which a uniform backwards republish
+//      would satisfy anyway, and which nothing enforces at write time at all.
+// 0244 closes both: an append-only HIGH-WATER relation that remembers the highest version each
+// (format, document_kind) has ever published, read by an INSERT-side wall; and a DEFERRED
+// constraint trigger that refuses, AT COMMIT, a transaction leaving more than one distinct
+// version on the table.
+//
+// THE OWNER CONNECTION IS THE ONLY WRITER THERE IS, which is why every probe here runs through
+// it. `clara.document_capabilities` is forced-RLS with an owner `for all` policy,
+// `clara_authenticated` holds SELECT only and `clara_agent_ro` holds no table privilege at all,
+// so a wall built out of grants or RLS would wall off exactly the roles that were never the
+// hazard. 0207's header settled that argument; this file inherits it.
+//
+// EVERY PROBE IS ROLLED BACK. The sibling battery (document-capability-registry.test.mjs) asserts
+// registry-wide invariants — exactly one distinct registry_version, the seeded OFX and CSV
+// verdicts, one engine per format — so a probe write left behind would turn THAT file red rather
+// than this one. The rollback-hygiene cell at the end re-reads both tables to prove it.
+
+// EVERY CELL GATES ON THE LIVE CATALOG, never on a migration number — review law 3, and the
+// sibling battery's own stated law. A PARTIAL cohort THROWS: a half-applied migration is a
+// defect, not a reason to skip. A focused run against a chain that predates 0244 FAILS LOUDLY;
+// only an estate sweep that preloads document-capability-high-water-preintegration-gate.mjs
+// skips, and it says so.
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { rootQuery, asRoot, endPool } from "./rig-fixtures.mjs";
+
+/** The immutability / append-only family code, the one 0193's `_tf_accounting_plans_immutable`
+ *  and 0207's `_tf_document_capabilities_version_monotone` already raise. #846's brief keeps it
+ *  rather than minting a second spelling for the same fact. */
+const CLR08 = "CLR08";
+
+const PDF_INVOICE = "where format = 'pdf' and document_kind = 'invoice'";
+
+const CAPABILITY_COLUMNS =
+  "(format, document_kind, mime_type, custody, byte_extraction, typed_facts, business_operation, "
+  + "engine_id, engine_byte, registry_version, basis, limits)";
+
+/** The count WITH 0244 applied. The `after` hook asserts it, so a cell that silently stops
+ *  running — the way a mis-gated cell does — fails the whole battery rather than passing by
+ *  absence. */
+const EXPECTED_CELLS = 10;
+
+let live = false;
+let executed = 0;
+
+/** #846's whole closure, read from the LIVE CATALOG: 0244's five objects plus the three routes
+ *  0272 closed in the SAME pull request (`g5` and `g6` are 0272's own — it installs all three routes in one
+ *  file, so its truncate trigger is that file's frontier the way the five-value CHECK is 0246's
+ *  in the sibling battery). Wholly present or wholly absent; anything between the two is a
+ *  half-applied migration and is reported as such. There is no shipped chain between 0244 and
+ *  0272 for the same reason: they land together or not at all. */
+async function cohortApplied() {
+  const r = await rootQuery(`select
+      to_regclass('clara.document_capability_version_high_water')                     is not null as t1,
+      to_regprocedure('clara._tf_document_capabilities_version_high_water()')         is not null as f1,
+      to_regprocedure('clara._tf_document_capabilities_high_water_record()')          is not null as f2,
+      exists (select 1 from pg_trigger t
+               where t.tgrelid = 'clara.document_capabilities'::regclass
+                 and t.tgname = 't_document_capabilities_version_high_water'
+                 and not t.tgisinternal)                                              as g1,
+      exists (select 1 from pg_trigger t
+               where t.tgrelid = 'clara.document_capabilities'::regclass
+                 and t.tgname = 't_document_capabilities_high_water_record'
+                 and not t.tgisinternal)                                              as g2,
+      to_regprocedure('clara._tf_document_capability_high_water_monotone()')          is not null as f3,
+      to_regprocedure('clara._tf_document_capabilities_version_uniform()')            is not null as f4,
+      exists (select 1 from pg_trigger t
+               where t.tgrelid = 'clara.document_capability_version_high_water'::regclass
+                 and t.tgname = 't_document_capability_high_water_monotone'
+                 and not t.tgisinternal)                                              as g3,
+      exists (select 1 from pg_constraint c
+               where c.conname = 't_document_capabilities_version_uniform'
+                 and c.connamespace = 'clara'::regnamespace
+                 and c.condeferrable and c.condeferred)                               as g4,
+      exists (select 1 from pg_trigger t
+               where t.tgrelid = 'clara.document_capability_version_high_water'::regclass
+                 and t.tgname = 't_document_capability_high_water_no_truncate'
+                 and not t.tgisinternal)                                              as g5,
+      exists (select 1 from pg_trigger t
+               where t.tgrelid = 'clara.document_capabilities'::regclass
+                 and t.tgname = 't_document_capabilities_version_high_water_rekey'
+                 and not t.tgisinternal)                                              as g6`);
+  const flags = Object.entries(r.rows[0]);
+  const present = flags.filter(([, v]) => v).length;
+  if (present !== 0 && present !== flags.length) {
+    throw new Error(
+      `the #846 high-water cohort is PARTIAL: ${flags.map(([k, v]) => `${k}=${v}`).join(" ")}. `
+      + "A half-applied migration is a defect; refusing to skip past it.",
+    );
+  }
+  return present === flags.length;
+}
+
+before(async () => { live = await cohortApplied(); });
+
+after(async () => {
+  if (live) assert.equal(executed, EXPECTED_CELLS, `expected ${EXPECTED_CELLS} cells to run, ${executed} did`);
+  await endPool();
+});
+
+function gate(t) {
+  if (live) return false;
+  if (process.env.CLARA_ALLOW_MISSING_DOCUMENT_CAPABILITY_HIGH_WATER === "1") {
+    console.warn("SKIP document-capability-high-water: 0244's cohort is not applied (explicit pre-integration run).");
+    t.skip("#846 high-water cohort absent -- explicit pre-integration run");
+    return true;
+  }
+  assert.fail(
+    "document-capability-high-water is required for a focused run: apply "
+    + "0244_document_capability_version_high_water.sql (or its numbered suite copy)",
+  );
+}
+
+const cell = (name, fn) => test(name, async (t) => { if (gate(t)) return; executed += 1; await fn(t); });
+
+async function caught(fn) {
+  try { await fn(); return null; } catch (err) { return err; }
+}
+
+/** Run `fn(client)` inside a transaction that is ALWAYS rolled back. */
+async function inRolledBackTxn(fn) {
+  return asRoot(async (c) => {
+    await c.query("begin");
+    try {
+      return await fn(c);
+    } finally {
+      await c.query("rollback");
+    }
+  });
+}
+
+/** Re-insert a captured registry row at `version`, every other column byte-identical. */
+function reinsert(c, row, version) {
+  return c.query(
+    `insert into clara.document_capabilities ${CAPABILITY_COLUMNS}
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [row.format, row.document_kind, row.mime_type, row.custody, row.byte_extraction, row.typed_facts,
+      row.business_operation, row.engine_id, row.engine_byte, version, row.basis, row.limits],
+  );
+}
+
+const capturePdfInvoice = (c) =>
+  c.query(`select * from clara.document_capabilities ${PDF_INVOICE}`).then((r) => r.rows[0]);
+
+cell("a pair's published version survives DELETE: re-inserting BELOW it is refused with CLR08 and a named reason", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const row = await capturePdfInvoice(c);
+    assert.ok(row.registry_version >= 2,
+      `this probe lowers the published version by one and must stay above the registry_version >= 1 `
+      + `positivity CHECK, so the refusal can only be the high-water wall; published is ${row.registry_version}`);
+    await c.query(`delete from clara.document_capabilities ${PDF_INVOICE}`);
+    // A savepoint, so the REFUSED insert aborts only its own sub-transaction and the rest of the
+    // probe can still read the table afterwards.
+    await c.query("savepoint probe_846");
+    const err = await caught(() => reinsert(c, row, row.registry_version - 1));
+    await c.query("rollback to savepoint probe_846");
+    const present = (await c.query(`select count(*)::int as n from clara.document_capabilities ${PDF_INVOICE}`))
+      .rows[0].n;
+    return { err, published: row.registry_version, present };
+  });
+
+  assert.ok(seen.err,
+    "a DELETE-then-INSERT below the published version was ACCEPTED — #779's first residual is still open");
+  assert.equal(seen.err.code, CLR08,
+    `expected the immutability-family code ${CLR08}, got ${seen.err.code}`);
+  const detail = JSON.parse(seen.err.detail ?? "{}");
+  assert.equal(detail.reason, "registry_version_high_water",
+    "the refusal must carry a MACHINE-READABLE reason naming the wall that fired, so a caller "
+    + "classifies it by code and reason rather than by message text");
+  assert.equal(detail.column, "registry_version");
+  assert.equal(detail.format, "pdf");
+  assert.equal(detail.document_kind, "invoice");
+  assert.equal(detail.from, seen.published, "the refusal names the HIGH WATER it was measured against");
+  assert.equal(detail.to, seen.published - 1, "the refusal names the version that was attempted");
+  assert.equal(seen.present, 0,
+    "the refused INSERT left nothing behind: the row is still deleted inside the probe transaction");
+});
+
+// ---------------------------------------------------------------------------------------------
+// "BY ANY ROUTE" — the mark is only worth what it costs to remove. An INSERT wall that reads a
+// relation anybody may delete from is a wall with a door beside it: delete the mark, re-insert
+// low, and the registry is back where #846 found it. So the relation is append-only in the
+// strong sense, and that is a REFUSAL rather than a habit.
+// ---------------------------------------------------------------------------------------------
+
+cell("the high-water mark itself is append-only: DELETE is refused, a lowering UPDATE is refused, a raise is admitted", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const mark = (await c.query(
+      `select * from clara.document_capability_version_high_water ${PDF_INVOICE}`)).rows[0];
+    assert.ok(mark, "the pair the probes use carries a high-water mark");
+
+    await c.query("savepoint probe_delete");
+    const del = await caught(() => c.query(
+      `delete from clara.document_capability_version_high_water ${PDF_INVOICE}`));
+    await c.query("rollback to savepoint probe_delete");
+
+    await c.query("savepoint probe_lower");
+    const lower = await caught(() => c.query(
+      `update clara.document_capability_version_high_water set registry_version = $1 ${PDF_INVOICE}`,
+      [mark.registry_version - 1]));
+    await c.query("rollback to savepoint probe_lower");
+
+    // A RAISE is the writer's own ordinary act and must still be admitted, or the mark could
+    // never follow a republication.
+    const raised = (await c.query(
+      `update clara.document_capability_version_high_water set registry_version = $1 ${PDF_INVOICE}
+         returning registry_version`, [mark.registry_version + 1])).rows[0].registry_version;
+
+    return { del, lower, raised, mark: mark.registry_version };
+  });
+
+  assert.ok(seen.del, "a DELETE of the high-water mark was ACCEPTED — the wall has a door beside it");
+  assert.equal(seen.del.code, CLR08, `expected ${CLR08} for the refused DELETE, got ${seen.del.code}`);
+  assert.equal(JSON.parse(seen.del.detail ?? "{}").reason, "registry_version_high_water_append_only");
+
+  assert.ok(seen.lower, "an UPDATE that LOWERS the high-water mark was ACCEPTED");
+  assert.equal(seen.lower.code, CLR08, `expected ${CLR08} for the refused lowering, got ${seen.lower.code}`);
+  assert.equal(JSON.parse(seen.lower.detail ?? "{}").reason, "registry_version_high_water_append_only");
+
+  assert.equal(seen.raised, seen.mark + 1, "raising the high-water mark must still succeed");
+});
+
+// FIX ROUND (0272) — THE THREE ROUTES THE FIRST CUT LEFT OPEN. 0244 walled DELETE and a lowering
+// or re-keying UPDATE of the mark, and an INSERT below it. The adversarial lens then drove three
+// more routes to the same end, as clara_fn_owner — the role every migration runs as and the only
+// writer either table has. Each cell below reproduces one of them and is the refusal's only
+// witness; each FAILED against 0244 alone before 0272 closed it.
+
+cell("TRUNCATE of the high-water mark is refused: a row trigger does not fire on TRUNCATE, so the ledger needs its own statement wall", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const before = (await c.query(
+      "select count(*)::int as n from clara.document_capability_version_high_water")).rows[0].n;
+    await c.query("savepoint probe_truncate");
+    const err = await caught(() => c.query("truncate clara.document_capability_version_high_water"));
+    await c.query("rollback to savepoint probe_truncate");
+    const after = (await c.query(
+      "select count(*)::int as n from clara.document_capability_version_high_water")).rows[0].n;
+    return { err, before, after };
+  });
+
+  assert.ok(seen.before > 0, "the mark ledger really carries rows to truncate");
+  assert.ok(seen.err,
+    "TRUNCATE emptied the mark ledger — #846's reproducer is back in two statements: truncate the "
+    + "marks, delete the registry row, re-insert it BELOW the version it published");
+  assert.equal(seen.err.code, CLR08, `expected the immutability-family code ${CLR08}, got ${seen.err.code}`);
+  assert.match(seen.err.message, /document_capability_version_high_water cannot be truncated/,
+    "the refusal names the relation, the way clara._tf_no_truncate has named every other "
+    + "append-only relation since 0003");
+  assert.equal(seen.after, seen.before, "the refused TRUNCATE left every mark in place");
+});
+
+cell("a RE-KEYING update cannot republish a pair below its mark: the wall reads the key the row is moving TO", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const row = await capturePdfInvoice(c);
+    const mark = (await c.query(
+      `select registry_version from clara.document_capability_version_high_water ${PDF_INVOICE}`))
+      .rows[0].registry_version;
+    assert.equal(mark, row.registry_version, "the pair starts with its mark at the version it publishes");
+
+    // The registry's primary key is (format, document_kind), so the pair has to be retired before
+    // anything can be re-keyed ONTO it. Retiring is legitimate and stays legitimate — that is
+    // #846's own "while retiring a row stays possible".
+    await c.query(`delete from clara.document_capabilities ${PDF_INVOICE}`);
+
+    // A never-seen pair has no mark, so its first publication is admitted AT ANY VERSION. This is
+    // the door the re-key walks through: the row is lawful where it is born and unlawful where it
+    // is moved to. (The registry is non-uniform here; the uniformity wall is DEFERRED and judges
+    // only what a transaction LEAVES, and this one leaves nothing.)
+    const probe = { ...row, format: "probe846rekey", document_kind: "probe_kind" };
+    await reinsert(c, probe, row.registry_version - 1);
+
+    await c.query("savepoint probe_rekey");
+    const err = await caught(() => c.query(
+      "update clara.document_capabilities set format = 'pdf', document_kind = 'invoice' "
+      + "where format = 'probe846rekey'"));
+    await c.query("rollback to savepoint probe_rekey");
+
+    const republished = (await c.query(
+      `select registry_version from clara.document_capabilities ${PDF_INVOICE}`)).rows[0] ?? null;
+    return { err, mark, published: row.registry_version, republished };
+  });
+
+  assert.ok(seen.err,
+    "a re-keying UPDATE republished pdf x invoice BELOW its high-water mark — the wall is "
+    + "INSERT-side only and a re-key is a DELETE-then-INSERT in disguise");
+  assert.equal(seen.err.code, CLR08, `expected ${CLR08} for the refused re-key, got ${seen.err.code}`);
+  const detail = JSON.parse(seen.err.detail ?? "{}");
+  assert.equal(detail.reason, "registry_version_high_water",
+    "the re-key is refused by the HIGH-WATER wall, under the reason a caller already classifies");
+  assert.equal(detail.format, "pdf", "the refusal names the key the row was moving TO, never the one it left");
+  assert.equal(detail.document_kind, "invoice");
+  assert.equal(detail.from, seen.mark, "…measured against that key's mark");
+  assert.equal(detail.to, seen.published - 1);
+  assert.equal(seen.republished, null,
+    "the refused re-key left the retired pair retired: nothing was republished under it");
+});
+
+cell("recorded_at only ever moves forward: the column comment is a claim the wall backs", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const mark = (await c.query(
+      `select registry_version, recorded_at from clara.document_capability_version_high_water ${PDF_INVOICE}`))
+      .rows[0];
+
+    await c.query("savepoint probe_backwards");
+    const err = await caught(() => c.query(
+      `update clara.document_capability_version_high_water set recorded_at = $1 ${PDF_INVOICE}`,
+      ["1999-01-01T00:00:00Z"]));
+    await c.query("rollback to savepoint probe_backwards");
+
+    // FORWARD is the writer's own ordinary act — clara._tf_document_capabilities_high_water_record
+    // stamps `recorded_at = now()` on every raise — and must stay admitted, or the mark could
+    // never follow a republication.
+    const forward = (await c.query(
+      `update clara.document_capability_version_high_water
+          set registry_version = $1, recorded_at = $2 ${PDF_INVOICE} returning recorded_at`,
+      [mark.registry_version + 1, new Date(mark.recorded_at.getTime() + 1000)])).rows[0].recorded_at;
+
+    return { err, was: mark.recorded_at, forward };
+  });
+
+  assert.ok(seen.err,
+    "recorded_at was rewritten BACKWARDS — 0244 comments the column 'Moves only upward with "
+    + "registry_version', and until this wall nothing made that true");
+  assert.equal(seen.err.code, CLR08, `expected ${CLR08} for the backwards write, got ${seen.err.code}`);
+  const detail = JSON.parse(seen.err.detail ?? "{}");
+  assert.equal(detail.reason, "registry_version_high_water_append_only",
+    "a backwards recorded_at is the mark's own append-only wall speaking, not a new refusal family");
+  assert.equal(detail.column, "recorded_at", "the refusal names the column that moved");
+  assert.equal(detail.operation, "UPDATE");
+  assert.ok(seen.forward.getTime() > seen.was.getTime(), "a FORWARD recorded_at must still be admitted");
+});
+
+// ---------------------------------------------------------------------------------------------
+// #779's SECOND RESIDUAL — "every row published together carries the same integer" was a
+// CONVENTION: a table-wide observation in the sibling battery, which a uniform BACKWARDS
+// republish would satisfy anyway, and which nothing enforced at write time. The wall is DEFERRED
+// on purpose: every multi-statement republish passes through a non-uniform intermediate state,
+// so the transaction is judged on what it LEAVES, never on what it passed through.
+// ---------------------------------------------------------------------------------------------
+
+// THE ONE CELL THAT REALLY COMMITS, and the only honest way to prove a verdict reached AT
+// COMMIT. Its safety rests on the gate above: `cohortApplied()` has already read the deferred
+// constraint trigger out of pg_constraint, so the wall is PROVEN present before the transaction
+// is opened and the COMMIT can only be refused. Measured while writing this file: with the wall
+// absent the same transaction COMMITS and leaves the registry publishing two versions — which is
+// exactly the defect, and exactly why no other probe in this battery commits anything.
+cell("a transaction that ends with TWO distinct registry_versions is refused AT COMMIT, and the registry is untouched", async () => {
+  const before = (await rootQuery(
+    `select count(distinct registry_version)::int as versions, min(registry_version)::int as v
+       from clara.document_capabilities`)).rows[0];
+
+  const err = await asRoot(async (c) => {
+    await c.query("begin");
+    // Raising ONE pair is the whole hazard: the INSERT wall and 0207's UPDATE wall both admit it
+    // (a raise for that pair is monotone), and until this cell's wall existed the registry simply
+    // ended up publishing two versions at once.
+    await c.query(`update clara.document_capabilities set registry_version = registry_version + 1 ${PDF_INVOICE}`);
+    const caughtHere = await caught(() => c.query("commit"));
+    // A refused COMMIT has already ended the transaction; this is belt-and-braces so a green
+    // path can never leave the pooled connection inside one.
+    await c.query("rollback").catch(() => {});
+    return caughtHere;
+  });
+
+  assert.ok(err, "a transaction leaving TWO distinct registry_versions COMMITTED — cross-row uniformity is still only a convention");
+  assert.equal(err.code, CLR08, `expected ${CLR08} at commit, got ${err.code}`);
+  const detail = JSON.parse(err.detail ?? "{}");
+  assert.equal(detail.reason, "registry_version_uniform",
+    "the refusal must name the wall that fired, so a caller tells it apart from the per-pair walls");
+  assert.equal(detail.column, "registry_version");
+  assert.deepEqual(detail.versions, [before.v, before.v + 1],
+    "the refusal names the distinct versions it found, in order");
+
+  const after = (await rootQuery(
+    `select count(distinct registry_version)::int as versions, min(registry_version)::int as v
+       from clara.document_capabilities`)).rows[0];
+  assert.deepEqual(after, before, "the refused COMMIT wrote NOTHING: the registry is exactly as it was");
+});
+
+cell("a UNIFORM publish passes the same wall: every row raised together is admitted", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const published = (await c.query("select min(registry_version)::int as v from clara.document_capabilities"))
+      .rows[0].v;
+    const moved = (await c.query(
+      "update clara.document_capabilities set registry_version = registry_version + 1")).rowCount;
+    // The wall is DEFERRED, so nothing has judged this transaction yet. `set constraints … immediate`
+    // fires it NOW, which is the same verdict COMMIT would reach — proven by the cell above, whose
+    // refusal came from a real COMMIT. Forcing it here is what lets this cell roll back afterwards
+    // instead of republishing the live registry.
+    await c.query("set constraints clara.t_document_capabilities_version_uniform immediate");
+    const state = (await c.query(
+      `select count(distinct registry_version)::int as versions, min(registry_version)::int as v
+         from clara.document_capabilities`)).rows[0];
+    return { published, moved, state };
+  });
+
+  assert.equal(seen.state.versions, 1, "a uniform publish leaves exactly one version on the table");
+  assert.equal(seen.state.v, seen.published + 1, "…and it is the raised one");
+  assert.ok(seen.moved >= 240,
+    `the probe raised the WHOLE registry (12 formats x 20 kinds = 240 rows at authoring); it moved ${seen.moved}`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// THE WALL CLOSES A HOLE; IT DOES NOT CLOSE THE DOOR. Three cells for the three things #846
+// requires to keep WORKING, each of which an over-wide wall would break silently — a refusal
+// that refuses everything passes the two cells above and fails the estate.
+// ---------------------------------------------------------------------------------------------
+
+cell("a retired pair may be re-published AT its high water and ABOVE it", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const row = await capturePdfInvoice(c);
+
+    await c.query("savepoint at_mark");
+    await c.query(`delete from clara.document_capabilities ${PDF_INVOICE}`);
+    await reinsert(c, row, row.registry_version);
+    const at = (await c.query(`select registry_version from clara.document_capabilities ${PDF_INVOICE}`))
+      .rows[0].registry_version;
+    await c.query("rollback to savepoint at_mark");
+
+    await c.query("savepoint above_mark");
+    await c.query(`delete from clara.document_capabilities ${PDF_INVOICE}`);
+    await reinsert(c, row, row.registry_version + 1);
+    const above = (await c.query(`select registry_version from clara.document_capabilities ${PDF_INVOICE}`))
+      .rows[0].registry_version;
+    // The mark follows the publication up — that is what makes the NEXT re-insert's floor the new
+    // version rather than the old one.
+    const mark = (await c.query(
+      `select registry_version from clara.document_capability_version_high_water ${PDF_INVOICE}`))
+      .rows[0].registry_version;
+    await c.query("rollback to savepoint above_mark");
+
+    return { published: row.registry_version, at, above, mark };
+  });
+
+  assert.equal(seen.at, seen.published, "re-inserting AT the high water must succeed");
+  assert.equal(seen.above, seen.published + 1, "re-inserting ABOVE the high water must succeed");
+  assert.equal(seen.mark, seen.published + 1, "…and the mark follows the publication upward");
+});
+
+cell("the FIRST publication of a never-seen pair is admitted, and mints its mark", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const row = await capturePdfInvoice(c);
+    // A pair the registry has never carried. Deliberately not a live format: 0191's registry is
+    // TOTAL over the twelve canonical formats x the live kind roster, so every real pair already
+    // has a row and a mark, and only a synthetic pair can exercise the never-seen branch.
+    const probe = { ...row, format: "probe846", document_kind: "probe_kind" };
+    const before = (await c.query(
+      "select count(*)::int as n from clara.document_capability_version_high_water where format = 'probe846'"))
+      .rows[0].n;
+    // At the PUBLISHED version, because a first publication at any other version would leave the
+    // registry non-uniform — which is the other half of this file's subject, not this cell's.
+    await reinsert(c, probe, row.registry_version);
+    const stored = (await c.query(
+      "select registry_version from clara.document_capabilities where format = 'probe846'")).rows[0];
+    const mark = (await c.query(
+      "select registry_version, first_seen_at, recorded_at from clara.document_capability_version_high_water where format = 'probe846'"))
+      .rows[0];
+    return { before, stored: stored.registry_version, mark, published: row.registry_version };
+  });
+
+  assert.equal(seen.before, 0, "the probe pair really had no mark before the insert");
+  assert.equal(seen.stored, seen.published, "a first publication of a never-seen pair must succeed");
+  assert.ok(seen.mark, "…and the writer minted its high-water mark in the same statement");
+  assert.equal(seen.mark.registry_version, seen.published, "the minted mark carries the version just published");
+  assert.ok(seen.mark.first_seen_at instanceof Date, "the minted mark records when the pair was first published");
+});
+
+cell("ROLLBACK HYGIENE — after every probe the registry and its marks are byte-identical", async () => {
+  const registry = (await rootQuery(
+    `select count(*)::int as rows, count(distinct registry_version)::int as versions,
+            min(registry_version)::int as v
+       from clara.document_capabilities`)).rows[0];
+  assert.equal(registry.versions, 1, "a probe write survived: the registry no longer publishes exactly one version");
+  assert.equal(registry.rows, 240,
+    "a probe write survived: the registry is no longer 12 formats x 20 kinds (0191's totality)");
+
+  const marks = (await rootQuery(
+    `select count(*)::int as rows, count(distinct registry_version)::int as versions,
+            min(registry_version)::int as v
+       from clara.document_capability_version_high_water`)).rows[0];
+  assert.equal(marks.rows, registry.rows, "a probe write survived: the marks and the registry no longer agree in count");
+  assert.equal(marks.versions, 1, "a probe write survived: the marks no longer sit at one version");
+  assert.equal(marks.v, registry.v, "a probe write survived: the marks moved off the published version");
+
+  const orphans = (await rootQuery(
+    `select count(*)::int as n
+       from clara.document_capability_version_high_water h
+       left join clara.document_capabilities c
+         on c.format = h.format and c.document_kind = h.document_kind
+      where c.format is null`)).rows[0].n;
+  assert.equal(orphans, 0, "a probe write survived: a synthetic pair left a mark behind");
+
+  // The sibling battery's own subject, re-read here so a leak shows up in THIS file rather than
+  // in a later one that never touched the registry.
+  const pdf = (await rootQuery(`select registry_version, limits from clara.document_capabilities ${PDF_INVOICE}`)).rows[0];
+  assert.equal(pdf.registry_version, registry.v, "the probed row's own version is back where it started");
+  assert.deepEqual(
+    pdf.limits,
+    // #782 (0245): the invoice family's line-item limit reads accepted_limitation with its
+    // reason since 2026-09-20, not planned. This cell only proves the probes above left the
+    // row's limits untouched, whatever they currently are.
+    { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
+    "the probed row's limits are back where they started",
+  );
+});

@@ -2,9 +2,14 @@
 // Migration: 0196_firm_document_limits_preserving.sql (recut of 0007_document_pipeline.sql:545).
 //
 // WHY EVERY CELL RUNS AS ROOT, stated once here because it is the whole reason this battery looks
-// unlike the rest of the package. There is NO public writer for clara.firm_document_limits and
-// this ticket deliberately adds none (#692 "Out of scope: adding a public writer or a settings
-// surface for the limits"). The table grants SELECT to clara_authenticated and NOTHING else to any
+// unlike the rest of the package. When #692 shipped there was NO public writer for
+// clara.firm_document_limits and that ticket deliberately added none (#692 "Out of scope: adding
+// a public writer or a settings surface for the limits"). #960 (migration 0270) later added
+// exactly one — clara.set_firm_document_limits, the firm's own admin-floored door — but this
+// battery still runs as root ON PURPOSE: what it owns is the TRIGGER's column-preserving rule,
+// which a door cannot express more directly than the relation itself does, and driving it
+// through a door would mix the two subjects. #960's own battery
+// (firm-document-limits-writer.test.mjs) is where the door is driven. The table grants SELECT to clara_authenticated and NOTHING else to any
 // application role, and the only routine in the schema that writes it is the BEFORE-INSERT trigger
 // itself, which is EXECUTE-granted to nobody — both halves are already asserted by C-26 in
 // tests/rig-docs-metering.test.mjs. So the trigger is reachable only by an owner-level or superuser

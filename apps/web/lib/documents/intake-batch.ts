@@ -16,10 +16,11 @@
 // the door because `clara._work_run_attempts` refuses more than 101 ids), so a batch with 120
 // members shows 25 of them under the number 120.
 //
-// THE CAPACITY BLOCK IS THE DATABASE'S, NOT A LOCAL CONSTANT. The daily window is a UTC day
-// (0007:1644), whose boundary is 08:00 Asia/Kuala_Lumpur — MEASURED on a migrated rig. The card
-// renders the door's own `resets_at_local`, so the copy cannot drift from the wall it describes,
-// and it never says "midnight" or "tomorrow".
+// THE CAPACITY BLOCK IS THE DATABASE'S, NOT A LOCAL CONSTANT. The daily window is an
+// Asia/Kuala_Lumpur day (0252, #964 — moved off 0007:1644's UTC day, whose boundary was 08:00
+// Asia/Kuala_Lumpur), so the reset is MYT MIDNIGHT. The card renders the door's own
+// `resets_at_local`, so the copy cannot drift from the wall it describes, and it never says
+// "midnight" or "tomorrow" as words.
 
 import { callDoor } from "@/lib/doors";
 import { getRows } from "@/lib/read";

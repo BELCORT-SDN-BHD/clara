@@ -1,0 +1,129 @@
+{
+  "axis": "SPEC",
+  "lane": "wave2-lane03",
+  "branch": "riders/w2-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commits": [
+    "019506782 docs(web): unblock fix-round — record why the trigger label uses the filtered roster",
+    "1e7565e2f fix(web): unblock — DocumentKindDialog referenced an undefined DOCUMENT_KINDS",
+    "dadfd18dd feat(web): #988 the Documents workbench renders proposal_only distinctly",
+    "f8467bf4a feat(db): #988 business_operation gains a fifth level, proposal_only",
+    "4a5c9f2d7 feat(web): #782 the document detail shows invoice line items as an accepted limitation",
+    "a2bc8fbe8 test(runtime): #782 clara.get_document_state reads the invoice line-item limit's new value",
+    "380617b1b feat(db): #782 the invoice family's registry limit becomes an accepted limitation, not planned",
+    "bcc38b749 docs(db): #846 the high-water mark in the module READMEs, CONTEXT and the rig cohort",
+    "f0ab72bb4 test(db): #846 the wall closes a hole, not the door — the three positive controls",
+    "20d32c99e feat(db): #846 refuse a publish that leaves two registry versions on the table",
+    "f777b9764 feat(db): #846 the high-water mark is append-only, by any route",
+    "ea336b33c feat(db): #846 the capability registry's version high-water mark, and the INSERT-side wall"
+  ],
+  "spec_sources": [
+    "gh issue view 846 --comments (Agent Brief 2026-09-17; no 2026-09-20 owner ruling on this ticket)",
+    "gh issue view 782 --comments (owner ruling / Agent brief 2026-09-18 + the wave-2 coordination comment)",
+    "gh issue view 988 --comments (owner ruling 2026-09-20, which carries the newest Agent Brief inline)"
+  ],
+  "reruns": [
+    "packages/db: node --test --test-concurrency=1 <full gate chain from packages/db/package.json> tests/document-capability-high-water.test.mjs tests/document-capability-registry.test.mjs -> 29 pass / 0 fail / 0 skipped (7 + 22) on clara_l03",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test lib/documents/document-state.test.ts lib/documents/capability-registry.test.ts components/documents/document-state-panel.test.tsx -> 36 pass / 0 fail",
+    "worktree root: CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3520 CLARA_E2E_NEXT_PORT=3521 CLARA_E2E_RUNTIME_PORT=3522 pnpm --filter @clara/web e2e documents-viewer-walk -> 22 passed (52.4s), exit 0 — confirms #782's AC3 walk claim, which #782's own report had to leave BLOCKED",
+    "clara_l03 probe, rolled back and the database re-measured afterwards (240 rows / 240 marks / version 3 / one distinct version): truncate clara.document_capability_version_high_water; delete pdf x invoice; re-insert at registry_version - 1 -> ACCEPTED, stored 2 against a published 3",
+    "clara_l03: col_description on clara.document_capabilities.limits still reads '{\"invoice_line_items\":\"planned\"}' ... 'an accepted target with no table yet'",
+    "git show 23cfad947b:apps/web/components/documents/document-kind-dialog.tsx -> DOCUMENT_KINDS referenced at the SelectValue call site with no import: the unblock fix's 'pre-existing' claim is confirmed",
+    "grep -rn -i 'line item' docs/PRD.md -> zero hits (confirms #782's 'PRD already satisfied'); docs/ARCHITECTURE.md:529 still carries the stale row"
+  ],
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "SPEC-846-1",
+      "ticket": 846,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "#846's headline invariant has an uncovered route: TRUNCATE of the high-water relation re-opens the delete-then-insert hole",
+      "evidence": "Ticket line: \"A version once published for a pair can never be undercut by ANY ROUTE, while retiring a row stays possible.\" 0244 §B.3 makes the same argument in its own words: \"An INSERT wall that reads a relation anybody may delete from is a wall with a door beside it: delete the mark, re-insert low, and the registry is back where #846 found it.\" But the append-only wall clara._tf_document_capability_high_water_monotone is a BEFORE UPDATE OR DELETE **FOR EACH ROW** trigger (0244:319-321), and TRUNCATE fires no row triggers. Measured on clara_l03 inside a rolled-back transaction: `truncate clara.document_capability_version_high_water` succeeded (240 marks -> 0), then deleting pdf x invoice (published registry_version 3) and re-inserting it at 2 was ACCEPTED and the table read 2 — #846's own reproducer, verbatim. The estate already owns the mechanism: clara._tf_no_truncate() exists on this database and is installed as a `before truncate ... for each statement` trigger on every other append-only relation (0003_books_core.sql:492-497 for audit_log / journal_entries / journal_lines; 0005_event_spine.sql:282-321 for domain_events, taxonomy_versions, wake_intents, relay_dead_letters). Neither clara.document_capability_version_high_water nor clara.document_capabilities carries one — pg_trigger on both lists only the four #846 triggers plus 0207's.",
+      "required_fix": "In a follow-up migration (0244 is applied and must not be edited), attach the estate's existing clara._tf_no_truncate() as a BEFORE TRUNCATE FOR EACH STATEMENT trigger on clara.document_capability_version_high_water, with a tail assertion that TRUNCATE is refused and a cell in document-capability-high-water.test.mjs that proves it. If the owner-only threat model is judged acceptable instead, the gap must be written into the ticket and 0244's successor notes rather than left implicit."
+    },
+    {
+      "id": "SPEC-782-1",
+      "ticket": 782,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "\"planned\" wording for line items still stands in the registry's own live column documentation",
+      "evidence": "Ticket line (AC2): \"no 'planned' or 'coming' wording for line items remains in the registry seed, the web copy or the PRD.\" 0245 changes only the 28 rows' `limits` data; it issues no `comment on column`. Measured on clara_l03 after 0245 and 0246: col_description(clara.document_capabilities.limits) still reads \"`{\\\"invoice_line_items\\\":\\\"planned\\\"}` records the ONE capability deferred by this slice: invoice header facts are persisted with regions today, per-LINE facts are an accepted target with no table yet\" (0191:236's text, still live in the catalog). That is the registry's own machine-readable documentation of the very key the ticket re-seeded, still describing line items as a deferred target. The house fix is demonstrated by this lane's own next ticket: 0246 re-issues `comment on column ... business_operation` from the new migration without editing 0191 (0246:202-203).",
+      "required_fix": "A follow-up migration re-issues `comment on column clara.document_capabilities.limits` describing the accepted-limitation shape (invoice_line_items + invoice_line_items_reason), with a tail assertion that the comment no longer calls line items planned. 0191 and 0245 stay unedited."
+    },
+    {
+      "id": "SPEC-782-2",
+      "ticket": 782,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "ARCHITECTURE.md still lists invoice line items as an accepted target marked 'planned' in the capability registry",
+      "evidence": "Owner ruling on #782 (2026-09-18): \"no invoice line items this round; stop promising them\"; AC2 asks that the planned/coming wording stop. docs/ARCHITECTURE.md:529, a row in the accepted-targets table, still reads `| 发票行项目（line items）的类型化事实 | 能力目录中显式标为 planned，当前不抽取行项目 |`. After 0245 that sentence is factually false about the registry (which now publishes accepted_limitation with a reason), and the row still presents line items as a target Clara intends to build. The AC's named surfaces are the registry seed, the web copy and the PRD — ARCHITECTURE is not named, and work-order rule 5 forbids a lane worker editing docs/ARCHITECTURE.md — so the lane correctly declined and filed it as a follow-up in wave2-lane03-ticket782.md. Confirmed separately: docs/PRD.md has zero 'line item' hits, so the PRD half of the AC really is already satisfied.",
+      "required_fix": "Orchestrator or a wayfinder pass overwrites that ARCHITECTURE.md row so the accepted target becomes a recorded permanent boundary, per AGENTS.md working-protocol rule 4. Not a lane fix."
+    },
+    {
+      "id": "SPEC-988-1",
+      "ticket": 988,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "operationVerdict() branches on business_operation and does not treat proposal_only as distinct from the store-only level",
+      "evidence": "Ticket line (AC4): \"Every reader that renders or branches on `business_operation`, including the Documents workbench, treats the new level as distinct from the store-only level.\" apps/web/lib/documents/document-state.ts:227-235 `operationVerdict()` reads state.operation.capability — the pair's business_operation level (DocumentStateResult.operation.capability: CapabilityLevel, :125-127) — and branches only on \"unsupported\" -> not_applicable; supported, stored_only, planned and now proposal_only all fall through to the same entries/statements ladder, so a proposal_only document reads exactly as a stored_only one there, which is the 'undersells what happens' the ticket exists to fix. The rendering surfaces ARE distinct (capability-registry.ts tierStateKey / TIER_STATE_KEYS, capability-tiers.tsx TONE gains proposal_only: text-info with --color-info defined at globals.css:105, en.json capabilityTier.proposal_only = \"Proposed, needs confirmation\"), and the Documents workbench reaches them through CapabilityTiers (documents-workbench.tsx:282,316 -> UploadPanel / IntakeReceipts). The omission is deliberate and recorded in wave2-lane03-ticket988.md under 'A judgement call', arguing the function never distinguishes any level pair pre-posting; zero rows carry the level today, so nothing is currently mis-rendered.",
+      "required_fix": "Either accept the recorded judgement call explicitly at integration — the AC is then partial by decision, not omission — or file the follow-up the report itself names: an OperationVerdict value for 'a proposal awaiting a person's confirmation', landing with the first pairing actually classified at the level."
+    },
+    {
+      "id": "SPEC-ALL-1",
+      "ticket": 988,
+      "severity": "minor",
+      "kind": "unrequested-behaviour",
+      "title": "Two commits change document-kind-dialog.tsx, which none of the lane's three tickets asked for",
+      "evidence": "1e7565e2f and 019506782 change apps/web/components/documents/document-kind-dialog.tsx: the SelectValue `items` roster moves from the undefined DOCUMENT_KINDS to CLASSIFIABLE_DOCUMENT_KINDS, plus a comment. No ticket in this lane (#846, #782, #988) names that file. The 'pre-existing' claim checks out: `git show 23cfad947b:apps/web/components/documents/document-kind-dialog.tsx` shows the same `items={DOCUMENT_KINDS.map(...)}` call site with only CLASSIFIABLE_DOCUMENT_KINDS imported — a TS2552 and a runtime ReferenceError inherited from the wave-1 integrated head, blocking two of the lane's own required gates (pnpm typecheck, and every `pnpm --filter @clara/web e2e <spec>` because it runs next build). The fix matches the file's own #878 comment and the adjacent SelectContent roster; the lane kept it in two separate, clearly-labelled commits and flagged it for the orchestrator. AGENTS.md's clock-out rule 4 still requires the owner to confirm an edit the session did not intend as its own ticket's work.",
+      "required_fix": "Orchestrator confirms or drops 1e7565e2f + 019506782 independently of the three feature commits, and resolves the defect once for every wave-2 lane rather than per branch — it sits on the wave-1 integrated head, so the other nine lanes carry it too."
+    },
+    {
+      "id": "SPEC-846-2",
+      "ticket": 846,
+      "severity": "note",
+      "kind": "reasoned-deviation",
+      "title": "\"a statement-level constraint trigger\" was delivered as a deferred AFTER ROW constraint trigger",
+      "evidence": "Ticket line (Key interfaces): \"clara.document_capabilities: gains the INSERT-side wall and a statement-level constraint trigger.\" 0244 §B.4 installs `create constraint trigger t_document_capabilities_version_uniform after insert or update or delete ... deferrable initially deferred for each row`, and the file's header records why: `create constraint trigger ... for each statement` is a 42601 syntax error in PostgreSQL (the grammar hard-codes FOR EACH ROW), so the brief's real requirement — a whole-table check at the END of the transaction — is met by the deferral. Verified behaviourally on re-run: document-capability-high-water.test.mjs's third cell refuses a real COMMIT with CLR08 / detail.reason = registry_version_uniform and re-reads the registry unchanged. Recorded so the integrator does not read 'statement-level' in the ticket against 'FOR EACH ROW' in the catalog as a mismatch.",
+      "required_fix": "None. Keep the header's justification with the file."
+    },
+    {
+      "id": "SPEC-782-3",
+      "ticket": 782,
+      "severity": "note",
+      "kind": "requirement-implemented-thinly",
+      "title": "The user-visible limitation sentence interpolates raw machine tokens",
+      "evidence": "Ticket line: \"every user-visible sentence built from that limit (the document detail, the reading-status copy, en and zh) says the same.\" The rendered detail now reads \"Per-line invoice facts: accepted_limitation. Clara records the header totals with their source regions; ...\" and \"Reason: no_consumer_reads_line_facts.\" (en.json:2847-2848; document-state-panel.tsx:328 interpolates the raw limit value into capabilityLimit.*). Before the change the same sentence read '...are planned', which happened to be English. This is not a regression against house shape: the pre-existing OFX limits already render the same way (0191:375 seeds opening_balance = absent_in_format and reader = parse_succeeds_corroboration_cannot into 'The opening balance is {level} from this file format' / 'Reader limit: {level}'). Also noted: apps/web/messages/ contains only en.json, so the AC's 'en and zh' half is vacuous today rather than skipped.",
+      "required_fix": "None required by the AC. Human copy for limit VALUES would be one follow-up covering every limit token, not a #782 fix."
+    },
+    {
+      "id": "SPEC-988-2",
+      "ticket": 988,
+      "severity": "note",
+      "kind": "reasoned-deviation",
+      "title": "The registry version is not raised, and #782/#988 shipped as two migrations rather than the brief's shared cut",
+      "evidence": "Ticket lines: Sequencing — \"The republish is shared with every other open ticket that republishes this registry in the same cut, #782 first among them ...: one migration, the version raised once across every touched row\"; AC5 — \"The registry version is raised exactly once for the whole republish, by updating existing rows, and every row published together carries the same value.\" Delivered as two migrations: 0245 (#782) raises 2 -> 3 over all 240 rows by UPDATE; 0246 (#988) raises nothing and moves zero rows. The lane's argument (report, 'Why the version does not move') is that a vocabulary widening republishes no content, with 0244 as the in-branch precedent, and that the wave-2 work-order addendum requires one migration per ticket at its reserved number, which forbids the shared cut. Verified: 0246's prestate and tail both assert count(distinct registry_version) = 1, min = 3, 240 rows, and the high-water mark in agreement; the re-run battery confirms PUBLISHED_REGISTRY_VERSION = 3 live. Net effect across the cut matches the AC's intent — the version rose exactly once, over every touched row.",
+      "required_fix": "None. Keep the reasoning visible in the release record so the hosted publish is not read as a missed raise."
+    },
+    {
+      "id": "SPEC-988-3",
+      "ticket": 988,
+      "severity": "note",
+      "kind": "requirement-partial",
+      "title": "The new level's basis requirement, and the message-key manifest, are asserted by nothing",
+      "evidence": "Ticket line: \"A pairing at the new level carries a `basis` stating what it proposes and why it stops short of posting.\" The honesty-invariant cell added to document-capability-registry.test.mjs checks only `business_operation = 'proposal_only' and typed_facts <> 'supported'`; nothing checks that such a row's basis says what it proposes. 0191's basis sentence is composed at seed time by a CASE with no proposal_only arm (0191:406-409), so a future proposal_only row would fall to 'The operation is an accepted target and is not built.' unless its own migration writes the sentence. Vacuous today — zero rows carry the level, which the same cell proves. Separately, capability-registry.test.ts:164 asserts TIER_STATE_KEYS contains 'capabilityTier.proposal_only' \"so a completeness check over it would catch a missing translation\", but no such completeness check exists: TIER_STATE_KEYS has no consumer outside its own test file. The en.json key was added by hand and is present (en.json:2677).",
+      "required_fix": "None blocking. When the first pairing is classified proposal_only, its migration must write the basis sentence and a cell must pin it; a messages-completeness cell over TIER_STATE_KEYS would make the manifest's stated purpose real."
+    }
+  ],
+  "already_satisfied_and_stopped_claims_checked": [
+    "#782 'the PRD half of the AC is already satisfied, not built' — CONFIRMED: grep for 'line item' / 'invoice_line_items' in docs/PRD.md returns zero hits.",
+    "#782 'documents-viewer-walk BLOCKED by next build' — SUPERSEDED on the branch: re-ran on the lane's own Playwright triple, 22 passed / exit 0, after #988's unblock commit. AC3's walk evidence now stands.",
+    "#782 'I verified the fix (import DOCUMENT_KINDS from @/lib/documents/types) but did not ship it' — CORRECTLY OVERRIDDEN by #988's report, which shows that fix trips document-kind-labels.test.tsx's #878 / CRS-07-09 cell; the shipped fix uses CLASSIFIABLE_DOCUMENT_KINDS instead.",
+    "#846 'a true from-scratch 0001->0244 chain is the integrator's job — unverified by me' — ACCEPTED as stated; AC5's from-scratch half remains the integrator's to prove.",
+    "#846 'the capability-registry cell file stays green' — CONFIRMED by re-run: 22 pass / 0 fail / 0 skipped, now including #988's two new cells.",
+    "#988 'operationVerdict() is deliberately NOT changed' — CONFIRMED as a real, recorded deviation; see SPEC-988-1.",
+    "#846 report's note that one proving run COMMITTED a non-uniform state and the rig was repaired with `alter table ... disable trigger` — re-measured: clara_l03 reads 240 rows / 240 marks / one distinct version / min = max = 3, and all five triggers are attached."
+  ]
+}

@@ -226,7 +226,7 @@ const DOCUMENT_STATES = {
       engine_id: "llm-openai:gpt-5.6-terra:v2", engine_byte: "azure-di:prebuilt-layout:2024-11-30",
       registry_version: 1,
       basis: "Bytes are sealed at intake and read by azure-di:prebuilt-layout:2024-11-30. Typed facts are persisted with source regions by llm-openai:gpt-5.6-terra:v2. A filed document of this kind carries a business operation Clara can drive from those facts.",
-      limits: { invoice_line_items: "planned" }, known_pair: true, kind_known: true,
+      limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" }, known_pair: true, kind_known: true,
     },
     custody: {
       state: "verified", sha256: "a".repeat(64), byte_size: 20480,
@@ -243,7 +243,7 @@ const DOCUMENT_STATES = {
       }],
     },
     facts: {
-      capability: "supported", limits: { invoice_line_items: "planned" },
+      capability: "supported", limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
       extractions: [{
         id: DOCS.extraction, engine_kind: "llm_text_facts", engine_id: "llm-openai:gpt-5.6-terra:v2",
         version_n: 1, status: "done", superseded_by: null,
@@ -273,7 +273,7 @@ const DOCUMENT_STATES = {
       typed_facts: "supported", business_operation: "supported",
       engine_id: "clara-myinvois:v1", engine_byte: "clara-myinvois:v1", registry_version: 1,
       basis: "Bytes are sealed at intake and read by clara-myinvois:v1. Typed facts are persisted with source regions by clara-myinvois:v1. A filed document of this kind carries a business operation Clara can drive from those facts.",
-      limits: { invoice_line_items: "planned" }, known_pair: true, kind_known: true,
+      limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" }, known_pair: true, kind_known: true,
     },
     custody: {
       state: "verified", sha256: "b".repeat(64), byte_size: 4096,
@@ -284,7 +284,7 @@ const DOCUMENT_STATES = {
       status: "stored_unparsed", page_count: null, capability: "supported",
       engine_id: "clara-myinvois:v1", tasks: [],
     },
-    facts: { capability: "supported", limits: { invoice_line_items: "planned" }, extractions: [], validations: [] },
+    facts: { capability: "supported", limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" }, extractions: [], validations: [] },
     operation: { capability: "supported", codeable_kind: true, entries: [], statements: [] },
     lineage: {
       sha256: "b".repeat(64), intakes: [], corrections: [], authoritative_extraction_id: null,

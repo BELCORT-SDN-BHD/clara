@@ -192,7 +192,7 @@ export async function registerAccountSetAcceptancePhase(t) {
       assert.match(`${error?.message} ${error?.detail ?? ""}`, /frozen corpus|reconstruct|account.?set.*integrity/i, tag);
     }
 
-    const overlapOp = `delta-overlap-${randomUUID()}`, overlapRefusal = await caught(() => createAccountSet(owner, { client, key: "freeze_wall", selector: { account_codes: [code] }, effectiveFrom: start, opKey: overlapOp })); assert.equal(overlapRefusal?.code, "CLR10"); assert.equal(reasonOf(overlapRefusal), "effective_window_overlap"); assert.equal((await rootQuery("select count(*)::int n from clara.op_receipts where fn='create_account_set_v1' and op_key=$1", [overlapOp])).rows[0].n, 0);
+    const overlapOp = `delta-overlap-${randomUUID()}`, overlapRefusal = await caught(() => createAccountSet(owner, { client, key: "freeze_wall", selector: { account_codes: [code] }, effectiveFrom: start, opKey: overlapOp })); assert.equal(overlapRefusal?.code, "CLR10"); assert.equal(reasonOf(overlapRefusal), "effective_window_overlap"); assert.equal((await rootQuery("select count(*)::int n from clara.op_receipts where fn='agent_create_account_set' and op_key=$1", [overlapOp])).rows[0].n, 0);
     const overlap = await caught(() => withActor({ transaction: true }, async (db) => {
       await db.query(`set role ${ROLES.fnOwner}`); await db.query("set constraints clara.t_account_set_version_integrity deferred");
       const base = (await db.query("select * from clara.account_set_versions where id=$1", [setId])).rows[0], duplicate = randomUUID(), end = addMonths(start, 2);
@@ -265,7 +265,7 @@ export async function registerAccountSetAcceptancePhase(t) {
       assert.deepEqual((await rootQuery(`select count(distinct s.id)::int sets,count(v.id)::int versions
           from clara.account_sets s left join clara.account_set_versions v on v.account_set_id=s.id
          where s.client_id=$1 and s.set_key=$2`, [client, key])).rows[0], { sets: 0, versions: 0 }, `${tag} leaves no set`);
-      assert.equal((await rootQuery("select count(*)::int n from clara.op_receipts where fn='create_account_set_v1' and op_key=$1", [opKey])).rows[0].n,
+      assert.equal((await rootQuery("select count(*)::int n from clara.op_receipts where fn='agent_create_account_set' and op_key=$1", [opKey])).rows[0].n,
         0, `${tag} leaves no operation receipt`);
     }
     assert.equal((await rootQuery(`select count(*)::int n from clara.account_set_version_members m

@@ -1,0 +1,27 @@
+{
+  "axis": "recheck",
+  "lane": "wave2-lane07",
+  "branch": "riders/w2-lane07",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head_checked": "a74ef35a8d9d53557b4428984c2af95abf35ad60",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave2-lane07-fix.md",
+  "verdict": "accept",
+  "reruns_performed": [
+    "packages/db (clara_l07 @ 127.0.0.1:55747), full 51-flag $GATES chain measured live off packages/db/package.json: depreciation-authority-pending-rowkind.test.mjs + ninth-rowkind-seeding-proposal.test.mjs + work-question-reads.test.mjs + web-reads-and-doors.test.mjs + f-a7-pi.test.mjs + operation-census.test.mjs -> 84 tests, 84 pass, 0 fail (matches fix report claim)",
+    "packages/db, full gate chain: rig-isolation.test.mjs -> 23 tests, 22 pass, 0 fail, 1 skipped (T19 poison-role, CLARA_RIG_ALLOW_RESET never set) -- matches fix report baseline",
+    "packages/db, full gate chain: activity-feed.test.mjs (#998 AC3) -> 31 tests, 31 pass, 0 fail -- matches",
+    "apps/web unit, one run: tests/firm-scope-db-pins.test.ts, lib/firm/needs-you-links.test.ts, lib/firm/needs-you.test.ts, components/firm/needs-you-affordances.test.ts, components/firm/firm-home/firm-home-board.test.tsx, components/firm/firm-home/firm-legal-standing-tile.test.tsx, lib/firm/activity.test.ts, lib/firm/home-facts.test.ts -> 130 tests, 130 pass, 0 fail -- matches",
+    "pnpm typecheck (repo root) -> packages/runtime: Done; apps/web: exactly the two pre-existing document-kind-dialog.tsx errors (TS2552, TS7006) and nothing else -- matches, and confirmed byte-identical to the base commit (git show 23cfad947...:apps/web/components/documents/document-kind-dialog.tsx has the same undefined DOCUMENT_KINDS reference; git diff base...HEAD for that file is empty)",
+    "CI=true GITHUB_ACTIONS=true pnpm lint (the RIG.md-mandated runner-parity gate, not shown run this way in the fix report) -> freeze-lint selftest FAILS one case (L05-STD-02 fix round, --retire CI-refusal masking the missing-ruling refusal it means to test). Verified this is NOT lane 07's: git diff 23cfad947...HEAD touches neither scripts/check-frozen-workflows.mjs nor scripts/check-frozen-workflows.selftest.mjs (zero-byte diff, confirmed with git diff --stat and git diff directly). Pre-existing at the wave's integrated head, same class of CI-vs-rig discrepancy RIG.md already documents from wave 1 (PR #1025). Not a lane-07 finding.",
+    "node scripts/check-frozen-workflows.mjs (non-CI) -> OK, 312 frozen files verified, 55 workflow modules registered, 3 retired entries -- matches",
+    "Read each of the five fix commits' diffs directly (e05f35baf, ba2d3bb7b, 47ea0e94e, 9f2f8f4e5, a74ef35a8) against the finding each claims to close",
+    "Checked out the fix report's local, unpushed riders/w2-lane07-e2e-proof branch (lane head + cherry-pick of cd7da1116e, the wave-1 integration-gate fix for the pre-existing document-kind-dialog defect) inside THIS worktree, confirmed cd7da111's parent is exactly the base commit 23cfad947 (git merge-base --is-ancestor + direct parent check), ran the Playwright triple assigned to this lane: pnpm --filter @clara/web e2e home-board-walk -> 28 passed, including p1009.home.legal_prompt with the new accept-control assertions (SPEC-L07-05) -- matches the fix report's claim exactly. Checked back out to riders/w2-lane07 afterward; worktree left clean on the original branch/head, nothing committed by this recheck."
+  ],
+  "findings": [],
+  "notes_not_scored": [
+    "SPEC-L07-09 and SPEC-L07-10 asked for corrections inside reports/wave2-lane07-ticket974.md and reports/wave2-lane07-ticket998.md. The fix report explains those ticket reports live in the main checkout and are outside what a worktree fix round may write, so the corrections are stated in wave2-lane07-fix.md instead ('Notes the integrator should carry' #2 and #3) rather than edited into the ticket reports themselves. Both were 'note' severity in the original review and explicitly non-blocking ('None.'/'Correct the number...'); this is a documentation-location gap, not an open defect, and does not affect the verdict.",
+    "SPEC-L07-07 and SPEC-L07-08 were 'note' severity with 'None required'/'None mandatory' in the original review; the fix report correctly left them as recorded follow-ups rather than fixes. Unchanged, not scored."
+  ],
+  "summary": "All five findings the fix round addressed (SPEC-L07-01 major; SPEC-L07-02, SPEC-L07-03, SPEC-L07-04, SPEC-L07-05 minor; std-1 minor/standards) are fixed on the current head and independently reproduced: the exact test counts and pass results the fix report claims came back identical on a fresh run, including the one e2e walk (28/28, run against a locally reconstructed proof branch whose ancestry I verified rather than trusting the report's description of it). SPEC-L07-06's refutation (the pre-existing document-kind-dialog defect blocks the branch's own build, but is a wave-1 fix one commit ahead of this wave's base, not this lane's fault) also holds under independent verification: the file is byte-identical to the base commit, and the named fix commit's parent is exactly that base. The one new observation from this recheck -- a freeze-lint selftest case that fails under CI=true GITHUB_ACTIONS=true -- is confirmed pre-existing and untouched by lane 07's diff (zero-byte diff on both files involved), so it is not attributed to this lane. Nothing above minor remains open."
+}

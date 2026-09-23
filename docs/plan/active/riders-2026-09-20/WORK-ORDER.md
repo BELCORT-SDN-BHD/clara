@@ -96,3 +96,29 @@ These lines override the rules above where they differ.
   contract" in your report (name, zod input, door call with argument order, refusal mapping, part
   kind, prompt stanza). The ONE shared cut `chatTurn_v22` / `claraWork_v6` happens at the end of
   wave 4.
+
+## Addendum for wave 3 (2026-09-20): what waves 1 and 2 taught
+
+- **The runner is Linux and sets `CI=true`.** Before you report: `CI=true GITHUB_ACTIONS=true pnpm lint`.
+  A test that spawns a CLI which refuses ceremony acts under CI clears `CI` and `GITHUB_ACTIONS` for
+  the child. A test that reaches the spool sets `CLARA_SPOOL_DIR` to a per-run temporary directory.
+  No test may depend on a Windows path, on a directory left by an earlier run, or on rows left in
+  the database by another test file.
+- **Prestate pins.** A prestate pins the bodies you recut AND, by house practice, neighbour bodies you
+  rely on. List EVERY pinned signature with its sha in your ticket report: the integrator uses that
+  list to find a pin that another lane recuts. Pin what is LIVE on your lane database after the
+  ticket before you; never copy a sha from an older migration header.
+- **A marker-tolerant or bimodal pin hides its sha branch from a redo.** `CLARA_MIGRATION_REDO` only
+  ever takes the "my own body is already live" branch. Prove the FIRST-APPLY branch yourself: inside
+  one transaction you roll back, restore the pre-images your migration expects (re-run the creating
+  migrations own statements), run your prestate verbatim, and see it pass; say in the report that
+  you did. The integrator runs a true from-scratch chain after you.
+- **A data-dependent branch must be entered once.** If your prestate or tail has a branch that only
+  runs when rows exist (a backfill, a count, "the newest row must have N keys"), create such rows
+  through the estate's own doors on your lane database BEFORE you apply, and say which states you
+  covered. Hosted has rows your seeded rig does not.
+- **A door's behaviour is asserted only after it was driven.** Do not write "the person can restate"
+  or "the door admits it" in a report, a comment or a sentence on screen unless a cell drove that
+  door and saw it. Three review rounds in wave 2 were spent on exactly that.
+- **Git hygiene on this host:** all git from Git Bash on Windows; never git from WSL against this
+  repository; never `git worktree` subcommands, `git gc`, or any `--depth` fetch.

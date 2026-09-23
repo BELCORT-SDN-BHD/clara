@@ -1288,6 +1288,58 @@ const CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES = [
 // roster, and the other three read none at all.
 const LEGAL_ENFORCEMENT_0234_CLOCK_NAMES = ["set_legal_enforcement_mode"];
 
+// RIDER #912 [0243, the role at the instant of a governed act] — ONE name, and it is a TRIGGER
+// body: `clara._tf_audit_actor_role` stamps `clara.audit_log.actor_role` BEFORE INSERT, and its
+// first statement is `if new.at is null or new.at < now() then return new; end if;` — a bare
+// `now()`, no `::date`, no zone. Arm (D)'s reading is the ordinary one: the token is an INSTANT,
+// compared against the row's own `at` (itself a `now()` column DEFAULT) to tell an act happening
+// in this transaction apart from history being re-loaded by a restore. It derives no DATE, so it
+// adds nothing to arm (B), and it spells no zone.
+//
+// `now()` is the RIGHT clock here, not `clock_timestamp()` or `statement_timestamp()`: the
+// comparison's whole job is "is this row part of THIS transaction", and `at`'s own DEFAULT is the
+// transaction clock. A statement clock on one side and a transaction clock on the other would
+// make an ordinary multi-statement door's audit row look like history.
+//
+// 0243's OTHER change adds no name: `clara.list_firm_knowledge` is RECUT, but the one key it
+// gains reads `clara.audit_log`, not a clock, and the body's existing `now() at time zone
+// 'Asia/Kuala_Lumpur'` is 0220's own, already adjudicated on KNOWLEDGE_FIRM_0220_CLOCK_NAMES.
+// `clara._audit` is NOT recut at all (it is a frozen metric-input-producer member).
+const AUDIT_ACTOR_ROLE_0243_CLOCK_NAMES = ["_tf_audit_actor_role"];
+
+// RIDERS WAVE 2, arm (D) — FOUR MORE NAMES, one per migration, each adjudicated on the same
+// question this roster always asks: does the body derive a DATE from the session clock, or does
+// it merely STAMP an instant? All four stamp. They are listed here in migration order (0235,
+// 0244, 0254, 0259) even though 0243's cohort above is numerically between two of them: the
+// cohorts are stem-gated, never number-gated, so their source order is documentation.
+//
+// Each was measured on the integrated wave-2 chain (0001..0272, from-scratch, 2026-09-20).
+// Each would have reddened arm (D) on its OWN lane's database too: no lane runs
+// x42b2-s5c-clock.test.mjs, so four independent lanes shipped an un-rostered name and the
+// integration run is where all four surfaced at once.
+
+// #1014 [0235] — `clara._lock_document_binding` gains `claimed_at = now()` on the ON CONFLICT
+// arm of the binding claim. A TIMESTAMPTZ stamp on the claim row, compared against nothing and
+// truncated to no date; the body carried no clock token at all at 0197, where it was born.
+const OPENING_BINDING_CLAIM_0235_CLOCK_NAMES = ["_lock_document_binding"];
+
+// #846 [0244] — `clara._tf_document_capabilities_high_water_record` stamps `recorded_at = now()`
+// on the high-water mark it records. An INSTANT on an append-only watermark row; the monotonicity
+// it guards is compared between two stored `recorded_at` values, never against a derived date.
+const DOCUMENT_CAPABILITY_HIGH_WATER_0244_CLOCK_NAMES = ["_tf_document_capabilities_high_water_record"];
+
+// #965 [0254] — `clara.create_document_intake`'s new CLR18 refusal arm takes `v_at := now()` and
+// stamps the committed refusal record with it. An INSTANT on the refusal row. The ceiling the arm
+// reports on is computed by `clara._reserve_document_ingest`, which owns the MYT day boundary and
+// is rostered for it on arm (B) (KL_ROSTER_0252_DOCUMENT_INGEST_WINDOW below); this body derives
+// no boundary of its own.
+const INTAKE_REFUSAL_RECORD_0254_CLOCK_NAMES = ["create_document_intake"];
+
+// #935 [0259] — `clara.dismiss_firm_setup_tip` stamps `answered_at = now(), updated_at = now()`
+// on the plan item it dismisses. Two INSTANTS on a setup row; no date, no zone, nothing reaching
+// a ledger.
+const FIRM_SETUP_EDUCATION_TIPS_0259_CLOCK_NAMES = ["dismiss_firm_setup_tip"];
+
 // #624 [0191] and #643 [0194] add NO name, and that is MEASURED rather than assumed: the live
 // arm-(D) census over 0001..0194 returns nothing out of either file. 0191's three constraint
 // triggers derive their verdicts from stored terms and stamp `evaluated_at` through a column
@@ -1428,6 +1480,17 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("client_financial_pack$")) names.push(...CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES);
   // RIDER #1008 (0234) - stem-gated, never number-gated, for the reason :207-214 gives.
   if (await appliedStem("legal_enforcement_mode$")) names.push(...LEGAL_ENFORCEMENT_0234_CLOCK_NAMES);
+  // RIDER #912 (0243) - stem-gated, never number-gated, for the reason :207-214 gives.
+  if (await appliedStem("audit_actor_role$")) names.push(...AUDIT_ACTOR_ROLE_0243_CLOCK_NAMES);
+  // RIDERS WAVE 2 (0235, 0244, 0254, 0259) - stem-gated, never number-gated, same reason.
+  if (await appliedStem("opening_binding_claim$")) names.push(...OPENING_BINDING_CLAIM_0235_CLOCK_NAMES);
+  if (await appliedStem("document_capability_version_high_water$")) {
+    names.push(...DOCUMENT_CAPABILITY_HIGH_WATER_0244_CLOCK_NAMES);
+  }
+  if (await appliedStem("intake_refusal_record$")) names.push(...INTAKE_REFUSAL_RECORD_0254_CLOCK_NAMES);
+  if (await appliedStem("firm_setup_education_tips$")) {
+    names.push(...FIRM_SETUP_EDUCATION_TIPS_0259_CLOCK_NAMES);
+  }
   return names.sort();
 }
 
@@ -1654,6 +1717,38 @@ const KL_ROSTER_0232_CLIENT_FINANCIAL = [
 ];
 // WAVE 2026-09-18 END
 
+// ===========================================================================================
+// RIDERS WAVE 2 (0252) - stem-gated, never number-gated.
+//
+// #964 [0252] - CLASS 2. The daily document-ingest ceiling behind CLR18 moved from a UTC
+// calendar day to an Asia/Kuala_Lumpur one (D4's named residual from #636, closed by this
+// ticket): `clara._reserve_document_ingest`, `clara._resize_document_reservation` and
+// `clara._settle_document_reservation` each derive a real TIMESTAMPTZ value —
+// `date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur'`,
+// the instant of MYT midnight for "today" — and compare a reservation's `created_at` against it.
+// That is a genuine value derived from the zone, never a zone-as-label the way
+// `get_intake_batch`'s own mention is (KL_ROSTER_0229_INTAKE_BATCHES above, CLASS 1: it REPORTS
+// this window's reset moment in its `capacity` block but computes none of the three boundaries
+// itself). NOT a MONEY date and NOT re-pointed at `clara._book_today()`, for the same reason
+// 0214's window bounds are exempt (KL_ROSTER_0214_WORK_PACK above): this is a per-firm DAILY
+// CAPACITY ceiling's reset moment, never a posting date, a due date or a period bound, and
+// nothing it derives reaches a ledger row. The four move TOGETHER, byte-identically (0252's own
+// tail asserts this), so they are rostered together rather than split one-by-one.
+//
+// THE FOURTH NAME was added at integration (2026-09-20). `clara.settle_ingest_reservation` is
+// 0252's own "fourth shipped door on the same ceiling" — its tail says so in those words, and it
+// carries the byte-identical MYT window clause the other three carry (proved by
+// document-ingest-window-myt.test.mjs's `p964.window.mechanism_myt` cell for that door). The lane
+// rostered the three helpers and missed the door; the live arm (B) census caught it on the first
+// integrated from-scratch chain. Same CLASS 2 adjudication as its three siblings, for the same
+// reason: a per-firm DAILY CAPACITY reset moment, never a posting date, a due date or a period
+// bound.
+const KL_ROSTER_0252_DOCUMENT_INGEST_WINDOW = [
+  "_reserve_document_ingest", "_resize_document_reservation", "_settle_document_reservation",
+  "settle_ingest_reservation",
+];
+// RIDERS WAVE 2 END
+
 /** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
 export async function s5KlDuplicationRoster(query) {
   const applied = async (pat) => (await query(
@@ -1684,5 +1779,7 @@ export async function s5KlDuplicationRoster(query) {
   if (await appliedStem("knowledge_retrieval$")) names.push(...KL_ROSTER_0230_KNOWLEDGE_RETRIEVAL);
   if (await appliedStem("firm_portfolio_pack$")) names.push(...KL_ROSTER_0231_FIRM_PORTFOLIO);
   if (await appliedStem("client_financial_pack$")) names.push(...KL_ROSTER_0232_CLIENT_FINANCIAL);
+  // RIDERS WAVE 2 - stem-gated, never number-gated.
+  if (await appliedStem("document_ingest_window_myt$")) names.push(...KL_ROSTER_0252_DOCUMENT_INGEST_WINDOW);
   return names.sort().join(" ");
 }

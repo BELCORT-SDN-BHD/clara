@@ -24,6 +24,7 @@ import {
 import {
   readInvitePreview,
   INVITE_PREVIEW_ROLES,
+  isNonBlockingPreviewStatus,
   type InvitePreviewOutcome,
   type InvitePreviewRole,
   type InvitePreviewRow,
@@ -219,7 +220,9 @@ function BlockedInvitationFace({
   status,
 }: {
   firm: string;
-  status: Exclude<InvitePreviewRow["status"], "pending">;
+  // #872 — `issuer_lapsed` is also excluded: it is a NON-BLOCKING status (see
+  // `INVITE_PREVIEW_NON_BLOCKING_STATUSES`), so this face is never reached for it.
+  status: Exclude<InvitePreviewRow["status"], "pending" | "issuer_lapsed">;
 }) {
   const t = useTranslations("Invite.preview");
   return (
@@ -527,7 +530,11 @@ export function InviteAcceptForm({
     // read that never came back is not a verdict and must not become one here. This is the same
     // reading `confirmMembership` already applies to the membership post-condition, in the other
     // direction — absence is not evidence either way.
-    if (outcome.ok ? outcome.preview.status !== "pending" : outcome.kind === "refused") {
+    if (
+      outcome.ok
+        ? !isNonBlockingPreviewStatus(outcome.preview.status)
+        : outcome.kind === "refused"
+    ) {
       setStage("blocked");
       return;
     }
@@ -747,8 +754,16 @@ export function InviteAcceptForm({
   // them: there is nothing left to accept, so offering the fields would be offering a control
   // that can only refuse (E-7 / 裁-187's reading, one journey over).
   if (stage === "blocked") {
-    if (preview?.ok && preview.preview.status !== "pending") {
-      return <BlockedInvitationFace firm={preview.preview.firm_name} status={preview.preview.status} />;
+    if (
+      preview?.ok
+      && !isNonBlockingPreviewStatus(preview.preview.status)
+    ) {
+      return (
+        <BlockedInvitationFace
+          firm={preview.preview.firm_name}
+          status={preview.preview.status as Exclude<InvitePreviewRow["status"], "pending" | "issuer_lapsed">}
+        />
+      );
     }
     return <NoOracleFace />;
   }
@@ -833,7 +848,7 @@ export function InviteAcceptForm({
             authority: `clara.accept_invite` re-checks every one of these facts inside its own
             transaction, which is why an INDEFINITE read degrades to one honest line rather than
             blocking a journey the door is still perfectly able to complete. */}
-        {preview?.ok && preview.preview.status === "pending" ? (
+        {preview?.ok && isNonBlockingPreviewStatus(preview.preview.status) ? (
           <section
             aria-labelledby="invite-preview-heading"
             className="rounded-lg border border-border bg-muted/40 p-4"
@@ -855,6 +870,21 @@ export function InviteAcceptForm({
               <dd className="font-medium text-foreground">{preview.preview.masked_email}</dd>
             </dl>
             <p className="mt-3 max-w-prose text-xs text-muted-foreground">{tPreview("roleNote")}</p>
+            {/* #872 — a NOTICE, never a block: the owner ruling is explicit that acceptance stays
+                open in this state, so the ONLY difference from `pending` is this one line.
+                WHAT THAT LINE MAY AND MAY NOT SAY (fix round 2026-09-20, adversarial ADV-L10-02):
+                it must not promise that accepting is unaffected. `issuer_lapsed` is true when the
+                issuer's rank is below admin; `clara.accept_invite` refuses CLR04 when the invited
+                role outranks the issuer's CURRENT rank, and for a REMOVED issuer that is every
+                role there is (coalesce(NULL,-1) = -1 < role_rank('viewer') = 0). The two overlap,
+                and `clara.preview_invite` returns no issuer rank, so this surface cannot tell the
+                acceptable case from the refused one. It therefore claims nothing and says the
+                firm re-checks at the end — the same register `indefiniteNote` uses for the other
+                question this surface cannot decide. Pinned by
+                `p872.web.issuer_lapsed_removed` in invite-accept-form.test.tsx. */}
+            {preview.preview.status === "issuer_lapsed" ? (
+              <p className="mt-3 max-w-prose text-xs text-muted-foreground">{tPreview("issuerLapsedNote")}</p>
+            ) : null}
           </section>
         ) : preview && !preview.ok && preview.kind === "indefinite" ? (
           <p className="max-w-prose text-xs text-muted-foreground">{tPreview("indefiniteNote")}</p>

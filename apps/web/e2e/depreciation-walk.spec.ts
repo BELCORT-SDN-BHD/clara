@@ -33,6 +33,7 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const CLIENT = DEP.clientId;
 const LIST_URL = `/clients/${CLIENT}/registers?tab=fixedAssets`;
 const LOCKED_LIST_URL = `/clients/${DEP.lockedClientId}/registers?tab=fixedAssets`;
+const RETIRED_LIST_URL = `/clients/${DEP.retiredClientId}/registers?tab=fixedAssets`;
 const DETAIL_URL = `/clients/${CLIENT}/registers/assets/${DEP.assetId}`;
 
 async function settle(page: Page): Promise<void> {
@@ -123,6 +124,46 @@ test.describe("#651 · depreciation under an explicit policy", () => {
     expect(await page.getByRole("row").count(), "no run row was created by a refused run").toBe(before);
     // …and the runs panel for this client is still HONESTLY empty rather than showing a phantom.
     await expect(page.getByText("No depreciation runs yet.", { exact: false })).toBeVisible();
+  });
+
+  // #979 (0251) — THE THIRD AUTHORITY STATE, IN A BROWSER. Until 0251 the read answered `null`
+  // for a client whose only authority had been WITHDRAWN, so this surface rendered the same
+  // "none proposed" sentence a client that never had one shows, and there was no browser
+  // evidence for the ticket's AC4 at all. The claim needs a browser rather than the component
+  // test beside it because it is about what the real Next bundle does with the door's real
+  // payload — the fixture is transcribed from `clara.get_depreciation_authority`'s own body,
+  // including the fact that the retired arm carries NO `authority_ref`.
+  test("#979 a WITHDRAWN authority reads as a retirement, not as an absence: its reason, its retiring author and the window it once governed, with Propose offered in place of a second Retire", async ({ page }) => {
+    await signInTo(page, RETIRED_LIST_URL);
+
+    // NOT "none proposed" — the sentence a fresh client gets, and the one this client used to
+    // share with it. Asserted as an ABSENCE first, because every other assertion here would also
+    // pass on a surface that rendered BOTH.
+    await expect(page.getByTestId("fa-authority-retired-reason")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("No depreciation authority has been proposed for this client yet.")).toHaveCount(0);
+
+    // THE RETIREMENT'S OWN FACTS: the reason the admin gave at the door, and the retiring author
+    // as the same short-id chip the instruction reference uses.
+    await expect(page.getByTestId("fa-authority-retired-reason")).toContainText(DEP.retiredReason);
+    await expect(page.getByTestId("fa-authority-retired-by")).toContainText(DEP.retiredBy.slice(0, 8));
+
+    // THE WINDOW IT ONCE GOVERNED, in the past tense — the same testid a live authority's window
+    // uses, because it is the same fact about the same column, read at a different moment.
+    await expect(page.getByTestId("fa-authority-window")).toContainText(DEP.retiredAuthorityFrom);
+    await expect(page.getByTestId("fa-authority-window")).toContainText("Before it was retired");
+
+    // …and the instruction reference is ABSENT, because the door does not return one on this arm.
+    await expect(page.getByTestId("fa-authority-ref")).toHaveCount(0);
+
+    // THE ACTION ROW SWAPS. A second Retire on an already-retired authority is a CLR38
+    // authority_not_live refusal waiting to happen; the lane reopens with Propose instead.
+    // "Retire authority", in full: the account-PROFILES panel on this same page carries its own
+    // "Retire" trigger (FixedAssetsDepreciation.profiles.retireTrigger), so a substring matcher
+    // here would assert about the wrong control.
+    await expect(page.getByRole("button", { name: "Propose authority", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retire authority", exact: true })).toHaveCount(0);
+
+    await scan(page, "#979 the withdrawn-authority card");
   });
 
   test("the asset detail separates the revision timeline from the charge ledger, and ?tab= survives Back", async ({ page }) => {

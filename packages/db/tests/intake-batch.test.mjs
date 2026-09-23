@@ -62,6 +62,99 @@ async function gate(t) {
   return true;
 }
 
+// #964 — the document-ingest capacity window's move to Asia/Kuala_Lumpur lives in its OWN
+// migration (0252), a separate frontier from 0229's above: a slice-frontier CI leg can be pinned
+// AT 0229, before 0252 lands, and the cell below must skip cleanly there rather than red on a
+// `get_intake_batch` capacity block that has not yet moved off the UTC day. Mirrors work-list
+// .test.mjs's `INTENT_KEY_STEM` / `gateIntentKey` pattern for the identical reason.
+const MYT_WINDOW_STEM = "document_ingest_window_myt$";
+let _mytReady = null;
+async function mytWindowReady() {
+  if (_mytReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [MYT_WINDOW_STEM]);
+      _mytReady = r.rows[0].n > 0;
+    } catch {
+      _mytReady = false;
+    }
+  }
+  return _mytReady;
+}
+async function gateMytWindow(t) {
+  if (await mytWindowReady()) return false;
+  markSkip();
+  t.skip(`#964 document-ingest MYT window absent (no ${MYT_WINDOW_STEM} migration applied)`);
+  return true;
+}
+
+// #968 — the batch-cancellation RE-ISSUE lives in its OWN migration (0253), the same
+// separate-frontier reason MYT_WINDOW_STEM exists above: a slice-frontier CI leg can be pinned at
+// 0229 (or anywhere before 0253), before this exception exists, and the cells below must skip
+// cleanly there rather than red on a `cancel_intake_batch` that still refuses unconditionally.
+const REISSUE_STEM = "batch_cancel_reissue$";
+let _reissueReady = null;
+async function reissueReady() {
+  if (_reissueReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [REISSUE_STEM]);
+      _reissueReady = r.rows[0].n > 0;
+    } catch {
+      _reissueReady = false;
+    }
+  }
+  return _reissueReady;
+}
+async function gateReissue(t) {
+  if (await reissueReady()) return false;
+  markSkip();
+  t.skip(`#968 batch-cancellation re-issue absent (no ${REISSUE_STEM} migration applied)`);
+  return true;
+}
+
+// #965 — the AT-CREATION ceiling refusal's committed record lives in its OWN migration (0254),
+// the same separate-frontier reason MYT_WINDOW_STEM and REISSUE_STEM exist above: a slice-frontier
+// leg can be pinned anywhere below 0254, where `clara.create_document_intake` still RAISES CLR18
+// and rolls its own intake row back. The two cells below branch on this rather than skip, because
+// both must stay true in BOTH generations.
+const REFUSAL_STEM = "intake_refusal_record$";
+
+// #905 — clara.list_accounting_work's RECEIPT WINDOW (0267) is a third frontier of its own, and it
+// differs in kind from the two above: #880 (0266) recuts the nine-argument body, then #905 (0267)
+// DROPS that signature and creates an ELEVEN-argument one (two trailing timestamptz bounds, both
+// defaulting to null, so every call of up to nine arguments still resolves). A pin naming the
+// nine-argument signature therefore does not read a different sha below — it raises 42883,
+// "function ... does not exist". The census pins the signature AND the value in both generations.
+const WORK_LIST_WINDOW_STEM = "work_list_receipt_window$";
+let _workListReady = null;
+async function workListWindowReady() {
+  if (_workListReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [WORK_LIST_WINDOW_STEM]);
+      _workListReady = r.rows[0].n > 0;
+    } catch {
+      _workListReady = false;
+    }
+  }
+  return _workListReady;
+}
+let _refusalReady = null;
+async function refusalRecordReady() {
+  if (_refusalReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [REFUSAL_STEM]);
+      _refusalReady = r.rows[0].n > 0;
+    } catch {
+      _refusalReady = false;
+    }
+  }
+  return _refusalReady;
+}
+
 let world = null;
 before(async () => {
   // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud.
@@ -71,6 +164,20 @@ before(async () => {
       + "CLARA_ALLOW_MISSING_INTAKE_BATCHES is not set. Apply 0229_intake_batches.sql, or "
       + "preload tests/intake-batches-preintegration-gate.mjs if a lane-less database is "
       + "expected here.",
+    );
+  }
+  // …AND THE SAME RULE FOR #968's OWN FRONTIER (fix round, L05-SPEC-03 / ADV-W2L05-04). The
+  // per-cell `gateReissue` below is the slice-frontier SKIP, which is right for a sweep and wrong
+  // for acceptance: without this hook, a chain missing 0253 reported four green skips and nothing
+  // anywhere failed, so #968's whole evidence base could disappear silently at integration. The
+  // stem's own gate module (tests/batch-cancel-reissue-preintegration-gate.mjs) sets the escape,
+  // exactly as 0252's and 0254's do for theirs.
+  if (!(await reissueReady()) && process.env.CLARA_ALLOW_MISSING_BATCH_CANCEL_REISSUE !== "1") {
+    throw new Error(
+      `#968: no migration matching /${REISSUE_STEM}/ is applied to this database, and `
+      + "CLARA_ALLOW_MISSING_BATCH_CANCEL_REISSUE is not set. Apply "
+      + "0253_batch_cancel_reissue.sql, or preload "
+      + "tests/batch-cancel-reissue-preintegration-gate.mjs if a chain below it is expected here.",
     );
   }
   world = await buildWorkWorld();
@@ -223,21 +330,38 @@ test("p636.batch.capacity_refusal — the shipped ceilings are FLUSH and the ref
     { name: "p_token_hash", cast: "text" }, { name: "p_expires_at", cast: "timestamptz" },
     { name: "p_op_key", cast: "text" },
   ]);
-  let admitted = 0; let err = null;
+  // #965 recut: the 101st call no longer RAISES. Since 0254 the creation door commits the refused
+  // intake at failed/limit and RETURNS a refusal outcome, so this cell reads the refusal off the
+  // receipt in that generation and off the raised CLR18 below it. Both arms assert the SAME two
+  // facts this cell has always been about — exactly 100 are admitted, and the DOCS guard is what
+  // refuses the 101st — so the shipped ceilings stay pinned in both worlds.
+  const refusalLive = await refusalRecordReady();
+  let admitted = 0; let err = null; let refusal = null;
   for (let i = 1; i <= 120; i++) {
     try {
-      await roleQuery(ROLES.runtime, create, [
+      const out = (await roleQuery(ROLES.runtime, create, [
         owner, "documents_tab", null, `cap${i}.pdf`, "application/pdf", 1048576,
         sha(`p636cap-${firm}-${i}`), new Date(Date.now() + 900_000).toISOString(),
-        opk(`p636cap${i}`)]);
+        opk(`p636cap${i}`)])).rows[0].result;
+      if (out?.refused === true) { refusal = out; break; }
       admitted += 1;
     } catch (e) { err = e; break; }
   }
   assert.equal(admitted, 100, "exactly 100 <=1MB PDFs are admitted on the shipped defaults");
-  assert.equal(err?.code, CLR18, "the 101st is refused CLR18");
-  assert.match(err.message, /docs/, "the refusal names the DOCS guard, not the pages guard");
-  assert.equal(err.detail ?? null, null,
-    "the 0007 capacity refusals carry NO detail.reason — the surface renders the message itself");
+  if (refusalLive) {
+    assert.equal(err, null, "#965: a ceiling refusal no longer leaves this door as an exception");
+    assert.ok(refusal, "the 101st comes back as a RETURNED refusal outcome");
+    assert.equal(refusal.failure_code, "limit", "…at the lane's existing limit failure reason");
+    assert.equal(refusal.ceiling, "documents",
+      "the refusal names the DOCS guard, not the pages guard");
+    assert.match(String(refusal.reason), /docs/,
+      "…and carries the database's own sentence, which is what the surface renders");
+  } else {
+    assert.equal(err?.code, CLR18, "the 101st is refused CLR18");
+    assert.match(err.message, /docs/, "the refusal names the DOCS guard, not the pages guard");
+    assert.equal(err.detail ?? null, null,
+      "the 0007 capacity refusals carry NO detail.reason — the surface renders the message itself");
+  }
   const used = await rootQuery(
     `select count(*)::int docs, coalesce(sum(pages_reserved),0)::int pages
        from clara.document_ingest_reservations
@@ -267,32 +391,92 @@ test("p636.batch.ladder_by_kind — the same member count binds on DIFFERENT cei
   assert.equal(cap(200), 5, ">10MB PDF members: the PAGES ceiling binds at 5");
 });
 
-test("p636.batch.capacity_window_utc — the daily window is a UTC day, i.e. 08:00 Asia/Kuala_Lumpur", async (t) => {
+// #964 recut: this cell was `p636.batch.capacity_window_utc`, pinning a UTC-day window and
+// asserting nothing about what the window SHOULD be ("moving it to MYT is #635's call"). #964 is
+// that call. The cell is renamed so it no longer asserts UTC is correct, and its assertions now
+// pin the Asia/Kuala_Lumpur boundary #964 shipped — the SAME raw-predicate technique (pure SQL
+// timezone arithmetic over crafted instants, since `document_ingest_reservations.created_at` is
+// IMMUTABLE and nothing in this estate can move `now()` for a session), pointed at the new zone.
+// Unlike its predecessor this is NOT gated on 0252: the expression is true independent of which
+// body is live, which is exactly what makes a future move visible in a diff rather than silent
+// (0229's own words about this cell, restated). The MECHANISM proof — that the three production
+// bodies actually COMPUTE this expression — lives in document-ingest-window-myt.test.mjs, gated
+// on 0252's stem, never duplicated here.
+// #964 CI RED (wave-2 integration PR #1029, second run, 2026-09-20T16:12Z = 00:12 MYT): this cell
+// used to derive `ws` AND its OLD-rule control from `now()` directly. Between MYT midnight and
+// 08:00 MYT that is TWO different now()-derived quantities that silently disagree about which
+// calendar date is "today" — `ws` truncates now() in the MYT zone (today's MYT date), while the
+// control truncated now() in the UTC zone (still YESTERDAY's date at that hour, since 00:00-08:00
+// MYT is 16:00-24:00 UTC of the day before). The 06:00-MYT-today probe then landed on-or-after
+// YESTERDAY's UTC-truncated boundary, so `counted_old_utc_today` came back true when the cell
+// expected false — a bug in the CONTROL, not in the door (0252's shipped window is unaffected;
+// see the door check in this ticket's report). Fixed by making every instant in this cell a
+// function of one FIXED reference instant, never of now(), for all three arms (the straddle pair,
+// the same-day pair, the 06:00 arm). The OLD-rule boundary is derived as `ws + 8 hours` — "08:00
+// MYT of the reference date" — pure arithmetic off `ws`, never a second, independently-truncated
+// instant, so the cell is correct for a reference at ANY hour of the day, not merely a
+// conveniently-chosen one. The control's precise claim: under the OLD rule (a UTC calendar day,
+// i.e. an MYT window that runs 08:00-to-08:00) a reservation at 06:00 MYT belongs to the PREVIOUS
+// window; under the NEW rule (MYT midnight to MYT midnight) it belongs to TODAY's — both evaluated
+// for the fixed reference instant below, proved stable at 00:12, 07:59, 08:01 and 23:59 MYT in
+// this ticket's report.
+test("p964.window.capacity_window_myt — the daily window is an Asia/Kuala_Lumpur calendar day, reset at MYT midnight", async (t) => {
   if (await gate(t)) return;
-  // `clara.document_ingest_reservations.created_at` is IMMUTABLE (_tf_reservation_update raises
-  // CLR08), so the window is pinned by evaluating the reservation body's OWN predicate over
-  // crafted instants rather than by back-dating a row. The predicate IS the mechanism.
+  const REF = "2026-06-15T12:00:00+08:00"; // any ordinary MYT calendar date; Malaysia has no DST.
   const w = (await rootQuery(
-    `select (date_trunc('day', now() at time zone 'utc') at time zone 'utc') as ws,
-            ((date_trunc('day', now() at time zone 'utc') at time zone 'utc')
-               at time zone 'Asia/Kuala_Lumpur')::time::text as local_time`)).rows[0];
-  assert.equal(w.local_time, "08:00:00",
-    "the UTC-day boundary lands at 08:00 Malaysian local time — the card says 08:00, never 'midnight'");
-  const ws = w.ws.getTime(); const myt = ws + 16 * 3600 * 1000;
-  const r = await rootQuery(
-    `select (v.ts >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc')) as counted_today,
-            (date_trunc('day', v.ts at time zone 'utc') at time zone 'utc') as utc_window
+    `select (date_trunc('day', $1::timestamptz at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur') as ws,
+            ((date_trunc('day', $1::timestamptz at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur')
+               at time zone 'Asia/Kuala_Lumpur')::time::text as local_time`,
+    [REF])).rows[0];
+  assert.equal(w.local_time, "00:00:00",
+    "the MYT-day boundary lands at MYT MIDNIGHT — the card says 'resets at midnight', never 08:00");
+  const ws = w.ws.getTime();
+  const wsIso = new Date(ws).toISOString();
+
+  // AC3 + the boundary itself: a pair straddling MYT MIDNIGHT falls in DIFFERENT windows.
+  const straddleMidnight = await rootQuery(
+    `select (v.ts >= $2::timestamptz) as counted_today,
+            (date_trunc('day', v.ts at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur') as myt_window
        from unnest($1::timestamptz[]) as v(ts)`,
-    [[ws - 1000, ws + 1000, myt - 1000, myt + 1000].map((t2) => new Date(t2).toISOString())]);
-  const [beforeUtc, afterUtc, beforeMyt, afterMyt] = r.rows;
-  assert.notEqual(beforeUtc.utc_window.getTime(), afterUtc.utc_window.getTime(),
-    "two reservations straddling 00:00 UTC fall in DIFFERENT daily windows");
-  assert.equal(beforeUtc.counted_today, false);
-  assert.equal(afterUtc.counted_today, true);
-  assert.equal(beforeMyt.utc_window.getTime(), afterMyt.utc_window.getTime(),
-    "two reservations straddling 00:00 MYT fall in the SAME daily window — today's behaviour, pinned");
-  // It asserts nothing about what the window SHOULD be: moving it to MYT is #635's call, and this
-  // cell is what makes that move visible instead of silent.
+    [[ws - 1000, ws + 1000].map((t2) => new Date(t2).toISOString()), wsIso]);
+  const [beforeMidnight, afterMidnight] = straddleMidnight.rows;
+  assert.notEqual(beforeMidnight.myt_window.getTime(), afterMidnight.myt_window.getTime(),
+    "two reservations straddling MYT MIDNIGHT fall in DIFFERENT daily windows");
+  assert.equal(beforeMidnight.counted_today, false);
+  assert.equal(afterMidnight.counted_today, true);
+
+  // AC2: 09:00 MYT and 23:00 MYT of the SAME MYT date count toward ONE quota.
+  const sameDay = await rootQuery(
+    `select (date_trunc('day', v.ts at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur') as myt_window
+       from unnest($1::timestamptz[]) as v(ts)`,
+    [[ws + 9 * 3600 * 1000, ws + 23 * 3600 * 1000].map((t2) => new Date(t2).toISOString())]);
+  assert.equal(sameDay.rows[0].myt_window.getTime(), sameDay.rows[1].myt_window.getTime(),
+    "09:00 MYT and 23:00 MYT of the same MYT date must count toward ONE quota");
+
+  // AC1: a reservation at 06:00 MYT counts against TODAY's MYT window — under the OLD 08:00-reset
+  // window it would still have belonged to YESTERDAY's window (06:00 MYT is before 08:00 MYT).
+  const sixAmMyt = await rootQuery(
+    `select ($1::timestamptz >= $2::timestamptz) as counted_myt_today,
+            ($1::timestamptz >= ($2::timestamptz + interval '8 hours')) as counted_old_utc_today`,
+    [new Date(ws + 6 * 3600 * 1000).toISOString(), wsIso]);
+  assert.equal(sixAmMyt.rows[0].counted_myt_today, true,
+    "06:00 MYT must count against TODAY's MYT window");
+  assert.equal(sixAmMyt.rows[0].counted_old_utc_today, false,
+    "06:00 MYT falls before the OLD 08:00-MYT UTC-day reset — the exact gap #964 closes");
+});
+
+// #964's other named acceptance criterion for this file: "the batch-board capacity descriptor
+// reports the MYT-midnight window, and the batch card shows it without a second hardcoded
+// string." Gated on 0252's OWN stem (never 0229's): a leg pinned at 0229 must skip cleanly here,
+// not red on a capacity block that has not yet moved off the UTC day.
+test("p964.window.capacity_descriptor_myt — get_intake_batch reports capacity as myt_day / 00:00, never utc_day / 08:00", async (t) => {
+  if (await gate(t)) return;
+  if (await gateMytWindow(t)) return;
+  const batch = await openBatch(ALICE());
+  const read = await getBatch(BOB(), batch.batch_id);
+  assert.deepEqual(read.capacity,
+    { window: "myt_day", resets_at_local: "00:00", timezone: "Asia/Kuala_Lumpur" },
+    "the capacity descriptor must report the MYT-midnight window, not the retired UTC-day one");
 });
 
 test("p636.batch.derived_key_author — a resumed fan-out MUST re-issue with the STORED actor", async (t) => {
@@ -314,25 +498,54 @@ test("p636.batch.derived_key_author — a resumed fan-out MUST re-issue with the
 
 test("p636.census.no_recut — the twelve pinned bodies are byte-identical after 0229", async (t) => {
   if (await gate(t)) return;
+  // #964 (migration 0252) deliberately recuts THREE of these twelve — the exact reservation
+  // helpers 0229's OWN header named as pinned-but-not-recut ("the three reservation bodies are
+  // untouched and pinned below"), moving them from a UTC day to an Asia/Kuala_Lumpur one. That
+  // claim was always scoped to 0229 itself ("byte-identical AFTER 0229", never "forever"), and
+  // 0229's header said so explicitly: "Moving the window to MYT is #635's ticket, not this one's."
+  // This cell now pins BOTH generations for those three names, selected by whether 0252 is live,
+  // so it stays a true regression watch in both the pre- and post-#964 world rather than a false
+  // red on a later ticket's IN-SCOPE, fully-verified recut (document-ingest-window-myt.test.mjs
+  // carries that recut's own prestate/reverse-substitution proof).
+  // #965 (migration 0254) deliberately recuts a FOURTH of these twelve, for the same reason and
+  // under the same discipline: `clara.create_document_intake`'s one reservation call gains a
+  // CLR18 arm that commits the refused intake instead of letting the raise roll it back. Pinned
+  // in BOTH generations, selected by whether 0254 is live; the recut's own prestate and
+  // reverse-substitution proof live in migration 0254 and in intake-refusal-record.test.mjs.
+  const mytLive = await mytWindowReady();
+  const refusalLive = await refusalRecordReady();
+  const workListLive = await workListWindowReady();
   const pins = [
     ["clara._tf_accounting_work_immutable()", "a1c4e0fc07dfe535433ee3061c54192ffeba640eae1375d8a2f529b3d1ff518e"],
     ["clara._assert_journal_source_refs(uuid,uuid,jsonb,boolean)", "f028c8ea70f7bcfde3cdd8ebaae045964ca763746010011a50d4c489bff232d2"],
     ["clara._admit_accounting_work_core(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)", "10b89677d342a424d5959ded8ad2c8c974c4ff9bdc26f5c0dd6c773a15af2612"],
     ["clara.cancel_accounting_work(uuid,uuid,text)", "27c7295b656c779aa80878e30e5113b3512ae773ce64ab64450f44c98eed871b"],
     ["clara._work_door_ctx(uuid,uuid,text,text,text,text)", "bd7bc3934fa919b2167b49f84b40f5205bcfcfc5207aaa31b94ce1c186ac2c7c"],
-    ["clara.create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamptz,text)", "09784b31f65ee230d2cf2e25426d43e6d529f1a5476468d96c4ef486a5c92e9d"],
+    ["clara.create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamptz,text)",
+      refusalLive ? "813b886a2015f32788ca509d7f89d8e9b5a5077d415ebaa95f8f8b0ec5291b8b"
+                  : "09784b31f65ee230d2cf2e25426d43e6d529f1a5476468d96c4ef486a5c92e9d"],
     ["clara.finalize_document_intake(uuid,text,text,jsonb,integer,text,uuid,uuid,text)", "8f9e0b1944c8910bcdef049d250ca834b74a4aa33084b38d97acc868b4a697d7"],
-    ["clara._reserve_document_ingest(uuid,uuid,integer,timestamptz)", "074c9b180729e3f2d8af8d9fecb38be158db9e2a74e4292b11ff7533a1ed9734"],
-    ["clara._resize_document_reservation(uuid,uuid,integer)", "41528b318065207775e48c4ac3f196f07d6cdf0511d108affc72b86c07114dbf"],
-    ["clara._settle_document_reservation(uuid,uuid,integer)", "b72d83e70645d7bbce44a491002981576059e9d0db41a95ee07e6b87930ddee6"],
+    ["clara._reserve_document_ingest(uuid,uuid,integer,timestamptz)",
+      mytLive ? "32a42ca3de5c3f4de81971530430ceffe4f763eb9ed2b7e215941c8a94e70400"
+              : "074c9b180729e3f2d8af8d9fecb38be158db9e2a74e4292b11ff7533a1ed9734"],
+    ["clara._resize_document_reservation(uuid,uuid,integer)",
+      mytLive ? "865f01a0c1094caf82efe9b9fec8b3bc4d611d1266be26058a42e9d8b60cc622"
+              : "41528b318065207775e48c4ac3f196f07d6cdf0511d108affc72b86c07114dbf"],
+    ["clara._settle_document_reservation(uuid,uuid,integer)",
+      mytLive ? "c96f43c0d5e4acec8871012044f3c4763f7af13b139b91ba7f3cede26f4b7d00"
+              : "b72d83e70645d7bbce44a491002981576059e9d0db41a95ee07e6b87930ddee6"],
     ["clara._declared_page_ceiling(bigint,text)", "82bc5e67afd4ea074665a320f357092fb0e93af9221f10b489a50cec3e4b4ca6"],
-    ["clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,integer)", "61bd9184fe271e081af426647c4081155c6d086368411478d1f2be88a1f4ca5a"],
+    [workListLive
+      ? "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,integer,timestamptz,timestamptz)"
+      : "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,integer)",
+      workListLive ? "dffa917db2180f5a13be48795ea823ef5cece813677d8d6ad6c61cf01726a828"
+                   : "61bd9184fe271e081af426647c4081155c6d086368411478d1f2be88a1f4ca5a"],
   ];
   for (const [sig, expected] of pins) {
     const r = await rootQuery(
       "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid = $1::regprocedure",
       [sig]);
-    assert.equal(r.rows[0].sha, expected, `${sig} MOVED — 0229 recuts nothing`);
+    assert.equal(r.rows[0].sha, expected, `${sig} MOVED unexpectedly — 0229 recuts nothing, and only #964's named MYT-window change, #965's refusal record and #880/#905's work-list recut are tolerated`);
   }
 });
 
@@ -508,9 +721,15 @@ test("p636.batch.no_percentage — the envelope carries no denominator at any de
   assert.equal(pack.cancel_blocked, null, "an open batch has nothing to name");
   assert.deepEqual(Object.keys(pack.facets).sort(),
     ["admitted", "failed", "settled", "unassigned", "waiting"]);
+  // #964 (0252) moved the SHIPPED window from a UTC day to an Asia/Kuala_Lumpur one; this
+  // assertion is a collateral shape-check inside a "no denominator" battery, not the window's own
+  // pin (that is `p964.window.capacity_window_myt` above), so it tracks whichever generation is
+  // actually live rather than gating the whole cell on 0252.
   assert.deepEqual(pack.capacity,
-    { window: "utc_day", resets_at_local: "08:00", timezone: "Asia/Kuala_Lumpur" },
-    "the capacity block reports the SHIPPED window so the surface can say 08:00, never 'midnight'");
+    (await mytWindowReady())
+      ? { window: "myt_day", resets_at_local: "00:00", timezone: "Asia/Kuala_Lumpur" }
+      : { window: "utc_day", resets_at_local: "08:00", timezone: "Asia/Kuala_Lumpur" },
+    "the capacity block reports the SHIPPED window so the surface can say a real reset time, never 'midnight' as a made-up default");
   const src = await rootQuery(
     "select prosrc from pg_proc where oid = 'clara.get_intake_batch(uuid,integer)'::regprocedure");
   assert.equal(src.rows[0].prosrc.includes("'total'"), false,
@@ -1054,6 +1273,194 @@ test("p636.batch.cancel_blocked_after_revocation — a stuck fan-out is NAMED, n
       "…and the board NAMES why, instead of showing 'stopping' forever with no explanation");
     assert.ok((await sweep(50)).batches.some((x) => x.batch_id === batch.batch_id),
       "the worklist still carries it — the blockage is reported, not hidden by dropping the parent");
+  } finally {
+    await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
+      [BOB(), FIRM_A()]);
+  }
+});
+
+// ===========================================================================================
+// #968 — THE RE-ISSUE. `p636.batch.cancel_blocked_after_revocation` above proves the block is
+// NAMED; these cells prove the remedy: a different, currently active bookkeeper may take over
+// the SAME stop, as a genuinely new decision, once the stored canceller no longer holds an
+// active bookkeeper+ membership — the owner's 2026-09-20 ruling on #968, Option B.
+// ===========================================================================================
+
+test("p968.reissue.blocked_canceller_may_be_replaced — a different active bookkeeper re-issues the stop as a genuinely new decision", async (t) => {
+  if (await gate(t)) return;
+  if (await gateReissue(t)) return;
+  const batch = await openBatch(BOB(), { label: "p968 reissue" });
+  const m = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p968 reissue" });
+  await claimWorkRun({ task: m.task_id, runId: opk("p968-reissue-run") });
+  const originalKey = opk("p968-original-cancel");
+  const original = await cancelBatch(BOB(), batch.batch_id, originalKey);
+  assert.equal(original.state, "cancelling");
+  assert.equal(original.cancel_requested_by, BOB());
+
+  await rootQuery("update clara.firm_memberships set status='removed' where user_id=$1 and firm_id=$2",
+    [BOB(), FIRM_A()]);
+  try {
+    const blocked = await getBatch(ALICE(), batch.batch_id);
+    assert.equal(blocked.cancel_blocked, "canceller_not_active",
+      "the board names the block before the re-issue");
+
+    const newKey = opk("p968-reissue-cancel");
+    const reissued = await cancelBatch(ALICE(), batch.batch_id, newKey);
+    assert.equal(reissued.state, "cancelling", "the one live child has not been fanned out to yet");
+    assert.equal(reissued.cancel_requested_by, ALICE(), "the NEW decision names the NEW actor");
+    assert.equal(reissued.cancel_op_key, newKey, "…under its OWN fresh key");
+    assert.notEqual(reissued.cancel_op_key, originalKey, "never the original key");
+    assert.deepEqual(reissued.children.map((c) => c.work_id), [m.work_id],
+      "the still-live child is handed to the NEW decision");
+
+    const row = await batchRow(batch.batch_id);
+    assert.equal(row.cancel_requested_by, ALICE(), "the row itself now names the new decision");
+    assert.equal(row.cancel_op_key, newKey);
+
+    const cleared = await getBatch(ALICE(), batch.batch_id);
+    assert.equal(cleared.cancel_blocked, null,
+      "the block clears once the new decision is accepted — with NO change to get_intake_batch's own body");
+
+    // THE ORIGINAL DECISION STAYS READABLE — an append-only audit trail, never overwritten.
+    const trail = await rootQuery(
+      `select actor, args->>'op_key' as op_key from clara.audit_log
+        where fn='cancel_intake_batch' and (args->>'batch')::uuid = $1 order by at`, [batch.batch_id]);
+    assert.equal(trail.rows.length, 2, "two decisions, both recorded — the original is never deleted or rewritten");
+    assert.equal(trail.rows[0].actor, BOB());
+    assert.equal(trail.rows[0].op_key, originalKey);
+    assert.equal(trail.rows[1].actor, ALICE());
+    assert.equal(trail.rows[1].op_key, newKey);
+
+    // The fan-out then re-issues under the STORED (new) actor and key, exactly as the sweep would.
+    const out = await cancelWork(m.work_id, reissued.cancel_requested_by,
+      `${reissued.cancel_op_key}:${m.work_id}`);
+    assert.ok(["cancel_requested", "stopping", "cancelled"].includes(out.status),
+      "the fan-out succeeds under the new decision's own actor and key");
+  } finally {
+    await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
+      [BOB(), FIRM_A()]);
+  }
+});
+
+// FIX ROUND (ADV-W2L05-01 / L05-SPEC-08). `clara.get_intake_batch` is INVOKER and reads
+// `clara.firm_memberships` under RLS, so its `canceller_not_active` predicate is silently
+// FIRM-SCOPED; `clara.cancel_intake_batch` is SECURITY DEFINER and sees every firm's rows. A
+// byte-identical predicate therefore MEANS two different things in the two bodies. The canonical
+// case the ticket names — the bookkeeper LEAVES this firm — is also the only one
+// `uq_membership_active_user` permits to carry an active membership anywhere else, so it is
+// exactly the case where the board reported the block and the door refused the remedy for ever.
+test("p968.reissue.blocked_canceller_active_at_another_firm_is_still_replaced — the door's membership test is scoped to THIS firm, exactly as the read's is", async (t) => {
+  if (await gate(t)) return;
+  if (await gateReissue(t)) return;
+  const batch = await openBatch(BOB(), { label: "p968 reissue elsewhere" });
+  const m = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p968 elsewhere" });
+  await claimWorkRun({ task: m.task_id, runId: opk("p968-elsewhere-run") });
+  const originalKey = opk("p968-elsewhere-original");
+  const original = await cancelBatch(BOB(), batch.batch_id, originalKey);
+  assert.equal(original.state, "cancelling");
+
+  // BOB leaves firm A and joins firm B as an active bookkeeper — one active membership
+  // estate-wide, which is all `uq_membership_active_user` allows.
+  await rootQuery("update clara.firm_memberships set status='removed' where user_id=$1 and firm_id=$2",
+    [BOB(), FIRM_A()]);
+  await rootQuery(
+    "insert into clara.firm_memberships(firm_id,user_id,role,status) values ($1,$2,'bookkeeper','active')",
+    [world.firms.B, BOB()]);
+  try {
+    const blocked = await getBatch(ALICE(), batch.batch_id);
+    assert.equal(blocked.cancel_blocked, "canceller_not_active",
+      "the board still names the block — BOB holds no active membership of THIS firm");
+
+    const newKey = opk("p968-elsewhere-reissue");
+    const reissued = await cancelBatch(ALICE(), batch.batch_id, newKey);
+    assert.equal(reissued.cancel_requested_by, ALICE(),
+      "…and the door admits the remedy the board's own block promises, instead of refusing for ever");
+    assert.equal(reissued.cancel_op_key, newKey);
+    assert.equal((await getBatch(ALICE(), batch.batch_id)).cancel_blocked, null,
+      "the block clears, so the two surfaces agree about the same batch");
+
+    // LEAVE THE WORLD SETTLED. `p636.batch.sweep_settles` reads the sweep's 20-row worklist,
+    // ordered by cancel_requested_at, and this file's world is SHARED and long-lived: a cell that
+    // walks away from a permanently-`cancelling` parent taxes that worklist on every future run.
+    // This one finishes what it started, through the same doors the belt would use.
+    for (const child of reissued.children) {
+      await cancelWork(child.work_id, reissued.cancel_requested_by,
+        `${reissued.cancel_op_key}:${child.work_id}`);
+    }
+    await settleWorkRun({ task: m.task_id, outcome: "cancelled" });
+  } finally {
+    await rootQuery("delete from clara.firm_memberships where user_id=$1 and firm_id=$2",
+      [BOB(), world.firms.B]);
+    await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
+      [BOB(), FIRM_A()]);
+  }
+});
+
+test("p968.reissue.active_canceller_still_refuses — the second-decision refusal is unchanged while the canceller is active", async (t) => {
+  if (await gate(t)) return;
+  if (await gateReissue(t)) return;
+  const batch = await openBatch(ALICE(), { label: "p968 still active" });
+  const m = await workMember(batch.batch_id, world.clients.A1, { memo: "p968 still active" });
+  await claimWorkRun({ task: m.task_id, runId: opk("p968-active-run") });
+  const key = opk("p968-active-cancel");
+  const decision = await cancelBatch(ALICE(), batch.batch_id, key);
+  assert.equal(decision.state, "cancelling");
+
+  const err = await assertRaises(CLR13,
+    () => cancelBatch(BOB(), batch.batch_id, opk("p968-active-second")),
+    "a second decision while the stored canceller is STILL active");
+  assert.equal(detailOf(err).reason, "batch_already_cancelling");
+  assert.equal(detailOf(err).cancel_op_key, key, "the refusal still names the LIVE (unchanged) decision");
+  assert.equal((await batchRow(batch.batch_id)).cancel_requested_by, ALICE(),
+    "the stored decision is untouched — no re-issue was admitted");
+});
+
+test("p968.reissue.excludes_already_committed_child — the re-issue never re-keys or re-cancels a posted sibling", async (t) => {
+  if (await gate(t)) return;
+  if (await gateReissue(t)) return;
+  const batch = await openBatch(BOB(), { label: "p968 committed sibling" });
+  const committed = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p968 committed" });
+  const receiptId = await postWork({ client: world.clients.A1, work: committed.work_id, task: committed.task_id });
+  const live = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p968 live" });
+  await claimWorkRun({ task: live.task_id, runId: opk("p968-committed-run") });
+
+  const originalKey = opk("p968-committed-cancel");
+  const original = await cancelBatch(BOB(), batch.batch_id, originalKey);
+  assert.ok(!original.children.map((c) => c.work_id).includes(committed.work_id),
+    "the committed sibling was never in the original decision's own live list either");
+
+  await rootQuery("update clara.firm_memberships set status='removed' where user_id=$1 and firm_id=$2",
+    [BOB(), FIRM_A()]);
+  try {
+    const reissued = await cancelBatch(ALICE(), batch.batch_id, opk("p968-committed-reissue"));
+    assert.deepEqual(reissued.children.map((c) => c.work_id), [live.work_id],
+      "the committed sibling is NEVER handed to the new decision");
+    const receipts = (await receiptsForWork(committed.work_id)).filter((r) => r.outcome === "committed");
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].id, receiptId, "its receipt is untouched, byte for byte, by the re-issue");
+  } finally {
+    await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
+      [BOB(), FIRM_A()]);
+  }
+});
+
+test("p968.reissue.terminal_batch_never_reissued — a cancelled batch stays refused even if its canceller is inactive", async (t) => {
+  if (await gate(t)) return;
+  if (await gateReissue(t)) return;
+  const batch = await openBatch(BOB(), { label: "p968 terminal" });
+  const m = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p968 terminal" });
+  await postWork({ client: world.clients.A1, work: m.work_id, task: m.task_id });
+  const key = opk("p968-terminal-cancel");
+  const decision = await cancelBatch(BOB(), batch.batch_id, key);
+  assert.equal(decision.state, "cancelled", "no live child — terminal in the same call");
+
+  await rootQuery("update clara.firm_memberships set status='removed' where user_id=$1 and firm_id=$2",
+    [BOB(), FIRM_A()]);
+  try {
+    const err = await assertRaises(CLR13,
+      () => cancelBatch(ALICE(), batch.batch_id, opk("p968-terminal-reissue")),
+      "a cancelled (terminal) batch has nothing left to decide, even with an inactive canceller");
+    assert.equal(detailOf(err).reason, "batch_already_cancelling");
   } finally {
     await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
       [BOB(), FIRM_A()]);

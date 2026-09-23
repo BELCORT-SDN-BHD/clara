@@ -28,26 +28,57 @@
 //     `id` column at json-build time — this row's `id` IS the client_id, not one proposal's
 //     id — so they ride their own dedicated columns instead, always present, null on every
 //     OTHER row_kind (the finding_id posture, no `case when row_kind=` gate needed).
-// The LIVE row_kind set is therefore NINE values, not the four the 0011 body
+//   - 0180_work_questions.sql (#629) — adds row_kind='work_question', the TENTH kind, section
+//     `needs_you`/lane `needs_you`. Reuses the existing 30-key shape unchanged (`id`/
+//     `question_id` carry the question, `task_id` the parked run); the counts envelope gains
+//     ONE integer, `work_questions`.
+//   - 0260_depreciation_authority_pending_rowkind.sql (#974, riders wave 2 lane 07, owner
+//     ruling 2026-09-20) — adds row_kind='depreciation_authority_pending', the ELEVENTH kind,
+//     section `needs_you`/lane `needs_you`: a client's proposed, unsigned depreciation
+//     authority (clara.fa_depreciation_authorities.status='proposed') blocks that client's
+//     whole depreciation lane. `authority_id` mirrors the shared `id` column at json-build
+//     time — the asset_id/advance_id idiom, not seeding_proposal's dedicated-column shape —
+//     because a client carries AT MOST ONE proposed authority
+//     (uq_fa_authorities_proposed), so no aggregation is needed. No new counts.* key.
+// The LIVE row_kind set is therefore ELEVEN values, not the four the 0011 body
 // alone would suggest: draft, uncoded_filing, open_question, coding_task,
 // compliance_watch, lint_finding, fixed_asset_incomplete, staff_advance_incomplete,
-// seeding_proposal — see REVIEW_QUEUE_ROW_KINDS below, the single source components/firm/
-// needs-you-row.tsx's label lookup is built from (never a hand-cast key path).
-// `counts` still carries EIGHT integers (seeding_proposal adds none — lane stays NULL,
-// same posture as fixed_asset_incomplete/staff_advance_incomplete, so ready/needs_review/
-// needs_you are untouched and no new `counts.*` integer was minted). The envelope ALSO
+// seeding_proposal, work_question, depreciation_authority_pending — see
+// REVIEW_QUEUE_ROW_KINDS below, the single source components/firm/needs-you-row.tsx's label
+// lookup is built from (never a hand-cast key path).
+// `counts` carries NINE integers (seeding_proposal and depreciation_authority_pending each add
+// none — lane stays NULL for the former, `needs_you` for the latter, so ready/needs_review/
+// needs_you fold them in without a dedicated tally). The envelope ALSO
 // carries top-level `compliance`/`lint` detail objects (per-client SST/lint figures,
 // BYTE-UNCHANGED by 裁-17) that THIS BUILD DOES NOT RENDER — a named, scoped gap (not
 // silently dropped from the type: see `ReviewQueueEnvelope`'s own comment), not a claim
 // that no such data exists.
 //
-// EXTENSION POINT (a TENTH row_kind — 裁-18b, the agent vendor-binding proposal door — is
-// deliberately deferred until this PR merges, so the two never CoR the reader in one
-// window): every closed-world pin of the row_kind set lives in exactly ONE obvious place
-// each, so the tenth is a mechanical repeat, never a hunt —
+// EXTENSION POINT, CORRECTED (#974). The note this section used to carry — "a TENTH row_kind
+// — 裁-18b, the agent vendor-binding proposal door — is deliberately deferred until this PR
+// merges" — was already overtaken by events before #974 touched this file: #629 shipped the
+// tenth kind (work_question, 0180) without going anywhere near 裁-18b's door, and #974's own
+// owner ruling (2026-09-20, gh#974) now VOIDS 裁-18b's reservation outright rather than merely
+// deferring past it — refresh spec decision O37 retires mandatory vendor/customer binding, so
+// the door the slot was held for is not being built. A future TWELFTH kind starts from a
+// clean slate, not from a reservation this file still owed anyone. What DOES survive: every
+// closed-world pin of the row_kind set still lives in exactly ONE obvious place each, so the
+// next addition is still a mechanical repeat, never a hunt —
 //   (1) this file's REVIEW_QUEUE_ROW_KINDS array (below) + ReviewQueueRow type,
 //   (2) the migration's own marker roster (prestate AND postcheck, in its splice DO block),
-//   (3) packages/db/tests/ninth-rowkind-seeding-proposal.test.mjs's FULL_ROW_KEYS array,
+//   (3) packages/db/tests/ninth-rowkind-seeding-proposal.test.mjs's AND
+//       packages/db/tests/work-question-reads.test.mjs's own FULL_ROW_KEYS arrays (#629
+//       restated pin (3) as a second file-local copy rather than importing the first; #974
+//       keeps both in sync). THE TWO COPIES STAY TWO — the earlier version of this note asked a
+//       future addition to "collapse them to one shared const", and #974's code review picked
+//       that up as Duplicated Code. It is withdrawn, because the collapse would cost more than
+//       it saves and the hazard it guards against does not exist: each roster is compared with
+//       assert.deepEqual against the keys of a LIVE list_review_queue row, so a twelfth kind that
+//       updates only one copy REDS the other (measured, #974 fix round: authority_id removed from
+//       work-question-reads.test.mjs alone -> "row_kind='work_question' carries a DIFFERENT key
+//       set than the pinned shape", 18 pass / 1 fail). Two independent restatements of a pinned
+//       shape are the /tdd rule's "expected values from an independent source of truth"; one
+//       shared const would let a single wrong edit move both censuses together in silence.
 //   (4) components/firm/needs-you-affordances.tsx's NEEDS_YOU_AFFORDANCES registry +
 //       needs-you-affordances.test.ts's by-name resolution cases,
 //   (5) messages/en.json's `NeedsYou.rowKind.*` label map.
@@ -91,9 +122,10 @@ import type { SessionTokenAccessor } from "@/lib/session";
 
 /** The full LIVE row_kind taxonomy (grounding note above) — the closed world
  *  components/firm/needs-you-row.tsx's label lookup is checked against. Extend
- *  this array (never a standalone string literal) the day a tenth kind ships
- *  (裁-18b's agent vendor-binding proposal door, deliberately deferred behind
- *  this one — see this file's own "EXTENSION POINT" note above). */
+ *  this array (never a standalone string literal) the day a twelfth kind ships
+ *  — the slot #974 once reserved for 裁-18b's agent vendor-binding proposal
+ *  door is VOID (see this file's own "EXTENSION POINT, CORRECTED" note above),
+ *  so a future addition starts fresh rather than resuming that reservation. */
 export const REVIEW_QUEUE_ROW_KINDS = [
   "draft",
   "uncoded_filing",
@@ -114,6 +146,14 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // the version, the typed fields and the reason come from
   // `clara.get_work_question`, which is the ONE record every surface renders.
   "work_question",
+  // #974 (0260_depreciation_authority_pending_rowkind.sql, riders wave 2 lane 07, owner
+  // ruling 2026-09-20): ONE row for a client's proposed, unsigned depreciation authority
+  // (clara.fa_depreciation_authorities.status='proposed') — the whole client's depreciation
+  // lane is blocked until an admin signs or withdraws it. Section `needs_you`, lane
+  // `needs_you`, exactly like open_question/work_question. `id`/`authority_id` both carry the
+  // authority's own id (the asset_id/advance_id idiom, not seeding_proposal's aggregation —
+  // a client carries at most one proposed authority at a time).
+  "depreciation_authority_pending",
 ] as const;
 
 export type ReviewQueueRowKind = (typeof REVIEW_QUEUE_ROW_KINDS)[number];
@@ -211,6 +251,10 @@ export type ReviewQueueRow = {
   /** 裁-17+: seeding_proposal rows only — the count of OPEN proposals summed
    *  across every open batch. */
   open_proposal_count: number | null;
+  /** #974 (0260)+: depreciation_authority_pending rows only — mirrors the shared `id`
+   *  column (the asset_id/advance_id idiom), because a client carries at most one
+   *  proposed authority at a time and needs no aggregation. */
+  authority_id: string | null;
 };
 
 export type ReviewQueueCounts = {

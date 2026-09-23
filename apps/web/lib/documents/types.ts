@@ -298,6 +298,24 @@ export type SourceRevisionResult = {
   observed_version: number;
   facts_version: number;
   carried_regions: number;
+  /** #885 (migration 0268) — every Work this correction RETIRED, one entry each, because the
+   *  correcting transaction retires the Work parked on a question about this document. `replaced`
+   *  is true when a successor was admitted on the same instruction; false with
+   *  `not_replaced_reason` when it could not be (a `clara_interpreted` basis was read off the
+   *  reading that just moved, so re-admitting it would post the PRE-correction figure; or
+   *  `clara.restate_accounting_work` refused that one Work). OPTIONAL on purpose: a database
+   *  below the 0268 frontier answers without the key at all. */
+  superseded_work?: SupersededWork[];
+};
+
+/** One entry of `SourceRevisionResult.superseded_work`. */
+export type SupersededWork = {
+  work_id: string;
+  new_work_id: string | null;
+  reason: string;
+  replaced: boolean;
+  not_replaced_reason: string | null;
+  revision_id: string;
 };
 
 /** One entry in `clara.list_source_revisions`' chronological lineage. The `entry_kind` names which

@@ -104,6 +104,43 @@ test("a correction links both ways: the original names its replacement and vice 
   await expect(page.getByText("Links to the original entry it replaced.")).toBeVisible();
 });
 
+// #840 — #721's ruling of 2026-09-12 (point 3): a restated Work's cancellation links FORWARD to
+// its successor on the firm's only firm-wide history surface, not only on the Work detail page.
+test("#840: a work.cancelled row for a restated Work links to its successor", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/activity");
+
+  const row = page.locator("li").filter({ hasText: "Accounting work was cancelled." }).first();
+  const link = row.getByRole("link", { name: "Links to the Work that superseded it." });
+  await expect(link).toHaveAttribute(
+    "href",
+    `/clients/${ACTIVITY.clientId}/work/${ACTIVITY.successorWorkId}`,
+  );
+
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/clients/${ACTIVITY.clientId}/work/${ACTIVITY.successorWorkId}$`));
+});
+
+// #840 — an ORDINARY cancellation (no successor) offers NO such link, on the row or in the detail
+// Sheet: the additive column is null and the JSX guard on it must not render an empty anchor.
+test("#840: an ordinary (non-restated) row offers no successor link, on the row or in its detail", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/activity");
+
+  const workRow = page.locator("li").filter({ hasText: "Recorded a journal entry" }).first();
+  await expect(workRow.getByRole("link", { name: "Links to the Work that superseded it." })).toHaveCount(0);
+
+  await workRow.getByRole("button").first().click();
+  const sheet = page.locator('[data-slot="sheet-content"]');
+  await expect(page.locator('[data-slot="sheet-title"]')).toBeVisible();
+  // Scoped to the Sheet, not the whole page: the SAME page also carries the #840-restated Work's
+  // OWN row (a sibling test's own subject), whose link is genuinely present in the LIST — a
+  // page-wide `getByText` here would find that unrelated row's link rather than proving this
+  // Sheet's own detail carries none.
+  await expect(sheet.getByText("Links to the Work that superseded it.")).toHaveCount(0);
+  await expect(sheet.getByText("Successor Work")).toHaveCount(0);
+});
+
 test("opening a row's detail: Title, initial focus, Escape closes it and returns focus to the row", async ({ page }) => {
   await signIn(page);
   await page.goto("/activity");

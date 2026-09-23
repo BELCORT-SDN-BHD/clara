@@ -67,3 +67,29 @@ out to grep), the Defender/EICAR skip, no `pg_dump` on PATH (four runtime files)
   variables for the child when the refusal it pins sits behind the CI refusal. Before you report,
   run the lint chain once more as the runner sees it: `CI=true GITHUB_ACTIONS=true pnpm lint`
   (wave 1 shipped a cell that was green on the rig and red on the runner, PR #1025).
+- The runner is Linux and unprivileged; this host is Windows. A test that runs the real reconciler
+  sweep (or anything that reaches the spool) must point `CLARA_SPOOL_DIR` at a per-run temporary
+  directory, as `reconcile-belt-isolation-unit.test.mjs` does: off Windows the default is
+  `/data/spool`, which a runner cannot create (PR #1025, second run). The integrator re-runs new
+  runtime test files once under WSL as user `runner` (`/opt/node/bin/node --test <file>`) before a PR.
+- NEVER run a `git worktree` subcommand (`add`, `remove`, `prune`, `repair`) or `git gc` from WSL
+  against this repository. The worktrees are registered with Windows paths, WSL cannot stat them,
+  and `git worktree prune` from WSL deregistered all eleven live worktrees on 2026-09-20 (repaired
+  by hand; per-worktree reflogs were lost). Git housekeeping runs from Git Bash on Windows only;
+  under WSL use git for read-only queries at most.
+- NEVER make this repository shallow: no `git fetch --depth`, no `--shallow-since`, no
+  `git clone --depth` that shares this object store. On 2026-09-20 a `.git/shallow` file appeared
+  mid-wave and hid every parent of three commits: branches looked unrelated ("refusing to merge
+  unrelated histories") and `main` read 804 commits instead of 1779. All parents were still in the
+  object store, so removing the file restored the history; a `git gc` in that state could have
+  deleted it. To mimic the runner's checkout, clone into a SEPARATE directory.
+
+## Addendum for wave 3 (2026-09-20)
+
+- Every lane cluster was dropped and recreated, and every lane database was migrated from scratch
+  0001 to 0272 (267 files) and seeded, from the integrated wave-2 head. Lane branches are
+  `riders/w3-lane<k>`, cut from that head (the prompt names the commit).
+- Lane 11 works in `C:\Users\zhant\Desktop\clara-wt\int` and has NO database of its own: it is a
+  web-only lane (Playwright triple 3600 / 3601 / 3602). A lane-11 ticket that turns out to need a
+  database stops and says so.
+- Reserved migration numbers for wave 3 start at `0273`; your prompt names yours.

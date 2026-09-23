@@ -1,0 +1,89 @@
+{
+  "axis": "standards",
+  "lane": 6,
+  "wave": 2,
+  "branch": "riders/w2-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\656",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head_reviewed": "07da571ae75760ecff3fe862bfb69351ab41826b",
+  "tickets": [894, 895, 891, 934, 935],
+  "sources_read": [
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "AGENTS.md",
+    "CONTEXT.md",
+    ".claude/skills/code-review/SKILL.md",
+    "packages/db/README.md (diff)",
+    "packages/db/tests/README.md (diff)",
+    "packages/db/migrations/0255_onboarding_plan_firm_uniqueness.sql (full)",
+    "packages/db/migrations/0256_firm_setup_polish.sql (full)",
+    "packages/db/migrations/0257_firm_setup_applicability.sql (full)",
+    "packages/db/migrations/0258_firm_setup_user_notes.sql (relevant sections)",
+    "packages/db/migrations/0259_firm_setup_education_tips.sql (relevant sections)",
+    "packages/db/tests/onboarding-plan-firm-uniqueness.test.mjs",
+    "packages/db/tests/firm-setup-applicability.test.mjs (full)",
+    "packages/db/tests/firm-setup-education-tips.test.mjs (full)",
+    "packages/db/tests/firm-setup-user-notes.test.mjs (partial)",
+    "packages/db/tests/rig-meta.mjs (diff)",
+    "packages/db/package.json (diff)",
+    "apps/web/lib/firm-setup/types.ts (diff)",
+    "apps/web/lib/firm-setup/api.ts (diff)",
+    "apps/web/components/firm-setup/firm-setup-checklist.tsx (diff)",
+    "apps/web/components/firm-setup/firm-setup-checklist.test.tsx (diff)",
+    "apps/web/components/firm-setup/firm-setup-item-form.tsx (diff)",
+    "apps/web/components/documents/document-kind-dialog.tsx (the unrelated one-line fix, commit 544e9daa2)",
+    "docs/plan/active/riders-2026-09-20/reports/wave2-lane06-ticket894.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave2-lane06-ticket895.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave2-lane06-ticket891.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave2-lane06-ticket934.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave2-lane06-ticket935.md",
+    "gh issue view 894/895/891/934/935 --comments"
+  ],
+  "verification_performed": [
+    "Confirmed clara_l06 is at 234 applied migrations (matches ticket #935's own apply log).",
+    "Re-ran the full firm-setup DB battery on clara_l06 with the real gate chain: onboarding-plan-firm-uniqueness.test.mjs + firm-setup-polish.test.mjs + firm-setup-applicability.test.mjs + firm-setup-user-notes.test.mjs + firm-setup-education-tips.test.mjs + firm-setup.test.mjs -> 35/35 PASS, 0 fail -- matches every ticket report's claimed count (3+3+4+3+5+17=35).",
+    "Re-ran packages/db/tests/operation-census.test.mjs on clara_l06 with the full gate chain -> 10/10 PASS.",
+    "Re-ran packages/db/tests/rig-isolation.test.mjs on clara_l06 with the full gate chain -> 22/23 PASS, 1 SKIP (T19 poison-role, correctly skipped since CLARA_RIG_ALLOW_RESET is unset), 0 fail.",
+    "Confirmed via git diff --name-status that all five migration files (0255-0259) are pure additions, no applied migration is edited, and docs/PRD.md / docs/ARCHITECTURE.md are untouched.",
+    "Confirmed no CREATE TABLE appears anywhere in the five migrations (grep across all five files) -- the FORCE RLS / zero-application-role-DML house rule for new relations is not applicable to this diff.",
+    "Confirmed packages/db/package.json's preintegration-gate --import chain grew from 51 to 56 entries, one per new migration (0255-0259), each appended at the end in migration order, matching the reports.",
+    "Confirmed packages/db/tests/rig-meta.mjs gained exactly one new cohort (FIRM_SETUP_TIP_0259_COHORT, one granted name: dismiss_firm_setup_tip), spliced into ALLOWED[ROLES.authenticated] and cohortFailures() -- correctly the only migration of the five that adds a GRANTED name; the other four add only ungranted helpers or recut existing signatures, and correctly add no cohort.",
+    "Read 0255's, 0256's and 0257's full text end to end (prestate, change, tail) and confirmed each prestate pin (sha256(prosrc), pg_get_indexdef, pg_constraint defs) is measured off pg_catalog rather than transcribed, and each tail re-reads the committed catalog rather than trusting the file's own DDL text.",
+    "Confirmed clara.dismiss_firm_setup_tip's body (0259) calls no clara._audit, clara._append_event or clara._firm_setup_bump -- the AC3 'no audit row, no domain event' property is structural in the reviewed code, not merely asserted by the test.",
+    "Confirmed clara.answer_firm_setup_item and clara.defer_firm_setup_item (0259) each gained exactly one new guard clause (item_kind = 'education' -> CLR10 firm_setup_item_is_a_tip) immediately after the catalogue lookup, with every other line unchanged from their 0256/0257 pre-images per the migration's own tail string-match assertions.",
+    "Confirmed the twelve owner-approved user_note sentences backfilled in 0258 (spot-checked legal_name, ssm, mia, tin, framework, accounting_basis, currency) are transcribed byte-identical to the ticket #934 table and the owner's ruling comment.",
+    "Confirmed git log 23cfad947b..HEAD --stat shows ten commits, each a vertical slice (migration+test together, or component+test together), never a batch of red test cells committed ahead of any implementation -- no horizontal-slicing anti-pattern found.",
+    "Confirmed the one commit with no ticket number in its subject (544e9daa2, the document-kind-dialog.tsx DOCUMENT_KINDS fix) touches a file last modified by a pre-existing wave-1 merge already on the base commit (git log -- that file, confirmed empty between base and this lane's first commit), and is fully explained in its own commit body and in ticket #934's report as a shared, unrelated, gate-blocking defect.",
+    "Grepped scripts/check-frozen-workflows.mjs / .selftest.mjs history on this branch and confirmed zero commits in this lane touch either file, corroborating ticket #935's report that the one lint-chain failure it saw (a CI-only selftest case) predates and is unrelated to this lane."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "ticket": 934,
+      "severity": "minor",
+      "category": "commit-hygiene",
+      "title": "One commit (544e9daa2) fixing an unrelated, pre-existing typecheck defect names no ticket in its subject line",
+      "evidence": "WORK-ORDER.md rule 2: \"One ticket = its own commits, whose messages name it (`fix(web): #896 …`).\" Commit 544e9daa2's subject is `fix(web): document-kind-dialog references the renamed DOCUMENT_KINDS export` -- no `#NNN`. The commit body explains at length why (a pre-existing, unrelated defect blocking #934's own required gates, confirmed by git log to predate this lane), and ticket #934's report cross-references it fully, but the literal rule is not followed.",
+      "required_fix": "No fix required retroactively (the commit is already landed, well-justified and fully traceable via its own body and ticket #934's report). Worth a one-line addendum to WORK-ORDER.md for a future lane: a commit that fixes a cross-cutting, pre-existing defect blocking a ticket's own gates may cite the blocking ticket in its body without a `#NNN` prefix in the subject, as long as it says so as explicitly as this one does."
+    },
+    {
+      "id": "F2",
+      "ticket": 891,
+      "severity": "note",
+      "category": "duplicated-code",
+      "title": "The two-item conditional-required predicate is repeated three times, inline, inside clara.get_firm_setup",
+      "evidence": "0257_firm_setup_applicability.sql's recut `clara.get_firm_setup` repeats `k.item_key in ('mpers_eligibility','tin') and ... clara._firm_setup_applicability(p.id, k.item_key) = 'applicable'` three times with small variations: once in the per-item `'required'` field (line ~389), once in `v_req_total` (line ~449) and once in `v_req_done` (line ~456-457) -- a possible Fowler 'Duplicated Code' judgement call.",
+      "required_fix": "No fix required. The migration's own header (\"REGRESSION THIS FILE MEASURED AND DELIBERATELY AVOIDED\") explains the `i.id is not null` asymmetry between the three sites, and the migration's tail census string-matches each of the three occurrences independently as a separate assertion -- collapsing them into one shared CTE/lateral expression would make the tail's per-site verification weaker, not stronger, in a house style that otherwise always favours an independently re-measurable tail over a DRY-er body. A documented-standard override, not a violation; noted for calibration only."
+    }
+  ],
+  "hard_violations": [],
+  "smells": [
+    {
+      "name": "Duplicated Code",
+      "location": "packages/db/migrations/0257_firm_setup_applicability.sql, clara.get_firm_setup",
+      "note": "See finding F2. Judgement call, overridden by the migration's own tail-verifiability rationale."
+    }
+  ],
+  "test_quality_issues": [],
+  "summary": "All five tickets (#894, #895, #891, #934, #935) comply with the repo's documented migration house shape: header, prestate pins measured live on clara_l06 (sha256(prosrc), pg_get_indexdef, pg_constraint defs, row-hash baselines) rather than transcribed, tail assertions that re-read the committed catalog, redo-safety guards (if not exists / definition probes), a preintegration-gate module with a stable stem for every migration, rig-meta.mjs cohort entries added only where a GRANTED name actually changed (once, for #935's dismiss_firm_setup_tip), and owner/SECURITY DEFINER/search_path/plan_cache_mode/ACL preserved and re-measured on every recut body. No new relation is created anywhere in the diff, so the FORCE RLS / zero-application-role-DML rule is not applicable. No applied migration is edited, no PRD/ARCHITECTURE edit, no frozen-workflow manifest diff (packages/runtime is untouched by this lane). Test quality against /tdd is strong throughout: every DB cell drives the two named doors (or the one new door) through humanQuery as a real persona, expected values are transcribed independently from the ticket/owner-ruling text rather than recomputed from the implementation, no internal collaborator or private function is asserted against, and the web tests mock only the fetch boundary. git log confirms ten genuinely vertical-sliced commits (migration+test, or component+test, together) with no battery of red tests committed ahead of any implementation. Independent verification on the live rig reproduced every load-bearing claim: 35/35 firm-setup DB cells green, 10/10 operation-census, 22/23 rig-isolation (1 correctly-skipped destructive cell), the gate-chain growing by exactly five entries in migration order, and the rig-meta.mjs cohort diff being the single, correctly-scoped addition the reports describe. Two minor/note-level observations are recorded above; neither is a hard violation and neither blocks acceptance."
+}

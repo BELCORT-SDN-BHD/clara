@@ -15,8 +15,9 @@
 // inference is exactly the defect C-37 names, and the whole point of the DB registry is that the
 // answer lives in one place.
 
-/** The four capability levels. A closed set, mirroring the CHECK on
- *  `clara.document_capabilities` (0191). */
+/** The capability levels shared by THREE of the four axes — custody, byte extraction, typed
+ *  facts. A closed set, mirroring those three columns' CHECKs on `clara.document_capabilities`
+ *  (0191), which 0246 did not touch. */
 export type CapabilityLevel = "supported" | "stored_only" | "unsupported" | "planned";
 
 export const CAPABILITY_LEVELS: readonly CapabilityLevel[] = [
@@ -25,6 +26,28 @@ export const CAPABILITY_LEVELS: readonly CapabilityLevel[] = [
 
 export function isCapabilityLevel(value: unknown): value is CapabilityLevel {
   return typeof value === "string" && (CAPABILITY_LEVELS as readonly string[]).includes(value);
+}
+
+/** BUSINESS OPERATION has its own, WIDER set (#988): the four above plus `proposal_only` —
+ *  "Clara reads the pair deterministically and derives a real proposal, but never carries it into
+ *  a posted operation on its own authority; a person confirms first".
+ *
+ *  WHY IT IS A SECOND TYPE AND NOT ONE WIDENED SHARED TYPE. The asymmetry is the DATABASE's, not
+ *  this module's, and it is checkable: `document_capabilities_business_operation_check` admits
+ *  five values since 0246, while `..._custody_check`, `..._byte_extraction_check` and
+ *  `..._typed_facts_check` each still read the original four — measured on the estate, and the
+ *  sibling db battery pins it with its own BUSINESS_OPERATION_LEVELS constant rather than
+ *  widening LEVELS. A single widened union would make `isCapabilityLevel` admit, for custody, a
+ *  value custody's own CHECK refuses; a guard that admits what the database refuses has stopped
+ *  mirroring it. */
+export type BusinessOperationLevel = CapabilityLevel | "proposal_only";
+
+export const BUSINESS_OPERATION_LEVELS: readonly BusinessOperationLevel[] = [
+  ...CAPABILITY_LEVELS, "proposal_only",
+] as const;
+
+export function isBusinessOperationLevel(value: unknown): value is BusinessOperationLevel {
+  return typeof value === "string" && (BUSINESS_OPERATION_LEVELS as readonly string[]).includes(value);
 }
 
 /** `clara._document_capability(format, kind)`'s jsonb. `known_pair`/`kind_known` are the two
@@ -37,7 +60,7 @@ export type DocumentCapability = {
   custody: CapabilityLevel;
   byte_extraction: CapabilityLevel;
   typed_facts: CapabilityLevel;
-  business_operation: CapabilityLevel;
+  business_operation: BusinessOperationLevel;
   engine_id: string | null;
   engine_byte: string | null;
   registry_version: number | null;
@@ -114,7 +137,7 @@ export type DocumentStateResult = {
     validations: DocumentFactValidation[];
   };
   operation: {
-    capability: CapabilityLevel;
+    capability: BusinessOperationLevel;
     codeable_kind: boolean;
     entries: { entry_id: string; status: string }[];
     statements: {
@@ -149,7 +172,14 @@ export type ExtractionVerdict =
   | "not_attempted" | "pending" | "running" | "done" | "failed" | "stored_unparsed";
 export type FactsVerdict =
   | "unsupported_kind" | "unsupported_format" | "pending" | "none" | "partial" | "validated" | "invalid";
-export type OperationVerdict = "not_applicable" | "uncoded" | "coded" | "posted" | "reconciled";
+/** `awaiting_confirmation` is `business_operation: "proposal_only"` with nothing coded yet (#988):
+ *  Clara reads this pair deterministically and derives a real proposal, but never carries it into
+ *  a posted operation on its own authority. It is NOT `uncoded` — that word is the store-only
+ *  pair's, where Clara derives nothing and nothing is ever coming. Once a person has acted the
+ *  verdict is about what happened, so a confirmed proposal reads `coded` or `posted` like any
+ *  other entry. */
+export type OperationVerdict =
+  "not_applicable" | "awaiting_confirmation" | "uncoded" | "coded" | "posted" | "reconciled";
 
 /** CUSTODY. A legal hold is the loudest thing true about a document's bytes, so it wins; the
  *  rest is simply whether the stored bytes were re-hashed and matched. */
@@ -215,14 +245,21 @@ export function factsVerdict(state: DocumentStateResult): FactsVerdict {
 }
 
 /** OPERATION. `not_applicable` is the registry's own `unsupported` — this kind carries no
- *  accounting operation at all — and it is a legitimate resting state, never a failure. */
+ *  accounting operation at all — and it is a legitimate resting state, never a failure.
+ *
+ *  THE LEVEL ONLY SPEAKS WHERE NOTHING HAS HAPPENED YET. Statements, posted entries and drafts
+ *  are FACTS about this document, and they outrank what the registry permits; a proposal someone
+ *  confirmed and posted reads `posted`, not "awaiting confirmation". The two levels that differ
+ *  before anything is coded are `proposal_only` (Clara has a proposal, a person confirms) and
+ *  everything else (nothing is coded, and for a store-only pair nothing ever will be) — which is
+ *  the one place #988's "distinct from the store-only level" has anything to distinguish. */
 export function operationVerdict(state: DocumentStateResult): OperationVerdict {
   if (state.operation.capability === "unsupported") return "not_applicable";
   if (state.operation.statements.length > 0) return "reconciled";
   const live = state.operation.entries.filter((e) => e.status !== "withdrawn" && e.status !== "void");
   if (live.some((e) => e.status === "approved" || e.status === "posted")) return "posted";
   if (live.length > 0) return "coded";
-  return "uncoded";
+  return state.operation.capability === "proposal_only" ? "awaiting_confirmation" : "uncoded";
 }
 
 /** The tone each verdict wears. NOTHING here is green-by-default: an unsupported kind is
@@ -237,6 +274,14 @@ export function factsTone(verdict: FactsVerdict): StateTone {
     case "pending": return "info";
     default: return "neutral";
   }
+}
+
+/** #988 — the ONE operation verdict that is not a plain statement of record. "Clara has a
+ *  proposal and is waiting for you" is a pending state, and the panel's own ladder already spells
+ *  pending `info` (the same token capability-tiers.tsx gives the `proposal_only` tier). Every
+ *  other verdict stays `neutral`: a document that is simply not coded yet is not a warning. */
+export function operationTone(verdict: OperationVerdict): StateTone {
+  return verdict === "awaiting_confirmation" ? "info" : "neutral";
 }
 
 export function extractionTone(verdict: ExtractionVerdict): StateTone {
@@ -254,4 +299,37 @@ export function extractionTone(verdict: ExtractionVerdict): StateTone {
 export function capabilityLimits(capability: DocumentCapability): [string, string][] {
   const limits = capability.limits ?? {};
   return Object.keys(limits).sort().map((key) => [key, String(limits[key])]);
+}
+
+/** #782 fix round — the limit VALUE's own message key.
+ *
+ *  A limit is a `[name, value]` pair and BOTH halves are machine tokens. The surfaces already
+ *  render the NAME through its own key (`capabilityLimit.*`); until this map the VALUE was
+ *  interpolated verbatim, so the invoice sentence read "Per-line invoice facts:
+ *  accepted_limitation." and its reason read "Reason: no_consumer_reads_line_facts." A
+ *  snake_case identifier is neither a sentence nor a reason a professional can act on, and #782's
+ *  deliverable is precisely that sentence.
+ *
+ *  A LITERAL MAP, never a `t(\`capabilityLimitLevel.${value}\`)` cast: document-facts-table.tsx's
+ *  own header settled that argument for this family — a missing translation renders the KEY at a
+ *  professional, which is worse than printing nothing. An unmapped value therefore falls back to
+ *  the raw token, which is honest rather than wrong, exactly as an unmapped limit NAME already
+ *  does through `capabilityLimitUnknown`.
+ *
+ *  The roster is CLOSED and MEASURED: these are the seven distinct values
+ *  `clara.document_capabilities.limits` publishes across all 240 rows (registry v3). */
+const LIMIT_LEVEL_KEY: Record<string, string> = {
+  absent: "capabilityLimitLevel.absent",
+  absent_in_format: "capabilityLimitLevel.absentInFormat",
+  accepted_limitation: "capabilityLimitLevel.acceptedLimitation",
+  myinvois_ubl_only: "capabilityLimitLevel.myinvoisUblOnly",
+  no_consumer_reads_line_facts: "capabilityLimitLevel.noConsumerReadsLineFacts",
+  parse_succeeds_corroboration_cannot: "capabilityLimitLevel.parseSucceedsCorroborationCannot",
+  tab_separated_mime_not_routed: "capabilityLimitLevel.tabSeparatedMimeNotRouted",
+};
+
+/** The message key for a limit's value, or `null` when this app publishes no phrase for it —
+ *  in which case the caller shows the raw token. */
+export function capabilityLimitLevelKey(level: string): string | null {
+  return LIMIT_LEVEL_KEY[level] ?? null;
 }

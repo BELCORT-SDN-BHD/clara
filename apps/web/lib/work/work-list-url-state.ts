@@ -1,13 +1,23 @@
 // #641 (journey B3) — the Work list's URL-state model: `?view=&client=&status=&purpose=
-// &initiator=&since=&until=&q=&cursor=&work=`.
+// &initiator=&since=&until=&receiptSince=&receiptUntil=&q=&cursor=&work=`.
 //
-// THE SEVEN FILTER AXES ARE ENUMERATED ONCE, IN `WORK_LIST_FILTER_AXES`, and every question this
+// THE NINE FILTER AXES ARE ENUMERATED ONCE, IN `WORK_LIST_FILTER_AXES`, and every question this
 // module and its two components ask about them is derived from that one list: is anything
 // narrowing the list, how many axes are, what the canonical saved-view spelling is, which keys a
 // patch must clear, and which keys drop the cursor. The first cut hand-wrote the tuple in five
 // places (including two byte-similar "clear everything" object literals in two components), which
-// is Fowler's Duplicated Code over a Data Clump and, more practically, five places to forget an
-// eighth axis. Adding one now is adding one line here.
+// is Fowler's Duplicated Code over a Data Clump and, more practically, a place to forget a new
+// axis. Adding one is adding one line here.
+//
+// #905: `receiptSince`/`receiptUntil` ARE FILTER AXES — they narrow the page exactly as `since`/
+// `until` do, just on `clara.list_accounting_work`'s OTHER date bound (a Work's own committed
+// receipt, `p_receipt_since`/`p_receipt_until`, migration 0267) — but they have NO VISIBLE
+// CONTROL in `WorkListFilterControls`: the only way a person reaches them today is the client
+// home's recent-success tile (`lib/work/client-work-pack.ts`'s `workAttentionHref`), never a
+// hand-picked date on the filter bar (#905's own "Out of scope" line: no second visible date
+// control). Being real axes is still correct — "N filters narrowing" and "Clear filters" must
+// count and clear a receipt-dated drilldown the same as any other, or a person arriving from the
+// tile would see a narrowed list with no way to tell, or clear, why.
 //
 // THE URL IS THE LIST'S STATE, ALL OF IT, AND THAT INCLUDES THE PAGE. This is the one place this
 // codebase deliberately departs from `lib/firm/activity.ts`, whose own header explains why the
@@ -47,6 +57,12 @@ export type WorkListUrlState = {
   initiator: string | null;
   since: string | null;
   until: string | null;
+  /** #905 — the OTHER date bound: `clara.list_accounting_work`'s `p_receipt_since`/
+   *  `p_receipt_until` (migration 0267), which fence a Work's OWN committed receipt instead of
+   *  its admission instant. Same calendar-date shape and validation as `since`/`until`; see this
+   *  file's header for why it is a real filter axis with no visible control of its own. */
+  receiptSince: string | null;
+  receiptUntil: string | null;
   q: string | null;
   cursor: string | null;
   /**
@@ -61,15 +77,17 @@ export type WorkListUrlState = {
   work: string | null;
 };
 
-/** THE SEVEN FILTER AXES, in the canonical order a saved view is spelled in. `view` is not one of
+/** THE NINE FILTER AXES, in the canonical order a saved view is spelled in. `view` is not one of
  *  them — it is a LABEL for a filter set, which is why it clears with them but does not count as
- *  one — and neither `cursor` nor `work` is: a page and an address are not narrowings. */
+ *  one — and neither `cursor` nor `work` is: a page and an address are not narrowings.
+ *  `receiptSince`/`receiptUntil` (#905) ARE axes despite having no visible control — see this
+ *  file's header. */
 export const WORK_LIST_FILTER_AXES = [
-  "client", "status", "purpose", "initiator", "since", "until", "q",
+  "client", "status", "purpose", "initiator", "since", "until", "receiptSince", "receiptUntil", "q",
 ] as const;
 export type WorkListFilterAxis = (typeof WORK_LIST_FILTER_AXES)[number];
 
-/** The keys a patch may carry that mean "the filter set changed" — the seven axes plus the view
+/** The keys a patch may carry that mean "the filter set changed" — the nine axes plus the view
  *  label they light. `applyWorkListUrlState` drops the cursor for any of them. */
 export const WORK_LIST_FILTER_KEYS = [...WORK_LIST_FILTER_AXES, "view"] as const;
 
@@ -80,7 +98,7 @@ export const WORK_LIST_FILTER_KEYS = [...WORK_LIST_FILTER_AXES, "view"] as const
  *  row the caller came here pointing at. */
 export const EMPTY_WORK_LIST_FILTERS: Pick<WorkListUrlState, WorkListFilterAxis | "view"> = {
   client: null, status: [], purpose: [], initiator: null,
-  since: null, until: null, q: null, view: null,
+  since: null, until: null, receiptSince: null, receiptUntil: null, q: null, view: null,
 };
 
 /** The empty state is the empty FILTER set plus the two fields that are not filters, so the two
@@ -128,7 +146,7 @@ function parseList(raw: string | null | undefined): string[] {
   return [...new Set(raw.split(",").map((v) => v.trim()).filter((v) => v.length > 0))];
 }
 
-/** Parse the list's nine query params off a `URLSearchParams` (or any string-keyed reader with a
+/** Parse the list's eleven query params off a `URLSearchParams` (or any string-keyed reader with a
  *  compatible `.get`). See this file's header for what is dropped and why. */
 export function parseWorkListUrlState(params: Pick<URLSearchParams, "get">): WorkListUrlState {
   const viewRaw = params.get("view");
@@ -138,6 +156,8 @@ export function parseWorkListUrlState(params: Pick<URLSearchParams, "get">): Wor
   const initiator = params.get("initiator");
   const since = params.get("since");
   const until = params.get("until");
+  const receiptSince = params.get("receiptSince");
+  const receiptUntil = params.get("receiptUntil");
   const qRaw = params.get("q");
   const cursorRaw = params.get("cursor");
   const workRaw = params.get("work");
@@ -156,6 +176,10 @@ export function parseWorkListUrlState(params: Pick<URLSearchParams, "get">): Wor
     initiator: initiator && isClientIdShape(initiator) ? initiator : null,
     since: since && isDateOnly(since) ? since : null,
     until: until && isDateOnly(until) ? until : null,
+    // #905 — same calendar-date shape and the same "malformed degrades to absent" rule as
+    // since/until, never sent to the door as a caller-editable raw string.
+    receiptSince: receiptSince && isDateOnly(receiptSince) ? receiptSince : null,
+    receiptUntil: receiptUntil && isDateOnly(receiptUntil) ? receiptUntil : null,
     q: qRaw && qRaw.trim() !== "" ? qRaw : null,
     cursor: cursorRaw && cursorRaw.trim() !== "" ? cursorRaw : null,
     // A non-uuid `?work=` is DROPPED here rather than sent to `clara.get_accounting_work_row`,
@@ -202,6 +226,8 @@ export function applyWorkListUrlState(
   if ("initiator" in patch) setOrDelete("initiator", patch.initiator);
   if ("since" in patch) setOrDelete("since", patch.since);
   if ("until" in patch) setOrDelete("until", patch.until);
+  if ("receiptSince" in patch) setOrDelete("receiptSince", patch.receiptSince);
+  if ("receiptUntil" in patch) setOrDelete("receiptUntil", patch.receiptUntil);
   if ("q" in patch) setOrDelete("q", patch.q);
 
   if ("work" in patch) setOrDelete("work", patch.work);

@@ -30,11 +30,38 @@ import { useTranslations } from "next-intl";
 import { StateBanner } from "@/components/common/state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkQuestionForm, type WorkQuestionAnnounce } from "@/components/work/work-question-form";
+import { RestateWorkPanel } from "@/components/work/work-restate";
 import { workDetailHref } from "@/lib/navigation/tree";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getSessionIdentity } from "@/lib/settings/account-identity";
-import { accountsForQuestion, getPendingWorkQuestion, getWorkQuestion } from "@/lib/work/questions";
+import {
+  accountsForQuestion, getPendingWorkQuestion, getWorkQuestion, type WorkQuestionRecord,
+} from "@/lib/work/questions";
+
+/**
+ * #839 — THE RESTATE GATE, as a PURE function so a cell can drive it directly rather than through
+ * `getSessionIdentity()`'s real Supabase browser client — the one seam this module's own header
+ * says the RTL harness cannot reach (see `work-cards.test.tsx`'s "WHY 'ACCEPTED' IS NOT HERE").
+ *
+ * TRUE only when the CALLER asked for it (`offerRestate` — B3's own separate `RestateWorkPanel`
+ * mount means this panel defaults OFF, see `WorkQuestionPanelProps.offerRestate`), the WORK is
+ * still `awaiting_input` (matching exactly when `work-detail.tsx` offers its own copy — a question
+ * round settling does not by itself mean the Work stopped waiting on a person), and the record
+ * actually carries a `basis` to prefill (absent on a pre-0265 database, or on a record this build
+ * could not read at all).
+ */
+export function offersRestateFor(
+  record: WorkQuestionRecord | null | undefined,
+  offerRestate: boolean,
+): boolean {
+  // #885 (third fix round) — …AND NOT A WORK THAT HAS ALREADY POSTED. `clara.restate_accounting_
+  // work` refuses one CLR13 `not_restatable` (a committed receipt reads as completed), so offering
+  // the control there is a 403 dressed as an affordance — the same rule L09-ADV-06 was fixed under.
+  // The working exit for that Work is Cancel Work, which its own card already offers.
+  return offerRestate && record?.work_status === "awaiting_input" && Boolean(record?.basis)
+    && record?.work_posted !== true;
+}
 
 export type WorkQuestionPanelProps = {
   /** Address by WORK when the caller knows the Work (B3), by QUESTION when it knows the question
@@ -61,10 +88,29 @@ export type WorkQuestionPanelProps = {
    *  their surface's announcement boundary. #629 (B6) passes "none" from inside the Clara
    *  transcript, which already announces its own updates. */
   announce?: WorkQuestionAnnounce;
+  /**
+   * #839 — offer "Restate as a new instruction" beside the form, reusing `RestateWorkPanel`
+   * exactly as the Work detail does (`work-detail.tsx` mounts it as a SIBLING of this same panel).
+   *
+   * DEFAULT FALSE, AND DELIBERATELY OPT-IN. The Work detail (B3) already mounts its OWN
+   * `RestateWorkPanel` beside its `WorkQuestionPanel`, fed by the full `AccountingWorkRow` it loads
+   * separately — turning this on there too would render restate TWICE (#839's own third acceptance
+   * line: "no second restate door or duplicate restate UI").
+   *
+   * EXACTLY ONE CALLER PASSES `true`, AND IT DECIDES PER MOUNT. `WorkCards.tsx`'s
+   * `WorkAcceptedCard` is the rail's single owner of this control, and it withholds it in two
+   * cases the shipped branch did not consider (fix round, findings L09-ADV-05 and L09-ADV-06): the
+   * rail is mounted on EVERY `(firm)` route including the Work detail itself, where B3's own panel
+   * is already on screen; and `clara.restate_accounting_work` floors at bookkeeper, so the offer
+   * carries the same rank gate the sibling Cancel control on that card already applies. Needs-you's
+   * row (`work-question-affordance.tsx`) keeps the default — see this lane's fix report.
+   */
+  offerRestate?: boolean;
 };
 
 export function WorkQuestionPanel({
   workId, questionId, onAnswered, onSettled, onBusy, onLeavePending, fallbackQuestion = null, announce,
+  offerRestate = false,
 }: WorkQuestionPanelProps) {
   const t = useTranslations("WorkQuestion.inbox");
   const silent = announce === "none";
@@ -74,7 +120,25 @@ export function WorkQuestionPanel({
     // The chart, ONLY when the question declares an `account` field — see accountsForQuestion.
     return { record, identity, accounts: await accountsForQuestion(record) };
   }, [questionId, workId]);
-  const { data, loading, err } = useHydratedPart(sessionTokenAccessor, load);
+  const { data, loading, err, reload } = useHydratedPart(sessionTokenAccessor, load);
+
+  // #839 — THE RESTATE OFFER IS COMPUTED ONCE AND RENDERED ON EVERY ARM THAT HAS A RECORD, and
+  // that is a correction rather than a convenience (fix round, review finding L09-SPEC-04). It used
+  // to sit inside the final return, BELOW the `!data.identity` guard — but restating needs the
+  // QUESTION RECORD (the work id, the client id, the admitted basis) and the caller's session
+  // token, and nothing else. `getSessionIdentity()` is the FORM's input: it stamps who is
+  // answering. Gating restate on it made the control unreachable exactly where the identity read
+  // comes back empty, and unreachable to any cell too — that read is a real `@supabase/ssr`
+  // browser client this harness has no seam for, which is why AC2 had no render proof at all.
+  const record = data?.record ?? null;
+  const restate = record !== null && offersRestateFor(record, offerRestate) ? (
+    <RestateWorkPanel
+      work={{ id: record.work_id, basis: record.basis ?? null }}
+      clientId={record.client_id}
+      session={sessionTokenAccessor}
+      onRestated={reload}
+    />
+  ) : null;
 
   if (loading) {
     // THE QUESTION IS ALREADY KNOWN; only its typed fields are not. The calling page read the
@@ -99,8 +163,10 @@ export function WorkQuestionPanel({
     );
   }
   if (err !== null || !data?.record || !data.identity) {
-    // Nothing to read and nothing to fall back on: render nothing, exactly as before.
-    if (err === null && !fallbackQuestion?.question) return null;
+    // Nothing to read and nothing to fall back on: render nothing — except the restate offer, if
+    // the record itself DID arrive and only the identity did not. A person who can still see the
+    // Work's admitted basis can still say the instruction was wrong.
+    if (err === null && !fallbackQuestion?.question) return restate;
     // THE DOOR COULD NOT BE READ, or admitted nothing to this caller. The question does not
     // disappear from the page when that happens: the calling surface's own row read is rendered
     // here instead, which is where the question text now lives on B3.
@@ -115,6 +181,7 @@ export function WorkQuestionPanel({
           <p className="text-xs text-secondary-ink">{fallbackQuestion.context}</p>
         ) : null}
         {err !== null ? <StateBanner tone="warning" silent={silent}>{t("loadFailed")}</StateBanner> : null}
+        {restate}
       </div>
     );
   }
@@ -131,6 +198,14 @@ export function WorkQuestionPanel({
         onLeavePending={onLeavePending}
         announce={announce}
       />
+      {/* #839 — AND THE OTHER ANSWER, matching `work-detail.tsx`'s own placement of this exact
+          sibling beside its copy of this form. Gated on the WORK's own status (not the question's):
+          B3 offers restate for as long as the Work is `awaiting_input`, whatever this particular
+          question round's own state is, and this mirrors that rather than tying restate to one
+          question's lifecycle. `basis` is the presence check — a record read from a database below
+          the 0265 frontier carries no such key and renders nothing here, honestly. Built above, so
+          the three arms of this component cannot drift into three different offers. */}
+      {restate}
       {/* THE ROUTE TO THE WORK, built from the HYDRATED record rather than from whatever the
           calling surface happened to have. Offered only where this panel is NOT already on the
           Work's own page (`questionId` addressing means the caller knew the question, not the

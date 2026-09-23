@@ -36,6 +36,8 @@ import {
   roleQuery, rootQuery, setCapacity, supportCase, supportQueue, undecidedRegistration, insertUser,
   forceOpenedAt, forceStatus, intentState, intentsOf, openIntent, openedCheckout, paymentsFor,
   stampSession, EVENT, deliver, gateApplicantNames, resolveApplicantNames, stripeSessionId,
+  SUPPORT_EVENT, SUPPORT_EVENT_KIND, assertSupportTimelineCohortPresent, dbNow, eventCountsSince,
+  firmActivity, gateSupportTimeline, operatorFirmViewer, supportTimelineLaneReady,
 } from "./operator-support-fixtures.mjs";
 
 const QUEUE_SIG = "clara.list_operator_support_queue(boolean)";
@@ -49,6 +51,8 @@ const SHARED_SIG = "clara._operator_support_cases(boolean,text,uuid)";
 let operator = null;
 let executed = 0;
 const EXPECTED_CELLS = 19;
+/** #843 — the two timeline cells, counted separately because they ride their own frontier. */
+const EXPECTED_TIMELINE_CELLS = 2;
 
 before(async () => {
   if (!(await operatorSupportLaneReady())) return;
@@ -75,6 +79,20 @@ function cell(name, fn) {
 function nameCell(name, fn) {
   test(name, async (t) => {
     if (await gateApplicantNames(t)) return;
+    executed += 1;
+    await fn(t);
+  });
+}
+
+/** #843's cells ride a THIRD frontier — 0188's stem AND the timeline-events migration's — so a
+ *  database between the two skips them cleanly instead of reporting an absent event type as a
+ *  finding. They count toward the same vacuity control, which is why this is a wrapper rather
+ *  than a bare `test()`. `gate` is the discriminator this cell should use: the FIRST #843 cell
+ *  passes the LOUD one, so a focused run against a chain missing the migration FAILS rather than
+ *  skipping silently. */
+function timelineCell(name, fn, gate = gateSupportTimeline) {
+  test(name, async (t) => {
+    if (await gate(t)) return;
     executed += 1;
     await fn(t);
   });
@@ -1113,7 +1131,158 @@ nameCell("os.18 the name door's posture -- clara_fn_owner-owned SECURITY DEFINER
   assert.ok(!body.includes("users_visible"), "the name door does not reach clara.users_visible");
 });
 
+// ===========================================================================================
+// 8 · #843 — THE OPERATOR FIRM'S OWN TIMELINE. Every support act the console offers is readable
+//     on the timeline the operator's firm home already renders, and on no other firm's.
+//
+// THE READ IS `clara.list_activity`, not `clara.list_firm_timeline`: the 2026-09-20 correction on
+// #843 records that the latter (and its web module) retire under #998, and that #659 already
+// swapped Firm Home's "Recent activity" band onto `clara.list_activity`. Both doors page the SAME
+// `clara.firm_timeline_visible` view at the same bookkeeper floor, so only the read moved.
+// ===========================================================================================
+
+timelineCell("os.20 every support act the console offers is readable on the OPERATOR firm's own "
+  + "timeline -- a rejection, a capacity change and a problem resolution", async () => {
+  const reg = await undecidedRegistration("os20");
+  const world = await openProblem(operator, "os20");
+  const since = await dbNow();
+
+  await rejectRegistration(operator.owner, reg.registration, "#843 os.20 out of scope");
+  await setCapacity(operator.owner,
+    { maxFirms: 4243, reason: "#843 os.20", opKey: opk("os20-cap") });
+  await resolveProblemWithKey(operator.owner, world.problem, "#843 os.20 refunded",
+    opk("os20-res"));
+
+  const page = await firmActivity(operator.owner, { since });
+  const byType = new Map(
+    page.rows.filter((r) => r.source === "event").map((r) => [r.event_type, r]));
+
+  // THE CONTROL FIRST. `firm_registration.rejected` has appended an event since 0145, so a page
+  // that cannot find IT is a broken read rather than a missing event type — without this line
+  // every assertion below could pass for the wrong reason.
+  assert.ok(byType.has(SUPPORT_EVENT.registrationRejected),
+    `os.20 control: the operator's timeline carries ${SUPPORT_EVENT.registrationRejected} `
+    + `(saw ${[...byType.keys()].join(", ") || "no event rows at all"})`);
+
+  for (const type of [SUPPORT_EVENT.registrationRejected, SUPPORT_EVENT.capacitySet,
+    SUPPORT_EVENT.problemResolved]) {
+    const row = byType.get(type);
+    assert.ok(row, `the operator's timeline carries ${type}`);
+    assert.equal(row.actor, operator.owner, `${type} is attributed to the deciding operator`);
+    assert.equal(row.client_id, null, `${type} names no client — an admission act has none`);
+    assert.ok(row.description, `${type} carries clara.event_types' own sentence`);
+    // THE KIND, AND THE DECISION IT RECORDS. `clara.list_activity`'s ladder recognises five
+    // prefixes and files everything else under `documents` — its STATED DEFAULT (0202's own
+    // `else 'documents'` arm). #843's 2026-09-20 correction asks this cell to say which the two
+    // new types take: they RIDE THE STATED DEFAULT, together with the rejection act that was
+    // already visible. The owner's #861 ruling fixes five new kinds — people (member.*/invite.*),
+    // assets, counterparties, clients (client.*/knowledge.*), firm (firm.*) — and none of them
+    // covers an admission act; `firm_registration.rejected` is not `firm.%` either, so all three
+    // stay on the default before and after that recut. A sixth kind would be new vocabulary, and
+    // vocabulary is the owner's call, not this ticket's.
+    assert.equal(row.kind, SUPPORT_EVENT_KIND,
+      `${type} lands on the door's stated default kind`);
+  }
+
+  // …AND THE TAXONOMY IS REGISTERED, read as ROOT rather than inferred from the page: an event
+  // type that is not routed at the active taxonomy version breaks the estate-wide coverage law
+  // (rig-events-structure.test.mjs §7) long after this cell stops looking.
+  const taxonomy = await rootQuery(
+    `select et.name, et.client_scoped, tt.decision
+       from clara.event_types et
+       left join clara.trigger_taxonomy tt
+         on tt.event_type = et.name and tt.version = (select version from clara.taxonomy_active)
+      where et.name = any($1) order by et.name`,
+    [[SUPPORT_EVENT.capacitySet, SUPPORT_EVENT.problemResolved]]);
+  assert.deepEqual(taxonomy.rows, [
+    { name: SUPPORT_EVENT.capacitySet, client_scoped: false, decision: "context_update" },
+    { name: SUPPORT_EVENT.problemResolved, client_scoped: false, decision: "context_update" },
+  ], "both new event types are registered firm-level and routed context_update, 0145's own choice");
+
+  // …AND NO OTHER FIRM READS ONE OF THEM. The estate admits exactly ONE operator firm
+  // (uq_firms_one_operator, 0133:274), so "a second firm's operator" is necessarily the owner of a
+  // firm that is NOT the operator firm — and that is the sharper test anyway: the wall which
+  // refuses them is `clara.firm_timeline_visible`'s own `firm_id = clara.jwt_firm()`, which is
+  // firm IDENTITY and has nothing to do with operator status, so nothing about these three rows
+  // could leak to a second operator firm that would not already leak here.
+  const outsider = await insertUser("w615", "os20-outside");
+  await ordinaryFirm(outsider, "owner");
+  const theirs = await firmActivity(outsider, { since });
+  const theirTypes = new Set(theirs.rows.map((r) => r.event_type));
+  for (const type of [SUPPORT_EVENT.registrationRejected, SUPPORT_EVENT.capacitySet,
+    SUPPORT_EVENT.problemResolved]) {
+    assert.ok(!theirTypes.has(type), `another firm's owner reads no ${type} row`);
+  }
+  // …and not by the narrower route either: no row on their page is attributed to the operator.
+  for (const row of theirs.rows) {
+    assert.notEqual(row.actor, operator.owner,
+      `another firm's page carries a row acted by the operator (${row.event_type ?? row.source})`);
+  }
+
+  // …AND A BELOW-FLOOR CALLER MEETS A REFUSAL, NOT AN EMPTY LIST — the brief's own words. A
+  // VIEWER of the operator firm is the sharpest persona for it: the right firm, one rung under
+  // `clara.list_activity`'s bookkeeper floor, so what refuses them is the floor and not the fence.
+  const viewer = await operatorFirmViewer(operator, "os20");
+  await assertRaises(CLR.authz, () => firmActivity(viewer, { since }),
+    "an operator-firm VIEWER reading the timeline");
+
+  await setCapacity(operator.owner, { maxFirms: null, reason: "#843 os.20 release" });
+}, assertSupportTimelineCohortPresent);
+
+timelineCell("os.21 a replay under the SAME op_key adds no second line to the timeline -- both "
+  + "new appends sit INSIDE the reservation, exactly where os.13 proves the audit row sits",
+async () => {
+  const world = await openProblem(operator, "os21");
+  const capKey = opk("os21-cap");
+  const resKey = opk("os21-res");
+  const since = await dbNow();
+
+  const cap = await setCapacity(operator.owner,
+    { maxFirms: 4244, reason: "#843 os.21", opKey: capKey });
+  const res = await resolveProblemWithKey(operator.owner, world.problem,
+    "#843 os.21 refunded", resKey);
+
+  // THE INSTRUMENT IS clara.domain_events READ AS ROOT, never the door about to be exercised —
+  // a COUNT rather than a presence check, because the defect this cell exists to catch (an
+  // append placed OUTSIDE the reservation) is invisible to any assertion about the first line.
+  const first = await eventCountsSince(operator.firm, since);
+  assert.equal(first.get(SUPPORT_EVENT.capacitySet), 1,
+    "the capacity change appended exactly one admission.capacity_set");
+  assert.equal(first.get(SUPPORT_EVENT.problemResolved), 1,
+    "the resolution appended exactly one stripe_event.problem_resolved");
+
+  // THE LOST-RESPONSE RETRY: the same key, the same arguments, on both doors.
+  const capReplay = await setCapacity(operator.owner,
+    { maxFirms: 4244, reason: "#843 os.21", opKey: capKey });
+  assert.deepEqual(capReplay, cap, "the capacity replay returned the ORIGINAL receipt");
+  const resReplay = await resolveProblemWithKey(operator.owner, world.problem,
+    "#843 os.21 refunded", resKey);
+  assert.deepEqual(resReplay, res, "the resolution replay returned the ORIGINAL receipt");
+
+  const after = await eventCountsSince(operator.firm, since);
+  assert.equal(after.get(SUPPORT_EVENT.capacitySet), 1,
+    "the replay appended no second admission.capacity_set");
+  assert.equal(after.get(SUPPORT_EVENT.problemResolved), 1,
+    "the replay appended no second stripe_event.problem_resolved");
+
+  // …AND THE TIMELINE ITSELF SHOWS ONE LINE EACH. The table count above is the mechanism; this is
+  // the claim the ticket actually makes, read back through the same door os.20 uses.
+  const page = await firmActivity(operator.owner, { since });
+  for (const type of [SUPPORT_EVENT.capacitySet, SUPPORT_EVENT.problemResolved]) {
+    assert.equal(page.rows.filter((r) => r.event_type === type).length, 1,
+      `the operator's timeline shows exactly one ${type} line after the replay`);
+  }
+
+  await setCapacity(operator.owner, { maxFirms: null, reason: "#843 os.21 release" });
+});
+
 test("os.VACUITY CONTROL -- every declared #615 cell executed", async (t) => {
   if (await gateOperatorSupport(t)) return;
-  assert.equal(executed, EXPECTED_CELLS, `${EXPECTED_CELLS} #615 cells executed before the control`);
+  // #843: the two timeline cells are counted ONLY when their own frontier is present, so a
+  // database pinned between 0188 and this ticket's migration reports "15 + 4 ran" rather than a
+  // false vacuity finding. (The four #776 name cells predate this shape and are still counted
+  // unconditionally — see the #843 report's follow-ups.)
+  const expected = EXPECTED_CELLS
+    + (await supportTimelineLaneReady() ? EXPECTED_TIMELINE_CELLS : 0);
+  assert.equal(executed, expected, `${expected} #615 cells executed before the control`);
 });

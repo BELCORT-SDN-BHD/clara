@@ -119,18 +119,32 @@ const REGISTRY_0057_HUMAN_FNS = [
 // default is "no role may execute anything unlisted", so cohortFailures() catches a name
 // that silently VANISHES from the catalog while its exemption lives on here.
 const REGISTRY_0057_COHORT = [...REGISTRY_0057_HUMAN_FNS];
-// 0058-0061 [Wave E lane delta]: the metric algebra + evaluator. ELEVEN names on
+// 0058-0061 [Wave E lane delta]: the metric algebra + evaluator. TEN names on
 // clara_authenticated and NOTHING anywhere else — the agent, both wake roles, clara_runtime and
 // both non-inheriting login shells gain ZERO EXECUTE across all four files, which delta's own
 // security tail asserts in-migration (its v_entrypoints loop refuses if any of them holds EXECUTE)
 // and which this roster is the second, independent instrument for.
 //
-// WHAT EACH GROUP IS, because "eleven granted verbs" is not self-explaining: four are the metric
-// definition LIFECYCLE (propose is a draft; approve carries the admin floor AND PRD §2's
+// #1003 (2026-09-20) RETIRED THE ELEVENTH. create_account_set_v1 held EXECUTE here from 0059
+// until 0271 dropped the function outright: two independently measured censuses (T9's rung-0
+// sweep and #660's re-confirmation) found zero product callers, and its capability was already
+// covered by the live agent-lane sibling (clara._agent_create_account_set_core /
+// clara.wake_create_account_set, DERIVED from this body at 0113 and standing on its own since).
+// Its name is removed from THIS array (the ten-member cohort) rather than left in it, because
+// cohortFailures() below would read it as a PARTIAL cohort — this is a single planned removal
+// from a group that otherwise still ships whole, never the whole group's own retirement. It is
+// NOT removed from ALLOWED: while a frontier below 0271 can still carry the live, granted body,
+// removing the exemption makes the grant-matrix sweep and the census's attribution roster
+// hard-FAIL instead of skip. That arm is `RETIRED_0271_HUMAN_FNS` below, with the whole
+// reasoning and its scheduled deletion beside it.
+//
+// WHAT EACH REMAINING GROUP IS, because "ten granted verbs" is not self-explaining: four are the
+// metric definition LIFECYCLE (propose is a draft; approve carries the admin floor AND PRD §2's
 // approver-≠-proposer segregation; reject and supersede are owner-floored) — every floor is
-// body-enforced, so the grant is a door, never the authority. create_account_set_v1 and
-// mint_metric_input_snapshot_v1 mint the two frozen inputs an evaluation reads. evaluate_metric_v1
-// and evaluate_fs_pack_v1 are the evaluator itself; assess_metric_cell_independent_v1 is the
+// body-enforced, so the grant is a door, never the authority. mint_metric_input_snapshot_v1
+// mints the frozen input an evaluation reads (account sets, the algebra's OTHER frozen input,
+// now mint only through the agent-lane wake door named above). evaluate_metric_v1 and
+// evaluate_fs_pack_v1 are the evaluator itself; assess_metric_cell_independent_v1 is the
 // INDEPENDENT re-check (E6), a separate frozen closure that reads only immutable facts.
 // verify_evaluator_freeze is a VERIFIER, not a writer — it is granted because a human needs to be
 // able to ask whether the deployed closure still matches its registration, and it writes nothing.
@@ -141,7 +155,7 @@ const REGISTRY_0057_COHORT = [...REGISTRY_0057_HUMAN_FNS];
 // ruling keeps evaluation authenticated-human-only; lane eta's wake wrappers reach these bodies as
 // internal ungranted calls under clara_fn_owner and never by a grant of their own.
 const METRICS_0058_HUMAN_FNS = [
-  "create_account_set_v1", "mint_metric_input_snapshot_v1",
+  "mint_metric_input_snapshot_v1",
   "propose_metric_definition", "approve_metric_definition",
   "reject_metric_definition", "supersede_metric_definition",
   "evaluate_metric_v1", "evaluate_fs_pack_v1",
@@ -155,10 +169,42 @@ const METRICS_0058_HUMAN_FNS = [
 // together across 0059/0060 and must live or die together — v2 ships in a different migration and
 // would make that cohort read PARTIAL on every pre-card-1 chain.
 const CARD1_SEAM_HUMAN_FNS = ["evaluate_metric_v2"];
-// A COHORT for the same closed-set reason as 0057's: these eleven ship together across 0059/0060
+// A COHORT for the same closed-set reason as 0057's: these ten ship together across 0059/0060
 // and must live or die together, so a name that silently vanishes while its exemption survives
-// here is a finding rather than a quiet pass.
+// here is a finding rather than a quiet pass. create_account_set_v1 is deliberately not one of
+// the ten any more (#1003 retired it alone, above) — it is removed from the cohort rather than
+// left in it to go "PARTIAL".
 const METRICS_0058_COHORT = [...METRICS_0058_HUMAN_FNS];
+// #1003 [0271] THE RETIREMENT WINDOW — the REMOVAL-SHAPED MIRROR of the bimodal cohorts the
+// additions below use (0234's, 0270's), added in the 2026-09-20 fix round for standards
+// L10-STD-02, spec S-1003-1 and adversarial ADV-L10-03.
+//
+// WHY AN ADDITION NEEDS NO ARM AND A REMOVAL DOES. Both of this file's consumers iterate the LIVE
+// catalog: `grantMatrixFailures()` below compares each live body's grants against ALLOWED, and
+// `scripts/operation-census/findings.mjs`'s `unattributed` label attributes each live PUBLIC door
+// against ALLOWED flattened. So a name ADDED to ALLOWED before its migration lands is simply never
+// reached on an earlier frontier — which is why `set_firm_document_limits` needs no condition and
+// its cohort's bimodal guard exists only for the dead-exemption check. A name REMOVED from ALLOWED
+// is the opposite: below the retiring migration's frontier the body is STILL LIVE and STILL
+// granted, so removing the exemption makes both consumers hard-FAIL rather than skip —
+// `clara_authenticated EXECUTE clara.create_account_set_v1: expected false, got true` (T17,
+// opcen.1) and an `unattributed` finding (opcen.7's own HARD label). Measured on clara_l10 inside
+// a rolled-back transaction: with the pre-0271 catalog state recreated, both fired.
+//
+// SO THE EXEMPTION STAYS WHILE THE BODY CAN STILL BE LIVE, and it is deliberately NOT a cohort:
+// `cohortFailures()` is the dead-exemption instrument, and above 0271's frontier this name is
+// SUPPOSED to be absent from the catalog while its exemption survives here — the one shape that
+// instrument reports. The retirement itself is asserted from the other side, by
+// `client-financial-pack.test.mjs`'s `p660.census.pins_unmoved` (frontier-gated on the
+// `retire_create_account_set_v1$` stem), and by 0271's own tail.
+//
+// SCHEDULED REMOVAL, not a permanent carve-out: drop this roster and its spread below once every
+// rig and every frontier leg this package runs against carries 0271 (i.e. after the riders wave-2
+// integration lands and the frontier matrix's legs are re-cut above it). F-A3 PR-3's own
+// retirements (propose_bank_rule and the twelve names beside it, TIEOUT_0040_* above) were
+// removed outright with no window because they merged long before any frontier leg could stand
+// between their creation and their drop; this one cannot, because 0271 is unmerged.
+const RETIRED_0271_HUMAN_FNS = ["create_account_set_v1"];
 // 0064 [Wave E lane theta]: the close-plan-as-document read. ONE name on
 // clara_authenticated -- the /close consumer (closeApi.ts's getClosePlan, called
 // from close/page.tsx). Originally authored with clara_agent_ro granted too (the
@@ -1267,7 +1313,7 @@ export const CHECKOUT_GATE_C6_COHORT = [...CHECKOUT_GATE_C6_HUMAN_FNS];
 // 裁-190 web reads and small doors (`0174_web_reads_and_small_doors.sql` +
 // `0175_stmt_witness_totals_and_institution_code.sql` — numbers claimed at merge prep):
 // the seven backend gaps the repair-session web lanes are blocked on, plus the statement lane's
-// institution resolver. Every one of the five human doors exists for the SAME reason: the
+// institution resolver. Every one of the four human doors exists for the SAME reason: the
 // relation that owns the fact is `force row level security` with a single clara_fn_owner policy
 // and no application-role grant, so a door is the only lawful read path and a table grant would
 // be the wrong fix.
@@ -1275,16 +1321,18 @@ export const CHECKOUT_GATE_C6_COHORT = [...CHECKOUT_GATE_C6_HUMAN_FNS];
 //     parameterised (a p_user argument would be a consent oracle on a pre-firm surface).
 //   client_egress_state          — one row per ratified typed egress purpose plus the legacy
 //     blanket consent; bookkeeper+ READ only. The four WRITE doors stay owner-floored.
-//   list_firm_timeline           — the keyset page of clara.firm_timeline_visible; bookkeeper+,
-//     matching /activity's own minimumRole and audit_log's floor.
 //   archive_chat_session         — author-only, one-way, audited; modelled on share_chat_session,
 //     the only other lawful mutation this table has.
 //   set_counterparty_identifiers — admin floor; the first and only writer of registration/tin on
 //     an EXISTING counterparty (create_counterparty's INSERT was the sole producer).
 // NO WAKE OR AGENT SIBLING FOR ANY OF THEM, and that is the design rather than an omission:
 // nothing here is an agent act. The runtime lane gains exactly two, both below.
+// list_firm_timeline RETIRED (#998, 0261): zero production callers since #659's Firm Home swap
+// onto clara.list_activity — see 0261's own header for the full census. The view it paged,
+// clara.firm_timeline_visible, is NOT retired and carries no cohort entry of its own (untyped by
+// EXECUTE grant — it is a table-privilege SELECT, not a routine).
 const WEB_READS_DOORS_HUMAN_FNS = [
-  "get_own_dpa_signature", "client_egress_state", "list_firm_timeline",
+  "get_own_dpa_signature", "client_egress_state",
   "archive_chat_session", "set_counterparty_identifiers",
 ];
 // clara_runtime ONLY, and both are underscore-free-by-intent EXCEPT _stmt_institution_code,
@@ -1361,6 +1409,21 @@ const CHECKOUT_CONVERGENCE_0186_HUMAN_FNS = [
   "get_own_checkout_intent_session",
 ];
 export const CHECKOUT_CONVERGENCE_0186_COHORT = [...CHECKOUT_CONVERGENCE_0186_HUMAN_FNS];
+
+// #843 [0263, the operator support acts on the operator firm's own timeline] — NO NEW COHORT, NO
+// NEW NAME, NO GRANT CHANGE, each MEASURED rather than assumed (0263's own §T re-reads owner /
+// SECURITY / settings / ACL after both recuts and refuses on drift).
+// `clara.set_admission_capacity` (this cohort) and `clara.resolve_stripe_event_problem`
+// (CHECKOUT_GATE_C2_HUMAN_FNS, above) are STILL the SAME two doors at their SAME signatures and
+// grant: each gains ONE `clara._append_event` call inside the reservation it already held — no
+// parameter, no new function, no widened or narrowed ACL — so no roster change is owed for
+// either name. The file's other effect is REFERENCE DATA (two `clara.event_types` rows and their
+// `clara.trigger_taxonomy` routing at the active version), which no cohort here enumerates:
+// rig-meta's rosters are about function names and the grants on them, and the estate's own
+// coverage law over the catalog lives in rig-events-structure.test.mjs §7, which this migration's
+// tail re-reads for itself. Same "wholly present or wholly absent" reasoning #840's note (below)
+// states for its own body-only recut of a different pair.
+// #843 END
 
 // #615 (0188 operator support console): the TWO reads the operator's support destination rides,
 // clara_authenticated ONLY -- no agent, wake, runtime or Stripe-webhook sibling, by the design's
@@ -1609,6 +1672,31 @@ const USER_PREFERENCES_0179_HUMAN_FNS = ["get_my_preferences", "save_my_preferen
 // audit surface, never something a model lane produces or consumes on its own.
 const ACTIVITY_FEED_0181_HUMAN_FNS = ["list_activity", "get_activity_event"];
 
+// #840 [0262, the successor Work link on a work.cancelled row] — NO NEW COHORT, NO NEW NAME, NO
+// GRANT CHANGE, each MEASURED rather than assumed (0262's own §T re-reads owner/SECURITY/settings/
+// ACL after the recut and refuses on drift). `clara.list_activity`/`clara.get_activity_event` are
+// STILL 0181's SAME two doors at their SAME signatures and grant (ACTIVITY_FEED_0181_HUMAN_FNS
+// above already covers them; 0183's own note above records the first body-only recut of these
+// names, 0262 is another one): it adds ONE additive jsonb key, `successor_work_id`, to each door's
+// return payload via `create or replace` — no parameter, no new function, no widened or narrowed
+// ACL — so no roster change is owed for either name, the same "wholly present or wholly absent"
+// reasoning 0183's own note states for this exact pair, and the same shape 0200's note (below,
+// #721) states for `clara.answer_work_question`/`clara._tf_accounting_work_immutable`.
+// #840 END
+
+// #861 [0264, the kind ladder's five new rungs] — NO NEW COHORT, NO NEW NAME, NO GRANT CHANGE,
+// each MEASURED rather than assumed (0264's own tail re-reads owner/SECURITY/settings/ACL for both
+// names after the recut and refuses on drift). `clara.list_activity`/`clara.get_activity_event`
+// are STILL 0181's SAME two doors at their SAME signatures and grant
+// (ACTIVITY_FEED_0181_HUMAN_FNS above already covers them; 0183, 0202 and 0262 each recut these
+// same bodies before). 0264 adds FIVE rungs to each door's domain-event kind ladder (member.*/
+// invite.* -> people, asset.* -> assets, counterparty.* -> counterparties, client.*/knowledge.* ->
+// clients, firm.* -> firm) and the same five values to list_activity's closed p_kinds roster — a
+// WIDENING of accepted input, no parameter, no new function, no ACL movement — so no roster change
+// is owed for either name, the same "wholly present or wholly absent" reasoning 0183's note states
+// for this exact pair and #840's note above states for the recut before this one.
+// #861 END
+
 // #629 [0180, shared Work questions] — the SHARED-QUESTION lane, one cohort for the same "wholly
 // present or wholly absent" reason 0178's list above carries.
 //
@@ -1649,6 +1737,18 @@ export const WORK_QUESTIONS_0180_COHORT = [
 // rather than merely redundant: cohortFailures() fails a HALF-present cohort, and 0198's one name is
 // present on every database from 0180 onward regardless of whether 0198 has been applied.
 // #720 END
+
+// #839 [0265, the shared question record gains the admitted basis] — NO COHORT, NO NEW NAME, NO
+// GRANT CHANGE, the same shape #720 above records. 0265 creates no function: it RECUTS
+// `clara._work_question_record` to add one key (`basis`, off `clara.accounting_work.basis`) to the
+// jsonb it already built. The name is already on WORK_QUESTIONS_0180_UNGRANTED_FNS above and STAYS
+// there — same signature `(uuid)`, same owner, same SECURITY DEFINER, same pinned search_path, same
+// "granted to nobody" ACL (0265's §T re-reads it, grantor included). `clara.get_work_question` and
+// `clara.get_work_pending_question` are not recut at all — 0265's §T pins both byte-identical to
+// their pre-images — so WORK_QUESTIONS_0180_HUMAN_FNS is untouched too. A cohort of its own would be
+// WRONG here for the same reason #720's is: cohortFailures() fails a HALF-present cohort, and 0265
+// adds no name for one to be half of.
+// #839 END
 
 // #634 [0182, optional and LATE journal evidence] — the EVIDENCE lane, its own cohort for the
 // same "wholly present or wholly absent" reason 0178's carries: folding these names into 0178's
@@ -1710,9 +1810,11 @@ export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 // present or wholly absent" reason 0178's list carries.
 //
 //   the TWO doors + the ONE helper — clara_authenticated ONLY. `list_accounting_work` and
-//   `get_accounting_work_row` are SECURITY INVOKER over three already-granted, firm-scoped
-//   sources (clara.accounting_work, clara.agent_interruptions, clara.clients) with their own
-//   inline bookkeeper floor; `_work_run_attempts` is the SECURITY DEFINER helper they need
+//   `get_accounting_work_row` are SECURITY INVOKER over already-granted, firm-scoped sources
+//   (clara.accounting_work, clara.agent_interruptions, clara.clients, clara.staff_expense_claims
+//   — since #880's claim_id/claimant_label widen, migration 0266 — and, since #905's
+//   receipt-dated window, migration 0267, clara.operation_receipts) with their own inline
+//   bookkeeper floor; `_work_run_attempts` is the SECURITY DEFINER helper they need
 //   because `clara.agent_tasks` carries NO clara_authenticated grant at all (humans read the
 //   masked `clara.agent_tasks_visible`, which does not republish `work_id`) — the SAME gap, and
 //   the same remedy, 0183 recorded for `clara.sweep_runs`. It is GRANTED and therefore
@@ -1723,6 +1825,15 @@ export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 //   `clara.save_my_preferences` is 0179's SAME name at its SAME signature and grant
 //   (USER_PREFERENCES_0179_HUMAN_FNS above already covers it; 0189 only edits its BODY), so no
 //   roster change is owed for that name.
+//
+//   #905 [0267, the receipt-dated window] — NO COHORT CHANGE, NO NEW NAME, the same "still the
+//   SAME name and ACL" shape #839/0265's own note beside 0180's cohort records. `list_accounting_
+//   work` is a DROP-and-CREATE (a new parameter cannot be added by `create or replace`, the same
+//   reason 0202/#770 gives for `list_activity`/`p_work`), but a drop-and-create of the SAME name
+//   is not a new name: 0267's own tail re-reads owner clara_fn_owner, SECURITY INVOKER and the
+//   literal ACL {clara_fn_owner, clara_authenticated} unchanged after the recut, so this roster
+//   entry already covers the widened door. `get_accounting_work_row` is untouched (0267's own
+//   tail pins it byte-identical to its 0266 pre-image), so it needs no roster change either.
 const WORK_LIST_0189_HUMAN_FNS = [
   "list_accounting_work", "get_accounting_work_row", "_work_run_attempts",
 ];
@@ -1933,6 +2044,85 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
 // ungranted ACL on every run, at every frontier, without being told it exists. 0207 changes no
 // existing name, signature or grant.
 // #779 END
+// #846 [0244, the capability registry's version high-water mark] — its own cohort, unlike 0207's,
+// and the difference is the number of names rather than a change of mind. 0207 minted ONE
+// ungranted trigger body, so a roster of one would only have asserted a name's presence that the
+// trigger's own attachment already proved. 0244 mints FOUR bodies and a relation, and
+// `cohortFailures()` fails a PARTIAL cohort — which is exactly the shape a half-applied 0244
+// would leave, and the shape packages/db/tests/README.md's "Preintegration gates" section asks a
+// new feature battery to declare beside its gate module.
+//
+//   ALL FOUR ARE UNGRANTED INTERNALS, granted to NOBODY — revoked from PUBLIC, no role grant at
+//   all. They are trigger bodies: nothing calls them by name, and the only lane that can write
+//   `clara.document_capabilities` at all is the owner/migration role (0191's ruling, which 0207's
+//   header restates). Listed here so a grant APPEARING on one fails the main sweep, and so a
+//   half-applied 0244 is reported as that rather than as a silently narrower boundary.
+//
+//   THE RELATION `clara.document_capability_version_high_water` needs NO roster entry of its own:
+//   `governedRlsFailures()`'s derive branch (b) sweeps every clara base table that is neither
+//   GOVERNED_TABLES nor RLS_EXEMPT and fails one that is not RLS-enabled AND forced, so the new
+//   table is checked on every run without being told it exists. A gated table cohort in the
+//   0037/C-2 shape buys nothing for a SINGLE table — "partial" is not a state one table can be in.
+const DOCUMENT_CAPABILITY_HIGH_WATER_0244_UNGRANTED_FNS = [
+  "_tf_document_capabilities_version_high_water", "_tf_document_capabilities_high_water_record",
+  "_tf_document_capability_high_water_monotone", "_tf_document_capabilities_version_uniform",
+];
+export const DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT = [
+  ...DOCUMENT_CAPABILITY_HIGH_WATER_0244_UNGRANTED_FNS,
+];
+//
+//   0272 (THE FIX ROUND) ADDS NO NAME TO THIS ROSTER, deliberately. It mints no function: it arms
+//   0003's `clara._tf_no_truncate` on the mark ledger, arms the high-water body above a second
+//   time as a key-change BEFORE UPDATE trigger, recuts
+//   `_tf_document_capability_high_water_monotone` in place and re-issues two comments.
+//   `cohortFailures()` rosters NAMES, and every name 0272 touches is already listed here or in
+//   0003's own closure -- so a cohort entry would be a duplicate, not a wider proof. The trigger
+//   ATTACHMENTS 0272 adds are proven where attachments are proven: the migration's own tail and
+//   `document-capability-high-water.test.mjs`'s cohort gate, which reads all five triggers.
+// #846 END
+// #782 [0245, invoice line items become an accepted limitation] — COMMENT-ONLY, deliberately, and
+// the comment IS the cohort's content, the same reason #656's 0228 entry above carries none.
+//
+//   0245_invoice_line_items_accepted_limitation.sql INSTALLS NO FUNCTION, NO TABLE, NO TRIGGER
+//   AND RECUTS NONE. Its whole content is a republication of `clara.document_capabilities`: an
+//   UPDATE that moves the 28 invoice-family rows' `limits.invoice_line_items` from `planned` to
+//   `accepted_limitation` (with a sibling `invoice_line_items_reason`), then the registry-wide
+//   raise every prior republication has used (0228's precedent) — `registry_version` 2 -> 3,
+//   never DELETE-then-INSERT (#846). So there is no granted name to roster and no ungranted
+//   closure to pin: a cohort array would be empty and `cohortFailures` would compare it against
+//   nothing. The file's own tail re-hashes the FIVE #779/#846 wall bodies its raise rides
+//   (`_tf_document_capabilities_version_monotone`, `_tf_document_capabilities_version_high_water`,
+//   `_tf_document_capabilities_high_water_record`, `_tf_document_capability_high_water_monotone`,
+//   `_tf_document_capabilities_version_uniform`) at their measured pre-image shas and raises
+//   CLR10 if any moved, which is the same claim from the migration's side.
+//
+//   THE HIGH-WATER MARK NEEDS NO NEW ROSTER ENTRY EITHER: 0245's raise runs through the same
+//   AFTER INSERT OR UPDATE writer #846 installed, so every pair's mark rises to 3 in the same
+//   statement — proved in the migration's own tail (§C.5) and in
+//   `packages/db/tests/document-capability-high-water.test.mjs`'s rollback-hygiene cell, never by
+//   a new name here.
+// #782 END
+// #988 [0246, business_operation's fifth level, proposal_only] — COMMENT-ONLY, deliberately, and
+// for the SAME reason #782's entry above carries none.
+//
+//   0246_business_operation_proposal_only.sql INSTALLS NO FUNCTION, NO TABLE AND NO TRIGGER, AND
+//   RECUTS NONE. Its whole content is DROP + ADD on `document_capabilities_business_operation_
+//   check` (the SAME auto-generated name, widened from four values to five) plus a column comment
+//   update — no row of `clara.document_capabilities` is inserted, deleted, or has any column
+//   other than the constraint's own definition changed. So there is no granted name to roster and
+//   no ungranted closure to pin: a cohort array would be empty and `cohortFailures` would compare
+//   it against nothing.
+//
+//   THE FRONTIER IS READ FROM THE CHECK'S OWN DEFINITION, never from a migration number:
+//   `document-capability-registry.test.mjs`'s `proposalLevelApplied()` greps
+//   `pg_get_constraintdef` for the `proposal_only` token, the same law `monotoneWallApplied()`
+//   already follows for 0207's trigger.
+//
+//   REGISTRY_VERSION DOES NOT MOVE: #988's owner ruling reclassifies no row onto the new level
+//   this round (`prior_gl` stays `stored_only`, #983/#1012), and a vocabulary widening that
+//   republishes no row's content does not raise the per-row publication mark — the migration's
+//   own tail proves the registry is still uniformly at 3 (0245's own publish) afterward.
+// #988 END
 // #639 [0216, fixed-asset acquisition] — the ACQUISITION lane, its own cohort for the same
 // "wholly present or wholly absent" reason every roster above carries: folding these names into
 // 0041's FA cohort would red every database between the two frontiers, and `cohortFailures()`
@@ -1978,6 +2168,57 @@ export const FA_DEPRECIATION_0227_COHORT = [
   ...FA_DEPRECIATION_0227_HUMAN_FNS, ...FA_DEPRECIATION_0227_RUNTIME_FNS,
   ...FA_DEPRECIATION_0227_UNGRANTED_FNS,
 ];
+
+// #973 [0248, fold preview_depreciation_run's duplicated leg-pairing aggregation into
+// clara._fa_run_period_core] — its own cohort for the same "wholly present or wholly absent"
+// reason FA_DEPRECIATION_0227_COHORT carries: folding this ONE name into 0227's own cohort would
+// red every database between the two frontiers, and `cohortFailures()` fails a PARTIAL cohort by
+// design. `_fa_depreciation_leg_pairing` is UNGRANTED like `_fa_assert_period_open` above: the
+// main sweep fails the moment a grant appears on it, this cohort fails if it ever DISAPPEARS.
+const FA_DEPRECIATION_LEG_FOLD_0248_UNGRANTED_FNS = ["_fa_depreciation_leg_pairing"];
+export const FA_DEPRECIATION_LEG_FOLD_0248_COHORT = [
+  ...FA_DEPRECIATION_LEG_FOLD_0248_UNGRANTED_FNS,
+];
+
+// #976 [0249, fold the fixed-asset particulars completion wall shared by
+// complete_fixed_asset_particulars and _fa_complete_particulars_core] — its own cohort for the
+// same "wholly present or wholly absent" reason FA_DEPRECIATION_LEG_FOLD_0248_COHORT carries:
+// folding this ONE name into 0216's own cohort would red every database between the two
+// frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+// Both names are UNGRANTED like `_fa_depreciation_leg_pairing` above: the main sweep fails the
+// moment a grant appears on either, this cohort fails if either ever DISAPPEARS. TWO names and
+// not one because the wall has two halves that belong at two different points in a door -- the
+// payload-only change-class guard runs BEFORE `clara._reserve_op` (0227's own anchor), the rest
+// after the row lock -- and 0249 mints both in the same statement pair, so they are wholly
+// present or wholly absent together, which is exactly what `cohortFailures()` wants.
+const FA_PARTICULARS_COMPLETION_FOLD_0249_UNGRANTED_FNS = [
+  "_fa_assert_completion_not_a_change", "_fa_assert_particulars_completable",
+];
+export const FA_PARTICULARS_COMPLETION_FOLD_0249_COHORT = [
+  ...FA_PARTICULARS_COMPLETION_FOLD_0249_UNGRANTED_FNS,
+];
+
+// #977 [0250, what counts as a person's instruction for an authority_ref] — its own cohort, for
+// the same "wholly present or wholly absent" reason the two above carry. `_authority_ref_refusal`
+// is the ONE definition clara.sign_depreciation_authority and clara.create_accounting_plan both
+// read, and it is UNGRANTED like its siblings: the main sweep fails the moment a grant appears on
+// it, this cohort fails if it ever DISAPPEARS.
+const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_UNGRANTED_FNS = ["_authority_ref_refusal"];
+export const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT = [
+  ...AUTHORITY_REF_HUMAN_INSTRUCTION_0250_UNGRANTED_FNS,
+];
+
+// #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
+// was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
+// the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:
+// it RECUTS `clara.get_depreciation_authority` to add one fallback select and one conditional
+// field merge, same signature `(uuid)`, same owner, same SECURITY DEFINER, same STABLE
+// volatility, same pinned search_path, same EXECUTE to clara_authenticated and to nobody else
+// (0251's own tail T.5/T.5b/T.5c re-reads exactly that off the catalog). A cohort of its own
+// would be WRONG here rather than merely redundant: cohortFailures() fails a HALF-present cohort,
+// and `get_depreciation_authority` is present on every database from 0041 onward regardless of
+// whether 0251 has been applied.
+// #979 END
 
 // #638 [0221, staff expense claims / employee payables / advance settlement] — its own cohort for
 // the same "wholly present or wholly absent" reason 0178's and 0194's carry.
@@ -2282,6 +2523,39 @@ export const DOCUMENT_SOURCE_REVISION_0217_COHORT = [
 // a MISSING-table failure that says nothing about RLS.
 export const DOCUMENT_SOURCE_REVISION_0217_TABLES = ["document_fact_revisions"];
 // #646 END
+
+// #885 [0268, a source correction cancels and re-admits the Work parked on a question about the
+// corrected document] — its OWN cohort, one frontier above 0217's, for the same "wholly present or
+// wholly absent" reason that roster carries: folding these names into 0217's would red every
+// database between the two frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   THE WHOLE COHORT IS UNGRANTED, and that is the boundary claim. All three bodies are reachable
+//   ONLY from inside `clara.revise_document_fact`, which is itself the one human door; a grant on
+//   any of them would be a second, unwalled way into the Work lane from the document lane. Listed
+//   here so an accidental grant FAILS instead of passing quietly, and so a half-applied 0268 is
+//   reported as one rather than as a silently narrower rule.
+//
+//   NOT LISTED, deliberately: `clara.revise_document_fact` and `clara.answer_work_question`. 0268
+//   recuts both BODIES and touches neither NAME, signature nor grant — the first is already on
+//   DOCUMENT_SOURCE_REVISION_0217_HUMAN_FNS and the second on WORK_QUESTIONS_0180_HUMAN_FNS — and a
+//   second listing of a name that exists at an EARLIER frontier would make this cohort resolve on
+//   databases 0268 has not touched, which is exactly the partial-cohort condition the gate exists
+//   to catch (#721's own block states the same rule for the same reason).
+//   THE FOURTH NAME (second fix round): `_question_source_corrected` answers "was this question
+//   asked against a reading that has since moved?" for `clara.answer_work_question` and for the
+//   shared question record. Ungranted for the same reason as the other three -- it reads
+//   clara.document_fact_revisions joined to clara.accounting_work across the Work lane, and the
+//   only callers that should ever ask it are SECURITY DEFINER doors that already hold a firm.
+//   THE FIFTH NAME (third fix round): `_fact_value_changed` is the ONE notion of "this revision
+//   changed the recorded value" that clara.revise_document_fact refuses a no-op with and
+//   clara._question_source_corrected reads a revision row through. Ungranted like its siblings: it
+//   is a predicate over document facts that only those two SECURITY DEFINER bodies should ask.
+const WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS = [
+  "_source_corrected_work", "_lock_source_corrected_work", "_supersede_source_corrected_work",
+  "_question_source_corrected", "_fact_value_changed",
+];
+export const WORK_SOURCE_CORRECTION_0268_COHORT = [...WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS];
+// #885 END
 
 // #648 [0218, firm setup] — the FIRM's own onboarding plan gains human doors. Its OWN cohort for
 // the same "wholly present or wholly absent" reason 0192's carries: folding these names into an
@@ -2590,6 +2864,85 @@ const LEGAL_ENFORCEMENT_0234_HUMAN_FNS = [
 ];
 export const LEGAL_ENFORCEMENT_0234_COHORT = [...LEGAL_ENFORCEMENT_0234_HUMAN_FNS];
 // #1008 END
+// #960 [0270, the firm's OWN document-processing caps] — its own cohort, bimodal like 0234's:
+// wholly present once 0270 applies, wholly absent before it, because the `db-slice-frontiers`
+// matrix runs this package against earlier frontiers.
+//
+//   ONE NEW HUMAN DOOR, clara_authenticated ONLY, floored on the FIRM's OWN admin rank in its own
+//   body (`clara._human_ctx(clara.role_rank('admin'))`, so an owner passes too) — the owner's
+//   2026-09-20 ruling on #960 is option C: the firm sets its own four caps, with no operator gate.
+//   `set_firm_document_limits(int,int,int,int,text)` is the FIRST human writer
+//   `clara.firm_document_limits` has ever had; it is op_receipts-idempotent and leaves a
+//   `clara._audit` row naming the before and after of every changed cap. clara_runtime, both
+//   agent read roles and all four wake lanes gain ZERO: the body is `_human_ctx`-gated, so a lane
+//   carrying no JWT claims could not execute it even if it held the grant.
+//
+//   0270's ONE internal, `clara._firm_document_limit_ceiling`, is granted to NOBODY — it is the
+//   estate's own ceiling above whatever a firm sets, reached only from the door's DEFINER body,
+//   and is therefore expected-false for every role in the live sweep rather than listed here.
+//   That is the same disposition 0234's `clara._legal_enforcement_mode` carries.
+const FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS = ["set_firm_document_limits"];
+export const FIRM_DOCUMENT_LIMITS_0270_COHORT = [...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS];
+// #960 END
+
+// #1014 [0235, the document binding claim] — ONE relation and NO function name: 0235 recuts
+// clara._lock_document_binding in place (a `create or replace`, so no catalog entry enters or
+// leaves) and mints clara.document_binding_claims, the serialization token that makes a blocked
+// SERIALIZABLE opening approval lose instead of committing on its pre-block snapshot. There is
+// therefore no EXECUTE cohort to declare — the grant matrix is unchanged — only a TABLE cohort,
+// gated exactly as DOCUMENT_SOURCE_REVISION_0217_TABLES is: GOVERNED_TABLES' (a) branch demands
+// every entry EXIST, so listing it unconditionally would turn every pre-0235 database into a
+// MISSING-table failure that says nothing about RLS. The relation is written by that one definer
+// and read by NOBODY, so it holds no grant for any application role — the (b) derive branch
+// below still asserts its forced RLS either way, and 0235's own tail asserts the empty ACL.
+export const OPENING_BINDING_CLAIM_0235_TABLES = ["document_binding_claims"];
+// #1014 END
+
+// #984 [0239, the opening lane becomes a Work] — NO cohort is owed here, and that is a measured
+// disposition rather than an omission. 0239 mints exactly one catalog name,
+// `clara._admit_opening_work`, and revokes EXECUTE from PUBLIC on it: it is an INTERNAL, reachable
+// only from clara.approve_opening_seed and clara.approve_opening_correction (both already recut in
+// place, so their ACLs did not move — `create or replace` preserves them, and 0239's tail asserts
+// each one). An internal granted to NOBODY is expected-false for every role in the live sweep
+// rather than listed here — the same disposition 0234's `clara._legal_enforcement_mode`, 0186's
+// `clara._admission_capacity_state` and 0188's `clara._operator_support_cases` carry. 0239 mints no
+// relation either, so there is no TABLE cohort to gate the way 0235's and 0217's are. What it DOES
+// move is four CHECK constraints and one column's nullability, none of which this file describes.
+// #984 END
+
+// #912 [0243, the role at the instant of a governed act] — its own cohort, bimodal like 0234's:
+// wholly present once 0243 applies, wholly absent before it, because the `db-slice-frontiers`
+// matrix runs this package against earlier frontiers.
+//
+//   ONE new body, and it is a TRIGGER function: clara._tf_audit_actor_role stamps
+//   `clara.audit_log.actor_role` BEFORE INSERT. It is granted to NOBODY (a trigger body is
+//   reached by the trigger, never by a caller), so it is expected-false for every role in the
+//   live sweep; this cohort is what fails if the NAME ever disappears, the other half of the
+//   0020 contract. No door is recut and no grant moves: clara._audit keeps its frozen 0004 body
+//   and its signature, which is exactly how all 304 callers inherit the column.
+//
+//   clara.list_firm_knowledge, which 0243 recuts, keeps its existing 0220 cohort membership
+//   (`create or replace` preserves the ACL, and 0243's tail asserts the body and the ACL).
+const AUDIT_ACTOR_ROLE_0243_UNGRANTED_FNS = ["_tf_audit_actor_role"];
+export const AUDIT_ACTOR_ROLE_0243_COHORT = [...AUDIT_ACTOR_ROLE_0243_UNGRANTED_FNS];
+// #912 END
+
+// #935 [0259, firm setup 2/2] — its own cohort for the same "wholly present or wholly absent"
+// reason 0218's/0257's/0258's carry: folding this name into an older roster would red every
+// database between the two frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   THE ONE NEW GRANTED NAME: `dismiss_firm_setup_tip`, the narrow door that acknowledges or skips
+//   an education tip — clara_authenticated ONLY, admin-floored in its own body through
+//   `clara._human_ctx` and then re-floored against the catalogue row's own `min_role`, exactly the
+//   0218 §E posture. clara_runtime, clara_agent_ro and both wake roles gain ZERO — the same
+//   `_human_ctx`-gated-verb-on-a-JWT-less-role "dark grant" reason 0192 §H and 0218 §G already
+//   state, and 0259's own tail asserts the same emptiness in-migration. `answer_firm_setup_item`
+//   and `defer_firm_setup_item` are RECUT (a new education guard) but mint no new name and keep
+//   their existing FIRM_SETUP_0218_HUMAN_FNS membership above — their grants did not move
+//   (`create or replace` preserves the ACL, and 0259's own tail asserts it byte-for-byte).
+const FIRM_SETUP_TIP_0259_HUMAN_FNS = ["dismiss_firm_setup_tip"];
+export const FIRM_SETUP_TIP_0259_COHORT = [...FIRM_SETUP_TIP_0259_HUMAN_FNS];
+// #935 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -2649,6 +3002,10 @@ export const ALLOWED = {
     // lifecycle verbs, the two frozen-input minters, the evaluator pair, the independent E6
     // re-check, the A30b attempt-receipt writer and the freeze verifier — clara_authenticated
     // ONLY, every floor body-enforced; agent/wake/runtime gain ZERO (see the block above)
+    ...RETIRED_0271_HUMAN_FNS, // #1003 [0271] the RETIREMENT WINDOW's own arm —
+    // create_account_set_v1, held here only while a frontier below 0271 can still carry the live,
+    // granted body. See the block where the roster is declared for why a removal needs an arm and
+    // an addition does not, and for when this line is deleted.
     ...CARD1_SEAM_HUMAN_FNS, // [Wave-F Track A, F-A5b card 1] clara.evaluate_metric_v2, on
     // evaluate_metric_v1's own terms — clara_authenticated ONLY; agent/wake/runtime gain ZERO
     ...CLOSE_PLAN_0064_HUMAN_FNS, // 0064 [Wave E lane θ] the close-plan-as-document read —
@@ -2841,6 +3198,14 @@ export const ALLOWED = {
     // agent read roles and all four wake lanes gain ZERO, and the ungranted predicate
     // clara._legal_enforcement_mode holds no role at all.
     ...LEGAL_ENFORCEMENT_0234_HUMAN_FNS,
+    // #935 [0259] the education-tip dismissal door — see the block above. clara_authenticated
+    // ONLY; clara_runtime, both agent read roles and all four wake lanes gain ZERO.
+    ...FIRM_SETUP_TIP_0259_HUMAN_FNS,
+    // #960 [0270] the firm's own four document-processing caps — the firm-admin write door, see
+    // the block above. clara_authenticated ONLY; clara_runtime, both agent read roles and all
+    // four wake lanes gain ZERO, and the ungranted ceiling clara._firm_document_limit_ceiling
+    // holds no role at all.
+    ...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3310,6 +3675,21 @@ export async function grantMatrixFailures() {
   if (depHistoryLive.length !== 0) {
     failures.push(...cohortFailures("#651 0227 depreciation-history lane", FA_DEPRECIATION_0227_COHORT, liveNames));
   }
+  // #973 [0248] — bimodal like 0227's: wholly present once 0248 applies, wholly absent before it.
+  const legFoldLive = FA_DEPRECIATION_LEG_FOLD_0248_COHORT.filter((n) => liveNames.has(n));
+  if (legFoldLive.length !== 0) {
+    failures.push(...cohortFailures("#973 0248 depreciation leg-pairing fold", FA_DEPRECIATION_LEG_FOLD_0248_COHORT, liveNames));
+  }
+  // #976 [0249] — bimodal like 0248's: wholly present once 0249 applies, wholly absent before it.
+  const particularsFoldLive = FA_PARTICULARS_COMPLETION_FOLD_0249_COHORT.filter((n) => liveNames.has(n));
+  if (particularsFoldLive.length !== 0) {
+    failures.push(...cohortFailures("#976 0249 fixed-asset particulars completion wall fold", FA_PARTICULARS_COMPLETION_FOLD_0249_COHORT, liveNames));
+  }
+  // #977 [0250] — bimodal like 0249's: wholly present once 0250 applies, wholly absent before it.
+  const authorityRefRuleLive = AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT.filter((n) => liveNames.has(n));
+  if (authorityRefRuleLive.length !== 0) {
+    failures.push(...cohortFailures("#977 0250 authority-ref human-instruction rule", AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT, liveNames));
+  }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
   const accrualLive = ACCRUAL_ADJUSTMENTS_0222_COHORT.filter((n) => liveNames.has(n));
@@ -3330,6 +3710,25 @@ export async function grantMatrixFailures() {
   if (enforcementLive.length !== 0) {
     failures.push(...cohortFailures("#1008 0234 platform legal enforcement mode",
       LEGAL_ENFORCEMENT_0234_COHORT, liveNames));
+  }
+  // #912 [0243] — bimodal, same reason as 0234's above.
+  const actorRoleLive = AUDIT_ACTOR_ROLE_0243_COHORT.filter((n) => liveNames.has(n));
+  if (actorRoleLive.length !== 0) {
+    failures.push(...cohortFailures("#912 0243 audit actor-role stamp",
+      AUDIT_ACTOR_ROLE_0243_COHORT, liveNames));
+  }
+  // #846 [0244] — bimodal for the same reason: wholly present once 0244 applies, wholly absent
+  // before it, because the db-slice-frontiers matrix runs this package against earlier frontiers.
+  const highWaterLive = DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT.filter((n) => liveNames.has(n));
+  if (highWaterLive.length !== 0) {
+    failures.push(...cohortFailures("#846 0244 capability registry version high-water mark",
+      DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT, liveNames));
+  }
+  // #960 [0270] — bimodal, same reasoning as 0234's above.
+  const capWriterLive = FIRM_DOCUMENT_LIMITS_0270_COHORT.filter((n) => liveNames.has(n));
+  if (capWriterLive.length !== 0) {
+    failures.push(...cohortFailures("#960 0270 firm document-limits writer",
+      FIRM_DOCUMENT_LIMITS_0270_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
@@ -3359,6 +3758,13 @@ export async function grantMatrixFailures() {
   if (sourceRevisionLive.length !== 0) {
     failures.push(...cohortFailures("#646 0217 document source-revision lane", DOCUMENT_SOURCE_REVISION_0217_COHORT, liveNames));
   }
+  // #885 [0268] — the source-correction supersession closure. Bimodal for 0217's reason: wholly
+  // present once 0268 applies, wholly absent before it.
+  const sourceCorrectionLive = WORK_SOURCE_CORRECTION_0268_COHORT.filter((n) => liveNames.has(n));
+  if (sourceCorrectionLive.length !== 0) {
+    failures.push(...cohortFailures("#885 0268 source-correction supersession closure", WORK_SOURCE_CORRECTION_0268_COHORT, liveNames));
+  }
+  // #885 END
   // #718 END
   // #776
   failures.push(...cohortFailures("#776 0206 operator applicant-name read",
@@ -3448,6 +3854,7 @@ export async function grantMatrixFailures() {
     );
   }
   failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
+  failures.push(...cohortFailures("#935 0259 firm setup education tip dismissal", FIRM_SETUP_TIP_0259_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-6 apps/web read doors", CHECKOUT_GATE_C6_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));
@@ -3545,10 +3952,14 @@ export async function governedRlsFailures() {
     );
   }
   const sourceRevisionTablesLive = DOCUMENT_SOURCE_REVISION_0217_TABLES.filter((t) => present.has(t));
+  // #1014 [0235] — present once 0235 applies, absent before it; the same gating as 0217's.
+  const bindingClaimTablesLive = OPENING_BINDING_CLAIM_0235_TABLES.filter((t) => present.has(t));
   const roster = [
     ...GOVERNED_TABLES,
     ...(sourceRevisionTablesLive.length === DOCUMENT_SOURCE_REVISION_0217_TABLES.length
       ? DOCUMENT_SOURCE_REVISION_0217_TABLES : []),
+    ...(bindingClaimTablesLive.length === OPENING_BINDING_CLAIM_0235_TABLES.length
+      ? OPENING_BINDING_CLAIM_0235_TABLES : []),
     ...(cohortLive.length === SUBLEDGER_0037_TABLES.length ? SUBLEDGER_0037_TABLES : []),
     ...(c2Live.length === CHECKOUT_GATE_C2_TABLES.length ? CHECKOUT_GATE_C2_TABLES : []),
     ...(c3Live.length === CHECKOUT_GATE_C3_TABLES.length ? CHECKOUT_GATE_C3_TABLES : []),
