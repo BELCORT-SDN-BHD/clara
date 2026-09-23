@@ -872,3 +872,524 @@ begin
 end
 $w948_freeze$;
 set local search_path = clara, pg_temp;
+
+-- =====================================================================================
+-- §E  THE FACTS ROUTER STOPS TERMINATING AN AGREEMENT CONTRACT AS A SKIPPED KIND.
+--
+--     WHAT WAS THERE BEFORE. clara._enqueue_invoice_facts_core's pdf/image branch routed
+--     invoice-shaped kinds to `llm_witness`, a bank statement to `statement_facts` and (since
+--     0296) a payroll summary to `payroll_facts`, and sent EVERYTHING ELSE — an agreement
+--     contract included — to a terminal `failed/skipped_kind` receipt. The capability registry's
+--     `stored_only` verdict for the pair is DERIVED from exactly that fall-through and says so in
+--     words, which is why §G's re-derivation and this arm are one change and not two.
+--
+--     WHY ITS OWN LANE AND NOT llm_witness OR payroll_facts. Every facts lane in this estate is
+--     claimed BY LANE ALONE: the workflow that owns a lane reads every task on it with its own
+--     prompts. A contract pair parked on `llm_witness` would be read with INVOICE prompts and
+--     resolved by clara._invoice_fact_state as an invoice corroboration; on `payroll_facts` it
+--     would be read with PAYSLIP prompts. 0098 recorded the same reasoning when it declined to
+--     move the bank statement onto the witness lane, and 0296 when it declined to move the
+--     payslip. A new lane costs five CHECK widenings and five surgical recuts; borrowing one
+--     costs correctness.
+--
+--     THE FIVE LIVE BODIES RECUT BELOW, and why each one must be:
+--       1. clara._enqueue_invoice_facts_core — the routing arm itself, the engine-kind map, the
+--          enqueue-time typed-consent gate and the attempt-cap emit.
+--       2. clara.enqueue_invoice_facts — the wrapper's lane-aware terminal emit: without this,
+--          every agreement refusal would reach the spine as a PHANTOM INVOICE FAILURE and wake
+--          the autodraft consumer for a document no invoice draft will ever be made from.
+--       3. clara._tf_processing_task_update — the transition wall: the consent gate FLIPS an
+--          in-flight queued task in place, and that transition is lane-scoped per verdict.
+--       4. clara.claim_document_processing_task — the kill switch, the per-lane attempt cap, the
+--          lane-true cap emit and the per-lane concurrency window. A lane no worker can claim is
+--          a dark lane.
+--       5. clara.release_held_document_tasks — the release sweep. A lane that can be HELD and
+--          cannot be RELEASED is a permanent stall, and 0038's own comment says this list must
+--          track the claim body's kill-switch list EXACTLY.
+--
+--     SPLICED, NEVER RE-TYPED (the 0017:1553 / 0093 / 0260 / 0297 idiom). Each block below reads
+--     the INSTALLED definition off the catalog, asserts each anchor occurs EXACTLY ONCE, replaces
+--     only at those anchors and executes the result. Everything in those five bodies that this
+--     file does not name is preserved BY CONSTRUCTION rather than by a careful human copy — which
+--     matters more here than anywhere else in the file, because three of the five were recut by
+--     #945 eleven days of chain-order ago and re-typing them from 0296's text would silently
+--     revert whatever landed since. Every anchor and every replacement is ONE dollar-quoted
+--     literal, never a `||` chain with chr(): apps/web/test/sqlFunctionCensus.ts proves what a
+--     migration's dynamic `execute` installs by RECONSTRUCTING the statement from its parts and
+--     cannot evaluate chr() (0297 §G's own measured note).
+--
+--     EVERY EDIT IS A LANE-LIST WIDENING OR A NEW BRANCH. No existing kind's route, refusal,
+--     event, cap or window moves, and each postcheck re-reads the COMMITTED catalog to prove the
+--     untouched regions survived.
+--
+--     REDO-SAFE: every constraint is dropped-if-exists before it is added, every insert is
+--     `on conflict do nothing`, and every splice detects its own marker in the installed body and
+--     no-ops on a redo.
+-- =====================================================================================
+set role clara_fn_owner;
+
+-- E1 · THE FIVE CHECK CONSTRAINTS THAT MAKE THE LANE EXIST AT ALL.
+--
+--      A CHECK is what turns "the router may write this" into "nothing may write anything else".
+--      Each is dropped and re-added rather than altered, because a CHECK cannot be altered in
+--      place and because an unconditional drop-then-add is what makes a redo install the clause
+--      this file's CURRENT text states rather than a stale one.
+
+alter table clara.document_processing_tasks drop constraint if exists ck_processing_task_lane_f_a1;
+alter table clara.document_processing_tasks add constraint ck_processing_task_lane_f_a1
+  check (lane = any (array['ocr','structured_parse','none','invoice_facts','local_facts',
+    'classify','statement_facts','statement_parse','llm_witness','payroll_facts',
+    'contract_facts']));
+
+alter table clara.document_processing_tasks drop constraint if exists ck_processing_task_lane_engine_f_a1_stmt;
+alter table clara.document_processing_tasks add constraint ck_processing_task_lane_engine_f_a1_stmt
+  check (engine_id like 'clara-fixture:%'
+     or (lane = any (array['ocr','invoice_facts']) and engine_id like 'azure-%')
+     or (lane = 'statement_facts' and (engine_id like 'azure-%' or engine_id like 'llm-%'))
+     or (lane = any (array['structured_parse','local_facts','none']) and engine_id like 'clara-%')
+     or (lane = 'classify' and engine_id like 'clara-classify-%')
+     or (lane = 'statement_parse' and engine_id like 'clara-statement-%')
+     or (lane = 'llm_witness' and engine_id like 'llm-%')
+     or (lane = 'payroll_facts' and engine_id like 'llm-%')
+     -- #948: the contract lane is a MODEL lane and may carry nothing but a model engine identity.
+     or (lane = 'contract_facts' and engine_id like 'llm-%'));
+
+alter table clara.document_processing_tasks drop constraint if exists ck_processing_task_error_code_f_a1;
+alter table clara.document_processing_tasks add constraint ck_processing_task_error_code_f_a1
+  check (error_code is null or error_code = any (array['engine_error','timeout','engine_lost',
+    'storage_error','corrupt','encrypted','bad_type','limit','budget','attempt_cap','internal',
+    'skipped_kind','header_unreadable','totals_unreadable','readers_disagree','chain_broken',
+    'continuity_mismatch','duplicate_period','overlapping_period','non_myr_statement',
+    'account_unregistered','account_inactive','statement_multi_client','period_invalid',
+    'line_date_out_of_period','consent_inactive','witness_multi_client','witness_consent_inactive',
+    'wait_exhausted','document_processing_multi_client','document_processing_consent_inactive',
+    'firm_narrow_consent_inactive','payroll_multi_client','payroll_consent_inactive',
+    -- #948: the contract lane's own two gate verdicts. Its OWN codes rather than a reuse of
+    -- another family's literals, because a refusal a person reads must say which read was
+    -- refused.
+    'agreement_multi_client','agreement_consent_inactive']));
+
+alter table clara.document_processing_tasks drop constraint if exists ck_processing_task_binding_f_a1;
+alter table clara.document_processing_tasks add constraint ck_processing_task_binding_f_a1
+  check ((status = any (array['queued','held_egress']) and workflow_run_id is null and started_at is null)
+      or (status = any (array['running','done']) and workflow_run_id is not null and started_at is not null)
+      or (status = 'failed' and ((workflow_run_id is not null and started_at is not null)
+                              or (workflow_run_id is null and started_at is null
+                                  and error_code = any (array['budget','attempt_cap','skipped_kind',
+                                    'consent_inactive','statement_multi_client','witness_multi_client',
+                                    'witness_consent_inactive','document_processing_multi_client',
+                                    'document_processing_consent_inactive','firm_narrow_consent_inactive',
+                                    'payroll_multi_client','payroll_consent_inactive',
+                                    -- #948: both contract gate verdicts are NEVER-CLAIMED terminal
+                                    -- receipts, exactly like every other enqueue-time gate code.
+                                    'agreement_multi_client','agreement_consent_inactive'])))));
+
+alter table clara.document_extractions drop constraint if exists ck_document_extractions_engine_kind_f_a1;
+alter table clara.document_extractions add constraint ck_document_extractions_engine_kind_f_a1
+  check (engine_kind = any (array['ocr','structured_parse','invoice_facts','doc_classify',
+    'statement_facts','llm_text_facts','llm_vision_facts',
+    'payroll_text_facts','payroll_vision_facts',
+    -- #948: the agreement pair's two kinds. Their OWN kinds, not a reuse of llm_text_facts /
+    -- llm_vision_facts: clara._invoice_fact_state resolves the witness regime off those two, so
+    -- an agreement envelope banked under them would be read as an invoice corroboration.
+    'agreement_text_facts','agreement_vision_facts']));
+
+-- E2 · THE TWO EVENT TYPES THE LANE SPEAKS. clara.domain_events carries a foreign key onto
+--      clara.event_types, so an unregistered type is an INSERT failure, not a silent drop. Both
+--      are client-scoped (every agreement document is filed to exactly one client by the time the
+--      router reaches it) and both are routed at the ACTIVE taxonomy version with decision
+--      `ignore`, which is document.llm_witness_failed's own registration exactly: the workflow is
+--      the registered consumer, and no router wake is wanted. Both tables are append-only
+--      (t_event_types_append_only / t_trigger_taxonomy_append_only), so these are INSERTs with
+--      `on conflict do nothing` — never an UPDATE, which those triggers would refuse.
+
+insert into clara.event_types (name, client_scoped, description) values
+  ('document.agreement_facts_completed', true,
+   '#948: an agreement contract''s typed terms were read and banked (the text+vision pair persisted atomically). The facts workflow is the registered consumer; no router wake.'),
+  ('document.agreement_facts_failed', true,
+   '#948: an agreement contract''s read terminated without facts — an enqueue-time consent verdict, an attempt cap, or a worker-reported failure. The lane-true twin of document.invoice_facts_failed, so an agreement refusal never wakes the autodraft consumer.')
+on conflict (name) do nothing;
+
+insert into clara.trigger_taxonomy (version, event_type, decision, note)
+  select a.version, e.name, 'ignore',
+         '#948: the agreement facts workflow is the registered consumer; no router wake.'
+    from clara.taxonomy_active a
+    cross join (values ('document.agreement_facts_completed'), ('document.agreement_facts_failed')) e(name)
+on conflict (version, event_type) do nothing;
+
+-- E3 · THE FIVE SPLICED BODIES.
+
+do $w948_router$
+declare
+  v_sig text := 'clara._enqueue_invoice_facts_core(uuid)';
+  v_def text; v_next text; v_anchor text; v_repl text;
+  v_n int; v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text; r record;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+
+  if position('contract_facts' in v_def) > 0 then
+    raise notice '#948 §E3(1): clara._enqueue_invoice_facts_core already routes contract_facts -- splice already applied, nothing to do (redo)';
+  else
+    v_next := v_def;
+
+    -- SPLICE (1a): THE ROUTING ARM, immediately after the payroll arm and immediately before the
+    -- skipped_kind dead end, which is where reading order puts it: the arm a kind falls into
+    -- must be read before the arm every unrouted kind falls into.
+    v_anchor := $a1$      v_lane:='payroll_facts'; v_engine:='llm-openai:gpt-5.6-terra:payroll-witness-v1';
+    else$a1$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (1a): the payroll routing arm appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $a2$      v_lane:='payroll_facts'; v_engine:='llm-openai:gpt-5.6-terra:payroll-witness-v1';
+    elsif d.document_kind='agreement_contract' then
+      -- #948 / parent #926 (owner ruling 2026-09-18, option G): a contract goes down the same
+      -- lane as any other accounting document, read and posted, not merely stored. Until this
+      -- arm existed an agreement_contract fell straight through to the skipped_kind dead end
+      -- below -- the capability registry's own `stored_only` verdict was literally derived from
+      -- that fall-through. ITS OWN LANE, not llm_witness and not payroll_facts: a facts lane is
+      -- claimed BY LANE ALONE, so a contract pair parked on either would be read with that
+      -- family's prompts. v_engine MUST string-equal AGREEMENT_ENGINE_SNAPSHOT.engineId in the
+      -- agreementFacts.v1 services module; the workflow compares the task's stamp against its
+      -- own snapshot BEFORE any egress and waits on a mismatch rather than sending bytes under a
+      -- receipt naming a model it did not call, so a drifted literal STALLS the lane instead of
+      -- mis-stamping it.
+      v_lane:='contract_facts'; v_engine:='llm-openai:gpt-5.6-terra:agreement-witness-v1';
+    else$a2$;
+    v_next := replace(v_next, v_anchor, v_repl);
+
+    -- SPLICE (1b): THE PER-LANE ENGINE-KIND SHORT-CIRCUIT. Without this arm a fully read
+    -- agreement would read as un-extracted on every re-fire and re-buy a vendor read.
+    v_anchor := $a3$    v_engine_kind := case when v_lane='payroll_facts'$a3$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (1b): the engine-kind map head appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $a4$    v_engine_kind := case when v_lane='contract_facts'
+                       then 'agreement_text_facts'  -- #948: the agreement pair's CANONICAL row,
+                       -- the llm_witness/payroll precedent exactly -- a done text row proves a
+                       -- done pair (one atomic writer transaction), so a re-fire is suppressed
+                       -- the moment the pair lands.
+                       when v_lane='payroll_facts'$a4$;
+    v_next := replace(v_next, v_anchor, v_repl);
+
+    -- SPLICE (1c): THE ENQUEUE-TIME TYPED-CONSENT GATE, the payroll arm's shape with this
+    -- family's own two verdict codes.
+    v_anchor := $a5$      perform clara._append_event(d.firm_id,'document.payroll_facts_failed',
+        null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));
+      return jsonb_build_object('task_id',v_task,'document_id',p_document,
+        'status','failed','reason',v_gate);
+    end if;
+  elsif v_lane='classify' then$a5$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (1c): the payroll gate tail appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $a6$      perform clara._append_event(d.firm_id,'document.payroll_facts_failed',
+        null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));
+      return jsonb_build_object('task_id',v_task,'document_id',p_document,
+        'status','failed','reason',v_gate);
+    end if;
+  elsif v_lane='contract_facts' then
+    -- #948: THE SAME enqueue-time typed-consent gate the witness and payroll lanes hold, keyed
+    -- on the SAME purpose ('witness_extraction') and with its OWN named refusal codes rather
+    -- than a reuse of another family's literals -- a refusal a person reads must say which read
+    -- was refused.
+    --
+    -- WHY THE EXISTING PURPOSE AND NOT A NEW ONE. 'witness_extraction' is the typed consent that
+    -- authorizes sending a client's document BYTES to a model in order to READ them; that is
+    -- exactly and only what this lane does. Minting a contract-specific purpose would need its
+    -- own CHECK widening, its own consent-capture surface and its own activation act, and until
+    -- all three existed the lane would be dark for every firm -- which the standing "nothing
+    -- dark" ruling refuses. The purpose IS a live gate here, not a bypass: a client with no live
+    -- witness_extraction activation gets a terminal refusal, exactly as an invoice would.
+    select array_agg(distinct f.client_id) into v_stmt_clients
+      from clara.document_filings f
+      where f.document_id=p_document and f.retired_at is null;
+    if coalesce(array_length(v_stmt_clients,1),0)>1 then
+      v_gate:='agreement_multi_client';
+    elsif coalesce(array_length(v_stmt_clients,1),0)=0 then
+      -- Zero active filings: no client exists who could have authorized this read. Fail closed.
+      v_gate:='agreement_consent_inactive';
+    else
+      v_stmt_client:=v_stmt_clients[1];
+      if not exists(select 1 from clara.client_egress_purpose_activations a
+          join clara.client_egress_purpose_consents c
+            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id
+              and c.purpose=a.purpose
+          where a.firm_id=d.firm_id and a.client_id=v_stmt_client
+            and a.purpose='witness_extraction'
+            and a.deactivated_at is null and c.revoked_at is null) then
+        v_gate:='agreement_consent_inactive';
+      end if;
+    end if;
+    if v_gate is not null then
+      update clara.document_processing_tasks
+        set status='failed', error_code=v_gate, finished_at=now()
+        where document_id=p_document and lane=v_lane and status='queued';
+      get diagnostics v_flip = row_count;
+      if v_flip = 0 then
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+        if v_task is not null then
+          return jsonb_build_object('task_id',v_task,'document_id',p_document,
+            'status','failed','reason',v_gate);
+        end if;
+        select coalesce(max(version_n),0)+1 into v_version
+          from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane;
+        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,
+            engine_config,version_n,lane,status,error_code,finished_at)
+          values(d.firm_id,p_document,v_engine,'{}'::jsonb,
+            v_version,v_lane,'failed',v_gate,now())
+          returning id into v_task;
+      else
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+      end if;
+      perform clara._append_event(d.firm_id,'document.agreement_facts_failed',
+        null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));
+      return jsonb_build_object('task_id',v_task,'document_id',p_document,
+        'status','failed','reason',v_gate);
+    end if;
+  elsif v_lane='classify' then$a6$;
+    v_next := replace(v_next, v_anchor, v_repl);
+
+    -- SPLICE (1d): THE ENQUEUE-TIME ATTEMPT-CAP EMIT, lane-true. Without it the agreement feed
+    -- never learns its document died at the cap, and folding it into the invoice twin would wake
+    -- the autodraft consumer on a phantom invoice failure.
+    v_anchor := $a7$    if v_lane in ('statement_facts','statement_parse','payroll_facts') then$a7$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (1d-i): the cap-emit lane list appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $a8$    if v_lane in ('statement_facts','statement_parse','payroll_facts','contract_facts') then$a8$;
+    v_next := replace(v_next, v_anchor, v_repl);
+
+    v_anchor := $a9$        case when v_lane='payroll_facts' then 'document.payroll_facts_failed'$a9$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (1d-ii): the cap-emit type map appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $b1$        case when v_lane='contract_facts' then 'document.agreement_facts_failed'
+             when v_lane='payroll_facts' then 'document.payroll_facts_failed'$b1$;
+    v_next := replace(v_next, v_anchor, v_repl);
+
+    if v_next = v_def then
+      raise exception '#948 §E3(1) splice: no byte moved -- refusing a no-op apply' using errcode = 'CLR10';
+    end if;
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#948 §E3(1) postcheck: % changed owner (% -> %) or ACL (% -> %)',
+        v_sig, v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode = 'CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#948 §E3(1) postcheck: prosrc sha256 did not change -- the splice was a no-op' using errcode = 'CLR10';
+    end if;
+    raise notice '#948 §E3(1): clara._enqueue_invoice_facts_core spliced -- one routing arm, one engine-kind arm, one consent gate, one lane-true cap emit. owner (%) and ACL byte-unchanged. prosrc sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+
+  -- BOTH BRANCHES: every other family's route is re-read from the COMMITTED catalog and asserted
+  -- present at exactly its pre-splice count, so a redo proves it too.
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  for r in select * from (values
+      -- MEASURED on this rig, not guessed: `llm_witness` is named twice (the invoice-shaped
+      -- kinds arm and the F-A1 receipt arm), `skipped_kind` three times.
+      ($$v_lane:='llm_witness'$$, 2),
+      ($$v_lane:='statement_facts'$$, 1),
+      ($$v_lane:='statement_parse'$$, 1),
+      ($$v_lane:='payroll_facts'$$, 1),
+      ($$v_lane:='contract_facts'$$, 1),
+      ($$v_lane:='local_facts'$$, 1),
+      ($$v_lane:='classify'$$, 1),
+      ($$'skipped_kind'$$, 3),
+      ($$d.document_kind='agreement_contract'$$, 1)
+      ) as t(marker, want) loop
+    v_n := (length(v_def) - length(replace(v_def, r.marker, ''))) / length(r.marker);
+    if v_n <> r.want then
+      raise exception '#948 §E3(1) postcheck: marker "%" appears % time(s), expected % -- the splice was not additive', r.marker, v_n, r.want
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+end
+$w948_router$;
+
+do $w948_wrap$
+declare
+  v_sig text := 'clara.enqueue_invoice_facts(uuid)';
+  v_def text; v_next text; v_anchor text; v_repl text; v_n int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('contract_facts' in v_def) > 0 then
+    raise notice '#948 §E3(2): clara.enqueue_invoice_facts already excludes contract_facts from the invoice twin -- nothing to do (redo)';
+  else
+    v_anchor := $c1$    if coalesce(v_lane,'') not in ('statement_facts','statement_parse','payroll_facts') then$c1$;
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (2): the wrapper''s lane exclusion appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $c2$    -- #948: contract_facts joins the exclusion for the reason the statement and payroll lanes
+    -- are in it -- the core owns every contract-lane terminal emit at its mint sites, and this
+    -- wrapper emitting its INVOICE twin for an agreement receipt would be a phantom invoice
+    -- failure that wakes the autodraft consumer for a document no invoice draft will ever be
+    -- made from.
+    if coalesce(v_lane,'') not in ('statement_facts','statement_parse','payroll_facts','contract_facts') then$c2$;
+    v_next := replace(v_def, v_anchor, v_repl);
+    execute v_next;
+    raise notice '#948 §E3(2): clara.enqueue_invoice_facts spliced -- contract_facts joins the invoice-twin exclusion.';
+  end if;
+end
+$w948_wrap$;
+
+do $w948_wall$
+declare
+  v_sig text := 'clara._tf_processing_task_update()';
+  v_def text; v_next text; v_anchor text; v_repl text; v_n int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('contract_facts' in v_def) > 0 then
+    raise notice '#948 §E3(3): clara._tf_processing_task_update already admits the contract verdicts -- nothing to do (redo)';
+  else
+    -- (3a) THE TWO GATE VERDICTS join the queued->failed arm, LANE-SCOPED exactly as every prior
+    -- addition scoped its own: no future writer can flip a queued task on another lane to an
+    -- AGREEMENT verdict, and no lane can flip a running or terminal task at all.
+    v_anchor := $d1$               or (new.error_code in ('payroll_consent_inactive','payroll_multi_client')
+                   and new.lane='payroll_facts')$d1$;
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (3a): the payroll verdict arm appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $d2$               or (new.error_code in ('payroll_consent_inactive','payroll_multi_client')
+                   and new.lane='payroll_facts')
+               -- #948: the AGREEMENT gate verdicts, the same shape and the same lane scope.
+               or (new.error_code in ('agreement_consent_inactive','agreement_multi_client')
+                   and new.lane='contract_facts')$d2$;
+    v_next := replace(v_def, v_anchor, v_repl);
+
+    -- (3b) THE skipped_kind ARM. The router no longer mints one for this kind, but a document
+    -- whose kind is CORRECTED away from agreement_contract can still meet it, and a lane missing
+    -- from this list would make that transition illegal.
+    v_anchor := $d3$                   and new.lane in ('invoice_facts','statement_facts','statement_parse','llm_witness','payroll_facts'))$d3$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (3b): the skipped_kind lane list appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $d4$                   and new.lane in ('invoice_facts','statement_facts','statement_parse','llm_witness','payroll_facts','contract_facts'))$d4$;
+    v_next := replace(v_next, v_anchor, v_repl);
+    execute v_next;
+    raise notice '#948 §E3(3): clara._tf_processing_task_update spliced -- two lane-scoped verdict arms.';
+  end if;
+end
+$w948_wall$;
+
+do $w948_claim$
+declare
+  v_sig text := 'clara.claim_document_processing_task(uuid,text,boolean)';
+  v_def text; v_next text; v_anchor text; v_repl text; v_n int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('contract_facts' in v_def) > 0 then
+    raise notice '#948 §E3(4): clara.claim_document_processing_task already knows contract_facts -- nothing to do (redo)';
+  else
+    -- (4a) THE KILL SWITCH. contract_facts is an EGRESSING lane (it sends document bytes to a
+    -- model), so it joins it. It runs NO per-client LEGACY consent check, for the reason
+    -- statement_facts, llm_witness and payroll_facts do not: its typed (consent, activation) pair
+    -- is checked at ENQUEUE, and reading the purpose-blind legacy table here would let a generic
+    -- consent authorize a contract-specific read.
+    v_anchor := $e1$  if t.lane in ('ocr','invoice_facts','statement_facts','llm_witness','payroll_facts')
+     and not coalesce(p_egress_approved,false) then$e1$;
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (4a): the kill-switch lane list appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $e2$  if t.lane in ('ocr','invoice_facts','statement_facts','llm_witness','payroll_facts','contract_facts')
+     and not coalesce(p_egress_approved,false) then$e2$;
+    v_next := replace(v_def, v_anchor, v_repl);
+
+    -- (4b) THE PER-LANE ATTEMPT CAP, counted over its OWN lane so one lane's attempts never cap
+    -- another's.
+    v_anchor := $e3$  if t.lane in ('invoice_facts','statement_facts','llm_witness','payroll_facts') then$e3$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (4b): the attempt-cap lane list appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $e4$  if t.lane in ('invoice_facts','statement_facts','llm_witness','payroll_facts','contract_facts') then$e4$;
+    v_next := replace(v_next, v_anchor, v_repl);
+
+    -- (4c) THE LANE-TRUE CAP EMIT.
+    v_anchor := $e5$             when t.lane='payroll_facts' then 'document.payroll_facts_failed'$e5$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (4c): the cap-emit type map appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $e6$             when t.lane='payroll_facts' then 'document.payroll_facts_failed'
+             when t.lane='contract_facts' then 'document.agreement_facts_failed'$e6$;
+    v_next := replace(v_next, v_anchor, v_repl);
+
+    -- (4d) THE PER-LANE CONCURRENCY WINDOW. The limit COLUMN is shared (llm_witness_concurrency)
+    -- because all three are model-read lanes with the same cost shape and a firm that tunes one
+    -- means all; the COUNT is per lane, which is the half that matters -- folding them into one
+    -- count would let a contract backlog starve invoices.
+    v_anchor := $e7$  if t.lane in ('llm_witness','payroll_facts') then$e7$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (4d): the concurrency-window lane list appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $e8$  if t.lane in ('llm_witness','payroll_facts','contract_facts') then$e8$;
+    v_next := replace(v_next, v_anchor, v_repl);
+    execute v_next;
+    raise notice '#948 §E3(4): clara.claim_document_processing_task spliced -- kill switch, attempt cap, cap emit and concurrency window.';
+  end if;
+end
+$w948_claim$;
+
+do $w948_release$
+declare
+  v_sig text := 'clara.release_held_document_tasks(integer)';
+  v_def text; v_next text; v_anchor text; v_repl text; v_n int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('contract_facts' in v_def) > 0 then
+    raise notice '#948 §E3(5): clara.release_held_document_tasks already releases contract_facts -- nothing to do (redo)';
+  else
+    -- #948: contract_facts joins BOTH lists together with the claim body's kill-switch list --
+    -- a lane that can be HELD and cannot be RELEASED is a permanent stall, and 0038's own comment
+    -- says this list must track the claim body's list EXACTLY.
+    v_anchor := $f1$    where t.status='held_egress' and t.lane in ('ocr','invoice_facts','statement_facts','llm_witness','payroll_facts')$f1$;
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (5a): the held-lane list appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $f2$    where t.status='held_egress' and t.lane in ('ocr','invoice_facts','statement_facts','llm_witness','payroll_facts','contract_facts')$f2$;
+    v_next := replace(v_def, v_anchor, v_repl);
+
+    v_anchor := $f3$        t.lane in ('ocr','statement_facts','llm_witness','payroll_facts')$f3$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §E3 splice (5b): the kill-switch-only lane list appears % time(s), expected 1', v_n using errcode = 'CLR10';
+    end if;
+    v_repl := $f4$        t.lane in ('ocr','statement_facts','llm_witness','payroll_facts','contract_facts')$f4$;
+    v_next := replace(v_next, v_anchor, v_repl);
+    execute v_next;
+    raise notice '#948 §E3(5): clara.release_held_document_tasks spliced -- contract_facts joins both lists.';
+  end if;
+end
+$w948_release$;
+
+reset role;
