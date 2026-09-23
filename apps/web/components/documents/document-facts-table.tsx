@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState, StateBanner } from "@/components/common/state";
-import type { EvidenceRegion } from "@/lib/documents/extract-shape";
+import { isPayrollFactPath, type EvidenceRegion } from "@/lib/documents/extract-shape";
 import type { SourceRevisionResult } from "@/lib/documents/types";
 import { cn } from "@/lib/utils";
 import { DocumentRevisionDialog, isRevisableFieldPath } from "./document-revision-dialog";
@@ -65,6 +65,19 @@ function factLabel(path: string | null, t: (key: string) => string): string {
     case "invoice.invoice_id": return t("factLabel.invoiceInvoiceId");
     case "invoice.invoice_date": return t("factLabel.invoiceInvoiceDate");
     case "invoice.deposit": return t("factLabel.invoiceDeposit");
+    // #945 — the payroll lane's eleven run-level questions. Each one is a TOTAL for the run, and
+    // the label says so, because "EPF" alone on a document page could be one employee's.
+    case "payroll.run.period": return t("factLabel.payrollPeriod");
+    case "payroll.run.gross_pay": return t("factLabel.payrollGrossPay");
+    case "payroll.run.epf_employee": return t("factLabel.payrollEpfEmployee");
+    case "payroll.run.epf_employer": return t("factLabel.payrollEpfEmployer");
+    case "payroll.run.socso_employee": return t("factLabel.payrollSocsoEmployee");
+    case "payroll.run.socso_employer": return t("factLabel.payrollSocsoEmployer");
+    case "payroll.run.eis_employee": return t("factLabel.payrollEisEmployee");
+    case "payroll.run.eis_employer": return t("factLabel.payrollEisEmployer");
+    case "payroll.run.pcb": return t("factLabel.payrollPcb");
+    case "payroll.run.hrdf_levy": return t("factLabel.payrollHrdfLevy");
+    case "payroll.run.net_pay": return t("factLabel.payrollNetPay");
     default: return path; // the honest unknown arm: the path IS the label
   }
 }
@@ -78,10 +91,21 @@ export function hasFactLabelArm(path: string): boolean {
 
 /** The displayed value. `monetary_cents` wins when present — it is the DB's own
  *  integer, and dividing by 100 here is a RENDER of that integer, never a
- *  recomputation of an amount. Otherwise the region's verbatim text. */
+ *  recomputation of an amount. Otherwise the region's verbatim text.
+ *
+ *  #945 — THE ONE ARM THAT IS NOT GENERIC. The payroll lane writes a region for
+ *  an answer the page does NOT print, carrying no rendering and no cents at
+ *  all; `clara.persist_payroll_facts` writes that row on purpose, so that "the
+ *  page is silent about the HRDF levy" survives to the screen instead of being
+ *  rounded off into a blank a reader would read as zero. Scoped to `payroll.*`
+ *  rather than applied to every valueless region, because no other lane writes
+ *  one for an unanswered field — saying "not printed" about an invoice region
+ *  would be this UI asserting something the invoice lane never said. */
 function factValue(region: EvidenceRegion, t: (key: string) => string): string {
   if (region.monetary_cents !== null) return (region.monetary_cents / 100).toFixed(2);
-  return region.text_content ?? t("evidenceNoValue");
+  if (region.text_content !== null) return region.text_content;
+  if (isPayrollFactPath(region.field_path)) return t("factNotPrinted");
+  return t("evidenceNoValue");
 }
 
 
