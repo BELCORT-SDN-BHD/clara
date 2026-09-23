@@ -77,7 +77,7 @@ comment and close on every ticket.
 | 10 | `clara-wt/660` | runtime and CI test infrastructure | #1015 #1016 #1018 #1023 #1028 (none) | no |
 | 11 | `clara-wt/int` (no database) | web tests and the Clara rail defect | #1024 #897 #1021 #1022 (none) | no |
 
-Held out: #871 (owner decision between a server-only database door and a service-key exception), #1000 (its whole scope needs the successor cut: wave 4), #944 (a blueprint statement: lands with #945 in wave 4).
+Held out: #1000 (its whole scope needs the successor cut: wave 4), #944 (a blueprint statement: lands with #945 in wave 4). Rulings of 2026-09-23 (the owner took every recommendation): #871 rides wave 4 as a server-only database door on the auth-wall pattern (re-briefed on the ticket); #1032 (the #891 remainder) rides wave 4 as option A (TIN always offered, required only when MyInvois is mandatory); #1030 (the #885 remainder) rides wave 4 with the successor cut; #912 ratified as shipped. Also wave 4: #877 (a Tier-A-complete autodraft fixture, runtime test infrastructure), which the wave-3 scan had missed.
 
 ## Wave 2 lanes (planned 2026-09-20, numbers reserved before the wave starts)
 
