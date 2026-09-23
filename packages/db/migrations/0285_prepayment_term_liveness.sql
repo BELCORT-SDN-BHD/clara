@@ -13,9 +13,34 @@
 -- corrected term needs a new schedule" was tribal knowledge a person had to already hold rather
 -- than a fact either read reports.
 --
--- WHAT THIS FILE ADDS, IN ONE SENTENCE. `term_live` and `term_superseded_by`, joined from
--- `clara.document_service_periods` on `service_period_id`, on BOTH reads — no new argument, no
--- floor change, no new relation, no new grant: the two doors' signatures and ACLs are untouched.
+-- WHAT THIS FILE ADDS, IN ONE SENTENCE. `term_live`, `term_superseded_by`, `term_moved`,
+-- `term_current_start` and `term_current_end`, joined from `clara.document_service_periods` on
+-- `service_period_id`, on BOTH reads — no new argument, no floor change, no new relation, no new
+-- grant: the two doors' signatures and ACLs are untouched.
+--
+-- WHY `term_moved` EXISTS BESIDE `term_live` (ADV-02, riders wave 3 review round 1, driven on
+-- clara_l06 inside a rolled-back transaction). `clara._record_document_service_period_core`
+-- (0140) supersedes the live row UNCONDITIONALLY — it compares no dates — so `term_live` goes
+-- FALSE on ANY re-record of a document's service period, including one that restates the term
+-- byte for byte (a second verification against the same invoice, a retyped basis sentence). A
+-- surface keyed on `term_live` alone therefore told a firm that its term "has since been
+-- CORRECTED" and that "a corrected term needs a new schedule" when nothing about the term had
+-- moved: a false statement of fact, and materially wrong advice about a running amortisation.
+--
+-- The two facts are different in kind, so both are reported and neither is inferred from the
+-- other. `term_live`/`term_superseded_by` are the AUDIT pair: WHICH row this schedule was derived
+-- from, and whether that row is still the live statement of the term — unchanged from this file's
+-- first cut, and the fact #939/#940/#941 will need. `term_moved` is the one a SURFACE may act on:
+-- true only when the row is superseded AND the term that stands today states a different
+-- (period_start, period_end) than the row this schedule rode. `term_current_start` and
+-- `term_current_end` carry that live term itself, so a reader (and a cell) can check the flag
+-- against the dates rather than take it on trust.
+--
+-- A NOTE ON THE CHAIN. `superseded_by` names the IMMEDIATE successor, which may itself have been
+-- superseded since; the term that stands today is the document's one row with
+-- `superseded_at is null` (`uq_document_service_period_live`, 0140). `term_moved` and the two
+-- `term_current_*` dates are computed against THAT row, never against `superseded_by`'s, so a
+-- twice-corrected term answers about the term in force rather than an intermediate one.
 --
 -- WHY A JOIN AND NOT A DENORMALISED COLUMN ON `prepayment_schedules`. That relation is
 -- APPEND-ONLY IN FULL (0223's own trigger, `_tf_prepayment_schedules_append_only`) precisely
@@ -40,13 +65,34 @@
 -- scope" line — the flag reports only). #939, #940 and #941 build on this flag; none of the three
 -- is this file's concern.
 --
--- REDO-SAFE (#957). The only catalog-changing statements are two `create or replace function`; the
--- prestate asserts nothing about this file's own additions being absent, so a `CLARA_MIGRATION_REDO`
--- re-run is safe.
+-- REDO-SAFE (#957), AND THE PIN IS BIMODAL BECAUSE OF IT. The only catalog-changing statements
+-- are two `create or replace function` — but this file RECUTS the two bodies it pins, so after it
+-- has applied once their live sha256 is no longer the 0223 pre-image the prestate was measured
+-- against. An unconditional pin would refuse its own redo (the wave-3 work-order addendum names
+-- exactly this trap). The prestate therefore admits TWO pre-images per body and says which it
+-- found: the 0223 sha (FIRST apply) or a body already carrying this file's own `term_live`
+-- attribution (REDO -- the marker is the field this file INTRODUCED, not the newest one it adds,
+-- so a redo over an EARLIER cut of this same file is admitted too and simply recut again; the
+-- tail is what proves the shape that ends up live). Anything else is real drift and still refuses. Because `CLARA_MIGRATION_REDO`
+-- only ever takes the REDO branch, the FIRST branch was proved by hand as the addendum requires:
+-- inside one transaction that was rolled back, 0223's own two `create or replace function`
+-- statements were re-run to restore the pre-images, this prestate block was executed verbatim,
+-- and it reported FIRST.
 -- =====================================================================================
 
 do $t919_pre$
-declare v_sha text;
+declare
+  v_sha text; v_src text; v_mode text;
+  v_first int := 0; v_redo int := 0; v_i int;
+  -- The two bodies this file RECUTS, pinned by the 0223 pre-image sha256(prosrc) MEASURED ON THIS
+  -- RIG (rule: pin what is live, never a literal copied from 0223's own text). This is lane 06's
+  -- second ticket; #936 (0284) touched neither function.
+  v_recut text[][] := array[
+    ['clara.get_prepayment_schedule(uuid)',
+     '40c5913fe3b0e05b489743f4b6e714313708c637609c9aa441b887e0f1932286'],
+    ['clara.list_prepayment_schedules(uuid)',
+     'e10eee318bf81bc12e987d30e7a580e5d29aa66245d20fa75ddca3b40171c51c']
+  ];
 begin
   if to_regclass('clara.document_service_periods') is null then
     raise exception '#919 prestate: clara.document_service_periods is absent -- 0140 must apply first'
@@ -57,30 +103,35 @@ begin
       using errcode='CLR10';
   end if;
 
-  -- THE TWO BODIES THIS FILE RECUTS, PINNED BY PRE-IMAGE sha256(prosrc), MEASURED ON THIS RIG NOW
-  -- (rule: pin what is live, never a literal copied from 0223's own text). This is lane 06's second
-  -- ticket; #936 (0284) touched neither function, so both are still at their 0223 originals -- but
-  -- the pin is measured, not assumed, for exactly the reason this comment states.
-  if to_regprocedure('clara.get_prepayment_schedule(uuid)') is null then
-    raise exception '#919 prestate: clara.get_prepayment_schedule(uuid) does not resolve -- 0223 must apply first'
-      using errcode='CLR10';
-  end if;
-  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
-    from pg_proc p where p.oid = 'clara.get_prepayment_schedule(uuid)'::regprocedure;
-  if v_sha is distinct from '40c5913fe3b0e05b489743f4b6e714313708c637609c9aa441b887e0f1932286' then
-    raise exception '#919 prestate: clara.get_prepayment_schedule(uuid) has DRIFTED from its measured pre-image -- re-derive the recut against the live text before applying (got %)', v_sha
-      using errcode='CLR10';
-  end if;
-
-  if to_regprocedure('clara.list_prepayment_schedules(uuid)') is null then
-    raise exception '#919 prestate: clara.list_prepayment_schedules(uuid) does not resolve -- 0223 must apply first'
-      using errcode='CLR10';
-  end if;
-  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
-    from pg_proc p where p.oid = 'clara.list_prepayment_schedules(uuid)'::regprocedure;
-  if v_sha is distinct from 'e10eee318bf81bc12e987d30e7a580e5d29aa66245d20fa75ddca3b40171c51c' then
-    raise exception '#919 prestate: clara.list_prepayment_schedules(uuid) has DRIFTED from its measured pre-image -- re-derive the recut against the live text before applying (got %)', v_sha
-      using errcode='CLR10';
+  -- THE BIMODAL PIN (see the header). Each body is either at its measured 0223 pre-image (FIRST)
+  -- or already carries this file's own `term_live` field beside its `#919` attribution (REDO).
+  -- A body matching NEITHER is real drift and still refuses by name.
+  for v_i in 1 .. array_length(v_recut, 1) loop
+    if to_regprocedure(v_recut[v_i][1]) is null then
+      raise exception '#919 prestate: % does not resolve -- 0223 must apply first', v_recut[v_i][1]
+        using errcode='CLR10';
+    end if;
+    select p.prosrc, encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_src, v_sha
+      from pg_proc p where p.oid = v_recut[v_i][1]::regprocedure;
+    if v_sha = v_recut[v_i][2] then
+      v_first := v_first + 1;
+    elsif position('term_live' in v_src) > 0 and position('#919' in v_src) > 0 then
+      v_redo := v_redo + 1;
+    else
+      raise exception '#919 prestate: % has DRIFTED -- it is neither its measured 0223 pre-image nor a body this file already recut, so re-derive the recut against the live text before applying (got %)',
+        v_recut[v_i][1], v_sha using errcode='CLR10';
+    end if;
+  end loop;
+  if v_first = array_length(v_recut, 1) then
+    v_mode := 'FIRST';
+  elsif v_redo = array_length(v_recut, 1) then
+    v_mode := 'REDO';
+  else
+    -- HALF AND HALF IS NOT A MODE. One read at its pre-image and the other already recut means
+    -- something outside this file moved one of them; refusing here is what stops this migration
+    -- from papering over that.
+    raise exception '#919 prestate: the two reads disagree about whether this file has already applied (% at the 0223 pre-image, % already recut) -- one of them was moved by something else',
+      v_first, v_redo using errcode='CLR10';
   end if;
 
   -- THE RLS POSTURE THE HEADER'S SAFETY ARGUMENT RESTS ON, measured rather than assumed.
@@ -98,15 +149,15 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#919 prestate: clean -- clara.document_service_periods and clara.prepayment_schedules exist, get_prepayment_schedule/list_prepayment_schedules are byte-identical to their measured 0223 pre-images, and document_service_periods is RLS-forced with clara_fn_owner''s unconditional owner policy live.';
+  raise notice '#919 prestate: clean (%) -- clara.document_service_periods and clara.prepayment_schedules exist, get_prepayment_schedule/list_prepayment_schedules are both at the SAME one of the two admitted pre-images (their measured 0223 text, or a body this file already recut), and document_service_periods is RLS-forced with clara_fn_owner''s unconditional owner policy live.', v_mode;
 end
 $t919_pre$;
 
 set role clara_fn_owner;
 
 -- =====================================================================================
--- clara.get_prepayment_schedule — RECUT. 0223's full body, with ONE addition: `term_live` and
--- `term_superseded_by`, joined from `clara.document_service_periods` on `service_period_id`.
+-- clara.get_prepayment_schedule — RECUT. 0223's full body, with ONE addition: the five
+-- term-liveness fields, joined from `clara.document_service_periods` on `service_period_id`.
 -- Nothing else moves.
 -- =====================================================================================
 create or replace function clara.get_prepayment_schedule(p_schedule uuid) returns jsonb
@@ -114,7 +165,8 @@ create or replace function clara.get_prepayment_schedule(p_schedule uuid) return
 declare
   v_ctx record; s clara.prepayment_schedules; p clara.accounting_plans; r record;
   v_occ jsonb; v_periods jsonb; v_entry record; v_covered date;
-  v_term_live boolean; v_term_superseded_by uuid;  -- #919
+  v_term_live boolean; v_term_superseded_by uuid; v_term_moved boolean;  -- #919
+  v_term_current_start date; v_term_current_end date;                    -- #919
 begin
   select * into v_ctx from clara._prepayment_ctx(p_schedule, clara.role_rank('viewer')) c;
   s := v_ctx.sc;
@@ -156,16 +208,29 @@ begin
         from jsonb_array_elements(s.period_lines) l
     ) u;
 
-  -- #919 — THE TERM-LIVENESS FLAG. `service_period_id` names the `document_service_periods` row
+  -- #919 — THE TERM-LIVENESS FIELDS. `service_period_id` names the `document_service_periods` row
   -- this schedule was DERIVED from (0223's own append-only design: a corrected term supersedes
   -- that row and NEVER moves the stored allocation). Joined here rather than assumed live, because
   -- a bookkeeper can correct the term on the SAME document at any later point — through
   -- `clara.record_document_service_period`, which supersedes the prior live row — and this read is
   -- the only place that fact becomes visible: the schedule row itself keeps naming the row it
   -- actually rode.
-  select (sp.superseded_at is null), sp.superseded_by
-    into v_term_live, v_term_superseded_by
+  --
+  -- `term_live` is the AUDIT fact (is the row this schedule rode still the live statement?).
+  -- `term_moved` is the fact a SURFACE may act on: the term door supersedes unconditionally, so a
+  -- re-record that restates the SAME dates flips `term_live` while changing nothing a firm needs
+  -- to act on (header, ADV-02). The comparison is against the term that stands TODAY — the
+  -- document's one `superseded_at is null` row — never against `superseded_by`'s, which may be an
+  -- intermediate row of a twice-corrected chain.
+  select (sp.superseded_at is null), sp.superseded_by, cur.period_start, cur.period_end,
+         (sp.superseded_at is not null
+            and (cur.period_start, cur.period_end)
+                  is distinct from (sp.period_start, sp.period_end))
+    into v_term_live, v_term_superseded_by, v_term_current_start, v_term_current_end, v_term_moved
     from clara.document_service_periods sp
+    left join lateral (
+      select c.period_start, c.period_end from clara.document_service_periods c
+       where c.document_id = sp.document_id and c.superseded_at is null limit 1) cur on true
    where sp.id = s.service_period_id;
 
   return jsonb_build_object(
@@ -177,6 +242,11 @@ begin
     'source_memo', v_entry.memo, 'source_status', v_entry.status,
     'document_id', s.document_id, 'service_period_id', s.service_period_id,
     'term_live', v_term_live, 'term_superseded_by', v_term_superseded_by,  -- #919
+    'term_moved', v_term_moved,                                            -- #919
+    'term_current_start', case when v_term_current_start is null then null
+                               else to_char(v_term_current_start,'YYYY-MM-DD') end,
+    'term_current_end', case when v_term_current_end is null then null
+                             else to_char(v_term_current_end,'YYYY-MM-DD') end,
     'term_start', to_char(s.term_start,'YYYY-MM-DD'), 'term_end', to_char(s.term_end,'YYYY-MM-DD'),
     'basis_kind', s.basis_kind,
     'prepaid_account_code', s.prepaid_account_code,
@@ -224,8 +294,16 @@ begin
         'source_entry_id', s.source_entry_id, 'document_id', s.document_id,
         'term_start', to_char(s.term_start,'YYYY-MM-DD'),
         'term_end', to_char(s.term_end,'YYYY-MM-DD'),
-        -- #919 — the SAME term-liveness flag get_prepayment_schedule carries, joined the same way.
+        -- #919 — the SAME term-liveness fields get_prepayment_schedule carries, computed the same
+        -- way against the term that stands TODAY (header, ADV-02).
         'term_live', (dsp.superseded_at is null), 'term_superseded_by', dsp.superseded_by,
+        'term_moved', (dsp.superseded_at is not null
+                        and (cur.period_start, cur.period_end)
+                              is distinct from (dsp.period_start, dsp.period_end)),
+        'term_current_start', case when cur.period_start is null then null
+                                   else to_char(cur.period_start,'YYYY-MM-DD') end,
+        'term_current_end', case when cur.period_end is null then null
+                                 else to_char(cur.period_end,'YYYY-MM-DD') end,
         'prepaid_account_code', s.prepaid_account_code,
         'expense_account_code', s.expense_account_code,
         'total_cents', s.total_cents, 'period_count', s.period_count,
@@ -255,6 +333,9 @@ begin
         left join clara.accounting_plan_revisions r
                on r.plan_id = s.plan_id and r.superseded_at is null
         join clara.document_service_periods dsp on dsp.id = s.service_period_id  -- #919
+        left join lateral (                                                      -- #919
+          select c.period_start, c.period_end from clara.document_service_periods c
+           where c.document_id = dsp.document_id and c.superseded_at is null limit 1) cur on true
        where s.client_id = p_client and s.firm_id = v_firm
     ) t;
   return jsonb_build_object('client_id', p_client, 'schedules', v_rows);
@@ -320,15 +401,19 @@ begin
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara.get_prepayment_schedule(uuid)'::regprocedure;
   if position('term_live' in v_src) = 0 or position('term_superseded_by' in v_src) = 0
+     or position('term_moved' in v_src) = 0 or position('term_current_start' in v_src) = 0
+     or position('superseded_at is null limit 1' in v_src) = 0
      or position('document_service_periods' in v_src) = 0 then
-    raise exception '#919 tail: get_prepayment_schedule is missing the term-liveness join or flag'
+    raise exception '#919 tail: get_prepayment_schedule is missing the term-liveness join, a flag, or the live-term comparison'
       using errcode='CLR10';
   end if;
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara.list_prepayment_schedules(uuid)'::regprocedure;
   if position('term_live' in v_src) = 0 or position('term_superseded_by' in v_src) = 0
+     or position('term_moved' in v_src) = 0 or position('term_current_start' in v_src) = 0
+     or position('superseded_at is null limit 1' in v_src) = 0
      or position('document_service_periods' in v_src) = 0 then
-    raise exception '#919 tail: list_prepayment_schedules is missing the term-liveness join or flag'
+    raise exception '#919 tail: list_prepayment_schedules is missing the term-liveness join, a flag, or the live-term comparison'
       using errcode='CLR10';
   end if;
 
@@ -348,6 +433,6 @@ begin
     raise exception '#919 tail: clara.document_service_periods is no longer RLS-forced' using errcode='CLR10';
   end if;
 
-  raise notice '#919 tail: OK -- clara.get_prepayment_schedule(uuid) and clara.list_prepayment_schedules(uuid) both resolve, keep their STABLE/SECURITY DEFINER/clara_fn_owner/search_path posture and their clara_authenticated-only ACL (no PUBLIC, no clara_runtime), and both bodies carry the term_live/term_superseded_by join against clara.document_service_periods; that relation''s four triggers and RLS-forced owner posture are unmoved -- this file altered no table.';
+  raise notice '#919 tail: OK -- clara.get_prepayment_schedule(uuid) and clara.list_prepayment_schedules(uuid) both resolve, keep their STABLE/SECURITY DEFINER/clara_fn_owner/search_path posture and their clara_authenticated-only ACL (no PUBLIC, no clara_runtime), and both bodies carry the term_live/term_superseded_by/term_moved/term_current_* join against clara.document_service_periods, each computing term_moved against the document''s LIVE term row rather than against superseded_by; that relation''s four triggers and RLS-forced owner posture are unmoved -- this file altered no table.';
 end
 $t919_tail$;
