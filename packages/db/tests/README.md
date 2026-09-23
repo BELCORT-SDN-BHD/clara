@@ -1384,22 +1384,39 @@ generalises to all 14 call sites.
 
 **Acceptance #3 ("every affected drill still passes its ordinary run") is PARTIAL, not done (code
 review L03-CRS3).** What runs here is only "no import-time crash from the added import" — a skip
-is not the drill's ordinary run — and, as the next paragraph says plainly, 3 of the 14 files have
-no CI leg anywhere to run the real thing. The fix-round report states this criterion's status as
-PARTIAL rather than folding it into the ticket's overall DONE.
+is not the drill's ordinary run — and, as the next paragraph says plainly, 3 of the 14 files HAD
+no CI leg anywhere to run the real thing at the time (#1023 has since closed that gap; this
+paragraph is #845's own acceptance record, not a live claim). The fix-round report states this
+criterion's status as PARTIAL rather than folding it into the ticket's overall DONE.
 
 **This suite never sets `CLARA_RIG_ALLOW_RESET`.** The 14 drills' own destructive paths are meant
-to be CI's job, one file at a time, on an isolated database — but as of this ticket only 11 of the
-14 actually have a CI leg: `.github/actions/closed-wave-upgrade-drills/action.yml` runs
-hrd-a-recut-guard, hrd-b-upgrade-kit, rig-docs-upgrade, rig-events-upgrade, s6-upgrade,
-wave-b/wb-0020-upgrade, x37/x40/x41-upgrade, and `.github/actions/frontier-leg/action.yml` runs
-x42-split-upgrade-kit; T19 (`rig-isolation.test.mjs`) runs in the ordinary battery and skips
-without the flag. `checkout-convergence-upgrade.test.mjs`, `rig-runtime-upgrade.test.mjs` and
-`wave-a-upgrade.test.mjs` have **no CI leg at all** — their destructive path has never run
-anywhere but a worker's own machine, by hand, per that file's own header recipe (a gap tracked as
-a follow-up, not closed by this ticket). What this suite proves locally, safely, and on a shared
-rig is the ROUTING: the name check runs before any of those 14 paths could reach a real `reset()`
-— never that the destructive body itself has been exercised for the 3 files with no CI leg.
+to be CI's job, one file at a time, on an isolated database — as of #845 only 11 of the 14 had a
+CI leg: `.github/actions/closed-wave-upgrade-drills/action.yml` ran hrd-a-recut-guard,
+hrd-b-upgrade-kit, rig-docs-upgrade, rig-events-upgrade, s6-upgrade, wave-b/wb-0020-upgrade,
+x37/x40/x41-upgrade, and `.github/actions/frontier-leg/action.yml` ran x42-split-upgrade-kit; T19
+(`rig-isolation.test.mjs`) runs in the ordinary battery and skips without the flag.
+`checkout-convergence-upgrade.test.mjs`, `rig-runtime-upgrade.test.mjs` and
+`wave-a-upgrade.test.mjs` had **no CI leg at all** — their destructive path had never run anywhere
+but a worker's own machine, by hand, per that file's own header recipe (a gap #845 tracked as a
+follow-up, not closed by that ticket).
+
+**#1023 closed that gap.** All three now have their own step in
+`.github/actions/closed-wave-upgrade-drills/action.yml`, following the established pattern
+exactly: their own throwaway `*_ci` database (the same name each file's own header recipe already
+documented — `clara_0186_upgrade_ci`, `clara_runtime_upgrade_ci`, `clara_waveA_upgrade_ci`), both
+destructive flags, and a between-step cluster cleanup. All 14 audited files now have a CI leg;
+only T19 still never exercises its destructive path anywhere but the ordinary battery's skip.
+`reset-gate-routing.test.mjs` carries the structural proof: it parses the action file itself and
+asserts, per newly-covered drill, that a step RUNS it — located by the one line carrying both
+`node --test` and `tests/<file>`, never by the step's prose, because a step chunk carries the
+comment block that precedes the NEXT step and a comment naming a drill would otherwise point every
+assertion at the wrong step (review SPEC-1023-03, with its own cell) — sets both
+`CLARA_RIG_ALLOW_RESET=1` and `CLARA_ALLOW_DESTRUCTIVE=1`, targets the documented database name, and that name passes the SAME
+`EPHEMERAL_DB` guard `rig-reset-guard.mjs`'s `guardedReset` enforces (imported, never re-spelled)
+— a leg whose own database name the guard would refuse proves nothing. What this suite proves
+locally, safely, and on a shared rig is still only the ROUTING and (since #1023) the WIRING —
+never that the destructive body itself has actually been exercised, which remains CI's job alone
+(RIG.md: this rig must never set `CLARA_RIG_ALLOW_RESET`).
 
 ## `fixed-asset-acquisition.test.mjs` `p639.birth.opening_excluded` / `p639.birth.opening_admitted` — #884
 

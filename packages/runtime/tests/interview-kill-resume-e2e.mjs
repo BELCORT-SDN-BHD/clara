@@ -26,37 +26,23 @@ import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { scriptedAnswers } from "./wave-b-interview-testkit.mjs";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
 if (process.env.CLARA_SKIP_KILL_RESUME === "1") {
   console.log("[kill-resume] skipped (CLARA_SKIP_KILL_RESUME=1)");
   process.exit(0);
 }
 
-// --- Fail-closed local gate (the intake-e2e precedent).
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci)$/;
-if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("interview-kill-resume-e2e is hard-gated to a loopback host + PGDATABASE in {clara_rt_test,clara_wave_b_ci}");
-}
-if (!process.env.WORKFLOW_POSTGRES_URL
-    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci)(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
-  throw new Error("interview-kill-resume-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci)");
-}
-// DSN GUARD (the parsed comparison is the actual gate; the regexes above are only a first
-// line): every field of WORKFLOW_POSTGRES_URL must independently agree with the PG* env this
-// process is trusting — never merely "looks like" a loopback URL.
-{
-  const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
-  const okProtocol = u.protocol === "postgres:";
-  const okHost = LOCAL_HOSTS.has(u.hostname);
-  const okPort = u.port === String(process.env.PGPORT ?? "");
-  const okPath = u.pathname === "/" + (process.env.PGDATABASE ?? "");
-  const okQuery = [...u.searchParams.keys()].length === 0; // allowlist: none
-  if (!okProtocol || !okHost || !okPort || !okPath || !okQuery) {
-    throw new Error(
-      `interview-kill-resume-e2e: WORKFLOW_POSTGRES_URL failed the parsed DSN gate (protocol=${u.protocol} host=${u.hostname} port=${u.port} vs PGPORT=${process.env.PGPORT} path=${u.pathname} vs /${process.env.PGDATABASE} query=${u.search})`);
-  }
-}
+// --- Fail-closed local gate (#1018: shared with every other standalone World e2e driver; the
+// intake-e2e precedent). The parsed-DSN check (not merely the string regex) is the actual gate:
+// every field of WORKFLOW_POSTGRES_URL must independently agree with the PG* env this process is
+// trusting — never merely "looks like" a loopback URL.
+assertLocalDbGate({
+  label: "interview-kill-resume-e2e",
+  pattern: allowedDbPattern(`${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.WAVE_B_CI}`),
+  checkDsnString: true,
+  checkDsnParsed: true,
+});
 
 // OS-assigned: CI jobs from different PRs share the runner host's network namespace; a
 // fixed port cross-wires one job's client into another job's runtime (401 jwt_signature).

@@ -828,6 +828,19 @@ vocabularies are checked against the relations' own CHECK constraints by
 `tests/rollback-preflight.test.mjs`, so a migration that adds one reds a test instead of quietly
 falling outside a census that advertises itself as complete.
 
+**#1015 — the document lane's own scoping rule, because it shares no key with the agent lane.**
+`clara.document_processing_tasks` carries no `work_id`/`task_id` column, so a `censusUnboundTasks`
+caller who scopes by `workIds`/`taskIds` alone has named nothing the document half could
+legitimately filter by. `censusUnboundTasks` narrows that half to **NONE** in that case, not to
+every live row — the earlier defect, caught by wave-1/wave-2 integration gates on a database
+carrying leftover queued document work, was exactly the opposite: an absent filter is "no rows" in
+this module's own reading, but it is "no filter" in SQL, and the difference used to leak every
+firm's queued document work into a scope the caller never asked for. A caller that wants the
+document lane's own full, unscoped picture regardless asks by **naming** the `documentTaskIds` key
+at all — even as `null` — which is how `preflight()`'s GLOBAL census and `tests/queue-drain.mjs`'s
+drain check still see everything (they scope by nothing at all, which is the same ask from the
+other side).
+
 **A kind or lane this command cannot place fails CLOSED** — it counts as stranding. The case you
 will actually meet is a `held` wake task whose source row was deleted: it is already unrunnable (the
 reconciler logs it and waits), and the answer is to settle it or re-register its source, not to roll
@@ -1550,10 +1563,74 @@ BELT REGRESSION, and firm P's children reading `failed` is not by itself the dis
 census appears when the belt stops counting refusals at all. Read the counters instead.
 `blocked >= 1` (and `cancel_blocked=canceller_not_active` at the moment of the red) means the belt
 DID refuse firm P's children, so a terminal parent means the World terminalised them first: the
-separate, unfixed defect. `refusals=0 blocked=0` means the belt is not counting firm P's refusals at
+#1028 race, below. `refusals=0 blocked=0` means the belt is not counting firm P's refusals at
 all: a regression, and exactly what this leg's vacuity control produces (measured: a `fanOutCancel`
 that records a CLR04 refusal as a success reds the P loop at its deadline after 11 sweeps in 5560 ms
 with `refusals=0 blocked=0`, throwaway clara_814).
+
+**#1028 — THE THIRD RACE: THE ENGINE CAN FINISH FIRM P'S CHILDREN BEFORE THIS LEG EVER LOOKS.**
+Firm P's two children are ordinary admitted Work; the World dispatches them the moment
+`seedChildren` returns, well before `applyPoison` even runs, and the recovery belt settles a
+running Work whose engine run it does not know (the same behaviour `postEntry`'s own comment
+documents) within seconds. Once both are terminal the parent has no live child left and the belt
+correctly settles it — `clara.sweep_intake_batch_cancellations` / `reconcileIntakeBatchCancellations`
+did nothing wrong. The leg used to read that as `assert.equal(pFinal.state, "cancelling", …)`
+unconditionally, so this read a genuine defect indistinguishable from a real one: a red that says
+"declared done" whether the belt actually swallowed a refusal or the World simply won a race with
+this leg's own final check. #1027 made the failure legible (both counters, both firms, the
+`cancel_blocked` verdict) but deliberately did not fix it — out of that ticket's own scope.
+
+**The fix does not depend on the engine being slower than the leg.** The disjointness check now
+branches on whether a live child remains, never on timing: `cancelling` is read once as before (a
+negative that converges is a negative that was never true, so it stays unpolled); any other state
+is accepted ONLY IF `clara._intake_batch_live_children` returns nothing for that parent — in which
+case the leg logs it as the correct outcome it is and moves on — and still throws, exactly as
+before, if a live child remains while the parent reads terminal (the belt settling the estate
+prematurely, the one genuine regression this leg exists to catch). The refusal-counting and
+attribution assertions above (`pWatch.refusals >= 1`, `blocked >= 1`, `cancel_blocked=
+canceller_not_active`) are untouched and still run before this check, so a belt that stops counting
+refusals still reds there regardless of how firm P's children finish.
+
+**THE LIVENESS PREDICATE IS THE ESTATE'S OWN, NOT A SECOND SPELLING OF IT** (review SPEC-1028-01).
+The leg asks `clara._intake_batch_live_children($1)` — the function
+`clara.sweep_intake_batch_cancellations` itself settles a parent by
+(`packages/db/migrations/0229_intake_batches.sql`) — rather than re-deriving liveness from a Work-
+status set. A status set is only HALF of that function: it also excludes a child that already
+holds a committed `clara.operation_receipts` row, which is out of the belt's hands while its Work
+status is still non-terminal. Re-spelling it here would have made a parent the belt settled
+CORRECTLY read as "settled prematurely" — the exact opposite of what the leg says. Both the
+`engine_wins` fault's own wait and the "honestly still stopping" branch read the same function, so
+what the fault waits for and what the assertion checks cannot drift apart, and both branches now
+PRINT the rows they read instead of asserting a live child remains without looking.
+
+**`CLARA_P636_LEG4_FAULT=engine_wins`** is the new, third fault value (`late_poison` and
+`slow_settle` are #1027's own two): it WAITS — a fixture action, never a belt one — for firm P's
+parent to have no live child left, then sweeps the belt once more so the parent's own
+settlement is visible before the disjointness check reads it. It manufactures deterministically what
+a slow host produces by accident, so the fix is proved against the exact scenario rather than hoped
+for. Measured on throwaway clones of a migrated database (WSL, Node 22, `/opt/node/bin/node`):
+against the PRE-#1028 disjointness check (throwaway clara_704), `engine_wins` reds after firm P's
+two children reached terminal in 6205 ms — `AssertionError: …and firm P's is honestly still
+stopping… actual: 'cancelled', expected: 'cancelling'` — the exact defect this ticket exists to
+close. Against the fixed check the same fault (throwaway clara_703) PASSES: children terminal after
+5051 ms, and the same fault re-run against the estate-predicate check (throwaway clara_722 and
+clara_725) passes too: `LEG4 firm P's parent reached 'cancelled' with NO live child left by the
+estate's own reckoning (the #1028 race, not a belt defect) — refusals were still COUNTED (2) and
+ATTRIBUTED (blocked=1, door read canceller_not_active during polling) before the engine got
+there.`
+
+The belt's own vacuity control (`fanOutCancel` rewritten so a CLR04 refusal records as a success, no
+`engine_wins`, throwaway clara_705) still reds at the P-loop's own refusal deadline —
+`refusals=0 blocked=0` after 9 sweeps in 5604 ms — because that assertion runs and fails BEFORE the
+disjointness check is ever reached: the fix adds no new way for a genuine regression to slip
+through. Five consecutive clean runs against fresh clones (clara_706…clara_710, no fault) all pass,
+and the estate-predicate check repeats that on fresh clones clara_721 and clara_724, each logging
+"firm P is honestly still stopping — 2 live child(ren) remain: […member_id/work_id…]" (the
+ordinary, unpolled path is unchanged, and now prints what it read). Its own vacuity control:
+forcing the else branch (`if (false)`) on a clean run, while both children are still live, reds
+with "firm P's parent was declared done while it still had a LIVE child" and the two live rows
+named (throwaway clara_723, exit 1) — restored byte for byte afterwards. `packages/runtime/lib/intake-batches.mjs`'s `fanOutCancel` was restored
+byte-for-byte after the vacuity control (`git status`/`git diff` clean, verified).
 
 ## #1026 — the live gates' heap budget
 
@@ -1856,13 +1933,51 @@ selector value (`ask_question:<client id>`) is open to a later lane.
 wave, beside `clara_rt_test` / `clara_wave_b_ci` / `clara_<ticket>`: `trade-invoice-e2e.mjs`,
 `work-journal-e2e.mjs`, `periodic-adjustment-e2e.mjs` and `staff-expense-claim-e2e.mjs`. Still
 loopback-only, still a parsed DSN equality check against the PG env, still fail-closed. The
-remaining spawners (`accrual`, `plan-occurrence`, `prepayment-occurrence`,
-`fixed-asset-acquisition`, `work-egress`, `work-cancel`, `work-question`) still carry the narrow
-literal and cannot be run on a lane rig; one shared `tests/local-db-gate.mjs` is the standing
-follow-up.
+standing follow-up named here (one shared `tests/local-db-gate.mjs`) landed as #1018 — see that
+section below.
 
 **No World e2e removes its gate directory recursively.** `tests/trade-invoice-e2e.mjs`'s hold gate
 cleans up its own two files and leaves `.trade-invoice-gates/` alone: the directory is shared with
 every other gate on the rig, and `open()` — the one call that must never throw, because a held
 child waits on that file forever — now re-creates its parent first. Both gate directories are
 git-ignored, because a watchdog exit skips the `finally` that would have removed their files.
+
+## #1018 — one shared local-database gate for every standalone World e2e driver
+
+Every standalone runtime World e2e driver (the 23 `tests/*-e2e.mjs` files that spawn the shared
+World test harness — `tests/shutdown-e2e.mjs` and `tests/world-e2e.mjs` never carried this gate,
+so they are not part of the 23) used to hand-roll its own copy of the loopback-host +
+allowed-database-name safety gate that runs before it does anything destructive: a `PGDATABASE`-
+anchored regex, and for most drivers a second, independently hand-typed regex or URL-parsing block
+re-encoding the same allowed names against `WORKFLOW_POSTGRES_URL`. Nothing stopped a driver's own
+two copies from disagreeing (`work-journal-e2e.mjs` had exactly that drift, caught and fixed under
+#980 before this ticket), and widening the gate for a new naming convention — the riders wave's
+per-lane `clara_l<NN>`, admitted by only four of the twenty-three before #1018 — meant editing
+every file by hand.
+
+`tests/local-db-gate.mjs` now owns the checking logic only: `isLoopbackHost`, `allowedDbPattern`
+(builds the anchored `PGDATABASE` regex and the matching `WORKFLOW_POSTGRES_URL` regex from ONE
+alternation body, so the two can never independently drift again), `dsnAgreesWithEnv` (the
+parsed-DSN equality style) and `assertLocalDbGate` (the combined guard every driver calls once,
+with `checkDsnString` / `checkDsnParsed` flags because drivers disagreed on which DSN check(s) they
+ran — `work-knowledge-e2e.mjs` ran neither, preserved as-is rather than widened into a new check by
+this refactor). Each driver still supplies its OWN admitted database-name shapes via
+`allowedDbPattern(...)`, composed from the named `DB_NAME_SHAPE` constants where a shape is shared
+with another driver; no driver's admitted set changed as a side effect of the refactor.
+`tests/local-db-gate-drivers-census.test.mjs` is AC3's own litmus test. It DERIVES the roster from
+the directory listing — every `tests/*-e2e.mjs` that is not one of the two documented non-gate
+files — and asserts the derived set equals the written one, so a driver added later reds the census
+on its first day instead of being silently out of scope. For each file it reads the source text and
+confirms it imports `./local-db-gate.mjs`, calls `assertLocalDbGate(...)`, and declares no local
+`ALLOWED_DB`, no local `LOCAL_HOSTS`, and no anchored `/^clara_.../` database-name regex under
+any other name either.
+
+`tests/body-census-guard-db.test.mjs` is the twenty-fourth file that spawns a real World behind
+this same gate (CI runs it as a World leg like the 23), and it is censused too — as a
+`SKIP_GATED_WORLD_TESTS` entry rather than a driver, because a `node --test` file must DECLINE
+rather than throw: a thrown gate fails the file instead of skipping it. It therefore composes
+`isLoopbackHost`, `allowedDbPattern` and `dsnAgreesWithEnv` itself instead of calling
+`assertLocalDbGate`, admitting exactly the two names it always admitted
+(`clara_rt_test`, `clara_wave_b_ci`), and the census checks those calls instead. With both
+rosters in place, no World-spawning file in this package carries a second, disagreeing copy of the
+check.

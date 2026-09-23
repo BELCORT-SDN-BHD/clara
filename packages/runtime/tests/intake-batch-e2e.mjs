@@ -49,16 +49,20 @@ import { tmpdir } from "node:os";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
 import { startHeapBound, MiB } from "./heap-bound.mjs";
+import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|intake_ci|\d{3})(_world)?$/;
-if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("intake-batch-e2e is hard-gated to loopback + PGDATABASE in {clara_rt_test,clara_intake_ci,clara_<ddd>}");
-}
-if (!process.env.WORKFLOW_POSTGRES_URL
-    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|intake_ci|\d{3})(?:_world)?(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
-  throw new Error("intake-batch-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + the same throwaway database");
-}
+// Fail-closed local gate (#1018: shared with every other standalone World e2e driver). The
+// trailing `_world` shape is intake-admission-e2e's `clara_<ddd>` PLUS the world-suffixed variant
+// this leg's own precedent already used — the suffix applies after WHICHEVER of the three names
+// matched, not only after the per-ticket digits.
+assertLocalDbGate({
+  label: "intake-batch-e2e",
+  pattern: allowedDbPattern(
+    `${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.INTAKE_CI}|${DB_NAME_SHAPE.PER_TICKET}`,
+    { outerOptionalSuffix: "_world" },
+  ),
+  checkDsnString: true,
+});
 
 process.env.RELAY_TEST_MODE = "1";
 process.env.CLARA_START_WORLD = "1";
@@ -132,13 +136,14 @@ const RESUME_N = Number(process.env.CLARA_P636_RESUME_N || 100);
 // READING A DEADLINE THAT DOES FIRE, AND THE DISCRIMINATOR THAT MAKES IT READABLE. The message
 // carries both firms, both parents, both states, every child's Work status, the cumulative refusal
 // and BLOCKED counts and the estate's own per-parent `cancel_blocked` verdict. Firm P's children
-// reading `failed` is CONSISTENT WITH, but does not by itself establish, the separate defect below:
-// the same census appears when the belt stops counting refusals at all, which is what this leg's
-// vacuity control produces. What tells them apart is the blocked signal — `blocked >= 1` with
+// reading `failed` is CONSISTENT WITH, but does not by itself establish, the separate #1028 race
+// below: the same census appears when the belt stops counting refusals at all, which is what this
+// leg's vacuity control produces. What tells them apart is the blocked signal — `blocked >= 1` with
 // `cancel_blocked=canceller_not_active` means the belt DID refuse firm P's children and the parent
-// went terminal because the World had already terminalised them (the separate defect, NOT fixed
-// here); `blocked = 0` with `refusals = 0` means the belt is not counting firm P's refusals, which
-// is a regression in the belt and is this leg's business.
+// went terminal because the World had already terminalised them (the #1028 race, recorded rather
+// than failed — see the LEG 4 disjointness check below); `blocked = 0` with `refusals = 0` means
+// the belt is not counting firm P's refusals, which is a regression in the belt and is this leg's
+// business.
 //
 // THE FAULT KNOB STAYS, DELIBERATELY (review SPEC-1027-04). It is the only way to re-run the red
 // this fix removes, it is how the fix round re-verified both deadlines, and it is inert by default
@@ -162,7 +167,7 @@ const LEG4_P_DEADLINE_MS = Number(process.env.CLARA_P636_LEG4_P_DEADLINE_MS || 5
 const LEG4_Q_DEADLINE_MS = Number(process.env.CLARA_P636_LEG4_Q_DEADLINE_MS || 8000);
 const LEG4_POLL_MS = Number(process.env.CLARA_P636_LEG4_POLL_MS || 500);
 // THE FAULT KNOB, on `CLARA_WORK_TEST_FAULT`'s precedent: inert unless asked for, and it moves
-// only WHEN THIS FIXTURE ACTS — never what the belt does. Two values, one per observation, each
+// only WHEN THIS FIXTURE ACTS — never what the belt does. Three values, one per observation, each
 // the documented mechanism of one CI red:
 //   `late_poison`  the poisoned parent's own cancellation decision lands `CLARA_P636_LEG4_FAULT_MS`
 //                  late, so the first sweep has nothing of firm P's to refuse. Keep it WELL under
@@ -173,6 +178,14 @@ const LEG4_POLL_MS = Number(process.env.CLARA_P636_LEG4_POLL_MS || 500);
 //                  parent whose runs have not landed. With the children left queued instead, the
 //                  fault is inert — `cancel_accounting_work` terminalises them itself and the
 //                  parent settles with or without this leg's settles (measured, clara_925).
+//   `engine_wins`  #1028's own repro: WAITS for firm P's two children — ordinary admitted Work,
+//                  the World dispatches them the moment `seedChildren` returns, well before
+//                  `applyPoison` even runs — to leave the estate's own live-children census for
+//                  that parent EMPTY on their own, then sweeps the belt once more so the
+//                  parent's own settlement is visible before the disjointness check below reads
+//                  it. This is the SAME mechanism a slow host produces by accident (the third
+//                  race #1027 deliberately left unfixed); asking for it here proves the fix
+//                  against the exact scenario instead of hoping a slow run happens to land one.
 // A ROW LOCK WAS TRIED FIRST AND REJECTED: holding `for update` on a parent row did not make the
 // belt's `skip locked` worklist pass it by, it made the whole sweep WAIT (8087 ms under an 8000 ms
 // lock, clara_923) and then proceed, which perturbs the leg's clock rather than its observations.
@@ -180,6 +193,11 @@ const LEG4_FAULT = process.env.CLARA_P636_LEG4_FAULT || "";
 // The default is 1500 ms: the lateness both faults were MEASURED at, and comfortably inside the
 // P-loop deadline above. A fault longer than that deadline is a vacuity control, not a repro.
 const LEG4_FAULT_MS = Number(process.env.CLARA_P636_LEG4_FAULT_MS || 1500);
+// #1028 — `engine_wins`'s OWN deadline: how long it waits for firm P's parent to have no live
+// child left, by the estate's own reckoning. Generous on purpose (the measured figure is ~8 s,
+// clara_922/927/933 in #1027's own report) because this fault's job is to GUARANTEE the race,
+// not to time it; the leg's own P/Q deadlines above are what stays tight.
+const LEG4_RACE_DEADLINE_MS = Number(process.env.CLARA_P636_LEG4_RACE_DEADLINE_MS || 20000);
 
 const pdfBytes = (marker) =>
   Buffer.from(`%PDF-1.7\n1 0 obj << /Type /Page /Marker (${marker}) >> endobj\nstartxref\n0\n%%EOF\n`);
@@ -666,6 +684,17 @@ async function main() {
   // =========================================================================================
   // LEG 4 — p636.poison.cross_firm.
   // =========================================================================================
+  // #1028 — THE DISCRIMINATOR both `engine_wins` and the final disjointness check need, read from
+  // the ESTATE'S OWN definition of a live child rather than re-spelled here (review SPEC-1028-01).
+  // `clara._intake_batch_live_children` is the very predicate
+  // `clara.sweep_intake_batch_cancellations` settles a parent by
+  // (`packages/db/migrations/0229_intake_batches.sql`), and a Work status is only HALF of it: the
+  // function ALSO excludes a child that already holds a committed `clara.operation_receipts` row,
+  // which is out of the belt's hands even while its Work status is still non-terminal. A second
+  // spelling here — the status set alone — would red a parent the belt settled CORRECTLY as "the
+  // belt settled it prematurely", which is the opposite of what this leg exists to say.
+  const liveChildrenOf = async (batch) => (await rig.rootQuery(
+    "select member_id, work_id from clara._intake_batch_live_children($1::uuid)", [batch])).rows;
   const P = await rig.buildFirm("p636-poison");
   await ensureChart(P.owner, P.client);
   const Q = await rig.buildFirm("p636-healthy");
@@ -721,7 +750,8 @@ async function main() {
    *  failures apart when firm P's children read `failed`:
    *    blocked >= 1 / cancel_blocked=canceller_not_active — the belt DID see and refuse firm P's
    *      children; if its parent is nevertheless terminal, the World drove those children terminal
-   *      first and the belt settled the parent correctly. That is the separate, unfixed defect.
+   *      first and the belt settled the parent correctly. That is the #1028 race: the LEG 4
+   *      disjointness check below records it as the correct outcome it is, rather than failing.
    *    blocked = 0 AND refusals = 0 — the belt is not counting firm P's refusals at all. That is a
    *      REGRESSION in the belt, and it is exactly what the vacuity control (`fanOutCancel`
    *      rewritten so a CLR04 refusal records as a success) produces. */
@@ -884,18 +914,80 @@ async function main() {
     + `settles=${JSON.stringify(qSettles)}`);
   assert.equal(qWatch.state, "cancelled",
     "firm Q's batch, swept in the SAME belt call as firm P's poison, still reached its terminal state");
+
+  // #1028 — `engine_wins`: DELIBERATELY LET THE ENGINE FINISH FIRM P'S CHILDREN FIRST, so the
+  // disjointness check below is proved against the exact race rather than against luck. A fixture
+  // action (what THIS LEG waits for) — nothing about what the belt does changes, and it is inert
+  // on every other run.
+  if (LEG4_FAULT === "engine_wins") {
+    const raceStarted = Date.now();
+    await pollToDeadline({
+      deadlineMs: LEG4_RACE_DEADLINE_MS,
+      step: async () => {
+        if ((await liveChildrenOf(pBatch)).length > 0) return false;
+        // One more sweep, the SAME call every other observation in this leg already uses, so the
+        // parent's own settlement (if the belt grants one) is visible before this fault returns.
+        await withRuntime((c) => reconcileIntakeBatchCancellations(c, { withRuntime }));
+        return true;
+      },
+      diagnose: async ({ elapsedMs, deadlineMs }) => {
+        const live = await liveChildrenOf(pBatch);
+        const rows = (await rig.rootQuery(
+          "select id, status from clara.accounting_work where id = any($1::uuid[]) order by id",
+          [pChildren.map((c) => c.work_id)])).rows;
+        return `[p636] FAULT engine_wins: firm P still had ${live.length} live child(ren) after `
+          + `${elapsedMs}ms (deadline ${deadlineMs}ms): live=${JSON.stringify(live)} `
+          + `children=${JSON.stringify(rows)}`;
+      },
+    });
+    console.log(`[p636] LEG4 FAULT engine_wins: firm P has NO live child left after `
+      + `${Date.now() - raceStarted}ms — the World finished its own children before this leg ever checked`);
+  }
+
   // THE DISJOINTNESS, unpolled ON PURPOSE: this one is a NEGATIVE, and a negative that converges is
-  // a negative that was never true. It is read once, at the end, and its message carries the same
-  // census as a deadline would — firm P's parent going terminal here, WITH blocked >= 1 and the
-  // door's `canceller_not_active`, means its children went terminal on their own under the World,
-  // which is a different fact from the two above and must not be mistaken for one.
+  // a negative that was never true. It is read once, at the end.
+  //
+  // #1028 — WHAT "DECLARED DONE" MEANS IS NOW PRECISE rather than "always still cancelling". Firm
+  // P's parent reading non-`cancelling` here is consistent with TWO different facts, and only one
+  // is a defect:
+  //   a LIVE CHILD REMAINED and the belt settled the parent anyway — the belt declared the estate
+  //     done while it still owed an answer, which is the genuine regression this leg exists to
+  //     catch, and it still throws exactly as before.
+  //   EVERY child of firm P's parent was independently finished BY THE WORLD first — the recovery
+  //     belt settling a running Work whose engine run it does not know, `postEntry`'s own comment
+  //     above — before this leg ever looked. The parent then has nothing left to be BLOCKED about
+  //     and the belt correctly calls it done. That is the #1027/#1028 third race, not a belt
+  //     defect: the disjointness this leg proves (a permanently-refusing firm's parent never goes
+  //     terminal WHILE STILL OWING A LIVE CHILD an answer) was never violated, only the
+  //     interleaving with a slow assertion was. The leg RECORDS this rather than failing.
+  // The two are told apart by whether a live child remains — asked of the estate's own
+  // `_intake_batch_live_children`, the predicate the belt itself settles by, never a second
+  // spelling of it here — and never by how fast anything ran. The refusal was already
+  // independently COUNTED and ATTRIBUTED to firm P above, before this read.
   const pFinal = await batchState(pBatch);
-  const pTail = pFinal?.state === "cancelling" ? "" : `\n  ${await leg4Diagnosis(
-    "firm P was declared done while this leg watched",
-    { sweeps: pRun.sweeps + qRun.sweeps, elapsedMs: pRun.elapsedMs + qRun.elapsedMs,
-      deadlineMs: LEG4_P_DEADLINE_MS + LEG4_Q_DEADLINE_MS, receipt: qWatch.receipt })}`;
-  assert.equal(pFinal.state, "cancelling",
-    "…and firm P's is honestly still stopping, rather than silently declared done" + pTail);
+  if (pFinal?.state === "cancelling") {
+    const pStillLive = await liveChildrenOf(pBatch);
+    console.log(`[p636] LEG4 firm P is honestly still stopping — `
+      + `${pStillLive.length} live child(ren) remain: ${JSON.stringify(pStillLive)}`);
+  } else {
+    const pLive = await liveChildrenOf(pBatch);
+    const pChildRows = await rig.rootQuery(
+      "select id, status from clara.accounting_work where id = any($1::uuid[]) order by id",
+      [pChildren.map((c) => c.work_id)]);
+    const pTail = `\n  ${await leg4Diagnosis(
+      "firm P was declared done while this leg watched",
+      { sweeps: pRun.sweeps + qRun.sweeps, elapsedMs: pRun.elapsedMs + qRun.elapsedMs,
+        deadlineMs: LEG4_P_DEADLINE_MS + LEG4_Q_DEADLINE_MS, receipt: qWatch.receipt })}`
+      + `\n  firm P children (raw): ${JSON.stringify(pChildRows.rows)}`
+      + `\n  firm P LIVE children (clara._intake_batch_live_children): ${JSON.stringify(pLive)}`;
+    assert.equal(pLive.length, 0,
+      "firm P's parent was declared done while it still had a LIVE child — the belt settled it "
+      + "prematurely, which IS the defect this leg exists to catch" + pTail);
+    console.log(`[p636] LEG4 firm P's parent reached '${pFinal.state}' with NO live child left by `
+      + `the estate's own reckoning (the #1028 race, not a belt defect) — refusals were still COUNTED `
+      + `(${pWatch.refusals}) and ATTRIBUTED (blocked=${pWatch.blocked}, door read `
+      + `canceller_not_active during polling) before the engine got there.`);
+  }
   void pChildren;
   await Promise.all(faultWork);
 

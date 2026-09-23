@@ -24,6 +24,16 @@
 // PGDATABASE in {clara_rt_test, clara_wave_b_ci}, with WORKFLOW_POSTGRES_URL parsed field by field
 // against the PG* env this process is trusting. Everything else SKIPS — a skip is not evidence, so
 // the reason is printed.
+//
+// #1018 — THE CHECKING LOGIC IS THE SHARED ONE (`tests/local-db-gate.mjs`), not a third
+// hand-typed copy of it. This is the one World-spawning file that does NOT call
+// `assertLocalDbGate`: a `node --test` file must DECLINE rather than throw, because a thrown
+// gate fails the file instead of skipping it. It therefore composes the same decision from the
+// module's own `isLoopbackHost` / `allowedDbPattern` / `dsnAgreesWithEnv`, admitting exactly
+// the two names it always admitted. `tests/local-db-gate-drivers-census.test.mjs` names it in
+// `SKIP_GATED_WORLD_TESTS` and censuses it on those calls (review SPEC-1018-01: until then this
+// file was the 24th carrying an independent copy of the identical gate, CI-wired as a World leg
+// like the 23 drivers, and named nowhere in that census).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -34,33 +44,26 @@ import { fileURLToPath } from "node:url";
 
 import * as rig from "./rig.mjs";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { DB_NAME_SHAPE, allowedDbPattern, dsnAgreesWithEnv, isLoopbackHost } from "./local-db-gate.mjs";
 
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci)$/;
+// The SAME two database names this file has always admitted, composed from the shared module's
+// named shapes instead of re-typed here — so admitting a new convention is one edit there.
+const DB_PATTERN = allowedDbPattern(`${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.WAVE_B_CI}`);
 const serveScript = fileURLToPath(new URL("../scripts/serve.mjs", import.meta.url));
 const bundle = fileURLToPath(new URL("../.output/server/index.mjs", import.meta.url));
 
-/** The same parsed-DSN gate the standalone e2es use: every field of WORKFLOW_POSTGRES_URL must
- *  independently agree with the PG* env, never merely "look like" a loopback URL. */
+/** The same parsed-DSN gate the standalone e2es use, and now literally the same code: every field
+ *  of WORKFLOW_POSTGRES_URL must independently agree with the PG* env, never merely "look like" a
+ *  loopback URL. */
 function worldDsnAgrees() {
-  if (!process.env.WORKFLOW_POSTGRES_URL) return false;
-  try {
-    const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
-    return (
-      u.protocol === "postgres:"
-      && LOCAL_HOSTS.has(u.hostname)
-      && u.port === String(process.env.PGPORT ?? "")
-      && u.pathname === "/" + (process.env.PGDATABASE ?? "")
-      && [...u.searchParams.keys()].length === 0
-    );
-  } catch {
-    return false;
-  }
+  const dsn = process.env.WORKFLOW_POSTGRES_URL;
+  if (!dsn) return false;
+  return dsnAgreesWithEnv(dsn, { port: process.env.PGPORT, database: process.env.PGDATABASE });
 }
 
 function gateReason() {
-  if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-    return "needs a loopback PGHOST and PGDATABASE in {clara_rt_test, clara_wave_b_ci} (it boots a REAL world)";
+  if (!isLoopbackHost(process.env.PGHOST) || !DB_PATTERN.dbRegex.test(process.env.PGDATABASE ?? "")) {
+    return `needs a loopback PGHOST and PGDATABASE matching ${DB_PATTERN.describe()} (it boots a REAL world)`;
   }
   if (!worldDsnAgrees()) return "needs WORKFLOW_POSTGRES_URL agreeing field-by-field with the PG* env";
   if (!existsSync(bundle)) return "needs a built runtime: pnpm --filter @clara/runtime build";

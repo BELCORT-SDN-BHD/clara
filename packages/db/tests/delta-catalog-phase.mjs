@@ -640,9 +640,16 @@ await t.test("freeze verifier positively reads registered live bodies, deploymen
   // ZERO deployed is the property this cell is really about on a FRESH witness -- the verifier
   // reads every registered closure's live bodies BEFORE any ceremony has flipped one. On a
   // RE-RUN (a prior invocation already ceremonied this database, one-way) the true count is the
-  // five covered closures plus F-A5 PR-1's own evaluate_fs_pack_agent IF ITS SEPARATE ceremony
-  // (cell D) has ALSO already run -- read directly rather than assumed, so this stays a strong,
-  // exact assertion in either shape rather than a bare skip.
+  // five covered closures plus EACH of F-A5 PR-1's own evaluate_fs_pack_agent, F-A5b card 1's
+  // evaluate_metric v2, and F-A4 PR-2a's prepayment_schedule v1 IF ITS OWN SEPARATE ceremony has
+  // ALSO already run -- read directly rather than assumed, so this stays a strong, exact
+  // assertion in either shape rather than a bare skip. #1016: this cell used to add a term for
+  // only the first two "ships dark" evaluators and silently drop prepayment_schedule from the
+  // deployment census, so it fell one short of clara.verify_evaluator_freeze()'s own
+  // count(*) where deployed the moment prepayment_schedule's ceremony had run on a reused
+  // database -- verify_evaluator_freeze() itself draws no OWNS_ITS_OWN_CEREMONY distinction (it
+  // counts every deployed row, full stop); only this test's hand-derived expectation must mirror
+  // that, for every evaluator that ships dark, not just some of them.
   const fresh = await evaluatorCeremonyUnwitnessed();
   const fsPackDeployed = (await rootQuery(
     "select deployed from clara.evaluator_versions where evaluator_name='evaluate_fs_pack_agent' and version=1")).rows[0]?.deployed === true;
@@ -651,8 +658,15 @@ await t.test("freeze verifier positively reads registered live bodies, deploymen
   // assumed, and its ABSENCE on a pre-card-1 chain contributes nothing.
   const card1V2Deployed = (await rootQuery(
     "select deployed from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=2 and firm_id is null")).rows[0]?.deployed === true;
+  // F-A4 PR-2a's prepayment_schedule v1 is the THIRD closure that owns its own separate ceremony
+  // (PR-2b's runtime ceremony flips it -- see delta-contract.test.mjs's CEREMONY_EXCLUDED_V3).
+  // Like the two above, its state is read directly rather than assumed, and its ABSENCE on a
+  // pre-PR-2a chain contributes nothing.
+  const prepayDeployed = (await rootQuery(
+    "select deployed from clara.evaluator_versions where evaluator_name='prepayment_schedule' and version=1 and firm_id is null")).rows[0]?.deployed === true;
   assert.equal(result.verified_deployed,
-    fresh ? 0 : 5 + (fsPackDeployed ? 1 : 0) + (card1V2Deployed ? 1 : 0), JSON.stringify(result));
+    fresh ? 0 : 5 + (fsPackDeployed ? 1 : 0) + (card1V2Deployed ? 1 : 0) + (prepayDeployed ? 1 : 0),
+    JSON.stringify(result));
   // SIX registered closures at this frontier: delta's evaluate_metric +
   // assess_metric_cell_independent, F-A1's evaluate_witness_fact_state (v1) +
   // evaluate_witness_identity (0091/0092), F-A2's evaluate_witness_fact_state **v2** — the

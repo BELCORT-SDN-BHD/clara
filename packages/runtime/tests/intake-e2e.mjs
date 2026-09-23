@@ -12,20 +12,17 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
-// Fail-closed local gate. Any PGPORT is accepted (local 5544, CI's 5432 service),
-// but the host MUST be loopback and the database MUST be one of the two sanctioned
-// throwaways — never a live/remote target. The runtime local rig uses clara_rt_test;
-// CI provisions a fresh clara_intake_ci for this e2e.
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|intake_ci)$/;
-if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("intake-e2e is hard-gated to a loopback host (127.0.0.1|localhost) + PGDATABASE in {clara_rt_test,clara_intake_ci}");
-}
-if (!process.env.WORKFLOW_POSTGRES_URL
-    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|intake_ci)(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
-  throw new Error("intake-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|intake_ci)");
-}
+// Fail-closed local gate (#1018: shared with every other standalone World e2e driver). Any
+// PGPORT is accepted (local 5544, CI's 5432 service), but the host MUST be loopback and the
+// database MUST be one of the two sanctioned throwaways — never a live/remote target. The
+// runtime local rig uses clara_rt_test; CI provisions a fresh clara_intake_ci for this e2e.
+assertLocalDbGate({
+  label: "intake-e2e",
+  pattern: allowedDbPattern(`${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.INTAKE_CI}`),
+  checkDsnString: true,
+});
 
 process.env.RELAY_TEST_MODE = "1";
 process.env.CLARA_START_WORLD = "1";

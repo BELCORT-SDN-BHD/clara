@@ -18,9 +18,14 @@
 //
 // (#845: the database name must look disposable — `rig-reset-guard.mjs`'s `guardedReset`, which
 // this file now routes its `reset()` through, refuses any name that isn't ci/test/tmp/temp/
-// scratch/ephemeral by whole name or final `.`/`_`/`-` segment. There is no CI leg for this file
-// yet — see packages/db/tests/README.md's #845 section — so this recipe is the only place this
-// drill's destructive path runs; run it against a throwaway database, never a shared rig.)
+// scratch/ephemeral by whole name or final `.`/`_`/`-` segment.
+//
+// #1023 GAVE THIS FILE A CI LEG, so the recipe above is no longer the only place its destructive
+// path runs: the `0186 checkout-convergence upgrade drill (isolated DB)` step in
+// `.github/actions/closed-wave-upgrade-drills/action.yml` creates `clara_0186_upgrade_ci` and runs
+// that recipe verbatim, so a by-hand run and the CI leg exercise the identical target. The job is
+// `closed-wave-drills`, reached on a schedule or a workflow_dispatch. Run it by hand against a
+// throwaway database, never a shared rig.)
 //
 // THE SHAPES IT BUILDS, and why each is a separate claim 0186 §A makes:
 //   · an UNSTAMPED intent                       -> `open`,            status_at = opened_at
