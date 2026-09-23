@@ -743,7 +743,22 @@ LAST two follow-up call sites: `CompleteParticularsDialog`/`DisposeDialog`
 (`components/registers/fa-row-actions.tsx`) and the needs-you inline
 `FixedAssetIncompleteAffordance` (`components/firm/fixed-asset-incomplete-affordance.tsx`, which has
 no `FaDoorDialog` of its own — its own open/close IS the decision boundary) all hold a key now;
-#639's original mint-per-call shape is gone.
+#639's original mint-per-call shape is gone. `completeIntent` and `reviseIntent` share ONE
+`serializeParticulars` helper rather than carrying the key-sorted block twice, so the convention
+cannot drift between them.
+
+**…and the two DEFAULT-POLICY doors hold one too** (#932 fix round, adversarial review ADV-L04-5).
+`setFaDepreciationPolicy` and `retireFaDepreciationPolicy`
+(`lib/registers/fa-depreciation-policies.ts`) shipped in this same wave still minting the key
+inside the wrapper — the very class the paragraph above exists to close. One human decision sent
+twice then left TWO policy versions (v2 active, v1 retired "superseded by
+set_fa_depreciation_policy v2"), and a register row born between the calls carried v1 while the
+account read v2. Both now take a required `opKey`, their tuples are `setPolicyIntent` (client,
+asset account, method, useful life, rate, residual — exactly what
+`clara.set_fa_depreciation_policy`'s own `_reserve_op` hashes, with `p_reason` outside it the way
+`p_memo` is outside the disposal's) and `retirePolicyIntent` (client, asset account), and
+`SetPolicyDialog`/`RetirePolicyDialog` (`components/registers/fa-account-profiles-panel.tsx`) hold
+the key with `useDepreciationDecisionKey` and renew it on close.
 
 **Five readings of one asset, addressable.** `fixed-asset-detail.tsx`' tab id lives in `?tab=`, so a
 pasted link lands on the reading it names and Back leaves the page rather than walking five tabs.

@@ -23,8 +23,10 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import { loadFaAccountProfiles, upsertFaAccountProfile, retireFaAccountProfile } from "@/lib/registers/fa-account-profiles";
 import {
   loadFaDepreciationPolicies, setFaDepreciationPolicy, retireFaDepreciationPolicy,
+  setPolicyIntent, retirePolicyIntent,
   type FaDepreciationMethod, type FaDepreciationPolicyRow,
 } from "@/lib/registers/fa-depreciation-policies";
+import { useDepreciationDecisionKey } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { FaDoorDialog } from "./FaDoorDialog";
 import type { AccountRow } from "@/lib/registers/accounts";
@@ -149,6 +151,10 @@ function SetPolicyDialog({
   triggerLabel: string;
 }) {
   const tp = useTranslations("FixedAssetsDepreciation.policies");
+  // #932 FIX ROUND (ADV-L04-5) — ONE DECISION, ONE KEY. A CLOSED DIALOG ENDS THE DECISION: the
+  // next press is a new policy and mints a new key (`onClosed` below), exactly as #978 wired the
+  // complete and dispose dialogs.
+  const decision = useDepreciationDecisionKey();
   const [method, setMethod] = useState<FaDepreciationMethod>(nonDepreciable ? "none" : "straight_line");
   const [life, setLife] = useState<number | null>(null);
   const [rate, setRate] = useState<number | null>(null);
@@ -168,16 +174,21 @@ function SetPolicyDialog({
       confirmLabel={triggerLabel}
       busy={busy}
       confirmDisabled={!ready}
+      onClosed={() => decision.renew()}
       onConfirm={() =>
         act(async () => {
-          await setFaDepreciationPolicy(sessionTokenAccessor, {
+          const sent = {
             clientId,
             assetAccount,
             method,
             usefulLifeMonths: method === "none" ? null : life,
             rateBps: method === "reducing_balance" ? rate : null,
             residualCents: method === "none" ? 0 : (residualCents ?? 0),
+          };
+          await setFaDepreciationPolicy(sessionTokenAccessor, {
+            ...sent,
             reason: reason.trim() === "" ? null : reason.trim(),
+            opKey: decision.key(setPolicyIntent(sent)),
           });
         })
       }
@@ -262,6 +273,8 @@ function RetirePolicyDialog({
   act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const tp = useTranslations("FixedAssetsDepreciation.policies");
+  // #932 FIX ROUND (ADV-L04-5) — the same held key the set dialog holds.
+  const decision = useDepreciationDecisionKey();
   return (
     <FaDoorDialog
       triggerLabel={tp("retireTrigger")}
@@ -269,7 +282,15 @@ function RetirePolicyDialog({
       description={tp("retireDescription")}
       confirmLabel={tp("retireTrigger")}
       busy={busy}
-      onConfirm={() => act(async () => { await retireFaDepreciationPolicy(sessionTokenAccessor, { clientId, assetAccount }); })}
+      onClosed={() => decision.renew()}
+      onConfirm={() =>
+        act(async () => {
+          await retireFaDepreciationPolicy(sessionTokenAccessor, {
+            clientId, assetAccount,
+            opKey: decision.key(retirePolicyIntent({ clientId, assetAccount })),
+          });
+        })
+      }
     />
   );
 }

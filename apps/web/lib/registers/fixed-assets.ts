@@ -317,18 +317,28 @@ export function completeFixedAssetParticulars(
   );
 }
 
+/** Particulars, serialised key-sorted for an INTENT TUPLE: an object built in a different key
+ *  order is the same decision, so it must produce the same string. Shared by `completeIntent` and
+ *  `reviseIntent` below, whose doors both hash the particulars into their own operation key
+ *  (`clara.complete_fixed_asset_particulars`, `clara.revise_fixed_asset_particulars`). Extracted
+ *  in the #978 fix round: the two functions carried this block verbatim, and a convention only
+ *  one of them ever changed would be a convention no longer. */
+function serializeParticulars(particulars: FaParticularsInput): string {
+  const p = particulars as Record<string, unknown>;
+  return Object.keys(p)
+    .sort()
+    .map((k) => `${k}=${JSON.stringify(p[k] ?? null)}`)
+    .join(",");
+}
+
 /** The intent tuple a PARTICULARS COMPLETION decision is identified by — exactly the tuple
  *  `clara.complete_fixed_asset_particulars` hashes into its own operation key (0249:350-352:
  *  `client`, `asset`, `particulars`). Editing any of them inside the open dialog is a different
  *  decision and earns a new key; pressing Confirm twice on the same one does not. Particulars are
- *  serialised key-sorted so an object built in a different order is still the same intent (the
- *  same convention `reviseIntent` below uses). */
+ *  serialised key-sorted by `serializeParticulars` above, which `reviseIntent` shares, so an
+ *  object built in a different order is still the same intent. */
 export function completeIntent(args: { clientId: string; assetId: string; particulars: FaParticularsInput }): string {
-  const p = args.particulars as Record<string, unknown>;
-  const particulars = Object.keys(p)
-    .sort()
-    .map((k) => `${k}=${JSON.stringify(p[k] ?? null)}`)
-    .join(",");
+  const particulars = serializeParticulars(args.particulars);
   return [args.clientId, args.assetId, particulars].join("|");
 }
 
@@ -384,7 +394,7 @@ export function reviseFixedAssetParticulars(
 /** The intent tuple a PROSPECTIVE REVISION decision is identified by: every value the door is
  *  being asked to write. Editing any of them inside the open dialog is a different decision and
  *  earns a new key; pressing Confirm twice on the same one does not. Particulars are serialised
- *  key-sorted so an object built in a different order is still the same intent. */
+ *  key-sorted by the shared `serializeParticulars` helper above. */
 export function reviseIntent(args: {
   clientId: string;
   assetId: string;
@@ -393,11 +403,7 @@ export function reviseIntent(args: {
   changeClass: FaChangeClass;
   changeReason: string;
 }): string {
-  const p = args.particulars as Record<string, unknown>;
-  const particulars = Object.keys(p)
-    .sort()
-    .map((k) => `${k}=${JSON.stringify(p[k] ?? null)}`)
-    .join(",");
+  const particulars = serializeParticulars(args.particulars);
   return [args.clientId, args.assetId, args.effectiveFrom, args.changeClass, args.changeReason, particulars]
     .join("|");
 }

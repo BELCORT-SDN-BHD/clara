@@ -252,7 +252,7 @@ test("disposeFixedAsset: calling it twice with the SAME key posts the SAME p_op_
   assert.equal(calls[1]!.body.p_op_key, "decided-dispose", "the retry carries the SAME key, not a fresh one");
 });
 
-test("#978 disposeIntent: one decision while the money facts are unchanged, a new one the moment any of them move — memo EXCLUDED", () => {
+test("#978 disposeIntent: one decision while the money facts are unchanged, a new one the moment any of them move — memo has no field to differ in, because the argument type excludes it", () => {
   const base = {
     clientId: "c1", assetId: "a1", disposalDate: "2026-08-27", proceedsCents: 50000,
     proceedsAccount: "1010", gainAccount: "4900", lossAccount: "5900",
