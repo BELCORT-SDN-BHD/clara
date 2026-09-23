@@ -1142,10 +1142,11 @@ control proving the door exists (it is #614's RECOVERY act, not a gate):
   impossible). The door's verdict is read back and printed VERBATIM.
 
 **Residual, named — and #877's correction.** Arm (c) proves the door is REACHED on ITS
-OWN document, not that a coding task is admitted THERE: that fixture's real MyInvois
-invoice states no tax breakdown, so `_coding_lane_core` refuses it (`tier_a_fails`,
-measured on clara_l07; the leg prints the door's exact reasons, never a fixed list) and
-routes it to `needs_you`. #633 owns exactly that reach-and-skip claim. **Leg 8 (#877)**
+OWN document, not that a coding task is admitted THERE: `_coding_lane_core` refuses that
+fixture on FOUR counts — `tier_a_fails` (it states no tax breakdown, so the structured
+Tier-A arithmetic tie is incomplete), `direction_unresolved`, `vendor_unresolved` and
+`no_consent` — and routes it to `needs_you`. Measured on clara_l07, and the leg prints the
+door's exact reasons rather than a fixed list, so all four are read off that printout. #633 owns exactly that reach-and-skip claim. **Leg 8 (#877)**
 closes the remaining gap in its own leg: a Tier-A-complete fixture — an explicit type 01,
 a net/tax tie, a tax breakdown that sums (migration 0023 §A's structured arm) — plus a
 name-only vendor counterparty already in the client's books (`clara.draft_entry` +
@@ -1194,6 +1195,26 @@ assertions already poll everything they admit to a terminal status first, so a c
 well under a second. `tests/intake-batch-e2e.mjs` deliberately does NOT call it: it is the last leg
 on this database in the CI job and its own §5 scope ends with live rows on purpose (a declared-fact
 wait, a quota wait, an unassigned failed upload) that nothing downstream needs drained.
+
+**Running it against a REUSED database: drain the WAKE state first, or the drain fails on somebody
+else's rows (#877 fix round).** CI builds this file's database fresh in the same job, so the point
+only arises on a rig. A `clara.wakes_outbox` row left `held` by an earlier ticket's session is
+turned into a `held` `clara.agent_tasks` wake row by `lib/drain.mjs`'s wake phase the moment ANY
+full server boots against that database — including this leg's own — and `censusUnboundTasks` then
+counts it, so `waitForQueueDrain` times out at the last step with rows no leg here created (and
+cancelling only the tasks does not help: the next boot re-creates them from the outbox). On a
+DISPOSABLE clone, settle the source first, through the estate's own lawful transition:
+
+```
+update clara.wakes_outbox set status='cancelled' where status='held';
+update clara.agent_tasks set status='cancelled' where status in ('queued','held','running','awaiting_input');
+```
+
+Measured, lane 07, 2026-09-24, on a `clara_l07` clone: before that, all 8 legs PASS and the run
+still exits 1 on four re-created `held` wake tasks; after it, the same run prints
+`INTAKE ADMISSION E2E: PASS (8 legs …)` and exits **0**, on Windows and again under WSL as `runner`
+(`/opt/node/bin/node tests/intake-admission-e2e.mjs`, the shape the integrator re-runs new runtime
+tests in).
 
 **RELEASE RISK, NAMED RATHER THAN DISCOVERED LATER (L06-967-C, fix round 1):** the drain converts
 today's noisy-but-passing CI run into a RED one on exactly the input #967 was filed about. A capped

@@ -38,13 +38,17 @@
 //
 // THE RESIDUAL, NAMED — AND #877's CORRECTION. Arm (c) proves the admission door is
 // REACHED automatically; on its OWN fixture it still does not prove an admitted CODING
-// TASK, because `_coding_lane_core` refuses that particular document — a real MyInvois
-// invoice with no stated tax breakdown, so its structured Tier-A arithmetic tie is
-// incomplete (`tier_a_fails`) — and routes it to `needs_you` instead (measured on
-// clara_l07; arm (c)'s own assertion prints the door's exact named reasons rather than
-// asserting a fixed list, so this sentence is read off that printout, not re-typed by
-// hand). #633 owns exactly that reach-and-skip claim, and arm (c) still proves it,
-// unchanged. #877 was the remaining gap this note used to leave open — "a document that
+// TASK, because `_coding_lane_core` refuses that particular document on FOUR counts and
+// routes it to `needs_you` instead: `tier_a_fails` (a real MyInvois invoice with no
+// stated tax breakdown, so its structured Tier-A arithmetic tie is incomplete),
+// `direction_unresolved`, `vendor_unresolved` and `no_consent`. All four are read off the
+// door's own printout — arm (c) asserts on the reasons the door names rather than on a
+// fixed list, and the leg prints them verbatim — measured on clara_l07, 2026-09-24:
+// `{"clr":"CLR29","lane":"needs_you","reason":"lane_changed","reasons":["tier_a_fails",
+// "direction_unresolved","vendor_unresolved","no_consent"]}`. Naming only the first would
+// understate the residual by three, which is how leg 8's own fixture reads as a
+// one-thing-away variant of arm (c)'s when it is four. #633 owns exactly that
+// reach-and-skip claim, and arm (c) still proves it, unchanged. #877 was the remaining gap this note used to leave open — "a document that
 // satisfies Tier A needs counterparty resolution, a resolved direction and coding
 // consent" — and it is CLOSED below, in its own leg (8): a Tier-A-complete fixture
 // (an explicit type 01, a net/tax tie, a tax breakdown that sums), a vendor counterparty
@@ -75,6 +79,14 @@
 //      `_coding_lane_core` precondition satisfied, `admit_autodraft_task` answers
 //      `admitted` by name and the minted task reads back tied to the document's live
 //      filing, with no human act and no `request_autodraft` anywhere in the trip.
+//      WHERE THE TRIP BEGINS, said plainly because the claim is only as good as its
+//      boundary: at the bytes. Everything before them — two accounts, a birth entry
+//      drafted and approved, a coding-lane consent — is the client's PRE-EXISTING state,
+//      set up through the real human doors exactly as `primeReadyFiling` sets up its own,
+//      and it is human by construction. Between the bytes landing and the admission there
+//      is ONE human act, `fileToClient`, which is leg 1(c)'s own unchanged claim; the
+//      recovery door appears nowhere at all, in the setup or after it (the file's
+//      AUTOMATIC_LANE source census).
 //      NAMED RESIDUAL (per the brief's own "name it, don't seed around it"): the
 //      sales-direction lane (`customer_ambiguous`, the `_sales_lane_active` gate), the
 //      F1 vendor-REGISTRATION-binding arms (`vendor_bound`, `binding_ambiguous` —
@@ -870,6 +882,11 @@ async function main() {
   // consumer's own catch-up pass already call) — not a widened gate and not a seeded-around
   // lane reason, because `refused_concurrency` is a resource-scheduling refusal, not one of
   // `_coding_lane_core`'s own preconditions.
+  //
+  // IT IS ORDER-DEPENDENT, and that is the thing to re-check (review SPEC-877-B): it clears the
+  // runs legs 1-7 opened, so it must run AFTER the last of them has opened its own. Adding a leg
+  // between this one and leg 1, or moving leg 8 up, puts a sweep run outside the reconcile and
+  // returns this leg to `refused_concurrency` — a red that names a resource, never the lane.
   await rig.rootQuery("select clara.reconcile_sweep_runs() as r");
 
   // -------------------------------------------------------------------------
