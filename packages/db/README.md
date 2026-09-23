@@ -576,6 +576,15 @@ between two concurrent merges and a `40P01` deadlock:
    deadlock shape. Sorting by `id` before the lock makes BOTH sessions request the SAME global
    order regardless of which argument named which row, so one session waits and the other
    proceeds — never a cycle.
+Before any of the three rungs, the door decides whether the two ids are its caller's business at
+all — and **a counterparty outside the caller's firm is answered `CLR11 counterparty not found`,
+exactly as an id that exists nowhere is.** 0289's second splice lifted the firm test out of the
+combined guard that used to answer `CLR23 cross_client` for a foreign firm's REAL rows, which made
+the door a cross-tenant existence oracle against the estate's own rule that CLR11 means
+"not-found-in-your-firm, no existence oracle". `cross_client` still answers for the case it was
+written for: two counterparties of the caller's OWN firm under different clients
+(`p889.merge.no_cross_tenant_oracle` drives both sides).
+
 2. **The alias insert**, into `clara.counterparty_aliases` (0015:2295, recut by 0289 to name
    `recorded_via`). An insert of a new row takes no lock on any EXISTING row, so this rung adds
    no deadlock surface of its own; it sits between the two rungs that do because the merged

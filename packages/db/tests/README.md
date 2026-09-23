@@ -1833,3 +1833,25 @@ No CONTEXT.md change: the retirement coins no domain term. `Opening source` stil
 prior general ledger a firm receives, and the `business operation` entry's note that `prior_gl`
 stays `stored_only` pending the Client Knowledge Base's own ingestion path is exactly what 0288
 makes true rather than something it changes.
+
+## `merge-alias-lane.test.mjs` (0289, #889)
+
+Three cells over `clara.merge_counterparties`, the one door `0289_merge_alias_lane.sql` recuts.
+Frontier-gated on a BEHAVIOUR rather than a structure — 0289 adds no catalog object, so the probe
+is the body's own `sha256(prosrc)` — through `merge-alias-lane-preintegration-gate.mjs`: a
+package-wide run below 0289 SKIPS loudly, a focused run FAILS.
+
+- `p889.merge.human_lane` — one real merge, then read back: the residue alias row, BOTH identity
+  revisions it produces (`alias_added` on the survivor, `merged` on the merged party) and the
+  emitted `counterparty.alias_added` event all carry `recorded_via = 'human_ui'` and agree. Before
+  #889 the first read `legacy_unknown` and the second `human_ui` for the same human act.
+- `p889.merge.no_cross_tenant_oracle` — another firm's REAL counterparty ids and ids that exist
+  nowhere get the SAME refusal (code, message and typed reason), so the door cannot be used to
+  test whether an arbitrary uuid is live elsewhere in the estate; a same-firm, different-client
+  pair still answers `CLR23 cross_client`.
+- `p889.census.no_legacy_writer` — the closed-world census, run again here so drift is caught by
+  the daily battery and not only at apply time. It is keyed on the SIGNATURE (an overload cannot
+  hide inside a member), it inspects EVERY alias insert in each body rather than the first, and it
+  reads the VALUE written at `recorded_via` rather than only the column name — a body that named
+  the column and bound it to a variable used to pass. Its own parser is proved non-vacuous against
+  a crafted body in the same cell.

@@ -258,4 +258,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "6b6c5d031e2fe33de52c935befe35a4efcc8c4e321b53c4c2943f99ca34857bc",
     },
   ],
+  // #889 [0289] (riders wave 3, lane 07) — the SAME 0149 read-splice-prove family, appended at
+  // the sorted position. Added in this lane's FIX round: the first generation shipped without an
+  // entry, so this census threw "unreviewed dynamic-SQL barrier at 0289_merge_alias_lane.sql".
+  [
+    "0289_merge_alias_lane.sql",
+    {
+      reason:
+        "Reviewed read-splice-prove of exactly ONE FUNCTION — clara.merge_counterparties(uuid,uuid,uuid,text,text), read with pg_get_functiondef at that literal regprocedure spelled in this file and re-installed with TWO boundary-anchored substitutions: its residue alias insert gains the recorded_via column and the literal 'human_ui', and its combined firm/client guard is split so a counterparty outside the caller's firm answers CLR11 not-found rather than the CLR23 cross_client that made the door a cross-tenant existence oracle. Both images are derived branch-free, one replace() per top-level assignment, from that one pg_get_functiondef base; each anchor is asserted to occur EXACTLY once on whichever branch it belongs to, and S2 re-reads the COMMITTED body, applies the REVERSE of both substitutions and requires the remainder to equal the pre-image byte for byte plus a pinned post-splice prosrc sha256. The function returns jsonb, so it cannot emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. The file creates no relation, no function (only a pg_temp anchor-count helper) and no grant; its other statements are the prestate, which pins the recorded_via CHECK and five witness bodies by sha, and the closed-world census of application-reachable clara.counterparty_aliases writers.",
+      sha256: "2832301cfc379c493fefa5a7e88fe7752fc2e5b74033bd9f1f0895bce2c68e9e",
+    },
+  ],
 ]);

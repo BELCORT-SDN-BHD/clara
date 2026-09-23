@@ -36,12 +36,34 @@
 -- event" still holds — the payload this file's splice touches is `_tf_counterparty_alias_revision`'s,
 -- read off the ROW, never `merge_counterparties`' own `_append_event` call).
 --
+-- THE SECOND SPLICE: THE DOOR STOPS BEING A CROSS-TENANT EXISTENCE ORACLE (fix round 1, review
+-- finding W3L07-ADV-03). MEASURED on this rig with one caller, one firm-B client id and two
+-- firm-A counterparty ids: the door answered `CLR23 cross_client` for another firm's REAL
+-- counterparties and `CLR11 counterparty not found` for ids that exist nowhere — two
+-- distinguishable answers, so a firm could test whether an arbitrary uuid was live somewhere
+-- else in the estate. `packages/db/tests/rig-helpers.mjs`'s own CLR taxonomy states the law that
+-- breaks: `notFound: "CLR11", // not-found-in-your-firm (NO existence oracle)`. The cause is
+-- 0015's guard ORDER, which folds the firm test and the client test into one `if` that answers
+-- with the client-shaped refusal; it predates this ticket by many migrations.
+--
+-- WHY IT IS CLOSED HERE RATHER THAN FILED. The ticket is narrowed to this door's alias writer,
+-- and widening a ticket is against the wave's own scope rule — so this was weighed, not waved
+-- through. Three things settled it: this file ALREADY recuts this exact body (the widening is
+-- four lines inside a splice that is happening anyway, not a new surface); the estate has a
+-- WRITTEN law naming the correct answer, so there is no judgement call to defer; and the two
+-- cells that pin this door's refusals already admit the corrected answer — `wave-a-merge`'s
+-- cross-FIRM case accepts `CLR23 cross_client` or `CLR11 not-found` by name, and
+-- `counterparty-merge-pr-1`'s cm.19/3 pins `cross_client` for a SAME-firm, different-CLIENT
+-- pair, which this splice leaves exactly as it was. The firm test is simply lifted OUT of the
+-- combined `if` and answered with CLR11; the client test keeps its own CLR23 token, its message
+-- and its detail. No other guard, ordering or refusal moves.
+--
 -- HOUSE SHAPE: read-splice-prove, the 0149 S2/S7 ceremony the ticket brief names by name. S0
 -- pins the live body (MEASURED on this rig; identical to 0215's own P6 residue pin, so the body
 -- has not moved since 0149 — no ticket before this one in this lane touched it: `git log
 -- <base>..HEAD -- packages/db/migrations` names only 0287 and 0288, neither of which mentions
--- `merge_counterparties`). S1 splices ONE anchor, asserted to occur EXACTLY once, redo-safe
--- both ways (#957). S2 proves the re-substitution reproduces the pre-image exactly and re-pins
+-- `merge_counterparties`). S1 splices TWO anchors, each asserted to occur EXACTLY once, redo-safe
+-- both ways (#957). S2 proves the re-substitution of BOTH reproduces the pre-image exactly and re-pins
 -- FIVE witness bodies byte-unchanged. S3 — a SEPARATE `do` block from S2 on purpose (see its
 -- own header) — closes the census the ticket's third acceptance criterion asks for: every
 -- clara-schema function reachable from an application role (`clara_authenticated` /
@@ -56,8 +78,11 @@
 -- copies `new.recorded_via` verbatim, so fixing the WRITE fixes the revision and the event for
 -- free, with no trigger edit); `clara._tf_counterparty_merge_revision`; `clara.add_counterparty_alias`;
 -- `clara.rename_counterparty`. Also untouched, by absence of any statement that could reach
--- them: the check constraint, the door's ACL, its six refusals, its op-key dedupe, the carrier
--- insert into `clara.counterparty_merges`, and the other four sites 0149 spliced.
+-- them: the check constraint, the door's ACL, its op-key dedupe, the carrier insert into
+-- `clara.counterparty_merges`, and the other four sites 0149 spliced. Of the door's six
+-- refusals, FIVE are untouched; the sixth (`cross_client`) keeps its code, message and detail
+-- for the case it was written for and no longer answers for a foreign FIRM — see "THE SECOND
+-- SPLICE" above.
 --
 -- README: `packages/db/README.md` gains "The counterparty merge door's own lock order" (the
 -- ticket's fourth acceptance criterion), naming the three rungs and the deadlock class the
@@ -110,7 +135,7 @@ begin
   -- identical to 0215's own P6 residue pin
   -- ('840180a8c22a4d43c2ed9b69c0907c568368201a0b348bb9415b66a1d46546c2' -- the body has not
   -- moved since 0149's S2 splice installed it). REDO measures the body THIS FILE's own S1
-  -- already installed ('2e4cb1af232e4b9ef6eec18c9b147fe0d2beefe40fff5b04d31d2b8d4782f8f9').
+  -- already installed ('ac31da36065caa5f3682d7792d6bad2c49ffd06665adfef6e343f64107f228e7').
   -- Any THIRD value is drift on EITHER branch and refuses -- S1 derives the text for whichever
   -- branch this run is on from here.
   select pg_get_functiondef(p.oid), encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
@@ -118,7 +143,7 @@ begin
     from pg_proc p where p.oid='clara.merge_counterparties(uuid,uuid,uuid,text,text)'::regprocedure;
   if v_sha = '840180a8c22a4d43c2ed9b69c0907c568368201a0b348bb9415b66a1d46546c2' then
     insert into _p889_pre(k, v) values ('branch', 'first_apply');
-  elsif v_sha = '2e4cb1af232e4b9ef6eec18c9b147fe0d2beefe40fff5b04d31d2b8d4782f8f9' then
+  elsif v_sha = 'ac31da36065caa5f3682d7792d6bad2c49ffd06665adfef6e343f64107f228e7' then
     insert into _p889_pre(k, v) values ('branch', 'redo');
   else
     raise exception '#889 prestate: clara.merge_counterparties has DRIFTED from BOTH the pre-splice and the post-splice pins (sha %) -- re-derive this file against the live body before applying', v_sha
@@ -169,10 +194,26 @@ end $s0$;
 -- under the SAME keys, so S2's checks below read identically regardless of which branch ran.
 -- =====================================================================================
 do $s1$
-declare v_live text; v_branch text; v_pre text; v_post text; v_anchor text; v_repl text;
+declare
+  v_live text; v_branch text; v_pre text; v_post text; v_anchor text; v_repl text;
+  v_anchor2 text; v_repl2 text;
 begin
   v_branch := (select v from _p889_pre where k = 'branch');
-  v_live := (select v from _p889_pre where k = 'live:clara.merge_counterparties(uuid,uuid,uuid,text,text)');
+  -- THE BASE IS RE-READ FROM THE CATALOG AT ITS LITERAL SIGNATURE, not lifted out of the temp
+  -- table, and then PROVED identical to what S0 stashed. Two reasons, and the second is the one
+  -- that made this a fix-round edit. (1) Evidence: the equality below is a real assertion that
+  -- nothing recut this body between S0 and S1 inside this transaction. (2) `apps/web`'s SQL
+  -- function census (`apps/web/test/sqlFunctionCensus.ts`) follows a dynamic `execute` back to
+  -- the function it can PROVE is being replaced, and it can only do that when the base is a
+  -- `pg_get_functiondef` at a literal regprocedure it can read here; a value arriving from a
+  -- temp-table SELECT is opaque to it, so every web census that walks the migration tree failed
+  -- closed on this file with `sql_function_census_unresolved_execute`.
+  select pg_get_functiondef(p.oid) into v_live
+    from pg_proc p where p.oid = 'clara.merge_counterparties(uuid,uuid,uuid,text,text)'::regprocedure;
+  if v_live is distinct from (select v from _p889_pre where k = 'live:clara.merge_counterparties(uuid,uuid,uuid,text,text)') then
+    raise exception '#889 S1: clara.merge_counterparties moved between the prestate and the splice'
+      using errcode = 'CLR10';
+  end if;
 
   v_anchor := '  insert into clara.counterparty_aliases(firm_id,client_id,counterparty_id,' || E'\n' ||
               '      alias_normalized,alias_display,origin,created_by)' || E'\n' ||
@@ -183,14 +224,53 @@ begin
             '    values(c.firm,p_client,p_survivor,m.name_normalized,m.name,''former_name'',c.actor,''human_ui'')' || E'\n' ||
             '    on conflict do nothing returning id into v_alias;';
 
+  -- ANCHOR 2 — THE EXISTENCE ORACLE (fix round 1, review finding W3L07-ADV-03). See this file's
+  -- header for why a ticket narrowed to the alias writer closes this here.
+  v_anchor2 := '  if s.firm_id<>c.firm or m.firm_id<>c.firm or s.client_id<>p_client' || E'\n' ||
+               '     or m.client_id<>p_client then' || E'\n' ||
+               '    raise exception ''counterparties are not in the same client''' || E'\n' ||
+               '      using errcode=''CLR23'',detail=''{"reason":"cross_client"}'';' || E'\n' ||
+               '  end if;';
+  v_repl2 := '  if s.firm_id<>c.firm or m.firm_id<>c.firm then' || E'\n' ||
+             '    raise exception ''counterparty not found'' using errcode=''CLR11'';' || E'\n' ||
+             '  end if;' || E'\n' ||
+             '  if s.client_id<>p_client or m.client_id<>p_client then' || E'\n' ||
+             '    raise exception ''counterparties are not in the same client''' || E'\n' ||
+             '      using errcode=''CLR23'',detail=''{"reason":"cross_client"}'';' || E'\n' ||
+             '  end if;';
+
+  -- THE TWO IMAGES ARE DERIVED BRANCH-FREE, one `replace` per statement, never nested and never
+  -- inside an `if`. Both shapes matter and both are fix-round edits (W3L07 web-suite red):
+  -- `apps/web/test/sqlFunctionCensus.ts` follows a dynamic `execute` back to the function it can
+  -- PROVE is being rewritten by walking TOP-LEVEL assignments and single `replace` transforms, so
+  -- a chain built inside an `if/else`, or nested two deep, is opaque to it and every web census
+  -- that walks the migration tree fails closed on this file. 0260's splice is the shape that
+  -- reads.
+  --
+  -- IT IS ALSO THE SIMPLER TRUTH. A forward `replace` whose anchor is already gone is a no-op, so
+  -- applying BOTH forward substitutions to whatever is live yields the post-image on EITHER
+  -- branch, and reversing both from the post-image yields the pre-image on either branch. The
+  -- branch is then only about WHICH anchors must be present, which is what the counts below
+  -- assert.
+  v_post := replace(v_live, v_anchor, v_repl);
+  v_post := replace(v_post, v_anchor2, v_repl2);
+  v_pre := replace(v_post, v_repl, v_anchor);
+  v_pre := replace(v_pre, v_repl2, v_anchor2);
+
   if v_branch = 'first_apply' then
-    v_pre := v_live;
-    perform pg_temp.p889_n_check(v_pre, v_anchor, 1, 'merge alias lane (forward)');
-    v_post := replace(v_pre, v_anchor, v_repl);
+    perform pg_temp.p889_n_check(v_live, v_anchor, 1, 'merge alias lane (forward)');
+    perform pg_temp.p889_n_check(v_live, v_anchor2, 1, 'merge firm scope (forward)');
+    if v_pre is distinct from v_live then
+      raise exception '#889 S1: on a first apply the reconstructed pre-image is not the live body'
+        using errcode = 'CLR10';
+    end if;
   else -- 'redo'
-    v_post := v_live;
-    perform pg_temp.p889_n_check(v_post, v_repl, 1, 'merge alias lane (redo, reverse)');
-    v_pre := replace(v_post, v_repl, v_anchor);
+    perform pg_temp.p889_n_check(v_live, v_repl, 1, 'merge alias lane (redo, reverse)');
+    perform pg_temp.p889_n_check(v_live, v_repl2, 1, 'merge firm scope (redo, reverse)');
+    if v_post is distinct from v_live then
+      raise exception '#889 S1: on a redo the derived post-image is not the live body'
+        using errcode = 'CLR10';
+    end if;
   end if;
 
   if v_post = v_pre then
@@ -236,7 +316,7 @@ begin
     raise exception '#889 tail: clara.merge_counterparties'' INSTALLED body is not the text this file spliced -- something else replaced it inside this transaction'
       using errcode = 'CLR10';
   end if;
-  if v_post_sha <> '2e4cb1af232e4b9ef6eec18c9b147fe0d2beefe40fff5b04d31d2b8d4782f8f9' then
+  if v_post_sha <> 'ac31da36065caa5f3682d7792d6bad2c49ffd06665adfef6e343f64107f228e7' then
     raise exception '#889 tail: clara.merge_counterparties'' post-splice sha is % -- does not match the value this file was derived against', v_post_sha
       using errcode = 'CLR10';
   end if;
@@ -251,6 +331,19 @@ begin
     '      alias_normalized,alias_display,origin,created_by)' || E'\n' ||
     '    values(c.firm,p_client,p_survivor,m.name_normalized,m.name,''former_name'',c.actor)' || E'\n' ||
     '    on conflict do nothing returning id into v_alias;');
+  v_recon := replace(v_recon,
+    '  if s.firm_id<>c.firm or m.firm_id<>c.firm then' || E'\n' ||
+    '    raise exception ''counterparty not found'' using errcode=''CLR11'';' || E'\n' ||
+    '  end if;' || E'\n' ||
+    '  if s.client_id<>p_client or m.client_id<>p_client then' || E'\n' ||
+    '    raise exception ''counterparties are not in the same client''' || E'\n' ||
+    '      using errcode=''CLR23'',detail=''{"reason":"cross_client"}'';' || E'\n' ||
+    '  end if;',
+    '  if s.firm_id<>c.firm or m.firm_id<>c.firm or s.client_id<>p_client' || E'\n' ||
+    '     or m.client_id<>p_client then' || E'\n' ||
+    '    raise exception ''counterparties are not in the same client''' || E'\n' ||
+    '      using errcode=''CLR23'',detail=''{"reason":"cross_client"}'';' || E'\n' ||
+    '  end if;');
   if v_recon is distinct from v_pre then
     raise exception '#889 tail: the merge_counterparties re-substitution does NOT reproduce the pre-image -- the splice touched more than the one anchor'
       using errcode = 'CLR10';
