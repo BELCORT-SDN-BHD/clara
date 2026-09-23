@@ -298,16 +298,38 @@ export function faRegisterTie(session: SessionTokenAccessor, clientId: string, a
  *  p_op_key) — bookkeeper+. COMPLETE-ONCE: refuses CLR37
  *  `fa_particulars_already_complete` on a row that already has its method
  *  set — revise_fixed_asset_particulars is the prospective-change door for
- *  that case, never a second call here. */
+ *  that case, never a second call here.
+ *
+ *  #978 — ONE DECISION, ONE KEY, the same house shape #651 wired onto the run/authority/revise
+ *  doors. This wrapper used to mint `crypto.randomUUID()` inside itself, so a retry after a lost
+ *  response was a NEW operation to the door's own `_reserve_op` dedupe (0249:350-352) rather than
+ *  a replay of the completion that had already earned its receipt. The caller now holds the key
+ *  for the life of the open decision (`completeIntent` below is the tuple it is keyed on;
+ *  `useDepreciationDecisionKey`, lib/registers/depreciation.ts, is the holder). */
 export function completeFixedAssetParticulars(
   session: SessionTokenAccessor,
-  args: { clientId: string; assetId: string; particulars: FaParticularsInput },
+  args: { clientId: string; assetId: string; particulars: FaParticularsInput; opKey: string },
 ): Promise<unknown> {
   return callDoor(
     "complete_fixed_asset_particulars",
-    { p_client: args.clientId, p_asset: args.assetId, p_particulars: args.particulars, p_op_key: crypto.randomUUID() },
+    { p_client: args.clientId, p_asset: args.assetId, p_particulars: args.particulars, p_op_key: args.opKey },
     { session },
   );
+}
+
+/** The intent tuple a PARTICULARS COMPLETION decision is identified by — exactly the tuple
+ *  `clara.complete_fixed_asset_particulars` hashes into its own operation key (0249:350-352:
+ *  `client`, `asset`, `particulars`). Editing any of them inside the open dialog is a different
+ *  decision and earns a new key; pressing Confirm twice on the same one does not. Particulars are
+ *  serialised key-sorted so an object built in a different order is still the same intent (the
+ *  same convention `reviseIntent` below uses). */
+export function completeIntent(args: { clientId: string; assetId: string; particulars: FaParticularsInput }): string {
+  const p = args.particulars as Record<string, unknown>;
+  const particulars = Object.keys(p)
+    .sort()
+    .map((k) => `${k}=${JSON.stringify(p[k] ?? null)}`)
+    .join(",");
+  return [args.clientId, args.assetId, particulars].join("|");
 }
 
 /** clara.revise_fixed_asset_particulars(p_client, p_asset, p_particulars,

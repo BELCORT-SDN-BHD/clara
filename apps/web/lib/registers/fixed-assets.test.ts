@@ -94,13 +94,14 @@ test("faRegisterTie: POSTs /rpc/fa_register_tie with p_client + p_as_of, resolve
   assert.deepEqual(resolved, tieOut);
 });
 
-test("completeFixedAssetParticulars: posts the exact door body shape, with a fresh op_key", async () => {
+test("completeFixedAssetParticulars: posts the exact door body shape, with the CALLER's key", async () => {
   const { impl, calls } = captureFetch({ asset_id: "a1", client_id: "c1", particulars_complete: true });
   await withMockedFetch(impl, async () => {
     await completeFixedAssetParticulars(fakeSession("tok"), {
       clientId: "c1",
       assetId: "a1",
       particulars: { method: "straight_line", useful_life_months: 60, start_date: "2026-01-01" },
+      opKey: "decided-complete",
     });
   });
   assert.equal(calls.length, 1);
@@ -109,8 +110,28 @@ test("completeFixedAssetParticulars: posts the exact door body shape, with a fre
   assert.equal(body.p_client, "c1");
   assert.equal(body.p_asset, "a1");
   assert.deepEqual(body.p_particulars, { method: "straight_line", useful_life_months: 60, start_date: "2026-01-01" });
-  assert.equal(typeof body.p_op_key, "string");
-  assert.ok((body.p_op_key as string).length > 0);
+  assert.equal(body.p_op_key, "decided-complete");
+});
+
+// #978 — the door mints NOTHING of its own: two calls with the SAME caller-supplied key post the
+// SAME p_op_key both times, which is what makes a retry after a lost response a replay of one
+// completion rather than a second one (`clara.complete_fixed_asset_particulars`'s own
+// `_reserve_op` dedupe, 0249:350-352, is what turns that replayed key into the same receipt).
+test("completeFixedAssetParticulars: calling it twice with the SAME key posts the SAME p_op_key both times — no key is minted internally", async () => {
+  const { impl, calls } = captureFetch({ asset_id: "a1", client_id: "c1", particulars_complete: true });
+  const args = {
+    clientId: "c1",
+    assetId: "a1",
+    particulars: { method: "straight_line", useful_life_months: 60, start_date: "2026-01-01" } as const,
+    opKey: "decided-complete",
+  };
+  await withMockedFetch(impl, async () => {
+    await completeFixedAssetParticulars(fakeSession("tok"), args);
+    await completeFixedAssetParticulars(fakeSession("tok"), args);
+  });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]!.body.p_op_key, "decided-complete");
+  assert.equal(calls[1]!.body.p_op_key, "decided-complete", "the retry carries the SAME key, not a fresh one");
 });
 
 test("reviseFixedAssetParticulars: posts p_effective_from AND the change classification alongside the particulars", async () => {
