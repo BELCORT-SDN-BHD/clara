@@ -271,6 +271,18 @@ const EMPTY_FINANCIAL_PACK = {
   excluded_by_design: ["receivable", "payable", "statement_balance"],
 };
 
+// #1002 — the second-pass editor's own read. This mock estate has no published cash account set
+// (EMPTY_FINANCIAL_PACK's own `cash.set: null` above), so the honest answer is the same empty
+// envelope `clara.get_client_cash_account_set_members` gives any client with none: a null version
+// carrying no members, never a fabricated one.
+const EMPTY_CURRENT_CASH_SET = {
+  published_version_id: null,
+  revision: null,
+  effective_from: null,
+  member_count: null,
+  members: [],
+};
+
 /** The proposal read with nothing to propose — this estate registers no bank account. */
 const EMPTY_CASH_PROPOSAL = {
   computed_at: "2026-09-18T02:00:00.000Z",
@@ -337,6 +349,13 @@ export async function handleHomeBoardSupabase(request, response, path, url, send
   }
   if (request.method === "POST" && path === "/rest/v1/rpc/propose_client_cash_accounts") {
     sendJson(response, 200, EMPTY_CASH_PROPOSAL, cors);
+    return true;
+  }
+  // #1002 — the second-pass editor's own read, answered the SAME way and for the SAME reason as
+  // its sibling above: opening the dialog reads it unconditionally, so an unanswered route here
+  // would render the editor's failure banner on every walk that merely opens the dialog.
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_client_cash_account_set_members") {
+    sendJson(response, 200, EMPTY_CURRENT_CASH_SET, cors);
     return true;
   }
   // The authoring door is a WRITE. This lane has nothing to write to, so it answers the shape a
