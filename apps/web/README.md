@@ -327,9 +327,11 @@ revoke it.
 (`INVITE_MAIL_ENDPOINT_ENV_NAME`), read by `inviteMailCapability` alongside the four required
 variables but never counted in `missing` — lets `productionInviteMailer`'s `send()` post
 somewhere other than `RESEND_ENDPOINT`. Owner ruling (2026-09-18): only the mail endpoint, never
-the Supabase admin calls (`canMintFor`/`mintSupabaseTokenHash` stay real everywhere). Unset (every
-real deployment), `send()` posts to `RESEND_ENDPOINT` exactly as before — pinned by
-`tests/invite-mail-transport.test.ts`'s `#874` suite.
+`config.supabaseUrl` itself — `canMintFor`/`mintSupabaseTokenHash` still build their admin client
+from the SAME Supabase project `send()`'s own key belongs to, in every deployment, unaffected by
+this seam. Unset (every real deployment), `send()` posts to `RESEND_ENDPOINT` exactly as before —
+pinned by `tests/invite-mail-transport.test.ts`'s `#874` suite. #1022 (below) adds a SEPARATE,
+equally-fenced seam for the admin client's OWN base URL, rather than touching `supabaseUrl`.
 
 **fix-round ADV-1 — the fence, and why it is a VALUE check, not a build-mode check.** The original
 cut read the override unconditionally, in any environment, with no gate at all — a production-live
@@ -339,35 +341,37 @@ could set an environment variable on the deployment (accidentally or not). `lib/
 and its fence (`NODE_ENV !== "production"`) was DELETED rather than kept, because `next start` —
 the exact shape a browser e2e walk runs against — sets `NODE_ENV=production`, neutralising it. This
 seam is fenced differently for exactly that reason: `inviteMailCapability` (via
-`isLoopbackMailEndpoint`) honours the override only when it parses as an http(s) URL whose host is
-loopback (`127.0.0.1`, `localhost`, `[::1]`); anything else — a real hostname, a bare path, a
-`javascript:` scheme — is silently treated exactly like an absent override. A variable set by
-mistake in production can therefore never redirect the mail off the machine it is running on. The
-name also now carries the `CLARA_E2E_` prefix every other harness-only flag in this app uses
-(`CLARA_E2E_MONEY_INPUT_HARNESS`).
+`isLoopbackEndpointOverride`, renamed by #1022 now that the identity seam below shares it) honours
+the override only when it parses as an http(s) URL whose host is loopback (`127.0.0.1`,
+`localhost`, `[::1]`); anything else — a real hostname, a bare path, a `javascript:` scheme — is
+silently treated exactly like an absent override. A variable set by mistake in production can
+therefore never redirect the mail off the machine it is running on. The name also now carries the
+`CLARA_E2E_` prefix every other harness-only flag in this app uses (`CLARA_E2E_MONEY_INPUT_HARNESS`).
 
-**AC2 (a Playwright walk substituting the endpoint) remains unmet, reconciled rather than built.**
-`e2e/members-lifecycle-mock.mjs`'s own header records that this harness sets no `RESEND_API_KEY`
-so the invite leg terminates at `mail_not_configured` before any admin call is attempted; reaching
-`send()` from a browser walk needs `canMintFor`/`mintSupabaseTokenHash` to succeed first, which
-needs the Supabase admin REST endpoints (`GoTrueAdminApi`'s `listUsers`/`generateLink`) mocked
-under `/e2e-supabase` — a second, larger seam this ticket's own "why human" note left as the
-owner's separate call, not decided here, and the fix-round review confirmed this blocker is real
-and independent of the fence above. Wiring `CLARA_E2E_INVITE_MAIL_ENDPOINT` into the e2e server's
-own env (`e2e/run.mjs`/`serve-built.mjs`) without that second seam would prove the variable is
-*read*, which the unit suite already pins, but not that a real invite flow ever *reaches* `send()`
-— the one thing AC2 actually asks for — so it was not built as a half-measure. The seam is proven
-at the unit level (`send()` posts to the override with the exact body a walk would need to assert
-on, and the fence rejects a non-loopback value); wiring a walk to reach it is a follow-up gated on
-the second seam, not a re-litigation of this ruling.
+**#1022 — the identity-provisioning seam, the second seam the note above named.**
+`InviteMailConfig.identityEndpoint` — resolved from `CLARA_E2E_INVITE_IDENTITY_ENDPOINT`
+(`INVITE_IDENTITY_ENDPOINT_ENV_NAME`), the SAME shape as `mailEndpoint` (optional, read last,
+never in `missing`, fenced to a loopback http(s) URL by the same `isLoopbackEndpointOverride`) —
+substitutes ONLY the base URL `productionInviteMailer`'s `admin()` builds its Supabase client
+from; the service-role KEY, and the separate mail-endpoint seam, are untouched. Unset (every real
+deployment), `admin()` still builds from `config.supabaseUrl` exactly as before — pinned by
+`tests/invite-mail-transport.test.ts`'s `#1022` suite.
 
-**Re-verified, code-review fix round (SPEC-874-1): unchanged, third confirmation.** All 38
-`invite-mail-transport.test.ts` cells re-run green; `e2e/members-invite-walk.spec.ts`'s own header
-still states the harness sets no mail transport so the invite leg settles at `mail_not_configured`
-before any admin call; and a repo-wide search finds no `GoTrueAdminApi`/admin `generate_link`
-mock anywhere under `e2e/` — only the general `/e2e-supabase` REST prefix, which is not the admin
-API `canMintFor`/`mintSupabaseTokenHash` need. The tension is between AC2 as written and the
-owner's own 2026-09-18 ruling, not a lane shortfall; resolving it needs the owner, not more build.
+**AC2 (a Playwright walk reaching a pending row, both calls intercepted) is now MET.**
+`e2e/run.mjs` enables the courier's mail capability with three harness-only placeholders and
+points both `CLARA_E2E_INVITE_MAIL_ENDPOINT` and `CLARA_E2E_INVITE_IDENTITY_ENDPOINT` at this same
+mock origin. `e2e/members-lifecycle-mock.mjs` answers the Supabase admin REST endpoints
+(`GoTrueAdminApi`'s `listUsers` under `GET /auth/v1/admin/users`, `generateLink` under
+`POST /auth/v1/admin/generate_link`) with an empty directory and a fixed hashed token, the real
+`clara.invite_member` verb with a realistic three-key receipt (`invite_id`/`token_hash`/
+`expires_at`, plus the plaintext `token`, matching `0147`'s own body), and
+`POST /e2e-invite-mail-capture`, which records what `send()` posted instead of relaying it. All
+scoped by `ours`, exactly like every other handler in that file.
+`e2e/members-invite-walk.spec.ts`'s first cell now drives the invite dialog to a settled
+`"The invitation to … was sent."` banner and a new pending row, then reads
+`e2e_members_lifecycle_invite_trace` for positive evidence that both calls actually fired and
+what `send()` posted — never merely that the journey looked right. Two consecutive runs green
+(9.9s, 10.5s); no other spec reaches `/api/invite` today, so no other walk's behaviour changed.
 
 **There is no resend door, by design.** The plaintext token is never stored (裁-16a) so no link can
 be re-sent, and `clara.invite_member` refuses a second pending invitation for the same address
