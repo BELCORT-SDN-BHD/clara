@@ -19,13 +19,15 @@ import {
   createPrepaymentScheduleForAs, chatTaskRef, planAuthority, scheduleRow, scheduleRowsFor,
   scheduleCountFor, opReceiptsFor, deactivateMember, reactivateMember,
   roleCanExecute, ROLES, opk, nowhere,
-  extraExpenseAccount,
+  extraExpenseAccount, refusalOf, memoOnlyRecognition, setClientStatus,
+  plainAssetRecognition, ineligibleAssetEntry, enrolPrepaymentAccount, bindBankAccount,
+  extraRecognition, recordPeriod,
   OBO_REASON, TWIN_SIG, HUMAN_SIG, AMORTISATION_KIND, PREPAY_BASIS,
 } from "./prepayment-schedule-obo-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 5;
 
 before(async () => {
   ready = await (async () => {
@@ -244,4 +246,190 @@ async () => {
   assert.equal(chatConflict.message, humanConflict.message,
     "one namespace, one answer: `op_key reused with different args`");
   assert.equal(await scheduleCountFor(scene.entry), 1, "and still exactly one schedule");
+});
+
+// ===========================================================================================
+// AC4 — THE TWIN'S REFUSAL VOCABULARY IS THE HUMAN DOOR'S, FOR EVERY SHARED RULE.
+// ===========================================================================================
+
+cell("p915.obo.refusals_match — sixteen shared rules, each driven through BOTH entrances on the "
+  + "same state, answer the same SQLSTATE, the same sentence and the same payload byte for byte — "
+  + "including the four authority rules, which the two lanes reach through DIFFERENT plan steps",
+async () => {
+  const scene = await prepaymentScene("obo-match");
+  const ref = await chatTaskRef({ firm: scene.firm, client: scene.client, author: scene.bob });
+  const memo = await memoOnlyRecognition(scene, { cents: 45000 });
+  const base = {
+    client: scene.client, sourceEntry: scene.entry, expenseAccount: scene.target,
+    expenseBasis: PREPAY_BASIS, purpose: "Prepaid subscription amortisation", authorityRef: ref,
+  };
+
+  /** Drive ONE rule through both entrances and compare the WHOLE answer. A raise that carried the
+   *  right token with a different sentence would still be a divergence a person would read. */
+  const both = async (label, over) => {
+    const human = await refusalOf(() => createPrepaymentSchedule(scene.bob,
+      { ...base, ...over, opKey: over.opKey ?? opk("p915-match-h") }), `${label} (human door)`);
+    const obo = await refusalOf(() => createPrepaymentScheduleFor(
+      { ...base, author: scene.bob, ...over, opKey: over.opKey ?? opk("p915-match-o") }),
+    `${label} (OBO twin)`);
+    assert.deepEqual(obo, human, `${label}: the two entrances must answer identically`);
+    return human;
+  };
+
+  // ---- the shape rules, one of which each wrapper spells for itself ------------------------
+  const key = await both("a blank idempotency key", { opKey: "   " });
+  assert.deepEqual([key.code, key.detail.reason], [CLR.badRequest, "invalid_op_key"]);
+
+  const purpose = await both("a blank purpose", { purpose: "   " });
+  assert.equal(purpose.detail.reason, "invalid_purpose");
+
+  const stranger = await both("a client of another firm", { client: scene.w.clients.B1 });
+  assert.deepEqual([stranger.code, stranger.detail.reason], [CLR.notFound, "client_not_found"]);
+
+  // ---- the source rules --------------------------------------------------------------------
+  const noEntry = await both("a source entry this client does not hold", { sourceEntry: nowhere() });
+  assert.equal(noEntry.detail.reason, "prepayment_source_unfit");
+
+  const noTerm = await both("a memo-only recognition nobody has stated a term for",
+    { sourceEntry: memo.entry });
+  assert.equal(noTerm.detail.reason, "prepayment_term_underivable");
+  assert.equal(noTerm.detail.missing, "prepayment_stated_terms");
+  assert.equal(noTerm.detail.remedy, "clara.record_prepayment_stated_term",
+    "…and both entrances name the HUMAN door that fills it");
+
+  // ---- the expense half --------------------------------------------------------------------
+  const noTarget = await both("no expense account at all", { expenseAccount: null });
+  assert.deepEqual([noTarget.detail.reason, noTarget.detail.axis],
+    ["prepayment_target_underivable", "account_missing"]);
+
+  const noBasis = await both("an expense account with no stated grounds", { expenseBasis: "  " });
+  assert.deepEqual([noBasis.detail.reason, noBasis.detail.axis],
+    ["prepayment_target_underivable", "basis_missing"]);
+
+  const unknown = await both("an expense code this chart does not hold", { expenseAccount: "59999999" });
+  assert.deepEqual([unknown.detail.reason, unknown.detail.axis],
+    ["prepayment_target_ineligible", "account_unknown"]);
+
+  const notExpense = await both("the prepaid asset itself as the charge target",
+    { expenseAccount: scene.prepaid });
+  assert.deepEqual([notExpense.detail.reason, notExpense.detail.axis],
+    ["prepayment_target_ineligible", "not_expense_class"]);
+
+  // ---- THE AUTHORITY RULES. These are the ones that matter most here: the human lane reaches
+  //      them inside `clara.create_accounting_plan` and the OBO lane inside
+  //      `clara._prepayment_plan_core`, so this is where two bodies would drift.
+  const notObject = await both("an authority reference that is not an object",
+    { authorityRef: "the conversation" });
+  assert.deepEqual([notObject.detail.reason, notObject.detail.constraint],
+    ["authority_ref_invalid", "object"]);
+
+  const badKind = await both("an authority reference of an unknown kind",
+    { authorityRef: { kind: "email", id: nowhere() } });
+  assert.deepEqual([badKind.detail.reason, badKind.detail.constraint],
+    ["authority_ref_invalid", "kind"]);
+
+  const badId = await both("an authority reference whose id is not a uuid",
+    { authorityRef: { kind: "chat_task", id: "the one we just had" } });
+  assert.deepEqual([badId.detail.reason, badId.detail.constraint],
+    ["authority_ref_invalid", "id"]);
+
+  const unresolved = await both("a conversation this database does not hold",
+    { authorityRef: { kind: "chat_task", id: nowhere() } });
+  assert.equal(unresolved.detail.reason, "authority_ref_unresolved");
+
+  // …and #977's own narrowing: a task nobody signed is not a person's instruction. This is the
+  // wall that stops a run from authorising its own amortisation schedule, and it must be the same
+  // wall on both lanes or the chat entrance would be the way around it.
+  const unsigned = await chatTaskRef({
+    firm: scene.firm, client: scene.client, author: scene.bob, createdBy: null });
+  const notHuman = await both("a chat task nobody signed", { authorityRef: unsigned });
+  assert.equal(notHuman.detail.reason, "authority_ref_not_human_instruction");
+
+  // ---- the duplicate, and then the client's own status -------------------------------------
+  const made = await createPrepaymentSchedule(scene.bob, { ...base, opKey: opk("p915-match-made") });
+  const exists = await both("a recognition that is already amortised", {});
+  // CLR13, the estate's conflict class — spelled as a literal because rig-helpers' CLR map stops
+  // at CLR12 and this battery does not widen a shared roster for one cell.
+  assert.deepEqual([exists.code, exists.detail.reason], ["CLR13", "prepayment_schedule_exists"]);
+  assert.equal(exists.detail.schedule_id, made.schedule_id,
+    "…and both entrances name the SAME schedule to go to instead");
+
+  // LAST, because it disables the client for everything above it.
+  // `archived` is the estate's own non-active status (`clients_status_check_0017` admits
+  // active | archived | onboarding); the door's token for any of them is `client_inactive`.
+  await setClientStatus(scene.client, "archived");
+  const inactive = await both("an inactive client", { sourceEntry: memo.entry });
+  assert.deepEqual([inactive.code, inactive.detail.reason], [CLR.badRequest, "client_inactive"]);
+});
+
+// ===========================================================================================
+// THE 2026-09-18 CROSS-REFERENCE — THE TWIN RUNS #940'S ROSTER CHECK, AHEAD OF THE SHARED WALL.
+// ===========================================================================================
+
+cell("p915.obo.roster_first — the twin refuses an unenrolled prepaid leg with #940's own "
+  + "prepaid_account_not_enrolled axis, its remedy and its panel, identically to the human door; "
+  + "enrolling the account makes the SAME OBO call succeed; and an account that fails BOTH the "
+  + "roster and the shared wall is answered by the ROSTER",
+async () => {
+  const scene = await prepaymentScene("obo-roster");
+  const ref = await chatTaskRef({ firm: scene.firm, client: scene.client, author: scene.bob });
+  const plain = await plainAssetRecognition(scene, { code: "19000009", tag: "obo" });
+
+  // 1 — THE REFUSAL, THROUGH THE TWIN, WITH THE PANEL NAMED. The account passes every one of the
+  //     shared wall's five negative axes; what it lacks is the POSITIVE statement #940 carries.
+  const refused = await assertPair(CLR.badRequest, "prepayment_source_unfit",
+    () => createPrepaymentScheduleFor({
+      client: scene.client, author: scene.bob, sourceEntry: plain.entry,
+      expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-roster"),
+    }), "an OBO configuration against an unenrolled prepaid account");
+  assert.equal(refused.detail.axis, "prepaid_account_not_enrolled");
+  assert.equal(refused.detail.prepaid_account_code, plain.code);
+  assert.equal(refused.detail.remedy, "clara.enrol_prepayment_account");
+  assert.equal(refused.detail.panel, "client_registers_prepayment_accounts");
+  assert.equal(await scheduleCountFor(plain.entry), 0, "and it configured nothing");
+
+  // …and the human door says exactly the same thing, which is what "one body" means here.
+  const humanSide = await refusalOf(() => createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: plain.entry, expenseAccount: scene.target,
+    expenseBasis: PREPAY_BASIS, purpose: "Prepaid subscription amortisation",
+    authorityRef: ref, opKey: opk("p915-roster-h"),
+  }), "the human door against the same unenrolled account");
+  assert.deepEqual(humanSide.detail, refused.detail);
+
+  // 2 — ENROL IT AND THE SAME OBO CALL SUCCEEDS. A gate cell that only ever measured the refusal
+  //     could not tell a gate from a ban.
+  await enrolPrepaymentAccount(scene.bob, { client: scene.client, account: plain.code });
+  const ok = await createPrepaymentScheduleFor({
+    client: scene.client, author: scene.bob, sourceEntry: plain.entry,
+    expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-roster-ok"),
+  });
+  assert.ok(ok.schedule_id, "the enrolled account amortises through the chat lane");
+  assert.equal(ok.prepaid_account_code, plain.code);
+
+  // 3 — THE ORDER. A receivable CONTROL account fails the roster AND the shared wall; the answer a
+  //     person can act on is the roster one, and #940's owner decision 6 puts it first. The twin
+  //     inherits that order by running the same body rather than by restating it.
+  const control = await ineligibleAssetEntry(scene, { tag: "obo-ctl" });
+  const both = await assertPair(CLR.badRequest, "prepayment_source_unfit",
+    () => createPrepaymentScheduleFor({
+      client: scene.client, author: scene.bob, sourceEntry: control.entry,
+      expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-roster-ctl"),
+    }), "an OBO configuration against an account that fails both gates");
+  assert.equal(both.detail.axis, "prepaid_account_not_enrolled",
+    "the ROSTER answers first, and names where to go");
+
+  // …and the WALL is still live behind it on this lane too: the scene's OWN prepaid account is
+  // enrolled, and binding it as a bank account makes the next configuration answer the wall.
+  await bindBankAccount(scene.alice, {
+    client: scene.client, coaAccountCode: scene.prepaid, accountNumber: "915000112233" });
+  const extra = await extraRecognition(scene, { cents: 24000, tag: "obo-wall" });
+  await recordPeriod(scene.bob, {
+    document: extra.document, start: scene.termStart, end: scene.termEnd });
+  const walled = await assertPair(CLR.badRequest, "prepayment_source_unfit",
+    () => createPrepaymentScheduleFor({
+      client: scene.client, author: scene.bob, sourceEntry: extra.entry,
+      expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-roster-wall"),
+    }), "an OBO configuration against an enrolled account that has since been bound as a bank account");
+  assert.equal(walled.detail.axis, "prepaid_account_ineligible");
+  assert.equal(walled.detail.breach.axis, "bank_account");
 });

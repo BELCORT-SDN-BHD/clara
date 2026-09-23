@@ -153,6 +153,32 @@ export async function readPrepaymentSourceForAs(role, { firm, client, sourceEntr
   return r.rows[0].result;
 }
 
+/**
+ * DRIVE A CALL THAT MUST REFUSE AND RETURN ITS WHOLE ANSWER — the SQLSTATE, the sentence a person
+ * would read, and the parsed payload. The AC4 cell compares the three as ONE value, because a
+ * divergence that kept the token and changed the sentence is still a divergence: the sentence is
+ * what a surface renders.
+ *
+ * A call that SUCCEEDS fails by name rather than returning a null answer that a `deepEqual` of two
+ * nulls would then happily accept — which is exactly how a comparison cell goes vacuous.
+ */
+export async function refusalOf(fn, label = "operation") {
+  let err = null;
+  try {
+    await fn();
+  } catch (e) {
+    err = e;
+  }
+  if (err === null) assert.fail(`${label}: expected a refusal, the call SUCCEEDED`);
+  let detail = null;
+  try {
+    detail = typeof err.detail === "string" ? JSON.parse(err.detail) : (err.detail ?? null);
+  } catch {
+    detail = { unparseable: String(err.detail) };
+  }
+  return { code: err.code, message: err.message, detail };
+}
+
 // ===========================================================================================
 // 4 · The chat lane's authority. The CONVERSATION is the instruction (0250/#977): a `chat_turn`
 //     task whose `created_by` a person stamped. Built the way f-a4-pr2c-fixtures.mjs builds one,
