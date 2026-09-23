@@ -118,12 +118,21 @@ before(async () => {
   page = (await pageRow(w.clients.A1, "xf")).id;
 
   const maDoc = await filedDocument(w.users.alice, { firm: w.firms.A, client: w.clients.A1, kind: "management_account" });
-  const batchR = await createSeedingBatch({
-    client: w.clients.A1, document: maDoc.documentId,
-    proposals: [{ proposal_kind: "wiki_fact", proposal_key: "k", payload: { x: 1 }, evidence: { y: 1 } }],
-  });
-  batch = batchR.batch_id ?? batchR.id;
-  prop = (await proposalRows(batch))[0].id;
+  // #1012 (0288): clara.create_seeding_batch is RETIRED, so a firm-A batch to aim probes at can
+  // no longer be minted through a door. It is PLANTED instead — pre-retirement history is
+  // exactly what the two surviving closers (complete/cancel) still have to refuse cross-firm.
+  batch = (await rootQuery(
+    `insert into clara.seeding_batches(firm_id, client_id, source_document_id, source_sha256, state, stats)
+       values ($1, $2, $3::uuid, $4, 'open',
+               jsonb_build_object('proposal_count', 1, 'refused_count', 0, 'source_document_id', $3::uuid))
+     returning id`,
+    [w.firms.A, w.clients.A1, maDoc.documentId, maDoc.sha256])).rows[0].id;
+  prop = (await rootQuery(
+    `insert into clara.seeding_proposals(batch_id, firm_id, client_id, proposal_kind, proposal_key,
+         payload, evidence, state)
+       values ($1, $2, $3, 'wiki_fact', 'k', '{"x":1}'::jsonb, '{"y":1}'::jsonb, 'proposed')
+     returning id`,
+    [batch, w.firms.A, w.clients.A1])).rows[0].id;
 
   rule = await stageFirmAProbeRule(w.users.alice, { firm: w.firms.A, client: w.clients.A1, accountCode: WB_COA.expense });
 
@@ -172,19 +181,34 @@ test("Cross-firm HUMAN-lane battery (15 writers): firm-B owner (dave) targeting 
     mk("retire_wiki_page", (opKey) => retireWikiPage(dave, { page, opKey })),
     // sign_coding_rule RETIRED with F-A2 PR-3 (Annex B.1) — dropped, so its cross-firm
     // probe entry is removed too (14-writer battery, was 15).
-    mk("tick_seeding_proposal", (opKey) => tickProposal(dave, { proposal: prop, opKey })),
-    mk("decline_seeding_proposal", (opKey) => declineProposal(dave, { proposal: prop, opKey })),
+    // tick_seeding_proposal / decline_seeding_proposal RETIRED with #1012 (0288) — they never
+    // reach a firm check any more, so they cannot belong to a CLR11 battery. The cross-firm
+    // claim that SURVIVES for them is proven right below this loop (12-writer battery, was 14).
     mk("complete_seeding_batch", (opKey) => completeSeedingBatch(dave, { batch, opKey })),
     mk("cancel_seeding_batch", (opKey) => cancelSeedingBatch(dave, { batch, opKey })),
   ];
-  assert.equal(probes.length, 14, "the full 14-writer human-lane battery (sign_coding_rule retired with F-A2 PR-3)");
+  assert.equal(probes.length, 12, "the full 12-writer human-lane battery (sign_coding_rule retired with F-A2 PR-3; tick/decline_seeding_proposal with #1012)");
   for (const [label, run, opKey] of probes) {
     await assertRaises(CLR.notFound, run, `firm-B dave -> firm-A ${label}`);
     probeReceipts.push({ fn: label, opKey });
   }
+
+  // #1012 (0288): the two RETIRED deciders, aimed cross-firm. The claim is weaker than CLR11
+  // and still worth holding: a firm-B owner aiming at a firm-A proposal receives the retirement
+  // — the same answer every caller receives — so the door is no existence oracle either, and
+  // the no-mutation sweep below covers it exactly as it covered the CLR11 probes.
+  for (const [fn, run] of [
+    ["tick_seeding_proposal", (opKey) => tickProposal(dave, { proposal: prop, opKey })],
+    ["decline_seeding_proposal", (opKey) => declineProposal(dave, { proposal: prop, opKey })],
+  ]) {
+    const opKey = opk(`xf_${fn}`);
+    const err = await assertRaises("CLR34", () => run(opKey), `firm-B dave -> firm-A ${fn} (retired)`);
+    assert.equal(detailReason(err), "seeding_lane_retired", `${fn} answers the retirement, not a firm verdict`);
+    probeReceipts.push({ fn, opKey });
+  }
 });
 
-test("Cross-firm RUNTIME-lane writers (publish_wiki_page_version, create_seeding_batch): NO firm-B actor exists — the cross-firm attack surface is a foreign OBJECT REFERENCE, refused CLR02", async () => {
+test("Cross-firm RUNTIME-lane writers: NO firm-B actor exists — the cross-firm attack surface is a foreign OBJECT REFERENCE, refused CLR02 by publish_wiki_page_version; create_seeding_batch answers its #1012 retirement instead", async () => {
   fail0017(live);
   const wpubKey = opk("xf_publish_wiki_page_version");
   const batchKey = opk("xf_create_seeding_batch");
@@ -193,15 +217,21 @@ test("Cross-firm RUNTIME-lane writers (publish_wiki_page_version, create_seeding
       client: w.clients.A1, firm: w.firms.A, slug: "xf-cite",
       citations: [{ source_kind: "document", document_id: bDoc.documentId }], opKey: wpubKey,
     }), wpubKey, "publish_wiki_page_version"],
-    ["create_seeding_batch (runtime lane — cross-firm REFERENCE, not actor)", () => createSeedingBatch({
-      client: w.clients.A1, document: bDoc.documentId,
-      proposals: [{ proposal_kind: "wiki_fact", proposal_key: "k", payload: { x: 1 }, evidence: { y: 1 } }], opKey: batchKey,
-    }), batchKey, "create_seeding_batch"],
   ];
   for (const [label, run, opKey, fn] of probes) {
     await assertRaises(CLR.provenance, run, label);
     probeReceipts.push({ fn, opKey });
   }
+
+  // #1012 (0288): create_seeding_batch is RETIRED. It no longer looks at the document it was
+  // handed, so a foreign-firm REFERENCE can no longer draw CLR02 out of it — the retirement is
+  // what a runtime caller gets, whatever it points at, and it still writes nothing.
+  const retiredErr = await assertRaises("CLR34", () => createSeedingBatch({
+    client: w.clients.A1, document: bDoc.documentId,
+    proposals: [{ proposal_kind: "wiki_fact", proposal_key: "k", payload: { x: 1 }, evidence: { y: 1 } }], opKey: batchKey,
+  }), "create_seeding_batch (runtime lane — retired, whatever it is pointed at)");
+  assert.equal(detailReason(retiredErr), "seeding_lane_retired", "the runtime creator answers the retirement");
+  probeReceipts.push({ fn: "create_seeding_batch", opKey: batchKey });
 });
 
 test("BATTERY CLOSURE: record_opening_targets_parsed + record_wiki_source_ingest — a firm-A seed/client given a firm-B document reference. Both fn bodies were read from 0017_wave_b.sql before writing this cell: record_wiki_source_ingest's document_filings/clients join CONFIRMS the CLR02-provenance-family hypothesis; record_opening_targets_parsed's tie-document lookup ALSO filters firm_id (equally real guard, zero mutation) but its typed refusal is CLR31/tie_mismatch (the CLR30-exported opening-seed family) — a verified DIVERGENCE from CLR02, reported as a finding rather than papered over", async () => {

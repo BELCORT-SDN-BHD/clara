@@ -28,13 +28,14 @@ import {
   endPool, humanQuery, opk, rootQuery, roleQuery, ROLES, PG, assertRaises,
 } from "./rig-fixtures.mjs";
 import { CLR33, detailReason } from "./wave-b/wb-helpers.mjs";
+import { listReviewQueue, humanPersona } from "./wave-a-reads.mjs";
 import {
   buildWaveBWorld, onboardingClient, filedDocument, setDocumentKind,
   createSeedingBatch, cancelSeedingBatch, completeSeedingBatch,
   batchRow, proposalRows, eventsOf,
 } from "./wave-b/wb-fixtures.mjs";
 
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 4;
 const RETIRED_REASON = "seeding_lane_retired";
 
 let live = false;
@@ -234,4 +235,43 @@ cell("p1012.closers.cancel_and_complete_still_close_a_batch_left_open", async ()
     assert.equal(rows.length, 1, "the closed batch keeps its proposal row");
     assert.equal(rows[0].state, "proposed", "a closed batch does not rewrite its proposals");
   }
+});
+
+/** Every `seeding_proposal` row in an envelope, deep-collected (the a21-helpers
+ *  collectRowKind idiom ninth-rowkind-seeding-proposal.test.mjs also uses). */
+function rowsOfKind(envelope, kind) {
+  const out = [];
+  (function walk(n) {
+    if (n == null || typeof n !== "object") return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (n.row_kind === kind) out.push(n);
+    Object.values(n).forEach(walk);
+  })(envelope);
+  return out;
+}
+
+cell("p1012.queue.no_seeding_row_even_for_a_client_with_open_proposals", async () => {
+  const onb = await onboardingClient(w.users.hana);
+  const doc = await priorGlSource(onb.client);
+  const batch = await plantHistoricalBatch(onb.client, doc, ["wf:q1", "wf:q2"]);
+  const open = await proposalRows(batch);
+  assert.equal(open.filter((p) => p.state === "proposed").length, 2,
+    "mandatory setup: this client carries TWO open proposals in an OPEN batch — exactly the state that used to chase");
+  assert.equal((await batchRow(batch)).state, "open", "mandatory setup: the owning batch is open");
+
+  // A POSITIVE CONTROL in the same envelope: an open question on the same firm's
+  // long-lived client, so an empty result below is the seeding row's absence and not a
+  // read that returned nothing at all.
+  await humanQuery(w.users.alice,
+    "select clara.open_question(p_client => $1, p_scope_kind => 'client', p_scope_id => $1, p_question => $2, p_op_key => $3) as r",
+    [w.clients.A1, "#1012 positive control: is this envelope alive?", opk("p1012q")]);
+
+  for (const scope of [{}, { client_id: onb.client }]) {
+    const envelope = await listReviewQueue(humanPersona(w.users.alice), { scope, limit: 500 });
+    assert.equal(rowsOfKind(envelope, "seeding_proposal").length, 0,
+      `the queue emits NO seeding_proposal row (scope ${JSON.stringify(scope)})`);
+  }
+  const firmWide = await listReviewQueue(humanPersona(w.users.alice), { scope: {}, limit: 500 });
+  assert.ok(rowsOfKind(firmWide, "open_question").length > 0,
+    "positive control: the SAME envelope still carries other row kinds");
 });

@@ -207,6 +207,180 @@ end $fn$;
 reset role;
 
 -- =====================================================================================
+-- §C  THE QUEUE SPLICE. `clara.list_review_queue` stops emitting `seeding_proposal`.
+--
+-- WHY FOR EVERY CLIENT, NOT ONLY FOR PROPOSALS OPENED LATER. The row is derived, never
+-- stored: 0146 (裁-17) added a BATCH-LEVEL CTE emitting one row per client that still owns an
+-- OPEN proposal in an OPEN batch. After §B nobody can tick or decline one ever again, so every
+-- such row points at a decision that can no longer be made. The beta rule (owner, 2026-09-20)
+-- is that nothing is switched off silently and nothing un-actionable is shown; a row nobody can
+-- act on is worse than no row. The proposals themselves stay exactly where they are and stay
+-- readable — only the chase stops.
+--
+-- THE LIVE DEFINITION OF THIS FUNCTION IS NOT ANY ONE FILE'S TEXT. It was born at 0011,
+-- REPLACED WHOLE by 0016, then DYNAMICALLY SPLICED (pg_get_functiondef -> replace() -> execute,
+-- never re-typed) by 0017, 0036, 0041 §S4.9, 0043 §S3.8, 0146, 0168, 0180 and 0260. This file is
+-- the NINTH splice and the FIRST that REMOVES a row kind. It is anchored the same way every
+-- predecessor was, and it asserts the ten surviving kinds at their exact pre-splice counts.
+--
+-- PRE-IMAGE PIN, MEASURED ON clara_l07 NOW off `pg_proc.prosrc` (never file text): sha256 =
+-- 1641f99f4d295400bd39bd7b2cee3ac4cac2c34e7478078014e7305d99d9b570. This lane's earlier ticket
+-- (#899 / 0287) does not touch this body, so this is the wave-2 integration head's own body.
+--
+-- A NAMED RESIDUAL, NOT AN OVERSIGHT: the three columns the retired CTE alone ever populated
+-- (`client_name`, `batch_ids`, `open_proposal_count`) STAY in the shared column vector and are
+-- now null on every row, so the envelope's 31-key row shape does not move. Dropping them would
+-- mean recutting all ten surviving CTEs and the row-json builder — a far wider change to a body
+-- ten other row kinds share — for no behavioural gain, and it would move a pinned shape that two
+-- independent test rosters and the web's ReviewQueueRow type all restate.
+--
+-- REDO-SAFE: the splice recognises "already spliced" from the live body and skips itself
+-- entirely, so a CLARA_MIGRATION_REDO of this file never double-cuts.
+-- =====================================================================================
+do $p1012_lrq$
+declare
+  v_sig text := 'clara.list_review_queue(jsonb,jsonb,integer)';
+  v_def text; v_next text; v_code text; v_sha text; v_pre_sha text; v_post_sha text;
+  v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_start int; v_end int; v_n int; v_raw_n int; r record;
+  v_cte_open  constant text := '  ), seeding_rows as (';
+  v_cte_next  constant text := '  ), work_question_rows as (';
+  v_union_arm constant text := '    union all select * from seeding_rows' || chr(10);
+  v_gravestone constant text :=
+    '  -- #1012 (0288): the seeding_proposal row kind is RETIRED here. 0146 (裁-17) added a' || chr(10) ||
+    '  -- BATCH-LEVEL seeding_rows CTE emitting one row per client that still owned an OPEN' || chr(10) ||
+    '  -- proposal in an OPEN batch; after 0288 nobody can tick or decline one ever again, so' || chr(10) ||
+    '  -- every such row pointed at a decision that can no longer be made. The CTE and its' || chr(10) ||
+    '  -- union arm are spliced OUT. The proposals and batches themselves are untouched and' || chr(10) ||
+    '  -- stay readable. The three columns this CTE alone populated (client_name, batch_ids,' || chr(10) ||
+    '  -- open_proposal_count) stay in the shared column vector, null on every row -- a named' || chr(10) ||
+    '  -- residual: dropping them would recut all ten surviving CTEs for no behavioural gain.' || chr(10);
+begin
+  if to_regprocedure(v_sig) is null then
+    raise exception '#1012 sectionC prestate: % is GONE', v_sig using errcode = 'CLR10';
+  end if;
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(convert_to(p.prosrc,'UTF8')),'hex'),
+         encode(sha256(pg_get_functiondef(p.oid)::bytea),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_sha, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+
+  -- IDEMPOTENCY / REDO: measured IN CODE so a comment cannot short-circuit a real apply.
+  v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  if position('''seeding_proposal''::text row_kind' in v_code) = 0 then
+    raise notice '#1012 sectionC: the queue already emits no seeding_proposal row -- REDO branch, this splice is a no-op.';
+  else
+    -- HARD PRE-IMAGE PIN (first apply only): the prosrc this splice was derived against.
+    if v_sha is distinct from '1641f99f4d295400bd39bd7b2cee3ac4cac2c34e7478078014e7305d99d9b570' then
+      raise exception '#1012 sectionC prestate: % has DRIFTED from its pinned pre-image (measured %) -- re-derive this splice against the LIVE body before applying', v_sig, v_sha
+        using errcode = 'CLR10';
+    end if;
+
+    -- THE WITNESS ROSTER: every one of the ELEVEN live kinds at its exact pre-splice count,
+    -- both IN CODE and cross-checked against the RAW count (0260's HIGH-1 guard: a marker
+    -- hiding inside a comment must not stand in for a real one).
+    for r in select * from (values
+        ($$'draft'::text row_kind$$, 1),
+        ($$'uncoded_filing'::text row_kind$$, 1),
+        ($$'open_question'::text row_kind$$, 1),
+        ($$'coding_task'::text row_kind$$, 1),
+        ($$'compliance_watch'::text row_kind$$, 1),
+        ($$'lint_finding'::text row_kind$$, 1),
+        ($$'fixed_asset_incomplete'::text row_kind$$, 1),
+        ($$'staff_advance_incomplete'::text row_kind$$, 1),
+        ($$'seeding_proposal'::text row_kind$$, 1),
+        ($$'work_question'::text row_kind$$, 1),
+        ($$'depreciation_authority_pending'::text row_kind$$, 1),
+        ('null::int open_proposal_count', 10),
+        ('_is_codeable_kind', 1),
+        ('_autodraft_attempt_budget', 1)
+        ) as t(marker, want) loop
+      v_n := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
+      if v_n <> r.want then
+        raise exception '#1012 sectionC prestate: list_review_queue carries the marker "%" % time(s) IN CODE, expected % -- the body drifted or lost a prior splice', r.marker, v_n, r.want
+          using errcode = 'CLR10';
+      end if;
+      v_raw_n := (length(v_def) - length(replace(v_def, r.marker, ''))) / length(r.marker);
+      if v_raw_n <> v_n then
+        raise exception '#1012 sectionC prestate (HIGH-1): marker "%" appears % time(s) in RAW text but % IN CODE -- % occurrence(s) hide inside a comment', r.marker, v_raw_n, v_n, (v_raw_n - v_n)
+          using errcode = 'CLR10';
+      end if;
+    end loop;
+
+    -- SPLICE (1): the seeding_rows CTE is cut out BETWEEN its own opener and the next CTE's,
+    -- and a gravestone comment takes its place. Boundary-anchored rather than whole-block
+    -- anchored (0260's idiom) because the block being REMOVED is thirty lines of prose that no
+    -- migration should have to re-type in order to delete.
+    v_start := position(v_cte_open in v_def);
+    v_end   := position(v_cte_next in v_def);
+    if v_start = 0 or v_end = 0 or v_end <= v_start then
+      raise exception '#1012 sectionC splice (1): the seeding_rows CTE boundaries are not where this splice expects them (start %, end %)', v_start, v_end
+        using errcode = 'CLR10';
+    end if;
+    if position(v_cte_open in substr(v_def, v_start + length(v_cte_open))) <> 0
+       or position(v_cte_next in substr(v_def, v_end + length(v_cte_next))) <> 0 then
+      raise exception '#1012 sectionC splice (1): a boundary marker occurs more than once' using errcode = 'CLR10';
+    end if;
+    v_next := substr(v_def, 1, v_start - 1) || v_gravestone || substr(v_def, v_end);
+
+    -- SPLICE (2): the all_rows union arm.
+    v_n := (length(v_next) - length(replace(v_next, v_union_arm, ''))) / length(v_union_arm);
+    if v_n <> 1 then
+      raise exception '#1012 sectionC splice (2): the seeding_rows union arm appears % time(s), expected 1', v_n
+        using errcode = 'CLR10';
+    end if;
+    v_next := replace(v_next, v_union_arm, '');
+
+    if v_next = v_def then
+      raise exception '#1012 sectionC splice: no byte moved -- refusing a no-op apply' using errcode = 'CLR10';
+    end if;
+    execute v_next;
+
+    -- POSTCHECK, both directions: the kind is gone and every survivor is at its exact
+    -- pre-splice count; owner and ACL byte-unchanged; the definition moved.
+    select p.proowner::regrole::text, p.proacl::text, encode(sha256(pg_get_functiondef(p.oid)::bytea),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#1012 sectionC postcheck: list_review_queue changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode = 'CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#1012 sectionC postcheck: the definition did not change -- the splice was a no-op' using errcode = 'CLR10';
+    end if;
+    v_code := regexp_replace(regexp_replace(
+      (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure),
+      '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+    for r in select * from (values
+        ($$'draft'::text row_kind$$, 1),
+        ($$'uncoded_filing'::text row_kind$$, 1),
+        ($$'open_question'::text row_kind$$, 1),
+        ($$'coding_task'::text row_kind$$, 1),
+        ($$'compliance_watch'::text row_kind$$, 1),
+        ($$'lint_finding'::text row_kind$$, 1),
+        ($$'fixed_asset_incomplete'::text row_kind$$, 1),
+        ($$'staff_advance_incomplete'::text row_kind$$, 1),
+        ($$'seeding_proposal'::text row_kind$$, 0),
+        ($$'work_question'::text row_kind$$, 1),
+        ($$'depreciation_authority_pending'::text row_kind$$, 1),
+        ('null::int open_proposal_count', 10),
+        ('_is_codeable_kind', 1),
+        ('_autodraft_attempt_budget', 1),
+        ('from clara.seeding_proposals', 0),
+        ('union all select * from seeding_rows', 0)
+        ) as t(marker, want) loop
+      v_n := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
+      if v_n <> r.want then
+        raise exception '#1012 sectionC postcheck: marker "%" appears % time(s), expected % -- the splice removed more (or less) than the seeding row kind', r.marker, v_n, r.want
+          using errcode = 'CLR10';
+      end if;
+    end loop;
+    raise notice '#1012 sectionC: clara.list_review_queue spliced -- the seeding_rows CTE and its union arm are OUT (a gravestone comment in their place), the TEN surviving row kinds sit at their EXACT pre-splice marker counts, the shared column vector is unmoved at 10, and owner (%) and ACL are byte-unchanged. definition sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+end
+$p1012_lrq$;
+
+-- =====================================================================================
 -- §E  TAIL. Re-reads the live catalog rather than trusting the statements above ran as
 --     written, and drives the retirement behaviourally inside a forced-rollback
 --     subtransaction (the 0018/0019/0020/0146/0260 CLR99-probe idiom) so nothing synthetic

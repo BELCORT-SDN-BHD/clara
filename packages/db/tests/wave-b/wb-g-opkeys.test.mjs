@@ -13,9 +13,9 @@ import {
   buildWaveBWorld, onboardingClient, seedOpeningCoa, planRevision,
   beginOnboarding, createOpeningSeed, recordOpeningTarget, draftOpeningItem,
   publishWikiPage, setWikiHold, clearWikiHold, retireWikiPage, recordWikiIngest, markStale,
-  createSeedingBatch, tickProposal, declineProposal, completeSeedingBatch, cancelSeedingBatch,
+  completeSeedingBatch, cancelSeedingBatch,
   updatePlan, resolvePlanItem, commitOnboarding, cancelOnboarding,
-  filedDocument, setDocumentKind, keyedRes, recordOpeningKeyedResolution, proposalRows, pageRow,
+  filedDocument, setDocumentKind, keyedRes, recordOpeningKeyedResolution, pageRow,
 } from "./wb-fixtures.mjs";
 
 let live = false;
@@ -35,6 +35,15 @@ const EXEMPT = {
   create_firm: "the documented O7 exception — the receipt lives on the token row; byte-replay proven in wb-o-lifecycle",
   run_client_lint: "L3 law: op_key validated + audited, NOT op_receipts-reserved (never raises)",
   run_lint_all: "L3 wrapper — same never-raise receipt law",
+  // #1012 (0288_seeding_lane_retired.sql): all three RETIRED. Each body is now one typed
+  // refusal (CLR34 / seeding_lane_retired) that raises AHEAD of any reservation, deliberately —
+  // a retired door writes nothing at all, not even an op_receipt. There is no payload left for
+  // the G4 hash law to move, so a fixture here is impossible rather than merely expensive. The
+  // refusal itself, and the fact that it reserves nothing, are proven behaviourally in
+  // packages/db/tests/seeding-lane-retired.test.mjs.
+  create_seeding_batch: "#1012 (0288) RETIRED — one typed refusal, no reservation; proven in seeding-lane-retired.test.mjs",
+  tick_seeding_proposal: "#1012 (0288) RETIRED — one typed refusal, no reservation; proven in seeding-lane-retired.test.mjs",
+  decline_seeding_proposal: "#1012 (0288) RETIRED — one typed refusal, no reservation; proven in seeding-lane-retired.test.mjs",
 };
 
 before(async () => {
@@ -78,6 +87,11 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
     // "O3: same-op_key retry" cell in wb-o-lifecycle.test.mjs, exercised through
     // begin_client_onboarding itself.
     "begin_client_onboarding",
+    // #1012 (0288): the three prior-GL seeding doors are RETIRED in place — each body is one
+    // typed refusal that raises ahead of the reservation on purpose, because a retired door
+    // must write nothing at all. They keep their grants (so a caller receives the retirement
+    // rather than 42501), which is why they are still in the grant-derived inventory above.
+    "create_seeding_batch", "tick_seeding_proposal", "decline_seeding_proposal",
   ]);
   const droppedReservation = writers.filter((fn) => !RESERVE_LAW_EXEMPT.has(fn) && !reserving.has(fn));
   assert.equal(droppedReservation.length, 0,
@@ -100,17 +114,26 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
   await updatePlan({ plan: oPlan.plan, expectedRevision: oPlan.revision, answeredBy: w.users.bob,
     items: [{ item_kind: "capture", item_key: "g4item", question: "g4?" }] });
   const planRev = await planRevision(oPlan.plan);
+  // #1012 (0288): create_seeding_batch is retired, so the complete/cancel fixtures' batches are
+  // PLANTED — pre-retirement history is exactly what those two closers still have to handle.
   const glBatch = async () => {
     const o = await onboardingClient(w.users.hana);
     const d = await filedDocument(w.users.alice, { firm: w.firms.A, client: o.client, kind: null });
     await setDocumentKind(w.users.alice, { document: d.documentId, kind: "prior_gl", reason: "g4" });
-    const b = await createSeedingBatch({ client: o.client, document: d.documentId, proposals: [
-      { proposal_kind: "wiki_fact", proposal_key: "wf:a", payload: { slug: "profile", fact: "a" }, evidence: {} },
-      { proposal_kind: "wiki_fact", proposal_key: "wf:b", payload: { slug: "profile", fact: "b" }, evidence: {} },
-      { proposal_kind: "wiki_fact", proposal_key: "wf:c", payload: { slug: "profile", fact: "c" }, evidence: {} },
-      { proposal_kind: "wiki_fact", proposal_key: "wf:d", payload: { slug: "profile", fact: "d" }, evidence: {} },
-    ], opKey: opk("gb") });
-    return { client: o.client, doc: d, batch: b.batch_id ?? b.id };
+    const batch = (await rootQuery(
+      `insert into clara.seeding_batches(firm_id, client_id, source_document_id, source_sha256, state, stats)
+         values ($1, $2, $3::uuid, $4, 'open',
+                 jsonb_build_object('proposal_count', 4, 'refused_count', 0, 'source_document_id', $3::uuid))
+       returning id`,
+      [w.firms.A, o.client, d.documentId, d.sha256])).rows[0].id;
+    for (const key of ["wf:a", "wf:b", "wf:c", "wf:d"]) {
+      await rootQuery(
+        `insert into clara.seeding_proposals(batch_id, firm_id, client_id, proposal_kind, proposal_key,
+             payload, evidence, state)
+           values ($1, $2, $3, 'wiki_fact', $4, '{"slug":"profile","fact":"g4"}'::jsonb, '{}'::jsonb, 'proposed')`,
+        [batch, w.firms.A, o.client, key]);
+    }
+    return { client: o.client, doc: d, batch };
   };
   const b1 = await glBatch(); // tick/decline pairs + complete
   // [0020 A6] record_wiki_source_ingest REFUSES a non-null p_note, so the note can no longer be
@@ -121,14 +144,8 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
   const b2 = await glBatch(); // complete pair
   const b3 = await glBatch(); // cancel pair
   const b4 = await glBatch(); // cancel pair
-  const p1 = await proposalRows(b1.batch);
-  // R2 reconcile: a DEDICATED, correctly-paired source with NO open batch — the
-  // earlier row borrowed b1's doc under oSeed.client, and the CLR02 it drew was
-  // CORRECT impl behavior (cross-client source), not a hash failure. Fixture
-  // defect acknowledged; the dispute resolved in the impl's favor.
-  const gsrcClient = (await onboardingClient(w.users.hana)).client;
-  const gsrcDoc = await filedDocument(w.users.alice, { firm: w.firms.A, client: gsrcClient, kind: null });
-  await setDocumentKind(w.users.alice, { document: gsrcDoc.documentId, kind: "prior_gl", reason: "g4src" });
+  // #1012 (0288): b1's proposal rows and the dedicated create_seeding_batch source both existed
+  // only to feed the three retired doors' fixtures; both are gone with them.
   for (const slug of ["g4r1", "g4r2"]) {
     await publishWikiPage({ client: w.clients.A1, firm: w.firms.A, slug, title: slug, content: `# ${slug}` });
   }
@@ -178,12 +195,9 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
     record_wiki_source_ingest: (k, v) => recordWikiIngest({ client: b1.client, document: (v === "a" ? g4ingA : g4ingB).documentId, opKey: k }),
     mark_wiki_citations_stale: (k, v) => markStale({
       client: w.clients.A1, document: (v === "a" ? g4staleA : g4staleB).documentId, opKey: k }),
-    create_seeding_batch: (k, v) => createSeedingBatch({
-      client: gsrcClient, document: gsrcDoc.documentId,
-      proposals: [{ proposal_kind: "wiki_fact", proposal_key: "wf:g4", payload: { slug: "profile", fact: v }, evidence: {} }],
-      opKey: k }),
-    tick_seeding_proposal: (k, v) => tickProposal(w.users.hana, { proposal: p1[v === "a" ? 0 : 1].id, opKey: k }),
-    decline_seeding_proposal: (k, v) => declineProposal(w.users.hana, { proposal: p1[v === "a" ? 2 : 3].id, opKey: k }),
+    // create_seeding_batch / tick_seeding_proposal / decline_seeding_proposal: RETIRED (#1012,
+    // 0288) — see EXEMPT above. A door with one refusal and no reservation has no payload for
+    // this law to move.
     complete_seeding_batch: (k, v) => completeSeedingBatch(w.users.hana, { batch: v === "a" ? b1.batch : b2.batch, opKey: k }),
     cancel_seeding_batch: (k, v) => cancelSeedingBatch(w.users.hana, { batch: v === "a" ? b3.batch : b4.batch, opKey: k }),
     update_onboarding_plan: (k, v) => updatePlan({ plan: oPlan.plan, expectedRevision: planRev,
