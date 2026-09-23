@@ -431,9 +431,13 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
       "/rest/v1/rpc/publish_client_cash_account_set",
     ],
   },
-  // #627's D4 lane. Every handler names its own client (five distinct ids, one per state)
-  // before it answers, and falls through otherwise — same shape as documents-viewer-mock.mjs
-  // above, which is the state a lane mock should be in.
+  // #627's D4 lane. Every handler names its own client (six distinct ids as of #997: the
+  // original five, one per read state, plus #997's own `clientReceipt`) before it answers, and
+  // falls through otherwise — same shape as documents-viewer-mock.mjs above, which is the state
+  // a lane mock should be in. #997's four new RPC handlers (the three governed writes plus
+  // `get_compliance_watch_disposition`) scope by `p_watch` instead of a client id — the same
+  // choice `get_document_state`'s row makes elsewhere in this file for a door whose own subject
+  // is a different kind of id — and fall through the same way.
   "tax-boundary-mock.mjs": { unscopeable: [], debt: [] },
   // #641's Work-list lane. `list_accounting_work`/`get_accounting_work_row` are brand-new RPCs no
   // other lane calls, and each carries its own `return false;` fall-through — the list handler on
@@ -1936,10 +1940,11 @@ test("client-id census · no two lane mocks mint the SAME client id", () => {
   assert.deepEqual(clientIdCollisions(census), []);
 
   // POSITIVE CONTROL on the reader itself, over the REAL files: a lane whose whole walk turns on
-  // FIVE client ids, one per read outcome, must census as five — under-matching would make the
-  // assertion above vacuous, and there is no count here that a passing regex could fake.
+  // SIX client ids — the original five, one per read outcome, plus #997's own `clientReceipt` —
+  // must census as six — under-matching would make the assertion above vacuous, and there is no
+  // count here that a passing regex could fake.
   const d4 = [...census].filter(([, files]) => files.length === 1 && files[0] === "tax-boundary-mock.mjs");
-  assert.equal(d4.length, 5, `tax-boundary-mock.mjs names five client ids; the census found ${d4.length}`);
+  assert.equal(d4.length, 6, `tax-boundary-mock.mjs names six client ids; the census found ${d4.length}`);
   assert.ok(census.size >= 30, `the census recognised only ${census.size} client ids — it is not reading the files`);
 });
 
