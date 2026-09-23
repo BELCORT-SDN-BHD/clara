@@ -32,11 +32,19 @@ import {
   chatTaskRef, refusalOf, planAuthority, opReceiptsFor, roleCanExecute, ROLES, nowhere,
   deactivateMember, reactivateMember,
   DR_HUMAN_SIG, DR_OBO_SIG, DR_READ_SIG,
+  getRecognitionSchedule, listRecognitionSchedules, listRecognitionAttention,
+  extraDocument, recordPeriod, monthEndAfter,
 } from "./revenue-recognition-fixtures.mjs";
+// THE STANDARD-CHART CELL's own doors, from the chart batteries that own them: a client born
+// through clara.create_client and the onboarding commit, and clara.apply_coa_template against
+// the estate's CURRENT published template. No surgery, and no chart row minted here.
+import {
+  applyTemplate, newInterviewClient, clientChartMap,
+} from "./coa-template-pr-b-helpers.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 8;
+const EXPECTED_CELLS = 12;
 
 before(async () => {
   ready = await (async () => {
@@ -738,4 +746,279 @@ cell("p941.read.recorded_term — the machine-lane read answers the RECORDED ter
     assert.equal(blob.includes(forbidden), false,
       `the machine-lane read must never carry ${forbidden}`);
   }
+});
+
+// ===========================================================================================
+// AC3 — THE DOCUMENT CARRIER, AND A CORRECTION THAT NEVER MOVES A RUNNING SCHEDULE.
+// ===========================================================================================
+
+cell("p941.term.document — a receipt bound to an issued invoice rides that document's own recorded service period, and the human door that records it does not restrict document direction", async () => {
+  const scene = await deferredRevenueScene("docterm", { cents: 90000, termMonths: 3 });
+  const doc = await extraDocument(scene, { tag: "invoice" });
+  const receipt = await advanceReceipt(scene, {
+    cents: 60000, document: doc.documentId, sha256: doc.sha256, tag: "invoiced" });
+
+  // THE EXISTING HUMAN DOOR, unchanged: 0140's `record_document_service_period` takes the term off
+  // the client's OWN issued invoice exactly as it takes one off a supplier's bill. Nothing about
+  // it is direction-aware, which is the acceptance row's own wording.
+  await recordPeriod(scene.bob, {
+    document: doc.documentId, start: scene.termStart, end: scene.termEnd,
+    basis: "#941 battery: the membership invoice states its service term on its face" });
+
+  const made = await createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: receipt.entry, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef });
+  assert.equal(made.term_source, "document_service_period");
+  assert.equal(made.document_id, doc.documentId);
+  assert.ok(made.service_period_id, "…and the schedule names the exact service-period row it rode");
+  assert.equal(made.stated_term_id, null);
+  assert.equal(made.term_start, scene.termStart);
+  assert.equal(made.term_end, scene.termEnd);
+  assert.equal(Number(made.total_cents), 60000);
+  assert.equal(made.period_count, 3);
+
+  // A DOCUMENT-BOUND RECEIPT CANNOT ALSO CARRY A STATED TERM — 0305's own wall, which is what
+  // keeps "a row names exactly one carrier" true for this relation as well.
+  await assertPair(CLR.badRequest, "prepayment_stated_term_source_has_document",
+    () => recordStatedTerm(scene.bob, {
+      client: scene.client, sourceEntry: receipt.entry,
+      start: scene.termStart, end: scene.termEnd, reason: "#941 battery: a second term" }),
+    "stating a term over a document-bound receipt");
+
+  const row = await recognitionScheduleRow(made.schedule_id);
+  assert.equal(row.term_source, "document_service_period");
+  assert.equal(row.stated_term_id, null);
+  assert.equal(row.basis_kind, "human_stated",
+    "the service period this battery records is a HUMAN's, not an extraction's");
+});
+
+cell("p941.supersede.running — a corrected service period never moves a schedule that is already running: the stored allocation, the term it rode, the occurrences and the committed receipt are all byte-identical afterwards, the schedule still names the SUPERSEDED statement, and a second schedule over the same receipt is still refused", async () => {
+  const scene = await deferredRevenueScene("supersede", { cents: 90000, termMonths: 3 });
+  const stated = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#941 battery: the member said three months when they paid" });
+  const made = await createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef });
+
+  // DRIVE IT TO MONEY ON THE BOOKS FIRST. A claim about "a RUNNING schedule" that never ran would
+  // be a claim about a row.
+  await wakeDuePlanOccurrences({ limit: 100 });
+  const before = await occurrenceRows(made.plan_id);
+  const live = before.filter((o) => o.work_id);
+  assert.ok(live.length >= 1, "the monthly scan admitted a due period");
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  const w = await workRow(live[0].work_id);
+  await claimWorkRun({ task: w.current_task_id, runId: opk("p941-sup-run") });
+  const entry = await wakeRecordJournalEntry(obo.secret, {
+    client: scene.client, work: live[0].work_id, logicalOpId: w.logical_op_id, basis: w.basis });
+  assert.equal(entry.posted, true, "the recognition really reached the books");
+  await settleWorkRun({
+    task: w.current_task_id, outcome: "completed", result: { entry_id: entry.entry_id } });
+  const receiptBefore = (await receiptsForWork(live[0].work_id))
+    .filter((x) => x.outcome === "committed");
+  assert.equal(receiptBefore.length, 1);
+
+  const rowBefore = await recognitionScheduleRow(made.schedule_id);
+
+  // NOW CORRECT THE TERM, to genuinely different dates, through the same human door.
+  const laterEnd = await monthEndAfter(scene.termStart, 5);
+  const corrected = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: laterEnd,
+    reason: "#941 battery: the member extended to six months and we corrected the record" });
+  assert.notEqual(corrected.stated_term_id, stated.stated_term_id);
+  assert.equal(corrected.superseded_id, stated.stated_term_id,
+    "the correction SUPERSEDES rather than edits");
+
+  // NOTHING MOVED.
+  const rowAfter = await recognitionScheduleRow(made.schedule_id);
+  assert.deepEqual(rowAfter.period_lines, rowBefore.period_lines,
+    "the stored allocation is byte-identical");
+  assert.equal(rowAfter.term_start, rowBefore.term_start);
+  assert.equal(rowAfter.term_end, rowBefore.term_end);
+  assert.equal(rowAfter.period_count, rowBefore.period_count);
+  assert.equal(rowAfter.stated_term_id, stated.stated_term_id,
+    "the schedule still names the statement it was DERIVED from, not the one that stands today");
+  assert.deepEqual(
+    (await occurrenceRows(made.plan_id)).map((o) => [o.due_date, o.work_id, o.attempt]),
+    before.map((o) => [o.due_date, o.work_id, o.attempt]),
+    "no occurrence moved");
+  assert.deepEqual((await receiptsForWork(live[0].work_id))
+    .filter((x) => x.outcome === "committed").map((x) => x.id),
+    receiptBefore.map((x) => x.id), "the committed receipt is the SAME receipt");
+
+  // …AND THE DETAIL READ SAYS SO: the term it rode is not the term that stands today.
+  const detail = await getRecognitionSchedule(scene.bob, made.schedule_id);
+  assert.equal(detail.term_live, false, "the statement this schedule rode has been superseded");
+  assert.equal(detail.term_superseded_by, corrected.stated_term_id);
+  assert.equal(detail.term_moved, true, "…and the term that stands today states DIFFERENT dates");
+  assert.equal(detail.term_current_end, laterEnd);
+  assert.equal(detail.term_end, scene.termEnd, "while the schedule keeps the term it rode");
+
+  // A CORRECTION IS A NEW SCHEDULE FROM THE NEXT PERIOD, never a second one over this receipt.
+  await assertPair("CLR13", DR_REASON.scheduleExists,
+    () => createRecognitionSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+      authorityRef: scene.authorityRef }),
+    "a second schedule over a corrected receipt");
+});
+
+// ===========================================================================================
+// AC "the web gains a Deferred revenue destination" — its READS, measured at the database seam.
+// ===========================================================================================
+
+cell("p941.reads — the list carries the term provenance and the posted-period count, the detail projects each period beside the occurrence that posted it, and the attention band offers only receipts the door would admit: never an unenrolled account, never an ambiguous one, and never one already scheduled", async () => {
+  const scene = await deferredRevenueScene("reads", { cents: 90000, termMonths: 3 });
+
+  // ARM B BEFORE THE TERM: the receipt is advertised with the act that unblocks it, which is the
+  // whole reason a memo-only receipt is listed at all.
+  const bare = await listRecognitionAttention(scene.bob, scene.client);
+  const mine = bare.unrecognised.find((r) => r.entry_id === scene.receipt);
+  assert.ok(mine, "an enrolled, eligible, unscheduled advance is offered");
+  assert.equal(mine.deferred_account_code, scene.deferred);
+  assert.equal(Number(mine.amount_cents), 90000);
+  assert.equal(mine.term_carrier, "human_stated");
+  assert.equal(mine.has_live_term, false);
+  assert.equal(mine.next_step, "state_service_period",
+    "the next act is a CLOSED token — the copy is the surface's, the fact is the read's");
+  assert.equal(bare.cap, 50);
+  assert.equal(bare.unrecognised_truncated, false);
+
+  // AN AMBIGUOUS RECEIPT IS NEVER OFFERED: the band asks the door's own candidate predicate.
+  const second = await account(scene.alice, {
+    client: scene.client, code: "20300003", name: "Deferred event revenue", type: "liability" });
+  const ambiguous = await advanceReceipt(scene, {
+    cents: 40000, extraLiability: { code: second, cents: 15000 }, tag: "amb" });
+  // …AND NEITHER IS AN UNENROLLED ONE: 20300003 is on the chart but not on the roster.
+  const unenrolled = await advanceReceipt(scene, {
+    cents: 20000, deferred: second, tag: "unenrolled" });
+  const band = await listRecognitionAttention(scene.bob, scene.client);
+  assert.equal(band.unrecognised.some((r) => r.entry_id === ambiguous.entry), false,
+    "a receipt the door would refuse as ambiguous is not advertised");
+  assert.equal(band.unrecognised.some((r) => r.entry_id === unenrolled.entry), false,
+    "…nor one whose account nobody enrolled");
+
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#941 battery: a three-month retainer paid up front" });
+  const withTerm = await listRecognitionAttention(scene.bob, scene.client);
+  assert.equal(withTerm.unrecognised.find((r) => r.entry_id === scene.receipt).next_step,
+    "configure_schedule", "with a live term the next act is the configuration itself");
+
+  const made = await createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef });
+  const after = await listRecognitionAttention(scene.bob, scene.client);
+  assert.equal(after.unrecognised.some((r) => r.entry_id === scene.receipt), false,
+    "once a schedule stands the receipt leaves arm B");
+
+  // THE LIST.
+  const list = await listRecognitionSchedules(scene.bob, scene.client);
+  const row = list.schedules.find((s) => s.schedule_id === made.schedule_id);
+  assert.ok(row, "the client's own schedule is listed");
+  assert.equal(row.term_source, "human_stated");
+  assert.ok(row.term_stated_by, "…with WHO stated the term");
+  assert.ok(row.term_reason.includes("retainer"), "…and the grounds they wrote");
+  assert.equal(row.term_live, true);
+  assert.equal(row.term_moved, false);
+  assert.equal(row.deferred_account_code, scene.deferred);
+  assert.equal(row.revenue_account_code, scene.revenue);
+  assert.equal(row.recognition_pattern, RECOGNITION_PATTERN);
+  assert.equal(Number(row.total_cents), 90000);
+  assert.equal(row.period_count, 3);
+  assert.equal(row.posted_periods, 0,
+    "configuration is not posting, and the list says the second fact");
+
+  // THE DETAIL, before anything posts and after one period does.
+  const before = await getRecognitionSchedule(scene.bob, made.schedule_id);
+  assert.equal(before.kind, RECOGNITION_KIND);
+  assert.equal(before.configuration_only, true);
+  assert.equal(before.periods.length, 3);
+  assert.equal(before.periods.every((p) => p.occurrence === null), true,
+    "no period has an occurrence yet");
+  assert.equal(before.revenue_account_basis.length > 0, true);
+
+  await wakeDuePlanOccurrences({ limit: 100 });
+  const occ = (await occurrenceRows(made.plan_id)).filter((o) => o.work_id);
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  const w = await workRow(occ[0].work_id);
+  await claimWorkRun({ task: w.current_task_id, runId: opk("p941-reads-run") });
+  const entry = await wakeRecordJournalEntry(obo.secret, {
+    client: scene.client, work: occ[0].work_id, logicalOpId: w.logical_op_id, basis: w.basis });
+  await settleWorkRun({
+    task: w.current_task_id, outcome: "completed", result: { entry_id: entry.entry_id } });
+
+  const detail = await getRecognitionSchedule(scene.bob, made.schedule_id);
+  const posted = detail.periods.find((p) => p.period_end === occ[0].due_date);
+  assert.ok(posted.occurrence, "the period is joined to the occurrence whose due date equals it");
+  assert.ok(posted.occurrence.receipt_id, "…and the occurrence carries its COMMITTED receipt");
+  assert.equal(posted.occurrence.entry_id, entry.entry_id, "…and the entry that posted");
+  assert.equal(
+    (await listRecognitionSchedules(scene.bob, scene.client)).schedules
+      .find((s) => s.schedule_id === made.schedule_id).posted_periods, 1,
+    "the list's posted count is a committed receipt, never an admitted Work");
+
+  // A SCHEDULE OF ANOTHER FIRM IS NOT FOUND — no existence oracle on the detail read.
+  await assertPair(CLR.notFound, DR_REASON.scheduleNotFound,
+    () => getRecognitionSchedule(scene.bob, nowhere()), "reading a schedule that does not exist");
+});
+
+// ===========================================================================================
+// LANE RULE (a) — THIS TICKET'S FIRST HALF IS ALREADY ON THIS BASE, AND THIS LANE CONSUMES IT.
+// ===========================================================================================
+
+cell("p941.standard_chart — a client born through the real doors and given the CURRENT published platform template carries 2030 Deferred Revenue as a non-control liability that this lane's roster admits by name, and 2150 SST Output Tax Payable carries the estate's own stamp that keeps it out of the candidate set", async () => {
+  const scene = await deferredRevenueScene("chart", { cents: 60000, termMonths: 3 });
+
+  // THE CURRENT PUBLISHED PLATFORM TEMPLATE — the highest published version, the estate's own
+  // convention for "whichever one is live" (lane rule (a)). Never a pinned number: 0295 minted v2
+  // and retired v1, and a later pre-step may mint a v3.
+  const templates = await rootQuery(
+    `select id, version from clara.coa_templates
+      where scope = 'platform' and template_key = 'my_sme_starter' and state = 'published'
+      order by version desc limit 1`);
+  assert.equal(templates.rows.length, 1,
+    "the picker offers exactly ONE published standard chart");
+  const current = templates.rows[0];
+
+  const client = await newInterviewClient(scene.alice, scene.firm, { tag: "p941" });
+  const receipt = await applyTemplate(scene.alice, {
+    client, template: current.id, families: null, opKey: opk("p941-template") });
+  assert.ok(receipt.accounts > 40, "the standard chart was really planted");
+
+  const chart = await clientChartMap(client);
+  const deferred = chart["2030"];
+  assert.ok(deferred, "the standard chart carries 2030 by code");
+  assert.equal(deferred.name, "Deferred Revenue", "…and by name");
+  assert.equal(deferred.type, "liability",
+    "…as a LIABILITY, which is the type this lane's roster rule requires");
+  assert.equal(deferred.class, null, "…and not as a control account");
+  assert.equal(deferred.active, true);
+
+  // THE ROSTER ADMITS IT BY NAME, through the real bookkeeper door — which is how this lane
+  // CONSUMES 0295's row rather than minting a look-alike of its own.
+  const enrolment = await enrolDeferredAccount(scene.bob, {
+    client, account: "2030",
+    reason: "#941 battery: the standard chart's own deferred-revenue account" });
+  assert.equal(enrolment.account_code, "2030");
+  assert.equal(enrolment.purpose, DEFERRED_PURPOSE);
+  assert.equal(await enrolled(client, "2030", DEFERRED_PURPOSE), true);
+
+  // …AND 2150 IS THE TAX LEG THE CORE EXCLUDES, by the estate's OWN STAMP rather than by code or
+  // name. The behavioural half — a receipt with an SST line having exactly one candidate leg, and
+  // that leg never moving — is `p941.posts.full_year`'s; this is the chart fact behind it.
+  const sst = await rootQuery(
+    `select account_code, account_type, special_acc_type from clara.coa_accounts
+      where client_id = $1 and special_acc_type = 'sst_output'`, [client]);
+  assert.equal(sst.rows.length, 1, "the standard chart carries exactly one SST output account");
+  assert.equal(sst.rows[0].account_code, "2150");
+  assert.equal(sst.rows[0].account_type, "liability",
+    "it is a liability, which is exactly why excluding it by its STAMP is the only safe rule");
+
+  // THE PREPAYMENT SIDE IS UNTOUCHED BY THE SECOND PURPOSE: 2030 is not a prepayment account, and
+  // the standard chart's own prepayments row is not a deferred-revenue one.
+  assert.equal(await enrolled(client, "2030", "prepayment"), false);
 });
