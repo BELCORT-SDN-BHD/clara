@@ -50,7 +50,8 @@ after(async () => {
 });
 
 const {
-  intakePaths, listIntakeMetaEntries, listIntakeMetas, readIntakeMeta, spoolConfig, sweepSpoolTtl, writeIntakeMeta,
+  intakePaths, listIntakeMetaEntries, listIntakeMetas, readIntakeMeta, readTaskMeta, spoolConfig, sweepSpoolTtl,
+  taskMetaPath, writeIntakeMeta, writeTaskMeta,
 } = await import("../lib/spool.mjs");
 const { recoverPendingDocumentIntakes } = await import("../lib/intake.mjs");
 
@@ -178,6 +179,120 @@ test(`p966.race: ${ATTEMPTS} sidecar writes against concurrent belt-shaped sweep
     `the reader genuinely contended (${sweeps} sweeps over ${ATTEMPTS} writes) — a cell that passed because nothing read is vacuous`);
   assert.equal((await readIntakeMeta(id)).n, ATTEMPTS,
     "…and the LAST write is the one on disk: a retry that gave up quietly would leave an earlier body");
+});
+
+// ---------------------------------------------------------------------------
+// 2b · THE WRITER, AGAINST ITSELF — two writers of ONE sidecar in ONE process (#1043).
+// ---------------------------------------------------------------------------
+//
+// THE MEASURED DEFECT. `atomicJson` named its temp file `${path}.${pid}.${Date.now()}.tmp`, whose
+// only per-call component is a MILLISECOND. Two writers of the SAME sidecar inside ONE process
+// therefore compute the SAME temp path whenever they land in the same millisecond, and both then
+// `writeFile` into it and `rename` it away:
+//
+//   * the loser's `rename` finds nothing to move and throws ENOENT — which `renameIntoPlace`
+//     deliberately does NOT retry (only EPERM/EACCES/EBUSY do), so it surfaces as an intake failed
+//     with an untyped `internal`;
+//   * worse and far more often, the two `writeFile`s interleave on the one inode and the body the
+//     WINNER renames into place is a splice of both — a sidecar that does not parse. A spliced
+//     `intake-<id>.json` makes `requireCapability`'s `readIntakeMeta(...).catch(() => null)` answer
+//     "not found" for a live upload; a spliced `task-<id>.json` hard-fails documentIngest_v2.
+//
+// THE TWO WRITERS ARE REAL AND ARE NOT RARE: `lib/intake.mjs:439` writes the full transport sidecar
+// inside `finalizeDocumentIntake`, and `lib/reconciler-documents.mjs:267` merges every
+// `clara.document_processing_tasks` row onto its own sidecar on every sweep — and the DB row exists
+// from the moment `clara.finalize_document_intake` commits, which is BEFORE intake.mjs:439 runs.
+//
+// MEASURED AGAINST THE PRE-FIX CODE AT 300 ROUNDS OF THE SHAPE BELOW, and THE RUNNER'S PLATFORM IS
+// THE BAD ONE: on Linux (WSL, the shape CI runs) 286 of 300 rounds threw ENOENT and 271 left an
+// unparseable sidecar; on this Windows rig, 6 and 116. So 200 rounds is a wide margin on the host
+// that matters, and not a thin one here either. CI job 107339673336 is the same defect in the wild
+// — the #633 admission e2e's very first upload, 1.8 s after the world booted, failed
+// `ENOENT ... rename '.../task-c6245da9-….json.7113.1790191021685.tmp'`.
+//
+// THE PROPERTY THIS CELL PINS is the one `atomicJson`'s name claims: a reader of a sidecar sees a
+// body some writer wrote, WHOLE — never a splice of two, and no writer is told its write failed
+// because a sibling won the race.
+const COLLIDE_ROUNDS = 200;
+
+/** The full transport sidecar `finalizeDocumentIntake` writes (`lib/intake.mjs:439`). */
+const intakeShapedTask = (taskId, n) => ({
+  schemaVersion: 1,
+  taskId,
+  documentId: randomUUID(),
+  firmId: randomUUID(),
+  storageKey: `firms/${randomUUID()}/docs/${"a".repeat(64)}.pdf`,
+  sha256: "a".repeat(64),
+  mime: "application/pdf",
+  format: "pdf",
+  lane: "ocr",
+  engineId: "azure-di",
+  engineConfig: { model: "prebuilt-layout", pages: "1-20" },
+  versionN: 1,
+  status: "queued",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  writer: "intake",
+  n,
+});
+
+/** The DB-row merge `documentTaskIndex` writes (`lib/reconciler-documents.mjs:267`) — the task
+ *  columns alone, which carry no transport, so it is much SHORTER than the body above. A splice of
+ *  two bodies of the same length could still parse; two lengths make the defect visible. */
+const reconcilerShapedTask = (taskId, n) => ({
+  taskId,
+  lane: "ocr",
+  status: "queued",
+  runId: null,
+  writer: "reconciler",
+  n,
+});
+
+test(`p1043.collide: ${COLLIDE_ROUNDS} rounds of TWO writers on ONE sidecar leave a WHOLE body every time`, async (t) => {
+  await ownSpool(t);
+  const taskId = randomUUID();
+  const failures = [];
+  const spliced = [];
+  const wins = { intake: 0, reconciler: 0 };
+
+  for (let i = 1; i <= COLLIDE_ROUNDS; i += 1) {
+    const bodies = [intakeShapedTask(taskId, i), reconcilerShapedTask(taskId, i)];
+    const settled = await Promise.allSettled(bodies.map((body) => writeTaskMeta(taskId, body)));
+    for (const result of settled) {
+      if (result.status === "rejected") failures.push({ round: i, code: result.reason?.code ?? String(result.reason) });
+    }
+    // WHOLE, not merely parseable: the body on disk must be one of the two, field for field. A
+    // splice that happens to parse is exactly the failure a `JSON.parse` check would wave through.
+    // Raw readFile + JSON.parse here on purpose, not `readTaskMeta`: the cell must see exactly what
+    // ANY reader sees on disk right now, splice included, the same raw-filesystem stance
+    // `p966.host` above takes with its own open()/rename() rather than going through a wrapper.
+    const raw = await readFile(taskMetaPath(taskId), "utf8");
+    let onDisk = null;
+    try {
+      onDisk = JSON.parse(raw);
+    } catch (err) {
+      spliced.push({ round: i, why: err?.message, bytes: raw.length });
+      continue;
+    }
+    const match = bodies.find((body) => JSON.stringify(body) === JSON.stringify(onDisk));
+    if (!match) spliced.push({ round: i, why: "parsed, but equal to neither writer's body", onDisk });
+    else wins[match.writer] += 1;
+  }
+
+  assert.deepEqual(failures, [],
+    `no writer may be told its write failed because a sibling in the SAME process won the race: `
+    + `${failures.length} of ${COLLIDE_ROUNDS * 2} writes threw (${JSON.stringify(failures.slice(0, 5))}) — `
+    + `each one fails a live intake with an untyped 'internal' (#1043)`);
+  assert.deepEqual(spliced, [],
+    `every read must see a body some writer wrote, WHOLE: ${spliced.length} of ${COLLIDE_ROUNDS} rounds `
+    + `left a spliced sidecar (${JSON.stringify(spliced.slice(0, 3))}) — a spliced intake sidecar reads `
+    + `back as 'not found' for a live capability, a spliced task sidecar hard-fails documentIngest_v2`);
+  // NON-VACUITY: the two writes genuinely contended. A cell in which one writer always finished
+  // before the other started would pass without ever exercising the defect.
+  assert.ok(wins.intake > 0 && wins.reconciler > 0,
+    `both writers must win rounds — otherwise nothing raced (intake=${wins.intake}, reconciler=${wins.reconciler})`);
+  assert.equal((await readTaskMeta(taskId)).taskId, taskId,
+    "…and the sidecar is still a readable sidecar at the end, not a temp file left in its place");
 });
 
 // ---------------------------------------------------------------------------
