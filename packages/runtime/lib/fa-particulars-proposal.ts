@@ -21,15 +21,27 @@
 //                                a refusal.
 //       client_knowledge       — a depreciation note recorded against this client (or this
 //                                account) by a person of the firm. See THE KNOWLEDGE GROUND below.
+//                                Two records that disagree ground nothing, exactly as two siblings
+//                                that disagree do.
 //       retired_account_policy — THIS account's own default policy, retired. A person of the firm
 //                                signed it for these very assets; that it was later retired makes
 //                                it history, not noise, and it is named as retired in the reason.
 //       account_siblings       — the account's other COMPLETED assets, where they AGREE. A split
 //                                account grounds nothing and says so: picking a side would be
 //                                Clara choosing between two humans' judgements.
+//   * ONE ACCOUNT RULE, THE SAME ON ALL THREE GROUNDS. A ground speaks for this row only when its
+//     OWN account is this row's account — and `clara.fixed_assets.asset_account_code` is nullable,
+//     so a row on no account grounds on nothing but inputs that are also on no account. Three arms
+//     that disagreed about one null let a sibling from any account in the register ground a
+//     proposal whose reason then named an account it never came from.
 //   * THE TWO FACTS THAT ARE NOT ESTIMATES ARE ALWAYS PROPOSED. The in-service date is the
 //     acquisition's own posting date (the owner's #932 decision, applied to the same question),
 //     and the residual is nil (the owner's #932 default). Both are stated rather than inferred.
+//   * THE RESIDUAL IS NEVER READ OFF A GROUND, and none of the three ground types carries one.
+//     The owner's #932 decision fixes it at the firm's nil default, so a ground's own residual
+//     could only ever be half-adopted — the drivers taken, the residual discarded — under a
+//     sentence claiming Clara proposed "the same". The field used to sit on all three input types
+//     and be read by none; it is gone, and the sibling sentence now names the DRIVERS it read.
 //   * WHERE NOTHING GROUNDS A METHOD, `method` IS NULL and the reason says so in words. An empty
 //     method is an honest proposal; an invented one is not.
 //
@@ -69,7 +81,18 @@ export type FaProposalAsset = {
   /** TRUE when #932's policy path already birthed this row complete. */
   particularsComplete: boolean;
   assetAccount: string | null;
-  /** The acquisition entry's posting date, ISO. The in-service date the owner's ruling names. */
+  /**
+   * The acquisition entry's posting date as a `YYYY-MM-DD` Asia/Kuala_Lumpur CALENDAR STRING — the
+   * in-service date the owner's ruling names — or `null`.
+   *
+   * NEVER A `Date`, AND THE READER MUST CAST. `node-postgres` maps a Postgres `date` column onto a
+   * JS `Date` at LOCAL midnight, whose UTC spelling under Asia/Kuala_Lumpur is the PREVIOUS
+   * calendar day (measured: `select '2026-09-15'::date` → `2026-09-14T16:00:00.000Z`), and this
+   * estate sets no `setTypeParser` anywhere. So the successor's own read spells it
+   * `fa.acquired_date::text as acquired_date`; a caller that forgets is refused by
+   * `deriveFaParticularsProposal` rather than silently shipping a date one day early, on the
+   * driver every depreciation charge from then on is computed from.
+   */
   acquiredDate: string | null;
 };
 
@@ -80,7 +103,6 @@ export type FaProposalSibling = {
   method: FaMethod | string | null;
   usefulLifeMonths: number | null;
   rateBps: number | null;
-  residualCents: number | null;
 };
 
 /**
@@ -110,7 +132,6 @@ export type FaProposalKnowledgeNote = {
   method: FaMethod | string | null;
   usefulLifeMonths: number | null;
   rateBps: number | null;
-  residualCents: number | null;
 };
 
 /** THIS account's own default depreciation policy, RETIRED (#932's `fa_account_depreciation_policies`
@@ -122,7 +143,6 @@ export type FaProposalRetiredPolicy = {
   method: FaMethod | string | null;
   usefulLifeMonths: number | null;
   rateBps: number | null;
-  residualCents: number | null;
 };
 
 export type FaProposalInputs = {
@@ -162,16 +182,18 @@ function congruent(method: unknown, life: number | null, rate: number | null): G
   return { method: m, usefulLifeMonths: life, rateBps: rate };
 }
 
-/** The account's other completed assets, WHERE THEY AGREE. A split account grounds nothing. */
-function fromSiblings(asset: FaProposalAsset, siblings: readonly FaProposalSibling[]): Grounded {
-  const seen: NonNullable<Grounded>[] = [];
-  for (const s of siblings) {
-    if (s.particularsComplete !== true) continue;
-    if (asset.assetAccount !== null && s.assetAccount !== asset.assetAccount) continue;
-    const g = congruent(s.method, s.usefulLifeMonths, s.rateBps);
-    if (g === null) continue;
-    seen.push(g);
-  }
+/** Does this ground speak for this row? ONE RULE FOR ALL THREE GROUNDS: the ground's own account
+ *  must BE this row's account. `asset_account_code` is nullable, so "no account" is an account
+ *  like any other here — a ground about account 1500 does not speak for a row that has none, and
+ *  a client-wide ground does not speak for a row that has one. */
+function speaksFor(asset: FaProposalAsset, groundAccount: string | null): boolean {
+  return groundAccount === asset.assetAccount;
+}
+
+/** The ONE driver set a collection of grounds agrees on, or null where it does not. Picking a side
+ *  would be Clara choosing between two humans' judgements — the header's rule, applied by the
+ *  sibling ground and, since the same defect was found in it, by the knowledge ground too. */
+function agreedOn(seen: readonly NonNullable<Grounded>[]): Grounded {
   if (seen.length === 0) return null;
   const first = seen[0]!;
   for (const g of seen) {
@@ -182,6 +204,19 @@ function fromSiblings(asset: FaProposalAsset, siblings: readonly FaProposalSibli
   return first;
 }
 
+/** The account's other completed assets, WHERE THEY AGREE. A split account grounds nothing. */
+function fromSiblings(asset: FaProposalAsset, siblings: readonly FaProposalSibling[]): Grounded {
+  const seen: NonNullable<Grounded>[] = [];
+  for (const s of siblings) {
+    if (s.particularsComplete !== true) continue;
+    if (!speaksFor(asset, s.assetAccount)) continue;
+    const g = congruent(s.method, s.usefulLifeMonths, s.rateBps);
+    if (g === null) continue;
+    seen.push(g);
+  }
+  return agreedOn(seen);
+}
+
 /** A calendar date in the prose a person reads, from the ISO one the register holds. `Intl` is
  *  avoided on purpose: this string is built inside a workflow closure the Workflow DevKit compiles
  *  into a VM script, and the twelve month names are cheaper than a locale table. */
@@ -189,8 +224,32 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+const CALENDAR_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * THE ONE INPUT SHAPE THIS MODULE REFUSES RATHER THAN TOLERATES, and the reason it is a throw.
+ *
+ * Everything else here degrades: a ground it cannot use is dropped, a method it cannot derive is
+ * left null. A MIS-SHAPED DATE CANNOT DEGRADE. Accepting a `Date` would put either a value the wire
+ * schema drops (losing the whole proposal, silently) or a calendar day one earlier than the
+ * acquisition's own posting date onto a form a person signs. Neither is something to be tolerant
+ * about, and the caller that produced it has a one-word fix (`::text`), so it is named.
+ */
+function calendarDay(value: string | null): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || !CALENDAR_DAY.test(value)) {
+    throw new TypeError(
+      "fa-particulars-proposal: acquiredDate must be a YYYY-MM-DD calendar string or null, got "
+        + `${Object.prototype.toString.call(value)} ${JSON.stringify(String(value))} — read the `
+        + "column as `fa.acquired_date::text`, because node-postgres maps a `date` onto a JS Date "
+        + "at local midnight and its UTC spelling is the previous calendar day",
+    );
+  }
+  return value;
+}
+
 function prettyDate(iso: string | null): string | null {
-  if (iso === null || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  if (iso === null || !CALENDAR_DAY.test(iso)) return iso;
   const [y, m, d] = iso.split("-");
   const name = MONTHS[Number(m) - 1];
   if (name === undefined) return iso;
@@ -210,6 +269,24 @@ function driversText(g: NonNullable<Grounded>): string {
  * the first thing an accountant asks. It names the ground, the account, and the two facts; where
  * nothing grounded a method it SAYS so, because a silence there reads as a recommendation.
  */
+/** The longest prose this module will put on a durable wire, and the longest it lets either of its
+ *  two free-text inputs contribute. These are THIS MODULE's bounds on ITS OWN sentence — not the
+ *  particulars door's, which has none — and they exist because a question is durable and a reason
+ *  nobody can read is worse than a shorter one. A producer that can break its own bound does not
+ *  have one, so both caps are applied before the sentence is built and the result is clamped. */
+const REASON_MAX = 400;
+const ACCOUNT_LABEL_MAX = 40;
+const NOTE_LABEL_MAX = 100;
+
+/** Trim to `max` on a word boundary where there is one, with an ellipsis, so a clipped label still
+ *  reads as a clipped label rather than as a different one. */
+function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max - 1);
+  const space = head.lastIndexOf(" ");
+  return `${(space > max * 0.6 ? head.slice(0, space) : head).trimEnd()}…`;
+}
+
 function reasonFor(
   asset: FaProposalAsset,
   grounded: Grounded,
@@ -217,7 +294,19 @@ function reasonFor(
   note: FaProposalKnowledgeNote | null,
   retiredVersion: number | null,
 ): string {
-  const account = asset.assetAccount === null ? "this asset account" : asset.assetAccount;
+  return clip(reasonLine(asset, grounded, ground, note, retiredVersion), REASON_MAX);
+}
+
+function reasonLine(
+  asset: FaProposalAsset,
+  grounded: Grounded,
+  ground: FaProposalBasis | null,
+  note: FaProposalKnowledgeNote | null,
+  retiredVersion: number | null,
+): string {
+  const account = asset.assetAccount === null
+    ? "this asset account"
+    : clip(asset.assetAccount, ACCOUNT_LABEL_MAX);
   const date = prettyDate(asset.acquiredDate);
   const tail = date === null
     ? "I propose a nil residual, which is this firm's default."
@@ -233,7 +322,7 @@ function reasonFor(
   }
   if (ground === "client_knowledge") {
     const label = note?.label?.trim();
-    return `This client's record states ${label && label !== "" ? `“${label}”` : "a depreciation policy"} `
+    return `This client's record states ${label && label !== "" ? `“${clip(label, NOTE_LABEL_MAX)}”` : "a depreciation policy"} `
       + `for ${account}, so I propose ${drivers}. ${tail}`;
   }
   if (ground === "retired_account_policy") {
@@ -241,7 +330,10 @@ function reasonFor(
     return `${account} has no live default policy, but the one a person of this firm signed for it`
       + `${v} and later retired said ${drivers}, so that is what I propose. ${tail}`;
   }
-  return `Every other completed asset on ${account} is depreciated ${drivers}, so I propose the same. ${tail}`;
+  // NAMES THE DRIVERS IT READ, not "the same": the proposal's residual is the firm's default rather
+  // than whatever those assets carry, and a sentence that said "the same" would be claiming a
+  // driver set this module never reads.
+  return `Every other completed asset on ${account} is depreciated ${drivers}, so I propose those drivers. ${tail}`;
 }
 
 /**
@@ -254,6 +346,8 @@ function reasonFor(
 export function deriveFaParticularsProposal(inputs: FaProposalInputs): FaParticularsProposal | null {
   const asset = inputs.asset;
   if (asset.particularsComplete === true) return null;
+  // The one input whose shape is checked rather than tolerated — see `calendarDay`.
+  const acquiredDate = calendarDay(asset.acquiredDate);
 
   const basis: FaProposalBasis[] = [];
   let grounded: Grounded = null;
@@ -267,24 +361,36 @@ export function deriveFaParticularsProposal(inputs: FaProposalInputs): FaParticu
   }
   let knowledgeNote: FaProposalKnowledgeNote | null = null;
   if (grounded === null) {
-    // THE NARROWER RECORD GOVERNS: one naming this account beats one about the client as a whole,
-    // because the narrower statement is the one its author meant for these assets.
+    // TWO TIERS, AND THE NARROWER ONE GOVERNS OUTRIGHT: a record naming THIS account is the one
+    // its author meant for these assets, so a client-wide record is not its rival and is not
+    // consulted at all once a scoped one exists. WITHIN the governing tier the records are peers,
+    // and peers that disagree ground nothing — the same rule a split account already had. Taking
+    // the first admissible record, as an earlier cut did, resolved two people's judgements by
+    // array order; falling back to the wide tier when the narrow one splits would choose a side by
+    // another route.
+    const scoped: { note: FaProposalKnowledgeNote; g: NonNullable<Grounded> }[] = [];
+    const wide: { note: FaProposalKnowledgeNote; g: NonNullable<Grounded> }[] = [];
     for (const note of inputs.knowledge ?? []) {
-      const scoped = asset.assetAccount !== null && note.assetAccount === asset.assetAccount;
-      const wide = note.assetAccount === null;
-      if (!scoped && !wide) continue;
+      const isScoped = speaksFor(asset, note.assetAccount);
+      // A client-wide record (`assetAccount: null`) speaks for a row on an account; for a row on
+      // NO account it is the same statement as the scoped one, and `speaksFor` already took it.
+      const isWide = note.assetAccount === null && !isScoped;
+      if (!isScoped && !isWide) continue;
       const g = congruent(note.method, note.usefulLifeMonths, note.rateBps);
       if (g === null) continue;
-      if (knowledgeNote === null || (scoped && knowledgeNote.assetAccount === null)) {
-        knowledgeNote = note;
-        grounded = g;
-      }
+      (isScoped ? scoped : wide).push({ note, g });
     }
-    if (grounded !== null) { basis.push("client_knowledge"); methodGround = "client_knowledge"; }
+    const tier = scoped.length > 0 ? scoped : wide;
+    grounded = agreedOn(tier.map((x) => x.g));
+    if (grounded !== null) {
+      knowledgeNote = tier[0]!.note;
+      basis.push("client_knowledge");
+      methodGround = "client_knowledge";
+    }
   }
   if (grounded === null) {
     const retired = inputs.retiredPolicy ?? null;
-    if (retired !== null && (asset.assetAccount === null || retired.assetAccount === asset.assetAccount)) {
+    if (retired !== null && speaksFor(asset, retired.assetAccount)) {
       grounded = congruent(retired.method, retired.usefulLifeMonths, retired.rateBps);
       if (grounded !== null) { basis.push("retired_account_policy"); methodGround = "retired_account_policy"; }
     }
@@ -297,7 +403,7 @@ export function deriveFaParticularsProposal(inputs: FaProposalInputs): FaParticu
   // THE TWO FACTS THAT ARE NOT ESTIMATES, always proposed and always named as grounds of their
   // own: the in-service date is the acquisition's own posting date and the residual is nil, both
   // the owner's 2026-09-18 decisions on #932 applied to the same question.
-  if (asset.acquiredDate !== null) basis.push("acquisition_date");
+  if (acquiredDate !== null) basis.push("acquisition_date");
   basis.push("firm_default_residual");
 
   return {
@@ -306,7 +412,7 @@ export function deriveFaParticularsProposal(inputs: FaProposalInputs): FaParticu
     useful_life_months: grounded?.usefulLifeMonths ?? null,
     rate_bps: grounded?.rateBps ?? null,
     residual_cents: 0,
-    start_date: asset.acquiredDate,
+    start_date: acquiredDate,
     description: asset.description.trim() === "" ? null : asset.description.trim(),
     basis,
     reason: reasonFor(asset, grounded, methodGround, knowledgeNote, inputs.retiredPolicy?.version ?? null),
@@ -318,8 +424,18 @@ export function deriveFaParticularsProposal(inputs: FaProposalInputs): FaParticu
  *
  * It exists so the SUCCESSOR can refuse to put a malformed block on a wire nobody can take back:
  * a question is durable, a person reads it hours later, and a proposal whose residual was negative
- * would be a proposal the particulars door refuses at the moment of confirmation. Every bound here
- * is `clara._fa_validate_particulars`'s own (0041:2977-3033) — none is a rule of this module's.
+ * would be a proposal the particulars door refuses at the moment of confirmation.
+ *
+ * WHICH BOUNDS ARE WHOSE, STATED HONESTLY — an earlier cut of this header claimed every one was
+ * the door's, and two were not (adversarial ADV-L05-02, 2026-09-24). The method enum, the positive
+ * useful life, the 1..10000 basis points, the non-negative residual and the calendar-day start are
+ * `clara._fa_validate_particulars`'s own (0041:2977-3033). `description` carries NO bound, because
+ * the door carries none either: the validator imposes no length and `clara.fixed_assets.description`
+ * is `text` with no length CHECK. It must not be bounded here, because the web pre-fills this exact
+ * value straight back into the door — a wire bound would either delete a real asset's proposal or,
+ * worse, quietly shorten a person's own description at the moment they confirm it. `reason` is the
+ * ONE bound that IS this module's own: it is this module's prose, not a person's data, `reasonFor`
+ * guarantees it by construction, and `p933.wire.reason_ceiling` drives that guarantee.
  *
  * `v` IS THE READER'S ESCAPE. A surface that meets a block it does not understand renders no
  * proposal and the ordinary empty form, which is exactly today's behaviour; it never guesses.
@@ -331,10 +447,10 @@ export const faParticularsProposalSchema = z
     useful_life_months: z.number().int().positive().nullable(),
     rate_bps: z.number().int().min(1).max(10000).nullable(),
     residual_cents: z.number().int().min(0).nullable(),
-    start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
-    description: z.string().trim().min(1).max(200).nullable(),
+    start_date: z.string().regex(CALENDAR_DAY).nullable(),
+    description: z.string().trim().min(1).nullable(),
     basis: z.array(z.enum(FA_PROPOSAL_BASES)),
-    reason: z.string().max(400),
+    reason: z.string().max(REASON_MAX),
   })
   .strict();
 

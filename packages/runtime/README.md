@@ -1064,11 +1064,25 @@ derivation, PURE (every fact is passed in) and tested on its own by
   account's own **retired default policy**, then the account's other **completed assets where they
   agree**. A split account grounds nothing, and where nothing grounds a method the block carries
   `method: null` and the reason SAYS so.
+* **One account rule on all three grounds.** A ground speaks for a row only when its OWN account
+  IS that row's account — and `asset_account_code` is nullable, so a row on no account grounds on
+  nothing but inputs that are also on no account. Two recorded notes that disagree ground nothing,
+  exactly as two siblings that disagree do; a note naming THIS account governs outright, and a
+  split at that narrower tier does not fall back to the client-wide ones.
 * **The two facts that are not estimates are always proposed**: the in-service date is the
   acquisition's own posting date and the residual is nil (both the owner's 2026-09-18 decisions on
-  #932, applied to the same question).
+  #932, applied to the same question). The residual is never read off a ground — none of the three
+  ground types carries one — because half-adopting a ground's own residual under a sentence saying
+  "the same" is exactly what the owner's default rules out.
+* **`acquiredDate` is a `YYYY-MM-DD` Asia/Kuala_Lumpur calendar STRING, never a `Date`.** The
+  successor's read spells it `fa.acquired_date::text`; a caller that forgets the cast is REFUSED
+  with a message naming it, because `node-postgres` maps a `date` onto local midnight whose UTC
+  spelling is the previous calendar day — and that day is the driver every depreciation charge is
+  computed from.
 * `reason` is ONE line of prose naming the ground, the account and the two facts — a proposal
-  nobody can check is a proposal nobody should confirm.
+  nobody can check is a proposal nobody should confirm. Its 400-character cap is this module's own
+  rule about its own prose and `reasonFor` guarantees it; `description` carries NO cap, because the
+  particulars door carries none and a surface pre-fills that value straight back into it.
 * `proposalSourceRef` EXTENDS #639's `{kind:'fixed_asset', asset_id}` stanza with the block.
   `clara.agent_interruptions.source_ref` is constrained to "null or an object" and nothing more
   (0180:183), so this needs **no migration**; `packages/db/tests/fa-particulars-proposal.test.mjs`

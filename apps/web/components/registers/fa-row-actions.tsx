@@ -20,6 +20,7 @@ import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { faRefusalControlId } from "@/lib/registers/fa-refusal-field";
 import { FaParticularsFields, EMPTY_PARTICULARS, particularsReadyToSubmit } from "./fa-particulars-fields";
 import { FaProposalNote } from "./fa-proposal-note";
+import { useFaParticularsProposal } from "./use-fa-particulars-proposal";
 import { fmtCents } from "@/lib/registers/money";
 import {
   completeFixedAssetParticulars, completeIntent, reviseFixedAssetParticulars, reviseIntent,
@@ -27,10 +28,6 @@ import {
 } from "@/lib/registers/fixed-assets";
 import { useDepreciationDecisionKey } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import {
-  loadAssetParticularsProposal, particularsFromProposal,
-} from "@/lib/registers/fa-particulars-proposal";
-import type { FaParticularsProposal } from "@/lib/registers/fa-particulars-proposal";
 import type { FixedAssetRow, FaParticularsInput, FaChangeClass } from "@/lib/registers/fixed-assets";
 import type { AccountRow } from "@/lib/registers/accounts";
 
@@ -66,10 +63,10 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act, error }:
   const decision = useDepreciationDecisionKey();
   // #933 — CLARA'S PROPOSAL, READ WHEN THE DIALOG OPENS AND NOT BEFORE. It is the same block the
   // Work question carries (`clara.agent_interruptions.source_ref`), so the person sees the SAME
-  // proposal here as in Needs-you and in the conversation. Reading it on mount would ask the
-  // database for a proposal about a dialog nobody has opened, once per row of the register — the
-  // reason `FaDoorDialog` has an `onOpen` at all (#651's own note).
-  const [proposal, setProposal] = useState<FaParticularsProposal | null>(null);
+  // proposal here as in Needs-you and in the conversation — through the one hook both register-side
+  // entrances share (`./use-fa-particulars-proposal.ts`), which owns the read-on-open,
+  // seed-only-an-untouched-form and clear-on-close rules.
+  const seedFromProposal = useFaParticularsProposal({ clientId, assetId: asset.id }, setParticulars);
 
   return (
     <FaDoorDialog
@@ -81,24 +78,12 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act, error }:
       refusal={toDialogRefusal(error)}
       refusalFocusId={faRefusalControlId(idPrefix, error)}
       confirmDisabled={!particularsReadyToSubmit(particulars)}
-      onOpen={() => {
-        void loadAssetParticularsProposal(sessionTokenAccessor, { clientId, assetId: asset.id })
-          .then((p) => {
-            if (p === null) return;
-            setProposal(p);
-            // SEEDED ONCE, AND ONLY ONTO AN UNTOUCHED FORM. `onOpen` fires on each open and the
-            // read resolves a tick later; a person who started typing while it was in flight must
-            // not have their work replaced by a suggestion that arrived after it.
-            setParticulars((current) =>
-              current === EMPTY_PARTICULARS ? particularsFromProposal(p, current) : current);
-          });
-      }}
+      onOpen={seedFromProposal.seed}
       onClosed={() => {
         decision.renew();
         // A CLOSED DIALOG ENDS THE DECISION, and the seed goes with it: the next open is a fresh
         // completion, re-read and re-seeded, never a stale proposal from a previous visit.
-        setProposal(null);
-        setParticulars(EMPTY_PARTICULARS);
+        seedFromProposal.clear();
       }}
       onConfirm={() =>
         act(async () => {
@@ -109,7 +94,7 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act, error }:
         })
       }
     >
-      <FaProposalNote proposal={proposal} />
+      <FaProposalNote proposal={seedFromProposal.proposal} />
       <FaParticularsFields idPrefix={idPrefix} value={particulars} onChange={setParticulars} />
     </FaDoorDialog>
   );

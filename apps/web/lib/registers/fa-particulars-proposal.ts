@@ -14,7 +14,10 @@
 // imported here, and this module is its READER, written from the same contract. The two are kept
 // in step the way `lib/work/question-fields.ts` keeps its own pair in step: one written grammar,
 // one live database battery that drives it, and a divergence that shows up as a proposal a
-// surface refuses to render rather than as a wrong value silently pre-filled.
+// surface refuses to render rather than as a wrong value silently pre-filled. Where the two sides
+// state a BOUND they must state the same one: `readFaParticularsProposal`'s per-field rules below
+// and `faParticularsProposalSchema`'s are the same set, and each side's own cells name the
+// estate's measurement the rule comes from rather than the other side's code.
 //
 // THE READER IS TOLERANT, AND THAT IS THE WHOLE POSTURE. A question is durable; a person opens it
 // hours or days later, possibly against a build that is not the one that wrote it. So an absent
@@ -62,10 +65,13 @@ function intIn(value: unknown, min: number, max: number): number | null {
   return value >= min && value <= max ? value : null;
 }
 
-function text(value: unknown, max: number): string | null {
+/** A non-empty trimmed string, or null. `max` is optional because only ONE field here has a
+ *  length rule at all — see `description` below. */
+function text(value: unknown, max?: number): string | null {
   if (typeof value !== "string") return null;
   const t = value.trim();
-  return t === "" || t.length > max ? null : t;
+  if (t === "") return null;
+  return max !== undefined && t.length > max ? null : t;
 }
 
 /**
@@ -94,7 +100,15 @@ export function readFaParticularsProposal(
     rate_bps: intIn(raw.rate_bps, 1, 10000),
     residual_cents: intIn(raw.residual_cents, 0, Number.MAX_SAFE_INTEGER),
     start_date: startDate,
-    description: text(raw.description, 200),
+    // NO LENGTH BOUND ON `description`, AND THAT IS THE DOOR'S RULE RATHER THAN A TOLERANCE.
+    // `clara._fa_validate_particulars` imposes none and `clara.fixed_assets.description` is `text`
+    // with no length CHECK, so a bound here would be a rule this reader invented — and this exact
+    // value is pre-filled straight back INTO the door by `particularsFromProposal`, where dropping
+    // it hides a real asset's description and trimming it would rewrite one under a person's
+    // signature. A 214-character vehicle description is what a document-derived acquisition looks
+    // like (adversarial ADV-L05-02, 2026-09-24). `reason` DOES carry one, because that string is
+    // the runtime module's own prose and the producer guarantees it.
+    description: text(raw.description),
     basis: Array.isArray(raw.basis) ? raw.basis.filter((b): b is string => typeof b === "string") : [],
     reason: text(raw.reason, 400) ?? "",
   };

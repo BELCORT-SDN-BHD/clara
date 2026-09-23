@@ -54,7 +54,7 @@ const WIRE = Object.freeze({
   start_date: "2026-08-15",
   description: "Air compressor, workshop bay 2",
   basis: ["account_siblings", "acquisition_date", "firm_default_residual"],
-  reason: "Every other completed asset on 1500 is depreciated straight line over 60 months, so I propose the same.",
+  reason: "Every other completed asset on 1500 is depreciated straight line over 60 months, so I propose those drivers.",
 });
 
 const sourceRef = (over: Record<string, unknown> = {}) => ({
@@ -98,6 +98,24 @@ test("readFaParticularsProposal: a value outside the shape the particulars door 
   assert.equal(p.residual_cents, null, "a residual is non-negative");
   assert.equal(p.start_date, null, "the in-service date is ISO — the spelling the answer door stores");
   assert.equal(p.description, null);
+});
+
+test("readFaParticularsProposal: a long description is read WHOLE — the particulars door has no length bound, so this reader must not invent one", () => {
+  // The two sides of one contract must agree about what they admit, or a block one wrote is a
+  // block the other silently drops. The runtime producer carries no bound on `description`
+  // because `clara._fa_validate_particulars` carries none and `clara.fixed_assets.description`
+  // is `text`; a 214-character vehicle description is what a document-derived acquisition
+  // actually looks like (adversarial ADV-L05-02, 2026-09-24). And this value is pre-filled
+  // STRAIGHT BACK into the door, so dropping or trimming it would quietly shorten a real asset's
+  // description at the moment a person confirms the form.
+  const description =
+    "Toyota Hiace panel van, registration WXY 1234, chassis JTFSX22P900123456, purchased from "
+    + "Sunrise Motors Sdn Bhd under invoice SM/2026/004417 dated 15 September 2026, fitted with "
+    + "refrigeration unit and rear shelving";
+  assert.ok(description.length > 200, `the fixture must exceed the removed bound: ${description.length}`);
+  const p = readFaParticularsProposal(sourceRef({ description }));
+  assert.ok(p, "the block reads");
+  assert.equal(p.description, description, "read whole, neither dropped nor trimmed");
 });
 
 // ------------------------------------------------------------------------------------------
