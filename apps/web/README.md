@@ -1914,3 +1914,30 @@ every fixture in the app would otherwise stop compiling for a key one affordance
 `i18n/request.ts` records that adding a locale is a routing.ts + middleware change. #942's
 acceptance names "en and zh"; the en half is here, and the zh half is an i18n lane's work rather
 than a string this ticket could have added to a file that does not exist.
+
+### Fix round 1 — the two accrual surfaces became one component
+
+`components/accruals/accrual-bill-conflicts.tsx` used to carry its OWN copy of the skip/reverse
+state machine, byte-for-byte `components/firm/accrual-bill-conflict-affordance.tsx`'s. The reviews
+then found three things missing from the INBOX copy alone — the document link AC2 asks for, the
+side #942 put on the row, and the period — which is exactly how two copies of one state machine
+fail. The Accruals page now mounts the SAME component the Needs-you inbox mounts and keeps only its
+own chrome (the section, the sentence, the accrued amount to compare the document against), so the
+two surfaces cannot drift again. Three `Accruals.*` keys the item owned (`billConflictSide`,
+`billConflictPeriod`, `billConflictViewEntry`) moved to their `NeedsYou.*` twins with them.
+
+Three things that component now says which neither surface said before:
+
+* **What each remedy settles.** "Skip this period's next occurrence" is FORWARD-looking: an accrual that
+  already stands cannot be un-posted, so the flagged period keeps both amounts and keeps its row
+  until its own reversal is admitted. A person who clicks it and sees the row unchanged was
+  otherwise reading a remedy as a failure.
+* **A plan that is not active.** Both doors refuse `plan_ended` / `plan_paused` while the double
+  count is still on the books. The item stays (hiding it would hide the double count) and the
+  CONTROLS go: a control whose only possible outcome is a refusal is not offered.
+* **Both sides, in the kind label and the section copy.** The row title was "A bill arrived for an
+  accrued period" and the section body named the EXPENSE account, on a surface #942 made two-sided;
+  they now say "document" and "profit-and-loss account".
+
+The accrual form's method hint is rule-dependent for the same reason (#937): it stated that one rule
+exists, beside a control that offers two.

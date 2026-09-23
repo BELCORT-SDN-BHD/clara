@@ -456,7 +456,14 @@ test("accrual.walk.billConflict: a bill posted inside the accrued period is name
   await expect(conflict).toBeVisible();
   await expect(page.getByText("Accrued period: 2026-07-31")).toBeVisible();
   await expect(page.getByText("Accrual amount: 1,200.00")).toBeVisible();
-  await expect(page.getByRole("link", { name: "View the bill" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "View the document" })).toBeVisible();
+  // #942 fix round 1 — the section is TWO-SIDED now: its heading and its sentence must be true of
+  // an accrued fee as well as of a cost, and the item says which way this one runs.
+  await expect(page.getByText("Documents posted inside an accrued period")).toBeVisible();
+  await expect(page.getByText(/hit this accrual.s own profit-and-loss account/)).toBeVisible();
+  await expect(page.getByText("Expense accrual", { exact: true })).toBeVisible();
+  // …and what each remedy actually settles (ADV-02).
+  await expect(page.getByText(/Skipping affects the NEXT period only/)).toBeVisible();
 
   await scan(page, "accrual bill conflict, before reverse now");
 

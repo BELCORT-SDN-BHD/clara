@@ -169,6 +169,7 @@ components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm-setup/firm-setup-a11y.test.tsx
 components/firm-setup/firm-setup-checklist.test.tsx
 components/firm-setup/firm-setup-keyboard.test.tsx
+components/firm/accrual-bill-conflict-affordance.test.tsx
 components/firm/activity/activity-event-sheet.test.tsx
 components/firm/activity/activity-feed.test.tsx
 components/firm/activity/activity-filters.test.tsx
