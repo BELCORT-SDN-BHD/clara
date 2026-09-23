@@ -1096,36 +1096,44 @@ begin
     raise notice '#946 §G: clara.persist_payroll_facts already calls the post -- splice already applied, nothing to do (redo)';
   else
     -- SPLICE (1): the declaration this splice needs.
-    v_anchor := '  v_cited_id uuid; v_cited_locator jsonb; v_locator jsonb;';
+    --
+    -- EVERY anchor and replacement below is ONE dollar-quoted literal, never a `||` chain with
+    -- chr(10). That is not a style choice: apps/web/test/sqlFunctionCensus.ts proves what a
+    -- migration's dynamic `execute` installs by RECONSTRUCTING the statement from its parts, and
+    -- it cannot evaluate chr(). A replacement it cannot reconstruct makes the whole splice an
+    -- unresolved execute, and the census fails closed (measured -- the first cut of this file did
+    -- exactly that and reddened do-action-floors.test.ts and three of its neighbours).
+    v_anchor := $p946a$  v_cited_id uuid; v_cited_locator jsonb; v_locator jsonb;$p946a$;
     v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
     if v_n <> 1 then
       raise exception '#946 §G splice (1): the declare anchor appears % time(s), expected 1', v_n
         using errcode = 'CLR10';
     end if;
-    v_repl := v_anchor || chr(10) || '  v_posting jsonb;   -- #946: what the post made of this read';
+    v_repl := $p946b$  v_cited_id uuid; v_cited_locator jsonb; v_locator jsonb;
+  v_posting jsonb;   -- #946: what the post made of this read$p946b$;
     v_next := replace(v_def, v_anchor, v_repl);
 
     -- SPLICE (2): the post, and the settle receipt that reports it.
-    v_anchor := '  return jsonb_build_object(''task_id'',p_task,''document_id'',t.document_id,'
-      || chr(10) || '    ''engine_id'',t.engine_id,''version_n'',t.version_n,'
-      || chr(10) || '    ''text_extraction_id'',v_text_id,''vision_extraction_id'',v_vision_id,'
-      || chr(10) || '    ''status'',''done'',''replayed'',false);';
+    v_anchor := $p946c$  return jsonb_build_object('task_id',p_task,'document_id',t.document_id,
+    'engine_id',t.engine_id,'version_n',t.version_n,
+    'text_extraction_id',v_text_id,'vision_extraction_id',v_vision_id,
+    'status','done','replayed',false);$p946c$;
     v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
     if v_n <> 1 then
       raise exception '#946 §G splice (2): the final-return anchor appears % time(s), expected 1', v_n
         using errcode = 'CLR10';
     end if;
-    v_repl :=
-      '  -- 12. #946 · THE POST. The facts are banked and the state is judged, so the run posts' || chr(10) ||
-      '  --     itself here -- inside this transaction, under its own gate, with no human and no' || chr(10) ||
-      '  --     model in the loop. A blocked run writes NOTHING and reports why; the derived' || chr(10) ||
-      '  --     Needs-you row (clara.list_review_queue, row_kind=payroll_posting_blocked) is what' || chr(10) ||
-      '  --     puts that reason in front of a person, and it clears itself when the block does.' || chr(10) ||
-      '  v_posting := clara._post_payroll_run(t.document_id);' || chr(10) || chr(10) ||
-      '  return jsonb_build_object(''task_id'',p_task,''document_id'',t.document_id,' || chr(10) ||
-      '    ''engine_id'',t.engine_id,''version_n'',t.version_n,' || chr(10) ||
-      '    ''text_extraction_id'',v_text_id,''vision_extraction_id'',v_vision_id,' || chr(10) ||
-      '    ''status'',''done'',''replayed'',false,''posting'',v_posting);';
+    v_repl := $p946d$  -- 12. #946 · THE POST. The facts are banked and the state is judged, so the run posts
+  --     itself here -- inside this transaction, under its own gate, with no human and no
+  --     model in the loop. A blocked run writes NOTHING and reports why; the derived
+  --     Needs-you row (clara.list_review_queue, row_kind=payroll_posting_blocked) is what
+  --     puts that reason in front of a person, and it clears itself when the block does.
+  v_posting := clara._post_payroll_run(t.document_id);
+
+  return jsonb_build_object('task_id',p_task,'document_id',t.document_id,
+    'engine_id',t.engine_id,'version_n',t.version_n,
+    'text_extraction_id',v_text_id,'vision_extraction_id',v_vision_id,
+    'status','done','replayed',false,'posting',v_posting);$p946d$;
     v_next := replace(v_next, v_anchor, v_repl);
 
     if v_next = v_def then
@@ -1404,7 +1412,11 @@ begin
        'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)'::regprocedure, 'EXECUTE') then
     raise exception '#946 tail: the recut persist door lost its clara_runtime grant' using errcode = 'CLR10';
   end if;
-  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+  -- `prosrc`, never the definition-wrapper read: this tail ASSERTS, it does not patch, and the
+  -- wiki dynamic-SQL lint classifies any block that reads a body through that wrapper AND
+  -- carries the word EXECUTE (here, the privilege name above) as a change-of-record patch. The
+  -- body text is what these assertions need, and prosrc is exactly that.
+  select p.prosrc into v_def from pg_proc p
    where p.oid = 'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)'::regprocedure;
   if position('clara._post_payroll_run(t.document_id)' in v_def) = 0 then
     raise exception '#946 tail: the persist door does not call the post' using errcode = 'CLR10';
@@ -1415,7 +1427,7 @@ begin
        'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure, 'EXECUTE') then
     raise exception '#946 tail: list_review_queue lost its clara_authenticated grant' using errcode = 'CLR10';
   end if;
-  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+  select p.prosrc into v_def from pg_proc p
    where p.oid = 'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure;
   v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
   v_n := (length(v_code) - length(replace(v_code, '''payroll_posting_blocked''::text row_kind', '')))

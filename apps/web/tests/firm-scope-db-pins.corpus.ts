@@ -307,4 +307,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "45235f2dab6652a3faa15abff761ea953993ecf4636fcbfcab8ad2a6637505b3",
     },
   ],
+  // #946 [0297] (riders wave 4, lane 01) — the payroll posting lane: the SAME
+  // 0146/0168/0180/0260/0288 splice family for the review queue, plus one recut of the payroll
+  // persist door. Appended at the sorted position.
+  [
+    "0297_payroll_summary_posting.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly TWO named FUNCTIONS, each read at its own literal regprocedure spelled in this file — clara.persist_payroll_facts(uuid,jsonb,jsonb,integer), which gains one declaration and one call to clara._post_payroll_run before its existing final return (two boundary-anchored substitutions, each asserted to occur EXACTLY once, each anchor and replacement a single dollar-quoted literal so the statement is reconstructible), and clara.list_review_queue(jsonb,jsonb,integer), which gains one payroll_rows CTE and one union arm in the 0146/0260 idiom. Both return jsonb, so neither can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Each splice detects its own marker in the INSTALLED body and no-ops on a redo, and both postchecks re-read the COMMITTED catalog in either branch: the persist recut for the three 0296 regions it must not have disturbed, the queue recut for every one of the eleven row-kind markers at its exact count. Every other object this migration creates is static DDL the lexer inspects directly — four `create or replace function` statements at literal signatures (the month parser, the drafting body, the posting gate and the poster) and one CHECK swap on clara.entry_post_receipts — and the file appends NO chart row at all, which its own prestate and tail both re-derive.",
+      sha256: "25ba80f517b201290fd0f3676bdffdc5c60a0def4a068511e9b2fc4f06bf28af",
+    },
+  ],
 ]);
