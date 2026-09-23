@@ -3084,3 +3084,73 @@ Frontier gate: `tests/fa-belt-birth-convention-preintegration-gate.mjs`, keyed o
 scratch, gated only by 0216/0041's own stems since the BEHAVIOUR predates 0278) and
 `p639.belt.convention_comment` (reads `pg_proc`/`obj_description` and pins the catalog text itself,
 gated on 0278's own stem) in `tests/fixed-asset-acquisition.test.mjs`.
+
+## 0279 — the closed-year arrears question (#975, riders wave 3 lane 04)
+
+`0279_fa_closed_year_arrears.sql` closes the half of the locked-period law that #651 (0227) left
+open. 0227 refuses a charge **dated** into a closing or closed fiscal year and teaches the due
+oracle to skip such a period. It says nothing about the months **inside** that year which the next
+OPEN period's charge folds forward — `clara._fa_asset_charges` charges every uncharged month up to
+the period end — so a closed year's depreciation rode into the next entry with nobody asked.
+
+**Owner ruling 2026-09-20, checked against IAS 8.** A MATERIAL prior-period error is restated in
+the year it belongs to; only an IMMATERIAL one is folded into the current period. Which of the two
+this is turns on materiality, a professional judgement Clara may not default. So the run states the
+amount and the year and asks for one of exactly two resolutions — `fold_current` or `reopen_prior`
+— and chooses neither. The ruling also records that 0227's own comment calling arrears "the
+ordinary accounting treatment" overstates the standard, and that the correction goes in
+`CONTEXT.md` ("Closed-year arrears resolution"), never into the applied migration file.
+
+**What it installs.**
+
+- `clara.fa_arrears_resolutions` — one live answer per `(client_id, fiscal_year_id)` by partial
+  unique index, append-only (a change of mind supersedes and mints a fresh row), carrying the
+  amount that was judged, the choice, the run's period, the author and the timestamp. RLS
+  enabled+forced; `clara_authenticated` holds SELECT and nothing else.
+- `clara._fa_closed_arrears(uuid,date)` — an UNGRANTED internal (no role holds EXECUTE; both doors
+  reach it from their own DEFINER bodies). It reads a closed year's share as a PREFIX DIFFERENCE
+  over the estate's own arithmetic: `charged(year end) − charged(the day before it opened)`, where
+  `charged(X)` is `clara._fa_compute_charges(client, X, X) ->> 'charged_cents'`. That is exact
+  because `_fa_compute_charges` passes only its period END to `_fa_asset_charges`, so `charged` is
+  a prefix sum over the same forward month walk the poster runs. Measured before the cut: a charge
+  BLOCK is closed at a fiscal-year boundary only on the reducing-balance arm, so a straight-line
+  block may straddle a year and the share can **not** be read off the blocks — the prefix
+  difference needs no apportionment at all. The year's END is measured first and a zero ends the
+  year there: `charged` is monotone and never negative, so the second computation would only
+  re-confirm it, and the steady state (closed years with nothing uncharged) costs one computation
+  per year inside the belt's own probe.
+- `clara.record_fa_arrears_resolution(...)` — bookkeeper+, the SAME floor `run_depreciation_manual`
+  takes. It RE-MEASURES the figure and refuses (`arrears_changed`) if it moved since the question
+  was asked: a materiality judgement is made about an amount, and filing it against a stale one
+  would put a ruling on the file that was never made. No machine role holds EXECUTE.
+
+**What it recuts, and nothing else.** `clara._fa_run_period_core` (the question, between 0227's
+locked-period wall and the first write); `clara._fa_oldest_unmet_period` and
+`clara.preview_depreciation_run` (one sibling key, `closed_arrears`, beside `skipped_closed` —
+whose own entries keep every key #651 gave them); `clara.run_depreciation_period_for` (one word in
+its loop exit: a parked period ends the chase as a noop does).
+`clara._agent_depreciation_catchup_core` has the same loop and is deliberately NOT recut: its wake
+source `close_prep` is registered-and-disabled, so no lane can drive it, and the tail pins its body
+unmoved. Its safety property holds regardless — it runs under the verb `run_depreciation_period`,
+so it parks and never posts.
+
+**Two renderings of one guard, discriminated by the verb.** `run_depreciation_manual` RAISES
+(`CLR38`, reason `arrears_resolution_required` or `arrears_awaiting_reopen`, axis
+`closed_year_arrears`); every other verb returns a receipted `parked` status with the same facts.
+Nothing is switched off: both doors stay callable, every branch stays testable, and
+`clara.reopen_fiscal_year` — the destination of the restatement choice — is untouched and pinned.
+
+**Redo-safe by construction**: `create table if not exists` with every constraint inside the
+statement, `create index if not exists`, `drop policy if exists` + `create policy`,
+`create or replace function`, `create or replace trigger`. The prestate reports FIRST or REDO and
+skips only the four RECUT pre-image pins on a redo; §T re-proves the whole post-state either way.
+This lane applied it FIRST (a genuine first apply, the prestate's first-apply branch exercised for
+real) and then re-applied it through the supported `CLARA_MIGRATION_REDO` path several times while
+the slices landed.
+
+Frontier gate: `tests/fa-arrears-resolution-preintegration-gate.mjs`, keyed on the stem
+`fa_closed_year_arrears$` (never the migration number). The battery is
+`tests/fa-arrears-resolution.test.mjs` (`p975.ask`, `p975.fold`, `p975.reopen`, `p975.parks`,
+`p975.probe`, `p975.no_closed`, `p975.work_lane`), and `p651.period.closed_belt_skips` in
+`tests/depreciation-history.test.mjs` is BIMODAL on this file's stem: once the fold is recorded,
+everything #651 measured is unchanged.

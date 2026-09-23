@@ -762,6 +762,27 @@ period earlier than the floor is charged only by an explicit catch-up a person p
 _Avoid_: Reading a signature as permission to charge every past period; a window a later edit can
 move; a floor derived from the machine's clock rather than the book's calendar.
 
+**Closed-year arrears resolution**:
+The accountant's recorded answer to one question: a depreciation run is about to charge months that
+belong to a fiscal year which is closing or closed, and somebody must say whether that omission is
+material. Under IAS 8 a material prior-period error is **restated in the year it belongs to**, and
+only an immaterial one is **folded into the current period**; which of the two this is turns on
+materiality, and materiality is a professional judgement. So Clara states the amount and the year,
+offers exactly those two resolutions, and chooses neither. The answer is recorded against the
+client, the fiscal year and the run that raised it, with the figure that was judged, who judged it
+and when, and a later run for the same client and year proceeds on that record instead of asking
+again. A change of mind supersedes the record rather than editing it, so both judgements keep their
+author and their timestamp. The human run door asks; the swept run parks with the reason stated and
+completes once an answer exists. Choosing restatement does not reopen anything by itself: the year
+is reopened through its own formal path, and only then is its period run in its own right.
+_Avoid_: Calling the fold "the ordinary accounting treatment" — the phrase migration 0227's comment
+uses, and an overstatement of the standard this entry corrects (an applied migration's bytes are
+immutable, so the correction lives here); a materiality threshold the product picks; folding as a
+silent default; a run that posts a prior year's charge into the current period without a recorded
+ruling; treating the locked-period refusal (a charge DATED into a closed year, refused outright) as
+the same thing as this question (months INSIDE a closed year that a later, lawful period's charge
+would carry).
+
 **Depreciation run preview**:
 What the NEXT depreciation run would do, read before anything is written: the exact period the
 register chose (never one a caller named), the per-asset amounts, the two general-ledger legs, every
