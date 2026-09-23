@@ -4743,7 +4743,7 @@
       "reasonLabel": "Reason"
     },
     "runDue": {
-      "due": "An adjustment run is due for {start} – {end}.",
+      "dueRetired": "A pre-retirement template still has an unposted period ({start} – {end}), and nothing will post it — the recurring-adjustment lane is retired. Retire the template and set up an accounting plan instead (Client → Plans).",
       "nothingDue": "No adjustment run is due right now.",
       "allBlocked": "Every live template's next period is blocked — see the run history below.",
       "clientNotFound": "Client not found.",

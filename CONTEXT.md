@@ -95,9 +95,10 @@ which prepayment, under WHOSE INSTRUCTION, which expense account, why, and what 
 for. It configures an Accounting plan of kind `amortisation_schedule`; the belt
 admits each period.
 _Avoid_: A recurring adjustment template — the 0045 template lane was retired 2026-09-18 (#788,
-delivered by #927–#929); an editable table of period amounts; a schedule that pays anything — the
-money left the bank before the schedule existed; "configured" as a synonym for "posted", which is
-a different fact and a different count.
+delivered by #927–#929), except for one PARKED agent entrance that still mints one and must be
+retired or rerouted before it is ever unparked; an editable table of period amounts; a schedule
+that pays anything — the money left the bank before the schedule existed; "configured" as a
+synonym for "posted", which is a different fact and a different count.
 
 **Service period**:
 The span of time an accrued or prepaid cost belongs to, stated by an identified person — for a

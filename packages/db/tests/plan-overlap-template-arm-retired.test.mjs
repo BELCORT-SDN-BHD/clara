@@ -28,6 +28,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { withTxn } from "./rig-txn.mjs";
 import {
   rootQuery, endPool, printLaneNotes, printSkipCount, buildWorkWorld, freshWorkClient, opk, basis,
   instructionRef, createAccountingPlan,
@@ -185,4 +186,86 @@ test("p929.tail -- outside-in re-proof of 0283's own tail: the template arm is g
          from pg_proc p where p.oid = to_regprocedure($1)`, [sig.fn]);
     assert.equal(c.rows[0].sha, sig.sha, `${sig.fn} moved -- 0283 asserts it is untouched`);
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// p929.containment -- THE ONE MINTING PATH THE THREE-TICKET RETIREMENT LEAVES STANDING, AND THE
+// FLAG THAT HOLDS IT SHUT.
+//
+// #927 closed `propose_adjustment_template` and `sign_adjustment_template`, #928 deleted the daily
+// sweep, #929 (this migration) took the advisory's template arm. None of the three touches
+// `clara._propose_adjustment_template_core`, and it is still reachable -- ONE path, through the
+// agent lane: `clara.wake_establish_prepayment_schedule` (0140's prepayment limb, granted to
+// clara_wake_interactive and carried in `clara.wake_fn_allowlist`) calls
+// `clara._agent_prepayment_schedule_core`, which calls that core, which INSERTS a `proposed`
+// template row. After #927 such a row could never be signed, never be run, never be swept and is
+// never named by the plan advisory -- exactly the orphan 0282's own live-template guard exists to
+// prevent. Retiring or rerouting that limb is a product act the #788 split did not publish
+// (it would retire the agent-lane prepayment feature, whose successor door
+// `clara.create_prepayment_schedule` arrived at 0223), so it is NOT done here.
+//
+// What holds the path shut today is `clara.wake_engine_sources.close_prep.enabled = false`: no
+// close_prep wake task is minted, so no caller can ever reach the wrapper. That is a parked
+// feature flag, not a closed door -- which is precisely why this cell exists. It goes RED the day
+// someone unparks close_prep, and names what must happen first. Measured, not argued: the mutant
+// below flips the flag inside a rolled-back transaction and shows the same predicate firing.
+// ---------------------------------------------------------------------------------------------
+test("p929.containment -- the agent prepayment limb is the ONE path left into clara.adjustment_templates, and it is held shut by close_prep being parked; unparking it re-opens a lane #927 retired", async (t) => {
+  if (unready(t)) return;
+
+  // (1) The core the human doors used to share is still there, and is UNGRANTED: no application
+  //     role can call it directly, so the wrapper below is the only way in.
+  const core = await rootQuery(
+    `select p.oid::regprocedure::text as sig,
+            coalesce(array_to_string(p.proacl::text[], '|'), '(default)') as acl
+       from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = '_propose_adjustment_template_core'`);
+  assert.equal(core.rowCount, 1, "the agent-lane propose core resolves at exactly one signature");
+  assert.equal(core.rows[0].acl, "clara_fn_owner=X/clara_fn_owner",
+    "the propose core gained a grant -- it is reachable from an application role, not only through the wrapper");
+
+  // (2) The wrapper IS still wired: granted to clara_wake_interactive and on the allowlist. This
+  //     is asserted POSITIVELY, so the cell cannot pass by the limb having quietly disappeared --
+  //     if it is ever retired, this assertion is where that is recorded.
+  const wrapper = await rootQuery(
+    `select coalesce(array_to_string(p.proacl::text[], '|'), '(default)') as acl
+       from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = 'wake_establish_prepayment_schedule'`);
+  assert.equal(wrapper.rowCount, 1, "0140's prepayment wrapper resolves at exactly one signature");
+  assert.match(wrapper.rows[0].acl, /clara_wake_interactive=X\/clara_fn_owner/,
+    "the prepayment wrapper lost its clara_wake_interactive grant -- if the limb was retired, retire this cell with it");
+  const allow = await rootQuery(
+    `select count(*)::int as n from clara.wake_fn_allowlist
+      where wake_kind = 'close_prep' and function_name = 'wake_establish_prepayment_schedule'`);
+  assert.equal(allow.rows[0].n, 1, "the prepayment wrapper left clara.wake_fn_allowlist");
+
+  // (3) THE TRIPWIRE. The flag that keeps the path unreachable.
+  const src = await rootQuery(
+    "select enabled from clara.wake_engine_sources where source_key = 'close_prep'");
+  assert.equal(src.rowCount, 1, "the close_prep wake source is absent -- 0133's two-row world moved");
+  assert.equal(src.rows[0].enabled, false,
+    "clara.wake_engine_sources.close_prep is ENABLED. The agent prepayment limb "
+    + "(wake_establish_prepayment_schedule -> _agent_prepayment_schedule_core -> "
+    + "_propose_adjustment_template_core) can now mint a 'proposed' clara.adjustment_templates row "
+    + "that #927 left no door to sign, no belt to run and no advisory to name. Retire or reroute "
+    + "that limb at clara.create_prepayment_schedule (0223) BEFORE unparking close_prep.");
+
+  // (4) THE MUTANT, in a transaction that is rolled back: the assertion above is live, not a
+  //     sentence about a value nobody ever changes.
+  await withTxn(async (c) => {
+    // `ck_wes_enabled_audit` requires the two audit stamps alongside the flag, so the mutant
+    // flips the row the way a real unparking act would -- which is the shape the assertion above
+    // has to be able to see.
+    await c.query(
+      `update clara.wake_engine_sources
+          set enabled = true, enabled_by = $1::uuid, enabled_at = now()
+        where source_key = 'close_prep'`, [ALICE()]);
+    const flipped = await c.query(
+      "select enabled from clara.wake_engine_sources where source_key = 'close_prep'");
+    assert.equal(flipped.rows[0].enabled, true,
+      "the mutant could not flip the flag, so (3) is not proven to be watching anything");
+  }, { commit: false });
+  const after = await rootQuery(
+    "select enabled from clara.wake_engine_sources where source_key = 'close_prep'");
+  assert.equal(after.rows[0].enabled, false, "the mutant leaked -- close_prep is left enabled");
 });

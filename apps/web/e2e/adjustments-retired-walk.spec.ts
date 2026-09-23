@@ -21,8 +21,13 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("#927: the retired tab renders the notice and its history, and offers only Retire — Propose/Sign/Run now are gone from the DOM", async ({ page }) => {
-  await expect(page.getByText(/This lane is retired/)).toBeVisible();
-  await expect(page.getByText(/Client → Plans/)).toBeVisible();
+  await expect(page.getByText(/This lane is retired\./)).toBeVisible();
+  await expect(page.getByText(/Client → Plans/).first()).toBeVisible();
+
+  // [#927/#928 fix round] THE DUE ORACLE'S OWN BANNER, on a client that really does carry an
+  // unposted period: it may report the fact, and it may NOT invite an act no mechanism can take.
+  await expect(page.getByText(/An adjustment run is due/)).toHaveCount(0);
+  await expect(page.getByText(/nothing will post it/)).toBeVisible();
 
   // Both historical rows still render — D6: the history stays readable.
   const liveRow = page.locator("li").filter({ hasText: AR.liveTemplateName });

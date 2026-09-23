@@ -621,10 +621,12 @@ export { reconcileFaRuns };
 // due-probe/run chase. #927 closed the human-facing write doors first (propose/sign/
 // run_adjustment_manual), so nothing new could ever fall due; this ticket retires the belt
 // and its caller (leader.mjs's own adjustmentRunDue/lastAdjRun/adjRuns wiring, gone with it);
-// #929 removes the DB surface (clara.adjustment_run_due / clara.run_adjustment_occurrence)
-// itself. Unlike the autopost retirement above, this caller retires AHEAD of its callee: the
-// DB functions may still exist on a frontier ahead of #929, but nothing schedules a call into
-// them any more, on any frontier — reconciler-adjustments.mjs is deleted whole (the
+// NO ticket of that ruling removes the DB surface (clara.adjustment_run_due /
+// clara.run_adjustment_occurrence) itself: 0282 pins both bodies byte-unchanged in its prestate
+// AND its tail, and both keep their clara_runtime EXECUTE grant with no caller left in the
+// image. Unlike the autopost retirement above, this caller therefore retires AHEAD of a callee
+// that SURVIVES it: the two functions still stand, but nothing schedules a call into them any
+// more, on any frontier — reconciler-adjustments.mjs is deleted whole (the
 // rule-post.mjs / autopost precedent: nothing frozen ever imported it, so no successor stub
 // is owed). Accounting plans' own occurrence scan (migration 0193, reconcilePlanOccurrences
 // below) is untouched — it is a separate, newer system.

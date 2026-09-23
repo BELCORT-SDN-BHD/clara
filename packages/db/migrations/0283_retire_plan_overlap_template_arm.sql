@@ -59,6 +59,75 @@
 -- because of a sibling plan; only the RETIRED lane's own contribution to the warning disappears,
 -- which is this whole ticket's point.
 --
+-- =====================================================================================
+-- WHAT THE THREE-STEP RETIREMENT DOES NOT CLOSE, MEASURED (fix round, 2026-09-23, clara_l05 at
+-- 0283). #927 closed the three human write doors, #928 deleted the daily sweep, this file takes
+-- the advisory's template arm. NONE of the three touches `clara._propose_adjustment_template_
+-- core`, and one path still reaches it: `clara.wake_establish_prepayment_schedule` (0140's agent
+-- prepayment limb, granted to clara_wake_interactive and carried in `clara.wake_fn_allowlist` as
+-- (close_prep, wake_establish_prepayment_schedule)) -> `clara._agent_prepayment_schedule_core` ->
+-- that core. DRIVEN, not read off the source: calling the core inside a transaction that was
+-- rolled back answered {"status":"proposed","template_id":...} and left one row at status
+-- 'proposed' before the rollback. Such a row can never be signed (#927), never be run by hand
+-- (#927), never be swept (#928) and is never named by this advisory (this file) -- the orphan
+-- 0282's own live-template guard exists to prevent.
+--
+-- WHAT HOLDS IT SHUT, AND WHAT DOES NOT. `clara.wake_engine_sources.close_prep.enabled` is FALSE
+-- (measured; it has been since 0133, and 0138/0140/0159/0223 each pin it as a prestate or tail
+-- tripwire), so no close_prep wake task is minted and no caller can reach the wrapper. That is a
+-- parked feature flag, not a closed door. Retiring or rerouting the limb -- at
+-- `clara.create_prepayment_schedule`, 0223's plan-lane successor -- would retire an agent-lane
+-- PRODUCT capability, which the #788 split did not publish and no ticket of this lane owns, so it
+-- is deliberately NOT done here. What IS done: the containment is now a live cell rather than a
+-- sentence -- `tests/plan-overlap-template-arm-retired.test.mjs`'s `p929.containment` asserts the
+-- core is ungranted, the wrapper is still wired, and the source is parked, and goes RED with the
+-- remedy in its own message the day anyone unparks close_prep.
+--
+-- =====================================================================================
+-- 0281's SELF-EXCLUSION ARGUMENT, RE-MEASURED AND CORRECTED (fix round, 2026-09-23). ARM 2 below
+-- excludes the caller's own plan BY BASIS VALUE (`r.basis is distinct from p_basis`) because the
+-- function takes no plan id and #909's brief forbade widening the three doors. 0281's header
+-- justified the resulting blind spot by calling two live plans with byte-identical bases "a
+-- coincidence this estate has never produced in practice". THAT SENTENCE IS FALSE on the rig this
+-- lane is built on, and this file's own copy of it is withdrawn: measured on clara_l05, 7
+-- (client, basis_digest) groups hold 28 live plans with byte-identical bases -- four at a time,
+-- minted 4ms apart by the rig's own seed ("Monthly office rent accrual") -- and
+-- `clara._plan_overlap_warning(<one of those clients>, <one of their own bases>)` answers NULL.
+-- The TOTAL-overlap case, which is the one a human most needs told, is exactly the case the
+-- self-exclusion swallows.
+--
+-- THE LIMITATION IS STILL ACCEPTED, on its OTHER argument, which holds: this is an advisory, so a
+-- false negative costs a missed warning and never a wrong refusal -- and no by-value heuristic
+-- fixes it safely. Excluding "the most recently written identical-basis plan" instead would make
+-- `revise_accounting_plan` warn a firm about the very plan it is revising, and a warning that
+-- names your own row is worse than a missing one: it teaches the reader to skip the key. The
+-- honest fix passes the plan id the three doors already hold, which recuts three bodies that
+-- 0280/0281/0282/0283 all pin byte-unchanged -- a ticket of its own, not a fix round's edit.
+--
+-- THE CONCURRENCY WINDOW, stated because the report that follows must not claim more than the
+-- code does. The advisory is computed INSIDE the creating transaction, so two sessions creating
+-- overlapping plans at the same time each see the other's row as uncommitted and BOTH answer
+-- null; the second sees the first only after it commits, by which time its own receipt has been
+-- returned. #909 was filed over a warning that "may not fire depending on creation order"; the
+-- sibling arm fixes the sequential case and leaves the concurrent one. Closing it means taking
+-- the client-level advisory lock this estate already uses for this class of question
+-- (`clara.retire_adjustment_template`'s pg_advisory_xact_lock(203005004, hashtext(p_client))) in
+-- the three plan-creating doors -- the same three bodies the paragraph above must not recut.
+--
+-- =====================================================================================
+-- A CITATION 0280 CARRIES THAT RESOLVES TO NOTHING (fix round, 2026-09-23; AGENTS.md rule 6).
+-- 0280_plan_schedule_yield_wall.sql names `clara.revise_accrual_adjustment` three times -- its
+-- header twice and, at :265, inside the `clara._assert_plan_schedule` body it ships, so the string
+-- is now permanent prosrc. No such function exists: the catalog's `clara` functions matching
+-- '%accrual%' are create_accrual_adjustment, create_accrual_adjustment_for, get_accrual_adjustment
+-- and list_accrual_adjustments plus the private helpers. The two REAL callers of
+-- `clara._assert_accrual_schedule_yields` are `clara.create_accrual_adjustment` (granted
+-- clara_authenticated) and `clara.create_accrual_adjustment_for` (granted clara_runtime, the
+-- on-behalf-of door) -- so the accrual entrance's yield wall guards the runtime door too, which
+-- 0280's header does not say. 0280 is applied and immutable (and is not the highest applied
+-- version, so #957's redo cannot reach it); the correction is recorded here, in packages/db's
+-- README and in the lane's fix report rather than left as an anchor a later reader will chase.
+--
 -- WRITTEN SO A REDO (#957) OVER ITS OWN OLD EFFECTS IS SAFE. `create or replace function` on the
 -- SAME signature is naturally idempotent DDL -- SS A below is unconditional either way. SS0's
 -- prestate recognises BOTH starting shapes (see its own comment): the measured pre-0283 pre-image
@@ -146,7 +215,9 @@ create or replace function clara._plan_overlap_warning(p_client uuid, p_basis js
   from (
     -- 0281's ARM 2, unmoved: every OTHER live (active or paused) accounting plan of this client
     -- whose CURRENT (unsuperseded) revision's basis lines intersect this basis's. Self-exclusion
-    -- by basis identity -- 0281's own header explains why in full, unchanged by this file.
+    -- by basis identity -- 0281's own header explains the mechanism; its EMPIRICAL justification
+    -- is withdrawn and replaced by a measured one in this file's header ("0281's SELF-EXCLUSION
+    -- ARGUMENT, RE-MEASURED AND CORRECTED"), which also states what a safe fix would cost.
     select jsonb_build_object('plan_id', p.id, 'name', p.purpose, 'cadence', r.frequency,
              'accounts', (select jsonb_agg(distinct c) from unnest(y.codes) c)) as w
       from clara.accounting_plans p

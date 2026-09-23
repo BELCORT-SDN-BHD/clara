@@ -88,7 +88,18 @@ export async function handleAdjustmentsRetiredSupabase(request, response, path, 
   if (verb === "adjustment_run_due") {
     const body = await readCachedJson(request);
     if (body?.p_client !== AR.clientId) return false;
-    sendJson(response, 200, { due: false, reason: "nothing_due", blocked: [] }, cors);
+    // [#927/#928 fix round] THE SHAPE D6 EXISTS FOR: a firm that ran this lane before the
+    // retirement still carries a LIVE template, and clara.adjustment_run_due still answers
+    // `due: true` for its unposted period -- truthfully, because the period really is unposted.
+    // #927 closed the manual run and #928 deleted the daily sweep, so nothing can post it any
+    // more, and the walk asserts the tab says THAT rather than inviting the act.
+    sendJson(response, 200, {
+      due: true,
+      template_id: AR.liveTemplateId,
+      period_start: "2026-06-01",
+      period_end: "2026-06-30",
+      blocked: [],
+    }, cors);
     return true;
   }
 

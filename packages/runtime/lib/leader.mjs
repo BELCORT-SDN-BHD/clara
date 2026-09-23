@@ -6,8 +6,9 @@
 //   3. reconcile — converge task rows with engine truth + expiry + prune + the
 //      SST/lint/FA daily repair belts (reconciler; Wave A2.1 §7's own autopost-rule
 //      expiry sweep retired with its DB function at `0118`, F-A2 PR-3; the Wave D-b
-//      adjustment-occurrence sweep's own daily trigger retired here the same way at
-//      #928, owner ruling #788 — the DB surface it called follows at #929)
+//      adjustment-occurrence sweep's own daily trigger retired at #928, owner ruling
+//      #788 — UNLIKE the autopost case, the DB surface it called is NOT dropped by
+//      any ticket of that ruling and still stands, ungranted of any caller)
 // plus a 'world' heartbeat (process-liveness proxy for /ready). A missing/empty
 // active taxonomy HALTs the loop and EXITS the process non-zero (crash-only; the
 // supervisor / Fly restarts) — an un-routable state is never silently swallowed.
@@ -94,10 +95,14 @@ const FA_RECONCILE_MS = Number.isFinite(FA_RECONCILE_MS_ENV) && FA_RECONCILE_MS_
 // ADJ_RECONCILE_MS, adjustmentRunDue) retired here WITH the belt it gated (#928, owner
 // ruling #788: retire the 0045 recurring-adjustment template lane fully). Unlike the
 // autopost retirement above, the DB surface (clara.adjustment_run_due /
-// clara.run_adjustment_occurrence, migration 0045) is NOT dropped by this ticket — #927
-// already closed the human-facing write doors first, and #929 removes the DB surface
-// itself — so this caller retires AHEAD of its callee, on purpose: nothing schedules a
-// call into it any more, on any frontier, whether or not 0045's functions still exist.
+// clara.run_adjustment_occurrence, migration 0045) is NOT dropped — #927 closed the
+// human-facing write doors, #928 retires this belt and #929 takes the plan advisory's
+// template arm and the vocabulary, and NONE of the three touches those two functions:
+// 0282 pins both bodies byte-unchanged in its prestate and re-reads them in its tail,
+// and both keep their clara_runtime EXECUTE grant with no caller left in the image.
+// So this caller retires AHEAD of a callee that survives it, on purpose: nothing
+// schedules a call into it any more, on any frontier. Dropping the two functions is a
+// residual this lane does not own (see the #927/#928/#929 reports).
 // Finite-guarded like every cadence above — a NaN here would make the due-check permanently false
 // and silently DISABLE the Wave E lane-ζ render-enqueue fallback, which is the belt that keeps a
 // sealed run from sitting without a render job if lane ε's seal has not yet been repointed to

@@ -11,11 +11,12 @@ import { periodicAdjustmentHref } from "@/lib/navigation/tree";
  * adjustment and supplied payroll obligation this client has recorded, with its exact particulars,
  * its posted entry, its operation receipt and its correction chain.
  *
- * IT IS ITS OWN DESTINATION, NOT `registers?tab=adjustments`. That tab is the 0045 PLAN lane —
- * templates, schedules, occurrences — and a periodic count has no schedule and no template. One
- * address for two unrelated lanes would make every later reader guess which one a row belongs to,
- * the same reason the table behind this page is `clara.periodic_adjustments` rather than
- * `clara.adjustment_*`.
+ * IT IS ITS OWN DESTINATION, NOT `registers?tab=adjustments`. That tab is the 0045 template lane
+ * — templates, schedules, occurrences — RETIRED as of #927 (owner ruling #788, migration 0282)
+ * and now read-only history; a periodic count has no schedule and no template, and never
+ * belonged there. One address for two unrelated lanes would make every later reader guess which
+ * one a row belongs to, the same reason the table behind this page is
+ * `clara.periodic_adjustments` rather than `clara.adjustment_*`.
  *
  * THE PRIMARY ACT IS A VISIBLE BUTTON, and it is offered to everyone who can see this page — the
  * form's own denied state is where a viewer meets the floor, so hiding the control here would be a
