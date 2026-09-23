@@ -84,7 +84,7 @@
  * refusal vocabulary being invented for this one name.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -301,6 +301,56 @@ function defaultStripLocalDependencies(names) {
   return result.status ?? 1;
 }
 
+/** #989 — a protected file's pre-install snapshot: its exact bytes if it already exists, or the
+ *  fact that it did NOT, so `restoreFileSnapshot` can put it back into EXACTLY the state it was
+ *  in before, whichever that was. A pure-ish, single-file primitive (real fs reads, an arbitrary
+ *  absolute path — never assumes `WEB_ROOT`) so it can be proven against a throwaway temp file,
+ *  never a real repo file, in `check-ui-add-guard.selftest.mjs`.
+ * @param {string} absPath
+ * @returns {{existed: boolean, content: Buffer|null}}
+ */
+export function snapshotFile(absPath) {
+  return existsSync(absPath) ? { existed: true, content: readFileSync(absPath) } : { existed: false, content: null };
+}
+
+/** The other half of `snapshotFile` — writes its exact bytes back if it existed, or removes
+ *  whatever the CLI's forced `--overwrite` just created if it did not. Never a partial write: the
+ *  CLI's own write already replaced the file wholesale, so this replaces it wholesale again.
+ * @param {string} absPath
+ * @param {{existed: boolean, content: Buffer|null}} snapshot
+ */
+export function restoreFileSnapshot(absPath, snapshot) {
+  if (snapshot.existed) {
+    writeFileSync(absPath, snapshot.content);
+  } else if (existsSync(absPath)) {
+    rmSync(absPath);
+  }
+}
+
+/** The default, REAL-FS backup step for a #989 partial install — one `snapshotFile` per blocked,
+ *  project-relative path, keyed by that path so `defaultRestoreProtectedFiles` can put each one
+ *  back at the same place. Never called by the selftest (same house rule as `defaultSpawnAdd`),
+ *  which injects a fixture instead. */
+function defaultBackupProtectedFiles(paths) {
+  const backups = new Map();
+  for (const p of paths) backups.set(p, snapshotFile(join(WEB_ROOT, p)));
+  return backups;
+}
+
+/** The default, REAL-FS restore step — the other half of `defaultBackupProtectedFiles`. Runs
+ *  UNCONDITIONALLY after `spawnAdd`, regardless of its exit code, for the same reason
+ *  `stripLocalDependencies` does below: the pinned CLI's own file-write step may have already
+ *  written the protected file before a later part of the same run failed. Never called by the
+ *  selftest. */
+function defaultRestoreProtectedFiles(backups) {
+  let restored = 0;
+  for (const [p, snapshot] of backups) {
+    restoreFileSnapshot(join(WEB_ROOT, p), snapshot);
+    restored++;
+  }
+  return restored;
+}
+
 /** The default, REAL-CLI-INVOKING installer — spawns the pinned local binary
  *  (never a floating `npx`-resolved one) with `add` plus every argument this
  *  script did not itself consume, inheriting stdio so the CLI's own prompts
@@ -329,6 +379,8 @@ function defaultSpawnAdd(args) {
  *   resolveDependencies?: (names: string[], config: unknown) => Promise<{dependencies?: string[], devDependencies?: string[]}>,
  *   spawnAdd?: (args: string[]) => number,
  *   stripLocalDependencies?: (names: string[]) => number,
+ *   backupProtectedFiles?: (paths: string[]) => Map<string, {existed: boolean, content: Buffer|null}>,
+ *   restoreProtectedFiles?: (backups: Map<string, {existed: boolean, content: Buffer|null}>) => number,
  *   log?: (line: string) => void,
  * }} deps
  * @returns {Promise<number>} the process exit code
@@ -338,6 +390,8 @@ export async function main(argv, env, deps = {}) {
   const resolveDependencies = deps.resolveDependencies ?? defaultResolveDependencies;
   const spawnAdd = deps.spawnAdd ?? defaultSpawnAdd;
   const stripLocalDependencies = deps.stripLocalDependencies ?? defaultStripLocalDependencies;
+  const backupProtectedFiles = deps.backupProtectedFiles ?? defaultBackupProtectedFiles;
+  const restoreProtectedFiles = deps.restoreProtectedFiles ?? defaultRestoreProtectedFiles;
   const log = deps.log ?? ((line) => console.log(line));
 
   // EVERY ARGUMENT THIS SCRIPT DOES NOT ITSELF CONSUME IS FORWARDED VERBATIM
@@ -362,7 +416,7 @@ export async function main(argv, env, deps = {}) {
   const targetPaths = resolveTargetPaths(files, componentsConfig.aliases ?? {});
 
   const override = env[OVERRIDE_ENV_VAR] === "1";
-  const { blocked, allowed, overrideUsed } = checkGuard({ targetPaths, allowlist, override });
+  const { blocked, installable, allowed, overrideUsed } = checkGuard({ targetPaths, allowlist, override });
 
   if (!allowed) {
     log(`[ui-add] REFUSING: installing ${componentNames.join(", ")} would overwrite ${blocked.length} protected file(s), owner-ruled fixes recorded in-file:`);
@@ -374,6 +428,20 @@ export async function main(argv, env, deps = {}) {
 
   if (overrideUsed) {
     log(`[ui-add] OVERRIDE USED (${OVERRIDE_ENV_VAR}=1): proceeding despite ${blocked.length} protected file(s) in the payload: ${blocked.join(", ")}.`);
+  }
+
+  const isDryRun = argv.includes("--dry-run");
+
+  // #989 — PARTIAL INSTALL: some file(s) in the closure are protected, override was NOT given,
+  // and `allowed` is still true (checkGuard above) because at least one OTHER file in the same
+  // closure is not — install everything installable, skip only the protected file(s), never the
+  // whole-payload abort `!allowed` handles above. A `--dry-run` writes nothing at all, so there is
+  // nothing to skip yet — only to NAME, the same "report every run, dry or real" posture as the
+  // `cn` dependency report below.
+  const partialSkip = blocked.length > 0 && !override;
+  if (partialSkip && isDryRun) {
+    const which = blocked.length === 1 ? "file" : "files";
+    log(`[ui-add] a REAL run would install ${installable.length} file(s) and SKIP ${blocked.length} protected ${which} (owner-ruled fixes recorded in-file, left byte-identical): ${blocked.join(", ")}. Set ${OVERRIDE_ENV_VAR}=1 to overwrite ${blocked.length === 1 ? "it" : "them"} instead.`);
   }
 
   // #969 — resolved and reported EVERY run (dry or real): a caller must never be silently
@@ -394,8 +462,35 @@ export async function main(argv, env, deps = {}) {
     log(`[ui-add] OVERRIDE USED (${OVERRIDE_ENV_VAR}=1): keeping ${local.join(", ")} as a REAL npm dependency this run, instead of the usual local stand-in.`);
   }
 
-  const isDryRun = argv.includes("--dry-run");
-  const code = spawnAdd(argv);
+  // #989 — a partial install must never hang a non-interactive run on the pinned CLI's own
+  // per-file "already exists, overwrite?" prompt for the OTHER, non-protected already-vendored
+  // files in the same closure (input.tsx etc. in the Combobox closure) — MEASURED (2026-09-23):
+  // with stdin closed, the pinned CLI's prompt reads EOF and defaults to "N" (skip), which would
+  // silently skip EVERY already-existing file, protected or not, defeating "installs every other
+  // file". `-o/--overwrite` (MEASURED to suppress that prompt entirely, non-interactively, for
+  // ANY already-existing file, protected included) is forced here ONLY for this partial-install
+  // case, and never duplicated if the caller already passed it — the protected file(s) it would
+  // also overwrite are backed up first and restored after, below, which is what makes forcing it
+  // safe. The override path (`partialSkip` false when `override` is true) is UNCHANGED: it still
+  // forwards the caller's own args verbatim, exactly as before #989 — a caller using the override
+  // is trusted to pass `--overwrite`/`--yes` themselves if their run is non-interactive.
+  const forcedArgv = partialSkip && !isDryRun && !argv.includes("--overwrite") && !argv.includes("-o")
+    ? [...argv, "--overwrite"]
+    : argv;
+
+  // Snapshotted BEFORE the CLI runs, so the guard's own restore — never the CLI's behaviour — is
+  // what proves the protected file(s) end up byte-identical (AC2). `null` (not an empty Map) when
+  // there is nothing to protect this run, so the restore step below is skipped outright rather
+  // than doing a zero-length no-op.
+  const backups = partialSkip && !isDryRun ? backupProtectedFiles(blocked) : null;
+
+  const code = spawnAdd(forcedArgv);
+
+  if (backups) {
+    restoreProtectedFiles(backups);
+    const which = blocked.length === 1 ? "file" : "files";
+    log(`[ui-add] SKIPPED ${blocked.length} protected ${which} — restored to its pre-install content, never silently overwritten: ${blocked.join(", ")}. Everything else in the payload installs normally. Set ${OVERRIDE_ENV_VAR}=1 to overwrite ${blocked.length === 1 ? "it" : "them"} instead.`);
+  }
 
   // #969 fix round (L05B-S03) — a non-zero exit here is NOT "nothing was written". MEASURED
   // against the pinned shadcn 4.19.0 bundle (apps/web/node_modules/shadcn/dist/chunk-CDOZT3OO.js):

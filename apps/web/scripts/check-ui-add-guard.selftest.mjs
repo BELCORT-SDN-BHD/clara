@@ -29,6 +29,8 @@ import {
   main,
   resolveTargetPaths,
   resolveTargetPathsFromDryRun,
+  restoreFileSnapshot,
+  snapshotFile,
   LOCAL_DEPENDENCY_NAMES,
   OVERRIDE_ENV_VAR,
 } from "./ui-add.mjs";
@@ -176,7 +178,11 @@ console.log("main():");
 /** #969 — `resolveDependencies`/`stripLocalDependencies` default to no-ops here (no
  *  dependency, nothing ever to strip) so every EXISTING `fakeDeps` call site — none of which
  *  concern themselves with dependencies — keeps working unchanged and network-free; a case
- *  that DOES care overrides them via `extra`. */
+ *  that DOES care overrides them via `extra`.
+ *  #989 — `backupProtectedFiles`/`restoreProtectedFiles`/`rewriteLocalImports` default to
+ *  no-ops FOR THE SAME REASON: no EXISTING call site's payload is ever partial (every fixture
+ *  above is either fully blocked or fully clean), so these three are never reached by them —
+ *  only the NEW partial-install cases below override them, and never touch a real file. */
 function fakeDeps(payload, spawnCalls, extra = {}) {
   return {
     resolveFiles: async () => payload,
@@ -186,6 +192,9 @@ function fakeDeps(payload, spawnCalls, extra = {}) {
       return 0;
     },
     stripLocalDependencies: () => 0,
+    backupProtectedFiles: () => new Map(),
+    restoreProtectedFiles: () => 0,
+    rewriteLocalImports: () => [],
     log: () => {},
     ...extra,
   };
@@ -270,6 +279,143 @@ await testCase("`button.tsx` is byte-identical ACROSS a refused run whose writer
   assert(/REFUSING/.test(said), `the refusal must say so in as many words; it said:\n${said}`);
   assert(new RegExp(OVERRIDE_ENV_VAR).test(said),
     "…and must name the override, or a blocked human has no lawful way forward");
+});
+
+// ---------------------------------------------------------------------------
+// (4a1) #989 — snapshotFile/restoreFileSnapshot: the primitive AC2's byte-
+//        identity guarantee is actually built on. Driven against a throwaway
+//        temp file, never a real repo file, so this proves the REAL fs
+//        read/write logic (not an injected fake) without ever risking
+//        button.tsx itself.
+// ---------------------------------------------------------------------------
+console.log("snapshotFile / restoreFileSnapshot (#989):");
+
+const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
+
+await testCase("round-trips an EXISTING file's bytes exactly, even after it is overwritten in between — the shape a forced --overwrite produces", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ui-add-guard-snapshot-"));
+  const target = join(dir, "protected.tsx");
+  writeFileSync(target, "export const ORIGINAL = true;\n", "utf8");
+  const before = sha256(readFileSync(target));
+
+  const snapshot = snapshotFile(target);
+  assert(snapshot.existed === true, "the file exists — the snapshot must say so");
+
+  writeFileSync(target, "export const OVERWRITTEN = true;\n", "utf8"); // simulates the CLI's forced --overwrite
+  assert(sha256(readFileSync(target)) !== before, "the simulated overwrite must actually change the file, or this proves nothing");
+
+  restoreFileSnapshot(target, snapshot);
+  assert(sha256(readFileSync(target)) === before, "restoreFileSnapshot must put the ORIGINAL bytes back exactly");
+});
+
+await testCase("removes a file that did not exist before, if the CLI created one where the snapshot found none", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ui-add-guard-snapshot-"));
+  const target = join(dir, "new-protected.tsx");
+
+  const snapshot = snapshotFile(target);
+  assert(snapshot.existed === false && snapshot.content === null, "a file that does not exist must snapshot as such");
+
+  writeFileSync(target, "export const CREATED = true;\n", "utf8"); // simulates the CLI creating it
+  assert(existsSync(target));
+
+  restoreFileSnapshot(target, snapshot);
+  assert(!existsSync(target), "a protected file that did not exist before must not exist after restore");
+});
+
+// ---------------------------------------------------------------------------
+// (4a2) #989 — partial install: SOME files in the closure are protected,
+//        others are not. The CLI is invoked (never the whole-payload abort
+//        above), forced to `--overwrite` so a non-interactive run never hangs
+//        on a per-file prompt for the OTHER, non-protected already-vendored
+//        files in the same closure (input.tsx etc.), and the protected
+//        file(s) are backed up before that call and restored after — so the
+//        guard's OWN restore is what proves byte-identity, never the CLI's
+//        behaviour (the CLI is never trusted to leave it alone once
+//        `--overwrite` is forced).
+// ---------------------------------------------------------------------------
+console.log("partial install, protected file(s) skipped (#989):");
+
+await testCase("[AC1][AC2] a payload naming ONE protected file alongside installable ones, no override, REAL run: the CLI IS invoked with --overwrite forced, the protected file is backed up then restored, and the report names it skipped and why — never REFUSING", async () => {
+  const spawnCalls = [];
+  const backupCalls = [];
+  const restoreCalls = [];
+  const lines = [];
+  const fakeBackup = new Map([["components/ui/button.tsx", { existed: true, content: Buffer.from("ORIGINAL BUTTON BYTES") }]]);
+  const code = await main(["combobox"], {}, fakeDeps(COMBOBOX_PAYLOAD, spawnCalls, {
+    backupProtectedFiles: (paths) => { backupCalls.push(paths); return fakeBackup; },
+    restoreProtectedFiles: (backups) => { restoreCalls.push(backups); return backups.size; },
+    log: (l) => lines.push(String(l)),
+  }));
+  assert(code === 0, "a successful partial install must exit 0");
+  assert(spawnCalls.length === 1, "the CLI must be invoked for a partial payload — never the whole-payload abort");
+  assert(spawnCalls[0].includes("combobox"));
+  assert(spawnCalls[0].includes("--overwrite"),
+    `a partial install must force --overwrite so the OTHER non-protected already-vendored files in the closure do not hang a non-interactive run on a per-file prompt; got ${JSON.stringify(spawnCalls[0])}`);
+  assert(backupCalls.length === 1 && JSON.stringify(backupCalls[0]) === JSON.stringify(["components/ui/button.tsx"]),
+    `expected exactly one backup call naming only the protected file, got ${JSON.stringify(backupCalls)}`);
+  assert(restoreCalls.length === 1 && restoreCalls[0] === fakeBackup,
+    "the SAME snapshot backupProtectedFiles returned must be the one restoreProtectedFiles receives");
+  const said = lines.join("\n");
+  assert(/SKIPPED/.test(said), `expected the report to say SKIPPED; it said:\n${said}`);
+  assert(/components\/ui\/button\.tsx/.test(said), `expected the report to name button.tsx; it said:\n${said}`);
+  assert(!/REFUSING/.test(said), "a partial install must never say REFUSING — it is not aborted");
+});
+
+await testCase("[AC3] the SAME partial payload WITH the override: proceeds as the override always did — no forced --overwrite, no backup, no restore, the protected file is genuinely overwritten", async () => {
+  const spawnCalls = [];
+  const backupCalls = [];
+  const restoreCalls = [];
+  const code = await main(["combobox"], { [OVERRIDE_ENV_VAR]: "1" }, fakeDeps(COMBOBOX_PAYLOAD, spawnCalls, {
+    backupProtectedFiles: (paths) => { backupCalls.push(paths); return new Map(); },
+    restoreProtectedFiles: (backups) => { restoreCalls.push(backups); return 0; },
+  }));
+  assert(code === 0);
+  assert(spawnCalls.length === 1 && spawnCalls[0].includes("combobox"));
+  assert(!spawnCalls[0].includes("--overwrite"),
+    "the override path is unchanged: it forwards the caller's own args verbatim, it does not force --overwrite itself");
+  assert(backupCalls.length === 0, "an override run never needs to protect a file it is deliberately overwriting");
+  assert(restoreCalls.length === 0, "an override run must never restore what the caller asked to overwrite");
+});
+
+await testCase("a REAL run whose payload is fully installable (no protected file at all): unaffected — no forced flag, no backup, no restore, same as before #989", async () => {
+  const spawnCalls = [];
+  const backupCalls = [];
+  const code = await main(["alert"], {}, fakeDeps(NON_PROTECTED_PAYLOAD, spawnCalls, {
+    backupProtectedFiles: (paths) => { backupCalls.push(paths); return new Map(); },
+  }));
+  assert(code === 0);
+  assert(spawnCalls.length === 1 && JSON.stringify(spawnCalls[0]) === JSON.stringify(["alert"]),
+    `a non-partial payload must forward argv verbatim, unmodified; got ${JSON.stringify(spawnCalls[0])}`);
+  assert(backupCalls.length === 0, "nothing to back up when nothing is blocked");
+});
+
+await testCase("a caller who ALREADY passed --overwrite for a partial payload: the guard never duplicates the flag", async () => {
+  const spawnCalls = [];
+  const code = await main(["combobox", "--overwrite"], {}, fakeDeps(COMBOBOX_PAYLOAD, spawnCalls));
+  assert(code === 0);
+  assert(spawnCalls[0].filter((a) => a === "--overwrite").length === 1,
+    `--overwrite must appear exactly once, got ${JSON.stringify(spawnCalls[0])}`);
+});
+
+await testCase("[AC1] a --dry-run on the SAME partial payload: the CLI still previews (dry-run always did), nothing is backed up or restored (nothing was written), and the report says what a REAL run would skip", async () => {
+  const spawnCalls = [];
+  const backupCalls = [];
+  const restoreCalls = [];
+  const lines = [];
+  const code = await main(["combobox", "--dry-run"], {}, fakeDeps(COMBOBOX_PAYLOAD, spawnCalls, {
+    backupProtectedFiles: (paths) => { backupCalls.push(paths); return new Map(); },
+    restoreProtectedFiles: (backups) => { restoreCalls.push(backups); return 0; },
+    log: (l) => lines.push(String(l)),
+  }));
+  assert(code === 0);
+  assert(spawnCalls.length === 1 && spawnCalls[0].includes("--dry-run"));
+  assert(!spawnCalls[0].includes("--overwrite"),
+    "a dry run writes nothing — there is no prompt to suppress, so nothing forces --overwrite for a preview");
+  assert(backupCalls.length === 0, "a dry run writes nothing — there is nothing to back up");
+  assert(restoreCalls.length === 0, "a dry run writes nothing — there is nothing to restore");
+  const said = lines.join("\n");
+  assert(/components\/ui\/button\.tsx/.test(said) && /skip/i.test(said),
+    `expected the dry-run report to name what a real run would skip; it said:\n${said}`);
 });
 
 // ---------------------------------------------------------------------------

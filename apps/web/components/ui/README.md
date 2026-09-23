@@ -25,10 +25,32 @@ changes on disk, it resolves the full set of files the install would write — i
 `registryDependency` the named component pulls in (this is exactly how a `pagination` install once
 also tried to overwrite `button.tsx`: `pagination`'s registry item names `button` as a dependency) —
 and compares that set against `scripts/protected-components.json`, a checked-in JSON array of
-project-relative paths. If any of them is in the payload, the wrapper aborts with a non-zero exit
-and names the file(s), **before invoking the real CLI at all** — regardless of `--overwrite`,
-`--yes`, `--all`, or whether stdin is a terminal, because none of those ever get a chance to matter
-once the wrapper has already decided not to call the CLI.
+project-relative paths.
+
+**If EVERY file the payload would write is protected** (nothing left to gain from installing at
+all — the original `pagination` incident, where `pagination.tsx` itself later joined the
+allowlist too), the wrapper aborts with a non-zero exit and names the file(s), **before invoking
+the real CLI at all** — regardless of `--overwrite`, `--yes`, `--all`, or whether stdin is a
+terminal, because none of those ever get a chance to matter once the wrapper has already decided
+not to call the CLI.
+
+**If SOME of the payload is protected and some is not (#989)** — Combobox's own closure today:
+`button.tsx` protected, `input.tsx`/`textarea.tsx`/`input-group.tsx`/`combobox.tsx` not — the
+wrapper installs everything that is not protected and leaves the protected file(s) untouched,
+rather than refusing the whole payload. It does this by forcing the pinned CLI's own
+`-o/--overwrite` (never duplicated if the caller already passed it) so a non-interactive run does
+not hang on a per-file "already exists, overwrite?" prompt for the OTHER, non-protected
+already-vendored files in the same closure — MEASURED (2026-09-23): with stdin closed, that
+prompt reads EOF and defaults to "N" (skip), which would silently skip every already-existing
+file, protected or not, and defeat "installs every other file" — and snapshots each protected
+file's exact bytes (or the fact that it did not exist) BEFORE that call, restoring them
+immediately after, so the guard's own restore — never the CLI's behaviour — is what makes the
+protected file byte-identical across the run. A `--dry-run` on a partial payload still only
+previews (nothing is backed up or restored, since nothing is written); the report names what a
+real run would install and what it would skip, the same "report every run" posture `cn` below
+uses. **The override, below, is unchanged**: `CLARA_UI_ADD_OVERWRITE=1` still forwards the
+caller's own arguments verbatim and genuinely overwrites the protected file(s) — it does not force
+`--overwrite` itself, so a non-interactive override run still needs the caller to pass it.
 
 ### What the allowlist protects
 
