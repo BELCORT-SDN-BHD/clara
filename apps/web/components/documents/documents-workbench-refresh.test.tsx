@@ -341,34 +341,65 @@ test("[633]: the registry is read ONCE per mount and never enters the poll's bud
   });
 });
 
-/** #1021 — settle until `countOf()` stops growing for a real wall-clock window, or a deadline
- *  passes. `intake-receipts.tsx` gives this cell no other externally visible signal that the poll's
- *  tick ceiling (`use-settle-poll.ts`'s `DEFAULT_MAX_TICKS`) was actually reached: the watermark and
- *  the manual-Refresh button both stay in the SAME state whether the poll is still ticking or
- *  already exhausted, because an unsettled row keeps `load.unsettled > 0` true throughout — so the
- *  read count going, and staying, flat is the only honest way to observe "the poll spent its whole
- *  budget and stopped". A fixed settle COUNT (this cell's previous shape) is what #1021 found could
- *  under-run once this file shares a timer queue with every other file's own polls in a full-suite
- *  pass: the number of macrotask hops a zero-delay poll needs to spend its budget grows with host
- *  contention, the same class of flake document-detail-live-refresh.test.tsx's own `settleUntil`
- *  (#904) fixed for a condition-based wait. A deadline gives the real event loop the time it needs
- *  regardless of how many other files' timers are queued alongside this one's. */
-async function settleUntilQuiet(
+/** The reads a mount makes before the poll has ticked once — ONE, the list read `reload()` issues.
+ *  MEASURED, not assumed: the SETTLED cell above (where `enabled` is false, so the poll never runs
+ *  at all) reads `document_intakes_visible` exactly once and never again, and the AC1(c) cell at the
+ *  top of this file pins that same mount read from the other side. Everything beyond it in THIS
+ *  cell is a poll tick. */
+const MOUNT_READS = 1;
+
+/** #1021 (fix round 2) — settle until the read count has stayed FLAT for a run of consecutive
+ *  passes, and bound that wait on WORK rather than on wall-clock time.
+ *
+ *  `intake-receipts.tsx` gives this cell no other externally visible signal that the poll's tick
+ *  ceiling (`use-settle-poll.ts`'s `DEFAULT_MAX_TICKS`) was reached: the watermark and the manual
+ *  Refresh button both stay in the SAME state whether the poll is still ticking or already
+ *  exhausted, because an unsettled row keeps `load.unsettled > 0` true throughout — so the read
+ *  count going, and staying, flat is the only honest way to observe "the poll spent its budget and
+ *  stopped".
+ *
+ *  WHY A RUN OF FLAT PASSES AND NOT A WALL-CLOCK QUIET WINDOW. Round 1 of this fix waited for the
+ *  count to stay flat for 300 ms of real time, with a 10 s deadline — and that is the defect
+ *  `test/settleUntil.ts`'s own header names in one line: "The bound is on WORK, not on wall-clock
+ *  time" (#798, retiring exactly this shape after #643). A contended full-suite host can spend
+ *  300 ms inside a single macrotask hop, so the quiet window could elapse before the poll had been
+ *  given even one chance to tick, and the wait would return reporting "quiet" having observed
+ *  nothing — which is how the very first whole-suite run after round 1 landed on `grew > 0` false
+ *  (`reports/wave3-lane11-ticket1022.md`). A run of CONSECUTIVE FLAT PASSES cannot be faked by a
+ *  slow host: this poll issues at most one read per macrotask hop (a tick needs its `setTicks`
+ *  re-render and the effect that schedules the next timer, and both of those wait for the next
+ *  `act` flush, i.e. the next `settle()`), so twenty-five hops in a row with no read is a poll that
+ *  has genuinely stopped, on a fast host and a crawling one alike.
+ *
+ *  The outer `STOP_PASSES` bound is the other half: a poll whose ceiling was removed or widened
+ *  keeps reading one per hop forever, never reaches a flat run, and lands here as a RED with its
+ *  own message — which is what keeps the assertions below non-vacuous. */
+const QUIET_PASSES = 25;
+const STOP_PASSES = 400;
+
+async function settleUntilPollStops(
   h: { settle: () => Promise<void> },
   countOf: () => number,
   label: string,
 ): Promise<number> {
-  const deadline = Date.now() + 10_000;
-  const QUIET_MS = 300;
   let last = countOf();
-  let quietSince = Date.now();
-  while (Date.now() - quietSince < QUIET_MS) {
-    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label} to go quiet`);
+  let flat = 0;
+  for (let pass = 0; pass < STOP_PASSES; pass += 1) {
     await h.settle();
     const cur = countOf();
-    if (cur !== last) { last = cur; quietSince = Date.now(); }
+    if (cur === last) {
+      flat += 1;
+      if (flat >= QUIET_PASSES) return cur;
+    } else {
+      last = cur;
+      flat = 0;
+    }
   }
-  return last;
+  throw new Error(
+    `${label} was still reading after ${STOP_PASSES} settle passes (count ${countOf()}) — the bound `
+    + `here is on WORK, not on wall-clock time, so read a red as a poll that never stops, never as a `
+    + `slow host`,
+  );
 }
 
 test("[633]: an UNSETTLED receipt keeps a bounded watch and says so; the poll's budget is finite", async () => {
@@ -376,16 +407,23 @@ test("[633]: an UNSETTLED receipt keeps a bounded watch and says so; the poll's 
   // than either never re-reading or re-reading forever.
   await withReceipts(() => [receiptRow({ status: "verifying", document_id: null })], async (h, counts) => {
     assert.match(h.text(), /Watching 1 unfinished upload/, "the watermark must say what is still moving");
-    const mount = counts.document_intakes_visible ?? 0;
-    const settled = await settleUntilQuiet(
+    // THE SUBJECT IS THE WHOLE POLL, not the part of it left over when this body starts — and that,
+    // measured, is what #1021 actually is. `withReceipts` advances ten settle hops before calling
+    // any body, and this poll spends ONE TICK PER HOP, so eleven of the twelve-tick budget are
+    // already gone by the time the body runs: the previous shape's `grew > 0` was a margin of
+    // exactly ONE tick (measured at the previous HEAD: 12 reads at mount, one more, then quiet).
+    // One extra flush anywhere in the mount phase takes that margin to zero, which is an
+    // intermittent red that says nothing about the poll. Counting from zero removes the margin:
+    // the ceiling is a property of the poll, not of how its budget happened to be split.
+    const total = await settleUntilPollStops(
       h, () => counts.document_intakes_visible ?? 0,
       "the unsettled receipts poll to spend its whole tick budget and stop",
     );
-    const grew = settled - mount;
-    // NON-VACUITY (fix round): the poll must have actually run, or "inside its ceiling"
-    // is a statement about nothing — which is exactly what this cell used to assert.
-    assert.ok(grew > 0, "the poll must issue SOME read while a row is still moving");
-    assert.ok(grew <= 12, `the settle-poll must stay inside its tick ceiling — issued ${grew} extra reads`);
+    const ticks = total - MOUNT_READS;
+    // NON-VACUITY: the poll must have actually run, or "inside its ceiling" is a statement about
+    // nothing — which is exactly what this cell used to assert.
+    assert.ok(ticks > 0, `the poll must issue SOME read while a row is still moving — saw ${total} reads in all`);
+    assert.ok(ticks <= 12, `the settle-poll must stay inside its tick ceiling — issued ${ticks} ticks past the mount read`);
     assert.ok(h.find((n) => (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("data-testid") === "receipts-refresh"),
       "an unsettled list must offer a manual Refresh, so an exhausted poll is a visible end and not a silent one");
   });

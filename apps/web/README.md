@@ -1361,28 +1361,46 @@ poll's own tick to land under host contention (1 failure in a 5-run sample). Fol
 that cell's own settle budget specifically — out of #875's stated scope (auditing *other*
 pollers) and not the same instance #875 was asked to fix.
 
-## #1021 — the [633] unsettled-receipt cell's settle budget, fixed to a deadline
+## #1021 — the [633] unsettled-receipt cell counts the WHOLE poll, on a work bound
 
-**Landed** — the follow-up #875 named above. The cell's fixed `for (let i = 0; i < 40; i++) await
-h.settle();` is replaced with `settleUntilQuiet` (same file, just above the cell): it keeps calling
-`h.settle()` until `document_intakes_visible`'s read count has held flat for a real 300 ms wall-clock
-window, bounded by a 10 s deadline — the same shape `document-detail-live-refresh.test.tsx`'s own
-`settleUntil` (#904) already uses for a condition-based wait, adapted here to a "no more reads are
-coming" wait rather than a "the read I want has arrived" one, since `intake-receipts.tsx` gives this
-cell no other externally visible signal that `use-settle-poll.ts`'s tick ceiling was reached (the
-watermark and the manual-Refresh button read the same whether the poll is still ticking or already
-exhausted, because an unsettled row keeps `load.unsettled > 0` true throughout). A real deadline, not
-an iteration count, is what gives the poll's zero-delay ticks the wall-clock room they need once this
-file's timer queue is shared with every other file's own polls in a full-suite pass — the exact
-mechanism the adjacent finding above measured as a 1-in-5 failure.
+**Landed** — the follow-up #875 named above. Two rounds, and the second one found the real
+mechanism, so what the first round wrote here has been overwritten rather than appended to.
 
-The poll itself (`lib/documents/use-settle-poll.ts`) is unchanged; this is a test-only fix, and the
-cell's assertions (`grew > 0`, `grew <= 12`, the manual-Refresh control) are unchanged in substance.
-Non-vacuity re-verified for this round too: with the bound temporarily widened to `maxTicks: 1000`
-(third arg to `withReceipts`, reverted byte-for-byte afterward), the cell fails — `settleUntilQuiet`
-times out waiting for the count to go quiet within its 10 s deadline (ticks never finish inside that
-window), so the fix still catches a removed or widened bound rather than turning the assertion
-vacuous.
+**What was actually wrong, measured.** The cell asserted on the reads that arrived AFTER
+`withReceipts`'s own mount phase (`const mount = counts.document_intakes_visible ?? 0;` then
+`grew > 0`). That mount phase advances ten `h.settle()` hops, and this poll spends exactly ONE TICK
+PER HOP — a tick needs its `setTicks` re-render and the effect that schedules the next timer, and
+both wait for the next `act` flush. Instrumented at the previous HEAD: 12 reads already counted when
+the body starts (the mount's own list read plus eleven of the twelve-tick budget), one more read,
+then silence. So `grew > 0` was a margin of exactly ONE TICK. Any single extra flush in the mount
+phase spends it, `grew` is 0, and the cell goes red saying nothing about the poll — which is what a
+full-suite run at the previous HEAD recorded
+(`docs/plan/active/riders-2026-09-20/reports/wave3-lane11-ticket1022.md`).
+
+**The first round's own fix was the second half of the problem.** `settleUntilQuiet` waited for the
+read count to hold flat for a real 300 ms window with a 10 s deadline — the exact shape
+`test/settleUntil.ts`'s header retires in one line: *"The bound is on WORK, not on wall-clock time"*
+(#798, after #643). A contended host can spend 300 ms inside one macrotask hop, so the quiet window
+could elapse before the poll was given a single chance to tick.
+
+**What it is now.** `settleUntilPollStops` (same file, just above the cell) settles until the read
+count has held flat for `QUIET_PASSES = 25` CONSECUTIVE PASSES, bounded by `STOP_PASSES = 400`
+passes of total work and no wall clock at all. One read per hop is the measured ceiling, so
+twenty-five hops with no read is a poll that has genuinely stopped, on a fast host and a crawling
+one alike. The cell then counts from zero: `ticks = total - MOUNT_READS` (one, the mount's own list
+read — measured, not assumed: the SETTLED cell above reads exactly once and never again), and
+asserts `ticks > 0` and `ticks <= 12`. The ceiling is now a property of the poll rather than of how
+its budget happened to be split across the mount phase.
+
+The poll itself (`lib/documents/use-settle-poll.ts`) is unchanged; this stays a test-only fix.
+Three controls, each run and each reverted byte for byte:
+
+- **The red reproduced deterministically.** The old shape with the mount phase given the whole
+  budget (`maxTicks: 11`, third arg to `withReceipts`) fails on `the poll must issue SOME read
+  while a row is still moving` — the identical intermittent failure, made repeatable.
+- **The new shape survives it.** Same `maxTicks: 11`, new shape: green (`ticks = 11`).
+- **Non-vacuity.** `maxTicks: 1000`: red, `still reading after 400 settle passes (count 412)` — 412
+  is 12 + 400, which is also the direct measurement of one read per hop.
 
 ## #897 — the full-screen onboarding altitude leg (code-review fix round; still open)
 
