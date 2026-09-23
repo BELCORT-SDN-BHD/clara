@@ -499,6 +499,18 @@ test("ready: world ON with a STALE control beat FAILS (control listener dead)", 
  * touching either production default: the probe's real cadence and the heartbeat's real staleness
  * window are both untouched: this is a caller merely proving it is still alive while it waits, the
  * same as `setBeat` already does once at the top of every cell that turns the world on.
+ *
+ * WHAT THE REFRESH DOES TO THE CALLER THAT ALREADY EXISTED, measured (review SPEC-1033-A, lane 07,
+ * 2026-09-24). Instrumented runs of the DISCONNECT-AND-RECOVER cell below — the cell AC1 names,
+ * driven with no other change — print the world heartbeat age its own `ready` assertion reads:
+ * 48ms then 37ms WITH this refresh, 59ms then 1374ms with the two `setBeat` lines removed. The
+ * refresh bounds that age by ONE iteration instead of by the whole wait, which is the property
+ * the cell's `ready === true` assertion rests on; without it the age grows with the wait and
+ * crosses `HEARTBEAT_STALE_MS` on any wait long enough (CI PR #1029: 30089ms, 89ms past it).
+ * The collision itself cannot be forced on that cell by environment alone — measured: with
+ * `CLARA_LANE_PROBE_CYCLE_MS=50` and `CLARA_LANE_PROBE_INTERVAL_MS=35000` it converges in one
+ * cycle and passes in 522ms either way — which is why the #1033 cell below injects a prober
+ * rather than racing the real one.
  */
 async function settleLaneUntil(pred, what, budgetMs = LANE_SETTLE_BUDGET_MS) {
   const deadline = Date.now() + budgetMs;
