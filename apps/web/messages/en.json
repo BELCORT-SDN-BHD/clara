@@ -1715,7 +1715,11 @@
     "advanceAccountCode": "Staff advance account",
     "advanceAccountCodeHelp": "The enrolled account the advance was paid from.",
     "advanceId": "Which advance",
-    "advanceIdHelp": "The advance this claim discharges. The register never guesses: if the claimant holds two, say which one.",
+    "advanceIdHelp": "Choose the advance this claim discharges. Only the claimant's own advances that still carry a balance are offered; the register never guesses.",
+    "advanceIdPlaceholder": "Choose an advance…",
+    "advanceIdOutstandingSuffix": "outstanding",
+    "advanceIdEmpty": "This claimant has no open advance.",
+    "advancesUnavailable": "The client's staff advances could not be read, so none can be offered here. You can still record the claim once they can be read again.",
     "paymentAccountCode": "Paid from",
     "paymentAccountCodeHelp": "The bank or cash account they were already paid from.",
     "sourceKind": {
