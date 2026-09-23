@@ -454,6 +454,10 @@ export async function spoolHealth() {
   try {
     await ensureSpoolDir();
     await access(dir);
+    // Deliberately still millisecond-only per #1043's fix, unlike atomicJson's temp name above:
+    // this write never renames into place (writeFile just overwrites the same inode again) and the
+    // `rm(..., { force: true })` below swallows a double delete, so two probes colliding on the
+    // same millisecond cost nothing.
     const probe = join(dir, `.ready-${process.pid}-${Date.now()}`);
     await writeFile(probe, "ok", { mode: 0o600 });
     await rm(probe, { force: true });

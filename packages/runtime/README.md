@@ -1871,12 +1871,16 @@ is committed BEFORE the intake path's own write runs. Nothing about it is a corn
 uniqueness `lib/intake.mjs`'s `taskTempPath` already uses for the spool's other temp file. The pid
 stays because it is what tells a human reading a spool directory whose leftover a temp file is. Both
 shapes still end in `.tmp`, so `SPOOL_REAPABLE` and `listJsonEntries` ignore them exactly as before.
+`spoolHealth`'s own probe file keeps the old millisecond-only name on purpose — it never renames
+into place, so two probes colliding on one millisecond just overwrite and doubly-remove the same
+inode, which costs nothing.
 
 **What is still true after it, stated.** Two writers of one sidecar still race on the rename itself,
 and the last rename wins: a full transport write and a DB-row merge landing together can still leave
 the merge's shorter body on disk, which is the read-then-write residual `mergeTaskMeta`'s own header
-already names (task #28, P4). What changed is that no reader ever sees a body no writer wrote, and no
-writer is told its write failed because a sibling won.
+already names (task #28, P4), and which is now tracked as its own defect, #1044. What changed is that
+no reader ever sees a body no writer wrote, and no writer is told its write failed because a sibling
+won.
 
 **Evidence.** `tests/intake-sidecar-race.test.mjs`'s `p1043.collide` — 200 rounds of the two real
 writer shapes against one task sidecar, asserting that no write is rejected, that the body on disk is

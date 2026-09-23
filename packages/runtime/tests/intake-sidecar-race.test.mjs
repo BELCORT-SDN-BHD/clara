@@ -263,6 +263,9 @@ test(`p1043.collide: ${COLLIDE_ROUNDS} rounds of TWO writers on ONE sidecar leav
     }
     // WHOLE, not merely parseable: the body on disk must be one of the two, field for field. A
     // splice that happens to parse is exactly the failure a `JSON.parse` check would wave through.
+    // Raw readFile + JSON.parse here on purpose, not `readTaskMeta`: the cell must see exactly what
+    // ANY reader sees on disk right now, splice included, the same raw-filesystem stance
+    // `p966.host` above takes with its own open()/rename() rather than going through a wrapper.
     const raw = await readFile(taskMetaPath(taskId), "utf8");
     let onDisk = null;
     try {
