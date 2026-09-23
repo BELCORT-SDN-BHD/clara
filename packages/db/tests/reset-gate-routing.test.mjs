@@ -273,13 +273,45 @@ const NEWLY_COVERED = [
 /** The composite-action step (its `- name:` line through the next step's, or EOF) whose `run:`
  *  block invokes `tests/<file>` — the same step-splitting shape a human reading the YAML uses,
  *  never a full-file search that could match a comment or an unrelated step. Step boundaries in
- *  this file are always a 4-space-indented `- name:` (verified against the file's own steps). */
+ *  this file are always a 4-space-indented `- name:` (verified against the file's own steps).
+ *
+ *  The match is on the INVOCATION LINE — one line carrying both `node --test` and the path —
+ *  never on the chunk as a whole (review SPEC-1023-03). A chunk carries the comment block that
+ *  PRECEDES the NEXT step, so a future comment naming a drill above an unrelated step would
+ *  otherwise hand every assertion below the wrong step, silently. */
 function stepInvoking(yamlText, file) {
   return yamlText
     .split(/\n(?= {4}- name:)/)
-    .find((step) => step.includes(`tests/${file}`));
+    .find((step) => step.split("\n").some(
+      (line) => line.includes("node --test") && line.includes(`tests/${file}`)));
 }
 
+test("#1023 a step is located by its INVOCATION line, never by a comment above it naming the file", () => {
+  // Review SPEC-1023-03. The chunks this splitter produces attach a step's PRECEDING comment
+  // block to the PREVIOUS step, so a whole-chunk `includes()` would hand every assertion below
+  // the wrong step the first time someone writes a comment naming a drill above an unrelated one.
+  // Coupling to the `node --test tests/<file>` line instead couples to the thing that RUNS it.
+  const yaml = [
+    "runs:",
+    "  using: composite",
+    "  steps:",
+    "    - name: An unrelated step",
+    "      run: |",
+    "        echo nothing",
+    "",
+    "    # see tests/wave-a-upgrade.test.mjs for what the step below proves",
+    "    - name: Wave-A 0011 fresh-vs-upgrade parity drill (isolated DB)",
+    "      run: |",
+    "        PGDATABASE=clara_waveA_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \\",
+    "          node --test tests/wave-a-upgrade.test.mjs",
+  ].join("\n");
+  const step = stepInvoking(yaml, "wave-a-upgrade.test.mjs");
+  assert.ok(step, "the step that RUNS the drill must be found at all");
+  assert.match(step, /Wave-A 0011 fresh-vs-upgrade parity drill/,
+    "the step returned must be the one whose run: block invokes the drill");
+  assert.doesNotMatch(step, /An unrelated step/,
+    "a comment naming the drill belongs to the PREVIOUS chunk — matching on it returns the wrong step");
+});
 for (const { file, db } of NEWLY_COVERED) {
   test(`#1023 CI coverage: ${file} has a closed-wave-upgrade-drills step that runs its destructive path on a disposable database`, () => {
     const yamlText = readFileSync(CLOSED_WAVE_ACTION, "utf8");

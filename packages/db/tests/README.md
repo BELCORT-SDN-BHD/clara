@@ -1407,8 +1407,11 @@ documented — `clara_0186_upgrade_ci`, `clara_runtime_upgrade_ci`, `clara_waveA
 destructive flags, and a between-step cluster cleanup. All 14 audited files now have a CI leg;
 only T19 still never exercises its destructive path anywhere but the ordinary battery's skip.
 `reset-gate-routing.test.mjs` carries the structural proof: it parses the action file itself and
-asserts, per newly-covered drill, that a step names it, sets both `CLARA_RIG_ALLOW_RESET=1` and
-`CLARA_ALLOW_DESTRUCTIVE=1`, targets the documented database name, and that name passes the SAME
+asserts, per newly-covered drill, that a step RUNS it — located by the one line carrying both
+`node --test` and `tests/<file>`, never by the step's prose, because a step chunk carries the
+comment block that precedes the NEXT step and a comment naming a drill would otherwise point every
+assertion at the wrong step (review SPEC-1023-03, with its own cell) — sets both
+`CLARA_RIG_ALLOW_RESET=1` and `CLARA_ALLOW_DESTRUCTIVE=1`, targets the documented database name, and that name passes the SAME
 `EPHEMERAL_DB` guard `rig-reset-guard.mjs`'s `guardedReset` enforces (imported, never re-spelled)
 — a leg whose own database name the guard would refuse proves nothing. What this suite proves
 locally, safely, and on a shared rig is still only the ROUTING and (since #1023) the WIRING —
