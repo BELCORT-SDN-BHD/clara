@@ -2944,6 +2944,23 @@ const FIRM_SETUP_TIP_0259_HUMAN_FNS = ["dismiss_firm_setup_tip"];
 export const FIRM_SETUP_TIP_0259_COHORT = [...FIRM_SETUP_TIP_0259_HUMAN_FNS];
 // #935 END
 
+// #1002 [0276, the second-pass cash-account-set membership editor's own read] — its own cohort,
+// bimodal like 0270's: wholly present once 0276 applies, wholly absent before it, because the
+// `db-slice-frontiers` matrix runs this package against earlier frontiers.
+//
+//   ONE NEW HUMAN READ: `get_client_cash_account_set_members(uuid)` — clara_authenticated ONLY,
+//   VIEWER floor (the same inline floor `propose_client_cash_accounts`, 0232, already uses,
+//   copied rather than shared). It enumerates the client's CURRENT PUBLISHED cash-account-set
+//   version's membership, each member carrying its RECORDED reason — the complement
+//   `propose_client_cash_accounts` cannot give, since that read flags `already_member` for
+//   bank-registry candidates only. clara_runtime, both agent read roles and all four wake lanes
+//   gain ZERO — no agent twin, no wake wrapper, no allowlist row, the same posture 0232's own
+//   three doors carry.
+const CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_HUMAN_FNS = ["get_client_cash_account_set_members"];
+export const CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_COHORT =
+  [...CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_HUMAN_FNS];
+// #1002 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -3206,6 +3223,10 @@ export const ALLOWED = {
     // four wake lanes gain ZERO, and the ungranted ceiling clara._firm_document_limit_ceiling
     // holds no role at all.
     ...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS,
+    // #1002 [0276] the second-pass cash-account-set membership editor's own read — see the block
+    // above. clara_authenticated ONLY, viewer floor; clara_runtime, both agent read roles and
+    // all four wake lanes gain ZERO.
+    ...CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3729,6 +3750,12 @@ export async function grantMatrixFailures() {
   if (capWriterLive.length !== 0) {
     failures.push(...cohortFailures("#960 0270 firm document-limits writer",
       FIRM_DOCUMENT_LIMITS_0270_COHORT, liveNames));
+  }
+  // #1002 [0276] — bimodal, same reasoning as 0270's above.
+  const cashMembershipReadLive = CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_COHORT.filter((n) => liveNames.has(n));
+  if (cashMembershipReadLive.length !== 0) {
+    failures.push(...cohortFailures("#1002 0276 cash-account-set membership editor read",
+      CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
