@@ -1,6 +1,8 @@
 // #1018 — the shared loopback-host + allowed-database-name safety gate every standalone runtime
 // World e2e driver runs at startup, before it does anything destructive. Before this module
-// existed, each of the 23 driver files carried its own inline copy: a PGDATABASE-anchored regex,
+// existed, each of the 23 driver files — and tests/body-census-guard-db.test.mjs, the one
+// World-spawning `node --test` file behind the same gate — carried its own inline copy: a
+// PGDATABASE-anchored regex,
 // and (for most of them) a SECOND, independently hand-typed regex or URL-parsing block re-encoding
 // the SAME allowed-name list against WORKFLOW_POSTGRES_URL. Nothing stopped a file's own two
 // copies from drifting apart, and widening the gate for a new naming convention (the wave's
@@ -13,6 +15,11 @@
 // change to a shared shape (say, a new per-lane convention for a later wave) is then a one-line
 // edit to that ONE constant, picked up by every driver that references it, with no driver able to
 // carry a second, disagreeing copy of the check ever again.
+//
+// tests/body-census-guard-db.test.mjs uses this module's checks WITHOUT `assertLocalDbGate`: a
+// `node --test` file must DECLINE (skip, with the reason printed) rather than throw, so it
+// composes `isLoopbackHost` + `allowedDbPattern(...).dbRegex` + `dsnAgreesWithEnv` into its own
+// `gateReason()`. tests/local-db-gate-drivers-census.test.mjs censuses it on exactly those calls.
 
 export const LOCAL_HOSTS = Object.freeze(new Set(["127.0.0.1", "localhost"]));
 

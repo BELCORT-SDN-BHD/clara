@@ -1856,7 +1856,20 @@ ran — `work-knowledge-e2e.mjs` ran neither, preserved as-is rather than widene
 this refactor). Each driver still supplies its OWN admitted database-name shapes via
 `allowedDbPattern(...)`, composed from the named `DB_NAME_SHAPE` constants where a shape is shared
 with another driver; no driver's admitted set changed as a side effect of the refactor.
-`tests/local-db-gate-drivers-census.test.mjs` is AC3's own litmus test: it reads each of the 23
-drivers' own source text and confirms each imports `./local-db-gate.mjs`, calls
-`assertLocalDbGate(...)`, and no longer declares a local `ALLOWED_DB` or `LOCAL_HOSTS` — so a
-driver can never again carry a second, disagreeing copy of the check.
+`tests/local-db-gate-drivers-census.test.mjs` is AC3's own litmus test. It DERIVES the roster from
+the directory listing — every `tests/*-e2e.mjs` that is not one of the two documented non-gate
+files — and asserts the derived set equals the written one, so a driver added later reds the census
+on its first day instead of being silently out of scope. For each file it reads the source text and
+confirms it imports `./local-db-gate.mjs`, calls `assertLocalDbGate(...)`, and declares no local
+`ALLOWED_DB`, no local `LOCAL_HOSTS`, and no anchored `/^clara_.../` database-name regex under
+any other name either.
+
+`tests/body-census-guard-db.test.mjs` is the twenty-fourth file that spawns a real World behind
+this same gate (CI runs it as a World leg like the 23), and it is censused too — as a
+`SKIP_GATED_WORLD_TESTS` entry rather than a driver, because a `node --test` file must DECLINE
+rather than throw: a thrown gate fails the file instead of skipping it. It therefore composes
+`isLoopbackHost`, `allowedDbPattern` and `dsnAgreesWithEnv` itself instead of calling
+`assertLocalDbGate`, admitting exactly the two names it always admitted
+(`clara_rt_test`, `clara_wave_b_ci`), and the census checks those calls instead. With both
+rosters in place, no World-spawning file in this package carries a second, disagreeing copy of the
+check.
