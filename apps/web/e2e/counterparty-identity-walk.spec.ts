@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { cellBudgetMs, signInTo } from "./helpers";
+import { cellBudgetMs, settleForScan, signInTo } from "./helpers";
 import { CI } from "./counterparty-identity-mock.mjs";
 
 // #647 — journeys C13 (knowledge/identity), A6, C1, C4 and C6 at their identity seam:
@@ -35,7 +35,10 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 // `grantCellBudget(CELL_BUDGET.signIn)` still stacks on top of whichever of these runs first, the
 // same as every other file in this suite.
 
+/** #1017 — settles the shared contract (opacity AND animations, ./helpers) before every scan
+ *  this function runs; it previously scanned directly with no settle at all. */
 async function expectAccessible(page: Page, face: string): Promise<void> {
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, `${face} axe violations`).toEqual([]);
 }

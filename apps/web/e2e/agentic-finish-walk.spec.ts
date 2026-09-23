@@ -23,7 +23,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { signIn } from "./helpers";
+import { settleForScan, signIn } from "./helpers";
 import { P6_5 } from "./agentic-finish-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -226,6 +226,7 @@ test("CB-AE2E-008 · a structured answer reads as prose on the built app — no 
   await expect(page.getByText("The firm's standard chart is not applied yet")).toBeVisible({ timeout: 20_000 });
   await assertNoWireArtefacts(page, "the client A onboarding card");
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(axe.violations, "client A workspace axe violations").toEqual([]);
 });
@@ -257,6 +258,7 @@ test("CB-AE2E-023 · a COMMITTED plan renders a receipt, with no Commit or Cance
   await expect(page.getByText("Registration 202401047756 — format checked", { exact: false })).toBeVisible({ timeout: 10_000 });
   await assertNoWireArtefacts(page, "the settled onboarding receipt");
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(axe.violations, "settled onboarding receipt axe violations").toEqual([]);
 });
@@ -311,6 +313,7 @@ test("H-30 · the apply-chart dialog's Confirm stays inside a 1280x720 viewport 
   // Reachable means CLICKABLE, not merely on screen.
   await expect(confirm).toBeEnabled();
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(axe.violations, "apply-chart dialog axe violations").toEqual([]);
 });
@@ -330,6 +333,7 @@ test("H-51 / CB-AE2E-024 · /clients offers Add client above the register, follo
   const addClient = page.getByRole("button", { name: "Add client", exact: true });
   await expect(addClient).toBeVisible({ timeout: 20_000 });
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(axe.violations, "/clients register axe violations").toEqual([]);
 

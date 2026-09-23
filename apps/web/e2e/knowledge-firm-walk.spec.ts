@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { signInTo } from "./helpers";
+import { settleForScan, signInTo } from "./helpers";
 import { KN } from "./knowledge-mock.mjs";
 
 // #654 — journeys C13 ("show current scope, source, status and applicability… corrections show
@@ -31,7 +31,10 @@ const SOURCE_RECORD = `/clients/${KN.clientFirmSource}/knowledge/${KN.recordFirm
 const RACED_RECORD = `/clients/${KN.clientFirmRaced}/knowledge/${KN.recordFirmRaced}`;
 const EXCEPTION_REGISTER = `/clients/${KN.clientFirmException}/knowledge`;
 
+/** #1017 — settles the shared contract (opacity AND animations, ./helpers) before every scan
+ *  this function runs; it previously scanned directly with no settle at all. */
 async function expectAccessible(page: Page, face: string): Promise<void> {
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, `${face} axe violations`).toEqual([]);
 }

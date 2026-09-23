@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, signIn } from "./helpers";
+import { ensureRealFocus, settleForScan, signIn } from "./helpers";
 import { WORK_LIST } from "./work-list-mock.mjs";
 
 /**
@@ -319,6 +319,7 @@ test("/work is axe-clean at 320px with the list rendered", async ({ page }) => {
   await page.goto("/work");
   await expect(rowLink(page, "Quarterly rent — which Maybank account?")).toBeVisible();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/work at 320px").toEqual([]);
 });

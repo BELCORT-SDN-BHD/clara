@@ -22,7 +22,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { CORR } from "./document-correction-mock.mjs";
-import { ensureRealFocus, signIn } from "./helpers";
+import { ensureRealFocus, settleForScan, signIn } from "./helpers";
 
 const DOCUMENTS_URL = `/clients/${CORR.clientId}/documents`;
 const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -300,6 +300,7 @@ test.describe("#646 — the wrong-client correction, its Sheet and the client it
     // itself, which is what stops this from passing vacuously: with the Sheet closed axe throws
     // "No elements found for include" rather than scanning the page behind it (measured red,
     // fix round 1).
+    await settleForScan(page);
     const sheetAxe = await new AxeBuilder({ page })
       .include('[data-testid="correction-impact-sheet"]')
       .withTags(AXE_TAGS).analyze();
@@ -387,6 +388,7 @@ test.describe("#646 — the shape of the faces", () => {
     await signIn(page);
     for (const tab of [undefined, "facts", "accounting"] as const) {
       await openDocument(page, tab);
+      await settleForScan(page);
       const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
       expect(
         results.violations,
@@ -400,6 +402,7 @@ test.describe("#646 — the shape of the faces", () => {
     await openDocument(page, "facts");
     await revise(page, "N/A", "the printed figure is smudged");
     await expect(page.getByRole("dialog")).toContainText("CLR10");
+    await settleForScan(page);
     const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
     expect(
       results.violations,

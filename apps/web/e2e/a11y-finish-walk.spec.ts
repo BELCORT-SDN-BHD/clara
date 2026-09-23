@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { cellBudgetMs, ensureRealFocus, signInTo } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
 
 /**
  * P6-3 · THE BROWSER LEG (裁-86). Every claim below needs the three things the
@@ -44,21 +44,18 @@ const FACES = [
  * does not exist — the same element measures clean one frame later. Anything
  * reading COLOUR off a freshly-navigated page has to wait for the paint the
  * user actually sees.
+ *
+ * #1017 — the settle half now DELEGATES to `settleForScan` (./helpers) instead of this file's own
+ * double-`requestAnimationFrame` plus animations-only poll: that local pair never checked the
+ * `.enter-content`/`.enter-panel` opacity itself, only that no `getAnimations()` entry was still
+ * running, which is a real gap `settleForScan`'s own header names. `gotoSettled` keeps the
+ * navigation/`networkidle` half, which is not `settleForScan`'s job, and is registered as a
+ * verified wrapper in `settle-before-scan-census.test.ts`.
  */
 async function gotoSettled(page: Page, url: string): Promise<void> {
   await page.goto(url);
   await page.waitForLoadState("networkidle");
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      }),
-  );
-  await expect
-    .poll(async () =>
-      page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length),
-    )
-    .toBe(0);
+  await settleForScan(page);
 }
 
 test("裁-13: axe-core's own target-size rule is clean on the firm surfaces this train touched", async ({ page }) => {
@@ -88,6 +85,7 @@ test("裁-13 CONTROL: the target-size rule actually RAN — it is not silently u
   // This asserts the rule appears in the RESULT INVENTORY, so the arm above is
   // a measurement rather than an absence.
   await signInTo(page, "/");
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withRules(["target-size"]).analyze();
   const seen = [...result.passes, ...result.violations, ...result.incomplete, ...result.inapplicable];
   expect(seen.map((r) => r.id)).toContain("target-size");

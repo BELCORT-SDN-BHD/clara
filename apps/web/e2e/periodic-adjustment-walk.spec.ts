@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { signInTo } from "./helpers";
+import { settleForScan, signInTo } from "./helpers";
 import { PA } from "./periodic-adjustment-mock.mjs";
 
 // #643 — "会计师提供期间、金额和依据后，Clara 或直接会计操作可完成定期存货及工资相关费用/负债调整".
@@ -53,15 +53,12 @@ async function control(page: Page, body: Record<string, unknown>): Promise<unkno
 
 /** Wait for every FINITE animation before measuring colour or geometry. Infinite animations (a
  *  Skeleton's pulse) are excluded, or this would never resolve on a loading page. */
+/** #1017 — delegates to the shared settle-before-scan contract (./helpers) instead of this file's
+ *  own animations-only wait, which never checked the enter/mount opacity fade settleForScan also
+ *  covers. Dropping the (0,0) mouse park too: settleForScan's own header records why it is no
+ *  longer needed — the hover-state contrast it used to dodge is fixed at the token now. */
 async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
+  await settleForScan(page);
 }
 
 async function scan(page: Page, what: string): Promise<void> {

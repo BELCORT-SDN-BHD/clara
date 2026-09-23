@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { signInTo } from "./helpers";
+import { settleForScan, signInTo } from "./helpers";
 import { SAR } from "./staff-advances-register-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -58,6 +58,7 @@ test("[879] the staffAdvances tab renders: the ledger, the enrolled account and 
   await expect(page.getByText("Opening balance")).toBeVisible();
   await expect(page.getByText("Closing balance")).toBeVisible();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "staffAdvances tab, collapsed").toEqual([]);
 });
@@ -80,6 +81,7 @@ test("[879] the empty first-use state is its own state, not a failure — and th
   // …and the primary act is still offered — an empty register is where a first enrolment starts.
   await expect(page.getByRole("button", { name: "Enrol account", exact: true })).toBeEnabled();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "staffAdvances tab, empty first-use state").toEqual([]);
 });

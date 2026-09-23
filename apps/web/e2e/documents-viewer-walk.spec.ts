@@ -23,7 +23,7 @@
 import { expect, test, type ConsoleMessage, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { DOCS } from "./documents-viewer-mock.mjs";
-import { cellBudgetMs, ensureRealFocus, signIn } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signIn } from "./helpers";
 
 const DOCUMENTS_URL = `/clients/${DOCS.clientId}/documents`;
 
@@ -488,6 +488,7 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     await page.locator("details", { hasText: "Raw engine output (JSON)" }).first().locator("summary").click();
     await expect(page.locator("pre", { hasText: "schema_version" })).toBeVisible();
 
+    await settleForScan(page);
     const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
 
     // NO CARVE-OUT. It is deleted with #549 (`90b59cc1`), which fixed
@@ -999,6 +1000,7 @@ test.describe("#620 — source custody: preview, download and the state ladder (
     await page.getByTestId("document-download-original").click();
     await expect(page.getByText(/no longer matches the record Clara holds/)).toBeVisible({ timeout: 15_000 });
 
+    await settleForScan(page);
     const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
     expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
   });

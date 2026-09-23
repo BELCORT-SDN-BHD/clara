@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
+import { settleForScan } from "./helpers";
+
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 test("the migrated journal money door accepts exact cents and visibly refuses ambiguous input", async ({ page }) => {
@@ -24,6 +26,7 @@ test("the migrated journal money door accepts exact cents and visibly refuses am
   await expect(moneyRefusal).toContainText("zero or a positive amount");
   await expect(acceptedCents).toHaveText("123456");
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(axe.violations, JSON.stringify(axe.violations, null, 2)).toEqual([]);
 

@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+import { settleForScan } from "./helpers";
+
 import { CLIENT_SEG_KEYS } from "../lib/interview/api";
 
 /**
@@ -226,6 +228,7 @@ test("client interview completes every tracked segment, unlocks Commit, and pass
   await expect(commitConfirm).toBeEnabled({ timeout: 30_000 });
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page })
     .include('[aria-label="Client onboarding interview"]')
     .withTags(WCAG_TAGS)

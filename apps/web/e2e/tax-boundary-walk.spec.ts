@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { signInTo } from "./helpers";
+import { settleForScan, signInTo } from "./helpers";
 import { D4 } from "./tax-boundary-mock.mjs";
 
 // #627 — "present the real tax reads and the honest not-enabled capability boundary".
@@ -17,7 +17,10 @@ import { D4 } from "./tax-boundary-mock.mjs";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 
+/** #1017 — settles the shared contract (opacity AND animations, ./helpers) before every scan
+ *  this function runs; it previously scanned directly with no settle at all. */
 async function expectAccessible(page: Page, face: string): Promise<void> {
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, `${face} axe violations`).toEqual([]);
 }
