@@ -848,10 +848,18 @@ a partial allocation of a line (a line belongs to at most one live group, always
 **Statement line**:
 One row of a bank statement as the bank stated it: its date, its description, its signed amount
 and its position in the running balance. It is evidence supplied from outside, never a figure
-the product computed, and it carries no page or region citation — the statement carries the
-provenance (its document, its digest and its filename), the line does not.
+the product computed. The statement itself always carries provenance (its document, its digest
+and its filename); the LINE additionally carries an optional _source citation_ (#990) — the
+printed page, an opaque reader-specific region locator, and which stored extraction it was read
+from — populated only on the machine (OCR/witness) intake lane, since the CSV import and the
+hand-keyed month have no page concept at all and never carry one. A citation is never a `Field
+path`/`Typed fact`: a statement line is not a `clara.document_regions` row, so its citation lives
+as three plain columns on the line itself rather than a link to one.
 _Avoid_: A journal line; a transaction the product created; an amount a human may edit to make
-something tie.
+something tie; treating an absent citation on the CSV/hand-keyed lanes as a defect rather than a
+structural fact about that lane; assuming a citation exists on every machine-lane line today —
+the persist door accepts one when a payload states it, but no live producer states one yet
+(0291's own residual, closed as a successor contract in #990's report).
 
 **Remaining capacity**:
 How much of one approved journal entry's movement on a given bank account is still unallocated,
