@@ -42,6 +42,8 @@
 //    WITHOUT that flag and reading that they still reach their existing skip gate cleanly — a skip
 //    is not the drill's ordinary run, and 3 of the 14 have no CI leg anywhere to run the real thing
 //    (code review L03-CRS3); the fix-round report states this criterion PARTIAL, not done.
+//    #1023 closed that 3-file gap (see the cells below, and packages/db/tests/README.md's #845
+//    section) — this comment block is left as the record of #845's own state, not rewritten.
 //
 // VACUITY CONTROL for Cell 2 (fix-round report has the transcript): with x42-split-upgrade-kit.mjs
 // reverted to its pre-fix bare `await reset(...)` byte-for-byte, this suite's Cell 2 RED on that
