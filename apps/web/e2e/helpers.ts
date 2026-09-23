@@ -148,8 +148,11 @@ export async function settleForScan(page: Page): Promise<void> {
  * is a sentence about the work — three fixture-driven state changes and two full-page axe
  * scans — so adding a face or a poll to a cell cannot silently re-open the same failure, and
  * a cell that blows a budget this size is a real stall rather than a slow host. The a11y
- * finish walk's own `test.setTimeout(30_000 * (FACES.length + 1))` is the same idea, written
- * before there was a shared place to put it.
+ * finish walk once carried its own hand-rolled `test.setTimeout(30_000 * (FACES.length + 1))`
+ * for the same idea, written before this shared place existed to put it — #864 folded it (and
+ * every other hand-rolled per-cell/per-describe timeout in this suite) into `cellBudgetMs`,
+ * held green by `cell-budget-census.test.ts` (README.md's own "Per-cell timeout policy"
+ * section names it).
  *
  * A BUDGET IS A CEILING, NEVER A WAIT. Nothing below makes any cell slower: a cell that
  * finishes in 8 s still finishes in 8 s. The per-assertion timeouts are what actually bound
