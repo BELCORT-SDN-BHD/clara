@@ -3104,6 +3104,10 @@
       "notSuperseded": "Not superseded",
       "srcCoverage": "Coverage",
       "coverageFigures": "{lines} lines · {debit} debits · {credit} credits · {unmatched} still unmatched",
+      "srcCitation": "Source citation",
+      "citationPage": "Page {page} of the source document",
+      "citationLaneNone": "This line's intake lane keeps no page or region citation.",
+      "citationNotRecorded": "No source citation was recorded for this line.",
       "candidatesTableLabel": "Match candidates for this line",
       "colPostingDate": "Posted",
       "colMemo": "Entry",
@@ -3156,6 +3160,7 @@
       "outcomeAccountCode": "GL account",
       "outcomeCounterparty": "Counterparty",
       "outcomeSource": "Source file",
+      "outcomeCitation": "Source citation",
       "outcomeOpKey": "Operation key"
     },
     "exceptions": {
