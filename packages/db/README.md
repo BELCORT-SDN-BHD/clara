@@ -3188,3 +3188,69 @@ merely asserting it. It does not remove the daily runtime sweep (#928) or rewrit
 `ARCHITECTURE.md` / `PRD.md` or the plan-overlap advisory's template arm (#929). It does not
 migrate data — the prestate's own guard is what makes that safe, not a claim that no live template
 could exist.
+
+## 0283 — the plan-overlap advisory loses its 0045 template arm (#929)
+
+**Context.** #788 (owner ruling, 2026-09-18): "retire the 0045 recurring-adjustment template lane
+fully," delivered in three tracer-bullet tickets. #927 closed the three human-write doors; #928
+retired the daily runtime sweep; this is #929, step three: the LAST live surface the 0045 lane
+still reached — `clara._plan_overlap_warning`'s template arm, which 0281 (#909) left in place
+alongside its own new sibling-plan arm — closes too. `clara.adjustment_templates` itself and every
+read of it (D6's retained historical surface: `list_adjustment_templates`, Registers →
+Adjustments) are untouched; this migration only stops the plan-creation advisory from SCANNING
+that table.
+
+**What 0283 does.** `0283_retire_plan_overlap_template_arm.sql` recuts `clara._plan_overlap_warning`
+a second time: 0281's own ARM 1 (the `clara.adjustment_templates` scan and its `UNION ALL`) is
+deleted outright; 0281's ARM 2 (the sibling-plan scan) survives verbatim, unindented to the top
+level. `kind` collapses from a two-branch `case` to the single literal `'accounting_plan_overlap'`
+— the only value this function can ever answer from here on. No signature change, no new relation,
+no new door, no data migration (a live `clara.adjustment_templates` row, historical or a rig
+fixture, simply stops being named — it is neither read nor written by this file). The three
+plan-creating doors and their web forms (`apps/web/components/{plans,accruals,prepayments}-
+form.tsx`) read only `overlap_warning.templates.map((x) => x.name)` and never branch on `kind`
+(0281's own header, unmoved), so none of them needed a code change; the `PlanOverlapWarning`-
+shaped TypeScript types (`lib/{plans,accruals,prepayments}/api.ts`) and the `overlapTitle`/
+`overlapBody` copy in `messages/en.json` were corrected in the same commit to stop describing a
+"recurring adjustment template" that can no longer exist, and no longer carry a `template_id`
+field that can no longer appear.
+
+**Prestate/tail.** Pins (pre-image `sha256(prosrc)`, MEASURED on `clara_l05`, 282 migrations,
+`0001->0282`, 2026-09-23): `clara._plan_overlap_warning`
+(`33b23167bf67f911a13b7523a4eb109e406ec2a10367b444c687d2461abc1e0b`, 0281's own two-arm output,
+unmoved by 0282), and as non-regression `clara.create_accounting_plan`
+(`84b67058244bfe795245ee224733bd0b09940331b1cf75f4cb6654d84e88d6c4`), `clara.revise_accounting_plan`
+(`87c9f1e9bcf493493dd805585ade921b679afda97a62daa18334ef61258f431f`) and
+`clara._accrual_plan_core` (`b3bd10065ed7a117ff3a324eff7ebebfcd06adaac38300fc9d77b99ef1759da8`) —
+the same three sha's 0281 itself pinned, re-confirmed byte-for-byte unmoved here. Redo-tolerant
+(#957): the prestate recognises either the measured pre-0283 pre-image or this file's own prior
+output (`adjustment_template_overlap` and `clara.adjustment_templates` both ABSENT from `prosrc`,
+the sibling arm's own tokens present), and refuses a mixed or unrecognised body outright. The tail
+re-reads `prosrc` and asserts the template tokens are GONE (not merely re-asserts the sibling
+tokens are present, as 0281's own tail does) before re-confirming the three callers' pins and the
+posture (owner, `SECURITY DEFINER`, `search_path`, `STABLE`, owner-only ACL). Measured: applied
+FIRST (the fresh-apply branch, confirmed by the prestate's own notice), then exercised via
+`CLARA_MIGRATION_REDO=0283_retire_plan_overlap_template_arm` (the redo branch, "own prior
+output," confirmed by the same notice) as this ticket's own vacuity control — see
+`tests/plan-overlap-template-arm-retired.test.mjs`'s own header for the red-then-green trace.
+
+**What stays exactly as it is.** `clara.adjustment_templates` keeps every row it has (live,
+proposed or retired); `clara.list_adjustment_templates`, `clara.list_adjustment_runs`,
+`clara.get_adjustment_run` and Registers → Adjustments (#927) still show them in full — only the
+PLAN-CREATION advisory stops consulting the table. `tests/plan-overlap-sibling-arm.test.mjs`
+(#909's own file) keeps every cell that is still true unconditionally from 0281 on (the sibling
+arm's own five design-decision cells, its tail's non-template assertions); its one cell that is no
+longer true anywhere (`p909.combined-with-template`, 0281's own documented "moot once #929 lands"
+case) is removed, with a pointer to this migration's own dedicated file,
+`tests/plan-overlap-template-arm-retired.test.mjs`, which owns the current-contract proof
+(`p929.template-alone`, `p929.template-with-sibling`, `p929.tail`). `accounting-plans.test.mjs`'s
+`p640.schedule.overlap` is retargeted the same way, gated locally on this migration's own stem.
+
+**What 0283 does not do.** It does not touch `clara.adjustment_templates` or any of its readers —
+D6's retained historical surface is untouched. It does not recut `clara.create_accounting_plan`,
+`clara.revise_accounting_plan` or `clara._accrual_plan_core`. It does not edit `CONTEXT.md`'s two
+`_Avoid_` lines (a separate, non-migration commit in this same ticket), `docs/ARCHITECTURE.md` or
+`docs/PRD.md` — the blueprints are never edited outside a #683 sync; this ticket's closing report
+carries the `ARCHITECTURE.md:500` blueprint-drift line and the C08.1 nested-obligation disposition
+addressed to #683 instead. It does not close #788 or edit #909's comment — the ticket's own triage
+correction records both are already satisfied.
