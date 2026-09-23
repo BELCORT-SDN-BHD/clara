@@ -210,9 +210,10 @@ function handlerCensus(file: string): { path: string; scoped: boolean }[] {
  * `unscopeable` — a handler that CANNOT be scoped, with the reason recorded in source beside
  * it. An allowlist is only honest when it is short, named and argued. The two on the P6-5 lane
  * are RPCs whose request carries no SUBJECT: `list_coa_templates()` takes no arguments at all,
- * and `begin_client_onboarding` takes a free-text name rather than an id — keying on this lane's
- * own string would be scoping by a label, the "spelling is not identity" mistake applied to a
- * fixture. Both are measured to have no other caller in `apps/web/e2e`.
+ * and `open_client_onboarding` (#899; `begin_client_onboarding` before 0287_client_birth_wall.sql
+ * re-pointed this lane's own two entrances) takes a free-text name rather than an id — keying on
+ * this lane's own string would be scoping by a label, the "spelling is not identity" mistake
+ * applied to a fixture. Both are measured to have no other caller in `apps/web/e2e`.
  *
  * `debt` — a handler that COULD be scoped and simply is not. Recording those as "unscopeable"
  * would be writing a false reason into a gate, so they get their own name. All three sit on the
@@ -262,7 +263,7 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
     debt: [],
   },
   "agentic-finish-mock.mjs": {
-    unscopeable: ["/rest/v1/rpc/list_coa_templates", "/rest/v1/rpc/begin_client_onboarding"],
+    unscopeable: ["/rest/v1/rpc/list_coa_templates", "/rest/v1/rpc/open_client_onboarding"],
     debt: [],
   },
   "chat-parity-mock.mjs": {
@@ -505,13 +506,15 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   "firm-setup-mock.mjs": { unscopeable: [], debt: [] },
   // #649's client-creation lane. Its `/rest/v1/clients` handler is id-scoped, and for its two RPC
   // verbs the NAME is the request's own subject rather than a label for one:
-  // `clara.client_identity_candidates(p_name, p_identifier)` and
-  // `clara.begin_client_onboarding(p_name, p_op_key)` carry no id at all.
-  // `begin_client_onboarding` gates on this lane's three names and falls through for every other,
-  // because a SECOND claimant (`agentic-finish-mock.mjs`) answers it for the rest — that is the
-  // distinction that lane draws the other way, declaring the verb unscopeable because its own walk
-  // does not care which name reached it. `client_identity_candidates` has NO second claimant and
-  // the Add-client control asks it before every dispatch on every walk, so this lane answers every
+  // `clara.client_identity_candidates(p_name, p_identifier)` and (#899, 0287_client_birth_wall.sql
+  // renamed this from `clara.begin_client_onboarding`)
+  // `clara.open_client_onboarding(p_name, p_op_key, p_identifier, p_acknowledged_candidate)` carry
+  // no id at all. `open_client_onboarding` gates on this lane's three names and falls through for
+  // every other, because a SECOND claimant (`agentic-finish-mock.mjs`) answers it for the rest —
+  // that is the distinction that lane draws the other way, declaring the verb unscopeable because
+  // its own walk does not care which name reached it. `client_identity_candidates` has NO second
+  // claimant and the Add-client control asks it before every dispatch on every walk, so this lane
+  // answers every
   // OTHER name with the honest arity-0 empty rather than falling through into a 501: an unanswered
   // verb is an outage, and an empty answer carries no fixture a sibling walk could resolve as its
   // own (`home-board-mock.mjs`'s row states the same posture for its own unscoped reads). That is
@@ -1514,15 +1517,16 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // `parkedCardWorkId`), neither of which originated from a plan. Each lane gates on its own
   // work ids and falls through otherwise, so this is a declared share, not a collision.
   get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs", "work-knowledge-mock.mjs"],
-  // #649 x P6-5 — `clara.begin_client_onboarding` is the ONE door that creates a client, so any
-  // lane whose walk creates one answers it. The two answer for DIFFERENT names and the door
-  // carries no id, so the name is the request's own subject here rather than a label for one:
-  // `client-create-mock.mjs` gates on its own three names and falls through for every other,
-  // `agentic-finish-mock.mjs` answers whatever is left (it declares the verb unscopeable above,
-  // because its own walk does not care which name reached it). ORDER IS LOAD-BEARING and is
+  // #649 x P6-5 — `clara.open_client_onboarding` is the ONE door that creates a client (#899,
+  // 0287_client_birth_wall.sql renamed it from `clara.begin_client_onboarding`, which both mocks
+  // answered under the same shape before), so any lane whose walk creates one answers it. The two
+  // answer for DIFFERENT names and the door's SUBJECT-carrying argument is the free-text name, not
+  // an id: `client-create-mock.mjs` gates on its own three names and falls through for every
+  // other, `agentic-finish-mock.mjs` answers whatever is left (it declares the verb unscopeable
+  // above, because its own walk does not care which name reached it). ORDER IS LOAD-BEARING and is
   // stated at the hook in `serve-built.mjs`: the scoped lane runs FIRST, or a #649 name would be
   // born into the other lane's fixture.
-  begin_client_onboarding: ["agentic-finish-mock.mjs", "client-create-mock.mjs"],
+  open_client_onboarding: ["agentic-finish-mock.mjs", "client-create-mock.mjs"],
   // #638 — `clara.get_work_claim_origin` is the Work detail identity block's "Staff expense claim"
   // row, and it is read on EVERY Work detail for the same structural reason the plan-origin row
   // above is: a claim is admitted with purpose `journal_entry` (migration 0221 states why a fourth

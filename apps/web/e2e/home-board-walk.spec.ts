@@ -833,7 +833,9 @@ test("p659.home.zero_client_create — a firm with no clients reaches creation f
   });
   await page.route("**/e2e-supabase/rest/v1/rpc/client_identity_candidates", (route) =>
     json(route, { name: "Penang Roastery", arity: 0, candidates: [] }));
-  await page.route("**/e2e-supabase/rest/v1/rpc/begin_client_onboarding", (route) =>
+  // #899 (0287_client_birth_wall.sql): the register's Add-client control now dispatches
+  // clara.open_client_onboarding, not clara.begin_client_onboarding.
+  await page.route("**/e2e-supabase/rest/v1/rpc/open_client_onboarding", (route) =>
     json(route, { client_id: BORN, plan_id: "plan-659" }));
 
   await signInTo(page, "/");

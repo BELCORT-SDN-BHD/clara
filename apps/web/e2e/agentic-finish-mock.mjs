@@ -364,19 +364,27 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
     return true;
   }
 
-  if (request.method === "POST" && path === "/rest/v1/rpc/begin_client_onboarding") {
+  if (request.method === "POST" && path === "/rest/v1/rpc/open_client_onboarding") {
     const body = await readJson(request);
     // EXCEPTION 2 of 2, and the one the review agreed is separately justified. Its only
-    // argument is `p_name` — a free-text client name, not an id — so there is no SUBJECT to
-    // scope by: any walk creating any client would carry a different name, and keying on this
-    // lane's own string would be scoping by a label rather than by identity ("spelling is not
-    // identity", applied to a fixture). Measured: no other spec calls it.
+    // SUBJECT-carrying argument is `p_name` — a free-text client name, not an id — so there is
+    // no id to scope by: any walk creating any client would carry a different name, and keying
+    // on this lane's own string would be scoping by a label rather than by identity ("spelling
+    // is not identity", applied to a fixture). Measured: no other spec calls it.
+    //
+    // #899 (0287_client_birth_wall.sql) RE-POINTED both this walk's own entrances (⌘K "Do" and
+    // the register's Add-client control — see the two tests below that drive them) from
+    // `clara.begin_client_onboarding` to `clara.open_client_onboarding`; this handler's own name
+    // moved with them. The door also gained two arguments (`p_identifier`, `p_acknowledged_
+    // candidate`) this fixture does not need to read: neither entrance this walk drives ever
+    // constructs the arity-1/arity->=2 wall (that is `client-create-walk.spec.ts`'s subject), so
+    // both always arrive `null` and the fixture answers success unconditionally, as before.
     //
     // NO FLOOR CHECK HERE either, and that absence is deliberate rather than lax. The floor
-    // this door enforces (`_human_ctx(role_rank('admin'))`, 0017:2497) is Postgres's, and
-    // Postgres is not in this walk — a mock re-implementing it would be a SECOND copy of a
-    // wall, which the review laws forbid, and greening it would prove the copy. What the
-    // browser leg proves is the SURFACE property: below the floor the row is not offered at
+    // this door enforces (`_human_ctx(role_rank('admin'))`, 0287_client_birth_wall.sql §B) is
+    // Postgres's, and Postgres is not in this walk — a mock re-implementing it would be a SECOND
+    // copy of a wall, which the review laws forbid, and greening it would prove the copy. What
+    // the browser leg proves is the SURFACE property: below the floor the row is not offered at
     // all, so this door is never reached. The verbatim rendering of a real refusal is proved
     // where one can be produced honestly — `components/command/command-do.test.tsx`.
     sendJson(response, 200, { client_id: P6_5.newClientId, plan_id: "plan-new", name: body.p_name }, cors);
