@@ -22,9 +22,10 @@ import {
   acqWorld, acqClient, acqBasis, armedAcquisition, postAcquisition, workLaneAcquisition,
   completeParticularsFor, openWorkQuestion, answerWorkQuestion, pendingQuestion,
   assetForEntry, triggerOrderOnJournalEntries, approvePathBodies, faHookCallers,
-  documentLaneAcquisition,
+  documentLaneAcquisition, sameTxnRetireAndApprove,
   subledgerHookCallers, entryCountOf, committedReceiptCountOf, assetCountOf,
   buyAsset, completeParticulars, getFixedAsset, listFixedAssets, upsertFaProfile,
+  profileRows,
   reverseAndSettle, approvedEntry, faRow, entryRowOf, eventCount,
   workRow, receiptsForWork, mintClientObo, wakeRecordJournalEntry,
   withActor, ROLES,
@@ -609,6 +610,69 @@ test("p639.settle.clr40_classification a commit-time CLR40 carries the SQLSTATE 
     + "'invariant' -> the Work settles FAILED with error.code='CLR40', "
     + "agent_tasks.error_code='internal', recoverable:false. Asserted against the deployed "
     + "classifier in packages/runtime/tests/fixed-asset-acquisition.test.mjs.");
+});
+
+// ===========================================================================================
+// 5b · #882(b) — THE SAME-TRANSACTION RETIRE-AND-APPROVE INSTANT. Owner ruling (2026-09-18): no
+//     trigger change. `clara._tf_fa_movement_belt` reads a CLOSED `approved_at` interval;
+//     `clara._tf_fa_acquisition_birth` reads the CURRENT `fp.active` flag. The two agree for every
+//     ordinary case and disagree at exactly one instant — an entry approved in the SAME
+//     transaction that retires its cost account's enrolment profile — and that instant stays
+//     refused. Migration 0278 (comment-only) pins the convention on both trigger bodies'
+//     `comment on function`; this cell pins the BEHAVIOUR from scratch, driving the production
+//     Work lane (`wake_record_journal_entry`), the only lane 0216's birth trigger exists for.
+// ===========================================================================================
+
+test("p639.belt.same_txn_retire_approve an entry approved in the SAME transaction that retires its cost account's enrolment profile is refused CLR40 fa_belt_unregistered_movement, and the whole transaction — including the retirement — rolls back", async (t) => {
+  if (await gate(t)) return;
+  const w = await acqWorld();
+  const client = await acqClient("same_txn_retire_approve");
+  const before = {
+    entries: await entryCountOf(client),
+    receipts: await committedReceiptCountOf(client),
+    assets: await assetCountOf(client),
+  };
+  const activeBefore = (await profileRows(client))
+    .filter((p) => p.active && p.asset_account_code === COST);
+  assert.equal(activeBefore.length, 1,
+    "same_txn_retire_approve: mandatory setup — the client's COST account starts enrolled");
+
+  // The Work lane is the ONLY lane that reaches this instant: it approves with a raw
+  // `update ... set status='approved'` and relies ENTIRELY on the deferred birth trigger to
+  // register the row (0216's whole premise) — never `clara._fa_on_approve`'s statement-time hook,
+  // which the document lane's `approve_entry` would call instead and which would have already
+  // birthed the row (under the STILL-active profile) before the retire even ran.
+  const a = await armedAcquisition({ client, author: w.users.bob });
+  const err = await sameTxnRetireAndApprove({ sub: w.users.bob, client, assetAccount: COST, a });
+
+  assert.ok(err,
+    "same_txn_retire_approve: the COMMIT was expected to refuse — the transaction must NOT succeed");
+  assert.equal(err.code, "CLR40",
+    "same_txn_retire_approve: the deferred belt's SQLSTATE, at COMMIT");
+  assert.equal(reasonToken(err), ACQ.beltUnregistered,
+    "same_txn_retire_approve: the belt's closed approved_at interval still matches at the equality "
+    + "instant and finds no register row — the birth trigger's fp.active read declined to leave one");
+
+  // THE WHOLE TRANSACTION ROLLED BACK — including the retirement itself, which shared it.
+  assert.equal(await entryCountOf(client), before.entries,
+    "same_txn_retire_approve: no journal entry survives the refused commit");
+  assert.equal(await committedReceiptCountOf(client), before.receipts,
+    "same_txn_retire_approve: …and no committed operation receipt");
+  assert.equal(await assetCountOf(client), before.assets,
+    "same_txn_retire_approve: …and no register row — the birth trigger truly declined to insert one");
+  const activeAfter = (await profileRows(client))
+    .filter((p) => p.active && p.asset_account_code === COST);
+  assert.equal(activeAfter.length, 1,
+    "same_txn_retire_approve: the profile is untouched — its retirement rolled back WITH the refused entry");
+  assert.equal(activeAfter[0].id, activeBefore[0].id,
+    "same_txn_retire_approve: …the SAME row, never a phantom re-enrolment");
+
+  noteLane(
+    "same_txn_retire_approve: clara._tf_fa_acquisition_birth (fires first, alphabetically) read "
+    + "fp.active=false at COMMIT and declined to register the row; clara._tf_fa_movement_belt "
+    + "(fires second) still matched the closed approved_at interval at the equality instant, found "
+    + "no register act, and raised fa_belt_unregistered_movement — pinning the owner ruling "
+    + "(2026-09-18, #882) behaviourally, from scratch, on the production Work lane.");
 });
 
 // ===========================================================================================
