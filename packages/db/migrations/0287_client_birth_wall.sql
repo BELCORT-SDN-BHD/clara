@@ -33,13 +33,34 @@
 --     does NOT gain the arity-1 acknowledgement wall: see "WHY ARITY 1 IS NOT EXTENDED TO THE
 --     LEGACY DOOR" below.
 --
--- `clara.create_client(text,text)` IS DELIBERATELY LEFT UNTOUCHED — BODY AND GRANT BOTH — and
--- this is the one place this file departs from the brief's literal "no granted human role can
--- reach a client-minting verb that lacks the wall". See "WHY create_client IS NOT RE-POINTED"
--- below; `packages/db/tests/client-birth-wall.test.mjs`'s own
--- `p899.census.create_client_documented_exception` cell is the named, tested residual — the
--- estate's own convention (0219's header: "A residual nobody wrote down is a residual nobody
--- can close") applied to this file's one open gap.
+-- THE WALL IS SERIALISED, not merely checked. `_client_birth_core` takes a transaction-scoped
+-- advisory lock on (firm, name-family token) BEFORE it reads the candidates, because a read
+-- followed by an insert is a time-of-check/time-of-use window: two concurrent sessions each see
+-- the other's uncommitted client as absent, each clears the same arity-1 acknowledgement, and
+-- the firm ends with THREE same-family parties — a state this same door refuses to reach one
+-- caller at a time. MEASURED with two real connections (fix round 1, review finding
+-- W3L07-ADV-01); the cell is `p899.new_verb.concurrent_same_family_serialised`.
+--
+-- `p_identifier` IS A WALL INPUT, SO THE DOOR RECORDS IT. The read's second argument adds every
+-- `clara.client_identifiers` row matching (kind, value) to the candidate set, so a caller that
+-- supplies one is walled against identifier matches as well as name-family ones. §A therefore
+-- WRITES that identifier against the new client, under `clara.add_client_identifier`'s own
+-- normalisation: otherwise the argument would be a guard input the estate keeps no trace of —
+-- the wall a caller cleared would not hold for the next caller, and a face could wall WITH an
+-- identifier and then dispatch WITHOUT it and reach arity 0 (fix round 1, W3L07-ADV-06).
+--
+-- `clara.create_client(text,text)` KEEPS ITS BODY AND ITS GRANT — the one place this file
+-- departs from the brief's literal "no granted human role can reach a client-minting verb that
+-- lacks the wall", and an OPEN residual rather than a closed question. §C2 does give the brief's
+-- third answer for this verb, SUPERSEDED, in the only place a reader of the catalogue can see it
+-- (a `comment on function` naming the successor and saying the gap is still open); body and
+-- grant are pinned byte-for-byte by the prestate and the tail. See "WHY create_client IS NOT
+-- RE-POINTED" below; `packages/db/tests/client-birth-wall.test.mjs`'s own
+-- `p899.census.create_client_documented_exception` and
+-- `p899.census.create_client_residual_is_bounded` cells are the named, tested residual and its
+-- measured reach (superseded in the catalogue, called by no product tree) — the estate's own
+-- convention (0219's header: "A residual nobody wrote down is a residual nobody can close")
+-- applied to this file's one open gap.
 --
 -- =====================================================================================
 -- WHY ARITY 1 IS NOT EXTENDED TO THE LEGACY DOOR (`begin_client_onboarding`). The estate's own
@@ -55,10 +76,12 @@
 -- could never be satisfied through this door and arity 1 would become an unconditional refusal
 -- through it. MEASURED, not assumed: `packages/db/tests/rig-fixtures.mjs`'s `buildWorld()` —
 -- the whole estate's own shared fixture, read by dozens of battery files — creates TWO clients
--- in one firm (`${prefix}_A1`, `${prefix}_A2`) whose shared `SANDBOX_PREFIX` ("rig_",
--- `tests/fixtures/sandbox-marker.mjs`) is their common leading token, i.e. an arity-1 pair BY
--- CONSTRUCTION, every single run. An arity-1 wall on `begin_client_onboarding` would be
--- harmless there only because `buildWorld()` calls `create_client`, not
+-- in one firm (`${prefix}_A1`, `${prefix}_A2`) whose shared `SANDBOX_PREFIX`
+-- (`tests/fixtures/sandbox-marker.mjs` holds the one spelling; this file deliberately does NOT
+-- quote its value — `sandbox-marker.test.mjs`'s own sbm.3 census sweeps THIS tree and a
+-- migration that spelled the marker out would read as production branching on it) is their
+-- common leading token, i.e. an arity-1 pair BY CONSTRUCTION, every single run. An arity-1
+-- wall on `begin_client_onboarding` would be harmless there only because `buildWorld()` calls `create_client`, not
 -- `begin_client_onboarding` — but the SAME shared-prefix pattern recurs against
 -- `begin_client_onboarding` itself in `packages/db/tests/wave-b/wb-fixtures.mjs`'s
 -- `onboardingClient()` helper and its callers. Raising the wall to arity 1 on the legacy door
@@ -74,7 +97,7 @@
 -- counterparty in one firm through this door.
 --
 -- WHY create_client IS NOT RE-POINTED. The SAME `buildWorld()` fixture creates a THIRD
--- same-family ("rig_"-prefixed) client in firm A through `clara.create_client` the moment
+-- same-family (marker-prefixed — see above) client in firm A through `clara.create_client` the moment
 -- `packages/db/tests/wave-b/wb-fixtures.mjs`'s `buildWaveBWorld()` calls it again for its own
 -- `A3_archived` fixture (`buildWorld()` then `createClient({name: '${prefix}_A3_archived'})`),
 -- and `packages/db/tests/name-only-guard.test.mjs` (via `createClient()`, this estate's shared
@@ -209,6 +232,26 @@ begin
                                     'acknowledged_candidate', p_acknowledged_candidate)));
   if v_dedupe is not null then return v_dedupe; end if;
 
+  -- SERIALISE THE FAMILY FIRST. The wall below is a READ followed by an INSERT, so without a
+  -- lock it is a plain time-of-check/time-of-use window: two sessions asking about the SAME
+  -- family at the same time each see the other's row as absent (READ COMMITTED: an uncommitted
+  -- insert is invisible), each clears the same arity-1 acknowledgement, and the firm ends with
+  -- THREE same-family parties -- a state this very door refuses to reach one caller at a time.
+  -- MEASURED on this rig with two real connections before this line existed; the cell that
+  -- drove it is `p899.new_verb.concurrent_same_family_serialised`.
+  --
+  -- The idiom is the estate's own firm-scoped invariant guard (0006:952, 0007:1637, 0009, 0011,
+  -- 0015, 0016, 0017, 0022 all take `pg_advisory_xact_lock(<classid>, hashtext(<key>))`), at a
+  -- NEW classid of its own. The key is FIRM + FAMILY TOKEN, not the whole firm: two births of
+  -- unrelated names never wait on each other, and `clara.name_family_token` is the same
+  -- function `clara.name_family_candidates` groups by, so the lock covers exactly the set the
+  -- read is about to count. `coalesce(..., '')` because the token of a name with no
+  -- alphanumeric character at all is the empty string, never null, and a null key would silently
+  -- serialise nothing. Transaction-scoped: released at commit or rollback, never held by a
+  -- session that dropped its work, and re-entrant within one transaction.
+  perform pg_advisory_xact_lock(203005008,
+    hashtext(p_firm::text || ':' || coalesce(clara.name_family_token(p_name), '')));
+
   -- THE WALL. The SAME predicate clara.client_identity_candidates already publishes, called
   -- here rather than re-derived: an arity>=2 collision RAISES from inside that call (CLR10
   -- name_family_collision, the same name/arity/candidates detail the read itself answers with)
@@ -237,6 +280,22 @@ begin
   exception when unique_violation then
     raise exception 'a client with that name already exists' using errcode = 'CLR10';
   end;
+
+  -- THE IDENTIFIER THE WALL WAS ASKED ABOUT IS RECORDED, not merely consulted. Without this the
+  -- argument is a caller-SELECTABLE guard input that leaves no trace: a face could read the
+  -- candidates WITH an identifier, see the one client that already answers to it, then call this
+  -- door WITHOUT it, reach arity 0 and create silently -- and even the honest caller's own wall
+  -- would not hold for the NEXT caller, because nothing kept what it walled against. The shape
+  -- (column list, normalisation, `added_by`) is `clara.add_client_identifier`'s own, byte for
+  -- byte, so the read that matches on `value_normalized` matches rows written by either door.
+  -- No re-validation here: `clara.client_identity_candidates` above already refused a malformed
+  -- identifier or an unknown kind with its own typed CLR10, BEFORE anything was created.
+  if p_identifier is not null and p_identifier <> 'null'::jsonb
+     and nullif(btrim(coalesce(p_identifier ->> 'kind', '')), '') is not null then
+    insert into clara.client_identifiers(firm_id, client_id, kind, value_normalized, added_by)
+      values (p_firm, v_client, btrim(p_identifier ->> 'kind'),
+              lower(regexp_replace(btrim(p_identifier ->> 'value'), '\s+', '', 'g')), p_actor);
+  end if;
 
   insert into clara.onboarding_plans(firm_id, scope_kind, client_id, review_maker, reviewed_at, contributors)
     values (p_firm, 'client', v_client, p_actor, now(), array[p_actor])
@@ -288,6 +347,24 @@ begin
   return clara._client_birth_core(c.actor, c.firm, p_name, null, null,
     false, 'begin_client_onboarding', p_op_key);
 end $$;
+
+-- =====================================================================================
+-- §C2 -- clara.create_client, SUPERSEDED IN THE CATALOGUE. Body and grant both untouched (the
+-- prestate and the tail pin them byte-for-byte); this statement changes nothing a caller can
+-- reach, and it is the ONE fact about this verb every reader of pg_proc can see without going
+-- to find a migration header. The ticket's per-verb criterion offers three answers -- superseded,
+-- re-pointed, or grant withdrawn -- and the other two are measured unavailable in this ticket's
+-- scope (the header's "WHY create_client IS NOT RE-POINTED"), so this file gives the answer it
+-- can actually give and says exactly what is still open in the same sentence.
+-- =====================================================================================
+comment on function clara.create_client(text, text) is
+  '#899: SUPERSEDED by clara.open_client_onboarding, which is the client birth verb. This verb '
+  'has no product caller (swept: no apps/web or packages/runtime tree names it) and mints a '
+  'client with NO identity wall, so it is an OPEN residual, not a safe alternative: the '
+  'ticket''s "no granted human role can reach a client-minting verb that lacks the wall" is NOT '
+  'yet true while this verb keeps its clara_authenticated grant. Closing it needs the rig''s own '
+  'shared createClient() fixture and the RBAC cells that pin this verb as a human door moved '
+  'first -- see 0287_client_birth_wall.sql''s header. New callers use open_client_onboarding.';
 
 reset role;
 
@@ -379,6 +456,27 @@ begin
   end loop;
   if not has_function_privilege('clara_authenticated', 'clara.create_client(text,text)'::regprocedure, 'execute') then
     raise exception '#899 tail: clara.create_client lost its clara_authenticated grant -- this file must not touch it (see the header)' using errcode = 'CLR10';
+  end if;
+
+  -- (T.5b) THE CORE'S TWO GUARD MECHANISMS ARE IN THE BODY THAT RAN, and in the right order:
+  -- the family lock is taken BEFORE the candidate read (a lock after the check would serialise
+  -- nothing), and the identifier the wall was asked about is written where the read can find it.
+  select prosrc into v_posture from pg_proc
+   where oid = 'clara._client_birth_core(uuid,uuid,text,jsonb,uuid,boolean,text,text)'::regprocedure;
+  if position('pg_advisory_xact_lock' in v_posture) = 0
+     or position('name_family_token' in v_posture) = 0 then
+    raise exception '#899 tail: clara._client_birth_core does not serialise the family before its wall' using errcode = 'CLR10';
+  end if;
+  if position('pg_advisory_xact_lock' in v_posture) > position('clara.client_identity_candidates(' in v_posture) then
+    raise exception '#899 tail: clara._client_birth_core takes its family lock AFTER the candidate read -- that is the TOCTOU the lock exists to close' using errcode = 'CLR10';
+  end if;
+  if position('insert into clara.client_identifiers' in v_posture) = 0 then
+    raise exception '#899 tail: clara._client_birth_core does not record the identifier it walls against' using errcode = 'CLR10';
+  end if;
+
+  -- (T.5c) THE SUPERSESSION IS IN THE CATALOGUE (§C2), not only in this header.
+  if coalesce(obj_description('clara.create_client(text,text)'::regprocedure, 'pg_proc'), '') not like '%SUPERSEDED by clara.open_client_onboarding%' then
+    raise exception '#899 tail: clara.create_client carries no supersession comment -- §C2 did not run as written' using errcode = 'CLR10';
   end if;
 
   -- (T.5) THE FIVE ROLE-PRIVILEGE CENSUS 0103:1225-1239 PINS STAYS EMPTY. §A/§B/§C call

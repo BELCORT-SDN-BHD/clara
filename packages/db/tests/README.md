@@ -564,7 +564,7 @@ retired counterparty is inserted with both `merged_into` and `retired_at` set.
 
 ## `client-birth-wall.test.mjs` (0287, #899)
 
-Eleven cells over the two granted doors `0287_client_birth_wall.sql` wires to the shared, ungranted
+Fourteen cells over the two granted doors `0287_client_birth_wall.sql` wires to the shared, ungranted
 `clara._client_birth_core`, plus a live catalogue census. Frontier-gated on the live catalog through
 `client-birth-wall-preintegration-gate.mjs`: a package-wide run against a chain below 0287 SKIPS
 loudly, a focused run FAILS, and a PARTIAL cohort (some but not all of `_client_birth_core`,
@@ -576,15 +576,27 @@ skipping — the estate's "wholly present or wholly absent" rule.
   `client_identity_candidates` itself returns (AC1); arity 1 refuses without an acknowledgement and
   succeeds with the read's own candidate id, and a WRONG id refuses the same way as none at all
   (AC2); a same-op_key replay returns the byte-identical receipt exactly once; the admin floor
-  refuses a bookkeeper and a viewer.
+  refuses a bookkeeper and a viewer. Two more cells own the door's guarantees BEYOND one caller:
+  `identifier_is_recorded_not_only_consulted` proves the door STORES the identifier it walled
+  against (so the next caller's read matches it, and a malformed one refuses before anything is
+  created), and `concurrent_same_family_serialised` drives TWO real connections — session A holds
+  its birth open, session B blocks on the door's own family lock (proved from `pg_blocking_pids`,
+  never a sleep), and once A commits B meets the wall a sequential caller meets instead of minting
+  a third same-family client.
 - `p899.legacy.*` — `clara.begin_client_onboarding`, re-pointed: arity ≥ 2 now refuses (closing
   `client-onboarding-identity.test.mjs`'s own `p649.identity.direct_birth_residual`); arity 0 and
   arity 1 are unchanged from before 0287 — the deliberate scope boundary the migration's own header
   argues for, proved here rather than left assumed.
 - `p899.census.*` — a live, catalogue-derived sweep of every granted human/agent/wake-reachable
-  body that mints a `clara.clients` row (directly, or by delegating to `_client_birth_core`), naming
-  `clara.create_client` as the one documented, tested exception, plus a belt asserting
-  `_client_birth_core` itself holds no application-role grant.
+  body that mints a `clara.clients` row (directly, or by delegating to `_client_birth_core`), plus a
+  belt asserting `_client_birth_core` itself holds no application-role grant. **These cells BOUND
+  the one residual; they do not claim the ticket's census criterion is met, because it is not.**
+  `clara.create_client` is still granted and still unwalled, so the roster of unwalled granted
+  minters is asserted to be exactly `["create_client"]` — a new member is a regression and an empty
+  array means the residual was closed and both this census and the criterion should be rewritten.
+  `create_client_residual_is_bounded` then measures the reach: the catalogue comment marking the
+  verb superseded is live, no product tree calls it, and the single operator script that does runs
+  as the superuser rather than on the grant. See `packages/db/README.md`, "The client birth wall".
 
 ## Batteries with their own frontier gate
 

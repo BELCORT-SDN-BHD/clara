@@ -715,8 +715,13 @@ client onboarding plan's financial-year end onto `clara.clients` by calling
 
 [0287_client_birth_wall.sql](migrations/0287_client_birth_wall.sql) moves the name-collision wall
 0219 added from a READ a caller can skip to the DOOR that mints a `clara.clients` row, closing the
-residual 0219's own header named. Two of the two granted entrances the ticket's triage measured are
-addressed; the third (`create_client`) is a documented, tested exception — see below.
+residual 0219's own header named. The ticket's 2026-09-19 triage measured **two** still-open
+granted entrances: the command palette's dispatch to `begin_client_onboarding`, and
+`clara.create_client(text,text)`'s standing `clara_authenticated` grant. **One of the two is
+closed** (the palette, and with it the legacy door, at arity ≥ 2). **The other is still open**:
+`create_client` keeps its body and its grant, and 0287 marks it SUPERSEDED in the catalogue rather
+than closing it — so the ticket's "no granted human role can reach a client-minting verb that lacks
+the wall" is NOT yet true. What IS measured is how far that gap reaches; see below.
 
 `clara._client_birth_core(p_actor, p_firm, p_name, p_identifier, p_acknowledged_candidate,
 p_require_ack_at_one, p_fn, p_op_key)` — ungranted, `security definer`. The ONE body that performs
@@ -746,9 +751,13 @@ Two granted doors share this one core:
   party under one firm through this door, so the arity-≥-2 wall costs them nothing while the
   arity-1 boundary stays exactly where the owner's 2026-09-15 ruling put it.
 
-**`clara.create_client(text,text)` is deliberately left untouched — body and grant both — and is
-the one place 0287 departs from the brief's literal "no granted role reaches an unwalled
-client-minting verb".** `rig-fixtures.mjs`'s shared `buildWorld()` (read by dozens of battery
+**`clara.create_client(text,text)` keeps its body and its grant, and is the one place 0287
+departs from the brief's literal "no granted role reaches an unwalled client-minting verb". It is
+an OPEN residual, not a closed question.** 0287 §C2 does give the brief's third per-verb answer —
+SUPERSEDED — where a reader of the catalogue can see it: a `comment on function` naming
+`open_client_onboarding` as the successor and saying in the same sentence that the gap is still
+open. The comment is the only thing about this verb 0287 changes; the prestate and the tail pin its
+body and its grant byte-for-byte. `rig-fixtures.mjs`'s shared `buildWorld()` (read by dozens of battery
 files) and `wave-b/wb-fixtures.mjs`'s `buildWaveBWorld()` both construct a THIRD same-leading-token
 client in one firm through `create_client`, and `name-only-guard.test.mjs` constructs six more
 through the same shared JS fixture helper; re-pointing `create_client`'s body would turn all of
@@ -758,10 +767,31 @@ grant would meet the forty-eight-plus test files that call it through `rig-fixtu
 no product caller — this ticket's own triage measured that with a repo-wide grep. Closing this
 residual for real needs a dedicated migration of those call sites onto `open_client_onboarding` (or
 a rewrite of the fixture naming convention so it stops manufacturing same-family collisions by
-construction) first; `client-birth-wall.test.mjs`'s `p899.census.create_client_documented_exception`
-keeps the gap named and tested rather than silent, and the estate's own census
-(`p899.census.granted_client_minters_have_wall_except_create_client`) fails loudly the day another
-granted body joins it unremarked.
+construction) first.
+
+Three cells bound the gap rather than claiming it away.
+`p899.census.granted_client_minters_and_the_one_residual` sweeps the live catalogue and fails
+loudly the day a SECOND granted minter loses the wall — or the day the array empties, which would
+mean this section and the ticket's criterion both need rewriting.
+`p899.census.create_client_documented_exception` drives the residual so it is evidenced, not
+asserted. `p899.census.create_client_residual_is_bounded` proves the reach: the catalogue comment
+is live, **no product tree calls the verb at all** (`apps/web/app|components|lib` and every
+`packages/runtime` tree the operation census counts as production are swept and empty), and the one
+non-test caller anywhere — `scripts/onboard-rpr.mjs`, the beta onboarding operator — runs as the
+postgres superuser with a jwt GUC and never `SET ROLE`s to `clara_authenticated`, so it does not
+ride the grant this residual is about.
+
+**Two guarantees the core carries that the doors above do not state.** (1) The wall is
+SERIALISED: `_client_birth_core` takes `pg_advisory_xact_lock(203005008, hashtext(firm || ':' ||
+name_family_token(name)))` BEFORE the candidate read. A read followed by an insert is a
+time-of-check/time-of-use window — two concurrent sessions each see the other's uncommitted client
+as absent, each clears the same arity-1 acknowledgement, and the firm ends with three same-family
+parties, a state the door refuses to reach one caller at a time. Measured with two real
+connections; the cell is `p899.new_verb.concurrent_same_family_serialised`. The key is (firm,
+family), not the whole firm, so unrelated births never wait on each other. (2) `p_identifier` is
+RECORDED, not only consulted: the core writes it into `clara.client_identifiers` under
+`clara.add_client_identifier`'s own normalisation, so a wall a caller cleared with an identifier
+also holds for the next caller. Both are re-asserted structurally by 0287's own tail (T.5b).
 
 ## Storage grant/policy battery
 

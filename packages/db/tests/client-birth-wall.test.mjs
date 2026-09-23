@@ -10,11 +10,16 @@
 //     `client-onboarding-identity.test.mjs`'s own `p649.identity.direct_birth_residual`
 //     (`p899.legacy.*`). Arity 1 is DELIBERATELY UNCHANGED — 0287's own header measures why —
 //     and one cell here proves that boundary rather than leaving it assumed.
-//   * `p899.census.*` — a live, catalogue-derived sweep of every granted, client-minting body,
-//     naming `clara.create_client` as the ONE documented, tested exception (0287's header has
-//     the full evidence: re-pointing it would turn `buildWorld()`/`buildWaveBWorld()` and
-//     `name-only-guard.test.mjs` red for a fixture-naming coincidence unrelated to what any of
-//     them test).
+//   * `p899.census.*` — a live, catalogue-derived sweep of every granted, client-minting body.
+//     It BOUNDS the one residual rather than claiming it away: `clara.create_client` is still
+//     granted to `clara_authenticated` and still has no wall, so the ticket's "no granted human
+//     role can reach a client-minting verb that lacks the wall" is NOT satisfied by these cells
+//     and must not be read as satisfied. What they do prove is how far the residual reaches —
+//     it is SUPERSEDED in the catalogue, and no product surface (the browser trees, the runtime
+//     trees) calls it at all. 0287's header carries the evidence for why closing it needs an
+//     estate-wide fixture migration of its own: re-pointing or ungranting it would turn
+//     `buildWorld()`/`buildWaveBWorld()` and `name-only-guard.test.mjs` red for a fixture-naming
+//     coincidence unrelated to what any of them test.
 //
 // EVERY ASSERTION GOES THROUGH `humanQuery` — a real per-role session under real RLS. `rootQuery`
 // appears only to PLANT a fixture (client-onboarding-identity.test.mjs's own posture: going
@@ -23,12 +28,20 @@
 
 import { after, before, test } from "node:test";
 import { randomUUID } from "node:crypto";
+import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import {
   CLR, assertRaises, endPool, humanQuery, opk, rootQuery,
 } from "./rig-fixtures.mjs";
+// The two-session machinery (two dedicated pooled clients, a human session on each, and a block
+// PROVEN from pg_blocking_pids rather than a sleep) is REUSED from the estate's own helpers
+// module rather than copied a fourth time — it is a plain module of generic helpers, not a
+// battery's fixtures, and it imports nothing but rig-helpers.
+import { asHumanSession, twoSessions, waitBlockedByOrThrow } from "./binding-proposal-pr-1-helpers.mjs";
 
-const EXPECTED_CELLS = 11;
+const EXPECTED_CELLS = 14;
 let live = false;
 let executed = 0;
 
@@ -120,8 +133,9 @@ const addCounterparty = async (firm, client, name, createdBy) =>
 // ---------------------------------------------------------------------------
 
 const CANDIDATES = `select clara.client_identity_candidates(p_name => $1, p_identifier => $2::jsonb) as r`;
-const candidatesAs = (sub, name) =>
-  humanQuery(sub, CANDIDATES, [name, null]).then((r) => r.rows[0].r);
+const candidatesAs = (sub, name, identifier = null) =>
+  humanQuery(sub, CANDIDATES, [name, identifier === null ? null : JSON.stringify(identifier)])
+    .then((r) => r.rows[0].r);
 
 const openAs = (sub, name, { opKey = opk("p899_open"), identifier = null, ack = null } = {}) =>
   humanQuery(sub,
@@ -228,6 +242,96 @@ cell("p899.new_verb.replay — same-op_key retry replays the receipt byte-identi
   assert.equal(await clientCount(w.firm), 1, "exactly one client, not two");
 });
 
+cell("p899.new_verb.identifier_is_recorded_not_only_consulted — p_identifier is a WALL INPUT, so the door stores it: the next caller quoting the same identifier meets the client this one created instead of an arity the first caller's argument silently dropped", async () => {
+  const w = await firmWorld("ident");
+  // The estate records three identifier kinds (clara.client_identity_candidates' own list); the
+  // value carries whitespace and upper case on purpose, because the store normalises both away.
+  const identifier = { kind: "tin", value: `C ${w.suffix} 42 X` };
+  const normalised = `c${w.suffix}42x`; // written out by hand, not re-derived from the door
+
+  const first = await openAs(w.admin, `Kinta Mining ${w.suffix}`, { identifier });
+  assert.ok(first.client_id, "arity 0 with an identifier still proceeds");
+
+  const stored = await rootQuery(
+    "select kind, value_normalized, firm_id, added_by from clara.client_identifiers where client_id = $1",
+    [first.client_id]);
+  assert.equal(stored.rowCount, 1, "the identifier the wall was asked about is RECORDED against the new client");
+  assert.equal(stored.rows[0].kind, "tin");
+  assert.equal(stored.rows[0].value_normalized, normalised,
+    "stored under clara.add_client_identifier's own normalisation, so the read that walls on it can match");
+  assert.equal(stored.rows[0].firm_id, w.firm);
+  assert.equal(stored.rows[0].added_by, w.admin);
+
+  // THE POINT: the read now answers for that identifier, under a COMPLETELY different name...
+  const answer = await candidatesAs(w.admin, `Perak Quarry ${w.suffix}`, identifier);
+  assert.equal(answer.arity, 1);
+  assert.equal(answer.candidates[0].id, first.client_id);
+  assert.equal(answer.candidates[0].match_reason, "identifier");
+
+  // ...and the door refuses that second birth until the candidate is acknowledged.
+  const err = await assertRaises(CLR.badRequest,
+    () => openAs(w.admin, `Perak Quarry ${w.suffix}`, { identifier }),
+    "a second birth quoting an identifier already recorded in this firm");
+  assert.equal(reasonOf(err), "identity_acknowledgement_required");
+  assert.equal(detailOf(err).candidates[0].id, first.client_id);
+
+  // A MALFORMED identifier is refused by the wall BEFORE anything is created — the door never
+  // stores what it did not wall against.
+  const before_ = await clientCount(w.firm);
+  const bad = await assertRaises(CLR.badRequest,
+    () => openAs(w.admin, `Pahang Estates ${w.suffix}`, { identifier: { kind: "passport", value: "A1" } }),
+    "an identifier kind this estate does not record");
+  assert.equal(reasonOf(bad), "identifier_kind_unknown");
+  assert.equal(await clientCount(w.firm), before_, "nothing born on a refused identifier");
+});
+
+cell("p899.new_verb.concurrent_same_family_serialised — the wall is not a TOCTOU: a SECOND session racing the same family blocks at the door's own lock, then meets the wall the sequential caller meets, instead of minting a third same-family client behind the first one's uncommitted insert", async () => {
+  const w = await firmWorld("race");
+  // One same-family party already exists, so BOTH racers read arity 1 and BOTH acknowledge it —
+  // the shape an adversarial review drove to three same-family clients in one firm before this
+  // door took a lock. The leading token (`clara.name_family_token` = the first token of the
+  // normalised name) is unique to this cell's own run, so no sibling cell shares the family.
+  const token = `Rentak${w.suffix.replace(/[^a-z0-9]/gi, "")}`;
+  const only = await addClient(w.firm, `${token} Public Advisory`, "onboarding");
+  const before_ = await clientCount(w.firm);
+
+  const outcome = await twoSessions(async (cA, cB) => {
+    const pidA = await asHumanSession(cA, w.admin);
+    const pidB = await asHumanSession(cB, w.admin);
+    await cA.query("begin");
+    await cB.query("begin");
+
+    // A creates, INSIDE an open transaction: its client row is invisible to B's snapshot, which
+    // is exactly the window the read-then-insert pair used to leave open.
+    const a = (await cA.query(
+      "select clara.open_client_onboarding(p_name => $1, p_op_key => $2, p_identifier => null, p_acknowledged_candidate => $3::uuid) as r",
+      [`${token} Ventures Alpha`, opk("p899_raceA"), only])).rows[0].r;
+    assert.ok(a.client_id, "session A's birth succeeds");
+
+    // B asks the same question of the same family while A still holds.
+    const racing = cB.query(
+      "select clara.open_client_onboarding(p_name => $1, p_op_key => $2, p_identifier => null, p_acknowledged_candidate => $3::uuid) as r",
+      [`${token} Ventures Beta`, opk("p899_raceB"), only])
+      .then((r) => ({ receipt: r.rows[0].r, error: null }), (error) => ({ receipt: null, error }));
+
+    // PROVEN from pg_stat_activity, never from a sleep: B is waiting on a LOCK held by A.
+    await waitBlockedByOrThrow(pidB, pidA);
+
+    await cA.query("commit");
+    const settled = await racing;
+    await cB.query("rollback");
+    return settled;
+  });
+
+  assert.ok(outcome.error, "the second racer must not create silently behind the first one's insert");
+  assert.equal(outcome.error.code, CLR.badRequest);
+  assert.equal(reasonOf(outcome.error), "name_family_collision",
+    "once serialised, B sees the two parties A left behind and meets the SAME wall a sequential caller meets");
+  assert.equal(detailOf(outcome.error).arity, 2);
+  assert.equal(await clientCount(w.firm), before_ + 1,
+    "exactly ONE of the two racers was born — never the three-same-family state the door refuses sequentially");
+});
+
 cell("p899.new_verb.floor — admin floor, matching every other client-minting body", async () => {
   const w = await firmWorld("floor");
   await assertRaises(CLR.authz, () => openAs(w.bookkeeper, `Barat Trading ${w.suffix}`), "bookkeeper");
@@ -272,7 +376,7 @@ cell("p899.legacy.arity_zero_unchanged — begin_client_onboarding's own ordinar
 // The census
 // ===========================================================================
 
-cell("p899.census.granted_client_minters_have_wall_except_create_client — a live, catalogue-derived sweep: every granted human-reachable body that mints a clara.clients row, DIRECTLY or by delegating to clara._client_birth_core, calls the wall, except the one documented exception", async () => {
+cell("p899.census.granted_client_minters_and_the_one_residual — a live, catalogue-derived sweep of every granted human-reachable body that mints a clara.clients row, DIRECTLY or by delegating to clara._client_birth_core. It BOUNDS the residual; it does NOT claim the ticket's no-unwalled-granted-minter criterion is met, because it is not", async () => {
   // TWO SHAPES OF MINTER, because §A of 0287 moved the literal `insert into clara.clients(` out
   // of every granted door and into one ungranted shared core: a census that only grepped granted
   // bodies for that literal text (0017's own historical tail did exactly that) would now see
@@ -317,8 +421,80 @@ cell("p899.census.granted_client_minters_have_wall_except_create_client — a li
   // 0287's tail — calls `clara.client_identity_candidates`).
   const hasWall = (norm) => norm.includes("client_identity_candidates(") || norm.includes("_client_birth_core(");
   const unwalled = [...new Set(r.rows.filter((x) => !hasWall(x.norm)).map((x) => x.proname))].sort();
+  // THE RESIDUAL, STATED AS A RESIDUAL. This assertion does not say the ticket's census
+  // criterion holds -- it says the gap is exactly one named body and cannot grow unnoticed. The
+  // criterion itself ("no granted human role can reach a client-minting verb that lacks the
+  // wall") is OPEN while this array is non-empty; the next two cells bound how far it reaches.
   assert.deepEqual(unwalled, ["create_client"],
-    `expected create_client as the ONLY granted client-minting body without the wall (got ${JSON.stringify(unwalled)}) -- see 0287's header for why it is the one documented exception`);
+    `the set of granted client-minting bodies WITHOUT the wall changed (got ${JSON.stringify(unwalled)}). `
+    + "It must be exactly the one open residual 0287's header measures -- a NEW member is a regression, "
+    + "and an EMPTY array means the residual was finally closed, so this census and the ticket's own "
+    + "acceptance criterion should both be rewritten rather than left asserting a gap that no longer exists");
+});
+
+// The trees a browser or the runtime actually ships. Same "production" the operation census and
+// sandbox-marker.test.mjs mean (RUNTIME_ROOTS in scripts/operation-census/scope.mjs), plus
+// apps/web/components, which is production the other two sweep under different names.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(HERE, "..", "..", "..");
+const PRODUCT_TREES = [
+  "apps/web/app", "apps/web/components", "apps/web/lib",
+  "packages/runtime/lib", "packages/runtime/plugins", "packages/runtime/scripts",
+  "packages/runtime/src", "packages/runtime/workflows",
+];
+const SWEEP_EXTENSIONS = [".sql", ".ts", ".tsx", ".mts", ".mjs", ".js", ".cjs"];
+const SKIP_DIRS = new Set(["node_modules", ".next", ".output", ".nitro", "dist", "coverage", ".wrangler", ".open-next"]);
+
+/** Every line under `root` naming `pattern`, as `path:line`. A test file never reaches here:
+ *  none of PRODUCT_TREES is a test tree, and `.test.` files inside them are excluded by name. */
+function sweepFor(root, pattern) {
+  const abs = join(REPO_ROOT, root);
+  const hits = [];
+  if (!existsSync(abs) || !statSync(abs).isDirectory()) return hits;
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      if (entry.name.startsWith(".")) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) { if (!SKIP_DIRS.has(entry.name)) walk(full); continue; }
+      if (!SWEEP_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) continue;
+      if (/\.(test|spec)\./.test(entry.name)) continue;
+      const rel = relative(REPO_ROOT, full).split(sep).join("/");
+      readFileSync(full, "utf8").split("\n").forEach((line, i) => {
+        if (pattern.test(line)) hits.push(`${rel}:${i + 1}  ${line.trim().slice(0, 100)}`);
+      });
+    }
+  };
+  walk(abs);
+  return hits;
+}
+
+cell("p899.census.create_client_residual_is_bounded — the one unwalled granted minter is SUPERSEDED in the live catalogue and reachable from no product surface: the gap the ticket's census criterion names is open, but it ends at the rig and one superuser operator script", async () => {
+  // (a) THE CATALOGUE SAYS IT, not only a migration header a reader must go and find. A comment
+  // is the one statement about a function every client of pg_proc can read.
+  const comment = (await rootQuery(
+    "select obj_description('clara.create_client(text,text)'::regprocedure, 'pg_proc') as c")).rows[0].c;
+  assert.ok(comment, "clara.create_client carries no catalogue comment at all");
+  for (const token of ["superseded", "open_client_onboarding", "#899"]) {
+    assert.ok(comment.toLowerCase().includes(token.toLowerCase()),
+      `clara.create_client's comment must name ${token} -- a residual nobody wrote down is a residual nobody can close (got: ${JSON.stringify(comment)})`);
+  }
+
+  // (b) NO PRODUCT SURFACE CALLS IT. The browser trees and every runtime tree the operation
+  // census counts as a production call site are swept for the name itself.
+  const productHits = PRODUCT_TREES.flatMap((root) => sweepFor(root, /\bcreate_client\b/));
+  assert.deepEqual(productHits, [],
+    "a product surface reaches clara.create_client -- the residual is no longer confined to the rig, "
+    + "and this ticket's wall can be walked around from a browser or the runtime");
+
+  // (c) THE ONE NON-TEST CALLER ANYWHERE is the beta onboarding operator script, and it does NOT
+  // ride the clara_authenticated grant: it runs as the postgres superuser with a jwt GUC (its own
+  // "HUMAN-CONTEXT IDIOM" header). So withdrawing that grant would not break it -- what would
+  // break is the rig's own shared fixture and the RBAC cells that pin create_client as a human
+  // door, which is why closing this residual needs a migration of those call sites first.
+  const operator = readFileSync(join(REPO_ROOT, "packages/db/scripts/onboard-rpr.mjs"), "utf8");
+  assert.ok(/clara\.create_client\(/.test(operator), "the operator script no longer calls create_client -- re-derive this census");
+  assert.equal(/set\s+role\s+clara_authenticated/.test(operator), false,
+    "the operator script now SET ROLEs to clara_authenticated, so it would depend on the very grant this residual is about");
 });
 
 cell("p899.census.create_client_documented_exception — the residual, named and evidenced rather than silent: create_client still creates without the wall, and buildWorld()'s own two-same-family-client shape is why 0287 does not touch it", async () => {
