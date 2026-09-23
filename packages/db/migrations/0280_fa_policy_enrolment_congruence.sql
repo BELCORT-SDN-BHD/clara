@@ -40,9 +40,15 @@
 --
 -- WHAT THIS FILE IS. Two `create or replace function` statements -- the SAME two bodies 0277 §E
 -- and §E2 recut, taken from 0277 byte for byte and changed in exactly ONE line each (the
--- policy-covered branch's condition) plus the comment that names the change -- and one accreted
--- catalog comment. It creates no relation, mints no function, moves no grant and adds no role,
--- so it owes no rig-meta cohort (0278 made the same claim for the same reason).
+-- policy-covered branch's condition), plus the in-body comments that name the change -- and one
+-- accreted catalog comment. It creates no relation, mints no function, moves no grant and adds no
+-- role, so it owes no rig-meta cohort (0278 made the same claim for the same reason).
+--
+-- ONE OTHER PROSE CORRECTION RIDES HERE (SPEC-932-2, minor, same review). 0277's own covered-
+-- branch comment claimed the policy's `effective_from` "only gates WHICH acquisitions the policy
+-- reaches"; the lookup filters on `active` alone and nothing anywhere reads that column for a
+-- decision, so the code and its own comment disagreed about a dated column. §B now says what is
+-- true. No behaviour moves with it.
 --
 -- WHY IT IS A SEPARATE FILE AND NOT AN EDIT TO 0277. 0278's prestate pins 0277's post-image of
 -- `clara._tf_fa_acquisition_birth` by `sha256(prosrc)` and accretes onto its 842-character
@@ -201,8 +207,17 @@ begin
     if v_pol.id is not null and not (l.accum_code is null and v_pol.method <> 'none') then
       -- POLICY-COVERED: the row is born COMPLETE, never "particulars pending". The start date is
       -- the ACQUISITION'S OWN posting date (owner ruling 2026-09-18) — never today's date, and
-      -- never the policy's own effective_from, which only gates WHICH acquisitions the policy
-      -- reaches. Stated particulars always win: there is today no mechanism for an acquisition
+      -- never the policy's own effective_from.
+      -- #932 FIX ROUND (0280), SPEC-932-2: 0277's own words here were "effective_from ... only
+      -- gates WHICH acquisitions the policy reaches", and that was never true of the code
+      -- underneath them — this lookup filters on `active` alone, and no consumer in packages/db
+      -- or apps/web reads effective_from for any decision. It is a RECORDED fact (when the person
+      -- says the policy took effect), carried on the row and shown in the register, and it gates
+      -- NOTHING: the owner's 2026-09-18 ruling that "changing a policy affects later acquisitions
+      -- only" is expressed by the active flag alone, which is why the column was never needed in
+      -- the predicate. A later ticket that wants a genuinely dated policy must change this
+      -- lookup; until it does, the code and this comment agree.
+      -- Stated particulars always win: there is today no mechanism for an acquisition
       -- entry itself to carry particulars at posting time (this file's header), so there is
       -- nothing here that could ever override one.
       v_method := v_pol.method; v_life := v_pol.useful_life_months; v_rate := v_pol.rate_bps;
@@ -741,7 +756,9 @@ begin
   select p.prosrc into v_src from pg_proc p where p.oid = 'clara._tf_fa_acquisition_birth()'::regprocedure;
   for v_pin in select * from (values
       ($$if v_pol.id is not null and not (l.accum_code is null and v_pol.method <> 'none') then$$, 1),
-      ('#932 FIX ROUND (0280)', 1),
+      -- TWICE in this body: once on the guard itself, once on the SPEC-932-2 prose correction
+      -- inside the covered branch (the header says why both ride here).
+      ('#932 FIX ROUND (0280)', 2),
       ('from clara.fa_account_depreciation_policies', 1),
       ('insert into clara.fixed_assets(', 1),
       ('on conflict (acquisition_line_id) do nothing', 1),

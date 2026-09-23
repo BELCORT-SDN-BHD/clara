@@ -39,6 +39,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   gate932, gate932c, p932Client, setFaPolicy, retireFaPolicy, policyRows, activePolicyRow, FA_POLICY_INVALID,
   rootQuery, noteLane, endPool, printLaneNotes, printSkipCount, x41EnsureReady, skip41,
@@ -46,6 +47,9 @@ import {
   refuses, mon, dayIn, liveAuthority, drainDue, chargeRows, upsertFaProfile,
   COST, LAND,
 } from "./fa-depreciation-policy-fixtures.mjs";
+import {
+  gateWorkLane, armedAcquisition, postAcquisition, assetForEntry, acqBasis, acqWorld,
+} from "./fixed-asset-acquisition-fixtures.mjs";
 
 let live = false;
 let w = null;
@@ -303,6 +307,90 @@ test("p932.drift a policy set against a DEPRECIABLE enrolment stops applying the
   assert.deepEqual(await chargeRows(asset.id), [],
     "nothing was charged against an asset nobody has completed");
   noteLane(`p932.drift: ${runs.length} period(s) ran with no 23502 — the stale policy was declined at birth, not carried into a journal line`);
+});
+
+// ===========================================================================================
+// p932.birth.work_lane — AC4's OTHER HALF: "born complete with NO QUESTION". The register row's
+// completeness is a database fact and is asserted above; whether a Work QUESTION opens is a
+// RUNTIME decision, taken in `claraWork.v4`/`v5` (FROZEN) on the result of
+// `loadPendingFixedAssetStepV4`. That step cannot call `clara._fa_particulars_complete` (0041
+// leaves it ungranted), so it carries its OWN inline restatement of the same four column tests —
+// and nothing had ever bound the two together. This cell reads the runtime's predicate OUT OF THE
+// FROZEN FILE (never retyped: a copy would prove only that the copy agrees with itself) and runs
+// it against a row born through the real Work-lane door, with an UNCOVERED acquisition beside it
+// as the vacuity control.
+// ===========================================================================================
+
+/** `loadPendingFixedAssetStepV4`'s own discovery query, sliced out of
+ *  `packages/runtime/workflows/claraWork.v4.impl.ts` at test time. Two bind parameters,
+ *  `$1 = client_id` and `$2 = acquisition_entry_id`, exactly as the step passes them. */
+function runtimePendingAssetSql() {
+  const src = readFileSync(
+    new URL("../../runtime/workflows/claraWork.v4.impl.ts", import.meta.url), "utf8");
+  const open = src.indexOf("`select fa.id, coalesce(fa.description");
+  assert.ok(open > 0,
+    "the runtime's pending-fixed-asset discovery query could not be found in claraWork.v4.impl.ts — "
+    + "if it moved, this cell must follow it rather than be deleted");
+  const close = src.indexOf("`", open + 1);
+  assert.ok(close > open, "the discovery query's template literal is unterminated");
+  const sql = src.slice(open + 1, close);
+  for (const marker of ["from clara.fixed_assets fa", "fa.acquisition_entry_id = $2::uuid",
+    "fa.depreciation_start_date is not null", "fa.depreciation_method is not null"]) {
+    assert.ok(sql.includes(marker),
+      `the sliced query is not the runtime's discovery predicate (missing ${JSON.stringify(marker)})`);
+  }
+  return sql;
+}
+
+test("p932.birth.work_lane a policy-covered acquisition posted through clara.wake_record_journal_entry is born COMPLETE, and the RUNTIME's own pending-asset discovery predicate — read out of the frozen workflow, never retyped — selects NOTHING for that entry, so no Work question opens", async (t) => {
+  if (await shut(t)) return;
+  if (await gateWorkLane(t)) return;
+  await acqWorld();
+  const sql = runtimePendingAssetSql();
+
+  // (a) THE CONTROL, FIRST. An account with NO policy births the pending row, and the runtime's
+  // predicate FINDS it — so an empty result below means "complete", never "this cell asks the
+  // wrong question".
+  const bare = await p932Client("work_lane_uncovered");
+  const a0 = await armedAcquisition({ client: bare, basis: acqBasis({ cents: 480_000 }) });
+  const out0 = await postAcquisition(a0);
+  assert.equal(out0.posted, true, "the control acquisition posted through the Work lane");
+  const born0 = await assetForEntry(out0.entry_id);
+  assert.equal(born0.length, 1);
+  assert.equal(born0[0].depreciation_start_date, null, "…and it is the pre-0277 pending row");
+  const found0 = await rootQuery(sql, [bare, out0.entry_id]);
+  assert.equal(found0.rows.length, 1,
+    "the runtime's discovery predicate FINDS the uncovered row — this is the question #932 exists to close");
+  assert.equal(found0.rows[0].id, born0[0].id);
+
+  // (b) THE SUBJECT. The same door, the same lane, with a live policy on the cost account.
+  const client = await p932Client("work_lane_covered");
+  const pol = await setFaPolicy(w.users.alice, {
+    client, method: "straight_line", usefulLifeMonths: 60, residualCents: 0, reason: "p932 work lane",
+  });
+  const a = await armedAcquisition({ client, basis: acqBasis({ cents: 480_000 }) });
+  const out = await postAcquisition(a);
+  assert.equal(out.posted, true, "the production command POSTED");
+
+  const born = await assetForEntry(out.entry_id);
+  assert.equal(born.length, 1, "exactly ONE register row, keyed to the approving entry");
+  assert.equal(born[0].depreciation_method, "straight_line");
+  assert.equal(born[0].useful_life_months, 60);
+  assert.equal(String(born[0].depreciation_start_date).slice(0, 10), a.basis.posting_date,
+    "the start date is the ACQUISITION's own posting date");
+  assert.equal(born[0].depreciation_policy_id, pol.policy_id);
+
+  const json = await rootQuery(
+    "select clara._fa_asset_json(id, current_date) as j from clara.fixed_assets where id = $1",
+    [born[0].id]);
+  assert.equal(json.rows[0].j.particulars_complete, true,
+    "clara._fa_particulars_complete — the ESTATE's predicate — reports the row complete");
+
+  const found = await rootQuery(sql, [client, out.entry_id]);
+  assert.deepEqual(found.rows, [],
+    "…and the RUNTIME's own predicate, which is where claraWork decides whether to open the "
+    + "particulars question, finds nothing: AC4's 'no question' is MEASURED, not inferred");
+  noteLane("p932.birth.work_lane: the runtime's inline restatement of clara._fa_particulars_complete and the estate's own function agree on a policy-born row (empty) and on an uncovered one (one row), driven through clara.wake_record_journal_entry");
 });
 
 // ===========================================================================================
