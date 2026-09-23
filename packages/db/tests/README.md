@@ -175,6 +175,27 @@ bare `node --test`, and four d-b2 cells plus one d-b0 cell died loudly on that s
 run 35893727271). A gate never turns a PASSING cell into a skip: its flag is read only on the
 branch where the premise is missing, which is a branch that fails without it.
 
+**Every run in that leg is bounded, and no bound lives in the file it bounds (#1041).** Preloading
+the chain buys the sweep the right to stand a cell down, so each of the leg's three runs declares
+what it expects to see:
+
+| the run | its floor | its skip bound | declared in |
+|---|---|---|---|
+| the slice list (step 3) | `#!cells-floor:` | `#!skips-max:` | `split-lists/test-list-d-bN.txt` |
+| the cross-slice contract roster (3c) | `#!cells-floor:` | `#!skips-max-d-bN:`, one per frontier | `split-lists/test-list-contracts.txt` |
+| the slice's isolated deploy drill (4) | `#!drill-cells-floor:` | `#!drill-skips-max:` (0) | `split-lists/test-list-d-bN.txt` |
+
+The floor is `pass + skip` — the cells the run REPORTS — because a lawfully gated cell is not a
+deleted one; `fail = 0` keeps its own line. The roster's skip bound is per frontier because a
+contract's arms go live as the frontier rises, so one number would bound only the lowest. The
+drill's bound is 0 and sits in the SLICE'S LIST rather than in the drill, for the same reason every
+floor does: a bound a deletion can edit in the same hunk bounds nothing. The drill's 0 rests on a
+census — `skipUnlessReset` is the only stand-down any of the four drills carries, and step (4) is
+the one place that gate is granted. `ci-frontier-leg-contract.test.mjs` holds all of it: the
+declarations, the drill floor against the drill's own cell count, and the action steps that read
+them; `partition-total` refuses a missing declaration on the PR itself, days before anyone
+dispatches the legs.
+
 **A fixture that runs at two frontiers is not a gate.** A gate lets a cell stand down; a
 FRONTIER-COMPAT fixture keeps the cell running on both sides of the migration that changed a
 door's grammar. `fa-authority-sign-compat.mjs` holds both of the x41 rig's:

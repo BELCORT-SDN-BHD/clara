@@ -32,6 +32,7 @@ const TESTS_DIR = fileURLToPath(new URL(".", import.meta.url));
 const DB_PKG = path.join(TESTS_DIR, "..");
 const REPO_ROOT = path.join(DB_PKG, "..", "..");
 const FRONTIER_ACTION = path.join(REPO_ROOT, ".github", "actions", "frontier-leg", "action.yml");
+const TOTAL_ACTION = path.join(REPO_ROOT, ".github", "actions", "partition-total", "action.yml");
 
 test("p1041.gates.script scripts/print-gate-chain.mjs prints exactly the preintegration gates that are ON DISK, one --import each", () => {
   const printed = execFileSync(process.execPath, [path.join(DB_PKG, "scripts", "print-gate-chain.mjs")],
@@ -106,4 +107,149 @@ test("p1041.floor.action the frontier leg reads both halves and counts SKIPPED c
     + "which is what a preloaded gate chain produces at a frontier");
   assert.match(yaml, /# skipped /,
     "the leg must read the run's OWN skipped count off the TAP summary to compare either of them");
+});
+
+// THE TWO STEPS THE FLOOR DID NOT REACH [#1041, review SPEC-1041-B].
+//
+// The gate chain above is preloaded into THREE `node --test` invocations, and only the first —
+// the slice list — carried a floor and a skip bound. The other two ran on nothing but `fail = 0`
+// (the roster) and node's own exit code (the isolated drill), so a gate module that stood one of
+// their cells down would have made them green with less measured: exactly the silent rot the
+// floor exists to close, in the two steps the gates newly reach.
+//
+// WHERE EACH BOUND IS DECLARED. Never in the file it bounds — a floor a deletion can edit in the
+// same hunk bounds nothing. The roster's own file carries its floor, and each slice list carries
+// its drill's, which is the slice's own declaration file and is already the thing
+// `partition-total` holds every slice to.
+//
+// THE ROSTER'S SKIP BOUND IS PER-FRONTIER, and that is the whole point: a contract's arms go live
+// as the frontier rises, so ONE number would be the lowest frontier's and would bound nothing at
+// the other three. MEASURED on the lane-07 cluster, 2026-09-24, one throwaway database per
+// frontier (0001..0042/0043/0044/0045, gate chain preloaded, --test-concurrency=1):
+//   d-b0 (0042): 12 cells · 4 pass · 8 skip      d-b3 (0044): 12 cells · 8 pass · 4 skip
+//   d-b1 (0043): 12 cells · 6 pass · 6 skip      d-b2 (0045): 12 cells · 8 pass · 4 skip
+// Twelve cells at EVERY frontier — which is why a cell FLOOR is one number while the skip bound
+// is four. (The roster's own header used to say a floor "would be a lie at three frontiers out of
+// four": true of the PASS count it was written about, and the same conflation #1041 took out of
+// the slice lists.)
+
+const SLICES = ["d-b0", "d-b1", "d-b3", "d-b2"];
+
+test("p1041.roster.floor the cross-slice contract roster declares a cell floor and its own PER-FRONTIER skip bound", () => {
+  const text = readFileSync(path.join(TESTS_DIR, "split-lists", "test-list-contracts.txt"), "utf8");
+  const floor = /^#!cells-floor:\s*(\d+)\s*$/m.exec(text);
+  assert.ok(floor, "test-list-contracts.txt declares no '#!cells-floor:' — the roster step asserted only fail=0, so "
+    + "a contract cell that a preloaded gate stands down left the step green with less measured");
+  for (const slice of SLICES) {
+    const bound = new RegExp(String.raw`^#!skips-max-${slice}:\s*(\d+)\s*$`, "m").exec(text);
+    assert.ok(bound, `test-list-contracts.txt declares no '#!skips-max-${slice}:' — every frontier leg runs this `
+      + "roster, so every frontier needs its own measured bound");
+    assert.ok(Number(bound[1]) < Number(floor[1]),
+      `the ${slice} bound admits ${bound[1]} of a ${floor[1]}-cell floor — a bound that admits the whole roster bounds nothing`);
+  }
+});
+
+/** One step's own `run:` block, cut out of the composite action by the step's `- name:` line, so a
+ *  cell about the ROSTER step cannot be satisfied by what the SLICE LIST step does. */
+function stepBlock(yaml, nameFragment) {
+  const start = yaml.indexOf(`- name: ${nameFragment}`);
+  assert.ok(start > 0, `.github/actions/frontier-leg has no step named ${nameFragment}`);
+  const next = yaml.indexOf("\n    - name: ", start + 1);
+  return yaml.slice(start, next === -1 ? yaml.length : next);
+}
+
+test("p1041.roster.action the roster step enforces its OWN floor, its own slice's skip bound and fail=0", () => {
+  const yaml = readFileSync(FRONTIER_ACTION, "utf8");
+  const step = stepBlock(yaml, "Run the cross-slice contract roster");
+  assert.match(step, /#!cells-floor:/,
+    "the roster step runs the whole roster with the gate chain preloaded and asserted only fail=0 — a cell a gate "
+    + "stands down was invisible to it");
+  assert.match(step, /#!skips-max-\$\{\{ inputs\.slice \}\}:/,
+    "the roster's skip bound is PER-FRONTIER, so the step must read the bound for ITS OWN slice, not a shared one");
+  assert.match(step, /# skipped /, "…which it can only compare against the run's own skipped count");
+  assert.match(step, /CELL FLOOR BREACHED|SKIP BOUND BREACHED/, "and it must refuse by name when either bound is breached");
+});
+
+// THE ISOLATED DRILL'S OWN BOUND [#1041, review SPEC-1041-B]. Step (4) runs the slice's deploy
+// drill ALONE, in its own throwaway database, with the reset gate GRANTED — and asserted nothing
+// beyond node's exit code. The drill is excluded from the file-granular totality gate by design
+// (`partition-total`: "each runs ALONE in the frontier job, never in a list"), so a deleted drill
+// cell was invisible to every gate this repo has, and since #1041 the step also preloads the gate
+// chain, which can stand a cell DOWN rather than red.
+//
+// THE BOUND LIVES IN THE SLICE'S LIST, not in the drill: a floor a deletion can edit in the same
+// hunk bounds nothing. MEASURED on the lane-07 cluster, 2026-09-24, each drill run at its own
+// frontier with the gate chain preloaded and the reset gate WITHHELD — which is the state in which
+// every cell reports and skips, so the run's own `# tests` line is the cell count:
+//   x42-0042-b0-upgrade: 3 cells      x42-0044-b3-upgrade: 2 cells
+//   x42-0043-b1-upgrade: 1 cell       x42-0045-b2-upgrade: 1 cell
+// `#!drill-skips-max:` is 0 for all four, and that is not a guess: the ONLY skip any of these four
+// files carries is `skipUnlessReset` (x42-split-upgrade-kit.mjs — the census below holds them to
+// it), and step (4) is the one place that gate is granted. A drill cell that skips THERE is a cell
+// that stopped asserting.
+
+const DRILL_FLOORS = { "d-b0": 3, "d-b1": 1, "d-b3": 2, "d-b2": 1 };
+
+test("p1041.drill.floor every slice list declares its drill's cell floor and skip bound, and the floor is the drill's own cell count", () => {
+  const dir = path.join(TESTS_DIR, "split-lists");
+  for (const slice of SLICES) {
+    const text = readFileSync(path.join(dir, `test-list-${slice}.txt`), "utf8");
+    const floor = /^#!drill-cells-floor:\s*(\d+)\s*$/m.exec(text);
+    const skips = /^#!drill-skips-max:\s*(\d+)\s*$/m.exec(text);
+    assert.ok(floor, `test-list-${slice}.txt declares no '#!drill-cells-floor:' — the isolated drill step asserted `
+      + "nothing but an exit code, and no other gate in this repo can see a cell deleted inside a drill");
+    assert.ok(skips, `test-list-${slice}.txt declares no '#!drill-skips-max:'`);
+    // The drill is found the way the leg finds it: by dbtag, number-agnostic (a merge-time renumber
+    // renames the file).
+    const dbtag = slice.replace(/^d-/, "");
+    const drills = readdirSync(TESTS_DIR)
+      .filter((f) => new RegExp(String.raw`^x42-\d{4}-${dbtag}-upgrade\.test\.mjs$`).test(f));
+    assert.equal(drills.length, 1, `the ${slice} slice must have exactly one upgrade drill on disk, found ${drills.length}`);
+    const cells = (readFileSync(path.join(TESTS_DIR, drills[0]), "utf8").match(/^test\(/gm) ?? []).length;
+    assert.equal(Number(floor[1]), cells,
+      `test-list-${slice}.txt declares a drill floor of ${floor[1]} while ${drills[0]} carries ${cells} cell(s) — `
+      + "the floor is declared in the LIST precisely so a deleted cell breaches it; raise it in the same PR that adds one");
+    assert.equal(Number(floor[1]), DRILL_FLOORS[slice], `${slice}'s drill floor moved away from the measured ${DRILL_FLOORS[slice]}`);
+  }
+});
+
+test("p1041.drill.only-skip the only cell-standing-down in any upgrade drill is the reset gate the isolated step grants", () => {
+  const drills = readdirSync(TESTS_DIR).filter((f) => /^x42-\d{4}-b\d-upgrade\.test\.mjs$/.test(f));
+  assert.equal(drills.length, 4, `the Wave D-b split has four deploy drills, found ${drills.length}`);
+  for (const f of drills) {
+    const src = readFileSync(path.join(TESTS_DIR, f), "utf8");
+    const skipSites = (src.match(/\bt\.skip\(|\bskip:\s|\bskipUnlessReset\(/g) ?? []);
+    assert.ok(skipSites.length > 0, `${f} has no skip at all — it must still stand down in the concurrent sweep`);
+    for (const site of skipSites) {
+      assert.match(site, /skipUnlessReset\(/,
+        `${f} stands a cell down by something other than skipUnlessReset (${site.trim()}) — step (4) declares `
+        + "'#!drill-skips-max: 0' on the strength of that being the only one, so a new skip needs a measured bound");
+    }
+  }
+});
+
+test("p1041.drill.action the isolated drill step reads that bound and refuses a run that meets neither half", () => {
+  const yaml = readFileSync(FRONTIER_ACTION, "utf8");
+  const step = stepBlock(yaml, "${{ inputs.slice }} upgrade drill (isolated DB)");
+  assert.match(step, /#!drill-cells-floor:/, "the drill step must read its slice's declared drill floor");
+  assert.match(step, /#!drill-skips-max:/, "…and its declared skip bound");
+  assert.match(step, /# skipped /, "…which it can only compare against the run's own TAP summary");
+  assert.match(step, /DRILL FLOOR BREACHED|DRILL SKIP BOUND BREACHED/, "and refuse by name when either is breached");
+  assert.match(step, /set -o pipefail/,
+    "the drill's output is piped to tee to be read, so the step must fail on the RUN's status, not tee's");
+});
+
+// EVERY DECLARATION IS ALSO CHECKED ON THE PR ITSELF [#1041, review SPEC-1041-B]. The frontier legs
+// are dispatch-only; `partition-total` runs on every PR that touches the database. It already
+// refuses a slice list that declares no cell floor and no skip bound, for that reason. The three
+// declarations added for the roster and the drills join it there, so a missing one is caught by the
+// gate that actually runs, days before anyone dispatches the legs.
+
+test("p1041.total.declared the PR-time totality gate refuses a missing declaration, roster and drill included", () => {
+  const yaml = readFileSync(TOTAL_ACTION, "utf8");
+  for (const directive of ["#!cells-floor:", "#!skips-max:", "#!drill-cells-floor:", "#!drill-skips-max:", "#!skips-max-"]) {
+    assert.ok(yaml.includes(directive),
+      `.github/actions/partition-total does not check for '${directive}' — the frontier legs are dispatch-only, `
+      + "so a declaration missing from a list or from the roster would not be noticed until someone dispatched them");
+  }
 });

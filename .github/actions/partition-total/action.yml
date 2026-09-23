@@ -75,10 +75,22 @@ runs:
         # slice's frontier rather than one that was deleted. This gate runs on EVERY PR while the
         # frontier legs themselves are dispatch-only, so it is the cheap place a missing
         # declaration is caught.
+        # [#1041, review SPEC-1041-B] …and its DRILL's two, which bound the one step nothing else
+        # can see into: the slice's deploy drill runs ALONE in the frontier leg and is excluded
+        # from the partition below by design, so a cell deleted inside it breaches nothing unless
+        # the floor is declared here, in the list, rather than in the drill itself.
         for L in tests/split-lists/test-list-d-b*.txt; do
           grep -qE '^#!cells-floor:' "$L" || { echo "$L declares no '#!cells-floor:'"; exit 1; }
           grep -qE '^#!skips-max:' "$L" || { echo "$L declares no '#!skips-max:'"; exit 1; }
+          grep -qE '^#!drill-cells-floor:' "$L" || { echo "$L declares no '#!drill-cells-floor:' for its isolated drill"; exit 1; }
+          grep -qE '^#!drill-skips-max:' "$L" || { echo "$L declares no '#!drill-skips-max:' for its isolated drill"; exit 1; }
+          # The slice's OWN skip bound on the shared contract roster: one per frontier, because a
+          # contract's arms go live as the frontier rises and one number would bound only the
+          # lowest. The slice id is the list's own file name.
+          SL="$(basename "$L" .txt | sed 's/^test-list-//')"
+          grep -qE "^#!skips-max-$SL:" "$ROSTER" || { echo "$ROSTER declares no '#!skips-max-$SL:' for the $SL frontier"; exit 1; }
         done
+        grep -qE '^#!cells-floor:' "$ROSTER" || { echo "$ROSTER declares no '#!cells-floor:'"; exit 1; }
         # The declared floor re-runs: allow exactly ONE extra listing each, then fall through to
         # the strict checks, which still fail on any undeclared duplicate.
         cat tests/split-lists/test-list-d-b*.txt | grep -E '^#!floor-rerun:' | awk '{print $2}' | sort -u > $RUNNER_TEMP/floorruns.txt

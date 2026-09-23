@@ -38,6 +38,20 @@
 #!cells-floor: 74
 #!skips-max: 4
 #
+# THE ISOLATED DRILL'S OWN BOUND [#1041, review SPEC-1041-B]. The two numbers above bound the
+# LIST; `x42-0044-b3-upgrade.test.mjs` is not in it (a drill runs ALONE, in its own throwaway
+# database, in the leg's step (4)) and is excluded from the totality gate by design — so a cell
+# deleted inside it was invisible to every gate this repo has, and since #1041 that step preloads
+# the gate chain too, which can stand a cell DOWN rather than red. The drill's bound is declared
+# HERE, in the slice's own list, rather than in the drill: a floor a deletion can edit in the same
+# hunk bounds nothing. MEASURED on the lane-07 cluster, 2026-09-24, at this slice's frontier with
+# the gate chain preloaded and the reset gate WITHHELD — the state in which every cell reports and
+# skips, so the run's own `# tests` line IS the cell count: 2 cell(s). The skip bound is 0
+# because the ONLY skip the four drills carry is `skipUnlessReset`, and step (4) is the one place
+# that gate is granted (`ci-frontier-leg-contract.test.mjs`'s `p1041.drill.only-skip` census).
+#!drill-cells-floor: 2
+#!drill-skips-max: 0
+#
 # THE RESET-GATED DRILL RUNS ALONE, in its own throwaway DB — NOT in this list:
 #   PGDATABASE=clara_x42_b3_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
 #     CLARA_RIG_DB=1 node --test tests/x42-0044-b3-upgrade.test.mjs
