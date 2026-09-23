@@ -519,7 +519,11 @@ export function AccrualFormView({
           id={accrualFieldElementId("method")}
           label={t("fieldMethod")}
           error={message("method")}
-          hint={t("methodHint")}
+          // #937 fix round 1 (ADV-05): the sentence states the rule that is SELECTED. It used to say
+          // "one rule is recorded because one rule is performed" beside a control offering two,
+          // and to describe what only the FIRST rule does -- the same rule-dependent shape
+          // fieldAmount/amountTotalHint already take on this form.
+          hint={draft.method === "stated_period_amount" ? t("methodHintStatedPeriodAmount") : t("methodHint")}
           className="min-w-40"
         >
           <NativeSelect

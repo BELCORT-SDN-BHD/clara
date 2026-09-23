@@ -527,6 +527,24 @@ test("937.form: the method is a REAL choice between the two rules the ledger per
   }
 });
 
+test("937.form: the sentence beside the method control states the rule that is SELECTED — it cannot go on saying one rule exists beside a control that offers two (ADV-05)", async () => {
+  const h = await renderComponent(App({}));
+  try {
+    // Under the default rule the hint is the one #652 shipped, minus its "one rule is recorded
+    // because one rule is performed" opening: two rules are performed now.
+    assert.match(h.text(), /accrues the amount stated above in every period of the authority window/);
+    assert.doesNotMatch(h.text(), /One rule is recorded because one rule is performed/,
+      "the form must not deny, beside the control, that the control has a second option");
+
+    await chooseMethod(h, "stated_period_amount");
+    assert.match(h.text(), /accrues the amount stated below for each due date separately/,
+      "…and under the second rule it describes THAT rule");
+    assert.doesNotMatch(h.text(), /accrues the amount stated above in every period of the authority window/,
+      "the first rule's sentence is gone, not merely joined by a second");
+  } finally {
+    await h.unmount();
+  }
+});
 test("937.form: the per-period block appears only under its own rule, and offers the SCHEDULE's own due dates", async () => {
   const h = await renderComponent(App({}));
   try {
