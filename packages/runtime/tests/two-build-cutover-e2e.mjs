@@ -131,29 +131,20 @@ import {
   readMigrationFrontier,
   supportedBodiesFromBundle,
 } from "../lib/rollback-preflight.mjs";
+import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[tb-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
   process.exit(0);
 }
 
-// --- Fail-closed local gate (the work-question-e2e precedent, verbatim).
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci)$/;
-if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("two-build-cutover-e2e is hard-gated to a loopback host + PGDATABASE in {clara_rt_test,clara_wave_b_ci}");
-}
-{
-  if (!process.env.WORKFLOW_POSTGRES_URL) throw new Error("two-build-cutover-e2e needs WORKFLOW_POSTGRES_URL");
-  const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
-  const ok =
-    u.protocol === "postgres:"
-    && LOCAL_HOSTS.has(u.hostname)
-    && u.port === String(process.env.PGPORT ?? "")
-    && u.pathname === "/" + (process.env.PGDATABASE ?? "")
-    && [...u.searchParams.keys()].length === 0;
-  if (!ok) throw new Error("two-build-cutover-e2e: WORKFLOW_POSTGRES_URL failed the parsed DSN gate");
-}
+// --- Fail-closed local gate (#1018: shared with every other standalone World e2e driver; the
+// work-question-e2e precedent, verbatim).
+assertLocalDbGate({
+  label: "two-build-cutover-e2e",
+  pattern: allowedDbPattern(`${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.WAVE_B_CI}`),
+  checkDsnParsed: true,
+});
 
 const ISSUER = "https://clara-two-build.test/auth/v1";
 const AUD = "authenticated";

@@ -29,6 +29,14 @@ export const DRIVERS = Object.freeze([
   "intake-admission-e2e.mjs",
   "intake-batch-e2e.mjs",
   "work-knowledge-e2e.mjs",
+  "accrual-e2e.mjs",
+  "opening-ledger-source-e2e.mjs",
+  "plan-occurrence-e2e.mjs",
+  "prepayment-occurrence-e2e.mjs",
+  "trade-invoice-e2e.mjs",
+  "two-build-cutover-e2e.mjs",
+  "work-cancel-e2e.mjs",
+  "work-question-e2e.mjs",
 ]);
 
 /** Pure text-level census of one driver's source — no execution, no filesystem beyond the read

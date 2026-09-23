@@ -65,11 +65,12 @@
 // the file SKIPS CLEANLY when migration 0225 is absent — its runtime half merges alongside its DB
 // half, and a green e2e against a database with no `clara.trade_invoices` would be a lie.
 //
-// A NOTE ON THE LOCAL GATE. The siblings hard-gate PGDATABASE to `clara_(rt_test|wave_b_ci)`. The
-// 2026-09-18 wave gave each implementer a DEDICATED cluster and database (`clara_<ticket>`), and
-// the riders wave of 2026-09-20 gives each LANE one (`clara_l<NN>`, riders/RIG.md), so the gate
-// admits both shapes — still loopback-only, still a parsed-DSN equality check against the PG env,
-// and still fail-closed on anything else.
+// A NOTE ON THE LOCAL GATE (#1018: shared with every other standalone World e2e driver). The
+// siblings hard-gate PGDATABASE to `clara_(rt_test|wave_b_ci)`. The 2026-09-18 wave gave each
+// implementer a DEDICATED cluster and database (`clara_<ticket>`), and the riders wave of
+// 2026-09-20 gives each LANE one (`clara_l<NN>`, riders/RIG.md), so the gate admits both shapes —
+// still loopback-only, still a parsed-DSN equality check against the PG env, and still
+// fail-closed on anything else.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -80,6 +81,7 @@ import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
 import { pinnedClaraWorkBannerRe, pinnedClaraWorkBundleId } from "./pinned-work-bundle.mjs";
+import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
 const WORK_BUNDLE_ID = pinnedClaraWorkBundleId();
 const WORK_BUNDLE_BANNER_RE = pinnedClaraWorkBannerRe();
@@ -89,26 +91,13 @@ if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   process.exit(0);
 }
 
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci|\d{3}(_world)?|l\d{2})$/;
-if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error(
-    "trade-invoice-e2e is hard-gated to a loopback host + PGDATABASE in "
-    + "{clara_rt_test, clara_wave_b_ci, clara_<ticket>, clara_<ticket>_world, clara_l<NN>}");
-}
-if (!process.env.WORKFLOW_POSTGRES_URL) {
-  throw new Error("trade-invoice-e2e needs WORKFLOW_POSTGRES_URL beside the PG env");
-}
-{
-  const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
-  const ok =
-    u.protocol === "postgres:"
-    && LOCAL_HOSTS.has(u.hostname)
-    && u.port === String(process.env.PGPORT ?? "")
-    && u.pathname === "/" + (process.env.PGDATABASE ?? "")
-    && [...u.searchParams.keys()].length === 0;
-  if (!ok) throw new Error("trade-invoice-e2e: WORKFLOW_POSTGRES_URL failed the parsed DSN gate");
-}
+assertLocalDbGate({
+  label: "trade-invoice-e2e",
+  pattern: allowedDbPattern(
+    `${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.WAVE_B_CI}|${DB_NAME_SHAPE.PER_TICKET}(?:_world)?|${DB_NAME_SHAPE.PER_LANE}`,
+  ),
+  checkDsnParsed: true,
+});
 
 const PORT = process.env.TI_E2E_PORT || (await ephemeralPort());
 const BASE = `http://127.0.0.1:${PORT}`;
