@@ -59,10 +59,9 @@ async function settle(page: Page): Promise<void> {
 }
 
 async function scan(page: Page, what: string): Promise<void> {
-  // #706 — one full-page `AxeBuilder.analyze()` is 14.4 s alone and 33 s under load, and two cells
-  // below scan three faces each. The grant is additive, so the budget grows with the number of
-  // scans that actually run (`identity-finish.spec.ts:28`).
-  grantCellBudget(CELL_BUDGET.scan);
+  // #864 (fix round) — `settleForScan` itself now grants `CELL_BUDGET.scan` per call, so the
+  // hand-written grant this wrapper used to carry would double-count. The budget still grows with
+  // the number of scans that actually run; it just does so for every file, not only this one.
   await settle(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.passes.length, `${what}: axe must actually have inspected the page`).toBeGreaterThan(0);

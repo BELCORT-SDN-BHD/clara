@@ -18,20 +18,11 @@
 // from `cellBudgetMs`, and a heavy cell in a file with no other source of headroom.
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 
-const E2E_DIR = dirname(fileURLToPath(import.meta.url));
-
-/** Every browser spec in this directory, read from disk rather than listed by hand — the same
- *  discipline `sign-in-census.test.ts` already argues for. */
-function specFiles(): string[] {
-  return readdirSync(E2E_DIR)
-    .filter((name) => name.endsWith(".spec.ts"))
-    .sort();
-}
+import { E2E_DIR, functionBody, specFiles, stripComments } from "./spec-census";
 
 /**
  * Every `test(...)`/`test.only(...)` CELL's own body, located by the arrow's `=> {` rather than by
@@ -190,6 +181,27 @@ test("#864 · a spec file with no automatic sign-in grant declares its own budge
       `and run 2+ scan() passes in one cell against the flat 30s default:\n${offenders.map((f) => `  - ${f}`).join("\n")}\n` +
       `Add test.setTimeout(cellBudgetMs({ scans: N })) sized to that cell's own scan() count.`,
   );
+});
+
+test("#864 · the shared helpers GRANT what they cost — a name in this census is not a budget", () => {
+  // THE LOAD-BEARING LINK. Every rule below prices a cell's automatic headroom from the shared
+  // helpers it reaches: `signInTo` is worth `CELL_BUDGET.signIn`, `settleForScan` is worth
+  // `CELL_BUDGET.scan` (a settle is this suite's one spelling of "a scan is about to run here" —
+  // `settle-before-scan-census.test.ts` holds that every scan has one). If either helper stopped
+  // granting, this census would go on reporting green about headroom that no longer exists, which
+  // is the exact failure mode review finding SPEC-864-A named in this file's first cut.
+  const helpers = stripComments(readFileSync(join(E2E_DIR, "helpers.ts"), "utf8"));
+  for (const [fn, unit] of [
+    ["signInTo", "CELL_BUDGET.signIn"],
+    ["settleForScan", "CELL_BUDGET.scan"],
+  ] as const) {
+    const body = functionBody(helpers, fn);
+    assert.ok(body, `helpers.ts must declare ${fn}(...) — this census prices every cell from it`);
+    assert.ok(
+      body!.includes(`grantCellBudget(${unit})`),
+      `helpers.ts's ${fn} must call grantCellBudget(${unit}) itself, spelled exactly that way — every rule in this file prices the cells that reach it as already granted`,
+    );
+  }
 });
 
 test("#864 · THE VACUITY CONTROL: the detector actually detects, and does not over-detect", () => {

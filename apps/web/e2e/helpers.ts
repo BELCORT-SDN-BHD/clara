@@ -116,8 +116,23 @@ export function watchReactFaults(page: Page): { seen: () => string[]; faults: ()
  * It also does not emulate `reducedMotion: 'reduce'`: several walks assert the full-motion
  * arm on the same page they scan, and a scan-only media emulation would make the scan measure
  * a page the rest of the cell never saw.
+ *
+ * IT ALSO BUYS THE SCAN ITS TIME (#864 fix round, 2026-09-23). Every call here is, by this
+ * function's own contract and by `settle-before-scan-census.test.ts`'s cell, immediately ahead of
+ * one full-page `AxeBuilder.analyze()` — the single most expensive thing any cell in this suite
+ * does (14.4 s alone, 33 s under load; `CELL_BUDGET.scan` prices it at 35 s). So the grant belongs
+ * HERE, for exactly the reason `signInTo`'s own `grantCellBudget(CELL_BUDGET.signIn)` belongs
+ * there: a cell that scans three times gets three times the headroom and a cell that never scans
+ * gets none, with nobody having to remember a number at the call site. Before this, three files
+ * (`identity-finish`, `staff-expense-claim`, `trade-invoice`) had each written this same grant into
+ * their OWN local scan wrapper by hand and the other thirty-odd had not — the review's finding
+ * SPEC-864-B counted 17 cells across 15 files running 2+ real scans against the flat 30 s default
+ * with no budget of their own. One shared place, every file.
+ *
+ * Still a ceiling, never a wait: `grantCellBudget` only raises the cell's timeout.
  */
 export async function settleForScan(page: Page): Promise<void> {
+  grantCellBudget(CELL_BUDGET.scan);
   await page.waitForFunction(() => {
     const entering = document.querySelectorAll(".enter-content, .enter-panel");
     for (const element of entering) {

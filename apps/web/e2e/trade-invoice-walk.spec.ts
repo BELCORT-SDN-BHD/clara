@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget, settleForScan, signInTo } from "./helpers";
+import { CELL_BUDGET, settleForScan, signInTo } from "./helpers";
 import { TI } from "./trade-invoice-mock.mjs";
 
 // #655 — "完整记录发票、账单及对应应收应付".
@@ -60,7 +60,8 @@ async function settle(page: Page): Promise<void> {
 }
 
 async function scan(page: Page, what: string): Promise<void> {
-  grantCellBudget(CELL_BUDGET.scan);
+  // #864 (fix round) — the scan grant moved into `settleForScan` (./helpers), which `settle` above
+  // delegates to; keeping a copy here would double-count it.
   await settle(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.passes.length, `${what}: axe must actually have inspected the page`).toBeGreaterThan(0);
