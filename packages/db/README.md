@@ -561,6 +561,41 @@ REWRITTEN by #872 to assert the new, agreeing behaviour (it now demotes an issue
 `issuer_lapsed` on both reads, and shows `accept_invite` still refusing CLR04 for an invited role
 that outranks the issuer's now-lower current rank — the wall, not the read, is what still refuses).
 
+## The counterparty merge door's own lock order
+
+`clara.merge_counterparties` (0011:1820, body replaced by 0015, spliced by 0149 S2 and again by
+[0289_merge_alias_lane.sql](migrations/0289_merge_alias_lane.sql) — #889) takes its locks in
+THREE rungs, in this order, and the order is not incidental — it is the one thing standing
+between two concurrent merges and a `40P01` deadlock:
+
+1. **Both counterparty rows, `for update`, in `id` ORDER — never in `(survivor, merged)`
+   argument order.** `perform 1 from clara.counterparties cp where cp.id in (p_survivor,
+   p_merged) order by cp.id for update;` (0015:2260-2261). Two sessions merging the same pair
+   in OPPOSITE roles — one calling `merge(A, B)`, the other `merge(B, A)` — would lock A-then-B
+   and B-then-A respectively if the door locked in call-argument order, the classic AB/BA
+   deadlock shape. Sorting by `id` before the lock makes BOTH sessions request the SAME global
+   order regardless of which argument named which row, so one session waits and the other
+   proceeds — never a cycle.
+2. **The alias insert**, into `clara.counterparty_aliases` (0015:2295, recut by 0289 to name
+   `recorded_via`). An insert of a new row takes no lock on any EXISTING row, so this rung adds
+   no deadlock surface of its own; it sits between the two rungs that do because the merged
+   party's former name must be recorded before its `coding_rules` are touched (a professional
+   reading the identity page mid-merge sees the alias before the retirement, never after).
+3. **The merged party's `coding_rules` rows, `for update`** — vendor_account first, then
+   autopost (0015:2299-2301, :2317-2319). Each `select … for update` locks at most the one live
+   rule of its type for `p_merged`; unlike rung 1, there is no cross-row ordering concern here
+   because no other door takes a `coding_rules` lock keyed on more than one counterparty at
+   once.
+
+**The deadlock class this order avoids is the same one the member-doors section above names for
+`clara.firms`**: two sessions that would otherwise acquire the SAME two row locks in opposite
+orders. The fix is the same shape too — sort a fixed key (`id`, not the caller's argument
+position) before locking — but the two orders are independent of each other: nothing here takes
+a `clara.firms` lock, and nothing in the member-doors chain touches `clara.counterparties`. A
+future recut that locks `p_survivor` then `p_merged` (or vice versa) directly, without the
+`order by cp.id`, is a deadlock regression against 0289's own `sha256(prosrc)` pin on this body
+(the value 0215's own P6 residue pin already carries too) — not a style change.
+
 ## The `interactive_client` wake kind
 
 `clara.wake_fn_allowlist` rows for the `interactive_client` wake kind are not "structurally
