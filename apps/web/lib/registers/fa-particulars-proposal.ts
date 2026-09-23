@@ -135,26 +135,31 @@ export async function loadAssetParticularsProposal(
   session: SessionTokenAccessor,
   { clientId, assetId }: { clientId: string; assetId: string },
 ): Promise<FaParticularsProposal | null> {
-  let rows: PendingQuestionRow[];
   try {
-    rows = await getRows<PendingQuestionRow>("agent_interruptions", {
+    const rows = await getRows<PendingQuestionRow>("agent_interruptions", {
       select: "id,source_ref",
       filters: { status: "eq.pending", client_id: `eq.${clientId}` },
       order: "created_at.desc",
       limit: PENDING_QUESTION_SCAN,
       session,
     });
+    // `Array.isArray` IS LOAD-BEARING, not a habit. PostgREST answers a select with a list, and
+    // "always" is exactly the assumption that takes a page down when it turns out not to be: an
+    // error body, a proxy's own JSON, a 200 from something that is not PostgREST at all. A
+    // pre-fill that threw would leave a person unable to complete particulars AT ALL, which is a
+    // far worse outcome than not seeing a suggestion.
+    if (!Array.isArray(rows)) return null;
+    for (const row of rows) {
+      const ref = row?.source_ref;
+      if (!isObject(ref)) continue;
+      if (ref.asset_id !== assetId) continue;
+      const proposal = readFaParticularsProposal(ref);
+      if (proposal !== null) return proposal;
+    }
+    return null;
   } catch {
     return null;
   }
-  for (const row of rows) {
-    const ref = row.source_ref;
-    if (!isObject(ref)) continue;
-    if (ref.asset_id !== assetId) continue;
-    const proposal = readFaParticularsProposal(ref);
-    if (proposal !== null) return proposal;
-  }
-  return null;
 }
 
 /**

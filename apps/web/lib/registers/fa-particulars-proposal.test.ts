@@ -141,6 +141,16 @@ test("loadAssetParticularsProposal: no parked question means no proposal, and a 
       null,
       "a proposal is a convenience: a read that fails leaves the ordinary empty form, never an error the person cannot act on");
   });
+  // AND A BODY THAT IS NOT A LIST reads as no proposal too. PostgREST always answers a select with
+  // an array, but "always" is the assumption that takes a page down when it turns out not to be:
+  // a form whose pre-fill threw would leave a person unable to complete particulars at all.
+  const notAList = (async () => new Response(JSON.stringify({ message: "nope" }),
+    { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+  await withMockedFetch(notAList, async () => {
+    assert.equal(
+      await loadAssetParticularsProposal(fakeSession("tok"), { clientId: "c1", assetId: "a1" }),
+      null);
+  });
 });
 
 // ------------------------------------------------------------------------------------------
