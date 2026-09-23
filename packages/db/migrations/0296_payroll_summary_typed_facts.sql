@@ -140,12 +140,22 @@ begin
     end if;
   end loop;
 
-  -- (d) THE LANE IS NOT ALREADY IN USE. A `payroll_facts` task row on a FIRST apply would mean
-  -- another author already minted this lane, and this file would not be its first writer.
+  -- (d) THE LANE IS NOT ALREADY MINTED BY SOMEONE ELSE. Asserted STRUCTURALLY — the lane roster
+  -- CHECK must not already admit `payroll_facts` on a first apply — rather than by counting task
+  -- rows. The first cut of this clause counted rows, and that was wrong twice over: on a genuine
+  -- first apply the count is vacuously zero (the CHECK refuses the lane, so no row can exist),
+  -- while on any database that has already run this file it is a claim about DATA that a
+  -- rolled-back restore-the-pre-images probe cannot honour. Measured, not reasoned: the probe
+  -- (docs/plan/active/riders-2026-09-20/reports/wave4-lane01-ticket945.md names it) refused on 48
+  -- task rows the lane's own battery had left. The structural claim says the same thing and can
+  -- be proven in both directions.
   if v_mode = 'FIRST' then
-    select count(*)::int into v_n from clara.document_processing_tasks where lane = 'payroll_facts';
+    select count(*)::int into v_n from pg_constraint
+     where conrelid = 'clara.document_processing_tasks'::regclass
+       and conname = 'ck_processing_task_lane_f_a1'
+       and position('payroll_facts' in pg_get_constraintdef(oid)) > 0;
     if v_n <> 0 then
-      raise exception '#945 prestate: % payroll_facts task row(s) already exist on a FIRST apply', v_n
+      raise exception '#945 prestate: the lane roster already admits payroll_facts on a FIRST apply -- this file would not be its first writer'
         using errcode = 'CLR10';
     end if;
   end if;
