@@ -2,65 +2,74 @@
 //
 // #706 wrote the shared vocabulary — `CELL_BUDGET`, `cellBudgetMs`, `grantCellBudget` — in
 // `helpers.ts` for exactly one reason: a walk that signs in, polls or scans states its own cost in
-// ONE place instead of guessing a number. Two call sites predate that vocabulary and were never
-// folded into it. `a11y-finish-walk.spec.ts` carries `test.setTimeout(30_000 * (FACES.length + 1))`
-// twice — `helpers.ts`'s own `CELL_BUDGET` doc comment names this exact line as "the same idea,
-// written before there was a shared place to put it." `counterparty-identity-walk.spec.ts` carries
-// `test.describe.configure({ timeout: 150_000 })`, whose own comment cites the a11y walk's shape as
-// its precedent — a guess built on a guess. A third shape is the ticket's other named gap:
-// `checkout-gate-walk.spec.ts` never signs in through the shared helper (every cell there signs UP,
-// which is a different form `sign-in-census.test.ts` deliberately does not match), so it gets no
-// automatic `grantCellBudget` at all — and several of its cells call its own local `scan()` two to
-// four times against the flat 30 s default, with nothing else standing between them and a
-// host-contention timeout.
+// ONE place instead of guessing a number. Playwright's config sets no per-test timeout, so without
+// that vocabulary every cell in this suite gets the same flat 30 s no matter how much work it does,
+// and a cell that does more than 30 s of work under host load fails as a TIMEOUT, which reads as a
+// product defect and is not one.
 //
-// This file measures both shapes so neither can drift back: a hand-rolled timeout that is not built
-// from `cellBudgetMs`, and a heavy cell in a file with no other source of headroom.
+// WHAT THIS FILE HOLDS, and what it learned from its own first cut (review findings SPEC-864-A,
+// SPEC-864-B, STD-1, 2026-09-23). The first cut held two narrow rules: a custom timeout must be
+// built from `cellBudgetMs`, and a file with NO shared sign-in must budget a cell that calls a
+// helper literally named `scan(` twice or more. Both halves of that second rule were too small to
+// hold the ticket's own words ("every spec file that signs in, polls or runs a full-page scan
+// calls `test.setTimeout(cellBudgetMs(...))` or `grantCellBudget` sized to its own work"):
+//
+//   - The token. `signup-confirm-pending.spec.ts` names its scan helper `expectAccessible(`, runs
+//     three of them in one cell, signs in nowhere and declares no budget anywhere — the exact shape
+//     the rule existed for, invisible to a detector that only matched `scan(`. Fifteen more files
+//     name theirs `expectAccessible(` too. This file now resolves every scan by following calls to
+//     the real scanner (`.analyze(`), whatever the local wrapper is called.
+//   - The exemption. "A file that signs in anywhere has `CELL_BUDGET.signIn`'s 20 s floor under
+//     every cell" exempted 45 of the 50 files by construction, and a sign-in grant is not headroom
+//     for a SCAN in any case: it is priced for the sign-in it pays for. The rule is now per cell and
+//     per unit of work, over every file.
+//   - The verb the census never looked at. Polls were in the ticket's own list and in no rule.
+//
+// The arithmetic below is therefore the whole budget, stated once: a cell's ceiling is the flat
+// base, PLUS `CELL_BUDGET.signIn` for every shared sign-in it reaches (granted inside `signInTo`),
+// PLUS `CELL_BUDGET.scan` for every settled scan it reaches (granted inside `settleForScan`), PLUS
+// whatever the cell declares for itself. Its need is the same sum computed from the work it
+// actually does. A cell whose need outruns its ceiling is an offender, and the offence names the
+// missing term.
+//
+// A NOTE ON WHERE A DECLARATION GOES. `test.setTimeout()` REPLACES the cell's timeout, so a
+// declaration belongs at the TOP of the cell, before any helper grant it would otherwise discard;
+// `grantCellBudget()` is additive and may appear anywhere, including inside a helper.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { E2E_DIR, functionBody, specFiles, stripComments } from "./spec-census";
+import {
+  E2E_DIR,
+  callCount,
+  functionBodies,
+  functionBody,
+  specFiles,
+  stripComments,
+  testCells,
+  transitiveAmount,
+} from "./spec-census";
 
 /**
- * Every `test(...)`/`test.only(...)` CELL's own body, located by the arrow's `=> {` rather than by
- * the first `{` after `test(` — a destructured `async ({ page }) => {` parameter has its OWN brace,
- * and taking that one for the body's opener would end the walk at the parameter list's own close,
- * reading zero of the cell's real content.
+ * `CELL_BUDGET`'s own prices, read out of `helpers.ts` rather than re-typed here. A census that
+ * carried its own copy of 35_000 would keep reporting green after the price it prices against
+ * moved — and the two numbers would then disagree with nothing noticing, which is the whole class
+ * of defect this file exists to catch.
  */
-function testBodies(source: string): string[] {
-  const bodies: string[] = [];
-  const re = /\btest(?:\.only)?\(\s*["'`]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(source))) {
-    const window = source.slice(m.index, m.index + 4000);
-    const arrow = /=>\s*\{/.exec(window);
-    if (!arrow) continue;
-    const bodyStart = m.index + arrow.index + arrow[0].length - 1;
-    let depth = 1;
-    let end = -1;
-    for (let i = bodyStart + 1; i < source.length; i++) {
-      if (source[i] === "{") depth++;
-      else if (source[i] === "}") {
-        depth--;
-        if (depth === 0) {
-          end = i;
-          break;
-        }
-      }
-    }
-    if (end === -1) continue;
-    bodies.push(source.slice(bodyStart, end + 1));
-    re.lastIndex = end;
-  }
-  return bodies;
+export function cellBudgetPrices(helpersSource: string): { base: number; poll: number; scan: number; signIn: number } {
+  const read = (key: string): number => {
+    const m = new RegExp(String.raw`\b${key}\s*:\s*([0-9_]+)`).exec(helpersSource);
+    assert.ok(m, `helpers.ts's CELL_BUDGET must declare a numeric ${key}`);
+    return Number(m![1]!.replaceAll("_", ""));
+  };
+  return { base: read("base"), poll: read("poll"), scan: read("scan"), signIn: read("signIn") };
 }
 
 /** A balanced-paren read of a call's own argument list, given the index of its opening `(`. Used
- *  for both `test.setTimeout(` and `test.describe.configure(`, which is why this takes the paren
- *  index rather than assuming one shape. */
+ *  for `test.setTimeout(`, `test.describe.configure(`, `cellBudgetMs(` and `grantCellBudget(`,
+ *  which is why this takes the paren index rather than assuming one shape. */
 function callArgs(source: string, openParenIndex: number): string {
   let depth = 1;
   let i = openParenIndex + 1;
@@ -78,7 +87,7 @@ function callArgs(source: string, openParenIndex: number): string {
  * Every custom per-cell or per-group timeout call in the file, as its own raw argument text — the
  * two shapes `README.md`'s `CELL_BUDGET` section names ("Use `test.setTimeout(cellBudgetMs(...))`
  * at the top of a cell... and `grantCellBudget(CELL_BUDGET.x)` inside a shared helper"), plus the
- * describe-level shape the two predating files actually used.
+ * describe-level shape two files predating the vocabulary actually used.
  */
 function customTimeoutCalls(source: string): string[] {
   const calls: string[] = [];
@@ -94,57 +103,145 @@ function customTimeoutCalls(source: string): string[] {
 
 /** Every custom timeout call that does NOT route through `cellBudgetMs(...)` — a bare literal or a
  *  hand-rolled formula, exactly the shape `a11y-finish-walk.spec.ts` and
- *  `counterparty-identity-walk.spec.ts` predate the shared vocabulary with. */
+ *  `counterparty-identity-walk.spec.ts` predated the shared vocabulary with. */
 export function hardcodedTimeouts(source: string): string[] {
   return customTimeoutCalls(source).filter((args) => !args.includes("cellBudgetMs("));
 }
 
-/** The local name a file gave the shared `signIn`/`signInTo` import, alias included
- *  (`signIn as sharedSignIn`, `members-invite-walk.spec.ts`'s own shape). */
-function importedSignInNames(source: string): string[] {
+/** The local name a file gave a shared import, alias included (`signIn as sharedSignIn`,
+ *  `members-invite-walk.spec.ts`'s own shape). */
+export function importedAs(source: string, exported: string[]): string[] {
   const names: string[] = [];
   for (const m of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']\.\/helpers["']/g)) {
     for (const part of m[1]!.split(",")) {
       const [imported, local] = part.trim().split(/\s+as\s+/).map((s) => s.trim());
-      if (imported === "signIn" || imported === "signInTo") names.push((local ?? imported)!);
+      if (imported && exported.includes(imported)) names.push((local ?? imported)!);
     }
   }
   return names;
 }
 
-/** Whether the file's own text calls the shared sign-in helper anywhere at all — directly in a
- *  cell, or once inside a local wrapper the cell calls instead (`members-invite-walk.spec.ts`'s
- *  `signInToMembers`). Either shape means EVERY cell that reaches it already receives the automatic
- *  `grantCellBudget(CELL_BUDGET.signIn)` `signInTo`/`signIn` carries internally — this function only
- *  answers "does this file have that automatic floor at all", not "does this one cell use it". */
-export function callsSharedSignIn(source: string): boolean {
-  const names = importedSignInNames(source);
-  return names.some((name) => new RegExp(String.raw`\b${name}\(`).test(source));
+/** Every explicit wait this text declares that is long enough to be a fixture POLL rather than an
+ *  ordinary assertion retry — `{ timeout: 15_000 }` and friends. The floor is deliberate: a bare
+ *  `expect()`'s own 5 s default is what the flat base is for, and pricing it as a poll would make
+ *  every cell in the suite an offender without measuring anything. */
+const POLL_FLOOR_MS = 10_000;
+function ownPollMs(text: string): number {
+  let total = 0;
+  for (const m of text.matchAll(/\btimeout\s*:\s*([0-9_]+)/g)) {
+    const ms = Number(m[1]!.replaceAll("_", ""));
+    if (ms >= POLL_FLOOR_MS) total += ms;
+  }
+  return total;
 }
 
-/** This suite's own established name for one settle-then-axe-scan pass — every file that defines
- *  a local helper for it (`checkout-gate-walk.spec.ts`, `firm-setup-walk.spec.ts`,
- *  `documents-viewer-walk.spec.ts`, `periodic-adjustment-walk.spec.ts`) names it exactly this. */
-const SCAN_CALL = /\bscan\(/g;
-const DECLARES_BUDGET = /\bcellBudgetMs\(|\bgrantCellBudget\(|\btest\.setTimeout\(/;
+/** What a `cellBudgetMs({...})`/`grantCellBudget(...)` call site inside this text declares, in
+ *  units. A `polls:`/`scans:` argument that is not a plain number is reported as `unreadable` —
+ *  never silently trusted, and never silently counted as zero either. */
+type Declared = { polls: number; scans: number; unreadable: string[] };
+function ownDeclared(text: string, prices: { poll: number; scan: number }): Declared {
+  const declared: Declared = { polls: 0, scans: 0, unreadable: [] };
+  for (const m of text.matchAll(/\bcellBudgetMs\(/g)) {
+    const args = callArgs(text, m.index + m[0].length - 1);
+    for (const key of ["polls", "scans"] as const) {
+      const hit = new RegExp(String.raw`\b${key}\s*:\s*([^,}]+)`).exec(args);
+      if (!hit) continue;
+      const raw = hit[1]!.trim();
+      if (/^[0-9_]+$/.test(raw)) declared[key] += Number(raw.replaceAll("_", ""));
+      else declared.unreadable.push(`${key}: ${raw}`);
+    }
+  }
+  for (const m of text.matchAll(/\bgrantCellBudget\(/g)) {
+    const args = callArgs(text, m.index + m[0].length - 1);
+    for (const g of args.matchAll(/CELL_BUDGET\.(poll|scan)\b(?:\s*\*\s*([0-9_]+))?/g)) {
+      const times = g[2] ? Number(g[2].replaceAll("_", "")) : 1;
+      if (g[1] === "poll") declared.polls += times;
+      else declared.scans += times;
+    }
+    void prices;
+  }
+  return declared;
+}
+
+export type CellGap = {
+  file: string;
+  line: number;
+  title: string;
+  /** What the cell is short of, in the vocabulary a fix is written in. */
+  missing: string;
+};
 
 /**
- * How many of a file's own cells call the local `scan()` helper twice or more WITHOUT declaring a
- * budget in that same cell, counted only for a file that has no automatic sign-in floor at all
- * (`callsSharedSignIn` false) — a file that signs in anywhere already has `CELL_BUDGET.signIn`'s
- * 20 s standing under every cell, which is the reason none of the many two-scan cells in
- * `home-board-walk.spec.ts` and its siblings need this check to fire on them too: #864's own Agent
- * Brief scopes this ticket to what still has NO headroom at all, not to re-litigating a threshold
- * every already-signed-in file has been shipped against for two waves.
+ * Every cell in one spec file whose own work outruns the ceiling it can name.
+ *
+ * Work and headroom are both counted TRANSITIVELY: a cell that calls a local helper three times
+ * pays that helper's cost three times, and is granted whatever that helper grants three times. A
+ * census that read only the cell's own text would price a file like `interview-walk.spec.ts` — whose
+ * waits live almost entirely inside its own local helpers — at nearly zero.
  */
-export function ungrantedHeavyCells(source: string): number {
-  if (callsSharedSignIn(source)) return 0;
-  let offenders = 0;
-  for (const body of testBodies(source)) {
-    const scans = (body.match(SCAN_CALL) ?? []).length;
-    if (scans >= 2 && !DECLARES_BUDGET.test(body)) offenders++;
+export function cellBudgetGaps(file: string, source: string, helpersSource: string): CellGap[] {
+  const prices = cellBudgetPrices(helpersSource);
+  const stripped = stripComments(source);
+  const bodies = functionBodies(stripped);
+  const settleNames = importedAs(stripped, ["settleForScan"]);
+
+  const scansOf = (text: string): number =>
+    transitiveAmount(text, bodies, (body) => (body.match(/\.analyze\(/g) ?? []).length);
+  const settlesOf = (text: string): number =>
+    transitiveAmount(text, bodies, (body) => settleNames.reduce((n, name) => n + callCount(body, name), 0));
+  const pollMsOf = (text: string): number => transitiveAmount(text, bodies, ownPollMs);
+  const declaredOf = (text: string): Declared => {
+    const totals: Declared = { polls: 0, scans: 0, unreadable: [] };
+    // `grantCellBudget` is additive and may sit inside a helper, so it is counted transitively;
+    // `cellBudgetMs` is read at the cell's own level, where the `test.setTimeout` that consumes it
+    // is written.
+    const own = ownDeclared(text, prices);
+    const granted = transitiveAmount(text, bodies, (body) => ownDeclared(body, prices).polls) - own.polls;
+    const grantedScans = transitiveAmount(text, bodies, (body) => ownDeclared(body, prices).scans) - own.scans;
+    totals.polls = own.polls + granted;
+    totals.scans = own.scans + grantedScans;
+    totals.unreadable = own.unreadable;
+    return totals;
+  };
+
+  const gaps: CellGap[] = [];
+  for (const cell of testCells(stripped)) {
+    const scans = scansOf(cell.body);
+    const settles = settlesOf(cell.body);
+    const pollMs = pollMsOf(cell.body);
+    const declared = declaredOf(cell.body);
+    const where = { file, line: cell.line, title: cell.title };
+
+    if (declared.unreadable.length > 0) {
+      gaps.push({ ...where, missing: `a readable budget — ${declared.unreadable.join(", ")} is not a plain number this census can size` });
+      continue;
+    }
+    const scanShortfall = scans - settles - declared.scans;
+    if (scanShortfall > 0) {
+      gaps.push({
+        ...where,
+        missing: `${scanShortfall} scan grant(s): it runs ${scans} accessibility scan(s) but only ${settles} settle(s) through the shared helper and declares ${declared.scans}. Settle each scan through settleForScan(page), or add test.setTimeout(cellBudgetMs({ scans: ${scans} })) at the top of the cell`,
+      });
+      continue;
+    }
+    const grantedPollMs = declared.polls * prices.poll;
+    if (pollMs >= prices.base && grantedPollMs < pollMs) {
+      const needed = Math.ceil(pollMs / prices.poll);
+      gaps.push({
+        ...where,
+        missing: `a poll budget: its own explicit waits total ${pollMs} ms — more than the whole ${prices.base} ms base — and it declares ${grantedPollMs} ms. Add test.setTimeout(cellBudgetMs({ polls: ${needed} })) at the top of the cell`,
+      });
+    }
   }
-  return offenders;
+  return gaps;
+}
+
+function helpersSource(): string {
+  return stripComments(readFileSync(join(E2E_DIR, "helpers.ts"), "utf8"));
+}
+
+function describeGaps(gaps: CellGap[]): string {
+  return gaps.map((g) => `  - ${g.file}:${g.line} "${g.title}" needs ${g.missing}`).join("\n");
 }
 
 test("#864 · no spec file's custom timeout is a hand-rolled number — every one is built from cellBudgetMs", () => {
@@ -167,22 +264,6 @@ test("#864 · no spec file's custom timeout is a hand-rolled number — every on
   );
 });
 
-test("#864 · a spec file with no automatic sign-in grant declares its own budget before a heavy scan cell", () => {
-  const files = specFiles();
-  const offenders: string[] = [];
-  for (const name of files) {
-    if (ungrantedHeavyCells(readFileSync(join(E2E_DIR, name), "utf8")) > 0) offenders.push(name);
-  }
-
-  assert.deepEqual(
-    offenders,
-    [],
-    `these spec files never sign in through the shared helper (no automatic CELL_BUDGET.signIn floor) ` +
-      `and run 2+ scan() passes in one cell against the flat 30s default:\n${offenders.map((f) => `  - ${f}`).join("\n")}\n` +
-      `Add test.setTimeout(cellBudgetMs({ scans: N })) sized to that cell's own scan() count.`,
-  );
-});
-
 test("#864 · the shared helpers GRANT what they cost — a name in this census is not a budget", () => {
   // THE LOAD-BEARING LINK. Every rule below prices a cell's automatic headroom from the shared
   // helpers it reaches: `signInTo` is worth `CELL_BUDGET.signIn`, `settleForScan` is worth
@@ -190,7 +271,7 @@ test("#864 · the shared helpers GRANT what they cost — a name in this census 
   // `settle-before-scan-census.test.ts` holds that every scan has one). If either helper stopped
   // granting, this census would go on reporting green about headroom that no longer exists, which
   // is the exact failure mode review finding SPEC-864-A named in this file's first cut.
-  const helpers = stripComments(readFileSync(join(E2E_DIR, "helpers.ts"), "utf8"));
+  const helpers = helpersSource();
   for (const [fn, unit] of [
     ["signInTo", "CELL_BUDGET.signIn"],
     ["settleForScan", "CELL_BUDGET.scan"],
@@ -204,10 +285,39 @@ test("#864 · the shared helpers GRANT what they cost — a name in this census 
   }
 });
 
+test("#864 · every cell's accessibility scans are covered by a grant it can name", () => {
+  const helpers = helpersSource();
+  const files = specFiles();
+  assert.ok(files.length >= 46, `the census must actually see the suite (found ${files.length} spec files)`);
+
+  const gaps: CellGap[] = [];
+  let scanningCells = 0;
+  for (const name of files) {
+    const source = readFileSync(join(E2E_DIR, name), "utf8");
+    for (const gap of cellBudgetGaps(name, source, helpers)) if (gap.missing.includes("scan")) gaps.push(gap);
+    const stripped = stripComments(source);
+    const bodies = functionBodies(stripped);
+    for (const cell of testCells(stripped)) {
+      if (transitiveAmount(cell.body, bodies, (b) => (b.match(/\.analyze\(/g) ?? []).length) > 0) scanningCells += 1;
+    }
+  }
+
+  // A count-control, not decoration: this rule can only be trusted while it is actually looking at
+  // scans. 162 cells across 41 files scan today (MEASURED 2026-09-23); a refactor that hid the
+  // scanner behind a shape `cellBudgetGaps` cannot follow would drop this number, not raise a
+  // failure, so the floor is asserted.
+  assert.ok(scanningCells >= 150, `the census must still see the suite's scans (found ${scanningCells} scanning cells)`);
+
+  assert.deepEqual(gaps, [], `these cells scan without the headroom to pay for it:\n${describeGaps(gaps)}`);
+});
+
 test("#864 · THE VACUITY CONTROL: the detector actually detects, and does not over-detect", () => {
-  // The hand-rolled shape a11y-finish-walk.spec.ts actually carries.
+  const helpers = helpersSource();
+  const gaps = (source: string): string[] => cellBudgetGaps("fixture.spec.ts", source, helpers).map((g) => g.missing);
+
+  // The hand-rolled shape a11y-finish-walk.spec.ts actually carried.
   assert.deepEqual(hardcodedTimeouts('test.setTimeout(30_000 * (FACES.length + 1));'), ["30_000 * (FACES.length + 1)"]);
-  // The describe-level shape counterparty-identity-walk.spec.ts and firm-setup-walk.spec.ts carry.
+  // The describe-level shape counterparty-identity-walk.spec.ts and firm-setup-walk.spec.ts carried.
   assert.deepEqual(hardcodedTimeouts("test.describe.configure({ timeout: 150_000 });"), ["{ timeout: 150_000 }"]);
   // The compliant per-cell shape every already-rolled-out file uses.
   assert.deepEqual(hardcodedTimeouts("test.setTimeout(cellBudgetMs({ signIns: 1, scans: 2 }));"), []);
@@ -217,48 +327,65 @@ test("#864 · THE VACUITY CONTROL: the detector actually detects, and does not o
   // A file with no custom timeout call anywhere reports none — not a false floor.
   assert.deepEqual(hardcodedTimeouts('await signInTo(page, "/");'), []);
 
-  // ungrantedHeavyCells: a file that never signs in, with one cell scanning four times and no
-  // budget of its own — checkout-gate-walk.spec.ts's own real shape, minified.
-  const noGrantHeavy = [
+  // THE SHAPE THE FIRST CUT MISSED (review finding SPEC-864-A), reproduced verbatim from
+  // signup-confirm-pending.spec.ts: a local wrapper named `expectAccessible`, NOT `scan`, which
+  // does not settle, in a file that never signs in, called three times from one cell.
+  const unsettledLocalWrapper = [
     'import { expect, test } from "@playwright/test";',
-    'async function scan(page) {}',
+    "async function expectAccessible(page, face) {",
+    "  const r = await new AxeBuilder({ page }).withTags(TAGS).analyze();",
+    "  expect(r.violations).toEqual([]);",
+    "}",
     'test("a", async ({ page }) => {',
-    "  await scan(page, 'one');",
-    "  await scan(page, 'two');",
+    "  await expectAccessible(page, 'one');",
+    "  await expectAccessible(page, 'two');",
+    "  await expectAccessible(page, 'three');",
     "});",
   ].join("\n");
-  assert.equal(ungrantedHeavyCells(noGrantHeavy), 1, "two ungranted scan() calls in one cell of a never-signs-in file must be caught");
+  assert.equal(gaps(unsettledLocalWrapper).length, 1, "three ungranted scans through a differently-named wrapper must be caught");
+  assert.match(gaps(unsettledLocalWrapper)[0]!, /3 scan grant\(s\).*runs 3 accessibility scan/s);
 
-  // The SAME two scans, but the cell already declares its own budget — not an offender.
-  const noGrantHeavyButBudgeted = noGrantHeavy.replace(
-    "  await scan(page, 'one');",
-    "  test.setTimeout(cellBudgetMs({ scans: 2 }));\n  await scan(page, 'one');",
-  );
-  assert.equal(ungrantedHeavyCells(noGrantHeavyButBudgeted), 0, "a cell that already declares a budget is not an offender");
+  // The SAME file, with the wrapper settling through the shared helper: covered, because
+  // settleForScan grants CELL_BUDGET.scan per call.
+  const settledLocalWrapper = unsettledLocalWrapper
+    .replace('import { expect, test } from "@playwright/test";', 'import { expect, test } from "@playwright/test";\nimport { settleForScan } from "./helpers";')
+    .replace("  const r = await new AxeBuilder", "  await settleForScan(page);\n  const r = await new AxeBuilder");
+  assert.deepEqual(gaps(settledLocalWrapper), [], "a wrapper that settles through the shared helper pays for its own scan");
 
-  // The SAME two scans, but the file signs in elsewhere — the automatic CELL_BUDGET.signIn floor
-  // already stands, so this check does not apply at all (home-board-walk.spec.ts's own real shape:
-  // many two-scan cells, always after a signIn call, never flagged).
-  const signsInElsewhere = [
-    'import { expect, test } from "@playwright/test";',
-    'import { signIn } from "./helpers";',
-    'async function scan(page) {}',
-    'test("setup", async ({ page }) => { await signIn(page); });',
-    'test("b", async ({ page }) => {',
-    "  await scan(page, 'one');",
-    "  await scan(page, 'two');",
+  // ONE scan, no settle, no budget — still an offender. The first cut's `>= 2` floor is gone:
+  // CELL_BUDGET's own measurement is that a SINGLE scan takes 33 s against a flat 30 s default.
+  const oneUnsettledScan = [
+    'test("a", async ({ page }) => {',
+    "  const r = await new AxeBuilder({ page }).analyze();",
     "});",
   ].join("\n");
-  assert.equal(ungrantedHeavyCells(signsInElsewhere), 0, "a file with the automatic sign-in floor anywhere is out of this check's scope");
+  assert.equal(gaps(oneUnsettledScan).length, 1, "a single ungranted scan is already over the flat default");
 
-  // ONE scan is never heavy enough to trip the check, granted or not.
-  const oneScanOnly = noGrantHeavy.replace("  await scan(page, 'two');\n", "");
-  assert.equal(ungrantedHeavyCells(oneScanOnly), 0, "a single scan() call is not the shape this ticket found a gap in");
-
-  // The alias import shape callsSharedSignIn must also resolve.
-  assert.equal(
-    callsSharedSignIn('import { signIn as sharedSignIn } from "./helpers";\nawait sharedSignIn(page);'),
-    true,
+  // The same single scan, paid for by the cell's own declaration rather than by a settle.
+  const oneScanDeclared = oneUnsettledScan.replace(
+    'test("a", async ({ page }) => {',
+    'test("a", async ({ page }) => {\n  test.setTimeout(cellBudgetMs({ scans: 1 }));',
   );
-  assert.equal(callsSharedSignIn('import { ensureRealFocus } from "./helpers";'), false);
+  assert.deepEqual(gaps(oneScanDeclared), [], "a cell may also declare the scan budget itself");
+
+  // A COMMENT NAMING THE SHAPE IS NOT THE SHAPE — the false positive #1017's census header records,
+  // reproduced here because this file greps the same text.
+  const commentOnly = [
+    "// one full-page `AxeBuilder.analyze()` is 14.4 s alone",
+    'test("a", async ({ page }) => {',
+    "  await expect(page.getByRole('heading')).toBeVisible();",
+    "});",
+  ].join("\n");
+  assert.deepEqual(gaps(commentOnly), [], "prose quoting the scanner must not be read as a scan");
+
+  // A cell that scans nothing and waits for nothing long is not this rule's business.
+  assert.deepEqual(gaps('test("a", async ({ page }) => { await page.goto("/"); });'), []);
+
+  // importedAs resolves the alias shape members-invite-walk.spec.ts uses.
+  assert.deepEqual(importedAs('import { signIn as sharedSignIn } from "./helpers";', ["signIn", "signInTo"]), ["sharedSignIn"]);
+  assert.deepEqual(importedAs('import { ensureRealFocus } from "./helpers";', ["signIn", "signInTo"]), []);
+
+  // The prices are READ, not re-typed: a census built on a stale number is the defect this guards.
+  const prices = cellBudgetPrices(helpers);
+  assert.ok(prices.scan >= 30_000 && prices.poll >= 10_000 && prices.signIn >= 10_000 && prices.base >= 20_000, JSON.stringify(prices));
 });

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
+import { ensureRealFocus, settleForScan, signInTo } from "./helpers";
 
 /**
  * P6-3 · THE BROWSER LEG (裁-86). Every claim below needs the three things the
@@ -62,12 +62,12 @@ test("裁-13: axe-core's own target-size rule is clean on the firm surfaces this
   // ONE BUDGET PER FACE, not one for all seven (#728 review round, N18). This cell signs in and
   // then loads, settles and axe-scans every face in FACES; under a loaded host that walk exceeds
   // the 30 s default and the run fails on a TIMEOUT rather than on a violation — which reads as an
-  // accessibility regression and is not one. The budget scales with the list so adding a face
-  // cannot silently re-open the same failure. #864 — built from cellBudgetMs (helpers.ts) instead
-  // of this file's own `30_000 * (FACES.length + 1))` formula, now that a shared place exists: one
-  // `scans` unit per face (each is a real, settled `AxeBuilder.analyze()`, exactly what
-  // `CELL_BUDGET.scan` measures) plus the one `signIns` unit for the sign-in above.
-  test.setTimeout(cellBudgetMs({ signIns: 1, scans: FACES.length }));
+  // accessibility regression and is not one. #864 (fix round) — the budget is no longer WRITTEN
+  // here at all: `signInTo` grants `CELL_BUDGET.signIn` and `settleForScan` (reached once per face
+  // through `gotoSettled`) grants `CELL_BUDGET.scan`, so the headroom scales with the faces the
+  // loop actually walks rather than with a count this cell has to keep in step by hand. The old
+  // `cellBudgetMs({ signIns: 1, scans: FACES.length })` line — itself #864's replacement for this
+  // file's original `30_000 * (FACES.length + 1)` formula — would now count the same work twice.
   // The rule this repo's a11yRules.ts target-size check stands in for, run for
   // real — with layout geometry and with SC 2.5.8's spacing exception, neither
   // of which the class-string gate implements or pretends to.
@@ -250,9 +250,9 @@ test("裁-1 / 裁-2 4c: the recut ring and the recut control edge reach the brow
 });
 
 test("the touched faces stay clean under the full WCAG 2.1 AA scan", async ({ page }) => {
-  // Same per-face budget as the target-size cell above, and for the same measured reason (N18):
-  // a full WCAG 2.1 AA axe pass over seven faces does not fit one 30 s default on a busy host.
-  test.setTimeout(cellBudgetMs({ signIns: 1, scans: FACES.length }));
+  // Same per-face budget as the target-size cell above, and for the same measured reason (N18): a
+  // full WCAG 2.1 AA axe pass over seven faces does not fit one 30 s default on a busy host. Also
+  // granted by `signInTo`/`settleForScan` themselves now (#864 fix round), per face walked.
   await signInTo(page, "/");
   for (const [face, url] of FACES) {
     await gotoSettled(page, url);
