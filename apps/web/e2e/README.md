@@ -129,7 +129,7 @@ Three rules the budgets do not replace:
 
 ## Coverage map
 
-The checked-in suite currently contains 51 specs. The table below describes 27 of them; the remaining 24 have no row yet and are named under [Specs with no coverage-map row](#specs-with-no-coverage-map-row) beneath it — so neither number here contradicts what a reader can count in the table or on disk. Writing the missing descriptions is deliberately outside [#1019](https://github.com/BELCORT-SDN-BHD/clara/issues/1019), whose Out of scope is "rewriting or auditing the individual per-spec description text in the coverage-map table"; it is carried as that ticket's follow-up.
+The checked-in suite currently contains 52 specs. The table below describes 27 of them; the remaining 25 have no row yet and are named under [Specs with no coverage-map row](#specs-with-no-coverage-map-row) beneath it — so neither number here contradicts what a reader can count in the table or on disk. Writing the missing descriptions is deliberately outside [#1019](https://github.com/BELCORT-SDN-BHD/clara/issues/1019), whose Out of scope is "rewriting or auditing the individual per-spec description text in the coverage-map table"; it is carried as that ticket's follow-up.
 
 | Spec | What it exercises |
 |---|---|
@@ -166,7 +166,7 @@ These files use `.spec.ts` because the package's Node test manifest accepts `*.t
 
 ### Specs with no coverage-map row
 
-These 24 checked-in specs are real and run; only their description above is missing. [`spec-discovery.test.ts`](spec-discovery.test.ts) holds this list against the directory itself, so a spec can be neither added nor removed without landing in exactly one of the two — the table above or the list below.
+These 25 checked-in specs are real and run; only their description above is missing. [`spec-discovery.test.ts`](spec-discovery.test.ts) holds this list against the directory itself, so a spec can be neither added nor removed without landing in exactly one of the two — the table above or the list below.
 
 - `accrual-walk.spec.ts`
 - `adjustments-retired-walk.spec.ts`
@@ -185,6 +185,7 @@ These 24 checked-in specs are real and run; only their description above is miss
 - `members-invite-walk.spec.ts`
 - `opening-ledger-source-walk.spec.ts`
 - `operator-support-walk.spec.ts`
+- `payroll-settlement-walk.spec.ts`
 - `periodic-adjustment-walk.spec.ts`
 - `plans-walk.spec.ts`
 - `prepayments-walk.spec.ts`

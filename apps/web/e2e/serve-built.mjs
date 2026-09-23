@@ -56,6 +56,11 @@ import { handleL7Supabase } from "./bank-close-registers-mock.mjs";
 // below and bank-match-mock.mjs own header for the measurement that makes the position
 // load-bearing rather than cosmetic.
 import { handleP657Supabase } from "./bank-match-mock.mjs";
+// #947 — the payroll settlement panel on the SAME Matching tab. Answers only the two verbs
+// #657's own allow-list does not know, so position relative to it is not load-bearing (no home-
+// board EMPTY_RPCS concern either — neither verb is in that array); dispatched beside it for
+// locality. Scoped to #657's own client id (reused deliberately — see that module's header).
+import { handleP947Supabase } from "./payroll-settlement-mock.mjs";
 // The documents-viewer walk's own lane (C-07 / D2 / D3), the same file-disjoint shape.
 // Every branch inside is scoped to ITS OWN client/document/extraction ids and falls
 // through otherwise; it never claims the shared client register or the session list.
@@ -761,6 +766,7 @@ async function handleSupabase(request, response, url) {
   // that has been fixed (`e2e-fixture-ownership.test.ts`'s `arrayMembershipVerbs`), and both
   // verbs are now declared, correctly, in `SHARED_RPC_VERBS`.
   if (await handleP657Supabase(request, response, path, url, sendJson, cors)) return;
+  if (await handleP947Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
   // id-scoped client row (a SERVER-side layout read `page.route` cannot reach), and it falls

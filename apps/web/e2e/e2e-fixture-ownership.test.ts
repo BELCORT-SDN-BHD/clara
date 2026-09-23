@@ -80,6 +80,7 @@ const LANE_MOCKS = [
   "members-lifecycle-mock.mjs",
   "opening-ledger-source-mock.mjs",
   "operator-support-mock.mjs",
+  "payroll-settlement-mock.mjs",
   "periodic-adjustment-mock.mjs",
   "plans-mock.mjs",
   "prepayments-mock.mjs",
@@ -510,6 +511,11 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // own guard (`if (body?.client !== PA.clientId) return false;`) and the walk's `control()` helper
   // names the lane on every call. The state a walk injects is this lane's alone.
   "periodic-adjustment-mock.mjs": { unscopeable: [], debt: [] },
+  // #947's own lane (the payroll settlement panel, reusing #657's client id — see that module's
+  // header for why). Both its verbs (get_payroll_settlement_candidates, settle_payroll_net_pay)
+  // gate on `body.p_client !== P947.clientId` before answering. Declares neither list, the shape
+  // a new lane mock should aim for.
+  "payroll-settlement-mock.mjs": { unscopeable: [], debt: [] },
   // #640's C9 lane. Every handler names this lane's own client id or plan id before it answers
   // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
   // aim for, declaring neither list.

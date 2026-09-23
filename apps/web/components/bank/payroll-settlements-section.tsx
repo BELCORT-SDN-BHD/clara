@@ -78,7 +78,7 @@ export function PayrollSettlementsSection({ clientId }: { clientId: string }) {
   const isEmpty = hasData && runs.length === 0;
 
   return (
-    <Card>
+    <Card data-testid="payroll-settlements-panel">
       <CardHeader>
         <SectionHeader level={2}>{t("heading")}</SectionHeader>
         <CardDescription>{t("body")}</CardDescription>
@@ -98,7 +98,7 @@ export function PayrollSettlementsSection({ clientId }: { clientId: string }) {
         >
           <div className="flex flex-col gap-4">
             {runs.map((run) => (
-              <div key={run.entry_id} className="flex flex-col gap-2 rounded-lg border border-border p-3">
+              <div key={run.entry_id} data-testid={`payroll-run-${run.entry_id}`} className="flex flex-col gap-2 rounded-lg border border-border p-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div className="font-medium">{t("runHeading", { period: periodLabel(run.period_month) })}</div>
                   <div className="text-sm text-muted-foreground">{formatMyr(run.unsettled_cents)}</div>
