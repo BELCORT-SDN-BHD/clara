@@ -1,10 +1,17 @@
-// Wave B — R2 prior-GL seeding-prepare lane. PURE unit tests for the grammar, the
-// self-contained XLSX reader (a hand-built ZIP+XML fixture — no external lib), the
-// header-convention column map, and the entries→proposals builder; plus DB-backed
-// tests that the audited `create_seeding_batch` writer accepts the typed proposals
-// (control-account rows refused at parse), the (client, sha) open-batch unique surfaces
-// 409 {existing:true, batchId}, and unparseable sources honestly 422. DB tests skip
-// cleanly when the 0017 surface is absent. Serial, RELAY_TEST_MODE.
+// Wave B — R2 prior-GL seeding-prepare lane, AFTER #1012 RETIRED IT
+// (0288_seeding_lane_retired.sql; owner ruling 2026-09-20 on #983). PURE unit tests for the
+// grammar, the self-contained XLSX reader (a hand-built ZIP+XML fixture — no external lib), the
+// header-convention column map and the entries→proposals builder — all unchanged, because the
+// deterministic READ half of this lane is what the Client KB inherits. The DB-backed half now
+// proves the other side of the retirement: the parse still runs exactly as it did, and the
+// audited writer answers its typed refusal, so `prepareSeeding` relays 410
+// {status:"retired", reason:"seeding_lane_retired"} and NO batch is created on any input.
+// The route that fronted it (src/seedingRoutes.ts) is deleted, so nothing calls this path in
+// the running process at all.
+//
+// The 409 {existing:true, batchId} cell is GONE rather than silently dropped: its whole subject
+// was the (client, sha) open-batch unique tripping on a SECOND create, and no first create can
+// happen again. DB tests skip cleanly when the 0017 surface is absent. Serial, RELAY_TEST_MODE.
 
 process.env.RELAY_TEST_MODE ??= "1";
 
@@ -246,6 +253,11 @@ test("seedingOpKey is the pinned shape; mapSeedingDbError maps refusals", () => 
     { http: 422, body: { status: "unparseable", reason: "not_prior_gl" } });
   assert.equal(mapSeedingDbError({ code: "CLR02", detail: '{"reason":"x"}' }).http, 409);
   assert.equal(mapSeedingDbError(new Error("boom")), null);
+  // #1012 (0288): the retirement maps to 410 Gone — never 409/422, which a caller would read
+  // as "retry" or "fix the source". The DB's own sentence travels verbatim.
+  assert.deepEqual(
+    mapSeedingDbError({ code: "CLR34", detail: '{"reason":"seeding_lane_retired"}', message: "the prior-GL seeding lane is retired" }),
+    { http: 410, body: { status: "retired", reason: "seeding_lane_retired", message: "the prior-GL seeding lane is retired" } });
 });
 
 // ---------------------------------------------------------------------------
@@ -301,7 +313,7 @@ async function buildSeedingFixture(label, { regionTexts = null, kind = "prior_gl
 
 after(() => rig.endPool());
 
-test("FEASIBILITY (F13): prior_gl.line facts → typed proposals; control-account rows refused at parse", { skip }, async () => {
+test("#1012: prior_gl.line facts still parse into typed proposals, and the audited writer answers its RETIREMENT — 410, no batch", { skip }, async () => {
   const fx = await buildSeedingFixture("wb-r2-seed-ok", {
     regionTexts: [
       "2025-03-14 Acme Supplies Sdn Bhd 5000 RM 1,200.00 DR",
@@ -311,48 +323,19 @@ test("FEASIBILITY (F13): prior_gl.line facts → typed proposals; control-accoun
   });
   const out = await rig.asRuntime((c) =>
     prepareSeeding(c, { clientId: fx.client, documentId: fx.documentId, principal: { sub: fx.owner, firmId: fx.firm } }));
-  assert.equal(out.http, 202, JSON.stringify(out.body));
-  assert.equal(out.body.status, "created");
-  assert.ok(out.body.batchId);
-  // 2 rule pairs + 2 counterparty wiki_facts. F-H9: counts relayed FLAT + verbatim.
-  assert.equal(out.body.proposal_count, 4);
-  assert.equal(out.body.refused_count, 1, "the receivable-control rule is refused at parse");
-  assert.equal(out.body.proposals, undefined, "no nested {proposals} wrapper (F-H9 flat shape)");
+  assert.equal(out.http, 410, JSON.stringify(out.body));
+  assert.equal(out.body.status, "retired");
+  assert.equal(out.body.reason, "seeding_lane_retired");
+  assert.match(out.body.message, /retired/i, "the DB's own sentence travels verbatim");
+  assert.equal(out.body.batchId, undefined, "no batch id, because no batch");
 
-  const props = await rig.rootQuery(
-    "select proposal_kind, proposal_key, state, refuse_reason from clara.seeding_proposals where batch_id=$1 order by proposal_key",
-    [out.body.batchId]);
-  const control = props.rows.find((p) => p.proposal_key === "rule:betatrading:300-A00");
-  assert.equal(control.state, "refused");
-  assert.equal(control.refuse_reason, "control_account");
-  const acme = props.rows.find((p) => p.proposal_key === "rule:acmesuppliessdnbhd:5000");
-  assert.equal(acme.state, "proposed");
-  assert.ok(props.rows.some((p) => p.proposal_kind === "wiki_fact"), "wiki_fact proposals present for the dispatch lane");
-
-  // Idempotent replay (stable op_key) returns the same batch.
-  const again = await rig.asRuntime((c) =>
-    prepareSeeding(c, { clientId: fx.client, documentId: fx.documentId, principal: { sub: fx.owner, firmId: fx.firm } }));
-  assert.equal(again.http, 202);
-  assert.equal(again.body.batchId, out.body.batchId);
-});
-
-test("an already-open batch for the same source → 409 {existing:true, batchId}", { skip }, async () => {
-  const fx = await buildSeedingFixture("wb-r2-seed-dup", {
-    regionTexts: ["2025-03-14 Gamma Traders 5000 RM 300.00 DR"],
-  });
-  // A batch created by a DIFFERENT op_key (a concurrent creator) holds the open slot.
-  const manual = await rig.asRuntime((c) =>
-    c.query("select clara.create_seeding_batch($1,$2,$3::jsonb,$4) as r", [
-      fx.client, fx.documentId,
-      JSON.stringify([{ proposal_kind: "wiki_fact", proposal_key: "wiki:manual", payload: { wiki: { slug: "prior-gl/manual", title: "Manual", page_kind: "recurring_pattern", content: "# Manual" } }, evidence: { occurrence_count: 1 } }]),
-      `manual-${randomUUID().slice(0, 8)}`,
-    ]));
-  const manualBatch = manual.rows[0].r.batch_id;
-  const out = await rig.asRuntime((c) =>
-    prepareSeeding(c, { clientId: fx.client, documentId: fx.documentId, principal: { sub: fx.owner, firmId: fx.firm } }));
-  assert.equal(out.http, 409);
-  assert.equal(out.body.existing, true);
-  assert.equal(out.body.batchId, manualBatch);
+  // The refusal is the LAST step, not the first: this source parsed to completion, which is
+  // what makes the answer a RETIREMENT (410) and not a parse failure (422). The empty write
+  // below is the other half of that claim.
+  const b = await rig.rootQuery("select count(*)::int as n from clara.seeding_batches where client_id=$1", [fx.client]);
+  assert.equal(b.rows[0].n, 0, "no seeding batch exists for this client");
+  const props = await rig.rootQuery("select count(*)::int as n from clara.seeding_proposals where client_id=$1", [fx.client]);
+  assert.equal(props.rows[0].n, 0, "and no proposal either");
 });
 
 test("a prior_gl with no parseable regions whose bytes are NOT an xlsx → 422 no_parse_source (byte-sniff)", { skip }, async () => {
@@ -367,19 +350,23 @@ test("a prior_gl with no parseable regions whose bytes are NOT an xlsx → 422 n
   assert.deepEqual(out.body, { status: "unparseable", reason: "no_parse_source" });
 });
 
-test("byte-sniff decides xlsx-ness NOT the mime: a prior_gl stamped application/octet-stream still parses when its bytes are a workbook", { skip }, async () => {
+test("#1012: byte-sniff still decides xlsx-ness NOT the mime — and the writer answers its retirement", { skip }, async () => {
   const fx = await buildSeedingFixture("wb-r2-seed-octet", { kind: "prior_gl", mime: "application/octet-stream" });
   const out = await rig.asRuntime((c) =>
     prepareSeeding(c, {
       clientId: fx.client, documentId: fx.documentId, principal: { sub: fx.owner, firmId: fx.firm },
       deps: { fetchBytes: async () => xlsxFixture() },
     }));
-  assert.equal(out.http, 202, JSON.stringify(out.body));
-  assert.equal(out.body.status, "created");
-  assert.equal(out.body.proposal_count, 2);
+  // #1012: the byte-sniff claim is unchanged — the mime said octet-stream and the bytes still
+  // decided xlsx-ness, because the parse reached the writer at all. What the writer answers now
+  // is the retirement.
+  assert.equal(out.http, 410, JSON.stringify(out.body));
+  assert.equal(out.body.reason, "seeding_lane_retired");
+  const b = await rig.rootQuery("select count(*)::int as n from clara.seeding_batches where client_id=$1", [fx.client]);
+  assert.equal(b.rows[0].n, 0, "no batch from a workbook either");
 });
 
-test("the xlsx byte path (injected fetchBytes) parses a spreadsheet prior_gl into a batch", { skip }, async () => {
+test("#1012: the xlsx byte path (injected fetchBytes) still parses a spreadsheet prior_gl — and creates no batch", { skip }, async () => {
   const fx = await buildSeedingFixture("wb-r2-seed-xlsx", {
     kind: "prior_gl",
     mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -390,11 +377,12 @@ test("the xlsx byte path (injected fetchBytes) parses a spreadsheet prior_gl int
       principal: { sub: fx.owner, firmId: fx.firm },
       deps: { fetchBytes: async () => xlsxFixture() },
     }));
-  assert.equal(out.http, 202, JSON.stringify(out.body));
-  assert.equal(out.body.status, "created");
-  // Acme Supplies / 5000 → one rule (proposed) + one wiki_fact. F-H9 flat counts.
-  assert.equal(out.body.proposal_count, 2);
-  assert.equal(out.body.refused_count, 0);
+  // #1012: Acme Supplies / 5000 still parses into one rule + one wiki_fact — the reader half is
+  // untouched — and the audited writer answers the retirement instead of a receipt.
+  assert.equal(out.http, 410, JSON.stringify(out.body));
+  assert.equal(out.body.reason, "seeding_lane_retired");
+  const b = await rig.rootQuery("select count(*)::int as n from clara.seeding_batches where client_id=$1", [fx.client]);
+  assert.equal(b.rows[0].n, 0, "the xlsx byte path creates no batch either");
 });
 
 test("STRICT (F-H5): one malformed prior_gl region fails the WHOLE prepare — 422 naming it, NO batch", { skip }, async () => {
@@ -453,34 +441,48 @@ async function drainWiki(firm) {
   });
 }
 
-test("F13 dispatch END-TO-END: a TICKED wiki_fact publishes a DETERMINISTIC page with prior_gl_line citations", { skip }, async () => {
-  const fx = await buildSeedingFixture("wb-r2-seed-e2e", {
-    regionTexts: [
-      "2025-02-10 Zeta Logistics 5000 RM 900.00 DR",
-      "2025-08-22 Zeta Logistics 5000 RM 1,100.00 DR",
-    ],
-  });
-  const created = await rig.asRuntime((c) =>
-    prepareSeeding(c, { clientId: fx.client, documentId: fx.documentId, principal: { sub: fx.owner, firmId: fx.firm } }));
-  assert.equal(created.http, 202, JSON.stringify(created.body));
+test("#1012 AC6: the projection worker still REPLAYS a historical ticked wiki_fact after the retirement — a deterministic page with prior_gl_line citations", { skip }, async () => {
+  const fx = await buildSeedingFixture("wb-r2-seed-e2e");
 
-  // The human admin ticks the wiki_fact proposal → seeding.proposal_decided(wiki_dispatch_required).
-  const prop = await rig.rootQuery(
-    "select id, payload from clara.seeding_proposals where batch_id=$1 and proposal_kind='wiki_fact' limit 1", [created.body.batchId]);
-  const proposalId = prop.rows[0].id;
-  const slug = prop.rows[0].payload.wiki.slug;
-  const ticked = await rig.asHuman(fx.owner, (c) =>
-    c.query("select clara.tick_seeding_proposal($1,$2) as r", [proposalId, rig.opk("tick")]));
-  assert.equal(ticked.rows[0].r.wiki_dispatch_required, true, "the DB flags the wiki dispatch");
+  // HISTORY, PLANTED. Before 0288 this state was produced by prepareSeeding + a human admin
+  // ticking the proposal. Neither door will run again, so the pre-retirement rows a hosted firm
+  // still carries are written directly — which is exactly the state AC6 asks about: "the
+  // projection worker still replays a historical decided event successfully after the
+  // migration".
+  const slug = "prior-gl/zeta-logistics";
+  const content = "# Prior-GL activity — Zeta Logistics\n\nPosts to 5000 twice in 2025.";
+  // ck_seeding_batches_terminal: a 'completed' batch must carry BOTH completion columns.
+  const batch = (await rig.rootQuery(
+    `insert into clara.seeding_batches(firm_id, client_id, source_document_id, source_sha256,
+         state, stats, completed_at, completed_by)
+       values ($1, $2, $3::uuid, $4, 'completed', '{}'::jsonb, now(), $5)
+     returning id`, [fx.firm, fx.client, fx.documentId, fx.sha, fx.owner])).rows[0].id;
+  const proposalId = (await rig.rootQuery(
+    `insert into clara.seeding_proposals(batch_id, firm_id, client_id, proposal_kind, proposal_key,
+         payload, evidence, state, decided_by, decided_at)
+       values ($1, $2, $3, 'wiki_fact', 'wiki:zeta', $4::jsonb, $5::jsonb, 'ticked', $6, now())
+     returning id`,
+    [batch, fx.firm, fx.client,
+      JSON.stringify({ wiki: { slug, title: "Prior-GL activity — Zeta Logistics", page_kind: "recurring_pattern", content } }),
+      JSON.stringify({ occurrence_count: 2, line_cites: [{ row: 12, text: "2025-02-10 Zeta Logistics 5000 RM 900.00 DR" }] }),
+      fx.owner])).rows[0].id;
+  // The decided event, through the estate's own appender, in the exact shape
+  // clara.tick_seeding_proposal emitted before 0288 recut it.
+  await rig.rootQuery(
+    `select clara._append_event($1,'seeding.proposal_decided',$2,$3,null,null,null,$4,null,$5::jsonb)`,
+    [fx.firm, fx.client, fx.owner, fx.documentId, JSON.stringify({
+      batch_id: batch, proposal_id: proposalId, decision: "ticked", proposal_kind: "wiki_fact",
+      resulting_rule_id: null, resulting_counterparty_id: null, wiki_dispatch_required: true,
+    })]);
 
-  // The deterministic wiki_fact lane publishes the page.
+  // The deterministic wiki_fact lane publishes the page — unchanged by the retirement.
   await drainWiki(fx.firm);
 
   const page = await rig.rootQuery(
     `select p.page_kind, p.counterparty_id, v.synthesis, v.engine_id, v.content
        from clara.wiki_pages p join clara.wiki_page_versions v on v.id=p.current_version_id
       where p.client_id=$1 and p.slug=$2`, [fx.client, slug]);
-  assert.equal(page.rowCount, 1, "the fact page was published");
+  assert.equal(page.rowCount, 1, "the historical fact page was published on replay");
   assert.equal(page.rows[0].synthesis, "deterministic");
   assert.equal(page.rows[0].engine_id, null, "no model — engine_id null");
   assert.equal(page.rows[0].counterparty_id, null);
