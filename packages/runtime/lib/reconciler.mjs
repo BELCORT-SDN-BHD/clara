@@ -28,7 +28,6 @@ import { isRunNotFound, reconcileDocumentIntakes, reconcileDocumentTasks } from 
 import { reconcileSstWatches } from "./reconciler-sst.mjs";
 import { reconcileLintBelt } from "./reconciler-lint.mjs";
 import { reconcileFaRuns } from "./reconciler-fa.mjs";
-import { reconcileAdjustmentRuns } from "./reconciler-adjustments.mjs";
 import { reconcilePlanOccurrences } from "./plan-occurrences.mjs";
 import { reconcileWakeEngineTasks } from "./reconciler-wake.mjs";
 import { cancelSettleForWork, reconcileAccountingWorkTasks, settleWorkTerminal, workResultForTask } from "./reconciler-work.mjs";
@@ -577,7 +576,7 @@ export async function reconcileAutoDraftTasks(client, deps) {
 // WA2-R10 never-auto-renew). clara.reconcile_autopost_rules() and the whole
 // CODING-rules EXECUTION tier were DROPPED at `0118` (F-A2 PR-3, 2026-08-25
 // ceremony; f-a2-annexes-1-estate.md §B.1 names this artifact "RETIRE (drop the
-// verb)"). Unlike the FA/adjustment belts below — whose DB surface arrives AFTER
+// verb)"). Unlike the FA belt below — whose DB surface arrives AFTER
 // this runtime image by design and which therefore feature-detect with
 // `to_regprocedure` so they can light up the moment their migration lands — this
 // function's DB half is gone FOR GOOD, on purpose: there is no future migration to
@@ -614,8 +613,22 @@ export { reconcileLintBelt };
 // or nothing overdue is a cheap {due:false} no-op.
 export { reconcileFaRuns };
 
-// The Wave D-b adjustment belt (design §2.3/§2.7 / migration 0045) lives in reconciler-adjustments.mjs.
-export { reconcileAdjustmentRuns };
+// ---------------------------------------------------------------------------
+// The Wave D-b adjustment-occurrence daily belt — RETIRED (#928, owner ruling #788: retire
+// the 0045 recurring-adjustment template lane fully). It lived in reconciler-adjustments.mjs
+// (design §2.3/§2.7 / migration 0045) exactly like reconciler-fa.mjs lives beside it above —
+// same module-size budget, same per-cycle to_regprocedure feature-detect, same per-client
+// due-probe/run chase. #927 closed the human-facing write doors first (propose/sign/
+// run_adjustment_manual), so nothing new could ever fall due; this ticket retires the belt
+// and its caller (leader.mjs's own adjustmentRunDue/lastAdjRun/adjRuns wiring, gone with it);
+// #929 removes the DB surface (clara.adjustment_run_due / clara.run_adjustment_occurrence)
+// itself. Unlike the autopost retirement above, this caller retires AHEAD of its callee: the
+// DB functions may still exist on a frontier ahead of #929, but nothing schedules a call into
+// them any more, on any frontier — reconciler-adjustments.mjs is deleted whole (the
+// rule-post.mjs / autopost precedent: nothing frozen ever imported it, so no successor stub
+// is owed). Accounting plans' own occurrence scan (migration 0193, reconcilePlanOccurrences
+// below) is untouched — it is a separate, newer system.
+// ---------------------------------------------------------------------------
 
 // #640 the accounting-plan due scan (migration 0193) lives in plan-occurrences.mjs. Registered
 // UNCONDITIONALLY — EVERY cycle, not on a daily flag — because its whole cost is ONE call whose
@@ -627,8 +640,8 @@ export { reconcilePlanOccurrences };
 // Gate G1's own belt (design Annex C / migration 0133_g1_wake_engine) lives in
 // reconciler-wake.mjs under the same module-size budget. Registered UNCONDITIONALLY (every
 // cycle, not a daily flag) — mirrors reconcileAutoDraftTasks's own registration exactly, since
-// crash-recovery for a wake-engine-owned task is not a cadence concern the way the SST/lint/FA/
-// adjustment belts are.
+// crash-recovery for a wake-engine-owned task is not a cadence concern the way the
+// SST/lint/FA belts are.
 export { reconcileWakeEngineTasks };
 export { reconcileAccountingWorkTasks, settleWorkTerminal, terminalForWork } from "./reconciler-work.mjs";
 
@@ -649,9 +662,10 @@ function isLeaderHalt(err) {
  * (opts.prune=true) so it does not scan on every fast sweep; the SST
  * compliance-watch repair belt runs on the leader's daily flag (opts.sstWatches=true);
  * the per-client wiki-lint belt runs on the leader's daily flag (opts.lintBelt=true); the FA
- * belt (opts.faRuns=true) and the D-b adjustment belt (opts.adjRuns=true) run on the same flag.
- * (The sixth daily flag this sweep once carried, opts.autopostRules, retired with its DB
- * function at `0118` — see the comment above reconcileSstWatches's own belt block.)
+ * belt runs on opts.faRuns=true. (Two daily flags this sweep once carried are retired: the
+ * autopost-rule expiry sweep, opts.autopostRules, with its DB function at `0118` — see the
+ * comment above reconcileSstWatches's own belt block; and the D-b adjustment belt,
+ * opts.adjRuns, at `#928` — see the comment above this JSDoc.)
  *
  * The chat-clarify belt (#852) runs FIRST, ahead of every other belt, for the reason its own
  * module header gives; its five `chatClarify*` counters ride the same receipt.
@@ -664,7 +678,7 @@ function isLeaderHalt(err) {
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{enqueueChatTurn:Function, getRun:Function, log?:Function, prune?:boolean,
  *          sstWatches?:boolean, lintBelt?:boolean, faRuns?:boolean,
- *          adjRuns?:boolean, resumeHook?:Function}} deps  `resumeHook` is the chat-clarify belt's
+ *          resumeHook?:Function}} deps  `resumeHook` is the chat-clarify belt's
  *          world call (#852): without it that belt is a clean no-op that issues no statement at
  *          all, rather than half a probe that settles conversations on a guess.
  */
@@ -763,16 +777,16 @@ export async function runReconcilerSweep(client, deps) {
     intakeRecovery = await belt("intake artifact recovery", () => deps.recoverDocumentIntakes(), intakeRecovery);
   }
   const spool = await belt("spool TTL sweep", () => sweepSpoolTtl(), { spoolRemoved: 0 });
-  // The four DAILY belts below fall back to their OWN ok:false, never to `{}`. leader.mjs
+  // The three DAILY belts below fall back to their OWN ok:false, never to `{}`. leader.mjs
   // advances the 24h cadence only on a truthy `*Ok`, so an absent key would already retry next
   // cycle — but saying it explicitly is the difference between a contract and an accident, and it
-  // is the one thing a reviewer should not have to derive from undefined-is-falsy. (A fifth belt,
-  // the autopost-rule expiry sweep, lived here until its DB function retired at `0118` — see the
-  // comment above reconcileSstWatches's own block.)
+  // is the one thing a reviewer should not have to derive from undefined-is-falsy. (Two belts that
+  // once lived here are retired: the autopost-rule expiry sweep, until its DB function retired at
+  // `0118` — see the comment above reconcileSstWatches's own block; and the D-b adjustment belt,
+  // at `#928` — see the retirement banner above reconcilePlanOccurrences's own export.)
   const sst = deps.sstWatches ? await belt("sst watches", () => reconcileSstWatches(client, { log }), { sstOk: false }) : {};
   const lint = deps.lintBelt ? await belt("lint belt", () => reconcileLintBelt(client, { log }), { lintOk: false }) : {};
   const fa = deps.faRuns ? await belt("fa runs", () => reconcileFaRuns(client, { log }), { faOk: false }) : {};
-  const adj = deps.adjRuns ? await belt("adjustment runs", () => reconcileAdjustmentRuns(client, { log }), { adjOk: false }) : {}; // Wave D-b belt (0045)
   // #640 belt (0193) — unconditional, like the render dispatch: one SQL-gated call, dormant
   // (feature-detected) until 0193 applies. Its own module header carries the cadence argument.
   const plans = await belt("plan occurrences", () => reconcilePlanOccurrences(client, { log }), { planOk: false });
@@ -794,5 +808,5 @@ export async function runReconcilerSweep(client, deps) {
   // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the
   // autodraft edge's own law (a failure that is COUNTED stays visible; a failure that is only
   // logged is one grep away from invisible).
-  return { heartbeatOk: true, beltErrors, ...chatClarify, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...adj, ...plans, ...wake, ...work, ...batchCancels, ...prune };
+  return { heartbeatOk: true, beltErrors, ...chatClarify, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...plans, ...wake, ...work, ...batchCancels, ...prune };
 }

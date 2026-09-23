@@ -147,12 +147,13 @@ try {
   restoreEnv = setDatabaseEnv(DBNAME);
 
   // Read at module load by lib/leader.mjs — set BEFORE the dynamic import below. A poll of 200ms
-  // (not the 2s default) is what keeps the reconnect arm's wall clock in the seconds; the five
+  // (not the 2s default) is what keeps the reconnect arm's wall clock in the seconds; the four
   // enormous cadences make every DAILY belt not-due on the first cycle (`now - 0 >= interval` is
   // false), which is the difference between a cell that measures a state transition and one that
-  // sweeps four thousand clients first.
+  // sweeps four thousand clients first. (A fifth knob, CLARA_ADJ_RECONCILE_MS, retired with the
+  // D-b adjustment belt at #928 — see leader.mjs's own retirement comment.)
   process.env.CLARA_LEADER_POLL_MS = "200";
-  for (const knob of ["CLARA_SST_RECONCILE_MS", "CLARA_LINT_RECONCILE_MS", "CLARA_FA_RECONCILE_MS", "CLARA_ADJ_RECONCILE_MS", "CLARA_RENDER_ENQUEUE_MS"]) {
+  for (const knob of ["CLARA_SST_RECONCILE_MS", "CLARA_LINT_RECONCILE_MS", "CLARA_FA_RECONCILE_MS", "CLARA_RENDER_ENQUEUE_MS"]) {
     process.env[knob] = "99999999999999";
   }
 
