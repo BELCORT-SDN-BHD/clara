@@ -718,6 +718,14 @@ next run WOULD do before anything is written: the period the register chose, the
 both general-ledger legs, every skipped asset with its reason in words, whether the run will post or
 wait for approval, and any period the oracle skipped for a closed financial year. Confirm runs it.
 
+**A judgement licenses the figure it was made about** (#975 fix round, ADV-L04-2). The run door now
+refuses — or parks — on `arrears_changed_since_judgement` when a closed year's arrears no longer
+match the amount the standing ruling was made about, so the preview stops presenting that ruling as
+the settled answer: it states both figures ("you judged RM 250.00 … it now stands at RM 400.00") and
+offers the two controls again, handing the door the CURRENT amount, which is the one it re-measures.
+A surface that kept saying "you judged it immaterial" would have left a person reading a settled
+sentence beside a run nobody could unblock.
+
 **Every skip reason was MEASURED, and an unknown one degrades rather than vanishing.** The five the
 database can emit are `incomplete`, `not_in_service`, `fully_depreciated`, `none_method` and
 `disposal_draft_outstanding` — the fifth is written by `clara._fa_compute_charges` itself and the

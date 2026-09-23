@@ -279,6 +279,18 @@ function ArrearsChoice({
   );
 }
 
+/** #975 FIX ROUND (adversarial review ADV-L04-2) — A JUDGEMENT LICENSES THE FIGURE IT WAS MADE
+ *  ABOUT. `clara._fa_run_period_core` treats a year whose live resolution was made about a
+ *  DIFFERENT amount as unanswered and refuses (or parks) on `arrears_changed_since_judgement`, so
+ *  a surface that still rendered "you judged it immaterial" and withheld the two controls would
+ *  leave the person looking at a settled sentence beside a run nobody could unblock. The
+ *  database's own test, restated on the two numbers it already ships beside each other. */
+function arrearsJudgementIsStale(
+  year: NonNullable<FaRunPreview["closed_arrears"]>["fiscal_years"][number],
+): boolean {
+  return year.resolution !== null && year.resolution.arrears_cents !== year.arrears_cents;
+}
+
 /** Periods the due oracle skipped because their financial year is closed, and — since #975 (0279)
  *  — the arrears those months carry and whether anybody has judged them yet. A skip nobody can see
  *  is the same defect as a silent post; an amount nobody states is the same defect as a silent
@@ -318,8 +330,12 @@ function SkippedClosed({
                 })}{" "}
                 {y.resolution === null
                   ? t("arrearsUnanswered")
-                  : t(y.resolution.choice === "fold_current" ? "arrearsFolded" : "arrearsRestated")}
-                {y.resolution === null && onRecordArrears ? (
+                  : arrearsJudgementIsStale(y)
+                    ? t("arrearsChangedSinceJudged", {
+                      judged: fmtCents(y.resolution.arrears_cents), amount: fmtCents(y.arrears_cents),
+                    })
+                    : t(y.resolution.choice === "fold_current" ? "arrearsFolded" : "arrearsRestated")}
+                {(y.resolution === null || arrearsJudgementIsStale(y)) && onRecordArrears ? (
                   <ArrearsChoice year={y} onRecordArrears={onRecordArrears} />
                 ) : null}
               </li>

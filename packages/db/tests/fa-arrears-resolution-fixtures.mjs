@@ -63,6 +63,43 @@ export async function gate975(t) {
   return true;
 }
 
+/** `0281_fa_arrears_judgement_scope.sql` → `fa_arrears_judgement_scope$`. #975's fix round
+ *  (spec review SPEC-975-1, adversarial ADV-L04-2/3/4): the refusal states the NAMED year's own
+ *  amount, a judgement licenses only the figure it was made about, and reopen_prior is refused on
+ *  a year that is only closing. Its own stem, because a chain can carry 0279 without it. */
+export const FA_ARREARS_JUDGEMENT_SCOPE_STEM = "fa_arrears_judgement_scope$";
+
+let _ready0281 = null;
+async function fa975bReady() {
+  if (_ready0281 === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [FA_ARREARS_JUDGEMENT_SCOPE_STEM]);
+      _ready0281 = r.rows[0].n > 0;
+    } catch {
+      _ready0281 = false;
+    }
+  }
+  return _ready0281;
+}
+
+/** The per-CELL frontier gate for the fix round, COUNTED — `gate975`'s exact shape on 0281's own
+ *  stem. A FOCUSED invocation FAILS LOUDLY below 0281: a skip is not evidence. */
+export async function gate975b(t) {
+  if (await gate975(t)) return true;
+  if (await fa975bReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_FA_ARREARS_JUDGEMENT_SCOPE !== "1") {
+    assert.fail(
+      `#975 fix-round migration (${FA_ARREARS_JUDGEMENT_SCOPE_STEM}) is NOT applied to this `
+      + "database, and this is a FOCUSED run. A skip is not evidence: apply the migration, or "
+      + "preload tests/fa-arrears-judgement-scope-preintegration-gate.mjs for a package-wide sweep.");
+  }
+  markSkip();
+  t.skip(`#975 arrears judgement scope absent (no ${FA_ARREARS_JUDGEMENT_SCOPE_STEM} migration applied)`);
+  return true;
+}
+
 // ===========================================================================================
 // 2 · The client factory, the fiscal-year fixture and the armed asset.
 // ===========================================================================================
@@ -86,11 +123,14 @@ export async function p975Client(label) {
  *  and that column is exactly what `clara._fa_assert_period_open` and 0056's own CLR19 trigger
  *  read. Driving the whole close ceremony would add a hundred lines of fixture that prove
  *  nothing this battery claims. */
-export async function fiscalYear(firm, client, { startsOn, endsOn, label = null, status = "closed", ordinal = 1, owner }) {
+export async function fiscalYear(firm, client, { startsOn, endsOn, label = null, status = "closed", ordinal = 1, priorFy = null, owner }) {
+  // `clara._tf_fiscal_years_contiguity` (0056:269) makes a gap or an overlap impossible: any
+  // ordinal past the first must NAME its predecessor and start the day after it ends. A battery
+  // that builds a second closed year therefore passes `priorFy`.
   const fy = await rootQuery(
-    `insert into clara.fiscal_years(firm_id,client_id,label,starts_on,ends_on,ordinal,status,fy_end_source,opened_by)
-       values ($1,$2,$3,$4::date,$5::date,$6,'open','asserted',$7) returning id`,
-    [firm, client, label ?? String(startsOn).slice(0, 4), startsOn, endsOn, ordinal, owner]);
+    `insert into clara.fiscal_years(firm_id,client_id,label,starts_on,ends_on,ordinal,prior_fy_id,status,fy_end_source,opened_by)
+       values ($1,$2,$3,$4::date,$5::date,$6,$7,'open','asserted',$8) returning id`,
+    [firm, client, label ?? String(startsOn).slice(0, 4), startsOn, endsOn, ordinal, priorFy, owner]);
   const id = fy.rows[0].id;
   const ladder = { closing: ["closing"], closed: ["closing", "closed"], reopened: ["closing", "closed", "reopened"] };
   for (const s of ladder[status] ?? []) {

@@ -27,7 +27,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  gate975, armed975, fiscalYear, reopenYear, recordResolution, resolutionRows,
+  gate975, gate975b, armed975, fiscalYear, reopenYear, recordResolution, resolutionRows, closedArrears,
   runManual, runPeriod, runDue, runDueAsHuman, entryRowOf, approveEntry, clientCharges, runRows,
   buyAsset, completeSL, mon, dayIn, opk,
   refuses, noteLane, printLaneNotes, printSkipCount, endPool, x41EnsureReady,
@@ -53,6 +53,15 @@ async function gate(t) {
   return gate975(t);
 }
 
+/** …and the four cells that assert the FIX ROUND's behaviour need 0281 as well. */
+async function gateB(t) {
+  if (!live) {
+    t.skip("0041 is not applied — the #975 battery is dormant");
+    return true;
+  }
+  return gate975b(t);
+}
+
 /** THE WORKED FIGURE, from the fixture's own arithmetic and not from the code under test:
  *  a 360,000-sen asset over 36 months straight line charges exactly 10,000 sen a month. */
 const MONTHLY = 10_000;
@@ -66,6 +75,23 @@ async function closedYearArrears(label, opts = {}) {
     startsOn: mon(-6).start, endsOn: armed.start.end, owner: armed.w.users.alice, status: opts.fyStatus ?? "closed",
   });
   return { ...armed, fy, open: mon(-2) };
+}
+
+/** TWO contiguous CLOSED fiscal years, each carrying its own arrears, with the open period after
+ *  both. The asset is in service from month −5, so FY-A (months −7..−4) carries TWO months and
+ *  FY-B (month −3) carries ONE — figures worked here, never read back off the code under test. */
+async function twoClosedYears(label) {
+  const armed = await armed975(label, { from: -5 });
+  const tag = String(armed.client).slice(0, 8);
+  const fyA = await fiscalYear(armed.w.firms.A, armed.client, {
+    startsOn: mon(-7).start, endsOn: mon(-4).end, label: `A-${tag}`,
+    owner: armed.w.users.alice, status: "closed", ordinal: 1,
+  });
+  const fyB = await fiscalYear(armed.w.firms.A, armed.client, {
+    startsOn: mon(-3).start, endsOn: mon(-3).end, label: `B-${tag}`,
+    owner: armed.w.users.alice, status: "closed", ordinal: 2, priorFy: fyA,
+  });
+  return { ...armed, fyA, fyB, labelA: `A-${tag}`, labelB: `B-${tag}`, open: mon(-2) };
 }
 
 // ===========================================================================================
@@ -121,7 +147,7 @@ test("p975.ask a run whose charge folds a CLOSED year's months forward stops BEF
 // ===========================================================================================
 
 test("p975.fold a recorded fold_current is stored with its author and timestamp, the run then posts exactly as it did before #975, and a LATER run over the same year proceeds on the record without asking", async (t) => {
-  if (await gate(t)) return;
+  if (await gateB(t)) return;
   const { w, client, fy, start, open } = await closedYearArrears("fold");
 
   // Mandatory setup: the question really is standing before the answer is given.
@@ -177,19 +203,43 @@ test("p975.fold a recorded fold_current is stored with its author and timestamp,
   assert.equal(receipt.arrears_folded[0].decided_by, w.users.bob);
   assert.equal(receipt.arrears_folded[0].resolution_id, rows[0].id);
 
-  // A LATER RUN OVER THE SAME CLIENT AND YEAR. A second asset is acquired now but was IN SERVICE
-  // from the closed year's own month, so the next run's charge folds that year forward again —
-  // and this time nothing is asked, because the record answers it.
-  const b = await buyAsset({ client, cents: 360_000, postingDate: dayIn(open, 20) });
+  // A LATER RUN OVER THE SAME CLIENT AND YEAR, WITH THE FIGURE MOVED. A second asset is acquired
+  // now but was IN SERVICE from the closed year's own month, so the year's arrears are no longer
+  // the amount anybody judged. #975 fix round (ADV-L04-2): a materiality judgement licenses the
+  // figure it was MADE ABOUT — the door's own `arrears_changed` law at record time (0279:305-310)
+  // applied at fold time too — so the run asks AGAIN, naming both figures.
+  // TWICE the cost over the same life, so its own month is 20,000 sen: the first run above
+  // already charged the 10,000 that WAS judged, and what now stands in that year is a figure
+  // nobody has ruled on.
+  const b = await buyAsset({ client, cents: 720_000, postingDate: dayIn(open, 20) });
   await completeSL(client, b.asset.id, { life: 36, start: start.start, description: "p975 fold later" });
+  const again = await refuses(() => runManual(w.users.bob,
+    { client, periodStart: open.start, periodEnd: open.end, opKey: opk("p975later") }),
+  "arrears_changed_since_judgement", "p975.fold.moved");
+  const dm = JSON.parse(String(again.detail));
+  assert.equal(dm.fiscal_years[0].fiscal_year_id, fy);
+  assert.equal(dm.judged_cents, MONTHLY, "the refusal states what was JUDGED…");
+  assert.equal(dm.arrears_cents, MONTHLY * 2, "…and what the year now stands at");
+  assert.equal(dm.chosen, "fold_current", "…and which ruling is being outgrown");
+  assert.equal(dm.remedy, "record_fa_arrears_resolution");
+  assert.equal((await resolutionRows(client)).filter((r) => r.active).length, 1,
+    "the standing judgement is untouched — it is superseded by a person, never by a run");
+
+  // …AND THE SAME FIGURE NEVER ASKS AGAIN. Re-judged at the amount that will actually move, the
+  // run proceeds on the record, which is AC2 exactly.
+  await recordResolution(w.users.bob, {
+    client, fiscalYear: fy, choice: "fold_current", arrearsCents: MONTHLY * 2,
+    periodStart: open.start, periodEnd: open.end, reason: "still immaterial at the larger figure",
+  });
   const later = await runManual(w.users.bob,
-    { client, periodStart: open.start, periodEnd: open.end, opKey: opk("p975later") });
+    { client, periodStart: open.start, periodEnd: open.end, opKey: opk("p975later2") });
   assert.equal(later.status, "posted",
-    `the LATER run proceeded on the record without asking (got ${JSON.stringify(later)})`);
-  assert.equal(later.arrears_folded[0].resolution_id, rows[0].id,
-    "…and it names the SAME record, not a second one");
-  assert.equal((await resolutionRows(client)).length, 1,
-    "…and no second answer was asked for or recorded");
+    `the LATER run proceeded on the re-made record without asking (got ${JSON.stringify(later)})`);
+  const live = (await resolutionRows(client)).filter((r) => r.active);
+  assert.equal(live.length, 1, "exactly one live answer per (client, year), as before");
+  assert.equal(later.arrears_folded[0].resolution_id, live[0].id,
+    "…and the receipt names the ruling that was actually made about this amount");
+  assert.equal(String(later.arrears_folded[0].arrears_cents), String(MONTHLY * 2));
 });
 
 // ===========================================================================================
@@ -421,4 +471,116 @@ test("p975.work_lane the on-behalf-of run door stops its chase at a parked perio
   assert.notEqual(cleared.periods[0].result.status, "parked");
   assert.equal(cleared.periods[0].result.arrears_folded[0].choice, "fold_current",
     "…and its receipt names the ruling it proceeded under");
+});
+
+// ===========================================================================================
+// 7 · #975 FIX ROUND (spec review SPEC-975-1 / adversarial ADV-L04-3, ADV-L04-2, ADV-L04-4).
+//     Three defects the one-fiscal-year battery above could not see.
+// ===========================================================================================
+
+test("p975.two_years with TWO closed years in play the refusal states the NAMED year's own amount — not the client-wide total — and the amount it states is the one the record door accepts", async (t) => {
+  if (await gateB(t)) return;
+  const { w, client, fyA, fyB, labelA, labelB, open } = await twoClosedYears("two_years");
+
+  // Mandatory setup: the helper really does see two years carrying 2 and 1 months.
+  const arr = await closedArrears(client, open.end);
+  assert.equal(arr.fiscal_years.length, 2, `two closed years carry arrears (got ${JSON.stringify(arr)})`);
+  assert.equal(arr.arrears_cents, MONTHLY * 3, "…summing to three months client-wide");
+
+  const err = await refuses(() => runManual(w.users.bob,
+    { client, periodStart: open.start, periodEnd: open.end }),
+  "arrears_resolution_required", "p975.two_years");
+  const d = JSON.parse(String(err.detail));
+  assert.equal(d.fiscal_years[0].fiscal_year_id, fyA, "the oldest unresolved year is the one named");
+  assert.equal(d.arrears_cents, MONTHLY * 2,
+    "the refusal states the NAMED YEAR's own arrears, never the client-wide total");
+  assert.equal(d.total_arrears_cents, MONTHLY * 3,
+    "…and the total rides beside it under its own key, so neither figure has to be guessed");
+  assert.ok(String(err.message).includes(String(MONTHLY * 2)) && String(err.message).includes(labelA),
+    `the SENTENCE states the same per-year figure beside the same year (got ${err.message})`);
+  assert.ok(!String(err.message).includes(String(MONTHLY * 3)),
+    "…and never quotes the client-wide total as if it belonged to one year");
+
+  // THE REMEDY THE REFUSAL NAMES, ANSWERED WITH THE NUMBER IT STATED. This is the compounding
+  // half of the defect: before the fix the stated figure was refused by the record door itself.
+  const rec = await recordResolution(w.users.bob, {
+    client, fiscalYear: fyA, choice: "fold_current", arrearsCents: d.arrears_cents,
+    periodStart: open.start, periodEnd: open.end, reason: "immaterial",
+  });
+  assert.equal(rec.status, "recorded",
+    "the figure the refusal stated is exactly the figure the record door re-measures");
+
+  // AND THE NEXT REFUSAL NAMES THE NEXT YEAR, WITH ITS OWN AMOUNT.
+  const err2 = await refuses(() => runManual(w.users.bob,
+    { client, periodStart: open.start, periodEnd: open.end, opKey: opk("p975ty2") }),
+  "arrears_resolution_required", "p975.two_years.second");
+  const d2 = JSON.parse(String(err2.detail));
+  assert.equal(d2.fiscal_years.length, 1, "only the UNANSWERED year is still being asked about");
+  assert.equal(d2.fiscal_years[0].fiscal_year_id, fyB);
+  assert.equal(d2.arrears_cents, MONTHLY,
+    "…stated at ITS own figure, not at a total that now includes an amount already judged");
+  assert.equal(d2.total_arrears_cents, MONTHLY * 3);
+  assert.ok(String(err2.message).includes(labelB));
+
+  await recordResolution(w.users.bob, {
+    client, fiscalYear: fyB, choice: "fold_current", arrearsCents: d2.arrears_cents,
+    periodStart: open.start, periodEnd: open.end, reason: "immaterial",
+  });
+  const run = await runManual(w.users.bob,
+    { client, periodStart: open.start, periodEnd: open.end, opKey: opk("p975ty3") });
+  assert.notEqual(run.status, "parked");
+  assert.equal(run.arrears_folded.length, 2,
+    "both judged years are named on the receipt the fold proceeded under");
+  noteLane(`p975.two_years: per-year ${MONTHLY * 2}/${MONTHLY} beside a client-wide total of ${MONTHLY * 3}`);
+});
+
+test("p975.stale.park the SWEPT run parks on the changed figure instead of folding it, and the parked payload names both amounts", async (t) => {
+  if (await gateB(t)) return;
+  const { w, client, fy, start, open } = await closedYearArrears("stale_park");
+  await recordResolution(w.users.bob, {
+    client, fiscalYear: fy, choice: "fold_current", arrearsCents: MONTHLY,
+    periodStart: open.start, periodEnd: open.end, reason: "immaterial at one month",
+  });
+  // The year's arrears move AFTER the judgement: a second asset placed in service inside it.
+  const b = await buyAsset({ client, cents: 360_000, postingDate: dayIn(open, 20) });
+  await completeSL(client, b.asset.id, { life: 36, start: start.start, description: "p975 stale park" });
+
+  const parked = await runPeriod({ client, periodStart: open.start, periodEnd: open.end });
+  assert.equal(parked.status, "parked",
+    `the machine lane may not fold a figure nobody judged (got ${JSON.stringify(parked)})`);
+  assert.equal(parked.reason, "arrears_changed_since_judgement");
+  assert.equal(String(parked.judged_cents), String(MONTHLY));
+  assert.equal(String(parked.arrears_cents), String(MONTHLY * 2));
+  assert.equal(parked.chosen, "fold_current");
+  assert.equal(parked.remedy, "record_fa_arrears_resolution");
+  assert.deepEqual(await depreciationEntries(client), [], "NOTHING was posted");
+  assert.deepEqual(await clientCharges(client), []);
+});
+
+test("p975.closing_reopen reopen_prior is refused while the year is only CLOSING, because clara.reopen_fiscal_year cannot be reached from there — and the refusal names the edge that can", async (t) => {
+  if (await gateB(t)) return;
+  const { w, client, fy, open } = await closedYearArrears("closing_reopen", { fyStatus: "closing" });
+
+  const err = await refuses(() => recordResolution(w.users.bob, {
+    client, fiscalYear: fy, choice: "reopen_prior", arrearsCents: MONTHLY,
+    periodStart: open.start, periodEnd: open.end, reason: "material",
+  }), "fa_arrears_resolution_invalid", "p975.closing_reopen");
+  const d = JSON.parse(String(err.detail));
+  assert.equal(d.axis, "year_still_closing");
+  assert.equal(d.fy_status, "closing");
+  assert.equal(d.remedy, "finalize_close",
+    "the refusal names the ONE lifecycle edge that exists from here, never one that does not");
+  assert.match(String(err.message), /finalize_close/);
+  assert.equal((await resolutionRows(client)).length, 0, "nothing was recorded");
+
+  // …AND THE OTHER RESOLUTION IS STILL AVAILABLE ON A CLOSING YEAR: this is a refusal of one
+  // unreachable remedy, never a wall across the question.
+  const rec = await recordResolution(w.users.bob, {
+    client, fiscalYear: fy, choice: "fold_current", arrearsCents: MONTHLY,
+    periodStart: open.start, periodEnd: open.end, reason: "immaterial",
+  });
+  assert.equal(rec.status, "recorded");
+  const run = await runManual(w.users.bob,
+    { client, periodStart: open.start, periodEnd: open.end, opKey: opk("p975cr") });
+  assert.notEqual(run.status, "parked", "and the run proceeds on it");
 });

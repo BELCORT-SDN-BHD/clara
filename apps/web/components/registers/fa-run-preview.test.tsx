@@ -297,6 +297,52 @@ test("preview.closed_arrears_answer the two resolutions are offered as controls,
   }
 });
 
+// #975 FIX ROUND (adversarial review ADV-L04-2) — A JUDGEMENT LICENSES THE FIGURE IT WAS MADE
+// ABOUT. `clara._fa_run_period_core` now refuses (or parks) on `arrears_changed_since_judgement`
+// when the year's arrears no longer match the amount the standing ruling was made about, so a
+// surface that kept saying "you judged it immaterial" and withheld the controls would leave the
+// person reading a settled sentence beside a run nobody could unblock.
+test("preview.closed_arrears_moved a standing ruling made about ANOTHER amount states both figures and offers the two controls again", async () => {
+  const calls: Array<{ fiscalYearId: string; choice: string; arrearsCents: number }> = [];
+  const h = await render({
+    preview: faPreview({
+      skipped_closed: [],
+      closed_arrears: {
+        arrears_cents: 40_000,
+        fiscal_years: [{
+          fiscal_year_id: "fy9", fy_label: "2025", fy_status: "closed",
+          fy_starts_on: "2025-01-01", fy_ends_on: "2025-12-31", arrears_cents: 40_000,
+          resolution: { id: "r9", choice: "fold_current", arrears_cents: 25_000, decided_by: "u1", decided_at: "2026-01-01T00:00:00Z", reason: null },
+        }],
+      },
+    }),
+    onRecordArrears: async (a: { fiscalYearId: string; choice: string; arrearsCents: number }) => {
+      calls.push(a);
+    },
+  });
+  try {
+    for (let i = 0; i < 3; i++) await h.settle();
+    const text = textOf(h.find((n) => tid(n) === "fa-preview-skipped-closed")!);
+    assert.match(text, /RM 250\.00/, "the amount that WAS judged is stated…");
+    assert.match(text, /RM 400\.00/, "…beside the amount that now stands");
+    assert.doesNotMatch(text, /folded into the current period/i,
+      "the stale ruling is NOT presented as the settled answer");
+
+    const fold = h.find((n) => tid(n) === "fa-arrears-fold-fy9");
+    assert.ok(fold, "the two controls are offered again, so the person can judge the amount that will move");
+    assert.ok(h.find((n) => tid(n) === "fa-arrears-restate-fy9"));
+    await h.act(() => { clickButton(fold as never); });
+    for (let i = 0; i < 3; i++) await h.settle();
+    assert.deepEqual(
+      { fiscalYearId: calls[0]!.fiscalYearId, choice: calls[0]!.choice, arrearsCents: calls[0]!.arrearsCents },
+      { fiscalYearId: "fy9", choice: "fold_current", arrearsCents: 40_000 },
+      "…and the door is handed the CURRENT amount, which is the one it re-measures",
+    );
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("preview.closed_arrears_answered an ANSWERED year offers no controls — the standing ruling replaces the question", async () => {
   const h = await render({
     preview: faPreview({
