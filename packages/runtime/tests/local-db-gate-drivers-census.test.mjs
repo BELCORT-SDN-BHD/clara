@@ -45,6 +45,9 @@ export const DRIVERS = Object.freeze([
   "periodic-adjustment-e2e.mjs",
   "staff-expense-claim-e2e.mjs",
   "work-journal-e2e.mjs",
+  "interview-e2e.mjs",
+  "interview-kill-resume-e2e.mjs",
+  "version-cutover-e2e.mjs",
 ]);
 
 /** Pure text-level census of one driver's source — no execution, no filesystem beyond the read
