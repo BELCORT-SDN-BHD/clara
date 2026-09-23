@@ -64,13 +64,16 @@
  * #969 — THE `cn` DEPENDENCY STAND-IN. The guard above answers "would this
  * OVERWRITE a protected FILE"; it never asked "would this add a bogus
  * DEPENDENCY", because it only ever read `resolved.files`. The pinned CLI's
- * registry items for the message/bubble/marker/avatar family (and others)
- * import a `cn()` helper from a bare specifier `"cn"` — a registry-authoring
- * placeholder, not a real published package this repo has ever needed
- * (`lib/utils.ts` exports its own). The CLI's file-WRITE step correctly
- * rewrites that import to this project's own `@/lib/utils` alias; its
- * dependency-INSTALL step does not know that and installs a REAL `cn` npm
- * package instead (#642's `ui:add --dry-run` finding — a hand-revert of
+ * registry items for the message/bubble/marker/avatar/popover family (and
+ * others) import a `cn()` helper from a bare specifier `"cn"` — a
+ * registry-authoring placeholder, not a real published package this repo has
+ * ever needed (`lib/utils.ts` exports its own). #969 believed — WRONGLY,
+ * MEASURED FALSE by #989 (`pnpm ui:add popover`/`avatar` against the pinned
+ * 4.19.0, both reverted after) — that the CLI's file-WRITE step already
+ * rewrote that import to this project's own `@/lib/utils` alias; a
+ * freshly-resolved file in fact lands on disk still importing `from "cn"`.
+ * Its dependency-INSTALL step separately installs a REAL `cn` npm package
+ * regardless (#642's `ui:add --dry-run` finding — a hand-revert of
  * `package.json` and the lockfile every time, until now).
  * `classifyDependencies` reads `resolved.dependencies`/`devDependencies`
  * (previously ignored) and splits `cn` out; `main` reports every dependency
@@ -78,10 +81,15 @@
  * this report is the only place that information surfaces), and after a
  * REAL install, automates the exact hand-revert #642 describes —
  * `stripLocalDependencies` runs `pnpm remove` on anything classified local,
- * offline, needing no registry fetch. The SAME `CLARA_UI_ADD_OVERWRITE=1`
+ * offline, needing no registry fetch — AND (#989)
+ * `rewriteLocalDependencyImport`/`defaultRewriteLocalImports` fix the bare
+ * `cn` import itself in every file the run actually wrote, since an
+ * unrewritten import breaks the moment the real package is gone (exactly
+ * what made Popover's own install not actually "succeed": the file existed,
+ * `pnpm typecheck` could not resolve it). The SAME `CLARA_UI_ADD_OVERWRITE=1`
  * knob the protected-file refusal above already defines lets a caller keep
- * a genuine external `cn` package deliberately, rather than a second
- * refusal vocabulary being invented for this one name.
+ * a genuine external `cn` package deliberately, import unrewritten, rather
+ * than a second refusal vocabulary being invented for this one name.
  */
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -122,10 +130,12 @@ export const OVERRIDE_ENV_VAR = "CLARA_UI_ADD_OVERWRITE";
  * #969 — package names this repo already provides ITSELF, so the pinned CLI must never
  * install one as a real npm dependency. `cn` is the one measured case: the registry's own
  * item source imports `cn` from a bare specifier `"cn"` (a registry-authoring convention, not
- * a real published import this repo uses), the CLI's file-WRITE step correctly rewrites that
- * to this project's own `aliases.utils` (`@/lib/utils`, verified live against the pinned
- * 4.19.0 — a freshly-resolved `avatar.tsx` lands on disk importing `cn` from `@/lib/utils`,
- * not from `"cn"`), but the CLI's dependency-INSTALL step is naive: it takes the registry
+ * a real published import this repo uses). #969 believed the CLI's file-WRITE step already
+ * rewrote that to this project's own `aliases.utils` (`@/lib/utils`) — MEASURED FALSE by #989
+ * against the SAME pinned 4.19.0: a freshly-resolved `popover.tsx`/`avatar.tsx` lands on disk
+ * STILL importing `cn` from the bare `"cn"` specifier, never from `@/lib/utils`, so `main`'s own
+ * `rewriteLocalImports` step fixes it after the fact (see that function, and #989's header note
+ * above). The CLI's dependency-INSTALL step is separately naive: it takes the registry
  * item's declared `dependencies` at face value and installs a REAL `cn` package from npm,
  * which this workspace has never needed and never wants (#642's own `ui:add --dry-run`
  * finding). Only `cn` is named — any other resolved-dependency problem in the pinned CLI is
@@ -145,6 +155,56 @@ export function classifyDependencies(dependencies) {
   const local = LOCAL_DEPENDENCY_NAMES.filter((name) => seen.has(name));
   const external = [...seen].filter((name) => !LOCAL_DEPENDENCY_NAMES.includes(name)).sort();
   return { local, external };
+}
+
+/** #989 — matches an import specifier that is EXACTLY the bare `"cn"` placeholder (never a
+ *  specifier that merely STARTS with it, e.g. `"cn-something-else"` — a real, different package),
+ *  immediately after the `from` keyword, whichever quote character it used. The backreference
+ *  (`\2`) requires the closing quote to match the opening one, so a mismatched pair is never
+ *  matched at all — the safest failure a regex substitution can have. */
+const CN_IMPORT_SPECIFIER = /(\bfrom\s+)(['"])cn\2/g;
+
+/** #989 — THE FIX #969's OWN CLAIM SAID WAS ALREADY THE PINNED CLI'S BEHAVIOUR, MEASURED FALSE.
+ *  `scripts/ui-add.mjs`'s own #969 header and `components/ui/README.md` both said "the CLI's
+ *  file-WRITE step correctly rewrites [a bare `cn` import] to this project's own `@/lib/utils`
+ *  alias" — MEASURED (2026-09-23, `pnpm ui:add popover` and `pnpm ui:add avatar` against the
+ *  pinned 4.19.0, both reverted after, recorded in the delivering report) to be false: a
+ *  freshly-resolved file lands on disk still importing `from "cn"`. Since this guard already
+ *  removes the real `cn` npm package as a matter of course (`stripLocalDependencies`), an
+ *  unrewritten import breaks `require`/module resolution — exactly what made Popover's install
+ *  not actually "succeed" (the file existed, but `pnpm typecheck` could not resolve its own
+ *  import). A pure string substitution, proven directly against a throwaway file in the selftest
+ *  the same way `snapshotFile`/`restoreFileSnapshot` are — never a parse, since the specifier is
+ *  a complete, self-delimited token (`CN_IMPORT_SPECIFIER`'s own comment).
+ * @param {string} source
+ * @param {string} aliasUtils this project's own `components.json` `aliases.utils` (`@/lib/utils`)
+ * @returns {string}
+ */
+export function rewriteLocalDependencyImport(source, aliasUtils) {
+  return source.replace(CN_IMPORT_SPECIFIER, (_match, fromKeyword, quote) => `${fromKeyword}${quote}${aliasUtils}${quote}`);
+}
+
+/** The default, REAL-FS rewrite step for #989's partial-install (and full-install) case: for
+ *  every WRITTEN, non-blocked target path, fix a bare `cn` import in place if (and only if) one
+ *  is there — a no-op for any file that never had one. Never called by the selftest, which
+ *  injects a fixture instead (same house rule as `defaultSpawnAdd`/`defaultStripLocalDependencies`).
+ * @param {readonly string[]} paths project-relative paths, as `targetPaths`/`blocked`/`installable` are
+ * @param {string} aliasUtils
+ * @returns {string[]} the subset of `paths` this actually rewrote
+ */
+function defaultRewriteLocalImports(paths, aliasUtils) {
+  const rewritten = [];
+  for (const p of paths) {
+    const abs = join(WEB_ROOT, p);
+    if (!existsSync(abs)) continue;
+    const before = readFileSync(abs, "utf8");
+    const after = rewriteLocalDependencyImport(before, aliasUtils);
+    if (after !== before) {
+      writeFileSync(abs, after, "utf8");
+      rewritten.push(p);
+    }
+  }
+  return rewritten;
 }
 
 /** registry item `type` → the `components.json` alias key the pinned CLI
@@ -381,6 +441,7 @@ function defaultSpawnAdd(args) {
  *   stripLocalDependencies?: (names: string[]) => number,
  *   backupProtectedFiles?: (paths: string[]) => Map<string, {existed: boolean, content: Buffer|null}>,
  *   restoreProtectedFiles?: (backups: Map<string, {existed: boolean, content: Buffer|null}>) => number,
+ *   rewriteLocalImports?: (paths: string[], aliasUtils: string) => string[],
  *   log?: (line: string) => void,
  * }} deps
  * @returns {Promise<number>} the process exit code
@@ -392,6 +453,7 @@ export async function main(argv, env, deps = {}) {
   const stripLocalDependencies = deps.stripLocalDependencies ?? defaultStripLocalDependencies;
   const backupProtectedFiles = deps.backupProtectedFiles ?? defaultBackupProtectedFiles;
   const restoreProtectedFiles = deps.restoreProtectedFiles ?? defaultRestoreProtectedFiles;
+  const rewriteLocalImports = deps.rewriteLocalImports ?? defaultRewriteLocalImports;
   const log = deps.log ?? ((line) => console.log(line));
 
   // EVERY ARGUMENT THIS SCRIPT DOES NOT ITSELF CONSUME IS FORWARDED VERBATIM
@@ -500,6 +562,20 @@ export async function main(argv, env, deps = {}) {
   // lockfile. A dry run is the one exception: it writes nothing at all, dependencies included,
   // regardless of spawnAdd's own exit code, so there is nothing to strip either way.
   if (local.length > 0 && !override && !isDryRun) {
+    // #989 — the SAME gate the strip below uses: a real, non-override, non-dry install that
+    // resolved `cn`. Runs BEFORE the strip (different files — package.json/the lockfile vs the
+    // component sources themselves — so the order does not matter functionally, but fixing what
+    // was WRITTEN before touching what was INSTALLED reads in the same order the CLI itself ran
+    // them). Only the files THIS run actually wrote: `installable` when a protected file was
+    // skipped (the protected one is restored to its pre-install content regardless, so rewriting
+    // its import first would be wasted work on a file about to be reverted), `targetPaths`
+    // otherwise (a clean payload, or an override that kept every file including any protected
+    // one — but the override branch above already returns before this point is ever wrong: see
+    // the `local.length > 0 && override` block, which never reaches here since `!override` gates
+    // this whole block).
+    const writtenPaths = partialSkip ? installable : targetPaths;
+    rewriteLocalImports(writtenPaths, componentsConfig.aliases?.utils ?? "@/lib/utils");
+
     const stripCode = stripLocalDependencies(local);
     if (stripCode !== 0) {
       const cause = code !== 0 ? ` (the pinned CLI itself also exited ${code})` : "";

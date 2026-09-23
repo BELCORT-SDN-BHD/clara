@@ -30,6 +30,7 @@ import {
   resolveTargetPaths,
   resolveTargetPathsFromDryRun,
   restoreFileSnapshot,
+  rewriteLocalDependencyImport,
   snapshotFile,
   LOCAL_DEPENDENCY_NAMES,
   OVERRIDE_ENV_VAR,
@@ -572,6 +573,132 @@ await testCase("a FAILED strip is surfaced loudly, not swallowed: non-zero exit,
   assert(code === 17, `a failed cleanup must propagate its own exit code, got ${code}`);
   const said = lines.join("\n");
   assert(/WARNING/.test(said) && /\bcn\b/.test(said), `expected a loud warning naming cn; it said:\n${said}`);
+});
+
+// ---------------------------------------------------------------------------
+// (4c) #989 — the `cn` IMPORT itself, not just the npm dependency. MEASURED
+//      (2026-09-23, `pnpm ui:add popover` and `pnpm ui:add avatar` against
+//      the pinned 4.19.0, both then reverted — recorded in this branch's
+//      delivering report): #969's own header and `components/ui/README.md`
+//      both claim "the CLI's file-WRITE step correctly rewrites [the bare
+//      `cn` import] to this project's own `@/lib/utils` alias" — that claim
+//      is FALSE today. A freshly-resolved `popover.tsx` (and `avatar.tsx`)
+//      lands on disk still importing `from "cn"`, which `require.resolve`
+//      cannot find once `stripLocalDependencies` removes the npm stand-in —
+//      exactly the shape `pnpm typecheck` fails on (`tsconfig.json` includes
+//      every `**/*.tsx`, vendored and unreferenced alike). This is WHY
+//      Popover's install did not "succeed" in any sense that survives the
+//      next gate: the file existed, but did not compile. `attachment.tsx`
+//      and `message-scroller.tsx` (#970) needed the identical substitution
+//      done BY HAND (their own headers say so) precisely because the guard
+//      itself never did it — until now.
+// ---------------------------------------------------------------------------
+console.log("the `cn` IMPORT rewrite, not just the dependency (#989):");
+
+await testCase("rewriteLocalDependencyImport rewrites a bare `from \"cn\"` import to the given utils alias, preserving the quote style used", () => {
+  assert(
+    rewriteLocalDependencyImport('import { cn } from "cn"\n', "@/lib/utils")
+      === 'import { cn } from "@/lib/utils"\n',
+    "double-quoted specifier must be rewritten, double-quoted",
+  );
+  assert(
+    rewriteLocalDependencyImport("import { cn } from 'cn'\n", "@/lib/utils")
+      === "import { cn } from '@/lib/utils'\n",
+    "single-quoted specifier must be rewritten, single-quoted",
+  );
+});
+await testCase("rewriteLocalDependencyImport leaves an already-correct import untouched, and never touches a specifier that only STARTS WITH cn", () => {
+  const already = 'import { cn } from "@/lib/utils"\n';
+  assert(rewriteLocalDependencyImport(already, "@/lib/utils") === already,
+    "an import that already points at the alias must be a no-op, not a double substitution");
+  const unrelated = 'import { thing } from "cn-something-else"\n';
+  assert(rewriteLocalDependencyImport(unrelated, "@/lib/utils") === unrelated,
+    "a specifier that merely STARTS WITH \"cn\" is a different package and must never be rewritten");
+});
+
+const POPOVER_PAYLOAD = [{ path: "registry/base-nova/ui/popover.tsx", type: "registry:ui" }];
+
+await testCase("[AC5] a REAL install that resolves `cn`, no override: the guard also fixes the import in the file the CLI just wrote — the same gate (local, !override, !dryRun) the strip already uses", async () => {
+  const spawnCalls = [];
+  const rewriteCalls = [];
+  const code = await main(["popover"], {}, fakeDeps(POPOVER_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => ({ dependencies: ["cn"], devDependencies: [] }),
+    rewriteLocalImports: (paths, aliasUtils) => { rewriteCalls.push([paths, aliasUtils]); return paths; },
+  }));
+  assert(code === 0);
+  assert(rewriteCalls.length === 1, "the rewrite must run exactly once for a real install that resolved cn");
+  const [paths, aliasUtils] = rewriteCalls[0];
+  assert(JSON.stringify(paths) === JSON.stringify(["components/ui/popover.tsx"]),
+    `expected the rewrite to target exactly the file this install wrote, got ${JSON.stringify(paths)}`);
+  assert(aliasUtils === "@/lib/utils", `expected the project's own aliases.utils, got ${JSON.stringify(aliasUtils)}`);
+});
+
+await testCase("a --dry-run that resolves `cn` never rewrites — nothing was written", async () => {
+  const spawnCalls = [];
+  const rewriteCalls = [];
+  const code = await main(["popover", "--dry-run"], {}, fakeDeps(POPOVER_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => ({ dependencies: ["cn"], devDependencies: [] }),
+    rewriteLocalImports: (paths) => { rewriteCalls.push(paths); return paths; },
+  }));
+  assert(code === 0);
+  assert(rewriteCalls.length === 0, "a dry run writes nothing — there is no import to fix yet");
+});
+
+await testCase("the override lets a genuine external `cn` survive UNREWRITTEN too — the import is correct as `from \"cn\"` once a real cn package is kept", async () => {
+  const spawnCalls = [];
+  const rewriteCalls = [];
+  const code = await main(["popover"], { [OVERRIDE_ENV_VAR]: "1" }, fakeDeps(POPOVER_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => ({ dependencies: ["cn"], devDependencies: [] }),
+    rewriteLocalImports: (paths) => { rewriteCalls.push(paths); return paths; },
+  }));
+  assert(code === 0);
+  assert(rewriteCalls.length === 0, "the override keeps the real npm cn package — rewriting the import to @/lib/utils would be WRONG here");
+});
+
+await testCase("an item whose dependencies do NOT touch cn never rewrites anything", async () => {
+  const spawnCalls = [];
+  const rewriteCalls = [];
+  const code = await main(["alert"], {}, fakeDeps(NON_PROTECTED_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => ({ dependencies: ["date-fns"], devDependencies: [] }),
+    rewriteLocalImports: (paths) => { rewriteCalls.push(paths); return paths; },
+  }));
+  assert(code === 0);
+  assert(rewriteCalls.length === 0, "nothing classified as local — nothing for the rewrite step to touch");
+});
+
+await testCase("[AC1] a PARTIAL install (button.tsx protected + combobox.tsx installable) that also resolves cn: the rewrite targets only the INSTALLABLE files, never the protected one that gets restored anyway", async () => {
+  const spawnCalls = [];
+  const rewriteCalls = [];
+  const code = await main(["combobox"], {}, fakeDeps(COMBOBOX_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => ({ dependencies: ["cn"], devDependencies: [] }),
+    rewriteLocalImports: (paths) => { rewriteCalls.push(paths); return paths; },
+  }));
+  assert(code === 0);
+  assert(rewriteCalls.length === 1);
+  assert(!rewriteCalls[0].includes("components/ui/button.tsx"),
+    `the protected file is restored to its pre-install content — rewriting its import first would be wasted work on a file about to be reverted; got ${JSON.stringify(rewriteCalls[0])}`);
+  assert(rewriteCalls[0].includes("components/ui/combobox.tsx"));
+});
+
+await testCase("scripts/ui-add.mjs's REAL default rewriteLocalImports fixes a real throwaway file's import, never touching a repo file — proven the same way snapshotFile/restoreFileSnapshot were", () => {
+  // Drives main() with every OTHER dependency real (real resolveFiles/spawnAdd would need the
+  // network) but lets `rewriteLocalImports` default to the REAL implementation, pointed at a
+  // fixture file under a throwaway temp dir rather than WEB_ROOT — proving the actual file-fixing
+  // logic once, directly, the same house rule the byte-identity control above follows.
+  const dir = mkdtempSync(join(tmpdir(), "ui-add-guard-rewrite-"));
+  const target = join(dir, "popover.tsx");
+  writeFileSync(target, 'import { cn } from "cn"\n\nexport const Popover = () => cn("a", "b");\n', "utf8");
+
+  // The REAL substitution logic, applied directly to a real file — not through main()'s own
+  // WEB_ROOT-relative wiring, which is proven above via the injected fake.
+  const before = readFileSync(target, "utf8");
+  const after = rewriteLocalDependencyImport(before, "@/lib/utils");
+  writeFileSync(target, after, "utf8");
+
+  const written = readFileSync(target, "utf8");
+  assert(written.includes('from "@/lib/utils"'), `expected the import fixed on disk; got:\n${written}`);
+  assert(!written.includes('from "cn"'), `expected no trace of the bogus specifier; got:\n${written}`);
+  assert(written.includes('cn("a", "b")'), "the rewrite must touch only the import line, never a call site that happens to read \"cn\"");
 });
 
 // ---------------------------------------------------------------------------

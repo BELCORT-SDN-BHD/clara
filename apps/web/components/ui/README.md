@@ -94,21 +94,29 @@ unification) are re-applied on top of the fresh file in the SAME commit, with th
 carried over (that file's own header). `pnpm ui:add pagination --dry-run` still refuses afterward,
 naming both `button.tsx` and `pagination.tsx`, unchanged by this.
 
-### The `cn` dependency stand-in (#969)
+### The `cn` dependency stand-in (#969), and the import itself (#989)
 
-Several registry items (the message/bubble/marker/avatar family, and others) import a `cn()`
-helper from a bare specifier `"cn"` — a registry-authoring placeholder, never a real published
-package this repo has used (`lib/utils.ts` exports its own). The pinned CLI's file-WRITE step
-correctly rewrites that import to this project's own `@/lib/utils` alias; its dependency-INSTALL
-step does not know that and installs a real `cn` npm package regardless, which then needs a hand
-revert of `package.json` and the lockfile (#642's own `ui:add --dry-run` finding).
+Several registry items (the message/bubble/marker/avatar/popover family, and others) import a
+`cn()` helper from a bare specifier `"cn"` — a registry-authoring placeholder, never a real
+published package this repo has used (`lib/utils.ts` exports its own). **#969's own claim that
+"the CLI's file-WRITE step correctly rewrites that import to this project's own `@/lib/utils`
+alias" was MEASURED FALSE by #989** (`pnpm ui:add popover` and `pnpm ui:add avatar`, both reverted
+after — recorded in that branch's delivering report): a freshly-resolved file lands on disk still
+importing `from "cn"`. Its dependency-INSTALL step separately installs a real `cn` npm package
+regardless, which then needs a hand revert of `package.json` and the lockfile (#642's own
+`ui:add --dry-run` finding) — this part of the claim was accurate. `attachment.tsx` and
+`message-scroller.tsx` (#970) needed the import substitution done BY HAND for exactly this reason
+(their own headers record it); the guard itself never did it before #989.
 
-`pnpm ui:add` now handles this itself: it reports every dependency the item would add — on a
-`--dry-run` too, since a dry run writes nothing for the next step to act on — and, after a real
-install, automatically removes anything classified as a local stand-in (`cn`, and nothing else
-today) from `package.json` and the lockfile via `pnpm remove`, no manual revert needed. The same
-`CLARA_UI_ADD_OVERWRITE=1` knob above lets a genuine external `cn` package survive deliberately,
-instead of a second refusal vocabulary for this one name.
+`pnpm ui:add` now handles both itself: it reports every dependency the item would add — on a
+`--dry-run` too, since a dry run writes nothing for the next two steps to act on — and, after a
+real install, automatically fixes the bare `cn` import in every file THIS run wrote (never a
+protected file being skipped and restored — see the partial-install section above, which reverts
+it anyway) to `aliases.utils`, and removes anything classified as a local stand-in (`cn`, and
+nothing else today) from `package.json` and the lockfile via `pnpm remove`, no manual revert
+needed for either. The same `CLARA_UI_ADD_OVERWRITE=1` knob above lets a genuine external `cn`
+package survive deliberately, import UNREWRITTEN, instead of a second refusal vocabulary for this
+one name.
 
 **The ordering, and the window it leaves (L05-S07, 2026-09-20 fix round).** This is a drop AFTER
 the pinned CLI writes, never a pre-filter BEFORE it: `ui-add.mjs`'s `main()` runs `spawnAdd` (the
@@ -167,11 +175,14 @@ primitive should expect the same class of gap, not a new one.
 
 `scripts/check-ui-add-guard.selftest.mjs` (wired into `pnpm lint`) is this guard's own positive
 control: it drives the guard's decision logic against fixture payloads with no network, proving the
-abort, the override, the no-false-positive case, and the `cn` classification/report/strip flow
-together. The live rehearsal against the real, pinned registry — `pnpm ui:add pagination` refusing
-because the payload still contains `button.tsx`, hash-identical before and after; separately,
-`pnpm ui:add avatar` installing `cn` as a real dependency and this guard then removing it from both
-`package.json` and `pnpm-lock.yaml` with no trace left, `avatar.tsx` itself reverted afterward since
-adding a real component is outside this fix's own scope — is recorded in the delivering change's
-own report rather than run on every CI build, since a gate every PR runs must not depend on the
-network.
+whole-payload abort, the partial install (#989), the override, the no-false-positive case, and the
+`cn` classification/report/strip/import-fix flow together. The live rehearsal against the real,
+pinned registry — `pnpm ui:add pagination` refusing because the payload still contains
+`button.tsx`, hash-identical before and after; `pnpm ui:add avatar` installing `cn` as a real
+dependency and this guard then removing it from both `package.json` and `pnpm-lock.yaml` with no
+trace left, `avatar.tsx` itself reverted afterward since adding a real component is outside that
+fix's own scope; separately (#989), `pnpm ui:add combobox` installing `input.tsx`/`textarea.tsx`/
+`input-group.tsx`/`combobox.tsx` while `button.tsx` stays byte-identical, and `pnpm ui:add popover`
+producing a `popover.tsx` whose `cn` import already points at `@/lib/utils` with no `cn` residue
+left in `package.json`/`pnpm-lock.yaml` — is recorded in the delivering change's own report rather
+than run on every CI build, since a gate every PR runs must not depend on the network.
