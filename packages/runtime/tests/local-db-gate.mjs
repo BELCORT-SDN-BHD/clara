@@ -53,7 +53,7 @@ export function allowedDbPattern(body, { outerOptionalSuffix } = {}) {
 // The "parsed-DSN equality" style: every field of the DSN must equal the corresponding PG* value
 // exactly, not merely satisfy the SAME allowed shape independently — the style that structurally
 // cannot drift from the PGDATABASE check, because there is no second list of names to re-type.
-export function dsnAgreesWithEnv(dsn, { host, port, database }) {
+export function dsnAgreesWithEnv(dsn, { port, database }) {
   let u;
   try {
     u = new URL(dsn);

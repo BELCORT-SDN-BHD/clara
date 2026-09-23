@@ -1780,13 +1780,38 @@ selector value (`ask_question:<client id>`) is open to a later lane.
 wave, beside `clara_rt_test` / `clara_wave_b_ci` / `clara_<ticket>`: `trade-invoice-e2e.mjs`,
 `work-journal-e2e.mjs`, `periodic-adjustment-e2e.mjs` and `staff-expense-claim-e2e.mjs`. Still
 loopback-only, still a parsed DSN equality check against the PG env, still fail-closed. The
-remaining spawners (`accrual`, `plan-occurrence`, `prepayment-occurrence`,
-`fixed-asset-acquisition`, `work-egress`, `work-cancel`, `work-question`) still carry the narrow
-literal and cannot be run on a lane rig; one shared `tests/local-db-gate.mjs` is the standing
-follow-up.
+standing follow-up named here (one shared `tests/local-db-gate.mjs`) landed as #1018 — see that
+section below.
 
 **No World e2e removes its gate directory recursively.** `tests/trade-invoice-e2e.mjs`'s hold gate
 cleans up its own two files and leaves `.trade-invoice-gates/` alone: the directory is shared with
 every other gate on the rig, and `open()` — the one call that must never throw, because a held
 child waits on that file forever — now re-creates its parent first. Both gate directories are
 git-ignored, because a watchdog exit skips the `finally` that would have removed their files.
+
+## #1018 — one shared local-database gate for every standalone World e2e driver
+
+Every standalone runtime World e2e driver (the 23 `tests/*-e2e.mjs` files that spawn the shared
+World test harness — `tests/shutdown-e2e.mjs` and `tests/world-e2e.mjs` never carried this gate,
+so they are not part of the 23) used to hand-roll its own copy of the loopback-host +
+allowed-database-name safety gate that runs before it does anything destructive: a `PGDATABASE`-
+anchored regex, and for most drivers a second, independently hand-typed regex or URL-parsing block
+re-encoding the same allowed names against `WORKFLOW_POSTGRES_URL`. Nothing stopped a driver's own
+two copies from disagreeing (`work-journal-e2e.mjs` had exactly that drift, caught and fixed under
+#980 before this ticket), and widening the gate for a new naming convention — the riders wave's
+per-lane `clara_l<NN>`, admitted by only four of the twenty-three before #1018 — meant editing
+every file by hand.
+
+`tests/local-db-gate.mjs` now owns the checking logic only: `isLoopbackHost`, `allowedDbPattern`
+(builds the anchored `PGDATABASE` regex and the matching `WORKFLOW_POSTGRES_URL` regex from ONE
+alternation body, so the two can never independently drift again), `dsnAgreesWithEnv` (the
+parsed-DSN equality style) and `assertLocalDbGate` (the combined guard every driver calls once,
+with `checkDsnString` / `checkDsnParsed` flags because drivers disagreed on which DSN check(s) they
+ran — `work-knowledge-e2e.mjs` ran neither, preserved as-is rather than widened into a new check by
+this refactor). Each driver still supplies its OWN admitted database-name shapes via
+`allowedDbPattern(...)`, composed from the named `DB_NAME_SHAPE` constants where a shape is shared
+with another driver; no driver's admitted set changed as a side effect of the refactor.
+`tests/local-db-gate-drivers-census.test.mjs` is AC3's own litmus test: it reads each of the 23
+drivers' own source text and confirms each imports `./local-db-gate.mjs`, calls
+`assertLocalDbGate(...)`, and no longer declares a local `ALLOWED_DB` or `LOCAL_HOSTS` — so a
+driver can never again carry a second, disagreeing copy of the check.
