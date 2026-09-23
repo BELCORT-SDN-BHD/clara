@@ -47,15 +47,29 @@
 //     time — the asset_id/advance_id idiom, not seeding_proposal's dedicated-column shape —
 //     because a client carries AT MOST ONE proposed authority
 //     (uq_fa_authorities_proposed), so no aggregation is needed. No new counts.* key.
-// The LIVE row_kind set is therefore TEN values, not the four the 0011 body
+//   - 0297_payroll_summary_posting.sql (#946, riders wave 4 lane 01) — adds
+//     row_kind='payroll_posting_blocked', the ELEVENTH kind live after 0288 took one away:
+//     ONE row per filed payroll summary that has been READ and whose run did NOT post, carrying
+//     the database's own sentence naming the condition that failed (the two readings disagreed,
+//     the page did not add up, the month could not be established, an account it needs is not in
+//     the client's chart, the period is closed, or that month is already posted). Section
+//     `needs_you`, lane `needs_you`. DERIVED from clara._payroll_posting_verdict: it stores
+//     nothing and clears itself when the block clears — add the missing account, or post the
+//     run, and it is gone on the next read — so there is no dismissal act and nothing to
+//     reconcile. It reuses the EXISTING shape unchanged: `id`/`filing_id` carry the filing,
+//     `document_id` the payslip, `entry_id` the entry a DUPLICATE refusal points at, `period`
+//     the month, `question_text` the reason. No new counts.* key and NO new json key, so both
+//     FULL_ROW_KEYS rosters named under pin (3) below stay byte-unchanged.
+// The LIVE row_kind set is therefore ELEVEN values, not the four the 0011 body
 // alone would suggest: draft, uncoded_filing, open_question, coding_task,
 // compliance_watch, lint_finding, fixed_asset_incomplete, staff_advance_incomplete,
-// work_question, depreciation_authority_pending — see
+// work_question, depreciation_authority_pending, payroll_posting_blocked — see
 // REVIEW_QUEUE_ROW_KINDS below, the single source components/firm/needs-you-row.tsx's label
 // lookup is built from (never a hand-cast key path).
 // `counts` carries NINE integers (depreciation_authority_pending adds none — its lane is
 // `needs_you`, so ready/needs_review/needs_you folds it in without a dedicated tally; the
-// retired seeding_proposal added none either, so its removal moves no tally). The envelope ALSO
+// retired seeding_proposal added none either, so its removal moves no tally; #946's
+// payroll_posting_blocked adds none for the same reason as depreciation_authority_pending). The envelope ALSO
 // carries top-level `compliance`/`lint` detail objects (per-client SST/lint figures,
 // BYTE-UNCHANGED by 裁-17) that THIS BUILD DOES NOT RENDER — a named, scoped gap (not
 // silently dropped from the type: see `ReviewQueueEnvelope`'s own comment), not a claim
@@ -163,6 +177,19 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // authority's own id (the asset_id/advance_id idiom, not seeding_proposal's aggregation —
   // a client carries at most one proposed authority at a time).
   "depreciation_authority_pending",
+  // #946 (0297_payroll_summary_posting.sql, riders wave 4 lane 01): the TWELFTH kind. ONE row
+  // per filed payroll summary that has been READ and whose run did not post — the two readings
+  // disagreed, the page did not add up, its month could not be established, an account it needs
+  // is not in this client's chart, the period is closed, or that month is already posted.
+  // Section `needs_you`, lane `needs_you`, like open_question/work_question. The row is DERIVED
+  // from clara._payroll_posting_verdict and stores nothing: it clears itself when the block
+  // clears, so there is no dismissal act and nothing to reconcile. It reuses the existing shape
+  // unchanged — `id`/`filing_id` carry the filing, `document_id` the payslip, `entry_id` the
+  // entry a DUPLICATE refusal points at, `period` the month, `question_text` the database's own
+  // sentence naming the condition that failed. No counts.* key is minted (its `needs_you` lane
+  // folds it into counts.needs_you already), and no new json key, so the two db-side
+  // FULL_ROW_KEYS rosters are byte-unchanged.
+  "payroll_posting_blocked",
 ] as const;
 
 export type ReviewQueueRowKind = (typeof REVIEW_QUEUE_ROW_KINDS)[number];

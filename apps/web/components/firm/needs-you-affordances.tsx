@@ -120,6 +120,14 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // whole affordance, and the fix round made it name the view that mounts those controls
     // (`/registers?tab=fixedAssets`) rather than the workbench's default aging view.
     depreciation_authority_pending: null,
+    // #946 (0297, riders wave 4 lane 01): NO inline act, same posture as `draft` and
+    // `depreciation_authority_pending` above. Every condition this row reports is cleared
+    // somewhere else — the chart door adds a missing account, the document page shows the page
+    // whose two readings disagreed, the journals workbench holds the entry a duplicate points
+    // at — and the posting lane deliberately has no "post it anyway" door, because nothing in
+    // this lane is posted on a guess. The row's own sentence plus needs-you-links.ts's link to
+    // the documents tab are the whole affordance.
+    payroll_posting_blocked: null,
   } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
 

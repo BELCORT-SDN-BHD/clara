@@ -405,6 +405,7 @@ lib/firm/invite-preview.test.ts
 lib/firm/navigation-label.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you-links.test.ts
+lib/firm/needs-you-payroll-posting.test.ts
 lib/firm/needs-you.test.ts
 lib/firm/portfolio-focus-return.test.ts
 lib/firm/portfolio-url-state.test.ts

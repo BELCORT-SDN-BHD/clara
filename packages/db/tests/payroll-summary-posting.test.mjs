@@ -40,6 +40,7 @@ import { rootQuery, ensureReady, endPool, buildWorld, upsertAccount, draftEntry,
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
 import { fiscalYear } from "./depreciation-history-fixtures.mjs";
+import { listReviewQueue } from "./wave-a-reads.mjs";
 
 let ready = false;
 let world = null;
@@ -932,4 +933,125 @@ test("S2 · an obligation already booked through the periodic-adjustment lane bl
   const v = await verdict(sept.documentId);
   assert.equal(v.detail.duplicate.scope, "payroll_obligation", "…and says WHICH lane already booked it");
   assert.equal(v.existing_entry_id, drafted.entry_id, "pointing at that lane's own entry");
+});
+
+// ---------------------------------------------------------------------------
+// S4 / S5 — Needs you, and the uncoded filing
+// ---------------------------------------------------------------------------
+
+async function queueRows(sub, client) {
+  const env = await listReviewQueue(human(sub), { scope: { client_id: client }, limit: 200 });
+  return env.rows;
+}
+
+test("S4 · a blocked payroll run appears under Needs you naming the condition that failed", async (t) => {
+  if (unready(t)) return;
+
+  // world.clients.B1 has no payroll chart at all, so its run is blocked on an account it does
+  // not hold — a condition a person can actually clear.
+  const doc = await readPayrollDoc(world.users.dave, world.clients.B1, {
+    answers: { "payroll.run.period": value("2026-03") },
+  });
+  assert.equal(doc.receipt.posting.posted, false, "mandatory setup: the run is blocked");
+
+  const rows = (await queueRows(world.users.dave, world.clients.B1))
+    .filter((r) => r.row_kind === "payroll_posting_blocked" && r.document_id === doc.documentId);
+  assert.equal(rows.length, 1, "exactly one row for this run, never one per condition");
+  const row = rows[0];
+  assert.equal(row.section, "needs_you", "a person must act before this month can be booked");
+  assert.equal(row.lane, "needs_you");
+  assert.equal(row.client_id, world.clients.B1);
+  assert.ok(row.filing_id, "…pointing at the filing the payslip was filed under");
+  assert.equal(row.period, "2026-03-01", "…and at the month the payslip covers");
+  assert.match(row.question_text, /account/i, `the row NAMES the condition: ${row.question_text}`);
+  assert.match(row.question_text, /6000/, "…down to the account code a person must add");
+});
+
+test("S4 · the row names whichever condition failed, and clears itself when the block clears", async (t) => {
+  if (unready(t)) return;
+
+  // A DIFFERENT condition on a fully-charted client: the two channels read the levy differently.
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { "payroll.run.period": value("2026-04") },
+    visionAnswers: { "payroll.run.period": value("2026-04"), "payroll.run.hrdf_levy": value("70.00") },
+  });
+  assert.equal(doc.receipt.posting.reason, "channels_disagree", "mandatory setup");
+
+  const row = (await queueRows(world.users.alice, world.clients.A1))
+    .find((r) => r.row_kind === "payroll_posting_blocked" && r.document_id === doc.documentId);
+  assert.ok(row, "the run is on the queue");
+  assert.match(row.question_text, /read.*differently|disagree/i, `${row.question_text}`);
+  assert.match(row.question_text, /hrdf_levy/, "…naming the question the two readings differ on");
+
+  // THE ROW IS DERIVED AND SELF-CLEARING: retiring the filing removes the run from the queue on
+  // the next read, with no dismissal act anywhere and nothing left behind to reconcile.
+  await rootQuery("update clara.document_filings set retired_at=now(), retired_by=$2, retirement_reason='p946 cell' where document_id=$1 and retired_at is null",
+    [doc.documentId, world.users.alice]);
+  const after = (await queueRows(world.users.alice, world.clients.A1))
+    .filter((r) => r.row_kind === "payroll_posting_blocked" && r.document_id === doc.documentId);
+  assert.deepEqual(after, [], "the row is gone — nothing was dismissed, because nothing was stored");
+});
+
+test("S4 · a payroll run that POSTED leaves no blocked row behind", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { "payroll.run.period": value("2026-05") },
+  });
+  assert.equal(doc.receipt.posting.posted, true, "mandatory setup: this one posts");
+
+  const rows = (await queueRows(world.users.alice, world.clients.A1))
+    .filter((r) => r.row_kind === "payroll_posting_blocked" && r.document_id === doc.documentId);
+  assert.deepEqual(rows, [], "a posted run is not a blocked run");
+});
+
+test("S5 · the filed payroll summary stops appearing as uncoded once its entry exists", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+
+  // BEFORE: a filed payroll summary that has not been read yet is uncoded, exactly as any other
+  // codeable document is — nothing about this ticket changes that.
+  const doc = await payrollDoc(world.users.alice, world.clients.A1);
+  const before = (await queueRows(world.users.alice, world.clients.A1))
+    .filter((r) => r.row_kind === "uncoded_filing" && r.document_id === doc.documentId);
+  assert.equal(before.length, 1, "a filed, unread payroll summary is an uncoded filing");
+
+  // Read it. The run posts, and the filing now carries an approved entry.
+  await enqueueInvoiceFacts(doc.documentId);
+  const task = (
+    await rootQuery(
+      `select id from clara.document_processing_tasks
+        where document_id=$1 and lane='payroll_facts' and status='queued' order by version_n desc limit 1`,
+      [doc.documentId],
+    )
+  ).rows[0];
+  await claimTask(task.id, { egressApproved: true });
+  const sha = (await rootQuery("select sha256 from clara.documents where id=$1", [doc.documentId])).rows[0].sha256;
+  const answers = { "payroll.run.period": value("2026-06") };
+  const receipt = (
+    await rootQuery("select clara.persist_payroll_facts($1,$2::jsonb,$3::jsonb,$4) as receipt", [
+      task.id,
+      JSON.stringify({ input_pin: doc.extractionId, prompt_hash: "p946-text", envelope: envelope({ channel: "text", answers }) }),
+      JSON.stringify({ input_pin: sha, prompt_hash: "p946-vision", envelope: envelope({ channel: "vision", answers }) }),
+      1,
+    ])
+  ).rows[0].receipt;
+  assert.equal(receipt.posting.posted, true, `mandatory setup: ${JSON.stringify(receipt.posting)}`);
+
+  // AFTER: through the EXISTING derived queue — the filing_rows CTE already excludes a filing
+  // that carries a live entry — and with no dismissal act of any kind.
+  const after = await queueRows(world.users.alice, world.clients.A1);
+  assert.deepEqual(
+    after.filter((r) => r.row_kind === "uncoded_filing" && r.document_id === doc.documentId),
+    [],
+    "the uncoded row is gone because the entry exists, not because anybody dismissed it",
+  );
+  assert.deepEqual(
+    after.filter((r) => r.row_kind === "payroll_posting_blocked" && r.document_id === doc.documentId),
+    [],
+    "…and it is not replaced by a blocked row either",
+  );
 });

@@ -106,6 +106,13 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // The tab is typed against `RegisterTab` rather than spelled inline, so renaming a workbench
   // view is a TYPECHECK failure here instead of a link that silently falls back to aging.
   depreciation_authority_pending: `/registers?tab=${FIXED_ASSETS_TAB}`,
+  // #946 (0297) — the documents tab, SHARED with the three kinds above it and deliberately so.
+  // A blocked payroll run is about ONE document that was read and did not post: the page whose
+  // two readings disagreed, or the payslip to re-file once the missing account exists. Its
+  // verbs are not on the journals workbench, because there is no entry yet — that absence is
+  // the row. (`?tab=` is not used here: the documents tab has no view that selects a single
+  // document from the URL, so naming one would be a link to a view that does not exist.)
+  payroll_posting_blocked: "/documents",
 });
 
 /**

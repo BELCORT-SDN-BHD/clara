@@ -582,6 +582,7 @@ declare
   v_disagree text[] := '{}'; v_arith text[] := '{}';
   v_contested jsonb; v_unbal jsonb; v_unchk jsonb;
   v_dup_entry uuid; v_dup_scope text;
+  v_sentence text; v_month_label text;
 begin
   -- 1 · FILED. The entry this lane posts is a DOCUMENT entry bound to the document's live
   --     filing, so a document with no live filing has nothing to bind to.
@@ -766,7 +767,60 @@ begin
 
   select d.sha256 into v_sha from clara.documents d where d.id = p_document;
 
+  -- THE SENTENCE A PERSON READS, BUILT HERE AND NOWHERE ELSE. §H's Needs-you row renders it
+  -- verbatim, so the words on screen and the decision the lane took come out of ONE body. A
+  -- sentence built in the queue instead would be a second opinion about the same facts, and the
+  -- two would drift the first time a rung changed.
+  v_month_label := case when (v_plan->>'period_month') is not null
+                        then to_char((v_plan->>'period_month')::date, 'FMMonth YYYY') end;
+  v_sentence := case coalesce(v_first, 'ready')
+    when 'ready' then
+      format('Payroll run %s is ready to post but no entry exists yet -- re-file the payslip to post it.',
+        coalesce(v_month_label, 'for this payslip'))
+    when 'not_filed' then 'This payroll summary is not filed under a client, so it has nothing to post against.'
+    when 'facts_read' then 'This payroll summary has not been read yet.'
+    when 'channels_agree' then
+      format('Payroll run %s was not posted: the two readings of this payslip disagree (%s). Check the page and re-file it.',
+        coalesce(v_month_label, '(month not established)'),
+        coalesce(nullif(array_to_string(v_disagree, ', '), ''), 'a quoted employee row'))
+    when 'arithmetic_holds' then
+      format('Payroll run %s was not posted: the page does not add up (%s). Nothing is posted on a page that contradicts itself.',
+        coalesce(v_month_label, '(month not established)'),
+        concat_ws('; ',
+          nullif(array_to_string(v_arith, ', '), ''),
+          case when jsonb_array_length(coalesce(v_unbal,'[]'::jsonb)) > 0
+               then 'rows that do not balance: ' || replace(trim(both '[]' from v_unbal::text), ',', ', ') end,
+          case when jsonb_array_length(coalesce(v_unchk,'[]'::jsonb)) > 0
+               then 'rows that could not be checked: ' || replace(trim(both '[]' from v_unchk::text), ',', ', ') end))
+    when 'period_established' then
+      format('A payroll summary was read but its month could not be established from what the page prints (%s), so nothing was posted. Tell Clara which month this run covers, or re-file a payslip that names it.',
+        coalesce(quote_literal(v_plan->>'period_raw'), 'the page prints no period'))
+    when 'period_open' then
+      format('Payroll run %s was not posted: the fiscal year covering %s is %s.',
+        coalesce(v_month_label, 'for this payslip'), v_plan->>'posting_date',
+        coalesce(v_detail->'closed_fiscal_year'->>'status', 'not open'))
+    when 'run_totals_printed' then
+      format('A payroll summary for %s was read but prints no run totals to post from (gross pay and net pay are both required), so nothing was posted.',
+        coalesce(v_month_label, 'an unestablished month'))
+    when 'accounts_resolve' then
+      format('Payroll run %s was not posted: this client''s chart of accounts has no %s. Add the account(s) and re-file the payslip.',
+        coalesce(v_month_label, 'for this payslip'),
+        coalesce(nullif(replace(trim(both '[]' from coalesce(v_plan->'missing_accounts','[]'::jsonb)::text), '"', ''), ''), 'account it needs'))
+    when 'entry_balances' then
+      format('Payroll run %s was not posted: the entry it would make does not balance (%s debit, %s credit).',
+        coalesce(v_month_label, 'for this payslip'), v_plan->>'debit_cents', v_plan->>'credit_cents')
+    when 'no_duplicate_entry' then
+      format('Payroll run %s is already posted (%s, %s). This payslip was not posted again -- open that entry to decide whether this is a correction or a re-upload.',
+        coalesce(v_month_label, 'for this payslip'),
+        coalesce(v_detail->'duplicate'->>'memo', 'an existing entry'),
+        coalesce(v_detail->'duplicate'->>'posting_date', 'no date'))
+    else format('Payroll run %s was not posted (%s).', coalesce(v_month_label,'for this payslip'),
+                coalesce(v_tokens->>v_first, v_first))
+  end;
+
   return jsonb_build_object(
+    'sentence', v_sentence,
+    'period_label', to_jsonb(v_month_label),
     'verdict', case when v_first is null then 'ready' else 'blocked' end,
     'rung', to_jsonb(v_first),
     'reason', to_jsonb(case when v_first is null then null else v_tokens->>v_first end),
@@ -1106,3 +1160,190 @@ begin
   end if;
 end
 $w946_persist$;
+
+-- =====================================================================================
+-- §H  NEEDS YOU -- clara.list_review_queue gains row_kind='payroll_posting_blocked' (AC3).
+--
+--     "When any condition fails the run does not post; it appears under Needs you naming the
+--     condition that failed, which row did not balance, which account is missing, or which
+--     existing entry it would duplicate." (the brief). This is that appearance.
+--
+--     THE ROW IS DERIVED, STORES NOTHING AND CLEARS ITSELF. There is no refusal table, no
+--     attempt record and no dismissal act: the CTE asks §D the same question the poster asked,
+--     about the estate as it is NOW. Add the missing account and the sentence changes on the
+--     next read; post the run and the row is gone; retire the filing and it is gone. This is the
+--     Settlement candidate row's own discipline (CONTEXT.md), applied to a posting block --
+--     derived, stores nothing, clears itself, offers the reason and never chooses.
+--
+--     WHICH RUNS IT SHOWS: a payroll summary that is FILED, has been READ (a payroll pair is
+--     banked for it) and whose filing carries NO live entry. Read off the ledger, that is
+--     exactly "was read, and did not post" -- which is why a posted run has no row (its filing
+--     has an entry), a blocked run does (it has none), and a run whose block was cleared but
+--     which nobody re-filed STILL does, saying it is ready. A rung that only the poster knew
+--     about would leave that last state invisible, which is the whole reason §D carries the
+--     sentence rather than the queue building one.
+--
+--     THE ROW COEXISTS WITH `uncoded_filing`, AND THAT IS THE BRIEF'S OWN MODEL. AC6 says the
+--     filed payroll summary "stops appearing as uncoded once its entry exists" -- so before the
+--     entry exists it IS an uncoded filing, and this row sits beside it saying WHY. Narrowing
+--     `filing_rows` to hide it would change what an existing kind means for every firm already
+--     reading that queue, which this wave's shared-file rule forbids and which the brief does
+--     not ask for.
+--
+--     SECTION `needs_you`, LANE `needs_you`, like open_question / work_question /
+--     depreciation_authority_pending: a person must act (add an account, check a page, decide
+--     between a correction and a re-upload) before this month can be booked at all. NO new
+--     counts.* key is minted -- the `lane='needs_you'` filter folds it into counts.needs_you
+--     already, exactly as #974's row kind does.
+--
+--     `id` IS THE FILING'S id, and `entry_id` names the entry a DUPLICATE refusal points at, so
+--     a person can open it from the row. Both ride columns the shared vector already has; this
+--     splice adds NO json key and therefore no row-builder gate (the #629 shape, not the
+--     asset_id/advance_id one).
+--
+--     SPLICED, NEVER RE-TYPED, and additive: the postcheck re-reads the committed body and
+--     asserts every pre-existing row kind survives at its exact pre-splice marker count.
+-- =====================================================================================
+do $w946_lrq$
+declare
+  v_sig text := 'clara.list_review_queue(jsonb,jsonb,integer)';
+  v_def text; v_next text; v_code text; v_anchor text; v_repl text;
+  v_n int; v_raw_n int; v_pre_cols int; v_post_cols int; r record;
+  v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(pg_get_functiondef(p.oid)::bytea),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+
+  if position('payroll_posting_blocked' in v_code) <> 0 then
+    raise notice '#946 §H: the queue already projects payroll_posting_blocked -- splice already applied, nothing to do (redo)';
+  else
+    -- The shared column vector's own trailing column, counted BEFORE so the postcheck can assert
+    -- this file added exactly one more occurrence rather than a remembered number (0288 removed a
+    -- CTE, so a literal count copied from 0260 would be wrong here).
+    v_pre_cols := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
+                  / length('null::int open_proposal_count');
+
+    v_anchor :=
+      '  ), all_rows as (' || chr(10) ||
+      '    select * from draft_rows union all select * from filing_rows' || chr(10) ||
+      '    union all select * from question_rows union all select * from task_rows' || chr(10) ||
+      '    union all select * from compliance_rows union all select * from lint_rows' || chr(10) ||
+      '    union all select * from fa_rows union all select * from adv_rows' || chr(10) ||
+      '    union all select * from work_question_rows' || chr(10) ||
+      '    union all select * from authority_rows' || chr(10) ||
+      '  ), keyed as (';
+    v_n := (length(v_code) - length(replace(v_code, v_anchor, ''))) / length(v_anchor);
+    v_raw_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 or v_raw_n <> v_n then
+      raise exception '#946 §H prestate: the all_rows union block appears % time(s) IN CODE / % in RAW text (expected 1/1) -- re-derive this splice against the LIVE body', v_n, v_raw_n
+        using errcode = 'CLR10';
+    end if;
+
+    v_repl := $payroll$  ), payroll_rows as (
+    -- #946 (0297): A PAYROLL SUMMARY THAT WAS READ AND DID NOT POST. DERIVED, stores nothing,
+    -- clears itself: clara._payroll_posting_verdict is asked about the estate as it is NOW, and
+    -- the sentence shown is that body's own, so the words a person reads and the decision the
+    -- lane took can never drift apart. Section `needs_you`, lane `needs_you` -- a person must
+    -- act (add an account, check a page, decide correction-versus-re-upload) before this month
+    -- can be booked. `id` is the filing's id; `entry_id` names the entry a duplicate refusal
+    -- points at, so the row opens onto it. The active-client guard mirrors the other kinds
+    -- (0017 R1-F5).
+    select 1 section_rank,'payroll_posting_blocked'::text row_kind,'needs_you'::text section,
+      pf.client_id,null::uuid counterparty_id,pf.id filing_id,
+      nullif(pv.v->>'existing_entry_id','')::uuid entry_id,
+      null::uuid question_id,null::uuid task_id,pf.document_id,'needs_you'::text lane,
+      false auto,false rule_backed,false high_stakes,pf.filed_at aged_since,
+      nullif(pv.v->'plan'->>'debit_cents','')::bigint amount_cents,
+      nullif(pv.v->'plan'->>'period_month','') period,
+      pv.v->>'sentence' question_text,
+      pf.filed_at created_at,pf.id,''::text vendor_group,
+      null::text coding_kind,null::uuid watch_id,null::text tier,null::uuid finding_id,
+      null::text client_name,null::uuid[] batch_ids,null::int open_proposal_count
+    from clara.document_filings pf
+    join clara.clients active_payroll_client on active_payroll_client.id=pf.client_id and active_payroll_client.status='active'
+    join clara.documents pd on pd.id=pf.document_id and pd.document_kind='payroll_summary'
+    cross join lateral (select clara._payroll_posting_verdict(pf.document_id) v) pv
+    where pf.firm_id=c.firm and pf.retired_at is null
+      and (v_client is null or pf.client_id=v_client)
+      and exists(select 1 from clara.document_extractions pe
+                  where pe.document_id=pf.document_id and pe.engine_kind='payroll_text_facts'
+                    and pe.status='done')
+      and not exists(select 1 from clara.journal_entries pj where pj.filing_id=pf.id
+        and (pj.status='draft' or (pj.status='approved' and pj.reversed_by is null)))
+  ), all_rows as (
+    select * from draft_rows union all select * from filing_rows
+    union all select * from question_rows union all select * from task_rows
+    union all select * from compliance_rows union all select * from lint_rows
+    union all select * from fa_rows union all select * from adv_rows
+    union all select * from work_question_rows
+    union all select * from authority_rows
+    union all select * from payroll_rows
+  ), keyed as ($payroll$;
+    v_next := replace(v_def, v_anchor, v_repl);
+    if position('union all select * from payroll_rows' in v_next) = 0 then
+      raise exception '#946 §H splice: the all_rows anchor did not rewrite' using errcode = 'CLR10';
+    end if;
+    if v_next = v_def then
+      raise exception '#946 §H splice: no byte moved -- refusing a no-op apply' using errcode = 'CLR10';
+    end if;
+
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(pg_get_functiondef(p.oid)::bytea),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#946 §H postcheck: list_review_queue changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode = 'CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#946 §H postcheck: prosrc sha256 did not change -- the splice was a no-op'
+        using errcode = 'CLR10';
+    end if;
+
+    v_code := regexp_replace(regexp_replace(
+      (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure),
+      '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+    v_post_cols := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
+                   / length('null::int open_proposal_count');
+    if v_post_cols <> v_pre_cols + 1 then
+      raise exception '#946 §H postcheck: the shared column vector appears % time(s), expected % (one more than before the splice)', v_post_cols, v_pre_cols + 1
+        using errcode = 'CLR10';
+    end if;
+    raise notice '#946 §H: clara.list_review_queue spliced -- one payroll_rows CTE (needs_you/needs_you, active-client-guarded, derived from clara._payroll_posting_verdict) and one union arm; owner (%) and ACL byte-unchanged. prosrc sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+
+  -- BOTH BRANCHES: every pre-existing row kind survives at EXACTLY one projection site, and the
+  -- new one is present exactly once. Re-read from the COMMITTED catalog so a redo proves it too.
+  v_code := regexp_replace(regexp_replace(
+    (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure),
+    '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  for r in select * from (values
+      ($$'draft'::text row_kind$$, 1),
+      ($$'uncoded_filing'::text row_kind$$, 1),
+      ($$'open_question'::text row_kind$$, 1),
+      ($$'coding_task'::text row_kind$$, 1),
+      ($$'compliance_watch'::text row_kind$$, 1),
+      ($$'lint_finding'::text row_kind$$, 1),
+      ($$'fixed_asset_incomplete'::text row_kind$$, 1),
+      ($$'staff_advance_incomplete'::text row_kind$$, 1),
+      ($$'work_question'::text row_kind$$, 1),
+      ($$'depreciation_authority_pending'::text row_kind$$, 1),
+      ($$'payroll_posting_blocked'::text row_kind$$, 1),
+      ('_is_codeable_kind', 1),
+      ('_autodraft_attempt_budget', 1),
+      ('_payroll_posting_verdict', 1)
+      ) as t(marker, want) loop
+    v_n := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
+    if v_n <> r.want then
+      raise exception '#946 §H postcheck: marker "%" appears % time(s), expected % -- the splice was not additive', r.marker, v_n, r.want
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+end
+$w946_lrq$;
