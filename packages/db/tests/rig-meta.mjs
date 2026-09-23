@@ -3144,6 +3144,31 @@ export const PREPAYMENT_STATED_TERM_0305_COHORT = [
   ...PREPAYMENT_STATED_TERM_0305_HUMAN_FNS, ...PREPAYMENT_STATED_TERM_0305_UNGRANTED_FNS,
 ];
 // #939 END
+// #940 [0306, a per-client roster of prepayment accounts gates amortisation ahead of the shared
+// negative wall] — its own cohort, the same "wholly present or wholly absent" reason 0305's
+// carries: the `db-slice-frontiers` matrix runs this package against databases pinned at earlier
+// frontiers where 0223/0305 have applied and 0306 has not.
+//
+//   the TWO human doors — clara_authenticated ONLY, bookkeeper-floored in their own bodies (owner
+//   decision 2, 2026-09-18: enrolling and retiring is bookkeeper work, the same floor as editing
+//   the chart and the fixed-asset profiles). The agent role, both wake roles and clara_runtime gain
+//   ZERO and NO wake wrapper exists at all: enrolment is a judgement about a client's chart, and
+//   0306's own tail asserts the absence by pg_proc count rather than by convention.
+const PREPAYMENT_ACCOUNT_ROSTER_0306_HUMAN_FNS = [
+  "enrol_prepayment_account", "retire_prepayment_account",
+];
+//   …and the UNGRANTED closure: the roster relation's retire-only trigger and the ONE spelling of
+//   the roster question, `_prepayment_account_enrolled`. The predicate is granted to NOBODY — it is
+//   reached only from a definer body (the schedule door and the attention read today, #915's OBO
+//   twin and #941's deferred-revenue mirror next), exactly as clara._adj_line_eligibility_breach is,
+//   and law 31 says do not mint a grant no consumer needs. No new runtime verb.
+const PREPAYMENT_ACCOUNT_ROSTER_0306_UNGRANTED_FNS = [
+  "_tf_pae_retire_only", "_prepayment_account_enrolled",
+];
+export const PREPAYMENT_ACCOUNT_ROSTER_0306_COHORT = [
+  ...PREPAYMENT_ACCOUNT_ROSTER_0306_HUMAN_FNS, ...PREPAYMENT_ACCOUNT_ROSTER_0306_UNGRANTED_FNS,
+];
+// #940 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -3436,6 +3461,10 @@ export const ALLOWED = {
     // ONLY, bookkeeper-floored in its own body; clara_runtime, both agent read roles and all four
     // wake lanes gain ZERO, and no wake wrapper for it exists anywhere in the catalog.
     ...PREPAYMENT_STATED_TERM_0305_HUMAN_FNS,
+    // #940 [0306] the two prepayment-account roster doors — see the block above. clara_authenticated
+    // ONLY, bookkeeper-floored in their own bodies; clara_runtime, both agent read roles and all
+    // four wake lanes gain ZERO, and no wake wrapper for either exists anywhere in the catalog.
+    ...PREPAYMENT_ACCOUNT_ROSTER_0306_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -4025,6 +4054,13 @@ export async function grantMatrixFailures() {
   if (statedTermLive.length !== 0) {
     failures.push(...cohortFailures("#939 0305 person-stated prepayment term",
       PREPAYMENT_STATED_TERM_0305_COHORT, liveNames));
+  }
+  // #940 [0306] — bimodal, same reasoning as 0305's above: wholly present once 0306 applies,
+  // wholly absent before it.
+  const rosterLive = PREPAYMENT_ACCOUNT_ROSTER_0306_COHORT.filter((n) => liveNames.has(n));
+  if (rosterLive.length !== 0) {
+    failures.push(...cohortFailures("#940 0306 prepayment-account roster",
+      PREPAYMENT_ACCOUNT_ROSTER_0306_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
