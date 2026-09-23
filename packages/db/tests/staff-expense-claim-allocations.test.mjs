@@ -353,3 +353,143 @@ test("p931.accounts allocations on two enrolled accounts produce TWO credit legs
   assert.equal(row.advance_account_code, SECHART.advance,
     "accounts: the claim row's own account column carries the HEAD of the confirmed list");
 });
+
+// ===========================================================================================
+// 4 · p931.sum / p931.twice / p931.claimant — the list's own walls.
+// ===========================================================================================
+
+test("p931.sum allocations that do not add up to the claim are refused, naming both figures", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("allocsum");
+  // 40,000 + 20,000 = 60,000 against a 60,500 claim: 500 sen owed to nobody. The parent ruling
+  // takes partial settlement and over-allocation out of scope, so this is a refusal, not a
+  // remainder.
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advB = (await seedAdvance(ALICE(), BOB(), { client, cents: 30000, issueDate: "2026-02-01" })).advance;
+  const c = allocClaim({
+    allocations: [
+      { advance_id: advA.id, amount_cents: 40000 },
+      { advance_id: advB.id, amount_cents: 20000 },
+    ],
+  });
+  const { detail } = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: c }), "sum");
+  assert.equal(detail.constraint, "exact_sum");
+  assert.equal(detail.field, "claim.advance_allocations");
+  assert.equal(Number(detail.allocated_cents), 60000);
+  assert.equal(Number(detail.amount_cents), 60500);
+});
+
+test("p931.twice one advance named twice in a list is refused", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("alloctwice");
+  // A list that names one advance twice would make "the allocations add up" true while saying two
+  // different things about one advance. The register would hold one row, the claim two.
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 80000, issueDate: "2026-01-10" })).advance;
+  const c = allocClaim({
+    allocations: [
+      { advance_id: advA.id, amount_cents: 40000 },
+      { advance_id: advA.id, amount_cents: 20500 },
+    ],
+  });
+  const { detail } = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: c }), "twice");
+  assert.equal(detail.constraint, "distinct");
+  assert.equal(detail.field, "claim.advance_allocations[2].advance_id");
+  assert.equal(detail.advance_id, advA.id);
+});
+
+test("p931.claimant an advance issued to ANOTHER claimant is refused naming that advance", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("allocwho");
+  // 1191 is enrolled here to a DIFFERENT attested person. 0221 never asked WHOSE advance a claim
+  // discharged — only which account it sat on — so this is a NEW wall, and the cell that holds it.
+  await enrolAdvanceFor(ALICE(), {
+    client, code: SECHART.advanceFresh, person: "Hakim bin Omar",
+  });
+  const advFarah = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advHakim = (await seedAdvance(ALICE(), BOB(), {
+    client, code: SECHART.advanceFresh, cents: 30000, issueDate: "2026-02-01",
+  })).advance;
+  const c = allocClaim({
+    allocations: [
+      { advance_id: advFarah.id, amount_cents: 40000 },
+      { advance_id: advHakim.id, amount_cents: 20500, account_code: SECHART.advanceFresh },
+    ],
+  });
+  const { detail } = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: c }), "claimant");
+  assert.equal(detail.constraint, "not_this_claimant");
+  assert.equal(detail.advance_id, advHakim.id, "claimant: the refusal names the advance that is not hers");
+  assert.equal(detail.field, "claim.advance_allocations[2].advance_id");
+  assert.equal(detail.claimant_enrolment_id, await liveEnrolment(client, SECHART.advance));
+});
+
+// ===========================================================================================
+// 5 · p931.single — a claim that names ONE advance is unchanged, end to end.
+// ===========================================================================================
+
+test("p931.single a single-advance claim still replays under its intent key and reads back as a ONE-element list", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("allocone");
+  const adv = (await seedAdvance(ALICE(), BOB(), { client, cents: 100000, issueDate: "2026-02-01" })).advance;
+  const c = claim({
+    settlement: SETTLEMENT.advance,
+    advanceAccountCode: SECHART.advance,
+    advanceId: adv.id,
+    payableAccountCode: null,
+  });
+  const key = `alloc-single-${opk("k")}`;
+  const first = await admitStaffExpenseClaimWork({ client, author: ALICE(), claim: c, intentKey: key });
+  const again = await admitStaffExpenseClaimWork({ client, author: ALICE(), claim: c, intentKey: key });
+  assert.equal(again.replayed, true, "single: the SAME claim under the SAME key still replays");
+  assert.equal(again.claim_id, first.claim_id, "single: …onto the very claim it already admitted");
+
+  // THE SAME CLAIM SPELLED AS A ONE-ELEMENT LIST canonicalises to the same bytes, so it replays too
+  // — which is what makes the new field a spelling rather than a second claim.
+  const spelled = allocClaim({ allocations: [{ advance_id: adv.id, amount_cents: 60500 }] });
+  const third = await admitStaffExpenseClaimWork({
+    client, author: ALICE(), claim: spelled, intentKey: key,
+  });
+  assert.equal(third.replayed, true,
+    "single: a plain advance_id and a one-element list naming it are ONE claim, not a conflict");
+  assert.equal(third.claim_id, first.claim_id);
+
+  const read = await getStaffExpenseClaim(ALICE(), first.claim_id);
+  assert.deepEqual(read.advance_allocations.map((x) => [x.advance_id, Number(x.amount_cents)]),
+    [[adv.id, 60500]],
+    "single: the claim read answers a LIST whatever shape the submission used");
+});
+
+test("p931.split.conflict re-submitting one intent key with a DIFFERENT split is a typed conflict", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("allocsplit");
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 50000, issueDate: "2026-01-10" })).advance;
+  const advB = (await seedAdvance(ALICE(), BOB(), { client, cents: 50000, issueDate: "2026-02-01" })).advance;
+  const key = `alloc-split-${opk("k")}`;
+  const first = await admitStaffExpenseClaimWork({
+    client,
+    author: ALICE(),
+    intentKey: key,
+    claim: allocClaim({
+      allocations: [
+        { advance_id: advA.id, amount_cents: 40000 },
+        { advance_id: advB.id, amount_cents: 20500 },
+      ],
+    }),
+  });
+  assert.ok(first.claim_id);
+  // Same total, same advances, DIFFERENT split. The stored record is the confirmed list, so a
+  // second confirmation that says something else is a conflict rather than a silent overwrite.
+  await assertPair("CLR10", SEC_REASON.intentConflict, () => admitStaffExpenseClaimWork({
+    client,
+    author: ALICE(),
+    intentKey: key,
+    claim: allocClaim({
+      allocations: [
+        { advance_id: advA.id, amount_cents: 30000 },
+        { advance_id: advB.id, amount_cents: 30500 },
+      ],
+    }),
+  }), "split.conflict");
+});
