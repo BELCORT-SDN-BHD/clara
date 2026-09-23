@@ -22,7 +22,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { CORR } from "./document-correction-mock.mjs";
-import { ensureRealFocus, settleForScan, signIn } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signIn } from "./helpers";
 
 const DOCUMENTS_URL = `/clients/${CORR.clientId}/documents`;
 const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -73,6 +73,7 @@ async function revise(page: Page, value: string, reason: string): Promise<void> 
 
 test.describe("#646 — the routed document views and the address that names them", () => {
   test("C2: the three views are addressable, a reload restores the one that was open, and a tab switch adds no history", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signIn(page);
     await page.goto(DOCUMENTS_URL);
 
@@ -117,6 +118,7 @@ test.describe("#646 — the routed document views and the address that names the
 
 test.describe("#646 — revising what the document says", () => {
   test("C2: a fact revision is accepted, and the two consequences are stated SEPARATELY", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signIn(page);
     await openDocument(page, "facts");
 
@@ -153,6 +155,7 @@ test.describe("#646 — revising what the document says", () => {
   });
 
   test("C2: a stale revision keeps the attempted value visible and recovers through a SECOND deliberate act", async ({ page, context }) => {
+    test.setTimeout(cellBudgetMs({ polls: 4 }));
     // THE ONLY TWO-PAGE CELL in this file: it signs in, opens a second page, and drives both. That
     // is two full navigations plus two document opens, which does not fit the 30s default — and a
     // cell that times out in its own sign-in says nothing about the journey it is meant to measure.
@@ -235,6 +238,7 @@ test.describe("#646 — the accounting view, and what stands on the old reading"
   });
 
   test("C13: after a revision the dependent record is marked as standing on a STALE source, and nothing was rewritten", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signIn(page);
     await openDocument(page, "facts");
     await revise(page, "1150.00", "the reader misread the printed total");
@@ -249,6 +253,7 @@ test.describe("#646 — the accounting view, and what stands on the old reading"
   });
 
   test("ORPHAN-QUESTION: a classification question whose filing was retired can finally be dismissed", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signIn(page);
     await openDocument(page, "accounting", CORR.docOrphan);
 
@@ -319,6 +324,7 @@ test.describe("#646 — the wrong-client correction, its Sheet and the client it
   });
 
   test("C2: the client the document moved AWAY from is told so, with the date and the correction id", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signIn(page);
     await openDocument(page);
 
@@ -340,6 +346,7 @@ test.describe("#646 — the wrong-client correction, its Sheet and the client it
 
 test.describe("#646 — the shape of the faces", () => {
   test("RESPONSIVE: no horizontal page scroll at 320px, nor at 200% zoom, on any of the three views", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signIn(page);
     for (const tab of [undefined, "facts", "accounting"] as const) {
       await page.setViewportSize({ width: 320, height: 720 });

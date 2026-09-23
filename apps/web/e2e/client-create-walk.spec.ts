@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, settleForScan, signInTo } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { CLIENT_CREATE } from "./client-create-mock.mjs";
 
 /**
@@ -71,6 +71,7 @@ async function expectNoPageScroll(page: Page, what: string): Promise<void> {
 // ===========================================================================================
 
 test("client-create.walk.identity: arity >= 2 refuses VERBATIM with its code beside the candidates, and renaming clears the check without clearing the name", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 8 }));
   await signInTo(page, REGISTER_URL);
   await openAddClient(page);
 
@@ -118,6 +119,7 @@ test("client-create.walk.identity: arity >= 2 refuses VERBATIM with its code bes
 });
 
 test("client-create.walk.identity: arity 1 SHOWS the candidate and waits for an explicit acknowledgement", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 8 }));
   await signInTo(page, REGISTER_URL);
   await openAddClient(page);
 
@@ -153,6 +155,7 @@ test("client-create.walk.identity: arity 1 SHOWS the candidate and waits for an 
 // ===========================================================================================
 
 test("client-create.walk.reach: the whole journey works at 320px, at 200% zoom and under prefers-reduced-motion", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 6 }));
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 320, height: 720 });
   await signInTo(page, REGISTER_URL);
@@ -191,6 +194,7 @@ test("client-create.walk.reach: the whole journey works at 320px, at 200% zoom a
 // ===========================================================================================
 
 test("client-create.walk.keyboard: the journey is reachable by keyboard alone, and focus RETURNS to the trigger when the dialog closes", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 2 }));
   await signInTo(page, REGISTER_URL);
   await ensureRealFocus(page);
 

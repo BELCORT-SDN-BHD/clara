@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, settleForScan, signInTo } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { DEP } from "./depreciation-mock.mjs";
 
 /**
@@ -58,6 +58,7 @@ async function openTab(page: Page, name: string): Promise<void> {
 
 test.describe("#651 · depreciation under an explicit policy", () => {
   test("the authority card names its window and its instruction, and the preview shows the period the DATABASE chose before anything is written", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 4 }));
     await signInTo(page, LIST_URL);
 
     // THE WINDOW, ON THE SURFACE. A person reading "nothing is due" on a client with old
@@ -98,6 +99,7 @@ test.describe("#651 · depreciation under an explicit policy", () => {
   });
 
   test("a CLOSED period is refused BEFORE anything is drafted, and the refusal names the year and the way back in", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     // A SEPARATE CLIENT, not a toggle on the one above: this cell's claim is an ABSENCE, and an
     // absence cannot be asserted on a world a sibling cell may have moved.
     await signInTo(page, LOCKED_LIST_URL);
@@ -164,6 +166,7 @@ test.describe("#651 · depreciation under an explicit policy", () => {
   });
 
   test("the asset detail separates the revision timeline from the charge ledger, and ?tab= survives Back", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 4 }));
     await signInTo(page, DETAIL_URL);
     await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
 
@@ -213,6 +216,7 @@ test.describe("#651 · depreciation under an explicit policy", () => {
   });
 
   test("keyboard reaches the preview and focus RETURNS to the trigger; 320px and 200% zoom keep the reading; the axe scan is clean under reduced motion", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await page.emulateMedia({ reducedMotion: "reduce" });
     await signInTo(page, LIST_URL);
     await ensureRealFocus(page);

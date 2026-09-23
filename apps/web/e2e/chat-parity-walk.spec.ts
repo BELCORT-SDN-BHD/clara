@@ -18,7 +18,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { settleForScan, signIn as sharedSignIn, watchReactFaults } from "./helpers";
+import { cellBudgetMs, settleForScan, signIn as sharedSignIn, watchReactFaults } from "./helpers";
 
 const CLIENT_ID = "55555555-5555-4555-8555-555555555555";
 const THREAD_ID = "66666666-6666-4666-8666-666666666666";
@@ -472,6 +472,7 @@ async function setBurst(page: Page, on: boolean): Promise<void> {
 }
 
 test("#727: a clarify asked DURING a live stream is answered in place — the turn clock does not tear the view down", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   // THE HOSTED SHAPE, reproduced. The turn streams, the clarify card mounts with its
   // answer control, the turn clock ("Clara has been working on this for m:ss") counts, and
   // assistant text keeps arriving for several seconds on top of it. On the code #727 was

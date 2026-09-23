@@ -311,6 +311,30 @@ test("#864 · every cell's accessibility scans are covered by a grant it can nam
   assert.deepEqual(gaps, [], `these cells scan without the headroom to pay for it:\n${describeGaps(gaps)}`);
 });
 
+test("#864 · a cell whose own waits can eat the whole base budget declares a budget sized to them", () => {
+  // THE THIRD VERB. #864's own Agent Brief names three — "every spec file that signs in, polls or
+  // runs a full-page scan" — and the first cut of this census held rules for two. A poll here is an
+  // EXPLICIT `{ timeout: N }` at or above 10 s: a wait the author already sized, because the thing
+  // waited for is a fixture-driven state change rather than a render (`CELL_BUDGET.poll` prices one
+  // at 15 s). An ordinary `expect()`'s own 5 s default is not a poll and is exactly what the flat
+  // base is for. The line is drawn where the arithmetic draws it: when a cell's own declared waits
+  // can consume the WHOLE base on their own, the base is no longer sized to that cell's work, and
+  // the cell has to say what it is waiting for. Sign-in and scan grants are not spendable here —
+  // each is priced for the work it pays for.
+  const helpers = helpersSource();
+  const files = specFiles();
+  assert.ok(files.length >= 46, `the census must actually see the suite (found ${files.length} spec files)`);
+
+  const gaps: CellGap[] = [];
+  for (const name of files) {
+    const source = readFileSync(join(E2E_DIR, name), "utf8");
+    for (const gap of cellBudgetGaps(name, source, helpers)) if (gap.missing.includes("poll budget")) gaps.push(gap);
+  }
+
+  assert.deepEqual(gaps, [], `these cells wait longer than their base budget without declaring it:
+${describeGaps(gaps)}`);
+});
+
 test("#864 · THE VACUITY CONTROL: the detector actually detects, and does not over-detect", () => {
   const helpers = helpersSource();
   const gaps = (source: string): string[] => cellBudgetGaps("fixture.spec.ts", source, helpers).map((g) => g.missing);

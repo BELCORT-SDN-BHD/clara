@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, settleForScan, signInTo } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { FA } from "./fixed-asset-mock.mjs";
 
 /**
@@ -60,6 +60,7 @@ async function openTab(page: Page, name: string): Promise<void> {
 
 test.describe("#639 · C7 fixed-asset acquisition", () => {
   test("the register links each asset to its own page and says which one is waiting", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signInTo(page, LIST_URL);
 
     // MEANINGFUL LOADING, then real data — never a placeholder amount painted as a zero.
@@ -128,6 +129,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
   });
 
   test("an invalid answer names the dependent CONTROL, keeps the draft, and a valid one persists", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 6 }));
     await ensureRealFocus(page);
     await signInTo(page, ANSWERABLE_URL);
     await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
@@ -198,6 +200,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
   });
 
   test("a VIEWER is refused by the door, reads the refusal where they are, and the asset is untouched", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     // AC9's "denied" leg, under a session whose role is genuinely below the door's floor rather
     // than a scripted asset. `clara.complete_fixed_asset_particulars` calls
     // `clara._human_ctx(role_rank('bookkeeper'))` FIRST (0004:299-309) - a viewer may read this

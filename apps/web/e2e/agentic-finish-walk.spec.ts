@@ -23,7 +23,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { settleForScan, signIn } from "./helpers";
+import { cellBudgetMs, settleForScan, signIn } from "./helpers";
 import { P6_5 } from "./agentic-finish-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -59,6 +59,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("裁-37 · ⌘K Do follows the DATABASE: absent below the door's floor, offered above it", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   // ARM 1 — the database says BOOKKEEPER. `begin_client_onboarding` floors at ADMIN
   // (`_human_ctx(role_rank('admin'))`, 0017:2497), so the row is ABSENT and the section says
   // what it looked for, rather than showing a greyed promise the caller could never keep.
@@ -85,6 +86,7 @@ test("裁-37 · ⌘K Do follows the DATABASE: absent below the door's floor, off
 });
 
 test("the parked question survives a RELOAD — re-read from the database, answerable in the thread", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 6 }));
   // N6 — THE CLAIM IS NOW ASSERTED. This walk's whole point is that the question arrives from a
   // READ rather than from the SSE buffer a page load discards, and the PR body said "asserted:
   // zero stream opens" while nothing counted anything. Every request the page makes is recorded
@@ -121,6 +123,7 @@ test("the parked question survives a RELOAD — re-read from the database, answe
 });
 
 test("the structural boundary: A -> B and A -> firm carry nothing client-owned across", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await signIn(page);
   await page.goto(CLIENT_A);
   await expect(page.getByText("CLIENT A TRANSCRIPT")).toBeVisible({ timeout: 20_000 });
@@ -169,6 +172,7 @@ test("the structural boundary: A -> B and A -> firm carry nothing client-owned a
 });
 
 test("裁-27 · an amend records a NEW resolution and shows what it supersedes", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 5 }));
   await signIn(page);
   await page.goto(CLIENT_A);
   await expect(page.getByText("Which banks does this client use?")).toBeVisible({ timeout: 20_000 });
@@ -215,6 +219,7 @@ async function assertNoWireArtefacts(page: Page, what: string): Promise<void> {
 }
 
 test("CB-AE2E-008 · a structured answer reads as prose on the built app — no [object Object], no raw JSON", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   await signIn(page);
   await page.goto(CLIENT_A);
 
@@ -232,6 +237,7 @@ test("CB-AE2E-008 · a structured answer reads as prose on the built app — no 
 });
 
 test("CB-AE2E-023 · a COMMITTED plan renders a receipt, with no Commit or Cancel trigger and the answers collapsed", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await signIn(page);
   await page.goto(CLIENT_B);
 
@@ -319,6 +325,7 @@ test("H-30 · the apply-chart dialog's Confirm stays inside a 1280x720 viewport 
 });
 
 test("H-51 / CB-AE2E-024 · /clients offers Add client above the register, follows the DATABASE's floor, and dispatches the SAME flow ⌘K does", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   // ARM 1 — below the door's admin floor (0017:2497), the control is ABSENT. Not greyed: a
   // caller is never offered a control they could not use.
   await signIn(page, "bookkeeper@example.test");
@@ -347,6 +354,7 @@ test("H-51 / CB-AE2E-024 · /clients offers Add client above the register, follo
 });
 
 test("裁-128 · the apply-standard-chart button plants the confirmed families and shows the door's own receipt", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   await signIn(page);
   await page.goto(CLIENT_A);
   await expect(page.getByText("Apply the firm's standard chart of accounts to this client")).toBeVisible({ timeout: 20_000 });

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, settleForScan, signInTo } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { PREPAY } from "./prepayments-mock.mjs";
 
 /**
@@ -99,6 +99,7 @@ test("prepayments.walk.attention: both persistent statements render, the attenti
 // ===========================================================================================
 
 test("prepayments.walk.refusal: a refused configure keeps every field, prints the database's own words, says the prepayment is STILL posted, and the retry succeeds and shows the derived allocation", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 2 }));
   await signInTo(page, NEW_URL);
 
   await expect(page.getByText(/never initiates a bank payment/)).toBeVisible();
@@ -245,6 +246,7 @@ test("prepayments.walk.geometry: the list and the detail hold at 320 CSS px with
 });
 
 test("prepayments.walk.motion_and_back: under prefers-reduced-motion nothing animates indefinitely, the URL is stable, and Back returns from the detail to the list", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await page.emulateMedia({ reducedMotion: "reduce" });
   await signInTo(page, LIST_URL);
   await settle(page);

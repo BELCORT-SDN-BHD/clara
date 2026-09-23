@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { settleForScan, signInTo } from "./helpers";
+import { cellBudgetMs, settleForScan, signInTo } from "./helpers";
 import { PA } from "./periodic-adjustment-mock.mjs";
 
 // #643 — "会计师提供期间、金额和依据后，Clara 或直接会计操作可完成定期存货及工资相关费用/负债调整".
@@ -302,6 +302,7 @@ test("t643 a SERVER refusal lands on its own control with the server's own reaso
 });
 
 test("t643 a LOST answer is resolved by re-sending the SAME intent key, not by a second Work", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   await page.goto(FORM_URL);
   await fillStocktake(page);
 

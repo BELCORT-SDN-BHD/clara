@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, settleForScan, signInTo } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 
 /**
@@ -125,6 +125,7 @@ test("B3 cancel: the dialog asks before it acts, the SAFE action holds focus, an
 });
 
 test("B3 cancel: STOPPING is shown while an admitted operation settles, and only then the terminal", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 5 }));
   const workId = await composeWork(page);
   await control(page, { op: "run", workId });
   await expect(page.getByText("Running", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
@@ -175,6 +176,7 @@ test("B3 cancel: STOPPING is shown while an admitted operation settles, and only
 });
 
 test("B3 cancel: a cancel that LOST the race shows the receipt and links the entry — never a cancellation", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   const workId = await composeWork(page);
   await control(page, { op: "run", workId });
   await expect(page.getByText("Running", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
@@ -193,6 +195,7 @@ test("B3 cancel: a cancel that LOST the race shows the receipt and links the ent
 });
 
 test("B3 cancel: a DENIED cancel is a persistent banner, and the Work is untouched", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 2 }));
   const workId = await composeWork(page);
   await control(page, { op: "run", workId });
   await expect(page.getByText("Running", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
@@ -211,6 +214,7 @@ test("B3 cancel: a DENIED cancel is a persistent banner, and the Work is untouch
 });
 
 test("B3 take-over: an orphaned Work offers it, and an INTERPRETED basis is confirmed before it is taken", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   const workId = await composeWork(page);
   await control(page, { op: "orphan", workId, origin: "clara_interpreted" });
   await expect(page.getByText("Refused", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
@@ -272,6 +276,7 @@ test("320 CSS px and 200% zoom: the cancel dialog fits, and the page does not sc
 });
 
 test("reduced motion: the cancel dialog does not MOVE, and the opacity that remains is allowed to", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 2 }));
   await page.emulateMedia({ reducedMotion: "reduce" });
   const workId = await composeWork(page);
   await control(page, { op: "run", workId });
@@ -307,6 +312,7 @@ test("reduced motion: the cancel dialog does not MOVE, and the opacity that rema
 // ===========================================================================================
 
 test("B7: Stop reply and Cancel Work are different controls doing different things, and closing the rail does neither", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   // THE TURN THIS TAB DID NOT POST. `sendStatus` is a fact about a send THIS tab made, so a rail
   // opened onto a turn that is already running — a reload, a reattach, a second tab — has no such
   // fact, and an earlier cut of the control (gated on `sendStatus === "sending"`) therefore never
@@ -350,6 +356,7 @@ test("B7: Stop reply and Cancel Work are different controls doing different thin
 });
 
 test("B7: a REFUSED stop says the reply is still running — it never prints Stopped over a live run", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   // `clara.begin_chat_turn` admits any ACTIVE member of the firm; `clara.cancel_agent_task` floors
   // at bookkeeper. So a viewer or clerk can start a turn they cannot stop, and the honest answer is
   // to say so: the run carries on, and this tab puts its read back if it can.
@@ -383,6 +390,7 @@ test("B7: a REFUSED stop says the reply is still running — it never prints Sto
 });
 
 test("B7: a stop that KILLED a queued turn says Stopped — and only a turn that had already ended says otherwise", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 5 }));
   // THE INVERSION THIS LEG EXISTS FOR. `clara.begin_chat_turn` admits every chat turn as `queued`,
   // and `clara.cancel_agent_task` settles a queued task TERMINALLY — answering `{status:
   // 'cancelled'}`, the same status it answers for a task that had already ended. Reading the status
