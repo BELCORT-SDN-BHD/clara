@@ -308,10 +308,10 @@ test("#864 · every cell's accessibility scans are covered by a grant it can nam
   }
 
   // A count-control, not decoration: this rule can only be trusted while it is actually looking at
-  // scans. 162 cells across 41 files scan today (MEASURED 2026-09-23); a refactor that hid the
-  // scanner behind a shape `cellBudgetGaps` cannot follow would drop this number, not raise a
-  // failure, so the floor is asserted.
-  assert.ok(scanningCells >= 150, `the census must still see the suite's scans (found ${scanningCells} scanning cells)`);
+  // scans. 208 cells across 48 of the 50 spec files scan today (MEASURED 2026-09-23); a refactor
+  // that hid the scanner behind a shape `cellBudgetGaps` cannot follow would drop this number, not
+  // raise a failure, so the floor is asserted.
+  assert.ok(scanningCells >= 190, `the census must still see the suite's scans (found ${scanningCells} scanning cells)`);
 
   assert.deepEqual(gaps, [], `these cells scan without the headroom to pay for it:\n${describeGaps(gaps)}`);
 });
