@@ -133,9 +133,11 @@ export function ClientFinancialSummary({
 
   // #1002 — THE SECOND-PASS EDITOR'S OWN READ, gated the SAME way and for the SAME reason: a
   // second door, read only when the dialog is open, never paid for by a board that never opens
-  // it. `clara.get_client_cash_account_set_members` fills the editor's roster; it never decides
-  // WHICH face the dialog shows — `pack.cashSet !== null` (already loaded, no extra latency)
-  // does that, exactly as `ClientCashSummary`'s own "Change" entrance already reads it.
+  // it. `clara.get_client_cash_account_set_members` fills the editor's roster AND carries the
+  // published-version fact the dialog's face finally rests on: `pack.cashSet !== null` (already
+  // loaded, no extra latency) is the FIRST answer, this read is the authoritative one, and
+  // `client-cash-set-dialog.tsx`'s own `isEdit` says why the pack alone is not enough — the pack
+  // resolves its version through the PERIOD WINDOW and the publish door does not.
   const currentMembers = useAsyncRead(
     useCallback(
       () => (dialogOpen

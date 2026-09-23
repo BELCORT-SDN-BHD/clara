@@ -14,6 +14,13 @@
 //   5. The op key is an idempotency key derived from the INTENT, not the clock: the SAME key
 //      survives a retry of the same decision, and a changed decision mints a NEW one.
 //
+// AND TWO MORE THE REVIEW OF 2026-09-23 ADDED, both about what the face RESTS on:
+//   6. WHICH FACE opens is the publish door's own `state = 'published'` fact (the membership
+//      read), not the period-windowed `pack.cashSet` — which is null for a client that plainly
+//      has a published set whenever the human is reading an earlier period.
+//   7. CLOSING the editor discards the draft, so a reopen states the CURRENT version again
+//      rather than abandoned boxes and a diff built from them.
+//
 // THE DIALOG IS PORTALLED to `document.body` (base-ui Dialog) — every search below walks the
 // body, exactly as `work-cancel-dialog.test.tsx` and `knowledge-promote-dialog.test.tsx` do.
 //
@@ -95,35 +102,47 @@ const CURRENT: CurrentCashSet = {
 type PublishArgs = { effectiveFrom?: string | null; opKey: string };
 type PublishCall = { clientId: string; members: CashSetMemberInput[]; args: PublishArgs };
 
-async function mount(opts: {
+type MountOpts = {
   hasPublishedSet?: boolean;
   proposal?: CashProposal | null;
   currentSet?: CurrentCashSet | null;
   publish?: typeof publishClientCashAccountSet;
-} = {}) {
-  const h = await renderComponent(
-    createElement(NextIntlClientProvider, {
-      locale: "en",
-      messages,
-      children: createElement(ClientCashSetDialog, {
-        clientId: CLIENT,
-        open: true,
-        onOpenChange: () => {},
-        hasPublishedSet: opts.hasPublishedSet ?? true,
-        proposal: opts.proposal === undefined ? PROPOSAL : opts.proposal,
-        loading: false,
-        error: null,
-        currentSet: opts.currentSet === undefined ? CURRENT : opts.currentSet,
-        membersLoading: false,
-        membersError: null,
-        onPublished: () => {},
-        publish: opts.publish,
-      }),
+};
+
+/** The same tree at a chosen `open`. Built once here so a cell can CLOSE and REOPEN the dialog
+ *  through `rerender` — an update of the same mounted component, never a remount, which is the
+ *  only way to prove what a reopen does with state the component was already holding. */
+function tree(opts: MountOpts, open: boolean) {
+  return createElement(NextIntlClientProvider, {
+    locale: "en",
+    messages,
+    children: createElement(ClientCashSetDialog, {
+      clientId: CLIENT,
+      open,
+      onOpenChange: () => {},
+      hasPublishedSet: opts.hasPublishedSet ?? true,
+      proposal: opts.proposal === undefined ? PROPOSAL : opts.proposal,
+      loading: false,
+      error: null,
+      currentSet: opts.currentSet === undefined ? CURRENT : opts.currentSet,
+      membersLoading: false,
+      membersError: null,
+      onPublished: () => {},
+      publish: opts.publish,
     }),
-  );
+  });
+}
+
+async function mount(opts: MountOpts = {}) {
+  const h = await renderComponent(tree(opts, true));
   bodyOf().appendChild(h.container);
   for (let i = 0; i < 6; i += 1) await h.settle();
-  return h;
+  return Object.assign(h, {
+    setOpen: async (open: boolean) => {
+      await h.rerender(tree(opts, open));
+      for (let i = 0; i < 6; i += 1) await h.settle();
+    },
+  });
 }
 
 function mockPublish(behaviour: (call: PublishCall) => Promise<unknown>): {
@@ -158,6 +177,55 @@ test("ticket 1002.1 every current member is pre-checked, including one with no b
       "an account that was never a member does not start checked");
     assert.match(bodyText(), /Declared petty cash/, "the recorded reason travels onto the row, in words");
     assert.match(bodyText(), /Change which accounts count as cash/, "the EDIT title, not the first-publish one");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ===========================================================================================
+// 1b — WHICH FACE OPENS IS THE PUBLISH DOOR'S OWN FACT, NOT THE PERIOD-WINDOWED PACK'S.
+//
+// `pack.cashSet` is resolved through 0232's WINDOW (`effective_from <= as_of and (effective_to is
+// null or effective_to >= as_of)`, 0232:1051-1055), so a human reading an EARLIER period than the
+// current version's own effective_from gets `cashSet: null` for a client that plainly has a
+// published set. THE PUBLISH DOOR HAS NO SUCH WINDOW: it locks `where v.client_id = p_client and
+// v.state = 'published'` (0232:587-589) — the same question `get_client_cash_account_set_members`
+// (0276:214) answers, and that read is already loaded in this same open.
+//
+// The first-publish face on such a client is a DEAD END: it states no date at all, so the door
+// meets a null `p_effective_from` with a published current version and raises
+// `effective_from_required` — a refusal that face has no field to answer.
+// ===========================================================================================
+test("ticket 1002.1b the EDIT face opens on the published-version fact, even when the period-windowed pack says nothing", async () => {
+  const h = await mount({ hasPublishedSet: false, currentSet: CURRENT });
+  try {
+    const body = bodyText();
+    assert.match(body, /Change which accounts count as cash/,
+      "the EDIT face must open once the membership read names a published version");
+    assert.ok(dateInput(),
+      "the edit face's effective-date field must be on screen — the door demands a date for a later version");
+    const petty = findIn(bodyOf(), memberBox("1090"));
+    assert.ok(petty, "the current version's own membership must be on screen");
+    assert.equal((petty as unknown as { checked: boolean }).checked, true,
+      "a current member must still start CHECKED on the face the published-version fact opened");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1002.1c a LOADED membership read with NO published version keeps the first-publish face", async () => {
+  // The guard against the obvious wrong fix — keying on `currentSet !== null` rather than on the
+  // published-version id. `get_client_cash_account_set_members` answers for a client with no
+  // published set too, and that answer is not a published set.
+  const h = await mount({
+    hasPublishedSet: false,
+    currentSet: { publishedVersionId: null, revision: null, effectiveFrom: null, memberCount: null, members: [] },
+  });
+  try {
+    assert.match(bodyText(), /Which accounts count as cash\?/,
+      "a read that found NO published version must leave the first-publish face alone");
+    assert.equal(findIn(bodyOf(), (n) => attr(n, "id") === "client-cash-set-effective-date"), null,
+      "the first-publish face states no date at all");
   } finally {
     await h.unmount();
   }
@@ -303,6 +371,78 @@ test("ticket 1002.5 a retry of the SAME decision reuses the op key; a changed de
     assert.equal(calls.length, 3);
     assert.notEqual(calls[2]!.args.opKey, calls[1]!.args.opKey,
       "changing the membership is a DIFFERENT decision and must mint a fresh key");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ===========================================================================================
+// 7 — CLOSING THE EDITOR DISCARDS THE DRAFT, SO A REOPEN SHOWS THE CURRENT VERSION.
+//
+// The pre-check is not a one-time courtesy: this face's whole job is to state what the CURRENT
+// published version says. A human who unchecks members, closes without saving and reopens the
+// SAME version must not be shown boxes that no longer describe it — with the diff (added /
+// removed / unchanged) computed from those stale boxes and nothing on screen saying they are a
+// leftover draft. That is the file's own footer rule, literally: "cancel restores nothing because
+// it committed nothing — this dialog holds no draft that outlives it."
+// ===========================================================================================
+test("ticket 1002.7 closing the editor discards the draft: a reopen shows the CURRENT version again, not the abandoned boxes", async () => {
+  const h = await mount({});
+  try {
+    await h.act(() => setCheckboxChecked(findIn(bodyOf(), memberBox("1090")) as never, false));
+    await h.act(() => setCheckboxChecked(findIn(bodyOf(), memberBox("1020")) as never, true));
+    await h.act(() => setFieldValue(dateInput()!, "2026-04-01"));
+    assert.match(bodyText(), /Added:\s*1020/, "the draft must really be dirty before it is abandoned");
+    assert.match(bodyText(), /Removed:\s*1090/, "the draft must really be dirty before it is abandoned");
+
+    await h.setOpen(false);
+    await h.setOpen(true);
+
+    const petty = findIn(bodyOf(), memberBox("1090"));
+    const notYet = findIn(bodyOf(), memberBox("1020"));
+    assert.ok(petty && notYet, "the editor must render again on the reopen");
+    assert.equal((petty as unknown as { checked: boolean }).checked, true,
+      "a reopen of the SAME published version must pre-check its members again — the face states the version, not a leftover draft");
+    assert.equal((notYet as unknown as { checked: boolean }).checked, false,
+      "an account the human added and then abandoned must not survive the close");
+
+    const body = bodyText();
+    assert.match(body, /Nothing added or removed yet/,
+      "the diff is still being built from the abandoned draft");
+    assert.match(body, /2 unchanged/, "both current members are unchanged again after the reopen");
+    assert.equal((dateInput() as unknown as { value?: string } | null)?.value ?? "", "",
+      "the abandoned effective date must not survive the close either");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1002.7b a decision abandoned by closing the editor mints a NEW op key on the next submit", async () => {
+  // The op key names a DECISION. A reopen reseeds from the current version, so the figures on
+  // screen are no longer the figures the pre-close submit carried; replaying the old key would
+  // ask `clara._reserve_op` to treat a different decision as a retry of that one.
+  const { publish, calls } = mockPublish(async () => { throw new Error("network blip"); });
+  const h = await mount({ publish });
+  try {
+    await h.act(() => setCheckboxChecked(findIn(bodyOf(), memberBox("1020")) as never, true));
+    await h.act(() => setFieldValue(dateInput()!, "2026-04-01"));
+    await h.act(async () => { await clickButton(findIn(bodyOf(), buttonNamed("Save changes")) as never); });
+    for (let i = 0; i < 4; i += 1) await h.settle();
+    assert.equal(calls.length, 1);
+
+    // NOTHING is touched after the reopen — touching the date or a box would renew the key on its
+    // own and make the assertion below pass for the wrong reason.
+    await h.setOpen(false);
+    await h.setOpen(true);
+
+    await h.act(async () => { await clickButton(findIn(bodyOf(), buttonNamed("Save changes")) as never); });
+    for (let i = 0; i < 4; i += 1) await h.settle();
+
+    assert.equal(calls.length, 2);
+    assert.notEqual(calls[1]!.args.opKey, calls[0]!.args.opKey,
+      "a decision abandoned by a close must not be replayed under the key the abandoned one carried");
+    assert.equal(calls[1]!.members.length, 2,
+      "the reopened submit carries the CURRENT version's membership, not the abandoned draft's three accounts");
   } finally {
     await h.unmount();
   }

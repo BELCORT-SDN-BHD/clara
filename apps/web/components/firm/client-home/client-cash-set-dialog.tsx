@@ -8,6 +8,11 @@
 // on a refusal) — and its own cancel restores nothing either, because it committed nothing. Both
 // facts are stated rather than left for a reader to infer from an absent control.
 //
+// A REFUSAL AND A CLOSE ARE DIFFERENT THINGS. A refusal keeps every dirty choice: the human's
+// answer was not what was wrong. A CLOSE discards the second-pass editor's draft outright, so the
+// next open states the CURRENT published version rather than boxes somebody abandoned — see
+// `seededForRef` below. The first-publish face keeps the draft behaviour #660 shipped.
+//
 // THE PROPOSAL IS A PROPOSAL. `clara.propose_client_cash_accounts` lists every account carrying
 // the bank-registry marker — ACTIVE OR INACTIVE, because a retired account still holds the balance
 // it held — and proposes NOTHING else. Petty cash has no structural marker in this schema and
@@ -94,10 +99,10 @@ export function ClientCashSetDialog({
   clientId,
   open,
   onOpenChange,
-  // Decided by the ALREADY-LOADED financial pack (`pack.cashSet !== null`, the same fact
+  // The ALREADY-LOADED financial pack's answer (`pack.cashSet !== null`, the same fact
   // `ClientCashSummary`'s own "Change" entrance is gated behind) — known the instant the dialog
-  // opens, never awaited from the membership read below. That read fills the EDITOR's roster; it
-  // never decides which face this dialog shows.
+  // opens, so the face never flickers while the membership read is in flight. It is the FIRST
+  // answer, not the LAST one: see `isEdit` below.
   hasPublishedSet,
   proposal,
   loading,
@@ -129,7 +134,25 @@ export function ClientCashSetDialog({
   const [refusal, setRefusal] = useState<unknown>(null);
   const [effectiveDate, setEffectiveDate] = useState("");
 
-  const isEdit = hasPublishedSet;
+  // WHICH FACE OPENS IS THE PUBLISH DOOR'S OWN FACT — "does this client have a PUBLISHED cash
+  // account set?" — and only one of these two answers is that fact.
+  //
+  // `hasPublishedSet` comes from `pack.cashSet`, which 0232 resolves through the PERIOD WINDOW
+  // (`effective_from <= as_of and (effective_to is null or effective_to >= as_of)`,
+  // 0232:1051-1055). A human reading an EARLIER period than the current version's own
+  // effective_from therefore gets `null` for a client that plainly has a published set, and the
+  // first-publish face on such a client is a DEAD END: it states no date at all, so
+  // `publish_client_cash_account_set` meets a null `p_effective_from` with a published current
+  // version — its own lock is `where v.client_id = p_client and v.state = 'published'`, with NO
+  // window (0232:587-589) — and raises `effective_from_required`, which that face has no field
+  // to answer.
+  //
+  // `currentSet.publishedVersionId` is that unwindowed fact, from the read this dialog already
+  // loads on the same open (`get_client_cash_account_set_members`, 0276:214, the identical
+  // `state = 'published'` predicate). So the pack answers INSTANTLY and the read CORRECTS it; the
+  // `||` means the face only ever moves from first-publish to editor, never back, so nothing
+  // flickers under a human's hands.
+  const isEdit = hasPublishedSet || currentSet?.publishedVersionId != null;
 
   // THE EDITOR'S OWN OP KEY: minted on the first submit attempt of a DECISION and reused for
   // every retry of the SAME figures, the same idiom `plan-form.tsx:116-126` already carries for
@@ -145,20 +168,42 @@ export function ClientCashSetDialog({
     return editOpKeyRef.current;
   };
 
-  // THE ROSTER IS SEEDED ONCE PER PUBLISHED VERSION, never on every render and never again on a
-  // reopen of the SAME version — a human who opened the editor, changed a box and closed without
-  // saving keeps that dirty state on reopen, the same "cancel restores nothing" rule this file's
-  // header states for the first-publish face. A successful submit clears the ref (below) so the
-  // NEXT version, once it loads, seeds fresh.
+  // THE ROSTER IS SEEDED ONCE PER OPEN, never on every render — and CLOSING THE EDITOR DISCARDS
+  // THE DRAFT, so the next open states the CURRENT version again rather than boxes a human
+  // abandoned. This face's whole job is to say what the published version says; boxes that no
+  // longer describe it, with the diff computed from them and nothing on screen calling them a
+  // leftover, would make it say something else. It is also this file's own footer rule, taken
+  // literally: "cancel restores nothing because it committed nothing — this dialog holds no
+  // draft that outlives it."
+  //
+  // A REFUSAL IS NOT A CLOSE. The dialog stays open on a refusal and every dirty choice survives
+  // it, because the human's answer was not the thing that was wrong (see `submit` below).
+  //
+  // THE FIRST-PUBLISH FACE IS NOT TOUCHED BY ANY OF THIS: the whole effect is behind `isEdit`,
+  // so that face keeps the exact draft behaviour #660 shipped.
   const seededForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!isEdit || currentSet === null || currentSet.publishedVersionId === null) return;
+    if (!isEdit) return;
+    if (!open) {
+      // Nothing was ever seeded, so there is nothing to forget — and no state to churn on a
+      // board whose dialog has never been opened.
+      if (seededForRef.current === null) return;
+      seededForRef.current = null;
+      setSelection({});
+      setEffectiveDate("");
+      setRefusal(null);
+      // The abandoned figures were a DECISION. The next open is a different one (it is reseeded
+      // from the current version), so it must not replay through the abandoned decision's key.
+      renewEditKey();
+      return;
+    }
+    if (currentSet === null || currentSet.publishedVersionId === null) return;
     if (seededForRef.current === currentSet.publishedVersionId) return;
     seededForRef.current = currentSet.publishedVersionId;
     const seeded: Selection = {};
     for (const m of currentSet.members) seeded[m.accountId] = m.memberReason as MemberReason;
     setSelection(seeded);
-  }, [isEdit, currentSet]);
+  }, [open, isEdit, currentSet]);
 
   const candidates: CashCandidate[] = proposal?.candidates ?? [];
   const roster: EditorRow[] = isEdit ? buildRoster(candidates, currentSet?.members ?? []) : [];

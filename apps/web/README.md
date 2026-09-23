@@ -1047,6 +1047,22 @@ restating it, so a later reorder of the door cannot leave this sentence behind. 
 composition by `a.account_code` too** — the same defect, pre-existing since #660 and deliberately
 left to its own ticket rather than widened into #1001.
 
+**#1002 — the second-pass membership editor, and the two facts its face rests on.** The cash-set
+dialog has two faces: FIRST PUBLISH (#660, unchanged) and the SECOND-PASS EDITOR that restates a
+published version's membership. WHICH ONE OPENS is the publish door's own question — "does this
+client have a PUBLISHED cash account set?" — and `pack.cashSet` is not that question's answer:
+0232 resolves it through the PERIOD WINDOW, so a human reading an earlier month than the current
+version's `effective_from` gets `null` for a client that plainly has one. The first-publish face
+on such a client is a dead end, because it states no date at all and the publish door — whose own
+lock is `where v.client_id = p_client and v.state = 'published'`, with NO window — answers a null
+`p_effective_from` with `effective_from_required`. So `pack.cashSet` is the INSTANT answer and
+`get_client_cash_account_set_members` (migration 0276, the identical `state = 'published'`
+predicate) is the AUTHORITATIVE one; the face only ever moves from first-publish to editor, never
+back, so nothing flickers. And CLOSING the editor DISCARDS its draft: a reopen pre-checks the
+current version again rather than showing boxes a human abandoned, with the added/removed/
+unchanged diff computed from them. A REFUSAL is not a close — the dialog stays open and every
+dirty choice survives it, because the human's answer was not what was wrong.
+
 ### Recharts, and the table that is never a fallback
 
 `recharts@3.8.0` and `components/ui/chart.tsx` arrived through `pnpm --filter @clara/web ui:add
