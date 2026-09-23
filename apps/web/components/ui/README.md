@@ -76,7 +76,12 @@ vendor install needs (`tests/focus-ring-contract.test.ts`'s own census — `tabs
 `toggle.tsx`, `field.tsx`, `input.tsx`, `input-group.tsx`, `radio-group.tsx`, `select.tsx`,
 `textarea.tsx`, `toast.tsx` and `badge.tsx` all carry it, and none of them is on the allowlist) and
 the bare-`cn`-import fix (#969's own registry-authoring quirk) are routine INSTALL HYGIENE, applied
-the same way on every future add — not an owner ruling a regeneration would silently undo. Only a
+the same way on every future add — not an owner ruling a regeneration would silently undo. So is
+the `motion-safe:` re-cut every vendored POPUP needs (`dialog.tsx`, `dropdown-menu.tsx`,
+`select.tsx`, `tooltip.tsx` and now `popover.tsx`): upstream ships the side slides and the
+open/close zoom unprefixed, and `tests/reduced-motion-contract.test.ts` reds on sight — which is
+how `popover.tsx`'s own copy was found the day it was vendored, at `pnpm test` rather than at
+review. Only a
 BEHAVIOURAL correction (an owner-ruled focus treatment, a corrected semantics) goes on the list.
 `attachment.tsx` and `message-scroller.tsx` (#970) carry the routine class only, so neither joined
 the allowlist.
