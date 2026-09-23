@@ -19,6 +19,14 @@
 // runtime never re-derives that arithmetic client-side (the DB owns every number). Only a
 // {due:true} answer names a (period_start, period_end) to hand to run_depreciation_period.
 //
+// A PARKED RUN IS A FOURTH OUTCOME, NOT A FAILURE (#975, migration 0279). Where a period's
+// charge would fold a closing or closed fiscal year's months forward, the DB stops before the
+// first write and asks the accountant whether the omission is immaterial (folded into this
+// period) or material (restated in that year) — IAS 8, and a judgement no machine may make. The
+// door answers `parked` with a stated reason; this belt counts it on its own axis (faParked),
+// names the reason in the log and breaks the per-client chase, because the due probe still
+// answers due:true for that period until a person records a choice.
+//
 // PER-CLIENT ERROR ISOLATION (the reconciler-sst.mjs precedent verbatim): a poisoned client's
 // due-probe or run-call throw is counted (faFailed) and the sweep moves on to the next client
 // — it never flips faOk, which gates only the leader's DAILY cadence. faOk goes false ONLY for
@@ -84,22 +92,22 @@ export async function reconcileFaRuns(client, opts = {}) {
     // law in reconciler.mjs) — re-check before containing.
     if (err instanceof TaxonomyHaltError || err?.halt) throw err;
     log(`[reconcile] fa surface probe error: ${err?.message ?? err}`);
-    return { faOk: false, faExamined: 0, faPosted: 0, faNoop: 0, faFailed: 0, dormant: false };
+    return { faOk: false, faExamined: 0, faPosted: 0, faNoop: 0, faParked: 0, faFailed: 0, dormant: false };
   }
   if (!surface) {
     // 0041 not yet applied — a clean no-op, never a failure (the image boots dormant on 0040
     // per the design's runtime-image-first ceremony order).
-    return { faOk: true, faExamined: 0, faPosted: 0, faNoop: 0, faFailed: 0, dormant: true };
+    return { faOk: true, faExamined: 0, faPosted: 0, faNoop: 0, faParked: 0, faFailed: 0, dormant: true };
   }
 
-  const out = { faOk: true, faExamined: 0, faPosted: 0, faNoop: 0, faFailed: 0, dormant: false };
+  const out = { faOk: true, faExamined: 0, faPosted: 0, faNoop: 0, faParked: 0, faFailed: 0, dormant: false };
 
   let ids;
   try {
     ids = await activeClientIds(client);
   } catch (err) {
     log(`[reconcile] fa runs client discovery error: ${err?.message ?? err}`);
-    return { faOk: false, faExamined: 0, faPosted: 0, faNoop: 0, faFailed: 0, dormant: false };
+    return { faOk: false, faExamined: 0, faPosted: 0, faNoop: 0, faParked: 0, faFailed: 0, dormant: false };
   }
 
   // One client at a time; each client's whole due-probe/run chain is isolated in ONE
@@ -148,6 +156,24 @@ export async function reconcileFaRuns(client, opts = {}) {
           log(`[reconcile] fa run client=${clientId} period=${due.period_start}..${due.period_end} status=noop (nothing computed — not chasing further)`);
           break;
         }
+        // #975 [0279] 'parked' IS ITS OWN AXIS, AND IT ALSO BREAKS THE CHASE. The DB stops a run
+        // before the first write when its charge would fold a CLOSING or CLOSED fiscal year's
+        // months into this open period and nobody has judged their materiality yet (IAS 8: only
+        // an immaterial omission is folded forward; a material one is restated in that year).
+        // The belt is a machine and may not make that judgement, so the door parks rather than
+        // posting, and the accountant answers through clara.record_fa_arrears_resolution.
+        //
+        // It is NOT a post (nothing was persisted), NOT a noop (a noop had nothing to do; a park
+        // has something it may not do) and NOT a failure (the belt did exactly the right thing,
+        // so gating the daily cadence on it would punish correct behaviour). And it must BREAK:
+        // the due probe still answers due:true for that period, honestly, so chasing on would
+        // call the verb FA_PERIOD_CAP times and bank one parked receipt per call — the same
+        // spin the noop fold closed, for a different reason.
+        if (r?.status === "parked") {
+          out.faParked += 1;
+          log(`[reconcile] fa run client=${clientId} period=${due.period_start}..${due.period_end} status=parked reason=${r?.reason ?? "?"} (a person must answer it — not chasing further)`);
+          break;
+        }
         out.faPosted += 1;
         log(`[reconcile] fa run client=${clientId} period=${due.period_start}..${due.period_end} status=${r?.status ?? "?"}`);
       }
@@ -157,6 +183,6 @@ export async function reconcileFaRuns(client, opts = {}) {
     }
   }
 
-  log(`[reconcile] fa runs examined=${out.faExamined} posted=${out.faPosted} noop=${out.faNoop} failed=${out.faFailed}`);
+  log(`[reconcile] fa runs examined=${out.faExamined} posted=${out.faPosted} noop=${out.faNoop} parked=${out.faParked} failed=${out.faFailed}`);
   return out;
 }

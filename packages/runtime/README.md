@@ -238,6 +238,19 @@ belt asks `depreciation_run_due` and runs what it is told. `tests/reconcile-fa-u
 exactly the period the oracle named when it skipped a closed one, and NO client-side mirror
 appeared (the module names neither `authority_from` nor `fiscal_years` nor `skipped_closed`).
 
+**#975 (migration 0279) gave that belt a FOURTH outcome: `parked`.** Where a period's charge would
+fold a closing or closed fiscal year's months into the open period, the database stops the run
+before its first write and asks the accountant whether the omission is immaterial (folded into this
+period) or material (restated in that year) — IAS 8, and a judgement no machine lane may make. The
+human door raises the question; every machine verb, including the one this belt calls, answers
+`parked` with a stated reason and posts nothing. `reconciler-fa.mjs` therefore counts `faParked` on
+its own axis — never a post, never a noop, never a failure — names the reason in the sweep log and
+in the `parked=` summary field, and BREAKS the per-client chase, because `depreciation_run_due`
+keeps answering `due:true` for that period until a person records a choice through
+`clara.record_fa_arrears_resolution`. `tests/reconcile-fa-unit.test.mjs` drives both halves (the
+counter and the single run call; the reason in the log). The module still mirrors nothing DB-side:
+it neither computes the arrears nor names a fiscal year.
+
 **Depreciation invokes NO Workflow, and that is a finding rather than an omission.** There is no
 standalone World leg for this lane and none is owed: `reconciler-fa.mjs:59-61` says in its own words
 that it is "a plain polled belt … it neither listens on a channel nor starts a workflow run". The
