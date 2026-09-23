@@ -62,9 +62,10 @@ work already admitted is untouched) and ended (terminal). Three KINDS exist: a *
 a *reversing journal* (an accrual and its reversal, two legs per period), and an *amortisation
 schedule* (a Prepayment schedule's configured plan, whose every period posts its own amount).
 Depreciation and close schedules are not plan kinds and are refused by name.
-_Avoid_: A recurring adjustment template as a synonym; a preference, a calculation policy or a
-repeated bank debit as a source of authority; an instruction to move money — a plan creates journal
-Work and never initiates a bank payment or a mandate.
+_Avoid_: A recurring adjustment template — the 0045 template lane was retired 2026-09-18 (#788,
+delivered by #927–#929); this is the one mechanism for recurring accounting from here on. A
+preference, a calculation policy or a repeated bank debit as a source of authority; an instruction
+to move money — a plan creates journal Work and never initiates a bank payment or a mandate.
 
 **Plan occurrence**:
 One due event of one plan. It is the identity of that event: one plan and one due date have exactly
@@ -93,9 +94,10 @@ evaluator's reading of rows this database already holds, and the only things a p
 which prepayment, under WHOSE INSTRUCTION, which expense account, why, and what the schedule is
 for. It configures an Accounting plan of kind `amortisation_schedule`; the belt
 admits each period.
-_Avoid_: A recurring adjustment template as a synonym; an editable table of period amounts; a
-schedule that pays anything — the money left the bank before the schedule existed; "configured" as
-a synonym for "posted", which is a different fact and a different count.
+_Avoid_: A recurring adjustment template — the 0045 template lane was retired 2026-09-18 (#788,
+delivered by #927–#929); an editable table of period amounts; a schedule that pays anything — the
+money left the bank before the schedule existed; "configured" as a synonym for "posted", which is
+a different fact and a different count.
 
 **Service period**:
 The span of time an accrued or prepaid cost belongs to, stated by an identified person — for a
