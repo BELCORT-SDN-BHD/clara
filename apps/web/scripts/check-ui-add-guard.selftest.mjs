@@ -67,6 +67,23 @@ const NON_PROTECTED_PAYLOAD = [
   { path: "registry/base-nova/ui/alert.tsx", type: "registry:ui" },
 ];
 
+/** #989's own measured incident: a `combobox` install whose flattened closure
+ *  names the protected `button.tsx` ALONGSIDE four files that are NOT
+ *  protected — three already-vendored (`input.tsx`, `textarea.tsx`,
+ *  `input-group.tsx`, all listed as `overwrite` targets) and one new
+ *  (`combobox.tsx`) — exactly the shape `resolveRegistryItems(["combobox"])`
+ *  returns for the real registry today (verified live,
+ *  `CLARA_UI_ADD_OVERWRITE=1 pnpm ui:add combobox --dry-run`, recorded in
+ *  this branch's delivering report). ONLY `button.tsx` is on the allowlist —
+ *  `pagination.tsx` never appears in this closure. */
+const COMBOBOX_PAYLOAD = [
+  { path: "registry/base-nova/ui/button.tsx", type: "registry:ui" },
+  { path: "registry/base-nova/ui/input.tsx", type: "registry:ui" },
+  { path: "registry/base-nova/ui/textarea.tsx", type: "registry:ui" },
+  { path: "registry/base-nova/ui/input-group.tsx", type: "registry:ui" },
+  { path: "registry/base-nova/ui/combobox.tsx", type: "registry:ui" },
+];
+
 const ALLOWLIST = loadAllowlist(readFileSync(join(WEB_ROOT, "scripts", "protected-components.json"), "utf8"));
 
 console.log("[check-ui-add-guard.selftest]");
@@ -111,6 +128,29 @@ await testCase("a payload naming no protected file: allowed, no false positive",
   const { blocked, allowed } = checkGuard({ targetPaths, allowlist: ALLOWLIST, override: false });
   assert(blocked.length === 0, `expected nothing blocked, got ${JSON.stringify(blocked)}`);
   assert(allowed === true, "an install touching no protected file must never be refused");
+});
+await testCase("[#989] a payload naming ONE protected file alongside non-protected ones, no override: allowed to proceed PARTIALLY — blocked names only the protected file, installable names the rest", () => {
+  const targetPaths = resolveTargetPaths(COMBOBOX_PAYLOAD, ALIASES);
+  const { blocked, installable, allowed, overrideUsed } = checkGuard({ targetPaths, allowlist: ALLOWLIST, override: false });
+  assert(JSON.stringify(blocked) === JSON.stringify(["components/ui/button.tsx"]),
+    `expected only button.tsx blocked, got ${JSON.stringify(blocked)}`);
+  assert(
+    ["components/ui/combobox.tsx", "components/ui/input-group.tsx", "components/ui/input.tsx", "components/ui/textarea.tsx"]
+      .every((p) => installable.includes(p)),
+    `expected the four non-protected files installable, got ${JSON.stringify(installable)}`);
+  assert(!installable.includes("components/ui/button.tsx"), "the protected file must never appear as installable");
+  assert(allowed === true, "a payload where SOME files are protected and others are not must be allowed to proceed partially, never aborted whole");
+  assert(overrideUsed === false, "no override was given");
+});
+await testCase("[#989] a payload where EVERY file is protected, no override: still not allowed — a partial install with nothing left to write is not partial, it is the same abort as before", () => {
+  // BUTTON_CONTAINING_PAYLOAD resolves to button.tsx AND pagination.tsx — BOTH
+  // on the allowlist — so this is the genuine all-protected corner case the
+  // original all-or-nothing abort still owns.
+  const targetPaths = resolveTargetPaths(BUTTON_CONTAINING_PAYLOAD, ALIASES);
+  const { blocked, installable, allowed } = checkGuard({ targetPaths, allowlist: ALLOWLIST, override: false });
+  assert(installable.length === 0, `expected nothing installable, got ${JSON.stringify(installable)}`);
+  assert(blocked.length === 2, `expected both files blocked, got ${JSON.stringify(blocked)}`);
+  assert(allowed === false, "an install that would write NOTHING but protected files must still abort");
 });
 
 // ---------------------------------------------------------------------------

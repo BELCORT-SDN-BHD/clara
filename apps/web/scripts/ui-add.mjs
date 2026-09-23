@@ -233,16 +233,32 @@ export function loadAllowlist(jsonText) {
 /**
  * THE GUARD'S WHOLE DECISION, as one pure function — the piece
  * check-ui-add-guard.selftest.mjs drives directly against fixtures.
+ *
+ * #989 — PARTIAL INSTALL, NEVER ALL-OR-NOTHING, UNLESS THERE IS NOTHING LEFT
+ * TO INSTALL. `installable` is `targetPaths` minus `blocked` — every file the
+ * payload names that carries no owner-ruled fix, and so is always safe to
+ * write regardless of what else in the same payload is protected (this is
+ * how `main()` below installs Combobox's four non-protected files while
+ * leaving `button.tsx` untouched, instead of #772's original refusal of the
+ * WHOLE payload). `allowed` stays false in exactly the one case where a
+ * partial install would write NOTHING new: every resolved path is on the
+ * allowlist (the `pagination` incident this guard was built for, and the
+ * ONE existing case this function's own selftest already covers unchanged —
+ * `pagination.tsx` itself has been on the allowlist since #771, so that
+ * fixture's closure is entirely blocked, not partial).
  * @param {{targetPaths: readonly string[], allowlist: readonly string[], override: boolean}} input
- * @returns {{blocked: string[], allowed: boolean, overrideUsed: boolean}}
- *   `allowed` is true when the install may proceed — either nothing on the
- *   allowlist is touched, or it is and the override was given.
+ * @returns {{blocked: string[], installable: string[], allowed: boolean, overrideUsed: boolean}}
+ *   `allowed` is true when the install may proceed — nothing on the allowlist
+ *   is touched, the override was given, or at least one non-protected file
+ *   remains to install (a partial run, protected file(s) skipped).
  */
 export function checkGuard({ targetPaths, allowlist, override }) {
   const allowlistSet = new Set(allowlist);
   const blocked = [...new Set(targetPaths.filter((p) => allowlistSet.has(p)))].sort();
+  const installable = [...new Set(targetPaths.filter((p) => !allowlistSet.has(p)))].sort();
   const overrideUsed = blocked.length > 0 && override === true;
-  return { blocked, allowed: blocked.length === 0 || override === true, overrideUsed };
+  const allowed = override === true || installable.length > 0 || blocked.length === 0;
+  return { blocked, installable, allowed, overrideUsed };
 }
 
 /** The default, NETWORK-REACHING resolver: the pinned CLI's own dependency
