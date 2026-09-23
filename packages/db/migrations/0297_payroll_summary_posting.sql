@@ -455,16 +455,21 @@ begin
     v_basis := concat_ws('+', case when v_c1 is not null then r.f1 end,
                               case when v_c2 is not null then r.f2 end);
 
-    if v_c1 is null and v_c2 is null then
-      -- AN UNPRINTED LINE PRODUCES NO LEG. Recorded by name so the plan can say what the page
-      -- was silent about, rather than leaving the reader to infer it from an absence.
-      v_unprinted := v_unprinted || r.f1;
-      continue;
+    -- WHAT THE PAGE WAS SILENT ABOUT, recorded by QUESTION rather than by leg and DISTINCT: the
+    -- levy is read by two legs (its expense and its payable) and the two paired payables read two
+    -- questions each, so a per-leg list would both repeat itself and lose the employer side of a
+    -- pair whose employee side printed. A question the page printed as 0.00 belongs here too --
+    -- the plan drew no figure from it either way.
+    if v_c1 is null or v_c1 = 0 then
+      if not (r.f1 = any(v_unprinted)) then v_unprinted := v_unprinted || r.f1; end if;
     end if;
+    if r.f2 is not null and (v_c2 is null or v_c2 = 0) then
+      if not (r.f2 = any(v_unprinted)) then v_unprinted := v_unprinted || r.f2; end if;
+    end if;
+
     if v_cents = 0 then
-      -- A PRINTED ZERO IS STILL NO LEG. The page said 0.00, which is a reading; booking a
-      -- zero-cent line would add a line that moves nothing.
-      v_unprinted := v_unprinted || r.f1;
+      -- AN UNPRINTED LINE PRODUCES NO LEG, and neither does a printed zero: 0.00 is a reading,
+      -- and a zero-cent line would assert a movement the document prices at nothing.
       continue;
     end if;
 

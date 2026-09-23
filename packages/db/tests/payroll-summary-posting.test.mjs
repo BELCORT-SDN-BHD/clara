@@ -304,3 +304,153 @@ test("S1 · a clean payroll fact state becomes the eleven-leg entry, and it bala
     );
   }
 });
+
+test("S1 · a line the document does not print produces no leg — never a zero one", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // The same payslip with no HRDF levy line printed. Both the levy EXPENSE and the levy PAYABLE
+  // come off, and nothing else moves.
+  const [textEnv, visionEnv] = bothChannels({ answers: { "payroll.run.hrdf_levy": notPrinted() } });
+  const p = await plan(world.clients.A1, await evaluate(textEnv, visionEnv));
+
+  assert.equal(p.ready, true, `an unprinted line is a lawful reading, not a refusal: ${JSON.stringify(p.refusals)}`);
+  const codes = p.legs.map((l) => l.account_code);
+  assert.equal(codes.includes("6040"), false, "no HRDF levy expense leg");
+  assert.equal(codes.includes("2140"), false, "…and no HRDF levy payable leg");
+  assert.equal(codes.length, 9, `the other nine legs are untouched: ${JSON.stringify(codes)}`);
+  assert.deepEqual(p.unprinted, ["payroll.run.hrdf_levy"], "the plan SAYS what the page was silent about");
+
+  // 576145 - 5000 (the levy debit) = 571145 on both sides, by hand from the worked example.
+  assert.equal(Number(p.debit_cents), 571145);
+  assert.equal(Number(p.credit_cents), 571145);
+
+  // A printed ZERO is the same answer as silence for posting purposes — a zero-cent line moves
+  // nothing and would assert a levy the page priced at nothing.
+  const [zText, zVision] = bothChannels({ answers: { "payroll.run.hrdf_levy": value("0.00") } });
+  const z = await plan(world.clients.A1, await evaluate(zText, zVision));
+  assert.equal(z.legs.map((l) => l.account_code).includes("6040"), false, "a printed 0.00 levy books no leg either");
+  assert.equal(Number(z.debit_cents), 571145);
+});
+
+test("S1 · the employee portions reduce the net-pay credit and are never debited to expense", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const [textEnv, visionEnv] = bothChannels();
+  const p = await plan(world.clients.A1, await evaluate(textEnv, visionEnv));
+
+  // NO debit anywhere carries an employee-side figure. 55000/2450/980/16000 are the four
+  // employee deductions from the worked example; expensing any of them twice is the defect this
+  // cell exists to catch.
+  const debitCents = p.legs.filter((l) => l.side === "debit").map((l) => Number(l.cents));
+  for (const employee of [55000, 2450, 16000]) {
+    assert.equal(
+      debitCents.includes(employee),
+      false,
+      `no debit leg carries the employee-side figure ${employee}: ${JSON.stringify(debitCents)}`,
+    );
+  }
+  // …and NO debit leg's basis names an employee-side question at all. (The figure test above
+  // deliberately skips 980: employee EIS and employer EIS are both 9.80 on this document, so a
+  // cell that read the employer debit as an employee figure would be reading a coincidence. The
+  // basis test below is the one that binds for that column.)
+  for (const leg of p.legs.filter((l) => l.side === "debit")) {
+    assert.equal(
+      /employee|payroll\.run\.pcb/.test(leg.basis),
+      false,
+      `debit leg ${leg.account_code} resolved from ${leg.basis}, which is an employee-side deduction`,
+    );
+  }
+
+  // The payable credits carry BOTH portions, and the net credit is the gross less the four
+  // employee deductions — which is the same identity, read off the plan.
+  const credit = (code) => Number(p.legs.find((l) => l.account_code === code).cents);
+  assert.equal(credit("2100"), 120000, "EPF payable is employee 550.00 + employer 650.00");
+  assert.equal(credit("2130"), 16000, "PCB payable is the employee deduction alone — PCB has no employer side");
+  assert.equal(credit("2040"), 425570, "salaries payable is the NET, never the gross");
+  const grossLeg = p.legs.find((l) => l.account_code === "6000");
+  assert.equal(Number(grossLeg.cents) - (55000 + 2450 + 980 + 16000), credit("2040"));
+});
+
+test("S1 · an account the client's own chart does not hold is a named refusal, and nothing is drafted on a substitute", async (t) => {
+  if (unready(t)) return;
+
+  // A client whose chart is payroll-capable EXCEPT for salaries payable — the case a client born
+  // before 0295's template version is in.
+  await seedPayrollChart(world.users.alice, world.clients.A2, { omit: ["2040"] });
+  const [textEnv, visionEnv] = bothChannels();
+  const p = await plan(world.clients.A2, await evaluate(textEnv, visionEnv));
+
+  assert.equal(p.ready, false, "a run whose net has nowhere to go does not draft");
+  assert.deepEqual(p.missing_accounts, ["2040"], "the plan names the account it could not resolve");
+  const refusal = p.refusals.find((r) => r.reason === "account_missing");
+  assert.ok(refusal, `a NAMED, typed refusal: ${JSON.stringify(p.refusals)}`);
+  assert.equal(refusal.detail.account_code, "2040", "…carrying the code, so a person can add exactly that account");
+  assert.equal(
+    p.legs.some((l) => l.basis === "payroll.run.net_pay"),
+    false,
+    "the net leg is ABSENT — it is never re-pointed at some other liability the client does hold",
+  );
+  // And the imbalance the missing leg causes is NOT reported as an imbalance: a missing account
+  // reports itself as a missing account, or a reader chases the wrong defect.
+  assert.equal(p.refusals.some((r) => r.reason === "entry_unbalanced"), false);
+});
+
+test("S1 · the month comes from the page, in every rendering the lane admits — and an ambiguous one is refused", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+
+  // Every admitted rendering of the SAME month lands on the same last-day posting date.
+  for (const raw of ["2026-08", "2026/08", "08/2026", "8-2026", "2026-08-15", "August 2026", "Aug 2026", "AUGUST, 2026", "2026 August"]) {
+    const [tx, vx] = bothChannels({ answers: { "payroll.run.period": value(raw) } });
+    const p = await plan(world.clients.A1, await evaluate(tx, vx));
+    assert.equal(p.posting_date, "2026-08-31", `"${raw}" is the August 2026 run: ${JSON.stringify(p.refusals)}`);
+    assert.equal(p.period_month, "2026-08-01");
+  }
+
+  // A month Clara cannot establish is ASKED, never assumed — and an all-numeric triple is
+  // exactly such a case, because 08/09/2026 cannot be told apart from its own reversal.
+  for (const raw of ["08/09/2026", "2026", "August", "Q3 2026", "Aug-Sep 2026", "Augustus 2026"]) {
+    const [tx, vx] = bothChannels({ answers: { "payroll.run.period": value(raw) } });
+    const p = await plan(world.clients.A1, await evaluate(tx, vx));
+    assert.equal(p.ready, false, `"${raw}" must not establish a month`);
+    assert.equal(p.posting_date, null, "…and no posting date is invented");
+    const refusal = p.refusals.find((r) => r.reason === "period_not_established");
+    assert.ok(refusal, `a NAMED refusal for "${raw}": ${JSON.stringify(p.refusals)}`);
+    assert.equal(refusal.detail.period_raw, raw, "…quoting back the rendering the page carries");
+  }
+
+  // A page that prints no period at all is the same refusal, with the reading that produced it.
+  const [nt, nv] = bothChannels({ answers: { "payroll.run.period": notPrinted() } });
+  const none = await plan(world.clients.A1, await evaluate(nt, nv));
+  assert.equal(none.ready, false);
+  assert.equal(none.refusals.find((r) => r.reason === "period_not_established").detail.period_state, "not_printed");
+});
+
+test("S1 · a run whose totals the page does not print has nothing to post, and says so", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // The summary page that prints per-employee rows but NO totals row: 0296's evaluator marks
+  // every run-level question `not_printed` and offers a row sum instead. This lane does not post
+  // from that sum — the evaluator's own verdict is what it drafts from.
+  const silent = Object.fromEntries(RUN_FIELDS.map((f) => [f, notPrinted()]));
+  const [tx, vx] = bothChannels({ answers: silent });
+  const state = await evaluate(tx, vx);
+  assert.equal(
+    String(state.facts["payroll.run.gross_pay"].computed_cents),
+    "500000",
+    "mandatory setup: the evaluator DID sum the rows — this cell is about what the lane posts, not what it read",
+  );
+
+  const p = await plan(world.clients.A1, state);
+  assert.equal(p.ready, false);
+  assert.deepEqual(
+    p.refusals.filter((r) => r.reason === "run_totals_not_printed").map((r) => r.detail.field).sort(),
+    ["payroll.run.gross_pay", "payroll.run.net_pay"],
+    "both totals without which there is no entry are named",
+  );
+  assert.deepEqual(p.legs, [], "and nothing at all is drafted");
+});
