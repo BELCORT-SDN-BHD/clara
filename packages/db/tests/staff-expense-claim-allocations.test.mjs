@@ -26,7 +26,7 @@ import {
   claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
   assertPair, rootQuery, opk,
   entryCount, committedReceiptCount,
-  SEC_REASON, SECHART, SETTLEMENT, SEC_DATE, ensureSecChart,
+  SEC_REASON, SECHART, SETTLEMENT, SEC_DATE, ensureSecChart, enrolAdvanceFor, liveEnrolment,
   claim, admitStaffExpenseClaimWork, getStaffExpenseClaim,
   listStaffExpenseClaims, claimRow, claimCount, applicationsForEntry, advanceOutstanding,
   seedAdvance, linesWithIds,
@@ -296,4 +296,60 @@ test("p931.cap.single a SINGLE-advance over-application keeps its existing reaso
   assert.equal(detail.advance_id, adv.id);
   assert.equal(Number(detail.shortfall_cents), 40500,
     "cap.single: …and the shortfall rides beside it (60,500 claimed against 20,000 outstanding)");
+});
+
+// ===========================================================================================
+// 3 · p931.accounts — advances on TWO enrolled accounts, and the TWO credit legs they imply.
+// ===========================================================================================
+
+test("p931.accounts allocations on two enrolled accounts produce TWO credit legs, one allocation each", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("allocacct");
+  // THE WORKED EXAMPLE. Farah holds TWO dedicated advance accounts — 1190 (enrolled by the rig's
+  // own chart) and 1191, enrolled here through 0043's admin door under the SAME attested label,
+  // which is what makes her second account HERS for this claim (0301's fourth measurement).
+  //   A = 40,000 sen on 1190, C = 30,000 sen on 1191.
+  // The 60,500 claim takes 40,000 from A and 20,500 from C, so the entry must credit BOTH
+  // accounts: 1190 by 40,000 and 1191 by 20,500. One leg carrying 60,500 would say the whole
+  // claim was settled out of one account, which is not what happened.
+  await enrolAdvanceFor(ALICE(), {
+    client, code: SECHART.advanceFresh, person: "Farah binti Idris",
+  });
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advC = (await seedAdvance(ALICE(), BOB(), {
+    client, code: SECHART.advanceFresh, cents: 30000, issueDate: "2026-02-01",
+  })).advance;
+
+  const c = allocClaim({
+    allocations: [
+      { advance_id: advA.id, amount_cents: 40000 },
+      { advance_id: advC.id, amount_cents: 20500, account_code: SECHART.advanceFresh },
+    ],
+  });
+  const a = await armed({ client, claim: c });
+  const out = await post(a);
+  assert.equal(out.posted, true, "accounts: the belt did NOT raise on either credit leg");
+
+  const lines = await linesWithIds(out.entry_id);
+  const credits = lines.filter((l) => Number(l.credit_cents) > 0);
+  assert.equal(credits.length, 2, "accounts: ONE credit leg per advance ACCOUNT, and there are two");
+  const byCode = new Map(credits.map((l) => [l.account_code, l]));
+  assert.equal(String(byCode.get(SECHART.advance).credit_cents), "40000");
+  assert.equal(String(byCode.get(SECHART.advanceFresh).credit_cents), "20500");
+
+  const apps = await applicationsForEntry(out.entry_id);
+  assert.equal(apps.length, 2, "accounts: one register allocation per named advance");
+  const appOf = new Map(apps.map((r) => [r.advance_id, r]));
+  assert.equal(appOf.get(advA.id).application_line_id, byCode.get(SECHART.advance).id,
+    "accounts: each allocation is keyed to the credit leg on ITS OWN advance account");
+  assert.equal(appOf.get(advC.id).application_line_id, byCode.get(SECHART.advanceFresh).id);
+  assert.equal(String(appOf.get(advA.id).amount_cents), "40000");
+  assert.equal(String(appOf.get(advC.id).amount_cents), "20500");
+
+  assert.equal(await advanceOutstanding(advA.id, SEC_DATE.posting), 0, "accounts: A is fully discharged");
+  assert.equal(await advanceOutstanding(advC.id, SEC_DATE.posting), 9500, "accounts: C keeps 9,500 sen");
+
+  const row = await claimRow(a.claim_id);
+  assert.equal(row.advance_account_code, SECHART.advance,
+    "accounts: the claim row's own account column carries the HEAD of the confirmed list");
 });

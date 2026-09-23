@@ -352,6 +352,58 @@ create or replace function clara._claim_settlement_account(p_claim jsonb) return
 $$;
 revoke all on function clara._claim_settlement_account(jsonb) from public;
 
+/**
+ * THE JOURNAL BASIS A CLAIM IMPLIES — 0221's body, with the settlement half widened to the second
+ * measurement of this file's header: ONE CREDIT LEG PER ADVANCE ACCOUNT.
+ *
+ * IT IS STILL A DERIVATION, NOT A PROPOSAL, and it is still the ONLY place the lines are decided.
+ * Each non-pending item is one expense DEBIT; the settlement is one credit leg per account the
+ * confirmed allocations name, carrying that account's allocations added together, IN ACCOUNT-CODE
+ * ORDER — so the derivation is deterministic and the admitted `basis_digest` is reproducible from
+ * the claim alone. Two advances on one dedicated account still give exactly ONE leg of exactly the
+ * old amount, which is what makes every claim written before 0301 derive byte for byte.
+ *
+ * `reimbursement` and `already_settled` keep 0221's single credit leg untouched: neither
+ * discharges anything, so neither has an allocation to split.
+ */
+create or replace function clara._claim_journal_basis(p_claim jsonb) returns jsonb
+  language sql immutable security definer set search_path = clara, pg_temp as $$
+  select jsonb_build_object(
+    'posting_date', btrim(coalesce(p_claim->>'posting_date','')),
+    'memo', left(btrim(coalesce(p_claim->>'instruction','')), 4000),
+    'currency', 'MYR',
+    'lines', coalesce((
+        select jsonb_agg(jsonb_build_object(
+                 'account_code', btrim(coalesce(x.elem->>'expense_account_code','')),
+                 'debit_cents', trunc((x.elem->>'amount_cents')::numeric)::bigint,
+                 'credit_cents', 0,
+                 'description', left(btrim(coalesce(x.elem->>'description','')), 2000))
+                 order by x.idx)
+          from jsonb_array_elements(coalesce(p_claim->'items','[]'::jsonb))
+            with ordinality as x(elem, idx)
+         where nullif(btrim(coalesce(x.elem->>'pending_fact','')),'') is null), '[]'::jsonb)
+      || case
+         when btrim(coalesce(p_claim->>'settlement','')) = 'advance_application'
+              and jsonb_array_length(clara._claim_allocations(p_claim)) > 0
+         then coalesce((
+           select jsonb_agg(jsonb_build_object(
+                    'account_code', g.code,
+                    'debit_cents', 0,
+                    'credit_cents', g.cents,
+                    'description', btrim(coalesce(p_claim->>'settlement','')))
+                  order by g.code)
+             from (select a.elem ->> 'account_code' as code,
+                          sum((a.elem ->> 'amount_cents')::bigint)::bigint as cents
+                     from jsonb_array_elements(clara._claim_allocations(p_claim)) as a(elem)
+                    group by 1) g), '[]'::jsonb)
+         else jsonb_build_array(jsonb_build_object(
+                'account_code', clara._claim_settlement_account(p_claim),
+                'debit_cents', 0,
+                'credit_cents', trunc((coalesce(nullif(p_claim->>'amount_cents',''),'0'))::numeric)::bigint,
+                'description', btrim(coalesce(p_claim->>'settlement','')))) end);
+$$;
+revoke all on function clara._claim_journal_basis(jsonb) from public;
+
 -- =====================================================================================
 -- §C  THE CLAIM SHAPE, RECUT. 0221 §B's body, byte for byte, plus the allocation list: its shape
 --     and exact sum in the PAYLOAD half, and its ownership, enrolment and per-allocation cap in
@@ -1272,6 +1324,7 @@ begin
       ('clara._claim_settlement_account(jsonb)'),
       ('clara._claim_basis_canonical(jsonb)'),
       ('clara._assert_claim_basis(uuid,jsonb,boolean)'),
+      ('clara._claim_journal_basis(jsonb)'),
       ('clara.admit_staff_expense_claim_work(uuid,uuid,text,jsonb,text,jsonb,text)'),
       ('clara._tf_adv_claim_application_birth()'),
       ('clara.get_staff_expense_claim(uuid)'),
