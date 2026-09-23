@@ -923,7 +923,11 @@ time it is read, it never becomes an object with its own lifecycle, and it clear
 moment the underlying facts stop producing it — nobody dismisses it, nobody closes it, and
 nothing has to be cleaned up when the decision is made elsewhere. It offers candidates and never
 chooses: an ambiguous case stays pending with the same one question, and choosing is the human's
-act. #657's pending bank line is its first instance.
+act. #657's pending bank line is its first instance. #938's "a bill posted inside an accrued
+period" row (`clara.list_review_queue`, row_kind `accrual_bill_conflict`) is a NEIGHBOUR on the
+same Needs-you roster that reuses the mechanics — derived, stores nothing, self-clearing — without
+being a member of the settlement-candidate FAMILY itself: it offers no candidate to choose, only
+two remedies (skip the next occurrence, or reverse now) that act on the accrual plan directly.
 _Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row
 that survives the fact that produced it; a suggestion the product acts on by itself.
 

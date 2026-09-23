@@ -439,3 +439,33 @@ test("accrual.walk.correction: correcting an accrual is a real transition — th
   await page.goto(LIST_URL);
   await expect(page.getByRole("row").filter({ hasText: ACC.correctablePurpose })).toHaveCount(2);
 });
+
+// #938 — "a bill posted inside an accrued period", rendered on the SAME Accruals page beside the
+// configured-accruals table (accrual-mock.mjs's own list_review_queue handler: ONE
+// accrual_bill_conflict row for POSTED's own plan, until "reverse now" is driven). Only one of
+// the two remedies is walked here — "reverse now" — because the SAME real door
+// (request_plan_catch_up) and its real catch_up_in_future refusal are the DB battery's own claim
+// (packages/db/tests/accrual-bill-conflict.test.mjs); this cell owns what the BROWSER does with
+// the answer: the item is on screen with the accrual, the bill and the period named, the act is a
+// real governed write, and the destination RE-READS — the row is gone because a fresh
+// list_review_queue answered without it, never because the client painted an optimistic remove.
+test("accrual.walk.billConflict: a bill posted inside the accrued period is named on the Accruals page, and 'reverse now' is a real write whose destination RE-READS the row away", async ({ page }) => {
+  await signInTo(page, LIST_URL);
+
+  const conflict = page.getByText(/A document-sourced entry posted inside the accrued period/);
+  await expect(conflict).toBeVisible();
+  await expect(page.getByText("Accrued period: 2026-07-31")).toBeVisible();
+  await expect(page.getByText("Accrual amount: 1,200.00")).toBeVisible();
+  await expect(page.getByRole("link", { name: "View the bill" })).toBeVisible();
+
+  await scan(page, "accrual bill conflict, before reverse now");
+
+  await page.getByRole("button", { name: "Reverse now" }).click();
+
+  // THE RE-READ, not an optimistic remove: the row is gone because list_review_queue's NEXT
+  // answer (accrual-mock.mjs's own `state.reversed` law) does not carry it.
+  await expect(conflict).toHaveCount(0);
+  // AND THE CONFIGURED-ACCRUALS TABLE BELOW IT IS UNTOUCHED — "reverse now" is scoped to the
+  // derived conflict row alone.
+  await expect(page.getByRole("row").filter({ hasText: ACC.purpose })).toContainText("Posted");
+});

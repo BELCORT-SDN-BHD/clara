@@ -1457,7 +1457,13 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   get_work_pending_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
   get_work_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
   answer_work_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
-  list_review_queue: ["journal-work-mock.mjs", "journals-table-mock.mjs", "tax-boundary-mock.mjs"],
+  // #938 joins as a FOURTH: the Accruals page now reads this same queue (row_kind=
+  // 'accrual_bill_conflict', scoped to its own client), through the SAME useReviewQueue hook the
+  // Needs-you inbox uses. Scoped to ACC.clientId and falls through otherwise — the same declared
+  // share, not a collision. (Sorted alphabetically — the census compares against a sorted array.)
+  list_review_queue: [
+    "accrual-mock.mjs", "journal-work-mock.mjs", "journals-table-mock.mjs", "tax-boundary-mock.mjs",
+  ],
   // #624 AC4 — `clara.get_document_state` is read from TWO surfaces by design: the Documents
   // detail panel and the Work detail's Sources tab mount the SAME component over it, because the
   // criterion is "Documents AND Work show the four states". Each lane answers only for the
@@ -1600,7 +1606,10 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   pause_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
   resume_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
   end_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
-  request_plan_catch_up: ["plans-mock.mjs", "prepayments-mock.mjs"],
+  // #938 — "reverse now" rides this SAME door; accrual-mock.mjs answers only for ACC.planId and
+  // falls through otherwise, joining as a THIRD declared claimant rather than colliding with
+  // either.
+  request_plan_catch_up: ["accrual-mock.mjs", "plans-mock.mjs", "prepayments-mock.mjs"],
   // REVIEW-ROUND L01-SPEC-02 — five of home-board-mock.mjs's own `EMPTY_RPCS` array-dispatched
   // verbs are ALSO answered by the lane that actually owns the fixture, a real share the
   // pre-#863-fix-round census could not see at all (an array literal consumed through

@@ -59,6 +59,12 @@ export const ACC = {
   correctedAccrualId: "6500cccc-6500-4650-8650-650650650650",
   correctedSuccessorId: "6500dddd-6500-4650-8650-650650650650",
   correctedPurpose: "Monthly delivery contract accrual",
+  // #938 — a document-sourced bill hitting POSTED's own expense account (6100), inside its own
+  // period (2026-07-01 to 2026-07-31), while its reversal has not been admitted. Rides POSTED's
+  // OWN plan (ACC.planId) rather than minting a third accrual: the ticket's row is the plan's own
+  // id, and this is the same plan the walk already drives.
+  billEntryId: "65ffffff-6500-4650-8650-650650650650",
+  billDocumentId: "6500eeee-6500-4650-8650-650650650650",
 };
 
 /** The ONLY RPC verbs this lane's dispatch chain recognises — the allow-list `readCachedJson`'s own
@@ -75,6 +81,11 @@ export const ACCRUAL_RPC_VERBS = new Set([
   "create_accrual_adjustment",
   "correct_accrual_adjustment",
   "list_spoken_for_documents",
+  // #938 — the derived read the Accruals page now also renders (SHARED with three other lanes,
+  // e2e-fixture-ownership.test.ts's own SHARED_RPC_VERBS declaration) and "reverse now" (SHARED
+  // with plans-mock.mjs / prepayments-mock.mjs, same declaration).
+  "list_review_queue",
+  "request_plan_catch_up",
 ]);
 
 const state = {
@@ -82,6 +93,10 @@ const state = {
   // #936 — whether the CORRECTABLE accrual has been corrected during this walk, and the op keys
   // `correct_accrual_adjustment` was sent, for the identical lost-response proof CREATE already has.
   corrected: false, correctOpKeys: [],
+  // #938 — whether "reverse now" has been driven this walk (clears the accrual_bill_conflict row
+  // on the NEXT list_review_queue read — the derived-row, no-cleanup law CONTEXT.md's "Settlement
+  // candidate row" entry states), and every op key request_plan_catch_up was sent for it.
+  reversed: false, reverseOpKeys: [],
 };
 
 export function resetAccruals() {
@@ -90,6 +105,13 @@ export function resetAccruals() {
   state.refusals = 0;
   state.corrected = false;
   state.correctOpKeys = [];
+  state.reversed = false;
+  state.reverseOpKeys = [];
+}
+
+/** Every op key `request_plan_catch_up` was sent for "reverse now", oldest first. */
+export function accrualReverseOpKeys() {
+  return [...state.reverseOpKeys];
 }
 
 /** Every op key `create_accrual_adjustment` was sent, oldest first — the walk's lost-response cell
@@ -509,6 +531,63 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
   if (verb === "list_spoken_for_documents") {
     if (body.p_client !== ACC.clientId && body.p_client !== ACC.otherClientId) return false;
     sendJson(response, 200, [], cors);
+    return true;
+  }
+
+  // #938 — THE DERIVED READ. clara.list_review_queue, SCOPED the same defensive way
+  // journal-work-mock.mjs's own list_review_queue handler is: this lane answers ONLY while it has
+  // something to say (a live accrual_bill_conflict row for THIS client), and falls through to
+  // serve-built.mjs's generic empty envelope otherwise — so a walk that never touches accruals
+  // never sees this lane's row. `state.reversed` is the whole derived-row law: once "reverse now"
+  // has been driven, the row is simply not produced any more — no dismissal, no cleanup.
+  if (verb === "list_review_queue") {
+    const scope = body.p_scope ?? {};
+    if (scope.client_id !== undefined && scope.client_id !== ACC.clientId) return false;
+    if (state.reversed) return false;
+    const row = {
+      row_kind: "accrual_bill_conflict", section: "needs_you", sort: "1",
+      client_id: ACC.clientId, counterparty_id: null, filing_id: null, entry_id: ACC.billEntryId,
+      question_id: null, task_id: null, document_id: ACC.billDocumentId, lane: "needs_you",
+      auto: false, rule_backed: false, high_stakes: false, aged_since: "2026-07-31T02:05:00.000Z",
+      amount_cents: 120000, period: "2026-07-31",
+      question_text: `A document-sourced entry posted inside the accrued period 2026-07-01 to 2026-07-31 for "${ACC.purpose}"`,
+      created_at: "2026-07-31T02:05:00.000Z", id: ACC.planId,
+      coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null,
+      advance_id: null, autodraft: null, client_name: null, batch_ids: null,
+      open_proposal_count: null,
+    };
+    sendJson(response, 200, {
+      counts: {
+        ready: 0, needs_review: 0, needs_you: 1, open_drafts: 0, open_questions: 0,
+        open_tasks: 0, compliance_watches: 0, lint_findings: 0,
+      },
+      sweep: null,
+      compliance: { stale_evaluator: false, clients: [] },
+      lint: null,
+      rows: [row],
+      next_cursor: null,
+    }, cors);
+    return true;
+  }
+
+  // #938 — "REVERSE NOW", the plan lane's own request_plan_catch_up door (SHARED with
+  // plans-mock.mjs / prepayments-mock.mjs, e2e-fixture-ownership.test.ts's own declaration).
+  // Scoped to ACC.planId and falls through otherwise. Admits the reversal on the FIRST call —
+  // there is no refusal cell in this walk, which lives entirely in packages/db/tests/
+  // accrual-bill-conflict.test.mjs's real catch_up_in_future cell.
+  if (verb === "request_plan_catch_up") {
+    if (body.p_plan !== ACC.planId) return false;
+    state.reversed = true;
+    state.reverseOpKeys.push(body.p_op_key);
+    sendJson(response, 200, {
+      plan_id: ACC.planId, from: body.p_from, to: body.p_to, admitted: 1, cap: 12,
+      events: [{
+        admitted: true, plan_id: ACC.planId, occurrence_id: ACC.reversalWorkId,
+        work_id: ACC.reversalWorkId, due_date: body.p_to, leg: "reversal", revision: 1,
+        attempt: 1, period_key: "2026-07-01", reverses_entry_id: ACC.entryId,
+        intent_key: `plan:${ACC.planId}:r1:${body.p_to}`,
+      }],
+    }, cors);
     return true;
   }
 

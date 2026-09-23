@@ -307,4 +307,16 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "45235f2dab6652a3faa15abff761ea953993ecf4636fcbfcab8ad2a6637505b3",
     },
   ],
+  // #938 [0302] (riders wave 4, lane 03) — the twelfth Needs-you row kind, the SAME
+  // 0146/0168/0180/0260/0288 splice family: ONE pg_get_functiondef splice of the SAME queue
+  // function, plus one plain `create function` (clara.skip_plan_occurrence) that is static DDL
+  // the lexer inspects directly and carries no dynamic SQL of its own.
+  [
+    "0302_accrual_bill_conflict.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at a literal signature and re-installed with one added CTE (bill_rows), one union arm, and NO new row-json builder gate (this row's `id` mirrors the PLAN id directly rather than a dedicated column, unlike asset_id/advance_id/authority_id). The block emits no view definition at all, so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) can be a target, and its own postcheck re-derives every one of the ELEVEN pre-existing row-kind markers at their prestate counts. Same family as 0146's, 0168's, 0180's, 0260's and 0288's splices of the same queue function. The file's other section, clara.skip_plan_occurrence, is a single `create function` at a literal signature with no dynamic SQL of any kind, and the prestate/tail blocks read the catalog and drive real functions inside a forced-rollback subtransaction.",
+      sha256: "181460d90c55555b6119bf541bd3b344d2617f078c4f687c45c2003990a9e73f",
+    },
+  ],
 ]);
