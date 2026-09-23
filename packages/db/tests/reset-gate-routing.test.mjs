@@ -274,7 +274,7 @@ const NEWLY_COVERED = [
  *  this file are always a 4-space-indented `- name:` (verified against the file's own steps). */
 function stepInvoking(yamlText, file) {
   return yamlText
-    .split(/\n(?=    - name:)/)
+    .split(/\n(?= {4}- name:)/)
     .find((step) => step.includes(`tests/${file}`));
 }
 
