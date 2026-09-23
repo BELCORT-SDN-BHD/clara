@@ -28,9 +28,15 @@
 // #1001 — THE CASH ARM'S OWN COMPOSITION TABLE lives here, under the trend, on the SAME
 // readable-table-with-per-row-journal-links pattern `client-income-expense-chart.tsx` already
 // established for profit — this file is the cash arm's own chart-and-drilldown home exactly as
-// that one is the profit arm's. `entryHref` is imported rather than re-spelled, per that file's
-// own header: "Built here once so the chart's table and any later caller cannot spell the same
-// drilldown two ways."
+// that one is the profit arm's. The ACCOUNT CELL, the ENTRIES CELL and `entryHref` come from
+// `composition-cells.tsx`, shared with that table rather than spelled a second time; the COLUMNS
+// are spelled out here because the cash table genuinely has its own (a closing BALANCE headline
+// and a reason each account counts as cash).
+//
+// AND THE ACCOUNT-LEVEL CAP DISCLOSURE SAYS WHICH 50 SURVIVED. 0232 cuts this composition
+// `order by a.account_code … limit 50`, so the rows shown are the alphabetically first by chart
+// code — never the largest. A sentence claiming otherwise would tell a firm with 63 cash
+// accounts that the 13 it cannot see are the small ones.
 //
 // THE HEADLINE IS THE CLOSING BALANCE, NEVER THE MOVEMENT. Book cash is a BALANCE cumulative from
 // inception (`financial-pack.ts`'s own `closingCents` — 0232's `q.closing`, summed over every
@@ -45,7 +51,6 @@
 // composition table with it — the cash tile's own unpublished-set banner
 // (`client-cash-summary.tsx`) stays the only face for that state, exactly as the brief requires.
 
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
@@ -60,7 +65,7 @@ import { CENTS_UNAVAILABLE, fmtCents } from "@/lib/registers/money";
 import { memberReasonKey, usePrefersReducedMotion } from "@/lib/dashboard/financial-display";
 import type { CashPoint, CashSetRef, CompositionRow } from "@/lib/dashboard/financial-pack";
 import { formatDay } from "./client-financial-figure";
-import { entryHref } from "./client-income-expense-chart";
+import { CompositionAccountCell, CompositionEntriesCell } from "./composition-cells";
 
 const CHART_CONFIG = {
   cash: { label: "Book cash", color: "var(--chart-1)" },
@@ -184,10 +189,7 @@ export function ClientCashTrend({
             <TableBody>
               {composition.map((row) => (
                 <TableRow key={row.accountId}>
-                  <TableCell>
-                    <span className="font-medium">{row.accountCode}</span>{" "}
-                    <span className="text-muted-foreground">{row.name}</span>
-                  </TableCell>
+                  <CompositionAccountCell row={row} />
                   {/* THE HEADLINE. `closingCents` is the cumulative balance book cash itself is
                       computed on — see the file header for why this is never `movementCents`. */}
                   <TableCell
@@ -204,32 +206,11 @@ export function ClientCashTrend({
                       : fmtCents(row.movementCents, tc("centsUnsafe"))}
                   </TableCell>
                   <TableCell>{t(memberReasonKey(row.memberReason))}</TableCell>
-                  <TableCell>
-                    <ul className="flex flex-col gap-1">
-                      {row.entries.map((e) => (
-                        <li key={e.entryId}>
-                          <Link
-                            href={entryHref(clientId, e.entryId)}
-                            className="text-primary underline-offset-4 hover:underline"
-                          >
-                            {formatDay(e.postingDate)}
-                            {" · "}
-                            {e.amountCents === null
-                              ? CENTS_UNAVAILABLE
-                              : fmtCents(e.amountCents, tc("centsUnsafe"))}
-                            {e.memo ? ` · ${e.memo}` : ""}
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                    {row.entriesTruncated ? (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t("cashDrilldown.truncated", {
-                          shown: row.entries.length, total: row.entriesTotal ?? 0,
-                        })}
-                      </p>
-                    ) : null}
-                  </TableCell>
+                  <CompositionEntriesCell
+                    clientId={clientId}
+                    row={row}
+                    truncatedKey="cashDrilldown.truncated"
+                  />
                 </TableRow>
               ))}
             </TableBody>
