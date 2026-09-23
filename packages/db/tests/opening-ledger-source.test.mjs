@@ -47,7 +47,19 @@ const MIGRATION = "0228_opening_ledger_source.sql";
  *  three different stems). Deriving it from a file name is not a safe rule here. */
 const GATE_ENV = "CLARA_ALLOW_MISSING_OPENING_LEDGER_SOURCE";
 /** 0228's premise probe is NOT a `to_regprocedure` check — the file installs no function. It is
- *  the republication itself: the registry publishes version 2. */
+ *  the republication itself: 0228 raised the registry to version 2.
+ *
+ *  A FLOOR, NOT AN EQUALITY (ADV-03, riders wave 3 review round 1). The original probe demanded
+ *  EXACTLY 2, and the registry has since been republished by later migrations — 0245 (#782) raised
+ *  every one of the 240 rows to 3, and `document-capability-registry.test.mjs` pins that 3. On any
+ *  database at 0245 or later this file's premise therefore read "0228 is not applied" and ALL
+ *  TWELVE of its cells skipped: measured on clara_l06 under the full gate chain, 12 tests / 0 pass
+ *  / 12 skipped. The battery went dark on the day a NEIGHBOURING migration republished the
+ *  registry, which is precisely the shape a premise probe must not have. What 0228 actually
+ *  guarantees is that the registry stands at ITS publication OR A LATER ONE, published as a single
+ *  version across the whole table (0207's monotonic wall makes "or later" the only direction), and
+ *  that is what this floor says. The precedent for re-basing a registry-version constant in ONE
+ *  place with the reason beside it is `document-capability-registry.test.mjs`'s own note. */
 const PUBLISHED_REGISTRY_VERSION = 2;
 
 let ready = false;
@@ -59,11 +71,11 @@ before(async () => {
   // assertion under test.
   const seen = (await rootQuery(
     "select min(registry_version)::int as v, count(distinct registry_version)::int as n from clara.document_capabilities")).rows[0];
-  if (seen?.v !== PUBLISHED_REGISTRY_VERSION || seen?.n !== 1) {
+  if (!(seen?.v >= PUBLISHED_REGISTRY_VERSION) || seen?.n !== 1) {
     if (process.env[GATE_ENV] !== "1") {
       throw new Error(
         `opening-ledger-source premise ${MIGRATION} is not applied (clara.document_capabilities publishes `
-        + `version ${seen?.v} across ${seen?.n} distinct value(s), expected ${PUBLISHED_REGISTRY_VERSION} across 1) `
+        + `version ${seen?.v} across ${seen?.n} distinct value(s), expected >= ${PUBLISHED_REGISTRY_VERSION} across 1) `
         + `and ${GATE_ENV} is unset -- this is a FOCUSED run and must fail loudly, not skip. Preload `
         + "./tests/opening-ledger-source-preintegration-gate.mjs for an estate sweep against a pre-0228 chain.",
       );
@@ -196,7 +208,7 @@ const targetRows = (seed) => rootQuery(
 //       professional reads on `components/documents/capability-tiers.tsx`.
 // ---------------------------------------------------------------------------------------------
 
-test("p656.registry.prior_gl_operation: the corrected rows read back at version 2 with the capability they can actually deliver, and the missing browser entrance is NAMED", async (t) => {
+test("p656.registry.prior_gl_operation: the corrected rows read back at 0228's publication or a later one with the capability they can actually deliver, and the missing browser entrance is NAMED", async (t) => {
   if (unready(t)) return;
   // rootQuery: `clara.document_capabilities` carries NO app-role write and the agent lane reads
   // it only through a DEFINER door; the table itself is a fixture-level read here. The
@@ -247,13 +259,15 @@ test("p656.registry.prior_gl_operation: the corrected rows read back at version 
       where business_operation='supported' and typed_facts<>'supported'`)).rows;
   assert.deepEqual(crossed, [], "no business operation may be promised over facts that do not exist");
 
-  // The whole registry publishes exactly one version, and it is 2.
+  // The whole registry publishes exactly ONE version at a time, and it stands at 0228's
+  // publication or a later one — never below it (0207's monotonic wall, exercised just below).
   const v = (await rootQuery(
     `select count(*)::int as n, count(distinct registry_version)::int as versions,
             min(registry_version)::int as v from clara.document_capabilities`)).rows[0];
   assert.equal(v.n, 240, "0228 inserts and deletes nothing");
   assert.equal(v.versions, 1, "the registry publishes exactly one version at a time");
-  assert.equal(v.v, PUBLISHED_REGISTRY_VERSION);
+  assert.ok(v.v >= PUBLISHED_REGISTRY_VERSION,
+    `the registry stands at ${v.v}, below 0228's own publication ${PUBLISHED_REGISTRY_VERSION}`);
 
   // A DOWNGRADE is still refused by 0207's wall — the republication rode the wall, it did not
   // step around it (#846: UPDATE that raises, never DELETE-then-INSERT).
