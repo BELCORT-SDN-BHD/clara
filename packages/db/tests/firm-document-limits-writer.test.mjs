@@ -417,8 +417,15 @@ test("#960 cell 9 · the enforcing doors are unmoved, and the new surface is exa
       "e8b50f0d10da45be4caf6e278248750a4b1e862148dc879fbe38e7a5b4a02408",
     "clara._tf_firm_document_limits_upsert()":
       "e07fabd4e475ae29ac8b5fa6a4f8477f72698df26110bfe8d4f3e456aa1f8eb2",
+    // RE-MEASURED AGAIN (wave 4, 2026-09-24). #945's 0296 recuts this body — lawfully and for a
+    // reason this cell's own claim does not reach: the payroll_facts lane joins the kill switch,
+    // the per-lane attempt cap, the lane-true cap emit and the per-lane concurrency window. The
+    // claim here is "0270 must not move a body that enforces a cap", and 0270 still does not;
+    // the pin names what the ordered chain leaves live at this frontier, exactly as the four
+    // 0252-recut pins above already do. 0296 is higher in the same ordered chain, so no chain
+    // can carry 0296 without 0270.
     "clara.claim_document_processing_task(uuid,text,boolean)":
-      "01e517bf575806a01f93441bbc2459856e1f4f12624b312c3ba670ebf111b9a0",
+      "315336c46f0de7589955f3b509017dbe0928390e3d00ad1b7c6efba2c7bea82e",
     "clara.get_firm_commercial_state()":
       "347141ee22b52c125ff845451051f03354f1f0e9d57cc43d759253f3273ed19e",
     "clara.settle_ingest_reservation(uuid,integer,text)":

@@ -357,11 +357,15 @@ test("f-a2.activation.i the INVOICE witness arm is untouched -- this migration e
   assert.ok(src.includes("v_gate:='witness_consent_inactive';"));
   assert.ok(src.includes("d.document_kind in ('invoice','credit_note','debit_note','receipt')"), "the invoice-kind condition set survives");
   assert.ok(src.includes("if v_task is null and v_lane='llm_witness' then"), "the M-4 EITHER-REGIME short-circuit survives");
-  // The witness_extraction lookup now appears TWICE: the re-keyed statement arm and the
-  // untouched llm_witness arm. Counted, because a third would mean the splice hit something it
-  // was not aimed at.
-  assert.equal(src.split("and a.purpose='witness_extraction'").length - 1, 2,
-    "exactly two witness_extraction activation lookups -- the re-keyed statement arm and the untouched llm_witness arm");
+  // The witness_extraction lookup appears THREE times: the re-keyed statement arm, the
+  // untouched llm_witness arm, and — since #945 (migration 0296) — the payroll_facts arm, which
+  // reuses the SAME typed purpose deliberately (0296 §E's own recorded reason: that purpose is
+  // the consent to send a client's document bytes to a model in order to read them, which is
+  // exactly what the payroll lane does, and minting a second purpose would leave the lane dark
+  // until a capture surface existed for it). Counted, because a FOURTH would mean a later
+  // splice hit something it was not aimed at.
+  assert.equal(src.split("and a.purpose='witness_extraction'").length - 1, 3,
+    "exactly three witness_extraction activation lookups -- the re-keyed statement arm, the untouched llm_witness arm and #945's payroll arm");
 });
 
 // ===========================================================================

@@ -69,7 +69,7 @@ set local lock_timeout = '5s';
 -- =====================================================================================
 do $w945_pre$
 declare
-  v_sha text; v_n int; v_mode text;
+  v_sha text; v_n int; v_mode text; v_marked boolean; v_row record;
 begin
   -- (a) THE GRAMMAR THIS FILE RECUTS. clara._assert_field_path (0191 §S5) is the ONE canonical
   -- field-path grammar; clara._field_path_conforms (0290, #857) is the boolean sibling the
@@ -114,7 +114,65 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice '#945 prestate: OK (% apply) -- clara._assert_field_path is at a pinned sha, clara._field_path_conforms is untouched by this file, and ck_document_regions_field_path_grammar is live.', v_mode;
+  -- (c) THE FIVE LIVE ROUTER-SIDE BODIES §E RECUTS, each pinned to its PRE-IMAGE sha measured on
+  -- this rig. The REDO branch is recognised by the marker every one of them gains — the literal
+  -- lane name `payroll_facts` — because a redo re-runs against this file's own post-image and a
+  -- single-sha pin would refuse it. The integrator's list of pins is this block: a later lane
+  -- that recuts any of these five will collide here rather than silently downstream.
+  for v_row in select * from (values
+      ('clara._enqueue_invoice_facts_core(uuid)','42e8b0b44babb5dbf71a9018f4d1004f3a9cba46eeff4e4a7178d43f113c2df2'),
+      ('clara.enqueue_invoice_facts(uuid)','7dd035b2dd52424957fbfb71cc349267bc854498881c6979aba56551f67a5a86'),
+      ('clara._tf_processing_task_update()','54fd2fc5c94ccbb5abe888b95bef8c72f69a2695daa49e635884a24e633f82f4'),
+      ('clara.claim_document_processing_task(uuid,text,boolean)','01e517bf575806a01f93441bbc2459856e1f4f12624b312c3ba670ebf111b9a0'),
+      ('clara.release_held_document_tasks(integer)','b4bb3dc63901211543a162df08ff6e162779b48b0ff771f8ba4f559d1f95f8dd')
+    ) as t(sig, sha)
+  loop
+    if to_regprocedure(v_row.sig) is null then
+      raise exception '#945 prestate: % is absent -- the document processing lane must exist before #945 widens it', v_row.sig
+        using errcode = 'CLR10';
+    end if;
+    select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex'), position('payroll_facts' in p.prosrc) > 0
+      into v_sha, v_marked
+      from pg_proc p where p.oid = v_row.sig::regprocedure;
+    if v_sha <> v_row.sha and not v_marked then
+      raise exception '#945 prestate: % body drifted (sha %) -- it is neither the pre-image this file recuts nor a body already carrying this file''s own lane', v_row.sig, v_sha
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- (d) THE LANE IS NOT ALREADY IN USE. A `payroll_facts` task row on a FIRST apply would mean
+  -- another author already minted this lane, and this file would not be its first writer.
+  if v_mode = 'FIRST' then
+    select count(*)::int into v_n from clara.document_processing_tasks where lane = 'payroll_facts';
+    if v_n <> 0 then
+      raise exception '#945 prestate: % payroll_facts task row(s) already exist on a FIRST apply', v_n
+        using errcode = 'CLR10';
+    end if;
+  end if;
+
+  -- (e) THE CAPABILITY REGISTRY, which §G re-derives. It must publish exactly one version today,
+  -- and the twelve payroll_summary pairs must still carry the `stored_only` verdict §G replaces.
+  select count(distinct registry_version)::int into v_n from clara.document_capabilities;
+  if v_n <> 1 then
+    raise exception '#945 prestate: the registry publishes % distinct registry_versions, not one', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities;
+  if v_n <> 240 then
+    raise exception '#945 prestate: the registry holds % rows, not the 240 measured on this rig -- this file inserts and deletes nothing', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n
+    from clara.document_capabilities c
+    left join clara.document_capability_version_high_water h
+      on h.format = c.format and h.document_kind = c.document_kind
+   where h.format is null or h.registry_version is distinct from c.registry_version;
+  if v_n <> 0 then
+    raise exception '#945 prestate: % pair(s) carry a high-water mark that disagrees with the published registry', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice '#945 prestate: OK (% apply) -- clara._assert_field_path is at a pinned sha, clara._field_path_conforms is untouched by this file, ck_document_regions_field_path_grammar is live, the five router-side bodies are at their pinned pre-images (or already carry this file''s lane), and the capability registry publishes one version across 240 rows with its high-water mark in agreement.', v_mode;
 end
 $w945_pre$;
 
@@ -603,25 +661,35 @@ reset role;
 --       _tf_evaluator_deploy_once, never a migration's to make. The freeze binds regardless —
 --       the flag is about traffic, not about immutability.
 --
---       REDO-SAFE: the registration is deleted and re-inserted only when this file is re-run, so
---       the recorded hash always describes the body that is live. The delete is scoped to THIS
---       evaluator name and version and can therefore touch nobody else's closure.
+--       REDO-SAFE, AND NOT BY RE-WRITING THE ROW — BY REFUSING TO. clara.evaluator_versions is
+--       historical (t_evaluatorversions_deploy_once refuses every DELETE and every UPDATE but the
+--       one deploy flip) and clara.evaluator_version_members is append-only, which is the whole
+--       point of a freeze: a registration is a fact about a body, and a fact you may rewrite is
+--       not a freeze. So this block INSERTS when the registration is absent and, when it is
+--       already present, RE-DERIVES the closure hash from the live catalog and refuses if it has
+--       moved. A redo of an UNCHANGED evaluator therefore passes silently; a redo after an edit
+--       to the evaluator body fails by name, and its only lawful repair is a _v2 — which is
+--       exactly the law this registry exists to enforce, applied to this file as to any other.
 -- -------------------------------------------------------------------------------------
 set local search_path = pg_catalog, pg_temp;
 do $w945_freeze$
-declare e uuid; h bytea;
+declare e uuid; h bytea; v_live bytea;
 begin
-  delete from clara.evaluator_version_members m
-    using clara.evaluator_versions ev
-   where m.evaluator_version_id = ev.id
-     and ev.evaluator_name = 'evaluate_payroll_run_state' and ev.version = 1;
-  delete from clara.evaluator_versions
-   where evaluator_name = 'evaluate_payroll_run_state' and version = 1;
-
   select sha256(convert_to(string_agg(
            encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text, 'UTF8')), 'hex'),
            '' order by o), 'UTF8')) into h
     from (values (0, 'clara.evaluate_payroll_run_state_v1(jsonb,jsonb)')) m(o, s);
+
+  select ev.closure_sha256 into v_live from clara.evaluator_versions ev
+   where ev.evaluator_name = 'evaluate_payroll_run_state' and ev.version = 1;
+  if v_live is not null then
+    if v_live is distinct from h then
+      raise exception '#945 freeze: clara.evaluate_payroll_run_state_v1 is already registered at a DIFFERENT closure hash. A registration is append-only and a frozen body is never recut in place: ship the change as clara.evaluate_payroll_run_state_v2 with its own version row.'
+        using errcode = 'CLR10';
+    end if;
+    return;   -- already registered, at exactly this body: a redo has nothing to do here
+  end if;
+
   insert into clara.evaluator_versions(evaluator_name, version, entrypoint_signature,
       closure_sha256, migration_version, deployed)
     values ('evaluate_payroll_run_state', 1, 'clara.evaluate_payroll_run_state_v1(jsonb,jsonb)', h,
@@ -636,11 +704,1016 @@ $w945_freeze$;
 set local search_path = clara, pg_temp;
 
 -- =====================================================================================
+-- §E  THE FACTS ROUTER STOPS TERMINATING A PAYROLL SUMMARY AS A SKIPPED KIND (AC4, first half).
+--
+--     WHAT WAS THERE BEFORE. clara._enqueue_invoice_facts_core's pdf/image branch routed
+--     invoice-shaped kinds to `llm_witness` and a bank statement to `statement_facts`, and sent
+--     EVERYTHING ELSE — a payroll summary included — to a terminal `failed/skipped_kind`
+--     receipt. 0016's own tail says so in words: "payroll_summary NEVER reaches invoice_facts
+--     (skipped_kind)". The capability registry's `stored_only` verdict for the pair is derived
+--     from exactly that fall-through, which is why §G's re-derivation and this arm are one
+--     change and not two.
+--
+--     WHY ITS OWN LANE AND NOT llm_witness. That lane is claimed BY LANE ALONE — the invoice
+--     witness workflow owns every task on it, and clara._invoice_fact_state keys the witness
+--     REGIME on it — so a payroll pair parked there would be read with invoice prompts and
+--     resolved as an invoice corroboration. 0098 recorded the same reasoning when it declined to
+--     move the bank statement onto it. A new lane costs five CHECK widenings and five surgical
+--     recuts; borrowing one costs correctness.
+--
+--     THE FIVE LIVE BODIES RECUT BELOW, and why each one must be:
+--       1. clara._enqueue_invoice_facts_core — the routing arm itself, the engine-kind map, the
+--          enqueue-time typed-consent gate and the attempt-cap emit.
+--       2. clara.enqueue_invoice_facts — the wrapper's lane-aware terminal emit: without this,
+--          every payroll refusal would reach the spine as a PHANTOM INVOICE FAILURE and wake the
+--          autodraft consumer for a document no invoice draft will ever be made from.
+--       3. clara._tf_processing_task_update — the transition wall: the consent gate FLIPS an
+--          in-flight queued task in place, and that transition is lane-scoped per verdict.
+--       4. clara.claim_document_processing_task — the kill switch, the per-lane attempt cap, the
+--          lane-true cap emit and the per-lane concurrency window. A lane no worker can claim is
+--          a dark lane.
+--       5. clara.release_held_document_tasks — the release sweep. A lane that can be HELD and
+--          cannot be RELEASED is a permanent stall, and 0038's own comment says this list must
+--          track the claim body's kill-switch list EXACTLY.
+--
+--     EVERY EDIT IS A LANE-LIST WIDENING OR A NEW BRANCH. No existing kind's route, refusal,
+--     event, cap or window moves: the bodies below were produced by reading each live
+--     pg_get_functiondef off this rig and applying exactly the named substitutions, never by
+--     re-typing a body from memory.
+--
+--     REDO-SAFE: every constraint is dropped-if-exists before it is added, every insert is
+--     `on conflict do nothing`, and every body is `create or replace`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+-- E1 · THE FIVE CHECK CONSTRAINTS THAT MAKE THE LANE EXIST AT ALL.
+--
+--      A CHECK is what turns "the router may write this" into "nothing may write anything else".
+--      Each is dropped and re-added rather than altered, because a CHECK cannot be altered in
+--      place and because an unconditional drop-then-add is what makes a redo install the clause
+--      this file's CURRENT text states rather than a stale one.
+
+alter table clara.document_processing_tasks drop constraint if exists ck_processing_task_lane_f_a1;
+alter table clara.document_processing_tasks add constraint ck_processing_task_lane_f_a1
+  check (lane = any (array['ocr','structured_parse','none','invoice_facts','local_facts',
+    'classify','statement_facts','statement_parse','llm_witness','payroll_facts']));
+
+alter table clara.document_processing_tasks drop constraint if exists ck_processing_task_lane_engine_f_a1_stmt;
+alter table clara.document_processing_tasks add constraint ck_processing_task_lane_engine_f_a1_stmt
+  check (engine_id like 'clara-fixture:%'
+     or (lane = any (array['ocr','invoice_facts']) and engine_id like 'azure-%')
+     or (lane = 'statement_facts' and (engine_id like 'azure-%' or engine_id like 'llm-%'))
+     or (lane = any (array['structured_parse','local_facts','none']) and engine_id like 'clara-%')
+     or (lane = 'classify' and engine_id like 'clara-classify-%')
+     or (lane = 'statement_parse' and engine_id like 'clara-statement-%')
+     or (lane = 'llm_witness' and engine_id like 'llm-%')
+     -- #945: the payroll lane is a MODEL lane and may carry nothing but a model engine identity.
+     or (lane = 'payroll_facts' and engine_id like 'llm-%'));
+
+alter table clara.document_processing_tasks drop constraint if exists ck_processing_task_error_code_f_a1;
+alter table clara.document_processing_tasks add constraint ck_processing_task_error_code_f_a1
+  check (error_code is null or error_code = any (array['engine_error','timeout','engine_lost',
+    'storage_error','corrupt','encrypted','bad_type','limit','budget','attempt_cap','internal',
+    'skipped_kind','header_unreadable','totals_unreadable','readers_disagree','chain_broken',
+    'continuity_mismatch','duplicate_period','overlapping_period','non_myr_statement',
+    'account_unregistered','account_inactive','statement_multi_client','period_invalid',
+    'line_date_out_of_period','consent_inactive','witness_multi_client','witness_consent_inactive',
+    'wait_exhausted','document_processing_multi_client','document_processing_consent_inactive',
+    'firm_narrow_consent_inactive',
+    -- #945: the payroll lane's own two gate verdicts. Its OWN codes rather than a reuse of the
+    -- witness family's, because a refusal a person reads must say which read was refused.
+    'payroll_multi_client','payroll_consent_inactive']));
+
+alter table clara.document_processing_tasks drop constraint if exists ck_processing_task_binding_f_a1;
+alter table clara.document_processing_tasks add constraint ck_processing_task_binding_f_a1
+  check ((status = any (array['queued','held_egress']) and workflow_run_id is null and started_at is null)
+      or (status = any (array['running','done']) and workflow_run_id is not null and started_at is not null)
+      or (status = 'failed' and ((workflow_run_id is not null and started_at is not null)
+                              or (workflow_run_id is null and started_at is null
+                                  and error_code = any (array['budget','attempt_cap','skipped_kind',
+                                    'consent_inactive','statement_multi_client','witness_multi_client',
+                                    'witness_consent_inactive','document_processing_multi_client',
+                                    'document_processing_consent_inactive','firm_narrow_consent_inactive',
+                                    -- #945: both payroll gate verdicts are NEVER-CLAIMED terminal
+                                    -- receipts, exactly like every other enqueue-time gate code.
+                                    'payroll_multi_client','payroll_consent_inactive'])))));
+
+alter table clara.document_extractions drop constraint if exists ck_document_extractions_engine_kind_f_a1;
+alter table clara.document_extractions add constraint ck_document_extractions_engine_kind_f_a1
+  check (engine_kind = any (array['ocr','structured_parse','invoice_facts','doc_classify',
+    'statement_facts','llm_text_facts','llm_vision_facts',
+    -- #945: the payroll pair's two rows. Their OWN kinds, not a reuse of llm_text_facts /
+    -- llm_vision_facts: clara._invoice_fact_state resolves the witness regime off those two
+    -- kinds, so a payroll envelope banked under them would be read as an invoice corroboration.
+    'payroll_text_facts','payroll_vision_facts']));
+
+-- E2 · THE TWO EVENT TYPES THE LANE SPEAKS. clara.domain_events carries a foreign key onto
+--      clara.event_types, so an unregistered type is an INSERT failure, not a silent drop. Both
+--      are client-scoped (every payroll document is filed to exactly one client by the time the
+--      router reaches it) and both are routed at the ACTIVE taxonomy version with decision
+--      `ignore`, which is document.llm_witness_failed's own registration exactly: the workflow is
+--      the registered consumer, and no router wake is wanted. Both tables are append-only
+--      (t_event_types_append_only / t_trigger_taxonomy_append_only), so these are INSERTs with
+--      `on conflict do nothing` — never an UPDATE, which those triggers would refuse.
+
+insert into clara.event_types (name, client_scoped, description) values
+  ('document.payroll_facts_completed', true,
+   '#945: a payroll summary''s typed facts were read and banked (the text+vision pair persisted atomically). The facts workflow is the registered consumer; no router wake.'),
+  ('document.payroll_facts_failed', true,
+   '#945: a payroll summary''s read terminated without facts — an enqueue-time consent verdict, an attempt cap, or a worker-reported failure. The lane-true twin of document.invoice_facts_failed, so a payroll refusal never wakes the autodraft consumer.')
+on conflict (name) do nothing;
+
+insert into clara.trigger_taxonomy (version, event_type, decision, note)
+  select a.version, e.name, 'ignore',
+         '#945: the payroll facts workflow is the registered consumer; no router wake.'
+    from clara.taxonomy_active a
+    cross join (values ('document.payroll_facts_completed'), ('document.payroll_facts_failed')) e(name)
+on conflict (version, event_type) do nothing;
+
+-- E3 · THE FIVE RECUT BODIES, each one the live pre-image plus its named substitutions.
+
+CREATE OR REPLACE FUNCTION clara._enqueue_invoice_facts_core(p_document uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $w945_router$
+declare
+  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;
+  v_lane text; v_engine text; v_task_status text;
+  v_engine_kind text; v_stmt_clients uuid[]; v_stmt_client uuid; v_gate text; v_flip int;
+begin
+  select * into d from clara.documents where id=p_document for update;
+  if not found then raise exception 'document not found' using errcode='CLR11'; end if;
+  -- 0014: a consent-evidence document is a LEGAL artifact — never facts-extracted.
+  if d.document_kind='consent_evidence' then
+    return jsonb_build_object('document_id',p_document,'status','skipped_consent_evidence');
+  end if;
+  if exists(select 1 from clara.document_filings df
+      where df.document_id=p_document and df.retired_at is null)
+     and not exists(select 1 from clara.document_filings df
+       join clara.clients oc on oc.id=df.client_id and oc.status='active'
+       where df.document_id=p_document and df.retired_at is null) then
+    return jsonb_build_object('document_id',p_document,
+      'status','skipped_client_onboarding');
+  end if;
+  -- 0015: mime chooses the engine family. 0016 (P3/WA21-R7): the DOCUMENT KIND
+  -- gates the facts engines — only invoice-shaped kinds reach invoice_facts;
+  -- a NULL kind classifies FIRST; xml stays rule-classified into the local lane.
+  -- 0038 (design 4.3): 'bank_statement' now has TWO homes -- the vendor OCR lane for a
+  -- pdf/image and the free local parse lane for a csv/ofx export.
+  if lower(coalesce(d.mime_type,''))='application/pdf'
+     or lower(coalesce(d.mime_type,'')) like 'image/%' then
+    if d.document_kind is null then
+      if not exists (
+        select 1 from clara.document_extractions e
+         where e.document_id=p_document and e.firm_id=d.firm_id
+           and e.status='done' and e.engine_kind in ('ocr','structured_parse')
+      ) then
+        return jsonb_build_object('document_id',p_document,'status','awaiting_extraction');
+      end if;
+      v_lane:='classify'; v_engine:='clara-classify-llm:v1';
+    elsif d.document_kind in ('invoice','credit_note','debit_note','receipt') then
+      -- F-A1 PR-3 CUTOVER (design SS3.8/D9): the invoice path now mints llm_witness
+      -- DIRECTLY -- NO DUAL-RUN. Exactly the SAME document-kind set the invoice_facts arm
+      -- served (mirrored above, never widened here). F-A2 OPENER 2: the engine identity moves
+      -- to :v2 because witnessFacts.v2 is a NEW frozen prompt closure and its reads answer
+      -- different questions -- v_engine MUST string-equal WITNESS_ENGINE_SNAPSHOT.engineId in
+      -- the witnessFacts.v2 services module -- battery cell f-a2.engine-literal reads both
+      -- sides and asserts equality.
+      v_lane:='llm_witness'; v_engine:='llm-openai:gpt-5.6-terra:v2';
+    elsif d.document_kind='bank_statement' then
+      -- 0038 arm 1 closed the bank_statement -> skipped_kind dead end 0026:392-410 left
+      -- behind, on the vendor OCR read. F-A2 WINDOW B (the ACTIVATION, design SS3.7) re-aims
+      -- it at the WITNESS PAIR: the same lane, a different engine identity.
+      -- THE LANE DOES NOT MOVE, and that is 0098's own LANE DECISION (0098:120-138), not an
+      -- omission: _invoice_fact_state keys the witness regime on lane llm_witness, so a
+      -- statement pair there would be resolved as an INVOICE corroboration, and the invoice
+      -- witness workflow claims that lane BY LANE ALONE and would read a statement with
+      -- invoice prompts. Staying on statement_facts also keeps this task inside the
+      -- enqueue-time page-budget reservation set (0098:114-118).
+      -- v_engine MUST string-equal STATEMENT_WITNESS_ENGINE_SNAPSHOT.engineId in the
+      -- statementFacts.v2 services module: the workflow compares the task's stamp against its
+      -- own snapshot BEFORE any egress and WAITS on a mismatch rather than sending bytes under
+      -- a receipt naming a model it did not call (0098:154-159), so a drifted literal STALLS
+      -- the lane instead of mis-stamping it. Battery cell f-a2.activation-engine-literal reads
+      -- both sides independently and asserts equality.
+      v_lane:='statement_facts'; v_engine:='llm-openai:gpt-5.6-terra:stmt-witness-v1';
+    elsif d.document_kind='payroll_summary' then
+      -- #945 / parent #926 (owner ruling 2026-09-18, option G): "a payroll summary and a
+      -- contract go down the same lane as any other accounting document, read and posted, not
+      -- merely stored". Until this arm existed a payroll_summary fell straight through to the
+      -- skipped_kind dead end below -- the capability registry's own `stored_only` verdict was
+      -- literally derived from that fall-through. ITS OWN LANE, not llm_witness: that lane's
+      -- claim is BY LANE ALONE (the bank-statement comment eight lines above records the same
+      -- reasoning), so a payroll pair parked there would be read with invoice prompts and
+      -- resolved by clara._invoice_fact_state as an invoice corroboration. v_engine MUST
+      -- string-equal PAYROLL_ENGINE_SNAPSHOT.engineId in the payrollFacts.v1 services module;
+      -- the workflow compares the task's stamp against its own snapshot BEFORE any egress and
+      -- waits on a mismatch rather than sending bytes under a receipt naming a model it did not
+      -- call, so a drifted literal STALLS the lane instead of mis-stamping it.
+      v_lane:='payroll_facts'; v_engine:='llm-openai:gpt-5.6-terra:payroll-witness-v1';
+    else
+      -- (adjudication #11): the skipped_kind receipt lives on the task trail —
+      -- a terminal failed row (never claimed, attempt_count 0 so it never
+      -- consumes attempts), reused idempotently on re-invocation.
+      select id into v_task from clara.document_processing_tasks
+        where document_id=p_document and lane='invoice_facts'
+          and status='failed' and error_code='skipped_kind'
+        order by id limit 1;
+      if v_task is null then
+        select coalesce(max(version_n),0)+1 into v_version
+          from clara.document_processing_tasks
+          where document_id=p_document and lane='invoice_facts';
+        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,
+            engine_config,version_n,lane,status,error_code,finished_at)
+          values(d.firm_id,p_document,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,
+            v_version,'invoice_facts','failed','skipped_kind',now())
+          returning id into v_task;
+      end if;
+      return jsonb_build_object('task_id',v_task,'document_id',p_document,
+        'status','skipped_kind','document_kind',d.document_kind);
+    end if;
+  elsif lower(coalesce(d.mime_type,'')) in ('application/xml','text/xml') then
+    -- Delta-review round 2 (2026-07-31): the XML arm was KIND-BLIND -- a bank_statement
+    -- xml rode the myinvois local lane into the INVOICE parser (wrong worker, wrong
+    -- events, a phantom autodraft wake if it happened to parse). No xml statement parser
+    -- exists in C-b (the structured lane is csv/ofx by design 4.3), so the honest verdict
+    -- is the same terminal skipped_type a csv non-statement gets: never a misroute.
+    if d.document_kind='bank_statement' then
+      return jsonb_build_object('document_id',p_document,'status','skipped_type');
+    end if;
+    v_lane:='local_facts'; v_engine:='clara-myinvois:v1';
+  elsif lower(coalesce(d.mime_type,'')) in ('text/csv','application/csv',
+      'application/x-ofx','application/ofx') then
+    -- 0038 arm 2 (design 4.3): the csv/ofx mimes JOIN the dispatch. They dead-ended at
+    -- skipped_type before the kind test could ever run. ONLY a bank statement routes; every
+    -- other kind keeps the byte-identical skipped_type verdict it has today, so nothing that
+    -- is not a statement changes behaviour.
+    if d.document_kind='bank_statement' then
+      v_lane:='statement_parse'; v_engine:='clara-statement-parse:v1';
+    else
+      return jsonb_build_object('document_id',p_document,'status','skipped_type');
+    end if;
+  else
+    return jsonb_build_object('document_id',p_document,'status','skipped_type');
+  end if;
+  if v_lane='classify' then
+    -- a DONE classify verdict with the kind still NULL = the low-confidence
+    -- hold: a human resolves it (set_document_kind / the review question);
+    -- never re-enqueue in a loop.
+    if exists(select 1 from clara.document_extractions e
+        where e.document_id=p_document and e.engine_kind='doc_classify'
+          and e.status='done') then
+      return jsonb_build_object('document_id',p_document,'status','classify_low_confidence');
+    end if;
+  else
+    -- 0038 (design 4.3): PER-LANE engine-kind. This short-circuit was hard-coded to
+    -- 'invoice_facts', which is correct for invoice_facts AND for local_facts (both settle an
+    -- invoice_facts extraction) and WRONG for either statement lane -- a fully ingested
+    -- statement would read as un-extracted on every re-fire and re-buy a vendor read. The map
+    -- preserves the two existing lanes exactly and names the two new ones.
+    v_engine_kind := case when v_lane='payroll_facts'
+                       then 'payroll_text_facts'  -- #945: the payroll pair's CANONICAL row,
+                       -- the llm_witness precedent exactly -- a done text row proves a done
+                       -- pair (one atomic writer transaction), so a re-fire is suppressed the
+                       -- moment the pair lands.
+                       when v_lane in ('statement_facts','statement_parse')
+                       then 'statement_facts'  -- BOTH statement lanes settle a
+                       -- statement_facts extraction (the lane records how the read was
+                       -- bought; the engine_kind what it is -- the 0026:709 precedent)
+                       when v_lane='llm_witness'
+                       then 'llm_text_facts'  -- F-A1 PR-3: the CANONICAL witness row --
+                       -- a done text row proves a done PAIR (one atomic writer transaction,
+                       -- 0095 section 8), so a re-fire is suppressed the moment the pair lands.
+                       else 'invoice_facts' end;
+    select e.id into v_task from clara.document_extractions e
+      where e.document_id=p_document and e.engine_kind=v_engine_kind and e.status='done'
+      order by e.version_n desc limit 1;
+    -- F-A1 PR-3 (M-4, RULED): for the invoice-shaped lane ONLY, a done LEGACY extraction ALSO
+    -- suppresses -- v_engine_kind above already names the witness side (llm_text_facts); this
+    -- is the legacy side of the EITHER-REGIME check, consulted only when the witness lookup
+    -- just found nothing.
+    if v_task is null and v_lane='llm_witness' then
+      select e.id into v_task from clara.document_extractions e
+        where e.document_id=p_document and e.engine_kind='invoice_facts' and e.status='done'
+        order by e.version_n desc limit 1;
+    end if;
+    if v_task is not null then
+      return jsonb_build_object('document_id',p_document,'status','already_completed',
+        'extraction_id',v_task);
+    end if;
+  end if;
+  -- 0038 (design 4.3/4.4, WCB-R1): THE ENQUEUE-TIME TYPED-CONSENT GATE, statement lanes only.
+  -- It is here rather than in the claim body because the ratified 0020 section 6 byte-identity
+  -- battery asserts claim_document_processing_task carries no call edge into the typed-consent
+  -- surface — and because enqueue is the earlier, more honest place: an unauthorized client
+  -- should never have a task queued in their name at all. Both verdicts write the terminal
+  -- NEVER-CLAIMED failed receipt (the skipped_kind idiom), never a raise: this function runs
+  -- inside file_document / finalize_document_intake / confirm_attribution_candidate /
+  -- approve_wrong_client_correction, and a raise would abort an unrelated filing transaction.
+  --
+  -- ORDERING, decided here because the design does not fix it: the gate runs AFTER the
+  -- already_completed short-circuit (an ingested statement raises no consent question and must
+  -- not generate noise on a re-fire) and BEFORE the in-flight short-circuit. The other order
+  -- has a real hole: a statement enqueued while one client held it, then filed to a SECOND
+  -- client, would hit the in-flight branch and return the queued task, so the vendor read
+  -- would proceed on a document with no answerable consent client. A re-fire whose gate now
+  -- fails should say so even while a task is queued.
+  if v_lane in ('statement_facts','statement_parse') then
+    select array_agg(distinct f.client_id) into v_stmt_clients
+      from clara.document_filings f
+      where f.document_id=p_document and f.retired_at is null;
+    if coalesce(array_length(v_stmt_clients,1),0)>1 then
+      v_gate:='statement_multi_client';
+    elsif coalesce(array_length(v_stmt_clients,1),0)=0 then
+      -- Zero active filings: no client exists who could have authorized this read. Fail closed.
+      v_gate:='consent_inactive';
+    else
+      v_stmt_client:=v_stmt_clients[1];
+      -- F-A2 WINDOW B (the ACTIVATION): the statement lane's typed consent is now keyed on the
+      -- purpose the witness pair actually egresses under, not on the retiring vendor-OCR one.
+      -- NO NEW CONSENT SURFACE IS NEEDED: the activation relation is keyed on
+      -- (firm_id, client_id, purpose) ALONE -- no lane, no document_kind, no engine column
+      -- (0038:5981-5987) -- so the activations already on file for the invoice witness pair
+      -- answer this lookup unchanged. THIS ARM'S OWN REFUSAL VOCABULARY IS UNCHANGED
+      -- (statement_multi_client / consent_inactive, 0098:161-165) and so is its
+      -- document.statement_facts_failed emit; only the purpose literal moves. The retiring
+      -- purpose STAYS REGISTERED in the purpose CHECKs -- historical authorization rows
+      -- reference it and drops are BY NAME (the 0038:5462 contract).
+      if not exists(select 1 from clara.client_egress_purpose_activations a
+          join clara.client_egress_purpose_consents c
+            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id
+              and c.purpose=a.purpose
+          where a.firm_id=d.firm_id and a.client_id=v_stmt_client
+            and a.purpose='witness_extraction'
+            and a.deactivated_at is null and c.revoked_at is null) then
+        v_gate:='consent_inactive';
+      end if;
+    end if;
+    if v_gate is not null then
+      -- AS-BUILT LADDER FIX (2026-07-31): the gate ACTS ON any in-flight queued task rather
+      -- than writing a receipt beside it -- the ordering rationale above promises the vendor
+      -- read stops, so it stops: the queued row flips to the gate verdict in this same
+      -- transaction (never-claimed failed rows are legal for both gate codes -- the widened
+      -- binding CHECK). A running task is past claiming and settles through its own persist.
+      update clara.document_processing_tasks
+        set status='failed', error_code=v_gate, finished_at=now()
+        where document_id=p_document and lane=v_lane and status='queued';
+      get diagnostics v_flip = row_count;
+      if v_flip = 0 then
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+        if v_task is not null then
+          -- Re-read of an EXISTING terminal receipt: this call acted on nothing, so it
+          -- emits nothing (delta-review round 2, 2026-07-31: the unconditional emit here
+          -- re-fired on every dark re-try and, picked by uuid order, could name an older
+          -- task than the one the verdict actually acted on). The verdict reached the
+          -- spine when its receipt was minted; re-reads only report it.
+          return jsonb_build_object('task_id',v_task,'document_id',p_document,
+            'status','failed','reason',v_gate);
+        end if;
+        select coalesce(max(version_n),0)+1 into v_version
+          from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane;
+        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,
+            engine_config,version_n,lane,status,error_code,finished_at)
+          values(d.firm_id,p_document,v_engine,'{}'::jsonb,
+            v_version,v_lane,'failed',v_gate,now())
+          returning id into v_task;
+      else
+        -- The flip acted: name the newest flipped row (version order, never uuid order).
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+      end if;
+      -- 0038 as-built fix (2026-07-31): every statement-lane terminal receipt this core
+      -- mints reaches the spine as the STATEMENT twin with its reason -- and EXACTLY ONCE
+      -- per verdict instance: only the two acting branches (the flip, the fresh insert)
+      -- reach this emit; the re-read branch returned above. The wrapper
+      -- (enqueue_invoice_facts, recut in E2b) no longer emits its invoice twin for
+      -- statement lanes, so this is the single emit site on every caller path --
+      -- file_document's direct core calls included.
+      perform clara._append_event(d.firm_id,'document.statement_facts_failed',
+        null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));
+      return jsonb_build_object('task_id',v_task,'document_id',p_document,
+        'status','failed','reason',v_gate);
+    end if;
+  elsif v_lane='llm_witness' then
+    -- F-A1 PR-1 (design SS3.5/SS6, wall 6): the SAME enqueue-time typed-consent gate, keyed
+    -- on purpose='witness_extraction' instead of 'statement_extraction', with its OWN named
+    -- refusal codes (wall 7) rather than a reuse of the statement family's bare literals --
+    -- witness and statement consent are granted independently, so the codes must stay
+    -- distinguishable. INERT AT PR-1: nothing in this body (or anywhere else at this
+    -- frontier) ever assigns v_lane:='llm_witness' -- no mime/kind arm mints it yet, and the
+    -- lane CHECK plus enqueueForLane's runtime allowlist keep an old image from reaching this
+    -- branch even by accident. Wired now so the gate exists the moment PR-3's router recut
+    -- adds the classification arm, rather than landing a second CoR on this pinned body then.
+    select array_agg(distinct f.client_id) into v_stmt_clients
+      from clara.document_filings f
+      where f.document_id=p_document and f.retired_at is null;
+    if coalesce(array_length(v_stmt_clients,1),0)>1 then
+      v_gate:='witness_multi_client';
+    elsif coalesce(array_length(v_stmt_clients,1),0)=0 then
+      -- Zero active filings: no client exists who could have authorized this read. Fail closed.
+      v_gate:='witness_consent_inactive';
+    else
+      v_stmt_client:=v_stmt_clients[1];
+      if not exists(select 1 from clara.client_egress_purpose_activations a
+          join clara.client_egress_purpose_consents c
+            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id
+              and c.purpose=a.purpose
+          where a.firm_id=d.firm_id and a.client_id=v_stmt_client
+            and a.purpose='witness_extraction'
+            and a.deactivated_at is null and c.revoked_at is null) then
+        v_gate:='witness_consent_inactive';
+      end if;
+    end if;
+    if v_gate is not null then
+      update clara.document_processing_tasks
+        set status='failed', error_code=v_gate, finished_at=now()
+        where document_id=p_document and lane=v_lane and status='queued';
+      get diagnostics v_flip = row_count;
+      if v_flip = 0 then
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+        if v_task is not null then
+          return jsonb_build_object('task_id',v_task,'document_id',p_document,
+            'status','failed','reason',v_gate);
+        end if;
+        select coalesce(max(version_n),0)+1 into v_version
+          from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane;
+        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,
+            engine_config,version_n,lane,status,error_code,finished_at)
+          values(d.firm_id,p_document,v_engine,'{}'::jsonb,
+            v_version,v_lane,'failed',v_gate,now())
+          returning id into v_task;
+      else
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+      end if;
+      perform clara._append_event(d.firm_id,'document.llm_witness_failed',
+        null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));
+      return jsonb_build_object('task_id',v_task,'document_id',p_document,
+        'status','failed','reason',v_gate);
+    end if;
+  elsif v_lane='payroll_facts' then
+    -- #945: THE SAME enqueue-time typed-consent gate the witness lanes hold, keyed on the SAME
+    -- purpose ('witness_extraction') and with its OWN named refusal codes rather than a reuse of
+    -- another family's literals -- a refusal a person reads must say which read was refused.
+    --
+    -- WHY THE EXISTING PURPOSE AND NOT A NEW ONE. 'witness_extraction' is the typed consent that
+    -- authorizes sending a client's document BYTES to a model in order to READ them; that is
+    -- exactly and only what this lane does. Minting a payroll-specific purpose would need its own
+    -- CHECK widening, its own consent-capture surface and its own activation act, and until all
+    -- three existed the lane would be dark for every firm -- which the standing "nothing dark"
+    -- ruling refuses. The purpose IS a live gate here, not a bypass: a client with no live
+    -- witness_extraction activation gets a terminal refusal, exactly as an invoice would.
+    -- FOLLOW-UP, recorded rather than silently decided: a payroll summary carries employee-level
+    -- personal data an invoice does not, so whether this class deserves its own consent moment is
+    -- a product question for the owner, filed by #945's report and not answered here.
+    select array_agg(distinct f.client_id) into v_stmt_clients
+      from clara.document_filings f
+      where f.document_id=p_document and f.retired_at is null;
+    if coalesce(array_length(v_stmt_clients,1),0)>1 then
+      v_gate:='payroll_multi_client';
+    elsif coalesce(array_length(v_stmt_clients,1),0)=0 then
+      -- Zero active filings: no client exists who could have authorized this read. Fail closed.
+      v_gate:='payroll_consent_inactive';
+    else
+      v_stmt_client:=v_stmt_clients[1];
+      if not exists(select 1 from clara.client_egress_purpose_activations a
+          join clara.client_egress_purpose_consents c
+            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id
+              and c.purpose=a.purpose
+          where a.firm_id=d.firm_id and a.client_id=v_stmt_client
+            and a.purpose='witness_extraction'
+            and a.deactivated_at is null and c.revoked_at is null) then
+        v_gate:='payroll_consent_inactive';
+      end if;
+    end if;
+    if v_gate is not null then
+      update clara.document_processing_tasks
+        set status='failed', error_code=v_gate, finished_at=now()
+        where document_id=p_document and lane=v_lane and status='queued';
+      get diagnostics v_flip = row_count;
+      if v_flip = 0 then
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+        if v_task is not null then
+          return jsonb_build_object('task_id',v_task,'document_id',p_document,
+            'status','failed','reason',v_gate);
+        end if;
+        select coalesce(max(version_n),0)+1 into v_version
+          from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane;
+        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,
+            engine_config,version_n,lane,status,error_code,finished_at)
+          values(d.firm_id,p_document,v_engine,'{}'::jsonb,
+            v_version,v_lane,'failed',v_gate,now())
+          returning id into v_task;
+      else
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+      end if;
+      perform clara._append_event(d.firm_id,'document.payroll_facts_failed',
+        null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));
+      return jsonb_build_object('task_id',v_task,'document_id',p_document,
+        'status','failed','reason',v_gate);
+    end if;
+  elsif v_lane='classify' then
+    -- F-A7 gamma (D-18/AB-4): THE CLASSIFY CONSENT GATE, at enqueue, following the same
+    -- statement-lane mechanism above. TWO populations, per design SS3.5: a FILED document
+    -- requires its client's live 'document_processing' typed consent+activation; an UNFILED
+    -- document (the pre-activation class, D-21) requires the firm's live firm-narrow
+    -- 'attribution'-moment activation. Either verdict is a terminal never-claimed failed
+    -- receipt, never a raise.
+    select array_agg(distinct f.client_id) into v_stmt_clients
+      from clara.document_filings f
+      where f.document_id=p_document and f.retired_at is null;
+    if coalesce(array_length(v_stmt_clients,1),0)>1 then
+      v_gate:='document_processing_multi_client';
+    elsif coalesce(array_length(v_stmt_clients,1),0)=1 then
+      v_stmt_client:=v_stmt_clients[1];
+      if not exists(select 1 from clara.client_egress_purpose_activations a
+          join clara.client_egress_purpose_consents c
+            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id
+              and c.purpose=a.purpose
+          where a.firm_id=d.firm_id and a.client_id=v_stmt_client
+            and a.purpose='document_processing'
+            and a.deactivated_at is null and c.revoked_at is null) then
+        v_gate:='document_processing_consent_inactive';
+      end if;
+    else
+      -- Zero active filings: the pre-activation document class (D-21). The firm-narrow
+      -- 'attribution' moment authorizes classify on an unfiled document; it is firm-scoped,
+      -- so no multi-client ambiguity is possible here by construction.
+      if not exists(select 1 from clara.firm_egress_purpose_activations a
+          join clara.firm_egress_purpose_consents c
+            on c.id=a.consent_id and c.firm_id=a.firm_id and c.purpose=a.purpose and c.moment=a.moment
+          where a.firm_id=d.firm_id and a.purpose='firm_narrow_intake' and a.moment='attribution'
+            and a.deactivated_at is null and c.revoked_at is null) then
+        v_gate:='firm_narrow_consent_inactive';
+      end if;
+    end if;
+    if v_gate is not null then
+      update clara.document_processing_tasks
+        set status='failed', error_code=v_gate, finished_at=now()
+        where document_id=p_document and lane=v_lane and status='queued';
+      get diagnostics v_flip = row_count;
+      if v_flip = 0 then
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+        if v_task is not null then
+          return jsonb_build_object('task_id',v_task,'document_id',p_document,
+            'status','failed','reason',v_gate);
+        end if;
+        select coalesce(max(version_n),0)+1 into v_version
+          from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane;
+        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,
+            engine_config,version_n,lane,status,error_code,finished_at)
+          values(d.firm_id,p_document,v_engine,'{}'::jsonb,
+            v_version,v_lane,'failed',v_gate,now())
+          returning id into v_task;
+      else
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+      end if;
+      perform clara._append_event(d.firm_id,'document.classify_failed',
+        null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));
+      return jsonb_build_object('task_id',v_task,'document_id',p_document,
+        'status','failed','reason',v_gate);
+    end if;
+  end if;
+  select * into t from clara.document_processing_tasks
+    where document_id=p_document and lane=v_lane
+      and status in ('queued','held_egress','running')
+    order by id limit 1;
+  if found then
+    return jsonb_build_object('task_id',t.id,'document_id',p_document,'status',t.status);
+  end if;
+  select coalesce(sum(attempt_count),0)::int,
+         coalesce(max(version_n),0)+1
+    into v_attempts,v_version from clara.document_processing_tasks
+    where document_id=p_document and lane=v_lane;
+  if v_attempts >= 3 then
+    insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status,error_code,finished_at)
+      values(d.firm_id,p_document,v_engine,'{}'::jsonb,
+        v_version,v_lane,'failed','attempt_cap',now()) returning id into v_task;
+    -- 0038 as-built fix (2026-07-31, regression-cells lane finding): THIS branch, not the
+    -- claim-time belt, is the one a capped statement actually reaches -- the running attempt
+    -- sum already reads 3 when the next enqueue fires, so the pre-fail intercepts before any
+    -- claim exists to emit. Without an emit here the statement feed never learns its document
+    -- died. Statement lanes only: the invoice lane's enqueue-time cap has been event-silent
+    -- since 0026, and lighting it now would wake the autodraft consumer on a path Wave A
+    -- never exercised -- that silence stays, recorded here as a pre-existing residual.
+    if v_lane in ('statement_facts','statement_parse','payroll_facts') then
+      -- #945: the payroll lane joins this emit for the reason the statement lane did -- without
+      -- it the payroll feed never learns its document died at the cap. The TYPE follows the lane:
+      -- a payroll cap must never reach the autodraft consumer as a phantom invoice failure.
+      perform clara._append_event(d.firm_id,
+        case when v_lane='payroll_facts' then 'document.payroll_facts_failed'
+             else 'document.statement_facts_failed' end,
+        null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_task,'reason','attempt_cap'));
+    end if;
+    return jsonb_build_object('task_id',v_task,'document_id',p_document,
+      'status','failed','reason','attempt_cap');
+  end if;
+  insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+      version_n,lane,status)
+    values(d.firm_id,p_document,v_engine,'{}'::jsonb,
+      v_version,v_lane,'queued')
+    on conflict do nothing returning id into v_task;
+  if v_task is null then
+    -- 0026 (amendment A11): the widened (document_id,engine_id,version_n,lane) key means a
+    -- conflict HERE is now a genuine same-lane duplicate — a cross-lane collision is
+    -- structurally impossible, lane joins the key. The exact colliding row must exist
+    -- regardless of its current status (it may already be done/failed by the time we look
+    -- again); silence hid this for the product's whole life, so an absent row here is
+    -- impossible-state-loud, not a null task_id.
+    select id,status into v_task,v_task_status from clara.document_processing_tasks
+      where document_id=p_document and engine_id=v_engine and version_n=v_version and lane=v_lane;
+    if v_task is null then
+      raise exception 'impossible state: an ON CONFLICT fired for (document=%,engine=%,version=%,lane=%) but no row exists at that key',
+        p_document,v_engine,v_version,v_lane using errcode='CLR35';
+    end if;
+    return jsonb_build_object('task_id',v_task,'document_id',p_document,'status',v_task_status);
+  end if;
+  -- Only the AZURE lanes consume the page budget; classify, the local parse and the local
+  -- statement parse reserve nothing. 0038 adds statement_facts to the reserving set, which is
+  -- what "the statement lane joins every existing spend control" means concretely.
+  if v_lane in ('invoice_facts','statement_facts') then
+    v_pages := greatest(coalesce(d.page_count,1),1);
+    begin
+      perform clara._reserve_processing_call(v_task,v_pages);
+    exception when sqlstate 'CLR18' then
+      update clara.document_processing_tasks set status='failed',error_code='budget',
+        finished_at=now() where id=v_task;
+      -- 0038 as-built fix (2026-07-31): the statement lane's budget verdict reaches the
+      -- spine as the STATEMENT twin (single emit site -- the wrapper, recut in E2b,
+      -- suppresses its invoice twin for statement lanes). The invoice lane keeps its
+      -- pre-existing shape: silent here, emitted by the wrapper.
+      if v_lane='statement_facts' then
+        perform clara._append_event(d.firm_id,'document.statement_facts_failed',
+          null,null,null,null,
+          null,p_document,null,jsonb_build_object('task_id',v_task,'reason','budget'));
+      end if;
+      return jsonb_build_object('task_id',v_task,'document_id',p_document,
+        'status','failed','reason','budget');
+    end;
+  end if;
+  return jsonb_build_object('task_id',v_task,'document_id',p_document,'status','queued');
+end $w945_router$
+;
+
+CREATE OR REPLACE FUNCTION clara.enqueue_invoice_facts(p_document uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $w945_wrapper$
+declare v_result jsonb; v_firm uuid; v_lane text;
+begin
+  v_result:=clara._enqueue_invoice_facts_core(p_document);
+  if v_result->>'status'='failed' then
+    -- 0038 E2b: lane-aware. The core owns every STATEMENT-lane terminal emit at its mint
+    -- sites; this wrapper emitting its invoice twin for a statement receipt was a phantom
+    -- invoice failure (it would wake the autodraft consumer for a bank statement) and a
+    -- double-emit. Invoice lanes keep the wrapper emit byte-for-byte.
+    select lane into v_lane from clara.document_processing_tasks
+      where id=(v_result->>'task_id')::uuid;
+    -- #945: payroll_facts joins the exclusion for the reason the statement lanes are in it --
+    -- the core owns every payroll-lane terminal emit at its mint sites, and this wrapper
+    -- emitting its INVOICE twin for a payroll receipt would be a phantom invoice failure that
+    -- wakes the autodraft consumer for a document no invoice draft will ever be made from.
+    if coalesce(v_lane,'') not in ('statement_facts','statement_parse','payroll_facts') then
+      select firm_id into v_firm from clara.documents where id=p_document;
+      perform clara._append_event(v_firm,'document.invoice_facts_failed',null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_result->>'task_id',
+          'reason',v_result->>'reason'));
+    end if;
+  end if;
+  return v_result;
+end $w945_wrapper$
+;
+
+CREATE OR REPLACE FUNCTION clara._tf_processing_task_update()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $w945_taskupd$
+declare v_ok boolean;
+begin
+  if tg_op='DELETE' then raise exception 'document processing tasks are not deleted' using errcode='CLR08'; end if;
+  if old.status in ('done','failed') then raise exception 'terminal document processing task is immutable' using errcode='CLR16'; end if;
+  if new.id<>old.id or new.firm_id<>old.firm_id or new.document_id<>old.document_id
+     or new.engine_id<>old.engine_id or new.engine_config<>old.engine_config
+     or new.version_n<>old.version_n or new.lane<>old.lane or new.created_at<>old.created_at then
+    raise exception 'document processing task identity/config is immutable' using errcode='CLR08';
+  end if;
+  if new.status<>old.status then
+    -- 0038 E2b: queued->failed widens by the two enqueue-time gate verdicts -- the gate
+    -- flips an in-flight queued task in place when a later filing invalidates its consent
+    -- basis. Both are never-claimed codes (ck_processing_task_binding_0038); the flip is
+    -- the only writer that uses them on this transition, and it only ever acts on the
+    -- statement lanes -- so the widening is LANE-SCOPED (delta-review round 2,
+    -- 2026-07-31): a queued invoice/classify/ocr task still cannot be flipped to a gate
+    -- verdict by any future writer.
+    -- 0040 (C-c, WCC-R8 ride-along; register entry 9): RE-KIND RETIREMENT joins the
+    -- queued->failed arm, LANE-SCOPED exactly as 0038 E2b scoped its two gate verdicts. A
+    -- document's lane is a function of the kind it carried at enqueue; when a human or the
+    -- classifier changes the kind, a queued task in a KIND-BOUND lane is work nobody wants --
+    -- and it blocks the correct lane's enqueue, because the router's in-flight short-circuit
+    -- hands back the stale task. So it is retired to the never-claimed `skipped_kind` receipt
+    -- (already in the binding CHECK's allowlist, 0038:7304, and already the router's own idiom
+    -- for "this document has nowhere to go"). The scoping is the point: the kind-INDEPENDENT
+    -- 'classify' lane can never be retired this way, and no writer can flip a running or
+    -- terminal task at all.
+    -- F-A1 PR-1 (wall 13): the WITNESS gate verdicts join the queued->failed arm,
+    -- LANE-SCOPED exactly as 0038 E2b and 0040 S4.11a scoped theirs. _enqueue_invoice_facts_core's
+    -- llm_witness branch flips an in-flight queued task in place when the typed witness_extraction
+    -- consent is absent/inactive or the document is filed to more than one client; both codes are
+    -- never-claimed (ck_processing_task_binding_f_a1) and the flip is their only writer. Scoping is
+    -- the point: no future writer can flip a queued invoice/classify/ocr/statement task to a
+    -- WITNESS verdict, and no lane can flip a running or terminal task at all.
+    -- F-A7 gamma (SECTION 6, D-18/AB-4): the CLASSIFY gate verdicts join the queued->failed arm,
+    -- LANE-SCOPED exactly as every prior addition scoped its own. _enqueue_invoice_facts_core's
+    -- classify branch flips an in-flight queued task in place when the client's document_processing
+    -- consent (filed population) or the firm's firm-narrow attribution activation (unfiled
+    -- population) is absent/inactive, or the document is filed to more than one client; all three
+    -- codes are never-claimed (ck_processing_task_binding_f_a1) and the flip is their only writer.
+    -- Scoping is the point: no future writer can flip a queued invoice/ocr/statement/witness task
+    -- to a CLASSIFY verdict, and no lane can flip a running or terminal task at all.
+    v_ok:=(old.status='queued' and new.status in ('running','held_egress'))
+      or (old.status='queued' and new.status='failed'
+          and (new.error_code in ('budget','attempt_cap')
+               or (new.error_code in ('consent_inactive','statement_multi_client')
+                   and new.lane in ('statement_facts','statement_parse'))
+               or (new.error_code in ('witness_consent_inactive','witness_multi_client')
+                   and new.lane='llm_witness')
+               -- #945: the PAYROLL gate verdicts join the queued->failed arm, LANE-SCOPED
+               -- exactly as every prior addition scoped its own. The router's payroll_facts
+               -- branch flips an in-flight queued task in place when the typed
+               -- witness_extraction consent is absent/inactive or the document is filed to more
+               -- than one client; both codes are never-claimed and the flip is their only
+               -- writer. No future writer can flip a queued task on another lane to a PAYROLL
+               -- verdict, and no lane can flip a running or terminal task at all.
+               or (new.error_code in ('payroll_consent_inactive','payroll_multi_client')
+                   and new.lane='payroll_facts')
+               or (new.error_code='skipped_kind'
+                   and new.lane in ('invoice_facts','statement_facts','statement_parse','llm_witness','payroll_facts'))
+               or (new.error_code in ('document_processing_multi_client','document_processing_consent_inactive','firm_narrow_consent_inactive')
+                   and new.lane='classify')))
+      or (old.status='held_egress' and new.status='queued')
+      or (old.status='running' and new.status in ('done','failed','queued','held_egress'));
+    if not v_ok then
+      raise exception 'illegal document processing transition % -> %',old.status,new.status
+        using errcode='CLR16';
+    end if;
+  end if;
+  new.updated_at:=now();
+  return new;
+end $w945_taskupd$
+;
+
+CREATE OR REPLACE FUNCTION clara.claim_document_processing_task(p_task uuid, p_workflow_run_id text, p_egress_approved boolean)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $w945_claim$
+declare
+  t record; d record; v_cap int; v_running int; v_attempts int;
+  v_clients int; v_consented int; v_hold_reason text; v_secret text;
+begin
+  if p_workflow_run_id is null or btrim(p_workflow_run_id)='' then
+    raise exception 'workflow_run_id is required' using errcode='CLR10';
+  end if;
+  select * into t from clara.document_processing_tasks where id=p_task for update;
+  if not found then raise exception 'processing task not found' using errcode='CLR16'; end if;
+  select storage_path,sha256,mime_type,byte_size into d
+    from clara.documents where id=t.document_id;
+
+  -- The lease check precedes EVERY dispatching branch. Only the EGRESSING lanes
+  -- (ocr, invoice_facts and -- 0038 -- statement_facts) are kill-switch-gated; invoice_facts
+  -- additionally requires every active filing client to hold a live LEGACY consent. Local
+  -- lanes (structured_parse, local_facts, classify, statement_parse) never hold.
+  --
+  -- 0038 (design 4.3/4.4): statement_facts joins the KILL SWITCH and nothing else here. The
+  -- typed (consent, activation) it needs is checked at ENQUEUE -- the 0020 section 6
+  -- byte-identity battery asserts this body carries no call edge into the typed-consent
+  -- surface, and the two questions are orthogonal anyway: the switch asks whether the vendor is
+  -- safe right now, the typed gate asks whether this client authorized this purpose. Widening
+  -- the LEGACY branch below to statement_facts would make a purpose-blind consent authorize a
+  -- statement-specific read, which is what 0020 section 1 built a separate relation to prevent.
+  -- #945: payroll_facts is an EGRESSING lane (it sends document bytes to a model), so it
+  -- joins the kill switch. It runs NO per-client LEGACY consent check here, for the reason
+  -- statement_facts and llm_witness do not: its typed (consent, activation) pair is checked at
+  -- ENQUEUE, and reading the purpose-blind legacy table here would let a generic consent
+  -- authorize a payroll-specific read.
+  if t.lane in ('ocr','invoice_facts','statement_facts','llm_witness','payroll_facts')
+     and not coalesce(p_egress_approved,false) then
+    v_hold_reason:='kill_switch';
+  elsif t.lane='invoice_facts' then
+    select count(distinct f.client_id)::int,
+      count(distinct f.client_id) filter(where exists(
+        select 1 from clara.client_egress_consents c
+        where c.client_id=f.client_id and c.revoked_at is null))::int
+      into v_clients,v_consented from clara.document_filings f
+      where f.document_id=t.document_id and f.retired_at is null;
+    if coalesce(v_clients,0)=0 or coalesce(v_consented,0)=0 then
+      v_hold_reason:='no_consent';
+    elsif v_consented<v_clients then
+      v_hold_reason:='partial_consent';
+    end if;
+  end if;
+  if v_hold_reason is not null then
+    if t.status in ('queued','running') then
+      update clara.document_processing_tasks set status='held_egress',
+        workflow_run_id=null,started_at=null,vendor_op_ref=null where id=p_task;
+      if t.lane='ocr' then
+        update clara.documents set extraction_status='held_egress' where id=t.document_id;
+      end if;
+    elsif t.status<>'held_egress' then
+      raise exception 'processing task is not dispatchable' using errcode='CLR16';
+    end if;
+    return jsonb_build_object('task_id',p_task,'status','held_egress',
+      'workflow_run_id',null,'payload',jsonb_build_object(
+        'clr','CLR28','reason',v_hold_reason));
+  end if;
+  if t.status='running' and t.workflow_run_id=p_workflow_run_id then
+    return jsonb_build_object('task_id',p_task,'status','running','replayed',true,
+      'document_id',t.document_id,'firm_id',t.firm_id,'lane',t.lane,
+      'storage_path',d.storage_path,'sha256',d.sha256,
+      'mime_type',d.mime_type,'byte_size',d.byte_size);
+  end if;
+  if t.status<>'queued' then raise exception 'processing task is not queued' using errcode='CLR16'; end if;
+  perform pg_advisory_xact_lock(203005001,hashtext(t.firm_id::text));
+  -- 0038: the attempt cap is now PER EGRESSING LANE. The sum was keyed on the literal
+  -- 'invoice_facts' while the branch it guards was too; widening the branch without re-keying
+  -- the sum would let one lane's attempts cap the other's. F-A1 PR-1: llm_witness joins the
+  -- same per-lane cap.
+  if t.lane in ('invoice_facts','statement_facts','llm_witness','payroll_facts') then
+    select coalesce(sum(attempt_count),0)::int into v_attempts
+      from clara.document_processing_tasks where document_id=t.document_id
+        and lane=t.lane;
+    if v_attempts>=3 then
+      update clara.document_processing_tasks set status='failed',error_code='attempt_cap',
+        finished_at=now() where id=p_task;
+      perform clara._refund_processing_call(p_task,'attempt_cap');
+      -- 0038 as-built fix: the terminal event follows the LANE -- a statement task's cap
+      -- must fire the statement feed (its subscribed twin), never wake the autodraft
+      -- consumer with a phantom invoice failure. F-A1 PR-1 (M9): llm_witness gets its OWN
+      -- twin -- the subscriber census (packages/runtime/lib/autodraft.mjs's
+      -- AUTODRAFT_EVENT_TYPES, and a repo-wide grep for both existing type strings) found
+      -- no consumer of either existing type that a witness-lane failure could misfire into,
+      -- so the lane-true default applies rather than folding into the invoice twin.
+      perform clara._append_event(t.firm_id,
+        case when t.lane='statement_facts' then 'document.statement_facts_failed'
+             when t.lane='llm_witness' then 'document.llm_witness_failed'
+             when t.lane='payroll_facts' then 'document.payroll_facts_failed'
+             else 'document.invoice_facts_failed' end,
+        null,null,null,null,
+        null,t.document_id,null,jsonb_build_object('task_id',p_task,'reason','attempt_cap'));
+      return jsonb_build_object('task_id',p_task,'status','failed','reason','attempt_cap');
+    end if;
+  end if;
+  select coalesce(l.ocr_concurrency,2) into v_cap from clara.firms f
+    left join clara.firm_document_limits l on l.firm_id=f.id where f.id=t.firm_id;
+  select count(*)::int into v_running from clara.document_processing_tasks
+    where firm_id=t.firm_id and lane in ('ocr','invoice_facts','statement_facts')
+      and status='running';
+  if t.lane in ('ocr','invoice_facts','statement_facts') and v_running>=v_cap then
+    raise exception 'document-processing concurrency limit reached' using errcode='CLR18';
+  end if;
+  -- F-A1 PR-1 (M10): llm_witness gets its OWN concurrency window, counted over
+  -- lane='llm_witness' alone -- it must NEVER be folded into the shared ocr/invoice_facts/
+  -- statement_facts count above, or the slowest lane could starve the others' throughput.
+  -- The limit column (llm_witness_concurrency) is nullable with a table-level default of 2,
+  -- coalesced here exactly the way ocr_concurrency is above.
+  -- #945: payroll_facts takes the SAME per-lane window, counted over its OWN lane. The limit
+  -- COLUMN is shared (llm_witness_concurrency) because both are model-read lanes with the same
+  -- cost shape and a firm that tunes one means both; the COUNT is per lane, which is the half
+  -- that matters -- folding the two into one count would let a payroll backlog starve invoices.
+  if t.lane in ('llm_witness','payroll_facts') then
+    select coalesce(l.llm_witness_concurrency,2) into v_cap from clara.firms f
+      left join clara.firm_document_limits l on l.firm_id=f.id where f.id=t.firm_id;
+    select count(*)::int into v_running from clara.document_processing_tasks
+      where firm_id=t.firm_id and lane=t.lane and status='running';
+    if v_running>=v_cap then
+      raise exception 'document-processing concurrency limit reached' using errcode='CLR18';
+    end if;
+  end if;
+  -- Q1: the CAPABILITY minted on this fresh claim — a random preimage whose digest ALONE
+  -- is stored (never the preimage). Returned once, below, to this session only.
+  v_secret:=gen_random_uuid()::text;
+  update clara.document_processing_tasks set status='running',
+    workflow_run_id=p_workflow_run_id,started_at=now(),attempt_count=attempt_count+1,
+    claim_secret_digest=sha256(convert_to(v_secret,'UTF8'))
+    where id=p_task;
+  if t.lane='ocr' then update clara.documents set extraction_status='running' where id=t.document_id; end if;
+  return jsonb_build_object('task_id',p_task,'status','running',
+    'workflow_run_id',p_workflow_run_id,'document_id',t.document_id,
+    'firm_id',t.firm_id,'lane',t.lane,'storage_path',d.storage_path,
+    'sha256',d.sha256,'mime_type',d.mime_type,'byte_size',d.byte_size,
+    'claim_secret',v_secret);
+end $w945_claim$
+;
+
+CREATE OR REPLACE FUNCTION clara.release_held_document_tasks(p_limit integer DEFAULT 1000)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $w945_release$
+declare v_n int; v_ids uuid[];
+begin
+  -- The kill-switch RELEASE sweep. A lane that can be HELD and cannot be RELEASED is a
+  -- permanent stall, so this lane list must track claim_document_processing_task's
+  -- kill-switch list EXACTLY (0038 E4/E8; the migration tail re-asserts it).
+  --
+  -- F4 fix: 'held_egress' alone does NOT mean "kill-switch-blocked" -- the claim body
+  -- writes three different hold reasons to that one status and records none of them. For
+  -- the ONE lane that can be held for a reason the kill switch has no authority over
+  -- (invoice_facts, the LEGACY purpose-blind consent gate) re-derive that gate FRESH, right
+  -- here, off the same join the claim body runs (0038:6870-6878). A row this predicate
+  -- declines stays held_egress, untouched.
+  with picked as (
+    select t.id from clara.document_processing_tasks t
+    -- #945: payroll_facts joins BOTH lists together with the claim body's kill-switch list --
+    -- a lane that can be HELD and cannot be RELEASED is a permanent stall.
+    where t.status='held_egress' and t.lane in ('ocr','invoice_facts','statement_facts','llm_witness','payroll_facts')
+      and (
+        -- KILL-SWITCH-ONLY lanes. claim_document_processing_task runs no per-client LEGACY
+        -- consent check for either: 'ocr' is pre-attribution, and 'statement_facts' is
+        -- authorized by the TYPED (consent, activation) pair at enqueue -- reading the
+        -- legacy table for it here would let a purpose-blind consent authorize a
+        -- statement-specific vendor read (0038 E3 header / 0020 section 1). Their only
+        -- hold cause is the switch this sweep's caller has already turned back on.
+        t.lane in ('ocr','statement_facts','llm_witness','payroll_facts')
+        or (t.lane='invoice_facts' and (
+             exists (
+               select 1 from clara.document_filings f
+               where f.document_id=t.document_id and f.retired_at is null
+             )
+             and not exists (
+               select 1 from clara.document_filings f
+               where f.document_id=t.document_id and f.retired_at is null
+                 and not exists (
+                   select 1 from clara.client_egress_consents c
+                   where c.client_id=f.client_id and c.revoked_at is null
+                 )
+             )
+           ))
+      )
+    order by t.created_at,t.id for update skip locked
+    limit greatest(1,least(p_limit,10000))
+  ), moved as (
+    update clara.document_processing_tasks t set status='queued'
+    from picked p where t.id=p.id returning t.id
+  )
+  select count(*)::int,array_agg(id) into v_n,v_ids from moved;
+  if v_ids is not null then
+    update clara.documents d set extraction_status='pending'
+      where d.id in (select t.document_id from clara.document_processing_tasks t
+        where t.id=any(v_ids) and t.lane='ocr');
+  end if;
+  return jsonb_build_object('released',coalesce(v_n,0));
+end $w945_release$
+;
+
+reset role;
+
+-- =====================================================================================
 -- §Z  TAIL. Everything this file claims to have done, re-derived from the live catalog.
 -- =====================================================================================
 do $w945_tail$
 declare
-  v_sha text; v_n int;
+  v_sha text; v_n int; v_row record;
 begin
   -- 1 · THE GRAMMAR REGISTERS `payroll` AND STILL REFUSES EVERYTHING OUTSIDE ITS ROSTER, driven
   --     through the CHECK's own boolean sibling rather than asserted from the body text.
@@ -733,6 +1806,67 @@ begin
     raise exception '#945 tail: an application role holds EXECUTE on clara._payroll_answers_ok -- it is an internal'
       using errcode = 'CLR10';
   end if;
+
+  -- 5 · THE LANE EXISTS AT EVERY WALL THAT HAS TO ADMIT IT, and the five recut bodies all carry
+  --     it. A lane one wall admits and another refuses is a lane that stalls mid-flight.
+  for v_row in select * from (values
+      ('ck_processing_task_lane_f_a1','document_processing_tasks'),
+      ('ck_processing_task_lane_engine_f_a1_stmt','document_processing_tasks'),
+      ('ck_processing_task_error_code_f_a1','document_processing_tasks'),
+      ('ck_processing_task_binding_f_a1','document_processing_tasks'),
+      ('ck_document_extractions_engine_kind_f_a1','document_extractions')
+    ) as t(conname, relname)
+  loop
+    select count(*)::int into v_n from pg_constraint
+     where conrelid = ('clara.' || v_row.relname)::regclass and conname = v_row.conname;
+    if v_n <> 1 then
+      raise exception '#945 tail: % is not on clara.%', v_row.conname, v_row.relname using errcode = 'CLR10';
+    end if;
+  end loop;
+  for v_row in select * from (values
+      ('clara._enqueue_invoice_facts_core(uuid)'), ('clara.enqueue_invoice_facts(uuid)'),
+      ('clara._tf_processing_task_update()'),
+      ('clara.claim_document_processing_task(uuid,text,boolean)'),
+      ('clara.release_held_document_tasks(integer)')
+    ) as t(sig)
+  loop
+    if not exists (select 1 from pg_proc p
+                    where p.oid = v_row.sig::regprocedure
+                      and position('payroll_facts' in p.prosrc) > 0) then
+      raise exception '#945 tail: % does not name the payroll_facts lane -- the recut did not land', v_row.sig
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- 6 · THE LANE'S TWO EVENT TYPES ARE REGISTERED AND ROUTED. clara.domain_events carries an FK
+  --     onto clara.event_types, so an unregistered type is an INSERT failure at the worst moment.
+  select count(*)::int into v_n from clara.event_types
+   where name in ('document.payroll_facts_completed','document.payroll_facts_failed') and client_scoped;
+  if v_n <> 2 then
+    raise exception '#945 tail: % of the 2 payroll event types are registered client-scoped', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.trigger_taxonomy t
+    join clara.taxonomy_active a on a.version = t.version
+   where t.event_type in ('document.payroll_facts_completed','document.payroll_facts_failed')
+     and t.decision = 'ignore';
+  if v_n <> 2 then
+    raise exception '#945 tail: % of the 2 payroll event types are routed at the active taxonomy version', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- 7 · NO OTHER LANE MOVED. The three lane rosters this file widened still carry every value
+  --     they carried before, so this is a widening and not a re-shuffle.
+  for v_row in select * from unnest(array['ocr','structured_parse','none','invoice_facts',
+      'local_facts','classify','statement_facts','statement_parse','llm_witness','payroll_facts']) as t(lane)
+  loop
+    if position('''' || v_row.lane || '''' in
+        (select pg_get_constraintdef(oid) from pg_constraint
+          where conrelid = 'clara.document_processing_tasks'::regclass
+            and conname = 'ck_processing_task_lane_f_a1')) = 0 then
+      raise exception '#945 tail: the lane roster lost %', v_row.lane using errcode = 'CLR10';
+    end if;
+  end loop;
 
   raise notice '#945 tail: OK -- the canonical field-path grammar registers the `payroll` namespace beside the five other fact families and still refuses an unregistered one with CLR10 / field_path_namespace; clara._field_path_conforms is byte-untouched and the recut body keeps its immutable, non-definer, clara_fn_owner disposition and all its EXECUTE holders; clara._payroll_answers_ok admits a complete envelope, refuses one missing an answer and one carrying an unknown key, and is granted to no application role.';
 end

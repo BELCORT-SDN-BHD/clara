@@ -143,16 +143,28 @@ test("an EXCLUDED kind (payment_voucher) still yields the skipped_kind terminal 
   assert.equal(full.rows[0].attempt_count, 0, "the receipt row was never claimed and consumes no attempts");
 });
 
-test("payroll_summary and claim_form ALSO still refuse the facts lane (a broad narrowing check, not just one kind)", async () => {
+// #945 (migration 0296) TOOK payroll_summary OUT OF THIS CELL'S POPULATION, and the cell says so
+// rather than quietly dropping the name. #926's owner ruling (2026-09-18, option G) reopened
+// payroll reading, so a payroll summary now has a reader and its own `payroll_facts` lane; what
+// this cell has always been about — the INVOICE facts lane stays narrow, and a kind with no
+// reader still terminates cleanly — is unchanged and is asserted over both halves below. The
+// payroll lane's own behaviour lives in packages/db/tests/payroll-summary-facts.test.mjs (S4).
+test("claim_form still refuses the facts lane, and payroll_summary refuses it too — by having its OWN lane, not by a receipt", async () => {
   requireReady();
   const client = W.clients.A1;
-  for (const kind of ["payroll_summary", "claim_form"]) {
-    const doc = await kindDoc(W.users.alice, { client, kind });
-    await enqueueInvoiceFacts(doc.documentId);
-    const tasks = await laneTasks(doc.documentId, "invoice_facts");
-    assert.ok(tasks.some((t) => t.status === "failed" && t.error_code === "skipped_kind"),
-      `${kind} still yields skipped_kind after the 0025 widening`);
-  }
+  const claim = await kindDoc(W.users.alice, { client, kind: "claim_form" });
+  await enqueueInvoiceFacts(claim.documentId);
+  const claimTasks = await laneTasks(claim.documentId, "invoice_facts");
+  assert.ok(claimTasks.some((t) => t.status === "failed" && t.error_code === "skipped_kind"),
+    "claim_form still yields skipped_kind after the 0025 widening");
+
+  const payroll = await kindDoc(W.users.alice, { client, kind: "payroll_summary" });
+  await enqueueInvoiceFacts(payroll.documentId);
+  const invoiceLane = await laneTasks(payroll.documentId, "invoice_facts");
+  assert.equal(invoiceLane.length, 0,
+    `a payroll_summary enters NO invoice_facts task of any status (got: ${invoiceLane.map((t) => `${t.status}/${t.error_code}`).join(",")})`);
+  const payrollLane = await laneTasks(payroll.documentId, "payroll_facts");
+  assert.ok(payrollLane.length > 0, "…it rides its own lane instead (#945)");
 });
 
 // ===========================================================================

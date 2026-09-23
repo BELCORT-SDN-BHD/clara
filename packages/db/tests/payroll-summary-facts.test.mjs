@@ -22,14 +22,21 @@
 //       row where one exists, and compares the two readings. The model never sums: every figure
 //       in the state is either a rendering the page printed or an arithmetic result THIS
 //       function produced.
+//   S4. THE FACTS ROUTER — clara.enqueue_invoice_facts(uuid), the door every caller reaches
+//       (file_document, finalize_document_intake, the facts-gate consumer). A payroll_summary
+//       pdf stops terminating as `skipped_kind` and enters its own `payroll_facts` lane, under
+//       the same enqueue-time typed-consent gate the witness lanes hold.
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention).
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, ensureReady, endPool } from "./rig-fixtures.mjs";
+import { rootQuery, ensureReady, endPool, buildWorld } from "./rig-fixtures.mjs";
+import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, docTasks } from "./a21-helpers.mjs";
+import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
 
 let ready = false;
+let world = null;
 
 before(async () => {
   ready = await ensureReady();
@@ -47,7 +54,9 @@ before(async () => {
       );
     }
     ready = false;
+    return;
   }
+  world = await buildWorld();
 });
 
 after(async () => {
@@ -519,4 +528,101 @@ test("S3 · the evaluator is a closed, single-member closure: it calls no other 
   assert.equal(ev[0].entrypoint_signature, "clara.evaluate_payroll_run_state_v1(jsonb,jsonb)");
   assert.equal(ev[0].migration_version, "0296_payroll_summary_typed_facts");
   assert.equal(ev[0].deployed, false, "the deploy flip is a one-way ceremony act, never a migration's to make");
+});
+
+// ---------------------------------------------------------------------------
+// S4 — the facts router
+// ---------------------------------------------------------------------------
+
+/** A FILED payroll-summary pdf with a done OCR extraction and one cited region, born through the
+ *  real doors (a21-classifier-gate.test.mjs's own `pdfDoc` shape), never by surgery. */
+async function payrollDoc(client, { consent = true } = {}) {
+  const sub = world.users.alice;
+  const firm = await firmOf(client);
+  // The consent is granted BEFORE the document is filed, deliberately: `file_document` runs the
+  // facts enqueue itself, so granting afterwards would leave a pre-consent gate receipt on the
+  // trail beside the live task and make "exactly one task" a lie about the lane rather than
+  // about this helper.
+  if (consent) {
+    const evidence = await consentEvidenceDoc(sub, { firm });
+    const grant = await grantPurpose(sub, { client, purpose: "witness_extraction", evidenceDocument: evidence.documentId });
+    await activatePurpose(sub, { client, purpose: "witness_extraction", consent: grant.consent_id });
+  }
+  const doc = await filedDocument(sub, { firm, client, kind: "payroll_summary" });
+  const extractionId = await seedExtraction({ firm, document: doc.documentId, engineKind: "ocr", status: "done" });
+  const regionId = await seedRegion({
+    firm, extraction: extractionId, fieldPath: "payroll.run.gross_pay", textContent: "5,000.00",
+  });
+  return { ...doc, extractionId, regionId };
+}
+
+test("S4 · a payroll_summary pdf stops terminating as skipped_kind and enters its own lane", async (t) => {
+  if (unready(t)) return;
+
+  const doc = await payrollDoc(world.clients.A1);
+  const receipt = await enqueueInvoiceFacts(doc.documentId);
+  assert.equal(receipt.status, "queued", `the router admits the document: ${JSON.stringify(receipt)}`);
+
+  const tasks = await docTasks(doc.documentId);
+  assert.equal(
+    tasks.filter((x) => x.error_code === "skipped_kind").length, 0,
+    "no skipped_kind receipt is left anywhere on the trail — the dead end is gone, not merely bypassed",
+  );
+  const lane = tasks.filter((x) => x.lane === "payroll_facts");
+  assert.equal(lane.length, 1, `exactly one payroll_facts task: ${JSON.stringify(tasks.map((x) => `${x.lane}/${x.status}/${x.error_code}`))}`);
+  assert.equal(lane[0].status, "queued", "the task is LIVE, not a consent refusal in disguise");
+  assert.match(lane[0].engine_id, /^llm-/, "the payroll lane is an LLM witness-pair lane, and its engine identity says so");
+  assert.equal(
+    tasks.filter((x) => x.lane === "invoice_facts").length, 0,
+    "a payroll summary never enters the invoice lane — this widens the estate, it does not reroute the invoice family",
+  );
+
+  // Idempotent: the facts-gate consumer re-fires this enqueue on every classified/extraction
+  // event, and a second call must find the queued task rather than mint a second one.
+  const again = await enqueueInvoiceFacts(doc.documentId);
+  assert.equal(again.status, "queued");
+  assert.equal((await docTasks(doc.documentId)).filter((x) => x.lane === "payroll_facts").length, 1,
+    "a re-fire finds the in-flight task; it never mints a second one");
+});
+
+test("S4 · the payroll lane holds the SAME enqueue-time typed-consent gate the witness lanes hold", async (t) => {
+  if (unready(t)) return;
+
+  // A client with no live witness_extraction activation: the read is refused BEFORE a task is
+  // ever runnable, and the refusal is a terminal never-claimed receipt, never a raise (the
+  // router runs inside file_document, and a raise would abort an unrelated filing transaction).
+  const doc = await payrollDoc(world.clients.A2, { consent: false });
+  const receipt = await enqueueInvoiceFacts(doc.documentId);
+  assert.equal(receipt.status, "failed");
+  assert.equal(receipt.reason, "payroll_consent_inactive");
+
+  const lane = (await docTasks(doc.documentId)).filter((x) => x.lane === "payroll_facts");
+  assert.equal(lane.length, 1);
+  assert.equal(lane[0].status, "failed");
+  assert.equal(lane[0].error_code, "payroll_consent_inactive");
+  assert.equal(lane[0].attempt_count, 0, "a gate verdict consumes no attempts");
+  assert.equal(lane[0].started_at, null, "…and was never claimed");
+});
+
+test("S4 · every other kind's route through the recut router is unchanged", async (t) => {
+  if (unready(t)) return;
+
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const firm = await firmOf(client);
+
+  // An invoice still routes to llm_witness (the F-A1 PR-3 cutover), not to the payroll lane.
+  const inv = await filedDocument(sub, { firm, client, kind: "invoice" });
+  await seedExtraction({ firm, document: inv.documentId, engineKind: "ocr", status: "done" });
+  await enqueueInvoiceFacts(inv.documentId);
+  const invTasks = await docTasks(inv.documentId);
+  assert.equal(invTasks.filter((x) => x.lane === "llm_witness").length, 1, "an invoice still rides llm_witness");
+  assert.equal(invTasks.filter((x) => x.lane === "payroll_facts").length, 0);
+
+  // A kind with no reader still terminates cleanly as skipped_kind: this file widened the router
+  // by ONE arm and removed nobody else's dead end.
+  const other = await filedDocument(sub, { firm, client, kind: "tax_correspondence" });
+  await seedExtraction({ firm, document: other.documentId, engineKind: "ocr", status: "done" });
+  const otherReceipt = await enqueueInvoiceFacts(other.documentId);
+  assert.equal(otherReceipt.status, "skipped_kind", "the skipped_kind arm still serves every kind with no reader");
 });
