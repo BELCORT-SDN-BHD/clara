@@ -62,6 +62,15 @@ export const PREPAY = {
   memoScheduleId: "65999999-6536-4653-8653-653653653653",
   memoPlanId: "65aaaaaa-6536-4653-8653-653653653653",
   statedTermId: "65bbbbbb-6536-4653-8653-653653653653",
+  // #940 — THE ROSTER LANE'S OWN RECOGNITION AND SCHEDULE. Its own ids, so the roster walk can
+  // drive a full enrol -> amortise journey without consuming either of the two transitions the
+  // refusal and memo-only cells own. Same id space, same tail, so the ownership census still sees
+  // one lane.
+  rosterEntryId: "65ccc0cc-6536-4653-8653-653653653653",
+  rosterScheduleId: "65ddd0dd-6536-4653-8653-653653653653",
+  rosterPlanId: "65eee0ee-6536-4653-8653-653653653653",
+  enrolmentId: "65fff0ff-6536-4653-8653-653653653653",
+  rosterPurpose: "Prepaid rent, amortised after enrolment",
   purpose: "Annual software subscription",
   refusingPurpose: "Annual software subscription",
   memoPurpose: "Prepaid insurance, no invoice",
@@ -80,6 +89,10 @@ export const PREPAY_RPC_VERBS = new Set([
   "resume_accounting_plan",
   "end_accounting_plan",
   "request_plan_catch_up",
+  // #940 — the two roster doors. Bookkeeper floor in the real estate; this fixture fakes only the
+  // transport, exactly as it does for every other door here.
+  "enrol_prepayment_account",
+  "retire_prepayment_account",
 ]);
 
 const state = {
@@ -89,6 +102,11 @@ const state = {
   // configured. Making them real transitions is what proves the surface RE-READS after each write
   // instead of painting its own optimistic answer.
   statedTerm: false, memoCreated: false,
+  // #940 — THE ROSTER'S OWN TWO TRANSITIONS. `enrolled` starts TRUE because every other cell in
+  // this walk configures a schedule, and a client with an empty roster can configure nothing: the
+  // roster gates amortisation ahead of the shared eligibility wall. The roster cell retires it,
+  // watches the consequence, enrols it again and amortises — and leaves it true.
+  enrolled: true, rosterCreated: false,
 };
 
 export function resetPrepayments() {
@@ -114,11 +132,28 @@ const CLIENT = () => ({
   created_at: "2026-01-01T00:00:00.000Z",
 });
 
+// #940 — `account_class` is SPELLED, not omitted. The prepayment-account panel offers only
+// non-control accounts (`account_class === null`), which an absent field is not: a row without it
+// would leave the enrol dropdown empty and the cell would fail for the wrong reason.
 const ACCOUNTS = () => [
-  { client_id: PREPAY.clientId, account_code: "19000001", name: "Prepayments", account_type: "asset", is_active: true },
-  { client_id: PREPAY.clientId, account_code: "59000001", name: "Software subscriptions", account_type: "expense", is_active: true },
-  { client_id: PREPAY.clientId, account_code: "59000002", name: "Insurance", account_type: "expense", is_active: true },
+  { client_id: PREPAY.clientId, account_code: "19000001", name: "Prepayments", account_type: "asset", account_class: null, is_active: true },
+  { client_id: PREPAY.clientId, account_code: "59000001", name: "Software subscriptions", account_type: "expense", account_class: null, is_active: true },
+  { client_id: PREPAY.clientId, account_code: "59000002", name: "Insurance", account_type: "expense", account_class: null, is_active: true },
 ];
+
+/** #940 — THE PER-CLIENT PREPAYMENT-ACCOUNT ROSTER, as the panel reads it: the LIVE population
+ *  only, which is exactly what the schedule door asks. Empty while retired, which is the state the
+ *  roster cell drives the form into. */
+const ROSTER_ROWS = () => (state.enrolled ? [{
+  id: PREPAY.enrolmentId,
+  account_code: "19000001",
+  purpose: "prepayment",
+  reason: "this account holds the client's prepaid insurance and prepaid rent, and nothing else",
+  active: true,
+  enrolled_at: "2026-04-01T00:00:00.000Z",
+  created_by: PREPAY.firmId,
+  retired_at: null,
+}] : []);
 
 const status = () => (state.paused ? "paused" : "active");
 
@@ -408,6 +443,52 @@ const MEMO_CREATED = () => ({
   overlap_warning: null,
 });
 
+/** #940 — the roster lane's schedule, once it exists. A document-bound one, so the ONLY thing that
+ *  ever stood between it and the books was the roster. */
+const ROSTER_DETAIL = () => ({
+  ...MEMO_DETAIL(),
+  schedule_id: PREPAY.rosterScheduleId,
+  plan_id: PREPAY.rosterPlanId,
+  purpose: PREPAY.rosterPurpose,
+  source_entry_id: PREPAY.rosterEntryId,
+  source_posting_date: "2026-04-22",
+  source_memo: "quarterly rent, paid in advance",
+  document_id: PREPAY.documentId,
+  service_period_id: PREPAY.documentId,
+  term_source: "document_service_period",
+  stated_term_id: null,
+  term_stated_by: null,
+  term_stated_at: null,
+  term_reason: null,
+  basis_kind: "document_stated",
+  schedule_version: "v1",
+  expense_account_code: "59000001",
+  expense_account_basis: "rent is charged to rent",
+});
+
+const ROSTER_CREATED = () => ({
+  ...MEMO_CREATED(),
+  ...ROSTER_DETAIL(),
+  revision_id: "65bbb0bb-6536-4653-8653-653653653653",
+});
+
+/** #940 — the ROSTER refusal, with 0140's own `prepayment_source_unfit` token and the NEW axis
+ *  that names the enrolment door and the panel. One axis, not a second vocabulary. */
+const NOT_ENROLLED_REFUSAL = {
+  code: "CLR10",
+  message: "account 19000001 is not enrolled as a prepayment account for this client",
+  details: JSON.stringify({
+    reason: "prepayment_source_unfit",
+    reason_text: "account 19000001 is not enrolled as a prepayment account for this client",
+    axis: "prepaid_account_not_enrolled",
+    prepaid_account_code: "19000001",
+    source_entry: PREPAY.rosterEntryId,
+    remedy: "clara.enrol_prepayment_account",
+    panel: "client_registers_prepayment_accounts",
+  }),
+  hint: null,
+};
+
 /** #939 — the memo-only lane's own create-time refusal: no document AND no stated term, so the
  *  payload names the CARRIER and the DOOR that fills it rather than `journal_entries.document_id`,
  *  which is what the old answer named and which told a firm its prepayment could never be
@@ -449,7 +530,12 @@ const ATTENTION_REFUSING = () => (state.paused ? [] : [{
 /** ARM B — the posted prepayment nothing amortises. Its document states NO term until the walk's
  *  first create attempt has been refused; that is what makes the two halves of the arm visible
  *  in one journey. */
-const ATTENTION_UNSCHEDULED = () => [
+// #940 — EVERY ARM-B ROW IS GATED ON THE ROSTER, because every one of them is an OFFER: the
+// surface renders it with a "configure the schedule" action, and the door would refuse it on an
+// account nobody enrolled. That is the database's own predicate (migration 0306 recuts
+// `clara.list_prepayment_attention` to ask the SAME `clara._prepayment_account_enrolled` the door
+// asks); this fixture mirrors it so the walk cannot show an offer the estate would not.
+const ATTENTION_UNSCHEDULED = () => (!state.enrolled ? [] : [
   ...(state.created ? [] : [{
     arm: "unscheduled",
     entry_id: PREPAY.unscheduledEntryId,
@@ -477,7 +563,22 @@ const ATTENTION_UNSCHEDULED = () => [
     has_live_term: state.statedTerm,
     next_step: state.statedTerm ? "configure_schedule" : "state_service_period",
   }]),
-];
+  // #940 — THE ROSTER LANE'S OWN CANDIDATE: document-bound, term already stated, and waiting only
+  // on the account being on the roster. It is the recognition the roster cell amortises once it has
+  // enrolled the account again.
+  ...(state.rosterCreated ? [] : [{
+    arm: "unscheduled",
+    entry_id: PREPAY.rosterEntryId,
+    posting_date: "2026-04-22",
+    memo: "quarterly rent, paid in advance",
+    document_id: PREPAY.documentId,
+    term_carrier: "document_service_period",
+    prepaid_account_code: "19000001",
+    amount_cents: 100001,
+    has_live_term: true,
+    next_step: "configure_schedule",
+  }]),
+]);
 
 const CREATED = () => ({
   schedule_id: PREPAY.scheduleId,
@@ -623,6 +724,35 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
     return false;
   }
 
+  // #940 — THE ROSTER RELATION, read directly by the Registers panel and by the configure form.
+  // `clara.prepayment_account_enrolments` carries a real SELECT grant to clara_authenticated under
+  // forced RLS, so this is a relation read rather than an rpc — which is also why the verb census
+  // in `e2e-fixture-ownership.test.ts` cannot see it.
+  if (request.method === "GET" && path === "/rest/v1/prepayment_account_enrolments") {
+    if (clientFilter === `eq.${PREPAY.clientId}`) {
+      sendJson(response, 200, ROSTER_ROWS(), cors);
+      return true;
+    }
+    return false;
+  }
+
+  // #940 — THE FIXED-ASSET HALF OF THE REGISTERS TAB, answered EMPTY for this lane's client only.
+  // The prepayment-account panel lives beside the fixed-asset account profiles, so the roster cell
+  // has to render that whole tab; these four reads are what it asks for, and every one of them
+  // answers the honest empty shape its own door answers for a client with no fixed assets. The
+  // FIXTURES for those surfaces belong to `fixed-asset-mock.mjs` and `depreciation-mock.mjs`, which
+  // run FIRST in `serve-built.mjs`'s chain and fall through for a client that is not theirs.
+  if (request.method === "GET" && path === "/rest/v1/fa_account_profiles") {
+    if (clientFilter !== `eq.${PREPAY.clientId}`) return false;
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+  if (request.method === "GET" && path === "/rest/v1/fa_account_depreciation_policies") {
+    if (clientFilter !== `eq.${PREPAY.clientId}`) return false;
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+
   // The DETAIL read's own route, scoped to this lane's own client exactly as
   // `journal-work-mock.mjs` and `work-list-mock.mjs` scope their own copies of it. The authority
   // Select no longer arrives here (#809 — see `prepaymentWorkListPage` above).
@@ -638,6 +768,60 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
   const verb = path.slice("/rest/v1/rpc/".length);
   if (!matchVerb(PREPAY_RPC_VERBS, verb)) return false;
   const body = await readJson(request);
+
+  // #940 — THE TWO ROSTER DOORS. Bookkeeper floor in the real estate; this fixture fakes the
+  // transport only. Both are real TRANSITIONS rather than canned answers: the panel and the form
+  // both RE-READ afterwards, and what they then show is this state, never their own optimism.
+  if (verb === "enrol_prepayment_account") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    state.enrolled = true;
+    sendJson(response, 200, {
+      enrolment_id: PREPAY.enrolmentId, client_id: PREPAY.clientId,
+      account_code: body.p_account, purpose: body.p_purpose, reason: body.p_reason,
+      enrolled_by: PREPAY.firmId, active: true,
+    }, cors);
+    return true;
+  }
+  if (verb === "retire_prepayment_account") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    state.enrolled = false;
+    sendJson(response, 200, {
+      enrolment_id: PREPAY.enrolmentId, client_id: PREPAY.clientId,
+      account_code: body.p_account, purpose: body.p_purpose,
+      retired_by: PREPAY.firmId, active: false,
+    }, cors);
+    return true;
+  }
+
+  // #940 — the four FIXED-ASSET reads the Registers tab makes, empty for this lane's client.
+  if (verb === "list_fixed_assets") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    sendJson(response, 200, {
+      client_id: PREPAY.clientId, as_of: "2026-04-22", assets: [], incomplete_count: 0,
+    }, cors);
+    return true;
+  }
+  if (verb === "fa_register_tie") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    sendJson(response, 200, {
+      client_id: PREPAY.clientId, as_of: "2026-04-22", tie: true, accounts: [],
+      incomplete_count: 0, pending_draft_count: 0,
+    }, cors);
+    return true;
+  }
+  if (verb === "get_depreciation_authority") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    sendJson(response, 200, {
+      client_id: PREPAY.clientId, authority: null, ramp_earned: false,
+      fy_end: { month: 12, day: 31, fallback: true }, high_stakes_threshold_cents: 1000000,
+    }, cors);
+    return true;
+  }
+  if (verb === "list_depreciation_runs") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    sendJson(response, 200, { client_id: PREPAY.clientId, runs: [] }, cors);
+    return true;
+  }
 
   if (verb === "list_prepayment_schedules") {
     if (body.p_client !== PREPAY.clientId) return false;
@@ -657,6 +841,10 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
   }
 
   if (verb === "get_prepayment_schedule") {
+    if (body.p_schedule === PREPAY.rosterScheduleId) {
+      sendJson(response, 200, ROSTER_DETAIL(), cors);
+      return true;
+    }
     if (body.p_schedule === PREPAY.memoScheduleId) {
       sendJson(response, 200, MEMO_DETAIL(), cors);
       return true;
@@ -697,6 +885,19 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
       }
       state.memoCreated = true;
       sendJson(response, 200, MEMO_CREATED(), cors);
+      return true;
+    }
+    // #940 — THE ROSTER, ASKED WHERE THE DOOR ASKS IT: after the branch on the source entry and
+    // BEFORE the authority is resolved, which is the real body's own order (0306 §D inserts the
+    // roster question immediately before the shared eligibility wall, and both sit ahead of the
+    // expense-target and authority half).
+    if (body.p_source_entry === PREPAY.rosterEntryId) {
+      if (!state.enrolled) {
+        sendJson(response, 400, NOT_ENROLLED_REFUSAL, cors);
+        return true;
+      }
+      state.rosterCreated = true;
+      sendJson(response, 200, ROSTER_CREATED(), cors);
       return true;
     }
     // THE DOOR RESOLVES THE AUTHORITY FIRST, so this fixture does too: a payload citing anything

@@ -39,6 +39,9 @@ const CLIENT = PREPAY.clientId;
 const LIST_URL = `/clients/${CLIENT}/prepayments`;
 const DETAIL_URL = `/clients/${CLIENT}/prepayments/${PREPAY.scheduleId}`;
 const NEW_URL = `/clients/${CLIENT}/prepayments/new`;
+// #940 — the Registers view that carries the per-client PREPAYMENT-ACCOUNT roster panel, beside
+// the fixed-asset account profiles.
+const REGISTERS_URL = `/clients/${CLIENT}/registers?tab=fixedAssets`;
 
 /** #1017 — delegates to the shared settle-before-scan contract (./helpers) instead of this file's
  *  own animations-only wait, which never checked the enter/mount opacity fade settleForScan also
@@ -87,7 +90,12 @@ test("prepayments.walk.attention: both persistent statements render, the attenti
   // no longer unique on the page. The count is asserted rather than the uniqueness relied on: a
   // strict-mode failure would have been this cell noticing the new row by accident, and the row is
   // the point.
-  await expect(page.getByTestId("prepayment-attention-unscheduled")).toHaveCount(2);
+  //
+  // #940 — AND A THIRD, the roster lane's own recognition (`prepayments.walk.roster` amortises it
+  // last in this file). Every one of these three is an OFFER, and after #940 arm B only ever
+  // carries a recognition whose account is on the client's prepayment roster — which is why the
+  // roster cell, having retired it, finds this band empty.
+  await expect(page.getByTestId("prepayment-attention-unscheduled")).toHaveCount(3);
   await expect(page.getByText(/Posted, not yet amortised/).first()).toBeVisible();
   await expect(page.getByText(/states no service period yet/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Open the document" })).toBeVisible();
@@ -348,4 +356,80 @@ test("prepayments.walk.motion_and_back: under prefers-reduced-motion nothing ani
   await expect(page.getByText(/never initiates a bank payment/)).toBeVisible();
   await expect(page.getByText(/An accepted schedule is not a posted period/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Annual software subscription" }).first()).toBeVisible();
+});
+
+
+// ===========================================================================================
+// prepayments.walk.roster — #940, end to end: the account a client's prepayments are amortised
+// against is a per-client ENROLMENT, and the whole journey runs in one browser: read the roster,
+// retire it, watch every prepayment surface say why nothing can be configured, enrol it again with
+// a stated reason, and amortise against it.
+//
+// IT RUNS LAST IN THIS FILE AND RESTORES WHAT IT FOUND. The fixture is stateful per SERVER (this
+// file's header), and this cell is the only one that moves the roster; it leaves the account
+// enrolled, and it amortises its OWN recognition rather than either of the two transitions the
+// refusal and memo-only cells own.
+// ===========================================================================================
+
+test("prepayments.walk.roster: the Registers page carries the prepayment-account roster with the reason a person gave; retiring it empties the amortisation form and says why, with a link back; enrolling it again with a reason makes the SAME prepayment configurable, and the schedule opens", async ({ page }) => {
+  // FOUR polls: this cell's own explicit waits total 60s (two 30s URL waits) against a 30s base,
+  // and #864's census refuses a cell whose waits can eat its whole budget without saying so.
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
+  await signInTo(page, REGISTERS_URL);
+
+  // THE PANEL IS ON THE REGISTERS PAGE, beside the fixed-asset account profiles, and it shows the
+  // REASON — which is the whole audit trail a later reader has for why this account is treated as
+  // a prepayment account.
+  const panel = page.getByTestId("prepayment-accounts-panel");
+  await expect(panel.getByText("Prepayment accounts")).toBeVisible();
+  await expect(panel.getByText("19000001")).toBeVisible();
+  await expect(panel.getByText(/holds the client.s prepaid insurance and prepaid rent/)).toBeVisible();
+  await scan(page, "the prepayment-account roster panel");
+
+  // RETIRE IT — and the dialog says the sentence a person could otherwise get wrong.
+  await panel.getByRole("button", { name: "Retire", exact: true }).click();
+  const retireDialog = page.getByRole("dialog");
+  await expect(retireDialog.getByText(/closes the account to NEW schedules/)).toBeVisible();
+  await expect(retireDialog.getByText(/keeps posting to the end of its term/)).toBeVisible();
+  await retireDialog.getByRole("button", { name: "Retire", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  // The panel RE-READ: the empty state is on screen because the database says the roster is empty.
+  await expect(panel.getByText(/no prepayment here can be amortised/)).toBeVisible();
+
+  // …AND THE AMORTISATION FORM SAYS WHY IT CAN OFFER NOTHING. Before #940 an empty source list
+  // meant one thing; now it can mean another, and the form names which.
+  await page.goto(NEW_URL);
+  await expect(page.getByText("No prepayment account is enrolled for this client")).toBeVisible();
+  await expect(page.getByText(/Until one is enrolled, nothing here can be configured/)).toBeVisible();
+  await scan(page, "the configure form with an empty prepayment roster");
+
+  // THE LINK IS THE REMEDY, and it goes where the enrolment is made.
+  await page.getByRole("link", { name: "Open the Registers page" }).first().click();
+  await expect(page).toHaveURL(/tab=fixedAssets$/, { timeout: 30_000 });
+
+  // ENROL IT AGAIN — with an account and a reason, both typed by the person. The Confirm is
+  // DISABLED until the reason is there, so the required basis is asked here rather than earned
+  // from the door.
+  await page.getByRole("button", { name: "Enrol an account" }).click();
+  const enrolDialog = page.getByRole("dialog");
+  await enrolDialog.getByLabel("Account", { exact: true }).selectOption("19000001");
+  await expect(enrolDialog.getByRole("button", { name: "Enrol an account" })).toBeDisabled();
+  await enrolDialog.getByLabel("Why this account holds prepayments").fill(
+    "the client pays rent and insurance a quarter ahead and books both here");
+  await enrolDialog.getByRole("button", { name: "Enrol an account" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByTestId("prepayment-accounts-panel").getByText("19000001")).toBeVisible();
+
+  // …AND THE SAME PREPAYMENT IS CONFIGURABLE AGAIN. Nothing about the recognition changed; the
+  // only thing that ever stood between it and its schedule was the roster.
+  await page.goto(NEW_URL);
+  await expect(page.getByText("No prepayment account is enrolled for this client")).toHaveCount(0);
+  await page.getByLabel("Recognised prepayment").selectOption(PREPAY.rosterEntryId);
+  await page.getByLabel("The instruction that authorises this schedule").selectOption(PREPAY.workId);
+  await page.getByLabel("Expense account").selectOption("59000001");
+  await page.getByLabel("Why that account").fill("rent is charged to rent");
+  await page.getByLabel("Purpose", { exact: true }).fill(PREPAY.rosterPurpose);
+  await page.getByRole("button", { name: "Configure the schedule" }).click();
+  await expect(page).toHaveURL(new RegExp(`/prepayments/${PREPAY.rosterScheduleId}$`), { timeout: 30_000 });
+  await expect(page.getByText(PREPAY.rosterPurpose).first()).toBeVisible();
 });
