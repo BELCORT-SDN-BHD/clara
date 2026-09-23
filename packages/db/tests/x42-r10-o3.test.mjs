@@ -43,7 +43,7 @@ import assert from "node:assert/strict";
 import {
   opk, endPool, printLaneNotes, printSkipCount, noteLane, rootQuery, humanQuery, namedCall,
   x42EnsureReady, skip42, caught, reasonToken,
-  adjWorld, freshAdjClient, liveTemplate, runManual, approveDraft, mirrorOf, retireTemplate,
+  adjWorld, freshAdjClient, liveTemplate, runOccurrence, approveDraft, mirrorOf, retireTemplate,
   prepaymentLines, accrualLines, enrolAdvance, reversePair, reverseEntry, forgeStamp,
   draftEntryV3, approveEntry, manualRes, mon, PREP, EXPA, EXPB, ACCR2,
 } from "./x42-adj-helpers.mjs";
@@ -85,7 +85,7 @@ async function stagedOverEnrolledCode(label, { autoReverse }) {
   const tpl = await liveTemplate({
     client, label, start: period.start, cents: CENTS, autoReverse,
     lines: prepaymentLines(CENTS), memo: "Prepaid insurance" });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   await approveDraft(w.users.alice, r.entry_id);
   if (!autoReverse) {
@@ -222,7 +222,7 @@ test("x42.r10o3.c1d the correction-admission authority is an EXHAUSTIVE, fail-cl
   const tpl = await liveTemplate({
     client, label: "o3c1d", start: period.start, cents: CENTS, autoReverse: true,
     lines: accrualLines(CENTS), memo: "Accrued audit fee" });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   await approveDraft(w.users.alice, r.entry_id);
   const mirror = await mirrorOf(r.entry_id);
@@ -301,7 +301,7 @@ test("x42.r10o3.c3a a standing charge whose WRITER these books cannot attribute 
   const tplA = await liveTemplate({
     client, label: "o3c3a first", start: period.start, cents: CENTS, autoReverse: false,
     lines: accrualLines(CENTS), memo: "Audit fee accrual" });
-  const rA = await runManual(w.users.bob, {
+  const rA = await runOccurrence({
     client, template: tplA.id, periodStart: period.start, periodEnd: period.end });
   await approveDraft(w.users.alice, rA.entry_id);
   // THE LEGACY STAMP: the writer can no longer be resolved, and the period keys no longer parse.
@@ -311,7 +311,7 @@ test("x42.r10o3.c3a a standing charge whose WRITER these books cannot attribute 
   const tplB = await liveTemplate({
     client, label: "o3c3a second", start: period.start, cents: CENTS, autoReverse: false,
     lines: accrualLines(CENTS), memo: "Audit fee accrual v2" });
-  const err = await caught(() => runManual(w.users.bob, {
+  const err = await caught(() => runOccurrence({
     client, template: tplB.id, periodStart: period.start, periodEnd: period.end }));
   assert.ok(err, "the gate still refuses on the money — the standing charge is real whoever wrote it");
   assert.equal(reasonToken(err), "period_shape_already_met");
@@ -345,13 +345,13 @@ test("x42.r10o3.c3b [WDB-R4 off-path] the census's two terms stay disjoint: an A
   const sib = await liveTemplate({
     client: c1, label: "o3c3b sibling", start: period.start, cents: CENTS, autoReverse: false,
     lines: accrualLines(CENTS), memo: "Audit fee" });
-  const rs = await runManual(w.users.bob, {
+  const rs = await runOccurrence({
     client: c1, template: sib.id, periodStart: period.start, periodEnd: period.end });
   await approveDraft(w.users.alice, rs.entry_id);
   const caller = await liveTemplate({
     client: c1, label: "o3c3b caller", start: period.start, cents: CENTS, autoReverse: false,
     lines: accrualLines(CENTS), memo: "Audit fee v2" });
-  const e1 = await caught(() => runManual(w.users.bob, {
+  const e1 = await caught(() => runOccurrence({
     client: c1, template: caller.id, periodStart: period.start, periodEnd: period.end }));
   assert.ok(e1);
   const d1 = JSON.parse(e1.detail);
@@ -370,7 +370,7 @@ test("x42.r10o3.c3b [WDB-R4 off-path] the census's two terms stay disjoint: an A
   const other = await liveTemplate({
     client: c2, label: "o3c3b other", start: period.start, cents: CENTS, autoReverse: false,
     lines: accrualLines(CENTS, { debit: EXPB, credit: ACCR2 }), memo: "disjoint" });
-  const r2 = await runManual(w.users.bob, {
+  const r2 = await runOccurrence({
     client: c2, template: other.id, periodStart: period.start, periodEnd: period.end });
   assert.equal(r2.status, "drafted", "a fully disjoint shape is admitted — the caution has not become a refusal");
   const cen = (await rootQuery(

@@ -37,9 +37,9 @@ import {
   opk, endPool, printLaneNotes, printSkipCount, rootQuery, humanQuery, namedCall,
   x42EnsureReady, skip42, caught, reasonToken,
   EXPA, EXPB, ACCR, ACCR2, PREP, CLR38, CLR10, mon,
-  runManual, retireTemplate, signTemplate, adjustmentRunDue, reverseEntry,
+  runOccurrence, retireTemplate, signTemplate, adjustmentRunDue, reverseEntry,
   accrualLines, prepaymentLines, adjWorld, freshAdjClient, liveTemplate, approveDraft, glNet,
-  enrolAdvance, reversePair,
+  enrolAdvance, reversePair, insertTemplateRaw, x42TemplatesRetiredReady, noteLane,
 } from "./x42-adj-helpers.mjs";
 
 let live = false;
@@ -58,21 +58,106 @@ const skipHere = (t) => skip42(t, live);
 
 /** propose WITH the optional trailing lineage declaration (the same call every other cell makes,
  *  plus one name — the whole content of "additive ABI delta"). */
-const proposeR = async (sub, {
-  client, name, cadence = "monthly", start, end = null, autoReverse = false,
-  lines, memo = "x42 r11 accrual", replaces = null, opKey = null,
-}) => (await humanQuery(sub, namedCall("propose_adjustment_template", [
-  { name: "p_client" }, { name: "p_name" }, { name: "p_cadence" },
-  { name: "p_start_date", cast: "date" }, { name: "p_end_date", cast: "date" },
-  { name: "p_auto_reverse", cast: "boolean" }, { name: "p_lines", cast: "jsonb" },
-  { name: "p_memo_template" }, { name: "p_op_key" }, { name: "p_replaces", cast: "uuid" },
-]), [client, name, cadence, start, end, autoReverse, JSON.stringify(lines), memo,
-  opKey ?? opk("x42r11prop"), replaces])).rows[0].result;
+// [#927] THE MINT, AT TWO FRONTIERS. `clara.propose_adjustment_template` and
+// `clara.sign_adjustment_template` are typed refusals from migration 0282 (owner ruling #788:
+// retire the 0045 recurring-adjustment template lane), so at the head of the chain the two
+// helpers below MINT the row the doors used to write — x42-adj-helpers' SURGERY 5, carrying the
+// declared predecessor and the lineage root the propose core derived from it — and answer
+// `warnings: null`, because the propose-time advisory retired WITH the door. Every cell whose
+// subject is the POSTER's wall, the due oracle, the correction door, the storage layer or the
+// books is unchanged by that and keeps its full assertion set; the handful whose subject IS the
+// propose/sign advisory or the door's own argument validation branch on `proposeDoorRetired()`
+// and assert the retirement instead. On a chain that predates 0282 — the d-b2 slice leg's
+// 0001..0045 copy (.github/actions/frontier-leg) — the REAL doors are driven exactly as before,
+// so this file's law keeps its original coverage at the frontier where that law is still live.
+const templatesRetired = () => x42TemplatesRetiredReady();
+
+const proposeR = async (sub, o) => {
+  const {
+    client, name, cadence = "monthly", start, end = null, autoReverse = false,
+    lines, memo = "x42 r11 accrual", replaces = null, opKey = null,
+  } = o;
+  if (await templatesRetired()) {
+    const t = await insertTemplateRaw({
+      client, status: "proposed", name, cadence, start, end, autoReverse, lines, memo,
+      proposer: sub, replaces });
+    return { template_id: t.id, warnings: null };
+  }
+  return (await humanQuery(sub, namedCall("propose_adjustment_template", [
+    { name: "p_client" }, { name: "p_name" }, { name: "p_cadence" },
+    { name: "p_start_date", cast: "date" }, { name: "p_end_date", cast: "date" },
+    { name: "p_auto_reverse", cast: "boolean" }, { name: "p_lines", cast: "jsonb" },
+    { name: "p_memo_template" }, { name: "p_op_key" }, { name: "p_replaces", cast: "uuid" },
+  ]), [client, name, cadence, start, end, autoReverse, JSON.stringify(lines), memo,
+    opKey ?? opk("x42r11prop"), replaces])).rows[0].result;
+};
 
 async function liveReplacement(o) {
+  if (await templatesRetired()) {
+    const t = await insertTemplateRaw({
+      client: o.client, status: "live", name: o.name, cadence: o.cadence ?? "monthly",
+      start: o.start, end: o.end ?? null, autoReverse: o.autoReverse ?? false, lines: o.lines,
+      memo: o.memo ?? "x42 r11 accrual", proposer: w.users.bob, signer: w.users.hana,
+      replaces: o.replaces ?? null });
+    return { template_id: t.id, warnings: null };
+  }
   const p = await proposeR(w.users.bob, o);
   await signTemplate(w.users.hana, { client: o.client, template: p.template_id, opKey: opk("x42r11sig") });
   return p;
+}
+
+/** Sign, at both frontiers: the real door below 0282, and -- above it, where the sign door is a
+ *  typed refusal -- the transition the door performed, written by hand with the user triggers
+ *  silenced (the file's own FIXTURE SURGERY idiom). Used only where a cell needs a PROPOSED row
+ *  to become live; a cell that only needs a live row mints one through `liveReplacement`. */
+async function makeLive(client, template) {
+  if (!(await templatesRetired())) {
+    return await signTemplate(w.users.hana, { client, template, opKey: opk("x42r11sig") });
+  }
+  await rootQuery(`do $do$ begin
+    perform set_config('session_replication_role','replica',true);
+    update clara.adjustment_templates
+       set status = 'live', signed_by = proposed_by, signed_at = now(),
+           signed_op_key = 'x42-raw-sign-' || gen_random_uuid()::text
+     where id = '${template}'::uuid;
+  end $do$;`);
+  return null;
+}
+
+/** The residue of a cell whose whole subject is a propose/sign-door branch #927 retired: drive
+ *  the door once and prove it refuses for the retirement, by its own reason token. Answers true
+ *  when the cell's original law is no longer reachable, so the caller returns; answers false at
+ *  a frontier below 0282, where the original body runs unchanged. NEVER a skip — a skip is not
+ *  evidence, and the d-b2 list carries a measured cell floor. */
+async function proposeDoorRetired(client, law) {
+  if (!(await templatesRetired())) return false;
+  const err = await caught(() => humanQuery(w.users.bob, namedCall("propose_adjustment_template", [
+    { name: "p_client" }, { name: "p_name" }, { name: "p_cadence" },
+    { name: "p_start_date", cast: "date" }, { name: "p_end_date", cast: "date" },
+    { name: "p_auto_reverse", cast: "boolean" }, { name: "p_lines", cast: "jsonb" },
+    { name: "p_memo_template" }, { name: "p_op_key" }, { name: "p_replaces", cast: "uuid" },
+  ]), [client, `x42 retired probe ${Math.random()}`, "monthly", mon(-3).start, null, false,
+    JSON.stringify(accrualLines(100_000)), "retired probe", opk("x42r11ret"), null]));
+  assert.ok(err, `${law}: the propose door answers something — it must REFUSE`);
+  assert.equal(err.code, CLR10);
+  assert.equal(reasonToken(err), "adjustment_template_lane_retired",
+    `${law}: the door that carried this law is retired (#927), and that is the only thing left to assert about it`);
+  noteLane(`${law} — the propose-door half retired at 0282; asserted as a refusal here and in full on a pre-0282 chain`);
+  return true;
+}
+
+/** The same, for `clara.sign_adjustment_template`. The door refuses before it reads an argument,
+ *  so the template id is a literal. */
+async function signDoorRetired(client, law) {
+  if (!(await templatesRetired())) return false;
+  const err = await caught(() => signTemplate(w.users.hana, {
+    client, template: "00000000-0000-4000-8000-0000000000fe" }));
+  assert.ok(err, `${law}: the sign door answers something — it must REFUSE`);
+  assert.equal(err.code, CLR10);
+  assert.equal(reasonToken(err), "adjustment_template_lane_retired",
+    `${law}: the door that carried this law is retired (#927)`);
+  noteLane(`${law} — the sign-door half retired at 0282; asserted as a refusal here and in full on a pre-0282 chain`);
+  return true;
 }
 const detailOf = (err) => JSON.parse(err.detail);
 const doorOf = async (entry) =>
@@ -80,7 +165,7 @@ const doorOf = async (entry) =>
 
 async function standingMonths(client, template, months) {
   for (const P of months) {
-    const r = await runManual(w.users.bob, {
+    const r = await runOccurrence({
       client, template, periodStart: P.start, periodEnd: P.end });
     await approveDraft(w.users.alice, r.entry_id);
   }
@@ -90,7 +175,7 @@ async function runUntilRefused(client, template, months) {
   for (const P of months) {
     let r = null;
     try {
-      r = await runManual(w.users.bob, { client, template, periodStart: P.start, periodEnd: P.end });
+      r = await runOccurrence({ client, template, periodStart: P.start, periodEnd: P.end });
     } catch (e) { return e; }
     await approveDraft(w.users.alice, r.entry_id);
   }
@@ -227,7 +312,7 @@ test("x42.r11c a generation whose charges this template can NEVER book is not a 
     lines: accrualLines(250_000, { debit: EXPA, credit: ACCR }), memo: "audit v2",
     replaces: gen1.id });
 
-  const err = await caught(() => runManual(w.users.bob, {
+  const err = await caught(() => runOccurrence({
     client, template: gen2.template_id, periodStart: P.start, periodEnd: P.end }));
   assert.ok(err, "the period IS refused — the legal accrual collides — but on the HONEST grounds");
   const d = detailOf(err);
@@ -274,7 +359,7 @@ test("x42.r11d when the entry in the way belongs to a template this one does NOT
     client, name: `x42 r11d gen2 ${Date.now()}`, start: A[0].start,
     lines: accrualLines(150_000, { debit: EXPA, credit: ACCR2 }), memo: "v2", replaces: gen1.id });
 
-  const err = await caught(() => runManual(w.users.bob, {
+  const err = await caught(() => runOccurrence({
     client, template: gen2.template_id, periodStart: P.start, periodEnd: P.end }));
   assert.ok(err);
   const d = detailOf(err);
@@ -303,7 +388,7 @@ test("x42.r11e a pair correction parked over a code that is then enrolled as a s
   const tpl = await liveTemplate({
     client, label: "r11e", start: P.start, cents: CENTS, autoReverse: true,
     lines: prepaymentLines(CENTS), memo: "Prepaid insurance" });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r.entry_id);
 
@@ -370,15 +455,20 @@ test("x42.r11f an ancestry pointer whose target is not there is a TRUNCATED walk
     "a row whose pointer produced no child stopped before a root, whatever the reason");
   assert.deepEqual(anc.ancestors, [], "…and it still reports honestly what it DID find");
 
-  const extend = await caught(() => proposeR(w.users.bob, {
-    client, name: `x42 r11f child ${Date.now()}`, start: mon(-3).start,
-    lines: accrualLines(50_000, { debit: EXPB, credit: ACCR2 }), replaces: staged }));
-  assert.ok(extend, "a predecessor whose own ancestry cannot be walked is not a foundation to assert on");
-  assert.equal(extend.code, CLR10);
-  assert.equal(reasonToken(extend), "template_replaces_chain_too_long");
-  assert.equal(detailOf(extend).axis, "unwalkable");
-  assert.match(extend.message, /propose this one without naming a predecessor/,
-    "…and the refusal names an act the caller can take");
+  // [#927] The truncated WALK above is this cell's own measurement and is asserted at every
+  // frontier. The refusal it fed — the propose door's "chain unwalkable" branch — retired with
+  // the door at 0282, so above that frontier the door's retirement is what is asserted instead.
+  if (!(await proposeDoorRetired(client, "x42.r11f the unwalkable-chain refusal"))) {
+    const extend = await caught(() => proposeR(w.users.bob, {
+      client, name: `x42 r11f child ${Date.now()}`, start: mon(-3).start,
+      lines: accrualLines(50_000, { debit: EXPB, credit: ACCR2 }), replaces: staged }));
+    assert.ok(extend, "a predecessor whose own ancestry cannot be walked is not a foundation to assert on");
+    assert.equal(extend.code, CLR10);
+    assert.equal(reasonToken(extend), "template_replaces_chain_too_long");
+    assert.equal(detailOf(extend).axis, "unwalkable");
+    assert.match(extend.message, /propose this one without naming a predecessor/,
+      "…and the refusal names an act the caller can take");
+  }
 
   // AND THE RIG IS LEFT AS IT WAS FOUND [round-12 confirming lens, native finding 7]. This cell
   // is the only one in the battery that changes the SCHEMA, and it was leaving the composite FK
@@ -394,12 +484,26 @@ test("x42.r11f an ancestry pointer whose target is not there is a TRUNCATED walk
   // cell staged — including any an EARLIER run of it left behind on a shared rig. Cleaning only
   // `staged` would leave the re-validation failing on somebody else's litter, which is how a
   // restoration step quietly stops restoring.
-  await rootQuery(`do $$ begin
-    set local session_replication_role = 'replica';
-    delete from clara.adjustment_templates t
-     where t.replaces_template_id is not null
-       and not exists (select 1 from clara.adjustment_templates p where p.id = t.replaces_template_id);
-  end $$;`);
+  // The delete REPEATS until it is a no-op: one statement sees one snapshot, so deleting a
+  // forged parent and the row pointing at it takes two passes -- and a single pass leaves the
+  // child dangling for the VALIDATE below (measured, #927 fix round).
+  for (let pass = 0; pass < 8; pass += 1) {
+    await rootQuery(`do $$ begin
+      set local session_replication_role = 'replica';
+      delete from clara.adjustment_templates t
+       where t.replaces_template_id is not null
+         and not exists (select 1 from clara.adjustment_templates p
+                          where p.id = t.replaces_template_id
+                            and p.firm_id = t.firm_id and p.client_id = t.client_id);
+    end $$;`);
+    const left = (await rootQuery(
+      `select count(*)::int as n from clara.adjustment_templates t
+        where t.replaces_template_id is not null
+          and not exists (select 1 from clara.adjustment_templates p
+                           where p.id = t.replaces_template_id
+                             and p.firm_id = t.firm_id and p.client_id = t.client_id)`)).rows[0].n;
+    if (Number(left) === 0) break;
+  }
   assert.equal((await rootQuery("select count(*)::int as n from clara.adjustment_templates where id=$1",
     [staged])).rows[0].n, 0, "the staged forgery is gone");
   await rootQuery(`alter table clara.adjustment_templates drop constraint if exists fk_adjustment_templates_replaces`);
@@ -435,11 +539,19 @@ test("x42.r11g a second declaration of the same predecessor is refused BY NAME a
     client, name: `x42 r11g B ${Date.now()}`, start: mon(-6).start,
     lines: accrualLines(80_000, { debit: EXPB, credit: ACCR2 }), replaces: gen1.id }));
   assert.ok(b, "the SECOND is not");
-  assert.equal(b.code, CLR10);
-  assert.equal(reasonToken(b), "template_replaces_already_succeeded");
-  assert.equal(detailOf(b).successor_template_id, a.template_id, "…naming the successor in the way");
-  assert.match(b.message, /retire that successor first/, "…and both acts that clear it");
-  assert.match(b.message, /without naming a predecessor/);
+  if (await templatesRetired()) {
+    // [#927] The propose door's own rung retired at 0282, so the BELT below it is what a second
+    // declaration meets now — the same law, one layer down, and the layer that survives every
+    // hand-write and restore. The door-worded half runs in full on a pre-0282 chain.
+    assert.equal(b.code, "23505", "the storage layer refuses the fork once the door is retired");
+    assert.match(String(b.constraint ?? b.message), /uq_adjustment_templates_one_successor/);
+  } else {
+    assert.equal(b.code, CLR10);
+    assert.equal(reasonToken(b), "template_replaces_already_succeeded");
+    assert.equal(detailOf(b).successor_template_id, a.template_id, "…naming the successor in the way");
+    assert.match(b.message, /retire that successor first/, "…and both acts that clear it");
+    assert.match(b.message, /without naming a predecessor/);
+  }
 
   // THE BELT: the door refuses under the client rung; the index refuses the writer the rung
   // cannot serialise (a restored register, a hand-written row, a future door that forgets).
@@ -457,7 +569,7 @@ test("x42.r11g a second declaration of the same predecessor is refused BY NAME a
 
   // ...AND A RETIRED SUCCESSOR IS STILL STORABLE, so the recovery act the prohibition names
   // (retire this template and propose it again) is not foreclosed by the law above.
-  await signTemplate(w.users.hana, { client, template: a.template_id, opKey: opk("r11gsig") });
+  await makeLive(client, a.template_id);
   await retireTemplate(w.users.hana, { client, template: a.template_id, reason: "mis-declared" });
   const c = await proposeR(w.users.bob, {
     client, name: `x42 r11g C ${Date.now()}`, start: mon(-6).start,
@@ -475,6 +587,10 @@ test("x42.r11h proposing over a retired generation's standing months warns repla
   if (skipHere(t)) return;
   const M = [mon(-6), mon(-5)];
   const client = await freshAdjClient("r11h");
+  // [#927] THE PROPOSE-TIME ADVISORY RETIRED WITH ITS DOOR at 0282: there is no longer a caller
+  // that can be warned, so above that frontier this cell asserts the retirement, and the whole
+  // advisory law runs on a pre-0282 chain (the d-b2 slice leg), where it is still reachable.
+  if (await proposeDoorRetired(client, "x42.r11h the propose-time replaced_period_overlap advisory")) return;
   const gen1 = await liveTemplate({
     client, label: "r11h gen1", start: M[0].start,
     lines: accrualLines(300_000, { debit: EXPA, credit: ACCR }), memo: "v1" });
@@ -531,7 +647,7 @@ test("x42.r11i the recorded declaration is PROJECTED on the template row and the
   assert.equal(plain.replaces_template_id, null, "…and it says 'nothing' honestly");
 
   const P = mon(-3);
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: gen2.template_id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r.entry_id);
   const run = (await rootQuery(
@@ -574,6 +690,7 @@ test("x42.r12a proposing a re-coded replacement while its predecessor is still L
   if (skipHere(t)) return;
   const M = [mon(-6), mon(-5), mon(-4)];
   const client = await freshAdjClient("r12a");
+  if (await proposeDoorRetired(client, "x42.r12a the LIVE arm of the propose-time advisory")) return;
   const gen1 = await liveTemplate({
     client, label: "r12a gen1", start: M[0].start,
     lines: accrualLines(300_000, { debit: EXPA, credit: ACCR }), memo: "v1" });
@@ -617,6 +734,7 @@ test("x42.r12b sign re-asks the period advisory at the last human moment, and th
   if (skipHere(t)) return;
   const M = [mon(-6), mon(-5)];
   const client = await freshAdjClient("r12b");
+  if (await signDoorRetired(client, "x42.r12b the sign-time re-ask of the period advisory")) return;
   const gen1 = await liveTemplate({
     client, label: "r12b gen1", start: M[0].start,
     lines: accrualLines(300_000, { debit: EXPA, credit: ACCR }), memo: "v1" });
@@ -666,6 +784,7 @@ test("x42.r12c the live arm stays narrow: silent on a forward-dated proposal, si
   // (1) FORWARD-DATED over a live, charging predecessor: nothing this proposal can book is
   // already charged, so there is nothing to say.
   const c1 = await freshAdjClient("r12c1");
+  if (await proposeDoorRetired(c1, "x42.r12c the false-positive control for the propose-time advisory")) return;
   const g1 = await liveTemplate({
     client: c1, label: "r12c1 gen1", start: M[0].start,
     lines: accrualLines(300_000, { debit: EXPA, credit: ACCR }), memo: "v1" });
@@ -711,28 +830,33 @@ test("x42.r12d a lineage may have one unretired continuation, however far up the
     client, label: "r12d P", start: mon(-6).start,
     lines: accrualLines(100_000, { debit: EXPA, credit: ACCR }), memo: "P" });
   await retireTemplate(w.users.hana, { client, template: P.id, reason: "superseded" });
-  const A = await proposeR(w.users.bob, {
+  const A = await liveReplacement({
     client, name: `x42 r12d A ${Date.now()}`, start: mon(-5).start,
     lines: accrualLines(90_000, { debit: EXPA, credit: ACCR }), replaces: P.id });
-  await signTemplate(w.users.hana, { client, template: A.template_id, opKey: opk("r12dA") });
   await retireTemplate(w.users.hana, { client, template: A.template_id, reason: "superseded" });
-  const B = await proposeR(w.users.bob, {
+  const B = await liveReplacement({
     client, name: `x42 r12d B ${Date.now()}`, start: mon(-4).start,
     lines: accrualLines(80_000, { debit: EXPA, credit: ACCR }), replaces: A.template_id });
-  await signTemplate(w.users.hana, { client, template: B.template_id, opKey: opk("r12dB") });
 
   // C attaches to P — whose only DIRECT successor A is RETIRED, so every edge-keyed test passes.
   const c = await caught(() => proposeR(w.users.bob, {
     client, name: `x42 r12d C ${Date.now()}`, start: mon(-4).start,
     lines: accrualLines(70_000, { debit: EXPB, credit: ACCR2 }), replaces: P.id }));
   assert.ok(c, "the second live leaf is refused");
-  assert.equal(c.code, CLR10);
-  assert.equal(reasonToken(c), "template_lineage_root_occupied");
-  assert.equal(detailOf(c).occupying_template_id, B.template_id,
-    "…NAMING the live template in the way, because 'some other template' is not a remedy");
-  assert.equal(detailOf(c).lineage_root_id, P.id, "…and the root the two branches share");
-  assert.match(c.message, /retire that one first/);
-  assert.match(c.message, /without naming a predecessor/);
+  if (await templatesRetired()) {
+    // [#927] as in x42.r11g: the door's rung retired at 0282 and the index below it is what the
+    // second leaf meets. Same law, named by the constraint instead of by the reason token.
+    assert.equal(c.code, "23505");
+    assert.match(String(c.constraint ?? c.message), /uq_adjustment_templates_one_live_leaf/);
+  } else {
+    assert.equal(c.code, CLR10);
+    assert.equal(reasonToken(c), "template_lineage_root_occupied");
+    assert.equal(detailOf(c).occupying_template_id, B.template_id,
+      "…NAMING the live template in the way, because 'some other template' is not a remedy");
+    assert.equal(detailOf(c).lineage_root_id, P.id, "…and the root the two branches share");
+    assert.match(c.message, /retire that one first/);
+    assert.match(c.message, /without naming a predecessor/);
+  }
 
   // B IS UNTOUCHED — a refusal at the door may not move anything.
   const brow = (await rootQuery("select status from clara.adjustment_templates where id=$1",
@@ -793,7 +917,7 @@ test("x42.r12e a period stamp that is not an ISO day is UNSTAMPED, and an unstam
       client, name: `x42 r12e ${label} gen2 ${Date.now()}`, start: P.start,
       lines: accrualLines(150_000, { debit: EXPB, credit: ACCR2 }), replaces: gen1.id });
 
-    const pristine = await caught(() => runManual(w.users.bob, {
+    const pristine = await caught(() => runOccurrence({
       client, template: gen2.template_id, periodStart: P.start, periodEnd: P.end }));
     assert.equal(reasonToken(pristine), "replaced_generation_period_standing",
       `${label}: the wall stands on a well-formed register (the control)`);
@@ -810,7 +934,7 @@ test("x42.r12e a period stamp that is not an ISO day is UNSTAMPED, and an unstam
         where je.client_id='${client}'
           and je.flags->'recurring_adjustment'->>'template_id'='${gen1.id}';
     end $$;`);
-    const after = await caught(() => runManual(w.users.bob, {
+    const after = await caught(() => runOccurrence({
       client, template: gen2.template_id, periodStart: P.start, periodEnd: P.end }));
     assert.ok(after, `${label}: a mangled stamp may not open the wall`);
     assert.equal(reasonToken(after), "replaced_generation_period_standing",
@@ -840,7 +964,7 @@ test("x42.r12f start-after MAY retain the predecessor once this template is reti
   const blocked = await liveReplacement({
     client, name: `x42 r12f gen2 ${Date.now()}`, start: M[0].start,
     lines: accrualLines(150_000, { debit: EXPB, credit: ACCR2 }), replaces: gen1.id });
-  const refused = await caught(() => runManual(w.users.bob, {
+  const refused = await caught(() => runOccurrence({
     client, template: blocked.template_id, periodStart: M[0].start, periodEnd: M[0].end }));
   assert.equal(reasonToken(refused), "replaced_generation_period_standing",
     "the state the remedy is offered from");
@@ -850,20 +974,24 @@ test("x42.r12f start-after MAY retain the predecessor once this template is reti
   const early = await caught(() => proposeR(w.users.bob, {
     client, name: `x42 r12f early ${Date.now()}`, start: mon(-3).start,
     lines: accrualLines(150_000, { debit: EXPB, credit: ACCR2 }), replaces: gen1.id }));
-  assert.equal(reasonToken(early), "template_replaces_already_succeeded",
-    "the predecessor still has an unretired direct successor: THIS template");
+  if (await templatesRetired()) {
+    assert.equal(early?.code, "23505", "the storage belt refuses it once the door is retired");
+    assert.match(String(early.constraint ?? early.message), /uq_adjustment_templates_one_successor/);
+  } else {
+    assert.equal(reasonToken(early), "template_replaces_already_succeeded",
+      "the predecessor still has an unretired direct successor: THIS template");
+  }
 
   // (2) THE ACTUAL REMEDY: retire this one, propose again with the SAME predecessor and a start
   // after the generation's last charge. ADMITTED — this is the sentence the gloss must carry.
   await retireTemplate(w.users.hana, { client, template: blocked.template_id, reason: "re-cut" });
-  const after = await proposeR(w.users.bob, {
+  const after = await liveReplacement({
     client, name: `x42 r12f after ${Date.now()}`, start: mon(-3).start,
     lines: accrualLines(150_000, { debit: EXPB, credit: ACCR2 }), replaces: gen1.id });
   assert.ok(after.template_id,
     "start-after MAY retain the predecessor — a retired successor is not in the way of anything");
-  await signTemplate(w.users.hana, { client, template: after.template_id, opKey: opk("r12fsig") });
   const P3 = mon(-3);
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: after.template_id, periodStart: P3.start, periodEnd: P3.end });
   await approveDraft(w.users.alice, r.entry_id);
   assert.equal(await glNet(client, EXPB), 150_000,
@@ -1047,7 +1175,7 @@ test("x42.r13b a period stamp that is not a real calendar day is UNSTAMPED too: 
       client, name: `x42 r13b ${label} gen2 ${Date.now()}`, start: P.start,
       lines: accrualLines(150_000, { debit: EXPB, credit: ACCR2 }), replaces: gen1.id });
 
-    const pristine = await caught(() => runManual(w.users.bob, {
+    const pristine = await caught(() => runOccurrence({
       client, template: gen2.template_id, periodStart: P.start, periodEnd: P.end }));
     assert.equal(reasonToken(pristine), "replaced_generation_period_standing",
       `${label}: the wall stands on a well-formed register (the control)`);
@@ -1063,7 +1191,7 @@ test("x42.r13b a period stamp that is not a real calendar day is UNSTAMPED too: 
         where je.client_id='${client}'
           and je.flags->'recurring_adjustment'->>'template_id'='${gen1.id}';
     end $$;`);
-    const after = await caught(() => runManual(w.users.bob, {
+    const after = await caught(() => runOccurrence({
       client, template: gen2.template_id, periodStart: P.start, periodEnd: P.end }));
     assert.ok(after, `${label}: an impossible day may not open the wall`);
     assert.equal(reasonToken(after), "replaced_generation_period_standing",
@@ -1088,13 +1216,19 @@ test("x42.r13b a period stamp that is not a real calendar day is UNSTAMPED too: 
         where je.client_id='${c2}'
           and je.flags->'recurring_adjustment'->>'template_id'='${g1.id}';
     end $$;`);
-    const p = await proposeR(w.users.bob, {
-      client: c2, name: `x42 r13b ${label} recode ${Date.now()}`, start: P.start,
-      lines: accrualLines(150_000, { debit: EXPB, credit: ACCR2 }), memo: "v2 recoded" });
-    const wr = (p.warnings ?? []).find((x) => x.axis === "replaced_period_overlap");
-    assert.ok(wr, `${label}: the advisory's own window uses the same grammar and still speaks`);
-    assert.equal(wr.template_id, g1.id);
-    assert.equal(wr.standing_charges, 1);
+    if (await templatesRetired()) {
+      // [#927] The advisory's caller retired at 0282; the WALL half above — which reads the same
+      // stamps through the same grammar — is the half that survives and is asserted in full.
+      noteLane(`x42.r13b ${label} — the propose-advisory arm retired at 0282; the wall arm above carries the grammar`);
+    } else {
+      const p = await proposeR(w.users.bob, {
+        client: c2, name: `x42 r13b ${label} recode ${Date.now()}`, start: P.start,
+        lines: accrualLines(150_000, { debit: EXPB, credit: ACCR2 }), memo: "v2 recoded" });
+      const wr = (p.warnings ?? []).find((x) => x.axis === "replaced_period_overlap");
+      assert.ok(wr, `${label}: the advisory's own window uses the same grammar and still speaks`);
+      assert.equal(wr.template_id, g1.id);
+      assert.equal(wr.standing_charges, 1);
+    }
   }
 });
 
@@ -1131,15 +1265,22 @@ test("x42.r13c a PARTIAL shape overlap warns nothing at propose — both advisor
   const p = await proposeR(w.users.bob, {
     client, name: `x42 r13c partial ${Date.now()}`, start: M[0].start,
     lines: accrualLines(150_000, { debit: EXPB, credit: ACCR }), memo: "legal fees, same accrual" });
-  assert.deepEqual(p.warnings, [],
-    "neither term speaks: (a) is containment-only and this is partial, (c)'s live arm is "
-    + "disjoint-only and these intersect");
+  if (p.warnings === null) {
+    // [#927] The propose-time silence this cell measured is unobservable once the door is
+    // retired. What the silence was PAID FOR — the poster's own wall, below — is the half that
+    // survives, and it is asserted in full at both frontiers.
+    noteLane("x42.r13c — the propose-advisory silence retired at 0282; the poster's wall below is what it was paid for");
+  } else {
+    assert.deepEqual(p.warnings, [],
+      "neither term speaks: (a) is containment-only and this is partial, (c)'s live arm is "
+      + "disjoint-only and these intersect");
+  }
 
   // ...AND THE WALL IS WHERE THE SILENCE IS PAID FOR. Sign it and run the month gen1 has already
   // charged: the poster refuses on the shape intersection, names the standing entry, and nothing
   // posts.
-  await signTemplate(w.users.hana, { client, template: p.template_id, opKey: opk("r13csig") });
-  const refused = await caught(() => runManual(w.users.bob, {
+  await makeLive(client, p.template_id);
+  const refused = await caught(() => runOccurrence({
     client, template: p.template_id, periodStart: M[0].start, periodEnd: M[0].end }));
   assert.ok(refused, "the second charge on an intersecting shape is refused");
   assert.equal(refused.code, CLR38);

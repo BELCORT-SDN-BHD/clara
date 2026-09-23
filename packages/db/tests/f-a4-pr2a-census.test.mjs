@@ -11,7 +11,7 @@ import { noteLane } from "./rig-runtime-helpers.mjs";
 import { humanQuery } from "./rig-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
 import {
-  ensurePrepay, prepayGate, prepaidScene, rootQuery, caught, uniq,
+  ensurePrepay, prepayGate, prepaidScene, rootQuery, caught, uniq, adjTemplateDoorsRetired,
 } from "./f-a4-pr2a-fixtures.mjs";
 
 let skipped = 0;
@@ -37,12 +37,27 @@ test("fa4p2a.W1 the extraction MOVED TEXT, not behaviour: the core carries the b
   const door = await prosrc(DOOR);
   assert.ok(core && door, "the extraction's two halves do not both resolve");
 
-  // The DOOR is now a delegate: it opens the floor and calls the core, and carries no DML of its own.
-  assert.match(door, /_human_ctx/, "the door no longer opens the human floor");
-  assert.match(door, /_propose_adjustment_template_core/, "the door does not delegate to the core");
-  assert.doesNotMatch(door, /insert into clara\.adjustment_templates/i,
-    "the door still writes -- the body did not move, it was copied");
-  assert.ok(door.length < 1200, `the door is ${door.length} bytes; a thin delegate it is not`);
+  if (await adjTemplateDoorsRetired()) {
+    // [#927] THE DOOR IS RETIRED (migration 0282, owner ruling #788): its body is one typed
+    // refusal. What this cell exists to protect is the CORE -- the body the extraction moved, and
+    // the body the PARKED agent prepayment limb still reaches through
+    // clara._agent_prepayment_schedule_core -- so the core's half below is asserted in full and
+    // the door's half becomes the retirement.
+    assert.match(door, /adjustment_template_lane_retired/,
+      "the retired door does not carry #927's own reason token");
+    assert.doesNotMatch(door, /_propose_adjustment_template_core/,
+      "a retired door still delegates to the core -- the refusal is not unconditional");
+    assert.doesNotMatch(door, /insert into clara\.adjustment_templates/i,
+      "the retired door still writes");
+    assert.ok(door.length < 1200, `the retired door is ${door.length} bytes; a bare refusal it is not`);
+  } else {
+    // The DOOR is a delegate: it opens the floor and calls the core, and carries no DML of its own.
+    assert.match(door, /_human_ctx/, "the door no longer opens the human floor");
+    assert.match(door, /_propose_adjustment_template_core/, "the door does not delegate to the core");
+    assert.doesNotMatch(door, /insert into clara\.adjustment_templates/i,
+      "the door still writes -- the body did not move, it was copied");
+    assert.ok(door.length < 1200, `the door is ${door.length} bytes; a thin delegate it is not`);
+  }
 
   // The CORE carries the substantive body, and it reads its ctx rather than opening a floor -- the
   // 0124 substitution shape. Distinctive markers from the shipped body are asserted individually so
@@ -73,11 +88,30 @@ test("fa4p2a.W2 the human door's FLOOR survives the extraction", async (t) => {
   // having proven nothing, so it fails instead.
   assert.ok(viewer.rows.length > 0,
     "no below-floor member in this world: W2 cannot show the floor survived without one, so it fails rather than notes. buildWorld mints one; if it stopped, fix the fixture.");
-  const e = await caught(() => humanQuery(viewer.rows[0].id,
+  const propose = (who, tag) => caught(() => humanQuery(who,
     `select clara.propose_adjustment_template($1::uuid,$2,'monthly',date '2025-02-01',
        date '2025-02-28',false,$3::jsonb,'m',$4) as r`,
-    [sc.client, `w2-${uniq()}`, JSON.stringify(lines), `w2-${uniq()}`]));
+    [sc.client, `${tag}-${uniq()}`, JSON.stringify(lines), `${tag}-${uniq()}`]));
+
+  const e = await propose(viewer.rows[0].id, "w2");
   assert.ok(e, "a BELOW-FLOOR viewer proposed a template -- the floor did not survive the move");
+
+  if (await adjTemplateDoorsRetired()) {
+    // [#927] THE FLOOR IS NO LONGER THE FIRST WALL: 0282 made the door refuse before it reads an
+    // argument or a role, so what survives -- and what a tenant-isolation reader needs -- is that
+    // the refusal is IDENTICAL for every rank and leaks nothing. Asserted here; the floor itself
+    // is asserted in full on a pre-0282 chain.
+    const bk = await propose(sc.alice, "w2ok");
+    assert.ok(bk, "a bookkeeper proposed a template after 0282 -- the retirement is not unconditional");
+    for (const [who, err] of [["the below-floor viewer", e], ["the bookkeeper", bk]]) {
+      assert.equal(JSON.parse(err.detail).reason, "adjustment_template_lane_retired",
+        `${who} met something other than #927's retirement`);
+    }
+    assert.equal(e.message, bk.message,
+      "the retired door answers the two ranks differently -- a refusal that varies by rank is an oracle");
+    noteLane("W2 -- the propose floor retired behind #927's unconditional refusal; the refusal is rank-identical");
+    return;
+  }
   // POSITIVE CONTROL: a bookkeeper+ still succeeds. A floor that refuses everyone is not a floor.
   const ok = await humanQuery(sc.alice,
     `select clara.propose_adjustment_template($1::uuid,$2,'monthly',date '2025-02-01',

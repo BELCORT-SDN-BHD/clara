@@ -136,6 +136,84 @@ export function proposeTemplate(sub, { client, name, start, end, lines, schedule
       schedule === null ? null : JSON.stringify(schedule)]).then((r) => r.rows[0].r);
 }
 
+/** Does THIS database carry #927's retirement of the human template doors (migration 0282)?
+ *  Read off `clara.schema_migrations` by STEM, never by number -- numbers are claimed at merge.
+ *  Memoised per process, like every other frontier probe in this battery. */
+let _retired = null;
+export async function adjTemplateDoorsRetired() {
+  if (_retired !== null) return _retired;
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'retire_adjustment_template_doors$'");
+  _retired = Number(r.rows[0].n) > 0;
+  return _retired;
+}
+
+/** THE LANE'S MINT, AT TWO FRONTIERS [#927]. Below 0282 this is the real propose door. Above it
+ *  the door is one typed refusal (owner ruling #788: retire the 0045 recurring-adjustment template
+ *  lane), so the row is written directly -- with the stored line canon and `content_hash` computed
+ *  through the DB's own `clara._adj_canon_lines` / `clara._adj_template_hash`, the very bodies the
+ *  door called, so the row is byte-for-byte what a proposal produced. Used ONLY by cells whose
+ *  subject is the RESOLVER, the storage layer or the books; a cell whose subject is the door's own
+ *  validation asserts the retirement instead (`proposeDoorRetired` in the battery files). */
+export async function mintTemplate(sub, { client, name, cadence = "monthly", start, end = null,
+    lines, schedule = null, memo = "fa4p2a", opKey = null }) {
+  if (!(await adjTemplateDoorsRetired())) {
+    return proposeTemplate(sub, { client, name, cadence, start, end, lines, schedule, memo, opKey });
+  }
+  const r = await rootQuery(
+    `with canon as (select clara._adj_canon_lines($5::jsonb) as l)
+     insert into clara.adjustment_templates(firm_id, client_id, status, name, cadence, start_date,
+         end_date, auto_reverse, lines, memo_template, content_hash, schedule, proposed_by,
+         proposed_op_key)
+     select c.firm_id, $1::uuid, 'proposed', $2, $9, $3::date, $4::date, false, canon.l, $6,
+            clara._adj_template_hash($2, $9, $3::date, $4::date, false, canon.l, $6, $7::jsonb),
+            $7::jsonb, $8::uuid, coalesce($10, 'fa4p2a-raw-' || gen_random_uuid()::text)
+       from clara.clients c, canon
+      where c.id = $1::uuid
+     returning id`,
+    [client, name, start, end, JSON.stringify(lines), memo,
+     schedule === null ? null : JSON.stringify(schedule), sub, cadence, opKey]);
+  return { template_id: r.rows[0].id };
+}
+
+/** Sign, at two frontiers [#927]: the real door below 0282, and above it the transition the door
+ *  performed, written directly with the user triggers silenced (`clara._tf_adjustment_template_
+ *  transition` refuses every non-lifecycle UPDATE by design, which is the law f-a4-pr2a-schedule's
+ *  W36-immutability cell pins and not something to weaken). Used by cells whose subject is what
+ *  happens AFTER a template goes live -- the books. */
+export async function makeTemplateLive(sub, { client, template }) {
+  if (!(await adjTemplateDoorsRetired())) {
+    return (await humanQuery(sub,
+      "select clara.sign_adjustment_template($1::uuid,$2::uuid,$3) as r",
+      [client, template, opk("fa4p2a-sign")])).rows[0].r;
+  }
+  await rootQuery(`do $do$ begin
+    perform set_config('session_replication_role','replica',true);
+    update clara.adjustment_templates
+       set status = 'live', signed_by = proposed_by, signed_at = now(),
+           signed_op_key = 'fa4p2a-raw-sign-' || gen_random_uuid()::text
+     where id = '${template}'::uuid;
+  end $do$;`);
+  return { status: "live", template_id: template };
+}
+
+/** The residue of a cell whose whole subject is a propose-door validation #927 retired: drive the
+ *  door once and prove it refuses for the retirement, by its own reason token. Answers true when
+ *  the original law is no longer reachable, so the caller returns; false below 0282, where the
+ *  original body runs unchanged. NEVER a skip -- a skip is not evidence, and this battery's
+ *  `armed-skip` cell counts them. */
+export async function proposeDoorRetired(sub, { client, lines, law }) {
+  if (!(await adjTemplateDoorsRetired())) return false;
+  const err = await caught(() => proposeTemplate(sub, {
+    client, name: `retired-probe-${uniq()}`, start: "2025-02-01", end: "2025-02-28", lines }));
+  if (!err) throw new Error(`${law}: the propose door answered -- it must REFUSE once 0282 is applied`);
+  const reason = (() => { try { return JSON.parse(err.detail).reason; } catch { return null; } })();
+  if (reason !== "adjustment_template_lane_retired") {
+    throw new Error(`${law}: the door refused with ${reason}, not the #927 retirement`);
+  }
+  return true;
+}
+
 /** A two-line pair, the shape every prepayment occurrence posts. */
 export function pair(dr, cr, cents) {
   return [{ account_code: dr, debit_cents: cents, credit_cents: 0, description: "d" },

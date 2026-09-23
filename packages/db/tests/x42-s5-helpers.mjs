@@ -214,7 +214,12 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "retire_staff_advance_account", "retire_wiki_page", "reverse_entry", "revise_entry", "revise_fixed_asset_particulars",
   "revoke_client_egress", "revoke_client_egress_purpose", "revoke_vendor_identity_binding", "revoke_wake_credential", "run_client_lint",
   "run_lint_all", "set_counterparty_terms", "set_document_kind", "set_member_role", "set_wiki_synthesis_hold",
-  "settle_chat_turn", "settle_ingest_reservation", "sign_adjustment_template", "sign_bank_rule",
+  // `sign_adjustment_template` LEFT this base array at #927 (migration 0282) and is now a
+  // REVERSE-gated cohort (ADJ_TEMPLATE_DOORS_PRE_0282_CLOCK_NAMES, below), exactly like
+  // begin_chat_turn: 0282 recut the body to a bare typed refusal, so it reads no clock any more
+  // on a database that has the retirement -- and still does on every `db-slice-frontiers` leg
+  // pinned before it, which is why the name is pushed back rather than deleted.
+  "settle_chat_turn", "settle_ingest_reservation", "sign_bank_rule",
   "sign_depreciation_authority", "sign_vendor_identity_binding", "snooze_compliance_watch", "tick_seeding_proposal",
   "unmatch_bank_match", "update_onboarding_plan", "upsert_fa_account_profile", "verify_document_intake", "void_bank_reconciliation",
   "void_bank_statement", "wake_context", "wake_record_notification", "withdraw_draft",
@@ -777,6 +782,15 @@ const F_A7_PI_CLOCK_NAMES = [
 // the file is numbered at MERGE, so a `like '0103_%'` gate would silently invert the moment
 // the train renumbers — and a silently-wrong roster is exactly the drift arm (D) catches.
 const CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES = ["begin_chat_turn"];
+
+// #927 (migration 0282, owner ruling #788: retire the 0045 recurring-adjustment template lane).
+// `sign_adjustment_template`'s body became one typed refusal that reads no clock, so the name
+// leaves the live roster AT that frontier and not before. REVERSE-gated on the stem for the same
+// reason every other cohort here is: a `db-slice-frontiers` leg at 0045 still meets the
+// clock-reading body it has, and an unconditional removal would red it.
+// The other two doors 0282 closed (`propose_adjustment_template`, `run_adjustment_manual`) were
+// never in this roster -- measured, not assumed: neither name appears in the base array above.
+const ADJ_TEMPLATE_DOORS_PRE_0282_CLOCK_NAMES = ["sign_adjustment_template"];
 
 // F-A9 PR-1B [the brake census, `f_a9_pr_1b_brake_census` at whatever number merge claimed]:
 // THE SECOND REVERSE COHORT, minted for exactly PR-0's reason and gated exactly PR-0's way.
@@ -1403,6 +1417,10 @@ export async function s5BareTokenRoster(query) {
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
   // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
   if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);
+  // REVERSE gate — see ADJ_TEMPLATE_DOORS_PRE_0282_CLOCK_NAMES (#927). Same direction, same reason.
+  if (!(await appliedStem("retire_adjustment_template_doors$"))) {
+    names.push(...ADJ_TEMPLATE_DOORS_PRE_0282_CLOCK_NAMES);
+  }
   // REVERSE gate — see PROCESSING_CALL_PRE_F_A9_PR1B_CLOCK_NAMES. Same direction, same reason.
   if (!(await appliedStem("f_a9_pr_1b_brake_census$"))) names.push(...PROCESSING_CALL_PRE_F_A9_PR1B_CLOCK_NAMES);
   if (await appliedStem("f_a3_pr1a_core_extractions$")) {

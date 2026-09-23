@@ -39,7 +39,7 @@ import {
   endPool, printLaneNotes, printSkipCount, rootQuery,
   x42EnsureReady, skip42, caught, reasonToken,
   EXPA, ACCR, CLR38, mon, addDays,
-  runManual, runOccurrence, reversePair, approvePairReversal, adjustmentRunDue,
+  runOccurrence, reversePair, approvePairReversal, adjustmentRunDue,
   accrualLines, adjWorld, freshAdjClient, liveTemplate,
   approveDraft, mirrorOf, glNet, stampedEntries,
 } from "./x42-adj-helpers.mjs";
@@ -71,7 +71,7 @@ const gateWide = async (client, period) => (await rootQuery(
   `select clara._wdb_rerun_breach($1,'recurring_adjustment',null::text[],$2::date,$3::date) as b`,
   [client, period.start, period.end])).rows[0].b;
 
-const runRefusal = (client, template, period) => caught(() => runManual(w.users.bob, {
+const runRefusal = (client, template, period) => caught(() => runOccurrence({
   client, template, periodStart: period.start, periodEnd: period.end,
 }));
 
@@ -179,7 +179,7 @@ test("x42.r9n1b an ordinary AUTO-REVERSE template still drains four consecutive 
     // The gate itself is asked first, so a failure names the GATE rather than the poster.
     assert.equal(await gateFor(client, tpl.id, P), null,
       `${P.start}: the period is sound — the previous month's mirror is standing in it and shares no element`);
-    const r = await runManual(w.users.bob, {
+    const r = await runOccurrence({
       client, template: tpl.id, periodStart: P.start, periodEnd: P.end });
     await approveDraft(w.users.alice, r.entry_id);
     const mir = await mirrorOf(r.entry_id);
@@ -209,7 +209,7 @@ test("x42.r9n1c when the standing posting is a MIRROR the gate names the mirror 
   const tA = await liveTemplate({
     client, label: "r9n1c accrue", start: M1.start, autoReverse: true,
     lines: accrualLines(C, { debit: EXPA, credit: ACCR }), memo: "r9n1c accrue" });
-  const rA = await runManual(w.users.bob, {
+  const rA = await runOccurrence({
     client, template: tA.id, periodStart: M1.start, periodEnd: M1.end });
   await approveDraft(w.users.alice, rA.entry_id);
   const mir = await mirrorOf(rA.entry_id);
@@ -240,7 +240,7 @@ test("x42.r9n1c when the standing posting is a MIRROR the gate names the mirror 
   }
   assert.equal(await gateFor(client, tB.id, M2), null,
     "with the pair corrected on its own two dates, the month re-opens by itself");
-  const r2 = await runManual(w.users.bob, {
+  const r2 = await runOccurrence({
     client, template: tB.id, periodStart: M2.start, periodEnd: M2.end });
   await approveDraft(w.users.alice, r2.entry_id);
   assert.equal(await glNet(client, EXPA), -C,
@@ -261,7 +261,7 @@ test("x42.r9n1d a mirror whose occurrence was corrected without it still reads p
   const tpl = await liveTemplate({
     client, label: "r9n1d auto", start: P.start, autoReverse: true,
     lines: accrualLines(500_000), memo: "r9n1d auto" });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r.entry_id);
   const mir = await mirrorOf(r.entry_id);
@@ -332,7 +332,7 @@ test("x42.r9n1e a DEGENERATE auto-reverse template that moves one account in bot
       { account_code: EXPA, debit_cents: 0, credit_cents: 100_000, description: "recharge" },
     ], memo: "r9n1e degen" });
 
-  const r1 = await runManual(w.users.bob, {
+  const r1 = await runOccurrence({
     client, template: tpl.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r1.entry_id);
   assert.equal(await glNet(client, EXPA, P.end), 200_000, "month one books its net charge once");

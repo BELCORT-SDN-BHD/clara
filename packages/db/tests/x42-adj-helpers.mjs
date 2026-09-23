@@ -405,6 +405,20 @@ export async function deactivateAccountRaw(client, code) {
   assert.equal(r.rows[0].is_active, false, `${code} is now inactive`);
 }
 
+/** Which `clara._adj_template_hash` body is live on THIS database — 7 args (0045) or 8 (0140's
+ *  schedule-bearing recut). Memoised: one catalog read per process, like every other frontier
+ *  probe in this battery. */
+let _hashArity = null;
+export async function adjTemplateHashArity() {
+  if (_hashArity !== null) return _hashArity;
+  const r = await rootQuery(
+    `select max(p.pronargs)::int as n from pg_catalog.pg_proc p
+       join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = '_adj_template_hash'`);
+  _hashArity = Number(r.rows[0].n);
+  return _hashArity;
+}
+
 /** SURGERY 5 [#927] — mint one `clara.adjustment_templates` row of ANY status by direct
  *  INSERT: `propose_adjustment_template`/`sign_adjustment_template` are retired doors as of
  *  #927 (see this file's header). `content_hash` and the stored line canon are computed
@@ -417,16 +431,24 @@ export async function insertTemplateRaw({
   client, status = "live", label = "tpl", cadence = "monthly", lines = null, cents = 120_000,
   autoReverse = false, start, end = null, memo = "x42 accrual",
   proposer = null, signer = null, retiredReason = "x42 raw retire",
+  name: explicitName = null, replaces = null,
 }) {
   assert.ok(["proposed", "live", "retired"].includes(status), `insertTemplateRaw: unknown status '${status}'`);
   const w = await adjWorld();
   const firm = await firmOfClient(client);
-  const name = `x42 ${label} ${uniqTag()}`;
+  const name = explicitName ?? `x42 ${label} ${uniqTag()}`;
   const body = lines ?? accrualLines(cents);
   const canon = (await rootQuery(
     "select clara._adj_canon_lines($1::jsonb) as l", [JSON.stringify(body)])).rows[0].l;
+  // FRONTIER ARITY. `clara._adj_template_hash` takes SEVEN arguments at 0045 and EIGHT from
+  // 0140 (`drop function ... (text,text,date,date,boolean,jsonb,text)` then a `schedule`-bearing
+  // recut). This fixture runs at BOTH frontiers -- the package sweep at the head of the chain,
+  // and the d-b2 slice leg on a 0001..0045 copy (.github/actions/frontier-leg) -- so it asks the
+  // catalog which body is live instead of pinning one arity a bounded chain does not have.
   const hash = (await rootQuery(
-    "select clara._adj_template_hash($1,$2,$3::date,$4::date,$5,$6::jsonb,$7,null) as h",
+    await adjTemplateHashArity() === 8
+      ? "select clara._adj_template_hash($1,$2,$3::date,$4::date,$5,$6::jsonb,$7,null) as h"
+      : "select clara._adj_template_hash($1,$2,$3::date,$4::date,$5,$6::jsonb,$7) as h",
     [name, cadence, start, end, autoReverse, JSON.stringify(canon), memo])).rows[0].h;
 
   const signed = status === "live" || status === "retired";
@@ -435,20 +457,30 @@ export async function insertTemplateRaw({
   const signedBy = signed ? (signer ?? w.users.hana) : null;
   const retiredBy = retired ? (signer ?? w.users.hana) : null;
 
+  // [#927] `lineage_root_id` is DERIVED here exactly as the retired propose core derived it
+  // (0140's `_propose_adjustment_template_core`: "the predecessor's own root, or the predecessor
+  // itself when it is one -- and NULL when nothing was declared"), read off the live row rather
+  // than recomputed in JS, so a declared lineage is byte-identical to what the door produced.
   const r = await rootQuery(
     `insert into clara.adjustment_templates(
        firm_id, client_id, status, name, cadence, start_date, end_date, auto_reverse, lines,
        memo_template, content_hash, proposed_by, proposed_op_key,
-       signed_by, signed_at, signed_op_key, retired_by, retired_at, retired_reason, retired_op_key)
+       signed_by, signed_at, signed_op_key, retired_by, retired_at, retired_reason, retired_op_key,
+       replaces_template_id, lineage_root_id)
      values (
        $1, $2, $3, $4, $5, $6::date, $7::date, $8, $9::jsonb, $10, $11, $12, $13,
        $14, case when $14::uuid is not null then now() else null end, $15,
-       $16, case when $16::uuid is not null then now() else null end, $17, $18)
+       $16, case when $16::uuid is not null then now() else null end, $17, $18,
+       $19::uuid,
+       case when $19::uuid is null then null
+            else (select coalesce(pr.lineage_root_id, pr.id) from clara.adjustment_templates pr
+                   where pr.id = $19::uuid) end)
      returning *`,
     [firm, client, status, name, cadence, start, end, autoReverse, JSON.stringify(canon), memo, hash,
       proposedBy, opk("x42rawprop"),
       signedBy, signed ? opk("x42rawsign") : null,
-      retiredBy, retired ? retiredReason : null, retired ? opk("x42rawret") : null]);
+      retiredBy, retired ? retiredReason : null, retired ? opk("x42rawret") : null,
+      replaces]);
   const row = r.rows[0];
   assert.equal(row.status, status, `insertTemplateRaw: the row really landed at status '${status}'`);
   return {
@@ -480,11 +512,11 @@ export async function setFirmThreshold(firm, cents) {
 export async function liveTemplate({
   client, label = "tpl", cadence = "monthly", lines = null, cents = 120_000,
   autoReverse = false, start, end = null, memo = "x42 accrual",
-  proposer = null, signer = null, backdateSignTo = null,
+  proposer = null, signer = null, backdateSignTo = null, name = null, replaces = null,
 }) {
   const t = await insertTemplateRaw({
     client, status: "live", label, cadence, lines, cents, autoReverse, start, end, memo,
-    proposer, signer,
+    proposer, signer, name, replaces,
   });
   if (backdateSignTo) await backdateSignedAt(t.id, backdateSignTo);
   const row = await templateRow(t.id);
