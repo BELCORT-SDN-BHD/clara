@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { signInTo } from "./helpers";
+import { cellBudgetMs, signInTo } from "./helpers";
 import { CI } from "./counterparty-identity-mock.mjs";
 
 // #647 — journeys C13 (knowledge/identity), A6, C1, C4 and C6 at their identity seam:
@@ -23,9 +23,17 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 // EVERY CELL BELOW SIGNS IN FROM SCRATCH AND MOST RUN A FULL AXE PASS, so the 30 s default is a
 // property of the harness, not of the code under test. MEASURED on this machine (2026-09-16,
 // twelve wave worktrees sharing one host): a populated face costs ~20 s cold and the sign-in
-// redirect alone outran `toHaveURL`'s 5 s default. The a11y walk sets its own budget the same
-// way (e2e/a11y-finish-walk.spec.ts:77). A budget changes no assertion.
-test.describe.configure({ timeout: 150_000 });
+// redirect alone outran `toHaveURL`'s 5 s default.
+//
+// #864 — PER CELL, BUILT FROM cellBudgetMs, not a blanket describe-level configure call setting one
+// timeout over the whole file. The blanket shape (this file's own, until #864) sized every cell — the
+// thirteen that sign in once and scan once alongside the four that never scan at all — to the
+// same 150 s guess, borrowed by analogy from a11y-finish-walk.spec.ts's OWN pre-#864 guess
+// (a11y-finish-walk.spec.ts:70). Each cell below now states its own real work instead:
+// `cellBudgetMs({ signIns: 1 })` for the four that only sign in, `cellBudgetMs({ signIns: 1, scans: 1 })`
+// for the thirteen that also run one `expectAccessible` pass. `signInTo`'s own additive
+// `grantCellBudget(CELL_BUDGET.signIn)` still stacks on top of whichever of these runs first, the
+// same as every other file in this suite.
 
 async function expectAccessible(page: Page, face: string): Promise<void> {
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
@@ -39,6 +47,7 @@ const identityHref = (client: string, counterparty: string) =>
 // The normal journey: ONE Identity section on Knowledge, carrying both halves.
 // ---------------------------------------------------------------------------
 test("the Identity section carries BOTH halves — the client's own identifiers and its counterparties — with every count from a read that ran", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, `/clients/${CI.clientOk}/knowledge`);
 
   // (a) H-20's half: the client's OWN identifiers, listed at last.
@@ -64,6 +73,7 @@ test("the Identity section carries BOTH halves — the client's own identifiers 
 });
 
 test("empty: a successful read with no counterparties and no identifiers is an empty state, never an error", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, `/clients/${CI.clientEmpty}/knowledge`);
   await expect(page.getByText("No counterparties are recorded for this client yet")).toBeVisible();
   await expect(page.getByText("No identifier has been recorded for this client yet")).toBeVisible();
@@ -72,6 +82,7 @@ test("empty: a successful read with no counterparties and no identifiers is an e
 });
 
 test("denied: a 403 read is its own alert, distinct from the empty state's wording", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, `/clients/${CI.clientDenied}/knowledge`);
   const denied = page.getByRole("alert").filter({ hasText: "Your account can't read this yet." });
   await expect(denied.first()).toBeVisible();
@@ -80,6 +91,7 @@ test("denied: a 403 read is its own alert, distinct from the empty state's wordi
 });
 
 test("filtered to nothing is NOT the empty state: it says how many exist, keeps the filter and offers the way back", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, `/clients/${CI.clientVendorOnly}/knowledge`);
   await expect(page.getByText("Sole Vendor Sdn Bhd")).toBeVisible();
   await page.getByRole("button", { name: "Customers" }).click();
@@ -94,6 +106,7 @@ test("filtered to nothing is NOT the empty state: it says how many exist, keeps 
 // The routed detail: a STABLE URL, reached by a real link, with Back intact.
 // ---------------------------------------------------------------------------
 test("the identity detail is a stable URL reached by a real link, and Back returns to Knowledge", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, `/clients/${CI.clientOk}/knowledge`);
   await page.getByRole("link", { name: "Open identity" }).first().click();
   await expect(page).toHaveURL(new RegExp(`${identityHref(CI.clientOk, CI.cpAcme)}$`));
@@ -112,6 +125,7 @@ test("the identity detail is a stable URL reached by a real link, and Back retur
 });
 
 test("every alias carries its lane, its basis and its source — and all four lanes read as English", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1 }));
   await signInTo(page, identityHref(CI.clientOk, CI.cpAcme));
   await expect(page.getByText("entered in the app").first()).toBeVisible();
   await expect(page.getByText("written by Clara").first()).toBeVisible();
@@ -132,6 +146,7 @@ test("every alias carries its lane, its basis and its source — and all four la
 });
 
 test("inaccessible source: an alias that NAMES a document it cannot open says so, with the id, rather than falling silent", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, identityHref(CI.clientOk, CI.cpAcme));
   const alert = page.getByRole("alert").filter({ hasText: "cannot read right now" });
   await expect(alert.first()).toBeVisible();
@@ -143,6 +158,7 @@ test("inaccessible source: an alias that NAMES a document it cannot open says so
 });
 
 test("the CONFLICT face states cross-client ambiguity and the same-name-other-role pair, and never resolves either", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, identityHref(CI.clientOk, CI.cpAcme));
   await expect(page.getByText("Borneo Timber Holdings also records TIN C24680135790", { exact: false })).toBeVisible();
   await expect(page.getByText("deliberately NOT linked", { exact: false })).toBeVisible();
@@ -153,6 +169,7 @@ test("the CONFLICT face states cross-client ambiguity and the same-name-other-ro
 });
 
 test("merge lineage is rendered from BOTH sides, and the absorbed party's own page says where its identity went", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, identityHref(CI.clientOk, CI.cpAcme));
   // AC6's EXACT DATE clause: businessDateTime renders the merge instant in Asia/Kuala_Lumpur,
   // so 2026-05-02T02:00:00Z reads "2 May 2026". The clock time is deliberately left out of the
@@ -170,6 +187,7 @@ test("merge lineage is rendered from BOTH sides, and the absorbed party's own pa
 // The correction: keyboard-reachable, a PERSISTENT outcome, and a refusal that keeps the draft.
 // ---------------------------------------------------------------------------
 test("Correct identifiers is a governed act with a PERSISTENT outcome: keyboard-reachable, and still there after a reload", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, identityHref(CI.clientOk, CI.cpAcme));
   const trigger = page.getByRole("button", { name: "Correct identifiers" });
   await trigger.focus();
@@ -200,6 +218,7 @@ test("Correct identifiers is a governed act with a PERSISTENT outcome: keyboard-
 });
 
 test("a governed refusal renders VERBATIM with its CLR code in a persistent banner, and the dialog keeps the typed draft", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, identityHref(CI.clientOk, CI.cpAcme));
   await page.getByRole("button", { name: "Correct identifiers" }).click();
   const dialog = page.getByRole("dialog");
@@ -216,6 +235,7 @@ test("a governed refusal renders VERBATIM with its CLR code in a persistent bann
 });
 
 test("CANCELLED correction and recovery: Escape closes the dialog, writes nothing, and the identity is untouched", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1 }));
   await signInTo(page, identityHref(CI.clientOk, CI.cpAcme));
   const trigger = page.getByRole("button", { name: "Correct identifiers" });
   await trigger.click();
@@ -234,6 +254,7 @@ test("CANCELLED correction and recovery: Escape closes the dialog, writes nothin
 });
 
 test("retiring an alias keeps its history and is still retired after a reload", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1 }));
   await signInTo(page, identityHref(CI.clientOk, CI.cpAcme));
   const row = page.locator("li").filter({ hasText: "ACME TRADING" }).first();
   await row.getByRole("button", { name: "Retire" }).click();
@@ -252,6 +273,7 @@ test("retiring an alias keeps its history and is still retired after a reload", 
 });
 
 test("H-20: adding an identifier is a governed act, and a duplicate renders the database's own refusal", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await signInTo(page, `/clients/${CI.clientOk}/knowledge`);
   await page.getByRole("button", { name: "Add identifier" }).click();
   const dialog = page.getByRole("dialog");
@@ -282,6 +304,7 @@ test("H-20: adding an identifier is a governed act, and a duplicate renders the 
 // Narrow width, 200% zoom and reduced motion (appendix C §4).
 // ---------------------------------------------------------------------------
 test("320px: the identity detail reads without a page-wide horizontal scrollbar", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await page.setViewportSize({ width: 320, height: 720 });
   await signInTo(page, identityHref(CI.clientOk, CI.cpAcme));
   await expect(page.getByText("Acme Sdn Bhd").first()).toBeVisible();
@@ -296,6 +319,7 @@ test("320px: the identity detail reads without a page-wide horizontal scrollbar"
 });
 
 test("200% zoom: the identity's own controls stay reachable", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1 }));
   await page.setViewportSize({ width: 640, height: 512 });
   await signInTo(page, identityHref(CI.clientOk, CI.cpAcme));
   await expect(page.getByRole("button", { name: "Correct identifiers" })).toBeVisible();
@@ -306,6 +330,7 @@ test("200% zoom: the identity's own controls stay reachable", async ({ page }) =
 });
 
 test("reduced motion: the identity section renders every face with no motion preference at all", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await page.emulateMedia({ reducedMotion: "reduce" });
   await signInTo(page, `/clients/${CI.clientOk}/knowledge`);
   await expect(page.getByText("Acme Sdn Bhd").first()).toBeVisible();
