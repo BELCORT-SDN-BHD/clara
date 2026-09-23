@@ -11,6 +11,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 const RIG = process.env.CLARA_RIG_DB === "1";
 const skip = !RIG;
@@ -79,8 +80,18 @@ const withRuntime = async (fn) => {
 };
 
 /** Birth an onboarding client + plan via the human admin lane (JWT-claims GUC), returning
- *  {clientId, planId}. */
-async function beginOnboarding(name) {
+ *  {clientId, planId}.
+ *
+ *  #899 (0287_client_birth_wall.sql): `clara.begin_client_onboarding` now delegates to
+ *  `clara._client_birth_core`, which refuses outright once TWO parties in the firm already share
+ *  the caller's name family, and `clara.name_family_token` (0103) is the FIRST alphanumeric token
+ *  of the name. Every label this file passes begins "DB …", and every one is born into the SAME
+ *  firm A — so the third onwards were refused with "this name matches 2 existing clients or
+ *  counterparties in your firm". The uniqueness leads now, which is the same remedy
+ *  packages/db/tests/wave-b/wb-fixtures.mjs's own `onboardingClient()` default took; the caller's
+ *  label still reads intact after it. */
+async function beginOnboarding(label) {
+  const name = `DB${randomUUID().slice(0, 8)} ${label}`;
   await client.query("set role clara_authenticated");
   await client.query("select set_config('request.jwt.claims', $1, false)", [JSON.stringify({ sub: OWNER_A, role: "authenticated" })]);
   const r = await client.query("select clara.begin_client_onboarding($1, $2) as receipt", [name, `begin:${name}`]);
