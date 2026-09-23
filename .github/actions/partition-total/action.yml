@@ -71,8 +71,13 @@ runs:
         # partitions nothing.
         cat tests/split-lists/test-list-d-b*.txt | grep -v '^#' | grep -v '^$' | grep -v '^x42x-' | sort > $RUNNER_TEMP/listed.txt
         # EVERY list must declare its cell floor — the file-granular gate cannot see a deleted cell.
+        # [#1041] …and its skip bound, the half that catches a cell which stops asserting at this
+        # slice's frontier rather than one that was deleted. This gate runs on EVERY PR while the
+        # frontier legs themselves are dispatch-only, so it is the cheap place a missing
+        # declaration is caught.
         for L in tests/split-lists/test-list-d-b*.txt; do
           grep -qE '^#!cells-floor:' "$L" || { echo "$L declares no '#!cells-floor:'"; exit 1; }
+          grep -qE '^#!skips-max:' "$L" || { echo "$L declares no '#!skips-max:'"; exit 1; }
         done
         # The declared floor re-runs: allow exactly ONE extra listing each, then fall through to
         # the strict checks, which still fail on any undeclared duplicate.

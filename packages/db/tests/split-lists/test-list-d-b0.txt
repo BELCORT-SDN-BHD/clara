@@ -16,7 +16,19 @@
 # clara_wc_b0 (0041_asm + this slice's chain), E17 honoured, --test-concurrency=1:
 #   149 pass / 0 fail / 4 skip over 32 files. Raise it when you add cells; NEVER lower it to
 #   go green.
-#!cells-floor: 149
+#
+# [#1041] THE FLOOR COUNTS CELLS, NOT PASSES, AND THE SKIPS HAVE THEIR OWN BOUND. The leg used to
+# compare PASSES, which answered "is the cell still there" and "does it still assert at THIS
+# frontier" with one number — and only the first is a deletion. `.github/actions/frontier-leg`
+# now preloads the package's whole preintegration gate chain (an old frontier IS an estate sweep
+# against a pre-integration chain), so a cell whose premise migration sits above this frontier
+# SKIPS lawfully and a pass-floor would read it as deleted. The leg therefore asserts three
+# things: `fail` is 0, the cells the run REPORTS (pass + skip) meet `#!cells-floor:`, and the
+# cells that SKIP stay within `#!skips-max:`. RE-MEASURED whole at this slice's own frontier on
+# the lane-07 cluster, 2026-09-24, gate chain preloaded, --test-concurrency=1:
+#   153 cells = 149 pass / 0 fail / 4 skip over 32 files.
+#!cells-floor: 153
+#!skips-max: 4
 #
 # THE RESET-GATED DRILL RUNS ALONE, in its own throwaway DB — NOT in this list:
 #   PGDATABASE=clara_x42_b0_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \

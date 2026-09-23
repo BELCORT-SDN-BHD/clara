@@ -133,6 +133,20 @@ runs:
         CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
       run: |
         set -o pipefail
+        # (3a) THE PREINTEGRATION GATE CHAIN [#1041]. This leg IS an estate sweep against a
+        # pre-integration chain: it replays the CURRENT corpus against a database that stops at
+        # 0042..0045, so every premise migration ABOVE the frontier is legitimately absent. The
+        # estate already ships one gate module per lane for exactly that state — each sets a
+        # CLARA_ALLOW_MISSING_<LANE> flag its own cells read — and #927's refusal message names
+        # the convention outright ("Preload ./tests/…-preintegration-gate.mjs for an estate sweep
+        # against a pre-#927 chain"). Without them four d-b2 cells and one d-b0 cell died loudly
+        # on dispatch run 35893727271. DERIVED, never copied: packages/db/package.json's `test`
+        # script is the one roster, and scripts/print-gate-chain.mjs reads it (a hand-copied list
+        # here would rot the first time a migration ships a gate). A gate never turns a PASSING
+        # cell into a skip: its flag is consulted only on the branch where the premise is missing,
+        # which is a branch that fails without it.
+        GATES="$(node scripts/print-gate-chain.mjs)"
+        echo "--- preloading $(echo $GATES | wc -w | awk '{print $1/2}') preintegration gate(s) ---"
         LIST="tests/split-lists/test-list-${{ inputs.slice }}.txt"
         test -f "$LIST" || { echo "missing $LIST"; exit 1; }
         FILES=""
@@ -146,19 +160,39 @@ runs:
         # CLARA_RIG_ALLOW_RESET is deliberately NOT set here: the reset-gated drill must SKIP in
         # this sweep and run ALONE in (4). CLARA_ALLOW_DESTRUCTIVE *is* set, at job level, because
         # the rig battery needs it — every reset gate keys on CLARA_RIG_ALLOW_RESET, never on it.
-        CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee $RUNNER_TEMP/list-run.txt
+        CLARA_RIG_DB=1 node --test --test-concurrency=1 $GATES $FILES 2>&1 | tee $RUNNER_TEMP/list-run.txt
         # (3b) THE CELL FLOOR. The totality gate is FILE-granular: a DELETED cell inside a
         # still-listed file passes it. Each list therefore declares its own measured floor and the
         # run must meet it. Raise the floor in the list when you add cells; never lower it to go
         # green.
+        #
+        # [#1041] IT COUNTS CELLS, NOT PASSES, AND BOUNDS THE SKIPS SEPARATELY. It used to compare
+        # PASSES, which answered two questions at once — "is the cell still there" and "does it
+        # still assert AT THIS FRONTIER" — and only the first is a deletion. With step (3a)'s gate
+        # chain preloaded, a cell whose premise migration sits above the frontier SKIPS lawfully,
+        # and a pass-floor reads that as a deleted cell. So: `fail` must be 0 (its own line,
+        # unchanged), the number of cells the run REPORTS must meet `#!cells-floor:`, and the
+        # number that SKIP must stay within `#!skips-max:`. The second half is new coverage the
+        # pass-floor never had: a cell that silently stops asserting now breaches a bound of its
+        # own instead of being invisible. Both numbers are MEASURED at the slice's own frontier
+        # and written in its list; every floor went UP when this changed (149→153, 76→82, 168→169,
+        # 70→74) — none was lowered.
         FLOOR="$(grep -E '^#!cells-floor:' "$LIST" | head -1 | awk '{print $2}')"
         test -n "$FLOOR" || { echo "$LIST declares no '#!cells-floor:' — every list must"; exit 1; }
+        SKIPMAX="$(grep -E '^#!skips-max:' "$LIST" | head -1 | awk '{print $2}')"
+        test -n "$SKIPMAX" || { echo "$LIST declares no '#!skips-max:' — every list must"; exit 1; }
         PASS="$(grep -E '^# pass ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
         FAIL="$(grep -E '^# fail ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
-        echo "--- ${{ inputs.slice }}: $PASS pass / $FAIL fail · declared floor $FLOOR ---"
+        SKIP="$(grep -E '^# skipped ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
+        test -n "$PASS" && test -n "$FAIL" && test -n "$SKIP" || {
+          echo "the ${{ inputs.slice }} run printed no TAP summary (pass='${PASS:-}' fail='${FAIL:-}' skipped='${SKIP:-}')"; exit 1; }
+        CELLS=$((PASS + SKIP))
+        echo "--- ${{ inputs.slice }}: $PASS pass / $FAIL fail / $SKIP skip = $CELLS cells · declared floor $FLOOR, skips-max $SKIPMAX ---"
         test "$FAIL" = "0" || { echo "the ${{ inputs.slice }} list is not green"; exit 1; }
-        test -n "$PASS" && [ "$PASS" -ge "$FLOOR" ] || {
-          echo "CELL FLOOR BREACHED: the ${{ inputs.slice }} list passed ${PASS:-?} cells, floor $FLOOR — a cell was deleted or silently skipped"; exit 1; }
+        [ "$CELLS" -ge "$FLOOR" ] || {
+          echo "CELL FLOOR BREACHED: the ${{ inputs.slice }} list ran $CELLS cells, floor $FLOOR — a cell was DELETED inside a still-listed file"; exit 1; }
+        [ "$SKIP" -le "$SKIPMAX" ] || {
+          echo "SKIP BOUND BREACHED: the ${{ inputs.slice }} list skipped $SKIP cells, at most $SKIPMAX may — a cell stopped asserting at this frontier"; exit 1; }
 
     # (3c) THE CROSS-SLICE CONTRACTS, from their OWN roster [merge-gate SF4]. The x42x-*
     # contracts are excluded from the file-granular totality gate (each appears in
@@ -181,6 +215,8 @@ runs:
         CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
       run: |
         set -o pipefail
+        # The same derived gate chain as step (3) — see its comment. [#1041]
+        GATES="$(node scripts/print-gate-chain.mjs)"
         ROSTER="tests/split-lists/test-list-contracts.txt"
         test -f "$ROSTER" || { echo "missing $ROSTER — the cross-slice contract roster is not optional"; exit 1; }
         FILES=""
@@ -191,7 +227,7 @@ runs:
         done < "$ROSTER"
         test -n "$FILES" || { echo "$ROSTER lists no contracts"; exit 1; }
         echo "--- ${{ inputs.slice }} frontier: $(echo $FILES | wc -w) cross-slice contract(s) ---"
-        CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee $RUNNER_TEMP/contracts-run.txt
+        CLARA_RIG_DB=1 node --test --test-concurrency=1 $GATES $FILES 2>&1 | tee $RUNNER_TEMP/contracts-run.txt
         FAIL="$(grep -E '^# fail ' $RUNNER_TEMP/contracts-run.txt | tail -1 | awk '{print $3}')"
         PASS="$(grep -E '^# pass ' $RUNNER_TEMP/contracts-run.txt | tail -1 | awk '{print $3}')"
         echo "--- contracts at the ${{ inputs.slice }} frontier: $PASS pass / $FAIL fail ---"
@@ -249,7 +285,10 @@ runs:
         CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
         CLARA_RIG_ALLOW_ROLE_SWEEP: "1"
       run: |
+        # The drill replays the chain to THIS SLICE'S frontier too, so it is the same
+        # pre-integration state as steps (3)/(3c) and takes the same derived gate chain. [#1041]
+        GATES="$(node scripts/print-gate-chain.mjs)"
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_${{ inputs.dbtag }}_upgrade_ci'
         PGDATABASE=clara_x42_${{ inputs.dbtag }}_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \
           CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1 \
-          node --test tests/${{ steps.gate.outputs.drill }}.test.mjs
+          node --test $GATES tests/${{ steps.gate.outputs.drill }}.test.mjs

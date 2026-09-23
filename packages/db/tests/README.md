@@ -155,6 +155,37 @@ it, and a cohort row in [rig-meta.mjs](rig-meta.mjs) that names every object the
 the rig census stays wholly-present-or-wholly-absent. `counterparty-identity.test.mjs` +
 `counterparty-identity-preintegration-gate.mjs` (migration `0215`, #647) is the current example.
 
+**The chain has one roster, and one way to read it (#1041).** `package.json`'s `test` script IS
+the gate chain; `scripts/print-gate-chain.mjs` prints it as `--import` flags so a caller that is
+not `pnpm test` never grows a second copy. `ci-frontier-leg-contract.test.mjs` holds that output
+to the gate modules ON DISK, in both directions — a gate that ships without joining the `test`
+script is a gate no sweep preloads, and a chain entry with no file kills every run that preloads
+it. Use it wherever a sweep needs the chain by hand:
+
+```
+GATES="$(node scripts/print-gate-chain.mjs)"
+node --test --test-concurrency=1 $GATES tests/<file>.test.mjs
+```
+
+**`db-slice-frontiers` is an estate sweep, and preloads the whole chain.** The leg replays the
+CURRENT corpus against a chain that stops at this slice's own migration (0042–0045), so every
+premise migration above that frontier is legitimately absent — the exact state a gate exists for,
+and the one #927's own refusal message tells the reader to preload for. Until #1041 the leg ran a
+bare `node --test`, and four d-b2 cells plus one d-b0 cell died loudly on that sentence (dispatch
+run 35893727271). A gate never turns a PASSING cell into a skip: its flag is read only on the
+branch where the premise is missing, which is a branch that fails without it.
+
+**A fixture that runs at two frontiers is not a gate.** A gate lets a cell stand down; a
+FRONTIER-COMPAT fixture keeps the cell running on both sides of the migration that changed a
+door's grammar. `fa-authority-sign-compat.mjs` holds both of the x41 rig's:
+`signTakesAuthorityRef()` (0227 moved the sign door's ARITY — feature-detected off
+`to_regprocedure`) and `reviseTakesChangeClass()` (0227 added the `change_class` /
+`change_reason` KEYS inside `p_particulars` — keyed on the migration's stem in
+`clara.schema_migrations`, because a key leaves no signature to detect and probing the door's own
+body would ask the subject under test what it should be).
+`fa-rig-frontier-compat.test.mjs` cross-checks the second against the live door from the other
+side.
+
 ## document_regions.field_path literals, kept honest (#857)
 
 `clara._assert_field_path` (migration 0191) is enforced at `clara.persist_document_extraction`
