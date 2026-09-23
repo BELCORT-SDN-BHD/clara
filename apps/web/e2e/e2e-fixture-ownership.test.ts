@@ -1579,6 +1579,13 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   get_work_claim_origin: [
     "journal-work-mock.mjs", "plans-mock.mjs", "staff-expense-claim-mock.mjs", "work-knowledge-mock.mjs",
   ],
+  // #930 — `clara.staff_advance_summary` used to be answered by ONE lane (`staff-advances-register
+  // -mock.mjs`, for the register's own allocation editor) and deliberately declined by the other;
+  // #930 gave the staff-expense-claim form's own advance-application arm a CHOOSER fed by that same
+  // read, so a SECOND lane now answers it too. Each gates on `p_client` before answering —
+  // `staff-advances-register-mock.mjs` on `SAR.clientId`, `staff-expense-claim-mock.mjs` on
+  // `SEC.clientId` — and falls through otherwise, so neither can answer for the other's walk.
+  staff_advance_summary: ["staff-advances-register-mock.mjs", "staff-expense-claim-mock.mjs"],
   // WAVE 2026-09-18, INTEGRATION — the two OTHER doors the Work detail now reads on EVERY mount,
   // for the same structural reason get_work_claim_origin above is read: a trade invoice and a
   // knowledge read-set are both invisible in accounting_work.purpose, so the surface has to ask.
