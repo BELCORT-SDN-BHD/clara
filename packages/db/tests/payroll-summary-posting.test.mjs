@@ -39,6 +39,7 @@ import assert from "node:assert/strict";
 import { rootQuery, ensureReady, endPool, buildWorld, upsertAccount } from "./rig-fixtures.mjs";
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
+import { fiscalYear } from "./depreciation-history-fixtures.mjs";
 
 let ready = false;
 let world = null;
@@ -655,4 +656,149 @@ test("S2 · a document that was never read has no verdict to give, and says so",
   assert.equal(v.rung, "facts_read");
   assert.equal(v.reason, "payroll_not_read");
   assert.equal(v.rung_vector.filed, "pass", "it IS filed — the gate distinguishes unfiled from unread");
+});
+
+// ---------------------------------------------------------------------------
+// S3 — the unattended post
+// ---------------------------------------------------------------------------
+
+const linesOf = async (entryId) =>
+  (
+    await rootQuery(
+      `select line_no, account_code, debit_cents::bigint as debit_cents,
+              credit_cents::bigint as credit_cents, description, counterparty_id
+         from clara.journal_lines where entry_id=$1 order by line_no`,
+      [entryId],
+    )
+  ).rows;
+
+test("S3 · a payroll summary whose arithmetic holds posts itself, with no human in the loop", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1);
+
+  // The READ's own settle receipt says what the read led to.
+  assert.equal(doc.receipt.posting.posted, true, `the run posted: ${JSON.stringify(doc.receipt.posting)}`);
+  assert.ok(doc.receipt.posting.entry_id);
+
+  const entries = await entriesOf(doc.documentId);
+  assert.equal(entries.length, 1, "exactly one entry, and nobody drafted a second");
+  const e = entries[0];
+  assert.equal(e.status, "approved", "POSTED, not left as a draft for a person to approve");
+  assert.equal(e.origin, "document", "…as a document entry");
+  assert.equal(e.posting_date, "2026-08-31", "dated at the END of the payslip's own month");
+  assert.equal(e.memo, "Payroll run August 2026");
+  assert.ok(e.filing_id, "bound to the document's own filing — which is what clears the uncoded row");
+  assert.equal(e.flags.payroll_run.period_month, "2026-08-01", "the marker the duplicate guard reads");
+
+  // The actor is the estate's agent identity on BOTH sides: nobody was asked, and nobody
+  // approved by hand.
+  const agent = (await rootQuery("select clara.agent_user_id() as id")).rows[0].id;
+  assert.equal(e.maker_actor, agent);
+  assert.equal(e.checker_actor, agent);
+
+  // THE LEGS, against the worked example rather than against what the plan said.
+  const lines = await linesOf(e.id);
+  assert.equal(lines.length, 11, `eleven legs: ${JSON.stringify(lines.map((l) => l.account_code))}`);
+  const got = lines.map((l) => ({
+    account_code: l.account_code,
+    side: Number(l.debit_cents) > 0 ? "debit" : "credit",
+    cents: Number(l.debit_cents) > 0 ? Number(l.debit_cents) : Number(l.credit_cents),
+  }));
+  assert.deepEqual(got, EXPECTED_LEGS.map(({ account_code, side, cents }) => ({ account_code, side, cents })));
+  assert.equal(
+    got.filter((l) => l.side === "debit").reduce((a, l) => a + l.cents, 0),
+    EXPECTED_TOTAL,
+    "…and the posted entry balances at the worked example's own total",
+  );
+  assert.equal(
+    lines.some((l) => l.counterparty_id !== null),
+    false,
+    "no leg carries a counterparty: salaries payable is deliberately not a control account",
+  );
+
+  // THE RECEIPT. An agent-approved entry owes exactly one; this is the document-shaped one, and
+  // it names the lane that posted rather than borrowing the invoice lane's.
+  const receipts = (
+    await rootQuery(
+      `select via_wake_kind, approval_arm, acting_actor, on_behalf_of, model_snapshot,
+              gate_verdicts, maker_active_at_approval, rationale
+         from clara.entry_post_receipts where entry_id=$1`,
+      [e.id],
+    )
+  ).rows;
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].via_wake_kind, "payroll_facts");
+  assert.equal(receipts[0].approval_arm, "payroll_unattended");
+  assert.equal(receipts[0].on_behalf_of, null, "nobody was acted for");
+  assert.equal(receipts[0].model_snapshot.provider, "clara_db", "no model took part in the POST");
+  assert.ok(receipts[0].gate_verdicts.extraction_id, "…but the reading it posted from is named");
+  assert.equal(receipts[0].gate_verdicts.rung_vector.accounts_resolve, "pass");
+  assert.equal(
+    (
+      await rootQuery("select count(*)::int as n from clara.operation_receipts where effects->>'entry_id'=$1", [e.id])
+    ).rows[0].n,
+    0,
+    "…and NOT an operation-shaped one as well: exactly one writer claims this post",
+  );
+
+  // THE EVENT.
+  const events = (
+    await rootQuery(
+      "select event_type, payload, actor from clara.domain_events where entry_id=$1 order by seq",
+      [e.id],
+    )
+  ).rows;
+  assert.equal(events.filter((x) => x.event_type === "entry.posted").length, 1);
+  assert.equal(events.find((x) => x.event_type === "entry.posted").payload.approval_arm, "payroll_unattended");
+});
+
+test("S3 · a run the gate blocks leaves no entry and tells the read why", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    visionAnswers: { "payroll.run.socso_employer": value("99.99") },
+  });
+
+  assert.equal(doc.receipt.status, "done", "the READ still settles — a blocked post never loses the facts");
+  assert.equal(doc.receipt.posting.posted, false);
+  assert.equal(doc.receipt.posting.reason, "channels_disagree");
+  assert.equal(doc.receipt.posting.rung, "channels_agree");
+  assert.equal(doc.receipt.posting.entry_id, null);
+
+  assert.equal((await entriesOf(doc.documentId)).length, 0, "nothing at all was written");
+  assert.equal(
+    (await rootQuery("select count(*)::int as n from clara.entry_post_receipts r join clara.journal_entries j on j.id=r.entry_id where j.document_id=$1", [doc.documentId])).rows[0].n,
+    0,
+    "…and no receipt: a receipt is written for a POST, never for a refusal",
+  );
+  // The facts themselves are all there, which is the whole point of refusing rather than raising.
+  assert.equal(
+    (await rootQuery("select count(*)::int as n from clara.document_regions r join clara.document_extractions e on e.id=r.extraction_id where e.document_id=$1 and e.engine_kind='payroll_text_facts'", [doc.documentId])).rows[0].n,
+    RUN_FIELDS.length,
+    "the eleven typed facts a person needs in order to clear the block are banked",
+  );
+});
+
+test("S3 · a payroll run whose month falls in a closed year is not posted", async (t) => {
+  if (unready(t)) return;
+
+  // Firm S / client S1 owns this cell: clara.fiscal_years is append-only, so a closed year on a
+  // shared client would follow every other cell around.
+  await seedPayrollChart(world.users.erin, world.clients.S1);
+  const firmS = await firmOf(world.clients.S1);
+  await fiscalYear(firmS, world.clients.S1, {
+    startsOn: "2026-01-01", endsOn: "2026-12-31", status: "closed", owner: world.users.erin,
+  });
+
+  const doc = await readPayrollDoc(world.users.erin, world.clients.S1);
+  assert.equal(doc.receipt.posting.posted, false);
+  assert.equal(doc.receipt.posting.rung, "period_open", `${JSON.stringify(doc.receipt.posting.rung_vector)}`);
+  assert.equal(doc.receipt.posting.reason, "period_closed");
+  assert.equal((await entriesOf(doc.documentId)).length, 0);
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.detail.closed_fiscal_year.status, "closed", "the gate names the year that is shut");
 });
