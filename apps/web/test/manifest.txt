@@ -377,6 +377,7 @@ lib/command/routes.test.ts
 lib/dashboard/financial-pack.test.ts
 lib/dashboard/period.test.ts
 lib/dashboard/use-financial-pack.test.ts
+lib/deferred-revenue/schedule.test.ts
 lib/documents/batch-url-state.test.ts
 lib/documents/bytes.test.ts
 lib/documents/capability-registry.test.ts
