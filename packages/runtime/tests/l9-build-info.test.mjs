@@ -91,6 +91,40 @@ test("#637: an image that passes neither reports empty, never a missing key", as
   assert.ok("bodies" in out && "pins" in out, "both keys are always present on the payload");
 });
 
+// #1035 — THE THIRD ROSTER ON THE SAME PAYLOAD: which DOOR CONTRACTS this image understands.
+//
+// `bodies` answers "what can this image run". `contracts` answers "does it read what the doors now
+// return" — the question 0254 and 0279 posed and nothing could answer about a target image. It
+// rides the same import-here-pass-in shape as `bodies` and `pins`, and for a different reason:
+// `lib/runtime-contracts.mjs` is plain-Node ESM, but the ROUTE is what decides that this payload
+// speaks for this image, so the roster is passed in where the other rosters are.
+//
+// AN ABSENT KEY WOULD BE THE WHOLE DEFECT AGAIN. A rollback preflight reading a target's
+// build-info must be able to tell "this image declares no contracts" (an honest pre-0254 answer,
+// which REFUSES at 0254 and above) from "this payload does not have the field" — and it gets the
+// former from an empty array beside a `bodies` list that is not.
+test("#1035: contracts are carried verbatim onto the payload, and absent reads as an empty declaration", async () => {
+  const out = await buildInfo({
+    env: {},
+    names: ["chatTurn"],
+    bodies: ["chatTurn_v18"],
+    contracts: ["intake_refusal_record_v1", "fa_parked_run_v1"],
+    withRuntime: runWith(async () => ({ rows: [{ frontier: null }] })),
+  });
+  assert.deepEqual(out.contracts, ["intake_refusal_record_v1", "fa_parked_run_v1"]);
+
+  const none = await buildInfo({ env: {}, names: [], bodies: ["chatTurn_v18"], withRuntime: runWith(async () => ({ rows: [{ frontier: null }] })) });
+  assert.deepEqual(none.contracts, [], "absent must read as 'declares none', not as an absent field");
+  assert.ok("contracts" in none, "the key is always present on the payload");
+});
+
+test("#1035: contracts is a COPY — a caller cannot mutate the roster through the response", async () => {
+  const contracts = ["intake_refusal_record_v1"];
+  const out = await buildInfo({ env: {}, names: [], contracts, withRuntime: runWith(async () => ({ rows: [{ frontier: null }] })) });
+  out.contracts.push("injected_v99");
+  assert.deepEqual(contracts, ["intake_refusal_record_v1"], "the roster's own array is untouched");
+});
+
 test("#637: bodies/pins are COPIES — a caller cannot mutate the registry's frozen roster through the response", async () => {
   const bodies = ["claraWork_v1", "claraWork_v2"];
   const pins = { claraWork: "claraWork_v2" };
@@ -197,6 +231,11 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   // payload naming only one of them would leave a rollback preflight unable to answer, from one
   // read, which bodies this image actually carries — the question this route exists for.
   assert.match(src, /import \{ claraWorkBundleIdentityV2 \} from "\.\.\/workflows\/claraWork\.v2\.bundle\.js"/, "the route imports the v2 bundle identity too");
+  // #1035 — the CONTRACT roster, same shape. Without this the payload would report
+  // `contracts: []`, which a rollback preflight reads as "this image declares none" — the exact
+  // false refusal that would make an operator distrust the gate and run the deploy anyway.
+  assert.match(src, /import \{ RUNTIME_CONTRACT_IDS \} from "\.\.\/lib\/runtime-contracts\.mjs"/, "the route imports the contract roster");
+  assert.match(src, /contracts: RUNTIME_CONTRACT_IDS/, "and passes it into the payload");
   // #631: THREE identities now, PINNED FIRST. v3 is what `workflows.claraWork` dispatches;
   // v2 and v1 are still carried for runs parked on their hooks, and an operator reading
   // /api/build-info has to be able to see all three rather than infer the rollback targets.

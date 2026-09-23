@@ -808,13 +808,45 @@ same will eventually ship on the second one. The database target comes from the 
 sources fails closed.
 
 It counts **three** things, because it is three questions. The third is the DATABASE's own vote,
-and it is the one no census can see: from `0195_work_egress_purpose_and_execution_trace` on, a
-target that does not carry `claraWork_v3` is REFUSED with reason `frontier_requires_body`,
+and it is the one no census can see. The rule table lives in `lib/rollback-preflight.mjs`
+(`FRONTIER_RULES`), it is global — no `--scope` clears it, because it counts no rows — and it is
+not drainable. It holds two kinds of rule.
+
+**(a) A body the applied schema requires.** From `0195_work_egress_purpose_and_execution_trace` on,
+a target that does not carry `claraWork_v3` is REFUSED with reason `frontier_requires_body`,
 however clean the estate is — 0195's posting core requires a consumed `accounting_work` egress
 authorisation, no other body can obtain one, and 0195 grandfathers pre-v3 bundles past that wall,
 so a pre-v3 image would run the whole Work lane with the wall in force and nothing subject to it.
-The rule table lives in `lib/rollback-preflight.mjs` (`FRONTIER_BODY_RULES`), it is global — no
-`--scope` clears it — and it is not drainable: ship a target that carries the named body.
+The answer is a target that carries the named body.
+
+**(b) A door contract the applied schema changed (#1035).** A migration can change what a door
+RETURNS, and then an older image runs every parked body perfectly and misreads the answer. Two
+have shipped, and the preflight said `ALLOWED` for both at a hosted window before this rule
+existed:
+
+| from | the door | what the old image does instead |
+|---|---|---|
+| `0254_intake_refusal_record` | `clara.create_document_intake` commits a ceiling-refused intake and returns `refused: true` instead of raising CLR18 | reads an `intake_id` off the refusal, mints an upload capability, answers **201** to the uploader, and re-drives the intake on every recovery sweep |
+| `0279_fa_closed_year_arrears` | `clara.run_depreciation_period` answers `status: 'parked'` instead of posting when a closed year's arrears need a materiality judgement | counts the park as a **post** and, since the due probe still answers `due: true`, chases the same period to the per-client cap |
+
+The target proves it understands a contract by **declaring** it. `lib/runtime-contracts.mjs` is the
+image's own roster: one `clara.contract` marker per contract, carried as a literal in the built
+bundle, and served as ids on `/api/build-info`'s `contracts`. The preflight scans the target
+artifact for the markers (`--target-bundle`) or reads the ids off the target's own build-info
+(`--target-build-info`), so the decision is a **measurement of the image** and never a list of
+image tags somebody keeps by hand. An image that declares nothing — every image built before this
+mechanism — reads as "does not understand", which is the whole point: that is exactly the image a
+rollback is pointed at. Refusal reason: `frontier_requires_contract`.
+
+A contract refusal has **neither** of the two answers a census refusal has: retaining a body
+teaches the target nothing about what the door now returns, and there is no queue to drain. Ship a
+target that declares the contract, or roll the schema back first — which is its own ceremony.
+
+Adding a rule is one row in `FRONTIER_RULES`, and adding a marker is one entry in
+`RUNTIME_CONTRACTS` naming the module and the line of it that only exists when the behaviour does.
+`tests/runtime-contracts.test.mjs` reads both, so a marker whose behaviour was deleted reds a cell
+instead of lying to a preflight, and `tests/rollback-preflight.test.mjs` fails any rule that names
+a migration the chain does not contain.
 
 The other two are the censuses. Non-terminal `workflow.workflow_runs`,
 grouped by name with the parked body derived from the row itself; **and** live tasks bound to NO
