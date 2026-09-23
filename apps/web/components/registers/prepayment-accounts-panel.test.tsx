@@ -14,6 +14,18 @@
 //   p940.panel.retire_copy  the retire dialog says the sentence a person could otherwise get wrong:
 //                           it closes the FUTURE only, and a running schedule posts to term end.
 //
+// #941 — THE SAME ROSTER NOW CARRIES A SECOND PURPOSE, so the panel stops being purpose-blind:
+//   p941.panel.rows_both     the read is NOT narrowed to one purpose, and each row says which
+//                            purpose it carries. A roster that showed only the prepayment arm
+//                            would tell a firm no account is enrolled while one is.
+//   p941.panel.enrol_purpose choosing "advances received" offers this client's active, non-control
+//                            LIABILITY accounts and none of the asset ones, and sends
+//                            `p_purpose: deferred_revenue` — the door's own positive rule
+//                            (0308 §A: a customer's advance is a contract liability).
+//   p941.panel.retire_purpose retiring a deferred-revenue row sends THAT row's purpose: the roster
+//                            is keyed on (client, account, purpose), so the default would retire a
+//                            different enrolment — or none.
+//
 // THE DIALOG RENDERS INTO A PORTAL at `document.body`, so every search below roots at the BODY
 // after the harness container is appended to it — `fa-row-actions.test.tsx`'s own idiom.
 
@@ -43,7 +55,17 @@ const ACCOUNTS = [
   { account_code: "19000001", name: "Prepayments", account_type: "asset", account_class: null, special_acc_type: null, is_active: true },
   { account_code: "374-C56", name: "Trade receivables", account_type: "asset", account_class: "receivable", special_acc_type: null, is_active: true },
   { account_code: "59000001", name: "Subscriptions", account_type: "expense", account_class: null, special_acc_type: null, is_active: true },
+  // #941's side of the roster: a plain liability the door admits, and a CONTROL liability the
+  // shared wall refuses — the panel must not offer the second one.
+  { account_code: "2030", name: "Deferred revenue", account_type: "liability", account_class: null, special_acc_type: null, is_active: true },
+  { account_code: "2100", name: "Trade payables", account_type: "liability", account_class: "payable", special_acc_type: null, is_active: true },
 ];
+
+const DEFERRED_ENROLMENT = {
+  id: "e2", account_code: "2030", purpose: "deferred_revenue",
+  reason: "memberships are billed a year ahead and earned monthly",
+  active: true, enrolled_at: "2026-09-22T02:00:00Z", created_by: "u1", retired_at: null,
+};
 
 const ENROLMENT = {
   id: "e1", account_code: "19000001", purpose: "prepayment",
@@ -210,6 +232,91 @@ test("p940.panel.retire_copy — the retire dialog says retirement closes the FU
     assert.match(text, /closes the account to NEW schedules/);
     assert.match(text, /keeps posting to the end of its term/,
       "owner decision 5, said in words where the decision is taken");
+  } finally {
+    await teardown();
+  }
+});
+
+test("p941.panel.rows_both — the roster read is not narrowed to one purpose, and each row says which purpose it carries", async () => {
+  const { h, calls, teardown } = await mountPanel([[ENROLMENT, DEFERRED_ENROLMENT]]);
+  try {
+    const read = calls.find((c) => c.url.includes("/rest/v1/prepayment_account_enrolments"));
+    assert.ok(read, "the panel reads the roster");
+    assert.doesNotMatch(read!.url, /purpose=eq\./,
+      "one relation, two purposes: a panel that asked for one arm would tell a firm no account is "
+      + "enrolled while one is");
+    const text = h.text();
+    assert.match(text, /19000001/, "the prepayment enrolment is on screen");
+    assert.match(text, /2030/, "…and so is the deferred-revenue one");
+    assert.match(text, /memberships are billed a year ahead/, "with its own stated reason");
+    assert.match(text, /Deferred revenue/,
+      "each row says WHICH purpose it carries — two accounts under one heading with no word "
+      + "between them is a roster a reader has to guess at");
+    assert.equal(
+      findAll(h.container as never, (n) => String(reactProps(n)["data-testid"] ?? "") === "prepayment-account-row").length,
+      2);
+  } finally {
+    await teardown();
+  }
+});
+
+test("p941.panel.enrol_purpose — choosing advances-received offers the client's non-control LIABILITY accounts and none of the asset ones, and sends the deferred_revenue purpose", async () => {
+  const { h, calls, teardown } = await mountPanel([[], [DEFERRED_ENROLMENT]]);
+  try {
+    const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).trim() === "Enrol an account");
+    await h.fireEvent(trigger!, "click");
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    const purpose = findAll(bodyNode(), (n) => String(reactProps(n).id ?? "") === "prepayment-account-purpose")[0];
+    assert.ok(purpose, "the dialog asks what the account holds");
+    await h.act(() => { setFieldValue(purpose as never, "deferred_revenue"); });
+    for (let i = 0; i < 4; i++) await h.settle();
+
+    const select = findAll(bodyNode(), (n) => String(reactProps(n).id ?? "") === "prepayment-account-code")[0];
+    const offered = findAll(select as never, (n) => n.tagName === "OPTION")
+      .map((n) => String(reactProps(n).value ?? ""))
+      .filter((v) => v !== "");
+    assert.deepEqual(offered, ["2030"],
+      "a contract liability is the only thing a customer's advance can be enrolled as: the asset "
+      + "accounts belong to the other purpose and the control liability is the shared wall's");
+
+    await h.act(() => { setFieldValue(select as never, "2030"); });
+    const reason = findAll(bodyNode(), (n) => String(reactProps(n).id ?? "") === "prepayment-account-reason")[0];
+    await h.act(() => {
+      setFieldValue(reason as never, "memberships are billed a year ahead and earned monthly");
+    });
+    for (let i = 0; i < 4; i++) await h.settle();
+
+    await clickButton(dialogConfirm("Enrol an account") as never);
+    for (let i = 0; i < 8; i++) await h.settle();
+
+    const post = calls.find((c) => c.url.includes("/rpc/enrol_prepayment_account"));
+    assert.ok(post, "the governed door was called");
+    assert.equal(post!.body.p_account, "2030");
+    assert.equal(post!.body.p_purpose, "deferred_revenue",
+      "the purpose is the person's choice, not this panel's default");
+    assert.match(h.text(), /2030/, "and the row on screen came from the re-read");
+  } finally {
+    await teardown();
+  }
+});
+
+test("p941.panel.retire_purpose — retiring a deferred-revenue row sends THAT row's purpose, because the roster is keyed on (client, account, purpose)", async () => {
+  const { h, calls, teardown } = await mountPanel([[DEFERRED_ENROLMENT], []]);
+  try {
+    const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).trim() === "Retire");
+    assert.ok(trigger, "the deferred-revenue row offers Retire");
+    await h.fireEvent(trigger!, "click");
+    for (let i = 0; i < 6; i++) await h.settle();
+    await clickButton(dialogConfirm("Retire") as never);
+    for (let i = 0; i < 8; i++) await h.settle();
+
+    const post = calls.find((c) => c.url.includes("/rpc/retire_prepayment_account"));
+    assert.ok(post, "the governed door was called");
+    assert.equal(post!.body.p_account, "2030");
+    assert.equal(post!.body.p_purpose, "deferred_revenue",
+      "the default would retire a prepayment enrolment of the same account — or nothing at all, "
+      + "while the row a person clicked stays live");
   } finally {
     await teardown();
   }

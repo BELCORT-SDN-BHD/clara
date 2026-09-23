@@ -27,8 +27,10 @@ import type { SessionTokenAccessor } from "@/lib/session";
 
 /** WHAT the account is enrolled to carry. A CLOSED SET on ONE roster: the deferred-revenue mirror
  *  (#941) adds an arm rather than a second relation, so a firm never has two answers to "may this
- *  account carry a release schedule". This build's doors admit `prepayment` only — the enrolment
- *  door refuses `deferred_revenue` by name until #941 states its account-type rule. */
+ *  account carry a release schedule". Migration 0308 states the second arm's rule at the enrolment
+ *  door — `prepayment` admits a prepaid ASSET, `deferred_revenue` a contract LIABILITY — and the
+ *  roster is keyed on (client, account, purpose), so the two arms version forward independently
+ *  and neither can retire the other's enrolment. */
 export type PrepaymentAccountPurpose = "prepayment" | "deferred_revenue";
 
 export type PrepaymentAccountRow = {
@@ -60,6 +62,23 @@ export function loadPrepaymentAccounts(
     select: PREPAYMENT_ACCOUNT_COLS,
     filters: { client_id: `eq.${clientId}`, purpose: `eq.${purpose}`, active: "eq.true" },
     order: "account_code.asc",
+    session,
+  });
+}
+
+/** The WHOLE live roster of one client, BOTH purposes, for the panel that administers it (#941).
+ *  The purpose-filtered read above answers a surface that gates on one arm; a panel that showed
+ *  only one would tell a firm no account is enrolled while one is. Ordered by purpose first so the
+ *  two arms arrive grouped, and each row carries its own `purpose` — the panel prints it rather
+ *  than inferring it from the account's type, which is the door's judgement and not a renderer's. */
+export function loadPrepaymentRoster(
+  session: SessionTokenAccessor,
+  clientId: string,
+): Promise<PrepaymentAccountRow[]> {
+  return getRows<PrepaymentAccountRow>("prepayment_account_enrolments", {
+    select: PREPAYMENT_ACCOUNT_COLS,
+    filters: { client_id: `eq.${clientId}`, active: "eq.true" },
+    order: "purpose.asc,account_code.asc",
     session,
   });
 }

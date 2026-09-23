@@ -21,6 +21,15 @@
 // those are the DOOR's five negative axes, answered with the estate's own reason, and a second
 // client-side copy of that judgement would be a second rule that could disagree.
 //
+// #941 — THE SAME ROSTER, A SECOND PURPOSE. A customer's advance is recognised into revenue under
+// the same positive statement, made on the same relation with `purpose = 'deferred_revenue'`, and
+// migration 0308 states that arm's rule at the door: a prepayment is a prepaid ASSET released by
+// credit, a customer advance a contract LIABILITY released by debit. This panel therefore reads the
+// WHOLE roster rather than one arm (a panel that showed one would tell a firm no account is
+// enrolled while one is), prints each row's purpose rather than inferring it from the account type,
+// and carries the purpose into BOTH doors — the roster is keyed on (client, account, purpose), so a
+// retire that defaulted would close a different enrolment from the row a person clicked.
+//
 // `FaDoorDialog` is this domain's own door-dialog mechanism (one click opens, one confirm performs
 // exactly one governed call, the refusal travels into the dialog). It is reused rather than copied:
 // a third copy would be a third mechanism to keep honest.
@@ -35,7 +44,8 @@ import { EmptyState, StateBanner } from "@/components/common/state";
 import { NativeSelect } from "@/components/common/native-select";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import {
-  loadPrepaymentAccounts, enrolPrepaymentAccount, retirePrepaymentAccount,
+  loadPrepaymentRoster, enrolPrepaymentAccount, retirePrepaymentAccount,
+  type PrepaymentAccountPurpose,
 } from "@/lib/registers/prepayment-accounts";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { FaDoorDialog } from "./FaDoorDialog";
@@ -55,7 +65,7 @@ export function PrepaymentAccountsPanel({
 }) {
   const t = useTranslations("PrepaymentAccounts");
   const { data: rows, loading, err, clr, busy, act: rawAct } =
-    useHydratedPart(sessionTokenAccessor, (s) => loadPrepaymentAccounts(s, clientId));
+    useHydratedPart(sessionTokenAccessor, (s) => loadPrepaymentRoster(s, clientId));
   const act = async (fn: () => Promise<void>): Promise<boolean> => {
     const ok = await rawAct(fn);
     onActed?.();
@@ -87,10 +97,21 @@ export function PrepaymentAccountsPanel({
             <li key={row.id} className="flex flex-col gap-1 rounded-md border p-2" data-testid="prepayment-account-row">
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <Badge variant="secondary">{row.account_code}</Badge>
+                {/* WHICH PURPOSE THIS ENROLMENT CARRIES, in a word rather than a colour. It is the
+                    row's own field, never inferred from the account's type: the purpose is the
+                    judgement the door recorded, and a reader guessing it from the chart would be
+                    guessing. */}
+                <PurposeBadge purpose={row.purpose} />
                 <span className="text-muted-foreground">
                   {t("enrolledOn", { date: String(row.enrolled_at).slice(0, 10) })}
                 </span>
-                <RetireDialog clientId={clientId} accountCode={row.account_code} busy={busy} act={act} />
+                <RetireDialog
+                  clientId={clientId}
+                  accountCode={row.account_code}
+                  purpose={row.purpose}
+                  busy={busy}
+                  act={act}
+                />
               </div>
               {/* THE REASON IS SHOWN, not stored and hidden. It is the whole audit trail a later
                   reader has for why this account was treated as a prepayment account. */}
@@ -106,6 +127,18 @@ export function PrepaymentAccountsPanel({
   );
 }
 
+/** THE TWO ARMS, each in its own word. A closed set of two: an unknown purpose prints itself
+ *  rather than being swallowed, because a roster row a reader cannot name is worse than an ugly
+ *  one. */
+function PurposeBadge({ purpose }: { purpose: string }) {
+  const t = useTranslations("PrepaymentAccounts");
+  const words: Record<string, string> = {
+    prepayment: t("purposeBadgePrepayment"),
+    deferred_revenue: t("purposeBadgeDeferredRevenue"),
+  };
+  return <Badge variant="outline">{words[purpose] ?? purpose}</Badge>;
+}
+
 function EnrolDialog({
   clientId,
   accounts,
@@ -118,10 +151,17 @@ function EnrolDialog({
   act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("PrepaymentAccounts");
+  const [purpose, setPurpose] = useState<PrepaymentAccountPurpose>("prepayment");
   const [accountCode, setAccountCode] = useState("");
   const [reason, setReason] = useState("");
-  const assetAccounts = accounts.filter(
-    (a) => a.account_type === "asset" && a.account_class === null && a.is_active);
+  // THE ONE POSITIVE RULE THE PURPOSE ADDS, as the door states it (0308 §A): a prepayment is a
+  // prepaid ASSET, a customer's advance a contract LIABILITY. The five NEGATIVE axes — inactive,
+  // control-class, bank-bound, register-reserved, unknown — stay the DOOR's, answered with the
+  // estate's own reason; only `account_class === null` is repeated here, and only because it is
+  // what keeps a receivable or a payable out of a list that offers nothing else.
+  const wantedType = purpose === "deferred_revenue" ? "liability" : "asset";
+  const eligibleAccounts = accounts.filter(
+    (a) => a.account_type === wantedType && a.account_class === null && a.is_active);
   const ready = accountCode !== "" && reason.trim() !== "";
 
   return (
@@ -138,12 +178,31 @@ function EnrolDialog({
       onConfirm={() =>
         act(async () => {
           await enrolPrepaymentAccount(sessionTokenAccessor, {
-            clientId, accountCode, reason,
+            clientId, accountCode, purpose, reason,
           });
         })
       }
     >
       <div className="flex flex-col gap-2">
+        {/* WHAT THIS ACCOUNT HOLDS, asked BEFORE the account: the answer decides which accounts can
+            be offered at all, so asking it second would present a list that then changes under the
+            person who read it. Switching it clears the chosen code for the same reason — an asset
+            code left selected under "advances received" is a submit the door could only refuse. */}
+        <div className="grid gap-1.5">
+          <Label htmlFor="prepayment-account-purpose">{t("purposeLabel")}</Label>
+          <NativeSelect
+            id="prepayment-account-purpose"
+            value={purpose}
+            onChange={(e) => {
+              setPurpose(e.target.value as PrepaymentAccountPurpose);
+              setAccountCode("");
+            }}
+          >
+            <option value="prepayment">{t("purposePrepayment")}</option>
+            <option value="deferred_revenue">{t("purposeDeferredRevenue")}</option>
+          </NativeSelect>
+          <p className="text-xs text-muted-foreground">{t("purposeHint")}</p>
+        </div>
         <div className="grid gap-1.5">
           <Label htmlFor="prepayment-account-code">{t("accountLabel")}</Label>
           <NativeSelect
@@ -152,7 +211,7 @@ function EnrolDialog({
             onChange={(e) => setAccountCode(e.target.value)}
           >
             <option value="">{t("accountChoose")}</option>
-            {assetAccounts.map((a) => (
+            {eligibleAccounts.map((a) => (
               <option key={a.account_code} value={a.account_code}>
                 {a.account_code} — {a.name}
               </option>
@@ -180,11 +239,16 @@ function EnrolDialog({
 function RetireDialog({
   clientId,
   accountCode,
+  purpose,
   busy,
   act,
 }: {
   clientId: string;
   accountCode: string;
+  /** THE ROW'S OWN PURPOSE, carried into the door. The roster is keyed on
+   *  (client, account, purpose), so a default here would retire a different enrolment from the one
+   *  whose Retire control a person pressed — or none at all, leaving the row on screen. */
+  purpose: PrepaymentAccountPurpose;
   busy: boolean;
   act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
@@ -200,7 +264,7 @@ function RetireDialog({
       busy={busy}
       onConfirm={() =>
         act(async () => {
-          await retirePrepaymentAccount(sessionTokenAccessor, { clientId, accountCode });
+          await retirePrepaymentAccount(sessionTokenAccessor, { clientId, accountCode, purpose });
         })
       }
     />
