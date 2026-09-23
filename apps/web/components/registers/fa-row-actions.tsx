@@ -21,8 +21,8 @@ import { faRefusalControlId } from "@/lib/registers/fa-refusal-field";
 import { FaParticularsFields, EMPTY_PARTICULARS, particularsReadyToSubmit } from "./fa-particulars-fields";
 import { fmtCents } from "@/lib/registers/money";
 import {
-  completeFixedAssetParticulars, reviseFixedAssetParticulars, reviseIntent, disposeFixedAsset,
-  FA_CHANGE_CLASSES, FA_IMPLEMENTED_CHANGE_CLASSES,
+  completeFixedAssetParticulars, completeIntent, reviseFixedAssetParticulars, reviseIntent,
+  disposeFixedAsset, disposeIntent, FA_CHANGE_CLASSES, FA_IMPLEMENTED_CHANGE_CLASSES,
 } from "@/lib/registers/fixed-assets";
 import { useDepreciationDecisionKey } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -55,6 +55,10 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act, error }:
   const t = useTranslations("FixedAssetsDepreciation.actions");
   const [particulars, setParticulars] = useState<FaParticularsInput>(EMPTY_PARTICULARS);
   const idPrefix = `fa-complete-${asset.id}`;
+  // #978 — ONE DECISION, ONE KEY, the same house shape #651 wired onto the run/authority/revise
+  // doors. A CLOSED DIALOG ENDS THE DECISION: the next press is a new completion and mints a new
+  // key (`onClosed` below), same as `ReviseParticularsDialog`.
+  const decision = useDepreciationDecisionKey();
 
   return (
     <FaDoorDialog
@@ -66,9 +70,13 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act, error }:
       refusal={toDialogRefusal(error)}
       refusalFocusId={faRefusalControlId(idPrefix, error)}
       confirmDisabled={!particularsReadyToSubmit(particulars)}
+      onClosed={() => decision.renew()}
       onConfirm={() =>
         act(async () => {
-          await completeFixedAssetParticulars(sessionTokenAccessor, { clientId, assetId: asset.id, particulars });
+          const intent = completeIntent({ clientId, assetId: asset.id, particulars });
+          await completeFixedAssetParticulars(sessionTokenAccessor, {
+            clientId, assetId: asset.id, particulars, opKey: decision.key(intent),
+          });
         })
       }
     >
@@ -227,6 +235,10 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act, error }: R
   const [memo, setMemo] = useState("");
   const [costPortionCents, setCostPortionCents] = useState<number | null>(null);
   const [costPortionValid, setCostPortionValid] = useState(true);
+  // #978 — ONE DECISION, ONE KEY. A CLOSED DIALOG ENDS THE DECISION: the next press is a new
+  // disposal and mints a new key (`onClosed` below). `disposeIntent` deliberately excludes the
+  // memo, so editing only the note stays the same decision, matching the door's own dedupe hash.
+  const decision = useDepreciationDecisionKey();
 
   const assetAccounts = accounts.filter((a) => a.account_type === "asset" && a.account_class === null && a.is_active);
   const incomeAccounts = accounts.filter((a) => a.account_type === "income" && a.account_class === null && a.is_active);
@@ -242,8 +254,13 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act, error }: R
       busy={busy}
       refusal={toDialogRefusal(error)}
       confirmDisabled={!disposalDate || !gainAccount || !lossAccount || !proceedsValid || !costPortionValid}
+      onClosed={() => decision.renew()}
       onConfirm={() =>
         act(async () => {
+          const intent = disposeIntent({
+            clientId, assetId: asset.id, disposalDate, proceedsCents: proceedsCents ?? 0,
+            proceedsAccount: proceedsAccount || null, gainAccount, lossAccount, costPortionCents,
+          });
           await disposeFixedAsset(sessionTokenAccessor, {
             clientId,
             assetId: asset.id,
@@ -254,6 +271,7 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act, error }: R
             lossAccount,
             memo: memo || null,
             costPortionCents,
+            opKey: decision.key(intent),
           });
         })
       }
