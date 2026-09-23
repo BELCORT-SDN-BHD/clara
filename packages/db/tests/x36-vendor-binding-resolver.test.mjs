@@ -5,7 +5,9 @@
 // caught the min(uuid) crash, the F2-omission over-match, and the birth-gate reachability
 // gap has to actually exist.
 //
-//   x36v.1 drive a binding fully to 'live' (propose -> sign, 0029 present).
+//   x36v.1 drive a binding fully to 'live' (propose -> sign, 0029 present). #921: both doors
+//     are carried by clara_fn_owner now (x36-vendor-binding-helpers.mjs's header) — no human
+//     session can reach them, which vendor-binding-write-doors-revoked.test.mjs proves.
 //   x36v.2 a NEW document (outside the evidence window) whose vendor name/registration/
 //     invoice-prefix all match the live binding resolves via clara._resolve_vendor_binding
 //     -- proves F1+F2+F3 all hit AND the uuid tiebreak (array_agg(...)[1]) never 42883s on
@@ -144,7 +146,7 @@ async function addTopBandOcrLine(document, text) {
 
 test("x36v readiness", () => { requireReady(); assert.ok(w, "world built"); });
 
-test("x36v.1 propose -> sign drives a binding to 'live' (0029 present)", async () => {
+test("x36v.1 the propose -> sign BODIES still drive a binding to 'live' (0029 present; #921: carried by clara_fn_owner, unreachable by any human)", async () => {
   requireReady();
   const { binding } = await seedLiveBinding(w, "V1");
   assert.equal(binding.status, "live");

@@ -1,6 +1,16 @@
 // Migration 0028 -- the vendor identity binding propose/sign/revoke ceremony (task #36).
+//
+// #921 (migration 0273): `clara_authenticated` no longer holds EXECUTE on propose/sign/decline,
+// so every propose/sign call below is carried by `clara_fn_owner` through the `…AsFnOwner`
+// wrappers — same bodies, same actor in request.jwt.claims, same walls, a different role on the
+// wire. Read x36-vendor-binding-helpers.mjs's header for why, and read
+// vendor-binding-write-doors-revoked.test.mjs for the proof that NO human session can reach
+// these three any more (42501, at every rank). `revoke` below IS still granted to
+// clara_authenticated and is still driven as a human, deliberately — that is the one write a
+// firm keeps under D6.
+//
 // Complements x36-vendor-binding-dwell.test.mjs (which proves the derivation's dwell gate in
-// isolation): this file drives the three GRANTED verbs themselves --
+// isolation): this file drives the three ceremony verbs themselves --
 //   x36c.1 propose_vendor_identity_binding happy path (bookkeeper floor) over a window that
 //     clears every _derive_vendor_binding_proposal gate (dwell+restated+F1+F2+F3).
 //   x36c.2 THE INTERLOCK -- sign_vendor_identity_binding refuses post_control_absent (CLR36)
@@ -141,8 +151,12 @@ test("x36c.3 revoke_vendor_identity_binding refuses binding_not_live against a s
 test("x36c.4 propose_vendor_identity_binding floors at bookkeeper+ — a viewer is refused CLR04", async () => {
   requireReady();
   const cp = await seedPassingWindow(w, "C4");
-  // _human_ctx(role_rank('bookkeeper')) raises CLR04 'insufficient role' -- the GRANT itself
-  // admits clara_authenticated broadly; the floor is enforced inside the function body.
+  // _human_ctx(role_rank('bookkeeper')) raises CLR04 'insufficient role' -- the rank floor is
+  // enforced INSIDE the function body, which is what this cell is about and what #921 did not
+  // touch. Since 0273 the ACL layer refuses a human session before the body is ever entered
+  // (vendor-binding-write-doors-revoked.test.mjs vb921.1/.4 measure exactly that), so the call
+  // below is carried by clara_fn_owner to reach the floor at all: a viewer who tried this for
+  // real today would be stopped one layer earlier, by 42501.
   await assertRaises("CLR04",
     () => proposeAsFnOwner(w.users.carol, { client: w.clients.A1, counterparty: cp.id }),
     "viewer proposes a vendor identity binding");
