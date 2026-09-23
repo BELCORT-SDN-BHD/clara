@@ -207,6 +207,14 @@ body would ask the subject under test what it should be).
 `fa-rig-frontier-compat.test.mjs` cross-checks the second against the live door from the other
 side.
 
+A DELIBERATE DEVIATION FROM #1041'S OWN BRIEF, recorded so the brief is not later read as what
+shipped (review SPEC-1041-A). The brief asked for "their gate module, or a premise check of the
+same shape" for the `change_class` grammar cells. Both of those let a cell STAND DOWN when its
+premise is missing, and at the d-b0 frontier that would have quietly dropped 26 cells out of the
+slice's own floor — the measurement the leg exists to make. The compat fixture keeps all 26
+running on both sides instead, at the cost the reader should know: at frontier 0042 those cells
+exercise the PRE-0227 revise grammar, which is the grammar that frontier actually has.
+
 ## document_regions.field_path literals, kept honest (#857)
 
 `clara._assert_field_path` (migration 0191) is enforced at `clara.persist_document_extraction`
