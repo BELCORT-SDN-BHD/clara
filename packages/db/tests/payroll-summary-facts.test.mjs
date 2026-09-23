@@ -26,13 +26,18 @@
 //       (file_document, finalize_document_intake, the facts-gate consumer). A payroll_summary
 //       pdf stops terminating as `skipped_kind` and enters its own `payroll_facts` lane, under
 //       the same enqueue-time typed-consent gate the witness lanes hold.
+//   S5. THE PERSIST DOOR — clara.persist_payroll_facts(uuid, jsonb, jsonb, integer) and
+//       clara.fail_payroll_facts(uuid, text), the pair a worker settles the lane through. The
+//       run's typed facts land as clara.document_regions rows with their source regions, a
+//       not-printed answer lands as a region that says so rather than as a zero, and NO
+//       employee-level figure is persisted anywhere.
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention).
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, ensureReady, endPool, buildWorld } from "./rig-fixtures.mjs";
-import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, docTasks } from "./a21-helpers.mjs";
+import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, docTasks, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
 
 let ready = false;
@@ -534,6 +539,21 @@ test("S3 · the evaluator is a closed, single-member closure: it calls no other 
 // S4 — the facts router
 // ---------------------------------------------------------------------------
 
+/** The typed witness_extraction consent is granted ONCE per client: the grant door refuses a
+ *  second live consent for the same purpose, so this asks before it grants rather than
+ *  swallowing the refusal (which would hide a genuinely absent consent from the cell below). */
+async function hasWitnessConsent(client) {
+  const r = await rootQuery(
+    `select exists(select 1 from clara.client_egress_purpose_activations a
+        join clara.client_egress_purpose_consents c
+          on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id and c.purpose=a.purpose
+       where a.client_id=$1 and a.purpose='witness_extraction'
+         and a.deactivated_at is null and c.revoked_at is null) as live`,
+    [client],
+  );
+  return r.rows[0].live === true;
+}
+
 /** A FILED payroll-summary pdf with a done OCR extraction and one cited region, born through the
  *  real doors (a21-classifier-gate.test.mjs's own `pdfDoc` shape), never by surgery. */
 async function payrollDoc(client, { consent = true } = {}) {
@@ -543,7 +563,7 @@ async function payrollDoc(client, { consent = true } = {}) {
   // facts enqueue itself, so granting afterwards would leave a pre-consent gate receipt on the
   // trail beside the live task and make "exactly one task" a lie about the lane rather than
   // about this helper.
-  if (consent) {
+  if (consent && !(await hasWitnessConsent(client))) {
     const evidence = await consentEvidenceDoc(sub, { firm });
     const grant = await grantPurpose(sub, { client, purpose: "witness_extraction", evidenceDocument: evidence.documentId });
     await activatePurpose(sub, { client, purpose: "witness_extraction", consent: grant.consent_id });
@@ -625,4 +645,208 @@ test("S4 · every other kind's route through the recut router is unchanged", asy
   await seedExtraction({ firm, document: other.documentId, engineKind: "ocr", status: "done" });
   const otherReceipt = await enqueueInvoiceFacts(other.documentId);
   assert.equal(otherReceipt.status, "skipped_kind", "the skipped_kind arm still serves every kind with no reader");
+});
+
+// ---------------------------------------------------------------------------
+// S5 — the persist door
+// ---------------------------------------------------------------------------
+
+/** Drive a payroll document all the way to a CLAIMED, running task through the real doors, and
+ *  hand back everything the persist call needs. */
+async function runningPayrollTask(client) {
+  const doc = await payrollDoc(client);
+  await enqueueInvoiceFacts(doc.documentId);
+  const task = (
+    await rootQuery(
+      "select id from clara.document_processing_tasks where document_id=$1 and lane='payroll_facts' and status='queued' order by version_n desc limit 1",
+      [doc.documentId],
+    )
+  ).rows[0];
+  assert.ok(task, "mandatory setup: the router queued a payroll_facts task");
+  const claimed = await claimTask(task.id, { egressApproved: true });
+  assert.equal(claimed.status, "running", `mandatory setup: the task is claimable (got ${JSON.stringify(claimed)})`);
+  const sha = (await rootQuery("select sha256 from clara.documents where id=$1", [doc.documentId])).rows[0].sha256;
+  return { ...doc, taskId: task.id, sha };
+}
+
+function call(env, { pin, promptHash }) {
+  return { input_pin: pin, prompt_hash: promptHash, envelope: env };
+}
+
+async function persist(taskId, textCall, visionCall, pages = 1) {
+  const r = await rootQuery("select clara.persist_payroll_facts($1,$2::jsonb,$3::jsonb,$4) as receipt", [
+    taskId, JSON.stringify(textCall), JSON.stringify(visionCall), pages,
+  ]);
+  return r.rows[0].receipt;
+}
+
+const regionsOf = async (documentId) => (
+  await rootQuery(
+    `select r.field_path, r.text_content, r.monetary_raw, r.monetary_cents, r.locator, e.engine_kind
+       from clara.document_regions r
+       join clara.document_extractions e on e.id = r.extraction_id
+      where e.document_id = $1
+        and e.engine_kind in ('payroll_text_facts','payroll_vision_facts')
+      order by r.field_path`,
+    [documentId],
+  )
+).rows;
+
+test("S5 · the run's typed facts land as regions with their source regions, and a not-printed answer lands saying so", async (t) => {
+  if (unready(t)) return;
+
+  const doc = await runningPayrollTask(world.clients.A1);
+  const rows = [payslipRow(1, R1), payslipRow(2, R2)];
+  const answers = { ...PRINTED, "payroll.run.hrdf_levy": notPrinted() };
+  const [textEnv, visionEnv] = bothChannels({ answers, rows });
+
+  const receipt = await persist(
+    doc.taskId,
+    call(textEnv, { pin: doc.extractionId, promptHash: "payroll-text-v1" }),
+    call(visionEnv, { pin: doc.sha, promptHash: "payroll-vision-v1" }),
+  );
+  assert.equal(receipt.status, "done");
+  assert.equal(receipt.replayed, false);
+
+  const regions = await regionsOf(doc.documentId);
+  assert.equal(regions.length, RUN_FIELDS.length,
+    `one region per run-level question, answered or not: ${JSON.stringify(regions.map((r) => r.field_path))}`);
+  for (const r of regions) {
+    assert.equal(r.engine_kind, "payroll_text_facts", "every fact hangs off the CANONICAL text row of the pair");
+  }
+
+  const gross = regions.find((r) => r.field_path === "payroll.run.gross_pay");
+  assert.equal(gross.monetary_cents, "500000", "the printed total, as the DB's own integer");
+  assert.equal(gross.monetary_raw, "5,000.00", "…beside the verbatim rendering the page carries");
+  assert.equal(gross.text_content, "5,000.00");
+  assert.ok(gross.locator, "…and a locator, so a person can click the figure and see where it came from");
+
+  const levy = regions.find((r) => r.field_path === "payroll.run.hrdf_levy");
+  assert.ok(levy, "an UNPRINTED answer still lands as a fact — silence is a reading, not an absence");
+  assert.equal(levy.monetary_cents, null, "…carrying NO figure at all, which is what `not printed` means");
+  assert.equal(levy.monetary_raw, null);
+  assert.equal(levy.text_content, null, "…never the string '0' and never a zero cents value");
+
+  const period = regions.find((r) => r.field_path === "payroll.run.period");
+  assert.equal(period.text_content, "2026-08", "the one non-monetary question lands as text");
+  assert.equal(period.monetary_cents, null);
+
+  // The pair is banked under its OWN engine kinds, so clara._invoice_fact_state can never
+  // resolve a payroll envelope as an invoice corroboration.
+  const kinds = (
+    await rootQuery(
+      "select engine_kind, status from clara.document_extractions where document_id=$1 order by engine_kind",
+      [doc.documentId],
+    )
+  ).rows;
+  assert.deepEqual(
+    kinds.map((k) => k.engine_kind).sort(),
+    ["ocr", "payroll_text_facts", "payroll_vision_facts"],
+    "the OCR row the read was pinned to, plus the payroll pair under its own two kinds",
+  );
+
+  // Idempotent replay: a worker that re-settles a done task gets the stored receipt back and
+  // banks nothing a second time.
+  const replay = await persist(
+    doc.taskId,
+    call(textEnv, { pin: doc.extractionId, promptHash: "payroll-text-v1" }),
+    call(visionEnv, { pin: doc.sha, promptHash: "payroll-vision-v1" }),
+  );
+  assert.equal(replay.replayed, true);
+  assert.equal((await regionsOf(doc.documentId)).length, RUN_FIELDS.length, "a replay writes no second set of facts");
+});
+
+test("S5 · NO employee-level figure is persisted anywhere — the quotes exist only so the evaluator can sum them", async (t) => {
+  if (unready(t)) return;
+
+  const doc = await runningPayrollTask(world.clients.A1);
+  // Renderings that appear ONLY on the per-employee rows and nowhere in the run-level totals, so
+  // finding either anywhere in the database is proof a quote was persisted.
+  const rows = [payslipRow(1, R1), payslipRow(2, R2)];
+  const [textEnv, visionEnv] = bothChannels({ answers: PRINTED, rows });
+  await persist(
+    doc.taskId,
+    call(textEnv, { pin: doc.extractionId, promptHash: "payroll-text-v1" }),
+    call(visionEnv, { pin: doc.sha, promptHash: "payroll-vision-v1" }),
+  );
+
+  const stored = (
+    await rootQuery(
+      `select coalesce(string_agg(e.envelope::text, ' '), '')
+            || ' ' || coalesce((select string_agg(coalesce(r.text_content,'') || ' ' || coalesce(r.monetary_raw,''), ' ')
+                                  from clara.document_regions r
+                                  join clara.document_extractions e2 on e2.id = r.extraction_id
+                                 where e2.document_id = $1), '') as blob
+         from clara.document_extractions e where e.document_id = $1`,
+      [doc.documentId],
+    )
+  ).rows[0].blob;
+
+  for (const quote of [R1.gross, R1.epf, R1.socso, R1.eis, R1.pcb, R1.net, R2.gross, R2.epf, R2.socso, R2.eis, R2.pcb, R2.net]) {
+    assert.equal(stored.includes(quote), false,
+      `the per-employee rendering ${quote} reached durable storage — no employee-level figure may be persisted`);
+  }
+  // The RUN-level figures, by contrast, are exactly what this document is for.
+  assert.ok(stored.includes("5,000.00"), "the run's printed gross total IS persisted");
+  // And the state the evaluator produced rides with the read, so a reader never has to guess
+  // why a figure is or is not established.
+  const state = (
+    await rootQuery(
+      `select e.envelope -> 'payroll_state' as s from clara.document_extractions e
+        where e.document_id = $1 and e.engine_kind = 'payroll_text_facts'`,
+      [doc.documentId],
+    )
+  ).rows[0].s;
+  assert.equal(state.state_version, "v1");
+  assert.equal(state.established.length, 11, "every question on this page was established");
+  assert.equal(state.rows.agreed, 2, "…over two agreed rows");
+  assert.equal(state.rows.balanced, 2);
+  assert.equal(
+    JSON.stringify(state).includes(R1.epf), false,
+    "the state itself carries no employee-level rendering either — counts, row numbers and column sums only",
+  );
+});
+
+test("S5 · the door refuses a malformed read at the write boundary, and the lane's own fail verb settles a running task", async (t) => {
+  if (unready(t)) return;
+
+  const doc = await runningPayrollTask(world.clients.A1);
+  const rows = [payslipRow(1, R1)];
+  const [textEnv, visionEnv] = bothChannels({ answers: PRINTED, rows });
+
+  // An envelope missing a question is refused BY THE DOOR, not silently stored.
+  const bad = JSON.parse(JSON.stringify(textEnv));
+  delete bad.payroll.answers["payroll.run.pcb"];
+  await assert.rejects(
+    () => persist(doc.taskId, call(bad, { pin: doc.extractionId, promptHash: "t" }), call(visionEnv, { pin: doc.sha, promptHash: "v" })),
+    (err) => err.code === "CLR10",
+    "a malformed answers vocabulary is a structural refusal",
+  );
+
+  // Two channels that used the SAME prompt are not two independent readings.
+  await assert.rejects(
+    () => persist(doc.taskId, call(textEnv, { pin: doc.extractionId, promptHash: "same" }), call(visionEnv, { pin: doc.sha, promptHash: "same" })),
+    (err) => err.code === "CLR10",
+    "the independence receipt requires distinct prompts",
+  );
+
+  // A vision pin that is not the document's own bytes is refused.
+  await assert.rejects(
+    () => persist(doc.taskId, call(textEnv, { pin: doc.extractionId, promptHash: "t" }), call(visionEnv, { pin: "deadbeef", promptHash: "v" })),
+    (err) => err.code === "CLR10",
+    "the vision channel must pin the document's own sha256",
+  );
+
+  assert.equal((await regionsOf(doc.documentId)).length, 0, "no refusal banked a partial read");
+
+  // The lane's own terminal settle.
+  const failed = (
+    await rootQuery("select clara.fail_payroll_facts($1,$2) as receipt", [doc.taskId, "engine_error"])
+  ).rows[0].receipt;
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.reason, "engine_error");
+  const again = (
+    await rootQuery("select clara.fail_payroll_facts($1,$2) as receipt", [doc.taskId, "engine_error"])
+  ).rows[0].receipt;
+  assert.equal(again.replayed, true, "a second settle replays rather than re-failing");
 });

@@ -1706,6 +1706,318 @@ begin
 end $w945_release$
 ;
 
+-- =====================================================================================
+-- §F  THE PERSIST DOOR AND THE LANE'S OWN FAIL VERB.
+--
+--     clara.persist_payroll_facts(uuid, jsonb, jsonb, integer) is the ONE writer of payroll
+--     facts: the atomic, idempotent two-row persist the invoice lane's clara.persist_witness_facts
+--     set the shape for. clara.fail_payroll_facts(uuid, text) is its terminal twin.
+--
+--     WHAT IT STORES, AND THE ONE THING IT DELIBERATELY DOES NOT. The brief is explicit: "no
+--     employee-level figure is persisted; the per-employee quotes exist only so the evaluator can
+--     sum and cross-check them." That is not a promise this file makes in prose and leaves to a
+--     runtime to keep — the door STRIPS the rows. What lands in clara.document_extractions.envelope
+--     is the channel's eleven RUN-LEVEL answers plus, on the text row, the fact state §D computed;
+--     the per-employee cells are consumed inside this transaction and never written. A payroll
+--     document therefore leaves no durable record of any employee's name or salary, which is what
+--     keeps #612's and #643's "full payroll processing stays out" true while #926's reading half
+--     ships.
+--
+--     THE FACT STATE RIDES WITH THE READ RATHER THAN BEING RE-DERIVED, and that is a consequence
+--     of the strip, stated so a reader does not mistake it for redundancy: §D's evaluator is
+--     IMMUTABLE and could in principle be re-run on demand — but not from what is stored, because
+--     what is stored no longer contains the rows it sums. So the state is banked at the one moment
+--     the inputs exist, beside the answers it judges.
+--
+--     THE REGIONS ARE THE TYPED FACTS. One clara.document_regions row per run-level question,
+--     hung off the CANONICAL text row of the pair, carrying the verbatim rendering, the DB's own
+--     integer cents where the two channels agreed on a readable figure, and a locator — so a
+--     person can click a figure and see where on the page it came from. AN UNPRINTED ANSWER STILL
+--     GETS A ROW, carrying no rendering and no cents at all: that row IS the reading "the page
+--     does not print this", and it is the reason the surface can say `not printed` instead of
+--     showing a zero. (A figure the two channels read DIFFERENTLY also lands with no cents; the
+--     region set is the facts, the banked state is the verdict, and the surface reads both.)
+--
+--     PERSIST WHOLE; NEVER REFUSE A READ FOR BEING WRONG. Structural malformation — a broken
+--     vocabulary, a missing or unresolvable pin, two channels on one prompt — is refused at the
+--     write boundary, before anything is inserted. A read that is well-formed but DISAGREES with
+--     itself is banked in full, with the disagreement named in the state. That is the invoice
+--     lane's own C4 discipline, applied here for the same reason: a person cannot adjudicate a
+--     reading they cannot see.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara.persist_payroll_facts(p_task uuid, p_text jsonb, p_vision jsonb,
+    p_pages_used integer default null)
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp as $ppf$
+declare
+  t record; d record;
+  v_run text[] := array['payroll.run.period','payroll.run.gross_pay',
+    'payroll.run.epf_employee','payroll.run.epf_employer',
+    'payroll.run.socso_employee','payroll.run.socso_employer',
+    'payroll.run.eis_employee','payroll.run.eis_employer',
+    'payroll.run.pcb','payroll.run.hrdf_levy','payroll.run.net_pay'];
+  v_text_env jsonb; v_vision_env jsonb; v_state jsonb;
+  v_text_pin text; v_vision_pin text; v_text_hash text; v_vision_hash text;
+  v_citations jsonb; v_usage_text jsonb; v_usage_vision jsonb;
+  v_existing_text uuid; v_existing_vision uuid; v_ocr_ext uuid;
+  v_vision_id uuid; v_text_id uuid; v_vision_at timestamptz; v_text_at timestamptz;
+  v_text_store jsonb; v_vision_store jsonb;
+  v_f text; v_ans jsonb; v_fact jsonb; v_raw text; v_cents bigint; v_idx int;
+  v_cited_id uuid; v_cited_locator jsonb; v_locator jsonb;
+begin
+  if p_pages_used is not null and p_pages_used < 0 then
+    raise exception 'payroll pages_used must be non-negative' using errcode='CLR10';
+  end if;
+
+  -- 1. TASK LOOKUP + LANE.
+  select * into t from clara.document_processing_tasks where id = p_task;
+  if not found or t.lane <> 'payroll_facts' then
+    raise exception 'payroll-facts task not found or not in the payroll_facts lane' using errcode='CLR16';
+  end if;
+
+  -- 2. IDEMPOTENT REPLAY (the persist_invoice_facts precedent): a done task's pair already
+  --    exists under the four-column unique; return the stored receipt, never re-insert.
+  if t.status = 'done' then
+    select id into v_existing_text from clara.document_extractions
+      where document_id=t.document_id and engine_id=t.engine_id and version_n=t.version_n
+        and engine_kind='payroll_text_facts';
+    select id into v_existing_vision from clara.document_extractions
+      where document_id=t.document_id and engine_id=t.engine_id and version_n=t.version_n
+        and engine_kind='payroll_vision_facts';
+    return jsonb_build_object('task_id',p_task,'document_id',t.document_id,
+      'engine_id',t.engine_id,'version_n',t.version_n,
+      'text_extraction_id',v_existing_text,'vision_extraction_id',v_existing_vision,
+      'status','done','replayed',true);
+  end if;
+
+  -- 3. THE ANSWER VOCABULARY (structural).
+  v_text_env := p_text->'envelope'; v_vision_env := p_vision->'envelope';
+  if not clara._payroll_answers_ok(v_text_env,'text')
+     or not clara._payroll_answers_ok(v_vision_env,'vision') then
+    raise exception 'payroll envelope is malformed (channel/answers vocabulary -- every run-level question is answered, `not_printed` included, and no unknown key is admitted)' using errcode='CLR10';
+  end if;
+
+  -- 4. THE INPUT PINS (structural). Text pins the PINNED, done, engine_kind='ocr' extraction of
+  --    THIS document; vision pins documents.sha256 -- the document's own bytes.
+  v_text_pin := nullif(btrim(p_text->>'input_pin'),'');
+  v_vision_pin := nullif(btrim(p_vision->>'input_pin'),'');
+  if v_text_pin is null or v_vision_pin is null then
+    raise exception 'payroll call is missing an input pin' using errcode='CLR10';
+  end if;
+  select * into d from clara.documents where id = t.document_id and firm_id = t.firm_id;
+  if not found then
+    raise exception 'impossible state: payroll task % names no owning document', p_task using errcode='CLR35';
+  end if;
+  begin
+    select e.id into v_ocr_ext from clara.document_extractions e
+      where e.id = v_text_pin::uuid and e.document_id = t.document_id and e.firm_id = t.firm_id
+        and e.engine_kind = 'ocr' and e.status = 'done';
+  exception when invalid_text_representation then
+    v_ocr_ext := null;
+  end;
+  if v_ocr_ext is null then
+    raise exception 'the text payroll input pin does not resolve to a done OCR extraction of this document' using errcode='CLR10';
+  end if;
+  if lower(v_vision_pin) <> d.sha256 then
+    raise exception 'the vision payroll input pin does not match documents.sha256' using errcode='CLR10';
+  end if;
+
+  -- 5. EQUAL PROMPT HASHES (structural) -- the independence receipt. Two channels that used one
+  --    prompt are one reading twice, not two readings.
+  v_text_hash := nullif(btrim(p_text->>'prompt_hash'),'');
+  v_vision_hash := nullif(btrim(p_vision->>'prompt_hash'),'');
+  if v_text_hash is null or v_vision_hash is null then
+    raise exception 'payroll call is missing a prompt hash' using errcode='CLR10';
+  end if;
+  if v_text_hash = v_vision_hash then
+    raise exception 'the text and vision channels used the same prompt hash -- the independence receipt requires distinct prompts' using errcode='CLR10';
+  end if;
+
+  v_citations := coalesce(p_text->'citations','[]'::jsonb);
+  if jsonb_typeof(v_citations) <> 'array' then
+    raise exception 'payroll citations payload is malformed' using errcode='CLR10';
+  end if;
+
+  if t.status <> 'running' then
+    raise exception 'payroll-facts task is not running' using errcode='CLR16';
+  end if;
+
+  -- 6. THE EVALUATOR. Called BEFORE anything is written, on the FULL envelopes -- the only
+  --    moment at which the per-employee quotes exist inside this estate at all.
+  v_state := clara.evaluate_payroll_run_state_v1(v_text_env, v_vision_env);
+
+  -- 7. THE STRIP. What is stored is the channel and its eleven run-level answers, and nothing
+  --    else. `rows` is dropped from both envelopes here, once, by construction -- there is no
+  --    branch in which a per-employee cell reaches clara.document_extractions.
+  v_text_store := jsonb_build_object(
+    'payroll', jsonb_build_object('channel','text','answers', v_text_env->'payroll'->'answers'),
+    'payroll_state', v_state);
+  v_vision_store := jsonb_build_object(
+    'payroll', jsonb_build_object('channel','vision','answers', v_vision_env->'payroll'->'answers'));
+
+  -- 8. THE ATOMIC PAIR INSERT -- vision FIRST, text LAST, each with an explicit clock reading, so
+  --    the document-wide pointer lands on the TEXT row deterministically (the witness precedent).
+  v_vision_at := clock_timestamp();
+  insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,
+      status,page_count,envelope,extracted_at)
+    values(t.firm_id,t.document_id,t.engine_id,'payroll_vision_facts',t.version_n,
+      'done',p_pages_used,v_vision_store,v_vision_at)
+    on conflict (document_id,engine_id,version_n,engine_kind) do nothing
+    returning id into v_vision_id;
+  if v_vision_id is null then
+    raise exception 'impossible state: an ON CONFLICT fired for the payroll vision row (document=%,engine=%,version=%) -- the pair row already exists at this key while its task is still running',
+      t.document_id,t.engine_id,t.version_n using errcode='CLR35';
+  end if;
+
+  v_text_at := greatest(clock_timestamp(), v_vision_at + interval '1 microsecond');
+  insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,
+      status,page_count,envelope,extracted_at)
+    values(t.firm_id,t.document_id,t.engine_id,'payroll_text_facts',t.version_n,
+      'done',p_pages_used,v_text_store,v_text_at)
+    on conflict (document_id,engine_id,version_n,engine_kind) do nothing
+    returning id into v_text_id;
+  if v_text_id is null then
+    raise exception 'impossible state: an ON CONFLICT fired for the payroll text row (document=%,engine=%,version=%) -- the pair row already exists at this key while its task is still running',
+      t.document_id,t.engine_id,t.version_n using errcode='CLR35';
+  end if;
+
+  -- 9. THE ELEVEN TYPED FACTS. One region per question, ANSWERED OR NOT.
+  --
+  --    The rendering comes from the TEXT channel -- the channel that can cite a region, and so
+  --    the channel whose quote a person can be shown on the page. The CENTS come from the fact
+  --    state, which is to say they exist only where the two channels agreed on a readable
+  --    figure: a contested or unreadable figure lands with its rendering and NO integer, because
+  --    there is no integer both readings support. An unprinted answer lands with neither, and
+  --    that row is the reading "the page does not print this" -- never a zero.
+  foreach v_f in array v_run loop
+    v_ans := v_text_env->'payroll'->'answers'->v_f;
+    v_fact := v_state->'facts'->v_f;
+    v_raw := case when v_ans->>'state' = 'value' then v_ans->>'raw' end;
+    v_cents := case when v_f <> 'payroll.run.period'
+                    then nullif(v_fact->>'printed_cents','')::bigint end;
+
+    -- The citation, when the text call supplied one for this question. Resolved through the ONE
+    -- numbering the estate publishes (clara.witness_citation_regions / _witness_resolve_citation
+    -- are the numbering, not an invoice-specific rule: they answer "the Nth region of this OCR
+    -- extraction, in reading order"), so a payroll prompt builder numbers against exactly what
+    -- this door resolves.
+    v_cited_id := null; v_cited_locator := null; v_idx := null;
+    if v_raw is not null then
+      select c.region_idx into v_idx
+        from jsonb_to_recordset(v_citations) as c(field_path text, region_idx int)
+       where c.field_path = v_f limit 1;
+      if v_idx is not null then
+        select r.region_id, r.locator into v_cited_id, v_cited_locator
+          from clara._witness_resolve_citation(v_ocr_ext, v_idx) r;
+      end if;
+    end if;
+    if v_cited_id is not null then
+      v_locator := jsonb_build_object(
+        'page', case when (v_cited_locator->>'page') ~ '^[0-9]+$' then (v_cited_locator->>'page')::int end,
+        'polygon', coalesce(v_cited_locator->'polygon','[]'::jsonb), 'source_region_id', v_cited_id);
+    else
+      v_locator := jsonb_build_object('polygon','[]'::jsonb);
+    end if;
+
+    insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,
+        text_content,engine_confidence,monetary_raw,monetary_cents)
+      values(t.firm_id,v_text_id,'page_polygon',v_locator,v_f,
+        v_raw,null,
+        case when v_f <> 'payroll.run.period' then v_raw end,
+        v_cents);
+  end loop;
+
+  -- 10. USAGE METERING, optional at this layer exactly as it is for the witness pair: the runtime
+  --     meters at call time (it alone knows a call that never reaches a persist), and a caller MAY
+  --     also pass usage here so a pair that DOES persist carries at least one row per channel.
+  v_usage_text := p_text->'usage'; v_usage_vision := p_vision->'usage';
+  if jsonb_typeof(v_usage_text) = 'object' then
+    perform clara.record_llm_usage_event(t.firm_id, t.document_id, p_task, 'text', t.engine_id,
+      v_text_hash, nullif(v_usage_text->>'input_tokens','')::int,
+      nullif(v_usage_text->>'output_tokens','')::int, nullif(v_usage_text->>'duration_ms','')::int,
+      coalesce(v_usage_text->>'outcome','success'));
+  end if;
+  if jsonb_typeof(v_usage_vision) = 'object' then
+    perform clara.record_llm_usage_event(t.firm_id, t.document_id, p_task, 'vision', t.engine_id,
+      v_vision_hash, nullif(v_usage_vision->>'input_tokens','')::int,
+      nullif(v_usage_vision->>'output_tokens','')::int, nullif(v_usage_vision->>'duration_ms','')::int,
+      coalesce(v_usage_vision->>'outcome','success'));
+  end if;
+
+  -- 11. SETTLE + AUDIT + EMIT. The event is the lane's OWN twin: nothing in this estate drafts
+  --     from a payroll read yet (#946 is the drafting half), so its taxonomy decision is `ignore`
+  --     and no consumer wakes -- but the fact that the read completed is on the record, where a
+  --     later consumer can subscribe to it without a second migration.
+  update clara.document_processing_tasks set status='done', finished_at=now() where id=p_task;
+
+  perform clara._audit(t.firm_id,null,null,null,'persist_payroll_facts',null,
+    jsonb_build_object('task',p_task,'document',t.document_id,
+      'text_extraction',v_text_id,'vision_extraction',v_vision_id,'version',t.version_n,
+      'established',jsonb_array_length(coalesce(v_state->'established','[]'::jsonb)),
+      'disagreed',jsonb_array_length(coalesce(v_state->'disagreed','[]'::jsonb)),
+      'missing',jsonb_array_length(coalesce(v_state->'missing','[]'::jsonb))));
+
+  perform clara._append_event(t.firm_id,'document.payroll_facts_completed',null,null,null,null,
+    null,t.document_id,null,jsonb_build_object('task_id',p_task,
+      'extraction_id',v_text_id,'version_n',t.version_n));
+
+  return jsonb_build_object('task_id',p_task,'document_id',t.document_id,
+    'engine_id',t.engine_id,'version_n',t.version_n,
+    'text_extraction_id',v_text_id,'vision_extraction_id',v_vision_id,
+    'status','done','replayed',false);
+end $ppf$;
+
+revoke all on function clara.persist_payroll_facts(uuid, jsonb, jsonb, integer) from public;
+grant execute on function clara.persist_payroll_facts(uuid, jsonb, jsonb, integer) to clara_runtime;
+
+comment on function clara.persist_payroll_facts(uuid, jsonb, jsonb, integer) is
+  '#945: the ONE writer of payroll typed facts -- the atomic, idempotent two-row persist for the payroll_facts lane, clara.persist_witness_facts'' shape. It evaluates the pair through clara.evaluate_payroll_run_state_v1 BEFORE writing, STRIPS the per-employee quotes (no employee-level figure is ever persisted), banks the two channels'' run-level answers plus the fact state, and writes one clara.document_regions row per run-level question -- including for an answer the page does not print, which lands carrying no rendering and no cents so a surface can say `not printed` instead of showing a zero. clara_runtime only.';
+
+create or replace function clara.fail_payroll_facts(p_task uuid, p_code text)
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp as $fpf$
+declare t record; v_code text;
+begin
+  select * into t from clara.document_processing_tasks where id=p_task for update;
+  if not found or t.lane<>'payroll_facts' then
+    raise exception 'payroll-facts task not found' using errcode='CLR16';
+  end if;
+  if t.status='failed' then
+    return jsonb_build_object('task_id',p_task,'status','failed',
+      'reason',coalesce(t.error_code,p_code),'replayed',true);
+  end if;
+  if t.status<>'running' then
+    raise exception 'payroll-facts task is not running' using errcode='CLR16';
+  end if;
+  -- THE ADMITTED VOCABULARY -- the exact codes this lane''s worker can terminally report, and
+  -- nothing broader. Anything else coerces to ''engine_error'', exactly as fail_witness_facts and
+  -- fail_invoice_facts already coerce an unrecognised reason.
+  v_code:=case when p_code in ('bad_type','limit','internal','corrupt','encrypted',
+      'payroll_consent_inactive','payroll_multi_client','wait_exhausted')
+    then p_code else 'engine_error' end;
+  update clara.document_processing_tasks set status='failed',error_code=v_code,
+    finished_at=now() where id=p_task;
+  -- Harmless unconditionally: payroll_facts never reserves a page budget (it is a model lane, and
+  -- the router reserves for the two Azure lanes alone), so this always finds no reservation --
+  -- called anyway for the SAME reason its siblings call it: one shape over a lane-conditional one.
+  perform clara._refund_processing_call(p_task,coalesce(nullif(btrim(p_code),''),v_code));
+  perform clara._audit(t.firm_id,null,null,null,'fail_payroll_facts',null,
+    jsonb_build_object('task',p_task,'document',t.document_id,'reason',v_code));
+  perform clara._append_event(t.firm_id,'document.payroll_facts_failed',null,null,null,null,
+    null,t.document_id,null,jsonb_build_object('task_id',p_task,'reason',v_code));
+  return jsonb_build_object('task_id',p_task,'status','failed','reason',v_code);
+end $fpf$;
+
+revoke all on function clara.fail_payroll_facts(uuid, text) from public;
+grant execute on function clara.fail_payroll_facts(uuid, text) to clara_runtime;
+
+comment on function clara.fail_payroll_facts(uuid, text) is
+  '#945: the terminal settle for a RUNNING payroll_facts task -- clara.fail_witness_facts'' shape exactly, with the payroll lane''s own admitted code vocabulary and its own lane-true event twin. clara_runtime only.';
+
 reset role;
 
 -- =====================================================================================
@@ -1867,6 +2179,54 @@ begin
       raise exception '#945 tail: the lane roster lost %', v_row.lane using errcode = 'CLR10';
     end if;
   end loop;
+
+  -- 8 · THE LANE'S TWO DOORS EXIST, ARE clara_runtime-ONLY, AND ARE THE ONLY NEW GRANTED
+  --     SURFACE. #945 adds no human EXECUTE at all: a person reads payroll facts back through
+  --     get_document_extract, which already serves every family, and writes none.
+  for v_row in select * from (values
+      ('clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)'),
+      ('clara.fail_payroll_facts(uuid,text)')
+    ) as t(sig)
+  loop
+    if to_regprocedure(v_row.sig) is null then
+      raise exception '#945 tail: % was not created', v_row.sig using errcode = 'CLR10';
+    end if;
+    if not pg_catalog.has_function_privilege('clara_runtime', v_row.sig, 'EXECUTE') then
+      raise exception '#945 tail: clara_runtime cannot execute % -- the lane would be undrivable', v_row.sig
+        using errcode = 'CLR10';
+    end if;
+    if pg_catalog.has_function_privilege('clara_authenticated', v_row.sig, 'EXECUTE')
+       or pg_catalog.has_function_privilege('clara_agent_ro', v_row.sig, 'EXECUTE') then
+      raise exception '#945 tail: a non-runtime role holds EXECUTE on % -- writing a payroll read is a worker act', v_row.sig
+        using errcode = 'CLR10';
+    end if;
+    select count(*)::int into v_n from pg_proc p
+     where p.oid = v_row.sig::regprocedure
+       and p.prosecdef and pg_get_userbyid(p.proowner) = 'clara_fn_owner'
+       and p.proconfig @> array['search_path=clara, pg_temp'];
+    if v_n <> 1 then
+      raise exception '#945 tail: % does not carry the estate posture (fn_owner, SECURITY DEFINER, pinned search_path)', v_row.sig
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+  if pg_catalog.has_function_privilege('clara_runtime','clara.evaluate_payroll_run_state_v1(jsonb,jsonb)','EXECUTE')
+     or pg_catalog.has_function_privilege('clara_authenticated','clara.evaluate_payroll_run_state_v1(jsonb,jsonb)','EXECUTE')
+     or pg_catalog.has_function_privilege('clara_agent_ro','clara.evaluate_payroll_run_state_v1(jsonb,jsonb)','EXECUTE') then
+    raise exception '#945 tail: an application role holds EXECUTE on the evaluator -- it is reached only from the persist door, which runs as the owner'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 9 · THE PERSIST DOOR STRIPS THE QUOTES, PROVEN BY ITS OWN BYTES. The body must never name
+  --     the rows key on a value it writes: the two stored envelopes are built from `answers`
+  --     alone, and this is the structural half of "no employee-level figure is persisted".
+  select count(*)::int into v_n from pg_proc p
+   where p.oid = 'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)'::regprocedure
+     and p.prosrc like '%''payroll'', jsonb_build_object(''channel'',''text'',''answers'', v_text_env->''payroll''->''answers'')%'
+     and p.prosrc like '%''payroll'', jsonb_build_object(''channel'',''vision'',''answers'', v_vision_env->''payroll''->''answers'')%';
+  if v_n <> 1 then
+    raise exception '#945 tail: the persist door no longer builds BOTH stored envelopes from answers alone -- the per-employee strip is what keeps full payroll processing out of this estate'
+      using errcode = 'CLR10';
+  end if;
 
   raise notice '#945 tail: OK -- the canonical field-path grammar registers the `payroll` namespace beside the five other fact families and still refuses an unregistered one with CLR10 / field_path_namespace; clara._field_path_conforms is byte-untouched and the recut body keeps its immutable, non-definer, clara_fn_owner disposition and all its EXECUTE holders; clara._payroll_answers_ok admits a complete envelope, refuses one missing an answer and one carrying an unknown key, and is granted to no application role.';
 end
