@@ -201,6 +201,14 @@ test("ticket 890 cell: AddCounterpartyAliasDialog — a REFUSED confirm leaves t
       for (let i = 0; i < 4; i++) await h.settle();
 
       await h.act(() => { setFieldValue(findIn(body, (n) => n.id === "cp-alias-name") as never, "Acme Retail"); });
+      // ORIGIN IS DRIVEN OFF ITS DEFAULT, deliberately. AddCounterpartyAliasDialog's success
+      // branch resets all three together (`if (ok) { setAlias(""); setOrigin("trade_name");
+      // setBasis(""); }`) and origin's default IS "trade_name" — so a mutant that reset origin
+      // unconditionally, on refusal as well as on success, would leave this cell green if it
+      // only ever typed the two text fields. "former_name" is a value the default cannot hide.
+      await h.act(() => {
+        setFieldValue(findIn(body, (n) => n.id === "cp-alias-origin") as never, "former_name");
+      });
       await h.act(() => {
         setFieldValue(findIn(body, (n) => n.id === "cp-alias-basis") as never, "seen on the delivery order");
       });
@@ -219,6 +227,33 @@ test("ticket 890 cell: AddCounterpartyAliasDialog — a REFUSED confirm leaves t
         "seen on the delivery order",
         "ticket 890: the typed basis survives the refusal too",
       );
+      // ORIGIN IS READ THROUGH THE DOOR, not off the control — MEASURED, not assumed. NativeSelect
+      // renders a real `<select>`, and in this harness react-dom never writes `.value` back onto a
+      // `<select>` node: the only thing that ever set it was `setFieldValue` itself, so
+      // `select.value === "former_name"` stays green even under the exact mutant this assertion
+      // exists to catch (`setOrigin("trade_name")` hoisted OUT of the `if (ok)` branch, so a
+      // refusal resets origin too). Ran that mutant: 3/3 still passed. The two text fields above
+      // are genuine — react-dom does assign `.value` on an `<input>` — but origin has to be asked
+      // for where the component's own state is observable: the NEXT attempt's arguments. A second
+      // confirm (the human retries without changing anything) must still carry "former_name".
+      const firstWrite = seen.filter((w) => w.fn === "add_counterparty_alias");
+      assert.equal(firstWrite.length, 1, "exactly one refused attempt so far");
+      assert.equal(firstWrite[0]?.body.p_origin, "former_name",
+        "the refused attempt carried the chosen origin, not the default");
+      assert.equal(firstWrite[0]?.body.p_basis, "seen on the delivery order");
+
+      const retry = footerButtonWithText(body, "Add");
+      assert.ok(retry, "the Add confirm control is still there to retry");
+      await h.act(async () => { await clickButton(retry as never); });
+      for (let i = 0; i < 8; i++) await h.settle();
+      const retried = seen.filter((w) => w.fn === "add_counterparty_alias");
+      assert.equal(retried.length, 2, "the retry is its own governed call");
+      assert.equal(retried[1]?.body.p_origin, "former_name",
+        "ticket 890: the chosen origin survives the refusal too — the AC names alias, origin AND basis");
+      assert.equal(retried[1]?.body.p_alias, "Acme Retail",
+        "…and the retry is still about the alias the human typed");
+      assert.equal(retried[1]?.body.p_basis, "seen on the delivery order",
+        "…with the basis they stated");
       // Scoped to the DIALOG's own content (not `textOf(body)`) — the panel's page-level standing
       // banner renders the identical text outside every dialog, so a body-wide match would pass
       // whether or not AddCounterpartyAliasDialog's own `refusal` prop is wired at all.
@@ -240,6 +275,14 @@ test("ticket 890 cell: AddCounterpartyAliasDialog — a REFUSED confirm leaves t
       await h.act(async () => { await clickButton(trigger as never); });
       for (let i = 0; i < 4; i++) await h.settle();
       await h.act(() => { setFieldValue(findIn(body, (n) => n.id === "cp-alias-name") as never, "Acme Retail"); });
+      // All THREE fields are driven off their defaults here too, so the success half proves the
+      // whole draft is discarded rather than just the one text field the earlier cut checked.
+      await h.act(() => {
+        setFieldValue(findIn(body, (n) => n.id === "cp-alias-origin") as never, "former_name");
+      });
+      await h.act(() => {
+        setFieldValue(findIn(body, (n) => n.id === "cp-alias-basis") as never, "seen on the delivery order");
+      });
       for (let i = 0; i < 2; i++) await h.settle();
       const confirm = footerButtonWithText(body, "Add");
       await h.act(async () => { await clickButton(confirm as never); });
@@ -253,9 +296,32 @@ test("ticket 890 cell: AddCounterpartyAliasDialog — a REFUSED confirm leaves t
       const reopened = findIn(body, (n) => n.id === "cp-alias-name");
       assert.ok(reopened, "the dialog reopens");
       assert.equal(reopened.value, "", "ticket 890: a SUCCESSFUL add-alias leaves no draft on the next open");
+      assert.equal(
+        (findIn(body, (n) => n.id === "cp-alias-basis") as Node).value,
+        "",
+        "ticket 890: the typed basis is discarded too",
+      );
+      // ORIGIN IS READ THROUGH THE DOOR here too, for the reason the refusal half records: this
+      // harness never reflects React's state onto a `<select>`'s `.value`, so reading the
+      // reopened control would pass for the wrong reason. The discard is proven where it IS
+      // observable — a second add, with ONLY the name typed, must carry the DEFAULT origin,
+      // which it cannot if the dialog is still holding the previous "former_name".
+      await h.act(() => { setFieldValue(findIn(body, (n) => n.id === "cp-alias-name") as never, "Acme Wholesale"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+      const secondConfirm = footerButtonWithText(body, "Add");
+      assert.ok(secondConfirm, "the Add confirm control renders on the second open");
+      await h.act(async () => { await clickButton(secondConfirm as never); });
+      for (let i = 0; i < 8; i++) await h.settle();
 
       const writes = seenOk.filter((s) => s.fn === "add_counterparty_alias");
-      assert.equal(writes.length, 1, "exactly one governed call, never a batch and never a double-fire");
+      assert.equal(writes.length, 2, "one governed call per confirm, never a batch and never a double-fire");
+      assert.equal(writes[0]?.body.p_origin, "former_name",
+        "the first, accepted call carried the CHOSEN origin — so the reset below is a discard, not a value the door never saw");
+      assert.equal(writes[0]?.body.p_basis, "seen on the delivery order");
+      assert.equal(writes[1]?.body.p_origin, "trade_name",
+        "ticket 890: the chosen origin is discarded too — the second add carries the default again");
+      assert.equal(writes[1]?.body.p_basis, null,
+        "ticket 890: the typed basis is discarded too — the second add states no basis");
     } finally {
       await h.unmount();
       for (let i = 0; i < 3; i++) await h.settle();
