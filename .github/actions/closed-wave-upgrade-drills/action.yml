@@ -381,7 +381,7 @@ runs:
     # machine, by hand, per the file's own header recipe. Run it FOR REAL here, ALONE, in its OWN
     # throwaway database — the exact name (`clara_0186_upgrade_ci`) that header recipe already
     # documents, so a worker's by-hand run and this CI leg exercise the identical target.
-    - name: 0186 checkout-convergence upgrade drill (isolated DB, #1023)
+    - name: 0186 checkout-convergence upgrade drill (isolated DB)
       working-directory: packages/db
       shell: bash -e {0}
       run: |
@@ -411,7 +411,7 @@ runs:
     # role-minting migration 0154 (RIG.md), so unlike the 0186 drill above it carries no in-file
     # role sweep of its own — the shared cleanup below still runs regardless, protecting the
     # cluster against whichever drill ran before it.
-    - name: Slice-4 runtime upgrade/cutover drill (isolated DB, #1023)
+    - name: Slice-4 runtime upgrade/cutover drill (isolated DB)
       working-directory: packages/db
       shell: bash -e {0}
       run: |
@@ -439,7 +439,7 @@ runs:
     # own header recipe already documents. It applies only through 0011, well below the
     # role-minting migration 0154 (RIG.md), so like the runtime drill above it carries no in-file
     # role sweep of its own — the shared cleanup below still runs regardless.
-    - name: Wave-A 0011 fresh-vs-upgrade parity drill (isolated DB, #1023)
+    - name: Wave-A 0011 fresh-vs-upgrade parity drill (isolated DB)
       working-directory: packages/db
       shell: bash -e {0}
       run: |
