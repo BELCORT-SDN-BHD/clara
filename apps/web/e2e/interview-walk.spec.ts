@@ -45,12 +45,15 @@ import { CLIENT_SEG_KEYS } from "../lib/interview/api";
  * shared COMPLETE/CANCEL/RACE fixtures every test above consumes and mutates; this runner
  * provisions none such.
  *
- * THIS ARM IS NOT PROVEN ANYWHERE TODAY — not here, not in a mock lane. #897 (open, not
- * delivered) is where it belongs and where it is tracked; do not read this comment as coverage.
- * The mock-lane fixture (the OPEN/unanswered park) and the interview-runtime handlers a walk
- * would need have not been built. Whoever picks up #897 should read that ticket's own report for
- * the traced reason: `InterviewRunCard.tsx`'s typed answer is a plain, un-persisted `useState`,
- * so a walk asserting survival across this exact escalation has nothing true to assert yet.
+ * DELIVERED, in `agentic-finish-walk.spec.ts`'s own #897 arm (that file's P6-5 mock lane —
+ * client C, a fixture with nothing else this file's own COMPLETE/CANCEL/RACE clients touch).
+ * That arm drives the rail's escalate control to the full-screen route and back, and asserts
+ * both AC1 halves: a typed-but-unsubmitted answer survives both remounts (rail -> full-screen
+ * and back — `InterviewRunCard.tsx`'s draft now reads/writes `claraThreadStore.interviewDrafts`,
+ * keyed by clientId, instead of the plain `useState` that lost it), and keyboard focus returns
+ * to the escalate control the way back (`lib/clara/rail-focus-return.ts`, the SAME
+ * `sessionStorage` take-once idiom `lib/firm/portfolio-focus-return.ts` established for the same
+ * class of problem — the browser does not restore focus across either leg on its own).
  */
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];

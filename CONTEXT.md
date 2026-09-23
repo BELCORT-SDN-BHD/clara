@@ -161,6 +161,19 @@ _Avoid_: "The turn ended" (absence of a row is not evidence of that); a silent c
 Stop reply aborts the SSE read and cancels the chat-turn task; Cancel Work cancels the persistent Work. Different `clara.agent_tasks` rows with no cascade between them; closing the rail does neither.
 _Avoid_: Assuming either one implies the other; a chat-lane action as a substitute for the Work-level cancel door.
 
+<!-- #1024 -->
+**Refused resume ≠ lost access**:
+A read a Clara tab re-opens for its OWN benefit after a refused Stop establishes only that this tab
+could not resume reading the reply. The stream route answers 403/404 both for "you may not see this
+task" and for a task the runtime no longer holds, so that refusal is never turned into a statement
+about the reader’s access: the refusal the door gave the reader stays on screen, the turn’s own record
+stays as it was, and the Stop control does not depend on how a background read resolved. A revocation
+the runtime sends down an OPEN read, or one found on a tab’s first attach, is unchanged — it still
+retires the clock and withdraws the parked question.
+_Avoid_: A refusal on a read a tab re-opens for its OWN benefit read as "you no longer have access";
+an existence fact rendered as an access fact; a live turn retired by a sentence about access.
+<!-- #1024 -->
+
 **Work batch**:
 A group of accounting work tracked together. An item waiting for information holds its dependants, while independent items may continue and retain their own outcomes.
 _Avoid_: A single all-or-nothing accounting transaction.

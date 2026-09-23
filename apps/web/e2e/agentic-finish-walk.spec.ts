@@ -360,3 +360,75 @@ test("裁-128 · the apply-standard-chart button plants the confirmed families a
   await page.getByRole("button", { name: "Apply the chart" }).click();
   await expect(page.getByText(/Applied: 51 accounts across 1 families/)).toBeVisible({ timeout: 15_000 });
 });
+
+test("#897 · the full-screen altitude change keeps a typed interview answer, and focus returns to the control that opened it", async ({ page }) => {
+  // UI-21 (the ticket's own AC) needs an interview run PARKED OPEN AND UNANSWERED, independent
+  // of every other arm's fixture — `interview-walk.spec.ts`'s own header explains why the
+  // real-stack spec cannot host this (docker-only, no such fixture provisioned) and why this
+  // mock lane does instead (owner-ratified 2026-09-18 in the ticket's own DECISIONS record).
+  // Client C (`P6_5.clientC`/`threadC`/`planC`/`runC`) is this lane's OWN client, touched by no
+  // other test() in this file — the ticket's AC2, "independent of any other arm's state", is a
+  // fixture-IDENTITY fact here, not only a behavioural one.
+  await signIn(page);
+  await page.goto(`/clients/${P6_5.clientC}`);
+
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+
+  // Start the durable run (idempotent — `startClientInterview`), and land on the OPEN park the
+  // mock's `/api/runtime/interview/state` answers with for `P6_5.runC`.
+  await page.getByRole("button", { name: "Start / continue interview" }).click();
+  await expect(page.getByText(P6_5.interviewCQuestion)).toBeVisible({ timeout: 20_000 });
+
+  const answer = page.getByLabel("Your answer");
+  await expect(answer).toBeVisible();
+  await answer.fill("Rome Advisory Sdn Bhd");
+
+  // THE ESCALATE CONTROL — "the triggering control" the AC names. Focused explicitly before
+  // the click (not merely clicked), so its own focus can be asserted as the ROUND TRIP's start,
+  // not assumed from the click alone.
+  const escalate = page.getByRole("link", { name: "Open full screen" });
+  await escalate.focus();
+  await escalate.click();
+
+  // (firm) and (full) are SIBLING route groups (rail-mount.tsx's own note) — a REAL navigation,
+  // not a re-render, so this is the remount InterviewRunCard.tsx's #897 fix targets.
+  await expect(page).toHaveURL(new RegExp(`/clients/${P6_5.clientC}/clara/${P6_5.threadC}(\\?|$)`));
+  // A FRESH InterviewRunCard instance — `runId` is plain local state, `null` on every mount —
+  // does not auto-attach; the human re-attaches by pressing the SAME idempotent control again
+  // (InterviewRunCard.tsx's own header, and the mock's `/api/interview/client/start` answers
+  // the SAME `run_id` every time for this client/plan pair). The draft itself, unlike `runId`,
+  // is already back the moment this instance mounted — `claraThreadStore.interviewDrafts` is
+  // keyed by clientId alone — it is only the answer FIELD that waits for a park to render.
+  await page.getByRole("button", { name: "Start / continue interview" }).click();
+  const fullScreenAnswer = page.getByLabel("Your answer");
+  await expect(fullScreenAnswer).toBeVisible({ timeout: 20_000 });
+  await expect(
+    fullScreenAnswer,
+    "AC1 — the typed answer must survive the rail -> full-screen remount",
+  ).toHaveValue("Rome Advisory Sdn Bhd");
+
+  // THE COLLAPSE CONTROL — reads `?from=` back to the rail's own URL (ClaraFullScreenThread's
+  // own header). The round trip's second half.
+  const collapse = page.getByRole("link", { name: "Back" });
+  await collapse.click();
+
+  await expect(rail).toBeVisible();
+
+  // AC1's other half — keyboard focus returns to the control that opened the full-screen
+  // thread, not to <body> or nowhere: a screen-reader or keyboard-only user does not have to
+  // re-find their place in the rail after a round trip they themselves drove. Asserted HERE,
+  // before the re-attach click below, which would otherwise move focus onto ITSELF and prove
+  // nothing about what the navigation alone left focused.
+  await expect(
+    page.getByRole("link", { name: "Open full screen" }),
+    "AC1 — focus returns to the control that opened the full-screen thread",
+  ).toBeFocused();
+
+  // The SAME re-attach again: the rail's own InterviewRunCard is now a fresh instance too.
+  await page.getByRole("button", { name: "Start / continue interview" }).click();
+  await expect(
+    page.getByLabel("Your answer"),
+    "AC1 — the typed answer must ALSO survive the full-screen -> rail remount, the way back",
+  ).toHaveValue("Rome Advisory Sdn Bhd");
+});

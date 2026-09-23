@@ -152,6 +152,30 @@ interface ClaraStoreState {
    *  would ride that change straight over the scope boundary A7 exists to draw.
    *  Memory-only: no localStorage, no reload recovery promised. */
   drafts: Record<string, Record<string, string>>;
+  /** #897 — the durable client interview's own typed-but-unsubmitted answer, keyed by
+   *  CLIENT ALONE, never by `InterviewRunCard`'s own `runId`. That component's `runId` is
+   *  local `useState` that starts `null` on every mount — including the remount the rail ↔
+   *  full-screen altitude change causes (`(firm)` and `(full)` are SIBLING route groups, not
+   *  nested — a real navigation tears down and rebuilds the whole subtree, exactly like
+   *  `drafts` above survives that same teardown for the composer) — so a key that needed a
+   *  live `runId` could never be read back before the human re-attaches the run by pressing
+   *  "Start / continue interview" again. `uq_onboarding_plans_one_open` (0017:1038-1039) means
+   *  at most one OPEN plan, and therefore at most one live run, per client, so `clientId` alone
+   *  is a real identity here — unlike the composer's draft, this has no second axis to nest
+   *  under. Memory-only, matching `drafts`'s own promise: no localStorage, no reload recovery.
+   *
+   *  THE RULING'S "ANOTHER THREAD" HALF IS ANSWERED BY THIS KEY, NOT BY A CELL, and that is a
+   *  deliberate deviation from its wording (#897's 2026-09-20 triage comment: the draft "never
+   *  leaks to another Client or another thread"). The CLIENT half is a real boundary and is
+   *  pinned by a cell (`threadStore.test.ts`, "ISOLATION BY CLIENT"). The THREAD half is not a
+   *  boundary at all here: `InterviewRunCard`'s only identity prop IS `clientId`
+   *  (`InterviewRunCard.tsx:43-50` — the component is never told which thread renders it), and
+   *  two Clara threads at one client's altitude show the SAME open plan's SAME run and its SAME
+   *  park. Nesting a thread axis under this key would not stop a leak; it would lose the draft
+   *  every time the reader switched threads at one client, which is the opposite of what the
+   *  ruling asks for. There is therefore no seam at which a "does not leak to another thread"
+   *  cell could be written without first inventing the axis it would test. */
+  interviewDrafts: Record<string, string>;
 }
 
 let state: ClaraStoreState = {
@@ -160,6 +184,7 @@ let state: ClaraStoreState = {
   threads: {},
   selectedByAltitude: {},
   drafts: {},
+  interviewDrafts: {},
 };
 const listeners = new Set<() => void>();
 
@@ -249,6 +274,33 @@ export const claraThreadStore = {
     const forAltitude = { ...state.drafts[altitude] };
     delete forAltitude[threadId];
     state = { ...state, drafts: { ...state.drafts, [altitude]: forAltitude } };
+    emit();
+  },
+
+  /** #897 — the interview answer draft for one client. `""` for a client that has never had a
+   *  keystroke recorded, same honest-default shape as `getDraft`. See `interviewDrafts`'s own
+   *  header for why this is keyed by client alone. */
+  getInterviewDraft(clientId: string): string {
+    return state.interviewDrafts[clientId] ?? "";
+  },
+
+  /** Fires `emit()` only on an actual change, matching `setDraft`'s own guard — every
+   *  keystroke in the answer textarea calls this. */
+  setInterviewDraft(clientId: string, text: string): void {
+    if ((state.interviewDrafts[clientId] ?? "") === text) return;
+    state = { ...state, interviewDrafts: { ...state.interviewDrafts, [clientId]: text } };
+    emit();
+  },
+
+  /** The ONE place a submitted interview answer is forgotten — call this only after
+   *  `submitAnswer` actually confirms delivery, never on a refusal: a park the runtime
+   *  rejected must leave the human's text right where they can still fix and resend it,
+   *  the same rule `clearDraft` follows for the composer. */
+  clearInterviewDraft(clientId: string): void {
+    if (!(clientId in state.interviewDrafts)) return;
+    const next = { ...state.interviewDrafts };
+    delete next[clientId];
+    state = { ...state, interviewDrafts: next };
     emit();
   },
 

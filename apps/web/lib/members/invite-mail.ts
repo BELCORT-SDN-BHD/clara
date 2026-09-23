@@ -78,12 +78,33 @@ export const INVITE_MAIL_ENV_NAMES = {
  *  census over that prefix finds it too. */
 export const INVITE_MAIL_ENDPOINT_ENV_NAME = "CLARA_E2E_INVITE_MAIL_ENDPOINT";
 
-/** True for an http(s) URL whose host is loopback — the only shape
- * `INVITE_MAIL_ENDPOINT_ENV_NAME` is ever honoured for (fix-round ADV-1). A relative path, a
- * non-http(s) scheme, or a real hostname (however plausible-looking) all fail this and the
- * override is then treated exactly like absence — never thrown, never logged with the value, the
- * same fail-quiet posture `inviteMailCapability` already gives a blank override. */
-function isLoopbackMailEndpoint(candidate: string): boolean {
+/**
+ * #1022 — THE IDENTITY-PROVISIONING SEAM, the SAME SHAPE as `INVITE_MAIL_ENDPOINT_ENV_NAME`
+ * above, for the OTHER outside call this transport makes: `canMintFor`'s `listUsers` and
+ * `mintSupabaseTokenHash`'s `generateLink`, both issued through `admin()`'s Supabase client
+ * (below). #874's own ruling was "only the mail endpoint becomes overridable... the Supabase
+ * admin calls stay real" — true of `config.supabaseUrl` itself, which this ticket does not touch.
+ * What was missing was a SEPARATE, EXPLICIT, test-only override for the admin client's base URL,
+ * decoupled from `supabaseUrl` the same way `mailEndpoint` is decoupled from `RESEND_ENDPOINT`: a
+ * harness that wants the identity calls local no longer has to repoint the whole Supabase project
+ * (which the browser's own sign-in traffic also depends on) — it sets ONE more test-only variable.
+ *
+ * Read by `inviteMailCapability` alongside `INVITE_MAIL_ENDPOINT_ENV_NAME`, fenced by the SAME
+ * loopback-only rule (`isLoopbackEndpointOverride`, renamed from `isLoopbackMailEndpoint` now
+ * that two seams share it) for the identical reason ADV-1 gave the mail seam: a production-live
+ * override with no restriction on its VALUE could redirect every admin call — `listUsers` walks
+ * this app's whole user directory — to a host an attacker controls. Honoured only for a loopback
+ * http(s) URL; anything else is treated exactly like absence, never thrown, never logged.
+ */
+export const INVITE_IDENTITY_ENDPOINT_ENV_NAME = "CLARA_E2E_INVITE_IDENTITY_ENDPOINT";
+
+/** True for an http(s) URL whose host is loopback — the only shape either
+ * `INVITE_MAIL_ENDPOINT_ENV_NAME` or `INVITE_IDENTITY_ENDPOINT_ENV_NAME` is ever honoured for
+ * (fix-round ADV-1, extended to the identity seam by #1022). A relative path, a non-http(s)
+ * scheme, or a real hostname (however plausible-looking) all fail this and the override is then
+ * treated exactly like absence — never thrown, never logged with the value, the same fail-quiet
+ * posture `inviteMailCapability` already gives a blank override. */
+function isLoopbackEndpointOverride(candidate: string): boolean {
   let url: URL;
   try {
     url = new URL(candidate);
@@ -105,6 +126,12 @@ export type InviteMailConfig = {
    *  test literal that omits this field (every one that existed before this ticket) is therefore
    *  still exactly production behaviour, unpinned by construction rather than by discipline. */
   mailEndpoint?: string;
+  /** #1022 — resolved from `INVITE_IDENTITY_ENDPOINT_ENV_NAME` by `inviteMailCapability`;
+   *  `undefined` whenever that variable is unset or blank, which `productionInviteMailer`'s
+   *  `admin()` reads as "use `config.supabaseUrl`" — the same default a config built with no such
+   *  field at all gets. A test literal that omits this field (every one that existed before this
+   *  ticket) is therefore still exactly production behaviour, unpinned by construction. */
+  identityEndpoint?: string;
 };
 
 export type InviteMailCapability =
@@ -154,8 +181,16 @@ export function inviteMailCapability(env: Record<string, string | undefined>): I
   const endpointOverride = env[INVITE_MAIL_ENDPOINT_ENV_NAME];
   const trimmedOverride = typeof endpointOverride === "string" ? endpointOverride.trim() : "";
   const mailEndpoint =
-    trimmedOverride !== "" && isLoopbackMailEndpoint(trimmedOverride) ? trimmedOverride : undefined;
-  return { ok: true, config: { supabaseUrl, serviceRoleKey, resendApiKey, from, mailEndpoint } };
+    trimmedOverride !== "" && isLoopbackEndpointOverride(trimmedOverride) ? trimmedOverride : undefined;
+  // #1022 — the identity-provisioning seam, read the SAME way: optional, last, never in
+  // `missing`, fenced to loopback only. See `INVITE_IDENTITY_ENDPOINT_ENV_NAME`'s own header.
+  const identityOverride = env[INVITE_IDENTITY_ENDPOINT_ENV_NAME];
+  const trimmedIdentityOverride = typeof identityOverride === "string" ? identityOverride.trim() : "";
+  const identityEndpoint =
+    trimmedIdentityOverride !== "" && isLoopbackEndpointOverride(trimmedIdentityOverride)
+      ? trimmedIdentityOverride
+      : undefined;
+  return { ok: true, config: { supabaseUrl, serviceRoleKey, resendApiKey, from, mailEndpoint, identityEndpoint } };
 }
 
 /**
@@ -523,7 +558,10 @@ export function productionInviteMailer(
   const makeClient = deps.createClient ?? createClient;
   const doFetch = deps.fetch ?? fetch;
   const admin = () =>
-    makeClient(config.supabaseUrl, config.serviceRoleKey, {
+    // #1022 — `config.identityEndpoint` substitutes ONLY the base URL the admin client is built
+    // with; the service-role KEY is unchanged either way, so `canMintFor`'s `listUsers` and
+    // `mintSupabaseTokenHash`'s `generateLink` are the only two calls a substitution redirects.
+    makeClient(config.identityEndpoint ?? config.supabaseUrl, config.serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
   return {

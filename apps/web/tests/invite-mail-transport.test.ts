@@ -27,6 +27,7 @@ import {
   classifyProviderStatus,
   escapeHtml,
   integerStatus,
+  INVITE_IDENTITY_ENDPOINT_ENV_NAME,
   INVITE_MAIL_ENDPOINT_ENV_NAME,
   INVITE_MAIL_ENV_NAMES,
   inviteMailCapability,
@@ -303,6 +304,123 @@ describe("#874 the mail-endpoint seam: unset is production, set is a genuine ove
 
   test("ADV-1 fence: the env var's NAME itself carries the CLARA_E2E_ harness prefix every other test-only flag in this app uses", () => {
     assert.equal(INVITE_MAIL_ENDPOINT_ENV_NAME, "CLARA_E2E_INVITE_MAIL_ENDPOINT");
+  });
+});
+
+// #1022 — the identity-provisioning seam: the SAME SHAPE as #874's mail-endpoint seam above, for
+// the OTHER outside call `productionInviteMailer` makes. `inviteMailCapability` is the ONE place
+// `INVITE_IDENTITY_ENDPOINT_ENV_NAME` is read; `admin()` (spent by both `canMintFor`'s
+// `listUsers` and `mintSupabaseTokenHash`'s `generateLink`) is the one place the resolved
+// `config.identityEndpoint` is spent.
+describe("#1022 the identity-provisioning seam: unset is production, set is a genuine override", () => {
+  const REQUIRED_ENV = {
+    [INVITE_MAIL_ENV_NAMES.supabaseUrl]: "https://rig.supabase.test",
+    [INVITE_MAIL_ENV_NAMES.serviceRoleKey]: "PLACEHOLDER-service",
+    [INVITE_MAIL_ENV_NAMES.resendApiKey]: "PLACEHOLDER-resend",
+    [INVITE_MAIL_ENV_NAMES.from]: "Clara <invites@example.test>",
+  };
+
+  test("PRODUCTION PINNED: with the override variable ABSENT, the capability resolves no identityEndpoint, and admin() constructs with config.supabaseUrl", async () => {
+    const capability = inviteMailCapability({ ...REQUIRED_ENV });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.identityEndpoint, undefined,
+      "an absent override must resolve to undefined, never to an empty string or supabaseUrl itself");
+
+    const client = recordingClient({ listUsers: () => ({ data: { users: [] }, error: null }) });
+    const mailer = productionInviteMailer(capability.config, { createClient: client.createClient });
+    assert.deepEqual(await mailer.canMintFor("nobody@example.test"), { ok: true });
+    assert.equal(client.constructedWith[0]!.url, capability.config.supabaseUrl, "production behaviour is unchanged by this ticket");
+  });
+
+  test("the override variable NEVER contributes to `missing` — its absence is production, not a misconfiguration", () => {
+    const capability = inviteMailCapability({ ...REQUIRED_ENV });
+    assert.equal(capability.ok, true, "an unset override must never itself cause mail_not_configured");
+  });
+
+  test("a BLANK override variable is treated exactly like absence, never as a request to point the admin client at the empty string", () => {
+    const capability = inviteMailCapability({ ...REQUIRED_ENV, [INVITE_IDENTITY_ENDPOINT_ENV_NAME]: "   " });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.identityEndpoint, undefined);
+  });
+
+  test("SET: canMintFor AND mintSupabaseTokenHash both construct the admin client with the override URL, not supabaseUrl", async () => {
+    const capability = inviteMailCapability({
+      ...REQUIRED_ENV,
+      [INVITE_IDENTITY_ENDPOINT_ENV_NAME]: "http://127.0.0.1:4873/captured-identity",
+    });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.identityEndpoint, "http://127.0.0.1:4873/captured-identity");
+
+    const client = recordingClient({
+      listUsers: () => ({ data: { users: [] }, error: null }),
+      generateLink: () => ({ data: { properties: { hashed_token: "hashed-abc" } }, error: null }),
+    });
+    const mailer = productionInviteMailer(capability.config, { createClient: client.createClient });
+
+    assert.deepEqual(await mailer.canMintFor("nobody@example.test"), { ok: true });
+    assert.equal(await mailer.mintSupabaseTokenHash("new@example.test"), "hashed-abc");
+
+    assert.equal(client.constructedWith.length, 2, "one client per call — never a module-scope singleton");
+    for (const call of client.constructedWith) {
+      assert.equal(call.url, "http://127.0.0.1:4873/captured-identity", "the override, not supabaseUrl");
+      assert.notEqual(call.url, capability.config.supabaseUrl);
+      assert.equal(call.key, capability.config.serviceRoleKey, "the SAME service-role key travels either way — only the URL substitutes");
+    }
+  });
+
+  test("the mail-endpoint seam and the identity seam are independent — setting one leaves the other at its own default", async () => {
+    const capability = inviteMailCapability({
+      ...REQUIRED_ENV,
+      [INVITE_IDENTITY_ENDPOINT_ENV_NAME]: "http://127.0.0.1:4873/captured-identity",
+    });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.mailEndpoint, undefined, "the mail seam stays at its own default, untouched by this ticket");
+
+    const net = recordingFetch(() => new Response("{}", { status: 200 }));
+    const mailer = productionInviteMailer(capability.config, { fetch: net.fetch });
+    await mailer.send({ to: "a@b.test", subject: "s", html: "h" });
+    assert.equal(net.calls[0]!.url, RESEND_ENDPOINT, "send() is untouched by the identity override — composable, not a replacement (#1022's own brief)");
+  });
+
+  // fix-round ADV-1's own fence, extended to this seam: an override with no restriction on its
+  // VALUE could redirect `listUsers` — a walk of this app's WHOLE user directory — to a host an
+  // attacker controls, from any environment that happened to have this variable set by mistake.
+  test("ADV-1 fence: a NON-LOOPBACK override is ignored — production behaviour, not honoured and not refused", () => {
+    const capability = inviteMailCapability({
+      ...REQUIRED_ENV,
+      [INVITE_IDENTITY_ENDPOINT_ENV_NAME]: "https://attacker.example/capture",
+    });
+    assert.equal(capability.ok, true, "a rejected override must never itself cause mail_not_configured");
+    if (!capability.ok) return;
+    assert.equal(capability.config.identityEndpoint, undefined, "a non-loopback host must never be honoured as the identity endpoint");
+  });
+
+  test("ADV-1 fence: an IPv6 loopback ([::1]) override IS honoured, matching the mail seam's own fence", () => {
+    const capability = inviteMailCapability({
+      ...REQUIRED_ENV,
+      [INVITE_IDENTITY_ENDPOINT_ENV_NAME]: "http://[::1]:4873/captured-identity",
+    });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.identityEndpoint, "http://[::1]:4873/captured-identity");
+  });
+
+  test("a whitespace-padded override is trimmed the same way the four required variables are", () => {
+    const capability = inviteMailCapability({
+      ...REQUIRED_ENV,
+      [INVITE_IDENTITY_ENDPOINT_ENV_NAME]: "  http://127.0.0.1:4873/captured-identity  ",
+    });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.identityEndpoint, "http://127.0.0.1:4873/captured-identity");
+  });
+
+  test("the env var's NAME itself carries the CLARA_E2E_ harness prefix every other test-only flag in this app uses", () => {
+    assert.equal(INVITE_IDENTITY_ENDPOINT_ENV_NAME, "CLARA_E2E_INVITE_IDENTITY_ENDPOINT");
   });
 });
 

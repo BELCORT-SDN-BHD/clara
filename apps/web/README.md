@@ -75,6 +75,22 @@ exclusive because one event must be one announcement.
 with a vacuity control proving the tree really does contain live regions — treat
 `nested-live-region` as a gate, not a check.
 
+**A read this tab opened for ITSELF does not speak about the reader's access (#1024).** When the
+door refuses a Stop, `useClaraThread`'s `stopReply` re-opens its own read of the reply so the answer keeps
+arriving. `runClaraTaskStream` delivers a 403/404 at attach as the same `revoked` event a mid-stream
+revocation delivers (#642, "one fact, one face"), which is right for a tab's FIRST attach — its only
+view of the turn — and wrong for this one. That 404 also covers a task the runtime no longer holds (a
+reply that ended, was reaped, a stale id), so it would render an EXISTENCE fact as an ACCESS fact, and
+`applyStreamEvent`'s `revoked` arm writes `turnStatus: null` — for a turn this tab did not post the ONLY
+live arm of `turnLive`, so a statement about access silently withdrew the Stop control from a reply the
+refusal had just called live. `AttachRefusalMeaning` lets the caller say which reading it wants:
+`"revocation"` (the default, unchanged) or `"this-tab-cannot-resume"`, whose refused attach is kept out
+of the shared stream state and recorded by the caller's own machine as `reattach: "lost"` plus
+`markReattachFailed` — the same state a re-attach that failed at the TRANSPORT already reaches. A
+`revoked` that arrives once the read is OPEN is never diverted: the runtime sent it, and it still
+retires the clock and withdraws the parked question. `e2e/work-cancel-walk.spec.ts`'s B7 cell was the
+non-deterministic red this produced on both branches.
+
 **The transcript owns its own scroll, and nothing else's.** `lib/clara/useTranscriptScroll.ts`
 holds the whole policy: a reader scrolled up stays put while content arrives (the "is the
 reader following?" answer is sampled from their own scroll events, never recomputed after an
@@ -311,9 +327,11 @@ revoke it.
 (`INVITE_MAIL_ENDPOINT_ENV_NAME`), read by `inviteMailCapability` alongside the four required
 variables but never counted in `missing` — lets `productionInviteMailer`'s `send()` post
 somewhere other than `RESEND_ENDPOINT`. Owner ruling (2026-09-18): only the mail endpoint, never
-the Supabase admin calls (`canMintFor`/`mintSupabaseTokenHash` stay real everywhere). Unset (every
-real deployment), `send()` posts to `RESEND_ENDPOINT` exactly as before — pinned by
-`tests/invite-mail-transport.test.ts`'s `#874` suite.
+`config.supabaseUrl` itself — `canMintFor`/`mintSupabaseTokenHash` still build their admin client
+from the SAME Supabase project `send()`'s own key belongs to, in every deployment, unaffected by
+this seam. Unset (every real deployment), `send()` posts to `RESEND_ENDPOINT` exactly as before —
+pinned by `tests/invite-mail-transport.test.ts`'s `#874` suite. #1022 (below) adds a SEPARATE,
+equally-fenced seam for the admin client's OWN base URL, rather than touching `supabaseUrl`.
 
 **fix-round ADV-1 — the fence, and why it is a VALUE check, not a build-mode check.** The original
 cut read the override unconditionally, in any environment, with no gate at all — a production-live
@@ -323,35 +341,43 @@ could set an environment variable on the deployment (accidentally or not). `lib/
 and its fence (`NODE_ENV !== "production"`) was DELETED rather than kept, because `next start` —
 the exact shape a browser e2e walk runs against — sets `NODE_ENV=production`, neutralising it. This
 seam is fenced differently for exactly that reason: `inviteMailCapability` (via
-`isLoopbackMailEndpoint`) honours the override only when it parses as an http(s) URL whose host is
-loopback (`127.0.0.1`, `localhost`, `[::1]`); anything else — a real hostname, a bare path, a
-`javascript:` scheme — is silently treated exactly like an absent override. A variable set by
-mistake in production can therefore never redirect the mail off the machine it is running on. The
-name also now carries the `CLARA_E2E_` prefix every other harness-only flag in this app uses
-(`CLARA_E2E_MONEY_INPUT_HARNESS`).
+`isLoopbackEndpointOverride`, renamed by #1022 now that the identity seam below shares it) honours
+the override only when it parses as an http(s) URL whose host is loopback (`127.0.0.1`,
+`localhost`, `[::1]`); anything else — a real hostname, a bare path, a `javascript:` scheme — is
+silently treated exactly like an absent override. A variable set by mistake in production can
+therefore never redirect the mail off the machine it is running on. The name also now carries the
+`CLARA_E2E_` prefix every other harness-only flag in this app uses (`CLARA_E2E_MONEY_INPUT_HARNESS`).
 
-**AC2 (a Playwright walk substituting the endpoint) remains unmet, reconciled rather than built.**
-`e2e/members-lifecycle-mock.mjs`'s own header records that this harness sets no `RESEND_API_KEY`
-so the invite leg terminates at `mail_not_configured` before any admin call is attempted; reaching
-`send()` from a browser walk needs `canMintFor`/`mintSupabaseTokenHash` to succeed first, which
-needs the Supabase admin REST endpoints (`GoTrueAdminApi`'s `listUsers`/`generateLink`) mocked
-under `/e2e-supabase` — a second, larger seam this ticket's own "why human" note left as the
-owner's separate call, not decided here, and the fix-round review confirmed this blocker is real
-and independent of the fence above. Wiring `CLARA_E2E_INVITE_MAIL_ENDPOINT` into the e2e server's
-own env (`e2e/run.mjs`/`serve-built.mjs`) without that second seam would prove the variable is
-*read*, which the unit suite already pins, but not that a real invite flow ever *reaches* `send()`
-— the one thing AC2 actually asks for — so it was not built as a half-measure. The seam is proven
-at the unit level (`send()` posts to the override with the exact body a walk would need to assert
-on, and the fence rejects a non-loopback value); wiring a walk to reach it is a follow-up gated on
-the second seam, not a re-litigation of this ruling.
+**#1022 — the identity-provisioning seam, the second seam the note above named.**
+`InviteMailConfig.identityEndpoint` — resolved from `CLARA_E2E_INVITE_IDENTITY_ENDPOINT`
+(`INVITE_IDENTITY_ENDPOINT_ENV_NAME`), the SAME shape as `mailEndpoint` (optional, read last,
+never in `missing`, fenced to a loopback http(s) URL by the same `isLoopbackEndpointOverride`) —
+substitutes ONLY the base URL `productionInviteMailer`'s `admin()` builds its Supabase client
+from; the service-role KEY, and the separate mail-endpoint seam, are untouched. Unset (every real
+deployment), `admin()` still builds from `config.supabaseUrl` exactly as before — pinned by
+`tests/invite-mail-transport.test.ts`'s `#1022` suite.
 
-**Re-verified, code-review fix round (SPEC-874-1): unchanged, third confirmation.** All 38
-`invite-mail-transport.test.ts` cells re-run green; `e2e/members-invite-walk.spec.ts`'s own header
-still states the harness sets no mail transport so the invite leg settles at `mail_not_configured`
-before any admin call; and a repo-wide search finds no `GoTrueAdminApi`/admin `generate_link`
-mock anywhere under `e2e/` — only the general `/e2e-supabase` REST prefix, which is not the admin
-API `canMintFor`/`mintSupabaseTokenHash` need. The tension is between AC2 as written and the
-owner's own 2026-09-18 ruling, not a lane shortfall; resolving it needs the owner, not more build.
+**AC2 (a Playwright walk reaching a pending row, both calls intercepted) is now MET.**
+`e2e/run.mjs` enables the courier's mail capability with three harness-only placeholders and
+points both `CLARA_E2E_INVITE_MAIL_ENDPOINT` and `CLARA_E2E_INVITE_IDENTITY_ENDPOINT` at this same
+mock origin. `e2e/members-lifecycle-mock.mjs` answers the Supabase admin REST endpoints
+(`GoTrueAdminApi`'s `listUsers` under `GET /auth/v1/admin/users`, `generateLink` under
+`POST /auth/v1/admin/generate_link`) with an empty directory and a fixed hashed token, the real
+`clara.invite_member` verb with a realistic three-key receipt (`invite_id`/`token_hash`/
+`expires_at`, plus the plaintext `token`, matching `0147`'s own body), and
+`POST /e2e-invite-mail-capture`, which records what `send()` posted instead of relaying it. All
+three carry that file's own `if (!ours) return false;` guard — the mail-capture one only since
+the code-review fix round: it shipped without the guard while this paragraph claimed otherwise,
+on a path `run.mjs` now sets for EVERY e2e run, and the census that should have contradicted the
+claim could not see any of the three. `HANDLER_OPENER` in
+`e2e/e2e-fixture-ownership.test.ts` reads `/auth/…` and `/e2e-…` openers from that round on, so
+the claim is now MEASURED: N5 censuses all four of this lane's non-`/rest/` handlers as scoped
+(44/44).
+`e2e/members-invite-walk.spec.ts`'s first cell now drives the invite dialog to a settled
+`"The invitation to … was sent."` banner and a new pending row, then reads
+`e2e_members_lifecycle_invite_trace` for positive evidence that both calls actually fired and
+what `send()` posted — never merely that the journey looked right. Two consecutive runs green
+(9.9s, 10.5s); no other spec reaches `/api/invite` today, so no other walk's behaviour changed.
 
 **There is no resend door, by design.** The plaintext token is never stored (裁-16a) so no link can
 be re-sent, and `clara.invite_member` refuses a second pending invitation for the same address
@@ -1554,36 +1580,102 @@ poll's own tick to land under host contention (1 failure in a 5-run sample). Fol
 that cell's own settle budget specifically — out of #875's stated scope (auditing *other*
 pollers) and not the same instance #875 was asked to fix.
 
-## #897 — the full-screen onboarding altitude leg (code-review fix round; still open)
+## #1021 — the [633] unsettled-receipt cell counts the WHOLE poll, on a work bound
 
-**Not delivered.** #897's own AC1 asks for a mock-lane cell proving typed-but-unsubmitted
-interview answers and focus survive the rail-to-full-screen escalation; AC2/AC3 ask for the
-fixture and its ownership declaration. None of the three is built. This fix round did two things,
-neither of which counts as delivering the ticket:
+**Landed** — the follow-up #875 named above. Two rounds, and the second one found the real
+mechanism, so what the first round wrote here has been overwritten rather than appended to.
 
-**Fixed (SPEC-897-2): the AC4 header note no longer asserts coverage that does not exist.**
-`e2e/interview-walk.spec.ts`'s header used to say the arm is "proven without docker in a real
-built-app Playwright walk exactly like every other mock-lane spec in this directory" — no such
-walk exists anywhere, so the note recreated exactly the false-coverage state #897 exists to
-remove. Reworded to say plainly that the arm is not proven anywhere today and to name #897 as
-the open ticket.
+**What was actually wrong, measured.** The cell asserted on the reads that arrived AFTER
+`withReceipts`'s own mount phase (`const mount = counts.document_intakes_visible ?? 0;` then
+`grew > 0`). That mount phase advances ten `h.settle()` hops, and this poll spends exactly ONE TICK
+PER HOP — a tick needs its `setTicks` re-render and the effect that schedules the next timer, and
+both wait for the next `act` flush. Instrumented at the previous HEAD: 12 reads already counted when
+the body starts (the mount's own list read plus eleven of the twelve-tick budget), one more read,
+then silence. So `grew > 0` was a margin of exactly ONE TICK. Any single extra flush in the mount
+phase spends it, `grew` is 0, and the cell goes red saying nothing about the poll — which is what a
+full-suite run at the previous HEAD recorded
+(`docs/plan/active/riders-2026-09-20/reports/wave3-lane11-ticket1022.md`).
 
-**Reproduced (SPEC-897-1): the blocker is now backed by a runtime empirical result, not only a
-static trace.** `components/clara/interview-draft-persistence.test.tsx` (new) mounts a real
-`ClaraFullScreenThread` instance, types an unsubmitted answer, unmounts it without submitting,
-then mounts a second fresh instance against the identical server-side run and reads its answer
-field. Today it starts empty — confirming, by running the actual component rather than only
-reading its source, that `InterviewRunCard.tsx`'s `draft` (`useState("")`, two call sites total,
-no persistence) does not survive an unmount of the tree that held it. This is not #897's
-deliverable (it does not touch the rail, the route-group boundary or a mock fixture) and its own
-header says so; it is the cheapest empirical confirmation available before committing to the
-larger build, and it is the test whose assertion should flip once #897 lands real persistence.
+**The first round's own fix was the second half of the problem.** `settleUntilQuiet` waited for the
+read count to hold flat for a real 300 ms window with a 10 s deadline — the exact shape
+`test/settleUntil.ts`'s header retires in one line: *"The bound is on WORK, not on wall-clock time"*
+(#798, after #643). A contended host can spend 300 ms inside one macrotask hop, so the quiet window
+could elapse before the poll was given a single chance to tick.
 
-**Still needed, unchanged from the prior report:** an owner ruling on whether AC1's typed-data
-and focus-return criteria mean literal cross-route-group survival, and — if so — a new
-interview-runtime mock subsystem (an OPEN/unanswered park fixture plus
-`/api/runtime/interview/*` handlers reachable through the rail) that this lane scoped as a
-genuine multi-piece build, not a same-shape addition to an existing fixture.
+**What it is now.** `settleUntilPollStops` (same file, just above the cell) settles until the read
+count has held flat for `QUIET_PASSES = 25` CONSECUTIVE PASSES, bounded by `STOP_PASSES = 400`
+passes of total work and no wall clock at all. One read per hop is the measured ceiling, so
+twenty-five hops with no read is a poll that has genuinely stopped, on a fast host and a crawling
+one alike. The cell then counts from zero: `ticks = total - MOUNT_READS` (one, the mount's own list
+read — measured, not assumed: the SETTLED cell above reads exactly once and never again), and
+asserts `ticks > 0` and `ticks <= 12`. The ceiling is now a property of the poll rather than of how
+its budget happened to be split across the mount phase.
+
+The poll itself (`lib/documents/use-settle-poll.ts`) is unchanged; this stays a test-only fix.
+Three controls, each run and each reverted byte for byte:
+
+- **The red reproduced deterministically.** The old shape with the mount phase given the whole
+  budget (`maxTicks: 11`, third arg to `withReceipts`) fails on `the poll must issue SOME read
+  while a row is still moving` — the identical intermittent failure, made repeatable.
+- **The new shape survives it.** Same `maxTicks: 11`, new shape: green (`ticks = 11`).
+- **Non-vacuity.** `maxTicks: 1000`: red, `still reading after 400 settle passes (count 412)` — 412
+  is 12 + 400, which is also the direct measurement of one read per hop.
+
+## #897 — the full-screen onboarding altitude leg
+
+**Delivered**, in riders wave 3. This section is overwritten rather than appended to: the
+paragraphs it replaces described the state before the build and were still standing, contradicting
+the branch, until the code-review fix round (SPEC-897-4).
+
+**The walk.** `e2e/agentic-finish-walk.spec.ts`'s #897 arm signs in, opens client C's rail, starts
+the interview, types an answer, escalates to full screen through the rail's own control, asserts
+the URL crossed the `(firm)` → `(full)` route-group boundary, re-attaches the run and reads the
+answer field back, then presses Back and asserts BOTH halves of AC1: the answer survived the
+second remount too, and keyboard focus is on the escalate control that opened it. Client C
+(`P6_5.clientC` / `threadC` / `planC` / `runC`, in `e2e/agentic-finish-mock.mjs`) is an OPEN,
+unanswered park no other cell in that file navigates to, which is AC2. N4's own-client-thread
+count moved 2 → 3 for it and `e2e/e2e-fixture-ownership.test.ts` passes with the two new runtime
+handlers censused as scoped, which is AC3. `e2e/interview-walk.spec.ts`'s header now records that
+the arm lives in the mock lane, which is AC4.
+
+**The product change the walk needed.** The 2026-09-20 triage comment widened the ticket after
+tracing that a typed interview answer was not persisted anywhere. It is now:
+`claraThreadStore.interviewDrafts` (see that file's own header for why the key is `clientId`
+alone, and for why the ruling's "another thread" half is answered by the key's design rather than
+by a cell), read and written by `components/clara/InterviewRunCard.tsx` through
+`useSyncExternalStore`, and cleared only on a CONFIRMED submit — a refused park leaves the
+person's text where they can still fix and resend it.
+
+**And a second one, argued from AC1 rather than from the triage comment.** With draft persistence
+alone the walk still failed on `toBeFocused()`: the browser restores no focus across either leg of
+that navigation (`document.activeElement` was `<body>`). `lib/clara/rail-focus-return.ts` is the
+fix — the same best-effort, take-once `sessionStorage` marker idiom
+`lib/firm/portfolio-focus-return.ts` already established for the identical problem on Firm Home,
+scoped by client altitude so a marker from one client's escalate can never move focus on
+another's. It is a second production change under a ticket whose newest ruling named one, and the
+code review flagged it as such (SPEC-897-3): AC1's own words are "asserts keyboard focus returns
+to the triggering control", so it is inside the ticket as written, but whether it should have
+ridden this ticket or its own is the integrator's call, not this file's.
+
+**That focus fix shipped with a race, found and fixed in the code-review round.** `ClaraRail.tsx`
+took the one-shot marker DURING RENDER. React may render a component and throw the result away — a
+navigation is a transition, and a transition can be re-rendered — so the marker could be consumed
+by a render that never committed and be gone for the one that did. Measured, not reasoned: a
+traced run of this exact round trip showed two `ClaraRail` renders on the way back, the first
+taking the marker and matching, the second (whose effects actually ran, and which later rendered
+the escalate link) finding `null`. `--repeat-each=5` on the #897 arm was **4 red, 1 green**. The
+take now happens inside the effect, i.e. in the COMMIT phase, so only a render that survived can
+consume it; the `undefined` ref guard still makes it once-per-instance. `--repeat-each=10` after
+the fix: **10 green**, and the whole spec 10/10. `components/firm/firm-portfolio-section.tsx`
+carries the older render-phase form of the same idiom and the same hazard; nothing has reproduced
+it on that surface, so it is a follow-up rather than a change made here.
+
+**The component-level cells** (`components/clara/interview-draft-persistence.test.tsx`) keep the
+seam the wave-1 reproduction opened: one mounts a card, types, unmounts without submitting and
+mounts a fresh instance against the same run — its assertion is FLIPPED, the draft is back; the
+other proves clear-on-submit and preserve-on-refusal against two independent runs. What they
+cannot prove at this harness's altitude is the rendered, user-visible `.value` (the
+`HTMLTextAreaElementStub` gap that file's header documents); that is the browser walk's claim.
 
 ## #981 — the durable-Work refusal carrier, read once
 

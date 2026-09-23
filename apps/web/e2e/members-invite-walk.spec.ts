@@ -28,13 +28,17 @@ import { MEMBERS_LIFECYCLE } from "./members-lifecycle-mock.mjs";
  * under real least-privileged Postgres roles, which is where AC7 evidence lives. A mock-backed
  * walk is never AC7 evidence.
  *
- * AND THE INVITE LEG'S OWN CEILING. `/api/invite` is a REAL route and this harness deliberately
- * configures no mail transport (`e2e/run.mjs` sets no `RESEND_API_KEY`, for the same reason it
- * sets no `STRIPE_SECRET_KEY`: a key here posts to a third party from every run). So the invite
- * cell drives the real dialog and the real courier round trip to the settled outcome this harness
- * can honestly produce — `mail_not_configured`, which creates nothing — and the pending-invite
- * half of the journey is walked over a row the lane seeds. The invite door's own behaviour is the
- * DB battery's claim.
+ * AND THE INVITE LEG'S OWN CEILING (#1022 raised it). `/api/invite` is a REAL route, and
+ * `e2e/run.mjs` now enables the courier's mail capability with THREE harness-only placeholders
+ * plus two loopback overrides (`CLARA_E2E_INVITE_MAIL_ENDPOINT` #874, `CLARA_E2E_INVITE_IDENTITY_
+ * ENDPOINT` #1022) that fence both outbound calls `productionInviteMailer` can make — `send()`
+ * and `admin()`'s `listUsers`/`generateLink` — to `members-lifecycle-mock.mjs`'s own handlers, on
+ * this same process. So the invite cell below now drives the real dialog, the real courier round
+ * trip, and the REAL `clara.invite_member` verb this lane answers, all the way to a SETTLED
+ * SUCCESS banner and a NEW pending row rendering — with no outbound call to a real Supabase
+ * project or a real mail provider anywhere in the journey (see that mock's own header for what
+ * each intercept proves and does not). The invite door's own behaviour — the token's real shape,
+ * every refusal wall — is still `packages/db/tests/p4t1-invite.test.mjs`'s claim, not this walk's.
  */
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -72,25 +76,45 @@ test("#625: invite, revoke, change a role and remove — each act reaches a sett
   const url = page.url();
 
   // ---------------------------------------------------------------------------------------
-  // 1 · INVITE — the real dialog, the real courier round trip, a settled PERSISTENT banner.
+  // 1 · INVITE — the real dialog, the real courier round trip (#1022: both outbound legs
+  // intercepted locally), a settled PERSISTENT banner and a new pending row.
   // ---------------------------------------------------------------------------------------
   const inviteTrigger = page.getByRole("button", { name: "Invite someone", exact: true });
   await expect(inviteTrigger).toBeVisible();
   await inviteTrigger.click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await page.getByLabel("Email address").fill("another-hire@larkin.test");
+  await page.getByLabel("Email address").fill(MEMBERS_LIFECYCLE.newInviteEmail);
   await page.getByRole("button", { name: "Send invitation" }).click();
 
   // THE SETTLED RESULT IS A BANNER ON THE PAGE, NOT A TOAST — R4's house law, and the reason
   // `members-panel.tsx` records for refusing Bonsai's "Invite sent." toast. It is still there
   // after the dialog is gone, which is what "persistent" means.
-  await expect(page.getByText("The invitation was not sent")).toBeVisible();
-  await expect(page.getByText(/no invitation mail set up/)).toBeVisible();
+  await expect(page.getByText(`The invitation to ${MEMBERS_LIFECYCLE.newInviteEmail} was sent.`)).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   // FOCUS RETURNED TO THE TRIGGER. A real focus manager is the only thing that can say so.
   await expect(inviteTrigger).toBeFocused();
-  // …and nothing was created: the seeded invitation is still the only row.
-  await expect(page.getByText("another-hire@larkin.test")).toHaveCount(0);
+  // …and the NEW invite is a PENDING row, from the re-read the act performed — never painted
+  // optimistically, the same hydrate-never-trust contract the other three acts below rely on.
+  const newInviteRow = page.getByRole("row").filter({ hasText: MEMBERS_LIFECYCLE.newInviteEmail });
+  await expect(newInviteRow.getByText("Pending")).toBeVisible();
+
+  // #1022's OWN CLAIM: BOTH outbound legs were actually exercised, not merely configured — the
+  // identity-provisioning call (`listUsers` then `generateLink`) and the mail transport, with
+  // NEITHER call ever having left this process. Read through the lane's own control endpoint
+  // (`members-lifecycle-mock.mjs`'s header), the same shape `resetLane` above already uses.
+  const origin = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
+  const traceAnswer = await page.request.post(
+    `${origin}/e2e-supabase/rest/v1/rpc/e2e_members_lifecycle_invite_trace`,
+    { data: { persona: MEMBERS_LIFECYCLE.email } },
+  );
+  expect(traceAnswer.ok(), "the lane's own trace control must answer").toBe(true);
+  const trace = await traceAnswer.json();
+  expect(trace.identityCalls.listUsers, "canMintFor drove at least one listUsers page").toBeGreaterThanOrEqual(1);
+  expect(trace.identityCalls.generateLink, "mintSupabaseTokenHash drove exactly one generateLink").toBe(1);
+  // send() actually posted HERE — no real Resend call was ever attempted.
+  expect(trace.capturedMail?.to).toBe(MEMBERS_LIFECYCLE.newInviteEmail);
+  expect(trace.capturedMail?.subject).toBe("You have been invited to ClaraBook");
+  expect(trace.capturedMail?.html).toContain(`/invite/${MEMBERS_LIFECYCLE.newInviteHashedToken}`);
 
   // ---------------------------------------------------------------------------------------
   // 2 · REVOKE — a governed act driven to settlement, asserted on the RE-READ.

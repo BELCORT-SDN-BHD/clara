@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +36,7 @@ import {
   TERMINAL_CHIPS,
   useInterviewRun,
 } from "@/lib/interview/useInterviewRun";
+import { claraThreadStore } from "@/lib/clara/threadStore";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { OnboardingDoorDialog } from "./OnboardingDoorDialog";
 
@@ -61,7 +62,24 @@ export function InterviewRunCard({
   const [runId, setRunId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
+  // #897 — the typed-but-unsubmitted answer, read through the SAME external-store contract
+  // ClaraThreadView's own composer draft uses (that file's header on `drafts`). Plain
+  // `useState("")` here lost the text on every remount — including the remount the rail <->
+  // full-screen altitude change causes ((firm) and (full) are SIBLING route groups: a real
+  // navigation, not a re-render — see rail-mount.tsx's "WHAT SURVIVES A SWITCH" note) — because
+  // nothing outside this component instance held it. `claraThreadStore.interviewDrafts` is
+  // keyed by `clientId` alone (see its own header for why no second key is needed here), which
+  // is a stable prop across the remount, so the FIRST render of a fresh instance already reads
+  // back whatever the human typed into the last one.
+  const draft = useSyncExternalStore(
+    claraThreadStore.subscribe,
+    () => claraThreadStore.getInterviewDraft(clientId),
+    () => claraThreadStore.getInterviewDraft(clientId),
+  );
+  const setDraft = useCallback(
+    (text: string) => claraThreadStore.setInterviewDraft(clientId, text),
+    [clientId],
+  );
   const [cancelReason, setCancelReason] = useState("");
   // #900 — the ONE genuinely field-shaped part of this card: htmlFor/id wiring for the answer
   // textarea's new visible `FieldLabel` (owner ruling, 2026-09-18: only this control recomposes
@@ -184,7 +202,11 @@ export function InterviewRunCard({
     const park = run.state?.pendingPark;
     const answer = draft.trim();
     if (!park || run.busy || !answer) return;
-    if (await run.submitAnswer(park, answer)) setDraft("");
+    // #897 — `clearInterviewDraft`, not `setDraft("")`: the same "forget the key entirely on a
+    // CONFIRMED delivery" idiom `claraThreadStore.clearDraft` uses for the composer, so a
+    // refused answer (this call resolving `false`) leaves the human's text exactly where they
+    // can still fix and resend it.
+    if (await run.submitAnswer(park, answer)) claraThreadStore.clearInterviewDraft(clientId);
   }
 
   // CB-AE2E-004: resolves the outcome — `true` only when the cancel actually
