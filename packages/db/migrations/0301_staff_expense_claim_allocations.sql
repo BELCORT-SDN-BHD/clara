@@ -743,14 +743,29 @@ begin
               'claimant_enrolment_id',v_claim_enrol)::text;
         end if;
       end if;
-      -- THE SHARED CAP (0043:1220), ASKED PER ALLOCATION — never once for the claim total.
+      -- THE SHARED CAP (0043:1220), ASKED PER ALLOCATION — never once for the claim total. A cap
+      -- asked once against the head advance would refuse a lawful split and admit an unlawful one.
+      --
+      -- THE REFUSAL NAMES THE ADVANCE, ITS OUTSTANDING ON THE BOUNDARY DAY, AND THE SHORTFALL.
+      -- `clara._adv_over_application` already answers the first two in its own object; the
+      -- SHORTFALL is what the preparer has to move, and making them subtract it themselves is how
+      -- a refusal stops being actionable. It is `-resulting_cents` — the cap's own arithmetic read
+      -- from its own answer, never a second walk.
+      --
+      -- AND IT ADDRESSES THE CONTROL THEY MUST CHANGE: the allocation's own amount when the claim
+      -- states a LIST, and `claim.amount_cents` when it names ONE advance (0221's own path, and
+      -- still the only control there is on that shape).
       v_alloc := (e.elem ->> 'amount_cents')::bigint;
       v_cap := clara._adv_over_application(v_advance, v_alloc, v_posting);
       if v_cap is not null then
         raise exception 'that advance cannot carry this claim: % cents outstanding at %, % claimed',
           v_cap->>'outstanding_cents', v_cap->>'boundary_date', v_alloc using errcode='CLR10',
           detail=(v_cap || jsonb_build_object('reason','advance_allocation_mismatch',
-            'field','claim.amount_cents','constraint','over_application'))::text;
+            'field', case when v_listed
+              then 'claim.advance_allocations[' || e.idx || '].amount_cents'
+              else 'claim.amount_cents' end,
+            'constraint','over_application',
+            'shortfall_cents', -((v_cap->>'resulting_cents')::bigint)))::text;
       end if;
     end loop;
   end if;
@@ -1071,7 +1086,8 @@ begin
         r.advance_id, v_cap->>'outstanding_cents', v_cap->>'boundary_date', r.amount_cents
         using errcode='CLR39',
         detail=(v_cap || jsonb_build_object('reason','advance_over_application','entry_id',new.id,
-          'claim_id',v_claim))::text;
+          'claim_id',v_claim,
+          'shortfall_cents', -((v_cap->>'resulting_cents')::bigint)))::text;
     end if;
 
     insert into clara.staff_advance_applications(firm_id, client_id, advance_id, enrolment_id,

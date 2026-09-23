@@ -26,7 +26,7 @@ import {
   claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
   assertPair, rootQuery, opk,
   entryCount, committedReceiptCount,
-  SECHART, SETTLEMENT, SEC_DATE, ensureSecChart,
+  SEC_REASON, SECHART, SETTLEMENT, SEC_DATE, ensureSecChart,
   claim, admitStaffExpenseClaimWork, getStaffExpenseClaim,
   listStaffExpenseClaims, claimRow, claimCount, applicationsForEntry, advanceOutstanding,
   seedAdvance, linesWithIds,
@@ -234,4 +234,66 @@ test("p931.two one claim discharges TWO advances on one enrolled account: two al
     .find((x) => x.id === a.claim_id);
   assert.equal(listed.advance_allocations.length, 2,
     "two: the register list shows ONE discharge per named advance");
+});
+
+// ===========================================================================================
+// 2 · p931.cap — the per-allocation temporal cap, and the typed shortfall that NAMES the advance.
+// ===========================================================================================
+
+test("p931.cap an allocation beyond ITS OWN advance's outstanding is refused naming THAT advance, its outstanding on the day and the shortfall", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("alloccap");
+  // THE WORKED EXAMPLE. A = 40,000 sen (enough for its own share), B = 10,000 sen (not enough).
+  // The 60,500 claim is split A 40,000 / B 20,500, so the SECOND allocation outruns B by
+  // 20,500 - 10,000 = 10,500 sen. The claim TOTAL is inside the pair's combined 50,000 + …, so a
+  // cap asked once for the claim against the head advance would have let this through.
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advB = (await seedAdvance(ALICE(), BOB(), { client, cents: 10000, issueDate: "2026-02-01" })).advance;
+
+  const c = allocClaim({
+    allocations: [
+      { advance_id: advA.id, amount_cents: 40000 },
+      { advance_id: advB.id, amount_cents: 20500 },
+    ],
+  });
+  const { detail } = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: c }), "cap");
+
+  assert.equal(detail.advance_id, advB.id, "cap: the refusal names the SECOND advance, not the head");
+  assert.equal(Number(detail.outstanding_cents), 10000,
+    "cap: …its outstanding on the boundary day the cap stopped at");
+  assert.equal(String(detail.boundary_date).slice(0, 10), SEC_DATE.posting,
+    "cap: …and which day that was");
+  assert.equal(Number(detail.proposed_cents), 20500, "cap: …what was asked of it");
+  assert.equal(Number(detail.shortfall_cents), 10500,
+    "cap: …and the SHORTFALL, so the preparer can move exactly that many sen");
+  assert.equal(detail.field, "claim.advance_allocations[2].amount_cents",
+    "cap: the refusal addresses the ALLOCATION the preparer must change, not the claim total");
+  assert.equal(detail.constraint, "over_application");
+
+  // Neither advance moved: the refusal is raised before anything durable.
+  assert.equal(await advanceOutstanding(advA.id, SEC_DATE.posting), 40000, "cap: A is untouched");
+  assert.equal(await advanceOutstanding(advB.id, SEC_DATE.posting), 10000, "cap: B is untouched");
+});
+
+test("p931.cap.single a SINGLE-advance over-application keeps its existing reason and its existing field", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("alloccap1");
+  // 0221's own `p638.advance.over` shape, restated here as #931's non-regression: a claim that
+  // names ONE advance is refused at `claim.amount_cents`, because that IS the control a preparer
+  // would change — there is no allocation row to address.
+  const adv = (await seedAdvance(ALICE(), BOB(), { client, cents: 20000, issueDate: "2026-02-01" })).advance;
+  const c = claim({
+    settlement: SETTLEMENT.advance,
+    advanceAccountCode: SECHART.advance,
+    advanceId: adv.id,
+    payableAccountCode: null,
+  });
+  const { detail } = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: c }), "cap.single");
+  assert.equal(detail.field, "claim.amount_cents", "cap.single: the 0221 field path is unmoved");
+  assert.equal(detail.constraint, "over_application");
+  assert.equal(detail.advance_id, adv.id);
+  assert.equal(Number(detail.shortfall_cents), 40500,
+    "cap.single: …and the shortfall rides beside it (60,500 claimed against 20,000 outstanding)");
 });
