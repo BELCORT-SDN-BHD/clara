@@ -1,7 +1,12 @@
-// GATE (b) — structural a11y scan of the adjustments workbench + the Propose
+// GATE (b) — structural a11y scan of the adjustments workbench + the Retire
 // Template door dialog open (owner ruling Q7). See test/domInspect.ts's header
 // for why this rides a hand-written rule engine rather than real axe-core —
 // the staff-advances-a11y.test.tsx precedent, ported to this train's own panel.
+//
+// [#927, riders wave 3] This gate used to open the Propose Template dialog —
+// `propose_adjustment_template` is retired (migration 0282) and the dialog is gone
+// with it, so the gate now opens Retire, the one write left on the templates list
+// (retire_adjustment_template is D6-untouched).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -87,7 +92,7 @@ function App() {
   });
 }
 
-test("adjustments workbench + Propose Template door dialog OPEN have zero violations", async () => {
+test("adjustments workbench + Retire Template door dialog OPEN have zero violations", async () => {
   await withMockedEnv(mockFetch, async () => {
     const h = await renderComponent(App());
     const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
@@ -99,8 +104,8 @@ test("adjustments workbench + Propose Template door dialog OPEN have zero violat
       const collapsedViolations = checkAccessibility(body as never);
       assert.deepEqual(collapsedViolations, [], `collapsed: ${JSON.stringify(collapsedViolations)}`);
 
-      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Propose template"));
-      assert.ok(trigger, "the Propose Template dialog trigger must render");
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Retire"));
+      assert.ok(trigger, "the Retire Template dialog trigger must render");
       await h.fireEvent(trigger!, "click");
       for (let i = 0; i < 6; i++) await h.settle();
 
