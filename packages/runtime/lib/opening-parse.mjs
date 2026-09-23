@@ -482,11 +482,24 @@ export async function refreshOpeningTargets(client, { seedId, firmId, reassert }
       [seed.id, JSON.stringify(lines), seed.tie_document_id, extractionId, opKey],
     );
     const receipt = r.rows[0]?.r ?? {};
+    // ADV-08 — A RECEIPT WITHOUT COUNTS IS NOT A SUCCESSFUL REFRESH.
+    //
+    // `clara._reserve_op` answers `{pending:true}` when the key is held with no stored result, and
+    // the door returns that envelope verbatim on its dedupe branch. The earlier form read the
+    // counts as `targets_recorded ?? lines.length` and `targets_retired ?? 0`, so that envelope
+    // was painted as "N read, 0 retired" — a 202 reporting an act that did nothing. The state is
+    // hard to reach (the door takes `opening_seed_registry FOR UPDATE` before its reservation, so
+    // two callers serialize and the reservation and the receipt commit together), which is exactly
+    // why it must not be papered over: an unreachable state reported as success is a lie nobody
+    // will ever see contradicted.
+    if (receipt.targets_recorded === undefined || receipt.targets_recorded === null) {
+      return { http: 409, body: { status: "refused", code: "CLR13", reason: "operation_in_flight" } };
+    }
     return {
       http: 202,
       body: {
         status: "refreshed",
-        lines: Number(receipt.targets_recorded ?? lines.length),
+        lines: Number(receipt.targets_recorded),
         retired: Number(receipt.targets_retired ?? 0),
       },
     };

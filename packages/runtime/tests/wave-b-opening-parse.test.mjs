@@ -603,3 +603,71 @@ test("#986 the refresh is not a second parse: on a basis nobody re-read it refus
     (await rig.rootQuery("select count(*)::int as n from clara.opening_tb_targets where seed_id=$1", [fx.seed]))
       .rows[0].n, 5);
 });
+
+// ---------------------------------------------------------------------------
+// #986 / ADV-08 — WHAT THE ROUTE SAYS WHEN THE DOOR ANSWERS WITHOUT COUNTS.
+//
+// PURE (no DB): the only thing under test is how `refreshOpeningTargets` reads the door's own
+// receipt, so the `pg` client is stubbed at the system boundary and nothing else is.
+//
+// `clara._reserve_op` answers `{pending:true}` when the key is held with no stored result, and the
+// door returns that envelope verbatim on its dedupe branch. The earlier form read the counts as
+// `targets_recorded ?? lines.length`, so that envelope was painted as a 202 "N read, 0 retired" —
+// an act that did nothing, reported as news. The state is hard to reach (the door takes
+// `opening_seed_registry FOR UPDATE` before its reservation, so two callers serialize), which is
+// exactly why it must not be papered over.
+// ---------------------------------------------------------------------------
+
+/** A `pg` client that answers this lane's three queries from a table. The read half is real
+ *  enough to get past `readOpeningParseSubject`; the door's answer is the variable. */
+function stubOpeningClient({ seed, firm, doc, extraction, doorAnswer }) {
+  return {
+    async query(sql) {
+      if (sql.includes("from clara.opening_seed_registry")) {
+        return {
+          rows: [{
+            id: seed, firm_id: firm, client_id: randomUUID(), plan_id: randomUUID(),
+            state: "open", tie_document_id: doc, tie_document_sha256: "a".repeat(64),
+          }],
+        };
+      }
+      if (sql.includes("opening_tb.line")) {
+        return {
+          rows: [{
+            region_id: randomUUID(), extraction_id: extraction,
+            text_content: "1000 Cash and bank RM 105,000.00 DR",
+          }],
+        };
+      }
+      if (sql.includes("clara.refresh_opening_targets_from_reread")) {
+        return { rows: [{ r: doorAnswer }] };
+      }
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+}
+
+test("#986 ADV-08: a refresh receipt with no counts answers a TYPED refusal, never a 202 reporting an act that did nothing", async () => {
+  const ctx = { seed: randomUUID(), firm: randomUUID(), doc: randomUUID(), extraction: randomUUID() };
+  const out = await refreshOpeningTargets(
+    stubOpeningClient({ ...ctx, doorAnswer: { pending: true } }),
+    { seedId: ctx.seed, firmId: ctx.firm },
+  );
+  assert.equal(out.http, 409, JSON.stringify(out.body));
+  assert.deepEqual(out.body, { status: "refused", code: "CLR13", reason: "operation_in_flight" },
+    "an in-flight reservation is somebody else's act in progress, not this one's success");
+});
+
+test("#986 ADV-08: the counts a 202 reports are the RECEIPT's own, never the payload's length", async () => {
+  // The door retires the targets of the reading the document left and records the new reading's,
+  // and those two numbers are facts about the DOCUMENT. One line was sent here and the receipt
+  // says three were recorded and five retired: a route that reported the payload's length would
+  // answer "1 read, 0 retired" and hide both facts.
+  const ctx = { seed: randomUUID(), firm: randomUUID(), doc: randomUUID(), extraction: randomUUID() };
+  const out = await refreshOpeningTargets(
+    stubOpeningClient({ ...ctx, doorAnswer: { targets_recorded: 3, targets_retired: 5 } }),
+    { seedId: ctx.seed, firmId: ctx.firm },
+  );
+  assert.equal(out.http, 202, JSON.stringify(out.body));
+  assert.deepEqual(out.body, { status: "refreshed", lines: 3, retired: 5 });
+});
