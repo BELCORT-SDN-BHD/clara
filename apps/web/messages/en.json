@@ -1847,6 +1847,20 @@
       "registration": "Reg. {value}",
       "tin": "TIN {value}"
     },
+    "duplicate": {
+      "title": "This looks like something already recorded",
+      "body": "This client already has {count, plural, =1 {a document} other {# documents}} from this counterparty that looks like the one you are about to record. Record it anyway only if it really is a second document.",
+      "signals": {
+        "same_reference": "Same document number",
+        "same_total_and_date": "Same total on the same date",
+        "both": "Same document number, and the same total on the same date"
+      },
+      "entry": "{reference} · {date} · RM {total}",
+      "noReference": "No document number",
+      "open": "Open what is recorded",
+      "recordAnyway": "Record it anyway",
+      "cancel": "Cancel"
+    },
     "conflict": {
       "title": "That draft was already submitted",
       "body": "This intent was already recorded with different figures. Open what was recorded rather than submitting a second one.",
@@ -1898,7 +1912,9 @@
       "invalid_particulars": "Clara could not read the document's particulars as a record.",
       "invalid_currency": "This estate records trade invoices in MYR only.",
       "invalid_tax_facts": "Tax facts are carried as a record, exactly as the document states them.",
-      "invalid_basis": "Clara could not read that submission."
+      "invalid_basis": "Clara could not read that submission.",
+      "nothing_acknowledged": "Clara could not record which earlier document you were shown. Try recording it again.",
+      "unknown_acknowledged_invoice": "Clara could not record which earlier document you were shown. Try recording it again."
     },
     "issues": {
       "party_unresolved": "Pick the counterparty this document names.",

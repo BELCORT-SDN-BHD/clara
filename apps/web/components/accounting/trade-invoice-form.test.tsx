@@ -15,7 +15,7 @@ import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { TradeInvoiceFormView } from "./trade-invoice-form";
 import { tradeInvoiceDraftKey } from "../../lib/work/trade-invoice-draft";
 import type { DraftStorage } from "../../lib/work/journal-draft";
-import type { SubmitTradeInvoiceWorkResult } from "../../lib/work/api";
+import type { SubmitTradeInvoiceWorkResult, TradeInvoiceDuplicateMatch } from "../../lib/work/api";
 import type { CoaAccountRow } from "../../lib/journals/types";
 import type { CounterpartyRow } from "../../lib/registers/counterparty";
 import type { NavigationScope } from "../../lib/firm/navigation";
@@ -73,6 +73,7 @@ type Submitted = { clientId: string; intentKey: string; kind: string; invoice: R
 function App(props: {
   scope?: typeof BOOKKEEPER;
   submit?: (auth: unknown, input: Submitted) => Promise<SubmitTradeInvoiceWorkResult>;
+  probe?: (auth: unknown, input: unknown) => Promise<TradeInvoiceDuplicateMatch[]>;
   navigate?: (href: string) => void;
   storage?: DraftStorage | null;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
@@ -87,6 +88,7 @@ function App(props: {
       scope: props.scope ?? BOOKKEEPER,
       navigate: props.navigate ?? (() => {}),
       submit: (props.submit ?? (async () => ({ kind: "denied" }) as SubmitTradeInvoiceWorkResult)) as never,
+      probe: (props.probe ?? (async () => [])) as never,
       storage: props.storage ?? null,
       loadAccounts: props.loadAccounts ?? (async () => ACCOUNTS),
       loadParties: props.loadParties ?? (async () => PARTIES),
@@ -409,4 +411,112 @@ test("switching the kind swaps the party read and drops only the party — nothi
   assert.deepEqual(asked, ["vendor", "customer"],
     "a sales invoice is recorded against a CUSTOMER, so the read changes with the kind");
   assert.equal((byId(h, F("reference")) as { value?: unknown }).value, "KEEP-ME", "…and everything that is not the party survives the switch");
+});
+
+// =====================================================================================
+// #1007 — WARN BEFORE RECORDING SOMETHING THIS CLIENT LOOKS TO HAVE ALREADY.
+//
+// The owner's ruling of 2026-09-20: check at the recording step, WARN and let the person
+// decide, NEVER refuse. So the assertion that matters in every cell below is about the `submit`
+// seam -- what the form DID or DID NOT admit -- and not about what it painted.
+// =====================================================================================
+
+const EARLIER = "65509aaa-6550-4655-8655-655065509aaa";
+const EARLIER_WORK = "65509001-6550-4655-8655-655065509001";
+
+const oneMatch = (over: Partial<TradeInvoiceDuplicateMatch> = {}): TradeInvoiceDuplicateMatch => ({
+  invoiceId: EARLIER, workId: EARLIER_WORK, signals: ["same_reference"],
+  reference: "ALPHA-2026-0042", documentDate: "2026-03-04", totalCents: 106000, ...over,
+});
+
+test("1007 — a bill this client already looks to have is WARNED about, and NOTHING is admitted until the person chooses", async () => {
+  const sent: Submitted[] = [];
+  const asked: unknown[] = [];
+  const h = await renderComponent(App({
+    probe: async (_auth, input) => { asked.push(input); return [oneMatch()]; },
+    submit: async (_auth, input) => {
+      sent.push(input);
+      return { kind: "accepted", workId: WORK, taskId: "t", logicalOpId: "l", status: "queued",
+        replayed: false, invoiceId: "inv", invoiceKind: "supplier_bill", counterpartyId: ALPHA,
+        dueDate: null, dueDateSource: "absent" } as SubmitTradeInvoiceWorkResult;
+    },
+  }));
+  await fillBill(h);
+  await submitForm(h);
+
+  assert.equal(asked.length, 1, "the form asked the probe before it admitted anything");
+  assert.equal(sent.length, 0,
+    "…and admitted NOTHING: the person has not chosen yet, which is the whole acceptance criterion");
+  assert.match(String(h.text()), /already recorded|looks like one/i,
+    "the warning is on the page, beside the form -- never a toast");
+  assert.ok(String(h.text()).includes("ALPHA-2026-0042"),
+    "…naming the earlier document by its own number");
+  assert.ok(String(h.text()).includes("2026-03-04"), "…its document date");
+  assert.ok(String(h.text()).includes("1,060.00"), "…and its total, in ringgit and sen");
+
+  // AND CANCEL ADMITS NOTHING, and leaves the figures where they were.
+  const cancel = h.find((n) => n.tagName === "BUTTON"
+    && /^cancel$/i.test(String(n.textContent ?? "").trim()));
+  assert.ok(cancel, "Cancel is a control, not prose");
+  await h.fireEvent(cancel, "click");
+  await h.settle();
+  assert.equal(sent.length, 0, "1007: choosing Cancel admits nothing at all");
+  assert.equal(String(h.text()).includes("ALPHA-2026-0042") && /already recorded|looks like one/i.test(String(h.text())), false,
+    "…and the warning is gone, so the person can change the figures");
+  assert.equal((byId(h, F("reference")) as { value?: unknown }).value, "ALPHA-2026-0042",
+    "…with what they typed still on the form");
+});
+
+test("1007 — Record anyway admits it under the SAME intent key, and names the invoices the person was shown", async () => {
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({
+    probe: async () => [oneMatch({ signals: ["same_reference", "same_total_and_date"] })],
+    submit: async (_auth, input) => {
+      sent.push(input);
+      return { kind: "accepted", workId: WORK, taskId: "t", logicalOpId: "l", status: "queued",
+        replayed: false, invoiceId: "inv", invoiceKind: "supplier_bill", counterpartyId: ALPHA,
+        dueDate: null, dueDateSource: "absent" } as SubmitTradeInvoiceWorkResult;
+    },
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  const anyway = h.find((n) => n.tagName === "BUTTON"
+    && /record it anyway|record anyway/i.test(String(n.textContent ?? "")));
+  assert.ok(anyway, "Record anyway is a control beside Cancel");
+  await h.fireEvent(anyway, "click");
+  await h.settle();
+
+  assert.equal(sent.length, 1, "1007: choosing to go ahead admits exactly one Work");
+  const one = sent[0];
+  assert.ok(one);
+  assert.deepEqual((one as { acknowledgeDuplicates?: unknown }).acknowledgeDuplicates, [EARLIER],
+    "…carrying the earlier invoices the person was SHOWN, so the choice can be kept beside the Work");
+  assert.ok(String(h.text()).includes("Queued"), "…and the ordinary accepted banner follows");
+});
+
+test("1007 — a probe that cannot answer never blocks a recording, and a client with nothing like it never sees a warning", async () => {
+  // The owner ruled WARN, never refuse. An advisory read that fails must therefore not become a
+  // refusal by the back door: the recording goes through and the person is not stopped.
+  const sent: Submitted[] = [];
+  const accepted = async (_auth: unknown, input: Submitted) => {
+    sent.push(input);
+    return { kind: "accepted", workId: WORK, taskId: "t", logicalOpId: "l", status: "queued",
+      replayed: false, invoiceId: "inv", invoiceKind: "supplier_bill", counterpartyId: ALPHA,
+      dueDate: null, dueDateSource: "absent" } as SubmitTradeInvoiceWorkResult;
+  };
+  const broken = await renderComponent(App({
+    probe: async () => { throw new Error("the probe is down"); }, submit: accepted,
+  }));
+  await fillBill(broken);
+  await submitForm(broken);
+  assert.equal(sent.length, 1, "1007: a failed probe admits the Work rather than refusing it");
+  assert.equal((sent[0] as { acknowledgeDuplicates?: unknown }).acknowledgeDuplicates, undefined,
+    "…and acknowledges nothing, because nobody was shown anything");
+
+  const clean = await renderComponent(App({ probe: async () => [], submit: accepted }));
+  await fillBill(clean);
+  await submitForm(clean);
+  assert.equal(sent.length, 2, "1007: no matches means straight through -- no extra click for the ordinary case");
+  assert.equal(/already recorded|looks like one/i.test(String(clean.text())), false,
+    "…and no warning is painted");
 });

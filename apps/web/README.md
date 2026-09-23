@@ -651,6 +651,24 @@ hands the derived basis back, which is what the success banner renders.
 filter over the counterparty reads the registers already use, and `party_ambiguous`'s candidates
 render INLINE as a choice.
 
+**#1007 — the form warns before it records something this client looks to have already, and it
+never refuses.** The owner ruled on 2026-09-20: check at the recording step, warn, and let the
+person decide. So the submit path gained ONE state between validation and the write — `warned` —
+and **nothing is admitted while the form is in it**. The advisory read is
+`probeTradeInvoiceDuplicates` (`lib/work/api.ts`), a PostgREST call to
+`clara.probe_trade_invoice_duplicates` as the signed-in bookkeeper, injectable as the `probe`
+seam beside `submit` for the same reason that one is. A probe that cannot answer returns NOTHING
+TO SHOW and the recording goes through: a failed advisory read that blocked a lawful recording
+would be the refusal the owner ruled out, arriving by the back door.
+
+The banner names each earlier document by what the BOOKS hold — its number, its document date,
+its total and which signal fired — with a link to the Work that recorded it, and offers exactly
+two controls: **Record it anyway** and **Cancel**. Cancel returns to `idle` with every keystroke
+intact and admits nothing. Record it anyway sends the ordinary submission with one extra key,
+`acknowledgeDuplicates` (the shown invoice ids), which the runtime route turns into the durable
+"recorded anyway" record BEFORE it admits. The walk drives all three outcomes in a real browser
+and asserts on what the RUNTIME received, not on what the page painted.
+
 **#982 — the chooser shows each candidate's TIN, and answers a third party refusal.** LHDN
 MyInvois requires the buyer TIN and BRN, so a Malaysian document carries both and the TIN is
 sometimes the only identifier that tells two candidates apart. The door has always carried each

@@ -31,6 +31,7 @@
 // Work); this module reports, the composer decides. Same posture doors.ts takes
 // about a refusal.
 
+import { callDoor } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 /** The wire shape `POST /api/work/journal` accepts — camelCase, because this is
@@ -389,6 +390,62 @@ export async function submitStaffExpenseClaimWork(
  * at posting — and with it the RESOLVED party and the DERIVED due-date basis, which the browser
  * could not have computed and must therefore render rather than guess.
  */
+/**
+ * ONE probable duplicate the person is shown before they record (#1007).
+ *
+ * Carried in the browser's own spelling, because this is the only place the database's snake_case
+ * answer is read: every field is a FACT ABOUT THE EARLIER DOCUMENT, re-read from the books by the
+ * door rather than echoed from anything this browser typed.
+ */
+export type TradeInvoiceDuplicateMatch = {
+  invoiceId: string;
+  /** The Work that recorded it, so the person can open it. Null only if the books lost the link. */
+  workId: string | null;
+  /** Which signal(s) fired: `same_reference`, `same_total_and_date`, or both. */
+  signals: string[];
+  reference: string | null;
+  documentDate: string | null;
+  totalCents: number | null;
+};
+
+/**
+ * "Which already-recorded invoices of this client look like the one about to be recorded?" (#1007)
+ *
+ * A READ, through PostgREST as the signed-in bookkeeper — `clara.probe_trade_invoice_duplicates`
+ * (migration 0275), which writes nothing and takes no row lock. It is NOT a wall: the owner ruled
+ * on 2026-09-20 that Clara warns and the person decides, so the ONLY thing this answer may do is
+ * put a warning on the screen. The form treats a failure here as "no warning", never as a refusal.
+ *
+ * The particulars are the SAME object the admission door is about to be sent, so the party the
+ * probe resolves is the party the admission would resolve.
+ */
+export async function probeTradeInvoiceDuplicates(
+  auth: SessionTokenAccessor,
+  input: { clientId: string; kind: string; invoice: Record<string, unknown> },
+  signal?: AbortSignal,
+): Promise<TradeInvoiceDuplicateMatch[]> {
+  const out = await callDoor<Record<string, unknown> | null>(
+    "probe_trade_invoice_duplicates",
+    { p_client: input.clientId, p_kind: input.kind, p_particulars: input.invoice },
+    { session: auth, signal },
+  );
+  const raw = (out ?? {}).matches;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((row) => {
+      const m = (row ?? {}) as Record<string, unknown>;
+      return {
+        invoiceId: typeof m.invoice_id === "string" ? m.invoice_id : "",
+        workId: typeof m.work_id === "string" ? m.work_id : null,
+        signals: Array.isArray(m.signals) ? m.signals.filter((x): x is string => typeof x === "string") : [],
+        reference: typeof m.reference === "string" ? m.reference : null,
+        documentDate: typeof m.document_date === "string" ? m.document_date : null,
+        totalCents: typeof m.total_cents === "number" ? m.total_cents : null,
+      };
+    })
+    .filter((m) => m.invoiceId !== "");
+}
+
 export async function submitTradeInvoiceWork(
   auth: SessionTokenAccessor,
   input: {
@@ -397,6 +454,11 @@ export async function submitTradeInvoiceWork(
     kind: string;
     invoice: Record<string, unknown>;
     basis: Record<string, unknown>;
+    /** #1007 · the earlier invoices the person was SHOWN and recorded anyway, by their own ids.
+     *  Present ONLY when they were warned and chose to go ahead: the route keeps that choice
+     *  beside the Work BEFORE it admits, so a reviewer can tell a knowing second recording from
+     *  an accident. Absent is the ordinary case and means nobody was warned. */
+    acknowledgeDuplicates?: ReadonlyArray<string>;
     /** Omitted entirely for an invoice with no cited document — AC3's "chat-without-attachment"
      *  and "direct UI" arms are both lawful. The route reads an absent, null or empty list
      *  identically. */

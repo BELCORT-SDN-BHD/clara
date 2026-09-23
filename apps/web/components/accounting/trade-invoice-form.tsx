@@ -71,7 +71,13 @@ import {
   type NavigationScope,
 } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { submitTradeInvoiceWork, type SubmitTradeInvoiceWorkResult } from "@/lib/work/api";
+import {
+  probeTradeInvoiceDuplicates,
+  submitTradeInvoiceWork,
+  type SubmitTradeInvoiceWorkResult,
+  type TradeInvoiceDuplicateMatch,
+} from "@/lib/work/api";
+import { formatCents } from "@/lib/bank/money";
 import {
   defaultDraftStorage,
   newIntentKey,
@@ -120,6 +126,9 @@ type Outcome =
   | { kind: "idle" }
   | { kind: "submitting" }
   | { kind: "checking" }
+  /** #1007 · the person has been WARNED and has not chosen yet. NOTHING is admitted in this
+   *  state: it exists precisely so that the recording waits for a human decision. */
+  | { kind: "warned"; matches: TradeInvoiceDuplicateMatch[] }
   | { kind: "accepted"; workId: string; invoiceId: string | null; dueDate: string | null; dueDateSource: string | null }
   | { kind: "refused"; reason: string; field: TradeInvoiceFieldId | null; candidates: PartyCandidate[] }
   | { kind: "conflict"; workId: string | null }
@@ -148,6 +157,7 @@ export function TradeInvoiceFormView({
   session = sessionTokenAccessor,
   storage = defaultDraftStorage(),
   submit = submitTradeInvoiceWork,
+  probe = probeTradeInvoiceDuplicates,
   loadAccounts,
   loadParties,
 }: {
@@ -159,6 +169,10 @@ export function TradeInvoiceFormView({
   /** The ONE write this form makes, open as a seam for the reason the composer's is: a cell must be
    *  able to drive the DECISION — accepted, refused, conflicted, lost — without a socket. */
   submit?: typeof submitTradeInvoiceWork;
+  /** #1007 · the ADVISORY read that runs before the write, open as a seam for the same reason the
+   *  write is: a cell must be able to drive "this client already has one that looks like it"
+   *  without a socket. It never refuses anything — see `onSubmit`. */
+  probe?: typeof probeTradeInvoiceDuplicates;
   /** The two reads, INDEPENDENTLY injectable, because they degrade independently: the chart read
    *  failing and the party read failing are different states with different next actions, and a
    *  cell must be able to produce either one alone. */
@@ -300,14 +314,54 @@ export function TradeInvoiceFormView({
 
   const busy = outcome.kind === "submitting" || outcome.kind === "checking";
 
-  async function send(key: string): Promise<SubmitTradeInvoiceWorkResult> {
+  async function send(key: string, acknowledged?: readonly string[]): Promise<SubmitTradeInvoiceWorkResult> {
     const wire = toTradeInvoiceWire(draft, knownCodes);
     // A LOCAL refusal never carries candidates: only the door knows which parties answer to a
     // name, so the empty list here is a fact rather than a placeholder.
     if (wire === null) return { kind: "invalid_basis", field: null, reason: "invalid_basis", candidates: [] };
     return submit(session, {
       clientId, intentKey: key, kind: wire.kind, invoice: wire.invoice, basis: wire.basis,
+      // #1007 · ABSENT unless the person was warned and chose to go ahead. An empty list would be
+      // a claim that they acknowledged nothing, which is a different thing from not being warned.
+      ...(acknowledged && acknowledged.length > 0 ? { acknowledgeDuplicates: [...acknowledged] } : {}),
     });
+  }
+
+  /**
+   * #1007 · WHAT THIS CLIENT ALREADY HAS THAT LOOKS LIKE THIS ONE.
+   *
+   * It runs BEFORE the write and it can only ever produce a WARNING: the owner ruled on
+   * 2026-09-20 that Clara warns and the person decides. So a probe that cannot answer — the read
+   * is down, the session lapsed, the door refused — returns NOTHING TO SHOW rather than
+   * propagating, and the recording goes through exactly as it would have. A failed advisory read
+   * that blocked a lawful recording would be the refusal the owner ruled out, arriving by the
+   * back door.
+   */
+  async function look(): Promise<TradeInvoiceDuplicateMatch[]> {
+    const wire = toTradeInvoiceWire(draft, knownCodes);
+    if (wire === null) return [];
+    try {
+      return await probe(session, { clientId, kind: wire.kind, invoice: wire.invoice });
+    } catch {
+      return [];
+    }
+  }
+
+  /** The one write path, shared by the plain submit and by "record it anyway". */
+  async function admit(acknowledged?: readonly string[]): Promise<void> {
+    setOutcome({ kind: "submitting" });
+    const first = await send(intentKey, acknowledged);
+    if (first.kind === "lost" && !lostOnce.current) {
+      // THE LOST-RESPONSE ARM. NO answer was observed, so the intent key is re-sent EXACTLY ONCE
+      // and the second answer is authoritative. `lost` is not `unavailable`: a replayed 202 means
+      // the first attempt DID land, and the form must not offer a distinct resubmit before it knows.
+      lostOnce.current = true;
+      setOutcome({ kind: "checking" });
+      applyResult(await send(intentKey, acknowledged));
+      return;
+    }
+    if (first.kind === "lost") { setOutcome({ kind: "unavailable", message: first.message }); return; }
+    applyResult(first);
   }
 
   function applyResult(res: SubmitTradeInvoiceWorkResult) {
@@ -362,19 +416,15 @@ export function TradeInvoiceFormView({
       focusField(firstInvalidTradeInvoiceField(found));
       return;
     }
+    // #1007 · THE WARNING COMES BEFORE THE WRITE, and only once per decision: the person who has
+    // already been shown these matches and pressed "Record it anyway" is not asked twice.
     setOutcome({ kind: "submitting" });
-    const first = await send(intentKey);
-    if (first.kind === "lost" && !lostOnce.current) {
-      // THE LOST-RESPONSE ARM. NO answer was observed, so the intent key is re-sent EXACTLY ONCE
-      // and the second answer is authoritative. `lost` is not `unavailable`: a replayed 202 means
-      // the first attempt DID land, and the form must not offer a distinct resubmit before it knows.
-      lostOnce.current = true;
-      setOutcome({ kind: "checking" });
-      applyResult(await send(intentKey));
+    const matches = await look();
+    if (matches.length > 0) {
+      setOutcome({ kind: "warned", matches });
       return;
     }
-    if (first.kind === "lost") { setOutcome({ kind: "unavailable", message: first.message }); return; }
-    applyResult(first);
+    await admit();
   }
 
   // ---- the denied state: a viewer typing the address reaches THIS, never a blank ---------------
@@ -426,6 +476,62 @@ export function TradeInvoiceFormView({
       ) : null}
       {outcome.kind === "checking" ? (
         <StateBanner tone="info" title={t("checking.title")}>{t("checking.body")}</StateBanner>
+      ) : null}
+      {/* #1007 · THE WARNING. Not a refusal and not a toast: the recording is waiting on a person,
+          so it stays on the page, names what it found, and offers BOTH ways out. */}
+      {outcome.kind === "warned" ? (
+        <StateBanner
+          tone="warning"
+          title={t("duplicate.title")}
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                type="button"
+                onClick={() => { void admit(outcome.matches.map((m) => m.invoiceId)); }}
+              >
+                {t("duplicate.recordAnyway")}
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => setOutcome({ kind: "idle" })}
+              >
+                {t("duplicate.cancel")}
+              </Button>
+            </div>
+          }
+        >
+          {t("duplicate.body", { count: outcome.matches.length })}
+          <ul className="mt-3 flex flex-col gap-2" aria-label={t("duplicate.title")}>
+            {outcome.matches.map((m) => (
+              <li key={m.invoiceId} className="flex flex-wrap items-center gap-2">
+                <span className="text-sm">
+                  {t("duplicate.entry", {
+                    reference: m.reference ?? t("duplicate.noReference"),
+                    date: m.documentDate ?? "",
+                    total: formatCents(m.totalCents),
+                  })}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {m.signals.length > 1
+                    ? t("duplicate.signals.both")
+                    : t(`duplicate.signals.${m.signals[0] ?? "same_reference"}`)}
+                </span>
+                {m.workId ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    render={<Link href={workDetailHref(clientId, m.workId)} />}
+                  >
+                    {t("duplicate.open")}
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </StateBanner>
       ) : null}
       {outcome.kind === "refused" ? (
         <StateBanner tone="error" title={t("refused.title")} code={outcome.reason}>

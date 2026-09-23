@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import { register } from "tsx/esm/api";
 
 register();
-const { toDbTradeInvoice } = await import("../src/workRoutes.ts");
+const { toDbTradeInvoice, toAcknowledgedInvoiceIds } = await import("../src/workRoutes.ts");
 const ti = await import("../lib/trade-invoice-basis.ts");
 
 const PARTY = "11111111-2222-4333-8444-555555555555";
@@ -326,4 +326,47 @@ test("parity.document a cited document travels as a source ref, never inside the
   const p = ti.tradeInvoiceFromInput(toolInput({ document_id: DOC }));
   assert.equal(JSON.stringify(p).includes(DOC), false,
     "the document is p_source_refs' business (clara._journal_source_document reads it there), which is what lets one predicate check every lane's evidence");
+});
+
+// ===========================================================================================
+// 1007.route.* — the "recorded anyway" list on the way IN.
+//
+// The browser sends the earlier invoices the person was SHOWN, by their own ids, and the route
+// keeps that choice BEFORE it admits. This helper is the shape guard: what it admits reaches
+// clara.record_trade_invoice_duplicate_ack, which re-reads every id against THIS client's books
+// and is the authority on whether the person could have been shown it.
+// ===========================================================================================
+
+test("1007.route: an ABSENT list is the ordinary recording -- nobody was warned, nothing is acknowledged", () => {
+  for (const raw of [undefined, null, []]) {
+    const out = toAcknowledgedInvoiceIds(raw);
+    assert.equal(out.ok, true, `1007.route: ${JSON.stringify(raw) ?? "undefined"} is lawful`);
+    assert.deepEqual(out.ids, [],
+      "1007.route: …and yields NO ids, so the route writes no acknowledgement at all");
+  }
+});
+
+test("1007.route: the ids ride through untouched, de-duplicated, and a repeat is not two acknowledgements", () => {
+  const out = toAcknowledgedInvoiceIds([PARTY, DOC, PARTY]);
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.ids, [PARTY, DOC],
+    "1007.route: the same invoice named twice on one screen is ONE thing the person was shown");
+});
+
+test("1007.route: a malformed list is refused BY NAME, on its own field, before any Work is admitted", () => {
+  // ONE VOCABULARY WHICHEVER HALF CAUGHT IT (#634's lesson, restated by this file's header): the
+  // token is the DATABASE's own `unknown_acknowledged_invoice`, and the path rides this lane's
+  // `invoice.` namespace — which is also what keeps a trade-invoice path out of the JOURNAL
+  // composer's refusal roster (apps/web/tests/journal-refusal-roster.test.ts reads every bare
+  // `invalid("…")` literal in this file as a path THAT composer must map to a control).
+  const notAList = toAcknowledgedInvoiceIds("65509aaa-6550-4655-8655-655065509aaa");
+  assert.equal(notAList.ok, false);
+  assert.deepEqual(notAList.error,
+    { error: "invalid_basis", field: "invoice.acknowledge_duplicates", reason: "unknown_acknowledged_invoice" },
+    "1007.route: a bare string is not a list of what somebody was shown");
+  const notAnId = toAcknowledgedInvoiceIds([PARTY, "the first one"]);
+  assert.equal(notAnId.ok, false);
+  assert.deepEqual(notAnId.error,
+    { error: "invalid_basis", field: "invoice.acknowledge_duplicates[2]", reason: "unknown_acknowledged_invoice" },
+    "1007.route: …and the path is 1-BASED, like every other list path this door emits");
 });

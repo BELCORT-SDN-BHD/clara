@@ -231,6 +231,9 @@ const state = {
   intents: new Map(),
   /** The next admission's refusal, planted by the control endpoint. */
   nextRefusal: null,
+  /** #1007 · what the duplicate probe answers next, planted by the control endpoint. Empty is
+   *  the ordinary case: this client has nothing that looks like what is being recorded. */
+  duplicates: [],
   /** Every admission body this lane received, so a cell can assert ONE submission rather than two. */
   received: [],
 };
@@ -324,6 +327,21 @@ export async function handleTradeInvoiceSupabase(request, response, path, url, s
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const verb = path.slice("/rest/v1/rpc/".length);
 
+  // #1007 · THE DUPLICATE PROBE, scoped to this lane's client like every branch here. It answers
+  // the EMPTY list unless a cell asked for a warning through the control endpoint, so every other
+  // leg of this walk stays the straight-through recording it was written as.
+  if (verb === "probe_trade_invoice_duplicates") {
+    const body = await readCachedJson(request);
+    if (body?.p_client !== TI.clientId) return false;
+    sendJson(response, 200, {
+      client_id: TI.clientId,
+      kind: body?.p_kind ?? "supplier_bill",
+      match_count: state.duplicates.length,
+      matches: state.duplicates,
+    }, cors);
+    return true;
+  }
+
   // THE ONE READ THIS LANE OWNS EXCLUSIVELY. It answers ONLY for the Work this module minted.
   if (verb === "get_trade_invoice") {
     const body = await readCachedJson(request);
@@ -353,6 +371,25 @@ export async function handleTradeInvoiceRuntime(request, response, url) {
       send(response, 200, { ok: true });
       return true;
     }
+    if (body?.op === "warn_next") {
+      // #1007 · WHAT clara.probe_trade_invoice_duplicates REALLY ANSWERS, transcribed from
+      // migration 0275's own jsonb_build_object: snake_case keys, the signal names verbatim, the
+      // date as YYYY-MM-DD text and the total in SEN.
+      state.duplicates = [{
+        invoice_id: TI.invoiceId,
+        work_id: TI.workId,
+        signals: ["same_reference"],
+        reference: "ALPHA-2026-0042",
+        document_date: "2026-03-04",
+        total_cents: 106000,
+        state: "posted",
+        entry_id: TI.entryId,
+        recorded_by: "65565u01-6556-4655-8655-65565565u01a",
+        created_at: "2026-03-31T02:00:00.000Z",
+      }];
+      send(response, 200, { ok: true });
+      return true;
+    }
     if (body?.op === "seed_intent") {
       // PLANTED WITH A PAYLOAD NOTHING CAN EQUAL, so every submit under this key is the CONFLICT
       // arm rather than a replay — the state the database produces for a key that already names a
@@ -368,6 +405,7 @@ export async function handleTradeInvoiceRuntime(request, response, url) {
     if (body?.op === "reset") {
       state.intents.clear();
       state.nextRefusal = null;
+      state.duplicates = [];
       state.received = [];
       send(response, 200, { ok: true });
       return true;
@@ -386,6 +424,8 @@ export async function handleTradeInvoiceRuntime(request, response, url) {
       kind: body?.kind ?? null,
       invoice: body?.invoice ?? null,
       basis: body?.basis ?? null,
+      // #1007 · ABSENT unless the person was warned and chose to go ahead.
+      acknowledgeDuplicates: body?.acknowledgeDuplicates ?? null,
     });
 
     if (state.nextRefusal !== null) {

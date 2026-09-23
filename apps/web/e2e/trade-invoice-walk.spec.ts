@@ -103,6 +103,48 @@ test("the hub offers recording an invoice as its own primary act, and the addres
   await expect(page.getByRole("heading", { name: /Record an invoice or bill/i })).toBeVisible();
 });
 
+test("#1007 — a bill this client already looks to have is WARNED about in the form, Cancel admits nothing, and Record it anyway carries what was shown", async ({ page }) => {
+  // THE OWNER'S RULING OF 2026-09-20, driven in a real browser: check at the recording step,
+  // WARN and let the person decide, never refuse. The load-bearing assertion in the first half is
+  // what the RUNTIME received -- nothing -- not what the page painted.
+  await control(page, { op: "warn_next" });
+  await fillBill(page);
+  await page.getByRole("button", { name: "Record it" }).click();
+
+  const warning = page.getByText(/looks like the one you are about to record/i);
+  await expect(warning).toBeVisible({ timeout: CELL_BUDGET.poll });
+  // …naming the earlier document by what the BOOKS hold: its number, its date and its total.
+  await expect(page.getByText(/ALPHA-2026-0042 · 2026-03-04 · RM 1,060\.00/)).toBeVisible();
+  await expect(page.getByText(/Same document number/i)).toBeVisible();
+  // …and a way to look at what is already recorded, rather than a sentence about it.
+  await expect(page.getByRole("link", { name: /Open what is recorded/i })).toBeVisible();
+
+  const beforeCancel = (await control(page, { op: "received" })) as { received: unknown[] };
+  expect(beforeCancel.received, "#1007: NOTHING may be admitted while the person is deciding").toEqual([]);
+
+  // CANCEL ADMITS NOTHING AT ALL, and leaves the figures where they were.
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(warning).toBeHidden();
+  await expect(field(page, "reference")).toHaveValue("ALPHA-2026-0042");
+  const afterCancel = (await control(page, { op: "received" })) as { received: unknown[] };
+  expect(afterCancel.received, "#1007: choosing Cancel admits nothing").toEqual([]);
+
+  // …AND RECORDING ANYWAY ADMITS EXACTLY ONE WORK, carrying the earlier invoice the person was
+  // SHOWN, so the choice can be kept beside it.
+  await control(page, { op: "warn_next" });
+  await page.getByRole("button", { name: "Record it" }).click();
+  await expect(warning).toBeVisible({ timeout: CELL_BUDGET.poll });
+  await page.getByRole("button", { name: "Record it anyway" }).click();
+  await expect(page.getByText(/Clara has admitted this/i)).toBeVisible({ timeout: CELL_BUDGET.poll });
+
+  const sent = (await control(page, { op: "received" })) as {
+    received: Array<{ acknowledgeDuplicates: string[] | null }>;
+  };
+  expect(sent.received.length, "#1007: one decision, one admission").toBe(1);
+  expect(sent.received[0]?.acknowledgeDuplicates,
+    "#1007: the admission names the earlier invoice the person was shown").toEqual([TI.invoiceId]);
+});
+
 test("compose a bill → 202 → the Work page shows the persistent outcome, and a reload keeps the links", async ({ page }) => {
   await fillBill(page);
   await page.getByRole("button", { name: "Record it" }).click();

@@ -616,6 +616,41 @@ const tiInvalid = (field: string, reason: string): InvalidBasis =>
   ({ error: "invalid_basis", field: `invoice.${field}`, reason });
 
 /**
+ * #1007 — THE EARLIER INVOICES THE PERSON WAS SHOWN AND RECORDED ANYWAY.
+ *
+ * SHAPE ONLY. `clara.record_trade_invoice_duplicate_ack` (migration 0275) is the authority: it
+ * re-reads every id against THIS client's books of THIS kind and refuses
+ * `unknown_acknowledged_invoice` for one they could not have been shown. This function refuses
+ * the two things the database cannot name helpfully — a payload that is not a list, and a member
+ * that is not an id at all — and de-duplicates, because the same invoice named twice on one
+ * screen is ONE thing a person was shown.
+ *
+ * ABSENT, NULL AND EMPTY ARE THE ORDINARY RECORDING: nobody was warned, so no acknowledgement is
+ * written. That is NOT the same as "warned and acknowledged nothing", which the door refuses
+ * (`nothing_acknowledged`) precisely so the two can never be confused in the record.
+ */
+export function toAcknowledgedInvoiceIds(
+  raw: unknown,
+): { ok: true; ids: string[] } | { ok: false; error: InvalidBasis } {
+  if (raw === undefined || raw === null) return { ok: true, ids: [] };
+  if (!Array.isArray(raw)) {
+    return { ok: false, error: tiInvalid("acknowledge_duplicates", "unknown_acknowledged_invoice") };
+  }
+  const ids: string[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const id = raw[i];
+    if (typeof id !== "string" || !UUID_RE.test(id)) {
+      return {
+        ok: false,
+        error: tiInvalid(`acknowledge_duplicates[${i + 1}]`, "unknown_acknowledged_invoice"),
+      };
+    }
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return { ok: true, ids };
+}
+
+/**
  * Shape-validate the WIRE trade-invoice particulars and translate them into the database's own
  * field spelling. `clara._assert_trade_invoice_basis` re-validates every one of these and is the
  * authority — it alone holds the client's chart, the identity surface and the fiscal calendar.
@@ -1356,7 +1391,7 @@ export function workRoutes(): express.Router {
     }
     const body = (req.body ?? {}) as {
       clientId?: unknown; intentKey?: unknown; kind?: unknown; invoice?: unknown;
-      basis?: unknown; sourceRefs?: unknown;
+      basis?: unknown; sourceRefs?: unknown; acknowledgeDuplicates?: unknown;
     };
     if (typeof body.clientId !== "string" || !UUID_RE.test(body.clientId)) {
       // A malformed client id is a NOT-FOUND, never a database error (#614's lesson) — and it is
@@ -1393,10 +1428,35 @@ export function workRoutes(): express.Router {
       res.status(400).json(refs.error);
       return;
     }
+    // #1007 · THE CHOICE A WARNED PERSON MADE, if they made one.
+    const acknowledged = toAcknowledgedInvoiceIds(body.acknowledgeDuplicates);
+    if (!acknowledged.ok) {
+      res.status(400).json(acknowledged.error);
+      return;
+    }
 
     try {
       const admitted = await withRuntime(async (c) => {
         const p = await authenticate(c, req.header("authorization"));
+        // #1007 · THE ACKNOWLEDGEMENT IS WRITTEN BEFORE THE ADMISSION IT AUTHORISES, under the
+        // SAME intent key — which is how a reviewer tells a knowing second recording from an
+        // accident. `withRuntime` is autocommit, so these are two transactions whichever way
+        // round they go; this order makes the only possible inconsistency "a choice that led
+        // nowhere" (an acknowledgement whose admission then refused, which
+        // `clara.get_trade_invoice_duplicate_ack` never surfaces because it reaches one through
+        // an ADMITTED Work), rather than "a knowing second recording that looks like an accident".
+        // A refusal here rides the SAME responder as the admission's, so the browser reads one
+        // vocabulary either way.
+        if (acknowledged.ids.length > 0) {
+          await c.query(
+            "select clara.record_trade_invoice_duplicate_ack($1::uuid, $2::uuid, $3::text,"
+            + " $4::text, $5::jsonb, $6::jsonb) as ack",
+            [
+              body.clientId, p.sub, body.intentKey, (body.kind as string).trim(),
+              JSON.stringify(invoice.invoice), JSON.stringify(acknowledged.ids),
+            ],
+          );
+        }
         const r = await c.query(
           "select clara.admit_trade_invoice_work($1::uuid, $2::uuid, $3::text, $4::text, $5::jsonb,"
           + " $6::jsonb, $7::text, $8::jsonb, $9::text) as receipt",
