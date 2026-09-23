@@ -231,6 +231,11 @@ const state = {
   intents: new Map(),
   /** The next admission's refusal, planted by the control endpoint. */
   nextRefusal: null,
+  /** #1007 · what this client's BOOKS already hold, planted by the control endpoint. Empty is
+   *  the ordinary case. The probe DERIVES its answer from these rows and from the particulars the
+   *  browser actually sent, rather than replaying a canned list — which is what lets this walk
+   *  catch a browser that sends the wrong shape (review finding S-1). */
+  recorded: [],
   /** Every admission body this lane received, so a cell can assert ONE submission rather than two. */
   received: [],
 };
@@ -353,6 +358,25 @@ export async function handleTradeInvoiceRuntime(request, response, url) {
       send(response, 200, { ok: true });
       return true;
     }
+    if (body?.op === "warn_next") {
+      // #1007 · ONE BILL THIS CLIENT ALREADY HAS, as clara.trade_invoices holds it: the party it
+      // was recorded against, its number, its date and its total in SEN. What the probe ANSWERS
+      // about it is derived below, from these columns and from the particulars the browser sent.
+      state.recorded = [{
+        invoice_id: TI.invoiceId,
+        work_id: TI.workId,
+        counterparty_id: TI.vendorId,
+        reference: "ALPHA-2026-0042",
+        document_date: "2026-03-04",
+        total_cents: 106000,
+        state: "posted",
+        entry_id: TI.entryId,
+        recorded_by: "65565u01-6556-4655-8655-65565565u01a",
+        created_at: "2026-03-31T02:00:00.000Z",
+      }];
+      send(response, 200, { ok: true });
+      return true;
+    }
     if (body?.op === "seed_intent") {
       // PLANTED WITH A PAYLOAD NOTHING CAN EQUAL, so every submit under this key is the CONFLICT
       // arm rather than a replay — the state the database produces for a key that already names a
@@ -368,11 +392,58 @@ export async function handleTradeInvoiceRuntime(request, response, url) {
     if (body?.op === "reset") {
       state.intents.clear();
       state.nextRefusal = null;
+      state.recorded = [];
       state.received = [];
       send(response, 200, { ok: true });
       return true;
     }
     return false;
+  }
+
+  // #1007 · THE DUPLICATE PROBE, on the runtime route the admission rides (fix round, review
+  // finding S-1). What is faked here is the DATABASE; the translation and the two signals are
+  // transcribed from the real subjects, never invented:
+  //   · the wire→database rename is `toDbTradeInvoice`'s (packages/runtime/src/workRoutes.ts) —
+  //     `documentDate` → `document_date`, `totalCents` → `total_cents`;
+  //   · the normalisation and the two signals are `clara._trade_invoice_reference_key` and
+  //     `clara._trade_invoice_duplicate_matches`' (migration 0275), including the rule that a
+  //     document stating no number is never matched on its number.
+  // Deriving rather than replaying is the point: a browser that sent the wrong keys, or no
+  // particulars at all, gets NO warning here, exactly as it would from the real door.
+  if (request.method === "POST" && path === "/api/work/trade-invoice/duplicates") {
+    const body = await readCachedJson(request);
+    if (body?.clientId !== TI.clientId) return false;
+    const wire = body?.invoice ?? {};
+    const particulars = {
+      counterparty: wire.counterparty,
+      document_date: wire.documentDate,
+      reference: wire.reference ?? null,
+      total_cents: wire.totalCents,
+    };
+    const key = (v) => (String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "") || null);
+    const asked = key(particulars.reference);
+    const matches = state.recorded
+      .filter((row) => row.counterparty_id === particulars.counterparty?.id)
+      .map((row) => {
+        const signals = [];
+        if (asked !== null && key(row.reference) === asked) signals.push("same_reference");
+        if (particulars.document_date != null && particulars.total_cents != null
+            && row.document_date === particulars.document_date
+            && row.total_cents === particulars.total_cents) signals.push("same_total_and_date");
+        return { ...row, signals };
+      })
+      .filter((m) => m.signals.length > 0);
+    send(response, 200, {
+      client_id: TI.clientId,
+      kind: body?.kind ?? "supplier_bill",
+      counterparty_id: particulars.counterparty?.id ?? null,
+      reference: particulars.reference,
+      document_date: particulars.document_date ?? null,
+      total_cents: particulars.total_cents ?? null,
+      match_count: matches.length,
+      matches,
+    });
+    return true;
   }
 
   if (request.method === "POST" && path === "/api/work/trade-invoice") {
@@ -386,6 +457,8 @@ export async function handleTradeInvoiceRuntime(request, response, url) {
       kind: body?.kind ?? null,
       invoice: body?.invoice ?? null,
       basis: body?.basis ?? null,
+      // #1007 · ABSENT unless the person was warned and chose to go ahead.
+      acknowledgeDuplicates: body?.acknowledgeDuplicates ?? null,
     });
 
     if (state.nextRefusal !== null) {

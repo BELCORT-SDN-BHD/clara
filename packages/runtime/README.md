@@ -1236,6 +1236,40 @@ form and, later, the v21 chat tool post through it, which is what makes ONE `cla
 the whole lane's admission. Its 202 carries `invoice_id`, the RESOLVED `counterparty_id` and the
 **derived** `due_date` / `due_date_source` — four facts the browser could not have computed.
 
+**#1007 — the probe sits beside the admission, over the admission's own translation.**
+`POST /api/work/trade-invoice/duplicates` takes `{ clientId, kind, invoice }` — the SAME wire
+`invoice` the admission takes — runs the SAME `toDbTradeInvoice`, and asks
+`clara.probe_trade_invoice_duplicates_for` (the actor-explicit twin; a `clara_runtime` connection
+carries no JWT claims, so `clara._human_ctx` cannot answer for one). It answers **200** with the
+door's whole answer: nothing is admitted here. A refusal rides the admission's own responder, so
+the browser reads one vocabulary either way, and the form treats any non-200 as "no warning".
+
+The route exists because the browser used to call the door directly with the WIRE spelling
+(`documentDate`, `totalCents`) while the door reads the database's (`document_date`,
+`total_cents`), so the "same money on the same day" signal could never fire from the shipped form.
+`apps/web` does not depend on this package, so one translation on the server is the alternative to
+two hand-written ones. `tests/trade-invoice-e2e.mjs` leg 8 drives the browser's own wire body
+through this route against a real database and sees that signal fire.
+
+**#1007 — the door also carries the choice a warned person made.** `POST /api/work/trade-invoice`
+takes one optional key, `acknowledgeDuplicates`: the ids of the earlier invoices the person was
+SHOWN and recorded anyway. `toAcknowledgedInvoiceIds` is the shape guard (a list of ids,
+de-duplicated because the same invoice named twice on one screen is ONE thing a person was shown)
+and refuses in this lane's own namespace and the DATABASE's own vocabulary —
+`invoice.acknowledge_duplicates`, `unknown_acknowledged_invoice` — which is also what keeps a
+trade-invoice path out of the JOURNAL composer's refusal roster
+(`apps/web/tests/journal-refusal-roster.test.ts` reads every bare `invalid("…")` literal in
+`workRoutes.ts` as a path THAT composer must map to a control).
+
+When the list is non-empty the handler calls `clara.record_trade_invoice_duplicate_ack` **before**
+`clara.admit_trade_invoice_work`, on the same connection and under the same intent key.
+`withRuntime` is autocommit, so the two are two transactions whichever way round they go; this
+order makes the only possible inconsistency "a choice that led nowhere" — an acknowledgement whose
+admission then refused, which no read surfaces, because `clara.get_trade_invoice_duplicate_ack`
+reaches one through an ADMITTED Work. The other order would make it "a knowing second recording
+that looks like an accident", which is the distinction #1007 exists to preserve. An absent, null
+or empty list is the ordinary recording and writes nothing.
+
 `lib/trade-invoice-basis.ts` is a **NEW non-frozen module**, and it is non-frozen only until
 `chatTurn_v21` imports it: `scripts/check-frozen-workflows.mjs` freezes the transitive relative-
 import closure of every frozen workflow, so at the cut every byte of it is hash-locked — exactly
@@ -1697,8 +1731,11 @@ ITSELF with a bare token and the two halves must not speak two vocabularies for 
 raw token is on the carrier as well. It folds by NAME, never "whenever a constraint exists":
 `invalid_adjustment`, `stale_basis` and `adjustment_lines_mismatch` carry one too and have always
 ridden back under their own names. The trade-invoice fold is gone entirely; what is left of it is
-`TRADE_INVOICE_FIELD_DEFAULTS`, one row of DATA saying which control to focus when the door raises
-`party_ambiguous` with no `field` at all.
+`TRADE_INVOICE_FIELD_DEFAULTS`, rows of DATA saying which control to focus when the door raises a
+party refusal with no `field` at all — `party_ambiguous`, and since #982 (migration 0274)
+`party_identifier_conflict`, the refusal raised when a document's registration number and its TIN
+name two different live parties. The second reason needed no code at all, only a second row, which
+is the shape's whole claim.
 
 **403 and 404 carry no carrier.** A 404 here answers both "no such Work" and "a Work that is not
 this firm's", and that identity is the point — no existence oracle across firms. A typed reason on

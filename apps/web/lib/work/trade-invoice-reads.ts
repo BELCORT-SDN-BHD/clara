@@ -69,3 +69,49 @@ export async function getTradeInvoice(
   }
   return out as TradeInvoiceRead;
 }
+
+/**
+ * #1007 · THE ACKNOWLEDGEMENT THIS WORK WAS ADMITTED UNDER, or null when nobody was warned.
+ *
+ * `clara.get_trade_invoice_duplicate_ack` (migration 0275), viewer-floored and firm-scoped like
+ * every read on this lane. It is what lets a reviewer tell a KNOWING second recording from an
+ * accident — the purpose clause behind #1007's "that choice is kept with the new invoice". NULL
+ * is a real answer and by far the ordinary one: most recordings were never warned about.
+ *
+ * The door reaches the row through the Work AND through what that Work actually recorded, so an
+ * acknowledgement whose admission then refused is never surfaced as a recording that happened.
+ */
+export type TradeInvoiceDuplicateAck = {
+  ack_id: string;
+  work_id: string;
+  intent_key: string;
+  kind: string;
+  counterparty_id: string;
+  reference: string | null;
+  document_date: string | null;
+  total_cents: number;
+  acknowledged_by: string | null;
+  acknowledged_by_name: string | null;
+  acknowledged_at: string | null;
+  /** The earlier invoices the person was SHOWN, re-read from the books by the door. */
+  shown: Array<{
+    invoice_id?: unknown;
+    work_id?: unknown;
+    reference?: unknown;
+    document_date?: unknown;
+    total_cents?: unknown;
+  }>;
+};
+
+export async function getTradeInvoiceDuplicateAck(
+  workId: string,
+  opts: Opts = {},
+): Promise<TradeInvoiceDuplicateAck | null> {
+  if (!isUuidShape(workId)) return null;
+  const out = await callDoor<unknown>("get_trade_invoice_duplicate_ack", { p_work: workId }, opts);
+  if (out === null || out === undefined) return null;
+  if (typeof out !== "object" || Array.isArray(out)) {
+    throw new Error("get_trade_invoice_duplicate_ack did not answer with an object");
+  }
+  return out as TradeInvoiceDuplicateAck;
+}

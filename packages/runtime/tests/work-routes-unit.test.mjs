@@ -649,6 +649,31 @@ test("981.route: party_ambiguous rides the SHARED responder, candidates and all"
   assert.equal(workErrorResponse(err).body.field, "basis");
 });
 
+test("982.route: party_identifier_conflict is the counterparty box's error too, and carries BOTH sides", () => {
+  // #982 (owner's ruling 2026-09-20). 0274's third refusal reason names no `field` either — like
+  // `party_ambiguous` it is about WHICH PARTY, and the control the person returns to is the
+  // counterparty box. It is one more row of the per-lane field defaults (data, not code), and the
+  // candidates ride the same generic carrier the browser already renders.
+  const candidates = [
+    { counterparty_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", name: "Alpha Supplies Sdn Bhd", registration_no: "199001000001", tin: null, matched_on: "registration" },
+    { counterparty_id: "ffffffff-ffff-4fff-8fff-ffffffffffff", name: "Alpha Supplies Trading", registration_no: null, tin: "C1234567890", matched_on: "tin" },
+  ];
+  const err = raised("CLR10", {
+    reason: "party_identifier_conflict", registration_no: "199001000001", tin: "C1234567890",
+    expected_counterparty_kind: "vendor", candidates,
+  });
+  const out = workErrorResponse(err, { fieldDefaults: TRADE_INVOICE_FIELD_DEFAULTS });
+  assert.equal(out.status, 400);
+  assert.equal(out.body.error, "invalid_basis");
+  assert.equal(out.body.field, "invoice.counterparty",
+    "the person returns to the party control, not to `basis`");
+  assert.equal(out.body.reason, "party_identifier_conflict");
+  assert.deepEqual(out.body.detail.candidates, candidates, "both sides, VERBATIM");
+  assert.equal(out.body.detail.registration_no, "199001000001");
+  assert.equal(out.body.detail.tin, "C1234567890",
+    "…and the two identifiers that disagreed, so the banner can name them");
+});
+
 test("981.route: a detail that is not a typed object carries NO carrier rather than an empty one", () => {
   // PostgreSQL's own errors carry plain-text details. A `detail: {}` would tell a reader "the
   // door raised a typed detail and it was empty", which is a different fact from "there is none".

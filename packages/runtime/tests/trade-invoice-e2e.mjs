@@ -45,6 +45,13 @@
 //      further replay AFTER the answer still resolving to the same Work. AC4 of #655 built this
 //      convergence lane-agnostically and other lanes cover it; nothing drove a trade invoice
 //      through the parked half until now.
+//   8. THE DUPLICATE PROBE OVER THE ADMISSION'S OWN DOOR (#1007, fix round). The BROWSER'S wire
+//      body — camelCase, exactly as `toTradeInvoiceWire` builds it — reaches
+//      `clara.probe_trade_invoice_duplicates_for` in the DATABASE's spelling, because the route
+//      translates it with the same `toDbTradeInvoice` the admission uses. With no document number
+//      stated, the earlier bill for the same money on the same day is reported; with the number
+//      stated, both signals are. Only a real HTTP boundary shows this: every unit cell injects the
+//      probe seam, so nothing below this line would catch the two spellings drifting apart.
 //   7. AN EXPLICIT CANCEL INSIDE THE COMMIT WINDOW (#980). The model is HELD after it has read
 //      the chart and before its `record_journal_entry` call — the Work is `running`, the run
 //      holds the task and nothing has been admitted — and the human cancels there. The Work
@@ -522,6 +529,51 @@ async function main() {
     assert.equal(conflict.body.work_id, workId, "…naming the Work leg 1 admitted");
     assert.equal((await invoices(one.client)).length, 1, "and it wrote nothing");
     console.log("[ti-e2e] 3 OK — a changed invoice under one key is a typed 409, from the particulars comparison");
+
+    // ---- 8. the duplicate probe, over the SAME door the admission goes through ----------------
+    // #1007's fix round (review finding S-1). The browser's probe used to go STRAIGHT to PostgREST
+    // with the wire body's own camelCase spelling, while `clara.probe_trade_invoice_duplicates`
+    // reads the DATABASE's spelling — so "same money on the same day" could never fire from the
+    // only shipped entrance, and an unnumbered or mistyped-number duplicate was never warned
+    // about. The probe now rides this route, which runs the SAME `toDbTradeInvoice` the admission
+    // runs, so the two spellings cannot drift apart again. This leg drives the BROWSER'S OWN WIRE
+    // BODY — the literal one `toTradeInvoiceWire` produces, transcribed in `invoiceWire` above —
+    // against the real route and the real door.
+    const probeMoney = await api("POST", "/api/work/trade-invoice/duplicates", {
+      clientId: one.client, kind: "supplier_bill",
+      invoice: invoiceWire(one.counterparty, { reference: null }),
+    }, one.jwt);
+    assert.equal(probeMoney.status, 200,
+      `leg 8: the probe answers 200 (got ${probeMoney.status} ${JSON.stringify(probeMoney.body)})`);
+    assert.equal(probeMoney.body.match_count, 1,
+      "leg 8: with NO number stated, the bill recorded for the same money on the same day is reported");
+    assert.equal(probeMoney.body.matches[0].invoice_id, inv.id, "leg 8: …by its own id");
+    assert.deepEqual(probeMoney.body.matches[0].signals, ["same_total_and_date"],
+      "leg 8: …on the money signal alone, which is the one the browser could never reach before");
+    assert.equal(probeMoney.body.counterparty_id, one.counterparty,
+      "leg 8: …about the party the admission would resolve");
+
+    const probeBoth = await api("POST", "/api/work/trade-invoice/duplicates", {
+      clientId: one.client, kind: "supplier_bill", invoice: invoiceWire(one.counterparty),
+    }, one.jwt);
+    assert.equal(probeBoth.status, 200, "leg 8: the same probe with the number stated");
+    assert.deepEqual([...probeBoth.body.matches[0].signals].sort(),
+      ["same_reference", "same_total_and_date"],
+      "leg 8: …reports BOTH signals, which is the state the form's 'both' sentence renders");
+
+    // A CLIENT WITH NOTHING RECORDED IS WARNED ABOUT NOTHING — so the leg above is the filter
+    // working rather than the probe reporting whatever it is asked about.
+    const quiet = await seedClient("ti-probe-quiet");
+    const probeQuiet = await api("POST", "/api/work/trade-invoice/duplicates", {
+      clientId: quiet.client, kind: "supplier_bill", invoice: invoiceWire(quiet.counterparty),
+    }, quiet.jwt);
+    assert.equal(probeQuiet.status, 200, "leg 8: a first bill is probed like any other");
+    assert.equal(probeQuiet.body.match_count, 0, "leg 8: …and warns about nothing");
+
+    // THE PROBE IS A READ: it admitted nothing on either client.
+    assert.equal((await invoices(one.client)).length, 1, "leg 8: the probe recorded nothing");
+    assert.equal((await invoices(quiet.client)).length, 0, "leg 8: …on either client");
+    console.log("[ti-e2e] 8 OK — the browser's own wire body reaches the probe in the database's spelling");
 
     // ---- 5. the due-date basis, derived by the database --------------------
     const terms = await seedClient("ti-terms", { termsDays: 30 });

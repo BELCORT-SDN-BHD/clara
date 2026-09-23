@@ -11,7 +11,7 @@ import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  gateTi, TI_REASON, TI_KIND, DUE_SOURCE, TICHART, TI_DATE,
+  gateTi, gateTiDup, tiDupLaneReady, probeTradeInvoiceDuplicates, TI_REASON, TI_KIND, DUE_SOURCE, TICHART, TI_DATE,
   ensureTiChart, vendor, customer,
   billParticulars, invoiceParticulars, billBasis, invoiceBasis,
   admitTradeInvoiceWork, getTradeInvoice, withClientRungHeld, awaitRungWaiters,
@@ -858,41 +858,60 @@ test("p655.replay.race a concurrent pair under ONE key leaves one invoice and a 
     "p655.replay.race: the stored reference belongs to the SAME submission as the stored party -- never a blend of the two");
 });
 
-test("p655.duplicate.same_reference_is_NOT_probed two admissions of ONE supplier bill number under two intent keys both land -- the residual, measured rather than assumed", async (t) => {
+test("p655.duplicate.same_reference_is_probed_and_warns two admissions of ONE supplier bill number under two intent keys still BOTH land -- and #1007's probe warns about the second before it is recorded", async (t) => {
   if (await gateTi(t)) return;
-  // ADV-655-6 (fix round 1), NAMED AND MEASURED, NOT FIXED. This branch reads "duplicate"
-  // exclusively as "the same INTENT replayed" -- which is what AC4 and the brief's cell 13 ask
-  // for, and what p655.replay.* proves. It does NOT read "duplicate" as "this supplier's bill
-  // number is already recorded": nothing in the door, the birth trigger or the belts looks at
-  // (client_id, counterparty_id, reference), and `reference` carries no uniqueness (0225 section
-  // A: it is nullable, and two suppliers legitimately reuse numbers, so a hard unique would be
-  // WRONG). The usual shape is a warn-not-refuse probe -- the person is told "this number is
-  // already recorded, here is the Work" and chooses -- and that is a new refusal/advisory surface
-  // the brief does not grant this ticket.
+  if (await gateTiDup(t)) return;
+  // THE REWRITE of p655.duplicate.same_reference_is_NOT_probed (#1007 AC7). That cell PINNED a
+  // named residual: on this lane "duplicate" meant a replayed INTENT and nothing else, so one
+  // bill number under two intent keys posted twice and doubled the payable, with nothing in the
+  // door, the birth trigger or the belts ever looking at (client_id, counterparty_id, reference).
+  // The owner ruled on 2026-09-20 how that residual is closed: WARN at the recording step and let
+  // the person decide -- never refuse. So BOTH halves are asserted here.
   //
-  // So the cell PINS today's behaviour instead of pretending it is not there: one bill number,
-  // two keys, two payables. A later ticket that adds the probe reds this cell, which is exactly
-  // how a named residual should behave.
+  // Half 1: THE DOOR IS UNCHANGED. It still admits the second recording, because a probable
+  // duplicate is a warning and never a refusal, and a hard unique on `reference` would be wrong
+  // (0225 section A: it is nullable, and two suppliers legitimately reuse numbers).
+  // Half 2: THE WARNING NOW EXISTS, and it is measured HERE, in #655's own file, on the very
+  // submission the old cell said nothing could see coming. #1007's battery
+  // (trade-invoice-duplicate-probe.test.mjs) owns the signals, the scoping and the record of a
+  // person who went ahead; this cell owns only the join between the two lanes.
   const client = await tiClient("dupref");
   const cp = await vendor(ALICE(), { client });
   const ref = `ALPHA-DUP-${randomUUID().slice(0, 8)}`;
-  for (const tag of ["one", "two"]) {
-    const a = await armed({
-      client, particulars: billParticulars({ counterparty: cp, reference: ref }),
-      basis: billBasis(), intentKey: `ti-dup-${tag}-${randomUUID()}`,
-    });
-    await post(a);
-  }
+  const particulars = billParticulars({ counterparty: cp, reference: ref });
+
+  const first = await armed({
+    client, particulars, basis: billBasis(), intentKey: `ti-dup-one-${randomUUID()}`,
+  });
+  await post(first);
+
+  // WHAT THE PERSON ABOUT TO RECORD IT AGAIN IS SHOWN -- before any second Work exists.
+  const warned = await probeTradeInvoiceDuplicates(ALICE(), {
+    client, kind: TI_KIND.bill, particulars,
+  });
+  assert.equal(warned.match_count, 1,
+    "p655.duplicate.same_reference_is_probed_and_warns: the bill already on the books is reported BEFORE the second recording");
+  assert.deepEqual(warned.matches[0].signals, ["same_reference", "same_total_and_date"],
+    "p655.duplicate.same_reference_is_probed_and_warns: …on BOTH signals, each named -- a straight re-recording repeats the number AND the money on the day");
+  assert.equal(warned.matches[0].work_id, first.work_id,
+    "p655.duplicate.same_reference_is_probed_and_warns: …carrying the Work that recorded it, so the person can open it");
+
+  // …AND THE DOOR STILL ADMITS, because warning is not blocking. The firm's control is now the
+  // warning and the acknowledgement kept beside it, not a refusal this lane never had.
+  const second = await armed({
+    client, particulars, basis: billBasis(), intentKey: `ti-dup-two-${randomUUID()}`,
+  });
+  await post(second);
   const dupes = (await rootQuery(
     "select count(*)::int n from clara.trade_invoices where client_id=$1 and reference=$2",
     [client, ref])).rows[0].n;
   assert.equal(dupes, 2,
-    "p655.duplicate.same_reference_is_NOT_probed: TWO trade invoices carry one bill number -- the residual this cell names");
+    "p655.duplicate.same_reference_is_probed_and_warns: TWO trade invoices still carry one bill number -- the probe refuses nothing");
   const items = await openItemsForClient(client);
-  assert.equal(items.length, 2, "p655.duplicate.same_reference_is_NOT_probed: …and TWO AP open items");
+  assert.equal(items.length, 2,
+    "p655.duplicate.same_reference_is_probed_and_warns: …TWO AP open items");
   assert.equal(items.reduce((s, i) => s + Number(i.amount_cents), 0), 212000,
-    "p655.duplicate.same_reference_is_NOT_probed: …so the payable is doubled. A firm's own control is the "
-    + "Work list and the open-item list, not this door -- until a duplicate probe is owned and built");
+    "p655.duplicate.same_reference_is_probed_and_warns: …and the payable is doubled, which is now a CHOSEN outcome rather than an invisible one");
 });
 
 test("p655.atomic.no_partial a failure anywhere in the admission leaves no Work, no invoice, no entry, no item and no receipt", async (t) => {
@@ -1278,13 +1297,26 @@ test("p655.grants the ONE door is clara_runtime's, the read is the human's, the 
   for (const role of [ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive]) {
     assert.equal(await can(role, DOOR), false, `p655.grants: ${role} does not hold the door`);
   }
-  // NO `_for` TWIN and no second door.
+  // NO `_for` TWIN OF THE ADMISSION DOOR, and no second way IN. #1007 (0275) adds four public
+  // names to this lane and NONE of them admits anything: two are the duplicate probe (the
+  // signed-in bookkeeper's and its actor-explicit runtime twin -- a READ, which is why a `_for`
+  // is right there and still wrong on the door), one records that a warned person went ahead and
+  // one reads that record back. The pin is frontier-tolerant, like every roster here: on a chain
+  // below 0275 the four are absent and the set is 0225's own pair.
   const doors = (await rootQuery(
     `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='clara' and p.proname like '%trade_invoice%' and p.proname not like '\\_%'
       order by 1`)).rows.map((r) => r.proname);
-  assert.deepEqual(doors, ["admit_trade_invoice_work", "get_trade_invoice"],
-    "p655.grants: exactly ONE admission door and ONE read carry public names");
+  const expected = ["admit_trade_invoice_work", "get_trade_invoice"];
+  if (await tiDupLaneReady()) {
+    expected.push("get_trade_invoice_duplicate_ack", "probe_trade_invoice_duplicates",
+      "probe_trade_invoice_duplicates_for", "record_trade_invoice_duplicate_ack");
+    expected.sort();
+  }
+  assert.deepEqual(doors, expected,
+    "p655.grants: exactly ONE admission door, ONE read, and (at 0275) the duplicate probe's two doors and the two acknowledgement verbs");
+  assert.equal(doors.filter((d) => d.startsWith("admit_")).length, 1,
+    "p655.grants: …and exactly ONE of them admits anything");
 
   assert.equal(await can(ROLES.authenticated, "clara.get_trade_invoice(uuid)"), true,
     "p655.grants: the read is reachable by the signed-in human");

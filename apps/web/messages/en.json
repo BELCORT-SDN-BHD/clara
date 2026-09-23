@@ -1843,7 +1843,29 @@
       "title": "Clara did not record this"
     },
     "candidates": {
-      "label": "Which party do you mean?"
+      "label": "Which party do you mean?",
+      "registration": "Reg. {value}",
+      "tin": "TIN {value}",
+      "matchedOn": {
+        "registration": "Matched the registration number",
+        "tin": "Matched the tax identification number",
+        "name": "Matched the name",
+        "tin_and_name": "Matched the tax identification number and the name"
+      }
+    },
+    "duplicate": {
+      "title": "This looks like something already recorded",
+      "body": "This client already has {count, plural, =1 {a document} other {# documents}} from this counterparty that looks like the one you are about to record. Record it anyway only if it really is a second document.",
+      "signals": {
+        "same_reference": "Same document number",
+        "same_total_and_date": "Same total on the same date",
+        "both": "Same document number, and the same total on the same date"
+      },
+      "entry": "{reference} · {date} · {total}",
+      "noReference": "No document number",
+      "open": "Open what is recorded",
+      "recordAnyway": "Record it anyway",
+      "cancel": "Cancel"
     },
     "conflict": {
       "title": "That draft was already submitted",
@@ -1878,7 +1900,9 @@
     },
     "refusals": {
       "party_ambiguous": "More than one party answers to that name. Say which one.",
+      "party_ambiguous_tin": "More than one party of this client holds that tax identification number. Say which one this document is about.",
       "party_unresolved": "No party of this client answers to that.",
+      "party_identifier_conflict": "The registration number and the tax identification number on this document name two different parties. Say which one it is.",
       "credit_shape_not_admitted": "A credit note is not recorded here. Record it as a credit against the invoice it corrects.",
       "invalid_total": "The stated total does not match the control leg's signed amount.",
       "unbalanced_basis": "The journal does not balance.",
@@ -1895,7 +1919,9 @@
       "invalid_particulars": "Clara could not read the document's particulars as a record.",
       "invalid_currency": "This estate records trade invoices in MYR only.",
       "invalid_tax_facts": "Tax facts are carried as a record, exactly as the document states them.",
-      "invalid_basis": "Clara could not read that submission."
+      "invalid_basis": "Clara could not read that submission.",
+      "nothing_acknowledged": "Clara could not record which earlier document you were shown. Try recording it again.",
+      "unknown_acknowledged_invoice": "Clara could not record which earlier document you were shown. Try recording it again."
     },
     "issues": {
       "party_unresolved": "Pick the counterparty this document names.",
@@ -1941,7 +1967,10 @@
       "outstanding": "Outstanding",
       "receipt": "Receipt",
       "document": "Source document",
-      "admitted": "Admitted — not posted yet"
+      "admitted": "Admitted — not posted yet",
+      "acknowledged": "{who} was warned this looked like {count, plural, =1 {a document} other {# documents}} already recorded, and recorded it anyway.",
+      "acknowledgedEntry": "Shown: {reference} · {date}",
+      "acknowledgedNoReference": "No document number"
     }
   },
   "WorkKnowledge": {

@@ -152,6 +152,11 @@ function App(props: {
    *  socket. Undefined leaves the component's own read in place, which is what the door-census
    *  cells above measure. */
   loadTradeInvoice?: (workId: string, opts?: unknown) => Promise<unknown>;
+  /** #1007 — `clara.get_trade_invoice_duplicate_ack`, injected so a cell can render the warning a
+   *  reviewer reads without a socket. Undefined leaves the component's own read in place, exactly
+   *  as `loadTradeInvoice` does — which is what keeps the door-census cells below MEASURING it
+   *  rather than being shielded from it. */
+  loadDuplicateAck?: (workId: string, opts?: unknown) => Promise<unknown>;
   /** #636 — the batch this Work belongs to. DEFAULTED to null so no cell reaches a socket; the
    *  two cells that care inject a row. */
   loadBatchOrigin?: (workId: string, deps: unknown) => Promise<unknown>;
@@ -175,6 +180,7 @@ function App(props: {
       storage: props.storage ?? null,
       loadLinks: (props.loadLinks ?? (async () => [])) as never,
       ...(props.loadTradeInvoice === undefined ? {} : { loadTradeInvoice: props.loadTradeInvoice as never }),
+      ...(props.loadDuplicateAck === undefined ? {} : { loadDuplicateAck: props.loadDuplicateAck as never }),
       loadBatchOrigin: (props.loadBatchOrigin ?? (async () => null)) as never,
     }),
   });
@@ -1634,7 +1640,21 @@ function claimOriginCalls(calls: DoorCall[]): DoorCall[] {
  *  the cells below exclude it BY NAME and then PIN what it actually did — one read on mount, and
  *  not one more per tab press. */
 function tradeInvoiceCalls(calls: DoorCall[]): DoorCall[] {
-  return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_trade_invoice"));
+  // `get_trade_invoice_duplicate_ack` starts with this verb's own name, so a bare `includes`
+  // would count the #1007 read as a second `get_trade_invoice` — measured, not feared: it turned
+  // the 624 AC4 census cell red the first time the read was added. The two are separate doors and
+  // are counted separately.
+  return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_trade_invoice")
+    && !c.url.includes("/rest/v1/rpc/get_trade_invoice_duplicate_ack"));
+}
+
+/** #1007 — `clara.get_trade_invoice_duplicate_ack` is the THIRD read of this shape (after
+ *  `get_work_claim_origin` and `get_trade_invoice`) and is pinned for the same reason: it is the
+ *  link block's mount effect, not a Sources door and not an act on the Work, so the cells below
+ *  exclude it BY NAME and then PIN what it actually did — one read on mount, and not one more per
+ *  tab press. An unpinned exclusion is a hole a second read could hide in. */
+function duplicateAckCalls(calls: DoorCall[]): DoorCall[] {
+  return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_trade_invoice_duplicate_ack"));
 }
 
 /** #658 — the Sources tab's knowledge block reads `clara.work_knowledge_drift` once on mount. It
@@ -1760,6 +1780,9 @@ test("624 AC4: a Work's SOURCE DOCUMENT shows the same four named states the Doc
       assert.equal(claimOriginCalls(calls).length, 1, "exactly one get_work_claim_origin read, on mount");
       // #655 — and the trade-invoice read, on the same footing and pinned the same way.
       assert.equal(tradeInvoiceCalls(calls).length, 1, "exactly one get_trade_invoice read, on mount");
+      // #1007 — and the acknowledgement read beside it, on the same footing and pinned the same way.
+      assert.equal(duplicateAckCalls(calls).length, 1,
+        "exactly one get_trade_invoice_duplicate_ack read, on mount");
       // #658 — the Sources tab's knowledge block reads clara.work_knowledge_drift ONCE on mount,
       // and it is excluded by name and PINNED for the same reason the claim-origin read above is:
       // an unpinned exclusion is a hole a second read could hide in.
@@ -1843,6 +1866,7 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
       const doorsBefore = stateDoorCalls(calls).length;
       const originsBefore = claimOriginCalls(calls).length;
       const invoicesBefore = tradeInvoiceCalls(calls).length;
+      const acksBefore = duplicateAckCalls(calls).length;
       const driftBefore = driftCalls(calls).length;
 
       const sources = h.find((n) =>
@@ -1859,6 +1883,8 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
       assert.equal(claimOriginCalls(calls).length, originsBefore,
         "and a tab press does not re-ask the Work's claim origin");
       // #655 — nor whether it carries a trade invoice. Same mount effect, same rule.
+      assert.equal(duplicateAckCalls(calls).length, acksBefore,
+        "ticket 1007's acknowledgement read does not fire again per tab press either");
       assert.equal(tradeInvoiceCalls(calls).length, invoicesBefore,
         "and a tab press does not re-ask the Work's trade invoice");
       // #658 — nor does it re-ask whether the knowledge basis has moved: that read is a MOUNT
@@ -2036,4 +2062,104 @@ test("p984.work_detail.opening_purpose — an opening-balance Work shows its hum
   assert.doesNotMatch(text, /opening_balance/,
     "…and the database's own token is never shown to a person on this page");
   await h.unmount();
+});
+
+// ============================================================================================
+// FIX ROUND (wave 3, lane 02) — review finding S-5. #1007 keeps the preparer's choice "so a
+// reviewer can tell a knowing second recording from an accident". The door
+// (`clara.get_trade_invoice_duplicate_ack`, migration 0275) held that record and was driven green
+// by the db battery, but NOTHING on any screen read it: a reviewer opening the Work still could
+// not tell the two apart.
+// ============================================================================================
+
+const ACK_INVOICE = {
+  invoice_id: "11111111-1111-4111-8111-111111111111", work_id: WORK,
+  kind: "supplier_bill", domain: "ap",
+  counterparty_id: "22222222-2222-4222-8222-222222222222", counterparty_name: "Alpha Supplies",
+  counterparty_kind: "vendor", counterparty_registration_no: null,
+  document_date: "2026-03-04", due_date: "2026-04-03", due_date_source: "stated",
+  reference: "ALPHA-2026-0043", currency: "MYR", total_cents: 106_000, tax_facts: null,
+  source_document_id: null, recorded_by: USER, created_at: "2026-03-04T02:00:00Z",
+  state: "posted", entry_id: ENTRY, receipt_id: "receipt-1",
+  open_item_id: "33333333-3333-4333-8333-333333333333",
+  open_item_amount_cents: 106_000, open_item_due_date: "2026-04-03",
+  outstanding_cents: 106_000,
+};
+
+function ackData() {
+  return data({
+    work: workRow({ status: "completed", result: { entry_id: ENTRY, receipt_id: "receipt-1", posted_at: "2026-09-01T02:00:00Z" } }),
+    entry: {
+      id: ENTRY, client_id: CLIENT, status: "approved", posting_date: "2026-03-31", memo: "Alpha Supplies bill",
+      origin: "agent", document_id: null, coding_kind: null, revision_token: "rev", maker_actor: null,
+      checker_actor: null, approved_at: "2026-03-31T02:00:00Z", reversal_of: null, reversed_by: null,
+      reversal_reason: null, withdrawn_at: null, withdrawal_reason: null, created_at: "2026-03-31T02:00:00Z",
+    },
+    lines: [],
+    receipts: [],
+  });
+}
+
+test("1007: a Work the preparer was WARNED about says so on the page — who, and which earlier document they were shown", async () => {
+  const h = await renderComponent(App({
+    loadTradeInvoice: async () => ACK_INVOICE,
+    loadDuplicateAck: async () => ({
+      ack_id: "aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaaa", work_id: WORK,
+      intent_key: "intent-1", kind: "supplier_bill",
+      counterparty_id: "22222222-2222-4222-8222-222222222222",
+      reference: "ALPHA-2026-0043", document_date: "2026-03-04", total_cents: 106_000,
+      acknowledged_by: USER, acknowledged_by_name: "Aisyah Rahman",
+      acknowledged_at: "2026-03-31T02:00:00Z",
+      shown: [{
+        invoice_id: "44444444-4444-4444-8444-444444444444", work_id: "work-earlier",
+        reference: "ALPHA-2026-0042", document_date: "2026-03-04", total_cents: 106_000,
+      }],
+    }),
+    load: async () => ackData(),
+  }));
+  try {
+    await settleUntil(h, () => String(h.text()).includes("recorded it anyway"),
+      "the acknowledgement line to render");
+    const text = String(h.text());
+    assert.ok(text.includes("Aisyah Rahman"), "WHO chose to record it anyway");
+    assert.ok(text.includes("ALPHA-2026-0042"),
+      "WHICH earlier document they were shown, by the number the BOOKS hold");
+    assert.equal(/TradeInvoice\.link\./.test(text), false, "no raw message key leaks into the page");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("1007: a Work nobody was warned about says NOTHING — the page never claims a recording was not a duplicate", async () => {
+  const h = await renderComponent(App({
+    loadTradeInvoice: async () => ACK_INVOICE,
+    loadDuplicateAck: async () => null,
+    load: async () => ackData(),
+  }));
+  try {
+    await settleUntil(h, () => String(h.text()).includes("Alpha Supplies"),
+      "the trade-invoice link block to render");
+    assert.equal(String(h.text()).includes("recorded it anyway"), false,
+      "the ordinary recording carries no warning line at all");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("1007: a FAILED acknowledgement read is indistinguishable from 'nobody was warned', and blocks nothing", async () => {
+  // The same discipline the trade-invoice read itself is held to: the page never says a recording
+  // was NOT warned about, only that it WAS, and a read that could not answer must not take the
+  // rest of the page down with it.
+  const h = await renderComponent(App({
+    loadTradeInvoice: async () => ACK_INVOICE,
+    loadDuplicateAck: async () => { throw new Error("PostgREST is down"); },
+    load: async () => ackData(),
+  }));
+  try {
+    await settleUntil(h, () => String(h.text()).includes("Alpha Supplies"),
+      "the trade-invoice link block to render even though the acknowledgement read threw");
+    assert.equal(String(h.text()).includes("recorded it anyway"), false, "and it claims nothing");
+  } finally {
+    await h.unmount();
+  }
 });

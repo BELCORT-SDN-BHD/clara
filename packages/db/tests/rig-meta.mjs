@@ -2964,6 +2964,60 @@ const FIRM_SETUP_TIP_0259_HUMAN_FNS = ["dismiss_firm_setup_tip"];
 export const FIRM_SETUP_TIP_0259_COHORT = [...FIRM_SETUP_TIP_0259_HUMAN_FNS];
 // #935 END
 
+// #1007 [0275, warn before recording a trade invoice that looks like one already recorded] — its
+// own cohort, frontier-tolerant like every cohort above: wholly absent on a chain below 0275,
+// wholly present once it applies, and a PARTIAL cohort is what `cohortFailures` reports.
+//
+//   ONE HUMAN READ, clara_authenticated ONLY. `probe_trade_invoice_duplicates(uuid,text,jsonb)`
+//   answers "which already-recorded invoices of this client look like the one about to be
+//   recorded", on two independent signals (same normalised document number; same total on the
+//   same document date). It is floored on the bookkeeper rank in its own body — the floor of the
+//   recording step it precedes — and takes its firm AND actor from the session, so it is no
+//   cross-tenant oracle. clara_runtime, both agent read roles and all four wake lanes gain ZERO:
+//   the body is `_human_ctx`-gated, so a lane carrying no JWT claims could not execute it even if
+//   it held the grant (packages/runtime/lib/pools.mjs sets no request.jwt.claims).
+//
+//   A SECOND HUMAN READ, also clara_authenticated ONLY and viewer-floored in its own body:
+//   `get_trade_invoice_duplicate_ack(uuid)` answers, for one Work, which earlier invoices the
+//   person who recorded it was shown, and who acknowledged them when. The machine lanes gain ZERO
+//   on it for the same `_human_ctx` reason.
+//
+//   TWO clara_runtime DOORS, and a NEW NAME rather than a widened grant in both cases. The
+//   actor-explicit probe twin `probe_trade_invoice_duplicates_for(uuid,uuid,text,jsonb)` exists
+//   because a clara_runtime connection carries no JWT claims (packages/runtime/lib/pools.mjs sets
+//   none), so `clara._human_ctx` cannot answer for the chat lane;
+//   `record_trade_invoice_duplicate_ack(uuid,uuid,text,text,jsonb,jsonb)` writes the "recorded
+//   anyway" choice BEFORE the admission it authorises and therefore carries
+//   `clara.admit_trade_invoice_work`'s own authority model. Both are expected-false for
+//   clara_authenticated: a caller-supplied actor on a session-authenticated role is the
+//   cross-tenant-oracle shape 0219 names.
+//
+//   FOUR INTERNALS, granted to NOBODY: `_trade_invoice_reference_key` (the ONE document-number
+//   normalisation), `_trade_invoice_duplicate_matches` (the ONE matcher both entrances share, so
+//   the form and the chat lane can never be shown different answers), `_trade_invoice_probe_core`
+//   (the shared probe body) and `_trade_invoice_actor_firm` (the ONE copy of the admission door's
+//   authority preamble the two actor-explicit doors share). They are rostered here so a
+//   half-applied 0275 is reported as one, and are expected-false for every role in the live grant
+//   sweep rather than listed in ALLOWED.
+//
+//   `clara.trade_invoice_duplicate_acks` is a TABLE and so invisible to this function roster:
+//   clara_authenticated holds SELECT on it and no DML, which 0275's own tail asserts.
+const TRADE_INVOICE_DUPLICATE_0275_HUMAN_FNS = [
+  "probe_trade_invoice_duplicates", "get_trade_invoice_duplicate_ack",
+];
+const TRADE_INVOICE_DUPLICATE_0275_RUNTIME_FNS = [
+  "probe_trade_invoice_duplicates_for", "record_trade_invoice_duplicate_ack",
+];
+const TRADE_INVOICE_DUPLICATE_0275_UNGRANTED_FNS = [
+  "_trade_invoice_reference_key", "_trade_invoice_duplicate_matches", "_trade_invoice_probe_core",
+  "_trade_invoice_actor_firm",
+];
+export const TRADE_INVOICE_DUPLICATE_0275_COHORT = [
+  ...TRADE_INVOICE_DUPLICATE_0275_HUMAN_FNS, ...TRADE_INVOICE_DUPLICATE_0275_RUNTIME_FNS,
+  ...TRADE_INVOICE_DUPLICATE_0275_UNGRANTED_FNS,
+];
+// #1007 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -3157,6 +3211,10 @@ export const ALLOWED = {
     // clara_runtime holds it too (it echoes what the run posted), the agent role and both wake
     // roles gain ZERO.
     ...TRADE_INVOICES_0225_HUMAN_FNS,
+    // #1007 [0275] the trade-invoice duplicate probe and the read of what a warned person
+    // acknowledged — see the block above. clara_authenticated ONLY, floored in their own bodies
+    // (bookkeeper for the probe, viewer for the read); every machine lane gains ZERO.
+    ...TRADE_INVOICE_DUPLICATE_0275_HUMAN_FNS,
     // #640 [0193] the eleven accounting-plan doors — see the block above. clara_authenticated
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
@@ -3408,6 +3466,9 @@ export const ALLOWED = {
     // (the same lane clara.admit_journal_work sits in, acting OBO a named human); the read is held
     // by BOTH lanes because the run echoes what it posted.
     ...TRADE_INVOICES_0225_RUNTIME_FNS, ...TRADE_INVOICES_0225_HUMAN_FNS,
+    // [#1007, 0275] the actor-explicit probe twin and the acknowledgement writer — clara_runtime
+    // ONLY, the same lane clara.admit_trade_invoice_work sits in, acting OBO a named human.
+    ...TRADE_INVOICE_DUPLICATE_0275_RUNTIME_FNS,
     // [#636, 0229] the intake-batch write doors and the cancellation sweep — clara_runtime ONLY,
     // the same lane clara.create_document_intake sits in. The sweep is the pool's ONLY way to see
     // a cancelling parent: it holds no SELECT on clara.intake_batches and none on
@@ -3875,6 +3936,10 @@ export async function grantMatrixFailures() {
   }
   failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
   failures.push(...cohortFailures("#935 0259 firm setup education tip dismissal", FIRM_SETUP_TIP_0259_COHORT, liveNames));
+  // #1007 [0275] — the probe, its matcher and the two normalisation/body internals ship as one
+  // lane; half of them is a door with no matcher, or a matcher no entrance can reach.
+  failures.push(...cohortFailures("#1007 0275 trade-invoice duplicate probe",
+    TRADE_INVOICE_DUPLICATE_0275_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-6 apps/web read doors", CHECKOUT_GATE_C6_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));

@@ -103,6 +103,70 @@ test("the hub offers recording an invoice as its own primary act, and the addres
   await expect(page.getByRole("heading", { name: /Record an invoice or bill/i })).toBeVisible();
 });
 
+test("#1007 — a bill this client already looks to have is WARNED about in the form, Cancel admits nothing, and Record it anyway carries what was shown", async ({ page }) => {
+  // THE OWNER'S RULING OF 2026-09-20, driven in a real browser: check at the recording step,
+  // WARN and let the person decide, never refuse. The load-bearing assertion in the first half is
+  // what the RUNTIME received -- nothing -- not what the page painted.
+  await control(page, { op: "warn_next" });
+  await fillBill(page);
+  await page.getByRole("button", { name: "Record it" }).click();
+
+  const warning = page.getByText(/looks like the one you are about to record/i);
+  await expect(warning).toBeVisible({ timeout: CELL_BUDGET.poll });
+  // …naming the earlier document by what the BOOKS hold: its number, its date and its total.
+  await expect(page.getByText(/ALPHA-2026-0042 · 2026-03-04 · RM 1,060\.00/)).toBeVisible();
+  await expect(page.getByText(/Same document number/i)).toBeVisible();
+  // …and a way to look at what is already recorded, rather than a sentence about it.
+  await expect(page.getByRole("link", { name: /Open what is recorded/i })).toBeVisible();
+
+  const beforeCancel = (await control(page, { op: "received" })) as { received: unknown[] };
+  expect(beforeCancel.received, "#1007: NOTHING may be admitted while the person is deciding").toEqual([]);
+
+  // CANCEL ADMITS NOTHING AT ALL, and leaves the figures where they were.
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(warning).toBeHidden();
+  await expect(field(page, "reference")).toHaveValue("ALPHA-2026-0042");
+  const afterCancel = (await control(page, { op: "received" })) as { received: unknown[] };
+  expect(afterCancel.received, "#1007: choosing Cancel admits nothing").toEqual([]);
+
+  // …AND RECORDING ANYWAY ADMITS EXACTLY ONE WORK, carrying the earlier invoice the person was
+  // SHOWN, so the choice can be kept beside it.
+  await control(page, { op: "warn_next" });
+  await page.getByRole("button", { name: "Record it" }).click();
+  await expect(warning).toBeVisible({ timeout: CELL_BUDGET.poll });
+  await page.getByRole("button", { name: "Record it anyway" }).click();
+  await expect(page.getByText(/Clara has admitted this/i)).toBeVisible({ timeout: CELL_BUDGET.poll });
+
+  const sent = (await control(page, { op: "received" })) as {
+    received: Array<{ acknowledgeDuplicates: string[] | null }>;
+  };
+  expect(sent.received.length, "#1007: one decision, one admission").toBe(1);
+  expect(sent.received[0]?.acknowledgeDuplicates,
+    "#1007: the admission names the earlier invoice the person was shown").toEqual([TI.invoiceId]);
+});
+
+test("#1007 — a bill stating NO document number is still warned about when the same money was recorded on the same day", async ({ page }) => {
+  // THE SIGNAL THAT CATCHES A MISSING OR MISTYPED NUMBER, driven from the only shipped entrance.
+  // It could not fire here before the fix round: the form posted its wire body straight to
+  // PostgREST, whose door reads `document_date` and `total_cents` while the wire spells them
+  // `documentDate` and `totalCents`, so the probe saw no date and no total at all. The probe now
+  // rides the runtime route, which translates the body with the SAME `toDbTradeInvoice` the
+  // admission uses, and the fixture derives its answer from what the browser actually sent.
+  await control(page, { op: "warn_next" });
+  await fillBill(page);
+  await field(page, "reference").fill("");
+  await page.getByRole("button", { name: "Record it" }).click();
+
+  await expect(page.getByText(/looks like the one you are about to record/i))
+    .toBeVisible({ timeout: CELL_BUDGET.poll });
+  await expect(page.getByText(/Same total on the same date/i)).toBeVisible();
+  // …naming the earlier document by what the BOOKS hold, number included, even though the one
+  // being recorded states none.
+  await expect(page.getByText(/ALPHA-2026-0042 · 2026-03-04 · RM 1,060\.00/)).toBeVisible();
+  const held = (await control(page, { op: "received" })) as { received: unknown[] };
+  expect(held.received, "#1007: nothing is admitted while the person is deciding").toEqual([]);
+});
+
 test("compose a bill → 202 → the Work page shows the persistent outcome, and a reload keeps the links", async ({ page }) => {
   await fillBill(page);
   await page.getByRole("button", { name: "Record it" }).click();
@@ -168,8 +232,11 @@ test("a refused party renders its candidates INLINE and preserves the draft", as
       name: TI.vendorName,
       expected_counterparty_kind: "vendor",
       candidates: [
-        { counterparty_id: TI.vendorId, name: TI.vendorName, registration_no: "200101065565" },
-        { counterparty_id: TI.vendorTwinId, name: TI.vendorTwinName, registration_no: "200101065566" },
+        { counterparty_id: TI.vendorId, name: TI.vendorName, registration_no: "200101065565", tin: "C65565565651" },
+        // #982 — the second candidate's registration number is NOT on the books, so its TIN is the
+        // only identifier that tells it apart. Before 0274's web half the form dropped `tin` when
+        // it mapped the refusal and this candidate reached the screen as a bare name.
+        { counterparty_id: TI.vendorTwinId, name: TI.vendorTwinName, registration_no: null, tin: "C65565565652" },
       ],
     },
   });
@@ -181,10 +248,47 @@ test("a refused party renders its candidates INLINE and preserves the draft", as
   await expect(page.getByText("party_ambiguous")).toBeVisible();
   // …and the candidates as CONTROLS, not prose — never a toast, never a dialog.
   await expect(page.getByRole("button", { name: TI.vendorTwinName })).toBeVisible();
+  // #982 — each candidate's TIN is ON SCREEN beside its registration number, so a person can tell
+  // apart two parties the books hold no registration number for.
+  await expect(page.getByText("C65565565651")).toBeVisible();
+  await expect(page.getByText("C65565565652")).toBeVisible();
   // EVERY KEYSTROKE SURVIVES.
   await expect(field(page, "reference")).toHaveValue("ALPHA-2026-0042");
   await expect(field(page, "memo")).toHaveValue("Alpha Supplies bill, office paper");
   await expect(field(page, "totalCents")).toHaveValue(/1,?060/);
+});
+
+test("ticket 982 — an identifier conflict names what disagreed and offers BOTH parties", async ({ page }) => {
+  // 0274's third party refusal, driven through the SAME carrier every refusal on this lane rides:
+  // the runtime hands `detail` back verbatim and the form reads `detail.candidates` off it. The
+  // person is choosing between the two identifiers the document itself carries, so the sentence
+  // says so and each side says which identifier reached it.
+  await control(page, {
+    op: "refuse_next",
+    field: "invoice.counterparty",
+    reason: "party_identifier_conflict",
+    detail: {
+      reason: "party_identifier_conflict",
+      registration_no: "200101065565",
+      tin: "C65565565652",
+      expected_counterparty_kind: "vendor",
+      candidates: [
+        { counterparty_id: TI.vendorId, name: TI.vendorName, registration_no: "200101065565", tin: null, matched_on: "registration" },
+        { counterparty_id: TI.vendorTwinId, name: TI.vendorTwinName, registration_no: null, tin: "C65565565652", matched_on: "tin" },
+      ],
+    },
+  });
+  await fillBill(page);
+  await page.getByRole("button", { name: "Record it" }).click();
+
+  await expect(page.getByText(/registration number and the tax identification number/i))
+    .toBeVisible({ timeout: CELL_BUDGET.poll });
+  await expect(page.getByText("party_identifier_conflict")).toBeVisible();
+  await expect(page.getByText("Reg. 200101065565")).toBeVisible();
+  await expect(page.getByText("TIN C65565565652")).toBeVisible();
+  // BOTH sides are controls, and picking one resolves the refusal in place.
+  await page.getByRole("button", { name: TI.vendorTwinName }).click();
+  await expect(page.getByText("party_identifier_conflict")).toHaveCount(0);
 });
 
 test("a duplicate submit after a dropped acknowledgement resolves to ONE Work", async ({ page }) => {

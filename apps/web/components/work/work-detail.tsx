@@ -82,7 +82,10 @@ import { WorkActivityView } from "@/components/work/work-activity-view";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { purposeLabel } from "@/lib/work/purpose-label";
 import { getWorkClaimOrigin, type WorkClaimOrigin } from "@/lib/work/staff-expense-claim-reads";
-import { getTradeInvoice, type TradeInvoiceRead } from "@/lib/work/trade-invoice-reads";
+import {
+  getTradeInvoice, getTradeInvoiceDuplicateAck,
+  type TradeInvoiceDuplicateAck, type TradeInvoiceRead,
+} from "@/lib/work/trade-invoice-reads";
 // #636 — the reverse row. NO `list_accounting_work` recut (that body is #905's and the Work-list
 // projection is frozen this wave): the LIST says nothing about batches; DETAIL gets ONE line.
 import { getWorkBatchOrigin, type WorkBatchOrigin } from "@/lib/documents/intake-batch";
@@ -180,6 +183,7 @@ export function WorkDetailView({
   loadLinks = listEntryLinks,
   loadClaimOrigin = getWorkClaimOrigin,
   loadTradeInvoice = getTradeInvoice,
+  loadDuplicateAck = getTradeInvoiceDuplicateAck,
   loadBatchOrigin = getWorkBatchOrigin, // #636
 }: {
   clientId: string;
@@ -207,6 +211,11 @@ export function WorkDetailView({
    *  answers NULL for every Work that does not, so this read costs one round trip and never
    *  invents an origin — the same discipline `loadClaimOrigin` is held to. */
   loadTradeInvoice?: typeof getTradeInvoice;
+  /** #1007 — the acknowledgement this Work was admitted under, if the preparer was warned
+   *  that it looked like something already recorded and recorded it anyway.
+   *  `clara.get_trade_invoice_duplicate_ack` answers NULL for every Work nobody was warned
+   *  about, so this read costs one round trip and never invents a warning. */
+  loadDuplicateAck?: typeof getTradeInvoiceDuplicateAck;
   loadBatchOrigin?: typeof getWorkBatchOrigin; // #636
   /** WHO is reading, for the composer draft "Edit as a new draft" seeds. Both
    *  halves are optional and a MISSING half means no seeding at all — a draft
@@ -283,6 +292,11 @@ export function WorkDetailView({
    *  from "not a trade invoice" on purpose: both leave the block absent, and the page never says
    *  a Work is NOT one, only that it IS. Nothing on this page is blocked by it. */
   const [tradeInvoice, setTradeInvoice] = useState<TradeInvoiceRead | null>(null);
+  /** #1007 — whether the preparer was WARNED that this looked like something already recorded and
+   *  recorded it anyway. A FAILED read is indistinguishable from "nobody was warned" on purpose,
+   *  exactly as the trade-invoice read above: the page never says a recording was NOT warned
+   *  about, only that it WAS, and nothing here is blocked by it. */
+  const [duplicateAck, setDuplicateAck] = useState<TradeInvoiceDuplicateAck | null>(null);
   /** #636 — the batch this Work belongs to, or null. Read under the caller's OWN JWT through the
    *  relation's FORCE-RLS grant, the same shape `entry_evidence_links` is read with. A FAILED read
    *  is indistinguishable from "not in a batch" on purpose: both leave the row absent, and the page
@@ -294,11 +308,13 @@ export function WorkDetailView({
     void (async () => {
       const found = await loadTradeInvoice(workId, { session }).catch(() => null);
       if (live) setTradeInvoice(found);
+      const ack = await loadDuplicateAck(workId, { session }).catch(() => null);
+      if (live) setDuplicateAck(ack);
     })();
     return () => {
       live = false;
     };
-  }, [addressable, workId, loadTradeInvoice, session]);
+  }, [addressable, workId, loadTradeInvoice, loadDuplicateAck, session]);
   useEffect(() => {
     if (!addressable) return;
     let live = true;
@@ -470,6 +486,7 @@ export function WorkDetailView({
         reloadLinks={reloadLinks}
         claimOrigin={claimOrigin}
         tradeInvoice={tradeInvoice}
+        duplicateAck={duplicateAck}
         reloadWork={() => state.reload()}
         session={session}
       />
@@ -756,6 +773,7 @@ function PostedEntrySection({
   reloadLinks,
   claimOrigin,
   tradeInvoice,
+  duplicateAck,
   reloadWork,
   session,
 }: {
@@ -769,6 +787,7 @@ function PostedEntrySection({
   reloadLinks: () => Promise<unknown>;
   claimOrigin: WorkClaimOrigin | null;
   tradeInvoice: TradeInvoiceRead | null;
+  duplicateAck: TradeInvoiceDuplicateAck | null;
   reloadWork: () => Promise<unknown>;
   session: SessionTokenAccessor;
 }) {
@@ -875,6 +894,34 @@ function PostedEntrySection({
                         cents are the storage unit, never the reading unit. */}
                     {tti("total")}: <Money cents={tradeInvoice.total_cents} />
                   </span>
+                  {/* #1007 — WHAT A REVIEWER CAME HERE FOR. The ticket keeps the preparer's
+                      choice "so a reviewer can tell a knowing second recording from an
+                      accident", and that is only true if a reviewer can READ it. The door
+                      answers NULL for every recording nobody was warned about, so this line is
+                      absent in the ordinary case and never says "not a duplicate" — it says only
+                      that somebody was shown an earlier document and went ahead. */}
+                  {duplicateAck === null ? null : (
+                    <span className="block text-sm text-muted-foreground" data-testid="work-trade-invoice-ack">
+                      {tti("acknowledged", {
+                        who: duplicateAck.acknowledged_by_name ?? duplicateAck.acknowledged_by ?? "—",
+                        count: duplicateAck.shown?.length ?? 0,
+                      })}
+                      {(duplicateAck.shown ?? []).map((shown) => {
+                        const id = typeof shown.invoice_id === "string" ? shown.invoice_id : null;
+                        if (id === null) return null;
+                        const reference = typeof shown.reference === "string" ? shown.reference : null;
+                        const date = typeof shown.document_date === "string" ? shown.document_date : null;
+                        return (
+                          <span className="block" key={id}>
+                            {tti("acknowledgedEntry", {
+                              reference: reference ?? tti("acknowledgedNoReference"),
+                              date: date ?? "—",
+                            })}
+                          </span>
+                        );
+                      })}
+                    </span>
+                  )}
                   {tradeInvoice.state !== "posted" ? (
                     <span className="block text-sm text-muted-foreground">{tti("admitted")}</span>
                   ) : (
