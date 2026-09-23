@@ -271,6 +271,7 @@ test("the vendor-bindings panel offers NO propose or sign control at any rank â€
     await expect(page.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Revoke", exact: true })).toBeVisible();
 
+    await settleForScan(page);
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
     expect(result.violations, `/settings/vendor-bindings as ${email}`).toEqual([]);
     await page.context().clearCookies();

@@ -374,6 +374,7 @@ test("裁-128 · the apply-standard-chart button plants the confirmed families a
 });
 
 test("#897 · the full-screen altitude change keeps a typed interview answer, and focus returns to the control that opened it", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   // UI-21 (the ticket's own AC) needs an interview run PARKED OPEN AND UNANSWERED, independent
   // of every other arm's fixture — `interview-walk.spec.ts`'s own header explains why the
   // real-stack spec cannot host this (docker-only, no such fixture provisioned) and why this

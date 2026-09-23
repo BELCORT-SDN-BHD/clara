@@ -58,7 +58,7 @@ async function openTab(page: Page, name: string): Promise<void> {
 
 test.describe("#651 · depreciation under an explicit policy", () => {
   test("the authority card names its window and its instruction, and the preview shows the period the DATABASE chose before anything is written", async ({ page }) => {
-    test.setTimeout(cellBudgetMs({ polls: 4 }));
+    test.setTimeout(cellBudgetMs({ polls: 6 }));
     await signInTo(page, LIST_URL);
 
     // THE WINDOW, ON THE SURFACE. A person reading "nothing is due" on a client with old

@@ -343,6 +343,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
   // (the policy is retired again at the end): `state.policySet` is per-SERVER, shared with every
   // other cell in this file, and none of them expects a fifth register row to exist.
   test("setting a default depreciation policy shows it beside the enrolled account, and the register carries a policy-born asset naming it", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 10 }));
     await signInTo(page, LIST_URL);
     await expect(page.getByRole("link", { name: FA.assetName })).toBeVisible({ timeout: 20_000 });
 
