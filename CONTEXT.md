@@ -761,6 +761,21 @@ form that no lane applies; anything a caller can extend without a new named rule
 The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it derives none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
 
+**Payroll run fact state**:
+What Clara established from reading a payroll summary: per run-level question — the month, and the
+totals for gross pay, employee and employer EPF, SOCSO and EIS, PCB and any HRDF levy, and net pay —
+whether the figure is ESTABLISHED (both readings of the page agree on what it prints, and where the
+page also prints employee rows their column sum agrees with it), DISAGREED (the two readings differ,
+the printed total contradicts the row sum, a row fails its own gross-minus-deductions identity, or
+the rendering is not a figure at all) or MISSING (the page does not print it), and why. Every
+arithmetic result in it is the database evaluator's, computed from quoted renderings; the model
+quotes and never sums. A figure the page does not print is reported as not printed — it is stored as
+a fact carrying no rendering and no amount, so a person can see that the page was silent rather than
+read a blank as a zero.
+_Avoid_: A contribution rate or threshold applied by the product; a total the model added up; a
+blank filled with zero; an employee-level figure kept after the read (the per-employee quotes exist
+only so the evaluator can sum and cross-check them, and are discarded in the same transaction).
+
 **Fixed asset acquisition**:
 The moment a client takes an asset onto its books: one approved journal entry whose debit lands on
 an enrolled fixed-asset cost account, and — in the SAME transaction, on whichever lane posted it —

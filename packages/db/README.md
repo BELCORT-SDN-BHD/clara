@@ -4697,3 +4697,99 @@ override census equal to v1's row for row; S6 drives `clara.list_coa_templates()
 firm session and shows exactly ONE published `my_sme_starter` row — version 2, 146 accounts — with
 v1 retired, unmoved at 42/142 and still carrying 0150's own content hash. Each carries its own
 vacuity control (a rolled-back mutation of the exact fact under test).
+
+## #945 — a payroll summary is read the way an invoice is read (0296)
+
+`0296_payroll_summary_typed_facts.sql` is the READING half of #926's owner ruling (2026-09-18,
+option G: "a payroll summary and a contract go down the same lane as any other accounting
+document, read and posted, not merely stored"). It supersedes two standing exclusions by name —
+mainline #612's Out-of-Scope third bullet and #643's acceptance criterion, both of which excluded
+"first-class payroll-document ingestion" — for the reading half only. Full payroll processing
+(employee masters, statutory rate tables, per-employee durable records) stays out, and this file's
+own walls are what keep it out.
+
+**Deploy order: DATABASE FIRST, RUNTIME SECOND.** The persist door validates the answer envelope
+against `clara._payroll_answers_ok`, so a runtime image answering a WIDER questionnaire than the
+live validator admits would be refused on every persist and the lane would bank nothing. In the
+other order the router's new lane simply queues tasks that the pre-#945 reconciler declines to
+dispatch (an unknown lane is never fallen through to `documentIngest`) and the image that lands
+second drains them. Between the two, the only behavioural change on a payroll summary is that the
+router stops minting `failed/skipped_kind` and mints `queued` instead — no extraction, no region,
+no fact, no event, no journal effect.
+
+**Seven parts.**
+
+1. **The field-path namespace.** `clara._assert_field_path` (0191) gains ONE entry, `payroll`,
+   beside the five other fact families. Its boolean sibling `clara._field_path_conforms` (0290,
+   #857) is byte-untouched, so the `clara.document_regions` CHECK and the persist boundary stay on
+   one grammar.
+2. **The answer vocabulary.** `clara._payroll_answers_ok(jsonb, text)` — its OWN closure, never an
+   arm of `clara._witness_answers_ok`, because a versioned workflow may not couple its shape to
+   another family's frozen files. Eleven run-level questions (the month plus the nine statutory and
+   pay totals, mapping one-to-one onto codes 0150 already seeds: 2100/2110/2120/2130/2140 and
+   6000/6010/6020/6030/6040) and six per-employee cells. Every question is answered or the read is
+   malformed; `not_printed` is a first-class answer, never a zero; an unknown key at any level is
+   refused outright.
+3. **The deterministic evaluator.** `clara.evaluate_payroll_run_state_v1(jsonb, jsonb)`: two channel
+   envelopes in, one fact state out — the column sums over the quoted rows, each row's own
+   gross-minus-deductions identity, the cross-check against a printed totals row where one exists,
+   and the text-vs-vision comparison. IMMUTABLE, table-free and calling no other `clara` function,
+   which is what keeps its `clara.evaluator_versions` closure at ONE member and the freeze
+   meaningful (0140's own recorded reason). The rendering-to-cents rule is inline for exactly that
+   reason: reaching for `clara._normalize_invoice_cents` would have dragged the F-A1 witness freeze
+   in with it. Registered in the same file, `deployed = false` (the flip is a one-way ceremony act),
+   and hand-inserted into `frozen-evaluators.json` so the change blesses ONE body.
+4. **The router.** A `payroll_summary` pdf/image stops falling through to `skipped_kind` and enters
+   `payroll_facts`, an LLM witness-pair lane of its own — never `llm_witness`, which is claimed BY
+   LANE ALONE and whose regime `clara._invoice_fact_state` reads as an invoice corroboration. Five
+   CHECK widenings (lane, lane-to-engine, error code, task binding, extraction engine kind), two
+   registered and routed event types, and five surgical recuts, each produced by reading the live
+   `pg_get_functiondef` and applying named substitutions: `_enqueue_invoice_facts_core`,
+   `enqueue_invoice_facts` (so a payroll refusal is never a phantom invoice failure that wakes
+   autodraft), `_tf_processing_task_update`, `claim_document_processing_task` and
+   `release_held_document_tasks`. The lane holds the SAME typed `witness_extraction` consent the
+   invoice and statement witness lanes hold, with its own named refusal codes.
+5. **The persist door.** `clara.persist_payroll_facts(uuid, jsonb, jsonb, integer)` evaluates the
+   pair BEFORE writing, then banks the two channels' run-level answers plus the fact state and
+   STRIPS the per-employee quotes — no employee name or salary becomes a durable record. The tail
+   proves that strip from the body's own bytes. One `clara.document_regions` row per run-level
+   question, hung off the canonical text row, with the verbatim rendering, the DB's own integer
+   cents where the two channels agreed on a readable figure, and a locator resolved through the
+   estate's one region numbering. AN UNPRINTED ANSWER STILL GETS A ROW, carrying neither: that row
+   IS the reading "the page does not print this".
+6. **The fail verb.** `clara.fail_payroll_facts(uuid, text)`, `fail_witness_facts`' shape with the
+   payroll lane's own admitted code vocabulary and its own lane-true event twin.
+7. **The capability registry, re-derived.** `stored_only` on the payroll summary's typed-facts axis
+   was DERIVED from the router's dead end (its own reason sentence said so), so removing the dead
+   end and re-publishing are one change. Six pairs move — heic/jpeg/pdf/png/tiff/webp, exactly the
+   mimes the router's payroll arm sits on — to `typed_facts = supported`, with the reason sentence
+   rewritten and `limits` gaining #782's two-key shape for the per-employee detail.
+   `business_operation` moves on NO row: #945 is the reading half, #946 the drafting one.
+
+**Rig-meta cohort:** `PAYROLL_0296_COHORT` — the two granted doors, in their own cohort per the
+"wholly present or wholly absent" rule. The evaluator and the vocabulary gate stay UNGRANTED to
+every application role and the tail asserts it. #945 adds no human EXECUTE at all.
+
+**Redo (#957).** Every recut body is `create or replace`, every constraint is dropped-if-exists
+before it is added, every insert is `on conflict do nothing`, and the registry raise is a
+SET-TO-LITERAL (`registry_version = 5 where registry_version <> 5`) rather than 0245's `+ 1`,
+because a `+ 1` re-run would carry the registry past the version this file publishes. Every prestate
+pin is BIMODAL: the pre-image sha OR a body already carrying this file's own marker. THE ONE THING A
+REDO CANNOT REPLAY is the evaluator's freeze registration — `clara.evaluator_versions` is historical
+and `clara.evaluator_version_members` is append-only, which is the point of a freeze — so that block
+INSERTS when absent and, when present, RE-DERIVES the closure hash and refuses by name if it moved.
+A redo after an edit to the evaluator body therefore fails loudly, and its only lawful repair is a
+`_v2`.
+
+**Cells** (`tests/payroll-summary-facts.test.mjs`, gated on
+`tests/payroll-summary-facts-preintegration-gate.mjs`): S1 the namespace and the still-closed
+roster; S2 the vocabulary gate (admitted shape, `not_printed`, every missing question, an unknown
+key at three levels, an incomplete row, the channel receipt, a blank rendering, zero rows, a
+duplicated row number); S3 the evaluator against a worked example whose arithmetic is done by hand
+in the file — a payslip with a printed totals row, one without, one whose row does not balance, one
+whose printed total contradicts the row sum, one whose channels disagree, one with an unprinted
+HRDF line, one printed unreadably, and the single-member closure proof; S4 the router (the lane, the
+idempotent re-fire, the consent gate, and every other kind's route unchanged); S5 the persist door
+(the eleven regions including the not-printed one, the pair's own engine kinds, the replay, the
+proof that no per-employee rendering reaches durable storage, and the four structural refusals);
+S6 the capability read and the whole-registry republication.
