@@ -122,9 +122,13 @@ async function renameIntoPlace(from, to) {
  * corner: `intake.mjs`'s `finalizeDocumentIntake` writes the full transport sidecar for the task
  * `clara.finalize_document_intake` just minted, while `reconciler-documents.mjs`'s
  * `documentTaskIndex` merges EVERY `clara.document_processing_tasks` row onto its own sidecar on
- * every sweep — and that row is committed before the intake path's own write runs. MEASURED on the
- * rig at 300 rounds of the two shapes: 6 ENOENT rejections and 116 unparseable sidecars; CI job
- * 107339673336 is the same defect in the wild (#1043).
+ * every sweep — and that row is committed before the intake path's own write runs.
+ *
+ * MEASURED AT 300 ROUNDS OF THE TWO SHAPES, and the RUNNER's platform is the bad one: on Linux
+ * (WSL, the shape CI runs) 286 of 300 rounds threw ENOENT and 271 left an unparseable sidecar,
+ * because two writes on a fast filesystem land in the same millisecond nearly every time; on this
+ * Windows rig, 6 and 116. After this change, 0 and 0 on both. CI job 107339673336 is the same
+ * defect in the wild (#1043).
  *
  * `randomUUID()` is the same per-call uniqueness `intake.mjs`'s `taskTempPath` already uses for the
  * spool's other temp file, so the two temp shapes agree. The pid stays because it is what tells a

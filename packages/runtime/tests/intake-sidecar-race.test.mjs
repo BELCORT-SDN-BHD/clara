@@ -202,9 +202,12 @@ test(`p966.race: ${ATTEMPTS} sidecar writes against concurrent belt-shaped sweep
 // inside `finalizeDocumentIntake`, and `lib/reconciler-documents.mjs:267` merges every
 // `clara.document_processing_tasks` row onto its own sidecar on every sweep — and the DB row exists
 // from the moment `clara.finalize_document_intake` commits, which is BEFORE intake.mjs:439 runs.
-// Measured on this rig against the pre-fix code, 300 rounds of the shape below: 6 ENOENT rejections
-// and 116 unparseable sidecars. CI job 107339673336 is the same defect in the wild — the #633
-// admission e2e's very first upload, 1.8 s after the world booted, failed
+//
+// MEASURED AGAINST THE PRE-FIX CODE AT 300 ROUNDS OF THE SHAPE BELOW, and THE RUNNER'S PLATFORM IS
+// THE BAD ONE: on Linux (WSL, the shape CI runs) 286 of 300 rounds threw ENOENT and 271 left an
+// unparseable sidecar; on this Windows rig, 6 and 116. So 200 rounds is a wide margin on the host
+// that matters, and not a thin one here either. CI job 107339673336 is the same defect in the wild
+// — the #633 admission e2e's very first upload, 1.8 s after the world booted, failed
 // `ENOENT ... rename '.../task-c6245da9-….json.7113.1790191021685.tmp'`.
 //
 // THE PROPERTY THIS CELL PINS is the one `atomicJson`'s name claims: a reader of a sidecar sees a
