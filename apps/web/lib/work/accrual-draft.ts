@@ -243,34 +243,10 @@ export function validateAccrualDraft(
   if (t(draft.purpose) === "") issues.push({ field: "purpose", code: "purposeRequired" });
   if (t(draft.authorityWorkId) === "") issues.push({ field: "authorityWorkId", code: "authorityRequired" });
 
-  if (t(draft.expenseAccountCode) === "") {
-    issues.push({ field: "expenseAccountCode", code: "expenseAccountRequired" });
-  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.expenseAccountCode))) {
-    issues.push({ field: "expenseAccountCode", code: "accountUnknown" });
-  }
-  if (t(draft.liabilityAccountCode) === "") {
-    issues.push({ field: "liabilityAccountCode", code: "liabilityAccountRequired" });
-  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.liabilityAccountCode))) {
-    issues.push({ field: "liabilityAccountCode", code: "accountUnknown" });
-  }
-  if (t(draft.expenseAccountCode) !== "" && t(draft.expenseAccountCode) === t(draft.liabilityAccountCode)) {
-    issues.push({ field: "liabilityAccountCode", code: "accountsNotDistinct" });
-  }
-
-  if (!Number.isSafeInteger(draft.amountCents) || draft.amountCents <= 0) {
-    issues.push({ field: "amountCents", code: "amountRequired" });
-  }
-
-  // THE TERM. Both halves, and its own code rather than a generic "required", because the
-  // preparer's next move differs: they have to go and find out, not fix a typo.
-  if (t(draft.servicePeriodStart) === "") issues.push({ field: "servicePeriodStart", code: "silentTerm" });
-  if (t(draft.servicePeriodEnd) === "") issues.push({ field: "servicePeriodEnd", code: "silentTerm" });
-  if (t(draft.servicePeriodStart) !== "" && t(draft.servicePeriodEnd) !== ""
-      && draft.servicePeriodEnd < draft.servicePeriodStart) {
-    issues.push({ field: "servicePeriodEnd", code: "servicePeriodOrder" });
-  }
-
-  if (t(draft.instruction) === "") issues.push({ field: "instruction", code: "instructionRequired" });
+  // THE FIVE PARTICULARS BOTH DRAFTS CARRY, in the order their controls appear. Shared with the
+  // #936 correction draft rather than written twice: the codes, the fields and the order are one
+  // rule each, and a rule with two owners is one that gets changed in one place.
+  issues.push(...validateAccrualParticulars(draft, knownAccounts));
 
   if (t(draft.effectiveFrom) === "") issues.push({ field: "effectiveFrom", code: "effectiveFromRequired" });
   // THE AUTHORITY ENDS, AND IT ENDS INSIDE THE TERM IT ACCRUES FOR (0222's SIXTH MEASUREMENT,
@@ -335,6 +311,61 @@ export function validateAccrualDraft(
 
 export function firstInvalidAccrualField(issues: readonly AccrualIssue[]): AccrualFieldId | null {
   return issues[0]?.field ?? null;
+}
+
+/**
+ * THE FIVE PARTICULARS EVERY ACCRUAL DRAFT STATES — both account legs, the amount, the term and
+ * the instruction — validated once, in the order their controls appear.
+ *
+ * WHY IT IS SHARED (standards review L06-STD-1). `validateAccrualDraft` (create) and
+ * `validateAccrualCorrectionDraft` (#936) each carried a byte-identical copy of these checks: the
+ * same five fields, the same issue codes, the same order. That is Fowler's Duplicated Code with
+ * the sharpest edge it has — the two copies are a rule of the ACCOUNTING domain, so a later change
+ * to one (a currency-precision rule, a reworded `accountsNotDistinct`) silently makes the create
+ * form and the correction form disagree about what a valid accrual is.
+ *
+ * The parameter is `AccrualParticularsSource`, the same `Pick` `toAccrualParticulars` takes, so
+ * either draft shape satisfies it structurally. Each caller appends its OWN issues around this
+ * call: create adds purpose, authority and the schedule window; a correction adds the brackets of
+ * the window it may not move.
+ */
+export function validateAccrualParticulars(
+  draft: AccrualParticularsSource,
+  knownAccounts: ReadonlySet<string> | null = null,
+): AccrualIssue[] {
+  const issues: AccrualIssue[] = [];
+  const t = (v: string) => v.trim();
+
+  if (t(draft.expenseAccountCode) === "") {
+    issues.push({ field: "expenseAccountCode", code: "expenseAccountRequired" });
+  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.expenseAccountCode))) {
+    issues.push({ field: "expenseAccountCode", code: "accountUnknown" });
+  }
+  if (t(draft.liabilityAccountCode) === "") {
+    issues.push({ field: "liabilityAccountCode", code: "liabilityAccountRequired" });
+  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.liabilityAccountCode))) {
+    issues.push({ field: "liabilityAccountCode", code: "accountUnknown" });
+  }
+  if (t(draft.expenseAccountCode) !== "" && t(draft.expenseAccountCode) === t(draft.liabilityAccountCode)) {
+    issues.push({ field: "liabilityAccountCode", code: "accountsNotDistinct" });
+  }
+
+  if (!Number.isSafeInteger(draft.amountCents) || draft.amountCents <= 0) {
+    issues.push({ field: "amountCents", code: "amountRequired" });
+  }
+
+  // THE TERM. Both halves, and its own code rather than a generic "required", because the
+  // preparer's next move differs: they have to go and find out, not fix a typo.
+  if (t(draft.servicePeriodStart) === "") issues.push({ field: "servicePeriodStart", code: "silentTerm" });
+  if (t(draft.servicePeriodEnd) === "") issues.push({ field: "servicePeriodEnd", code: "silentTerm" });
+  if (t(draft.servicePeriodStart) !== "" && t(draft.servicePeriodEnd) !== ""
+      && draft.servicePeriodEnd < draft.servicePeriodStart) {
+    issues.push({ field: "servicePeriodEnd", code: "servicePeriodOrder" });
+  }
+
+  if (t(draft.instruction) === "") issues.push({ field: "instruction", code: "instructionRequired" });
+
+  return issues;
 }
 
 /** The `id` attribute of one control, so a label, its error and a focus call all name one element. */
@@ -408,44 +439,18 @@ export type AccrualCorrectionDraft = AccrualParticularsSource;
 export type AccrualCorrectionWindow = { effectiveFrom: string; effectiveTo: string };
 
 /**
- * Every refusal a correction can raise BEFORE a round trip, mirroring the relevant subset of
- * `validateAccrualDraft` — the amount, both legs, the term and the instruction. There is no
- * purpose, authority or schedule issue to raise: this draft carries none of those controls.
+ * Every refusal a correction can raise BEFORE a round trip: the five shared particulars, and then
+ * the one rule that is this draft's alone — the fixed authority window must stay bracketed by the
+ * term. There is no purpose, authority or schedule issue to raise: this draft carries none of
+ * those controls.
  */
 export function validateAccrualCorrectionDraft(
   draft: AccrualCorrectionDraft,
   window: AccrualCorrectionWindow,
   knownAccounts: ReadonlySet<string> | null = null,
 ): AccrualIssue[] {
-  const issues: AccrualIssue[] = [];
   const t = (v: string) => v.trim();
-
-  if (t(draft.expenseAccountCode) === "") {
-    issues.push({ field: "expenseAccountCode", code: "expenseAccountRequired" });
-  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.expenseAccountCode))) {
-    issues.push({ field: "expenseAccountCode", code: "accountUnknown" });
-  }
-  if (t(draft.liabilityAccountCode) === "") {
-    issues.push({ field: "liabilityAccountCode", code: "liabilityAccountRequired" });
-  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.liabilityAccountCode))) {
-    issues.push({ field: "liabilityAccountCode", code: "accountUnknown" });
-  }
-  if (t(draft.expenseAccountCode) !== "" && t(draft.expenseAccountCode) === t(draft.liabilityAccountCode)) {
-    issues.push({ field: "liabilityAccountCode", code: "accountsNotDistinct" });
-  }
-
-  if (!Number.isSafeInteger(draft.amountCents) || draft.amountCents <= 0) {
-    issues.push({ field: "amountCents", code: "amountRequired" });
-  }
-
-  if (t(draft.servicePeriodStart) === "") issues.push({ field: "servicePeriodStart", code: "silentTerm" });
-  if (t(draft.servicePeriodEnd) === "") issues.push({ field: "servicePeriodEnd", code: "silentTerm" });
-  if (t(draft.servicePeriodStart) !== "" && t(draft.servicePeriodEnd) !== ""
-      && draft.servicePeriodEnd < draft.servicePeriodStart) {
-    issues.push({ field: "servicePeriodEnd", code: "servicePeriodOrder" });
-  }
-
-  if (t(draft.instruction) === "") issues.push({ field: "instruction", code: "instructionRequired" });
+  const issues: AccrualIssue[] = validateAccrualParticulars(draft, knownAccounts);
 
   // THE FIXED AUTHORITY WINDOW BRACKETS THE STATED TERM (0222's SIXTH MEASUREMENT, the same wall
   // `validateAccrualDraft` mirrors for CREATE) — but the MISTAKE, if any, is in the term a

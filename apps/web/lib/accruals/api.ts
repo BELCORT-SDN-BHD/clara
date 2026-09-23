@@ -212,6 +212,33 @@ export async function loadAccruals(
   return answer?.accruals ?? [];
 }
 
+/**
+ * #936 — THE ACCRUAL AN ACCOUNTING PLAN'S FIGURES ARE STATED ON, or null when the plan is not
+ * accrual-backed. Pure; it selects over rows `loadAccruals` already read.
+ *
+ * WHY A SELECTOR AND NOT A FIELD ON THE PLAN READ. `clara.get_accounting_plan` does not say
+ * whether a plan carries an accrual detail row, and `kind` cannot stand in for it: an accrual's
+ * plan is a `reversing_journal`, and so is an ordinary reversing journal nobody configured from an
+ * accrual (MEASURED on the lane rig: 115 reversing plans with an accrual and 3 without). The
+ * honest discriminator is `clara.accrual_adjustments.plan_id`, which `list_accrual_adjustments`
+ * already returns to this client's own surfaces.
+ *
+ * THE LIVE ROW IS THE HIGHEST REVISION. A corrected accrual leaves BOTH rows on the relation —
+ * that is the whole of #936's lineage — and `uq_accrual_adjustments_plan_revision (plan_id,
+ * revision)` makes the newest revision the one the plan is running under.
+ */
+export function liveAccrualForPlan(
+  rows: readonly AccrualListRow[],
+  planId: string,
+): AccrualListRow | null {
+  let live: AccrualListRow | null = null;
+  for (const row of rows) {
+    if (row.plan_id !== planId) continue;
+    if (live === null || row.revision > live.revision) live = row;
+  }
+  return live;
+}
+
 export async function loadAccrual(accrualId: string, o: Opts = {}): Promise<AccrualDetail | null> {
   if (!isUuidShape(accrualId)) return null;
   return callDoor<AccrualDetail | null>("get_accrual_adjustment", { p_accrual: accrualId }, opts(o));

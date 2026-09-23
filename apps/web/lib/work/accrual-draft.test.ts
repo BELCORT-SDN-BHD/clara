@@ -457,3 +457,41 @@ test("652.wire: the optional particulars appear only when they were given, and a
   assert.equal(full.memo, "July rent");
   assert.equal(full.source_document_id, "d-1");
 });
+
+// ==============================================================================================
+// L06-STD-1 — THE FIVE PARTICULARS ARE ONE RULE WITH ONE OWNER.
+//
+// The two validators each carried a byte-identical copy of the account-leg, amount, term and
+// instruction checks, so a change to any of them had to be made twice and re-verified twice. They
+// now share `validateAccrualParticulars`. This cell pins the property that made the duplication
+// worth removing: over the SAME particulars, the correction validator's answer IS the create
+// validator's answer with the create-only issues removed — so the two forms can never come to
+// disagree about what a valid accrual states.
+// ==============================================================================================
+
+test("936.correction: the shared particulars answer identically on both validators", () => {
+  const CREATE_ONLY = new Set(["purpose", "authorityWorkId", "effectiveFrom", "effectiveTo",
+    "frequency", "dayRule", "dayOfMonth"]);
+  const cases: Array<Partial<AccrualCorrectionDraft>> = [
+    {},
+    { expenseAccountCode: "" },
+    { liabilityAccountCode: "" },
+    { expenseAccountCode: "9999" },
+    { liabilityAccountCode: "9999" },
+    { liabilityAccountCode: "6100" },
+    { amountCents: 0 },
+    { amountCents: 1.5 },
+    { servicePeriodStart: "" },
+    { servicePeriodEnd: "" },
+    { servicePeriodEnd: "2026-06-01" },
+    { instruction: "" },
+  ];
+  for (const over of cases) {
+    const shared = validateAccrualDraft(goodDraft(over as Partial<AccrualDraft>), KNOWN)
+      .filter((i) => !CREATE_ONLY.has(i.field));
+    const correction = validateAccrualCorrectionDraft(goodCorrectionDraft(over), CORRECTION_WINDOW, KNOWN)
+      .filter((i) => i.code !== "windowBeforeTerm" && i.code !== "windowAfterTerm");
+    assert.deepEqual(correction, shared,
+      `the two validators disagree about ${JSON.stringify(over)}`);
+  }
+});
