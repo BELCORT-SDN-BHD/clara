@@ -1870,9 +1870,15 @@ with a one-click date-ordered suggestion; the stored record is always the confir
 how an ordering can be offered on screen without becoming the silent FIFO WD-R10 forbids.
 
 **The draft.** `ClaimDraft.advanceId` is gone; `ClaimDraft.advanceAllocations` is the whole list
-(`lib/work/staff-expense-claim.ts`). `claimAllocations(draft)` is the ONE reader: a list of one
-returns that advance with the WHOLE claim on it, derived rather than typed, which is why the amount
-column only appears once there is a second line. `allocationFieldId(i, key)` is the other half of
+(`lib/work/staff-expense-claim.ts`). `claimAllocations(draft)` is the ONE reader: an UNAPPORTIONED
+list of one returns that advance with the WHOLE claim on it, derived rather than typed, which is
+why the amount column is hidden on the untouched chooser. `allocationsAreApportioned(rows)` is the
+predicate both that reader and the form's `amountLabel` consult, and it is why DELETING a line of a
+confirmed split does not restate the survivor: a one-line list whose row already carries a figure
+KEEPS that figure, the amount column stays on screen, and a claim it no longer covers is a list
+that does not add up (`allocationsNotExact`), exactly as a suggestion the advances cannot cover
+already was. Handing the survivor the whole claim would have sent a number nobody confirmed,
+caught only when the estate's cap happened to refuse it. `allocationFieldId(i, key)` is the other half of
 the contract — index 0's advance keeps the control id `advanceId`, so #930's label, error text,
 focus and the server path `claim.advance_id` all still land on it.
 

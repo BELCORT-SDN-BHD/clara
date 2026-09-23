@@ -161,6 +161,19 @@ function attrOf(n: Stub, name: string): string | null {
   return (n as { getAttribute?: (k: string) => string | null }).getAttribute?.(name) ?? null;
 }
 
+/** EVERY node matching `predicate`, document order — `RenderHarness.find` answers the first only,
+ *  and a cell about the SECOND row of a repeated control needs the rest (the harness's own header
+ *  says to walk `container` directly for what `find` does not cover). */
+function findAll(node: Stub, predicate: (n: Stub) => boolean): Stub[] {
+  const out: Stub[] = [];
+  const visit = (n: Stub) => {
+    if (predicate(n)) out.push(n);
+    for (const child of ((n as { childNodes?: Stub[] }).childNodes ?? [])) visit(child);
+  };
+  visit(node);
+  return out;
+}
+
 /** Every `<option>` under a `<select>` stub, in document order. */
 function optionsOf(select: Stub): Stub[] {
   return ((select as { childNodes?: Stub[] }).childNodes ?? []).filter((n) => n.tagName === "OPTION");
@@ -699,6 +712,62 @@ test("ticket 931 a split that does not add up to the claim is refused beside the
     assert.equal(calls, 0, "nothing is sent while the split does not settle the claim");
     assert.match(h.text(), /add up to the claim/i,
       "…and the reason sits beside the list the preparer has to change");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 931 deleting a line of a CONFIRMED split never restates the surviving figure behind the preparer", async () => {
+  // THE SAME claim and the SAME three advances: the suggestion is January 400.00 + February 80.00
+  // on a 480.00 claim. The preparer then REMOVES the February line with the editor's own row
+  // button — the one act that used to hand January the whole 480.00 with no amount on screen.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => THREE_OPEN(),
+    submit: async (_a, input) => {
+      sent.push(input);
+      return { kind: "accepted", workId: "w", taskId: null, logicalOpId: null, status: "queued", replayed: false, claimId: "c" };
+    },
+  }));
+  try {
+    await h.settle();
+    const suggest = h.find((n) => attrOf(n, "data-testid") === "advance-suggest");
+    assert.ok(suggest);
+    await h.fireEvent(suggest, "click");
+    await h.settle();
+
+    const removeLabel = messages.StaffAdvances.allocationsEditor.removeAllocation;
+    const removes = findAll(h.container, (n) => attrOf(n, "aria-label") === removeLabel);
+    assert.equal(removes.length, 2, "the suggestion put TWO lines on screen, each with its own remove");
+    await h.fireEvent(removes[1]!, "click");
+    await h.settle();
+
+    // THE FIGURE IS STILL ON SCREEN, and it is still January's own 400.00 — the amount column does
+    // not vanish with the second line, because the list has been apportioned.
+    assert.match(h.text(), new RegExp(messages.StaffExpenseClaim.advanceAllocationAmount),
+      "the amount column stays once the list carries confirmed figures");
+    assert.ok(h.find((n) => attrOf(n, "id") === F("advanceAllocations.0.amountCents")),
+      "…and the surviving line still has its own amount control");
+
+    // NOTHING IS SENT, because 400.00 no longer settles a 480.00 claim — the shortfall is stated
+    // rather than quietly absorbed.
+    await submitForm(h);
+    assert.equal(sent.length, 0, "a list that no longer adds up sends nothing");
+    assert.match(h.text(), /add up to the claim/i,
+      "…and says so beside the list, where the preparer can act on it");
+
+    // THE PREPARER'S OWN RESTATEMENT settles it, and it crosses as the single-advance shape.
+    await h.fireEvent(byId(h, F("advanceAllocations.0.amountCents")), "change",
+      (n) => setFieldValue(n, "480.00"));
+    await submitForm(h);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.claim.advanceId, JAN_ADVANCE);
+    assert.equal(sent[0]!.claim.advanceAllocations, undefined,
+      "one advance carrying the whole claim crosses exactly as it did before ticket 931");
   } finally {
     await h.unmount();
   }

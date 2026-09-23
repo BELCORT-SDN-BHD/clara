@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 import {
   buildWorkWorld, endPool, printLaneNotes, printSkipCount,
   claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
-  assertPair, rootQuery, opk,
+  assertPair, rootQuery, opk, detailOf, withClientRungHeld, awaitRungWaiters, reverseEntry,
   entryCount, committedReceiptCount,
   SEC_REASON, SECHART, SETTLEMENT, SEC_DATE, ensureSecChart, enrolAdvanceFor, liveEnrolment,
   claim, admitStaffExpenseClaimWork, getStaffExpenseClaim,
@@ -492,4 +492,289 @@ test("p931.split.conflict re-submitting one intent key with a DIFFERENT split is
       ],
     }),
   }), "split.conflict");
+});
+
+// ===========================================================================================
+// 6 · p931.race — TWO admissions of ONE intent key, both past the payload comparison before
+//     either holds the client rung.
+//
+//     WHY THIS SHAPE IS REACHABLE RATHER THAN THEORETICAL. The claim form mints ONE `intentKey`
+//     when the draft starts and keeps it across reloads
+//     (`apps/web/components/accounting/staff-expense-claim-form.tsx`,
+//     `apps/web/lib/work/staff-expense-claim-draft.ts`), so one draft edited into a different
+//     split and submitted twice — two tabs, or a retry while the first request is still in
+//     flight — is exactly two concurrent admissions under one key with two different confirmed
+//     lists.
+//
+//     WHY THE DOOR CANNOT ANSWER FROM STEP 4 ALONE. Step 4's canonical comparison is the only
+//     place a changed split is caught, and it runs BEFORE `pg_advisory_xact_lock`, so it cannot
+//     see a sibling that has not committed. `clara._admit_accounting_work_core` then converges on
+//     the intent key and compares the JOURNAL BASIS DIGEST — and #931's own second measurement
+//     groups allocations on ONE account into ONE credit leg, so a single-advance claim and a
+//     split of the same total on that account derive the SAME digest. The second caller is
+//     therefore told `replayed` and arrives at the claim insert holding a DIFFERENT confirmed
+//     list from the one already stored.
+// ===========================================================================================
+
+test("p931.race.graft two concurrent admissions under ONE key with DIFFERENT lists: the loser is a typed conflict, and the stored list still adds up to its claim", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("allocrace");
+  // THE WORKED EXAMPLE. Two advances to Farah on her one dedicated account:
+  //   A = 60,500 sen issued 2026-01-10 — enough to carry the whole claim on its own,
+  //   B = 30,000 sen issued 2026-02-01.
+  // ONE 60,500 claim is submitted TWICE under ONE key: once naming A alone, once split
+  // A 40,000 / B 20,500. Both derive the SAME journal (one 60,500 credit leg on the one
+  // account), so the core answers the second caller `replayed`; the two CONFIRMED LISTS are
+  // different, and the door has to say so rather than merge them.
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 60500, issueDate: "2026-01-10" })).advance;
+  const advB = (await seedAdvance(ALICE(), BOB(), { client, cents: 30000, issueDate: "2026-02-01" })).advance;
+
+  const single = claim({
+    settlement: SETTLEMENT.advance, advanceAccountCode: SECHART.advance,
+    advanceId: advA.id, payableAccountCode: null,
+  });
+  const split = allocClaim({
+    allocations: [
+      { advance_id: advA.id, amount_cents: 40000 },
+      { advance_id: advB.id, amount_cents: 20500 },
+    ],
+  });
+  const key = `alloc-race-${opk("k")}`;
+  const settled = await withClientRungHeld(client, async (release) => {
+    const race = Promise.allSettled([
+      admitStaffExpenseClaimWork({ client, author: ALICE(), claim: single, intentKey: key }),
+      admitStaffExpenseClaimWork({ client, author: ALICE(), claim: split, intentKey: key }),
+    ]);
+    await awaitRungWaiters(2);
+    await release();
+    return race;
+  });
+
+  const won = settled.filter((r) => r.status === "fulfilled");
+  const lost = settled.filter((r) => r.status === "rejected");
+  assert.equal(won.length, 1,
+    `race.graft: exactly ONE of the two lists may be the confirmed record (got ${won.length}); `
+    + `outcomes ${JSON.stringify(settled.map((r) => (r.status === "fulfilled" ? "ok" : (r.reason?.code ?? "err"))))}`);
+  const err = lost[0].reason;
+  assert.equal(err.code, "CLR10",
+    `race.graft: the loser is a TYPED refusal, not a raw ${err.code} — "${err.message}"`);
+  assert.equal(detailOf(err)?.reason, SEC_REASON.intentConflict,
+    `race.graft: …and it says the key already carries a different claim, got ${JSON.stringify(detailOf(err))}`);
+  assert.equal(detailOf(err)?.field, "claim",
+    "race.graft: …addressed at the claim, the same field step 4's own comparison uses");
+
+  // THE DATA IS THE POINT. One claim, and the confirmed list stored against it adds up to it to
+  // the sen — migration 0301's own tail T.3b arithmetic, asked here of the row this race wrote.
+  assert.equal(await claimCount(client), 1, "race.graft: ONE claim was admitted, not one and a half");
+  const stored = await getStaffExpenseClaim(ALICE(), won[0].value.claim_id);
+  assert.equal(
+    stored.advance_allocations.reduce((n, x) => n + Number(x.amount_cents), 0),
+    Number(stored.amount_cents),
+    `race.graft: the confirmed list adds up to its claim, got `
+    + `${JSON.stringify(stored.advance_allocations)} against ${stored.amount_cents}`,
+  );
+});
+
+test("p931.race.ordinal the same race with a DIFFERENT head is refused by NAME, never as a raw 23505 on the list's ordinal", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("allocraceord");
+  // THE SAME RACE, ONE FIGURE MOVED. Here the single-advance spelling names the SECOND advance:
+  //   A = 40,000 sen issued 2026-01-10, B = 60,500 sen issued 2026-02-01.
+  //   caller 1: the whole 60,500 against B alone.   caller 2: A 40,000 / B 20,500.
+  // Both still derive ONE 60,500 credit leg, so the core still answers `replayed`; but now the
+  // two lists disagree about WHICH advance is FIRST, so the second payload's head collides with
+  // the stored head on `uq_sec_allocations_claim_ordinal` — an index the allocation insert's
+  // `on conflict (claim_id, advance_id)` arbiter does not cover. A raw 23505 is an error
+  // `workErrorResponse` does not classify, so the route would answer 500 {error:"internal"} and
+  // the browser would say "unavailable" where the preparer needs to be told their split changed.
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advB = (await seedAdvance(ALICE(), BOB(), { client, cents: 60500, issueDate: "2026-02-01" })).advance;
+
+  const single = claim({
+    settlement: SETTLEMENT.advance, advanceAccountCode: SECHART.advance,
+    advanceId: advB.id, payableAccountCode: null,
+  });
+  const split = allocClaim({
+    allocations: [
+      { advance_id: advA.id, amount_cents: 40000 },
+      { advance_id: advB.id, amount_cents: 20500 },
+    ],
+  });
+  const key = `alloc-race-ord-${opk("k")}`;
+  const settled = await withClientRungHeld(client, async (release) => {
+    const race = Promise.allSettled([
+      admitStaffExpenseClaimWork({ client, author: ALICE(), claim: single, intentKey: key }),
+      admitStaffExpenseClaimWork({ client, author: ALICE(), claim: split, intentKey: key }),
+    ]);
+    await awaitRungWaiters(2);
+    await release();
+    return race;
+  });
+
+  const won = settled.filter((r) => r.status === "fulfilled");
+  const lost = settled.filter((r) => r.status === "rejected");
+  assert.equal(won.length, 1,
+    `race.ordinal: exactly ONE of the two lists may be the confirmed record (got ${won.length})`);
+  const err = lost[0].reason;
+  assert.equal(err.code, "CLR10",
+    `race.ordinal: the loser is a TYPED refusal, not a raw ${err.code} — "${err.message}"`);
+  assert.equal(detailOf(err)?.reason, SEC_REASON.intentConflict,
+    `race.ordinal: …and it names WHAT happened, got ${JSON.stringify(detailOf(err))}`);
+
+  // The confirmed list is WHOLE and it is ONE payload's: its head is the claim row's own advance
+  // (tail T.3c's arithmetic) and it adds up to the claim (T.3b's).
+  const row = await claimRow(won[0].value.claim_id);
+  const stored = await getStaffExpenseClaim(ALICE(), won[0].value.claim_id);
+  assert.equal(stored.advance_allocations[0].advance_id, row.advance_id,
+    "race.ordinal: the stored head is the claim row's own advance, not the loser's");
+  assert.equal(
+    stored.advance_allocations.reduce((n, x) => n + Number(x.amount_cents), 0),
+    Number(stored.amount_cents),
+    `race.ordinal: the confirmed list adds up to its claim, got ${JSON.stringify(stored.advance_allocations)}`,
+  );
+});
+
+// ===========================================================================================
+// 7 · p931.replay.birth — AC3's second half, DRIVEN.
+//
+//     `t_je_adv_claim_application_birth` is a DEFERRABLE constraint trigger on
+//     `clara.journal_entries`, `after insert or update ... when (new.status = 'approved')`. The
+//     public act that re-enters it on an entry already approved is the REVERSAL, which stamps
+//     `reversed_by` on that very row: an UPDATE whose `new.status` is still `approved`. So a
+//     posted multi-advance claim that is then reversed runs the per-allocation registration loop
+//     a SECOND time over the same allocations — which is the only path on which "registers every
+//     allocation idempotently" is a property of behaviour rather than of the unique index alone.
+// ===========================================================================================
+
+test("p931.replay.birth re-entering the post-approve registration for a TWO-allocation claim registers nothing twice", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("allocidem");
+  // THE WORKED EXAMPLE, p931.two's own: A = 40,000 (2026-01-10), B = 30,000 (2026-02-01); the
+  // 60,500 claim takes 40,000 from A and 20,500 from B.
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advB = (await seedAdvance(ALICE(), BOB(), { client, cents: 30000, issueDate: "2026-02-01" })).advance;
+  const a = await armed({
+    client,
+    claim: allocClaim({
+      allocations: [
+        { advance_id: advA.id, amount_cents: 40000 },
+        { advance_id: advB.id, amount_cents: 20500 },
+      ],
+    }),
+  });
+  const out = await post(a);
+  assert.equal(out.posted, true);
+
+  const born = (await applicationsForEntry(out.entry_id)).filter((r) => r.kind === "claim");
+  assert.equal(born.length, 2, "replay.birth: the first pass registered ONE allocation per advance");
+  assert.equal(await advanceOutstanding(advA.id, SEC_DATE.posting), 0);
+  assert.equal(await advanceOutstanding(advB.id, SEC_DATE.posting), 9500);
+
+  // THE SECOND PASS. `reverse_entry` stamps `reversed_by` on the approved entry, so the birth
+  // trigger's WHEN clause is true again and the loop walks BOTH allocations a second time.
+  await reverseEntry(ALICE(), { entry: out.entry_id, reason: "#931: posted in error" });
+
+  const after = (await applicationsForEntry(out.entry_id)).filter((r) => r.kind === "claim");
+  assert.equal(after.length, 2,
+    `replay.birth: the second pass registered NOTHING again — still one 'claim' row per advance, `
+    + `got ${JSON.stringify(after.map((r) => [r.advance_id, String(r.amount_cents)]))}`);
+  assert.deepEqual(
+    after.map((r) => [r.advance_id, String(r.amount_cents), r.application_line_id]).sort(),
+    born.map((r) => [r.advance_id, String(r.amount_cents), r.application_line_id]).sort(),
+    "replay.birth: …and they are the very rows the first pass minted, unchanged",
+  );
+
+  // THE ARITHMETIC IS THE REVERSAL'S ALONE, on BOTH days that matter.
+  //
+  // ON THE CLAIM'S OWN DAY nothing moved at all: the second pass registered no further discharge,
+  // so 0043's outstanding still reads exactly what the FIRST pass left.
+  assert.equal(await advanceOutstanding(advA.id, SEC_DATE.posting), 0,
+    "replay.birth: A's outstanding on the claim's day is untouched by the second pass");
+  assert.equal(await advanceOutstanding(advB.id, SEC_DATE.posting), 9500,
+    "replay.birth: …and so is B's");
+
+  // ON THE REVERSAL'S OWN DAY each advance is whole again, and the unwind is ONE correction per
+  // application rather than one per pass — a second registration would have left a correction with
+  // nothing to correct, or a discharge with no correction at all.
+  const rev = (await rootQuery(
+    "select id, posting_date::text as posting_date from clara.journal_entries where reversal_of = $1",
+    [out.entry_id])).rows[0];
+  assert.ok(rev, "replay.birth: the reversal entry is in the books");
+  const corrections = (await applicationsForEntry(rev.id)).filter((r) => r.kind === "correction");
+  assert.equal(corrections.length, 2,
+    `replay.birth: ONE correction per allocation, got ${corrections.length}`);
+  assert.equal(await advanceOutstanding(advA.id, rev.posting_date), 40000,
+    "replay.birth: as of the reversal's own day A carries its whole 40,000 again");
+  assert.equal(await advanceOutstanding(advB.id, rev.posting_date), 30000,
+    "replay.birth: …and B its whole 30,000");
+});
+
+// ===========================================================================================
+// 8 · p931.claimant.samelabel — WHAT "BELONGS TO THIS CLAIMANT" CAN AND CANNOT TELL APART.
+//
+//     0301's fourth measurement reads ownership in two arms: (a) the advance's own enrolment IS
+//     the claimant's, or (b) the advance's enrolment is another LIVE enrolment of this client
+//     whose `btrim(person_label)` is byte-identical. Arm (b) is the ONLY thing that makes #931's
+//     own listed default — "advances on different enrolled accounts may be discharged together" —
+//     reachable while 0221's D4 stands (the claimant IS an enrolment handle; there is no staff
+//     master).
+//
+//     THE LIMIT, NAMED RATHER THAN HIDDEN. `person_label` is free text: its only wall is
+//     `nullif(btrim(coalesce(p_person_label,'')),'')` inside `clara.enrol_staff_advance_account`,
+//     and `clara.staff_advance_accounts` carries no CHECK on the column. So TWO DIFFERENT PEOPLE
+//     of one client who happen to be labelled identically are ONE person to this rule — even when
+//     the claim itself states a `claimant.identifier` that says otherwise, because the rule never
+//     reads it.
+//
+//     THIS CELL PINS THE ANSWER AS IT STANDS so the owner's ruling has somewhere to land (#931
+//     report, "Flag for review"; adversarial A931-2; spec SPEC-931-B). If the ruling is arm (a)
+//     only, THIS is the cell that flips to a `not_this_claimant` refusal and p931.accounts becomes
+//     unreachable until a staff master lands.
+// ===========================================================================================
+
+test("p931.claimant.samelabel two enrolments of ONE client sharing a person_label are ONE claimant to this wall, whatever the claim's own identifier says", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("alloclabel");
+  // 1190 is enrolled by the rig to "Farah binti Idris". 1191 is enrolled here to a SECOND person
+  // carrying the same written name — a different human, a different attestation, a different
+  // staff number — and the advance on it is HERS, not the claimant's.
+  await enrolAdvanceFor(ALICE(), {
+    client, code: SECHART.advanceFresh, person: "Farah binti Idris",
+  });
+  const enrolOne = await liveEnrolment(client, SECHART.advance);
+  const enrolTwo = await liveEnrolment(client, SECHART.advanceFresh);
+  assert.notEqual(enrolOne, enrolTwo, "samelabel: two distinct enrolment rows");
+
+  const mine = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const hers = (await seedAdvance(ALICE(), BOB(), {
+    client, code: SECHART.advanceFresh, cents: 30000, issueDate: "2026-02-01",
+  })).advance;
+  assert.equal(hers.enrolment_id, enrolTwo, "samelabel: the second advance sits on the OTHER enrolment");
+
+  const a = await armed({
+    client,
+    claim: allocClaim({
+      identifier: "STAFF-0001",
+      allocations: [
+        { advance_id: mine.id, amount_cents: 40000 },
+        { advance_id: hers.id, amount_cents: 20500, account_code: SECHART.advanceFresh },
+      ],
+    }),
+  });
+
+  // PINNED, PENDING THE OWNER'S RULING: admitted. The claim is recorded against the FIRST
+  // enrolment and states an identifier of its own, and neither fact stopped it discharging an
+  // advance issued under the SECOND.
+  const row = await claimRow(a.claim_id);
+  assert.equal(row.claimant_enrolment_id, enrolOne,
+    "samelabel: the claim is the FIRST enrolment's");
+  assert.equal(row.claimant_identifier, "STAFF-0001",
+    "samelabel: …and it carries an identifier the ownership rule never consults");
+  const stored = await getStaffExpenseClaim(ALICE(), a.claim_id);
+  assert.deepEqual(
+    stored.advance_allocations.map((x) => [x.advance_id, Number(x.amount_cents)]),
+    [[mine.id, 40000], [hers.id, 20500]],
+    "samelabel: the confirmed list discharges an advance enrolled to the OTHER row — arm (b), "
+    + "on a byte-equal person_label and nothing else",
+  );
 });

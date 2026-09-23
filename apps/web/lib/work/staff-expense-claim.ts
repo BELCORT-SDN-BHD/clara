@@ -232,16 +232,46 @@ export function claimTotalCents(draft: ClaimDraft): number {
 }
 
 /**
- * THE EFFECTIVE ALLOCATION LIST — what the claim actually discharges, with the one-line case's
- * amount DERIVED from the claim rather than typed.
+ * HAS THIS LIST BEEN APPORTIONED? — true once the preparer has said how the claim is divided, and
+ * that is a property of the ROWS, not of how many there are.
+ *
+ * A LIST OF TWO OR MORE always apportions: every line carries its own share. A LIST OF ONE
+ * apportions only when its row already holds a figure — which happens when a split was suggested
+ * or typed and then taken back to one line, never on the untouched chooser #930 renders (its row
+ * is minted at zero).
+ *
+ * ONE READER for that question, because two surfaces act on it: `claimAllocations` decides whether
+ * the figure is the row's own or the claim's, and the form decides whether the amount column is on
+ * screen. They must never disagree, or a figure is submitted that was never shown.
+ */
+export function allocationsAreApportioned(rows: readonly ClaimAllocationDraft[]): boolean {
+  if (rows.length > 1) return true;
+  const only = rows[0];
+  return only !== undefined && Number.isSafeInteger(only.amountCents) && only.amountCents > 0;
+}
+
+/**
+ * THE EFFECTIVE ALLOCATION LIST — what the claim actually discharges, with the UNAPPORTIONED
+ * one-line case's amount DERIVED from the claim rather than typed.
  *
  * ONE READER, so the wire, the validation and the rendered summary can never disagree about how
  * many sen a line carries.
+ *
+ * WHY AN APPORTIONED ONE-LINE LIST KEEPS ITS OWN FIGURE. Deleting the second line of a confirmed
+ * split leaves ONE line carrying the share that line was confirmed with. Handing it the whole
+ * claim instead would restate a figure the preparer agreed to, silently and with no amount on
+ * screen — and #881's ruling is that the stored record is ALWAYS the confirmed list. What it
+ * leaves is a list that does not add up, which `validateClaimDraft` says out loud, exactly as it
+ * does for a suggestion the claimant's advances cannot cover.
  */
 export function claimAllocations(draft: ClaimDraft): ClaimAllocationDraft[] {
   const rows = draft.advanceAllocations;
   if (rows.length <= 1) {
-    return [{ advanceId: rows[0]?.advanceId.trim() ?? "", amountCents: claimTotalCents(draft) }];
+    const only = rows[0];
+    if (only !== undefined && allocationsAreApportioned(rows)) {
+      return [{ advanceId: only.advanceId.trim(), amountCents: only.amountCents }];
+    }
+    return [{ advanceId: only?.advanceId.trim() ?? "", amountCents: claimTotalCents(draft) }];
   }
   return rows.map((r) => ({
     advanceId: r.advanceId.trim(),
@@ -439,9 +469,11 @@ export function validateClaimDraft(
         issues.push({ field: allocationFieldId(i, "amountCents"), code: "amountRequired" });
       }
     });
-    if (rows.length > 1
-        && rows.reduce((n, r) => n + (Number.isSafeInteger(r.amountCents) ? r.amountCents : 0), 0)
-           !== claimTotalCents(draft)) {
+    // …AND IT ADDS UP TO THE CLAIM, whatever its length. An UNAPPORTIONED one-line list is the
+    // whole claim by construction, so this can only bite a list the preparer apportioned — a
+    // split that is short, or a split taken back to one line that no longer covers the claim.
+    if (rows.reduce((n, r) => n + (Number.isSafeInteger(r.amountCents) ? r.amountCents : 0), 0)
+        !== claimTotalCents(draft)) {
       issues.push({ field: "advanceAllocations", code: "allocationsNotExact" });
     }
   }

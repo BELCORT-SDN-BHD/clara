@@ -4733,7 +4733,13 @@ reachable; it compares two admin-attested enrolment rows, not a free-text claima
 record, and it is case-sensitive, so strictness there can only refuse a lawful claim (which the
 preparer fixes by naming the other claimant) and never admit an unlawful one. **This is a NEW wall:
 0221 asked only which account the advance sat on, never whose it was.** A staff master is what
-replaces the second arm.
+replaces the second arm. **`p931.claimant.samelabel` pins what that arm cannot tell apart**: two
+enrolments of one client written with the SAME `person_label` are one claimant to this rule, even
+when the claim states a `claimant.identifier` of its own — the rule never reads it, and
+`clara.staff_advance_accounts` carries no other discriminator. The narrow reading (arm (a) only) is
+a two-line change; measured on the rig, it also reds `p931.accounts`, i.e. it makes #931's own
+listed default — advances on different enrolled accounts discharged together — unreachable until a
+staff master lands. Awaiting the owner's ruling.
 
 **The single-advance shape is untouched, and that is structural.** The claim row's `advance_id` and
 `advance_account_code` carry the HEAD of the list; `clara._claim_basis_canonical` gains the
@@ -4742,6 +4748,23 @@ and a one-element list naming X canonicalise to the SAME bytes and every claim s
 migration still REPLAYS instead of conflicting. §G backfills each stored advance-application claim
 into its own one-element list, exactly (the settlement CHECK guarantees `advance_id`, and the old
 derivation credited the whole `amount_cents` to it), so the reads have one shape to answer with.
+
+**A SECOND WRITE UNDER ONE INTENT KEY DOES NOT CONVERGE — IT MERGES, so the door asks the payload
+question twice.** Before this migration the door's only post-lock write was the claim insert's own
+`on conflict (work_id) do nothing`: two concurrent admissions under one key ended on ONE claim
+whatever they carried. The allocation list is a second write, and `on conflict do nothing` on it
+grafts rather than converges. The three facts that meet: step 4's canonical comparison is the only
+place a CHANGED SPLIT is caught and it runs BEFORE `pg_advisory_xact_lock`, so it cannot see an
+uncommitted sibling; `clara._admit_accounting_work_core` answers `replayed` on a matching
+`basis_digest`; and one credit leg per ACCOUNT (above) makes that digest EQUAL for a single-advance
+claim and a split of the same total on that account. Measured on a throwaway clone of the lane rig
+before the fix: the second payload's extra advance landed on the first payload's claim, leaving
+`81000` sen allocated against a `60500` claim — which tail T.3b counts as broken and
+`clara._tf_adv_movement_belt` would refuse to post for ever; with the heads swapped, the loser
+escaped as an untyped `23505` on `uq_sec_allocations_claim_ordinal`. So the claim insert now
+REPORTS whether it created the row (`returning id into v_claim`), the allocation insert runs ONLY on
+the branch that did, and the other branch re-reads the stored `basis` under the rung and answers
+step 4's own `intent_payload_conflict`. Cells: `p931.race.graft`, `p931.race.ordinal`.
 
 **Redo-safe by construction** ("Redo (#957)" above): `create table if not exists`,
 `create index if not exists`, `create or replace function|trigger`, policies created only when

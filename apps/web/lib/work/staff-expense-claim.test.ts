@@ -428,6 +428,34 @@ test("validate.allocations: the list adds up to the claim, names each advance on
     [["advanceAllocations.1.amountCents", "amountRequired"]]);
 });
 
+test("validate.allocations.delete: taking a split back to ONE line never re-apportions a confirmed figure", () => {
+  // THE WORKED EXAMPLE, driven from the browser's own controls. The preparer confirms
+  //   [A 40,000 · B 20,500] on a 60,500 claim, then REMOVES the second line with the editor's
+  // own row button. What survives says 40,000 — 20,500 sen short of the claim.
+  //
+  // #881's ruling is that the stored record is ALWAYS the confirmed list. A one-line list whose
+  // row carries no figure is #930's chooser and still takes the whole claim (the case above);
+  // a one-line list whose row carries a figure the preparer APPORTIONED is that figure, and a
+  // claim it no longer covers is a list that does not add up — which is exactly how
+  // `suggestAllocationsByDate` already shows a shortfall. Silently handing the whole claim back
+  // to the survivor would send a number nobody confirmed, caught only when the cap happens to
+  // refuse it.
+  const deleted = advanceDraft([{ advanceId: ADV_A, amountCents: 40000 }]);
+  assert.deepEqual(claimAllocations(deleted), [{ advanceId: ADV_A, amountCents: 40000 }],
+    "the surviving line keeps the figure it was confirmed with");
+  assert.deepEqual(validateClaimDraft(deleted, CHART, ENROLLED).map((i) => [i.field, i.code]),
+    [["advanceAllocations", "allocationsNotExact"]],
+    "…and a list that no longer adds up says so, at the list's own error");
+  assert.equal(toClaimWire(deleted, CHART, ENROLLED), null, "…so nothing crosses the wire");
+
+  // PUT THE WHOLE CLAIM ON THE SURVIVOR AND IT IS LAWFUL AGAIN — the preparer's own act, with the
+  // figure on screen.
+  const restated = advanceDraft([{ advanceId: ADV_A, amountCents: 60500 }]);
+  assert.deepEqual(validateClaimDraft(restated, CHART, ENROLLED), []);
+  assert.equal(toClaimWire(restated, CHART, ENROLLED)?.advanceAllocations, undefined,
+    "…and it still crosses as the single-advance shape, because that is what it is");
+});
+
 test("wire.allocations: one advance crosses as the 2021 single shape, several as the confirmed list", () => {
   const single = toClaimWire(advanceDraft([{ advanceId: ADV_A, amountCents: 0 }]), CHART, ENROLLED);
   assert.equal(single?.advanceId, ADV_A);

@@ -899,6 +899,17 @@ revoke all on function clara._claim_basis_canonical(jsonb) from public;
 --     allocation list, written in the SAME admission transaction as the claim it belongs to. The
 --     claim row's own `advance_id` now takes the HEAD of that list rather than the raw field, so
 --     a claim that states only the list still satisfies `ck_staff_expense_claims_settlement`.
+--
+--     AND ONE GUARD THE LIST MADE NECESSARY. Before this file the door's only post-lock write was
+--     the claim insert's own `on conflict (work_id) do nothing`, which CONVERGES: two concurrent
+--     admissions under one intent key end on one claim whatever they carried. A second write does
+--     not converge — it MERGES. Step 4's canonical comparison is the only place a changed split is
+--     caught and it runs BEFORE the client rung, so it cannot see an uncommitted sibling; and
+--     `clara._admit_accounting_work_core` answers `replayed` on a matching basis DIGEST, which the
+--     second measurement above makes equal for a single-advance claim and a split of the same
+--     total on one account. So the claim insert now REPORTS whether it created the row, and the
+--     allocation insert runs only on the branch that did; the other branch re-asserts the payload
+--     identity under the rung and answers step 4's own `intent_payload_conflict`.
 -- =====================================================================================
 create or replace function clara.admit_staff_expense_claim_work(p_client uuid, p_author uuid,
     p_intent_key text, p_claim jsonb, p_basis_origin text, p_source_refs jsonb, p_model text)
@@ -1015,12 +1026,43 @@ begin
       case when v_settlement = 'advance_application'
            then (v_allocs -> 0 ->> 'advance_id')::uuid end,
       v_canon, v_corrects, p_author, p_author)
-    on conflict (work_id) do nothing;
-  select sec.id into v_claim from clara.staff_expense_claims sec where sec.work_id = v_work;
+    on conflict (work_id) do nothing
+    returning id into v_claim;
+
+  -- 8 (CONT) · THE WORK ALREADY CARRIED A CLAIM, so this transaction wrote nothing above. Step 4's
+  -- probe could not have seen it: a SIBLING admission under this very intent key was still
+  -- uncommitted when we read, and it committed while we waited on the client rung at step 6 —
+  -- after which `clara._admit_accounting_work_core` converged on the key and compared the JOURNAL
+  -- BASIS DIGEST, which this file's second measurement makes EQUAL for a single-advance claim and
+  -- a split of the same total across advances on ONE account (one credit leg either way).
+  --
+  -- THE STORED CLAIM IS THE CONFIRMED RECORD. Re-assert the payload identity HERE, under the rung,
+  -- with step 4's OWN comparison, and never reach §8a — writing this payload's allocations onto
+  -- another payload's claim would graft a list that no longer adds up to the claim it belongs to
+  -- (tail T.3b's own arithmetic), leaving a claim the belt can never post and a read that returns
+  -- the graft as fact. This is the replay answer step 4 would have given a moment later, so it
+  -- returns exactly as that branch does, without a second status row or a second audit line.
+  if v_claim is null then
+    select sec.id, sec.basis into v_claim, v_prior_basis
+      from clara.staff_expense_claims sec where sec.work_id = v_work;
+    if v_claim is null then
+      raise exception 'this intent key already carries a different accounting work'
+        using errcode='CLR10',
+        detail=jsonb_build_object('reason','intent_payload_conflict','work_id',v_work,
+          'field','claim')::text;
+    end if;
+    if v_prior_basis is distinct from v_canon then
+      raise exception 'this intent key already carries a different staff expense claim'
+        using errcode='CLR10',
+        detail=jsonb_build_object('reason','intent_payload_conflict','work_id',v_work,
+          'field','claim')::text;
+    end if;
+    return v_res || jsonb_build_object('claim_id', v_claim);
+  end if;
 
   -- 8a · THE CONFIRMED ALLOCATION LIST (#931), one row per named advance, in the confirmed order.
-  -- `on conflict do nothing` for the same reason the claim insert above carries one: this door
-  -- converges rather than races.
+  -- Reached ONLY on the branch that actually created the claim above, so `on conflict do nothing`
+  -- is the ordinary statement-level convergence guard and never a merge of two payloads.
   if v_settlement = 'advance_application' then
     insert into clara.staff_expense_claim_allocations(firm_id, client_id, claim_id, advance_id,
         amount_cents, ordinal)
@@ -1072,7 +1114,8 @@ comment on function clara.admit_staff_expense_claim_work(uuid,uuid,text,jsonb,te
   'the typed claim lives in clara.staff_expense_claims with its CONFIRMED allocation list in '
   'clara.staff_expense_claim_allocations, all written in this same transaction. Idempotent on '
   '(firm, client, intent_key); the payload comparison covers the canonical claim, including a '
-  'multi-advance split.';
+  'multi-advance split, and is asked AGAIN under the client rung so a concurrent sibling under one '
+  'key is a typed intent_payload_conflict rather than two lists merged onto one claim.';
 
 -- =====================================================================================
 -- §E  THE LANE-AGNOSTIC ADVANCE BIRTH TRIGGER, RECUT TO THE LIST.

@@ -92,6 +92,7 @@ import {
   PERSON_LABEL_MAX_CHARS,
   PENDING_FACT_MAX_CHARS,
   allocationFieldId,
+  allocationsAreApportioned,
   claimTotalCents,
   defaultMemo,
   derivedLines,
@@ -707,9 +708,14 @@ export function StaffExpenseClaimFormView({
                   allocationFieldId(i, key === "advance" ? "advanceId" : "amountCents"),
                   i === 0 && key === "advance",
                 )}
-                // ONE LINE TAKES THE WHOLE CLAIM by construction, so there is no figure to
-                // apportion and none to retype.
-                amountLabel={draft.advanceAllocations.length > 1 ? t("advanceAllocationAmount") : null}
+                // AN UNAPPORTIONED ONE-LINE LIST TAKES THE WHOLE CLAIM by construction, so there
+                // is no figure to apportion and none to retype. Once the list HAS been
+                // apportioned — a suggested or typed split, including one a delete has taken back
+                // to a single line — the column stays, because the surviving line carries a figure
+                // of its own and a confirmed figure is never off screen. `claimAllocations` reads
+                // the same predicate, so what is submitted is what is shown.
+                amountLabel={allocationsAreApportioned(draft.advanceAllocations)
+                  ? t("advanceAllocationAmount") : null}
               />
               {errorFor("advanceAllocations") === "" ? null : (
                 <p id={`${claimFieldId("advanceAllocations")}-error`} className="text-xs text-error"
