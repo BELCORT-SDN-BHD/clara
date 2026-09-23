@@ -635,7 +635,9 @@ export function toDbClaim(
         }
         out.advance_id = wire.advanceId;
       } else {
-        out.advance_id = allocations[0].advance_id;
+        // The list is non-empty by the guard above, so the head exists; `at(0)` states that to the
+        // compiler without an assertion.
+        out.advance_id = allocations[0]?.advance_id;
       }
     } else if (typeof wire.advanceId !== "string" || !UUID_RE.test(wire.advanceId)) {
       // No silent FIFO in this register (WD-R10): a claim says WHICH advance it discharges.

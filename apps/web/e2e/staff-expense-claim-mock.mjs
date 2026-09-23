@@ -58,6 +58,11 @@ export const SEC = {
    *  states it — booked before this walk's own claims, still carrying a balance. */
   advanceIssueDate: "2026-02-01",
   advanceOutstandingCents: 40000,
+  /** #931 — Farah's SECOND open advance, booked EARLIER, so "suggest by date" has a real ordering
+   *  to get right rather than a one-element list that is oldest-first by accident. */
+  olderAdvanceId: "63863a02-6386-4638-8638-63863863a02a",
+  olderAdvanceIssueDate: "2026-01-10",
+  olderAdvanceOutstandingCents: 30000,
   /** A Work the walk's happy submit resolves to — the persistent outcome the form navigates to. */
   workId: "63809001-6380-4638-8638-638063809001",
   claimId: "63809aaa-6380-4638-8638-638063809aaa",
@@ -320,8 +325,9 @@ export async function handleStaffExpenseClaimSupabase(request, response, path, u
   }
 
   // #930 — THE ADVANCE CHOOSER'S OWN READ, owned here for `SEC.clientId` only (this file's own
-  // header explains why this verb is no longer left to the register lane alone). ONE outstanding
-  // advance, Farah's, so the chooser's happy path has exactly one real option to pick.
+  // header explains why this verb is no longer left to the register lane alone). #931 gives Farah
+  // a SECOND open advance, booked earlier: two real options, so the date-ordered suggestion has an
+  // ordering to get right and the allocation list has something to split.
   if (verb === "staff_advance_summary") {
     const body = await readCachedJson(request);
     if (body?.p_client !== SEC.clientId) return false;
@@ -344,8 +350,23 @@ export async function handleStaffExpenseClaimSupabase(request, response, path, u
           particulars_complete: false,
           enrolment_active: true,
         },
+        {
+          enrolment_id: SEC.enrolmentId,
+          account_code: SEC.advance,
+          person_label: "Farah binti Idris",
+          advance_id: SEC.olderAdvanceId,
+          issue_date: SEC.olderAdvanceIssueDate,
+          amount_cents: 60000,
+          outstanding_cents: SEC.olderAdvanceOutstandingCents,
+          days_outstanding: 80,
+          purpose: null,
+          reference: null,
+          voided: false,
+          particulars_complete: true,
+          enrolment_active: true,
+        },
       ],
-      outstanding_cents: SEC.advanceOutstandingCents,
+      outstanding_cents: SEC.advanceOutstandingCents + SEC.olderAdvanceOutstandingCents,
       incomplete_count: 1,
       policy_notes: [],
     }, cors);

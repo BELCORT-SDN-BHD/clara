@@ -120,6 +120,7 @@ export function BookApplicationDialog({
           onChange={setAllocations}
           candidates={outstandingAdvances}
           lineCount={lines.length}
+          newRow={() => ({ line_no: 1, advance_id: outstandingAdvances[0]?.advance_id ?? "", amount_cents: 0 })}
         />
         {/* S3 (independent review): a client-side PRESENTATION sum ONLY —
             routed through the shared fmtCents formatter (never a computed

@@ -1860,3 +1860,47 @@ once (the owner's ruling: an allocation list with a one-click date-ordered sugge
 record always the confirmed list) and is the ticket that touches `chatTurn_v22`'s own successor
 contract; this ticket's chooser is its first, single-advance step and does not anticipate that
 shape beyond leaving `advanceId` exactly where #931 will need to read it from.
+
+## #931 — one claim, several advances: the chooser becomes the first line of a confirmed list
+
+#930 replaced the typed advance id with a chooser. #931 makes that chooser **the first line of an
+allocation list**, so one staff expense claim can discharge several of the claimant's open
+advances. The parent ruling (#881, 2026-09-18) is the whole design: *an explicit allocation list
+with a one-click date-ordered suggestion; the stored record is always the confirmed list*, which is
+how an ordering can be offered on screen without becoming the silent FIFO WD-R10 forbids.
+
+**The draft.** `ClaimDraft.advanceId` is gone; `ClaimDraft.advanceAllocations` is the whole list
+(`lib/work/staff-expense-claim.ts`). `claimAllocations(draft)` is the ONE reader: a list of one
+returns that advance with the WHOLE claim on it, derived rather than typed, which is why the amount
+column only appears once there is a second line. `allocationFieldId(i, key)` is the other half of
+the contract — index 0's advance keeps the control id `advanceId`, so #930's label, error text,
+focus and the server path `claim.advance_id` all still land on it.
+
+**The suggestion.** `suggestAllocationsByDate(candidates, totalCents)` is pure: oldest `issue_date`
+first (ties broken by `advance_id`, so the same claim suggests the same split on every machine),
+each advance taking as much as it still has outstanding, stopping when the claim is settled. When
+the advances cannot cover the claim it names everything outstanding and stops — the shortfall stays
+visible as a list that does not add up, because inventing the difference or trimming the claim
+would be the form deciding something only the preparer can.
+
+**The editor is the register's own.** `components/registers/staff-advance-allocations-editor.tsx`
+now takes `lineCount` as OPTIONAL (a claim composes no GL lines — the door derives them — so it
+names none and writes no `line_no`), plus `newRow`, `optionLabel`, `rowProps` and `amountLabel`.
+The register's call is unchanged in behaviour; `BookApplicationDialog` only gained the explicit
+`newRow` the generic parameter needs.
+
+**The wire.** A one-line list crosses exactly as #638's claim did — `advanceId`, no
+`advanceAllocations` key — because the door normalises both spellings into the same one-element
+list, so sending the key would be a second spelling of one claim. Two or more lines send both: the
+list, and the head under `advanceId` for the claim row's own NOT NULL column.
+
+**Restoring an older draft.** `readClaimDraft` migrates a draft filed BEFORE this ticket (a single
+`advanceId`, no list) into its one-line self, so a preparer who left the page mid-claim comes back
+to their claim rather than to an empty settlement arm. Anything malformed is refused whole, like
+every other field there.
+
+**Where the rules really live.** `clara._assert_claim_basis` (migration 0301) re-asks all of it at
+admission, and adds the three the browser cannot know: every advance belongs to this claimant on an
+enrolled account, each allocation passes the temporal over-application cap ON ITS OWN, and the
+refusal names the advance, its outstanding on the day and the shortfall. The form's rules are
+mirrors, never a second authority.

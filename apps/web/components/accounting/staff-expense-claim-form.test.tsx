@@ -577,3 +577,129 @@ test("the DRAFT survives a remount under the same scope, and carries its intent 
     await second.unmount();
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// #931 — THE ALLOCATION LIST. One claim may discharge SEVERAL of the claimant's open advances, so
+// #930's single chooser becomes the FIRST LINE of a list (its control id, and therefore its error
+// wiring and its focus, are unchanged). "Suggest by date" pre-fills the list oldest-advance-first;
+// the person may edit any line and confirms; WHAT IS STORED IS THE CONFIRMED LIST, never the
+// suggestion — which is what keeps WD-R10's "no silent FIFO" true with an ordering on screen.
+// ---------------------------------------------------------------------------------------------
+
+const JAN_ADVANCE = "99999999-9999-4999-8999-999999999999";
+const MAR_ADVANCE = "aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+
+/** Farah's three open advances: January 400.00, February 300.00, March 50.00. */
+const THREE_OPEN = () => staffAdvanceSummary([
+  advanceRow({ advance_id: FARAH_ADVANCE, issue_date: "2026-02-01", outstanding_cents: 30000 }),
+  advanceRow({ advance_id: JAN_ADVANCE, issue_date: "2026-01-10", outstanding_cents: 40000 }),
+  advanceRow({ advance_id: MAR_ADVANCE, issue_date: "2026-03-01", outstanding_cents: 5000 }),
+]);
+
+test("ticket 931 the advance arm SUGGESTS a date-ordered split, and stores the CONFIRMED list rather than the suggestion", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");   // one item, RM 480.00, claimant 1190
+
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => THREE_OPEN(),
+    submit: async (_a, input) => {
+      sent.push(input);
+      return { kind: "accepted", workId: "w", taskId: null, logicalOpId: null, status: "queued", replayed: false, claimId: "c" };
+    },
+  }));
+  try {
+    await h.settle();
+
+    // ONE CLICK, AND THE LIST IS OLDEST FIRST. The claim is 480.00: January's 400.00 goes first and
+    // in full, February takes the remaining 80.00, and March is never named — the claim is already
+    // settled by then.
+    const suggest = h.find((n) => attrOf(n, "data-testid") === "advance-suggest");
+    assert.ok(suggest, "the arm offers a one-click date-ordered suggestion");
+    await h.fireEvent(suggest, "click");
+    await h.settle();
+
+    await submitForm(h);
+    assert.equal(sent.length, 1, "the suggestion alone is a complete, submittable claim");
+    const suggested = sent[0];
+    assert.ok(suggested);
+    assert.deepEqual(suggested.claim.advanceAllocations, [
+      { advanceId: JAN_ADVANCE, amountCents: 40000 },
+      { advanceId: FARAH_ADVANCE, amountCents: 8000 },
+    ], "oldest advance first, each taking what it still has, stopping at the claim");
+    assert.equal(suggested.claim.advanceId, JAN_ADVANCE,
+      "the head of the list fills the claim row's own structural column");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 931 the person may EDIT the suggested split, and what is stored is the list they confirmed", async () => {
+  // THE SAME claim and the SAME three advances as the cell above, so the suggestion it would
+  // produce is known: January 400.00 and February 80.00. This preparer overrides both.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => THREE_OPEN(),
+    submit: async (_a, input) => {
+      sent.push(input);
+      return { kind: "accepted", workId: "w", taskId: null, logicalOpId: null, status: "queued", replayed: false, claimId: "c" };
+    },
+  }));
+  try {
+    await h.settle();
+    const suggest = h.find((n) => attrOf(n, "data-testid") === "advance-suggest");
+    assert.ok(suggest);
+    await h.fireEvent(suggest, "click");
+    await h.settle();
+
+    // 300.00 against January and 180.00 against February — a DIFFERENT split of the same claim.
+    await h.fireEvent(byId(h, F("advanceAllocations.0.amountCents")), "change",
+      (n) => setFieldValue(n, "300.00"));
+    await h.fireEvent(byId(h, F("advanceAllocations.1.amountCents")), "change",
+      (n) => setFieldValue(n, "180.00"));
+    await submitForm(h);
+
+    assert.equal(sent.length, 1);
+    const confirmed = sent[0];
+    assert.ok(confirmed);
+    assert.deepEqual(confirmed.claim.advanceAllocations, [
+      { advanceId: JAN_ADVANCE, amountCents: 30000 },
+      { advanceId: FARAH_ADVANCE, amountCents: 18000 },
+    ], "what is stored is the CONFIRMED list, not the suggestion that proposed it");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 931 a split that does not add up to the claim is refused beside the list, and sends nothing", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  let calls = 0;
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => THREE_OPEN(),
+    submit: async () => { calls += 1; return { kind: "denied" }; },
+  }));
+  try {
+    await h.settle();
+    const suggest = h.find((n) => attrOf(n, "data-testid") === "advance-suggest");
+    assert.ok(suggest);
+    await h.fireEvent(suggest, "click");
+    await h.settle();
+    // 300.00 + 80.00 = 380.00 against a 480.00 claim: 100.00 owed to nobody.
+    await h.fireEvent(byId(h, F("advanceAllocations.0.amountCents")), "change",
+      (n) => setFieldValue(n, "300.00"));
+    await submitForm(h);
+    assert.equal(calls, 0, "nothing is sent while the split does not settle the claim");
+    assert.match(h.text(), /add up to the claim/i,
+      "…and the reason sits beside the list the preparer has to change");
+  } finally {
+    await h.unmount();
+  }
+});

@@ -4697,3 +4697,57 @@ override census equal to v1's row for row; S6 drives `clara.list_coa_templates()
 firm session and shows exactly ONE published `my_sme_starter` row — version 2, 146 accounts — with
 v1 retired, unmoved at 42/142 and still carrying 0150's own content hash. Each carries its own
 vacuity control (a rolled-back mutation of the exact fact under test).
+
+## #931 — one staff expense claim discharges SEVERAL advances (0301)
+
+`0301_staff_expense_claim_allocations.sql` adds `clara.staff_expense_claim_allocations` — the
+CONFIRMED allocation list of one claim (advance, amount, ordinal) — plus the pure normalisation
+`clara._claim_allocations`, and recuts the seven 0221 bodies that have to read a list where they
+read one advance: the validator, the canonical form, the settlement-account reader, the journal
+derivation, the door, the lane-agnostic birth trigger and the two reads.
+
+**Why a child table rather than a jsonb column.** 0221's own header states the rule: *every foreign
+key carries the tenant*, because the alternative "is a property of CODE, not of DATA". A jsonb array
+of advance ids would be exactly that. Every allocation row carries the same three-column FK to
+`clara.staff_advances` and to the claim that `advance_id` already carried.
+
+**One credit leg per advance ACCOUNT.** `clara._tf_adv_movement_belt` counts coverage PER JOURNAL
+LINE, and `uq_staff_advance_applications_line_advance` admits several allocations on one line as
+long as they name different advances. So `clara._claim_journal_basis` groups the confirmed
+allocations by account code and emits one credit leg each. Two advances on one dedicated account →
+one leg, two register allocations keyed to it. Two accounts → two legs. Neither needs the belt, the
+hook roster or the shared cap to change.
+
+**The cap is asked ONCE PER ALLOCATION**, in both places 0221 asks it (the door's world half and
+the deferred birth trigger), never once for the claim total — a cap asked against the head advance
+would refuse a lawful split and admit an unlawful one. The refusal carries the advance, the
+boundary date, the outstanding at it and `shortfall_cents`, and addresses
+`claim.advance_allocations[N].amount_cents` when the claim states a list (0221's unmoved
+`claim.amount_cents` when it names one advance).
+
+**"Belongs to this claimant" has one enforceable reading, and its limit is named.** There is no
+staff master (0221 D4), so ownership is read in two arms: the advance's own `enrolment_id` IS the
+claim's claimant enrolment, or it is another LIVE enrolment of this client whose `person_label` is
+byte-identical after `btrim`. The second arm is what makes a claimant's SECOND dedicated account
+reachable; it compares two admin-attested enrolment rows, not a free-text claimant string against a
+record, and it is case-sensitive, so strictness there can only refuse a lawful claim (which the
+preparer fixes by naming the other claimant) and never admit an unlawful one. **This is a NEW wall:
+0221 asked only which account the advance sat on, never whose it was.** A staff master is what
+replaces the second arm.
+
+**The single-advance shape is untouched, and that is structural.** The claim row's `advance_id` and
+`advance_account_code` carry the HEAD of the list; `clara._claim_basis_canonical` gains the
+`advance_allocations` key ONLY when the normalised list has two or more members, so `{advance_id: X}`
+and a one-element list naming X canonicalise to the SAME bytes and every claim stored before this
+migration still REPLAYS instead of conflicting. §G backfills each stored advance-application claim
+into its own one-element list, exactly (the settlement CHECK guarantees `advance_id`, and the old
+derivation credited the whole `amount_cents` to it), so the reads have one shape to answer with.
+
+**Redo-safe by construction** ("Redo (#957)" above): `create table if not exists`,
+`create index if not exists`, `create or replace function|trigger`, policies created only when
+absent, and a backfill that is `on conflict … do nothing`. The prestate reports FIRST or REDO on
+the marker only this file writes; the FIRST-apply branch was proved separately on the lane rig by
+restoring 0221's own pre-images inside a transaction that was rolled back.
+
+**Gate:** `tests/staff-expense-claim-allocations.test.mjs`, frontier-gated on the stable stem
+`staff_expense_claim_allocations$` with `tests/staff-expense-claim-allocations-preintegration-gate.mjs`.

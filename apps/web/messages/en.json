@@ -1719,6 +1719,9 @@
     "advanceIdPlaceholder": "Choose an advance…",
     "advanceIdOutstandingSuffix": "outstanding",
     "advanceIdEmpty": "This claimant has no open advance.",
+    "advanceSuggestByDate": "Suggest by date",
+    "advanceSuggestHelp": "Fills the list oldest advance first. Edit any line before you record it.",
+    "advanceAllocationAmount": "Amount discharged",
     "advancesUnavailable": "The client's staff advances could not be read, so none can be offered here. You can still record the claim once they can be read again.",
     "paymentAccountCode": "Paid from",
     "paymentAccountCodeHelp": "The bank or cash account they were already paid from.",
@@ -1756,6 +1759,8 @@
       "attestationRequired": "Write the attestation before enrolling this account.",
       "confirmDedicatedRequired": "Confirm that this account is dedicated to one person.",
       "advanceRequired": "Name which advance this claim discharges.",
+      "advanceDuplicated": "This advance is already on the list. Name a different one, or change the amount on the line that is already there.",
+      "allocationsNotExact": "The amounts on these advances must add up to the claim.",
       "tooLong": "This is too long. Shorten it before submitting."
     },
     "origin": {

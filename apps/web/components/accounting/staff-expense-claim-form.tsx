@@ -69,6 +69,7 @@ import { FieldDescription, FieldLegend, FieldSet } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { listCoaAccounts } from "@/lib/journals/api";
 import { getStaffAdvanceSummary, type StaffAdvanceSummary } from "@/lib/registers/staff-advances-doors";
+import { StaffAdvanceAllocationsEditor } from "@/components/registers/staff-advance-allocations-editor";
 import { fmtCents } from "@/lib/registers/money";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { canOpenClientLeaf, staffExpenseClaimsHref, workDetailHref, type NavigationScope } from "@/lib/navigation/tree";
@@ -90,6 +91,7 @@ import {
   IDENTIFIER_MAX_CHARS,
   PERSON_LABEL_MAX_CHARS,
   PENDING_FACT_MAX_CHARS,
+  allocationFieldId,
   claimTotalCents,
   defaultMemo,
   derivedLines,
@@ -98,6 +100,7 @@ import {
   fieldForClaimPath,
   firstInvalidClaimField,
   isPendingItem,
+  suggestAllocationsByDate,
   toClaimWire,
   validateClaimDraft,
   type ClaimDraft,
@@ -262,6 +265,13 @@ export function StaffExpenseClaimFormView({
       (a) => a.account_code === code && a.outstanding_cents > 0 && !a.voided,
     );
   }, [advancesRead.data, draft.claimantAccountCode]);
+  /** #931 — the draft's allocation list in the shared editor's own row shape. The claim form keeps
+   *  camelCase and the register keeps snake_case; this is the ONE place they meet, rather than one
+   *  module bending to the other's spelling. */
+  const allocationRows = useMemo(
+    () => draft.advanceAllocations.map((r) => ({ advance_id: r.advanceId, amount_cents: r.amountCents })),
+    [draft.advanceAllocations],
+  );
   /** True when the chosen claimant account has NO live enrolment — the case that needs the three
    *  enrol answers. Unknown (the register could not be read) counts as "new", the conservative
    *  direction: asking for an attestation that turns out to be unnecessary costs a sentence, and
@@ -660,22 +670,54 @@ export function StaffExpenseClaimFormView({
               accounts={accounts} props={controlProps("advanceAccountCode", true)}
               onPick={(v) => set("advanceAccountCode", v)} placeholder={t("accountPlaceholder")} />
           </Field>
-          {/* NO SILENT FIFO (WD-R10). The claim says WHICH advance it discharges; the register
-              never guesses, and the database refuses a claim that does not name one. #930 turns
-              this from a typed id into a CHOOSER fed by the claimant's own outstanding advances —
-              choosing one fills `draft.advanceId` exactly as typing it did, so every rule below
-              this control (the wire, the validation, the focus mapping) is unchanged. */}
+          {/* NO SILENT FIFO (WD-R10). The claim says WHICH advances it discharges and by how much;
+              the register never guesses, and the database refuses a claim that does not name one.
+              #930 turned the typed id into a CHOOSER fed by the claimant's own outstanding
+              advances; #931 makes that chooser the FIRST LINE of a LIST, reusing the staff-advance
+              register's own allocation editor rather than minting a second table that drifts. The
+              first line keeps the `advanceId` control id, so its label, its error text, its focus
+              and the server paths that address it are all unchanged. */}
           <Field field="advanceId" errorText={errorFor("advanceId")} label={t("advanceId")}
             hint={t("advanceIdHelp")}>
-            <NativeSelect {...controlProps("advanceId", true)} className="w-full" value={draft.advanceId}
-              onChange={(e) => set("advanceId", e.target.value)}>
-              <option value="">{t("advanceIdPlaceholder")}</option>
-              {advanceCandidates.map((a) => (
-                <option key={a.advance_id} value={a.advance_id}>
-                  {a.issue_date} — {fmtCents(a.outstanding_cents, tcommon("centsUnsafe"))} {t("advanceIdOutstandingSuffix")}
-                </option>
-              ))}
-            </NativeSelect>
+            <div className="flex flex-col gap-2">
+              {/* THE ONE-CLICK SUGGESTION (#881's ruling): oldest advance first, each taking what it
+                  still has outstanding, stopping at the claim. It PRE-FILLS the list and nothing
+                  more — the person may edit any line, and what is submitted is what they confirmed,
+                  which is exactly how an ordering can be offered without becoming a silent FIFO. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" variant="outline" size="sm" data-testid="advance-suggest"
+                  disabled={busy || advanceCandidates.length === 0 || total <= 0}
+                  onClick={() => set("advanceAllocations",
+                    suggestAllocationsByDate(advanceCandidates, total))}>
+                  {t("advanceSuggestByDate")}
+                </Button>
+                <p className="text-xs text-muted-foreground">{t("advanceSuggestHelp")}</p>
+              </div>
+              <StaffAdvanceAllocationsEditor
+                allocations={allocationRows}
+                onChange={(rows) => set("advanceAllocations",
+                  rows.map((r) => ({ advanceId: r.advance_id, amountCents: r.amount_cents })))}
+                candidates={advanceCandidates}
+                newRow={() => ({ advance_id: "", amount_cents: 0 })}
+                // ALREADY SCOPED TO ONE CLAIMANT, so the option says what actually tells two of
+                // HER advances apart: when it was paid, and what is still outstanding on it.
+                optionLabel={(a) =>
+                  `${a.issue_date} — ${fmtCents(a.outstanding_cents, tcommon("centsUnsafe"))} ${t("advanceIdOutstandingSuffix")}`}
+                rowProps={(i, key) => controlProps(
+                  allocationFieldId(i, key === "advance" ? "advanceId" : "amountCents"),
+                  i === 0 && key === "advance",
+                )}
+                // ONE LINE TAKES THE WHOLE CLAIM by construction, so there is no figure to
+                // apportion and none to retype.
+                amountLabel={draft.advanceAllocations.length > 1 ? t("advanceAllocationAmount") : null}
+              />
+              {errorFor("advanceAllocations") === "" ? null : (
+                <p id={`${claimFieldId("advanceAllocations")}-error`} className="text-xs text-error"
+                  role="alert" data-testid="advance-allocations-error">
+                  {errorFor("advanceAllocations")}
+                </p>
+              )}
+            </div>
           </Field>
           {/* THE ONE-LINE REASON (AC3): a claimant with nothing outstanding sees WHY the chooser is
               empty rather than a silent dead end — shown only once the read has actually settled,

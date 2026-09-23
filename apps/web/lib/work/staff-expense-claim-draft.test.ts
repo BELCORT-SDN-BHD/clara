@@ -149,3 +149,43 @@ test("parse.pending: a waiting item round-trips with the fact it names", () => {
   assert.equal(back?.draft.items[1]?.pendingFact, "incurred_date");
   assert.equal(back?.draft.items[1]?.amountCents, 0);
 });
+
+test("parse.allocations: #931 — a list round-trips, and a draft filed BEFORE this ticket restores as its one-line self", () => {
+  const store = memory();
+  const key = claimDraftKey(SCOPE);
+  const A = "11111111-1111-4111-8111-111111111111";
+  const B = "22222222-2222-4222-8222-222222222222";
+
+  // THE LIST ROUND-TRIPS, amounts and order intact — the record IS the confirmed list.
+  const split = draft({
+    settlement: "advance_application",
+    advanceAccountCode: "1190",
+    advanceAllocations: [{ advanceId: A, amountCents: 40000 }, { advanceId: B, amountCents: 8000 }],
+  });
+  writeClaimDraft(SCOPE, { intentKey: "k1", draft: split, documentId: null }, store);
+  assert.deepEqual(readClaimDraft(SCOPE, store)?.draft.advanceAllocations,
+    [{ advanceId: A, amountCents: 40000 }, { advanceId: B, amountCents: 8000 }]);
+
+  // A DRAFT FILED BEFORE #931 carries a single `advanceId` and no list at all. It restores as the
+  // one-line list that means the same claim: a preparer who left the page mid-claim comes back to
+  // their claim, not to an empty settlement arm.
+  const legacy = draft({ settlement: "advance_application", advanceAccountCode: "1190" }) as Record<string, unknown>;
+  delete legacy.advanceAllocations;
+  legacy.advanceId = A;
+  store.map.set(key, JSON.stringify({ intentKey: "k1", draft: legacy, documentId: null }));
+  assert.deepEqual(readClaimDraft(SCOPE, store)?.draft.advanceAllocations,
+    [{ advanceId: A, amountCents: 0 }],
+    "the stored advance becomes the head of a one-line list, whose amount is the whole claim");
+
+  // UNTRUSTED INPUT, like every other field: a half-read allocation is a figure nobody typed, so
+  // the whole draft is refused rather than restored with a number the preparer never saw.
+  for (const bad of [[], [{ advanceId: A }], [{ advanceId: 7, amountCents: 1 }],
+    [{ advanceId: A, amountCents: -1 }], [{ advanceId: A, amountCents: 1.5 }], "x", 3]) {
+    store.map.set(key, JSON.stringify({
+      intentKey: "k1",
+      draft: { ...draft({ settlement: "advance_application", advanceAccountCode: "1190" }), advanceAllocations: bad },
+      documentId: null,
+    }));
+    assert.equal(readClaimDraft(SCOPE, store), null, `${JSON.stringify(bad)} is not an allocation list`);
+  }
+});
