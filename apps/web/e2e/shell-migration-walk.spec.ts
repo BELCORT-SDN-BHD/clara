@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { DOCS } from "./documents-viewer-mock.mjs";
-import { ensureRealFocus, signInTo } from "./helpers";
+import { ensureRealFocus, settleForScan, signInTo } from "./helpers";
 
 /**
  * #614 — THE UNIFIED SHELL'S OWN WALK (裁-86).
@@ -864,6 +864,7 @@ test.describe("axe: the new shell's own surfaces are clean under WCAG 2.1 AA", (
       await signInTo(page, "/");
       await page.goto(url);
       await page.waitForLoadState("networkidle");
+      await settleForScan(page);
       const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
       expect(result.violations, `${face} axe violations`).toEqual([]);
     });
@@ -874,9 +875,9 @@ test.describe("axe: the new shell's own surfaces are clean under WCAG 2.1 AA", (
     await signInTo(page, "/");
     await page.getByRole("button", { name: "Toggle navigation" }).click();
     await expect(page.locator("[data-slot=sheet-content]")).toBeVisible();
-    await expect
-      .poll(async () => page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length))
-      .toBe(0);
+    // #1017 — folded this file's own animations-only poll onto the shared settle-before-scan
+    // contract (./helpers), which also checks the enter/mount opacity fade the poll never did.
+    await settleForScan(page);
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
     expect(result.violations, "mobile sheet open axe violations").toEqual([]);
   });

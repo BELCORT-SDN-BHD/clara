@@ -1,7 +1,29 @@
 // Migration 0028 -- shared rig fixtures for the vendor identity binding battery (task #36).
 // NOT a test file (does not end in `.test.mjs`): `node --test` ignores it. Split out of
-// x36-vendor-binding-dwell.test.mjs so the ceremony test (propose/sign/revoke,
-// x36-vendor-binding-ceremony.test.mjs) shares the exact same fixtures rather than drifting.
+// x36-vendor-binding-dwell.test.mjs so every vendor-binding battery shares the exact same
+// fixtures rather than drifting.
+//
+// #921 (migration 0273): `clara_authenticated` no longer holds EXECUTE on
+// `propose_vendor_identity_binding`, `sign_vendor_identity_binding` or
+// `decline_vendor_identity_binding`. 0273 moved the GRANT and nothing else — it states in its
+// own header that no table, column, trigger, policy or function BODY moves, and D6 keeps the
+// three bodies deliberately, as the only record of how a still-visible historical row came to
+// exist and so the ruling stays reversible without resurrecting a body from source control.
+//
+// So the three wrappers below are named `…AsFnOwner` and drive their door through the SCHEMA
+// OWNER (`clara_fn_owner`, which still holds EXECUTE) carrying the SAME human actor context
+// (`request.jwt.claims`) the human session used to carry. `clara._human_ctx` reads that claim,
+// so every wall INSIDE each body still runs for real and still sees the named user: the rank
+// floors, 裁-18a's signer<>proposer comparison, the loop brake, the drift and corpus re-runs,
+// the roster window, the post-time interlock. MEASURED, not assumed: driving
+// `propose_vendor_identity_binding` as `clara_fn_owner` with an unknown `sub` raises CLR04
+// 'actor has no active membership' (the body), while the same call as `clara_authenticated`
+// raises 42501 (the ACL, before the body).
+//
+// NONE of them shows that a HUMAN can still call these doors — the opposite is what
+// `vendor-binding-write-doors-revoked.test.mjs` proves, by driving `clara_authenticated` at all
+// three and seeing 42501 at every rank. `revoke`/`list`/`get` are UNTOUCHED by 0273 and are
+// still driven as `clara_authenticated` here, which is why `revoke` below carries no suffix.
 
 import { randomUUID } from "node:crypto";
 import { rootQuery, withActor, humanQuery, namedCall, opk, ROLES } from "./rig-helpers.mjs";
@@ -15,26 +37,45 @@ export async function has28() {
 }
 
 // ---------------------------------------------------------------------------
-// The three granted ceremony verbs, called through the real governed surface
+// The ceremony verbs, called through the real governed surface
 // (shared by x36-vendor-binding-ceremony and x36-vendor-binding-resolver).
 // ---------------------------------------------------------------------------
 
-export async function propose(sub, { client, counterparty, opKey } = {}) {
+/** Run one statement against a door as `clara_fn_owner` while `request.jwt.claims` names `sub`
+ *  — the transport the retired human write doors need after 0273 (see this file's header).
+ *  The door is SECURITY DEFINER and owned by `clara_fn_owner`, so its body executes exactly as
+ *  it always did; the only thing this changes is which role is allowed to reach it. */
+const fnOwnerAsHumanQuery = (sub, sql, params) =>
+  withActor({ role: ROLES.fnOwner, jwtSub: sub }, (c) => c.query(sql, params));
+
+/** `propose_vendor_identity_binding` as `sub`, carried by `clara_fn_owner` (#921 — no human
+ *  role holds EXECUTE any more). The body's own walls all still run; see the file header. */
+export async function proposeAsFnOwner(sub, { client, counterparty, opKey } = {}) {
   const specs = [{ name: "p_proposal", cast: "jsonb" }, { name: "p_op_key" }];
-  const r = await humanQuery(sub, namedCall("propose_vendor_identity_binding", specs), [
+  const r = await fnOwnerAsHumanQuery(sub, namedCall("propose_vendor_identity_binding", specs), [
     JSON.stringify({ client_id: client, counterparty_id: counterparty }),
     opKey ?? opk("vbprop"),
   ]);
   return r.rows[0].result;
 }
 
-export async function sign(sub, { binding, opKey } = {}) {
+/** `sign_vendor_identity_binding` as `sub`, carried by `clara_fn_owner` (#921). */
+export async function signAsFnOwner(sub, { binding, opKey } = {}) {
   const specs = [{ name: "p_binding" }, { name: "p_op_key" }];
-  const r = await humanQuery(sub, namedCall("sign_vendor_identity_binding", specs),
+  const r = await fnOwnerAsHumanQuery(sub, namedCall("sign_vendor_identity_binding", specs),
     [binding, opKey ?? opk("vbsign")]);
   return r.rows[0].result;
 }
 
+/** One arbitrary statement against a retired write door as `sub`, carried by `clara_fn_owner`
+ *  — for the few cells that need a named argument the wrappers above do not take (an
+ *  attestation, a reason). Same transport, same body, same walls. */
+export function retiredWriteDoorQuery(sub, sql, params) {
+  return fnOwnerAsHumanQuery(sub, sql, params);
+}
+
+/** `revoke_vendor_identity_binding` — UNTOUCHED by 0273 and still granted to
+ *  `clara_authenticated`, so this one is still driven as a human, deliberately. */
 export async function revoke(sub, { binding, reason, opKey } = {}) {
   const specs = [{ name: "p_binding" }, { name: "p_reason" }, { name: "p_op_key" }];
   const r = await humanQuery(sub, namedCall("revoke_vendor_identity_binding", specs),
@@ -168,18 +209,22 @@ export async function withPostTimeControl(fn) {
 }
 
 /** Sign through the REAL audited door, with PR-3's control present. Use wherever a cell needs a
- *  LIVE binding; use bare `sign()` wherever the cell is about a refusal. */
-export async function signLive(sub, opts = {}) {
-  return withPostTimeControl(() => sign(sub, opts));
+ *  LIVE binding; use bare `signAsFnOwner()` wherever the cell is about a refusal. */
+export async function signLiveAsFnOwner(sub, opts = {}) {
+  return withPostTimeControl(() => signAsFnOwner(sub, opts));
 }
 
-/** Propose + sign a binding to 'live' over a fully-qualifying window. Returns the live binding's
- *  receipt. */
+/** Propose + sign a binding to 'live' over a fully-qualifying window. Returns the live
+ *  binding's receipt (the sign door's own `{binding_id, status, self_approved} || derivation`).
+ *
+ *  #921: both doors are driven through `clara_fn_owner` now (this file's header) — the row this
+ *  builds is still written by the REAL bodies, with every wall run, so a fixture can never drift
+ *  from a shape the doors could not have produced. */
 export async function seedLiveBinding(w, tag) {
   const cp = await seedPassingWindow(w, tag);
-  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
-  const signed = await signLive(w.users.alice, { binding: proposed.binding_id });
-  return { cp, binding: signed };
+  const proposed = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const binding = await signLiveAsFnOwner(w.users.alice, { binding: proposed.binding_id });
+  return { cp, binding };
 }
 
 /** The 0029 LEDGER row. Kept for the one cell that genuinely asks about the ledger; it is NOT

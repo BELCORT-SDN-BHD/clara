@@ -64,13 +64,16 @@
  * #969 — THE `cn` DEPENDENCY STAND-IN. The guard above answers "would this
  * OVERWRITE a protected FILE"; it never asked "would this add a bogus
  * DEPENDENCY", because it only ever read `resolved.files`. The pinned CLI's
- * registry items for the message/bubble/marker/avatar family (and others)
- * import a `cn()` helper from a bare specifier `"cn"` — a registry-authoring
- * placeholder, not a real published package this repo has ever needed
- * (`lib/utils.ts` exports its own). The CLI's file-WRITE step correctly
- * rewrites that import to this project's own `@/lib/utils` alias; its
- * dependency-INSTALL step does not know that and installs a REAL `cn` npm
- * package instead (#642's `ui:add --dry-run` finding — a hand-revert of
+ * registry items for the message/bubble/marker/avatar/popover family (and
+ * others) import a `cn()` helper from a bare specifier `"cn"` — a
+ * registry-authoring placeholder, not a real published package this repo has
+ * ever needed (`lib/utils.ts` exports its own). #969 believed — WRONGLY,
+ * MEASURED FALSE by #989 (`pnpm ui:add popover`/`avatar` against the pinned
+ * 4.19.0, both reverted after) — that the CLI's file-WRITE step already
+ * rewrote that import to this project's own `@/lib/utils` alias; a
+ * freshly-resolved file in fact lands on disk still importing `from "cn"`.
+ * Its dependency-INSTALL step separately installs a REAL `cn` npm package
+ * regardless (#642's `ui:add --dry-run` finding — a hand-revert of
  * `package.json` and the lockfile every time, until now).
  * `classifyDependencies` reads `resolved.dependencies`/`devDependencies`
  * (previously ignored) and splits `cn` out; `main` reports every dependency
@@ -78,13 +81,18 @@
  * this report is the only place that information surfaces), and after a
  * REAL install, automates the exact hand-revert #642 describes —
  * `stripLocalDependencies` runs `pnpm remove` on anything classified local,
- * offline, needing no registry fetch. The SAME `CLARA_UI_ADD_OVERWRITE=1`
+ * offline, needing no registry fetch — AND (#989)
+ * `rewriteLocalDependencyImport`/`defaultRewriteLocalImports` fix the bare
+ * `cn` import itself in every file the run actually wrote, since an
+ * unrewritten import breaks the moment the real package is gone (exactly
+ * what made Popover's own install not actually "succeed": the file existed,
+ * `pnpm typecheck` could not resolve it). The SAME `CLARA_UI_ADD_OVERWRITE=1`
  * knob the protected-file refusal above already defines lets a caller keep
- * a genuine external `cn` package deliberately, rather than a second
- * refusal vocabulary being invented for this one name.
+ * a genuine external `cn` package deliberately, import unrewritten, rather
+ * than a second refusal vocabulary being invented for this one name.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -122,10 +130,12 @@ export const OVERRIDE_ENV_VAR = "CLARA_UI_ADD_OVERWRITE";
  * #969 — package names this repo already provides ITSELF, so the pinned CLI must never
  * install one as a real npm dependency. `cn` is the one measured case: the registry's own
  * item source imports `cn` from a bare specifier `"cn"` (a registry-authoring convention, not
- * a real published import this repo uses), the CLI's file-WRITE step correctly rewrites that
- * to this project's own `aliases.utils` (`@/lib/utils`, verified live against the pinned
- * 4.19.0 — a freshly-resolved `avatar.tsx` lands on disk importing `cn` from `@/lib/utils`,
- * not from `"cn"`), but the CLI's dependency-INSTALL step is naive: it takes the registry
+ * a real published import this repo uses). #969 believed the CLI's file-WRITE step already
+ * rewrote that to this project's own `aliases.utils` (`@/lib/utils`) — MEASURED FALSE by #989
+ * against the SAME pinned 4.19.0: a freshly-resolved `popover.tsx`/`avatar.tsx` lands on disk
+ * STILL importing `cn` from the bare `"cn"` specifier, never from `@/lib/utils`, so `main`'s own
+ * `rewriteLocalImports` step fixes it after the fact (see that function, and #989's header note
+ * above). The CLI's dependency-INSTALL step is separately naive: it takes the registry
  * item's declared `dependencies` at face value and installs a REAL `cn` package from npm,
  * which this workspace has never needed and never wants (#642's own `ui:add --dry-run`
  * finding). Only `cn` is named — any other resolved-dependency problem in the pinned CLI is
@@ -145,6 +155,56 @@ export function classifyDependencies(dependencies) {
   const local = LOCAL_DEPENDENCY_NAMES.filter((name) => seen.has(name));
   const external = [...seen].filter((name) => !LOCAL_DEPENDENCY_NAMES.includes(name)).sort();
   return { local, external };
+}
+
+/** #989 — matches an import specifier that is EXACTLY the bare `"cn"` placeholder (never a
+ *  specifier that merely STARTS with it, e.g. `"cn-something-else"` — a real, different package),
+ *  immediately after the `from` keyword, whichever quote character it used. The backreference
+ *  (`\2`) requires the closing quote to match the opening one, so a mismatched pair is never
+ *  matched at all — the safest failure a regex substitution can have. */
+const CN_IMPORT_SPECIFIER = /(\bfrom\s+)(['"])cn\2/g;
+
+/** #989 — THE FIX #969's OWN CLAIM SAID WAS ALREADY THE PINNED CLI'S BEHAVIOUR, MEASURED FALSE.
+ *  `scripts/ui-add.mjs`'s own #969 header and `components/ui/README.md` both said "the CLI's
+ *  file-WRITE step correctly rewrites [a bare `cn` import] to this project's own `@/lib/utils`
+ *  alias" — MEASURED (2026-09-23, `pnpm ui:add popover` and `pnpm ui:add avatar` against the
+ *  pinned 4.19.0, both reverted after, recorded in the delivering report) to be false: a
+ *  freshly-resolved file lands on disk still importing `from "cn"`. Since this guard already
+ *  removes the real `cn` npm package as a matter of course (`stripLocalDependencies`), an
+ *  unrewritten import breaks `require`/module resolution — exactly what made Popover's install
+ *  not actually "succeed" (the file existed, but `pnpm typecheck` could not resolve its own
+ *  import). A pure string substitution, proven directly against a throwaway file in the selftest
+ *  the same way `snapshotFile`/`restoreFileSnapshot` are — never a parse, since the specifier is
+ *  a complete, self-delimited token (`CN_IMPORT_SPECIFIER`'s own comment).
+ * @param {string} source
+ * @param {string} aliasUtils this project's own `components.json` `aliases.utils` (`@/lib/utils`)
+ * @returns {string}
+ */
+export function rewriteLocalDependencyImport(source, aliasUtils) {
+  return source.replace(CN_IMPORT_SPECIFIER, (_match, fromKeyword, quote) => `${fromKeyword}${quote}${aliasUtils}${quote}`);
+}
+
+/** The default, REAL-FS rewrite step for #989's partial-install (and full-install) case: for
+ *  every WRITTEN, non-blocked target path, fix a bare `cn` import in place if (and only if) one
+ *  is there — a no-op for any file that never had one. Never called by the selftest, which
+ *  injects a fixture instead (same house rule as `defaultSpawnAdd`/`defaultStripLocalDependencies`).
+ * @param {readonly string[]} paths project-relative paths, as `targetPaths`/`blocked`/`installable` are
+ * @param {string} aliasUtils
+ * @returns {string[]} the subset of `paths` this actually rewrote
+ */
+function defaultRewriteLocalImports(paths, aliasUtils) {
+  const rewritten = [];
+  for (const p of paths) {
+    const abs = join(WEB_ROOT, p);
+    if (!existsSync(abs)) continue;
+    const before = readFileSync(abs, "utf8");
+    const after = rewriteLocalDependencyImport(before, aliasUtils);
+    if (after !== before) {
+      writeFileSync(abs, after, "utf8");
+      rewritten.push(p);
+    }
+  }
+  return rewritten;
 }
 
 /** registry item `type` → the `components.json` alias key the pinned CLI
@@ -233,16 +293,32 @@ export function loadAllowlist(jsonText) {
 /**
  * THE GUARD'S WHOLE DECISION, as one pure function — the piece
  * check-ui-add-guard.selftest.mjs drives directly against fixtures.
+ *
+ * #989 — PARTIAL INSTALL, NEVER ALL-OR-NOTHING, UNLESS THERE IS NOTHING LEFT
+ * TO INSTALL. `installable` is `targetPaths` minus `blocked` — every file the
+ * payload names that carries no owner-ruled fix, and so is always safe to
+ * write regardless of what else in the same payload is protected (this is
+ * how `main()` below installs Combobox's four non-protected files while
+ * leaving `button.tsx` untouched, instead of #772's original refusal of the
+ * WHOLE payload). `allowed` stays false in exactly the one case where a
+ * partial install would write NOTHING new: every resolved path is on the
+ * allowlist (the `pagination` incident this guard was built for, and the
+ * ONE existing case this function's own selftest already covers unchanged —
+ * `pagination.tsx` itself has been on the allowlist since #771, so that
+ * fixture's closure is entirely blocked, not partial).
  * @param {{targetPaths: readonly string[], allowlist: readonly string[], override: boolean}} input
- * @returns {{blocked: string[], allowed: boolean, overrideUsed: boolean}}
- *   `allowed` is true when the install may proceed — either nothing on the
- *   allowlist is touched, or it is and the override was given.
+ * @returns {{blocked: string[], installable: string[], allowed: boolean, overrideUsed: boolean}}
+ *   `allowed` is true when the install may proceed — nothing on the allowlist
+ *   is touched, the override was given, or at least one non-protected file
+ *   remains to install (a partial run, protected file(s) skipped).
  */
 export function checkGuard({ targetPaths, allowlist, override }) {
   const allowlistSet = new Set(allowlist);
   const blocked = [...new Set(targetPaths.filter((p) => allowlistSet.has(p)))].sort();
+  const installable = [...new Set(targetPaths.filter((p) => !allowlistSet.has(p)))].sort();
   const overrideUsed = blocked.length > 0 && override === true;
-  return { blocked, allowed: blocked.length === 0 || override === true, overrideUsed };
+  const allowed = override === true || installable.length > 0 || blocked.length === 0;
+  return { blocked, installable, allowed, overrideUsed };
 }
 
 /** The default, NETWORK-REACHING resolver: the pinned CLI's own dependency
@@ -285,6 +361,56 @@ function defaultStripLocalDependencies(names) {
   return result.status ?? 1;
 }
 
+/** #989 — a protected file's pre-install snapshot: its exact bytes if it already exists, or the
+ *  fact that it did NOT, so `restoreFileSnapshot` can put it back into EXACTLY the state it was
+ *  in before, whichever that was. A pure-ish, single-file primitive (real fs reads, an arbitrary
+ *  absolute path — never assumes `WEB_ROOT`) so it can be proven against a throwaway temp file,
+ *  never a real repo file, in `check-ui-add-guard.selftest.mjs`.
+ * @param {string} absPath
+ * @returns {{existed: boolean, content: Buffer|null}}
+ */
+export function snapshotFile(absPath) {
+  return existsSync(absPath) ? { existed: true, content: readFileSync(absPath) } : { existed: false, content: null };
+}
+
+/** The other half of `snapshotFile` — writes its exact bytes back if it existed, or removes
+ *  whatever the CLI's forced `--overwrite` just created if it did not. Never a partial write: the
+ *  CLI's own write already replaced the file wholesale, so this replaces it wholesale again.
+ * @param {string} absPath
+ * @param {{existed: boolean, content: Buffer|null}} snapshot
+ */
+export function restoreFileSnapshot(absPath, snapshot) {
+  if (snapshot.existed) {
+    writeFileSync(absPath, snapshot.content);
+  } else if (existsSync(absPath)) {
+    rmSync(absPath);
+  }
+}
+
+/** The default, REAL-FS backup step for a #989 partial install — one `snapshotFile` per blocked,
+ *  project-relative path, keyed by that path so `defaultRestoreProtectedFiles` can put each one
+ *  back at the same place. Never called by the selftest (same house rule as `defaultSpawnAdd`),
+ *  which injects a fixture instead. */
+function defaultBackupProtectedFiles(paths) {
+  const backups = new Map();
+  for (const p of paths) backups.set(p, snapshotFile(join(WEB_ROOT, p)));
+  return backups;
+}
+
+/** The default, REAL-FS restore step — the other half of `defaultBackupProtectedFiles`. Runs
+ *  UNCONDITIONALLY after `spawnAdd`, regardless of its exit code, for the same reason
+ *  `stripLocalDependencies` does below: the pinned CLI's own file-write step may have already
+ *  written the protected file before a later part of the same run failed. Never called by the
+ *  selftest. */
+function defaultRestoreProtectedFiles(backups) {
+  let restored = 0;
+  for (const [p, snapshot] of backups) {
+    restoreFileSnapshot(join(WEB_ROOT, p), snapshot);
+    restored++;
+  }
+  return restored;
+}
+
 /** The default, REAL-CLI-INVOKING installer — spawns the pinned local binary
  *  (never a floating `npx`-resolved one) with `add` plus every argument this
  *  script did not itself consume, inheriting stdio so the CLI's own prompts
@@ -313,6 +439,9 @@ function defaultSpawnAdd(args) {
  *   resolveDependencies?: (names: string[], config: unknown) => Promise<{dependencies?: string[], devDependencies?: string[]}>,
  *   spawnAdd?: (args: string[]) => number,
  *   stripLocalDependencies?: (names: string[]) => number,
+ *   backupProtectedFiles?: (paths: string[]) => Map<string, {existed: boolean, content: Buffer|null}>,
+ *   restoreProtectedFiles?: (backups: Map<string, {existed: boolean, content: Buffer|null}>) => number,
+ *   rewriteLocalImports?: (paths: string[], aliasUtils: string) => string[],
  *   log?: (line: string) => void,
  * }} deps
  * @returns {Promise<number>} the process exit code
@@ -322,6 +451,9 @@ export async function main(argv, env, deps = {}) {
   const resolveDependencies = deps.resolveDependencies ?? defaultResolveDependencies;
   const spawnAdd = deps.spawnAdd ?? defaultSpawnAdd;
   const stripLocalDependencies = deps.stripLocalDependencies ?? defaultStripLocalDependencies;
+  const backupProtectedFiles = deps.backupProtectedFiles ?? defaultBackupProtectedFiles;
+  const restoreProtectedFiles = deps.restoreProtectedFiles ?? defaultRestoreProtectedFiles;
+  const rewriteLocalImports = deps.rewriteLocalImports ?? defaultRewriteLocalImports;
   const log = deps.log ?? ((line) => console.log(line));
 
   // EVERY ARGUMENT THIS SCRIPT DOES NOT ITSELF CONSUME IS FORWARDED VERBATIM
@@ -346,7 +478,7 @@ export async function main(argv, env, deps = {}) {
   const targetPaths = resolveTargetPaths(files, componentsConfig.aliases ?? {});
 
   const override = env[OVERRIDE_ENV_VAR] === "1";
-  const { blocked, allowed, overrideUsed } = checkGuard({ targetPaths, allowlist, override });
+  const { blocked, installable, allowed, overrideUsed } = checkGuard({ targetPaths, allowlist, override });
 
   if (!allowed) {
     log(`[ui-add] REFUSING: installing ${componentNames.join(", ")} would overwrite ${blocked.length} protected file(s), owner-ruled fixes recorded in-file:`);
@@ -358,6 +490,20 @@ export async function main(argv, env, deps = {}) {
 
   if (overrideUsed) {
     log(`[ui-add] OVERRIDE USED (${OVERRIDE_ENV_VAR}=1): proceeding despite ${blocked.length} protected file(s) in the payload: ${blocked.join(", ")}.`);
+  }
+
+  const isDryRun = argv.includes("--dry-run");
+
+  // #989 — PARTIAL INSTALL: some file(s) in the closure are protected, override was NOT given,
+  // and `allowed` is still true (checkGuard above) because at least one OTHER file in the same
+  // closure is not — install everything installable, skip only the protected file(s), never the
+  // whole-payload abort `!allowed` handles above. A `--dry-run` writes nothing at all, so there is
+  // nothing to skip yet — only to NAME, the same "report every run, dry or real" posture as the
+  // `cn` dependency report below.
+  const partialSkip = blocked.length > 0 && !override;
+  if (partialSkip && isDryRun) {
+    const which = blocked.length === 1 ? "file" : "files";
+    log(`[ui-add] a REAL run would install ${installable.length} file(s) and SKIP ${blocked.length} protected ${which} (owner-ruled fixes recorded in-file, left byte-identical): ${blocked.join(", ")}. Set ${OVERRIDE_ENV_VAR}=1 to overwrite ${blocked.length === 1 ? "it" : "them"} instead.`);
   }
 
   // #969 — resolved and reported EVERY run (dry or real): a caller must never be silently
@@ -378,8 +524,51 @@ export async function main(argv, env, deps = {}) {
     log(`[ui-add] OVERRIDE USED (${OVERRIDE_ENV_VAR}=1): keeping ${local.join(", ")} as a REAL npm dependency this run, instead of the usual local stand-in.`);
   }
 
-  const isDryRun = argv.includes("--dry-run");
-  const code = spawnAdd(argv);
+  // #989 — a partial install must never hang a non-interactive run on the pinned CLI's own
+  // per-file "already exists, overwrite?" prompt for the OTHER, non-protected already-vendored
+  // files in the same closure (input.tsx etc. in the Combobox closure) — MEASURED (2026-09-23):
+  // with stdin closed, the pinned CLI's prompt reads EOF and defaults to "N" (skip), which would
+  // silently skip EVERY already-existing file, protected or not, defeating "installs every other
+  // file". `-o/--overwrite` (MEASURED to suppress that prompt entirely, non-interactively, for
+  // ANY already-existing file, protected included) is forced here ONLY for this partial-install
+  // case, and never duplicated if the caller already passed it — the protected file(s) it would
+  // also overwrite are backed up first and restored after, below, which is what makes forcing it
+  // safe. The override path (`partialSkip` false when `override` is true) is UNCHANGED: it still
+  // forwards the caller's own args verbatim, exactly as before #989 — a caller using the override
+  // is trusted to pass `--overwrite`/`--yes` themselves if their run is non-interactive.
+  const forcedArgv = partialSkip && !isDryRun && !argv.includes("--overwrite") && !argv.includes("-o")
+    ? [...argv, "--overwrite"]
+    : argv;
+
+  // Snapshotted BEFORE the CLI runs, so the guard's own restore — never the CLI's behaviour — is
+  // what proves the protected file(s) end up byte-identical (AC2). `null` (not an empty Map) when
+  // there is nothing to protect this run, so the restore step below is skipped outright rather
+  // than doing a zero-length no-op.
+  const backups = partialSkip && !isDryRun ? backupProtectedFiles(blocked) : null;
+
+  // #989 fix round (review finding SPEC-989-B) — THE RESTORE IS NOT ON THE HAPPY PATH.
+  // Forcing `--overwrite` means the protected file IS written by the CLI and put back afterwards;
+  // it is not left untouched, and saying otherwise would tell an operator the wrong thing. So the
+  // restore runs in a `finally`: a throw out of `spawnAdd`, or the host OOM this CLI has already
+  // been measured hitting, must not decide whether `button.tsx` stays as upstream's file. The one
+  // window this cannot close is the process being killed outright (Ctrl-C, SIGKILL) between the
+  // write and the restore — the protected files are all tracked in git, so the recovery there is
+  // `git checkout -- <path>`, and the line below says so before anything is written.
+  if (backups) {
+    const which = blocked.length === 1 ? "file" : "files";
+    log(`[ui-add] the pinned CLI is about to OVERWRITE ${blocked.length} protected ${which} and this guard will restore ${blocked.length === 1 ? "it" : "them"} straight after: ${blocked.join(", ")}. If this run is killed in between, restore by hand with \`git checkout -- ${blocked.join(" ")}\`.`);
+  }
+
+  let code;
+  try {
+    code = spawnAdd(forcedArgv);
+  } finally {
+    if (backups) {
+      restoreProtectedFiles(backups);
+      const which = blocked.length === 1 ? "file" : "files";
+      log(`[ui-add] SKIPPED ${blocked.length} protected ${which} — overwritten by the CLI and RESTORED byte for byte to its pre-install content, never silently left as the upstream file: ${blocked.join(", ")}. Everything else in the payload installs normally. Set ${OVERRIDE_ENV_VAR}=1 to overwrite ${blocked.length === 1 ? "it" : "them"} instead.`);
+    }
+  }
 
   // #969 fix round (L05B-S03) — a non-zero exit here is NOT "nothing was written". MEASURED
   // against the pinned shadcn 4.19.0 bundle (apps/web/node_modules/shadcn/dist/chunk-CDOZT3OO.js):
@@ -389,6 +578,20 @@ export async function main(argv, env, deps = {}) {
   // lockfile. A dry run is the one exception: it writes nothing at all, dependencies included,
   // regardless of spawnAdd's own exit code, so there is nothing to strip either way.
   if (local.length > 0 && !override && !isDryRun) {
+    // #989 — the SAME gate the strip below uses: a real, non-override, non-dry install that
+    // resolved `cn`. Runs BEFORE the strip (different files — package.json/the lockfile vs the
+    // component sources themselves — so the order does not matter functionally, but fixing what
+    // was WRITTEN before touching what was INSTALLED reads in the same order the CLI itself ran
+    // them). Only the files THIS run actually wrote: `installable` when a protected file was
+    // skipped (the protected one is restored to its pre-install content regardless, so rewriting
+    // its import first would be wasted work on a file about to be reverted), `targetPaths`
+    // otherwise (a clean payload, or an override that kept every file including any protected
+    // one — but the override branch above already returns before this point is ever wrong: see
+    // the `local.length > 0 && override` block, which never reaches here since `!override` gates
+    // this whole block).
+    const writtenPaths = partialSkip ? installable : targetPaths;
+    rewriteLocalImports(writtenPaths, componentsConfig.aliases?.utils ?? "@/lib/utils");
+
     const stripCode = stripLocalDependencies(local);
     if (stripCode !== 0) {
       const cause = code !== 0 ? ` (the pinned CLI itself also exited ${code})` : "";

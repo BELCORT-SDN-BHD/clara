@@ -1,0 +1,159 @@
+{
+  "axis": "SPEC",
+  "lane": "wave 3, lane 09",
+  "branch": "riders/w3-lane09",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\659",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head": "2a6bae6f77ac79415bae8d939a31ccb695921bf0",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "commit_log_command": "git log ffe63a0dd084e99b84c1368119845be273c421ce..HEAD --oneline",
+  "tickets_reviewed": [970, 989, 864, 997, 1017],
+  "spec_sources": [
+    "gh issue view 970 --json body,comments  (owner ruling 2026-09-19/20 comment carries the newest Agent Brief)",
+    "gh issue view 989 --json body,comments  (0 comments; the issue body is the only Agent Brief)",
+    "gh issue view 864 --json body,comments  (one 2026-09-17 triage comment carries the Agent Brief; no 2026-09-20 owner ruling)",
+    "gh issue view 997 --json body,comments  (owner ruling 2026-09-20 comment carries the newest Agent Brief)",
+    "gh issue view 1017 --json body,comments (2026-09-20 triage comment WIDENS the brief with the resting-contrast criterion)",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane09-ticket{970,989,864,997,1017}.md"
+  ],
+  "verdict": "accept-with-fixes",
+  "cells_rerun_by_the_reviewer": [
+    "apps/web $ node --import ./test/bootstrap.mjs --import tsx --test e2e/cell-budget-census.test.ts e2e/settle-before-scan-census.test.ts tests/token-contrast.test.ts tests/focus-ring-contract.test.ts e2e/e2e-fixture-ownership.test.ts components/clara/composer-attachment.test.tsx components/clara/composer-attachment-control.test.tsx -> 89 tests, 89 pass, 0 fail (live)",
+    "apps/web $ node scripts/check-ui-add-guard.selftest.mjs -> '[check-ui-add-guard.selftest] all cases passed.' (live)",
+    "apps/web $ node scripts/check-token-contrast.mjs -> 57 pairs, all pass; muted-foreground-on-muted 4.62:1 (#687171 on #f5f6f4); foreground-on-muted-selected-document-row 14.32:1 (#202525 on #f5f6f4) (live)",
+    "Drove a wide scan detector (scan( | expectAccessible( | .analyze() over every apps/web/e2e/*.spec.ts test body, reusing cell-budget-census.test.ts's own testBodies/callsSharedSignIn/DECLARES_BUDGET logic verbatim (live)",
+    "Imported the census's own exported unsettledScanLines/stripComments and drove a two-cell fixture: a trailing settle in cell A clears an unsettled scan in cell B -> returned [] (live)",
+    "Re-ran a CELL-BOUNDARY-AWARE variant of the same census over the real 50 spec files -> zero offenders (so SPEC-1017-C is latent, not live)",
+    "ls apps/web/components/ui/ -> no popover.tsx and no combobox.tsx on the branch",
+    "git diff of button.tsx, filed-document-list.tsx, check-token-contrast.mjs, tests/token-contrast.test.ts, tests/focus-ring-contract.test.ts, scripts/ui-add.mjs, e2e/helpers.ts, e2e/tax-boundary-mock.mjs, apps/web/package.json, pnpm-lock.yaml"
+  ],
+  "findings": [
+    {
+      "id": "SPEC-864-A",
+      "ticket": 864,
+      "severity": "major",
+      "kind": "requirement implemented wrongly",
+      "title": "The cell-budget census's rule-2 detector matches only the literal `scan(`, so a file in exactly the shape the rule exists for is invisible to it - and the README/report claim that only one such file existed is measurably false",
+      "evidence": "#864 Agent Brief AC1: \"A census (a cell or a recorded grep) shows every spec file that signs in, polls or scans calls the budget helper.\" apps/web/e2e/cell-budget-census.test.ts:153 defines `const SCAN_CALL = /\\bscan\\(/g;` and `ungrantedHeavyCells` counts only that token. MEASURED live by re-driving that file's own testBodies/callsSharedSignIn/DECLARES_BUDGET logic over all 50 spec files: apps/web/e2e/signup-confirm-pending.spec.ts has callsSharedSignIn=false (it imports only `settleForScan` from ./helpers, line 4, so no automatic CELL_BUDGET.signIn floor), declares no budget ANYWHERE in the file (no test.setTimeout / cellBudgetMs / grantCellBudget), and runs 10 real axe passes through its own local `expectAccessible(` (defined at line 90, which calls settleForScan then AxeBuilder.analyze) - with THREE cells running 2+ of them (the cell at line 112 scans at 115/122/203, at 286 scans at 310/325, at 334 scans at 367/379). The census reports 0 offenders for it. Consequently apps/web/e2e/README.md line 100 (\"`checkout-gate-walk.spec.ts`, which only ever signs UP, was the one file with that shape\") and wave3-lane09-ticket864.md (\"the only file in the whole 49-file suite matching this shape\") are both false on the branch as shipped.",
+      "required_fix": "Widen the rule-2 scan token to the suite's real scan spellings (`scan(`, `expectAccessible(`, `.analyze(`) or resolve each file's own scan-helper name the way #1017's census resolves LOCAL_WRAPPERS; then give signup-confirm-pending.spec.ts's three heavy cells their own `test.setTimeout(cellBudgetMs({ scans: N }))`, and correct the README sentence and the ticket report so neither claims a uniqueness the detector never established."
+    },
+    {
+      "id": "SPEC-864-B",
+      "ticket": 864,
+      "severity": "major",
+      "kind": "requirement missing or partial",
+      "title": "AC1's literal requirement is not met: the census never looks at polls at all, and exempts every file that signs in - 17 cells across 15 files run 2+ real scans with no budget of their own",
+      "evidence": "#864 Agent Brief, Desired behavior: \"Every spec file that signs in, polls or runs a full-page scan calls `test.setTimeout(cellBudgetMs(...))` or `grantCellBudget` sized to its own work.\" The shipped census holds two narrower rules: (1) a custom timeout must be built from cellBudgetMs, (2) a file with NO shared sign-in must budget a 2+-scan cell. `ungrantedHeavyCells` opens with `if (callsSharedSignIn(source)) return 0;` (cell-budget-census.test.ts:165), so 45 of the 50 spec files are exempt by construction, and no rule mentions polls anywhere. MEASURED live with the wide detector: 17 cells across 15 files (bank-close-registers-walk, bank-match-walk, chat-parity-walk x2, depreciation-walk, fixed-asset-acquisition-walk, knowledge-firm-walk, opening-ledger-source-walk, parity-holes, periodic-adjustment-walk, plans-walk, responsive-shell-walk, staff-expense-claim-walk, trade-invoice-walk, work-cancel-walk, work-question-walk x2) run 2+ real scans with no cell budget, standing only on signInTo's 20 s CELL_BUDGET.signIn floor. The narrowing IS argued in the report's \"Scope note\", but the AC as written is not satisfied and the census's own failure message does not say so.",
+      "required_fix": "Either extend the census to the AC's own three verbs (sign-in, poll, scan) across every file - sizing each 2+-scan cell's own budget - or get the narrowing ruled explicitly on the ticket and rewrite AC1 to the rule that actually shipped, so the census's green does not read as coverage it does not have."
+    },
+    {
+      "id": "SPEC-864-C",
+      "ticket": 864,
+      "severity": "minor",
+      "kind": "requirement missing or partial",
+      "title": "AC3 \"The browser suite stays green on one full run\" was not achieved, and no full-suite run exists at all against the branch's final tree",
+      "evidence": "#864 AC3, verbatim: \"The browser suite stays green on one full run.\" wave3-lane09-ticket864.md marks it [~] and records three real runs (560/1/7, 558/3/7, 560/1/7) with four distinct failing cells, all in files #864 did not touch. That self-report is honest and its \"not caused by this ticket\" reasoning checks out against the diff (apps/web/e2e/helpers.ts's only change in the whole branch is a doc comment - verified). But those three runs predate #1017's 37-file settle fold (777c7417b), and wave3-lane09-ticket1017.md's own \"Anything unverified\" says the remainder of the suite \"was not re-run end to end\". MEASURED: 12 spec files (activity-feed-walk, chat-parity-walk, documents-intake-walk, entry-faces-walk, identity-finish, intake-batch-walk, journal-work-walk, manual-journal-walk, members-invite-walk, reports-download-walk, work-cancel-walk, work-question-walk) have never been run live against HEAD, which also carries #970's button.tsx/ComposerAttachmentControl.tsx rewrite that chat-parity-walk covers.",
+      "required_fix": "The integrator runs one whole `pnpm --filter @clara/web e2e` against HEAD before the PR and records it; if it does not come back green, AC3 is settled on the ticket (documented flake classes) rather than left as a [~] the branch never revisited."
+    },
+    {
+      "id": "SPEC-989-A",
+      "ticket": 989,
+      "severity": "minor",
+      "kind": "requirement missing or partial",
+      "title": "AC5 asks for the vendored Popover files; the branch has none - AC4 and AC5 rest on live runs that were deliberately reverted",
+      "evidence": "#989 AC5, verbatim: \"Installing Popover succeeds and produces the vendored Popover files.\" AC4: \"Installing Combobox succeeds and leaves the protected Button file untouched.\" MEASURED: `ls apps/web/components/ui/` on HEAD lists neither popover.tsx nor combobox.tsx (nor did the combobox run's other four files survive - wave3-lane09-ticket989.md records them reverted with `git checkout --`/`rm`). The only evidence for AC4/AC5 is an ephemeral 2026-09-23 rehearsal narrated in the report; nothing on the branch re-proves it, and the guard selftest's new cases run against fixtures, not a real install. The revert is defensible (\"Out of scope: Building any feature that consumes Combobox or Popover\") but the AC asks for the produced files, not for a rehearsal.",
+      "required_fix": "Either vendor popover.tsx (and combobox.tsx) so AC5's artifact exists on the branch, or get the AC amended on the ticket to \"a recorded rehearsal proves the install succeeds; the files are vendored by the ticket that consumes them\" - and say which one in the report rather than ticking the box as written."
+    },
+    {
+      "id": "SPEC-989-B",
+      "ticket": 989,
+      "severity": "minor",
+      "kind": "requirement implemented wrongly",
+      "title": "\"Never silently overwritten\" is delivered as force-overwrite-then-restore from an in-memory snapshot, with the spawn outside any try/finally",
+      "evidence": "#989 AC2, verbatim: \"The protected file's content is byte-identical before and after; it is never silently overwritten and no interactive confirmation is needed in a non-interactive run.\" apps/web/scripts/ui-add.mjs:539-553 appends `--overwrite` for exactly this path (`forcedArgv`), snapshots the blocked files into a Map, then `const code = spawnAdd(forcedArgv);` followed by `if (backups) restoreProtectedFiles(backups);` - no try/finally and no on-disk backup. So the protected file IS overwritten during the run, and the only copy of the owner-ruled content lives in this process's memory: a throw out of spawnAdd, a Ctrl-C, or the host OOM the same report records hitting this CLI leaves components/ui/button.tsx sitting as upstream's file with no restore. The end-state byte-identity claim is true on the happy path (the report's sha256 before/after match), but \"never silently overwritten\" is not what the code does.",
+      "required_fix": "Wrap the spawn in try/finally so the restore runs on any exit path, and say plainly in the report and in the CLI's own message that the protected file is written and restored rather than left untouched."
+    },
+    {
+      "id": "SPEC-989-C",
+      "ticket": 989,
+      "severity": "note",
+      "kind": "behaviour not asked for",
+      "title": "The forced --overwrite also replaces non-protected already-vendored files, and the run's report names only the protected skip",
+      "evidence": "#989 Desired behavior: \"Installing a component whose dependency closure includes an already-vendored, owner-ruled protected file installs every other file and names the file(s) skipped because they are protected... this changes only the default (no-override) path.\" Forcing `--overwrite` (ui-add.mjs:539) also suppresses the CLI's per-file prompt for every OTHER already-vendored file in the closure: wave3-lane09-ticket989.md records the combobox run \"updated input.tsx/textarea.tsx/input-group.tsx\". MEASURED: all three of those files carry hand-applied `focus-visible:ring-ring/70` where upstream ships `/50` (components/ui/input.tsx:12, textarea.tsx:10, input-group.tsx:17), so a real run silently reverts them. Partially netted: tests/focus-ring-contract.test.ts's \"every ring-ring/NN carrier matches the declared alpha\" cell would red on that specific drift (re-run live, 22 carriers, green). Nothing catches a non-alpha local edit, and the guard's SKIPPED message mentions only the protected file.",
+      "required_fix": "Name the non-protected already-vendored files the forced overwrite will rewrite in the same report line the skip uses, so the operator knows which files to re-diff after the run."
+    },
+    {
+      "id": "SPEC-970-A",
+      "ticket": 970,
+      "severity": "note",
+      "kind": "behaviour not asked for",
+      "title": "The button's motion-token treatment was dropped with the overwrite; the ruling named only the accessibility fixes and the variants/sizes, and no gate catches the motion regression",
+      "evidence": "#970 owner ruling (2026-09-20): \"let upstream's button file win the overwrite, and re-add on top of it only the app-specific variants and sizes other surfaces still use... The owner-ruled accessibility fixes the button carries are not repealed.\" The pre-#970 file carried `motion-fast` plus `transition-[color,background-color,border-color,box-shadow,transform,opacity]` with its own rationale (\"`all` animates whatever a variant happens to change, layout properties included, which is both off-GPU and unpredictable\"). HEAD's components/ui/button.tsx:57 ships upstream's bare `transition-all` and no `motion-fast`. The in-file header states the omission and why, so it is deliberate and documented - but it is neither an accessibility fix nor a variant/size, so the ruling authorises neither keeping nor dropping it, and no cell in apps/web/tests (reduced-motion-contract.test.ts included) asserts the button's transition property list or duration token.",
+      "required_fix": "Get the drop acknowledged on #970 (or re-apply `motion-fast` + the explicit property list as a fourth named re-application); if it stays dropped, add the assertion so the next regeneration cannot change it again unobserved."
+    },
+    {
+      "id": "SPEC-970-B",
+      "ticket": 970,
+      "severity": "note",
+      "kind": "requirement implemented wrongly",
+      "title": "AC6 \"no extraneous dependency is left in the lockfile\" holds for packages, but the install left incidental peer-resolution churn in pnpm-lock.yaml",
+      "evidence": "#970 AC: \"No extraneous dependency is left in the package manifest or lockfile by the install.\" apps/web/package.json's diff is exactly one line (`\"@shadcn/react\": \"^0.3.1\"`), which is the wanted dependency, and no `cn` residue survives - that half is clean. But pnpm-lock.yaml also rewrites unrelated entries from `debug: 4.4.3(supports-color@8.1.1)` to `debug: 4.4.3` in several snapshots and adds a new bare `debug@4.4.3:` snapshot block. That is a resolution-graph change nothing in this ticket asked for.",
+      "required_fix": "Either regenerate the lockfile so the only delta is @shadcn/react, or record the debug peer-context churn in the ticket report as accepted install noise so the integrator does not have to rediscover it."
+    },
+    {
+      "id": "SPEC-997-A",
+      "ticket": 997,
+      "severity": "note",
+      "kind": "requirement missing or partial",
+      "title": "AC2's \"rather than a stubbed door\" holds only against a component-level stub - the three governed doors and the disposition read are themselves new handlers in the lane's mock",
+      "evidence": "#997 AC2, verbatim: \"The walk runs against a served build rather than a stubbed door, so a wiring break between the write and the disposition read fails it.\" The walk does run against `next build` + `next start` + Chromium, and its vacuity control (the ack handler answering 200 without recording) genuinely reds it - the wiring half of the AC is proven. But apps/web/e2e/tax-boundary-mock.mjs now implements `ack_compliance_watch`, `snooze_compliance_watch`, `resolve_compliance_watch` and `get_compliance_watch_disposition` as in-process handlers over module-level `receiptAck`/`receiptSnooze`/`receiptResolve`, so the doors' own SQL, floors and state machine are never exercised. The spec file's own header says this plainly; the ticket report's AC2 line does not.",
+      "required_fix": "Carry the spec header's own caveat into the report's AC2 line, so the ticket does not close reading as though the governed doors themselves were proven end to end."
+    },
+    {
+      "id": "SPEC-997-B",
+      "ticket": 997,
+      "severity": "note",
+      "kind": "requirement implemented wrongly",
+      "title": "The new walk is not idempotent inside one server process: the mock's disposition state is never reset and the walk's first assertion requires the pristine state",
+      "evidence": "apps/web/e2e/tax-boundary-mock.mjs declares `let receiptAck = null; let receiptSnooze = null; let receiptResolve = null;` at module scope and never clears them; apps/web/e2e/tax-compliance-watch-receipt-walk.spec.ts opens with `await expect(watchRegion.getByText(\"Nothing has been recorded on this watch yet.\")).toBeVisible();`, which only holds while all three are null. Today this is safe because playwright.config.ts sets `retries: 0`, `workers: 1` and `reuseExistingServer: false` (verified, lines 28-30 and 62) - but any retry, any `--repeat-each` (the shape #1017's own AC3 gate used), or a future retries bump reds this walk on the second pass for a reason that is not a product defect.",
+      "required_fix": "Reset the three module variables per run - a fixture-reset route the spec calls in a beforeEach, the shape other lane mocks use - or state in the spec header that it may only be run once per server process."
+    },
+    {
+      "id": "SPEC-1017-A",
+      "ticket": 1017,
+      "severity": "minor",
+      "kind": "requirement implemented wrongly",
+      "title": "The new pinned contrast pair is pure token math and cannot see the component, so the regression guard its own citation claims does not exist",
+      "evidence": "#1017 owner widening (2026-09-20): \"the selected row's text and background pair must clear 4.5 to 1 with a real margin at rest (checked by the design-token contrast lint the repo already runs, by adding this pair to it), without relaxing any threshold.\" The pair was added: apps/web/scripts/check-token-contrast.mjs `{ id: \"foreground-on-muted-selected-document-row\", fg: (h) => h(\"foreground\"), bg: (h) => h(\"muted\"), threshold: 4.5 }`, measured live at 14.32:1, and tests/token-contrast.test.ts asserts `ratio >= 10`. Both resolve ONLY from app/globals.css tokens. Its `source` string nonetheless claims it is \"pinned on its own so a future regression back onto text-muted-foreground reds this specific id\" - it would not: reverting components/documents/filed-document-list.tsx:69/79 to plain `text-muted-foreground` leaves the pair's fg/bg lookups unchanged, so `node scripts/check-token-contrast.mjs` still reports 14.32:1 and both cells stay green. No cell asserts the component's selected-row class either (components/documents/documents-a11y.test.tsx exercises the unselected state).",
+      "required_fix": "Either correct the `source` string to say what the pin actually does (record which pair the selected row is supposed to render, not detect that it does), or add a component-level cell that renders FiledDocumentList with `selectedId` set and asserts the selected row's cells carry `text-foreground` - that is the cell that makes the claimed regression guard real."
+    },
+    {
+      "id": "SPEC-1017-B",
+      "ticket": 1017,
+      "severity": "note",
+      "kind": "requirement missing or partial",
+      "title": "The same 4.62:1 at-rest pair the ruling called out still renders on a selected row inside the very facts view the previously-flaky cell scans",
+      "evidence": "#1017 triage comment: \"the selected row's resting contrast (muted foreground on the muted selection background) sits on the threshold itself, and anti-aliasing decides which side a scan lands on.\" The fix moved ONE component. MEASURED live: `muted-foreground-on-muted` still reports 4.62:1 (#687171 on #f5f6f4), and components/documents/document-facts-table.tsx:170 renders `<TableRow ... className={cn(selected && \"bg-muted\")}>` whose cells include `align-top text-muted-foreground` and a `text-xs text-muted-foreground` field-path span - the identical at-rest pair, on a selected row, inside the `tab=facts` view that document-correction-walk.spec.ts:388's axe cell scans. It is latent rather than live (nothing selects a fact by default; selection comes from a click), so the cell is green today. The brief's Key interfaces also asked the shared helper to cover \"any hover/selection state that stacks background-opacity classes\"; settleForScan (e2e/helpers.ts:120) was not modified by this ticket.",
+      "required_fix": "Decide on the ticket whether the ruling's margin requirement applies to every selected-row carrier of this pair or only to the filed-document row, and if the former, give document-facts-table.tsx's selected row the same treatment and pin it too."
+    },
+    {
+      "id": "SPEC-1017-C",
+      "ticket": 1017,
+      "severity": "note",
+      "kind": "requirement implemented wrongly",
+      "title": "The settle census's markers are file-ordered with no cell boundary, so a settle at the end of one test can clear an unsettled scan at the start of the next",
+      "evidence": "#1017 AC2: \"A mechanical check fails if a spec file invokes the accessibility scanner without first calling the shared helper, unless the file is named in a reviewed exception list.\" apps/web/e2e/settle-before-scan-census.test.ts's `unsettledScanLines` builds one flat marker list over the whole file and carries a single `settled` boolean across it; nothing resets at a `test(` boundary. DRIVEN live against the census's own export: a fixture where cell A ends with `await settleForScan(page);` and cell B then runs a bare `.analyze()` returns `[]`, i.e. the unsettled scan in B is cleared by A's settle. Latent, not live: a cell-boundary-aware re-run of the same census over all 50 real spec files reports zero offenders, so nothing on the branch depends on the hole today.",
+      "required_fix": "Reset `settled` at every `test(`/`test.only(` boundary (the same brace-walk cell-budget-census.test.ts already implements), and add the cross-cell fixture to the vacuity control so the hole cannot reopen."
+    },
+    {
+      "id": "SPEC-1017-D",
+      "ticket": 1017,
+      "severity": "note",
+      "kind": "behaviour not asked for",
+      "title": "The fold also removed the (0,0) mouse park from ten files' local settle(), which changes what those scans measure",
+      "evidence": "#1017 Desired behavior asks that every scan settle \"using one shared implementation rather than per-file local copies\" - it does not ask for the pointer-parking behaviour to change. The diff removes `await page.mouse.move(0, 0);` along with the local animation poll (e.g. apps/web/e2e/accrual-walk.spec.ts's `settle`), so those scans can now measure a hovered control. The reasoning is recorded (settleForScan's own header: the hover shortfall is fixed at the token, pinned by `primary-foreground-on-primary-hover`), and all 37 touched files were re-run green (403 passed, 5 skipped) - so this is a recorded, proven change rather than an unnoticed one, but it is a behaviour change beyond the ticket's ask.",
+      "required_fix": "None required beyond what is already recorded; flagged so the integrator reads any new hover-contrast red on these files as this change's consequence rather than a fresh defect."
+    }
+  ],
+  "summary": "Fourteen findings across the five tickets, none blocking. The two that matter are both on #864: the cell-budget census's second rule keys on the literal token `scan(`, so signup-confirm-pending.spec.ts - a file with no shared sign-in, no budget anywhere and three cells running 2+ real axe passes, exactly the shape the rule exists for - is invisible to it, which also makes the README's and the report's \"the one file with that shape\" claim false; and AC1 as written (every file that signs in, POLLS or scans) is not what shipped, since the rule exempts all 45 signed-in files by construction and never looks at polls, leaving 17 ungranted 2+-scan cells across 15 files. #864's AC3 is self-reported partial and no full browser-suite run exists against the final tree at all (12 spec files never re-run after #1017's 37-file fold). #989 ships no vendored Popover or Combobox files, so AC4/AC5 rest on reverted rehearsals, and its \"never silently overwritten\" is really force-overwrite-then-restore from an in-memory snapshot outside any try/finally. #1017's two halves are real and re-verified (census 4/4, contrast 57 pairs, the row at 14.32:1), but the new pinned pair is pure token math and cannot detect the component regression its own citation claims it guards, and the same 4.62:1 at-rest pair still sits on a selected row in document-facts-table.tsx inside the scanned facts view. #970 and #997 are substantially as specified; their findings are notes."
+}

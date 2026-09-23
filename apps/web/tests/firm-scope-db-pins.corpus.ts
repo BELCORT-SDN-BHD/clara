@@ -248,4 +248,63 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "d84659c80b4aee33f46038660ee97e2f322a7e6861cdc5874ebfb79507cde81f",
     },
   ],
+  // #932 [0277] (riders wave 3, lane 04) — the fixed-asset default depreciation policy. NOT the
+  // pg_get_functiondef splice family: its three recut function bodies (the acquisition birth
+  // trigger, clara._fa_on_approve and clara._fa_asset_json) are each written out as a whole
+  // literal `create or replace function … as $$ … $$`, static DDL the lexer reads directly. This
+  // file's dynamic SQL is confined to TWO closed, literal EXECUTE sites, neither of which is a
+  // pg_get_functiondef discovery and neither of which can emit a CREATE [OR REPLACE] VIEW of any
+  // spelling.
+  [
+    "0277_fa_default_depreciation_policy.sql",
+    {
+      reason:
+        "Reviewed: the file's only dynamic SQL is (1) a guarded ALTER TABLE do-block adding clara.fixed_assets.depreciation_policy_id/depreciation_policy_version and their tenant-congruence foreign key — two EXECUTE calls on single string literals and one on a three-piece `||` concatenation of literal ALTER TABLE text, no interpolated identifier or discovered body — and (2) the standard 0038:8056-8064 / 0041:4404-4423 bulk-ACL idiom, `execute format('revoke|grant|alter function owner …', f)` looped over a two-element literal array naming this file's own two new doors, clara.set_fa_depreciation_policy and clara.retire_fa_depreciation_policy. Both sites emit ALTER TABLE / GRANT / REVOKE / ALTER FUNCTION OWNER statements only; neither calls pg_get_functiondef, reads a live catalog body, or interpolates a relation name, so neither can produce a CREATE OR REPLACE VIEW of any kind by construction, and the file contains no `create view` of any spelling — static or spliced — at all. Every other object this migration creates (one new table with its RLS/policies/triggers, two new columns, one new foreign key and index, and the three recut function bodies) is STATIC DDL the lexer inspects directly; the recut bodies' own prestate pins the LIVE pre-image sha256 measured on the lane-04 rig and the tail re-reads the installed bodies' sha256, ACL and owner.",
+      sha256: "90656f46a5a89cc64e97938694c0e5139ab0d5eb6e8ab9cdeb8022a4cb380acb",
+    },
+  ],
+  // #975 [0279] (riders wave 3, lane 04) — the closed-year arrears question. Same family as
+  // 0277's entry directly above: every recut body is written out as a whole literal
+  // `create or replace function … as $$ … $$`, static DDL the lexer reads directly, and the file's
+  // ONLY dynamic SQL is the standard bulk-ACL loop over its own one new door.
+  [
+    "0279_fa_closed_year_arrears.sql",
+    {
+      reason:
+        "Reviewed: the file's only dynamic SQL is the standard 0038:8056-8064 / 0041:4404-4423 bulk-ACL idiom, `execute format('revoke|grant|alter function owner …', f)` looped over a ONE-element literal array naming this file's own new door, clara.record_fa_arrears_resolution. That site emits GRANT / REVOKE / ALTER FUNCTION OWNER statements only; it never calls pg_get_functiondef, never reads a live catalog body and never interpolates a relation name, so it cannot produce a CREATE [OR REPLACE] VIEW of any spelling by construction, and the file contains no `create view` of any spelling — static or spliced — at all. Everything else this migration installs is STATIC DDL the lexer inspects directly: one new table (clara.fa_arrears_resolutions) with its indexes, RLS policies and two triggers, one new ungranted internal (clara._fa_closed_arrears), one new door, and four whole recut function bodies (clara._fa_run_period_core, clara._fa_oldest_unmet_period, clara.preview_depreciation_run, clara.run_depreciation_period_for). The recut bodies' prestate pins each LIVE pre-image sha256 measured on the lane-04 rig, and the tail re-reads the installed bodies' markers, volatility, ACL and owner.",
+      sha256: "ca9ede2bd4b065a8d3b4e67bde07b5afffbe937b2c1c083e580baf563de5a640",
+    },
+  ],
+  // Ticket 1012 [0288] (riders wave 3, lane 07) — the SAME 0146/0168/0180/0260 splice family,
+  // run in reverse for the first time: a row kind is REMOVED from the queue rather than added.
+  [
+    "0288_seeding_lane_retired.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at a literal signature and re-installed with its `seeding_rows` CTE and that CTE's union arm REMOVED (a gravestone comment in their place), because ticket 1012 retires the prior-GL seeding lane the row kind chased. The spliced text is built by boundary-anchored substring surgery between two literal CTE openers, each asserted to occur exactly once, plus one exact-count `replace()` of the union arm; the block emits no view definition at all, so neither P4 scope view can be a target, and its own postcheck re-derives every one of the TEN surviving row-kind markers at their prestate counts and asserts the removed kind's marker is gone. Same family as 0146's, 0168's, 0180's and 0260's splices of the same queue function. The file's OTHER sections use no dynamic SQL: three `create or replace function` statements at literal signatures recut the retired doors to one typed refusal, two `update clara.document_capabilities` statements republish seven prior_gl rows and raise the registry version, and the prestate/tail blocks read the catalog and drive the real doors inside a forced-rollback subtransaction.",
+      sha256: "6b6c5d031e2fe33de52c935befe35a4efcc8c4e321b53c4c2943f99ca34857bc",
+    },
+  ],
+  // #889 [0289] (riders wave 3, lane 07) — the SAME 0149 read-splice-prove family, appended at
+  // the sorted position. Added in this lane's FIX round: the first generation shipped without an
+  // entry, so this census threw "unreviewed dynamic-SQL barrier at 0289_merge_alias_lane.sql".
+  [
+    "0289_merge_alias_lane.sql",
+    {
+      reason:
+        "Reviewed read-splice-prove of exactly ONE FUNCTION — clara.merge_counterparties(uuid,uuid,uuid,text,text), read with pg_get_functiondef at that literal regprocedure spelled in this file and re-installed with TWO boundary-anchored substitutions: its residue alias insert gains the recorded_via column and the literal 'human_ui', and its combined firm/client guard is split so a counterparty outside the caller's firm answers CLR11 not-found rather than the CLR23 cross_client that made the door a cross-tenant existence oracle. Both images are derived branch-free, one replace() per top-level assignment, from that one pg_get_functiondef base; each anchor is asserted to occur EXACTLY once on whichever branch it belongs to, and S2 re-reads the COMMITTED body, applies the REVERSE of both substitutions and requires the remainder to equal the pre-image byte for byte plus a pinned post-splice prosrc sha256. The function returns jsonb, so it cannot emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. The file creates no relation, no function (only a pg_temp anchor-count helper) and no grant; its other statements are the prestate, which pins the recorded_via CHECK and five witness bodies by sha, and the closed-world census of application-reachable clara.counterparty_aliases writers.",
+      sha256: "2832301cfc379c493fefa5a7e88fe7752fc2e5b74033bd9f1f0895bce2c68e9e",
+    },
+  ],
+  // #990 [0291] (riders wave 3, lane 08) — the bank-statement line source-citation lane, the same
+  // 0175/0177/0191/0201/0226/0234 splice family: pg_get_functiondef recuts of a CLOSED literal
+  // roster of named FUNCTIONS, each read at its own literal regprocedure signature.
+  [
+    "0291_bank_statement_line_citation.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly TWO named functions, each read at its own literal regprocedure spelled in this file — clara._persist_statement_core_v2(uuid,uuid,uuid,jsonb,text,uuid,uuid,uuid,text,text) on TWO counted anchors (the reader2-wrong-lane guard block, which gains a sibling citation-shape guard, and the atomic INSERT into clara.bank_statement_lines, which gains three citation columns sourced from a LEFT JOIN onto reader1's raw payload) and clara.get_bank_line_matching_context(uuid) on ONE counted anchor (the line jsonb_build_object's closing tuple, which gains citation_page). Both return jsonb, so neither can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Each splice asserts its anchor occurs EXACTLY once before replacing, and each postcheck re-reads the INSTALLED body for the literal marker (citation_extraction_id / citation_page) it just spliced in. Every other object this migration creates (three nullable columns plus four CHECK/FK constraints on clara.bank_statement_lines) is static DDL the lexer inspects directly, and the file's own prestate pins the pre-image prosrc sha256 of all three bodies it reasons about (the two splice targets plus the untouched neighbour clara._stmt_lines_norm) MEASURED live on the lane database, per the wave-3 rig rule.",
+      sha256: "45235f2dab6652a3faa15abff761ea953993ecf4636fcbfcab8ad2a6637505b3",
+    },
+  ],
 ]);

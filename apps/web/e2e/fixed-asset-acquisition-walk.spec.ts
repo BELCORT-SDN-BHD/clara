@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, signInTo } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { FA } from "./fixed-asset-mock.mjs";
 
 /**
@@ -38,15 +38,12 @@ const DETAIL_URL = `/clients/${CLIENT}/registers/assets/${FA.assetId}`;
 const ANSWERABLE_URL = `/clients/${CLIENT}/registers/assets/${FA.answerableAssetId}`;
 const REVERSED_URL = `/clients/${CLIENT}/registers/assets/${FA.reversedAssetId}`;
 
+/** #1017 — delegates to the shared settle-before-scan contract (./helpers) instead of this file's
+ *  own animations-only wait, which never checked the enter/mount opacity fade settleForScan also
+ *  covers. Dropping the (0,0) mouse park too: settleForScan's own header records why it is no
+ *  longer needed — the hover-state contrast it used to dodge is fixed at the token now. */
 async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
+  await settleForScan(page);
 }
 
 async function scan(page: Page, what: string): Promise<void> {
@@ -63,6 +60,7 @@ async function openTab(page: Page, name: string): Promise<void> {
 
 test.describe("#639 · C7 fixed-asset acquisition", () => {
   test("the register links each asset to its own page and says which one is waiting", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     await signInTo(page, LIST_URL);
 
     // MEANINGFUL LOADING, then real data — never a placeholder amount painted as a zero.
@@ -131,6 +129,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
   });
 
   test("an invalid answer names the dependent CONTROL, keeps the draft, and a valid one persists", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 6 }));
     await ensureRealFocus(page);
     await signInTo(page, ANSWERABLE_URL);
     await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
@@ -201,6 +200,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
   });
 
   test("a VIEWER is refused by the door, reads the refusal where they are, and the asset is untouched", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 3 }));
     // AC9's "denied" leg, under a session whose role is genuinely below the door's floor rather
     // than a scripted asset. `clara.complete_fixed_asset_particulars` calls
     // `clara._human_ctx(role_rank('bookkeeper'))` FIRST (0004:299-309) - a viewer may read this
@@ -336,5 +336,61 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
     await expect(otherTrigger).toBeVisible();
     await otherTrigger.click();
     await expect(page.getByRole("dialog").getByLabel("Useful life (months)")).toHaveValue("");
+  });
+
+  // #932 (migration 0277) — setting a default depreciation policy on the enrolled account, and
+  // seeing the register carry a policy-born asset with its provenance. Placed LAST and cleaned up
+  // (the policy is retired again at the end): `state.policySet` is per-SERVER, shared with every
+  // other cell in this file, and none of them expects a fifth register row to exist.
+  test("setting a default depreciation policy shows it beside the enrolled account, and the register carries a policy-born asset naming it", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 10 }));
+    await signInTo(page, LIST_URL);
+    await expect(page.getByRole("link", { name: FA.assetName })).toBeVisible({ timeout: 20_000 });
+
+    // BEFORE: the enrolled account carries no policy, said in words.
+    await expect(page.getByText("No policy set", { exact: false })).toBeVisible();
+
+    // SET IT. The trigger is scoped to the enrolled account's own row, not a bare role query —
+    // the panel could in principle carry more than one enrolled account.
+    const setTrigger = page.getByRole("button", { name: "Set default policy" });
+    await expect(setTrigger).toBeVisible();
+    await setTrigger.click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Method")).toHaveValue("straight_line");
+    await dialog.getByLabel("Useful life (months)").fill("36");
+    const confirm = dialog.getByRole("button", { name: "Set default policy" });
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await expect(dialog).toBeHidden({ timeout: 20_000 });
+
+    // AFTER, RE-READ: the panel names the version, never a client-side guess.
+    await expect(page.getByText("v1", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Change policy" })).toBeVisible();
+
+    // …AND THE REGISTER CARRIES THE POLICY-BORN ASSET, already complete, naming the account and
+    // the version beside its particulars — a READ, never a client-side inference (AC3). Setting a
+    // policy never births an asset by itself (only a LATER acquisition does); the mock stands
+    // that acquisition in by keying the register's own `list_fixed_assets` fixture off
+    // `state.policySet`. Nothing on this page subscribes to that relation, so — exactly as this
+    // file's own header says of a completion, "the register must SWITCH … because the surface
+    // re-read, not because it painted its own optimistic answer" — this reloads the page, the
+    // same re-read a bookkeeper gets by revisiting Fixed Assets after that later acquisition
+    // posted, rather than asserting an in-session push this app never promises.
+    await page.reload();
+    await expect(page.getByRole("link", { name: FA.assetName })).toBeVisible({ timeout: 20_000 });
+    const bornRow = page.getByRole("row").filter({ hasText: "RM 3,600.00" });
+    await expect(bornRow).toBeVisible({ timeout: 20_000 });
+    await expect(bornRow.getByText("Particulars from 1510 policy v1")).toBeVisible();
+    await expect(bornRow.getByText("Waiting on depreciation particulars")).toHaveCount(0);
+
+    // CLEAN UP: retire the policy so no other cell in this shared-server file inherits the extra
+    // row or the changed panel state.
+    await page.getByRole("button", { name: "Retire policy" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.getByRole("dialog").getByRole("button", { name: "Retire policy" }).click();
+    await expect(page.getByRole("dialog")).toBeHidden({ timeout: 20_000 });
+    await expect(page.getByText("No policy set", { exact: false })).toBeVisible({ timeout: 20_000 });
   });
 });

@@ -59,6 +59,26 @@ risk is high) → fix → recheck → integration branch (merges in lane order, 
 fresh cluster when a migration exists) → PR → `ci` → merge → hosted release → hosted-evidence
 comment and close on every ticket.
 
+## Wave 4 lanes (planned 2026-09-23 from the scan of the integrated wave-2 head, re-checked against wave 3 before the cut)
+
+25 tickets plus the ONE successor cut. Reserved migration numbers `0295` to `0314` (a gap after wave 3 for its fix-round extras). Three rules added since wave 2: a fix round that needs ANOTHER migration takes a number from the wave's overflow block (`0315` and up for wave 4), never the next free number, because in wave 3 lane 04's fix round took 0280 and 0281 out of lane 05's reservation and the two lanes collided at integration (lane 04's files were renumbered to 0292 and 0293); and, from the scan: `apps/web/lib/firm/needs-you.ts` (the review-queue row kinds) is a SHARED file touched from four lanes, and the three tickets that instantiate a Settlement candidate row (#938, #947, #949) reuse the shape CONTEXT.md documents rather than minting a sibling.
+
+**Pre-step, before the lanes are cut:** the ONE standard-chart migration (`0295`), built alone as the first half of #941 by the owner's ruling (whichever lands first adds the rows): `2030 Deferred Revenue`, `1180 Accrued Income`, `Salaries Payable`, `Rent Payable`. It merges into the wave-4 base so every lane consumes the rows by name and none inserts them.
+
+| lane | worktree | theme | tickets (reserved migration) | adversarial lens |
+|---|---|---|---|---|
+| 01 | `clara-wt/635` | payroll and agreement contracts | #944 (none) #945 (0296) #946 (0297) #947 (0298) #948 (0299) #949 (0300) | yes |
+| 02 | `clara-wt/636` | staff expense claims | #930 (none) #931 (0301) | yes |
+| 03 | `clara-wt/642` | accruals: per-period amounts, bill arrived, the revenue side | #938 (0302) #937 (0303) #942 (0304), in that order | yes |
+| 04 | `clara-wt/651` | prepayments, the account roster, deferred revenue | #939 (0305) #940 (0306) #915 (0307) #941 second half (0308) #1036 (0315, the wake door rerouted onto the live prepayment door; wave-3 lane 05's disclosed residual), in that order | yes |
+| 05 | `clara-wt/655` | depreciation proposal, signed-out invite preview | #933 (none) #871 (0309) | yes |
+| 06 | `clara-wt/656` | Knowledge and firm-setup correctness, fixture hygiene | #1031 (0310) #1032 (0311) #1038 (0316, the shared fixtures off clara.create_client; wave-3 #899's residual) | no |
+| 07 | `clara-wt/657` | runtime readiness, rollback safety, autodraft coverage | #1033 #1035 #877 (none) | no |
+
+**The cut phase (after every lane above has merged):** `chatTurn_v22` / `claraWork_v6`, own tickets #985, #1000, #1030 (reserved `0312` to `0314`) plus #1037 (the statement-facts successor that carries page and region: a SECOND frozen family cut in the same phase, wave-3 #990's producer half), carrying every successor contract on the roster (`scratch scan-w4-notes.md`: confirmed from waves 2 and 3: #982, #1007, #986; optional: #960; out of this cut: #990, which targets the statement-facts family; from wave 4: #915, #931, #933, #937, #941, #942, #949). Preconditions: the merged wave-4 head, `check-frozen-workflows` clean on it (the frozen-manifest lock), the roster re-read against the merged reports, the two-build cutover drill on a fresh cluster, and one chat and one Work walk on each successor body.
+
+Then a short sweep wave for whatever wave 4's own review finds, until no ticket outside the #597 mainline is open.
+
 ## Wave 3 lanes (planned 2026-09-20 from the scan of the integrated wave-2 head)
 
 42 tickets, reserved migration numbers `0273` to `0291`. Grouped so that no function body is written in one lane and written or likely pinned in another (the wave-2 lesson: a prestate pins neighbour bodies too).

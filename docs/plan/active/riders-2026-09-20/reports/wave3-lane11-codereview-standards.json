@@ -1,0 +1,64 @@
+{
+  "axis": "standards",
+  "lane": 11,
+  "wave": 3,
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head_reviewed": "3fc1bb17a0ad3dc5f7266517d54807cbf7fed207",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\int",
+  "branch": "riders/w3-lane11",
+  "tickets_covered": [1024, 897, 1021, 1022],
+  "sources_read": [
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (incl. wave-2 and wave-3 addenda)",
+    "docs/plan/active/riders-2026-09-20/RIG.md (incl. wave-2 and wave-3 addenda)",
+    "AGENTS.md",
+    "CONTEXT.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    ".claude/skills/code-review/SKILL.md",
+    "apps/web/README.md (module README for the touched module)",
+    "reports/wave3-lane11-ticket1021.md, ticket1022.md, ticket1024.md, ticket897.md"
+  ],
+  "verification_performed": [
+    "git log ffe63a0dd08..HEAD --oneline in the lane worktree",
+    "git diff ffe63a0dd08...HEAD --stat and per-commit `git show` for every ticket",
+    "re-ran lib/clara/threadStore.test.ts: 16/16 pass",
+    "re-ran components/clara/interview-draft-persistence.test.tsx: 2/2 pass",
+    "re-ran lib/clara/rail-focus-return.test.ts: 6/6 pass",
+    "re-ran lib/clara/use-clara-thread-stop.test.ts: 27/27 pass",
+    "re-ran components/clara/thread-stop-reply.test.tsx: 10/10 pass",
+    "CI=true GITHUB_ACTIONS=true npx eslint on every touched components/**|lib/** file touched by #897/#1022: 0 findings",
+    "diffed apps/web/e2e/e2e-fixture-ownership.test.ts and apps/web/test/manifest.txt (shared files) for minimal, sorted-position hunks",
+    "confirmed no packages/db, packages/runtime, docs/PRD.md or docs/ARCHITECTURE.md file appears in the diffstat (rule 5 / migration rule N/A, matches RIG.md's 'lane 11 has no database')",
+    "confirmed the claimed sibling idioms (lib/firm/portfolio-focus-return.ts, firm-portfolio-section.tsx's 'held until it appears' effect, the __reactProps$ form-submit walk in onboarding-progress-sync.test.tsx and 4 other test files) actually exist as described"
+  ],
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 897,
+      "severity": "minor",
+      "kind": "smell:duplicated-code",
+      "title": "rail-focus-return.ts duplicates portfolio-focus-return.ts's storage plumbing verbatim",
+      "evidence": "apps/web/lib/clara/rail-focus-return.ts's `readSessionStorage()` (typeof window check, try/catch returning null) and its remember/take-once shape are byte-for-byte the same structure as apps/web/lib/firm/portfolio-focus-return.ts's `readSessionStorage()` and its `rememberPortfolioReturnFocus`/`takePortfolioReturnFocus` pair. The new module's own header even names the sibling as 'the SAME idiom' and 'this fix's twin' — the duplication is acknowledged in prose, not accidental. Two now-separate copies of 'best-effort sessionStorage take-once marker, swallow every throw, degrade to no-restore' exist for the same class of problem (RailMount's escalate control vs. a portfolio count link).",
+      "required_fix": "Extract the shared shape (readSessionStorage + a generic rememberMarker(key, value)/takeMarker(key) pair) into one helper (e.g. lib/shared/take-once-focus-marker.ts) that both lib/clara/rail-focus-return.ts and lib/firm/portfolio-focus-return.ts call, each keeping only its own STORAGE_KEY and scope-derivation logic. Judgement call per the Fowler smell baseline (Refactoring ch.3, Duplicated Code) — not a documented repo standard, so not a hard violation, and reasonable to leave for a follow-up rather than block this diff."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 897,
+      "severity": "note",
+      "kind": "smell:duplicated-code",
+      "title": "The reflection-based form-submit walk (__reactProps$ + manual onSubmit invocation) gains a 6th duplicate copy",
+      "evidence": "apps/web/components/clara/interview-draft-persistence.test.tsx's new second test re-implements the exact `Object.keys(form as object).find((k) => k.startsWith(\"__reactProps\"))` → invoke `onSubmit` directly pattern that already exists, near-identically, in apps/web/components/clara/onboarding-progress-sync.test.tsx (answerCurrentPark), apps/web/components/login-a11y.test.tsx, login-keyboard.test.tsx, password-policy.test.tsx and shell-responsive.test.tsx (confirmed by grep -rl \"__reactProps\"). The pattern is a pre-existing, repo-wide workaround for the test harness's stub DOM lacking native form submission, and this diff adds one more site instead of reusing a shared helper.",
+      "required_fix": "Not introduced by this diff and not blocking; worth a follow-up to extract a `submitForm(node)` helper into apps/web/test/hookHarness.ts so the six call sites (soon to be more) share one implementation instead of re-deriving the reflection walk per file. Judgement call, lowest severity: the pattern is already the established repo idiom, so this diff is simply consistent with existing (imperfect) practice."
+    }
+  ],
+  "no_findings_in": [
+    "TDD vertical-slice discipline: every ticket's commit sequence is test → minimal code → next slice (verified via git log --stat per commit and the ticket897 report's declared seams, written before the first test, per work-order rule 4)",
+    "Mocking boundaries: all new mocks (Supabase admin REST via recordingClient, RESEND-shaped fetch, members-lifecycle-mock.mjs's new handlers) are at system boundaries (external APIs), never internal collaborators; no test reaches through a private/internal seam except the pre-existing harness-DOM workaround noted in STD-2",
+    "Vacuity controls: #897's InterviewRunCard fix, the rail-focus-return scope-match line, and #1021's settleUntilQuiet were each proven to fail against a deliberately broken/reverted subject and restored byte-for-byte, per the commit messages and ticket reports; re-ran the resulting cells myself and they pass",
+    "Migration/frozen-closure rules: no packages/db, packages/runtime, docs/PRD.md or docs/ARCHITECTURE.md file appears in the diff; matches RIG.md's 'lane 11 has no database' and the ticket897 report's explicit 'Migration: none' line",
+    "Shared-file discipline (rule 7): CONTEXT.md, apps/web/test/manifest.txt and apps/web/e2e/e2e-fixture-ownership.test.ts hunks are each minimal and inserted at a locally sorted/topically-consistent position, not appended",
+    "Docs-in-same-commit (rule 9): apps/web/README.md and apps/web/e2e/README.md updated alongside the code for every ticket; CONTEXT.md gained one term (#1024) in house 'term / _Avoid_' shape",
+    "Lint/typecheck: re-ran eslint (CI mode) on every #897/#1022 touched file under components/**|lib/** — clean; the dc7118bb9 raw-colour-literal fix is scoped to exactly the 5 offending string literals the report names",
+    "Security fence reuse (#1022): isLoopbackEndpointOverride (renamed, shared by both the #874 mail seam and the new #1022 identity seam) preserves ADV-1's loopback-only restriction; the new CLARA_E2E_INVITE_IDENTITY_ENDPOINT follows the same CLARA_E2E_ naming and never-in-`missing` contract as its sibling"
+  ],
+  "summary": "Standards-axis review of lane 11 (tickets #1024, #897, #1021, #1022) against ffe63a0dd08. TDD vertical-slicing, mocking-boundary discipline, vacuity controls, migration/frozen-closure rules, shared-file hygiene and docs-in-commit rules are all followed, and every claim I re-ran (5 targeted test files, 27+10+16+6+2 = 61 test cases, plus a scoped eslint pass) reproduced. Two Fowler-baseline judgement calls, both low severity: rail-focus-return.ts (#897) duplicates portfolio-focus-return.ts's sessionStorage take-once plumbing almost verbatim instead of sharing it, and interview-draft-persistence.test.tsx adds a 6th copy of the pre-existing __reactProps$ form-submit test workaround instead of a shared harness helper. Neither is a hard violation of a documented repo standard; both are reasonable to leave as follow-ups rather than block this diff."
+}

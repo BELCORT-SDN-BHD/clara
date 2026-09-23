@@ -1,0 +1,110 @@
+{
+  "axis": "SPEC",
+  "lane": "wave 3, lane 08",
+  "branch": "riders/w3-lane08",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "database": "clara_l08 @ 127.0.0.1:55748",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "head": "4d9a5062ba171352c5fb8ec3eb285486455d2995",
+  "commits": 8,
+  "tickets": [857, 990, 1019, 1020],
+  "spec_sources": [
+    "gh issue view 857 --comments (Agent Brief 2026-09-17 + the wave-1 'Released' comment 2026-09-20, which narrows the remaining scope to AC2, the CHECK arm)",
+    "gh issue view 990 --comments (body + the owner's ruling comment 2026-09-20 'Build the per-line source citation now', with the Agent Brief beneath it; newest and binding)",
+    "gh issue view 1019 (body Agent Brief; no comments, so the body is the whole contract)",
+    "gh issue view 1020 (body Agent Brief; no comments, so the body is the whole contract)"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "Three of the four tickets are substantively built and their cells re-run green on clara_l08 (0290: 8/8; 0291: 6/6; the bank/match batteries 88/88; the web citation/matching/context cells 44/44; spec-discovery 3/3; both manifest checks exit 0). One blocker: migration 0290's own prestate REFUSES a first apply when clara.document_regions is empty, which is exactly the state of every fresh CI database and every from-scratch chain - proved by applying the file verbatim against an emptied disposable clone of clara_l08, where it raised CLR10 'clara.document_regions holds ZERO rows'. Beyond that, #990's headline requirement (an OCR line that says where it was read from) is unreachable on the live lane - the frozen statementFacts_v3 line schema and toWriterLines() cannot emit a page or region, so every machine-lane line renders 'No source citation was recorded for this line' - and the ticket is reported 'done' rather than 'partial'. #1019 fixed the sentence against the file count but left it contradicting the coverage-map table directly below it, which is the other half of the requirement it quotes.",
+  "findings": [
+    {
+      "id": "SPEC-L08-01",
+      "ticket": 857,
+      "severity": "blocker",
+      "kind": "implemented-wrongly",
+      "title": "0290's prestate refuses a first apply against an empty clara.document_regions, so the migration cannot apply on any fresh CI database or from-scratch chain",
+      "evidence": "packages/db/migrations/0290_document_regions_field_path_check.sql lines 178-181: `if v_regions = 0 and not v_fn_present then raise exception 'drfp prestate: clara.document_regions holds ZERO rows -- the ADD CONSTRAINT below would validate against an empty table, which proves nothing about populated rows. Seed real regions through clara.persist_document_extraction first ...' using errcode = 'CLR10';`. On a first apply v_fn_present is false by construction, so the only thing standing between the chain and an abort is a populated document_regions table. The lane's own report states the table is empty after a fresh migrate+seed: 'clara.document_regions started EMPTY on this freshly migrated (0001 to 0272, 267 files) + seeded lane database - seeding does not populate it (measured: select count(*) from clara.document_regions -> 0 before any work)' (wave3-lane08-ticket857.md). The 14 rows the migration validated against came from a one-off scratchpad script the implementer ran by hand and did not commit ('scratchpad/seed-857-populated-rows.mjs ... not committed anywhere, so a fresh rig (or hosted) needs an equivalent one-off run'). PROVED EMPIRICALLY, not argued: I cloned clara_l08 into a disposable clara_l08_rev0290, dropped ck_document_regions_field_path_grammar and clara._field_path_conforms, emptied clara.entry_evidence and clara.document_regions, then executed the migration file verbatim in a transaction - PRE-STATE: document_regions rows = 0 | _field_path_conforms absent = true; RESULT: 0290 REFUSED - sqlstate CLR10 | 'drfp prestate: clara.document_regions holds ZERO rows ...'. The clone was dropped afterwards. The states that hit this: (a) .github/actions/db-estate-suite/action.yml's FIRST step, 'Deploy-onto-existing check (main migrations, then HEAD)', which applies origin/main's chain and then HEAD's onto the throwaway clara_ci BEFORE the 'Migrate + seed + tests' step runs any seed; (b) .github/actions/frontier-leg/action.yml's 'Migrate clara_ci at the <slice> frontier', a fresh service database; (c) the from-scratch proof RIG.md's wave-2 addendum assigns to the integrator on a disposable cluster. None of them has a populated document_regions.",
+      "required_fix": "Make the zero-row state non-fatal on a first apply. 0291, the same lane's own sibling, is the house pattern to copy: it MEASURES the row count and reports it in a NOTICE ('clara.bank_statement_lines holds % row(s) (the live proof runs in this ticket's own test battery, not against these)') rather than refusing. Turn 0290's raise into the same NOTICE, keep the bad-path census refusal (clause (d)'s v_bad arm) exactly as it is - that one is load-bearing and correct - and leave the populated-row proof where it already lives, in packages/db/tests/document-regions-field-path-check.test.mjs, which seeds through clara.persist_document_extraction itself. Re-verify by applying the edited file against an EMPTY clara.document_regions (a disposable clone with the table emptied is enough) and seeing it apply clean, then by a CLARA_MIGRATION_REDO re-run on clara_l08."
+    },
+    {
+      "id": "SPEC-L08-02",
+      "ticket": 990,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "AC1 is unreachable on the live lane: no producer can state a citation, so every OCR/witness line renders 'No source citation was recorded' - and the ticket is reported done, not partial",
+      "evidence": "The ticket's AC1, quoted: '[ ] A line ingested through the OCR lane persists with a page and region citation attributable to a stored extraction of that document.' The owner's ruling, quoted: 'Build the per-line source citation now, on the OCR ingestion path ... A bank line a person is asked to match should be able to say where it was read from.' What ships is the receiving half only. packages/runtime/workflows/statementFacts.v3.prompts.mjs's lineShape declares exactly five keys (entry_date, value_date, description, amount_cents, running_balance_cents) with no page or region, and toWriterLines() at lines 349-360 REBUILDS every line as a fresh object of six named keys - so even a model that volunteered a page could not get it past the runtime into p_payload.readers.reader1.lines[i]. Both files are frozen (grep statementFacts frozen-workflows.json lists statementFacts.v3.prompts.mjs and statementFacts.v3.behavior.mjs), so the work order's frozen-body rule genuinely blocks the producer half, and the lane's report carries it correctly as a successor contract. The consequence for a person, though, is unstated in the ticket report: citationState() in apps/web/lib/bank/citation.ts returns 'not_recorded' for any ocr/witness line with a null citation_page, so the Matching tab's detail pane and outcome block will show 'No source citation was recorded for this line.' on EVERY real statement line for the foreseeable future. CONTEXT.md's own new prose admits it ('no live producer states one yet') and packages/db/README.md's 0291 section names it a residual - but wave3-lane08-ticket990.md's Status line reads 'done' and its AC1 row cites cell 990.a, whose citation is supplied by the test's own local fixture (landCitedWitnessStatement builds reader1Lines with { page, region } by hand), not by any production path.",
+      "required_fix": "Report #990 as PARTIAL, not done: AC1 and the citation-present half of AC3 are delivered as plumbing plus a successor contract, and no live OCR line can satisfy them until statementFacts.v3.prompts.mjs's lineShape/toWriterLines and its behavior mapper are unfrozen and widened. State in the ticket report (and in whatever comment the release session posts on #990) that the visible outcome TODAY on every machine-lane line is 'No source citation was recorded for this line.', so the owner rules on shipping that face rather than discovering it. File the successor work as its own ticket blocked on the wave-4 chatTurn_v22/claraWork_v6 cut, as the report's own follow-up section already proposes."
+    },
+    {
+      "id": "SPEC-L08-03",
+      "ticket": 1019,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "The README now states 49 specs above a coverage-map table that lists 26 - the requirement forbids exactly that contradiction, and nothing records the residual",
+      "evidence": "The ticket's Desired behavior, quoted: 'Either way, a person reading the README is never told a number that contradicts what they can count in the table below it or on disk.' The fix changed apps/web/e2e/README.md line 108 from 'currently contains 25 specs' to '49 specs' and pinned it to the real file count with a new cell. Measured on the branch: `ls apps/web/e2e/*.spec.ts | wc -l` = 49, and the coverage-map table below that sentence holds 26 rows. Twenty-three checked-in specs have no row at all: accrual-walk, bank-match-walk, client-create-walk, counterparty-identity-walk, depreciation-walk, document-correction-walk, documents-intake-walk, firm-commercial-walk, firm-setup-walk, fixed-asset-acquisition-walk, intake-batch-walk, knowledge-firm-walk, knowledge-walk, members-invite-walk, opening-ledger-source-walk, operator-support-walk, periodic-adjustment-walk, plans-walk, prepayments-walk, staff-advances-register-walk, staff-expense-claim-walk, trade-invoice-walk, work-knowledge-walk. So the drift was moved, not removed: before the fix the sentence agreed with the table (25 vs 26) and lied about disk; after it, it agrees with disk and lies about the table by 23 rows. The new cell pins only the sentence against readdirSync, never the table, so the larger contradiction has no guard either. wave3-lane08-ticket1019.md's 'Follow-ups worth filing' says 'None' and never mentions the missing rows; the ticket's Out of scope covers 'Rewriting or auditing the individual per-spec description text in the coverage-map table', which is not the same thing as adding rows for specs that have none.",
+      "required_fix": "Close the contradiction the requirement names, in whichever of the two ways the ticket's own either/or allows: (a) add the 23 missing rows so the table matches the sentence, and extend the #1019 cell to assert the table's row count equals the stated count as well as the file count; or (b) if adding 23 descriptions is genuinely a separate job, reword the sentence so it does not imply the table enumerates the suite (e.g. 'The checked-in suite currently contains 49 specs; the table below describes the 26 oldest'), pin BOTH numbers in the cell, and file the table-completion follow-up naming all 23 specs. Either way the residual must appear in the ticket report rather than be left for the next reader to rediscover."
+    },
+    {
+      "id": "SPEC-L08-04",
+      "ticket": 1020,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "The duplicated reference-tag lines the ticket's own Context names are still in the file, neither fixed nor recorded as out of scope",
+      "evidence": "The ticket's Context, quoted: 'ends with what look like duplicated one-line reference tags (the same issue-number tag appearing twice, adjacent to each other, because the sort placed identical lines next to one another)', restated in Current behavior as 'at least one short reference-tag line appears twice adjacently as a byproduct of the sort'. The header restore itself is faithful and provable - `git show b43bef2fb:apps/web/test/manifest.txt | sed -n 1,34p` diffs byte-identical against the branch's lines 1-34, the path list is untouched, and `node apps/web/scripts/check-test-manifest.mjs` (503 files) and its selftest both exit 0, which I re-ran. But the duplicated tags the ticket describes are not in the header at all: they sit inside the path list, `# #770` at lines 303 and 305 (straddling components/work/work-activity-view.test.tsx) and `# #809` at lines 438 and 440 (straddling lib/plans/api.test.ts), and they are unchanged on this branch - `awk 'NR>34 && /^#/'` prints exactly those four lines. wave3-lane08-ticket1020.md records the adjacency check it ran over the header ('no output, zero duplicates') but never mentions these four lines or the fact that the symptom the ticket names lives elsewhere, and its Follow-ups section lists only the optional sort-guard.",
+      "required_fix": "Name the four lines in the ticket report: say that the duplicated reference tags the ticket's Context describes are `# #770` (303, 305) and `# #809` (438, 440) in the path-list region, not in the header, that AC2's byte-for-byte constraint is why they were left alone, and either delete the redundant second tag of each pair in a follow-up or state explicitly that they are deliberate in-body train markers. A reader comparing the ticket text against the delivered file should not have to work this out."
+    },
+    {
+      "id": "SPEC-L08-05",
+      "ticket": 990,
+      "severity": "note",
+      "kind": "requirement-partial",
+      "title": "The region half of the citation is write-only: it is persisted and constrained but never crosses the read door or any surface",
+      "evidence": "The Agent Brief's Key interfaces say 'The statement line and matching surfaces render the citation when present and a stated absence when not', and the citation is defined throughout as 'the page and region it was read from'. 0291 S3 deliberately surfaces only the page: the splice comment states 'citation_region is deliberately NOT surfaced here: a raw polygon locator is not something the Matching tab's surfaces render', and I confirmed the INSTALLED clara.get_bank_line_matching_context body builds `'citation_page', l.citation_page` with no citation_region key. apps/web/lib/bank/matching-context-types.ts adds only citation_page. The justification cites the ticket's Out of scope line 'OCR region-detection accuracy itself', which is about detection quality, not about whether the locator is readable. This is a defensible product call - a polygon is not a sentence a person reads - and it is documented in three places, so it is recorded here as a note, not a defect.",
+      "required_fix": "None required. If the owner wants the region to be reachable at all (for a future highlight overlay on the document viewer, which is the only thing a locator is good for), say so on #990 now so the read door gains it in the same unfreeze window as the producer half, rather than needing a third migration later."
+    }
+  ],
+  "already_satisfied_claims_checked": [
+    {
+      "claim": "#857 AC1 (the repository lint) shipped in wave 1 and is untouched here (wave3-lane08-ticket857.md).",
+      "verdict": "true",
+      "evidence": "scripts/check-document-region-field-paths.mjs is present and unmodified in ffe63a0dd...HEAD (absent from the diffstat); re-ran it: '[check-document-region-field-paths] clean - every literal field_path in 1005 file(s) under packages/db/tests, packages/runtime/tests conforms'."
+    },
+    {
+      "claim": "#857 AC3 'the db and runtime suites are unchanged'.",
+      "verdict": "true for the suites most exposed to the new CHECK",
+      "evidence": "Re-ran with the full gate chain on clara_l08: field-path-grammar.test.mjs + document-regions-unique-field-path.test.mjs + document-fact-validation-belt.test.mjs - 25 tests, 25 pass, 0 fail. The new CHECK raises the grammar's own CLR10, so no existing refusal assertion changes shape."
+    },
+    {
+      "claim": "#990 AC4 'Matching, tie-out and reconciliation results are unchanged and the bank batteries pass unchanged'.",
+      "verdict": "true",
+      "evidence": "Re-ran x38-wave-c-b-bank.test.mjs + x38-wave-c-b-match.test.mjs + bank-line-existing-booking.test.mjs with the full gate chain: 88 tests, 88 pass, 0 fail."
+    },
+    {
+      "claim": "#1020 AC2 'the manifest's list of test-file paths is byte-for-byte unchanged' and AC3 'the checking script and the runner both still pass'.",
+      "verdict": "true",
+      "evidence": "The only non-comment line the whole lane diff adds to apps/web/test/manifest.txt is '+lib/bank/citation.test.ts', and it belongs to #990's commit, not #1020's (4d9a5062b touches only the header hunk @@ -1,37 +1,37 @@). check-test-manifest.mjs exit 0 (503 files) and check-test-manifest.selftest.mjs exit 0, both re-run."
+    },
+    {
+      "claim": "#1019's new cell is real and fires on drift.",
+      "verdict": "true",
+      "evidence": "Re-ran `node --import ./test/bootstrap.mjs --import tsx --test e2e/spec-discovery.test.ts` - 3 tests, 3 pass, including \"#1019 README's coverage-map count matches the real number of checked-in spec files\". The cell reads the number out of README.md rather than re-typing it, and counts *.spec.ts with the same readdirSync shape the file's existing cells use."
+    }
+  ],
+  "cells_rerun_by_this_review": [
+    "packages/db: node --test --test-concurrency=1 $GATES tests/document-regions-field-path-check.test.mjs - 8/8 pass",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/bank-statement-line-citation.test.mjs - 6/6 pass",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/field-path-grammar.test.mjs tests/document-regions-unique-field-path.test.mjs tests/document-fact-validation-belt.test.mjs - 25/25 pass",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/x38-wave-c-b-bank.test.mjs tests/x38-wave-c-b-match.test.mjs tests/bank-line-existing-booking.test.mjs - 88/88 pass",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test lib/bank/citation.test.ts lib/bank/matching-context-types.test.ts components/bank/matching-section.test.tsx components/bank/matching-outcome.test.tsx tests/firm-scope-db-pins.test.ts - 44/44 pass",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test e2e/spec-discovery.test.ts - 3/3 pass",
+    "node apps/web/scripts/check-test-manifest.mjs - exit 0, 503 files; node apps/web/scripts/check-test-manifest.selftest.mjs - exit 0",
+    "node scripts/check-document-region-field-paths.mjs - clean, 1005 files",
+    "0290 first-apply against an EMPTY clara.document_regions on a disposable template clone (clara_l08_rev0290, created and dropped by this review) - REFUSED with CLR10"
+  ],
+  "not_verified": [
+    "The whole apps/web unit suite and the whole packages/db suite were not re-run by this review; the lane's own reports claim 4856/4854 and the db files above, and every subset I re-ran agrees with those claims.",
+    "No e2e browser walk was re-run: bank-match-walk.spec.ts is the one the lane touched and its result is taken from wave3-lane08-ticket990.md (6/6 legs).",
+    "Hosted's clara.document_regions row count is unknown to this review, so SPEC-L08-01's effect on a hosted apply is untested; the CI and from-scratch failures are proved and are enough to block."
+  ]
+}

@@ -52,6 +52,77 @@ export async function tiLaneReady() {
   return _ready;
 }
 
+/** #982's migration STABLE STEM — a SEPARATE frontier from `TI_STEM`: a chain can carry 0225 and
+ *  not 0274, and on that chain #655's battery must still run in full while #982's skips. */
+export const TI_TIN_STEM = "trade_invoice_party_tin$";
+
+let _tinReady = null;
+export async function tiTinLaneReady() {
+  if (_tinReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [TI_TIN_STEM]);
+      _tinReady = r.rows[0].n > 0;
+    } catch {
+      _tinReady = false;
+    }
+  }
+  return _tinReady;
+}
+
+/** `if (await gateTiTin(t)) return;` — #982's own per-cell frontier gate, the same idiom as
+ *  `gateTi` below and keyed on `TI_TIN_STEM`. */
+export async function gateTiTin(t) {
+  if (await tiTinLaneReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_TRADE_INVOICE_PARTY_TIN === "1") {
+    markSkip();
+    t.skip(`#982 trade-invoice TIN resolution absent (no ${TI_TIN_STEM} migration applied)`);
+    return true;
+  }
+  assert.fail(
+    "#982: the trade-invoice TIN resolution arm is absent. Apply 0274_trade_invoice_party_tin.sql "
+    + "(or its numbered suite copy), or set CLARA_ALLOW_MISSING_TRADE_INVOICE_PARTY_TIN=1 for the "
+    + "package-wide pre-integration sweep.",
+  );
+  return true;
+}
+
+/** #1007's migration STABLE STEM — a THIRD frontier on this lane: a chain can carry 0225 and
+ *  0274 and not 0275, and on that chain #655's and #982's batteries must still run in full while
+ *  #1007's skips. */
+export const TI_DUP_STEM = "trade_invoice_duplicate_probe$";
+
+let _dupReady = null;
+export async function tiDupLaneReady() {
+  if (_dupReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [TI_DUP_STEM]);
+      _dupReady = r.rows[0].n > 0;
+    } catch {
+      _dupReady = false;
+    }
+  }
+  return _dupReady;
+}
+
+/** `if (await gateTiDup(t)) return;` — #1007's own per-cell frontier gate, the same idiom as
+ *  `gateTi` and `gateTiTin`, keyed on `TI_DUP_STEM`. */
+export async function gateTiDup(t) {
+  if (await tiDupLaneReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_TRADE_INVOICE_DUPLICATE_PROBE === "1") {
+    markSkip();
+    t.skip(`#1007 trade-invoice duplicate probe absent (no ${TI_DUP_STEM} migration applied)`);
+    return true;
+  }
+  assert.fail(
+    "#1007: the trade-invoice duplicate probe is absent. Apply 0275_trade_invoice_duplicate_probe.sql "
+    + "(or its numbered suite copy), or set CLARA_ALLOW_MISSING_TRADE_INVOICE_DUPLICATE_PROBE=1 for "
+    + "the package-wide pre-integration sweep.",
+  );
+  return true;
+}
+
 /**
  * `if (await gateTi(t)) return;` — the house per-cell frontier gate.
  *
@@ -104,12 +175,27 @@ export const TI_REASON = {
   invalidParticulars: "invalid_particulars",
   invalidCurrency: "invalid_currency",
   invalidTaxFacts: "invalid_tax_facts",
+  // THE NINETEENTH (#982, owner's ruling 2026-09-20): the submitted registration number and the
+  // submitted TIN each name a DIFFERENT live party of the wanted kind. Distinct from
+  // `party_unresolved` (nothing answered) and from `party_ambiguous` (one identifier, several
+  // parties) because the remedy is different: the person is choosing between two identifiers the
+  // document itself carries, not between two parties one identifier reaches.
+  partyIdentifierConflict: "party_identifier_conflict",
   // Raised by the birth trigger and by clara._tf_open_items_validate, not by the door.
   counterpartyKindMismatch: "counterparty_kind_mismatch",
   genericControlLeg: "generic_control_leg",
 };
 
 export const TI_KIND = { sales: "sales_invoice", bill: "supplier_bill" };
+/** #1007 · the TWO independent duplicate signals the probe reports, and the ONLY two. Amount
+ *  alone, or counterparty alone, is never one: a monthly rent bill legitimately repeats both. */
+export const TI_DUP_SIGNAL = { reference: "same_reference", money: "same_total_and_date" };
+/** #1007's own refusal tokens — the ACK door's, never the probe's: the probe warns and refuses
+ *  nothing, by the owner's ruling of 2026-09-20. */
+export const TI_ACK_REASON = {
+  nothingAcknowledged: "nothing_acknowledged",
+  unknownAcknowledgedInvoice: "unknown_acknowledged_invoice",
+};
 export const DUE_SOURCE = { stated: "stated", terms: "counterparty_terms", absent: "absent" };
 
 /** The chart this battery posts against, ON TOP of `WCHART`. Codes are the starter template's own
@@ -144,24 +230,26 @@ export async function ensureTiChart(sub, client, label = "ti") {
   await mk(TICHART.nonControl, "Other Payables", "liability", null);
 }
 
-/** A vendor of this client, optionally with agreed payment terms. */
-export async function vendor(sub, { client, name = null, registration = null, termsDays = null }) {
+/** A vendor of this client, optionally with agreed payment terms. `tin` rides through to
+ *  `clara.create_counterparty`'s own `p_tin`, which is how #982's TIN resolution arm gets a party
+ *  to find without a root UPDATE. */
+export async function vendor(sub, { client, name = null, registration = null, tin = null, termsDays = null }) {
   const { createCounterparty } = await import("./wave-a-fixtures.mjs");
   const r = await createCounterparty(sub, {
     client, kind: "vendor", name: name ?? `Alpha Supplies ${randomUUID().slice(0, 8)}`,
-    registration, opKey: opk("ti-cp"),
+    registration, tin, opKey: opk("ti-cp"),
   });
   const id = r.counterparty_id ?? r;
   if (termsDays !== null) await setTerms(sub, { counterparty: id, days: termsDays });
   return id;
 }
 
-/** A customer of this client, optionally with agreed payment terms. */
-export async function customer(sub, { client, name = null, registration = null, termsDays = null }) {
+/** A customer of this client, optionally with agreed payment terms and a TIN (#982). */
+export async function customer(sub, { client, name = null, registration = null, tin = null, termsDays = null }) {
   const { createCounterparty } = await import("./wave-a-fixtures.mjs");
   const r = await createCounterparty(sub, {
     client, kind: "customer", name: name ?? `Rome Properties ${randomUUID().slice(0, 8)}`,
-    registration, opKey: opk("ti-cp"),
+    registration, tin, opKey: opk("ti-cp"),
   });
   const id = r.counterparty_id ?? r;
   if (termsDays !== null) await setTerms(sub, { counterparty: id, days: termsDays });
@@ -280,6 +368,48 @@ export async function admitTradeInvoiceWork({
 export async function getTradeInvoice(sub, workId) {
   const r = await humanQuery(sub,
     "select clara.get_trade_invoice(p_work => $1::uuid) as result", [workId]);
+  return r.rows[0].result;
+}
+
+/** #1007 · THE PROBE, driven as the SIGNED-IN HUMAN — its only production caller is the browser,
+ *  through PostgREST, as the bookkeeper who is about to record the invoice. */
+export async function probeTradeInvoiceDuplicates(sub, { client, kind = TI_KIND.bill, particulars }) {
+  const r = await humanQuery(sub, namedCall("probe_trade_invoice_duplicates", [
+    { name: "p_client", cast: "uuid" }, { name: "p_kind", cast: "text" },
+    { name: "p_particulars", cast: "jsonb" },
+  ]), [client, kind, JSON.stringify(particulars)]);
+  return r.rows[0].result;
+}
+
+/** #1007 · THE RUNTIME TWIN, actor-explicit, for the chat lane. Same answer, same matcher; the
+ *  authority preamble is `clara.admit_trade_invoice_work`'s own. */
+export async function probeTradeInvoiceDuplicatesFor({
+  client, author, kind = TI_KIND.bill, particulars, role = ROLES.runtime,
+}) {
+  const r = await roleQuery(role, namedCall("probe_trade_invoice_duplicates_for", [
+    { name: "p_client", cast: "uuid" }, { name: "p_author", cast: "uuid" },
+    { name: "p_kind", cast: "text" }, { name: "p_particulars", cast: "jsonb" },
+  ]), [client, author, kind, JSON.stringify(particulars)]);
+  return r.rows[0].result;
+}
+
+/** #1007 · THE "RECORDED ANYWAY" RECORD. A runtime act OBO a named human, exactly as admission is
+ *  — the route writes it BEFORE it admits, so no invoice can carry a warning nobody kept. */
+export async function recordTradeInvoiceDuplicateAck({
+  client, author, intentKey, kind = TI_KIND.bill, particulars, shown, role = ROLES.runtime,
+}) {
+  const r = await roleQuery(role, namedCall("record_trade_invoice_duplicate_ack", [
+    { name: "p_client", cast: "uuid" }, { name: "p_author", cast: "uuid" },
+    { name: "p_intent_key", cast: "text" }, { name: "p_kind", cast: "text" },
+    { name: "p_particulars", cast: "jsonb" }, { name: "p_shown", cast: "jsonb" },
+  ]), [client, author, intentKey, kind, JSON.stringify(particulars), JSON.stringify(shown)]);
+  return r.rows[0].result;
+}
+
+/** #1007 · what a reviewer reads afterwards: the acknowledgement this Work was admitted under. */
+export async function getTradeInvoiceDuplicateAck(sub, workId) {
+  const r = await humanQuery(sub,
+    "select clara.get_trade_invoice_duplicate_ack(p_work => $1::uuid) as result", [workId]);
   return r.rows[0].result;
 }
 

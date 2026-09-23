@@ -16,7 +16,7 @@
 // (裁-107a: a gate proved through a copy of its predicate is not proved). A row that reached
 // a click by any route other than that predicate returning true does nothing.
 
-import { beginClientOnboarding, bootstrapClientPlan, getMostRecentOnboardingPlan, getOnboardingClient } from "@/lib/onboarding/api";
+import { bootstrapClientPlan, getMostRecentOnboardingPlan, getOnboardingClient, openClientOnboarding } from "@/lib/onboarding/api";
 import { startClientInterview } from "@/lib/interview/api";
 import { loadCallerContext } from "@/lib/identity/caller-context";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -73,7 +73,7 @@ export type DoDispatchResult =
 
 /**
  * Performs EXACTLY ONE governed act, then reports where the human should look. Nothing here
- * invents a receipt: `begin_client_onboarding` returns the DB's own `{client_id, plan_id}`
+ * invents a receipt: `open_client_onboarding` returns the DB's own `{client_id, plan_id}`
  * and the caller navigates to that client's real workspace; the interview start returns the
  * runtime's own run id and the caller opens the rail, where the run renders itself. A
  * refusal is NOT caught here — `callDoor`'s `DoorRefusal` propagates to the palette, which
@@ -88,7 +88,15 @@ export async function runDoAction(
 
   switch (spec.id) {
     case "beginClientOnboarding": {
-      const out = await beginClientOnboarding(env.query.trim(), { session });
+      // #899: routed through clara.open_client_onboarding, the ONE birth verb — the same door
+      // AddClientControl's own Confirm now calls, so the palette and the register's Add Client
+      // control share one dispatch. `identityAcknowledgedCandidate` is set only by a face that
+      // asked the identity read first and got the human's acknowledgement; the palette never
+      // sets it, so its own arity-1 case clears the DOOR's wall exactly as arity >=2 does —
+      // refused, never created silently (0287's header).
+      const out = await openClientOnboarding(env.query.trim(), {
+        acknowledgedCandidate: env.identityAcknowledgedCandidate ?? null,
+      }, { session });
       return { kind: "navigated", href: `/clients/${out.client_id}` };
     }
     case "startClientInterview": {

@@ -27,10 +27,13 @@ import { SectionHeader } from "@/components/common/section-header";
 import { Badge } from "@/components/ui/badge";
 import { StateBanner } from "@/components/common/state";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { buttonVariants } from "@/components/ui/button";
 import { AccrualBoundaryStatement } from "./accrual-statement";
 import { methodLabel } from "./accruals-list";
 import { loadAccrual, type AccrualDetail as AccrualDetailRow, type AccrualOccurrenceRow } from "@/lib/accruals/api";
-import { accrualsHref, journalEntryHref, planDetailHref, workDetailHref } from "@/lib/navigation/tree";
+import {
+  accrualCorrectHref, accrualDetailHref, accrualsHref, journalEntryHref, planDetailHref, workDetailHref,
+} from "@/lib/navigation/tree";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { formatCents } from "@/lib/bank/money";
 
@@ -63,7 +66,18 @@ function Body({ clientId, row }: { clientId: string; row: AccrualDetailRow }) {
   return (
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
-        <SectionHeader level={2}>{row.purpose}</SectionHeader>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <SectionHeader level={2}>{row.purpose}</SectionHeader>
+          {row.corrected_by_accrual_id !== null ? null : (
+            // #936 — ALWAYS OFFERED, never floor-gated here: the destination form does that
+            // (裁-187 is about a CONTROL whose only outcome is a refusal, not a navigation link to
+            // a page that renders its own denied face — the accruals list's own "New accrual"
+            // link is the same shape).
+            <Link className={buttonVariants({ variant: "outline", size: "sm" })} href={accrualCorrectHref(clientId, row.accrual_id)}>
+              {t("correctLink")}
+            </Link>
+          )}
+        </div>
         <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
           <Fact label={t("factAmount")} value={formatCents(row.amount_cents)} />
           <Fact label={t("factCurrency")} value={row.currency} />
@@ -86,6 +100,32 @@ function Body({ clientId, row }: { clientId: string; row: AccrualDetailRow }) {
           />
         </dl>
       </section>
+
+      {row.corrects_accrual_id === null && row.corrected_by_accrual_id === null ? null : (
+        // #936 — THE CORRECTION LINEAGE. `corrects_accrual_id` and `corrected_by_accrual_id` are
+        // 0222's own columns, first WRITTEN by `clara.correct_accrual_adjustment` (0284): they name
+        // each other, in both directions, and the superseded row is otherwise unmoved apart from
+        // this one stamp — 0222's append-only trigger's own law.
+        <section className="flex flex-col gap-2">
+          <SectionHeader level={2}>{t("lineageNote")}</SectionHeader>
+          <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+            {row.corrects_accrual_id === null ? null : (
+              <Fact
+                label={t("correctsLabel")}
+                value={row.corrects_accrual_id}
+                href={accrualDetailHref(clientId, row.corrects_accrual_id)}
+              />
+            )}
+            {row.corrected_by_accrual_id === null ? null : (
+              <Fact
+                label={t("correctedByLabel")}
+                value={row.corrected_by_accrual_id}
+                href={accrualDetailHref(clientId, row.corrected_by_accrual_id)}
+              />
+            )}
+          </dl>
+        </section>
+      )}
 
       <section className="flex flex-col gap-2">
         <SectionHeader level={2}>{t("authorityHeading")}</SectionHeader>

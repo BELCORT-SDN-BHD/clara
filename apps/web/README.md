@@ -75,6 +75,22 @@ exclusive because one event must be one announcement.
 with a vacuity control proving the tree really does contain live regions — treat
 `nested-live-region` as a gate, not a check.
 
+**A read this tab opened for ITSELF does not speak about the reader's access (#1024).** When the
+door refuses a Stop, `useClaraThread`'s `stopReply` re-opens its own read of the reply so the answer keeps
+arriving. `runClaraTaskStream` delivers a 403/404 at attach as the same `revoked` event a mid-stream
+revocation delivers (#642, "one fact, one face"), which is right for a tab's FIRST attach — its only
+view of the turn — and wrong for this one. That 404 also covers a task the runtime no longer holds (a
+reply that ended, was reaped, a stale id), so it would render an EXISTENCE fact as an ACCESS fact, and
+`applyStreamEvent`'s `revoked` arm writes `turnStatus: null` — for a turn this tab did not post the ONLY
+live arm of `turnLive`, so a statement about access silently withdrew the Stop control from a reply the
+refusal had just called live. `AttachRefusalMeaning` lets the caller say which reading it wants:
+`"revocation"` (the default, unchanged) or `"this-tab-cannot-resume"`, whose refused attach is kept out
+of the shared stream state and recorded by the caller's own machine as `reattach: "lost"` plus
+`markReattachFailed` — the same state a re-attach that failed at the TRANSPORT already reaches. A
+`revoked` that arrives once the read is OPEN is never diverted: the runtime sent it, and it still
+retires the clock and withdraws the parked question. `e2e/work-cancel-walk.spec.ts`'s B7 cell was the
+non-deterministic red this produced on both branches.
+
 **The transcript owns its own scroll, and nothing else's.** `lib/clara/useTranscriptScroll.ts`
 holds the whole policy: a reader scrolled up stays put while content arrives (the "is the
 reader following?" answer is sampled from their own scroll events, never recomputed after an
@@ -224,8 +240,9 @@ so the firm intake surface mounts the same control rather than copying a second 
 
 The client register's **Add client** control reuses ⌘K's own dispatch rather than minting a second
 call site. Confirm asks `clara.client_identity_candidates` before it reaches
-`clara.begin_client_onboarding`, and the answer decides what happens next — the three arities the
-owner ruled on 2026-09-15:
+`clara.open_client_onboarding` (#899; `clara.begin_client_onboarding` before
+`0287_client_birth_wall.sql` re-pointed this control at the new birth verb), and the answer decides
+what happens next — the three arities the owner ruled on 2026-09-15:
 
 - **0** — nothing in the firm answers to that name. The same click goes straight on to the door.
 - **1** — the candidate is **shown**, with a real link to the record and the reason it matched, and
@@ -246,19 +263,28 @@ text. **There is no client-side duplicate rule and there must not be one**: the 
 not be granted to any application role (a live census in migration 0103 raises on any such grant),
 which is why the browser is given a definer wrapper and never the predicate.
 
-**The wall is the READ, not the birth door.** A caller that never asks can still call
-`begin_client_onboarding` and a client is born — a named residual, kept honest by
-`packages/db/tests/client-onboarding-identity.test.mjs`'s `p649.identity.direct_birth_residual`.
+**The wall used to be the READ, not the birth door — #899 moved it.**
+`0287_client_birth_wall.sql` folds `clara.client_identity_candidates`' own candidate resolution
+into the door itself, through one ungranted shared core (`clara._client_birth_core`) both granted
+doors call: a caller that never asks can no longer create a two-or-more same-family client, through
+either door. `packages/db/tests/client-onboarding-identity.test.mjs`'s
+`p649.identity.direct_birth_residual` now asserts that closure (the name is kept so the history
+reads honestly); `packages/db/tests/client-birth-wall.test.mjs` is #899's own battery.
 
-**⌘K is a SECOND entrance to that door, and it does not ask.** `DO_ACTIONS`'
-`beginClientOnboarding` (`lib/command/do-actions.ts`) is dispatched straight from the palette
-(`components/command/command-palette.tsx`), with no `client_identity_candidates` read anywhere in
-that path — `agentic-finish-walk.spec.ts`'s 裁-37 arm proves it green, dispatching with zero
-identity reads in the whole run. So the arities above are the register control's wall, not the
-product's: the same name typed into the palette is born unchecked. That is a **named residual**,
-not a claim, and it is a face-level sibling of the birth-door one above — closing it means giving
-the palette an arity-1 acknowledgement of its own (a design, not a one-liner), or moving the wall
-into the door, which needs the new birth verb the residual above describes.
+**⌘K is a SECOND entrance to the SAME door, and it still does not ask — and does not need to.**
+`DO_ACTIONS`' `beginClientOnboarding` (`lib/command/do-actions.ts`) dispatches through
+`open_client_onboarding` (`lib/command/do-dispatch.ts`'s own case) with no
+`client_identity_candidates` read anywhere in that path, exactly as before #899. What changed is
+that the door reached at the end of that path now carries its own wall at **every** arity ≥ 1, not
+only ≥ 2: `open_client_onboarding` requires an acknowledgement at arity 1 for every caller, and the
+palette never has a candidate to acknowledge, so it forwards none. At arity ≥ 2 the door refuses
+CLR10 `name_family_collision`; at arity 1 it refuses CLR10 `identity_acknowledgement_required` —
+both VERBATIM, both rendered by the palette's existing DoorRefusal handling, never a client-side
+guess (`lib/command/do-actions.test.ts`'s "the palette cannot create a two-match client" cell,
+`agentic-finish-walk.spec.ts`'s 裁-37 arm). The refusal message itself names the register's Add
+Client control as where to go next — the brief's "refuses and points at the register's control",
+not a second acknowledgement face grafted onto the palette. Only the register's own control can
+clear the arity-1 wall, because only it has somewhere to show the candidate and read the tick.
 
 **Committing an onboarding plan writes neither Knowledge nor the client's own record.** Two
 separate, named acts follow it at the same call site, and they are treated differently on purpose:
@@ -311,9 +337,11 @@ revoke it.
 (`INVITE_MAIL_ENDPOINT_ENV_NAME`), read by `inviteMailCapability` alongside the four required
 variables but never counted in `missing` — lets `productionInviteMailer`'s `send()` post
 somewhere other than `RESEND_ENDPOINT`. Owner ruling (2026-09-18): only the mail endpoint, never
-the Supabase admin calls (`canMintFor`/`mintSupabaseTokenHash` stay real everywhere). Unset (every
-real deployment), `send()` posts to `RESEND_ENDPOINT` exactly as before — pinned by
-`tests/invite-mail-transport.test.ts`'s `#874` suite.
+`config.supabaseUrl` itself — `canMintFor`/`mintSupabaseTokenHash` still build their admin client
+from the SAME Supabase project `send()`'s own key belongs to, in every deployment, unaffected by
+this seam. Unset (every real deployment), `send()` posts to `RESEND_ENDPOINT` exactly as before —
+pinned by `tests/invite-mail-transport.test.ts`'s `#874` suite. #1022 (below) adds a SEPARATE,
+equally-fenced seam for the admin client's OWN base URL, rather than touching `supabaseUrl`.
 
 **fix-round ADV-1 — the fence, and why it is a VALUE check, not a build-mode check.** The original
 cut read the override unconditionally, in any environment, with no gate at all — a production-live
@@ -323,35 +351,43 @@ could set an environment variable on the deployment (accidentally or not). `lib/
 and its fence (`NODE_ENV !== "production"`) was DELETED rather than kept, because `next start` —
 the exact shape a browser e2e walk runs against — sets `NODE_ENV=production`, neutralising it. This
 seam is fenced differently for exactly that reason: `inviteMailCapability` (via
-`isLoopbackMailEndpoint`) honours the override only when it parses as an http(s) URL whose host is
-loopback (`127.0.0.1`, `localhost`, `[::1]`); anything else — a real hostname, a bare path, a
-`javascript:` scheme — is silently treated exactly like an absent override. A variable set by
-mistake in production can therefore never redirect the mail off the machine it is running on. The
-name also now carries the `CLARA_E2E_` prefix every other harness-only flag in this app uses
-(`CLARA_E2E_MONEY_INPUT_HARNESS`).
+`isLoopbackEndpointOverride`, renamed by #1022 now that the identity seam below shares it) honours
+the override only when it parses as an http(s) URL whose host is loopback (`127.0.0.1`,
+`localhost`, `[::1]`); anything else — a real hostname, a bare path, a `javascript:` scheme — is
+silently treated exactly like an absent override. A variable set by mistake in production can
+therefore never redirect the mail off the machine it is running on. The name also now carries the
+`CLARA_E2E_` prefix every other harness-only flag in this app uses (`CLARA_E2E_MONEY_INPUT_HARNESS`).
 
-**AC2 (a Playwright walk substituting the endpoint) remains unmet, reconciled rather than built.**
-`e2e/members-lifecycle-mock.mjs`'s own header records that this harness sets no `RESEND_API_KEY`
-so the invite leg terminates at `mail_not_configured` before any admin call is attempted; reaching
-`send()` from a browser walk needs `canMintFor`/`mintSupabaseTokenHash` to succeed first, which
-needs the Supabase admin REST endpoints (`GoTrueAdminApi`'s `listUsers`/`generateLink`) mocked
-under `/e2e-supabase` — a second, larger seam this ticket's own "why human" note left as the
-owner's separate call, not decided here, and the fix-round review confirmed this blocker is real
-and independent of the fence above. Wiring `CLARA_E2E_INVITE_MAIL_ENDPOINT` into the e2e server's
-own env (`e2e/run.mjs`/`serve-built.mjs`) without that second seam would prove the variable is
-*read*, which the unit suite already pins, but not that a real invite flow ever *reaches* `send()`
-— the one thing AC2 actually asks for — so it was not built as a half-measure. The seam is proven
-at the unit level (`send()` posts to the override with the exact body a walk would need to assert
-on, and the fence rejects a non-loopback value); wiring a walk to reach it is a follow-up gated on
-the second seam, not a re-litigation of this ruling.
+**#1022 — the identity-provisioning seam, the second seam the note above named.**
+`InviteMailConfig.identityEndpoint` — resolved from `CLARA_E2E_INVITE_IDENTITY_ENDPOINT`
+(`INVITE_IDENTITY_ENDPOINT_ENV_NAME`), the SAME shape as `mailEndpoint` (optional, read last,
+never in `missing`, fenced to a loopback http(s) URL by the same `isLoopbackEndpointOverride`) —
+substitutes ONLY the base URL `productionInviteMailer`'s `admin()` builds its Supabase client
+from; the service-role KEY, and the separate mail-endpoint seam, are untouched. Unset (every real
+deployment), `admin()` still builds from `config.supabaseUrl` exactly as before — pinned by
+`tests/invite-mail-transport.test.ts`'s `#1022` suite.
 
-**Re-verified, code-review fix round (SPEC-874-1): unchanged, third confirmation.** All 38
-`invite-mail-transport.test.ts` cells re-run green; `e2e/members-invite-walk.spec.ts`'s own header
-still states the harness sets no mail transport so the invite leg settles at `mail_not_configured`
-before any admin call; and a repo-wide search finds no `GoTrueAdminApi`/admin `generate_link`
-mock anywhere under `e2e/` — only the general `/e2e-supabase` REST prefix, which is not the admin
-API `canMintFor`/`mintSupabaseTokenHash` need. The tension is between AC2 as written and the
-owner's own 2026-09-18 ruling, not a lane shortfall; resolving it needs the owner, not more build.
+**AC2 (a Playwright walk reaching a pending row, both calls intercepted) is now MET.**
+`e2e/run.mjs` enables the courier's mail capability with three harness-only placeholders and
+points both `CLARA_E2E_INVITE_MAIL_ENDPOINT` and `CLARA_E2E_INVITE_IDENTITY_ENDPOINT` at this same
+mock origin. `e2e/members-lifecycle-mock.mjs` answers the Supabase admin REST endpoints
+(`GoTrueAdminApi`'s `listUsers` under `GET /auth/v1/admin/users`, `generateLink` under
+`POST /auth/v1/admin/generate_link`) with an empty directory and a fixed hashed token, the real
+`clara.invite_member` verb with a realistic three-key receipt (`invite_id`/`token_hash`/
+`expires_at`, plus the plaintext `token`, matching `0147`'s own body), and
+`POST /e2e-invite-mail-capture`, which records what `send()` posted instead of relaying it. All
+three carry that file's own `if (!ours) return false;` guard — the mail-capture one only since
+the code-review fix round: it shipped without the guard while this paragraph claimed otherwise,
+on a path `run.mjs` now sets for EVERY e2e run, and the census that should have contradicted the
+claim could not see any of the three. `HANDLER_OPENER` in
+`e2e/e2e-fixture-ownership.test.ts` reads `/auth/…` and `/e2e-…` openers from that round on, so
+the claim is now MEASURED: N5 censuses all four of this lane's non-`/rest/` handlers as scoped
+(44/44).
+`e2e/members-invite-walk.spec.ts`'s first cell now drives the invite dialog to a settled
+`"The invitation to … was sent."` banner and a new pending row, then reads
+`e2e_members_lifecycle_invite_trace` for positive evidence that both calls actually fired and
+what `send()` posted — never merely that the journey looked right. Two consecutive runs green
+(9.9s, 10.5s); no other spec reaches `/api/invite` today, so no other walk's behaviour changed.
 
 **There is no resend door, by design.** The plaintext token is never stored (裁-16a) so no link can
 be re-sent, and `clara.invite_member` refuses a second pending invitation for the same address
@@ -651,6 +687,62 @@ hands the derived basis back, which is what the success banner renders.
 filter over the counterparty reads the registers already use, and `party_ambiguous`'s candidates
 render INLINE as a choice.
 
+**#1007 — the form warns before it records something this client looks to have already, and it
+never refuses.** The owner ruled on 2026-09-20: check at the recording step, warn, and let the
+person decide. So the submit path gained ONE state between validation and the write — `warned` —
+and **nothing is admitted while the form is in it**. The advisory read is
+`probeTradeInvoiceDuplicates` (`lib/work/api.ts`), injectable as the `probe` seam beside `submit`
+for the same reason that one is. A probe that cannot answer returns NOTHING TO SHOW and the
+recording goes through: a failed advisory read that blocked a lawful recording would be the
+refusal the owner ruled out, arriving by the back door.
+
+**It rides the admission's own runtime route, not a door call of its own**, and that is load
+bearing rather than tidy. The first cut posted the form's wire body straight to PostgREST, and the
+wire's keys are the browser's (`documentDate`, `totalCents`) while
+`clara.probe_trade_invoice_duplicates` reads the database's (`document_date`, `total_cents`): the
+"same money on the same day" signal — the one that catches a MISSING or MISTYPED document number —
+could never fire from the only shipped entrance, so an unnumbered duplicate bill was never warned
+about at all. `apps/web` deliberately does not depend on `@clara/runtime`
+(`lib/registers/fa-refusal-field.ts` states that rule and mirrors a map by hand for it), so the
+choice was a second hand-written translation in the browser or ONE on the server.
+`POST /api/work/trade-invoice/duplicates` is that one: it runs the SAME `toDbTradeInvoice` the
+admission runs, on the same body, and then asks the actor-explicit twin the chat lane will use —
+so the form and the chat lane cannot be shown different answers, and the two spellings cannot
+drift apart again.
+
+The banner names each earlier document by what the BOOKS hold — its number, its document date,
+its total and which signal fired — with a link to the Work that recorded it, and offers exactly
+two controls: **Record it anyway** and **Cancel**. Cancel returns to `idle` with every keystroke
+intact and admits nothing. Record it anyway sends the ordinary submission with one extra key,
+`acknowledgeDuplicates` (the shown invoice ids), which the runtime route turns into the durable
+"recorded anyway" record BEFORE it admits. The walk drives all three outcomes in a real browser
+and asserts on what the RUNTIME received, not on what the page painted.
+
+**#982 — the chooser shows each candidate's TIN, and answers a third party refusal.** LHDN
+MyInvois requires the buyer TIN and BRN, so a Malaysian document carries both and the TIN is
+sometimes the only identifier that tells two candidates apart. The door has always carried each
+candidate's `tin`; this form mapped id, name and registration number and dropped it, so it never
+reached the screen. It now renders labelled (`Reg. …` / `TIN …`) beside the name, and beside THAT,
+where the door says so, which identifier reached that candidate (`matched_on`) — which is what
+makes the chooser a choice between the document's identifiers rather than a list of names. A
+refusal whose candidates carry no `matched_on` renders no label: an invented one would be a
+sentence the door never said. `party_ambiguous` raised from a TIN also gets its own sentence,
+keyed on `detail.matched_on`; before that the screen answered a TIN-only submission with "More
+than one party answers to that name", a name it never sent. Migration 0274's
+`party_identifier_conflict` — the document's registration number and its TIN name two different
+live parties — renders through the SAME banner and the SAME chooser, because the remedy is the
+same act; it has its own sentence because the person is choosing between two identifiers the
+document carries, not between two parties one identifier reaches.
+
+**#1007 — and a reviewer can see the warning afterwards.** The Work detail's trade-invoice block
+reads `clara.get_trade_invoice_duplicate_ack` beside `clara.get_trade_invoice` and, when the
+preparer was warned and went ahead, says WHO chose it and WHICH earlier document they were shown
+(by the number the books hold, not the one that was retyped). A recording nobody was warned about
+says nothing at all, and a FAILED read is indistinguishable from that: the page never claims a
+recording was *not* a duplicate, and nothing on it is blocked by the read. Without this line the
+ticket's purpose clause — "so a reviewer can tell a knowing second recording from an accident" —
+was true of the database and of no screen.
+
 **AC5's mutual links**: ONE block on the Work detail, from `clara.get_trade_invoice` — the kind,
 the party, the two dates, the reference and, once posted, the entry, the open item and its
 outstanding. The other half was already built and needed nothing:
@@ -718,6 +810,14 @@ next run WOULD do before anything is written: the period the register chose, the
 both general-ledger legs, every skipped asset with its reason in words, whether the run will post or
 wait for approval, and any period the oracle skipped for a closed financial year. Confirm runs it.
 
+**A judgement licenses the figure it was made about** (#975 fix round, ADV-L04-2). The run door now
+refuses — or parks — on `arrears_changed_since_judgement` when a closed year's arrears no longer
+match the amount the standing ruling was made about, so the preview stops presenting that ruling as
+the settled answer: it states both figures ("you judged RM 250.00 … it now stands at RM 400.00") and
+offers the two controls again, handing the door the CURRENT amount, which is the one it re-measures.
+A surface that kept saying "you judged it immaterial" would have left a person reading a settled
+sentence beside a run nobody could unblock.
+
 **Every skip reason was MEASURED, and an unknown one degrades rather than vanishing.** The five the
 database can emit are `incomplete`, `not_in_service`, `fully_depreciated`, `none_method` and
 `disposal_draft_outstanding` — the fifth is written by `clara._fa_compute_charges` itself and the
@@ -732,11 +832,33 @@ with a refusal instead of the receipt it had already earned. `lib/registers/depr
 `useDepreciationDecisionKey` mints one key per OPEN DECISION, keyed on the intent tuple, and holds
 it until the decision changes or ends — on `components/work/work-cancel-dialog.tsx:95`'s shape. The
 tuples are `depreciationIntent` (client, period start, period end), `authorityIntent` (the act, the
-authority, the value being decided) and `reviseIntent` (every value the revision door is asked to
-write, particulars key-sorted). **Signing is where a person actually meets this**: the sign door's
-replay identity is {client, authority}, so a second key reaches 0227's `authority_already_live` arm
-and refuses. `completeFixedAssetParticulars` and `disposeFixedAsset` still mint their own key —
-#639's original shape, untouched by this branch and carried as a follow-up.
+authority, the value being decided), `reviseIntent` (every value the revision door is asked to
+write, particulars key-sorted), `completeIntent` and `disposeIntent` (#978 — each exactly the tuple
+its own door's `_reserve_op` dedupe hashes into its operation key; `disposeIntent` deliberately
+EXCLUDES the memo, following `clara.dispose_fixed_asset`'s own comment that a relabel is the same
+disposal). **Signing is where a person actually meets this**: the sign door's replay identity is
+{client, authority}, so a second key reaches 0227's `authority_already_live` arm and refuses.
+`completeFixedAssetParticulars` and `disposeFixedAsset` (`lib/registers/fixed-assets.ts`) took the
+LAST two follow-up call sites: `CompleteParticularsDialog`/`DisposeDialog`
+(`components/registers/fa-row-actions.tsx`) and the needs-you inline
+`FixedAssetIncompleteAffordance` (`components/firm/fixed-asset-incomplete-affordance.tsx`, which has
+no `FaDoorDialog` of its own — its own open/close IS the decision boundary) all hold a key now;
+#639's original mint-per-call shape is gone. `completeIntent` and `reviseIntent` share ONE
+`serializeParticulars` helper rather than carrying the key-sorted block twice, so the convention
+cannot drift between them.
+
+**…and the two DEFAULT-POLICY doors hold one too** (#932 fix round, adversarial review ADV-L04-5).
+`setFaDepreciationPolicy` and `retireFaDepreciationPolicy`
+(`lib/registers/fa-depreciation-policies.ts`) shipped in this same wave still minting the key
+inside the wrapper — the very class the paragraph above exists to close. One human decision sent
+twice then left TWO policy versions (v2 active, v1 retired "superseded by
+set_fa_depreciation_policy v2"), and a register row born between the calls carried v1 while the
+account read v2. Both now take a required `opKey`, their tuples are `setPolicyIntent` (client,
+asset account, method, useful life, rate, residual — exactly what
+`clara.set_fa_depreciation_policy`'s own `_reserve_op` hashes, with `p_reason` outside it the way
+`p_memo` is outside the disposal's) and `retirePolicyIntent` (client, asset account), and
+`SetPolicyDialog`/`RetirePolicyDialog` (`components/registers/fa-account-profiles-panel.tsx`) hold
+the key with `useDepreciationDecisionKey` and renew it on close.
 
 **Five readings of one asset, addressable.** `fixed-asset-detail.tsx`' tab id lives in `?tab=`, so a
 pasted link lands on the reading it names and Back leaves the page rather than walking five tabs.
@@ -805,6 +927,82 @@ message that fades cannot carry that. Every branch of the route's contract rende
 database's own words: the named 422 VERBATIM with its counts and failing rows,
 `no_opening_tb_lines` as the honest keyed-fallback signal rather than an error, a 403 as denied
 (naming the restriction, offering no fake retry).
+
+**#986 — the one refusal on this lane that carries an act.** `source_reread_since_parse` is what the
+runtime answers when the bound document has been READ AGAIN: the parse op key is stable per
+(seed, document) so a retried POST cannot double a basis, while the payload it hashes is keyed by
+region id, so a second reading arrives as the same key with different args. That refusal is correct
+and it has not changed — but until #986 it was also the end of the road, because the basis's lines
+then cite a reading the document has superseded and `approve_opening_seed` refuses those too, so
+the only way on was to abandon the basis.
+
+`isSourceRereadConflict` picks out exactly that token, and the outcome banner renders it in WORDS
+("The document was read again") with **Refresh from the new reading** beside it. The button calls
+`refreshOpeningSource` -> `POST /api/runtime/opening/refresh-targets` — a SECOND VERB, never a retry
+of the read, because reading again would refuse again on purpose — and the 202 names BOTH numbers:
+how many lines the new reading carried and how many the reading it left behind had. "5 read, 3
+retired" and "5 read, 5 retired" are different facts about the document. Every OTHER refusal keeps
+the plain block: a closed registry or a moved tie is not something refreshing can fix, and a control
+that cannot work is not shown. Both verbs share `callOpeningAct` in `lib/registers/opening-source.ts`
+and settle the SAME banner, so a person who performed one act on one basis is owed one standing
+answer rather than two competing ones.
+
+**The refresh door's own three refusals are said in words too** (review round 1, ADV-05). 0286
+mints `no_reread_to_refresh`, `stale_extraction_version` and `refresh_extraction_mixed`, and none
+of them is a sentence — they are machine words, unlike the producer's named refusals the banner
+renders verbatim for good reason. `no_reread_to_refresh` is the single likeliest outcome of the new
+act (a colleague, or a second tab, refreshed the basis first), and a professional met
+"Refused · CLR31 · no_reread_to_refresh" has been told nothing at all. Each has its own branch in
+`OpeningParseOutcomeBanner` with its own literal message key — a lookup table over `t()` would
+compile while a key was missing and fail in the face — and each says what happened, that nothing
+was changed, and what to do next.
+
+**The basis's state shows WHICH reading it stands on, after the moment has passed** (#986 AC2,
+review round 1, L06-SPEC-04). The 202 banner lives in component state and is gone on reload, so a
+colleague opening the basis later saw a target set with nothing saying an earlier reading had been
+retired from under it. `loadOpeningTargetRefreshes` reads `clara.opening_target_refreshes` (plain
+firm-scoped SELECT, no door, no new grant) newest-first, and `OpeningSourceHeader` names the
+newest receipt beside the provenance line: how many readings this basis has stood on, when the
+last retirement happened, and how many lines replaced how many. It is a SEPARATE `useAsyncRead` in
+`OpeningSeedWorkbench` for the same reason the tie document's filename is — a failure there (an
+older database under a newer build, most of all) must degrade to "no refresh is named" rather than
+take the targets and the tie gates down with it. The component still mints nothing: the counts and
+the date are the receipt's, and the only arithmetic is `refreshes.length + 1`, because the FIRST
+reading leaves no receipt.
+
+## #936 — the generic plan revision is not the road to an accrual's figures
+
+`clara.revise_accounting_plan` accepts an accrual's plan happily: it knows nothing about accruals.
+It records a new plan revision carrying the new basis while `clara.accrual_adjustments` stays keyed
+to the revision it was written for, so a reader joining plan → revision → accrual detail afterwards
+sees the OLD amount beside the NEW one the ledger will post from the next due date — the books
+contradicting themselves, which is the defect #936's first sentence names. The dedicated door
+`clara.correct_accrual_adjustment` (0284) advances BOTH together, and
+`/clients/:clientId/accruals/:accrualId/correct` is where a person reaches it.
+
+`PlanReviseForm` holds that wall at the only surface that can START the generic act: for a plan an
+accrual's figures are stated on it renders no form at all, says what would go wrong in the words of
+the books, and links to the correction. The discriminator is a SECOND read —
+`liveAccrualForPlan(loadAccruals(clientId), planId)`, keyed on
+`clara.accrual_adjustments.plan_id` — because `clara.get_accounting_plan` carries no such field and
+`kind` cannot stand in for it: an accrual's plan is a `reversing_journal`, and so is an ordinary
+reversing journal nobody configured from an accrual (measured on the lane rig: 115 reversing plans
+with an accrual, 3 without). The live row is the highest revision, because a corrected accrual
+leaves both rows on the relation — that is the whole of #936's lineage. The read is folded into the
+SAME `DataState` as the plan read, so the form renders only once BOTH have succeeded: a surface
+that fell back to the form when it could not tell would be choosing to risk the contradiction, and
+the plan's other lifecycle controls are all still on its detail page.
+
+## #919 — a corrected term on the prepayment surfaces
+
+Both the detail banner and the list row's **Term corrected** badge are keyed on `term_moved === true`
+and never on `term_live`. `clara._record_document_service_period_core` supersedes the live service
+period UNCONDITIONALLY — it compares no dates — so `term_live` goes false on a re-record that
+restates the term byte for byte, and a surface keyed on it told firms that a running amortisation
+needed rebuilding when nothing about the term had changed. `=== true` rather than a truthiness test
+is the second half of the same discipline: the field arrives as unvalidated jsonb, and an absent one
+— a web build ahead of its database, or a rolled-back migration under a live runtime — is falsy,
+which would paint the warning on every prepayment in the firm.
 
 **The coverage footer is not the tie.** Mapped/unmapped counts and cents live in the target panel,
 labelled as coverage, with no percentage — and deliberately OUTSIDE `OpeningDryrunStrip`, whose own
@@ -1011,6 +1209,57 @@ this build cannot deliver, the band's footer says what it actually does: these f
 most every 30 seconds while the tab is open, and here is the last successful read. The 60-second
 "delayed" rule is IMPORTED from `lib/work/use-work-detail.ts` (C77.12: one contract, one owner,
 extended by reference rather than copied), and a source-reading cell refuses a second literal.
+
+**#1001 — the CASH arm renders `cash.composition` too, headlined by the CLOSING balance.** Both
+`cash.composition` and `profit.composition` shipped on every read from 0232 onward, but only
+`profit.composition` had a consumer (`client-income-expense-chart.tsx`) until #1001: the owner's
+ruling of 2026-09-20 built the cash side now, mirroring the profit side's readable-table-with-
+per-row-journal-links pattern rather than leaving the client home permanently asymmetric.
+`client-cash-trend.tsx` is that consumer — the cash arm's own chart-and-drilldown home, exactly as
+`client-income-expense-chart.tsx` is the profit arm's — with ONE deliberate difference: **the
+row's headline is `closingCents`, never `movementCents`.** Book cash is a BALANCE cumulative from
+inception (0232's `q.closing`, summed with no lower bound); the profit table's movement headline
+is right THERE because profit is itself a movement over the period, but a cash table built the
+same way would not sum to the figure above it. `movementCents` is still shown, beside the balance,
+never in place of it. Each row's `memberReason` (`bank_registry` / `declared_cash` /
+`declared_petty_cash`) is rendered through a new CLOSED lookup,
+`lib/dashboard/financial-display.ts`'s `memberReasonKey` — the same discipline
+`coverageReasonKey` already holds for coverage reasons, so a raw machine token never reaches the
+screen. NO NEW CASE FOR "no published cash account set" WAS WRITTEN: 0232 returns
+`composition: []` on the same `v_set_id is null` branch that leaves `points: []`, so
+`client-cash-trend.tsx`'s existing `if (points.length === 0) return null` already withdraws the
+composition table with it, and `client-cash-summary.tsx`'s own unpublished-set banner stays the
+only face for that state. The read (`clara.get_client_financial_pack`, migration 0232) is
+UNCHANGED — this is rendering only.
+
+**And the account-level cap disclosure names the cut the DOOR makes.** 0232 builds the cash
+composition `order by a.account_code … limit 50`, so the 50 rows a firm sees are the
+alphabetically first by chart code — NOT the largest. `ClientFinancial.cashDrilldown.
+accountsTruncated` therefore reads "Showing {shown} of {total} cash accounts, in account code
+order."; a sentence saying "largest first" would tell a firm with 63 cash accounts that the 13 it
+cannot see are the small ones, when they may hold the largest balances behind the headline — the
+same class of silent wrongness the cap disclosure exists to prevent, dressed as a disclosure.
+`client-financial-charts.test.tsx`'s own cell READS the ordering out of migration 0232 rather than
+restating it, so a later reorder of the door cannot leave this sentence behind. **The PROFIT twin
+(`ClientFinancial.drilldown.accountsTruncated`) still says "largest first" and 0232 orders that
+composition by `a.account_code` too** — the same defect, pre-existing since #660 and deliberately
+left to its own ticket rather than widened into #1001.
+
+**#1002 — the second-pass membership editor, and the two facts its face rests on.** The cash-set
+dialog has two faces: FIRST PUBLISH (#660, unchanged) and the SECOND-PASS EDITOR that restates a
+published version's membership. WHICH ONE OPENS is the publish door's own question — "does this
+client have a PUBLISHED cash account set?" — and `pack.cashSet` is not that question's answer:
+0232 resolves it through the PERIOD WINDOW, so a human reading an earlier month than the current
+version's `effective_from` gets `null` for a client that plainly has one. The first-publish face
+on such a client is a dead end, because it states no date at all and the publish door — whose own
+lock is `where v.client_id = p_client and v.state = 'published'`, with NO window — answers a null
+`p_effective_from` with `effective_from_required`. So `pack.cashSet` is the INSTANT answer and
+`get_client_cash_account_set_members` (migration 0276, the identical `state = 'published'`
+predicate) is the AUTHORITATIVE one; the face only ever moves from first-publish to editor, never
+back, so nothing flickers. And CLOSING the editor DISCARDS its draft: a reopen pre-checks the
+current version again rather than showing boxes a human abandoned, with the added/removed/
+unchanged diff computed from them. A REFUSAL is not a close — the dialog stays open and every
+dirty choice survives it, because the human's answer was not what was wrong.
 
 ### Recharts, and the table that is never a fallback
 
@@ -1341,36 +1590,140 @@ poll's own tick to land under host contention (1 failure in a 5-run sample). Fol
 that cell's own settle budget specifically — out of #875's stated scope (auditing *other*
 pollers) and not the same instance #875 was asked to fix.
 
-## #897 — the full-screen onboarding altitude leg (code-review fix round; still open)
+## #1021 — the [633] unsettled-receipt cell counts the WHOLE poll, on a work bound
 
-**Not delivered.** #897's own AC1 asks for a mock-lane cell proving typed-but-unsubmitted
-interview answers and focus survive the rail-to-full-screen escalation; AC2/AC3 ask for the
-fixture and its ownership declaration. None of the three is built. This fix round did two things,
-neither of which counts as delivering the ticket:
+**Landed** — the follow-up #875 named above. Two rounds, and the second one found the real
+mechanism, so what the first round wrote here has been overwritten rather than appended to.
 
-**Fixed (SPEC-897-2): the AC4 header note no longer asserts coverage that does not exist.**
-`e2e/interview-walk.spec.ts`'s header used to say the arm is "proven without docker in a real
-built-app Playwright walk exactly like every other mock-lane spec in this directory" — no such
-walk exists anywhere, so the note recreated exactly the false-coverage state #897 exists to
-remove. Reworded to say plainly that the arm is not proven anywhere today and to name #897 as
-the open ticket.
+**What was actually wrong, measured.** The cell asserted on the reads that arrived AFTER
+`withReceipts`'s own mount phase (`const mount = counts.document_intakes_visible ?? 0;` then
+`grew > 0`). That mount phase advances ten `h.settle()` hops, and this poll spends exactly ONE TICK
+PER HOP — a tick needs its `setTicks` re-render and the effect that schedules the next timer, and
+both wait for the next `act` flush. Instrumented at the previous HEAD: 12 reads already counted when
+the body starts (the mount's own list read plus eleven of the twelve-tick budget), one more read,
+then silence. So `grew > 0` was a margin of exactly ONE TICK. Any single extra flush in the mount
+phase spends it, `grew` is 0, and the cell goes red saying nothing about the poll — which is what a
+full-suite run at the previous HEAD recorded
+(`docs/plan/active/riders-2026-09-20/reports/wave3-lane11-ticket1022.md`).
 
-**Reproduced (SPEC-897-1): the blocker is now backed by a runtime empirical result, not only a
-static trace.** `components/clara/interview-draft-persistence.test.tsx` (new) mounts a real
-`ClaraFullScreenThread` instance, types an unsubmitted answer, unmounts it without submitting,
-then mounts a second fresh instance against the identical server-side run and reads its answer
-field. Today it starts empty — confirming, by running the actual component rather than only
-reading its source, that `InterviewRunCard.tsx`'s `draft` (`useState("")`, two call sites total,
-no persistence) does not survive an unmount of the tree that held it. This is not #897's
-deliverable (it does not touch the rail, the route-group boundary or a mock fixture) and its own
-header says so; it is the cheapest empirical confirmation available before committing to the
-larger build, and it is the test whose assertion should flip once #897 lands real persistence.
+**The first round's own fix was the second half of the problem.** `settleUntilQuiet` waited for the
+read count to hold flat for a real 300 ms window with a 10 s deadline — the exact shape
+`test/settleUntil.ts`'s header retires in one line: *"The bound is on WORK, not on wall-clock time"*
+(#798, after #643). A contended host can spend 300 ms inside one macrotask hop, so the quiet window
+could elapse before the poll was given a single chance to tick.
 
-**Still needed, unchanged from the prior report:** an owner ruling on whether AC1's typed-data
-and focus-return criteria mean literal cross-route-group survival, and — if so — a new
-interview-runtime mock subsystem (an OPEN/unanswered park fixture plus
-`/api/runtime/interview/*` handlers reachable through the rail) that this lane scoped as a
-genuine multi-piece build, not a same-shape addition to an existing fixture.
+**What it is now.** `settleUntilPollStops` (same file, just above the cell) settles until the read
+count has held flat for `QUIET_PASSES = 25` CONSECUTIVE PASSES, bounded by `STOP_PASSES = 400`
+passes of total work and no wall clock at all. One read per hop is the measured ceiling, so
+twenty-five hops with no read is a poll that has genuinely stopped, on a fast host and a crawling
+one alike. The cell then counts from zero: `ticks = total - MOUNT_READS` (one, the mount's own list
+read — measured, not assumed: the SETTLED cell above reads exactly once and never again), and
+asserts `ticks > 0` and `ticks <= 12`. The ceiling is now a property of the poll rather than of how
+its budget happened to be split across the mount phase.
+
+The poll itself (`lib/documents/use-settle-poll.ts`) is unchanged; this stays a test-only fix.
+Three controls, each run and each reverted byte for byte:
+
+- **The red reproduced deterministically.** The old shape with the mount phase given the whole
+  budget (`maxTicks: 11`, third arg to `withReceipts`) fails on `the poll must issue SOME read
+  while a row is still moving` — the identical intermittent failure, made repeatable.
+- **The new shape survives it.** Same `maxTicks: 11`, new shape: green (`ticks = 11`).
+- **Non-vacuity.** `maxTicks: 1000`: red, `still reading after 400 settle passes (count 412)` — 412
+  is 12 + 400, which is also the direct measurement of one read per hop.
+
+## #897 — the full-screen onboarding altitude leg
+
+**Delivered**, in riders wave 3. This section is overwritten rather than appended to: the
+paragraphs it replaces described the state before the build and were still standing, contradicting
+the branch, until the code-review fix round (SPEC-897-4).
+
+**The walk.** `e2e/agentic-finish-walk.spec.ts`'s #897 arm signs in, opens client C's rail, starts
+the interview, types an answer, escalates to full screen through the rail's own control, asserts
+the URL crossed the `(firm)` → `(full)` route-group boundary, re-attaches the run and reads the
+answer field back, then presses Back and asserts BOTH halves of AC1: the answer survived the
+second remount too, and keyboard focus is on the escalate control that opened it. Client C
+(`P6_5.clientC` / `threadC` / `planC` / `runC`, in `e2e/agentic-finish-mock.mjs`) is an OPEN,
+unanswered park no other cell in that file navigates to, which is AC2. N4's own-client-thread
+count moved 2 → 3 for it and `e2e/e2e-fixture-ownership.test.ts` passes with the two new runtime
+handlers censused as scoped, which is AC3. `e2e/interview-walk.spec.ts`'s header now records that
+the arm lives in the mock lane, which is AC4.
+
+**The product change the walk needed.** The 2026-09-20 triage comment widened the ticket after
+tracing that a typed interview answer was not persisted anywhere. It is now:
+`claraThreadStore.interviewDrafts` (see that file's own header for why the key is `clientId`
+alone, and for why the ruling's "another thread" half is answered by the key's design rather than
+by a cell), read and written by `components/clara/InterviewRunCard.tsx` through
+`useSyncExternalStore`, and cleared only on a CONFIRMED submit — a refused park leaves the
+person's text where they can still fix and resend it.
+
+**And a second one, argued from AC1 rather than from the triage comment.** With draft persistence
+alone the walk still failed on `toBeFocused()`: the browser restores no focus across either leg of
+that navigation (`document.activeElement` was `<body>`). `lib/clara/rail-focus-return.ts` is the
+fix — the same best-effort, take-once `sessionStorage` marker idiom
+`lib/firm/portfolio-focus-return.ts` already established for the identical problem on Firm Home,
+scoped by client altitude so a marker from one client's escalate can never move focus on
+another's. It is a second production change under a ticket whose newest ruling named one, and the
+code review flagged it as such (SPEC-897-3): AC1's own words are "asserts keyboard focus returns
+to the triggering control", so it is inside the ticket as written, but whether it should have
+ridden this ticket or its own is the integrator's call, not this file's.
+
+**That focus fix shipped with a race, found and fixed in the code-review round.** `ClaraRail.tsx`
+took the one-shot marker DURING RENDER. React may render a component and throw the result away — a
+navigation is a transition, and a transition can be re-rendered — so the marker could be consumed
+by a render that never committed and be gone for the one that did. Measured, not reasoned: a
+traced run of this exact round trip showed two `ClaraRail` renders on the way back, the first
+taking the marker and matching, the second (whose effects actually ran, and which later rendered
+the escalate link) finding `null`. `--repeat-each=5` on the #897 arm was **4 red, 1 green**. The
+take now happens inside the effect, i.e. in the COMMIT phase, so only a render that survived can
+consume it; the `undefined` ref guard still makes it once-per-instance. `--repeat-each=10` after
+the fix: **10 green**, and the whole spec 10/10. `components/firm/firm-portfolio-section.tsx`
+carries the older render-phase form of the same idiom and the same hazard; nothing has reproduced
+it on that surface, so it is a follow-up rather than a change made here.
+
+**The component-level cells** (`components/clara/interview-draft-persistence.test.tsx`) keep the
+seam the wave-1 reproduction opened: one mounts a card, types, unmounts without submitting and
+mounts a fresh instance against the same run — its assertion is FLIPPED, the draft is back; the
+other proves clear-on-submit and preserve-on-refusal against two independent runs. What they
+cannot prove at this harness's altitude is the rendered, user-visible `.value` (the
+`HTMLTextAreaElementStub` gap that file's header documents); that is the browser walk's claim.
+
+## Ticket 1012 — the prior-GL seeding lane is retired, and the browser says so
+
+Owner ruling 2026-09-20 (on ticket 983): the prior-GL seeding lane gets no browser entrance,
+because the product direction is the Client KB — nobody pre-registers by hand what Clara can learn
+from a source. Migration `0288_seeding_lane_retired.sql` recut `clara.create_seeding_batch`,
+`clara.tick_seeding_proposal` and `clara.decline_seeding_proposal` to one typed refusal (`CLR34`,
+`detail.reason = "seeding_lane_retired"`). Three things changed here, and one deliberately did not.
+
+**`SeedingBatchesPanel` is read-only, and it says why.** The Tick and Decline dialogs are gone,
+and a `StateBanner` carrying `ReportsSnapshotsSeeding.seeding.retiredNotice` renders in their
+place. The banner is the point: the beta rule is that nothing is switched off silently, so a
+person who filed a prior general ledger last month and comes back for the tick-list is told the
+lane is retired rather than finding the buttons simply absent. Every past batch and proposal stays
+on screen with its state, kind and payload — the retirement deletes nothing.
+
+**The two CLOSERS stay.** `Cancel batch` and `Complete batch` still render on an OPEN batch,
+because a batch left open at the moment of retirement must still be closeable by the firm that
+owns it, or its history is stranded open forever. `lib/reports/api.ts` keeps both wrappers and
+both reads, and has NO `tickSeedingProposal` / `declineSeedingProposal` any more: a wrapper in
+front of a door that refuses everything is a decoy a future surface could be wired to.
+`components/reports/seeding-batches-retired.test.tsx` holds all three claims — the rendered
+absence, the rendered notice, and a census cell over the module's own exports.
+
+**The `seeding_proposal` needs-you row is gone with its row kind.** 0288 §C spliced the CTE out of
+`clara.list_review_queue`, so the queue emits no such row for any client — including one that
+still owns OPEN proposals, which is the whole point: a row nobody can act on is worse than no row.
+`REVIEW_QUEUE_ROW_KINDS` is back to TEN entries, the registry entry and
+`components/firm/seeding-proposal-affordance.tsx` are deleted, and `NeedsYou.rowKind.*` and
+`NeedsYou.reviewSeedingProposals` lose their strings. This is the first time a row kind has been
+REMOVED from that closed world; `lib/firm/needs-you.ts`'s own grounding note records the five
+places the walk touched, in reverse.
+
+**What did NOT change: `ReviewQueueRow`'s three seeding-only fields.** `client_name`, `batch_ids`
+and `open_proposal_count` are still typed, because the DB still emits them — 0288 keeps them in
+the shared column vector rather than recut all ten surviving CTEs, so they are now null on every
+row. The type states what the envelope CONTAINS, not what is useful in it; dropping them would
+make the type disagree with the read. Nothing in the UI consumes them any more.
 
 ## #981 — the durable-Work refusal carrier, read once
 
@@ -1405,3 +1758,67 @@ D12(a)'s list is read off `detail.candidates` and typed as a first-class field b
 `components/accounting/trade-invoice-form.tsx` RENDERS it inline as a choice; the rest of the
 door's sentence (the name it could not resolve, the counterparty kind it expected) is readable
 beside it now, where the route-specific fold used to throw it away.
+
+## #958 — cash is book cash; the tie-out's GL balance is never called cash
+
+Owner's ruling (2026-09-20): only governed book cash, over the published cash account set, is ever
+labelled cash on a human-facing surface. `list_bank_statements`' `tie.gl_balance_cents` and
+`get_bank_reconciliation`'s `gl_prime_cents` (the same DB key, mapped in `lib/bank/recon-types.ts`)
+are both the bank tie-out's own ledger-derived figure for ONE bank account — a THIRD figure,
+alongside the bank statement's closing balance (migration 0232) and book cash, on the same
+ledger-derived-but-different footing. It is a term of the tie-out, never a claim about how much
+cash the client holds, and CONTEXT.md now carries it as its own entry, "Tie-out GL balance".
+
+**Nothing changed on the tree.** Checked first: the one surface that renders it,
+`components/bank/reconciliation-section.tsx`'s `<dl>` row, already labels it "GL balance"
+(`ClientBank.reconciliation.glBalance`); the client home's cash tile already says "Book cash"
+(`ClientFinancial.cash.heading`). This ticket is the vocabulary ruling and its repeatable check,
+not a recut of the tie-out, matching, reconciliation or the client financial pack.
+
+**The backstop.** `apps/web/tests/gl-balance-cash-label-census.test.ts` walks every `.ts`/`.tsx`
+file under `app/` and `components/` for a `.gl_balance_cents`/`.gl_prime_cents` read rendered
+inside JSX, resolves the nearest preceding label element (a JSX text literal, a string literal, or
+a `t("KEY")`/`tc("KEY")` call traced to its `useTranslations` namespace and looked up in the real
+`messages/en.json`), and fails on a "cash" label OR on a label it cannot statically resolve
+(fail-closed). It is an AST check over source AND message copy together — a violation can come from
+a hardcoded JSX label or from reusing an existing cash-labelled i18n key next to this figure. Known
+limitation, documented in the file's own header: it only sees the balance rendered INLINE in JSX: a
+future surface that reads the field into a local variable first and renders that variable elsewhere
+would not be traced across that boundary.
+
+## #1017 — every accessibility scan settles through one shared helper, and one row got a real margin
+
+`#760` built `settleForScan` (`e2e/helpers.ts`) after three walks independently measured the same
+intermittent axe `color-contrast` violation: a scan that runs before the mount/selection fade
+reaches its resting opacity measures a COMPOSITED mid-transition colour nobody ever ships. That
+fix covered a handful of named scans. Two more independent findings during the riders waves (the
+integration gate's own three-run classification, and a repo-wide count) showed the large majority
+of the suite's `AxeBuilder` scans still called the scanner directly, or through a local settle
+routine that waited only on `document.getAnimations()` (or only on `networkidle`) and never on the
+fade's own opacity — the exact gap #760 closed for three walks and left everywhere else.
+
+**Every scan now settles first, through one shared implementation.** Ten spec files' identical
+local `settle()`+`scan()` pair now has `settle()` delegate to `settleForScan`; eleven spec files'
+identical local `expectAccessible()` now settles before its own scan; `a11y-finish-walk.spec.ts`'s
+`gotoSettled` and `home-board-walk.spec.ts`'s `settled` (called from dozens of sites) now delegate
+too. Fourteen remaining spec files call `settleForScan(page)` directly ahead of each scan,
+including `document-correction-walk.spec.ts`'s routed-views axe cell — the specific cell the
+wave-1/wave-2 flake was measured on. `e2e/settle-before-scan-census.test.ts` holds the convention
+mechanically (`e2e/README.md`'s own "One settle-before-scan" section has the full shape), and the
+previously-flaky cell was re-run 12 times under deliberate CPU load (twelve background busy-loop
+processes on a 24-core host) with zero failures.
+
+**The owner's own triage ruling on 2026-09-20 widened the ticket once more.** The same axe cell
+went red on the SAME selected-document row in two consecutive isolated re-runs, measuring 4.49:1
+against the 4.5:1 floor, on an UNCHANGED token and an unchanged spec file — so this was never only
+a settle-before-scan gap. `muted-foreground-on-muted` measured 4.62:1 at REST, the tightest margin
+above 4.5:1 in `scripts/check-token-contrast.mjs` outside the identity-canvas block — close enough
+that anti-aliasing at a glyph edge could plausibly decide which side a live scan landed on.
+`components/documents/filed-document-list.tsx`'s selected row now renders its caption cells at
+`text-foreground` instead of `text-muted-foreground` (the same idiom `components/ui/command.tsx`'s
+own `CommandItem` selected state already uses on the same `bg-muted` ground), measuring 14.32:1.
+Pinned as its own id, `foreground-on-muted-selected-document-row` (kept separate from
+`foreground-on-muted`, which the file already uses for other consumers, for the same token-drift
+reason several other pairs in that file are kept separate), with a margin-specific assertion in
+`tests/token-contrast.test.ts` — shown red against the pre-fix pairing (4.62:1 against a `>=10:1`
+bar) before the fix, green after. Never fixed by relaxing a threshold.

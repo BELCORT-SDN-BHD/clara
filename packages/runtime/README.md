@@ -238,6 +238,19 @@ belt asks `depreciation_run_due` and runs what it is told. `tests/reconcile-fa-u
 exactly the period the oracle named when it skipped a closed one, and NO client-side mirror
 appeared (the module names neither `authority_from` nor `fiscal_years` nor `skipped_closed`).
 
+**#975 (migration 0279) gave that belt a FOURTH outcome: `parked`.** Where a period's charge would
+fold a closing or closed fiscal year's months into the open period, the database stops the run
+before its first write and asks the accountant whether the omission is immaterial (folded into this
+period) or material (restated in that year) — IAS 8, and a judgement no machine lane may make. The
+human door raises the question; every machine verb, including the one this belt calls, answers
+`parked` with a stated reason and posts nothing. `reconciler-fa.mjs` therefore counts `faParked` on
+its own axis — never a post, never a noop, never a failure — names the reason in the sweep log and
+in the `parked=` summary field, and BREAKS the per-client chase, because `depreciation_run_due`
+keeps answering `due:true` for that period until a person records a choice through
+`clara.record_fa_arrears_resolution`. `tests/reconcile-fa-unit.test.mjs` drives both halves (the
+counter and the single run call; the reason in the log). The module still mirrors nothing DB-side:
+it neither computes the arrears nor names a fiscal year.
+
 **Depreciation invokes NO Workflow, and that is a finding rather than an omission.** There is no
 standalone World leg for this lane and none is owed: `reconciler-fa.mjs:59-61` says in its own words
 that it is "a plain polled belt … it neither listens on a channel nor starts a workflow run". The
@@ -249,6 +262,14 @@ The bank-agent and close-prep wake engine/bodies exist. Their cadence sources sh
 their producer/activation work remains open. Reporting uses a separate
 [render service](../reporting-render/README.md). Tax computation and SST return issuance are
 incomplete; reference tables and the SST compliance watch do not constitute an issuing tax engine.
+
+### The Wave D-b adjustment-occurrence sweep — retired (#928)
+
+The leader's daily sweep for the 0045 recurring/reversing-adjustment template lane is retired:
+`#788`'s owner ruling retires the 0045 lane fully, `#927` closed its human-facing write doors
+first, and `#928` stops the runtime's daily trigger and deletes `lib/reconciler-adjustments.mjs`
+whole — accounting plans' own occurrence scan (migration 0193, `lib/plan-occurrences.mjs`) is the
+separate, newer system and is untouched.
 
 ## Local commands
 
@@ -295,14 +316,17 @@ optional attachment, and a SIGKILL between the database commit and the workflow 
 advance arm — where the allocation is minted by a deferred constraint trigger at commit, so only a
 real World can show the four writes are one transaction.
 
-This is a general rule, not per-file guidance: none of the standalone e2es
-(`tests/interview-e2e.mjs`, `tests/version-cutover-e2e.mjs`, `tests/work-journal-e2e.mjs`,
-`tests/work-question-e2e.mjs`, `tests/work-cancel-e2e.mjs`,
-`tests/periodic-adjustment-e2e.mjs`, `tests/staff-expense-claim-e2e.mjs`) may share a host with another suite
-WHILE it is actually running. `db-live-gates` runs each battery alone — one at a time on the same
-rig, never concurrently with anything else that could touch the same rows or steal the same lease
-clock. Running one locally while another suite hammers the same database at the same time is the
-one setup CI does not reproduce and these e2es do not defend against.
+This is a general rule, not per-file guidance, and it deliberately NAMES NO FILE (#919 — the list
+here previously said "five" while enumerating seven, itself already stale against the actual set):
+none of the standalone e2es this package ships that
+[`db-live-gates/action.yml`](../../.github/actions/db-live-gates/action.yml) wires by path may
+share a host with another suite WHILE it is actually running — grep that action for
+`world-gate.mjs` (or `.output/server` for the three intake legs it drives directly) for the
+CURRENT, authoritative set and its order, rather than trust a count restated here to stay in sync.
+`db-live-gates` runs each battery alone — one at a time on the same rig, never concurrently with
+anything else that could touch the same rows or steal the same lease clock. Running one locally
+while another suite hammers the same database at the same time is the one setup CI does not
+reproduce and these e2es do not defend against.
 
 `tests/version-cutover-e2e.mjs` is the one exception to needing a *clean* rig, not to the rule
 above: its rollback preflight — per-name and inventory-shaped alike — is scoped to the
@@ -682,7 +706,10 @@ adds nothing any deployed image calls, so it is safe to apply ahead of the relea
 writer quiescence of its own. Rolling the image back is safe with 0190 still applied: the previous
 image calls `clara.get_document_for_human_read` (v1), which 0190 leaves byte-identical and still
 granted to `clara_runtime` — and which `lib/seeding-parse.mjs` still calls today, so v1 is not
-retired by this change.
+retired by this change. (Since ticket 1012 nothing in the running process calls
+`lib/seeding-parse.mjs`'s write path at all — see "The prior-GL seeding lane is retired" below —
+but the module and its `get_document_for_human_read` v1 read are still there, so this rollback
+statement holds unchanged.)
 
 1. Apply required database changes with the [database deployment contract](../db/README.md).
    For a fresh engine only, run the installed `bootstrap` CLI against the intended session
@@ -811,6 +838,19 @@ does not: the reconciler settles an unbound one without starting any body. The k
 vocabularies are checked against the relations' own CHECK constraints by
 `tests/rollback-preflight.test.mjs`, so a migration that adds one reds a test instead of quietly
 falling outside a census that advertises itself as complete.
+
+**#1015 — the document lane's own scoping rule, because it shares no key with the agent lane.**
+`clara.document_processing_tasks` carries no `work_id`/`task_id` column, so a `censusUnboundTasks`
+caller who scopes by `workIds`/`taskIds` alone has named nothing the document half could
+legitimately filter by. `censusUnboundTasks` narrows that half to **NONE** in that case, not to
+every live row — the earlier defect, caught by wave-1/wave-2 integration gates on a database
+carrying leftover queued document work, was exactly the opposite: an absent filter is "no rows" in
+this module's own reading, but it is "no filter" in SQL, and the difference used to leak every
+firm's queued document work into a scope the caller never asked for. A caller that wants the
+document lane's own full, unscoped picture regardless asks by **naming** the `documentTaskIds` key
+at all — even as `null` — which is how `preflight()`'s GLOBAL census and `tests/queue-drain.mjs`'s
+drain check still see everything (they scope by nothing at all, which is the same ask from the
+other side).
 
 **A kind or lane this command cannot place fails CLOSED** — it counts as stranding. The case you
 will actually meet is a `held` wake task whose source row was deleted: it is already unrunnable (the
@@ -1236,6 +1276,40 @@ form and, later, the v21 chat tool post through it, which is what makes ONE `cla
 the whole lane's admission. Its 202 carries `invoice_id`, the RESOLVED `counterparty_id` and the
 **derived** `due_date` / `due_date_source` — four facts the browser could not have computed.
 
+**#1007 — the probe sits beside the admission, over the admission's own translation.**
+`POST /api/work/trade-invoice/duplicates` takes `{ clientId, kind, invoice }` — the SAME wire
+`invoice` the admission takes — runs the SAME `toDbTradeInvoice`, and asks
+`clara.probe_trade_invoice_duplicates_for` (the actor-explicit twin; a `clara_runtime` connection
+carries no JWT claims, so `clara._human_ctx` cannot answer for one). It answers **200** with the
+door's whole answer: nothing is admitted here. A refusal rides the admission's own responder, so
+the browser reads one vocabulary either way, and the form treats any non-200 as "no warning".
+
+The route exists because the browser used to call the door directly with the WIRE spelling
+(`documentDate`, `totalCents`) while the door reads the database's (`document_date`,
+`total_cents`), so the "same money on the same day" signal could never fire from the shipped form.
+`apps/web` does not depend on this package, so one translation on the server is the alternative to
+two hand-written ones. `tests/trade-invoice-e2e.mjs` leg 8 drives the browser's own wire body
+through this route against a real database and sees that signal fire.
+
+**#1007 — the door also carries the choice a warned person made.** `POST /api/work/trade-invoice`
+takes one optional key, `acknowledgeDuplicates`: the ids of the earlier invoices the person was
+SHOWN and recorded anyway. `toAcknowledgedInvoiceIds` is the shape guard (a list of ids,
+de-duplicated because the same invoice named twice on one screen is ONE thing a person was shown)
+and refuses in this lane's own namespace and the DATABASE's own vocabulary —
+`invoice.acknowledge_duplicates`, `unknown_acknowledged_invoice` — which is also what keeps a
+trade-invoice path out of the JOURNAL composer's refusal roster
+(`apps/web/tests/journal-refusal-roster.test.ts` reads every bare `invalid("…")` literal in
+`workRoutes.ts` as a path THAT composer must map to a control).
+
+When the list is non-empty the handler calls `clara.record_trade_invoice_duplicate_ack` **before**
+`clara.admit_trade_invoice_work`, on the same connection and under the same intent key.
+`withRuntime` is autocommit, so the two are two transactions whichever way round they go; this
+order makes the only possible inconsistency "a choice that led nowhere" — an acknowledgement whose
+admission then refused, which no read surfaces, because `clara.get_trade_invoice_duplicate_ack`
+reaches one through an ADMITTED Work. The other order would make it "a knowing second recording
+that looks like an accident", which is the distinction #1007 exists to preserve. An absent, null
+or empty list is the ordinary recording and writes nothing.
+
 `lib/trade-invoice-basis.ts` is a **NEW non-frozen module**, and it is non-frozen only until
 `chatTurn_v21` imports it: `scripts/check-frozen-workflows.mjs` freezes the transitive relative-
 import closure of every frozen workflow, so at the cut every byte of it is hash-locked — exactly
@@ -1333,13 +1407,49 @@ because emitting nothing is exactly what the lane did before the module existed.
 - CLR10 `op_key reused with different args` — the parse's op key is stable per (seed, document) so a
   retry cannot double a basis, while the payload it hashes is keyed by region id. Re-reading the
   tie document therefore makes a second parse a replay CONFLICT, which the generic arm reported as
-  `malformed_lines`. It is now a typed 409 `source_reread_since_parse`. **Named residual**: the
-  answer is honest but still a dead end; re-parsing a re-read document needs either an op key
-  carrying the extraction or a door that re-points existing targets.
+  `malformed_lines`. It is now a typed 409 `source_reread_since_parse`, and #986 (below) is the way
+  forward from it.
 
 `tests/opening-ledger-source-e2e.mjs` is the standalone leg that runs the whole chain on real
 Postgres. It bootstraps **no Workflow World**, measured rather than skipped: no workflow touches the
 opening lane, so AC7's database-boundary clause applies.
+
+### The re-read remedy (#986)
+
+`source_reread_since_parse` was honest and still a dead end: the basis's targets then cite an
+extraction the document has superseded, so `clara.approve_opening_seed` refuses them too
+(`extraction_not_accepted`), and the only escape was to cancel the basis and start another. And a
+fresh op key is NOT the fix — it succeeds and leaves the old targets standing beside the new ones,
+because a second reading mints new region ids and therefore new `line_key`s.
+
+`refreshOpeningTargets` (same module) is the second door, reached at
+`POST /api/opening/refresh-targets` with the same bookkeeper+ floor, the same single clara_runtime
+transaction and the same F-H7 re-assertion. It shares the parse's WHOLE read half —
+`readOpeningParseSubject`, extracted from `parseOpeningTargets` without changing one branch — and
+calls `clara.refresh_opening_targets_from_reread` (migration 0286) under
+`openingRefreshOpKey(seed, document, extraction)`: a retried refresh of the same reading replays,
+a LATER reading is a new act. It answers 202 `{status:'refreshed', lines, retired}`, and 409
+`{status:'refused', reason:'no_reread_to_refresh'}` on a basis nobody re-read, so it can never
+become a second road past the pinned parse key.
+
+**`openingOpKey` did not move**, and that is the point: `parseOpeningTargets` refuses a re-read
+exactly as it did before, and `clara.record_opening_targets_parsed`'s body sha is pinned in 0286's
+prestate AND tail.
+
+**A receipt with no counts is not a successful refresh** (review round 1, ADV-08).
+`clara._reserve_op` answers `{pending:true}` when the key is held with no stored result, and the
+door returns that envelope verbatim on its dedupe branch. Reading the counts as
+`targets_recorded ?? lines.length` painted that envelope as a 202 "N read, 0 retired" — an act
+that did nothing, reported as news. `refreshOpeningTargets` now answers a typed 409
+`{status:'refused', code:'CLR13', reason:'operation_in_flight'}` for a receipt carrying no
+`targets_recorded`, and the counts it does report are the RECEIPT's own, never the payload's
+length: how many lines the new reading carried and how many the reading it left behind had are
+facts about the DOCUMENT, not about what this process happened to send. The state is hard to reach
+(the door takes `opening_seed_registry FOR UPDATE` before its reservation, so two callers
+serialize and the reservation and the receipt commit together), which is exactly why it must not
+be papered over. A DB-side mirror of #936's own `pending` branch was considered and left out: no
+cell could ever drive it through the door, so it would be untestable defensive code inside a
+migration whose tail census cannot reach behaviour.
 ## The intake batch lane (#636)
 
 `lib/intake-batches.mjs` is a NEW, NON-FROZEN module carrying every line of batch logic:
@@ -1464,10 +1574,74 @@ BELT REGRESSION, and firm P's children reading `failed` is not by itself the dis
 census appears when the belt stops counting refusals at all. Read the counters instead.
 `blocked >= 1` (and `cancel_blocked=canceller_not_active` at the moment of the red) means the belt
 DID refuse firm P's children, so a terminal parent means the World terminalised them first: the
-separate, unfixed defect. `refusals=0 blocked=0` means the belt is not counting firm P's refusals at
+#1028 race, below. `refusals=0 blocked=0` means the belt is not counting firm P's refusals at
 all: a regression, and exactly what this leg's vacuity control produces (measured: a `fanOutCancel`
 that records a CLR04 refusal as a success reds the P loop at its deadline after 11 sweeps in 5560 ms
 with `refusals=0 blocked=0`, throwaway clara_814).
+
+**#1028 — THE THIRD RACE: THE ENGINE CAN FINISH FIRM P'S CHILDREN BEFORE THIS LEG EVER LOOKS.**
+Firm P's two children are ordinary admitted Work; the World dispatches them the moment
+`seedChildren` returns, well before `applyPoison` even runs, and the recovery belt settles a
+running Work whose engine run it does not know (the same behaviour `postEntry`'s own comment
+documents) within seconds. Once both are terminal the parent has no live child left and the belt
+correctly settles it — `clara.sweep_intake_batch_cancellations` / `reconcileIntakeBatchCancellations`
+did nothing wrong. The leg used to read that as `assert.equal(pFinal.state, "cancelling", …)`
+unconditionally, so this read a genuine defect indistinguishable from a real one: a red that says
+"declared done" whether the belt actually swallowed a refusal or the World simply won a race with
+this leg's own final check. #1027 made the failure legible (both counters, both firms, the
+`cancel_blocked` verdict) but deliberately did not fix it — out of that ticket's own scope.
+
+**The fix does not depend on the engine being slower than the leg.** The disjointness check now
+branches on whether a live child remains, never on timing: `cancelling` is read once as before (a
+negative that converges is a negative that was never true, so it stays unpolled); any other state
+is accepted ONLY IF `clara._intake_batch_live_children` returns nothing for that parent — in which
+case the leg logs it as the correct outcome it is and moves on — and still throws, exactly as
+before, if a live child remains while the parent reads terminal (the belt settling the estate
+prematurely, the one genuine regression this leg exists to catch). The refusal-counting and
+attribution assertions above (`pWatch.refusals >= 1`, `blocked >= 1`, `cancel_blocked=
+canceller_not_active`) are untouched and still run before this check, so a belt that stops counting
+refusals still reds there regardless of how firm P's children finish.
+
+**THE LIVENESS PREDICATE IS THE ESTATE'S OWN, NOT A SECOND SPELLING OF IT** (review SPEC-1028-01).
+The leg asks `clara._intake_batch_live_children($1)` — the function
+`clara.sweep_intake_batch_cancellations` itself settles a parent by
+(`packages/db/migrations/0229_intake_batches.sql`) — rather than re-deriving liveness from a Work-
+status set. A status set is only HALF of that function: it also excludes a child that already
+holds a committed `clara.operation_receipts` row, which is out of the belt's hands while its Work
+status is still non-terminal. Re-spelling it here would have made a parent the belt settled
+CORRECTLY read as "settled prematurely" — the exact opposite of what the leg says. Both the
+`engine_wins` fault's own wait and the "honestly still stopping" branch read the same function, so
+what the fault waits for and what the assertion checks cannot drift apart, and both branches now
+PRINT the rows they read instead of asserting a live child remains without looking.
+
+**`CLARA_P636_LEG4_FAULT=engine_wins`** is the new, third fault value (`late_poison` and
+`slow_settle` are #1027's own two): it WAITS — a fixture action, never a belt one — for firm P's
+parent to have no live child left, then sweeps the belt once more so the parent's own
+settlement is visible before the disjointness check reads it. It manufactures deterministically what
+a slow host produces by accident, so the fix is proved against the exact scenario rather than hoped
+for. Measured on throwaway clones of a migrated database (WSL, Node 22, `/opt/node/bin/node`):
+against the PRE-#1028 disjointness check (throwaway clara_704), `engine_wins` reds after firm P's
+two children reached terminal in 6205 ms — `AssertionError: …and firm P's is honestly still
+stopping… actual: 'cancelled', expected: 'cancelling'` — the exact defect this ticket exists to
+close. Against the fixed check the same fault (throwaway clara_703) PASSES: children terminal after
+5051 ms, and the same fault re-run against the estate-predicate check (throwaway clara_722 and
+clara_725) passes too: `LEG4 firm P's parent reached 'cancelled' with NO live child left by the
+estate's own reckoning (the #1028 race, not a belt defect) — refusals were still COUNTED (2) and
+ATTRIBUTED (blocked=1, door read canceller_not_active during polling) before the engine got
+there.`
+
+The belt's own vacuity control (`fanOutCancel` rewritten so a CLR04 refusal records as a success, no
+`engine_wins`, throwaway clara_705) still reds at the P-loop's own refusal deadline —
+`refusals=0 blocked=0` after 9 sweeps in 5604 ms — because that assertion runs and fails BEFORE the
+disjointness check is ever reached: the fix adds no new way for a genuine regression to slip
+through. Five consecutive clean runs against fresh clones (clara_706…clara_710, no fault) all pass,
+and the estate-predicate check repeats that on fresh clones clara_721 and clara_724, each logging
+"firm P is honestly still stopping — 2 live child(ren) remain: […member_id/work_id…]" (the
+ordinary, unpolled path is unchanged, and now prints what it read). Its own vacuity control:
+forcing the else branch (`if (false)`) on a clean run, while both children are still live, reds
+with "firm P's parent was declared done while it still had a LIVE child" and the two live rows
+named (throwaway clara_723, exit 1) — restored byte for byte afterwards. `packages/runtime/lib/intake-batches.mjs`'s `fanOutCancel` was restored
+byte-for-byte after the vacuity control (`git status`/`git diff` clean, verified).
 
 ## #1026 — the live gates' heap budget
 
@@ -1697,8 +1871,11 @@ ITSELF with a bare token and the two halves must not speak two vocabularies for 
 raw token is on the carrier as well. It folds by NAME, never "whenever a constraint exists":
 `invalid_adjustment`, `stale_basis` and `adjustment_lines_mismatch` carry one too and have always
 ridden back under their own names. The trade-invoice fold is gone entirely; what is left of it is
-`TRADE_INVOICE_FIELD_DEFAULTS`, one row of DATA saying which control to focus when the door raises
-`party_ambiguous` with no `field` at all.
+`TRADE_INVOICE_FIELD_DEFAULTS`, rows of DATA saying which control to focus when the door raises a
+party refusal with no `field` at all — `party_ambiguous`, and since #982 (migration 0274)
+`party_identifier_conflict`, the refusal raised when a document's registration number and its TIN
+name two different live parties. The second reason needed no code at all, only a second row, which
+is the shape's whole claim.
 
 **403 and 404 carry no carrier.** A 404 here answers both "no such Work" and "a Work that is not
 this firm's", and that identity is the point — no existence oracle across firms. A typed reason on
@@ -1713,6 +1890,32 @@ asserts the door's own object beside it. All three carried the same pre-#981 lit
 `assert.deepEqual(body, {error, field, reason})`, and `node:assert/strict` deepEqual is
 deepStrictEqual — one additive key fails it. Any future change to the promoted half of a
 durable-Work refusal has to move those three lines together.
+
+## The prior-GL seeding lane is retired (ticket 1012, migration 0288)
+
+`POST /api/seeding/prepare` and `src/seedingRoutes.ts` are **GONE**. Owner ruling 2026-09-20 (on
+ticket 983): the prior-GL seeding lane gets no browser entrance, because the product direction is
+the Client KB — nobody pre-registers by hand what Clara can learn from a source. Migration
+[`0288_seeding_lane_retired.sql`](../db/migrations/0288_seeding_lane_retired.sql) recut
+`clara.create_seeding_batch`, `clara.tick_seeding_proposal` and `clara.decline_seeding_proposal`
+to one shared typed refusal — `CLR34`, `detail.reason = "seeding_lane_retired"`, one sentence —
+raising ahead of any reservation, so a retired door writes nothing at all.
+
+**Why the route is removed rather than left to relay.** A route in front of a door that refuses
+every input is a decoy a future surface could be wired to: the same reason
+[`0271`](../db/migrations/0271_retire_create_account_set_v1.sql) gave for dropping a body with no
+callers. The DOORS keep their signatures and grants, because a caller must meet the retirement and
+not `42501 insufficient_privilege`; the ROUTE has no such obligation, because no caller of it
+survives.
+
+**What stays, and why.**
+
+| Surface | State |
+|---|---|
+| `lib/seeding-parse.mjs`'s READ half (grammar, xlsx reader, region/cell readers, `entriesToProposals`) | Untouched. It is the deterministic prior-GL reader the Client KB lane inherits (ticket 663). |
+| `lib/seeding-parse.mjs`'s `prepareSeeding` | Kept, uncalled. It is the only place the three readers are composed end to end. Its last step now meets the retirement, and `mapSeedingDbError` maps that to **410 Gone** with `{status:"retired", reason:"seeding_lane_retired", message}` — never 409 or 422, which a caller would read as "retry" or "fix the source". |
+| `lib/wiki-projection.mjs`'s `seeding.proposal_decided` lane | Untouched, and it must stay: a hosted firm's HISTORICAL ticked proposals still replay into deterministic wiki pages. It simply never receives a new event. Proven in `tests/wave-b-seeding-prepare.test.mjs`'s replay cell, which plants a ticked proposal and its decided event and drains the projection. |
+| `clara.cancel_seeding_batch` / `clara.complete_seeding_batch` | Byte-unchanged. A batch left open at the moment of retirement must still be closeable by the firm that owns it. |
 
 ## #980 — the shared World harness's third script, and the trade-invoice lane's park and cancel
 
@@ -1767,13 +1970,51 @@ selector value (`ask_question:<client id>`) is open to a later lane.
 wave, beside `clara_rt_test` / `clara_wave_b_ci` / `clara_<ticket>`: `trade-invoice-e2e.mjs`,
 `work-journal-e2e.mjs`, `periodic-adjustment-e2e.mjs` and `staff-expense-claim-e2e.mjs`. Still
 loopback-only, still a parsed DSN equality check against the PG env, still fail-closed. The
-remaining spawners (`accrual`, `plan-occurrence`, `prepayment-occurrence`,
-`fixed-asset-acquisition`, `work-egress`, `work-cancel`, `work-question`) still carry the narrow
-literal and cannot be run on a lane rig; one shared `tests/local-db-gate.mjs` is the standing
-follow-up.
+standing follow-up named here (one shared `tests/local-db-gate.mjs`) landed as #1018 — see that
+section below.
 
 **No World e2e removes its gate directory recursively.** `tests/trade-invoice-e2e.mjs`'s hold gate
 cleans up its own two files and leaves `.trade-invoice-gates/` alone: the directory is shared with
 every other gate on the rig, and `open()` — the one call that must never throw, because a held
 child waits on that file forever — now re-creates its parent first. Both gate directories are
 git-ignored, because a watchdog exit skips the `finally` that would have removed their files.
+
+## #1018 — one shared local-database gate for every standalone World e2e driver
+
+Every standalone runtime World e2e driver (the 23 `tests/*-e2e.mjs` files that spawn the shared
+World test harness — `tests/shutdown-e2e.mjs` and `tests/world-e2e.mjs` never carried this gate,
+so they are not part of the 23) used to hand-roll its own copy of the loopback-host +
+allowed-database-name safety gate that runs before it does anything destructive: a `PGDATABASE`-
+anchored regex, and for most drivers a second, independently hand-typed regex or URL-parsing block
+re-encoding the same allowed names against `WORKFLOW_POSTGRES_URL`. Nothing stopped a driver's own
+two copies from disagreeing (`work-journal-e2e.mjs` had exactly that drift, caught and fixed under
+#980 before this ticket), and widening the gate for a new naming convention — the riders wave's
+per-lane `clara_l<NN>`, admitted by only four of the twenty-three before #1018 — meant editing
+every file by hand.
+
+`tests/local-db-gate.mjs` now owns the checking logic only: `isLoopbackHost`, `allowedDbPattern`
+(builds the anchored `PGDATABASE` regex and the matching `WORKFLOW_POSTGRES_URL` regex from ONE
+alternation body, so the two can never independently drift again), `dsnAgreesWithEnv` (the
+parsed-DSN equality style) and `assertLocalDbGate` (the combined guard every driver calls once,
+with `checkDsnString` / `checkDsnParsed` flags because drivers disagreed on which DSN check(s) they
+ran — `work-knowledge-e2e.mjs` ran neither, preserved as-is rather than widened into a new check by
+this refactor). Each driver still supplies its OWN admitted database-name shapes via
+`allowedDbPattern(...)`, composed from the named `DB_NAME_SHAPE` constants where a shape is shared
+with another driver; no driver's admitted set changed as a side effect of the refactor.
+`tests/local-db-gate-drivers-census.test.mjs` is AC3's own litmus test. It DERIVES the roster from
+the directory listing — every `tests/*-e2e.mjs` that is not one of the two documented non-gate
+files — and asserts the derived set equals the written one, so a driver added later reds the census
+on its first day instead of being silently out of scope. For each file it reads the source text and
+confirms it imports `./local-db-gate.mjs`, calls `assertLocalDbGate(...)`, and declares no local
+`ALLOWED_DB`, no local `LOCAL_HOSTS`, and no anchored `/^clara_.../` database-name regex under
+any other name either.
+
+`tests/body-census-guard-db.test.mjs` is the twenty-fourth file that spawns a real World behind
+this same gate (CI runs it as a World leg like the 23), and it is censused too — as a
+`SKIP_GATED_WORLD_TESTS` entry rather than a driver, because a `node --test` file must DECLINE
+rather than throw: a thrown gate fails the file instead of skipping it. It therefore composes
+`isLoopbackHost`, `allowedDbPattern` and `dsnAgreesWithEnv` itself instead of calling
+`assertLocalDbGate`, admitting exactly the two names it always admitted
+(`clara_rt_test`, `clara_wave_b_ci`), and the census checks those calls instead. With both
+rosters in place, no World-spawning file in this package carries a second, disagreeing copy of the
+check.

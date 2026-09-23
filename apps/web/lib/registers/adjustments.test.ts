@@ -1,15 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as adjustments from "./adjustments";
 import {
   loadAdjustmentTemplates,
   loadAdjustmentRuns,
   loadAdjustmentPairReversals,
   listAdjustmentRuns,
   adjustmentRunDue,
-  proposeAdjustmentTemplate,
-  signAdjustmentTemplate,
   retireAdjustmentTemplate,
-  runAdjustmentManual,
   reverseAdjustmentPair,
   approvePairReversal,
   cancelPairReversal,
@@ -117,49 +115,6 @@ test("adjustmentRunDue: posts p_client only, resolves the envelope verbatim", as
   assert.deepEqual(resolved, due);
 });
 
-test("proposeAdjustmentTemplate: posts every field with p_replaces/p_schedule null and a fresh op_key", async () => {
-  const { impl, calls } = captureFetch({ template_id: "tpl1", status: "proposed", content_hash: "h", warnings: [] });
-  await withMockedFetch(impl, async () => {
-    await proposeAdjustmentTemplate(fakeSession("tok"), {
-      clientId: "c1",
-      name: "Monthly rent accrual",
-      cadence: "monthly",
-      startDate: "2026-01-01",
-      endDate: null,
-      autoReverse: true,
-      lines: [
-        { account_code: "5100", debit_cents: 10000, credit_cents: 0 },
-        { account_code: "2100", debit_cents: 0, credit_cents: 10000 },
-      ],
-      memoTemplate: "Rent accrual",
-    });
-  });
-  assert.match(calls[0]!.url, /\/rpc\/propose_adjustment_template$/);
-  const body = calls[0]!.body;
-  assert.equal(body.p_client, "c1");
-  assert.equal(body.p_name, "Monthly rent accrual");
-  assert.equal(body.p_cadence, "monthly");
-  assert.equal(body.p_start_date, "2026-01-01");
-  assert.equal(body.p_end_date, null);
-  assert.equal(body.p_auto_reverse, true);
-  assert.equal((body.p_lines as unknown[]).length, 2);
-  assert.equal(body.p_memo_template, "Rent accrual");
-  assert.equal(typeof body.p_op_key, "string");
-  assert.equal(body.p_replaces, null);
-  assert.equal(body.p_schedule, null);
-});
-
-test("signAdjustmentTemplate: posts p_client + p_template with a fresh op_key", async () => {
-  const { impl, calls } = captureFetch({ template_id: "tpl1", status: "live", warnings: [] });
-  await withMockedFetch(impl, async () => {
-    await signAdjustmentTemplate(fakeSession("tok"), "c1", "tpl1");
-  });
-  assert.match(calls[0]!.url, /\/rpc\/sign_adjustment_template$/);
-  assert.equal(calls[0]!.body.p_client, "c1");
-  assert.equal(calls[0]!.body.p_template, "tpl1");
-  assert.equal(typeof calls[0]!.body.p_op_key, "string");
-});
-
 test("retireAdjustmentTemplate: posts p_reason alongside p_client/p_template", async () => {
   const { impl, calls } = captureFetch({ template_id: "tpl1", status: "retired" });
   await withMockedFetch(impl, async () => {
@@ -167,19 +122,6 @@ test("retireAdjustmentTemplate: posts p_reason alongside p_client/p_template", a
   });
   assert.match(calls[0]!.url, /\/rpc\/retire_adjustment_template$/);
   assert.equal(calls[0]!.body.p_reason, "duplicated by a corrected template");
-});
-
-test("runAdjustmentManual: posts the exact period-window arguments with a fresh op_key", async () => {
-  const { impl, calls } = captureFetch({ status: "posted", entry_id: "e1", amount_cents: 10000 });
-  await withMockedFetch(impl, async () => {
-    await runAdjustmentManual(fakeSession("tok"), "c1", "tpl1", "2026-01-01", "2026-01-31");
-  });
-  assert.match(calls[0]!.url, /\/rpc\/run_adjustment_manual$/);
-  assert.equal(calls[0]!.body.p_client, "c1");
-  assert.equal(calls[0]!.body.p_template, "tpl1");
-  assert.equal(calls[0]!.body.p_period_start, "2026-01-01");
-  assert.equal(calls[0]!.body.p_period_end, "2026-01-31");
-  assert.equal(typeof calls[0]!.body.p_op_key, "string");
 });
 
 test("reverseAdjustmentPair: posts p_occurrence (the run's own entry_id) + p_reason", async () => {
@@ -229,4 +171,19 @@ test("retireAdjustmentTemplate: a CLR38 occurrence_draft_outstanding refusal sur
       });
     },
   );
+});
+
+// [#927] REGRESSION PIN: the three writers the ticket's own acceptance criterion names
+// ("the client library for the lane no longer exports the three writers") stay gone. A
+// TypeScript import of a removed name already fails typecheck; this is the RUNTIME half —
+// a future change that re-added one of the three as an untyped/`any`-cast export would pass
+// typecheck at a careless call site but must still fail here.
+test("propose/sign/run-manual are NOT exported: the retired lane's client library carries only the reads, retire and the pair-reversal ceremony", () => {
+  const mod = adjustments as unknown as Record<string, unknown>;
+  for (const name of ["proposeAdjustmentTemplate", "signAdjustmentTemplate", "runAdjustmentManual"]) {
+    assert.equal(mod[name], undefined, `${name} must not be exported — the door it wrapped is retired (#927)`);
+  }
+  for (const name of ["loadAdjustmentTemplates", "loadAdjustmentRuns", "retireAdjustmentTemplate", "reverseAdjustmentPair"]) {
+    assert.equal(typeof mod[name], "function", `${name} must still be exported — D6 keeps every read, retire and the reversal-pair ceremony`);
+  }
 });

@@ -23,6 +23,8 @@ import { test, expect, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
+import { cellBudgetMs } from "./helpers";
+
 const CLIENT_ID = process.env.CLARA_E2E_REPORTS_CLIENT_ID ?? "";
 const ARTIFACT_ID = process.env.CLARA_E2E_REPORTS_ARTIFACT_ID ?? "";
 const EXPECTED_SHA = process.env.CLARA_E2E_REPORTS_ARTIFACT_SHA256 ?? "";
@@ -60,6 +62,7 @@ test.describe("FS-7 e2 — the Reports tab download, in a real browser", () => {
   test.skip(!provisioned, "run-reports-download-walk.mjs supplies the client/artifact fixture");
 
   test("a signed-in member opens Reports, clicks Download, and receives the sealed PDF bytes", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 15 }));
     await establishSession(page);
     await page.goto(reportsHref());
     // level:1 AND exact — "Reports" is also a prefix of the "Statutory close reports" h2, which is
@@ -120,6 +123,7 @@ test.describe("FS-7 e2 — the Reports tab download, in a real browser", () => {
   });
 
   test("an UNFINISHED export shows the door's own refusal reason and NO control", async ({ page }) => {
+    test.setTimeout(cellBudgetMs({ polls: 10 }));
     test.skip(PENDING_ID === "", "the harness supplies a second, unfinished export");
     await establishSession(page);
     await page.goto(reportsHref());

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { cellBudgetMs, signInTo } from "./helpers";
+import { cellBudgetMs, settleForScan, signInTo } from "./helpers";
 
 // The Home boards' browser leg (裁-86): Firm Home -> a tile -> the surface that owns it -> back,
 // then the client board for an ACTIVE and an ONBOARDING client, each at 1440 and at 1024 with
@@ -329,11 +329,15 @@ function workbench(page: Page) {
 
 /** Wait for the entrance transition before measuring COLOUR or GEOMETRY — a scan started
  *  mid-fade reads composited values (a11y-finish-walk.spec.ts's own measured lesson). */
+/** #1017 — delegates the paint half to the shared contract (./helpers): the networkidle wait here
+ *  is real (this file drives many `page.route()` mocks that resolve after navigation) and stays,
+ *  but the old animations-only poll never checked the enter/mount opacity fade itself, the exact
+ *  gap `settleForScan` closes. Registered as a verified wrapper in
+ *  `settle-before-scan-census.test.ts` — called ahead of a scan from dozens of sites in this file,
+ *  not always the immediately preceding line. */
 async function settled(page: Page): Promise<void> {
   await page.waitForLoadState("networkidle");
-  await expect.poll(async () =>
-    page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length),
-  ).toBe(0);
+  await settleForScan(page);
 }
 
 test("Firm Home names the firm, scores the queue from the envelope, and every tile links to the surface that owns it", async ({ page }) => {
@@ -833,7 +837,9 @@ test("p659.home.zero_client_create — a firm with no clients reaches creation f
   });
   await page.route("**/e2e-supabase/rest/v1/rpc/client_identity_candidates", (route) =>
     json(route, { name: "Penang Roastery", arity: 0, candidates: [] }));
-  await page.route("**/e2e-supabase/rest/v1/rpc/begin_client_onboarding", (route) =>
+  // #899 (0287_client_birth_wall.sql): the register's Add-client control now dispatches
+  // clara.open_client_onboarding, not clara.begin_client_onboarding.
+  await page.route("**/e2e-supabase/rest/v1/rpc/open_client_onboarding", (route) =>
     json(route, { client_id: BORN, plan_id: "plan-659" }));
 
   await signInTo(page, "/");

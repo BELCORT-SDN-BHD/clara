@@ -114,6 +114,9 @@ export const PLAN_REASON = {
   planKindUnsupported: "plan_kind_unsupported",
   timezoneUnsupported: "timezone_unsupported",
   reversalCollides: "reversal_collides_with_next_occurrence",
+  // #908: `_assert_plan_schedule`'s own wall, next to the accrual entrance's
+  // `accrual_schedule_yields_no_occurrence` (accrual-adjustments-fixtures.mjs's ACCRUAL_REASON).
+  scheduleYieldsNoOccurrence: "plan_schedule_yields_no_occurrence",
   reversalBeforePrimary: "reversal_before_primary",
   periodAlreadyAdmitted: "period_already_admitted",
   effectiveFromBeforeAuthority: "effective_from_before_authority",
@@ -151,23 +154,35 @@ export const PLAN_MODEL = "clara-opus-5-plan-test";
 // ===========================================================================================
 
 
-export async function createAccountingPlan(sub, {
+/** The exact statement + parameters `createAccountingPlan` sends — ONE definition, so a
+ *  concurrency helper that must drive this door on its own connection inside an explicit
+ *  transaction (#929's `p929.concurrent-creation`) races the same door the ordinary cells use,
+ *  never a hand-copied approximation of it. */
+export function createAccountingPlanCall({
   client, kind = PLAN_KIND.recurring, purpose = "Monthly office rent accrual",
   authorityKind = "explicit_instruction", authorityRef,
   frequency = "monthly", dayRule = "day_of_month", dayOfMonth = 1, timezone = TZ,
   effectiveFrom, effectiveTo = null, basis: b, reversalDayRule = null, opKey = null,
 }) {
-  const r = await humanQuery(sub, namedCall("create_accounting_plan", [
-    { name: "p_client", cast: "uuid" }, { name: "p_kind", cast: "text" },
-    { name: "p_purpose", cast: "text" }, { name: "p_authority_kind", cast: "text" },
-    { name: "p_authority_ref", cast: "jsonb" }, { name: "p_frequency", cast: "text" },
-    { name: "p_day_rule", cast: "text" }, { name: "p_day_of_month", cast: "int" },
-    { name: "p_timezone", cast: "text" }, { name: "p_effective_from", cast: "date" },
-    { name: "p_effective_to", cast: "date" }, { name: "p_basis", cast: "jsonb" },
-    { name: "p_reversal_day_rule", cast: "text" }, { name: "p_op_key", cast: "text" },
-  ]), [client, kind, purpose, authorityKind, JSON.stringify(authorityRef), frequency, dayRule,
-    dayOfMonth, timezone, effectiveFrom, effectiveTo, JSON.stringify(b), reversalDayRule,
-    opKey ?? opk("p640-create")]);
+  return {
+    sql: namedCall("create_accounting_plan", [
+      { name: "p_client", cast: "uuid" }, { name: "p_kind", cast: "text" },
+      { name: "p_purpose", cast: "text" }, { name: "p_authority_kind", cast: "text" },
+      { name: "p_authority_ref", cast: "jsonb" }, { name: "p_frequency", cast: "text" },
+      { name: "p_day_rule", cast: "text" }, { name: "p_day_of_month", cast: "int" },
+      { name: "p_timezone", cast: "text" }, { name: "p_effective_from", cast: "date" },
+      { name: "p_effective_to", cast: "date" }, { name: "p_basis", cast: "jsonb" },
+      { name: "p_reversal_day_rule", cast: "text" }, { name: "p_op_key", cast: "text" },
+    ]),
+    params: [client, kind, purpose, authorityKind, JSON.stringify(authorityRef), frequency, dayRule,
+      dayOfMonth, timezone, effectiveFrom, effectiveTo, JSON.stringify(b), reversalDayRule,
+      opKey ?? opk("p640-create")],
+  };
+}
+
+export async function createAccountingPlan(sub, args) {
+  const { sql, params } = createAccountingPlanCall(args);
+  const r = await humanQuery(sub, sql, params);
   return r.rows[0].result;
 }
 

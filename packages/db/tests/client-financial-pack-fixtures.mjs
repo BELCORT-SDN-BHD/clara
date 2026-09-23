@@ -373,4 +373,13 @@ export async function proposeOn(client, clientId) {
   return r.rows[0].result;
 }
 
+/** #1002 — the second-pass editor's own read: the CURRENT PUBLISHED version's membership, each
+ *  member carrying its RECORDED reason. Named arguments, as every #660-family door is called. */
+export async function currentMembers(sub, client) {
+  const r = await humanQuery(sub,
+    namedCall("get_client_cash_account_set_members", [{ name: "p_client", cast: "uuid" }]),
+    [client]);
+  return r.rows[0].result;
+}
+
 export { ROLES, rootQuery, humanQuery, roleQuery, opk, upsertAccount, getPool };

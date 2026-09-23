@@ -1,6 +1,7 @@
 // GATE (c) — keyboard-walk tests for T9's (port-wave) door dialogs: mint
-// snapshot, requeue render job (incl. the drift-acknowledge checkbox), tick a
-// seeding proposal, retire a wiki page. Same mechanism as
+// snapshot, requeue render job (incl. the drift-acknowledge checkbox), retire a
+// wiki page. (The tick-a-seeding-proposal dialog was retired with its door by
+// ticket 1012 — see the note further down.) Same mechanism as
 // components/close/close-keyboard.test.tsx (test/keyboardWalk.ts); see that
 // file's header for what real key-event dispatch this environment can and
 // cannot prove.
@@ -15,7 +16,6 @@ import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource, sessionTokenAccessor } from "../../lib/session-accessor";
 import messages from "../../messages/en.json";
 import { SnapshotRegistryPanel } from "./SnapshotRegistryPanel";
-import { SeedingBatchesPanel } from "./SeedingBatchesPanel";
 import { RenderJobQueuePanel } from "./RenderJobQueuePanel";
 import { WikiCurationPanel } from "./WikiCurationPanel";
 
@@ -171,59 +171,13 @@ test("T9 (mint-snapshot door): the trigger is keyboard-reachable, opening it rea
   });
 });
 
-test("T9 (tick-proposal door): the trigger is keyboard-reachable and Enter/Space-equivalent activation opens it, reaching Confirm", async () => {
-  const impl = (async (u: RequestInfo | URL) => {
-    const url = String(u);
-    if (url.includes("/seeding_batches")) {
-      return jsonResponse([{ id: "b1", client_id: "c1", source_document_id: "doc1", source_sha256: "d".repeat(64), state: "open", stats: {}, created_by: "u1", created_at: "2026-07-01T00:00:00Z", completed_at: null, completed_by: null, cancelled_at: null, cancelled_by: null, cancel_reason: null }]);
-    }
-    if (url.includes("/seeding_proposals")) {
-      return jsonResponse([{ id: "p1", batch_id: "b1", client_id: "c1", proposal_kind: "counterparty_birth", proposal_key: "k1", payload: { name: "Acme Sdn Bhd" }, evidence: {}, state: "proposed", decided_by: null, decided_at: null, decision_reason: null, refuse_reason: null, resulting_rule_id: null, resulting_counterparty_id: null, created_at: "2026-07-01T00:00:00Z" }]);
-    }
-    throw new Error(`unexpected fetch: ${url}`);
-  }) as typeof fetch;
-
-  await withMockedEnv(impl, async () => {
-    const h = await renderComponent(App(createElement(SeedingBatchesPanel, { clientId: "c1", session: sessionTokenAccessor })));
-    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
-    body.appendChild(h.container);
-    try {
-      for (let i = 0; i < 4; i++) await h.settle();
-      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Tick");
-      assert.ok(trigger, "the Tick trigger must render as a real button");
-      assert.ok(focusableElements(h.container as never).includes(trigger as never), "the trigger must be keyboard-reachable");
-
-      (trigger as unknown as { focus: () => void }).focus();
-      assert.equal(activeElement(), trigger, "keyboard focus must reach the trigger");
-
-      await h.fireEvent(trigger!, "click");
-      for (let i = 0; i < 6; i++) await h.settle();
-      assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the dialog is open");
-
-      const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Tick" && (n as unknown) !== (trigger as unknown));
-      assert.ok(confirmButton, "the dialog's own Confirm (Tick) button must be reachable, distinct from the trigger");
-      // F6 (independent review): TickDialog carries no confirmDisabled prop
-      // at all (no reason field), so Confirm must be enabled from open —
-      // this is the exact mutation class (`confirmDisabled={true}` shipping
-      // green) F6 asks to catch; asserting the property, not just presence,
-      // is what makes that mutation go red.
-      assert.equal(
-        (confirmButton as unknown as { disabled: boolean }).disabled,
-        false,
-        "Confirm must NOT be disabled — a mutation to confirmDisabled={true} here must go RED",
-      );
-    } finally {
-      await h.unmount();
-      for (let i = 0; i < 5; i++) await h.settle();
-    }
-  });
-});
-
-// F7 (independent review): the header claimed four doors, tested two — this
-// adds requeue (through the drift-checkbox path, both opens) and retire-wiki.
-// Both this door's Trigger AND Confirm buttons carry the SAME label text
-// ("Requeue" / "Retire"), so every lookup below disambiguates by OBJECT
-// IDENTITY (`!== trigger`), never text alone.
+// The T9 TICK-PROPOSAL door cell lived here. 0288_seeding_lane_retired.sql (ticket 1012, owner
+// ruling 2026-09-20 on ticket 983) retired `clara.tick_seeding_proposal`, so the panel renders
+// no Tick trigger at all and there is no dialog left to walk. The two SURVIVING seeding doors
+// (cancel/complete a batch) keep their own coverage: the Cancel batch dialog is opened and
+// accessibility-checked in reports-snapshots-seeding-a11y.test.tsx, and
+// components/reports/seeding-batches-retired.test.tsx proves both triggers still render while
+// Tick and Decline do not.
 
 test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm starts DISABLED on an empty reason, enables once typed, the drift checkbox is keyboard-reachable on the SECOND open, Confirm re-gates on it, and a THIRD open (after a plain cancel) resets the checkbox + reason + Confirm again — F4's pin", async () => {
   const impl = (async (u: RequestInfo | URL) => {

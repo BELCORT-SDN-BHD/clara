@@ -31,6 +31,9 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import type { OpeningTbTargetRow } from "./opening-types";
 
 const PARSE_PATH = "/api/runtime/opening/parse-targets";
+/** #986 — the SECOND verb on this lane. A separate path, not a flag on the parse route: the two
+ *  acts have different keys, different receipts and different news to give a person. */
+const REFRESH_PATH = "/api/runtime/opening/refresh-targets";
 const PARSE_TIMEOUT_MS = 30_000;
 
 /** What the route answers, as the surfaces read it. `kind` is the DISCRIMINANT the face renders
@@ -46,31 +49,54 @@ export type OpeningParseOutcome =
   /** 403 — the bookkeeper+ floor. Named as a restriction; the surface offers no fake retry. */
   | { kind: "denied" }
   /** 404 — a basis this person cannot see, masked identically to one that does not exist. */
-  | { kind: "not_found" };
+  | { kind: "not_found" }
+  /** 202 from the REFRESH verb (#986) — the basis now stands on a new reading of the same
+   *  document. `retired` is how many targets the reading it left behind had, and it is NOT
+   *  cosmetic: "3 replaced 3" and "3 replaced 5" are different facts about the document. */
+  | { kind: "refreshed"; lines: number; retired: number };
 
 /** True when the outcome is one a person can act on by keying the balances instead. */
 export const isKeyedFallback = (o: OpeningParseOutcome): boolean =>
   o.kind === "unparseable" && o.reason === "no_opening_tb_lines";
 
+/**
+ * #986 — TRUE ONLY FOR THE RE-READ CONFLICT, which is the one refusal on this lane that has an
+ * act behind it.
+ *
+ * The token is the runtime's own (`packages/runtime/lib/opening-parse.mjs` mints it when
+ * `clara._reserve_op` refuses the pinned (seed, document) key with different args, which is what a
+ * second reading of the document looks like from there). Every OTHER refusal on this lane is
+ * something a person fixes elsewhere — the registry is closed, the tie moved — so offering the
+ * refresh beside them would be a control that cannot work.
+ */
+export const isSourceRereadConflict = (o: OpeningParseOutcome): boolean =>
+  o.kind === "refused" && o.reason === "source_reread_since_parse";
+
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
 /**
- * Ask the runtime to read this basis's tie document into opening targets.
+ * The one road to either opening-target verb: the same transport discipline, the same typed
+ * outcome table, one path and one success shape apart.
  *
- * Resolves an outcome for EVERY answer the route contracts (202/403/404/409/422) and throws only
- * for a genuine transport or infrastructure fault — a refusal is a result the surface renders, not
- * an exception it has to catch to stay usable.
+ * EXTRACTED, NOT REWRITTEN (#986). Every branch below is #656's; what is new is that the 202 arm
+ * is supplied by the caller, because "I read this document" and "I replaced what an earlier
+ * reading left" are different news and must not share a sentence. A second hand-written copy of
+ * the redirect/abort/status discipline is how one of the two quietly stops handling an expired
+ * cookie.
  */
-export async function parseOpeningSource(
+async function callOpeningAct(
+  path: string,
   seedId: string,
-  opts: Opts = {},
+  label: string,
+  opts: Opts,
+  ok: (body: Record<string, unknown>) => OpeningParseOutcome,
 ): Promise<OpeningParseOutcome> {
   const session = opts.session ?? sessionTokenAccessor;
   const token = await session.getAccessToken();
-  if (!token) throw new RuntimeError("read opening source: not signed in", { status: null, kind: "unauthenticated" });
+  if (!token) throw new RuntimeError(`${label}: not signed in`, { status: null, kind: "unauthenticated" });
 
   const res = await safeRuntimeFetch(
-    PARSE_PATH,
+    path,
     {
       method: "POST",
       cache: "no-store",
@@ -79,17 +105,15 @@ export async function parseOpeningSource(
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ seedId }),
     },
-    "read opening source",
+    label,
   );
   // An opaque redirect is the expired-cookie case and must never be read as a body.
-  if (res.type === "opaqueredirect") await expectRuntimeOk(res, "read opening source");
+  if (res.type === "opaqueredirect") await expectRuntimeOk(res, label);
 
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   const reason = typeof body.reason === "string" ? body.reason : null;
 
-  if (res.status === 202) {
-    return { kind: "parsed", lines: Number(body.lines ?? 0) };
-  }
+  if (res.status === 202) return ok(body);
   if (res.status === 422) {
     return {
       kind: "unparseable",
@@ -106,7 +130,37 @@ export async function parseOpeningSource(
   if (res.status === 404) return { kind: "not_found" };
 
   // Anything else is a genuine fault: classified by STATUS only, body never quoted.
-  throw new RuntimeError("read opening source failed", { status: res.status, kind: kindForStatus(res.status) });
+  throw new RuntimeError(`${label} failed`, { status: res.status, kind: kindForStatus(res.status) });
+}
+
+/**
+ * Ask the runtime to read this basis's tie document into opening targets.
+ *
+ * Resolves an outcome for EVERY answer the route contracts (202/403/404/409/422) and throws only
+ * for a genuine transport or infrastructure fault — a refusal is a result the surface renders, not
+ * an exception it has to catch to stay usable.
+ */
+export function parseOpeningSource(seedId: string, opts: Opts = {}): Promise<OpeningParseOutcome> {
+  return callOpeningAct(PARSE_PATH, seedId, "read opening source", opts,
+    (body) => ({ kind: "parsed", lines: Number(body.lines ?? 0) }));
+}
+
+/**
+ * #986 — BRING THIS BASIS ONTO THE NEW READING OF ITS OWN DOCUMENT.
+ *
+ * The act a person reaches for after `parseOpeningSource` answers the re-read conflict. It is a
+ * SEPARATE verb rather than a retry of the read, and deliberately so: reading the document again
+ * would still refuse (the parse's op key is stable per (seed, document), which is what stops a
+ * retried POST doubling a basis), while this call retires the targets the earlier reading left and
+ * records the new one's under a key that carries the new extraction.
+ *
+ * `no_reread_to_refresh` comes back as an ordinary `refused` outcome. It means somebody — or
+ * another tab — already refreshed this basis onto the reading the document now stands on, so
+ * there is nothing left to retire; re-reading the basis shows the answer.
+ */
+export function refreshOpeningSource(seedId: string, opts: Opts = {}): Promise<OpeningParseOutcome> {
+  return callOpeningAct(REFRESH_PATH, seedId, "refresh opening source", opts,
+    (body) => ({ kind: "refreshed", lines: Number(body.lines ?? 0), retired: Number(body.retired ?? 0) }));
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -43,20 +43,23 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[knowledge-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
   process.exit(0);
 }
 
-// --- Fail-closed local gate, in the shape work-egress-e2e.mjs uses. The database set is widened
-// by exactly the per-ticket rig pattern (`clara_<three digits>`) the wave's worktrees use, and by
-// nothing else: this leg WRITES, and a writer that could reach a hosted DSN is a hosted incident.
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci|[0-9]{3})$/;
-if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("work-knowledge-e2e is hard-gated to a loopback host + PGDATABASE in {clara_rt_test, clara_wave_b_ci, clara_<nnn>}");
-}
+// --- Fail-closed local gate (#1018: shared with every other standalone World e2e driver). The
+// database set is widened by exactly the per-ticket rig pattern (`clara_<three digits>`) the
+// wave's worktrees use, and by nothing else: this leg WRITES, and a writer that could reach a
+// hosted DSN is a hosted incident. Unlike its siblings, this driver has never checked
+// WORKFLOW_POSTGRES_URL at all — preserved as-is rather than widened into a new check by this
+// refactor.
+assertLocalDbGate({
+  label: "work-knowledge-e2e",
+  pattern: allowedDbPattern(`${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.WAVE_B_CI}|${DB_NAME_SHAPE.PER_TICKET}`),
+});
 
 const CONN = {
   host: process.env.PGHOST,

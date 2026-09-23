@@ -74,11 +74,13 @@ test("getNeedsYouAffordance resolves lint_finding (T7, port wave)", () => {
   assert.equal(typeof getNeedsYouAffordance("lint_finding"), "function");
 });
 
-// 裁-17 (mohe-grill-rulings-2026-08-28.md): the ninth row_kind, by name — the
-// same F8 discipline as every case above (this file's own count of assertions
-// proves nothing; the registry table does).
-test("getNeedsYouAffordance resolves seeding_proposal (裁-17, pre-beta)", () => {
-  assert.equal(typeof getNeedsYouAffordance("seeding_proposal"), "function");
+// 裁-17's ninth row_kind, `seeding_proposal`, was RETIRED by 0288_seeding_lane_retired.sql
+// (ticket 1012, owner ruling 2026-09-20 on ticket 983). Its registry entry and its whole
+// affordance module are deleted, so the by-name case above it flips: the kind is now an
+// UNKNOWN key, and the registry's own hostile-key guard is what must answer for it. That is the
+// discriminating claim — an entry left behind would make this cell return a function.
+test("getNeedsYouAffordance('seeding_proposal') resolves NOTHING — the kind is retired (ticket 1012)", () => {
+  assert.equal(getNeedsYouAffordance("seeding_proposal"), undefined);
 });
 
 // MED-4 (Codex cross-model review, fec6ab5b): the registry is now a CLOSED

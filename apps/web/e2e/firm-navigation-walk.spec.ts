@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ACTIVITY_CLIENTS } from "./activity-mock.mjs";
-import { signIn } from "./helpers";
+import { settleForScan, signIn } from "./helpers";
 import { WORK_LIST_CLIENTS } from "./work-list-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -158,6 +158,7 @@ test("a bookkeeper reaches /settings/members by URL and is offered NO role menu 
   await expect(page.getByText("Admin or owner can invite someone")).toHaveCount(0);
   await expect(page.getByText("Remove from firm")).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/members as a bookkeeper").toEqual([]);
 });
@@ -168,6 +169,7 @@ test("an owner IS offered the role menu on the same page — the gate shapes by 
   await expect(page.getByRole("button", { name: /^Actions for / })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Invite someone", exact: true })).toBeVisible();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/members as an owner").toEqual([]);
 });
@@ -189,8 +191,89 @@ test("the high-stakes threshold control is GONE from /settings/firm for every ra
     await expect(page.getByText(/Change-threshold control is retired/)).toBeVisible();
     await expect(page.getByText(/still refuses a solo approval on a high-stakes entry/)).toBeVisible();
 
+    await settleForScan(page);
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
     expect(result.violations, `/settings/firm as ${email}`).toEqual([]);
+    await page.context().clearCookies();
+  }
+});
+
+// #921 [0273]: migration 0273 revoked clara_authenticated's EXECUTE on
+// propose_vendor_identity_binding and sign_vendor_identity_binding OUTRIGHT, for every rank — D6
+// keeps only historical receipts (list/get) and the ability to close an in-flight LIVE binding
+// (revoke). Unlike the threshold control above (a rank-shaped retirement), this one is
+// UNCONDITIONAL: an owner, who used to clear both the propose AND the sign floor, is asserted
+// identically to a bookkeeper. `page.route` stubs `list_vendor_bindings` the same way the
+// E-3/E-2 block below stubs its own reads — the shared mock never carried this RPC (the panel is
+// client-scoped and no walk drove it before this cell). `get_vendor_binding` is NOT stubbed
+// because nothing here reaches it: it is read from inside the Revoke dialog, which this walk
+// never opens; whoever teaches this walk to open Revoke has to add that stub.
+//
+// TWO ROWS, deliberately. Sign only ever rendered on a `proposed` row
+// (`binding.status === "proposed" && canSign`, vendor-binding-ceremony.tsx at the base commit),
+// so a fixture carrying only a `live` row would assert an absence that was already absent before
+// #921 — the assertion could not fail, in either direction. The `proposed` row is the one that
+// makes the Sign half load-bearing; the `live` row is what keeps Revoke (D6's other half)
+// asserted at the same time.
+test("the vendor-bindings panel offers NO propose or sign control at any rank — the doors are revoked, not merely rank-gated", async ({ page }) => {
+  const liveRow = {
+    binding_id: "22222222-2222-4222-8222-222222222222",
+    counterparty_id: "33333333-3333-4333-8333-333333333333",
+    counterparty_name: "Example Supplier Sdn Bhd",
+    status: "live",
+    f1_vendor_name_norm: "example supplier sdn bhd",
+    f2_invoice_prefix: "INV-E",
+    registration_at_signing: "202401011111",
+    signed_by: "44444444-4444-4444-8444-444444444444",
+    signed_at: "2026-01-02T00:00:00Z",
+    expires_at: "2026-12-31T00:00:00Z",
+    evidence_count: 3,
+    resolution_count: 1,
+    divergence_documents: 0,
+  };
+  // A HISTORICAL 'proposed' row — the shape D6 keeps visible and the only shape Sign ever
+  // rendered on. A different counterparty name from the live row's, because the name assertion
+  // below is an exact-text match and two rows sharing one name would violate strict mode.
+  const proposedRow = {
+    ...liveRow,
+    binding_id: "55555555-5555-4555-8555-555555555555",
+    counterparty_id: "66666666-6666-4666-8666-666666666666",
+    counterparty_name: "Legacy Vendor Sdn Bhd",
+    status: "proposed",
+    f1_vendor_name_norm: "legacy vendor sdn bhd",
+    f2_invoice_prefix: "INV-L",
+    signed_by: null,
+    signed_at: null,
+  };
+  await page.route("**/e2e-supabase/rest/v1/rpc/list_vendor_bindings", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([liveRow, proposedRow]) }));
+
+  for (const email of ["owner@example.test", "bookkeeper@example.test"]) {
+    await signIn(page, email);
+    await page.goto("/settings/vendor-bindings");
+    await expect(page.getByRole("heading", { name: "Vendor identity bindings", level: 1 })).toBeVisible();
+    await page.getByLabel("Client").selectOption({ label: "Rome Properties" });
+    // exact: true — the row's own fingerprint line ALSO carries this name, lowercased, inside
+    // `Vendor name "example supplier sdn bhd" · invoice prefix …`, and Playwright's getByText is
+    // a case-insensitive substring match by default, so the un-exact query hits both.
+    await expect(page.getByText("Example Supplier Sdn Bhd", { exact: true })).toBeVisible();
+    // The 'proposed' row really did render — otherwise the Sign assertions below would be
+    // asserting the absence of a control on a row that is not on the page at all.
+    await expect(page.getByText("Legacy Vendor Sdn Bhd", { exact: true })).toBeVisible();
+
+    // BY ROLE and BY TEXT, both personas — #921's own retirement, not a rank floor.
+    await expect(page.getByRole("button", { name: "Propose binding", exact: true })).toHaveCount(0);
+    await expect(page.getByText("Propose binding")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Sign", exact: true })).toHaveCount(0);
+    await expect(page.getByText("Sign this vendor identity binding")).toHaveCount(0);
+    // D6 keeps the ability to close an in-flight LIVE binding — Revoke stays offered, on the
+    // LIVE row and only there: exactly one, not one per row.
+    await expect(page.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Revoke", exact: true })).toBeVisible();
+
+    await settleForScan(page);
+    const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+    expect(result.violations, `/settings/vendor-bindings as ${email}`).toEqual([]);
     await page.context().clearCookies();
   }
 });
@@ -269,6 +352,7 @@ test("a Needs-you row answers WHAT, WHY, NEXT and WHEN on the built app", async 
   await expect(page.getByText(/never produced by the agent runtime/)).toBeVisible();
   await expect(page.getByText("acknowledge the run there")).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/work?view=needs-you").toEqual([]);
 });
@@ -306,6 +390,7 @@ test("/activity is an audit trail again — no agent-task panel, no Details butt
   await expect(page.getByRole("button", { name: "Details", exact: true })).toHaveCount(0);
   await expect(page.getByText("Agent task detail")).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/activity").toEqual([]);
 });
@@ -354,6 +439,7 @@ test("/work opens the agent-task drawer and logs NO MISSING_MESSAGE", async ({ p
   await expect(page.getByRole("link", { name: "Open the client" })).toBeVisible();
   await expect(page.getByText(/no read joins a task id to the receipts/)).toBeVisible();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/work with the task drawer open").toEqual([]);
 
@@ -419,6 +505,7 @@ test("the client register is a named table whose population is EXACTLY this firm
   await expect(page.getByText("PENANG SPICE TRADING")).toHaveCount(0);
   await expect(page.getByText("ROME PUBLIC ADVISORY")).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/clients, populated").toEqual([]);
 });
@@ -433,6 +520,7 @@ test("an empty firm's client register shows the labelled empty state, never an e
   await expect(page.getByText("No clients are visible to this firm yet.")).toBeVisible();
   await expect(page.getByRole("table", { name: "Clients" })).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/clients, empty firm").toEqual([]);
 });

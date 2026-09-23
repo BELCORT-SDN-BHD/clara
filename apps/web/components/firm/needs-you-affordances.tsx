@@ -30,7 +30,6 @@ import { UncodedFilingAffordance } from "./uncoded-filing-affordance";
 import { CodingTaskAffordance } from "./coding-task-affordance";
 import { LintFindingAffordance } from "./lint-finding-affordance";
 import { ComplianceWatchAffordance } from "./compliance-watch-affordance";
-import { SeedingProposalAffordance } from "./seeding-proposal-affordance";
 import { WorkQuestionAffordance } from "./work-question-affordance";
 
 export type NeedsYouAffordanceProps = {
@@ -105,10 +104,10 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // inline acts on a compliance_watch row — see
     // ./compliance-watch-affordance.tsx's own header for the grounding.
     compliance_watch: ComplianceWatchAffordance,
-    // 裁-17 (mohe-grill-rulings-2026-08-28.md): a LINK-ONLY affordance — the
-    // tick/decline acts stay on T9's SeedingBatchesPanel; see
-    // ./seeding-proposal-affordance.tsx's own header for the grounding.
-    seeding_proposal: SeedingProposalAffordance,
+    // 裁-17's LINK-ONLY `seeding_proposal` affordance is GONE with its row kind
+    // (0288_seeding_lane_retired.sql, ticket 1012): the prior-GL seeding lane accepts no new
+    // work, so the queue emits no such row and ./seeding-proposal-affordance.tsx is deleted
+    // rather than left registered against a kind the closed world no longer admits.
     // #629 (0180_work_questions.sql): the persistent question a running accounting
     // Work is parked on. The affordance EXPANDS the same form the Work detail and
     // the Clara rail render — see ./work-question-affordance.tsx's own header.

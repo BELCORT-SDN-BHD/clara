@@ -40,8 +40,9 @@ import {
   opk, endPool, printLaneNotes, printSkipCount, rootQuery, getPool, humanQuery, namedCall,
   x42EnsureReady, skip42, caught, reasonToken,
   EXPA, EXPB, ACCR, ACCR2, CLR38, CLR10, mon,
-  runManual, retireTemplate, signTemplate, reverseEntry,
+  runOccurrence, retireTemplate, signTemplate, reverseEntry,
   accrualLines, adjWorld, freshAdjClient, liveTemplate, approveDraft, glNet, templateRow,
+  insertTemplateRaw, x42TemplatesRetiredReady, noteLane,
 } from "./x42-adj-helpers.mjs";
 
 let live = false;
@@ -61,25 +62,73 @@ const skipHere = (t) => skip42(t, live);
 /** propose WITH the optional trailing lineage declaration. The argument is LAST and defaults to
  *  NULL, so this is the same call every other cell in the battery makes plus one name — which is
  *  the whole content of "additive ABI delta" and is asserted as such by the cells that omit it. */
-const proposeR = async (sub, {
-  client, name, cadence = "monthly", start, end = null, autoReverse = false,
-  lines, memo = "x42 p1 accrual", replaces = null, opKey = null,
-}) => (await humanQuery(sub, namedCall("propose_adjustment_template", [
-  { name: "p_client" }, { name: "p_name" }, { name: "p_cadence" },
-  { name: "p_start_date", cast: "date" }, { name: "p_end_date", cast: "date" },
-  { name: "p_auto_reverse", cast: "boolean" }, { name: "p_lines", cast: "jsonb" },
-  { name: "p_memo_template" }, { name: "p_op_key" }, { name: "p_replaces", cast: "uuid" },
-]), [client, name, cadence, start, end, autoReverse, JSON.stringify(lines), memo,
-  opKey ?? opk("x42p1prop"), replaces])).rows[0].result;
+// [#927] THE MINT, AT TWO FRONTIERS -- the x42-r11-lineage.test.mjs shape, for the same reason.
+// `propose_adjustment_template` and `sign_adjustment_template` are typed refusals from migration
+// 0282 (owner ruling #788), so above that frontier the two helpers below MINT the row the doors
+// used to write -- x42-adj-helpers' SURGERY 5, carrying the declared predecessor and the lineage
+// root the propose core derived -- and answer `warnings: null`, because the propose-time advisory
+// retired WITH the door. Every cell whose subject is the POSTER's wall, the caution, the storage
+// layer or the books keeps its full assertion set; the cells whose subject IS the propose-door
+// advisory or its argument validation branch and assert the retirement instead. On a chain that
+// predates 0282 (the d-b2 slice leg's 0001..0045 copy) the REAL doors are driven as before.
+const templatesRetired = () => x42TemplatesRetiredReady();
 
-/** propose + sign a LIVE template that DECLARES a predecessor. */
+const proposeR = async (sub, o) => {
+  const {
+    client, name, cadence = "monthly", start, end = null, autoReverse = false,
+    lines, memo = "x42 p1 accrual", replaces = null, opKey = null,
+  } = o;
+  if (await templatesRetired()) {
+    const t = await insertTemplateRaw({
+      client, status: "proposed", name, cadence, start, end, autoReverse, lines, memo,
+      proposer: sub, replaces });
+    return { template_id: t.id, warnings: null };
+  }
+  return (await humanQuery(sub, namedCall("propose_adjustment_template", [
+    { name: "p_client" }, { name: "p_name" }, { name: "p_cadence" },
+    { name: "p_start_date", cast: "date" }, { name: "p_end_date", cast: "date" },
+    { name: "p_auto_reverse", cast: "boolean" }, { name: "p_lines", cast: "jsonb" },
+    { name: "p_memo_template" }, { name: "p_op_key" }, { name: "p_replaces", cast: "uuid" },
+  ]), [client, name, cadence, start, end, autoReverse, JSON.stringify(lines), memo,
+    opKey ?? opk("x42p1prop"), replaces])).rows[0].result;
+};
+
+/** A LIVE template that DECLARES a predecessor (propose + sign below 0282, one raw mint above). */
 async function liveReplacement(o) {
+  if (await templatesRetired()) {
+    const t = await insertTemplateRaw({
+      client: o.client, status: "live", name: o.name, cadence: o.cadence ?? "monthly",
+      start: o.start, end: o.end ?? null, autoReverse: o.autoReverse ?? false, lines: o.lines,
+      memo: o.memo ?? "x42 p1 accrual", proposer: w.users.bob, signer: w.users.hana,
+      replaces: o.replaces ?? null });
+    return { template_id: t.id, warnings: null };
+  }
   const p = await proposeR(w.users.bob, o);
   await signTemplate(w.users.hana, { client: o.client, template: p.template_id, opKey: opk("x42p1sig") });
   return p;
 }
 
-const refusalOf = (client, template, period) => caught(() => runManual(w.users.bob, {
+/** The residue of a cell whose whole subject is a propose-door branch #927 retired: drive the
+ *  door once and prove it refuses for the retirement, by its own reason token. NEVER a skip --
+ *  a skip is not evidence, and the d-b2 list carries a measured cell floor. */
+async function proposeDoorRetired(client, law) {
+  if (!(await templatesRetired())) return false;
+  const err = await caught(() => humanQuery(w.users.bob, namedCall("propose_adjustment_template", [
+    { name: "p_client" }, { name: "p_name" }, { name: "p_cadence" },
+    { name: "p_start_date", cast: "date" }, { name: "p_end_date", cast: "date" },
+    { name: "p_auto_reverse", cast: "boolean" }, { name: "p_lines", cast: "jsonb" },
+    { name: "p_memo_template" }, { name: "p_op_key" }, { name: "p_replaces", cast: "uuid" },
+  ]), [client, `x42 retired probe ${Math.random()}`, "monthly", mon(-3).start, null, false,
+    JSON.stringify(accrualLines(100_000)), "retired probe", opk("x42p1ret"), null]));
+  assert.ok(err, `${law}: the propose door answers something -- it must REFUSE`);
+  assert.equal(err.code, CLR10);
+  assert.equal(reasonToken(err), "adjustment_template_lane_retired",
+    `${law}: the door that carried this law is retired (#927)`);
+  noteLane(`${law} — the propose-door half retired at 0282; asserted as a refusal here and in full on a pre-0282 chain`);
+  return true;
+}
+
+const refusalOf = (client, template, period) => caught(() => runOccurrence({
   client, template, periodStart: period.start, periodEnd: period.end }));
 
 const detailOf = (err) => JSON.parse(err.detail);
@@ -87,7 +136,7 @@ const detailOf = (err) => JSON.parse(err.detail);
 /** Four months of an ordinary accrual, standing and approved. */
 async function standingMonths(client, template, months) {
   for (const P of months) {
-    const r = await runManual(w.users.bob, {
+    const r = await runOccurrence({
       client, template, periodStart: P.start, periodEnd: P.end });
     await approveDraft(w.users.alice, r.entry_id);
   }
@@ -216,22 +265,30 @@ test("x42.r10p1b the propose-first order is still lawful, still only WARNED and 
 
   // ORDER B, step 1: propose the replacement while the predecessor is still LIVE. The declaration
   // is refused BY NAME (it would not be true yet) and the proposal itself is admitted.
-  const eLive = await caught(() => proposeR(w.users.bob, {
-    client, name: `x42 r10p1b early ${Date.now()}`, start: M[0].start,
-    lines: accrualLines(150_000, { debit: EXPA, credit: ACCR }), memo: "accrual v2",
-    replaces: gen1.id }));
-  assert.equal(eLive.code, CLR10);
-  assert.equal(reasonToken(eLive), "template_replaces_not_retired");
-  assert.match(eLive.message, /retire it first \(clara\.retire_adjustment_template\)/,
-    "the refusal names the act that makes the declaration true — and that verb really admits");
-  assert.match(eLive.message, /or propose it now without naming a predecessor/,
-    "…and the act that keeps the propose-first order open");
+  // [#927] The DOOR's half of this cell -- "a live predecessor may not be declared" and lane O1's
+  // propose advisory -- retired with the door at 0282. Above that frontier its retirement is what
+  // is asserted; the O1 CAUTION below, which is the poster's own and is what this cell exists to
+  // pin, runs unchanged at both frontiers.
+  if (!(await proposeDoorRetired(client, "x42.r10p1b the propose-first refusal and lane O1's advisory"))) {
+    const eLive = await caught(() => proposeR(w.users.bob, {
+      client, name: `x42 r10p1b early ${Date.now()}`, start: M[0].start,
+      lines: accrualLines(150_000, { debit: EXPA, credit: ACCR }), memo: "accrual v2",
+      replaces: gen1.id }));
+    assert.equal(eLive.code, CLR10);
+    assert.equal(reasonToken(eLive), "template_replaces_not_retired");
+    assert.match(eLive.message, /retire it first \(clara\.retire_adjustment_template\)/,
+      "the refusal names the act that makes the declaration true — and that verb really admits");
+    assert.match(eLive.message, /or propose it now without naming a predecessor/,
+      "…and the act that keeps the propose-first order open");
+  }
 
   const early = await liveReplacement({
     client, name: `x42 r10p1b gen2 ${Date.now()}`, start: M[0].start,
     lines: accrualLines(150_000, { debit: EXPA, credit: ACCR }), memo: "accrual v2" });
-  assert.equal(early.warnings.length, 1, "lane O1's propose advisory is untouched by this round");
-  assert.equal(early.warnings[0].axis, "colliding_live_sibling");
+  if (early.warnings !== null) {
+    assert.equal(early.warnings.length, 1, "lane O1's propose advisory is untouched by this round");
+    assert.equal(early.warnings[0].axis, "colliding_live_sibling");
+  }
   const dEarly = detailOf(await refusalOf(client, early.template_id, M[0]));
   assert.deepEqual(dEarly.remedy,
     ["correct_the_standing_entry_in_period", "distinct_codes_with_predecessor_caution"],
@@ -269,7 +326,7 @@ test("x42.r10p1c the standing member is a predecessor's auto-reversal MIRROR: th
   const gen1 = await liveTemplate({
     client, label: "r10p1c accrue", start: P.start, autoReverse: true,
     lines: accrualLines(500_000, { debit: EXPA, credit: ACCR }), memo: "accrue" });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: gen1.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r.entry_id);
   await retireTemplate(w.users.hana, { client, template: gen1.id, reason: "re-cut" });
@@ -394,17 +451,24 @@ test("x42.r10p1f a declaration this product cannot verify is refused by name —
     client, name: `x42 r10p1f ${Math.random().toString(36).slice(2)}`, start: M[0].start,
     lines: accrualLines(90_000, { debit: EXPB, credit: ACCR2 }), replaces }));
 
-  const forged = await attempt(cA, "00000000-0000-4000-8000-000000000000");
-  assert.equal(forged.code, CLR10);
-  assert.equal(reasonToken(forged), "template_replaces_unknown");
-  assert.match(forged.message, /propose it without naming a predecessor/, "…and names the act");
+  // [#927] The three refusals below are the propose door's own argument validation, retired with
+  // the door at 0282 -- above that frontier the door's retirement is asserted instead, and the
+  // ANCESTRY WALK further down (the measurement the cap refusal rested on) is asserted in full at
+  // both frontiers.
+  const doorRetired = await proposeDoorRetired(cA, "x42.r10p1f the declaration's own validation");
+  if (!doorRetired) {
+    const forged = await attempt(cA, "00000000-0000-4000-8000-000000000000");
+    assert.equal(forged.code, CLR10);
+    assert.equal(reasonToken(forged), "template_replaces_unknown");
+    assert.match(forged.message, /propose it without naming a predecessor/, "…and names the act");
 
-  const cross = await attempt(cA, theirs.id);
-  assert.equal(reasonToken(cross), "template_replaces_unknown",
-    "another client's template is reported as 'not a template of this client', never as a different fact — the read may not be used to probe another tenant's register");
+    const cross = await attempt(cA, theirs.id);
+    assert.equal(reasonToken(cross), "template_replaces_unknown",
+      "another client's template is reported as 'not a template of this client', never as a different fact — the read may not be used to probe another tenant's register");
 
-  const stillLive = await attempt(cA, mine.id);
-  assert.equal(reasonToken(stillLive), "template_replaces_not_retired");
+    const stillLive = await attempt(cA, mine.id);
+    assert.equal(reasonToken(stillLive), "template_replaces_not_retired");
+  }
 
   // AN OVER-CAP CHAIN, staged with plain INSERTs (the transition trigger is before DELETE/UPDATE).
   let prev = null;
@@ -413,10 +477,12 @@ test("x42.r10p1f a declaration this product cannot verify is refused by name —
   assert.equal(anc.cap, 64, "the walk owns the number, and reports it");
   assert.equal(anc.depth, 64, "…and stops there");
   assert.equal(anc.truncated, true, "…saying so rather than answering as if it had reached a root");
-  const deep = await attempt(cA, prev);
-  assert.equal(reasonToken(deep), "template_replaces_chain_too_long");
-  assert.equal(detailOf(deep).axis, "unwalkable");
-  assert.match(deep.message, /propose this one without naming a predecessor/);
+  if (!doorRetired) {
+    const deep = await attempt(cA, prev);
+    assert.equal(reasonToken(deep), "template_replaces_chain_too_long");
+    assert.equal(detailOf(deep).axis, "unwalkable");
+    assert.match(deep.message, /propose this one without naming a predecessor/);
+  }
 });
 
 // ---------------------------------------------------------------------------------------
@@ -493,18 +559,23 @@ test("x42.r10p1g the recorded lineage cannot be forged after the fact: a self-re
     0, "the forged cycle is unwound — the rig is left as this cell found it");
 
   // (iv) THE REPLAY. Same op_key, CHANGED declaration: refused, never replayed.
-  const older = await liveTemplate({ client, label: "r10p1g old", start: M[0].start,
-    lines: accrualLines(70_000, { debit: EXPB, credit: ACCR2 }), memo: "old" });
-  await retireTemplate(w.users.hana, { client, template: older.id, reason: "replay fixture" });
-  const key = opk("x42p1replay");
-  const name = `x42 r10p1g replay ${Date.now()}`;
-  const shot = { client, name, start: M[0].start,
-    lines: accrualLines(70_000, { debit: EXPB, credit: ACCR2 }), memo: "old", opKey: key };
-  const first = await proposeR(w.users.bob, shot);
-  const again = await proposeR(w.users.bob, shot);
-  assert.equal(again.template_id, first.template_id, "an identical replay is still idempotent");
-  const eReplay = await caught(() => proposeR(w.users.bob, { ...shot, replaces: older.id }));
-  assert.equal(eReplay.code, CLR10);
-  assert.match(eReplay.message, /op_key reused with different args/,
-    "a CORRECTED declaration under the same key must not be swallowed by the first receipt");
+  // [#927] An op-key replay is a DOOR law -- the operation ledger is written by the door, and the
+  // door retired at 0282. The three storage-layer arms above are what survive, and they are
+  // asserted in full at every frontier.
+  if (!(await proposeDoorRetired(client, "x42.r10p1g the op-key replay arm"))) {
+    const older = await liveTemplate({ client, label: "r10p1g old", start: M[0].start,
+      lines: accrualLines(70_000, { debit: EXPB, credit: ACCR2 }), memo: "old" });
+    await retireTemplate(w.users.hana, { client, template: older.id, reason: "replay fixture" });
+    const key = opk("x42p1replay");
+    const name = `x42 r10p1g replay ${Date.now()}`;
+    const shot = { client, name, start: M[0].start,
+      lines: accrualLines(70_000, { debit: EXPB, credit: ACCR2 }), memo: "old", opKey: key };
+    const first = await proposeR(w.users.bob, shot);
+    const again = await proposeR(w.users.bob, shot);
+    assert.equal(again.template_id, first.template_id, "an identical replay is still idempotent");
+    const eReplay = await caught(() => proposeR(w.users.bob, { ...shot, replaces: older.id }));
+    assert.equal(eReplay.code, CLR10);
+    assert.match(eReplay.message, /op_key reused with different args/,
+      "a CORRECTED declaration under the same key must not be swallowed by the first receipt");
+  }
 });

@@ -1,0 +1,65 @@
+{
+  "lens": "recheck",
+  "lane": "wave 3, lane 07",
+  "branch": "riders/w3-lane07",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head_checked": "ac4cae6eedc8e8d7e1269b8b758ccfa92f1789e1",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave3-lane07-fix.md",
+  "reviews_rechecked": [
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane07-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane07-codereview-standards.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane07-review-adversarial.json"
+  ],
+  "verdict": "accept",
+  "summary": "Re-ran every finding from the three review lenses on the current head (ac4cae6ee) against the live clara_l07 database. All ten blocker/major/minor findings (SPEC-L07-01..05, F1, ADV-01..06) are genuinely fixed, verified by direct re-execution, not by trusting the fix report's prose: packages/db's four touched test files (client-birth-wall, merge-alias-lane, sandbox-marker, opening-ledger-source) run 32/32 pass under the full 87-gate chain; operation-census+rig-isolation 32 pass/0 fail/1 correctly-skipped; the merge/identity batteries (counterparty-merge-pr-1, wave-a-merge, counterparty-identity) 44/44 pass; wave-b/rig-invariants/rig-events/audit-actor-role 56/56 pass; the whole apps/web unit suite is 4846 pass/0 fail/2 skipped (was 8 fail pre-fix, confirmed clean now, including the do-action-floors/firm-capability-floors/firm-scope-db-pins cells the 0289 dynamic-SQL fix targeted); the onboarding-begin-keyboard.test.tsx file carries the new D3 cell and is 3/3 pass; e2e client-create-walk is 4/4 pass; pnpm typecheck is clean; CI=true GITHUB_ACTIONS=true pnpm lint exits 0; check-frozen-workflows, check-parts-parity and check-dead-citations are all clean. Source-level checks confirm the claimed mechanisms are actually in the code, not just asserted: 0287 carries the pg_advisory_xact_lock(203005008, ...) ahead of the candidate read (ADV-01), the create_client catalogue comment names SUPERSEDED/open_client_onboarding/#899 (SPEC-L07-01/04), OnboardingBeginCard.tsx now imports and calls openClientOnboarding with a null acknowledgement (SPEC-L07-02), 0289 splices a second CLR11 anchor lifting the firm test out of the combined guard (ADV-03), opening-ledger-source.test.mjs's premise is now a >= floor (ADV-04), and merge-alias-lane.test.mjs's no_legacy_writer census reads the value at recorded_via with a depth-aware, quote-aware parser and a vacuity-proving crafted-body case (ADV-05). The fix round's own diff (61b7463f..ac4cae6ee, 11 files, 781+/88-) touches only the files the ten findings named, confirming no scope creep. Nothing above minor remains open, and nothing new broke.",
+  "findings": [
+    {
+      "id": "RECHECK-L07-01",
+      "ticket": 899,
+      "severity": "note",
+      "kind": "disclosed-partial-scope",
+      "title": "SPEC-L07-01's underlying acceptance criterion (no granted role reaches an unwalled client-minting verb) is still not fully met for #899 -- correctly disclosed, not a code defect",
+      "evidence": "The fix round did not withdraw clara.create_client's grant or re-point its body (both require an estate-wide fixture migration the fix report scopes out as a successor contract). What it fixed is the BLOCKER-level defect the review actually found: the census previously asserted the residual AS satisfying AC3. Re-run p899.census.granted_client_minters_and_the_one_residual (cell 12) now explicitly asserts the criterion is OPEN while the array is non-empty ('It BOUNDS the residual; it does NOT claim the ticket's no-unwalled-granted-minter criterion is met, because it is not' -- read verbatim from tests/client-birth-wall.test.mjs:379). packages/db/README.md's client-birth-wall section and 0287's own header say the same in matching language. A successor contract ('Move the rig's client fixtures off clara.create_client, then withdraw its grant') is filed in the fix report. This is the honest-disclosure path the original finding's required_fix implicitly allows when full closure is infeasible in-scope; it is not something this lane can close without touching ~48 shared fixture files outside its ticket.",
+      "outcome_for_integrator": "Not blocking. #899 should be tracked as PARTIAL on this one AC with the filed follow-up, exactly as the fix report, the migration header and packages/db/README.md all already say."
+    },
+    {
+      "id": "RECHECK-L07-02",
+      "ticket": 899,
+      "severity": "note",
+      "kind": "unverified-surface",
+      "title": "ADV-09's runtime e2e spawners that drive clara.begin_client_onboarding were still not run this round -- correctly disclosed as 'Unverified'",
+      "evidence": "The fix report's own 'Unverified' section names interview-e2e.mjs, interview-kill-resume-e2e.mjs, kdoc-opening-tb-e2e.test.mjs, wave-b-opening-parse.test.mjs and wave-b-lint-belt.test.mjs as not run, and gives a structural (not measured) argument for why the advisory lock and the identifier write are safe for them (single-session callers; p_identifier is always null from the two-argument legacy door). I did not run these either -- RIG.md requires cloning the lane database to clara_rt_test/clara_wave_b_ci first, which is destructive ceremony outside this recheck's read-only mandate. packages/runtime itself is untouched by the fix round's diff (confirmed: the 61b7463f..ac4cae6ee diff stat touches no packages/runtime file), and check-frozen-workflows/check-parts-parity are clean.",
+      "outcome_for_integrator": "Not blocking (ADV-09 was already 'note' severity and this gap is honestly named, not hidden). The integrator should run the five listed spawners against a cloned database before the from-scratch release proof, per the fix report's own instruction."
+    }
+  ],
+  "verified_fixed": [
+    { "id": "SPEC-L07-02", "ticket": 899, "claim": "OnboardingBeginCard re-pointed to openClientOnboarding with null acknowledgement", "verification": "source read (OnboardingBeginCard.tsx now imports/calls openClientOnboarding), onboarding-begin-keyboard.test.tsx D3 cell re-run 3/3 pass, e2e client-create-walk re-run 4/4 pass" },
+    { "id": "SPEC-L07-03 / W3L07-ADV-02 / F1", "ticket": 899, "claim": "sandbox-marker.test.mjs sbm.3 fixed", "verification": "re-ran tests/sandbox-marker.test.mjs under the full 87-gate chain: sbm.1/2/3 all pass" },
+    { "id": "SPEC-L07-04", "ticket": 899, "claim": "README entrance count corrected to match migration header", "verification": "packages/db/README.md:723-734 read verbatim: 'One of the two is closed ... The other is still open'" },
+    { "id": "SPEC-L07-05 / W3L07-ADV-06", "ticket": 899, "claim": "p_identifier now persisted by the door", "verification": "re-ran p899.new_verb.identifier_is_recorded_not_only_consulted -- pass" },
+    { "id": "W3L07-ADV-01", "ticket": 899, "claim": "advisory lock closes the birth-wall TOCTOU", "verification": "0287_client_birth_wall.sql:252 carries pg_advisory_xact_lock(203005008, ...) ahead of the candidate read; re-ran p899.new_verb.concurrent_same_family_serialised (real two-connection race) -- pass" },
+    { "id": "W3L07-ADV-03", "ticket": 889, "claim": "merge door no longer a cross-tenant existence oracle", "verification": "0289 splices a second CLR11 anchor lifting the firm test out of the combined guard; re-ran p889.merge.no_cross_tenant_oracle -- pass" },
+    { "id": "W3L07-ADV-04", "ticket": 1012, "claim": "opening-ledger-source premise is a floor, not an equality that fails open", "verification": "tests/opening-ledger-source.test.mjs:75 now (seen.v >= MIN_PUBLISHED_REGISTRY_VERSION); full 12-cell battery re-run, 12 pass" },
+    { "id": "W3L07-ADV-05", "ticket": 889, "claim": "closed-world census reads the recorded_via VALUE, not just its presence, across every insert", "verification": "re-ran p889.census.no_legacy_writer including its own vacuity-proving crafted-body case -- pass" }
+  ],
+  "gates_rerun": [
+    { "gate": "packages/db tests/client-birth-wall.test.mjs + merge-alias-lane.test.mjs + sandbox-marker.test.mjs + opening-ledger-source.test.mjs (full 87-gate chain, clara_l07)", "result": "32 pass / 0 fail" },
+    { "gate": "packages/db tests/operation-census.test.mjs + rig-isolation.test.mjs", "result": "32 pass / 0 fail / 1 skip (T19, reset flag correctly unset)" },
+    { "gate": "packages/db tests/counterparty-merge-pr-1.test.mjs + wave-a-merge.test.mjs + counterparty-identity.test.mjs", "result": "44 pass / 0 fail" },
+    { "gate": "packages/db tests/wave-b/wb-o-lifecycle, wb-g-opkeys, wb-r3 + rig-invariants + rig-events + audit-actor-role", "result": "56 pass / 0 fail" },
+    { "gate": "apps/web whole unit suite (node scripts/run-tests.mjs)", "result": "4846 pass / 0 fail / 2 skipped, 4848 tests" },
+    { "gate": "apps/web onboarding-begin-keyboard.test.tsx", "result": "3 pass / 0 fail (includes new D3 cell)" },
+    { "gate": "pnpm typecheck (repo root)", "result": "pass, clean" },
+    { "gate": "CI=true GITHUB_ACTIONS=true pnpm lint (repo root)", "result": "exit 0" },
+    { "gate": "node scripts/check-frozen-workflows.mjs", "result": "OK, 312 frozen files, no manifest diff" },
+    { "gate": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "OK" },
+    { "gate": "node scripts/check-dead-citations.mjs", "result": "clean" },
+    { "gate": "e2e client-create-walk on the lane triple (3560/3561/3562)", "result": "4 passed" },
+    { "gate": "git diff 61b7463fb..ac4cae6ee --stat (fix round diff)", "result": "11 files changed, all within the ten findings' scope: apps/web onboarding card+api+test+corpus, packages/db README+tests README, 0287/0289 migrations, 3 db test files" }
+  ],
+  "not_rerun": [
+    "The runtime e2e spawners named in ADV-09 (interview-e2e.mjs and siblings) -- require a cloned database per RIG.md, outside this read-only recheck's scope; already correctly disclosed as unverified by the fix report itself.",
+    "A true from-scratch migration chain (0001..0289) -- delegated to the integrator per RIG.md/WORK-ORDER.md house practice; the fix report's own re-apply method (ledger-row deletion + redo) is documented, not independently re-derived here."
+  ]
+}

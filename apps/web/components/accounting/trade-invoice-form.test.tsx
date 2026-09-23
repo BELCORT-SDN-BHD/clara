@@ -15,7 +15,7 @@ import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { TradeInvoiceFormView } from "./trade-invoice-form";
 import { tradeInvoiceDraftKey } from "../../lib/work/trade-invoice-draft";
 import type { DraftStorage } from "../../lib/work/journal-draft";
-import type { SubmitTradeInvoiceWorkResult } from "../../lib/work/api";
+import type { SubmitTradeInvoiceWorkResult, TradeInvoiceDuplicateMatch } from "../../lib/work/api";
 import type { CoaAccountRow } from "../../lib/journals/types";
 import type { CounterpartyRow } from "../../lib/registers/counterparty";
 import type { NavigationScope } from "../../lib/firm/navigation";
@@ -73,6 +73,7 @@ type Submitted = { clientId: string; intentKey: string; kind: string; invoice: R
 function App(props: {
   scope?: typeof BOOKKEEPER;
   submit?: (auth: unknown, input: Submitted) => Promise<SubmitTradeInvoiceWorkResult>;
+  probe?: (auth: unknown, input: unknown) => Promise<TradeInvoiceDuplicateMatch[]>;
   navigate?: (href: string) => void;
   storage?: DraftStorage | null;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
@@ -87,6 +88,7 @@ function App(props: {
       scope: props.scope ?? BOOKKEEPER,
       navigate: props.navigate ?? (() => {}),
       submit: (props.submit ?? (async () => ({ kind: "denied" }) as SubmitTradeInvoiceWorkResult)) as never,
+      probe: (props.probe ?? (async () => [])) as never,
       storage: props.storage ?? null,
       loadAccounts: props.loadAccounts ?? (async () => ACCOUNTS),
       loadParties: props.loadParties ?? (async () => PARTIES),
@@ -247,6 +249,60 @@ test("`party_ambiguous` renders its candidates INLINE as a choice, and picking o
     "picking one resolves the refusal in place");
 });
 
+test("ticket 982 — the chooser shows each candidate's TIN beside its registration number", async () => {
+  // LHDN MyInvois requires the buyer TIN and BRN, so a Malaysian document carries both and a
+  // person telling two parties apart may only have the TIN to go on. The door has always carried
+  // each candidate's `tin` in the refusal; this form mapped id, name and registration number and
+  // dropped it, so the one identifier that told the SECOND party here apart never reached the
+  // screen.
+  const h = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001", tin: "C24680135791" },
+        { counterparty_id: BETA, name: "Beta Trading Sdn Bhd", registration_no: null, tin: "C13579246802" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  assert.ok(String(h.text()).includes("200101000001"), "the registration number still shows");
+  assert.ok(String(h.text()).includes("C24680135791"), "…and now the TIN beside it");
+  assert.ok(String(h.text()).includes("C13579246802"),
+    "…including for the candidate whose registration number the books do not hold, which is the one a person could not otherwise tell apart");
+});
+
+test("ticket 982 — `party_identifier_conflict` is a banner with its own sentence, its code and BOTH sides as controls", async () => {
+  // The door's third party refusal (0274): the document's registration number and its TIN name two
+  // different live parties. It is not `party_unresolved` (something DID answer) and not
+  // `party_ambiguous` (the person is choosing between two identifiers the document carries, not
+  // between two parties one identifier reaches), so it gets its own sentence — and the same
+  // chooser, because the remedy is the same act.
+  const h = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_identifier_conflict",
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001", tin: null, matched_on: "registration" },
+        { counterparty_id: BETA, name: "Beta Trading Sdn Bhd", registration_no: null, tin: "C13579246802", matched_on: "tin" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  assert.ok(String(h.text()).includes("party_identifier_conflict"), "the door's CODE, verbatim");
+  assert.match(String(h.text()), /registration number and the tax identification number/i,
+    "…beside a sentence that names what disagreed, not a generic one");
+  assert.ok(String(h.text()).includes("200101000001"), "the party the registration number reached");
+  assert.ok(String(h.text()).includes("C13579246802"), "…and the party the TIN reached");
+  const pick = h.find((n) => n.tagName === "BUTTON"
+    && String(n.textContent ?? "").trim() === "Beta Trading Sdn Bhd");
+  assert.ok(pick, "both sides are CONTROLS, so the person chooses rather than being informed");
+  await h.fireEvent(pick, "click");
+  await h.settle();
+  assert.equal(String(h.text()).includes("party_identifier_conflict"), false,
+    "picking one resolves the refusal in place");
+});
+
 test("every refusal is a BANNER carrying the door's code — and there is no toast anywhere", async () => {
   for (const [reason, phrase] of [
     ["credit_shape_not_admitted", "credit note is not recorded here"],
@@ -355,4 +411,198 @@ test("switching the kind swaps the party read and drops only the party — nothi
   assert.deepEqual(asked, ["vendor", "customer"],
     "a sales invoice is recorded against a CUSTOMER, so the read changes with the kind");
   assert.equal((byId(h, F("reference")) as { value?: unknown }).value, "KEEP-ME", "…and everything that is not the party survives the switch");
+});
+
+// =====================================================================================
+// #1007 — WARN BEFORE RECORDING SOMETHING THIS CLIENT LOOKS TO HAVE ALREADY.
+//
+// The owner's ruling of 2026-09-20: check at the recording step, WARN and let the person
+// decide, NEVER refuse. So the assertion that matters in every cell below is about the `submit`
+// seam -- what the form DID or DID NOT admit -- and not about what it painted.
+// =====================================================================================
+
+const EARLIER = "65509aaa-6550-4655-8655-655065509aaa";
+const EARLIER_WORK = "65509001-6550-4655-8655-655065509001";
+
+const oneMatch = (over: Partial<TradeInvoiceDuplicateMatch> = {}): TradeInvoiceDuplicateMatch => ({
+  invoiceId: EARLIER, workId: EARLIER_WORK, signals: ["same_reference"],
+  reference: "ALPHA-2026-0042", documentDate: "2026-03-04", totalCents: 106000, ...over,
+});
+
+test("1007 — a bill this client already looks to have is WARNED about, and NOTHING is admitted until the person chooses", async () => {
+  const sent: Submitted[] = [];
+  const asked: unknown[] = [];
+  const h = await renderComponent(App({
+    probe: async (_auth, input) => { asked.push(input); return [oneMatch()]; },
+    submit: async (_auth, input) => {
+      sent.push(input);
+      return { kind: "accepted", workId: WORK, taskId: "t", logicalOpId: "l", status: "queued",
+        replayed: false, invoiceId: "inv", invoiceKind: "supplier_bill", counterpartyId: ALPHA,
+        dueDate: null, dueDateSource: "absent" } as SubmitTradeInvoiceWorkResult;
+    },
+  }));
+  await fillBill(h);
+  await submitForm(h);
+
+  assert.equal(asked.length, 1, "the form asked the probe before it admitted anything");
+  assert.equal(sent.length, 0,
+    "…and admitted NOTHING: the person has not chosen yet, which is the whole acceptance criterion");
+  assert.match(String(h.text()), /already recorded|looks like one/i,
+    "the warning is on the page, beside the form -- never a toast");
+  assert.ok(String(h.text()).includes("ALPHA-2026-0042"),
+    "…naming the earlier document by its own number");
+  assert.ok(String(h.text()).includes("2026-03-04"), "…its document date");
+  assert.ok(String(h.text()).includes("1,060.00"), "…and its total, in ringgit and sen");
+
+  // AND CANCEL ADMITS NOTHING, and leaves the figures where they were.
+  const cancel = h.find((n) => n.tagName === "BUTTON"
+    && /^cancel$/i.test(String(n.textContent ?? "").trim()));
+  assert.ok(cancel, "Cancel is a control, not prose");
+  await h.fireEvent(cancel, "click");
+  await h.settle();
+  assert.equal(sent.length, 0, "1007: choosing Cancel admits nothing at all");
+  assert.equal(String(h.text()).includes("ALPHA-2026-0042") && /already recorded|looks like one/i.test(String(h.text())), false,
+    "…and the warning is gone, so the person can change the figures");
+  assert.equal((byId(h, F("reference")) as { value?: unknown }).value, "ALPHA-2026-0042",
+    "…with what they typed still on the form");
+});
+
+test("1007 — Record anyway admits it under the SAME intent key, and names the invoices the person was shown", async () => {
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({
+    probe: async () => [oneMatch({ signals: ["same_reference", "same_total_and_date"] })],
+    submit: async (_auth, input) => {
+      sent.push(input);
+      return { kind: "accepted", workId: WORK, taskId: "t", logicalOpId: "l", status: "queued",
+        replayed: false, invoiceId: "inv", invoiceKind: "supplier_bill", counterpartyId: ALPHA,
+        dueDate: null, dueDateSource: "absent" } as SubmitTradeInvoiceWorkResult;
+    },
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  const anyway = h.find((n) => n.tagName === "BUTTON"
+    && /record it anyway|record anyway/i.test(String(n.textContent ?? "")));
+  assert.ok(anyway, "Record anyway is a control beside Cancel");
+  await h.fireEvent(anyway, "click");
+  await h.settle();
+
+  assert.equal(sent.length, 1, "1007: choosing to go ahead admits exactly one Work");
+  const one = sent[0];
+  assert.ok(one);
+  assert.deepEqual((one as { acknowledgeDuplicates?: unknown }).acknowledgeDuplicates, [EARLIER],
+    "…carrying the earlier invoices the person was SHOWN, so the choice can be kept beside the Work");
+  assert.ok(String(h.text()).includes("Queued"), "…and the ordinary accepted banner follows");
+});
+
+test("1007 — a probe that cannot answer never blocks a recording, and a client with nothing like it never sees a warning", async () => {
+  // The owner ruled WARN, never refuse. An advisory read that fails must therefore not become a
+  // refusal by the back door: the recording goes through and the person is not stopped.
+  const sent: Submitted[] = [];
+  const accepted = async (_auth: unknown, input: Submitted) => {
+    sent.push(input);
+    return { kind: "accepted", workId: WORK, taskId: "t", logicalOpId: "l", status: "queued",
+      replayed: false, invoiceId: "inv", invoiceKind: "supplier_bill", counterpartyId: ALPHA,
+      dueDate: null, dueDateSource: "absent" } as SubmitTradeInvoiceWorkResult;
+  };
+  const broken = await renderComponent(App({
+    probe: async () => { throw new Error("the probe is down"); }, submit: accepted,
+  }));
+  await fillBill(broken);
+  await submitForm(broken);
+  assert.equal(sent.length, 1, "1007: a failed probe admits the Work rather than refusing it");
+  assert.equal((sent[0] as { acknowledgeDuplicates?: unknown }).acknowledgeDuplicates, undefined,
+    "…and acknowledges nothing, because nobody was shown anything");
+
+  const clean = await renderComponent(App({ probe: async () => [], submit: accepted }));
+  await fillBill(clean);
+  await submitForm(clean);
+  assert.equal(sent.length, 2, "1007: no matches means straight through -- no extra click for the ordinary case");
+  assert.equal(/already recorded|looks like one/i.test(String(clean.text())), false,
+    "…and no warning is painted");
+});
+
+// ============================================================================================
+// FIX ROUND (wave 3, lane 02) — review findings S-2 and S-3.
+// ============================================================================================
+
+test("ticket 982 — a TIN several parties hold is answered with a sentence about the TIN, never about a name the submission never carried", async () => {
+  // 0274 made `party_ambiguous` reachable from a TIN. The screen kept the one sentence the name
+  // branch has ever had — "More than one party answers to that name." — so a submission whose
+  // ONLY identifier was a tax number was answered about a name it never sent. The door says which
+  // identifier it was (`detail.matched_on`); this is the mapping that stops dropping it.
+  const h = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
+      detail: { reason: "party_ambiguous", matched_on: "tin", tin: "C13579246802" },
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: null, tin: "C13579246802", matched_on: "tin" },
+        { counterparty_id: BETA, name: "Beta Trading Sdn Bhd", registration_no: null, tin: "C13579246802", matched_on: "tin" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  assert.ok(String(h.text()).includes("holds that tax identification number"),
+    "the sentence is about the identifier that WAS submitted");
+  assert.equal(String(h.text()).includes("answers to that name"), false,
+    "…and never about a name the submission did not carry");
+  assert.ok(String(h.text()).includes("party_ambiguous"),
+    "…while the door's own CODE is unchanged, because the refusal is the same one");
+});
+
+test("ticket 982 — a name-branch `party_ambiguous` keeps 0225's own sentence, unchanged", async () => {
+  // The other half of the same claim: the mapping is a DEFAULT keyed on what the door said, never
+  // a rewrite. A refusal that names no identifier reads exactly as it always has.
+  const h = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
+      detail: { reason: "party_ambiguous", name: "Alpha Supplies" },
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001" },
+        { counterparty_id: BETA, name: "Alpha Supplies Trading", registration_no: "200101000002" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  assert.ok(String(h.text()).includes("More than one party answers to that name"),
+    "0225's sentence, byte for byte");
+});
+
+test("ticket 982 — the chooser says WHICH identifier reached each candidate, and says nothing where the door said nothing", async () => {
+  // CONTEXT.md's "Identifier conflict" entry promises exactly this, and the browser walk asserts
+  // it: "Clara stops and shows both, with the identifier that reached each one". Nothing rendered
+  // `matched_on` — the walk's two fixture candidates simply happened to carry disjoint
+  // identifiers, so the claim was never driven.
+  const h = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
+      detail: { reason: "party_ambiguous", matched_on: "tin", tin: "C13579246802" },
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: null, tin: "C13579246802", matched_on: "tin" },
+        { counterparty_id: BETA, name: "Beta Trading Sdn Bhd", registration_no: null, tin: null, matched_on: "name" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  assert.ok(String(h.text()).includes("Matched the tax identification number"),
+    "the candidate the TIN reached says so");
+  assert.ok(String(h.text()).includes("Matched the name"),
+    "…and the candidate the NAME reached says so, which is the whole point of showing both");
+
+  // A refusal whose candidates carry no `matched_on` renders no label at all — an invented one
+  // would be a sentence the door never said.
+  const quiet = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(quiet);
+  await submitForm(quiet);
+  assert.equal(String(quiet.text()).includes("Matched the"), false,
+    "no label where the door named no identifier");
 });

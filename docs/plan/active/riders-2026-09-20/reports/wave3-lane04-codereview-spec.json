@@ -1,0 +1,152 @@
+{
+  "axis": "SPEC",
+  "wave": 3,
+  "lane": "04 (fixed assets)",
+  "branch": "riders/w3-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "commits": 22,
+  "tickets": [932, 882, 975, 978],
+  "spec_sources": [
+    "gh issue view 932 --comments (body + belcorttao 2026-09-19 sequencing comment)",
+    "gh issue view 882 --comments (Agent Brief, owner ruling 2026-09-18, 2026-09-19 narrowing to half b)",
+    "gh issue view 975 --comments (owner ruling 2026-09-20 + Agent Brief; supersedes the body's (A)/(B) options)",
+    "gh issue view 978 (zero comments; the body is the whole contract)"
+  ],
+  "verdict": "accept-with-fixes",
+  "reruns_performed": [
+    "packages/db: fa-depreciation-policy.test.mjs + fa-arrears-resolution.test.mjs, 87-flag gate chain, --test-concurrency=1 -> 18/18 pass",
+    "packages/db: fixed-asset-acquisition.test.mjs + depreciation-history.test.mjs, same chain -> 44/44 pass (p639.belt.same_txn_retire_approve, p639.belt.convention_comment, p651.period.closed_belt_skips all green)",
+    "packages/runtime: reconcile-fa-unit.test.mjs -> 20/20 pass; clara-work-v5.test.mjs -> 38/38 pass",
+    "apps/web unit: fixed-assets.test.ts 12/12, fa-row-actions.test.tsx 6/6, fixed-asset-incomplete-affordance.test.tsx 3/3, fa-depreciation-policies.test.ts 4/4, fa-run-preview.test.tsx 8/8",
+    "apps/web WHOLE suite (node scripts/run-tests.mjs) -> 4862 tests, 4860 pass, 0 fail, 2 skipped",
+    "e2e on the lane-04 triple (3530/3531/3532): fixed-asset-acquisition-walk 9/9 pass; depreciation-walk 5/5 pass"
+  ],
+  "findings": [
+    {
+      "id": "SPEC-932-1",
+      "ticket": 932,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "#932 AC4's 'born complete with no question' half is never driven, yet the report offers it as evidence",
+      "evidence": "Ticket line (AC4): 'Cells: policy-covered acquisition is born complete with no question and correct provenance'. Body: 'no Work question opens and the asset is depreciated from the next run'. The delivered cell packages/db/tests/fa-depreciation-policy.test.mjs `p932.birth.covered` asserts only register-row columns plus clara._fa_asset_json(...).particulars_complete === true; it never touches a Work question, and its acquisition runs through the document/human fixture `buyAsset`, not clara.wake_record_journal_entry. The question is not opened by SQL at all: packages/runtime/workflows/claraWork.v4.ts:197-215 opens it on the result of loadPendingFixedAssetStepV4, whose completeness test is an INDEPENDENT hand-restatement of clara._fa_particulars_complete in inline SQL (packages/runtime/workflows/claraWork.v4.impl.ts:691-717, and its own doc comment admits 'that function is ungranted, so it cannot be called from here; its body is four lines of column tests and this SQL is those four lines'). The lane touched no packages/runtime file for #932. reports/wave3-lane04-ticket932.md AC2 nevertheless presents 'no question' as measured. WORK-ORDER wave-3 addendum: 'A door's behaviour is asserted only after it was driven. Three review rounds in wave 2 were spent on exactly that.'",
+      "required_fix": "Drive it: post a policy-covered acquisition through clara.wake_record_journal_entry (the door p639.birth.work_lane already uses) and assert both that the register row is complete AND that the runtime's pending-asset discovery predicate selects no row for that entry. Failing that, restate the claim in the ticket report as inferred from two independently written predicates rather than measured."
+    },
+    {
+      "id": "SPEC-975-1",
+      "ticket": 975,
+      "severity": "major",
+      "kind": "implemented-wrongly",
+      "title": "#975: with more than one closed year in play the refusal and the park misstate the arrears, and the stated figure cannot then be recorded",
+      "evidence": "Ticket line (AC1): 'A run whose charge includes closed or closing year months stops before posting and states the arrears amount and the fiscal year'. In packages/db/migrations/0279_fa_closed_year_arrears.sql the refusal at :888-891 interpolates (v_arr ->> 'arrears_cents') -- the TOTAL summed over every closing/closed year carrying arrears (v_total := v_total + v_amt, :291) -- while naming only v_unresolved -> 0's fy_label / fiscal_year_id / fy_status. The same total is put on detail.arrears_cents (:895) beside a fiscal_years array holding only the UNRESOLVED subset, and identically on the parked payload (:907) and throughout the awaiting-reopen branch (:914-920, :929). So with two unresolved closed years, or one already answered plus one unresolved, the sentence tells the accountant that the whole total 'belongs to fiscal year <the first one>', and detail.arrears_cents no longer equals the sum of detail.fiscal_years[].arrears_cents. It compounds: clara.record_fa_arrears_resolution compares p_arrears_cents against the PER-YEAR measured figure and refuses CLR37 axis arrears_changed otherwise (:363-377), so a caller answering with the number the refusal just stated -- the chat lane, a script, or anyone not using the web panel, which alone passes the per-year year.arrears_cents -- cannot record a resolution at all and the run stays blocked. Untested: every cell in packages/db/tests/fa-arrears-resolution.test.mjs builds exactly ONE fiscal year (fixture :65; cells :75, :123, :200, :261, :337, :380, :403), and the ticket report's 'data-dependent branch entered once' list names no multi-year state.",
+      "required_fix": "State the per-year amount in both raised sentences and in detail.arrears_cents (or keep arrears_cents per-year and add an explicit arrears_cents_total), keep the headline figure congruent with the fiscal_years array it ships beside, and add a cell with two unresolved closed fiscal years that answers the first through the door using the number the refusal stated."
+    },
+    {
+      "id": "SPEC-975-2",
+      "ticket": 975,
+      "severity": "minor",
+      "kind": "implemented-per-letter-risk",
+      "title": "#975: a recorded fold_current licenses an arbitrarily larger later arrears in the same year with nobody re-asked",
+      "evidence": "Ticket line (AC2): 'a later run for the same client and year proceeds on the record without asking again' -- implemented exactly. But the record door itself treats a moved figure as a ruling nobody made: 'THE FIGURE IS RE-MEASURED AT RECORD TIME AND MUST STILL MATCH... if the amount moved between the question and the answer, the judgement was made about a figure that no longer exists' (0279:305-310, enforced :371-377). clara._fa_run_period_core applies a live record with no equivalent check (0279:874-945): any fold_current row for the year admits the run whatever the arrears now come to. The ticket's own AC2 cell demonstrates precisely this -- reports/wave3-lane04-ticket975.md AC2: 'a SECOND asset is acquired in the open month but placed in service from the closed year's own month, so the next run's charge folds that year forward again -- it proceeds (status = posted) naming the SAME resolution_id'. Under IAS 8 that can fold a MATERIAL prior-period error with nobody asked, which is the failure the ruling exists to prevent.",
+      "required_fix": "Not a fix this ticket may take unilaterally, since it follows the brief's letter. File a follow-up or take an owner ruling: either re-ask when the year's measured arrears exceed the judged figure (the door's own arrears_changed law applied at run time), or record the judgement as a threshold rather than a point figure."
+    },
+    {
+      "id": "SPEC-978-1",
+      "ticket": 978,
+      "severity": "minor",
+      "kind": "evidence-wrong",
+      "title": "#978 report overstates a cell count: fa-row-actions.test.tsx is 6/6, not 9/9",
+      "evidence": "reports/wave3-lane04-ticket978.md, Gates: 'apps/web/components/registers/fa-row-actions.test.tsx -- 9/9 pass (2 new component-level tests ...; the 4 pre-existing ReviseParticularsDialog tests unchanged and still green)'. 4 + 2 = 6, and the file has exactly six top-level test( calls (lines 170, 196, 221, 249, 270, 301); the pre-base version had four. Re-run on this branch: node --import ./test/bootstrap.mjs --import tsx --test components/registers/fa-row-actions.test.tsx -> '# tests 6 # pass 6 # fail 0'. The substance of AC2/AC3 is unaffected -- both new cells exist and pass -- only the count in the delivered evidence is wrong.",
+      "required_fix": "Correct the count in the ticket report to 6/6 so the integrator's evidence reads true."
+    },
+    {
+      "id": "SPEC-932-2",
+      "ticket": 932,
+      "severity": "minor",
+      "kind": "implemented-wrongly",
+      "title": "#932: the policy's effective_from is recorded but consulted by nothing, and the migration's own comment claims otherwise",
+      "evidence": "Ticket line (AC1): 'A new versioned policy relation ... (append-only revisions with author, reason and effective-from)'. The column exists (0277:247) and is written now() (:433) and projected to the web (apps/web/lib/registers/fa-depreciation-policies.ts:31,38), but the birth lookup filters on active alone: 'select * into v_pol from clara.fa_account_depreciation_policies where client_id = new.client_id and asset_account_code = l.account_code and active limit 1' (0277:547-549, same shape in the §E2 recut). Meanwhile 0277:553-555 asserts the opposite in prose: 'never the policy's own effective_from, which only gates WHICH acquisitions the policy reaches'. It gates nothing; no consumer in packages/db or apps/web reads it for any decision.",
+      "required_fix": "Correct the §E/§E2 comment -- the live-policy-at-birth reading is the right one under the 2026-09-18 owner decision 'changing a policy affects later acquisitions only' -- or make the lookup honour effective_from. Do not leave the code and its own comment disagreeing about a dated column."
+    },
+    {
+      "id": "SPEC-932-3",
+      "ticket": 932,
+      "severity": "note",
+      "kind": "requirement-vacuous",
+      "title": "#932: 'stated particulars always win' is unreachable today and is evidenced by a different property",
+      "evidence": "Ticket line (AC2): 'stated particulars are never overridden'; body: 'Particulars the acquisition itself states always win.' 0277:552-556 records that 'there is today no mechanism for an acquisition entry itself to carry particulars at posting time'. Checked independently against every writer of clara.fixed_assets in the migration set (0017:3450, 0041:2479/2492/2614/3209, 0216:320, 0227, 0247:288, 0277): the only site that births from stated particulars is the opening-balance seeder at 0017:3450, which the birth trigger explicitly excludes ('if new.is_opening_balance then return null'). The substitute cell p932.frozen proves something else -- that a policy-born row refuses a second completion and still admits a prospective revision. The ticket report and the test file's own lane note both say this; recorded so the AC is not read as satisfied by measurement.",
+      "required_fix": "None on this branch. Name it in the wave digest as an AC satisfied vacuously, so the next lane that adds an acquisition-states-particulars path knows the precedence rule is untested."
+    },
+    {
+      "id": "SPEC-932-4",
+      "ticket": 932,
+      "severity": "note",
+      "kind": "requirement-substituted",
+      "title": "#932 AC3's 'audit row for the birth' is delivered as an event, not an audit row",
+      "evidence": "Ticket line (AC3): 'the audit row for the birth names the policy version'. Both recut birth sites carry the provenance in clara._append_event(..., 'asset.acquired', ..., 'depreciation_policy_id', v_pol_id, 'depreciation_policy_version', v_pol_ver) (0277 §E and §E2); no clara._audit row is written at birth by either site, and none existed before this ticket. clara.set_fa_depreciation_policy does write a clara._audit row naming the version (0277:440-443). A reasonable substitution -- the estate has no audit row for a trigger-borne birth -- but it is a substitution.",
+      "required_fix": "None. Say 'event' rather than 'audit row' in the ticket report's AC3 line."
+    },
+    {
+      "id": "SPEC-882-1",
+      "ticket": 882,
+      "severity": "note",
+      "kind": "deviation-justified",
+      "title": "#882 cut its own migration 0278 where the ticket's newest comment said to ride #932's",
+      "evidence": "Ticket line (belcorttao, 2026-09-19): 'Sequencing. ... Ride #932's migration (open, same fixed-asset acquisition and policy family) rather than cutting a comment-only migration.' The lane shipped packages/db/migrations/0278_fa_belt_birth_convention.sql instead. The justification checks out: 0277 was already committed and applied to clara_l04 before #882 began, and WORK-ORDER's wave-2 addendum says 'Never edit an applied migration or another ticket's new migration'; 0277's only comment on function clara._tf_fa_acquisition_birth() documents the policy feature alone and never the belt/birth temporal convention (read at 0277:600-609). Both remaining half-(b) items land and are driven: p639.belt.same_txn_retire_approve and p639.belt.convention_comment both pass in my re-run (44/44 across that file pair). Integration note: 0278's prestate hard-requires 0277 to have applied and pins the birth comment at exactly 842 characters hashing to 831df896cf2f76bb82e5378d1e2664b4d79056997d33aa0fe1712b9c44acb67c (0278:127-137), so the two files are order-locked as a pair.",
+      "required_fix": "None. Integrator: keep 0277 and 0278 adjacent and in order; any later file that re-comments clara._tf_fa_acquisition_birth must accrete, never replace."
+    },
+    {
+      "id": "SPEC-975-3",
+      "ticket": 975,
+      "severity": "note",
+      "kind": "scope-beyond-brief",
+      "title": "#975 added an ANSWER surface the brief's key interfaces do not name",
+      "evidence": "The brief's Key interfaces name the due probe, the two run doors, the durable record, clara.reopen_fiscal_year and the vocabulary document -- no web surface for answering; the only surface line is 'so the question can be asked before anything posts'. The lane added ArrearsChoice (two buttons, neither preselected, plus a free-text note) inside SkippedClosed in apps/web/components/registers/fa-run-preview.tsx, the recordFaArrearsResolution door wrapper (apps/web/lib/registers/depreciation.ts:172-201), the panel wiring with its own decision key (apps/web/components/registers/fa-depreciation-runs-panel.tsx:183,220,243-257) and an e2e leg (depreciation-walk.spec.ts). Defensible and documented: without it clara.run_depreciation_manual becomes unrunnable for any client carrying closed-year arrears, which the standing 'beta, nothing dark' ruling forbids, and the door is _human_ctx-floored so no machine may answer. Recorded as behaviour in the diff that was not asked for.",
+      "required_fix": "None. Name it in the wave digest as a deliberate widening under the nothing-dark ruling."
+    },
+    {
+      "id": "SPEC-975-4",
+      "ticket": 975,
+      "severity": "note",
+      "kind": "requirement-partial-known",
+      "title": "#975: the agent catch-up lane keeps the twelve-turn chase over a parked period",
+      "evidence": "The loop exit was added to clara.run_depreciation_period_for only (0279:706, 'exit when (v_result ->> status) in (noop, parked)', replacing 0227:1394's '= noop'). clara._agent_depreciation_catchup_core carries the identical loop (0138:2389-2403, live body at 0227:1382-1394) and was deliberately not recut (0279 §B5 header, :630-637), pinned unmoved in §T.3i. Correct under the wave-3 rule -- its wake source close_prep is registered-and-disabled so the lane could not drive it -- and the safety property holds, since it runs under the verb run_depreciation_period and therefore parks and never posts. What it loses is twelve dedupe replays of one parked answer per wake. Named as follow-up 1 in the ticket report.",
+      "required_fix": "None here. Carry the follow-up into whichever ticket unparks close_prep."
+    },
+    {
+      "id": "SPEC-975-5",
+      "ticket": 975,
+      "severity": "note",
+      "kind": "requirement-partial",
+      "title": "#975: the record is not keyed to the run that raised it, though CONTEXT.md says it is",
+      "evidence": "Brief: 'A durable record of the resolution: client, fiscal year, arrears amount, choice, author, timestamp' -- all present in clara.fa_arrears_resolutions. But the brief's desired behaviour also says 'recorded durably against that client, fiscal year and run', and the new CONTEXT.md term states 'The answer is recorded against the client, the fiscal year and the run that raised it'. The table stores period_start/period_end only (0279 §A, :171-210); no run id, receipt id or op key is kept. A period identifies the run in practice, but the CONTEXT.md sentence is stronger than the schema.",
+      "required_fix": "Either soften the CONTEXT.md sentence to name the period, or store the raising run's op key alongside."
+    },
+    {
+      "id": "SPEC-975-6",
+      "ticket": 975,
+      "severity": "note",
+      "kind": "superseded-checklist",
+      "title": "#975: the body's 'existing p651.period.* cells still pass unchanged' is honoured in substance, not in letter",
+      "evidence": "Body checklist: 'The existing p651.period.* cells still pass unchanged'. p651.period.closed_belt_skips gained a bimodal preamble (packages/db/tests/depreciation-history.test.mjs:283-301) that drives the new refusal and records fold_current before the run it always made; every original assertion below it is untouched. Correct handling -- the owner's 2026-09-20 ruling supersedes the body's option (A), and that cell measured the silent fold the ruling abolishes -- and verified green in my re-run: 19/19 in that file, 44/44 for the pair with fixed-asset-acquisition.test.mjs on clara_l04.",
+      "required_fix": "None."
+    }
+  ],
+  "verified_clean": [
+    "#978 AC1: crypto.randomUUID() is gone from both wrappers and opKey: string is required on both argument types (apps/web/lib/registers/fixed-assets.ts:298-335, :412-457).",
+    "#978 AC3: completeIntent/disposeIntent mirror the doors' own _reserve_op tuples, with memo deliberately excluded per clara.dispose_fixed_asset's own comment; both dialogs hold useDepreciationDecisionKey() and renew on close (fa-row-actions.tsx:58, 74-80, 258-276); the holder mints a fresh uuid whenever the intent string changes (depreciation.ts:380-393).",
+    "#978 AC4: exactly three non-test callers repo-wide, all passing a key (fixed-asset-incomplete-affordance.tsx:41, fa-row-actions.tsx:77, :264); whole web suite green at 4862/4860/0 fail.",
+    "#932 AC1: clara.upsert_fa_account_profile and clara.retire_fa_account_profile are pinned in 0277's prestate (:168) and re-pinned in the tail (:1313); the new relation is append-only, version-forward, one live row per enrolled account (uq_fadp_active), with its own set/retire doors, both bookkeeper-floored and holding no EXECUTE for clara_runtime.",
+    "#932 AC3: provenance renders from a READ -- clara._fa_asset_json surfaces depreciation_policy_id/version (0277 §F), FixedAssetRow carries them, and fixed-assets-register.tsx:136-138 renders t('policyProvenance') = 'Particulars from {account} policy v{version}'.",
+    "#932 method-driver congruence: ck_fadp_method_drivers (0277:263-272) and the set door's own branch (:436-460) make a policy-born row complete by clara._fa_particulars_complete on every admissible method, including none.",
+    "#932 AC5: fixed-asset-acquisition-walk.spec.ts 9/9 on the lane-04 triple, including the new policy cell end to end (set -> v1 -> policy-born row naming 1510 v1 -> retire -> 'No policy set').",
+    "#882 half (a) still live and green: claraWork.v5.errors.ts:87 carries the [CLR40, FA_COST_ADJUSTMENT_DEFERRED, refusal] row; clara-work-v5.test.mjs 38/38.",
+    "#882 half (b): 0278 is comment-only (its tail re-pins both prosrc sha256s), both trigger bodies carry the convention, the accretion onto 0277's text is hash-proved, and p639.belt.same_txn_retire_approve drives a retire and an approve in one transaction and sees CLR40 fa_belt_unregistered_movement with a full rollback.",
+    "#975 AC1/AC3 mechanics: the guard sits after the zero-charge noop arm and after clara._fa_assert_period_open, before the first write; two renderings discriminated by the verb alone; run_depreciation_manual raises and every other verb parks; clara._fa_assert_period_open, run_depreciation_manual, run_depreciation_period and reopen_fiscal_year are all pinned unmoved.",
+    "#975 AC3 belt: reconciler-fa.mjs counts faParked on its own axis, breaks the per-client chase and names the reason in the log line and the summary; 20/20 in reconcile-fa-unit.test.mjs.",
+    "#975 AC4: skipped_closed is untouched and closed_arrears rides beside it (0279:500, 512, 544, 579, 605); depreciation-walk.spec.ts 5/5 including the keyboard / 320px / 200%-zoom / axe cell over the new controls.",
+    "#975 AC5: CONTEXT.md gains 'Closed-year arrears resolution', naming IAS 8, stating that materiality is asked for and never assumed, and correcting 0227's 'ordinary accounting treatment' phrasing in the docs rather than in the applied migration.",
+    "#975 AC6: one new migration at 0279; the diff shows no applied migration edited."
+  ]
+}

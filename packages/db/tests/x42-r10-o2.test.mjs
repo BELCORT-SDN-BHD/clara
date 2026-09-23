@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import {
   endPool, printLaneNotes, printSkipCount, rootQuery, humanQuery,
   x42EnsureReady, skip42, EXPA, ACCR, mon,
-  runManual, reversePair, approvePairReversal, accrualLines,
+  runOccurrence, reversePair, approvePairReversal, accrualLines,
   adjWorld, freshAdjClient, liveTemplate, approveDraft,
   mirrorOf, firmThresholdOf, receiptForEntry,
 } from "./x42-adj-helpers.mjs";
@@ -154,7 +154,10 @@ async function bornPair(label, { cents = 60_000, period = mon(-3), client = null
   const tpl = await liveTemplate({
     client, label, start: period.start, cents, autoReverse: true,
     lines: accrualLines(cents, { debit: EXPA, credit: ACCR }), memo: "x42r10o2 accrual" });
-  const r = await runManual(w.users.bob, {
+  // [#927] The occurrence is posted through clara.run_adjustment_occurrence — the machine
+  // door D6 keeps — because run_adjustment_manual is a retired door as of migration 0282.
+  // Same poster core, same drafted receipt; only the caller's role changes.
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   await approveDraft(w.users.alice, r.entry_id);
   const mirror = await mirrorOf(r.entry_id);

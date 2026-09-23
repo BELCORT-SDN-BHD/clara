@@ -62,9 +62,10 @@ work already admitted is untouched) and ended (terminal). Three KINDS exist: a *
 a *reversing journal* (an accrual and its reversal, two legs per period), and an *amortisation
 schedule* (a Prepayment schedule's configured plan, whose every period posts its own amount).
 Depreciation and close schedules are not plan kinds and are refused by name.
-_Avoid_: A recurring adjustment template as a synonym; a preference, a calculation policy or a
-repeated bank debit as a source of authority; an instruction to move money — a plan creates journal
-Work and never initiates a bank payment or a mandate.
+_Avoid_: A recurring adjustment template — the 0045 template lane was retired 2026-09-18 (#788,
+delivered by #927–#929); this is the one mechanism for recurring accounting from here on. A
+preference, a calculation policy or a repeated bank debit as a source of authority; an instruction
+to move money — a plan creates journal Work and never initiates a bank payment or a mandate.
 
 **Plan occurrence**:
 One due event of one plan. It is the identity of that event: one plan and one due date have exactly
@@ -93,9 +94,11 @@ evaluator's reading of rows this database already holds, and the only things a p
 which prepayment, under WHOSE INSTRUCTION, which expense account, why, and what the schedule is
 for. It configures an Accounting plan of kind `amortisation_schedule`; the belt
 admits each period.
-_Avoid_: A recurring adjustment template as a synonym; an editable table of period amounts; a
-schedule that pays anything — the money left the bank before the schedule existed; "configured" as
-a synonym for "posted", which is a different fact and a different count.
+_Avoid_: A recurring adjustment template — the 0045 template lane was retired 2026-09-18 (#788,
+delivered by #927–#929), except for one PARKED agent entrance that still mints one and must be
+retired or rerouted before it is ever unparked; an editable table of period amounts; a schedule
+that pays anything — the money left the bank before the schedule existed; "configured" as a
+synonym for "posted", which is a different fact and a different count.
 
 **Service period**:
 The span of time an accrued or prepaid cost belongs to, stated by an identified person — for a
@@ -111,6 +114,18 @@ _Avoid_: The posting date; the authority window; an effective date range on a pl
 an extracted or inferred period; a term the product derived from an invoice's own dates, a filename,
 a date range it saw, or a conversation it summarised; treating a corrected term as something a
 revision re-derives — a re-derived allocation is a new schedule.
+
+**Corrected term**:
+A service period a person has RE-STATED with different dates, so what the document is taken to say
+about the span it buys has changed. It is not the same fact as a superseded term ROW: recording a
+period on a document that already carries a live one supersedes the old row whatever the new one
+says, so a second verification that restates the same two dates supersedes a row and corrects
+nothing. Only a corrected term makes an allocation already derived from the old one wrong, and only
+a corrected term is grounds for telling a firm its schedule has to be rebuilt.
+_Avoid_: Reading "the row this schedule rode is no longer live" as "the term was corrected" — the
+first is bookkeeping about rows, the second is a statement about the client's affairs, and a
+surface that confuses them tells a firm to abandon a running amortisation for no reason; treating a
+corrected term as something a revision re-derives — a re-derived allocation is a new schedule.
 
 **Plan catch-up**:
 Admitting due events that already passed, over a window a person names. Oldest first, bounded per
@@ -148,6 +163,19 @@ _Avoid_: "The turn ended" (absence of a row is not evidence of that); a silent c
 **Stop reply ≠ Cancel Work**:
 Stop reply aborts the SSE read and cancels the chat-turn task; Cancel Work cancels the persistent Work. Different `clara.agent_tasks` rows with no cascade between them; closing the rail does neither.
 _Avoid_: Assuming either one implies the other; a chat-lane action as a substitute for the Work-level cancel door.
+
+<!-- #1024 -->
+**Refused resume ≠ lost access**:
+A read a Clara tab re-opens for its OWN benefit after a refused Stop establishes only that this tab
+could not resume reading the reply. The stream route answers 403/404 both for "you may not see this
+task" and for a task the runtime no longer holds, so that refusal is never turned into a statement
+about the reader’s access: the refusal the door gave the reader stays on screen, the turn’s own record
+stays as it was, and the Stop control does not depend on how a background read resolved. A revocation
+the runtime sends down an OPEN read, or one found on a tab’s first attach, is unchanged — it still
+retires the clock and withdraws the parked question.
+_Avoid_: A refusal on a read a tab re-opens for its OWN benefit read as "you no longer have access";
+an existence fact rendered as an access fact; a live turn retired by a sentence about access.
+<!-- #1024 -->
 
 **Work batch**:
 A group of accounting work tracked together. An item waiting for information holds its dependants, while independent items may continue and retain their own outcomes.
@@ -258,6 +286,15 @@ One line of the printed source, as stated, mapped or not yet mapped to an accoun
 tie-out compares the books against, never a posting in its own right.
 _Avoid_: Calling an unmapped target an error — it is work a person has still to do; calling a
 target a journal line.
+
+**Opening source refresh**:
+Bringing an opening basis's targets onto a NEW reading of the same tie document, after the document
+was genuinely read again. The targets standing on the reading the document has left are retired and
+replaced, line by line, from the new one — never re-pointed and never left beside it — and the act
+leaves a receipt naming the reading left, the reading arrived at, and the retired rows verbatim.
+_Avoid_: Calling it a re-parse — parsing one reading twice is still refused, and that refusal is
+what the refresh exists beside, not instead of; calling it a correction — nobody changed what the
+document says, only which reading of it the basis stands on.
 
 **Opening Work**:
 The Work record an approved opening batch carries: one per approval — the seed batch, then one per
@@ -373,6 +410,14 @@ _Avoid_: Automatically sharing one client's private facts or practices with ever
 **Counterparty identity**:
 Who one supplier or customer of a client *is*, as a durable record: a stable tenant-scoped id that survives every rename and merge, the current name, the registration number and TIN, every alias, and the correction history behind all of it. A vendor and a customer are separate identities even under one name, and two clients of one firm may carry the same registration number or TIN without being linked.
 _Avoid_: The displayed name as the identity; a binding ceremony as a prerequisite for working with a party; linking two clients' parties because an identifier matches.
+
+**Identifier conflict**:
+A submitted document whose registration number and whose TIN each name a *different* live counterparty of the same client. Clara stops and shows both, with the identifier that reached each one, so the person decides which party the document is about; she never prefers one identifier over the other. Distinct from an ambiguous party, where one identifier reaches several parties, and from an unresolved one, where no identifier reaches anybody. An identifier that reaches several parties has not identified anybody, so it does not outrank the name printed beside it: where the name answers to exactly one of those parties the two agree and the document resolves, and otherwise the chooser carries every party either identifier reached.
+_Avoid_: Silently preferring the registration number; treating an identifier that matched nobody as a disagreement; resolving the clash by creating a party; a chooser that omits the party the document names.
+
+**Probable duplicate**:
+An invoice or bill about to be recorded that looks like one this client already has on the books: the same counterparty and the same document number ignoring case, spaces and punctuation, or the same counterparty, the same total and the same document date. "The same counterparty" is the party as it stands today together with every party merged into it, so merging two records of one vendor never hides a bill recorded against the one that was absorbed. Clara shows what she found and the person decides; she never refuses the recording, and she never treats a repeated amount or a repeated counterparty on its own as a sign. An earlier document whose Work will never post, or whose entry was reversed, is not on the books and is not a sign either.
+_Avoid_: Blocking or auto-merging a suspected duplicate; a unique constraint on a document number; matching across clients, across kinds or on the amount alone; calling a replayed request a probable duplicate (that is an intent key converging, not a second document); reading a warning kept against one recording as if it belonged to another attempt under the same intent key.
 
 **Counterparty alias**:
 Another name the same party is known by — a former name, a trade name, a name a person stated or a name read off a named document. Each alias records the lane that wrote it (a person in the app, Clara, client setup, or an unrecorded legacy lane), the stated basis and, where one exists, the source document and extraction it was read from. Retiring an alias stops it matching new activity and keeps it readable as history.
@@ -588,8 +633,8 @@ A value Clara read out of a document and persisted with its exact source: the do
 _Avoid_: Client Knowledge; a duplicated copy of an extraction value living in Knowledge; a value shown without its source version and region; a fact that failed or skipped its arithmetic check presented as validated.
 
 **Field path**:
-The canonical name of one value inside an extraction — dot-separated segments under a registered namespace, such as `invoice.total`, `myinvois.supplier_tin` or `pages.1.lines.0`. It is validated at the one write boundary that owns it, so a region can always be traced back to what it claims to be.
-_Avoid_: A free-text label; a display name; a path invented by a surface rather than written by a producer.
+The canonical name of one value inside an extraction — dot-separated segments under a registered namespace, such as `invoice.total`, `myinvois.supplier_tin` or `pages.1.lines.0`. It is validated by the one grammar function (`clara._assert_field_path`) both at the persist boundary that owns writing it and, since #857, by a table CHECK on `clara.document_regions` itself, so a region can always be traced back to what it claims to be even when a writer bypasses the persist door.
+_Avoid_: A free-text label; a display name; a path invented by a surface rather than written by a producer; assuming the grammar is enforced only where a producer writes through the persist door.
 
 **Arithmetic validation**:
 A named check run over persisted typed facts — the invoice totals identity, a statement's balance chain, its printed totals — recorded with its outcome and its terms. `unmeasured` means the terms the check needs were never persisted, and is deliberately not a pass.
@@ -690,6 +735,19 @@ refused, with which of the three ways the accrual failed to stand behind it.
 _Avoid_: A correction; a cancellation; a separately authorised entry; treating an admitted accrual
 as a posted one.
 
+**Accrual correction**:
+A restatement of an accrual's own particulars — amount, either account leg, the service period, the
+method or the instruction — that advances its schedule to a NEW plan revision and writes a
+SUCCESSOR accrual-adjustment row for it, naming the row it supersedes. The superseded row is kept,
+stamped with which row corrected it, and is otherwise unchanged; occurrences the schedule has
+already admitted keep naming the revision they ran under, so a correction reaches only what has not
+yet come due. It moves neither the schedule nor the authority window — those are the LIVE revision's
+own, carried through unchanged — because a correction restates what was STATED, not when or how
+often the plan runs.
+_Avoid_: The generic plan revision alone (it advances the schedule but leaves the accrual's own
+detail naming the first revision — #936's own bug); editing a posted entry; a second correction of
+an already-corrected row (refused by name: one correction per target).
+
 **Calculation method**:
 The rule that says WHICH stated amount each of a schedule's periods uses. It selects among amounts a
 person supplied; it computes none, which is why it is a closed set of named rules rather than a
@@ -731,6 +789,18 @@ journal entry.
 _Avoid_: A depreciation authority (that is the firm's permission to run it); a schedule (that is
 what these produce); a policy the product infers from the evidence; a second accounting entry.
 
+**Default depreciation policy**:
+A person-set, versioned default for ONE enrolled fixed-asset account — method, useful life or
+rate, and residual — signed once and applied at every later acquisition on that account which
+states no particulars of its own. A covered acquisition is born with complete depreciation
+particulars, never pending ones, and the register row carries the policy's own version so its
+provenance is a read, never a guess. Setting a policy again never mutates the one it replaces: the
+live row retires and a fresh one is minted one version higher, and only acquisitions AFTER that
+change are born from it — an asset a prior version already birthed keeps its own particulars.
+_Avoid_: A rule the product infers from an asset's own evidence (that is exactly what Depreciation
+particulars is not); a class finer than the account; a back-fill of an asset already waiting; a
+value an acquisition itself states (that always wins, because a policy fills only what is absent).
+
 **Depreciation change class**:
 What KIND of change a revision to an asset's depreciation particulars is, recorded on the generation
 the revision MINTED and never on the one it superseded. Three are recognised — an *estimate* change
@@ -749,6 +819,35 @@ unattended belt runs forward only and a signature is not permission to charge ev
 period earlier than the floor is charged only by an explicit catch-up a person performs.
 _Avoid_: Reading a signature as permission to charge every past period; a window a later edit can
 move; a floor derived from the machine's clock rather than the book's calendar.
+
+**Closed-year arrears resolution**:
+The accountant's recorded answer to one question: a depreciation run is about to charge months that
+belong to a fiscal year which is closing or closed, and somebody must say whether that omission is
+material. Under IAS 8 a material prior-period error is **restated in the year it belongs to**, and
+only an immaterial one is **folded into the current period**; which of the two this is turns on
+materiality, and materiality is a professional judgement. So Clara states the amount and the year,
+offers exactly those two resolutions, and chooses neither. A question names ONE year and states
+THAT year's own arrears; where several closed years carry arrears the client-wide total is a
+separate figure and never stands in for a year's. The answer is recorded against the client, the
+fiscal year and the period of the run that raised it, with the figure that was judged, who judged it
+and when. **A judgement licenses the figure it was made about, and nothing else**: a later run for
+the same client and year proceeds on the record while the arrears still stand at that figure, and
+asks again — naming both figures — once they do not, because deciding that a ruling about one amount
+still holds at another would be Clara making the materiality judgement herself. A change of mind
+supersedes the record rather than editing it, so both judgements keep their author and their
+timestamp. The human run door asks; the swept run parks with the reason stated and completes once an
+answer exists. Choosing restatement does not reopen anything by itself: the year is reopened through
+its own formal path, and only then is its period run in its own right — and while a year is still
+CLOSING that path does not exist yet, so restatement is refused there and the close is finalised
+first.
+_Avoid_: Calling the fold "the ordinary accounting treatment" — the phrase migration 0227's comment
+uses, and an overstatement of the standard this entry corrects (an applied migration's bytes are
+immutable, so the correction lives here); a materiality threshold the product picks; folding as a
+silent default; a run that posts a prior year's charge into the current period without a recorded
+ruling, or one that posts an amount larger than the amount anybody ruled on; quoting a client-wide
+arrears total as one year's figure; treating the locked-period refusal (a charge DATED into a closed year, refused outright) as
+the same thing as this question (months INSIDE a closed year that a later, lawful period's charge
+would carry).
 
 **Depreciation run preview**:
 What the NEXT depreciation run would do, read before anything is written: the exact period the
@@ -848,10 +947,18 @@ a partial allocation of a line (a line belongs to at most one live group, always
 **Statement line**:
 One row of a bank statement as the bank stated it: its date, its description, its signed amount
 and its position in the running balance. It is evidence supplied from outside, never a figure
-the product computed, and it carries no page or region citation — the statement carries the
-provenance (its document, its digest and its filename), the line does not.
+the product computed. The statement itself always carries provenance (its document, its digest
+and its filename); the LINE additionally carries an optional _source citation_ (#990) — the
+printed page, an opaque reader-specific region locator, and which stored extraction it was read
+from — populated only on the machine (OCR/witness) intake lane, since the CSV import and the
+hand-keyed month have no page concept at all and never carry one. A citation is never a `Field
+path`/`Typed fact`: a statement line is not a `clara.document_regions` row, so its citation lives
+as three plain columns on the line itself rather than a link to one.
 _Avoid_: A journal line; a transaction the product created; an amount a human may edit to make
-something tie.
+something tie; treating an absent citation on the CSV/hand-keyed lanes as a defect rather than a
+structural fact about that lane; assuming a citation exists on every machine-lane line today —
+the persist door accepts one when a payload states it, but no live producer states one yet
+(0291's own residual, closed as a successor contract in #990's report).
 
 **Remaining capacity**:
 How much of one approved journal entry's movement on a given bank account is still unallocated,
@@ -875,6 +982,11 @@ _Avoid_: An account-type filter; a metric account set (that family refuses inact
 **Book cash / 账面现金**:
 What the LEDGER says a client's cash accounts hold: every approved debit minus every approved credit over the published cash account set, cumulative from inception with no fiscal-year reset and an approved opening counted exactly once. It is a balance at an as-of date, not a flow over a period.
 _Avoid_: Statement balance; available balance; cleared balance — all three are a bank's claim at a date the bank chose, and they may legitimately differ from this by everything that has not cleared.
+
+<!-- #958 -->
+**Tie-out GL balance / 核对总账余额**:
+The bank tie-out's own ledger-derived figure for ONE bank account — every approved debit minus every approved credit on that account's own chart code, through the tie's as-of — computed fresh by `list_bank_statements`' cheap read and by `get_bank_reconciliation`'s own identity (there `gl_prime_cents`, net of the opening-anchor set), never by a human-governed membership. It is ledger-derived like book cash, but scoped to the one account behind one statement rather than the published cash account set, and it is a TERM OF THE TIE-OUT, not a claim about how much cash the client holds. The reconciliation surface renders it verbatim under its own label, "GL balance" — that rendering is unchanged by this ruling, only the naming is now written down.
+_Avoid_: Cash; book cash; a second cash reader — migration 0232 already rules the adjacent pair, a bank statement's closing balance and book cash, as neither substituting for nor summing into the other, and this is a THIRD figure on the same footing, never labelled cash on any human-facing surface (owner ruling #958); the generic "GL balance" opening-item kind on the opening register (`gl_balance`), an unrelated onboarding term for any account's carried-down balance that happens to share the same two words.
 
 **Period profit / 期间利润**:
 Income minus expense over one interval of approved entries, excluding the year-end closing transfer — the entries that carry BOTH the year-end mark and the closing-transfer mark. A year-end revenue CORRECTION carries only the first and still counts. Reversals and negative corrections move the figure by their signed amount; the figure is never clamped at zero, so a month the books say went backwards reads as a loss.

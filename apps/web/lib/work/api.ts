@@ -137,6 +137,10 @@ export type PartyCandidateWire = {
   name?: unknown;
   registration_no?: unknown;
   tin?: unknown;
+  /** #982 (migration 0274) — which identifier reached this candidate, `"registration"` or
+   *  `"tin"`, present only on a `party_identifier_conflict`. Declared because the door raises it;
+   *  no surface renders it yet. */
+  matched_on?: unknown;
 };
 
 export type RetryWorkResult =
@@ -385,6 +389,72 @@ export async function submitStaffExpenseClaimWork(
  * at posting — and with it the RESOLVED party and the DERIVED due-date basis, which the browser
  * could not have computed and must therefore render rather than guess.
  */
+/**
+ * ONE probable duplicate the person is shown before they record (#1007).
+ *
+ * Carried in the browser's own spelling, because this is the only place the database's snake_case
+ * answer is read: every field is a FACT ABOUT THE EARLIER DOCUMENT, re-read from the books by the
+ * door rather than echoed from anything this browser typed.
+ */
+export type TradeInvoiceDuplicateMatch = {
+  invoiceId: string;
+  /** The Work that recorded it, so the person can open it. Null only if the books lost the link. */
+  workId: string | null;
+  /** Which signal(s) fired: `same_reference`, `same_total_and_date`, or both. */
+  signals: string[];
+  reference: string | null;
+  documentDate: string | null;
+  totalCents: number | null;
+};
+
+/**
+ * "Which already-recorded invoices of this client look like the one about to be recorded?" (#1007)
+ *
+ * A READ, over the SAME runtime route the admission rides — `POST /api/work/trade-invoice/
+ * duplicates`, which translates this wire body with the ONE `toDbTradeInvoice` the admission
+ * uses and then asks `clara.probe_trade_invoice_duplicates_for` (migration 0275). That door
+ * writes nothing and takes no row lock.
+ *
+ * WHY THE ROUTE AND NOT A DOOR CALL OF ITS OWN (fix round, review finding S-1). The first cut
+ * posted this wire body STRAIGHT to PostgREST, and the wire's keys are the browser's
+ * (`documentDate`, `totalCents`) while the door reads the database's (`document_date`,
+ * `total_cents`). The consequence was not cosmetic: "same money on the same day" — the signal
+ * that catches a missing or mistyped document number — could never fire from the only shipped
+ * entrance. `apps/web` deliberately does not depend on `@clara/runtime`
+ * (`lib/registers/fa-refusal-field.ts` states that rule), so the choice is a second hand-written
+ * translation in the browser or ONE translation on the server. This is the second.
+ *
+ * IT IS NOT A WALL: the owner ruled on 2026-09-20 that Clara warns and the person decides, so the
+ * ONLY thing this answer may do is put a warning on the screen. Every failure — a lapsed session,
+ * a refusal, an unreadable body, a network fault — answers "nothing to show", and the recording
+ * goes through exactly as it would have.
+ */
+export async function probeTradeInvoiceDuplicates(
+  auth: SessionTokenAccessor,
+  input: { clientId: string; kind: string; invoice: Record<string, unknown> },
+  signal?: AbortSignal,
+): Promise<TradeInvoiceDuplicateMatch[]> {
+  const token = await auth.getAccessToken();
+  if (token === null) return [];
+  const res = await runtimePost(`${WORK_BASE}/trade-invoice/duplicates`, token, input, signal);
+  if (res.status !== 200) return [];
+  const raw = ((await readBody(res)) ?? {}).matches;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((row) => {
+      const m = (row ?? {}) as Record<string, unknown>;
+      return {
+        invoiceId: typeof m.invoice_id === "string" ? m.invoice_id : "",
+        workId: typeof m.work_id === "string" ? m.work_id : null,
+        signals: Array.isArray(m.signals) ? m.signals.filter((x): x is string => typeof x === "string") : [],
+        reference: typeof m.reference === "string" ? m.reference : null,
+        documentDate: typeof m.document_date === "string" ? m.document_date : null,
+        totalCents: typeof m.total_cents === "number" ? m.total_cents : null,
+      };
+    })
+    .filter((m) => m.invoiceId !== "");
+}
+
 export async function submitTradeInvoiceWork(
   auth: SessionTokenAccessor,
   input: {
@@ -393,6 +463,11 @@ export async function submitTradeInvoiceWork(
     kind: string;
     invoice: Record<string, unknown>;
     basis: Record<string, unknown>;
+    /** #1007 · the earlier invoices the person was SHOWN and recorded anyway, by their own ids.
+     *  Present ONLY when they were warned and chose to go ahead: the route keeps that choice
+     *  beside the Work BEFORE it admits, so a reviewer can tell a knowing second recording from
+     *  an accident. Absent is the ordinary case and means nobody was warned. */
+    acknowledgeDuplicates?: ReadonlyArray<string>;
     /** Omitted entirely for an invoice with no cited document — AC3's "chat-without-attachment"
      *  and "direct UI" arms are both lawful. The route reads an absent, null or empty list
      *  identically. */

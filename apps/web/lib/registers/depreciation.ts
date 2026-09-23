@@ -169,6 +169,39 @@ export async function getDepreciationRun(session: SessionTokenAccessor, runId: s
   return out.run;
 }
 
+/** clara.record_fa_arrears_resolution(p_client, p_fiscal_year, p_choice, p_arrears_cents,
+ *  p_period_start, p_period_end, p_reason, p_op_key) — bookkeeper+, the SAME floor the manual run
+ *  takes: the person who may run the period is the person who may judge its arrears. No machine
+ *  role holds EXECUTE, because materiality is a professional judgement under IAS 8.
+ *
+ *  THE AMOUNT IS THE ONE THAT WAS SHOWN, not one this surface recomputes. The door RE-MEASURES it
+ *  and refuses CLR37 `fa_arrears_resolution_invalid` axis `arrears_changed` when it has moved
+ *  since the question was asked — a judgement filed against a stale figure is a ruling nobody
+ *  made. The other axes are `choice`, `not_this_client`, `year_not_closed` and `no_arrears`. */
+export function recordFaArrearsResolution(
+  session: SessionTokenAccessor,
+  args: {
+    clientId: string; fiscalYearId: string; choice: "fold_current" | "reopen_prior";
+    arrearsCents: number; periodStart: string | null; periodEnd: string | null;
+    reason: string | null; opKey: string;
+  },
+): Promise<unknown> {
+  return callDoor(
+    "record_fa_arrears_resolution",
+    {
+      p_client: args.clientId,
+      p_fiscal_year: args.fiscalYearId,
+      p_choice: args.choice,
+      p_arrears_cents: args.arrearsCents,
+      p_period_start: args.periodStart,
+      p_period_end: args.periodEnd,
+      p_reason: args.reason,
+      p_op_key: args.opKey,
+    },
+    { session },
+  );
+}
+
 /** clara.run_depreciation_manual(p_client, p_period_start, p_period_end,
  *  p_op_key) — bookkeeper+. The period must be EXACTLY the live authority's
  *  own cadence window (CLR38 `not_cadence_aligned` otherwise — the door
@@ -218,14 +251,46 @@ export type FaPreviewSkip = { asset_id: string; reason: string };
 export type FaPreviewLeg = { account_code: string; debit_cents: number; credit_cents: number };
 
 /** A period the due oracle SKIPPED because its fiscal year is closing or closed. It will never be
- *  run in its own right; the arrears are charged by the next OPEN period's run, and the charge
- *  rows still carry their own months, so nothing is lost and nothing is silent. */
+ *  run in its own right. Its months are NOT lost: they are carried by the next OPEN period's
+ *  charge — but, since #975 (0279), only once the accountant has judged them. See
+ *  `FaClosedArrears` below, and `CONTEXT.md`'s "Closed-year arrears resolution". */
 export type FaSkippedClosedPeriod = {
   period_start: string;
   period_end: string;
   fiscal_year_id: string;
   fy_label: string | null;
   fy_status: string;
+};
+
+/** #975 [0279] — the ONE answer a person may give to the closed-year arrears question. Under
+ *  IAS 8 a material prior-period error is restated in the year it belongs to and only an
+ *  immaterial one is folded into the current period, so materiality is ASKED for and never
+ *  inferred. `fold_current` lets the next open period's run carry the months; `reopen_prior`
+ *  keeps them where they belong and points at `clara.reopen_fiscal_year`. */
+export type FaArrearsResolution = {
+  id: string;
+  choice: "fold_current" | "reopen_prior";
+  arrears_cents: number;
+  decided_by: string;
+  decided_at: string;
+  reason: string | null;
+};
+
+/** #975 [0279] — what the NEXT run would fold forward out of closing or closed fiscal years, and
+ *  whether anybody has judged it yet. Reported beside `skipped_closed` rather than inside it: a
+ *  closed year can carry arrears with no period skipped at all. Always present, EMPTY rather than
+ *  absent, so a reader never has to tell "none" from "this build does not say". */
+export type FaClosedArrears = {
+  arrears_cents: number;
+  fiscal_years: Array<{
+    fiscal_year_id: string;
+    fy_label: string | null;
+    fy_status: string;
+    fy_starts_on: string;
+    fy_ends_on: string;
+    arrears_cents: number;
+    resolution: FaArrearsResolution | null;
+  }>;
 };
 
 export type FaRunPreview = {
@@ -240,6 +305,7 @@ export type FaRunPreview = {
   authority_from?: string | null;
   authority_ref?: FaAuthorityRef | null;
   skipped_closed?: FaSkippedClosedPeriod[];
+  closed_arrears?: FaClosedArrears;
   charges: FaPreviewCharge[];
   skipped: FaPreviewSkip[];
   legs: FaPreviewLeg[];

@@ -5,7 +5,9 @@
 // caught the min(uuid) crash, the F2-omission over-match, and the birth-gate reachability
 // gap has to actually exist.
 //
-//   x36v.1 drive a binding fully to 'live' (propose -> sign, 0029 present).
+//   x36v.1 drive a binding fully to 'live' (propose -> sign, 0029 present). #921: both doors
+//     are carried by clara_fn_owner now (x36-vendor-binding-helpers.mjs's header) — no human
+//     session can reach them, which vendor-binding-write-doors-revoked.test.mjs proves.
 //   x36v.2 a NEW document (outside the evidence window) whose vendor name/registration/
 //     invoice-prefix all match the live binding resolves via clara._resolve_vendor_binding
 //     -- proves F1+F2+F3 all hit AND the uuid tiebreak (array_agg(...)[1]) never 42883s on
@@ -31,8 +33,8 @@ import { rootQuery, endPool } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
-  has28, has29, seedPayableAccount, seedLiveBinding, seedBareDocument, seedF123Evidence, signLive,
-  seedVendorCounterparty, seedApprovedEntry, propose, seedClientHardIdentifier,
+  has28, has29, seedPayableAccount, seedLiveBinding, seedBareDocument, seedF123Evidence, signLiveAsFnOwner,
+  seedVendorCounterparty, seedApprovedEntry, proposeAsFnOwner, seedClientHardIdentifier,
 } from "./x36-vendor-binding-helpers.mjs";
 
 let has0028 = false;
@@ -110,11 +112,11 @@ async function bindLiveWithInvoiceId(cp, invoiceId, evidenceIdentity = cp) {
       { postingDate: d, approvedAt: `${d}T09:00:00Z` });
     i += 1;
   }
-  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const proposed = await proposeAsFnOwner(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
   // signLive: the post-time re-check is proven by a witnessed prosrc sha now (裁-18b PR-1 finding
   // C3), so signing refuses until PR-3 mints the witness; the helper performs PR-3's two acts and
   // undoes both.
-  return signLive(w.users.alice, { binding: proposed.binding_id });
+  return signLiveAsFnOwner(w.users.alice, { binding: proposed.binding_id });
 }
 
 /** Add one more top-band OCR region to a document's (already-seeded) ocr extraction,
@@ -144,7 +146,7 @@ async function addTopBandOcrLine(document, text) {
 
 test("x36v readiness", () => { requireReady(); assert.ok(w, "world built"); });
 
-test("x36v.1 propose -> sign drives a binding to 'live' (0029 present)", async () => {
+test("x36v.1 the propose -> sign BODIES still drive a binding to 'live' (0029 present; #921: carried by clara_fn_owner, unreachable by any human)", async () => {
   requireReady();
   const { binding } = await seedLiveBinding(w, "V1");
   assert.equal(binding.status, "live");

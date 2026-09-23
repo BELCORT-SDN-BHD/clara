@@ -10,9 +10,12 @@
 //
 // (#845: the name must look disposable to `rig-reset-guard.mjs`'s `guardedReset`, which this file
 // now routes its `reset()` through — ci/test/tmp/temp/scratch/ephemeral by whole name or final
-// `.`/`_`/`-` segment, or it refuses. No CI leg exists for this file yet — see
-// packages/db/tests/README.md's #845 section — so run this against a throwaway database, never a
-// shared rig.)
+// `.`/`_`/`-` segment, or it refuses.
+//
+// #1023 GAVE THIS FILE A CI LEG: the `Wave-A 0011 fresh-vs-upgrade parity drill (isolated DB)`
+// step in `.github/actions/closed-wave-upgrade-drills/action.yml` creates `clara_waveA_upgrade_ci`
+// and runs the recipe above verbatim, in the `closed-wave-drills` job reached on a schedule or a
+// workflow_dispatch. Run it by hand against a throwaway database, never a shared rig.)
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

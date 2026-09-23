@@ -32,7 +32,7 @@ import {
   opk, endPool, printLaneNotes, printSkipCount, noteLane,
   x42EnsureReady, skip42, refuses, caught,
   EXPA, ACCR, EXPB, ACCR2, CLR38, mon, addDays, mytToday,
-  runManual, reverseEntry, reversePair, adjustmentRunDue, retireTemplate,
+  runOccurrence, reverseEntry, reversePair, adjustmentRunDue, retireTemplate,
   accrualLines, adjWorld, freshAdjClient, liveTemplate, approveDraft,
   entryRowOf, mirrorOf, glNet, forgeEntryColumns,
   draftEntryV3, manualRes, rootQuery,
@@ -63,7 +63,7 @@ async function bornOccurrence(label, { cents = 60_000, period = mon(-3), autoRev
     client, label, start: period.start, cents, autoReverse,
     lines: accrualLines(cents), memo: "Accrued charge",
   });
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client, template: tpl.id, periodStart: period.start, periodEnd: period.end });
   assert.equal(r.status, "drafted", `${label}: occurrence #1 always drafts (the ramp is unearned)`);
   await approveDraft(w.users.alice, r.entry_id);
@@ -75,7 +75,7 @@ async function rerunAdvertisedPeriod(f, label) {
   const due = await adjustmentRunDue(f.client);
   assert.equal(due.due, true, `${label}: the corrected period is DUE again (design §2.3 — entries are the truth, receipts are never read for eligibility)`);
   assert.equal(iso(due.period_start), f.period.start, `${label}: it is the corrected period that is due`);
-  const r = await runManual(w.users.bob, {
+  const r = await runOccurrence({
     client: f.client, template: f.tpl.id, periodStart: f.period.start, periodEnd: f.period.end });
   const id = r.entry_id;
   if (r.status === "drafted") await approveDraft(w.users.alice, id);
@@ -176,7 +176,7 @@ test("x42.cd3 a correction dated OUTSIDE its period refuses the re-run by name �
   await forgeEntryColumns(rev.reversal_id, { posting_date: elsewhere }, { casts: { posting_date: "date" } });
   assert.equal(iso((await entryRowOf(rev.reversal_id)).posting_date), elsewhere);
 
-  const err = await caught(() => runManual(w.users.bob, {
+  const err = await caught(() => runOccurrence({
     client: f.client, template: f.tpl.id, periodStart: f.period.start, periodEnd: f.period.end }));
   assert.ok(err, "the poster refuses to re-run a period whose correction sits outside it — the re-run would double the period's own figure");
   assert.equal(err.code, CLR38);
@@ -239,7 +239,7 @@ test("x42.cd4 an un-corrected pair half blocks the re-run: one standing mirror p
   assert.equal((await entryRowOf(mirror.id)).reversed_by, null);
 
   await refuses(
-    () => runManual(w.users.bob, {
+    () => runOccurrence({
       client: f.client, template: f.tpl.id, periodStart: f.period.start, periodEnd: f.period.end }),
     "period_correction_unsound",
     "cd4: a standing, un-corrected pair half refuses the re-run",
@@ -301,7 +301,7 @@ test("x42.cd6 retire + re-propose with a CORRECTED figure cannot double the mont
   const t1 = await liveTemplate({
     client, label: "cd6a", start: p.start, cents: wrong, autoReverse: false,
     lines: accrualLines(wrong), memo: "Accrued audit fee" });
-  const r1 = await runManual(w.users.bob, {
+  const r1 = await runOccurrence({
     client, template: t1.id, periodStart: p.start, periodEnd: p.end });
   if (r1.status === "drafted") await approveDraft(w.users.alice, r1.entry_id);
   assert.equal(await glNet(client, ACCR, p.end), -wrong, "cd6: the month opens carrying the wrong figure, once");
@@ -320,7 +320,7 @@ test("x42.cd6 retire + re-propose with a CORRECTED figure cannot double the mont
     "cd6: and it says so on blocked[] — silently skipping the month would leave the wrong figure in the books with nobody told");
   assert.equal(due.blocked[0].template_id, t2.id);
 
-  const err = await caught(() => runManual(w.users.bob, {
+  const err = await caught(() => runOccurrence({
     client, template: t2.id, periodStart: p.start, periodEnd: p.end }));
   assert.ok(err, "cd6: and the poster refuses the same triple, so a direct call cannot get around the oracle");
   assert.equal(err.code, CLR38);
@@ -355,7 +355,7 @@ test("x42.cd6 retire + re-propose with a CORRECTED figure cannot double the mont
   const due2 = await adjustmentRunDue(client);
   assert.equal(due2.due, true, "cd6: …and the corrected template's month is due at once");
   assert.equal(due2.template_id, t2.id);
-  const r2 = await runManual(w.users.bob, {
+  const r2 = await runOccurrence({
     client, template: t2.id, periodStart: p.start, periodEnd: p.end });
   if (r2.status === "drafted") await approveDraft(w.users.alice, r2.entry_id);
   assert.equal(await glNet(client, ACCR, p.end), -right,
@@ -389,7 +389,7 @@ test("x42.cd7 the shape key's boundary: different account shapes never collide, 
     client, label: "cd7b", start: p.start, cents: 30_000, autoReverse: false,
     lines: accrualLines(30_000, { debit: EXPB, credit: ACCR2 }), memo: "Accrued audit" });
 
-  const ra = await runManual(w.users.bob, { client, template: ta.id, periodStart: p.start, periodEnd: p.end });
+  const ra = await runOccurrence({ client, template: ta.id, periodStart: p.start, periodEnd: p.end });
   if (ra.status === "drafted") await approveDraft(w.users.alice, ra.entry_id);
 
   // DIRECTION 1 — a DIFFERENT shape in the same period is untouched.
@@ -397,7 +397,7 @@ test("x42.cd7 the shape key's boundary: different account shapes never collide, 
   assert.equal(due.due, true, "cd7: template B's period is still due — a different account shape is a different accrual");
   assert.equal(due.template_id, tb.id);
   assert.deepEqual(due.blocked, [], "cd7: …and nothing is blocked");
-  const rb = await runManual(w.users.bob, { client, template: tb.id, periodStart: p.start, periodEnd: p.end });
+  const rb = await runOccurrence({ client, template: tb.id, periodStart: p.start, periodEnd: p.end });
   if (rb.status === "drafted") await approveDraft(w.users.alice, rb.entry_id);
   assert.equal(await glNet(client, EXPA, p.end), 40_000, "cd7: both accruals stand, each on its own accounts");
   assert.equal(await glNet(client, EXPB, p.end), 30_000);
@@ -406,7 +406,7 @@ test("x42.cd7 the shape key's boundary: different account shapes never collide, 
   const tc = await liveTemplate({
     client, label: "cd7c", start: p.start, cents: 25_000, autoReverse: false,
     lines: accrualLines(25_000), memo: "Accrued rent, second" });
-  const err = await caught(() => runManual(w.users.bob, {
+  const err = await caught(() => runOccurrence({
     client, template: tc.id, periodStart: p.start, periodEnd: p.end }));
   assert.ok(err, "cd7: a THIRD template moving the same two accounts the same way is refused");
   const d = JSON.parse(err.detail);

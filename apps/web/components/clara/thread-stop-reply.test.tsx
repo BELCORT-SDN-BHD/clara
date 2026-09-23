@@ -456,8 +456,12 @@ async function refusedStopText(
   threadId: string,
   taskId: string,
   streamAnswer: () => Response,
-): Promise<{ text: string; announcers: string[]; container: Stub }> {
-  let out = { text: "", announcers: [] as string[], container: {} as Stub };
+): Promise<{ text: string; announcers: string[]; everyStatus: string[]; stopControls: number }> {
+  // #1024 — EVERYTHING IS MEASURED BEFORE THE UNMOUNT. This used to hand the caller the live
+  // `container` and let it walk the tree itself; the `finally` below unmounts first, so by the
+  // time a cell walked it the tree was empty and every count read zero — an assertion that could
+  // only ever pass by asserting absence.
+  let out = { text: "", announcers: [] as string[], everyStatus: [] as string[], stopControls: 0 };
   await withFetch(
     (url) => {
       if (url.includes("/stream")) return streamAnswer();
@@ -490,7 +494,11 @@ async function refusedStopText(
           announcers: collect(h.container as Stub, (n) => attrOf(n, "role") === "status")
             .filter((n) => /responding|stop|Stopped|reading it/i.test(textOf(n)))
             .map((n) => textOf(n)),
-          container: h.container as Stub,
+          // #1024 — the WHOLE ladder, unfiltered: the defect this ticket closes was one sentence
+          // replacing another, so the count that settles it is every live region in the tree.
+          everyStatus: collect(h.container as Stub, (n) => attrOf(n, "role") === "status")
+            .map((n) => textOf(n)),
+          stopControls: collect(h.container as Stub, buttonNamed("Stop reply")).length,
         };
       } finally {
         await h.unmount();
@@ -546,53 +554,57 @@ test("630 …and once the re-attach OPENS, the same line says so", async () => {
 const THREAD_REFUSE_REVOKED = "c7c7c7c7-1111-4111-8111-c7c7c7c7c7c7";
 const TASK_REFUSE_REVOKED = "d7d7d7d7-1111-4111-8111-d7d7d7d7d7d7";
 
-test("642 a refusal whose re-attach is REFUSED tells the reader THAT, and says it once", async () => {
-  // Fix round 1, review finding ADV-642-5, at the face, and the sibling of the two cells
-  // whose fixtures were re-encoded. When a re-attach comes back 403/404 the reader has lost
-  // access to the reply, which is a later and stronger fact than "your role cannot stop it":
-  // the stop refusal is about one door, the revocation is about the whole reply. It does not
-  // reuse `refusedStopText` precisely because that helper waits for the refusal line, and
-  // the point of this cell is that the refusal line stands down.
-  await withFetch(
-    (url) => {
-      if (url.includes("/stream")) {
-        return new Response(JSON.stringify({ error: "not_found", message: "not found" }), { status: 404 });
-      }
-      if (url.includes("/messages")) return json({ messages: [] });
-      if (url.includes("agent_tasks_visible")) {
-        return json([{ id: TASK_REFUSE_REVOKED, status: "running", created_at: new Date(Date.now() - 9_000).toISOString() }]);
-      }
-      if (url.includes("agent_interruptions")) return json([]);
-      if (url.includes("caller_context")) return json([]);
-      if (url.includes("/rpc/cancel_agent_task")) {
-        return refusal("CLR04", "stopping a reply requires a bookkeeper", "insufficient_role");
-      }
-      return json([]);
-    },
-    async () => {
-      const h = await renderComponent(App(THREAD_REFUSE_REVOKED));
-      try {
-        await settleUntil(h, () => h.find(buttonNamed("Stop reply")) !== null, "the Stop control");
-        await h.act(() => {
-          claraThreadStore.applyStreamEvent(THREAD_REFUSE_REVOKED, { event: "chunk", data: "half an answer" });
-        });
-        const stop = h.find(buttonNamed("Stop reply"));
-        assert.ok(stop, "the Stop control is offered for a live turn");
-        await h.act(() => clickButton(stop));
-        await settleUntil(h, () => /You no longer have access to this reply/.test(h.text()), "the revocation line");
-        for (let i = 0; i < 8; i += 1) await h.settle();
-
-        const text = h.text();
-        assert.doesNotMatch(text, /Reconnecting/, "a refused attach is not a flaky connection");
-        assert.doesNotMatch(text, /gone back to reading it/, "…and this tab is emphatically not reading it");
-        assert.doesNotMatch(text, /needs a bookkeeper role/,
-          "the stop refusal is about one door; the revocation is the later fact about all of them");
-        const announcers = collect(h.container as Stub, (n) => attrOf(n, "role") === "status").map((n) => textOf(n));
-        assert.equal(announcers.length, 1, `one press, one announcement; saw ${JSON.stringify(announcers)}`);
-        assert.match(announcers.at(0) ?? "", /You no longer have access to this reply/);
-      } finally {
-        await h.unmount();
-      }
-    },
+test("1024 a refusal whose re-attach is REFUSED keeps the refusal, the turn and the Stop control", async () => {
+  // RE-DECIDES the #642 cell that stood here ("642 a refusal whose re-attach is REFUSED tells the
+  // reader THAT, and says it once"), openly, per the ticket's triage ruling of 2026-09-20. That
+  // cell asserted the stop refusal STOOD DOWN and the revocation line spoke in its place. The
+  // argument for the reversal is written above the hook cell that owns the machine
+  // (`lib/clara/use-clara-thread-stop.test.ts`, "1024 a refused stop whose re-attach is REFUSED
+  // says only that THIS TAB could not resume"); at the face it comes to three sentences.
+  //
+  //   · The refusal was established by a DOOR, about this reader's own press. The 404 is a fact
+  //     about a background read this tab opened for itself, and the same 404 covers a reply that
+  //     merely ended — so it may not overwrite the door's answer with a claim about access.
+  //   · `applyStreamEvent`'s `revoked` arm writes `turnStatus: null`, which for a turn this tab
+  //     did not post is the ONLY arm of `turnLive` — so the old contract withdrew the Stop
+  //     control from a reply the refusal it had just erased said was still running. That is the
+  //     defect `e2e/work-cancel-walk.spec.ts` B7 has been catching on both branches.
+  //   · One press still says one thing. The refusal is the only `role="status"` speaking, here
+  //     as in the two cells above; what changed is which line it is.
+  //
+  // IT CAN REUSE `refusedStopText` NOW, and that is the point in one line: the helper waits for
+  // the refusal line, and the refusal line no longer stands down.
+  const { text, announcers, everyStatus, stopControls } = await refusedStopText(
+    THREAD_REFUSE_REVOKED,
+    TASK_REFUSE_REVOKED,
+    () => new Response(JSON.stringify({ error: "not_found", message: "not found" }), { status: 404 }),
   );
+
+  assert.match(text, /needs a bookkeeper role/,
+    "the refusal the reader was given for their OWN press stays on screen");
+  assert.match(text, /it is still running/,
+    "…still saying the one thing the door established");
+  assert.doesNotMatch(text, /You no longer have access to this reply/,
+    "a 404 on a read THIS TAB opened is not evidence the reader lost access: it also covers a "
+    + "reply that ended or was reaped, and that copy may never be an existence oracle");
+  assert.doesNotMatch(text, /gone back to reading it/,
+    "…and the attach did not open, so this tab is emphatically not reading it either");
+  assert.doesNotMatch(text, /Reconnecting/,
+    "nor is a refused attach a flaky connection — the stop refusal owns the line");
+  assert.equal(announcers.length, 1,
+    `one press, one announcement; saw ${JSON.stringify(announcers)}`);
+
+  // AND THE WHOLE LADDER, not just the lines this helper's filter matches: the defect was a
+  // SECOND sentence replacing the first, so the count that matters is every live region in the
+  // tree.
+  assert.equal(everyStatus.length, 1,
+    `the ladder stays exclusive; saw ${JSON.stringify(everyStatus)}`);
+  assert.match(everyStatus.at(0) ?? "", /needs a bookkeeper role/,
+    "…and the one that speaks is the reader's own refusal");
+
+  // THE CONTROL THE WHOLE TICKET IS ABOUT. Its presence may not depend on how a background read
+  // this tab opened for itself happened to resolve: the turn is exactly as live as the refusal
+  // says it is.
+  assert.equal(stopControls, 1,
+    "the Stop control is still offered, because nothing has said the turn ended");
 });

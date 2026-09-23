@@ -727,7 +727,12 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
   //     and one `authority_id` json-builder gate for the `depreciation_authority_pending` row
   //     kind. 0260's own postcheck proves the ten pre-existing row kinds survive at their exact
   //     pre-splice marker counts; that recut's proof lives in
-  //     depreciation-authority-pending-rowkind.test.mjs, not here.
+  //     depreciation-authority-pending-rowkind.test.mjs, not here. Then ticket 1012 (0288)
+  //     splices the SAME body the other way for the first time: the `seeding_rows` CTE and its
+  //     union arm are REMOVED, because the prior-GL seeding lane they chased is retired. 0288's
+  //     own postcheck proves the TEN surviving row kinds sit at their exact pre-splice marker
+  //     counts and that the shared column vector did not move; the behavioural proof lives in
+  //     ninth-rowkind-seeding-proposal.test.mjs and seeding-lane-retired.test.mjs.
   //   · clara.list_activity — #840 (0262) projects `successor_work_id`, then #861 (0264) rebuilds
   //     the kind ladder with five new rungs. Both are create-or-replace recuts that 0262/0264's
   //     own tails re-measure; activity-feed.test.mjs carries their behavioural proof.
@@ -752,14 +757,17 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
   // any database rests in — a chain that stopped between them failed, and a sha mismatch here is
   // then the right answer rather than a false red.
   const reviewQueueRecut = await migrationApplied("^0260_");
+  const seedingRetired = await migrationApplied("^0288_");
   const activityRecut = await migrationApplied("^0264_");
   const workListWidened = await migrationApplied("^0267_");
   const workListSig = workListWidened ? "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int,timestamptz,timestamptz)" : "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)";
   const PINS = {
     "clara.list_review_queue(jsonb,jsonb,int)":
-      reviewQueueRecut
-        ? "1641f99f4d295400bd39bd7b2cee3ac4cac2c34e7478078014e7305d99d9b570"
-        : "29deb82d1609441d40a5be6131ffac12dc6b0ee8f1d37645dd9de986ce3eaf40",
+      seedingRetired
+        ? "f4a34c72e567bf825d4376d043ea23cc3d8bcd2d4f0caaee3a5d052bf8a25d69"
+        : reviewQueueRecut
+          ? "1641f99f4d295400bd39bd7b2cee3ac4cac2c34e7478078014e7305d99d9b570"
+          : "29deb82d1609441d40a5be6131ffac12dc6b0ee8f1d37645dd9de986ce3eaf40",
     [workListSig]:
       workListWidened
         ? "dffa917db2180f5a13be48795ea823ef5cece813677d8d6ad6c61cf01726a828"
@@ -778,8 +786,8 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
       "select encode(sha256(convert_to(prosrc, 'UTF8')), 'hex') as sha "
       + `from pg_proc where oid = '${sig}'::regprocedure`);
     assert.equal(r.rows[0].sha, sha,
-      `${sig} DRIFTED — 0231 recuts nothing, and only #974's (0260), #840/#861's (0262/0264) `
-      + "and #880/#905's (0266/0267) own named recuts are tolerated");
+      `${sig} DRIFTED — 0231 recuts nothing, and only #974's (0260), #840/#861's (0262/0264), `
+      + "#880/#905's (0266/0267) and ticket 1012's (0288) own named recuts are tolerated");
   }
   const secdef = await rootQuery(
     "select (select prosecdef from pg_proc where oid = 'clara.list_review_queue(jsonb,jsonb,int)'::regprocedure) as q, "

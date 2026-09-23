@@ -237,7 +237,6 @@
       "lint_finding": "Lint finding",
       "fixed_asset_incomplete": "Fixed asset — particulars incomplete",
       "staff_advance_incomplete": "Staff advance — particulars incomplete",
-      "seeding_proposal": "Seeding proposals awaiting review",
       "work_question": "Clara is waiting on an answer",
       "depreciation_authority_pending": "Depreciation authority awaiting signature",
       "unknown": "Unrecognized item ({kind})"
@@ -266,7 +265,6 @@
       "ask": "Ask Clara about this",
       "askPrefill": "Clara proposed a new client file named \"{name}\": \"{question}\" — what is the proposal based on?"
     },
-    "reviewSeedingProposals": "Review in Reports",
     "loadMore": "Load more",
     "loadingMore": "Loading more…",
     "highStakes": "high stakes",
@@ -883,6 +881,21 @@
         "truncated": "Showing {shown} of {total} entries.",
         "accountsTruncated": "Showing {shown} of {total} accounts, largest first."
       },
+      "cashDrilldown": {
+        "heading": "What book cash is made of",
+        "tableLabel": "Cash accounts behind this balance, with their entries",
+        "colAccount": "Account",
+        "colBalance": "Balance",
+        "colMovement": "Movement this period",
+        "colReason": "Why this is cash",
+        "colEntries": "Entries",
+        "truncated": "Showing {shown} of {total} entries.",
+        "accountsTruncated": "Showing {shown} of {total} cash accounts, in account code order.",
+        "reasonBankRegistry": "Registered bank account",
+        "reasonDeclaredCash": "Declared cash on hand",
+        "reasonDeclaredPettyCash": "Declared petty cash",
+        "reasonGeneric": "Marked as a cash account"
+      },
       "cashSet": {
         "missingTitle": "Nobody has said which accounts count as cash",
         "missingBody": "Book cash cannot be worked out until somebody chooses the cash and bank accounts for this client. This is not a figure of zero.",
@@ -901,7 +914,20 @@
         "publishing": "Publishing…",
         "cancel": "Cancel",
         "refused": "That could not be published",
-        "proposalFailed": "The account list could not be read"
+        "proposalFailed": "The account list could not be read",
+        "editTitle": "Change which accounts count as cash",
+        "editBody": "The current membership is pre-checked, each with its own recorded reason. Choose what changes and state when the new version takes effect — this supersedes the current version, it never edits it.",
+        "editCurrentBasis": "Currently {n} accounts, effective {date} (version {revision}).",
+        "membersLabel": "Members",
+        "membersFailed": "The current membership could not be read",
+        "diffHeading": "What changes",
+        "diffAdded": "Added",
+        "diffRemoved": "Removed",
+        "diffUnchanged": "{n} unchanged",
+        "diffNothing": "Nothing added or removed yet.",
+        "effectiveDateLabel": "New effective date",
+        "save": "Save changes",
+        "saving": "Saving…"
       },
       "denied": {
         "title": "You cannot see this client’s figures",
@@ -1843,7 +1869,29 @@
       "title": "Clara did not record this"
     },
     "candidates": {
-      "label": "Which party do you mean?"
+      "label": "Which party do you mean?",
+      "registration": "Reg. {value}",
+      "tin": "TIN {value}",
+      "matchedOn": {
+        "registration": "Matched the registration number",
+        "tin": "Matched the tax identification number",
+        "name": "Matched the name",
+        "tin_and_name": "Matched the tax identification number and the name"
+      }
+    },
+    "duplicate": {
+      "title": "This looks like something already recorded",
+      "body": "This client already has {count, plural, =1 {a document} other {# documents}} from this counterparty that looks like the one you are about to record. Record it anyway only if it really is a second document.",
+      "signals": {
+        "same_reference": "Same document number",
+        "same_total_and_date": "Same total on the same date",
+        "both": "Same document number, and the same total on the same date"
+      },
+      "entry": "{reference} · {date} · {total}",
+      "noReference": "No document number",
+      "open": "Open what is recorded",
+      "recordAnyway": "Record it anyway",
+      "cancel": "Cancel"
     },
     "conflict": {
       "title": "That draft was already submitted",
@@ -1878,7 +1926,9 @@
     },
     "refusals": {
       "party_ambiguous": "More than one party answers to that name. Say which one.",
+      "party_ambiguous_tin": "More than one party of this client holds that tax identification number. Say which one this document is about.",
       "party_unresolved": "No party of this client answers to that.",
+      "party_identifier_conflict": "The registration number and the tax identification number on this document name two different parties. Say which one it is.",
       "credit_shape_not_admitted": "A credit note is not recorded here. Record it as a credit against the invoice it corrects.",
       "invalid_total": "The stated total does not match the control leg's signed amount.",
       "unbalanced_basis": "The journal does not balance.",
@@ -1895,7 +1945,9 @@
       "invalid_particulars": "Clara could not read the document's particulars as a record.",
       "invalid_currency": "This estate records trade invoices in MYR only.",
       "invalid_tax_facts": "Tax facts are carried as a record, exactly as the document states them.",
-      "invalid_basis": "Clara could not read that submission."
+      "invalid_basis": "Clara could not read that submission.",
+      "nothing_acknowledged": "Clara could not record which earlier document you were shown. Try recording it again.",
+      "unknown_acknowledged_invoice": "Clara could not record which earlier document you were shown. Try recording it again."
     },
     "issues": {
       "party_unresolved": "Pick the counterparty this document names.",
@@ -1941,7 +1993,10 @@
       "outstanding": "Outstanding",
       "receipt": "Receipt",
       "document": "Source document",
-      "admitted": "Admitted — not posted yet"
+      "admitted": "Admitted — not posted yet",
+      "acknowledged": "{who} was warned this looked like {count, plural, =1 {a document} other {# documents}} already recorded, and recorded it anyway.",
+      "acknowledgedEntry": "Shown: {reference} · {date}",
+      "acknowledgedNoReference": "No document number"
     }
   },
   "WorkKnowledge": {
@@ -3104,6 +3159,10 @@
       "notSuperseded": "Not superseded",
       "srcCoverage": "Coverage",
       "coverageFigures": "{lines} lines · {debit} debits · {credit} credits · {unmatched} still unmatched",
+      "srcCitation": "Source citation",
+      "citationPage": "Page {page} of the source document",
+      "citationLaneNone": "This line's intake lane keeps no page or region citation.",
+      "citationNotRecorded": "No source citation was recorded for this line.",
       "candidatesTableLabel": "Match candidates for this line",
       "colPostingDate": "Posted",
       "colMemo": "Entry",
@@ -3156,6 +3215,7 @@
       "outcomeAccountCode": "GL account",
       "outcomeCounterparty": "Counterparty",
       "outcomeSource": "Source file",
+      "outcomeCitation": "Source citation",
       "outcomeOpKey": "Operation key"
     },
     "exceptions": {
@@ -3616,6 +3676,7 @@
       "method": "Method",
       "incompleteNote": "{count} asset(s) have incomplete particulars.",
       "pendingParticulars": "Waiting on depreciation particulars",
+      "policyProvenance": "Particulars from {account} policy v{version}",
       "statuses": {
         "pending": "Pending",
         "active": "Active",
@@ -3630,6 +3691,7 @@
       }
     },
     "adjustments": {
+      "retiredNotice": "This lane is retired. Set up recurring or reversing entries as an accounting plan instead (Client → Plans).",
       "templatesHeading": "Templates",
       "runsHeading": "Runs",
       "emptyTemplates": "No recurring adjustment templates for this client.",
@@ -4264,6 +4326,7 @@
       "boundToNothing": "This basis carries no source document.",
       "headerDocumentRead": "From the bound document (sha {sha}) · {n} line(s) read",
       "headerDocumentUnread": "Bound to a document (sha {sha}) · nothing read yet",
+      "headerRefreshed": "This basis has stood on {readings} readings of that document — the newest, on {at}, replaced {retired} line(s) with {recorded}.",
       "headerKeyed": "Keyed by a person of your firm · {n} line(s)",
       "headerKeyedEmpty": "Keyed basis · nothing keyed yet",
       "readDocumentTrigger": "Read this document",
@@ -4278,6 +4341,18 @@
         "allOrNothing": "Nothing was recorded: one unreadable line forfeits the whole document, because a partial opening basis is worse than none.",
         "unmappedAccounts": "Not in this client’s chart of accounts: {accounts}. Create them on the Accounts tab, then read again.",
         "refusedTitle": "Refused",
+        "rereadTitle": "The document was read again",
+        "rereadBody": "These opening lines came from an earlier reading of this document. Reading it again is refused on purpose — a second reading is not a retry — so bring the lines onto the newest reading instead. Every figure is re-derived by the database, and nothing is approved by this.",
+        "refreshTrigger": "Refresh from the new reading",
+        "refreshing": "Refreshing…",
+        "refreshedTitle": "Refreshed",
+        "refreshedBody": "{n} line(s) were read from the new reading of the bound document, and {retired} line(s) from the reading it left behind were retired.",
+        "noRereadTitle": "Already on the newest reading",
+        "noRereadBody": "These opening lines already come from the reading this document stands on \u2014 somebody, or another tab, refreshed them first. Nothing was changed. Open this basis again to see the lines as they stand.",
+        "staleReadingTitle": "The document has been read again since this page loaded",
+        "staleReadingBody": "The lines could not be brought onto the reading this page knew about, because it is no longer the one the document stands on. Nothing was changed. Open this basis again and refresh from the newest reading.",
+        "mixedReadingTitle": "Those lines came from two readings",
+        "mixedReadingBody": "Every line has to come from one reading of the document, so this was refused before anything moved. Nothing was changed. Open this basis again and refresh once more.",
         "deniedTitle": "Not allowed",
         "deniedBody": "Reading an opening source is restricted to a bookkeeper or above of this firm.",
         "notFoundTitle": "Not found",
@@ -4597,6 +4672,30 @@
       "retireTitle": "Retire this account profile",
       "retireDescription": "This does not free the account for any register row that already carries it — those rows keep the codes they were born with."
     },
+    "policies": {
+      "heading": "Default depreciation policy",
+      "none": "No policy set — acquisitions still ask for particulars.",
+      "setTrigger": "Set default policy",
+      "changeTrigger": "Change policy",
+      "setTitle": "Set the default depreciation policy",
+      "setDescription": "Applied at every acquisition on this account that states no particulars, starting from that acquisition's own posting date. Changing this affects later acquisitions only — an asset already born keeps its own particulars.",
+      "methodLabel": "Method",
+      "methods": {
+        "straight_line": "Straight-line",
+        "reducing_balance": "Reducing balance",
+        "none": "None"
+      },
+      "usefulLifeLabel": "Useful life (months)",
+      "rateBpsLabel": "Annual rate (basis points)",
+      "residualLabel": "Residual value",
+      "reasonLabel": "Reason (optional)",
+      "summarySl": "{life} months",
+      "summaryRb": "{life} months at {rate}%/yr",
+      "versionLabel": "v{version}",
+      "retireTrigger": "Retire policy",
+      "retireTitle": "Retire the default depreciation policy",
+      "retireDescription": "New acquisitions on this account go back to asking for particulars. This does not touch any asset already born from this policy."
+    },
     "tie": {
       "heading": "Register / GL tie-out",
       "subheading": "Whether the fixed-asset register agrees with the general ledger, as of today.",
@@ -4704,7 +4803,16 @@
       "floor": "This authority reaches periods from {from} onward. Anything earlier needs an explicit catch-up run by a bookkeeper.",
       "skippedHeading": "{count} asset(s) will be skipped",
       "skippedClosedHeading": "{count} period(s) were skipped because their financial year is closed",
-      "skippedClosedNote": "A closed period is never run in its own right. Its arrears are charged by the next open period, and each charge row still carries the month it belongs to.",
+      "skippedClosedNote": "A closed period is never run in its own right, and its months are not lost. Before the next open period's run posts them, Clara states what they come to and asks you whether the omission is immaterial — IAS 8 permits folding it into the current period only then; a material one is restated in the year it belongs to. Each charge row still carries the month it belongs to.",
+      "arrearsAmount": "{amount} belongs to financial year {year}.",
+      "arrearsChangedSinceJudged": "You judged {judged} for this year, and it now stands at {amount} — so the run is waiting for you to judge the amount that would actually move.",
+      "arrearsUnanswered": "This has not been answered yet, so the run is waiting for you.",
+      "arrearsFolded": "You judged it immaterial, so it is folded into the current period.",
+      "arrearsRestated": "You judged it material, so it is restated in that year once the year is reopened.",
+      "arrearsNoteLabel": "Why you judged it this way (optional)",
+      "arrearsNotePlaceholder": "Why you judged it this way (optional)",
+      "arrearsFoldAction": "It is immaterial — fold it into this period",
+      "arrearsRestateAction": "It is material — restate it in that year",
       "skip": {
         "incomplete": "waiting on depreciation particulars",
         "not_in_service": "not yet in service",
@@ -4735,38 +4843,6 @@
       "cancel": "Cancel",
       "working": "Working…"
     },
-    "linesEditor": {
-      "lineNo": "#",
-      "account": "Account",
-      "debit": "Debit",
-      "credit": "Credit",
-      "selectAccount": "Select an account…",
-      "removeLine": "Remove line",
-      "presentationSumLabel": "Sum (presentation only)",
-      "notBalanced": "Debits and credits do not balance yet — the DB will refuse an unbalanced entry.",
-      "addLine": "Add line"
-    },
-    "proposeTemplate": {
-      "trigger": "Propose template",
-      "title": "Propose a recurring adjustment template",
-      "description": "An admin must sign this before it can run. Lines are the template's own recipe — every occurrence posts them unchanged.",
-      "nameLabel": "Name",
-      "cadenceLabel": "Cadence",
-      "cadence": {
-        "monthly": "Monthly",
-        "annual": "Annual"
-      },
-      "autoReverseLabel": "Auto-reverse each occurrence at the start of the next period",
-      "startDateLabel": "Start date",
-      "endDateLabel": "End date (optional)",
-      "memoLabel": "Memo template",
-      "memoHint": "The memo every occurrence carries — required, since it is the only description a scheduled run posts with."
-    },
-    "signTemplate": {
-      "trigger": "Sign",
-      "title": "Sign \"{name}\"",
-      "description": "Signing is admin-only. This re-checks the template's dates are still the first/last day of a period under the client's CURRENT fiscal year — a stale window refuses rather than posting on the wrong dates."
-    },
     "retireTemplate": {
       "trigger": "Retire",
       "title": "Retire \"{name}\"",
@@ -4774,7 +4850,7 @@
       "reasonLabel": "Reason"
     },
     "runDue": {
-      "due": "An adjustment run is due for {start} – {end}.",
+      "dueRetired": "A pre-retirement template still has an unposted period ({start} – {end}), and nothing will post it — the recurring-adjustment lane is retired. Retire the template and set up an accounting plan instead (Client → Plans).",
       "nothingDue": "No adjustment run is due right now.",
       "allBlocked": "Every live template's next period is blocked — see the run history below.",
       "clientNotFound": "Client not found.",
@@ -4794,16 +4870,6 @@
       "soloOccurrenceNote": "This run is a solo occurrence, not an auto-reverse pair — correct it from the Journals tab.",
       "wallFallback": "Not correctable right now ({wall}).",
       "unavailable": "Could not load run history — see the error above."
-    },
-    "runNow": {
-      "trigger": "Run now",
-      "title": "Run an adjustment manually",
-      "description": "The period must exactly match the live template's own cadence window, and must have already ended.",
-      "templateLabel": "Template",
-      "selectTemplate": "Select a live template…",
-      "noLiveTemplates": "No live templates yet — sign one above first.",
-      "periodStartLabel": "Period start",
-      "periodEndLabel": "Period end"
     },
     "reversePair": {
       "trigger": "Reverse pair",
@@ -5634,18 +5700,7 @@
         "description": "clara.complete_seeding_batch — records the batch's final tick/decline/refuse counts.",
         "confirm": "Complete batch"
       },
-      "tick": {
-        "trigger": "Tick",
-        "title": "Tick this proposal",
-        "description": "clara.tick_seeding_proposal — accepts the proposal, birthing or binding the counterparty it names.",
-        "confirm": "Tick"
-      },
-      "decline": {
-        "trigger": "Decline",
-        "title": "Decline this proposal",
-        "confirm": "Decline",
-        "reasonPlaceholder": "Reason"
-      }
+      "retiredNotice": "This lane is retired: Clara now learns a client’s counterparties and coding from the source itself, so no proposal can be ticked or declined. Everything below stays readable, and a batch left open can still be cancelled or completed."
     },
     "wiki": {
       "heading": "Wiki pages",
@@ -5729,7 +5784,7 @@
     },
     "vendorBindings": {
       "pageHeading": "Vendor identity bindings",
-      "pageDescription": "Propose, sign and revoke a vendor's identity binding. Signing requires an admin who did not propose it — the person who proposed a binding cannot also sign it; let Clara propose it, or add a second admin.",
+      "pageDescription": "Review history and revoke a vendor's identity binding. Proposing and signing are retired — Clara maintains counterparty identities and aliases from evidence automatically.",
       "notPrerequisiteNotice": "Vendor identity bindings are no longer a prerequisite for processing documents — Clara maintains counterparty identities and aliases from evidence automatically. This register remains for history and for governing existing bindings.",
       "clientPickerLabel": "Client",
       "clientPickerLoading": "Loading clients…",
@@ -5747,9 +5802,6 @@
       },
       "fingerprint": "Vendor name \"{f1}\" · invoice prefix \"{f2}\"",
       "evidenceLine": "{evidence} evidence entr{evidence, plural, one {y} other {ies}} · {resolutions} resolution{resolutions, plural, one {} other {s}} · {divergences} divergence{divergences, plural, one {} other {s}} (30d)",
-      "signTrigger": "Sign",
-      "signTitle": "Sign this vendor identity binding",
-      "signDescription": "Signing makes this binding LIVE — future invoices from this vendor auto-bind to the counterparty it names. Requires an admin who did not propose this binding; the person who proposed it cannot also sign it — let Clara propose it, or add a second admin.",
       "revokeTrigger": "Revoke",
       "revokeTitle": "Revoke this vendor identity binding",
       "revokeDescription": "Revoking ends auto-binding for this vendor immediately. A reason is required.",
@@ -5761,14 +5813,7 @@
       "detailEvidenceCount": "{count, plural, one {# entry} other {# entries}}",
       "detailResolutions": "Resolutions",
       "detailResolutionsCount": "{count, plural, one {# resolution} other {# resolutions}}",
-      "detailFingerprintHash": "Content fingerprint",
-      "proposeTrigger": "Propose binding",
-      "proposeTitle": "Propose a vendor identity binding",
-      "proposeDescription": "The DB derives the binding's own fingerprint from at least three recent approved entries for this vendor — this dialog only names which counterparty to bind.",
-      "counterpartyLabel": "Vendor",
-      "counterpartyPlaceholder": "Select a vendor…",
-      "counterpartyNoneYet": "No eligible vendors for this client yet",
-      "counterpartiesLoading": "Loading vendors…"
+      "detailFingerprintHash": "Content fingerprint"
     },
     "sharing": {
       "sharedBadge": "Shared with firm",
@@ -6505,8 +6550,8 @@
       "catchUpToInvalid": "That is not a calendar date.",
       "catchUpToBeforeFrom": "The end of the window cannot be before its start.",
       "catchUpBeforeAuthority": "This plan's authority starts later than that. A catch-up cannot reach back past it.",
-      "overlapTitle": "A recurring adjustment already moves these accounts",
-      "overlapBody": "The plan was created. A live recurring adjustment template on this client already posts to one or more of the same accounts ({templates}), so check that the two are not both intended to run.",
+      "overlapTitle": "Another plan already moves these accounts",
+      "overlapBody": "The plan was created. Another live accounting plan of this client already posts to one or more of the same accounts ({templates}), so check that the two are not both intended to run.",
       "overlapContinue": "Back to plans",
       "fieldPurpose": "Purpose",
       "purposeFrozen": "A plan's purpose is recorded when it is authorised and does not change with a revision.",
@@ -6544,6 +6589,9 @@
       "issueEffectiveToInvalid": "That is not a calendar date.",
       "issueEffectiveToBeforeFrom": "The authority cannot end before it starts.",
       "issueReversalCollides": "A monthly reversing plan cannot accrue on the 1st: its reversal would land on the next accrual's own day.",
+      "reviseIsCorrectionTitle": "This plan's figures are stated on an accrual",
+      "reviseIsCorrectionBody": "Revising the plan here would move what the ledger posts while the accrual's own record kept the old figures, and the two would then disagree. Correct the accrual instead: that records the new figures on both, and keeps the link between the row it replaces and the row that replaces it.",
+      "reviseIsCorrectionAction": "Correct the accrual",
       "reviseUnavailableTitle": "This plan cannot be revised",
       "reviseUnavailableBody": "An ended plan is final. Create a new plan if this work is needed again.",
       "backToPlan": "Back to the plan"
@@ -6665,7 +6713,7 @@
       "retry": "Try again",
       "draftNotKept": "This browser is not keeping your draft, so a reload will lose it. Everything you type still submits normally.",
       "overlapTitle": "Another schedule already moves one of these accounts",
-      "overlapBody": "The accrual was recorded. A live adjustment template of this client already moves one of these accounts: {templates}. Check that the same cost is not being recorded twice.",
+      "overlapBody": "The accrual was recorded. Another live accounting plan of this client already moves one of these accounts: {templates}. Check that the same cost is not being recorded twice.",
       "overlapContinue": "Go to accruals",
       "deniedTitle": "You cannot record an accrual",
       "deniedBody": "Recording an accrual needs a bookkeeper role in this firm. Ask someone who has one.",
@@ -6693,7 +6741,18 @@
       "issueDayOfMonthRange": "Choose a day between 1 and 28. Use the last day of the month for a month end.",
       "issueDayOfMonthAbsent": "A last-day-of-month schedule carries no day number.",
       "issueReversalCollides": "A monthly accrual on the 1st would have its reversal land on the next accrual's own day. Accrue on the month end, or on a day between 2 and 28.",
-      "issueScheduleYieldsNone": "This schedule never reaches an accrual date inside the authority window, so nothing would ever post. Choose a day that falls inside the service period."
+      "issueScheduleYieldsNone": "This schedule never reaches an accrual date inside the authority window, so nothing would ever post. Choose a day that falls inside the service period.",
+      "correctLink": "Correct this accrual",
+      "correctHeading": "Correct this accrual",
+      "correctBody": "Restate the amount, either account, the service period, the instruction or the memo. The schedule and the authority window do not move — the correction applies from the next due date, and every due date already reached is unchanged.",
+      "correctionFrozenNote": "The purpose, the authority and the schedule do not change here. The service period below must still sit inside the authority window shown above.",
+      "submitCorrect": "Record the correction",
+      "alreadyCorrectedTitle": "This accrual has already been corrected",
+      "alreadyCorrectedBody": "A correction supersedes exactly once. Open the successor to correct it further.",
+      "openSuccessor": "Open the successor",
+      "correctsLabel": "Corrects",
+      "correctedByLabel": "Corrected by",
+      "lineageNote": "A correction supersedes the row it corrects. The superseded row is kept, unchanged apart from this pointer."
     },
     "Prepayments": {
       "heading": "Prepayments",
@@ -6757,6 +6816,8 @@
       "openWork": "Open the work",
       "pausedReason": "Paused: {reason}",
       "endedReason": "Ended: {reason}",
+      "termCorrectedBadge": "Term corrected",
+      "termSupersededBody": "The service period this schedule was derived from has since been corrected on its document. Nothing above has moved — a corrected term needs a new schedule, not a revision of this one.",
       "allocationHeading": "Period-by-period charge",
       "allocationBody": "Derived from the recognition entry and the term the document states, exact to the cent, with the remainder wholly in the final period. It is a preview of what each period posts, not something to edit here.",
       "allocationTableLabel": "Derived amortisation periods",
@@ -6833,8 +6894,8 @@
       "refusalAuthorityUnresolved": "The instruction this schedule cites does not exist for this client. Choose one of this client's own recorded instructions and try again.",
       "refusalOperationInFlight": "The same request is already in flight. Waiting for it rather than asking twice.",
       "refusalPostedAnyway": "The prepayment itself is still posted and still needs a schedule. Your entries are kept — fix what the message names and configure it again.",
-      "overlapTitle": "A recurring adjustment already moves these accounts",
-      "overlapBody": "The schedule was configured. A live recurring adjustment template on this client already posts to one or more of the same accounts ({templates}), so check that the two are not both intended to run.",
+      "overlapTitle": "Another plan already moves these accounts",
+      "overlapBody": "The schedule was configured. Another live accounting plan of this client already posts to one or more of the same accounts ({templates}), so check that the two are not both intended to run.",
       "overlapContinue": "Back to prepayments",
       "endedNoControls": "This schedule has ended. Configure a new one if the remaining periods are still to be charged.",
       "unknown": "The database refused this and gave a reason this page does not recognise. Its own words are shown above."

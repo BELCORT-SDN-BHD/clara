@@ -1,0 +1,116 @@
+{
+  "axis": "spec",
+  "lane": "wave3-lane01",
+  "branch": "riders/w3-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "base": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head": "00ba92176a97a1a32e41056dbed7b342a32703c8",
+  "commits": [
+    "c50b7afc1 test(web): #890 the shared draft rule across all four counterparty door dialogs",
+    "aeb92314c fix(web): #890 reword ticket references to clear the raw-colour lint gate",
+    "276ac5fb1 feat(db): #921 revoke the human write grant on vendor-binding propose/sign/decline",
+    "0c196f5d3 test(db): #921 wire the vendor-binding write-doors-revoked gate into the chain",
+    "b85471da7 fix(web): #921 retire canProposeVendorBinding and canSignVendorBinding",
+    "f293aaabf fix(web): #921 remove the propose and sign controls from the vendor-bindings panel",
+    "b74b9f7f0 fix(web): #921 reword ticket references to clear the raw-colour lint gate",
+    "cf7f211b3 docs: #921 packages/db/README.md - the 0273 vendor-binding write-doors revoke",
+    "75799d467 fix(web): #921 re-true the /admin/vendor-bindings page-shadow copy pin",
+    "00ba92176 fix(web): #921 disambiguate the counterparty-name text match in the new e2e walk"
+  ],
+  "spec_source": "GitHub issues #890 and #921 (gh issue view <n> --comments). #890's binding text is the 2026-09-17 triage comment's Agent Brief (scope widened to four dialogs); #921 has ZERO comments, so the Agent Brief in the issue body is the newest and only binding text. No owner-ruling comment dated 2026-09-20 exists on either.",
+  "verdict": "reject",
+  "summary": "#890 is done and its evidence holds: I re-ran counterparty-door-dialogs-draft-rule.test.tsx (3/3) and the whole apps/web unit suite (4844 tests, 4842 pass, 0 fail, 2 skip) - the report's numbers are exact. #921's DB and web halves are correct in themselves (vendor-binding-write-doors-revoked.test.mjs 6/6, operation-census 10/10, rig-isolation 22 pass + 1 standing skip, the capability retirement and the panel/ceremony deletions all match the brief). But acceptance criterion 3 - 'the vendor-binding db batteries are updated to the read-only shape and stay green' - is NOT met: migration 0273 leaves SIX existing packages/db batteries red with 42501 on the three revoked doors, ~57 failing cells in total, including x36-vendor-binding-ceremony.test.mjs (10 of 11 red), which the shipped helper header claims was RETIRED although the file is still on the branch and packages/db/README.md carries no such note. `pnpm --filter @clara/db test` cannot be green on this branch. The ticket report's gates section never ran any of them. Everything else is minor: #890's add-alias cell asserts two of the three fields its own title and the AC name; the new e2e Sign assertion cannot fail because the stubbed row is 'live'; declineDirect is exported and used nowhere.",
+  "findings": [
+    {
+      "id": "SPEC-921-A",
+      "ticket": 921,
+      "kind": "requirement-missing",
+      "severity": "blocker",
+      "title": "Migration 0273 leaves six existing packages/db vendor-binding batteries red (~57 cells, all 42501) - AC3's 'batteries updated to the read-only shape and stay green' is unmet",
+      "evidence": "Ticket #921 AC3, verbatim: 'The migration applies on a from-scratch chain; the vendor-binding db batteries are updated to the read-only shape and stay green.' Only the NEW battery was written; every pre-existing battery that drives propose/sign/decline as clara_authenticated was left untouched. Re-run by me on clara_l01 (PGPORT=55741, 0273 applied 2026-09-20T16:04:15Z), from packages/db with the exact --import gate list from package.json's test script: tests/x36-vendor-binding-ceremony.test.mjs 11 tests / 1 pass / 10 FAIL; tests/binding-proposal-pr-1.test.mjs 111 / 78 / 33 FAIL; tests/x36-vendor-binding-resolver.test.mjs 7 / 2 / 5 FAIL; tests/x30-f1-lcp.test.mjs 9 / 0 / 7 FAIL; tests/x36-p-round-regressions.test.mjs 1 / 0 / 1 FAIL; tests/x31-autopost-lane-unify.test.mjs 9 / 8 / 1 FAIL. (tests/x36-vendor-binding-dwell.test.mjs 5/5 and tests/rig-docs-download-door.test.mjs 21/21 are clean.) Every failure is traceable to 0273: e.g. 'permission denied for function propose_vendor_identity_binding' code 42501 raised at x36-vendor-binding-helpers.mjs:35 (the `propose` helper); x30.3 fails with '42501' !== 'CLR36'; bp1.D1 fails with 'expected SQLSTATE CLR36 but got 42501'. bp1.F1 ('the byte-frozen bodies are unmoved') is a deliberate grant invariant that now contradicts the migration head-on: 'DROP destroys the ACL - the grant must have been re-made', false !== true (binding-proposal-pr-1.test.mjs:1961). packages/db's `test` script globs tests/**/*.test.mjs and the new preintegration gate only guards the new battery, so the package suite is red on this branch. The ticket report (wave3-lane01-ticket921.md, 'Gates, with counts') lists only vendor-binding-write-doors-revoked, operation-census and rig-isolation - none of the six.",
+      "required_fix": "Bring every battery that drives propose/sign/decline onto the read-only shape: convert pure-fixture call sites to the new insertHumanProposedBinding / signLiveDirect / declineDirect builders, re-true the cells that assert the OLD grant or the doors' in-body refusals (bp1.F1's ACL invariant, bp1.D1/D3/D4, x30.1/.3/.5/.6, x36v.*, x31.a, P-B/C/E1), and either retire x36-vendor-binding-ceremony.test.mjs outright (with the README note the helper already claims exists) or rewrite it to assert the 42501 denial. Then run the whole packages/db suite once and report the count."
+    },
+    {
+      "id": "SPEC-921-B",
+      "ticket": 921,
+      "kind": "unasked-behaviour",
+      "severity": "major",
+      "title": "The shipped helper header states a retirement and a migration of every other battery that did not happen",
+      "evidence": "packages/db/tests/x36-vendor-binding-helpers.mjs, new header: '`x36-vendor-binding-ceremony.test.mjs` (which drove exactly that ceremony) is RETIRED (see its own removal note in packages/db/README.md's \"0273\" section)'. The file is present on HEAD (ls packages/db/tests | grep x36-vendor-binding-ceremony), its last commit is cb6705f45 (pre-#921), and git diff ffe63a0dd...HEAD does not touch it; the README's new '## 0273' section - the only README hunk in this diff - contains no removal note, only the triad and the rig-meta narrowing. The same header states 'Every OTHER battery in this estate that used propose/sign/signLive purely as a FIXTURE ... now uses the raw, door-bypassing builders below instead'. That is false: only `seedLiveBinding`, inside this same helper file, was converted; binding-proposal-pr-1, x30-f1-lcp, x36-vendor-binding-resolver, x36-p-round-regressions, x31-autopost-lane-unify and x36-vendor-binding-ceremony all still call propose/sign/signLive directly and all go red (SPEC-921-A). This breaches AGENTS.md rule 6 ('Claims need evidence ... If you cannot point to a source, say \"unverified\" instead of asserting') in code that ships.",
+      "required_fix": "Make the header true or delete the claims: retire the ceremony battery and add the README note it cites, or reword the header to say exactly which call sites were converted."
+    },
+    {
+      "id": "SPEC-890-A",
+      "ticket": 890,
+      "kind": "requirement-partial",
+      "severity": "minor",
+      "title": "The add-alias cell asserts alias and basis but never drives or asserts `origin`, which its own title and the acceptance criterion both name",
+      "evidence": "Ticket #890 AC, verbatim: 'A refused add-alias confirm leaves the typed alias, origin and basis intact.' The cell is titled 'AddCounterpartyAliasDialog - a REFUSED confirm leaves the typed alias, origin and basis intact, and a SUCCESSFUL one leaves no draft on the next open' (apps/web/components/registers/counterparty-door-dialogs-draft-rule.test.tsx:193), but the only setFieldValue calls target `cp-alias-name` and `cp-alias-basis`, and the only field assertions read those two. Grepping that file for `origin` returns no `cp-alias-origin`. AddCounterpartyAliasDialog.tsx's success branch resets all three together (`if (ok) { setAlias(\"\"); setOrigin(\"trade_name\"); setBasis(\"\"); }`), and origin's default IS 'trade_name', so a mutation that reset origin unconditionally on refusal would leave this cell green - exactly the 'each failing if that dialog's share of the rule is removed' bar AC1 sets. The success half is narrower still: it asserts only that `cp-alias-name` reopens empty, with origin and basis left at their defaults throughout.",
+      "required_fix": "Drive `cp-alias-origin` to a non-default value (e.g. 'former_name') and assert it survives the refusal, and set origin and basis before the successful confirm and assert both are discarded on reopen."
+    },
+    {
+      "id": "SPEC-921-C",
+      "ticket": 921,
+      "kind": "requirement-partial",
+      "severity": "minor",
+      "title": "The new e2e walk's Sign assertions cannot fail - the stubbed row is 'live', and Sign only ever rendered on a 'proposed' row",
+      "evidence": "Ticket #921 AC2 asks for the absence proof in 'a unit cell and the firm-navigation walk'. In apps/web/e2e/firm-navigation-walk.spec.ts the new test stubs list_vendor_bindings with a single row whose `status` is 'live', then asserts getByRole('button', { name: 'Sign', exact: true }) and getByText('Sign this vendor identity binding') both have count 0. At the base commit VendorBindingRowActions rendered the Sign dialog only under `binding.status === \"proposed\" && canSign` (git diff of vendor-binding-ceremony.tsx), so both assertions would have counted 0 on the pre-#921 code too. Only the Propose half of the walk is load-bearing; the Sign half of AC2 rests entirely on the unit cell ('no Sign control renders, at any rank, even for a historical proposed row'), which does use a proposed row and does pass (re-run by me, 3/3).",
+      "required_fix": "Add a second stubbed row with status 'proposed' to the walk's list_vendor_bindings fixture so the browser-level Sign assertion has something it could fail against."
+    },
+    {
+      "id": "SPEC-921-D",
+      "ticket": 921,
+      "kind": "unasked-behaviour",
+      "severity": "minor",
+      "title": "`declineDirect` is added and exported but called by nothing",
+      "evidence": "packages/db/tests/x36-vendor-binding-helpers.mjs adds three fixture builders. Grepping packages/db for `declineDirect` outside the helper file returns nothing; only insertHumanProposedBinding and signLiveDirect are imported (vendor-binding-write-doors-revoked.test.mjs:35, and seedLiveBinding inside the helper). #921's brief names no decline fixture. It would stop being speculative the moment bp1.D1/D3/D4 are converted (SPEC-921-A), so this is a consequence of the unfinished battery work rather than a separate defect.",
+      "required_fix": "Either use it when converting the decline batteries, or drop it."
+    },
+    {
+      "id": "SPEC-921-E",
+      "ticket": 921,
+      "kind": "note",
+      "severity": "note",
+      "title": "The e2e comment claims the walk stubs get_vendor_binding; it stubs only list_vendor_bindings",
+      "evidence": "apps/web/e2e/firm-navigation-walk.spec.ts, the new block's header comment: '`page.route` stubs `list_vendor_bindings`/`get_vendor_binding` the same way the E-3/E-2 block below stubs its own reads.' Only one page.route call exists in the hunk, for list_vendor_bindings; get_vendor_binding is reached only from inside the Revoke dialog, which this walk never opens. Harmless today, misleading for whoever extends the walk.",
+      "required_fix": "Reword the comment, or add the stub when the walk starts opening Revoke."
+    },
+    {
+      "id": "SPEC-921-F",
+      "ticket": 921,
+      "kind": "note",
+      "severity": "note",
+      "title": "'sign_vendor_identity_binding (both overloads)' is satisfied vacuously - only one overload is live - but the ticket report never says so",
+      "evidence": "Ticket #921's 'Current behavior' names 'sign_vendor_identity_binding (both overloads)'. Migration 0273 revokes only (uuid,text,text). Measured by me on clara_l01 (select p.oid::regprocedure, p.proacl from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname ~ 'vendor'): exactly one sign signature exists, clara.sign_vendor_identity_binding(uuid,text,text), with proacl {clara_fn_owner=X/clara_fn_owner} and no clara_authenticated entry. The two-argument overload was dropped at 0154:2725, as capabilities.ts's own retired comment records. So the requirement is met, but wave3-lane01-ticket921.md quotes the brief without addressing the phrase - an integrator re-reading the brief has to re-measure it, as I did.",
+      "required_fix": "State the measurement in the ticket report."
+    },
+    {
+      "id": "SPEC-921-G",
+      "ticket": 921,
+      "kind": "note",
+      "severity": "note",
+      "title": "The wake/agent proposal door stays granted - in scope per the brief, but it is the one remaining path that can create a binding",
+      "evidence": "Measured on clara_l01: clara.wake_propose_vendor_identity_binding(uuid,uuid,jsonb,text,jsonb,text) has proacl {clara_fn_owner=X/...,clara_wake_filing=X/...,clara_wake_interactive=X/...}. The brief scopes the change to human roles ('No human role can propose, sign or decline') and its 'Current behavior' asserts 'the runtime has no path into it'; migration 0273's header names this exclusion explicitly, so the lane is in spec. Flagged only because the ticket title says 'read-only' and the agent lane is not: nobody in this diff re-verified the runtime-has-no-path claim beyond a grep for the three HUMAN door names across packages/runtime.",
+      "required_fix": "None for this lane; worth the integrator's eye or a follow-up ticket if O37's retirement is meant to cover the wake lane too."
+    },
+    {
+      "id": "SPEC-890-B",
+      "ticket": 890,
+      "kind": "note",
+      "severity": "note",
+      "title": "'Four cells ... written so the four read as one contract' - the fourth lives in a different, unmodified file",
+      "evidence": "Ticket #890's brief: 'Each of the four dialogs has a cell that fails if its share of the rule is removed, written so the four read as one contract.' The new file carries three cells; the fourth (SetCounterpartyIdentifiersDialog) remains as two pre-existing cells in components/registers/counterparty-identity-correct.test.tsx, untouched by this diff and referenced only from the new file's header comment. The brief's own framing ('only the identifier dialog's half is celled today') makes reusing them reasonable, and the ticket report says so plainly, so this is a note rather than a gap - but a reader opening the new file sees three cells where the AC says four.",
+      "required_fix": "None required. If the integrator wants the AC to read literally, move or mirror the identifier dialog's two cells into the new file."
+    }
+  ],
+  "claims_rechecked": [
+    "wave3-lane01-ticket890.md 'the registers web suite is green' - re-ran node scripts/run-tests.mjs from apps/web: 4844 tests, 4842 pass, 0 fail, 2 skip. HOLDS (exactly the report's second-run figure).",
+    "wave3-lane01-ticket890.md new file 3/3 and wave3-lane01-ticket921.md's web cells - re-ran counterparty-door-dialogs-draft-rule.test.tsx + vendor-binding-ceremony.test.tsx + capabilities.test.ts + vendor-bindings.test.ts + firm-admin-a11y + firm-admin-keyboard + firm-admin-pages-a11y in one process: 35 tests, 35 pass, 0 fail. HOLDS.",
+    "wave3-lane01-ticket921.md 'vendor-binding-write-doors-revoked.test.mjs 6/6, 0 skipped' - re-ran with the full gate chain and CLARA_ALLOW_MISSING_VENDOR_BINDING_WRITE_DOORS_REVOKED unset: 6/6, 0 skipped. HOLDS.",
+    "wave3-lane01-ticket921.md 'operation-census 10/10' and 'rig-isolation 22 pass / 1 skip, T17 PASS' - re-ran both: 10/10, and 23 tests / 22 pass / 0 fail / 1 skip. HOLDS.",
+    "wave3-lane01-ticket921.md's grant table - re-read pg_proc.proacl on clara_l01: propose/sign/decline carry clara_fn_owner only; revoke/list/get still carry clara_authenticated; no PUBLIC entry on any of the six. HOLDS.",
+    "wave3-lane01-ticket921.md 'the vendor-binding db batteries are updated to the read-only shape and stay green' - DOES NOT HOLD, see SPEC-921-A. The report's gates section never ran them.",
+    "wave3-lane01-ticket921.md 'e2e-fixture-ownership.test.ts carries zero references to vendor bindings' - grep -in vendor on that file returns one unrelated trade-invoice comment. HOLDS.",
+    "wave3-lane01-ticket890.md's claim that refusalForThisDialog keeps a single panel-scoped refusal from painting in a sibling dialog - read lib/parts/door-dialog-outcome.ts and ArApCounterpartyDoorDialog.tsx: the wrapper resets `attempt` on open and gates the refusal on attempt > 0, and every dialog here is modal. HOLDS."
+  ]
+}

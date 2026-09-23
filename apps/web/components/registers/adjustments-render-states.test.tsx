@@ -143,3 +143,58 @@ test("F4: after list_adjustment_runs fails, Run History and Pair-Reversal Ledger
     },
   );
 });
+
+// [#927/#928, riders wave 3 fix round — ADV-L05-05] THE TAB MAY NOT ANNOUNCE AN ACT NOBODY CAN
+// TAKE. `clara.adjustment_run_due` still answers `due: true` for a client that carries a live
+// pre-retirement template, and it is right to: the period really is unposted. But #927 closed
+// `run_adjustment_manual` and #928 deleted the daily sweep, so there is no mechanism left that
+// could post it. The old copy ("An adjustment run is due for …") is an invitation to an act the
+// product can no longer perform — a dead end for exactly the firm D6 exists to protect.
+test("ticket 927: a due period on the retired tab is reported as a dead end with its successor, never as an adjustment run that is due", async () => {
+  await withMockedEnv(
+    (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/rpc/list_adjustment_runs")) return jsonResponse({ runs: [], pair_reversals: [] });
+      if (u.includes("/rpc/adjustment_run_due")) {
+        return jsonResponse({
+          due: true, template_id: "tpl1", period_start: "2026-06-01", period_end: "2026-06-30", blocked: [],
+        });
+      }
+      if (u.includes("/rest/v1/adjustment_templates?")) return jsonResponse(TEMPLATES);
+      if (u.includes("/rest/v1/adjustment_runs?")) return jsonResponse([]);
+      if (u.includes("/rest/v1/coa_accounts?")) return jsonResponse([]);
+      if (u.includes("/rest/v1/adjustment_pair_reversals?")) return jsonResponse([]);
+      throw new Error(`unexpected fetch: ${u}`);
+    }) as typeof fetch,
+    async () => {
+      const h = await renderComponent(App());
+      try {
+        for (let i = 0; i < 8; i++) await h.settle();
+        const text = h.text();
+        assert.doesNotMatch(
+          text,
+          /An adjustment run is due/,
+          "the retired tab still tells the firm a run is DUE — after tickets 927 and 928 no act anywhere can satisfy it",
+        );
+        assert.match(
+          text,
+          /2026-06-01/,
+          "the period is still named — the firm is entitled to know which period is unposted",
+        );
+        assert.match(
+          text,
+          /nothing will post it/,
+          "the banner must say the period will never be posted, in words, not by omission",
+        );
+        assert.match(
+          text,
+          /Client → Plans/,
+          "…and name the successor the firm is meant to use instead",
+        );
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});

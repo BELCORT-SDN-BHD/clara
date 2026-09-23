@@ -1,0 +1,98 @@
+{
+  "lens": "adversarial",
+  "wave": 3,
+  "lane": "02",
+  "branch": "riders/w3-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head": "3967ba183bd356e687cc4c863df60c91f64d31ec",
+  "database": "127.0.0.1:55742/clara_l02",
+  "tickets": [982, 1007],
+  "verdict": "accept-with-fixes",
+  "summary": "Seven findings (1 blocker, 2 major, 1 minor, 3 notes). One blocker on #1007: the acknowledgement read joins a Work to the ack table on the intent key alone and takes the newest row, while the writer deliberately appends a second row for a different payload and the route writes the ack BEFORE an admission that can refuse -- driven on clara_l02, a Work that recorded 106000 sen reads back an acknowledgement for 999900 sen naming its OWN invoice as the earlier document the preparer was warned about. Two majors: the duplicate probe is blind across a counterparty merge (it canonicalises the submitted party but compares the stored, un-canonicalised counterparty_id, so the same bill number warns about nothing and is recorded twice), and #982's TIN arm turns a previously-resolving name submission into party_ambiguous whose candidate list names two parties the document never mentions and omits the one it does -- live on the shipped chat entrance, which already accepts counterparty.tin. One minor and three notes. What HELD under attack: every tenant wall and rank floor on the four new doors, no existence oracle (byte-equal CLR11 for an unknown uuid and another firm's client), true two-connection idempotency on the ack writer, the ack table's grant/RLS posture mirroring clara.trade_invoices exactly, _trade_invoice_actor_firm being arm-for-arm identical to the live admission preamble, uq_trade_invoice_status ruling out a duplicated match row, and 46/46 db cells green.",
+  "findings": [
+    {
+      "id": "ADV-1007-1",
+      "ticket": 1007,
+      "severity": "blocker",
+      "kind": "correctness",
+      "title": "get_trade_invoice_duplicate_ack can answer for an admitted Work with an acknowledgement about particulars that Work never recorded, naming the Work's own invoice as the duplicate",
+      "evidence": "clara.get_trade_invoice_duplicate_ack (0275 section 9) joins clara.accounting_work to clara.trade_invoice_duplicate_acks on (firm_id, client_id, intent_key) ONLY, then 'order by a.acknowledged_at desc, a.id desc limit 1'. clara.record_trade_invoice_duplicate_ack is idempotent on (firm, client, intent_key, ack_digest), so a different payload under the same intent key APPENDS a second row by design; and workRoutes.ts:1434-1455 writes the acknowledgement BEFORE clara.admit_trade_invoice_work, so an ack whose admission is then refused still lands. DRIVEN on clara_l02 through the lane's own doors (scratchpad adv/a.mjs): intent key K -> ack A1 (total 106000, shown = the real earlier bill 79f19b53) -> admit -> Work 3267d70b / invoice a8f5e09d, and get_trade_invoice_duplicate_ack(3267d70b) correctly answered A1 {total 106000, shown [79f19b53]}. Then the SAME intent key with a different total: ack A2 succeeded {ack_id e71086a3, replayed false}, admit refused CLR10 intent_payload_conflict -- and get_trade_invoice_duplicate_ack(3267d70b) now answers A2: {total_cents 999900, shown ['a8f5e09d-371b-453a-b4ae-0363d73c33ab']}, i.e. a figure the Work never carried and the Work's OWN invoice as the earlier document. clara.get_trade_invoice(3267d70b) still reports total_cents 106000. Two ack rows under one intent key (count = 2). Reachable from the browser: apps/web/components/accounting/trade-invoice-form.tsx mints intentKey once per draft (line 196) and remints it only on a scope change or Discard (lines 208-211, 857); after 'accepted' the fields stay rendered and the submit button re-enables (line 459 banner, line 848 'disabled={busy}'), so edit-the-total-and-submit-again reaches exactly this sequence, and the probe will warn (the just-recorded invoice matches) so the person presses 'Record it anyway'. The same intent-key-only join also lets a non-trade-invoice Work sharing a key read a trade-invoice acknowledgement. This defeats AC5 ('a reviewer can tell a knowing second recording from an accident') in the only direction that matters: the reviewer is shown a knowing acknowledgement of the wrong document.",
+      "required_fix": "Bind the acknowledgement a reviewer reads to what the Work actually recorded, not to the intent key alone. Either (a) have clara.get_trade_invoice_duplicate_ack select the ack whose ack_digest matches a digest recomputed from the Work's own recorded trade_invoices row, or (b) return the OLDEST ack under the key (the one the admission rode) instead of the newest, or (c) refuse a second acknowledgement under an intent key that already carries an admitted trade-invoice Work with different particulars. Add a cell that admits under a key, then acknowledges again under the same key with different figures, and asserts the read still answers the FIRST acknowledgement and never names the Work's own invoice."
+    },
+    {
+      "id": "ADV-1007-2",
+      "ticket": 1007,
+      "severity": "major",
+      "kind": "correctness",
+      "title": "The duplicate probe is blind across a counterparty merge: it canonicalises the submitted party but matches on the stored, un-canonicalised counterparty_id, so a merged vendor's bills stop warning and record twice",
+      "evidence": "clara._trade_invoice_resolve_party arm (a) resolves a named counterparty id through clara._canonical_counterparty (0149's rule, carried over verbatim by 0274), so the probe always asks about the SURVIVOR. clara._trade_invoice_duplicate_matches (0275 section 2) then filters 'ti.counterparty_id = p_counterparty' against the id stored at recording time, and clara.merge_counterparties (0011:1886) only sets merged_into / retired_at -- it never rewrites clara.trade_invoices.counterparty_id. DRIVEN on clara_l02 (scratchpad adv/b.mjs): bill ADVB-xxxx recorded against absorbed party 142060d9; probe naming that party BEFORE the merge -> match_count 1. After clara.merge_counterparties(absorbed 142060d9 -> survivor e54e8aa3): probe naming the survivor -> match_count 0; probe naming the absorbed id -> counterparty_id resolves to the survivor e54e8aa3 and match_count 0; the stored invoice still carries 142060d9. The second recording of the same bill number then ADMITTED with no warning at all (invoice 6b447874), which is precisely the doubled payable #1007 exists to prevent. The probe is internally inconsistent: it canonicalises one side of the comparison and not the other. Merging duplicate vendor records is an ordinary bookkeeping act with a shipped door, and no cell in tests/trade-invoice-duplicate-probe.test.mjs covers it.",
+      "required_fix": "Make the matcher compare canonical identities on both sides -- e.g. match 'clara._canonical_counterparty(p_client, ti.counterparty_id) = p_counterparty', or widen the filter to the survivor plus every counterparty whose merged_into chain reaches it (ix_counterparties_merged_into already indexes that). Add a cell: record a bill against a party, merge it into a survivor, probe naming the survivor, assert the earlier bill is still reported."
+    },
+    {
+      "id": "ADV-982-1",
+      "ticket": 982,
+      "severity": "major",
+      "kind": "regression",
+      "title": "A shared TIN now refuses a submission whose name resolved uniquely before 0274, and the party_ambiguous candidate list offers two parties the document never names while omitting the one it does",
+      "evidence": "0274's arm (b2) counts TIN matches before the name tier is ever consulted, and 'if v_tin_hits > 1' raises party_ambiguous with candidates built ONLY from the TIN match -- the registration arm can never do this because uq_counterparties_client_registration makes it at most one live row, and the migration's own comment says 'Nothing constrains a TIN to one party'. DRIVEN on clara_l02 (scratchpad adv/e.mjs E3, adv/f.mjs F2): client with vendor 'Gamma Works ...' (no TIN) plus 'Delta One ...' and 'Delta Two ...' both holding TIN C...; a supplier bill naming counterparty {name: 'Gamma Works ...', tin: 'C...'} is now refused CLR10 party_ambiguous with candidates ['Delta One 2f78482d','Delta Two 2d67383e'] and name_party_offered = false. The same submission with the tin omitted resolves to Gamma Works (adv/e.mjs E2 arm). This is live on a SHIPPED entrance, not a future one: packages/runtime/lib/trade-invoice-basis.ts:94-101 and :341-344 show the frozen start_trade_invoice_work tool already accepts counterparty.tin, registration_no and name together and passes them straight through. No cell in tests/trade-invoice-party-tin.test.mjs drives a submission carrying both a name and a TIN -- the seven p982 cells are id-only, tin-only, tin+registration, and kind scoping.",
+      "required_fix": "Decide and encode what a name-plus-TIN submission means. Either (a) let the TIN arm fall through to the name tier when v_tin_hits > 1 and a name was also submitted (a shared TIN is then not the identifier that answers), or (b) keep the refusal but carry the name-matched candidate in the list and say which identifier reached each candidate (the detail already has a matched_on key for exactly this). Either way add a cell that submits a name AND a TIN, for both the shared-TIN case and the one-match case, and pins the outcome."
+    },
+    {
+      "id": "ADV-1007-3",
+      "ticket": 1007,
+      "severity": "minor",
+      "kind": "consistency",
+      "title": "The human probe has no client_inactive arm while its runtime twin does, so the form and the chat lane give different answers on an archived client",
+      "evidence": "clara.probe_trade_invoice_duplicates (0275 section 4) checks only _human_ctx(bookkeeper) plus 'client is in my firm'; clara.probe_trade_invoice_duplicates_for goes through clara._trade_invoice_actor_firm, which carries the admission door's client_inactive arm. DRIVEN on clara_l02 (scratchpad adv/c.mjs C3): with clara.clients.status = 'archived', the human probe ANSWERED normally (match_count 1, full match payload) while the twin raised CLR10 client_inactive. The file's own header claims the twin 'carries clara.admit_trade_invoice_work's OWN authority preamble, arm for arm and token for token, so the two can never disagree', and section 5's comment says 'One copy, so the three doors can never disagree about who may ask'. Not a leak -- the bookkeeper's own firm owns the client -- but the form will warn about a recording the admission then refuses, and the two entrances disagree on the same question.",
+      "required_fix": "Either give clara.probe_trade_invoice_duplicates the same client_inactive arm (so the form's answer matches the recording step it precedes), or state in the header and the report that the human probe is deliberately one arm shorter and why, and drop the 'can never disagree' claim. Pin whichever is chosen with a cell."
+    },
+    {
+      "id": "ADV-1007-4",
+      "ticket": 1007,
+      "severity": "note",
+      "kind": "robustness",
+      "title": "The acknowledgement writer leaks untyped 23514 / 22007 where the admission door types the same shapes invalid_total and invalid_due_date",
+      "evidence": "DRIVEN on clara_l02 (scratchpad adv/c.mjs C4): clara.record_trade_invoice_duplicate_ack with total_cents 0 or -100 fails '23514 new row for relation trade_invoice_duplicate_acks violates check constraint trade_invoice_duplicate_acks_total_cents_check'; with document_date 'not-a-date' it fails '22007 invalid input syntax for type date'. The admission door answers the same payloads CLR10 invalid_total {field total_cents, constraint integer}, and the writer restates every OTHER guard by name (invalid_intent_key, invalid_particulars, invalid_kind, nothing_acknowledged, unknown_acknowledged_invoice). Not reachable through POST /api/work/trade-invoice today: toDbTradeInvoice (workRoutes.ts:703, :744-746) rejects a non-ISO date, a non-integer and a non-positive total before the ack call, and the probe's own fractional-total rounding (105999.6 -> 106000, adv/c.mjs C4) is caught there too. It matters because this writer is the door the successor contract hands the chat lane, and because the route calls it FIRST, so an untyped raise here would surface as a 500 in place of the door's own refusal.",
+      "required_fix": "Restate the two guards inside clara.record_trade_invoice_duplicate_ack with the lane's own tokens (CLR10 invalid_total for a non-positive or non-integer total, CLR10 invalid_due_date for an unparseable document_date) before the insert, so the check constraint is a belt rather than the message a caller reads."
+    },
+    {
+      "id": "ADV-982-2",
+      "ticket": 982,
+      "severity": "note",
+      "kind": "behaviour-change",
+      "title": "A TIN now silently outranks a uniquely-resolving name and re-points the bill to another vendor -- consistent with the existing registration tier, but the conflict refusal only covers registration vs TIN",
+      "evidence": "DRIVEN on clara_l02 (scratchpad adv/e.mjs E1): a supplier bill naming {name: 'Beta Trading ...', tin: 'C...'} where the name resolves uniquely to Beta and the TIN belongs to Alpha is ADMITTED against ALPHA, with no refusal; the same submission without the tin resolves to Beta (E2). 0274's conflict arm (b3) fires only when v_reg_hit is true, so name-vs-TIN disagreement is never a conflict. CALIBRATED rather than over-claimed: adv/f.mjs F1 shows 0225 ALREADY does this for a registration number -- a name that uniquely resolves to Beta plus a registration number belonging to Alpha has always admitted against Alpha -- so this is the estate's existing identifier-over-name tier law extended to a new key, exactly as the owner's ruling ('at the same tier as the normalised registration number') asks. Recorded because the same ruling says 'Clara never prefers an identifier silently', and that principle is enforced only between the two identifiers and not between an identifier and the name printed beside it, and because the bill lands on the wrong vendor's payable sub-ledger.",
+      "required_fix": "No code change required by the ticket as written. Record the behaviour explicitly in the ticket report and in packages/db/README.md's 0274 section (a name is never a conflict partner; a TIN wins over it exactly as a registration number always has), and file a follow-up if the owner wants name-vs-identifier disagreement to stop too."
+    },
+    {
+      "id": "ADV-1007-5",
+      "ticket": 1007,
+      "severity": "note",
+      "kind": "nondeterminism",
+      "title": "Two acknowledgements under one intent key can share acknowledged_at to the microsecond, so the reviewer's read tie-breaks on a random uuid",
+      "evidence": "DRIVEN on clara_l02 (scratchpad adv/d.mjs D2): two real connections writing clara.record_trade_invoice_duplicate_ack under one intent key with different totals produced two rows whose acknowledged_at were byte-equal ('2026-09-23T07:15:06.680Z' for both), so clara.get_trade_invoice_duplicate_ack's 'order by a.acknowledged_at desc, a.id desc' falls through to a gen_random_uuid() comparison. The companion case is clean: the same digest from two real connections converges on ONE row with replayed true on the loser (adv/d.mjs D1, count = 1). Same root cause as ADV-1007-1; listed separately because it makes the wrong-acknowledgement outcome nondeterministic rather than merely last-writer-wins.",
+      "required_fix": "Fixed by ADV-1007-1's change. If the intent-key join is kept for any reason, give the read a deterministic total order that does not depend on a random primary key."
+    }
+  ],
+  "held_under_attack": [
+    "Tenant walls: clara.probe_trade_invoice_duplicates refuses CLR11 client_not_found with a BYTE-EQUAL message for another firm's client and for an unknown uuid (no existence oracle); the runtime twin with an author of another firm gives the same CLR11; a viewer author gives CLR04 insufficient_role (adv/c.mjs C1, C2).",
+    "Role walls: the actor-explicit twin raises 42501 for clara_authenticated and clara_agent_ro; the human probe is refused to a viewer with CLR04 (adv/c.mjs C1, C2).",
+    "The acknowledgement writer refuses another client's invoice id with CLR10 unknown_acknowledged_invoice, naming only ids the caller supplied (adv/c.mjs C4).",
+    "Idempotency under a TRUE two-connection race: same key, same digest -> one row, replayed true on the loser (adv/d.mjs D1).",
+    "clara.trade_invoice_duplicate_acks' grant and RLS posture is identical to clara.trade_invoices': SELECT to clara_authenticated only, policy firm_id = clara.jwt_firm(), RLS enabled AND forced, append-only and no-truncate belts, no DML to any application role (read from the catalog).",
+    "clara._trade_invoice_actor_firm is arm-for-arm and token-for-token the live clara.admit_trade_invoice_work step 2 (compared against the live prosrc, not against the file).",
+    "uq_trade_invoice_status is unique on (invoice_id, state), so the matcher's left join on state = 'posted' cannot duplicate a match row.",
+    "Adding 'expired' to the terminal-without-posting filter cannot hide a posted bill: 0178's receipt-aware terminal arm lands a cancelled/failed/expired settle over a Work holding a committed receipt as 'completed'.",
+    "0274's TIN arm correctly excludes merged and retired parties (adv/e.mjs E6 -> party_unresolved) and normalises case and punctuation through the estate's single identifier normalisation (adv/e.mjs E5); identifiers that agree resolve unchanged (E4).",
+    "0274's index is a plain create index, which is this estate's practice (0 of 234 index statements use CONCURRENTLY); the FK targets counterparties_id_firm_id_client_id_key and clients(id, firm_id), both present.",
+    "The full db battery re-run on clara_l02 with the 172-flag gate chain: trade-invoice-duplicate-probe + trade-invoice-party-tin + trade-invoice = 46 pass, 0 fail, 0 skip."
+  ],
+  "commands_run": [
+    "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD --stat  (in C:\\Users\\zhant\\Desktop\\clara-wt\\636)",
+    "git log ffe63a0dd084e99b84c1368119845be273c421ce..HEAD --oneline",
+    "gh issue view 1007 --repo BELCORT-SDN-BHD/clara ; gh issue view 982 --repo BELCORT-SDN-BHD/clara --comments",
+    "node --test --test-concurrency=1 $GATES tests/trade-invoice-duplicate-probe.test.mjs tests/trade-invoice-party-tin.test.mjs tests/trade-invoice.test.mjs   (46 pass / 0 fail / 0 skip)",
+    "scratchpad adv/a.mjs adv/b.mjs adv/c.mjs adv/d.mjs adv/e.mjs adv/f.mjs -- driven against 127.0.0.1:55742/clara_l02 through the lane's own fixtures and doors"
+  ]
+}

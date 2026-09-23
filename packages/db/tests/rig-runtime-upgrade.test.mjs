@@ -12,9 +12,13 @@
 // (#845: this file's `reset()` now routes through `rig-reset-guard.mjs`'s `guardedReset`, which
 // refuses any database name that doesn't look disposable — ci/test/tmp/temp/scratch/ephemeral by
 // whole name or final `.`/`_`/`-` segment. This file previously documented no PGDATABASE recipe
-// at all and has no CI leg — see packages/db/tests/README.md's #845 section — so it had never
-// been proven to run its destructive path anywhere; run it against a throwaway database like the
-// one named above, never a shared rig.)
+// at all and no CI leg, so its destructive path had never been proven to run anywhere.
+//
+// #1023 GAVE IT A CI LEG: the `Slice-4 runtime upgrade/cutover drill (isolated DB)` step in
+// `.github/actions/closed-wave-upgrade-drills/action.yml` creates `clara_runtime_upgrade_ci` and
+// runs the recipe above verbatim, in the `closed-wave-drills` job reached on a schedule or a
+// workflow_dispatch. Run it by hand against a throwaway database like the one named above, never
+// a shared rig.)
 //
 // The deploy-onto-existing path: apply ONLY 0001–0005 onto a fresh DB, create
 // real data through the writers, seed a SYNTHETIC taxonomy version mapping

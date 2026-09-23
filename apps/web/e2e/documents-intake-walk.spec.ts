@@ -20,7 +20,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { settleForScan, signIn as sharedSignIn, watchReactFaults } from "./helpers";
+import { cellBudgetMs, settleForScan, signIn as sharedSignIn, watchReactFaults } from "./helpers";
 
 const CLIENT_ID = "1e1e1e1e-1e1e-4e1e-8e1e-1e1e1e1e1e1e";
 const WORK_ID = "8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a";
@@ -75,6 +75,7 @@ const pdf = (name: string, size = 64) => ({
 });
 
 test("the durable receipts survive a RELOAD — the queue's own memory is not the record", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 5 }));
   const faults = watchReactFaults(page);
   await openDocuments(page);
 
@@ -92,6 +93,7 @@ test("the durable receipts survive a RELOAD — the queue's own memory is not th
 });
 
 test("a status SETTLES without a reload, and the watermark says what is still moving", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 6 }));
   await openDocuments(page);
 
   // `march-statement.pdf` is still verifying on the first read and adopts on the second.
@@ -102,6 +104,7 @@ test("a status SETTLES without a reload, and the watermark says what is still mo
 });
 
 test("the four capability tiers are readable per row, and a payroll PDF never reads as facts support", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await openDocuments(page);
   const row = receiptsTable(page).getByRole("row").filter({ hasText: "march-statement.pdf" });
   await expect(row).toBeVisible({ timeout: 20_000 });
@@ -114,6 +117,7 @@ test("the four capability tiers are readable per row, and a payroll PDF never re
 });
 
 test("a five-file mixed batch settles each file on its own, with a NEXT STEP for each refusal", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 9 }));
   await openDocuments(page);
 
   await page.setInputFiles('input[type="file"]', [
@@ -143,6 +147,7 @@ test("a five-file mixed batch settles each file on its own, with a NEXT STEP for
 });
 
 test("Cancel, Retry and Remove are three DIFFERENT acts, and progress is measured or absent", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 6 }));
   await openDocuments(page);
   await page.setInputFiles('input[type="file"]', [pdf("controls.pdf")]);
   await expect(queueTable(page).getByRole("row").filter({ hasText: "controls.pdf" })).toBeVisible({ timeout: 20_000 });
@@ -165,6 +170,7 @@ test("Cancel, Retry and Remove are three DIFFERENT acts, and progress is measure
 });
 
 test("the document says which WORK it produced — and says so honestly when it produced none", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await openDocuments(page);
   // The FILED row, not the receipt row: the same filename appears in both tables and only
   // the filed one opens the detail. "filed by a human" is the filed table's own basis cell.
@@ -219,6 +225,7 @@ test("320px and 200% zoom leave no page-wide horizontal scroll on the documents 
 });
 
 test("the documents tab is axe-clean with a populated queue and populated receipts", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 5 }));
   await openDocuments(page);
   await page.setInputFiles('input[type="file"]', [pdf("a11y.pdf")]);
   await expect(queueTable(page).getByRole("row").filter({ hasText: "a11y.pdf" })).toBeVisible({ timeout: 20_000 });
@@ -231,6 +238,7 @@ test("the documents tab is axe-clean with a populated queue and populated receip
 // ---------------------------------------------------------------------------
 
 test("the firm leaf lists an unassigned source with its kind phrase and its published tiers", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await signIn(page);
   await page.goto(FIRM_DOCUMENTS_URL);
 
@@ -245,6 +253,7 @@ test("the firm leaf lists an unassigned source with its kind phrase and its publ
 });
 
 test("the firm leaf is axe-clean and leaves no horizontal scroll at 320px", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 2 }));
   // Signed in at a normal width first — see the documents-tab cell's own note.
   await signIn(page);
   await page.setViewportSize({ width: 320, height: 720 });
@@ -285,6 +294,7 @@ test("the firm leaf is reachable by KEYBOARD from the shell, and its own control
 // after. Playwright runs a file in source order on one worker, so "last" is the contract —
 // and it is cheaper and more honest than a reset hook the mock would have to expose.
 test("the ask-once attribution act files the source and the row LEAVES the set", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await signIn(page);
   await page.goto(FIRM_DOCUMENTS_URL);
   await expect(sourcesTable(page).getByText("ssm-form-24.pdf")).toBeVisible({ timeout: 20_000 });

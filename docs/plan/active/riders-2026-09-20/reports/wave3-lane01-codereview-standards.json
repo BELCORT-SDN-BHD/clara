@@ -1,0 +1,64 @@
+{
+  "axis": "standards",
+  "lane": "wave3-lane01",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "branch": "riders/w3-lane01",
+  "tickets_reviewed": [890, 921],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (incl. wave-3 addendum)",
+    "docs/plan/active/riders-2026-09-20/RIG.md (incl. wave-3 addendum)",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/db/README.md (0273 section)",
+    "gh issue view 890/921 --json body,comments"
+  ],
+  "findings": [
+    {
+      "id": "L01-STD-1",
+      "ticket": 921,
+      "severity": "blocker",
+      "kind": "hard-violation",
+      "title": "Migration 0273's revoke breaks 6 pre-existing packages/db test files (57 failing tests) that the diff did not fix; the migration's own commit message and a source comment falsely claim this was handled",
+      "evidence": "Re-ran every packages/db test file that imports packages/db/tests/x36-vendor-binding-helpers.mjs and calls propose/signLive/sign/revoke directly (not through the one converted fixture, seedLiveBinding), against clara_l01 (migration 0273 applied): tests/x36-vendor-binding-ceremony.test.mjs 1 pass/10 fail/11 total (all failures: 'permission denied for function propose_vendor_identity_binding' or 'sign_vendor_identity_binding', 42501); tests/x30-f1-lcp.test.mjs 0 pass/7 fail/2 skip/9 total; tests/binding-proposal-pr-1.test.mjs 78 pass/33 fail/111 total; tests/x31-autopost-lane-unify.test.mjs 8 pass/1 fail/9 total; tests/x36-p-round-regressions.test.mjs 0 pass/1 fail/1 total; tests/x36-vendor-binding-resolver.test.mjs 2 pass/5 fail/7 total. 57 failing tests across 6 files, all with the ACL-layer 42501 (or a downstream mismatch, e.g. x30-f1-lcp expecting CLR36 and getting 42501) as their root cause. None of these six files appear in this diff's changed-file list (git diff --stat), so migration 0273 broke them without touching them. Commit 276ac5fb1's own message claims: 'Adds three door-bypassing raw fixture builders to x36-vendor-binding-helpers.mjs ... for every other battery that used the now-retired human doors only as fixture setup, and converts seedLiveBinding to use them' -- only seedLiveBinding was actually converted; the five other test files (plus x36-vendor-binding-ceremony.test.mjs's own propose/sign-driving cells, which needed rewriting not just a fixture swap) call propose()/sign()/signLive()/revoke() directly and were left untouched. This directly contradicts ticket #921's own acceptance criterion: 'The migration applies on a from-scratch chain; the vendor-binding db batteries are updated to the read-only shape and stay green' -- they do not stay green. Neither packages/db/README.md's new ## 0273 section nor docs/plan/active/riders-2026-09-20/reports/wave3-lane01-ticket921.md names any of these six files or acknowledges the breakage; the ticket report's own Gates section only ran the new vendor-binding-write-doors-revoked.test.mjs plus operation-census.test.mjs and rig-isolation.test.mjs -- never the full packages/db suite (441 .test.mjs files) nor these five pre-existing vendor-binding-adjacent batteries, so the regression was never caught before reporting done.",
+      "required_fix": "Convert every direct propose()/sign()/signLive()/revoke() call site in tests/x30-f1-lcp.test.mjs, tests/x31-autopost-lane-unify.test.mjs, tests/binding-proposal-pr-1.test.mjs, tests/x36-p-round-regressions.test.mjs and tests/x36-vendor-binding-resolver.test.mjs to the new door-bypassing raw builders (insertHumanProposedBinding/signLiveDirect/declineDirect), the same way seedLiveBinding was converted. For tests/x36-vendor-binding-ceremony.test.mjs, retire or rewrite the cells that specifically drove the propose/sign ceremony as a door (x36c.1-x36c.9), since that door no longer exists for a human caller -- a fixture swap alone cannot fix cells that assert on the ceremony's own refusal shapes (CLR36, signer_is_proposer, etc.). Then run the full packages/db suite once (not only the touched-file gate list) before reporting the ticket done, per the WORK-ORDER's own gate philosophy."
+    },
+    {
+      "id": "L01-STD-2",
+      "ticket": 921,
+      "severity": "major",
+      "kind": "hard-violation",
+      "title": "False claim of repo state in a source comment: packages/db/tests/x36-vendor-binding-helpers.mjs asserts x36-vendor-binding-ceremony.test.mjs is 'RETIRED', citing a README removal note that does not exist",
+      "evidence": "packages/db/tests/x36-vendor-binding-helpers.mjs's new module header (added in this diff) reads: '... x36-vendor-binding-ceremony.test.mjs (which drove exactly that ceremony) is RETIRED (see its own removal note in packages/db/README.md's \"0273\" section) ...'. Verified both halves of that claim false: (1) git ls-tree on HEAD shows packages/db/tests/x36-vendor-binding-ceremony.test.mjs still present, and it is absent from this diff's file list entirely (git diff --stat) -- it was neither deleted nor edited; (2) packages/db/README.md's '## 0273' section (read in full) documents the migration, its prestate pins, and the web-side changes, and contains no mention of x36-vendor-binding-ceremony.test.mjs or any removal note. This is an unverified/false claim about the state of the codebase left in a comment other engineers and agents will read as fact.",
+      "required_fix": "Either retire the file for real (delete or rewrite the cells that drive the retired doors, per L01-STD-1) and then add the removal note this comment already claims exists, or correct the comment to describe the file's actual (still-live, still-broken) state. AGENTS.md's own rule: 'Claims need evidence ... If you cannot point to a source, say unverified instead of asserting.'"
+    },
+    {
+      "id": "L01-STD-3",
+      "ticket": 921,
+      "severity": "minor",
+      "kind": "smell-judgement-call",
+      "title": "Duplicated Code (baseline smell): the new raw-fixture builders hand-copy each retired door's write shape, with no cell cross-checking the mirror against the live body",
+      "evidence": "packages/db/tests/x36-vendor-binding-helpers.mjs's insertHumanProposedBinding/signLiveDirect/declineDirect (new in this diff) each re-implement, as a literal INSERT/UPDATE, the exact column set and status transition that propose_vendor_identity_binding/sign_vendor_identity_binding/decline_vendor_identity_binding write in their live bodies (0154), justified in-comment as 'mirrors ... own INSERT (0154 SS10b)' / 'own UPDATE (0154 SS10)'. This is a defensible, well-precedented pattern for a door that no longer has a public seam a fixture can drive (matches every other direct-insert fixture already in this file), so it is a labelled judgement call, not a violation. The risk it carries: if a future migration recuts sign_vendor_identity_binding's or propose_vendor_identity_binding's write shape, these three mirrors silently drift out of sync and every downstream fixture (seedLiveBinding and, per L01-STD-1's fix, five more files) would then build states no door can actually produce, with nothing in the suite positioned to catch the drift.",
+      "required_fix": "Consider a small pinning cell (comparable to the migration's own prosrc sha pins) that fails loudly if 0154's live propose/sign/decline bodies' write shape (the column set they touch) changes, pointing whoever recuts them at these three mirrors. Not required for this ticket; worth a follow-up ticket."
+    },
+    {
+      "id": "L01-STD-4",
+      "ticket": 921,
+      "severity": "note",
+      "kind": "shared-file-risk",
+      "title": "rig-meta.mjs (a wave-3 shared file, WORK-ORDER rule 7) is edited in place rather than only appended to",
+      "evidence": "packages/db/tests/rig-meta.mjs is listed in WORK-ORDER.md's rule 7 as a file 'nine other lanes edit... at the same time,' with guidance to 'keep your hunk minimal, at the sorted position.' This ticket's edit narrows two existing exported constants in place (VENDOR_BINDING_0028_HUMAN_FNS -> renamed/split into VENDOR_BINDING_0028_ALL_FNS + a narrower VENDOR_BINDING_0028_HUMAN_FNS; BINDING_PROPOSAL_PR1_HUMAN_FNS loses one entry) rather than only appending a new block at the bottom, unlike this same commit's append-only edit to packages/db/package.json's test script. This is unavoidable for a narrowing edit (there is no 'sorted position' for removing an entry from an existing array) and is well-commented, so it is not a violation -- flagged only because it is the more merge-collision-prone of the two shared-file edits in this ticket, worth the integrator's attention if another wave-3 lane also touches the vendor-binding or binding-proposal cohorts in rig-meta.mjs.",
+      "required_fix": "None required of this lane. Integrator: watch for a conflicting concurrent edit to these two constants from another lane when merging."
+    }
+  ],
+  "positive_notes": [
+    "Migration 0273 itself (packages/db/migrations/0273_vendor_binding_write_doors_revoked.sql) follows house law precisely: header with spec-of-record citation, prestate with sha256(prosrc) pins re-measured on clara_l01 (re-verified independently: 6/6 pass, packages/db/tests/vendor-binding-write-doors-revoked.test.mjs), REDO-safe construction correctly reasoned (a REVOKE has no bimodal body pin), tail assertions re-reading the live catalog, a stable-stem preintegration gate, a rig-meta cohort split into existence vs. grant expectations, and a gate-chain entry appended in migration order.",
+    "operation-census.test.mjs (10/10 pass) and rig-isolation.test.mjs (22/23 pass, 1 pre-existing skip per RIG.md) both re-run clean against clara_l01 with 0273 applied, including rig-isolation's T17 grant-matrix sweep.",
+    "The #890 shared-draft-rule test (apps/web/components/registers/counterparty-door-dialogs-draft-rule.test.tsx) is textbook /tdd test quality: drives through the real public UI seam (button clicks, field typing, network-boundary fetch mocking), uses independent expected values, and its own header documents a vacuity probe that caught and fixed a real false-positive (an unscoped body-wide text match that would have passed whether or not the dialog's own refusal prop was wired).",
+    "The #921 web-side changes (vendor-bindings-panel.tsx, vendor-binding-ceremony.tsx, capabilities.ts, vendor-bindings.ts, en.json, the firm-navigation-walk e2e cell, and the three retrofitted a11y/keyboard test files) are clean, consistently cross-referenced, and match the ticket's acceptance criteria; re-ran the full touched set (35 web unit tests across 7 files) -- 35/35 pass.",
+    "RenameCounterpartyDialog's #890 fix correctly follows the established refusalForThisDialog/onOpened convention already used by the other three counterparty door dialogs (verified against ArApCounterpartyDoorDialog.tsx's own attempt-gating logic)."
+  ],
+  "summary": "Ticket #890's diff is clean and matches house TDD/test-quality conventions with no standards findings. Ticket #921's migration and web-side work are individually well-executed and match house migration law, but the diff leaves a severe, unacknowledged regression behind it: six pre-existing packages/db test files (57 tests) that fixture a live/proposed vendor binding by calling the now human-revoked propose/sign/decline doors directly were never converted to the new door-bypassing fixture builders, so they now fail against this branch's own database. The migration's landing commit and a source-code comment both assert (falsely, on re-verification) that this was handled / that the affected ceremony test file was retired. This blocks calling ticket #921 done as reported."
+}

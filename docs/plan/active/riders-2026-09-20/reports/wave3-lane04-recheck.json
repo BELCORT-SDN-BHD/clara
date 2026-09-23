@@ -1,0 +1,152 @@
+{
+  "lens": "recheck",
+  "lane": "wave 3 / lane 04 (fixed assets)",
+  "branch": "riders/w3-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "database": "clara_l04 @ 127.0.0.1:55744",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "review_head_checked": "c49ebd030",
+  "recheck_head": "a3e9f5d3772a200e278ff0144ec43a3e60b792eb",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave3-lane04-fix.md",
+  "source_review_reports": [
+    "wave3-lane04-codereview-spec.json",
+    "wave3-lane04-codereview-standards.json",
+    "wave3-lane04-review-adversarial.json"
+  ],
+  "tickets": [932, 882, 975, 978],
+  "verdict": "accept",
+  "summary": "Re-ran every gate the fix report claims and read every recut migration/TS hunk directly rather than trusting the report's prose. All five re-checked findings above minor (ADV-L04-1 blocker, ADV-L04-2 blocker, ADV-L04-3/SPEC-975-1 major, ADV-L04-4 major, ADV-L04-5 major, SPEC-932-1 major) are genuinely fixed on the current head: the guarding logic is present in migrations 0280/0281 exactly as described, and the named regression cells (p932.drift, p932.birth.work_lane, p975.fold, p975.stale.park, p975.two_years, p975.closing_reopen) all pass in a fresh full-gate-chain run. The two minor findings (SPEC-975-2, SPEC-978-1) and the two standards smells (Duplicated Code, disposeIntent test title) are also fixed and independently confirmed in source. The two notes with an open 'either/or' remedy (ADV-L04-6, ADV-L04-7) took the documentation option their own findings offered and are correctly carried, not silently dropped. Full gate chain re-run clean: packages/db focused batteries 67/67 (0 fail, 0 skip) covering all four named regression cells; operation-census+rig-isolation 33 tests/32 pass/1 skip (T19 poison-role, the RIG.md-documented destructive skip, correctly not run); packages/runtime reconcile-fa-unit 20/20; check-frozen-workflows OK (312 frozen files, no manifest diff, depreciation-run.ts confirmed untouched); check-parts-parity OK; apps/web whole unit suite 4866 tests/4864 pass/0 fail/2 skip; firm-scope-db-pins 22/22; e2e fixed-asset-acquisition-walk 9/9; e2e depreciation-walk 5/5; pnpm typecheck clean; CI=true GITHUB_ACTIONS=true pnpm lint exit 0. Working tree clean, no applied (pre-base) migration touched (0277-0279 confirmed byte-unchanged since review head via empty diff), 0280/0281 are the only new files. Nothing above minor remains open and nothing new broke. Accept.",
+  "findings": [],
+  "per_finding_recheck": [
+    {
+      "id": "ADV-L04-1",
+      "ticket": 932,
+      "severity": "blocker",
+      "recheck_verdict": "fixed",
+      "evidence": "packages/db/migrations/0280_fa_policy_enrolment_congruence.sql:207,674 gate both recut birth sites with `if v_pol.id is not null and not (l.accum_code is null and v_pol.method <> 'none') then` (measured directly in the file, matches the fix report's description). Test p932.drift ('a policy set against a DEPRECIABLE enrolment stops applying the moment that enrolment is re-issued as NON-depreciable...') passes in a fresh run: `node --test --test-concurrency=1 <178 gate flags> tests/fa-depreciation-policy.test.mjs tests/fa-arrears-resolution.test.mjs` -> ok 19. Full four-file battery: 67/67 pass, 0 fail, 0 skipped."
+    },
+    {
+      "id": "ADV-L04-2",
+      "ticket": 975,
+      "severity": "blocker",
+      "recheck_verdict": "fixed",
+      "evidence": "packages/db/migrations/0281_fa_arrears_judgement_scope.sql:437-521 splits affected years into v_unresolved/v_stale/v_awaiting; v_stale is computed as years with a resolution whose `arrears_cents` differs from the currently measured figure (lines 452-455) and raises/parks on axis `arrears_changed_since_judgement` naming both `arrears_cents` (current) and `judged_cents` (stored). Tests p975.fold and p975.stale.park both pass in a fresh run (ok 2, ok 9 in the named-cell listing)."
+    },
+    {
+      "id": "ADV-L04-3 / SPEC-975-1",
+      "ticket": 975,
+      "severity": "major",
+      "recheck_verdict": "fixed",
+      "evidence": "0281:471-497 names the FIRST unresolved year's own `arrears_cents` (v_amt from v_named, not v_total) in both the raise and the parked payload, with the client-wide sum riding separately under `total_arrears_cents` (line 439 computes v_total once from clara._fa_closed_arrears). Test p975.two_years ('with TWO closed years in play the refusal states the NAMED year's own amount...') passes (ok 8)."
+    },
+    {
+      "id": "ADV-L04-4",
+      "ticket": 975,
+      "severity": "major",
+      "recheck_verdict": "fixed",
+      "evidence": "0281:221-226 refuses `reopen_prior` on a `closing` year with axis `year_still_closing` naming remedy `finalize_close`; 0281:538-544 derives v_remedy from the named year's own fy_status (`finalize_close` when still closing, else `reopen_fiscal_year`) rather than hard-coding an unreachable edge. Test p975.closing_reopen passes (ok 10)."
+    },
+    {
+      "id": "ADV-L04-5",
+      "ticket": 932,
+      "severity": "major",
+      "recheck_verdict": "fixed",
+      "evidence": "apps/web/lib/registers/fa-depreciation-policies.ts: setFaDepreciationPolicy/retireFaDepreciationPolicy now require `opKey: string` in their args type (grep confirms `p_op_key: args.opKey`, no crypto.randomUUID() call remains in the file); setPolicyIntent/retirePolicyIntent mint the doors' own _reserve_op fingerprints. apps/web/components/registers/fa-account-profiles-panel.tsx:157,191,277,290 holds `useDepreciationDecisionKey()` and calls `decision.key(setPolicyIntent(...))` / `decision.key(retirePolicyIntent(...))` for both dialogs."
+    },
+    {
+      "id": "SPEC-932-1",
+      "ticket": 932,
+      "severity": "major",
+      "recheck_verdict": "fixed",
+      "evidence": "Test p932.birth.work_lane ('a policy-covered acquisition posted through clara.wake_record_journal_entry is born COMPLETE, and the RUNTIME's own pending-asset discovery predicate...selects NOTHING...') passes (ok 20). reports/wave3-lane04-ticket932.md:100-103 (main checkout) is corrected in place to say AC4 'is measured now' rather than presenting register-row completeness alone as evidence of no-question."
+    },
+    {
+      "id": "SPEC-932-2",
+      "ticket": 932,
+      "severity": "minor",
+      "recheck_verdict": "fixed",
+      "evidence": "packages/db/migrations/0280_fa_policy_enrolment_congruence.sql:210-214 replaces 0277's comment claiming effective_from 'gates WHICH acquisitions the policy reaches' with a correction: the lookup filters on `active` alone, effective_from is a recorded fact only, consulted by nothing in packages/db or apps/web."
+    },
+    {
+      "id": "SPEC-975-2",
+      "ticket": 975,
+      "severity": "minor",
+      "recheck_verdict": "fixed",
+      "evidence": "Folded into the ADV-L04-2 fix: the fix report argues the owner's 2026-09-20 ruling (materiality is never Clara's to default) licenses treating this as a real defect rather than an unauthorized scope change, and records the reasoning in CONTEXT.md's 'Closed-year arrears resolution' entry ('A judgement licenses the figure it was made about, and nothing else') so it can be overturned in one place. Same code path as ADV-L04-2, independently confirmed above."
+    },
+    {
+      "id": "SPEC-978-1",
+      "ticket": 978,
+      "severity": "minor",
+      "recheck_verdict": "fixed",
+      "evidence": "reports/wave3-lane04-ticket978.md:137 (main checkout) now reads 'fa-row-actions.test.tsx — 6/6 pass'. Fresh re-run: `node --import ./test/bootstrap.mjs --import tsx --test components/registers/fa-row-actions.test.tsx` -> 6/6, matching the file's six top-level test() calls."
+    },
+    {
+      "id": "standards-978-dup-completeIntent",
+      "ticket": 978,
+      "severity": "minor",
+      "recheck_verdict": "fixed",
+      "evidence": "apps/web/lib/registers/fixed-assets.ts:326 defines one `serializeParticulars(particulars)` helper; both completeIntent (line 341) and reviseIntent (line 406) now call it instead of each carrying its own five-line block."
+    },
+    {
+      "id": "standards-978-disposeIntent-title",
+      "ticket": 978,
+      "severity": "note",
+      "recheck_verdict": "fixed",
+      "evidence": "apps/web/lib/registers/fixed-assets.test.ts:255 test title changed to '...memo has no field to differ in, because the argument type excludes it' — no longer claims a runtime-demonstrated exclusion the assertions could not show."
+    },
+    {
+      "id": "ADV-L04-6",
+      "ticket": 975,
+      "severity": "note",
+      "recheck_verdict": "no_change_needed",
+      "evidence": "The finding itself offered two remedies (validate the pair, or state that the columns are caller-asserted provenance). 0281:155-156 takes the second: 'p_period_start and p_period_end are stored verbatim and nothing validates them: they are CALLER-ASSERTED...'. Follow-up to validate against the client's cadence window is correctly carried in the fix report's Follow-ups section rather than built without a brief, consistent with WORK-ORDER's scope-discipline rule."
+    },
+    {
+      "id": "ADV-L04-7",
+      "ticket": 975,
+      "severity": "note",
+      "recheck_verdict": "no_change_needed",
+      "evidence": "packages/runtime/lib/depreciation-run.ts confirmed untouched by `git diff ffe63a0dd08..HEAD --stat` (empty). The finding itself says this belongs to the wave-4 shared chatTurn_v22/claraWork_v6 cut and cannot be fixed in this lane; the fix report's successor contract was updated with the third parked reason (arrears_changed_since_judgement) and both new amount fields, superseding item 3 of the #975 ticket report as promised."
+    },
+    {
+      "id": "SPEC-932-3, SPEC-932-4, SPEC-882-1, SPEC-975-3, SPEC-975-4, SPEC-975-6",
+      "ticket": "932/882/975",
+      "severity": "note",
+      "recheck_verdict": "no_change_needed",
+      "evidence": "All six were 'None'/'None here' required_fix notes in the original SPEC review (vacuous-AC disclosure, event-vs-audit-row wording, justified migration-file deviation, deliberate scope widening under nothing-dark, a known/carried agent-catchup limitation, and a substance-not-letter checklist item). No fix was owed; none was silently dropped — SPEC-975-4 and SPEC-975-6 are unaffected by the fix round's changes and remain true on inspection."
+    },
+    {
+      "id": "SPEC-975-5",
+      "ticket": 975,
+      "severity": "note",
+      "recheck_verdict": "fixed",
+      "evidence": "CONTEXT.md diff (c49ebd030..HEAD) softens 'recorded against the client, the fiscal year and the run that raised it' to '...and the period of the run that raised it', matching what clara.fa_arrears_resolutions actually stores (period_start/period_end, no run id)."
+    }
+  ],
+  "gates_rerun": {
+    "packages/db focused (178-flag gate chain, --test-concurrency=1)": {
+      "files": ["fa-depreciation-policy.test.mjs", "fa-arrears-resolution.test.mjs", "fixed-asset-acquisition.test.mjs", "depreciation-history.test.mjs"],
+      "result": "67 tests, 67 pass, 0 fail, 0 skipped",
+      "named_cells_confirmed_passing": ["p932.drift", "p932.birth.work_lane", "p975.fold", "p975.stale.park", "p975.two_years", "p975.closing_reopen"]
+    },
+    "packages/db operation-census + rig-isolation": "33 tests, 32 pass, 0 fail, 1 skipped (T19 poison-role, RIG.md-documented destructive skip; CLARA_RIG_ALLOW_RESET/CLARA_RIG_ALLOW_ROLE_SWEEP never set)",
+    "packages/runtime reconcile-fa-unit.test.mjs": "20/20 pass",
+    "check-frozen-workflows.mjs": "OK — 312 frozen files verified, no manifest diff",
+    "check-parts-parity.mjs": "OK",
+    "apps/web whole unit suite (node scripts/run-tests.mjs)": "4866 tests, 4864 pass, 0 fail, 2 skipped",
+    "apps/web firm-scope-db-pins.test.ts": "22/22 pass",
+    "e2e fixed-asset-acquisition-walk (lane-04 triple 3530/3531/3532)": "9/9 pass",
+    "e2e depreciation-walk (lane-04 triple)": "5/5 pass",
+    "pnpm typecheck": "clean (apps/web Done, packages/runtime Done)",
+    "CI=true GITHUB_ACTIONS=true pnpm lint": "exit 0, all packages"
+  },
+  "repo_hygiene_checked": [
+    "git status --porcelain: clean working tree",
+    "git diff ffe63a0dd08..HEAD --name-only under packages/db/migrations: only 0277-0281, no applied (pre-base) migration edited",
+    "git diff c49ebd030..HEAD (review head to recheck head) over 0277/0278/0279: empty — confirmed byte-unchanged as the fix report claims"
+  ],
+  "unverified": [
+    "No from-scratch migration chain was re-run here (the integrator's job per WORK-ORDER; the fix report's own FIRST-APPLY-branch proof in a rolled-back transaction was not independently reproduced, consistent with this being a read-only recheck)."
+  ]
+}

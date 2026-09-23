@@ -13,14 +13,25 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, StateBanner } from "@/components/common/state";
 import { NativeSelect } from "@/components/common/native-select";
+import { MoneyInput } from "@/components/common/money-input";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { loadFaAccountProfiles, upsertFaAccountProfile, retireFaAccountProfile } from "@/lib/registers/fa-account-profiles";
+import {
+  loadFaDepreciationPolicies, setFaDepreciationPolicy, retireFaDepreciationPolicy,
+  setPolicyIntent, retirePolicyIntent,
+  type FaDepreciationMethod, type FaDepreciationPolicyRow,
+} from "@/lib/registers/fa-depreciation-policies";
+import { useDepreciationDecisionKey } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { FaDoorDialog } from "./FaDoorDialog";
 import type { AccountRow } from "@/lib/registers/accounts";
+
+const POLICY_METHODS: readonly FaDepreciationMethod[] = ["straight_line", "reducing_balance", "none"];
 
 export function FaAccountProfilesPanel({
   clientId,
@@ -37,12 +48,22 @@ export function FaAccountProfilesPanel({
   onActed?: () => void;
 }) {
   const t = useTranslations("FixedAssetsDepreciation.profiles");
+  const tp = useTranslations("FixedAssetsDepreciation.policies");
   const { data: profiles, loading, err, clr, busy, act: rawAct } = useHydratedPart(sessionTokenAccessor, (s) => loadFaAccountProfiles(s, clientId));
+  const {
+    data: policies, busy: policyBusy, err: policyErr, clr: policyClr, act: rawPolicyAct,
+  } = useHydratedPart(sessionTokenAccessor, (s) => loadFaDepreciationPolicies(s, clientId));
   const act = async (fn: () => Promise<void>): Promise<boolean> => {
     const ok = await rawAct(fn);
     onActed?.();
     return ok;
   };
+  // #932: the policy panel's OWN act — a policy set/retire never changes fa_account_profiles or
+  // the register's own display columns the enrolment `onActed` refresh exists for, so it does
+  // not fire that callback; it only re-hydrates ITS OWN read.
+  const policyAct = (fn: () => Promise<void>): Promise<boolean> => rawPolicyAct(fn);
+  const policyFor = (assetAccount: string): FaDepreciationPolicyRow | undefined =>
+    policies?.find((p) => p.asset_account_code === assetAccount);
 
   return (
     <div className="flex flex-col gap-2">
@@ -62,18 +83,215 @@ export function FaAccountProfilesPanel({
       {loading ? null : !profiles || profiles.length === 0 ? (
         <EmptyState className="text-xs">{t("empty")}</EmptyState>
       ) : (
-        <ul className="flex flex-col gap-1">
-          {profiles.map((p) => (
-            <li key={p.id} className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant="secondary">{p.asset_account_code}</Badge>
-              <span className="text-muted-foreground">→</span>
-              <span>{p.accum_depr_account_code ?? "—"}</span>
-              <RetireDialog clientId={clientId} assetAccount={p.asset_account_code} busy={busy} act={act} />
-            </li>
-          ))}
+        <ul className="flex flex-col gap-2">
+          {profiles.map((p) => {
+            const policy = policyFor(p.asset_account_code);
+            return (
+              <li key={p.id} className="flex flex-col gap-1 rounded-md border p-2">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <Badge variant="secondary">{p.asset_account_code}</Badge>
+                  <span className="text-muted-foreground">→</span>
+                  <span>{p.accum_depr_account_code ?? "—"}</span>
+                  <RetireDialog clientId={clientId} assetAccount={p.asset_account_code} busy={busy} act={act} />
+                </div>
+                {/* #932 — the "default depreciation policy" block per enrolled account (AC1). */}
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">{tp("heading")}:</span>
+                  {policy ? (
+                    <>
+                      <Badge variant="outline">{tp(`methods.${policy.method}`)}</Badge>
+                      {policy.method !== "none" ? (
+                        <span className="text-muted-foreground">
+                          {policy.method === "reducing_balance"
+                            ? tp("summaryRb", { life: policy.useful_life_months ?? 0, rate: (policy.rate_bps ?? 0) / 100 })
+                            : tp("summarySl", { life: policy.useful_life_months ?? 0 })}
+                        </span>
+                      ) : null}
+                      <span className="text-muted-foreground">{tp("versionLabel", { version: policy.version })}</span>
+                      <RetirePolicyDialog clientId={clientId} assetAccount={p.asset_account_code} busy={policyBusy} act={policyAct} />
+                      <SetPolicyDialog clientId={clientId} assetAccount={p.asset_account_code} nonDepreciable={p.accum_depr_account_code === null} busy={policyBusy} act={policyAct} triggerLabel={tp("changeTrigger")} />
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-muted-foreground">{tp("none")}</span>
+                      <SetPolicyDialog clientId={clientId} assetAccount={p.asset_account_code} nonDepreciable={p.accum_depr_account_code === null} busy={policyBusy} act={policyAct} triggerLabel={tp("setTrigger")} />
+                    </>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
+      {policyErr ? (
+        <StateBanner tone="error" code={policyClr ? `${policyClr.code}${policyClr.reason ? ` · ${policyClr.reason}` : ""}` : undefined} className="text-xs">
+          {policyErr}
+        </StateBanner>
+      ) : null}
     </div>
+  );
+}
+
+function SetPolicyDialog({
+  clientId,
+  assetAccount,
+  nonDepreciable,
+  busy,
+  act,
+  triggerLabel,
+}: {
+  clientId: string;
+  assetAccount: string;
+  /** AC1 / the door's own wall: an enrolment with no accumulated-depreciation account admits
+   *  ONLY method none — offered before the door refuses one, the same discipline the
+   *  particulars form already gives (fa-particulars-fields.tsx's own non_depreciable note). */
+  nonDepreciable: boolean;
+  busy: boolean;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
+  triggerLabel: string;
+}) {
+  const tp = useTranslations("FixedAssetsDepreciation.policies");
+  // #932 FIX ROUND (ADV-L04-5) — ONE DECISION, ONE KEY. A CLOSED DIALOG ENDS THE DECISION: the
+  // next press is a new policy and mints a new key (`onClosed` below), exactly as #978 wired the
+  // complete and dispose dialogs.
+  const decision = useDepreciationDecisionKey();
+  const [method, setMethod] = useState<FaDepreciationMethod>(nonDepreciable ? "none" : "straight_line");
+  const [life, setLife] = useState<number | null>(null);
+  const [rate, setRate] = useState<number | null>(null);
+  const [residualCents, setResidualCents] = useState<number | null>(0);
+  const [reason, setReason] = useState("");
+
+  const ready =
+    method === "none" ? true
+      : method === "straight_line" ? life != null && life > 0
+      : life != null && life > 0 && rate != null && rate >= 1 && rate <= 10000;
+
+  return (
+    <FaDoorDialog
+      triggerLabel={triggerLabel}
+      title={tp("setTitle")}
+      description={tp("setDescription")}
+      confirmLabel={triggerLabel}
+      busy={busy}
+      confirmDisabled={!ready}
+      onClosed={() => decision.renew()}
+      onConfirm={() =>
+        act(async () => {
+          const sent = {
+            clientId,
+            assetAccount,
+            method,
+            usefulLifeMonths: method === "none" ? null : life,
+            rateBps: method === "reducing_balance" ? rate : null,
+            residualCents: method === "none" ? 0 : (residualCents ?? 0),
+          };
+          await setFaDepreciationPolicy(sessionTokenAccessor, {
+            ...sent,
+            reason: reason.trim() === "" ? null : reason.trim(),
+            opKey: decision.key(setPolicyIntent(sent)),
+          });
+        })
+      }
+    >
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor={`fa-policy-method-${assetAccount}`}>{tp("methodLabel")}</Label>
+          <NativeSelect
+            id={`fa-policy-method-${assetAccount}`}
+            value={method}
+            onChange={(e) => {
+              const next = e.target.value as FaDepreciationMethod;
+              setMethod(next);
+              if (next === "none") { setLife(null); setRate(null); }
+              if (next !== "reducing_balance") setRate(null);
+            }}
+          >
+            {POLICY_METHODS.filter((m) => !nonDepreciable || m === "none").map((m) => (
+              <option key={m} value={m}>{tp(`methods.${m}`)}</option>
+            ))}
+          </NativeSelect>
+        </div>
+        {method !== "none" ? (
+          <div className="grid gap-1.5">
+            <Label htmlFor={`fa-policy-life-${assetAccount}`}>{tp("usefulLifeLabel")}</Label>
+            <Input
+              id={`fa-policy-life-${assetAccount}`}
+              type="number"
+              min={1}
+              inputMode="numeric"
+              value={life ?? ""}
+              onChange={(e) => setLife(e.target.value === "" ? null : Number(e.target.value))}
+            />
+          </div>
+        ) : null}
+        {method === "reducing_balance" ? (
+          <div className="grid gap-1.5">
+            <Label htmlFor={`fa-policy-rate-${assetAccount}`}>{tp("rateBpsLabel")}</Label>
+            <Input
+              id={`fa-policy-rate-${assetAccount}`}
+              type="number"
+              min={1}
+              max={10000}
+              inputMode="numeric"
+              value={rate ?? ""}
+              onChange={(e) => setRate(e.target.value === "" ? null : Number(e.target.value))}
+            />
+          </div>
+        ) : null}
+        {method !== "none" ? (
+          <div className="grid gap-1.5">
+            <Label htmlFor={`fa-policy-residual-${assetAccount}`}>{tp("residualLabel")}</Label>
+            <MoneyInput
+              id={`fa-policy-residual-${assetAccount}`}
+              cents={residualCents}
+              mode="unsigned"
+              zeroIsBlank={false}
+              onValueChange={(change) => {
+                if (change.ok) setResidualCents(change.cents);
+              }}
+            />
+          </div>
+        ) : null}
+        <div className="grid gap-1.5 sm:col-span-2">
+          <Label htmlFor={`fa-policy-reason-${assetAccount}`}>{tp("reasonLabel")}</Label>
+          <Input id={`fa-policy-reason-${assetAccount}`} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </div>
+      </div>
+    </FaDoorDialog>
+  );
+}
+
+function RetirePolicyDialog({
+  clientId,
+  assetAccount,
+  busy,
+  act,
+}: {
+  clientId: string;
+  assetAccount: string;
+  busy: boolean;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
+}) {
+  const tp = useTranslations("FixedAssetsDepreciation.policies");
+  // #932 FIX ROUND (ADV-L04-5) — the same held key the set dialog holds.
+  const decision = useDepreciationDecisionKey();
+  return (
+    <FaDoorDialog
+      triggerLabel={tp("retireTrigger")}
+      title={tp("retireTitle")}
+      description={tp("retireDescription")}
+      confirmLabel={tp("retireTrigger")}
+      busy={busy}
+      onClosed={() => decision.renew()}
+      onConfirm={() =>
+        act(async () => {
+          await retireFaDepreciationPolicy(sessionTokenAccessor, {
+            clientId, assetAccount,
+            opKey: decision.key(retirePolicyIntent({ clientId, assetAccount })),
+          });
+        })
+      }
+    />
   );
 }
 

@@ -42,6 +42,8 @@
 //    WITHOUT that flag and reading that they still reach their existing skip gate cleanly — a skip
 //    is not the drill's ordinary run, and 3 of the 14 have no CI leg anywhere to run the real thing
 //    (code review L03-CRS3); the fix-round report states this criterion PARTIAL, not done.
+//    #1023 closed that 3-file gap (see the cells below, and packages/db/tests/README.md's #845
+//    section) — this comment block is left as the record of #845's own state, not rewritten.
 //
 // VACUITY CONTROL for Cell 2 (fix-round report has the transcript): with x42-split-upgrade-kit.mjs
 // reverted to its pre-fix bare `await reset(...)` byte-for-byte, this suite's Cell 2 RED on that
@@ -65,9 +67,11 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { EPHEMERAL_DB } from "../lib/guard.mjs";
 
 const TESTS_DIR = fileURLToPath(new URL(".", import.meta.url));
 const SELF = path.basename(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.join(TESTS_DIR, "..", "..", "..");
 
 /** Every module under packages/db/tests (recursive) that ends in .mjs. */
 function walk(dir) {
@@ -250,3 +254,86 @@ test("#845 env buffer restored after the poisoned-target probe — every key is 
     assert.equal(process.env[k], AMBIENT[k], `${k} must be back to its pre-probe value (was ${AMBIENT[k]})`);
   }
 });
+
+// #1023 — the CI-coverage gap #845's own comment above named plainly: "checkout-convergence-
+// upgrade.test.mjs, rig-runtime-upgrade.test.mjs and wave-a-upgrade.test.mjs have no CI leg at
+// all — their destructive path has never run anywhere but a worker's own machine, by hand". Each
+// entry pairs a drill with the PGDATABASE name ITS OWN header comment already documents
+// (checkout-convergence-upgrade.test.mjs:16, rig-runtime-upgrade.test.mjs:9,
+// wave-a-upgrade.test.mjs:8) — the CI step must target the SAME name a worker running the file by
+// hand would, not an invented one, so the two recipes are provably the same drill.
+const CLOSED_WAVE_ACTION = path.join(REPO_ROOT, ".github", "actions", "closed-wave-upgrade-drills", "action.yml");
+
+const NEWLY_COVERED = [
+  { file: "checkout-convergence-upgrade.test.mjs", db: "clara_0186_upgrade_ci" },
+  { file: "rig-runtime-upgrade.test.mjs", db: "clara_runtime_upgrade_ci" },
+  { file: "wave-a-upgrade.test.mjs", db: "clara_waveA_upgrade_ci" },
+];
+
+/** The composite-action step (its `- name:` line through the next step's, or EOF) whose `run:`
+ *  block invokes `tests/<file>` — the same step-splitting shape a human reading the YAML uses,
+ *  never a full-file search that could match a comment or an unrelated step. Step boundaries in
+ *  this file are always a 4-space-indented `- name:` (verified against the file's own steps).
+ *
+ *  The match is on the INVOCATION LINE — one line carrying both `node --test` and the path —
+ *  never on the chunk as a whole (review SPEC-1023-03). A chunk carries the comment block that
+ *  PRECEDES the NEXT step, so a future comment naming a drill above an unrelated step would
+ *  otherwise hand every assertion below the wrong step, silently. */
+function stepInvoking(yamlText, file) {
+  return yamlText
+    .split(/\n(?= {4}- name:)/)
+    .find((step) => step.split("\n").some(
+      (line) => line.includes("node --test") && line.includes(`tests/${file}`)));
+}
+
+test("#1023 a step is located by its INVOCATION line, never by a comment above it naming the file", () => {
+  // Review SPEC-1023-03. The chunks this splitter produces attach a step's PRECEDING comment
+  // block to the PREVIOUS step, so a whole-chunk `includes()` would hand every assertion below
+  // the wrong step the first time someone writes a comment naming a drill above an unrelated one.
+  // Coupling to the `node --test tests/<file>` line instead couples to the thing that RUNS it.
+  const yaml = [
+    "runs:",
+    "  using: composite",
+    "  steps:",
+    "    - name: An unrelated step",
+    "      run: |",
+    "        echo nothing",
+    "",
+    "    # see tests/wave-a-upgrade.test.mjs for what the step below proves",
+    "    - name: Wave-A 0011 fresh-vs-upgrade parity drill (isolated DB)",
+    "      run: |",
+    "        PGDATABASE=clara_waveA_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \\",
+    "          node --test tests/wave-a-upgrade.test.mjs",
+  ].join("\n");
+  const step = stepInvoking(yaml, "wave-a-upgrade.test.mjs");
+  assert.ok(step, "the step that RUNS the drill must be found at all");
+  assert.match(step, /Wave-A 0011 fresh-vs-upgrade parity drill/,
+    "the step returned must be the one whose run: block invokes the drill");
+  assert.doesNotMatch(step, /An unrelated step/,
+    "a comment naming the drill belongs to the PREVIOUS chunk — matching on it returns the wrong step");
+});
+for (const { file, db } of NEWLY_COVERED) {
+  test(`#1023 CI coverage: ${file} has a closed-wave-upgrade-drills step that runs its destructive path on a disposable database`, () => {
+    const yamlText = readFileSync(CLOSED_WAVE_ACTION, "utf8");
+    const step = stepInvoking(yamlText, file);
+    assert.ok(step, `no step in .github/actions/closed-wave-upgrade-drills/action.yml invokes tests/${file} — `
+      + "packages/db/tests/README.md's #845 section says this file has no CI leg; #1023 closes that gap");
+    assert.match(step, /CLARA_RIG_ALLOW_RESET=1/,
+      `${file}'s CI step must set CLARA_RIG_ALLOW_RESET=1 — the flag its own header recipe documents, without which it only skips`);
+    assert.match(step, /CLARA_ALLOW_DESTRUCTIVE=1/,
+      `${file}'s CI step must set CLARA_ALLOW_DESTRUCTIVE=1 — lib/guard.mjs's assertDestructiveAllowed requires it before reset() may run at all`);
+    // Not the FIRST `PGDATABASE=` in the step — that one is `PGDATABASE=postgres` on the `create
+    // database` line, the same admin connection every drill in this file provisions from. The
+    // drill's own target is the `PGDATABASE=` immediately followed by `CLARA_RIG_ALLOW_RESET=1` on
+    // the same line, the invocation line's own shape.
+    const dbMatch = step.match(/PGDATABASE=(\S+)\s+CLARA_RIG_ALLOW_RESET=1/);
+    assert.ok(dbMatch, `${file}'s CI step must create and target its own PGDATABASE, like every other drill in this action`);
+    assert.equal(dbMatch[1], db,
+      `${file}'s CI step should target ${db} — the exact name the file's own header recipe documents, so a worker running it by hand and CI running it exercise the identical target`);
+    assert.match(dbMatch[1], EPHEMERAL_DB,
+      `${dbMatch[1]} does not look disposable to the SAME guard rig-reset-guard.mjs's guardedReset enforces (imported here from lib/guard.mjs, never re-spelled) — `
+      + "a CI leg whose own database name the guard itself would refuse proves nothing about the destructive path running safely");
+    assert.match(yamlText, new RegExp(`rig-cluster-reset\\.mjs --drop-database=${db} --sweep-roles`),
+      `no cluster-cleanup step drops ${db} — every closed-wave-upgrade-drills step must clean up its own throwaway database and any roles its chain minted (review-518 D1/D2), the same as the 11 drills already in this file`);
+  });
+}

@@ -9,6 +9,7 @@
 
 import { randomUUID } from "node:crypto";
 import { rootQuery, humanQuery, wakeQuery, roleQuery, namedCall, opk, ROLES, getPool } from "./rig-helpers.mjs";
+import { retiredWriteDoorQuery } from "./x36-vendor-binding-helpers.mjs";
 
 // ---------------------------------------------------------------------------
 // TWO-SESSION MACHINERY — the lock-order cells (H6 / M-9 / C-1).
@@ -55,6 +56,20 @@ export async function twoSessions(fn) {
  *  pid. `false` on set_config so the claim survives outside an explicit transaction too. */
 export async function asHumanSession(client, sub) {
   await client.query("set role clara_authenticated");
+  await client.query("select set_config('request.jwt.claims', $1, false)",
+    [JSON.stringify({ sub, role: "authenticated" })]);
+  return (await client.query("select pg_backend_pid() as pid")).rows[0].pid;
+}
+
+/** The same session, carried by `clara_fn_owner` instead — the transport the propose/sign/
+ *  decline doors need after #921 (migration 0273) revoked `clara_authenticated`'s EXECUTE on
+ *  all three. `request.jwt.claims` still names `sub`, so `clara._human_ctx` resolves the same
+ *  actor and every wall inside each body still runs; only the ACL layer is stepped around, and
+ *  the ACL layer is what vendor-binding-write-doors-revoked.test.mjs proves separately. A cell
+ *  that drives a door 0273 did NOT move (revoke, list, get, reset_binding_decline) keeps
+ *  asHumanSession above. */
+export async function asRetiredWriteDoorSession(client, sub) {
+  await client.query(`set role ${ROLES.fnOwner}`);
   await client.query("select set_config('request.jwt.claims', $1, false)",
     [JSON.stringify({ sub, role: "authenticated" })]);
   return (await client.query("select pg_backend_pid() as pid")).rows[0].pid;
@@ -153,9 +168,12 @@ export async function listCandidates({ role, secret }, client) {
   return r.rows;
 }
 
-export async function declineBinding(sub, { binding, reason = "rig decline", opKey } = {}) {
+/** `decline_vendor_identity_binding` as `sub`, carried by `clara_fn_owner` (#921 — no human role
+ *  holds EXECUTE on it any more; see x36-vendor-binding-helpers.mjs's header). The door's own
+ *  admin floor, its reason check and the loop brake it arms all still run. */
+export async function declineBindingAsFnOwner(sub, { binding, reason = "rig decline", opKey } = {}) {
   const specs = [{ name: "p_binding" }, { name: "p_reason" }, { name: "p_op_key" }];
-  const r = await humanQuery(sub, namedCall("decline_vendor_identity_binding", specs),
+  const r = await retiredWriteDoorQuery(sub, namedCall("decline_vendor_identity_binding", specs),
     [binding, reason, opKey ?? opk("vbdecline")]);
   return r.rows[0].result;
 }
@@ -245,7 +263,7 @@ import { seedBareDocument, seedApprovedEntry, FULL_ABSENT_RECEIPT, deriveEconomi
   from "./x36-vendor-binding-helpers.mjs";
 
 export {
-  postTimeControlLive, withPostTimeControl, signLive, POST_TIME_MARKER,
+  postTimeControlLive, withPostTimeControl, signLiveAsFnOwner, POST_TIME_MARKER,
 } from "./x36-vendor-binding-helpers.mjs";
 
 /** A window with an arbitrary date list and invoice id — the near-miss builder. Returns the

@@ -1,0 +1,50 @@
+{
+  "lane": 9,
+  "wave": 3,
+  "axis": "standards",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "commit_log_command": "git log ffe63a0dd084e99b84c1368119845be273c421ce..HEAD --oneline",
+  "tickets_in_diff": [970, 989, 864, 997, 1017],
+  "verification_performed": [
+    "node --import ./test/bootstrap.mjs --import tsx --test tests/token-contrast.test.ts (20/20 pass, live)",
+    "node --import ./test/bootstrap.mjs --import tsx --test e2e/cell-budget-census.test.ts (3/3 pass, live)",
+    "node --import ./test/bootstrap.mjs --import tsx --test e2e/settle-before-scan-census.test.ts (4/4 pass, live)",
+    "node --import ./test/bootstrap.mjs --import tsx --test e2e/e2e-fixture-ownership.test.ts (44/44 pass, live)",
+    "node scripts/check-ui-add-guard.selftest.mjs (all cases pass, live)",
+    "CI=true GITHUB_ACTIONS=true pnpm lint (exit 0, live)",
+    "pnpm typecheck (exit 0, apps/web + packages/runtime both Done, live)",
+    "manual grep/regex audit of e2e/*.spec.ts against cell-budget-census.test.ts's own SCAN_CALL/ungrantedHeavyCells detector to find files it does not cover",
+    "confirmed no packages/db migration, no docs/PRD.md or docs/ARCHITECTURE.md edit, no packages/runtime/frozen-workflow file touched in this diff",
+    "confirmed protected-components.json unchanged (button.tsx, pagination.tsx only) matching #970's brief",
+    "read all five gh issue briefs (970, 989, 864, 997, 1017) and all five per-ticket reports in docs/plan/active/riders-2026-09-20/reports/wave3-lane09-ticket*.md"
+  ],
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 864,
+      "severity": "major",
+      "kind": "test-quality (structural cell does not detect what it claims to)",
+      "title": "cell-budget-census.test.ts's ungrantedHeavyCells detector only recognizes a locally-named `scan(` helper called 2+ times; it misses a bare .analyze() call and a single-scan cell, so three real files with no sign-in floor and no budget go unflagged",
+      "evidence": "apps/web/e2e/cell-budget-census.test.ts's own detector: `const SCAN_CALL = /\\bscan\\(/g;` (only matches a call literally named `scan(`) and `if (scans >= 2 && !DECLARES_BUDGET.test(body)) offenders++;` (requires 2+). Verified live against the real tree: `money-input.spec.ts` (one `new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze()` at line 30, no `signIn`/`signInTo` import at all), `interview-walk.spec.ts` (its \"client interview completes every tracked segment...\" cell, line 232, signs in through a locally-defined `establishSession(page)` that is NOT the shared `signIn`/`signInTo` helper and never calls `grantCellBudget`), and `signup-confirm-pending.spec.ts` (line 92, no sign-in at all) each run a real `AxeBuilder.analyze()` pass with zero automatic CELL_BUDGET.signIn floor and zero `test.setTimeout`/`cellBudgetMs`/`grantCellBudget` call anywhere in the file (`grep -c \"test.setTimeout\\|grantCellBudget\\|cellBudgetMs\"` = 0 for all three). CELL_BUDGET's own doc comment in helpers.ts measures a single `AxeBuilder.analyze()` at up to 33s under host load against a flat 30s Playwright default — exactly the timeout-flake mechanism #864 exists to close — yet these three cells sit on the bare 30s default today, on `main` as landed by this lane, and the census that is supposed to hold #864's whole brief (\"A census... shows every spec file that signs in, polls or scans calls the budget helper\") reports green while they exist.",
+      "required_fix": "Broaden the detector to a generic pattern (any `new AxeBuilder(` / `.analyze(` call, not only a call to a helper literally named `scan(`) and drop the '>=2' floor to '>=1' for a file with no automatic sign-in grant, since CELL_BUDGET's own measurement shows a single scan can already exceed the flat default under load; then give money-input.spec.ts, interview-walk.spec.ts and signup-confirm-pending.spec.ts (and `establishSession` in interview-walk.spec.ts, which is a second sign-in shape the census's `callsSharedSignIn` does not recognize) their own `test.setTimeout(cellBudgetMs({ scans: 1 }))`/`grantCellBudget` calls the same way checkout-gate-walk.spec.ts was fixed."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 864,
+      "severity": "note",
+      "title": "The ticket's AC1 literal wording (\"every spec file that signs in, polls or scans\") is knowingly narrower in the shipped census than its own words claim, but this is disclosed rather than hidden",
+      "evidence": "wave3-lane09-ticket864.md's own \"Scope note\" section: the census only requires a budget for a never-signs-in file with 2+ scan() calls, deliberately not re-litigating the ~20 already-signed-in files with 2+ scan/poll cells, citing work-order rule 5 (no scope creep) and naming #1017 as the ticket chartered to revisit accessibility-scan call sites. This is a defensible, explicitly-argued scope decision, not a violation — recorded here only because it is adjacent to STD-1 and a reviewer reading the AC's literal words in isolation would otherwise flag it too.",
+      "required_fix": "None required; already disclosed. If the owner wants the literal wording enforced, that is a scope decision for a follow-up ticket, not a defect in this one."
+    }
+  ],
+  "positive_observations": [
+    "Every /tdd-mandated structural cell in this diff (cell-budget-census.test.ts, settle-before-scan-census.test.ts) carries its own inline vacuity control with synthetic offender/compliant fixtures, matching WORK-ORDER rule 4's requirement for a test-only deliverable, and both were shown RED against the real tree before the fix (documented per-commit and in the per-ticket reports) and GREEN after — genuine vertical-slice TDD, not horizontal slicing.",
+    "#970's button.tsx overwrite and #989's guard rewrite are exhaustively commented with the owner ruling, the measured numbers behind each decision, and a re-applied-fix-by-fix accounting against upstream; protected-components.json is correctly left unchanged (button.tsx, pagination.tsx only).",
+    "#997's tax-boundary-mock.mjs addition follows the file's own established ID-scoped-fall-through convention exactly, and its vacuity control (temporarily breaking the ack handler, observing the walk fail for the right reason, then restoring and sha256-verifying byte-identity) is a model example of the work-order's rule 4 requirement.",
+    "#1017's settle-before-scan-census.test.ts and the filed-document-list.tsx contrast fix both fix the underlying defect (extract-and-delegate for the duplicated settle logic; a real 14.32:1 margin via the same idiom command.tsx's CommandItem already uses) rather than relaxing an assertion — token-contrast.test.ts's new cell explicitly asserts a >=10:1 margin rather than merely a pass, guarding against the exact anti-aliasing-flip defect that was found.",
+    "Shared files (apps/web/test/manifest.txt, apps/web/e2e/e2e-fixture-ownership.test.ts) are touched with minimal, sorted-position hunks per work-order rule 7.",
+    "No migration, no docs/PRD.md or docs/ARCHITECTURE.md edit, no frozen-workflow file touched anywhere in this diff.",
+    "pnpm typecheck and CI=true GITHUB_ACTIONS=true pnpm lint both re-verified clean (exit 0) live in this review session."
+  ]
+}

@@ -23,7 +23,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { signIn } from "./helpers";
+import { cellBudgetMs, settleForScan, signIn } from "./helpers";
 import { P6_5 } from "./agentic-finish-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -59,6 +59,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("裁-37 · ⌘K Do follows the DATABASE: absent below the door's floor, offered above it", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   // ARM 1 — the database says BOOKKEEPER. `begin_client_onboarding` floors at ADMIN
   // (`_human_ctx(role_rank('admin'))`, 0017:2497), so the row is ABSENT and the section says
   // what it looked for, rather than showing a greyed promise the caller could never keep.
@@ -85,6 +86,7 @@ test("裁-37 · ⌘K Do follows the DATABASE: absent below the door's floor, off
 });
 
 test("the parked question survives a RELOAD — re-read from the database, answerable in the thread", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 6 }));
   // N6 — THE CLAIM IS NOW ASSERTED. This walk's whole point is that the question arrives from a
   // READ rather than from the SSE buffer a page load discards, and the PR body said "asserted:
   // zero stream opens" while nothing counted anything. Every request the page makes is recorded
@@ -121,6 +123,7 @@ test("the parked question survives a RELOAD — re-read from the database, answe
 });
 
 test("the structural boundary: A -> B and A -> firm carry nothing client-owned across", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await signIn(page);
   await page.goto(CLIENT_A);
   await expect(page.getByText("CLIENT A TRANSCRIPT")).toBeVisible({ timeout: 20_000 });
@@ -169,6 +172,7 @@ test("the structural boundary: A -> B and A -> firm carry nothing client-owned a
 });
 
 test("裁-27 · an amend records a NEW resolution and shows what it supersedes", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 5 }));
   await signIn(page);
   await page.goto(CLIENT_A);
   await expect(page.getByText("Which banks does this client use?")).toBeVisible({ timeout: 20_000 });
@@ -215,6 +219,7 @@ async function assertNoWireArtefacts(page: Page, what: string): Promise<void> {
 }
 
 test("CB-AE2E-008 · a structured answer reads as prose on the built app — no [object Object], no raw JSON", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   await signIn(page);
   await page.goto(CLIENT_A);
 
@@ -226,11 +231,13 @@ test("CB-AE2E-008 · a structured answer reads as prose on the built app — no 
   await expect(page.getByText("The firm's standard chart is not applied yet")).toBeVisible({ timeout: 20_000 });
   await assertNoWireArtefacts(page, "the client A onboarding card");
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(axe.violations, "client A workspace axe violations").toEqual([]);
 });
 
 test("CB-AE2E-023 · a COMMITTED plan renders a receipt, with no Commit or Cancel trigger and the answers collapsed", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await signIn(page);
   await page.goto(CLIENT_B);
 
@@ -257,6 +264,7 @@ test("CB-AE2E-023 · a COMMITTED plan renders a receipt, with no Commit or Cance
   await expect(page.getByText("Registration 202401047756 — format checked", { exact: false })).toBeVisible({ timeout: 10_000 });
   await assertNoWireArtefacts(page, "the settled onboarding receipt");
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(axe.violations, "settled onboarding receipt axe violations").toEqual([]);
 });
@@ -311,11 +319,13 @@ test("H-30 · the apply-chart dialog's Confirm stays inside a 1280x720 viewport 
   // Reachable means CLICKABLE, not merely on screen.
   await expect(confirm).toBeEnabled();
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(axe.violations, "apply-chart dialog axe violations").toEqual([]);
 });
 
 test("H-51 / CB-AE2E-024 · /clients offers Add client above the register, follows the DATABASE's floor, and dispatches the SAME flow ⌘K does", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   // ARM 1 — below the door's admin floor (0017:2497), the control is ABSENT. Not greyed: a
   // caller is never offered a control they could not use.
   await signIn(page, "bookkeeper@example.test");
@@ -330,6 +340,7 @@ test("H-51 / CB-AE2E-024 · /clients offers Add client above the register, follo
   const addClient = page.getByRole("button", { name: "Add client", exact: true });
   await expect(addClient).toBeVisible({ timeout: 20_000 });
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(axe.violations, "/clients register axe violations").toEqual([]);
 
@@ -343,6 +354,7 @@ test("H-51 / CB-AE2E-024 · /clients offers Add client above the register, follo
 });
 
 test("裁-128 · the apply-standard-chart button plants the confirmed families and shows the door's own receipt", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   await signIn(page);
   await page.goto(CLIENT_A);
   await expect(page.getByText("Apply the firm's standard chart of accounts to this client")).toBeVisible({ timeout: 20_000 });
@@ -359,4 +371,77 @@ test("裁-128 · the apply-standard-chart button plants the confirmed families a
 
   await page.getByRole("button", { name: "Apply the chart" }).click();
   await expect(page.getByText(/Applied: 51 accounts across 1 families/)).toBeVisible({ timeout: 15_000 });
+});
+
+test("#897 · the full-screen altitude change keeps a typed interview answer, and focus returns to the control that opened it", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
+  // UI-21 (the ticket's own AC) needs an interview run PARKED OPEN AND UNANSWERED, independent
+  // of every other arm's fixture — `interview-walk.spec.ts`'s own header explains why the
+  // real-stack spec cannot host this (docker-only, no such fixture provisioned) and why this
+  // mock lane does instead (owner-ratified 2026-09-18 in the ticket's own DECISIONS record).
+  // Client C (`P6_5.clientC`/`threadC`/`planC`/`runC`) is this lane's OWN client, touched by no
+  // other test() in this file — the ticket's AC2, "independent of any other arm's state", is a
+  // fixture-IDENTITY fact here, not only a behavioural one.
+  await signIn(page);
+  await page.goto(`/clients/${P6_5.clientC}`);
+
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+
+  // Start the durable run (idempotent — `startClientInterview`), and land on the OPEN park the
+  // mock's `/api/runtime/interview/state` answers with for `P6_5.runC`.
+  await page.getByRole("button", { name: "Start / continue interview" }).click();
+  await expect(page.getByText(P6_5.interviewCQuestion)).toBeVisible({ timeout: 20_000 });
+
+  const answer = page.getByLabel("Your answer");
+  await expect(answer).toBeVisible();
+  await answer.fill("Rome Advisory Sdn Bhd");
+
+  // THE ESCALATE CONTROL — "the triggering control" the AC names. Focused explicitly before
+  // the click (not merely clicked), so its own focus can be asserted as the ROUND TRIP's start,
+  // not assumed from the click alone.
+  const escalate = page.getByRole("link", { name: "Open full screen" });
+  await escalate.focus();
+  await escalate.click();
+
+  // (firm) and (full) are SIBLING route groups (rail-mount.tsx's own note) — a REAL navigation,
+  // not a re-render, so this is the remount InterviewRunCard.tsx's #897 fix targets.
+  await expect(page).toHaveURL(new RegExp(`/clients/${P6_5.clientC}/clara/${P6_5.threadC}(\\?|$)`));
+  // A FRESH InterviewRunCard instance — `runId` is plain local state, `null` on every mount —
+  // does not auto-attach; the human re-attaches by pressing the SAME idempotent control again
+  // (InterviewRunCard.tsx's own header, and the mock's `/api/interview/client/start` answers
+  // the SAME `run_id` every time for this client/plan pair). The draft itself, unlike `runId`,
+  // is already back the moment this instance mounted — `claraThreadStore.interviewDrafts` is
+  // keyed by clientId alone — it is only the answer FIELD that waits for a park to render.
+  await page.getByRole("button", { name: "Start / continue interview" }).click();
+  const fullScreenAnswer = page.getByLabel("Your answer");
+  await expect(fullScreenAnswer).toBeVisible({ timeout: 20_000 });
+  await expect(
+    fullScreenAnswer,
+    "AC1 — the typed answer must survive the rail -> full-screen remount",
+  ).toHaveValue("Rome Advisory Sdn Bhd");
+
+  // THE COLLAPSE CONTROL — reads `?from=` back to the rail's own URL (ClaraFullScreenThread's
+  // own header). The round trip's second half.
+  const collapse = page.getByRole("link", { name: "Back" });
+  await collapse.click();
+
+  await expect(rail).toBeVisible();
+
+  // AC1's other half — keyboard focus returns to the control that opened the full-screen
+  // thread, not to <body> or nowhere: a screen-reader or keyboard-only user does not have to
+  // re-find their place in the rail after a round trip they themselves drove. Asserted HERE,
+  // before the re-attach click below, which would otherwise move focus onto ITSELF and prove
+  // nothing about what the navigation alone left focused.
+  await expect(
+    page.getByRole("link", { name: "Open full screen" }),
+    "AC1 — focus returns to the control that opened the full-screen thread",
+  ).toBeFocused();
+
+  // The SAME re-attach again: the rail's own InterviewRunCard is now a fresh instance too.
+  await page.getByRole("button", { name: "Start / continue interview" }).click();
+  await expect(
+    page.getByLabel("Your answer"),
+    "AC1 — the typed answer must ALSO survive the full-screen -> rail remount, the way back",
+  ).toHaveValue("Rome Advisory Sdn Bhd");
 });

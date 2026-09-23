@@ -195,12 +195,12 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   // :153-164 comment already names, mirrored to the removal direction.
   "_wake_cred_full", "ack_compliance_watch", "acknowledge_sweep_run", "add_bank_account",
   "admit_autodraft_task", "answer_interruption", "approve_opening_correction", "approve_opening_seed", "approve_pair_reversal",
-  "approve_wrong_client_correction", "begin_client_onboarding", "bootstrap_client_plan", "cancel_agent_task",
+  "approve_wrong_client_correction", "bootstrap_client_plan", "cancel_agent_task",
   "cancel_client_onboarding", "cancel_opening_seed", "cancel_pair_reversal", "cancel_seeding_batch", "claim_document_intake_upload",
   "claim_document_processing_task", "classify_document", "commit_client_onboarding", "complete_bank_reconciliation", "complete_coding_task",
   "complete_fixed_asset_particulars", "complete_pending_match", "complete_seeding_batch", "complete_stored_document_task", "confirm_attribution_candidate",
-  "consume_egress_dispatch", "create_client", "create_firm", "create_seeding_batch", "deactivate_bank_account",
-  "deactivate_client_egress_purpose", "decline_seeding_proposal", "dismiss_attribution_candidate", "dismiss_coding_task",
+  "consume_egress_dispatch", "create_client", "create_firm", "deactivate_bank_account",
+  "deactivate_client_egress_purpose", "dismiss_attribution_candidate", "dismiss_coding_task",
   "dismiss_open_question", "enrol_staff_advance_account", "evaluate_sst_watch", "evaluate_sst_watches_all",
   "fail_classify", "fail_invoice_facts", "fail_statement_facts", "finalize_document_intake", "get_bank_reconciliation",
   "get_context_pack", "list_review_queue", "list_vendor_bindings", "mark_document_intake_received",
@@ -214,8 +214,18 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "retire_staff_advance_account", "retire_wiki_page", "reverse_entry", "revise_entry", "revise_fixed_asset_particulars",
   "revoke_client_egress", "revoke_client_egress_purpose", "revoke_vendor_identity_binding", "revoke_wake_credential", "run_client_lint",
   "run_lint_all", "set_counterparty_terms", "set_document_kind", "set_member_role", "set_wiki_synthesis_hold",
-  "settle_chat_turn", "settle_ingest_reservation", "sign_adjustment_template", "sign_bank_rule",
-  "sign_depreciation_authority", "sign_vendor_identity_binding", "snooze_compliance_watch", "tick_seeding_proposal",
+  // `sign_adjustment_template` LEFT this base array at #927 (migration 0282) and is now a
+  // REVERSE-gated cohort (ADJ_TEMPLATE_DOORS_PRE_0282_CLOCK_NAMES, below), exactly like
+  // begin_chat_turn: 0282 recut the body to a bare typed refusal, so it reads no clock any more
+  // on a database that has the retirement -- and still does on every `db-slice-frontiers` leg
+  // pinned before it, which is why the name is pushed back rather than deleted.
+  // `tick_seeding_proposal` left this same line at ticket 1012 (migration 0288) for exactly the
+  // same reason and by the same mechanism, into SEEDING_LANE_RETIRED_0288_CLOCK_NAMES below
+  // (with its two siblings, which leave from the lines above). The two retirements are
+  // independent and BOTH removals stand: this array is the "still stamps a clock" roster, and
+  // neither name does any more once its own migration has applied.
+  "settle_chat_turn", "settle_ingest_reservation", "sign_bank_rule",
+  "sign_depreciation_authority", "sign_vendor_identity_binding", "snooze_compliance_watch",
   "unmatch_bank_match", "update_onboarding_plan", "upsert_fa_account_profile", "verify_document_intake", "void_bank_reconciliation",
   "void_bank_statement", "wake_context", "wake_record_notification", "withdraw_draft",
 ].sort();
@@ -234,6 +244,51 @@ const RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES = [
   "list_autopost_rules", "propose_autopost_rule", "reconcile_autopost_rules", "retire_autopost_rule",
   "retire_coding_rule", "sign_autopost_rule", "sign_coding_rule",
 ];
+
+// ---------------------------------------------------------------------------
+// TWO MORE REVERSE-GATED COHORTS, the exact shape the block above uses: a name that carried a
+// bare clock token from early in the estate's life and STOPS carrying one at a named migration.
+// Each is pushed back on a database that has not yet applied its migration, so arm (D) stays
+// exact at both frontiers and a MISSING name still fails.
+//
+// (a) #899 [0287_client_birth_wall.sql]. `clara.begin_client_onboarding`'s body was moved into
+// the new ungranted `clara._client_birth_core`, which the base roster above carries: the clock
+// token went with the body. The door itself is now a thin wrapper with none.
+const BIRTH_WALL_0287_MOVED_CLOCK_NAMES = ["begin_client_onboarding"];
+// …and the body it moved INTO, born at 0287, so it is forward-gated rather than pushed back.
+const BIRTH_WALL_0287_CLOCK_NAMES = ["_client_birth_core"];
+// (b) Ticket 1012 [0288_seeding_lane_retired.sql]. All three prior-GL seeding write doors are
+// recut to ONE typed refusal (CLR34 `seeding_lane_retired`) that raises before anything else, so
+// none of them stamps a timestamp any more -- there is no body left to stamp one. The two
+// CLOSERS (cancel_seeding_batch / complete_seeding_batch) are byte-unchanged and stay in the base
+// roster above, which is the discriminating half of this edit.
+const SEEDING_LANE_RETIRED_0288_CLOCK_NAMES = [
+  "create_seeding_batch", "decline_seeding_proposal", "tick_seeding_proposal",
+];
+// (c) Riders wave 3, lane 04 — THREE FORWARD-GATED NAMES, born with their migration, found at
+// integration rather than in the lane (this battery reads the WHOLE catalog, and no lane runs the
+// whole estate suite). Each is gated on its OWN stem, so a `db-slice-frontiers` leg pinned below
+// it still measures exact.
+//
+// THE ADJUDICATION, the same one 0046's block below states: arm (D) catches a BARE clock token,
+// and a bare token is only a defect when the body derives a DATE from it. All three stamp
+// TIMESTAMPTZ columns and nothing else — measured on the live catalog, not read off the file:
+// `retired_at`, `superseded_at` and `effective_from` are all `timestamp with time zone`
+// (information_schema.columns on clara.fa_account_depreciation_policies and
+// clara.fa_arrears_resolutions), so there is no assignment cast to a date column anywhere in
+// them. They belong in the roster, not in a fix.
+//
+// #932 [0277_fa_default_depreciation_policy.sql]: the set door supersedes the live policy row
+// (`retired_at = now()`) and stamps the new row's `effective_from = now()`; the retire door
+// stamps `retired_at = now()`. 0292 (#932's fix round) pins BOTH bodies as unmoved, so the pair
+// reads the same from 0277 onward.
+const FA_DEPRECIATION_POLICY_0277_CLOCK_NAMES = [
+  "retire_fa_depreciation_policy", "set_fa_depreciation_policy",
+];
+// #975 [0279_fa_closed_year_arrears.sql]: the record door supersedes the live judgement
+// (`superseded_at = now()`). 0293 (#975's fix round) RECUTS this body, and the token survives the
+// recut — measured on a database at 0293 — so one forward gate is exact at both frontiers.
+const FA_ARREARS_RESOLUTION_0279_CLOCK_NAMES = ["record_fa_arrears_resolution"];
 
 // ---------------------------------------------------------------------------
 // 0046 [§7-A] — THE THREE NAMES THIS MIGRATION ADDS, AND WHY THE ROSTER IS BIMODAL.
@@ -777,6 +832,15 @@ const F_A7_PI_CLOCK_NAMES = [
 // the file is numbered at MERGE, so a `like '0103_%'` gate would silently invert the moment
 // the train renumbers — and a silently-wrong roster is exactly the drift arm (D) catches.
 const CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES = ["begin_chat_turn"];
+
+// #927 (migration 0282, owner ruling #788: retire the 0045 recurring-adjustment template lane).
+// `sign_adjustment_template`'s body became one typed refusal that reads no clock, so the name
+// leaves the live roster AT that frontier and not before. REVERSE-gated on the stem for the same
+// reason every other cohort here is: a `db-slice-frontiers` leg at 0045 still meets the
+// clock-reading body it has, and an unconditional removal would red it.
+// The other two doors 0282 closed (`propose_adjustment_template`, `run_adjustment_manual`) were
+// never in this roster -- measured, not assumed: neither name appears in the base array above.
+const ADJ_TEMPLATE_DOORS_PRE_0282_CLOCK_NAMES = ["sign_adjustment_template"];
 
 // F-A9 PR-1B [the brake census, `f_a9_pr_1b_brake_census` at whatever number merge claimed]:
 // THE SECOND REVERSE COHORT, minted for exactly PR-0's reason and gated exactly PR-0's way.
@@ -1376,6 +1440,9 @@ export async function s5BareTokenRoster(query) {
   // REVERSE gate, no lower bound -- these eleven are early-born (see the array's own header),
   // so they are expected everywhere the roster reaches UNTIL the cutover retires them.
   if (!(await appliedStem("f_a2_cutover_retirement$"))) names.push(...RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES);
+  if (await appliedStem("client_birth_wall$")) names.push(...BIRTH_WALL_0287_CLOCK_NAMES);
+  else names.push(...BIRTH_WALL_0287_MOVED_CLOCK_NAMES);
+  if (!(await appliedStem("seeding_lane_retired$"))) names.push(...SEEDING_LANE_RETIRED_0288_CLOCK_NAMES);
   if (await applied("0046_%")) names.push(...SALES_LANE_0046_CLOCK_NAMES);
   if (await applied("0046_%") && !(await appliedStem("f_a2_cutover_retirement$"))) {
     names.push(...SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES);
@@ -1403,6 +1470,10 @@ export async function s5BareTokenRoster(query) {
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
   // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
   if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);
+  // REVERSE gate — see ADJ_TEMPLATE_DOORS_PRE_0282_CLOCK_NAMES (#927). Same direction, same reason.
+  if (!(await appliedStem("retire_adjustment_template_doors$"))) {
+    names.push(...ADJ_TEMPLATE_DOORS_PRE_0282_CLOCK_NAMES);
+  }
   // REVERSE gate — see PROCESSING_CALL_PRE_F_A9_PR1B_CLOCK_NAMES. Same direction, same reason.
   if (!(await appliedStem("f_a9_pr_1b_brake_census$"))) names.push(...PROCESSING_CALL_PRE_F_A9_PR1B_CLOCK_NAMES);
   if (await appliedStem("f_a3_pr1a_core_extractions$")) {
@@ -1490,6 +1561,15 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("intake_refusal_record$")) names.push(...INTAKE_REFUSAL_RECORD_0254_CLOCK_NAMES);
   if (await appliedStem("firm_setup_education_tips$")) {
     names.push(...FIRM_SETUP_EDUCATION_TIPS_0259_CLOCK_NAMES);
+  }
+  // RIDERS WAVE 3, lane 04 (0277, 0279) - stem-gated, never number-gated, for the reason
+  // :207-214 gives, and doubly so here: 0277's and 0279's own fix-round siblings were RENUMBERED
+  // to 0292/0293 at merge, which a number gate would not have survived.
+  if (await appliedStem("fa_default_depreciation_policy$")) {
+    names.push(...FA_DEPRECIATION_POLICY_0277_CLOCK_NAMES);
+  }
+  if (await appliedStem("fa_closed_year_arrears$")) {
+    names.push(...FA_ARREARS_RESOLUTION_0279_CLOCK_NAMES);
   }
   return names.sort();
 }

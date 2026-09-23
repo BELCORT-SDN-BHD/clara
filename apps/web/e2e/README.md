@@ -63,6 +63,21 @@ Every spec takes its sign-in from [`helpers.ts`](helpers.ts) — `signIn(page, e
 
 A third cell keeps both lists live: an entry that no longer offends fails, so the lists can shrink but cannot rot — it is what forced the `entry-faces-walk.spec.ts` entry out once the detector stopped mis-reading that file. A fourth is the vacuity control — the detector is driven over synthetic offenders (the variable-then-click shape, the indirected Password locator, the regex spellings, and a real form whose two acts are separated by a comment block) and over compliant, signup and two-different-forms sources, so an empty census is evidence rather than an instrument that never fired.
 
+### One settle-before-scan, and the census that holds it (#760, #1017)
+
+Every spec that scans with axe calls [`helpers.ts`](helpers.ts)'s `settleForScan(page)` immediately before `new AxeBuilder(...).analyze()` — the ONE spelling of "this page has stopped moving, measure it now": every `.enter-content`/`.enter-panel` element at `opacity: 1` AND no finite `document.getAnimations()` entry still running. #760 built it after three walks independently measured the same intermittent axe `color-contrast` violation — a scan that runs mid-transition measures a COMPOSITED colour nobody ever ships. By wave 3 (2026-09-20) two more independent findings (the integration gate's own three-run classification, and a repo-wide count on this ticket) showed most of the suite's scans still called the scanner directly, or through a local routine that waited only on `getAnimations()` or only on `networkidle` — never on the fade's own opacity, the exact gap #760 closed for the three walks it touched and nowhere else.
+
+[`settle-before-scan-census.test.ts`](settle-before-scan-census.test.ts) is that rule with a cell behind it, the same shape `sign-in-census.test.ts` uses: comment-stripped source (this suite's own prose regularly quotes the exact code shapes the census greps for), a scan not preceded — since the last scan, or the start of the file — by a direct `settleForScan(page)` call or a call to a verified `LOCAL_WRAPPERS` delegate is an offender.
+
+| List | Entries | What it permits |
+|---|---|---|
+| `LOCAL_WRAPPERS` | `a11y-finish-walk.spec.ts` (`gotoSettled`), `home-board-walk.spec.ts` (`settled`) | a file's own navigate-then-settle idiom, verified (by extracting its balanced function body) to call `settleForScan(page)` itself rather than reimplement the wait |
+| `EXCEPTIONS` | *(empty)* | a spec file the rule does not hold, with the reason recorded — empty as of #1017's own fold |
+
+A second cell verifies every `LOCAL_WRAPPERS` entry actually delegates (a name registered whose body never calls `settleForScan(page)` fails on its own), a third keeps `EXCEPTIONS` live the same way the sign-in census does, and a fourth is the vacuity control (an unsettled offender, a settled compliant source, two scans sharing one settle, a comment naming the shape without being it, and a wrapper call site recognised only when its name is registered).
+
+The same ticket's other half: `filed-document-list.tsx`'s selected row measured 4.62:1 at REST (muted-foreground on the muted selection background) — the tightest margin above 4.5:1 in `check-token-contrast.mjs` outside the identity-canvas block — close enough that anti-aliasing at a glyph edge measured 4.49:1 and 4.36:1 on two independent full-browser-suite runs, on an unchanged token and an unchanged spec file. Settling the scan fixes the mid-transition reading; the selected row's cells now render at `text-foreground` instead (14.32:1, pinned as `foreground-on-muted-selected-document-row`) so the resting pair itself is never close enough for anti-aliasing to matter.
+
 ## One worker, one host (#706)
 
 The harness is single-worker by construction and it must not share a machine with another test suite while it runs.
@@ -80,7 +95,16 @@ The config sets no per-test timeout, so Playwright's flat 30 s applies to every 
 | `CELL_BUDGET.scan` | 35 s | one full-page `AxeBuilder.analyze()` — measured at 14.4 s alone and 33 s under load |
 | `CELL_BUDGET.signIn` | 20 s | one form sign-in: a real round trip through the mock auth server plus a server-rendered redirect |
 
-Use `test.setTimeout(cellBudgetMs({ polls, scans, signIns }))` at the top of a cell whose work is visible from the cell, and `grantCellBudget(CELL_BUDGET.x)` inside a shared helper (`signIn()`, `scan()`) whose cost depends on how many times the cell calls it — that form ADDS to whatever the cell already set, so a cell that signs in three times gets three times the headroom.
+Two of the three units are granted AUTOMATICALLY, at the point the work happens: `signInTo()` grants `CELL_BUDGET.signIn` and `settleForScan()` grants `CELL_BUDGET.scan`, both through `grantCellBudget`, which ADDS to whatever the cell already set. So a cell that signs in twice and scans four times gets that headroom with nothing written at the call site, and a cell that does neither gets none. What a cell still declares for itself is its POLLS: `test.setTimeout(cellBudgetMs({ polls: N }))` at the TOP of the cell (`test.setTimeout` REPLACES, so a declaration written after a grant would discard it).
+
+**This is the host-contention mitigation (#864), and it is finished, not merely available.** [`cell-budget-census.test.ts`](cell-budget-census.test.ts) holds it with cells instead of a sentence, and holds it per CELL rather than per file:
+
+- Every custom per-cell or per-describe timeout in this suite is built from `cellBudgetMs`, never a hand-rolled literal or formula (`a11y-finish-walk.spec.ts`'s own `test.setTimeout(30_000 * (FACES.length + 1))` and `counterparty-identity-walk.spec.ts`'s file-wide `test.describe.configure({ timeout: 150_000 })` were the two guesses that predated the vocabulary; both are gone).
+- The two shared helpers actually grant what this census prices them at — a cell asserts that `signInTo` and `settleForScan` each call `grantCellBudget` themselves, because every other rule stands on it.
+- Every cell's accessibility scans are covered: the census resolves each scan by FOLLOWING calls to the real scanner (`.analyze(`), whatever the file calls its own wrapper, and counts the settles (hence grants) the same cell reaches. A scan that is neither settled nor declared is an offence.
+- Every cell whose own explicit waits — its own plus those of every local helper it calls, once per call — can consume the whole 30 s base declares `cellBudgetMs({ polls: N })` sized to them.
+
+The first cut of that census (2026-09-21) keyed its scan rule on a helper named literally `scan(` and exempted every file that signs in anywhere, which made it blind to `signup-confirm-pending.spec.ts` — three cells running 2+ real axe passes, no sign-in, no budget — and to 17 more such cells across 15 signed-in files. It also claimed `checkout-gate-walk.spec.ts` was "the one file with that shape"; that claim was never measured by a detector that could see the other shapes, and it was false. The rules above replaced it (#864 fix round, 2026-09-23). A budget is still not a promise that a cell never reds: **running this suite alongside sibling worktree lanes on one host is expected to cost more wall-clock than the quiet-host measurements the table above records, and a cell that exceeds even a generous budget under real twelve-lane contention is evidence of load, not of a defect** — the fix for that is running the suite alone or sequencing heavy suites one at a time (above), which this budget vocabulary does not attempt to replace.
 
 ### The sign-in cold-start flake (#804)
 
@@ -105,7 +129,7 @@ Three rules the budgets do not replace:
 
 ## Coverage map
 
-The checked-in suite currently contains 25 specs:
+The checked-in suite currently contains 51 specs. The table below describes 27 of them; the remaining 24 have no row yet and are named under [Specs with no coverage-map row](#specs-with-no-coverage-map-row) beneath it — so neither number here contradicts what a reader can count in the table or on disk. Writing the missing descriptions is deliberately outside [#1019](https://github.com/BELCORT-SDN-BHD/clara/issues/1019), whose Out of scope is "rewriting or auditing the individual per-spec description text in the coverage-map table"; it is carried as that ticket's follow-up.
 
 | Spec | What it exercises |
 |---|---|
@@ -119,7 +143,7 @@ The checked-in suite currently contains 25 specs:
 | `a11y-finish-walk.spec.ts` | Target size, skip link, focus ring, reduced motion, and axe scans across the shell's own surfaces |
 | `parity-holes.spec.ts` | Client/thread isolation, password recovery, route errors, and rail layout |
 | `chat-parity-walk.spec.ts` | Clarifications, attachments, thread creation/switching, stream proxying, and typed cards; a clarify answered IN PLACE while a 900-delta stream is still arriving (the timer census is taken over a window 200 DECODED deltas wide, never a fixed wait) and the turn clock is counting (the live view must not be replaced by a send error, and no React nested-update or hydration fault may reach the console), at 320 CSS px, plus reduced motion counted as MOVEMENT on the clarify group |
-| `agentic-finish-walk.spec.ts` | Capability-shaped commands, task reattachment, onboarding receipt states, and chart apply |
+| `agentic-finish-walk.spec.ts` | Capability-shaped commands, task reattachment, onboarding receipt states, chart apply, and (#897) the rail's full-screen altitude round trip — a typed interview answer surviving both remounts and keyboard focus returning to the escalate control |
 | `journals-table-walk.spec.ts` | Journal tables, filters, disclosure, approval, clarifications, and accessibility. #634 review round: an expanded POSTED row discloses its purpose, its Work link, its operation receipt with a working copy control, and its source — "No document" for a Work-recorded entry and the named lane for a document-coded one |
 | `documents-viewer-walk.spec.ts` | Safe document viewing, evidence overlays, extraction hierarchy, CSP reporting, and accessibility. #620 adds source custody at the face: the original downloaded with `disposition=attachment` and its object URL released, a viewable original still opening its own tab while an un-previewable one is never offered it, the six refusals (denied, not-found, storage-unavailable, custody-pending, expired session, integrity) rendering DISTINCTLY, Retry reaching the wire a second time and clearing the failure, `?document=` surviving a reload with the browser's own Back closing the detail and an unshowable id clearing the parameter, and a keyboard-only pass — open with Enter, focus landing in what was opened, back out, download — whose F9 cell samples focus ACROSS the read (vacuity control first: the busy window must appear in the samples before their focus values mean anything; on `disabled={busy !== null}` it measured `BODY×12`), at 320 CSS px, 200% zoom, under reduced motion, with axe run on a document open beside a standing refusal |
 | `bank-close-registers-walk.spec.ts` | Refusal-preserving dialogs, close restart, and human-readable close holds |
@@ -133,11 +157,41 @@ The checked-in suite currently contains 25 specs:
 | `shell-migration-walk.spec.ts` | #614's unified shell: the legacy `/admin`/`/needs-you` redirect matrix, identity at every width, the keyboard scope switcher and its cross-client isolation guarantee, the mobile sheet's keyboard contract, the Accounting sidebar group, reduced motion, the client-not-found boundary (a bogus id, and — via a same-process visibility toggle — a client that goes invisible mid-session), one overlay stack (the Clara rail plus the mobile nav Sheet open together at 640px), Work's destination split, settings rank-shaping, and the train's retired entries |
 | `personal-settings-walk.spec.ts` | #626's `/settings/account`: loaded/dirty/saved/reload-persists, per-field Reset, save failure (CLR10) preserving dirty state with first-invalid-focus, concurrent change (CLR06) and Reload-and-keep-my-edits, denied/signed-out, the honest Notifications "not configured" note, the saved motion preference's `data-motion` attribute independent of the OS setting, keyboard-only save, 320px and 200%-zoom layout, and deep link/Back |
 | `tax-boundary-walk.spec.ts` | #627's Tax tab: the SST watch's enabled/empty/stale/denied/technical-failure states as distinct labelled regions, the capability-boundary deep link and its focus return (both click-driven and a fresh navigation), 320px, reduced motion, and the `/admin/compliance` legacy redirect into the rebuilt compliance register |
+| `tax-compliance-watch-receipt-walk.spec.ts` | #997's compliance-watch RECEIPT on the client Tax tab: acknowledge, snooze and resolve an open SST watch against a served build (never a stub), each act's `get_compliance_watch_disposition` re-read showing the honest "nothing recorded" reading beforehand and a NEW disposition line after each act — the actor resolved to a name, the `state_before → state_after` transition, the rationale/evidence and the "no version number" note — proving the wiring a stubbed unit cell cannot: a write that succeeds and then shows nothing new |
 | `activity-feed-walk.spec.ts` | #632's `/activity`: representative upload/posting/correction/close/report/agent-receipt/conversation-maintenance rows with attribution, kind and client filters written to the URL, keyset "Load more" with dedupe-by-(source,id), a correction's two-sided original/replacement link, the `?event=` detail Sheet's Title/initial-focus/Escape/focus-return and Back-preserves-filters contract, a no-oracle denied detail via a direct deep link, live permission loss clearing the list on a focus recheck, 320px, 200% zoom, and reduced motion. #728 finding 4: history Back returns focus to the row that opened the Sheet (not just that the URL/filters survive). #728 finding 1: a KEPT sweep-heartbeat row reads "Clara (system)" under kind Agent (never Documents) and no row on the page is unattributed |
 
 | `work-list-walk.spec.ts` | #641's B3 durable Work list on BOTH `/work` and `/clients/:id/work`: rows carrying their derived state WORD (including "Retrying", which is `attempts > 1` rather than a status), the client and the origin of a chat-started Work; status facets and free text written to the URL and cleared from it; the two Empty states told apart (filtered no-results keeping its filters and offering Clear filters, versus a client with no durable Work reading as first use); a live permission loss clearing the rows with no affordance that could only refuse; keyset Pagination writing `?cursor=` with Back returning to the first page and no total ever claimed; a filtered deep link whose Back out of the detail restores the identical query; the built-in "Needs you" saved view still a link marked `aria-current`; the client surface pinning its own client with no client picker; keyboard Enter into a row's durable address; the 320 px filter Sheet naming how many filters are applied; narrow list-to-detail and Back; 200 % zoom; reduced motion; the Work detail's current question proved to PRECEDE the Results/Sources/Activity tab strip with `compareDocumentPosition`; and an axe scan of `/work` at 320 px. The pagination control is asserted as `role="button"` because shadcn base-nova's `PaginationLink` renders its real `<a href>` through Base UI's Button with `nativeButton={false}` — measured, not preferred |
 
 These files use `.spec.ts` because the package's Node test manifest accepts `*.test.*` files. Do not add Playwright specs to [`test/manifest.txt`](../test/manifest.txt).
+
+### Specs with no coverage-map row
+
+These 24 checked-in specs are real and run; only their description above is missing. [`spec-discovery.test.ts`](spec-discovery.test.ts) holds this list against the directory itself, so a spec can be neither added nor removed without landing in exactly one of the two — the table above or the list below.
+
+- `accrual-walk.spec.ts`
+- `adjustments-retired-walk.spec.ts`
+- `bank-match-walk.spec.ts`
+- `client-create-walk.spec.ts`
+- `counterparty-identity-walk.spec.ts`
+- `depreciation-walk.spec.ts`
+- `document-correction-walk.spec.ts`
+- `documents-intake-walk.spec.ts`
+- `firm-commercial-walk.spec.ts`
+- `firm-setup-walk.spec.ts`
+- `fixed-asset-acquisition-walk.spec.ts`
+- `intake-batch-walk.spec.ts`
+- `knowledge-firm-walk.spec.ts`
+- `knowledge-walk.spec.ts`
+- `members-invite-walk.spec.ts`
+- `opening-ledger-source-walk.spec.ts`
+- `operator-support-walk.spec.ts`
+- `periodic-adjustment-walk.spec.ts`
+- `plans-walk.spec.ts`
+- `prepayments-walk.spec.ts`
+- `staff-advances-register-walk.spec.ts`
+- `staff-expense-claim-walk.spec.ts`
+- `trade-invoice-walk.spec.ts`
+- `work-knowledge-walk.spec.ts`
 
 ## CI status
 

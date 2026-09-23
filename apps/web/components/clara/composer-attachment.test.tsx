@@ -224,6 +224,59 @@ test("the sixth attachment is refused HERE, because the DB's own five-per-turn w
   );
 });
 
+// #970 — THE TRAY RENDERS THROUGH message-scroller, bounded rather than growing the
+// composer without limit. A five-row tray (the capacity this same file's cell above
+// already fills) is the case that most needs a bound. This reuses that same scenario
+// rather than inventing a second one, then drives BOTH existing a11y gates against it —
+// `role="log"` is a live region (test/a11yRules.ts's own `IMPLICIT_LIVE_ROLES`), and the
+// per-row error banner sitting inside it must have opted OUT of its own announcement
+// (`StateBanner`'s `silent` prop, `components/common/state.tsx`'s own "one-announcement-
+// owner" note) or `nested-live-region` reds here.
+test("[970] the attachment tray renders through message-scroller, bounded and without double-announcing a row's own refusal", async () => {
+  await withFetch(
+    (url) => {
+      const base = baseRouter(url);
+      if (base) return base;
+      if (url === "/api/runtime/intake/documents") return json({ error: "bad_request", message: "bad request" }, 400);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App());
+      try {
+        await settleUntil(h, () => h.find(buttonNamed("Attach document")) !== null, "attach affordance");
+        const fileInput = h.find((node) => node.tagName === "INPUT" && node.type === "file");
+        assert.ok(fileInput);
+        const files = Array.from({ length: 6 }, (_, i) => (
+          new File([new Uint8Array([i])], `invoice-${i}.pdf`, { type: "application/pdf", lastModified: 200 + i })
+        ));
+        await h.fireEvent(fileInput, "change", (node) => { node.files = files; });
+        await settleUntil(h, () => /at most 5 attachments/.test(h.text()), "the local five-per-turn refusal");
+
+        const getAttr = (node: Stub | null, name: string): string | null =>
+          (node?.getAttribute as ((n: string) => string | null) | undefined)?.call(node, name) ?? null;
+        const bySlot = (slot: string) => (node: Stub) => getAttr(node, "data-slot") === slot;
+        assert.ok(h.find(bySlot("message-scroller")), "the tray mounts message-scroller's Root");
+        const viewport = h.find(bySlot("message-scroller-viewport"));
+        assert.ok(viewport, "…and its Viewport");
+        assert.equal(getAttr(viewport, "role"), "region", "the Viewport is a labelled, tabbable scroll region");
+        const content = h.find(bySlot("message-scroller-content"));
+        assert.ok(content, "…and its Content");
+        assert.equal(getAttr(content, "role"), "log", "Content keeps the vendor's own live-region role — new attachments are additions worth announcing");
+        assert.equal(
+          findAllIn(h.container, (node) => node.tagName === "LI").length,
+          5,
+          "the semantic <ul>/<li> list is unchanged inside message-scroller's Content",
+        );
+
+        assert.deepEqual(checkAccessibility(h.container as never), [], "in particular: no nested-live-region — the per-row refusal banner opted out via `silent`");
+        assert.deepEqual(checkKeyboardWalk(h.container as never), []);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 /** The intake + filing legs, shared by the two cells that need an attachment to reach
  *  "Filed". Kept out of `baseRouter` so the cells that must NOT see them still throw. */
 function intakeRouter(url: string, init?: RequestInit, onFiled?: (body: Record<string, unknown>) => void): Response | null {

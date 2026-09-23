@@ -337,16 +337,40 @@ test("p640.schedule.replay — the same op key replays the same answer and never
   assert.equal(n.rows[0].n, 1);
 });
 
-test("p640.schedule.overlap — creating a plan over a LIVE 0045 adjustment template's accounts answers an advisory overlap_warning and refuses nothing", async (t) => {
+test("p640.schedule.overlap — a LIVE 0045 adjustment template's accounts no longer answer an overlap_warning (#929/0283 retired the template arm); creating a plan still refuses nothing", async (t) => {
   if (await gatePlans(t)) return;
+
+  // #929/0283 retired `_plan_overlap_warning`'s template arm; this cell's own assertion below
+  // depends on that migration, which a bare `accounting_plans$` (0193) frontier does not carry.
+  // Frontier-gated the same way plan-overlap-template-arm-retired.test.mjs is, loud-fail unless
+  // an estate sweep preloaded the gate module — a skip here is not evidence either.
+  const armRetired = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["retire_plan_overlap_template_arm$"]);
+  if (armRetired.rows[0].n === 0) {
+    if (process.env.CLARA_ALLOW_MISSING_PLAN_OVERLAP_TEMPLATE_ARM_RETIRED !== "1") {
+      throw new Error(
+        "#929 premise 0283_retire_plan_overlap_template_arm.sql is not applied (no " +
+        "retire_plan_overlap_template_arm$ row in clara.schema_migrations) and " +
+        "CLARA_ALLOW_MISSING_PLAN_OVERLAP_TEMPLATE_ARM_RETIRED is unset -- this is a FOCUSED " +
+        "run and must fail loudly, not skip. Preload " +
+        "./tests/plan-overlap-template-arm-retired-preintegration-gate.mjs for an estate sweep " +
+        "against a pre-#929 chain.");
+    }
+    t.skip("rig not ready: 0283_retire_plan_overlap_template_arm.sql is not applied");
+    return;
+  }
+
   const client = await freshWorkClient(ALICE(), "overlap");
   const ref = await instructionRef({ client, author: ALICE() });
   const from = monthStart(await shiftMonths(today, -1));
   const b = basis({ postingDate: from });
   const codes = b.lines.map((l) => l.account_code);
 
-  // A live signed template of the 0045 lane, planted directly: this battery is about #640's
-  // WARNING, not about 0045's own propose/sign ceremony, which has its own battery.
+  // A live signed template of the 0045 lane, planted directly (its own doors were closed by
+  // #927; this shape is now only reachable as historical residue or a rig fixture): this battery
+  // is about #640's WARNING, not about 0045's own propose/sign ceremony, which has its own
+  // (now-retired) battery.
   const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [client])).rows[0].firm_id;
   await rootQuery(
     `insert into clara.adjustment_templates(firm_id, client_id, status, name, cadence, start_date,
@@ -361,21 +385,10 @@ test("p640.schedule.overlap — creating a plan over a LIVE 0045 adjustment temp
   const created = await createAccountingPlan(ALICE(), {
     client, authorityRef: ref, effectiveFrom: from, basis: b,
   });
-  assert.ok(created.plan_id, "the overlap is ADVISORY: the plan is created");
-  assert.ok(created.overlap_warning, "…and the answer names the overlap");
-  assert.equal(created.overlap_warning.kind, "adjustment_template_overlap");
-  assert.equal(created.overlap_warning.templates.length, 1);
-  assert.equal(created.overlap_warning.templates[0].name, "Rig overlap template");
-  assert.ok(created.overlap_warning.templates[0].accounts.some((a) => codes.includes(a)),
-    "the warning names the intersecting account codes");
-
-  // A plan on UNRELATED accounts carries no warning at all.
-  const other = await freshWorkClient(ALICE(), "overlap2");
-  const ref2 = await instructionRef({ client: other, author: ALICE() });
-  const clean = await createAccountingPlan(ALICE(), {
-    client: other, authorityRef: ref2, effectiveFrom: from, basis: b,
-  });
-  assert.equal(clean.overlap_warning, null, "no live template of THAT client, so no warning");
+  assert.ok(created.plan_id, "the plan is created regardless -- still never a refusal");
+  assert.equal(created.overlap_warning, null,
+    "the retired template arm names nothing any more, even for an exact account match " +
+    "(tests/plan-overlap-template-arm-retired.test.mjs owns the full retirement proof)");
 });
 
 // ===========================================================================================

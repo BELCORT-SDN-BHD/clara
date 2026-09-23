@@ -93,6 +93,8 @@ import { handlePeriodicAdjustmentRuntime, handlePeriodicAdjustmentSupabase } fro
 // and falls through otherwise. No runtime hook — every write is a plain PostgREST RPC. See
 // staff-advances-register-mock.mjs.
 import { handleStaffAdvancesRegisterSupabase } from "./staff-advances-register-mock.mjs";
+// #927 (riders wave 3) — the retired Adjustments register (`?tab=adjustments`).
+import { handleAdjustmentsRetiredSupabase } from "./adjustments-retired-mock.mjs";
 // #638's own lane — the staff-expense-claim form, its enrolment read, its refusals and its
 // register. Scoped to its own client id in every branch (the control endpoint included) and
 // file-disjoint from every other lane. See staff-expense-claim-mock.mjs.
@@ -155,7 +157,9 @@ import { handleMembersLifecycleSupabase } from "./members-lifecycle-mock.mjs";
 // #649's client-creation lane — the identity-candidates read and the birth door. Both branches
 // gate on the request's own subject (for these two verbs the subject IS the free-text name: the
 // door takes no id) and fall through otherwise, so it can run anywhere in the chain below; it is
-// placed BEFORE the P6-5 lane because that lane answers `begin_client_onboarding` for ANY name.
+// placed BEFORE the P6-5 lane because that lane answers `open_client_onboarding` for ANY name
+// (#899, 0287_client_birth_wall.sql renamed this door from `begin_client_onboarding`; both mocks
+// moved with it).
 import { handleClientCreateSupabase } from "./client-create-mock.mjs";
 // #639's C7 acquisition lane. Every handler names this lane's own client id or asset id
 // before it answers and falls through otherwise; it has no runtime half at all.
@@ -686,10 +690,11 @@ async function handleSupabase(request, response, url) {
   if (await handleDocumentsIntakeSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   // #649 — BEFORE the P6-5 lane, and that position IS load-bearing: `agentic-finish-mock.mjs`
-  // answers `begin_client_onboarding` for every name (it declares the verb unscopeable, because
-  // its own walk does not care which name reached it), so a #649 name that arrived there first
-  // would be born into that lane's fixture. This lane gates on its own three names and falls
-  // through for every other, including that lane's.
+  // answers `open_client_onboarding` for every name (#899 renamed it from `begin_client_
+  // onboarding`; it declares the verb unscopeable, because its own walk does not care which name
+  // reached it), so a #649 name that arrived there first would be born into that lane's fixture.
+  // This lane gates on its own three names and falls through for every other, including that
+  // lane's.
   if (await handleClientCreateSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
   if (await handleJournalWorkRpc(request, response, path, url, sendJson, cors)) return;
@@ -728,6 +733,11 @@ async function handleSupabase(request, response, url) {
   // would hold nothing but their placeholder with this hook after it. Every branch is scoped to
   // this lane's own client and falls through otherwise.
   if (await handleStaffAdvancesRegisterSupabase(request, response, path, url, sendJson, cors)) return;
+  // #927 — the retired Adjustments register (`?tab=adjustments`). No account picker to starve
+  // (Propose/Sign are gone with their doors), so position relative to home-board-mock.mjs is not
+  // load-bearing here; kept beside its closest sibling, staff-advances-register, all the same.
+  // Every branch is scoped to this lane's own client and falls through otherwise.
+  if (await handleAdjustmentsRetiredSupabase(request, response, path, url, sendJson, cors)) return;
   // #638, beside its closest sibling and ahead of the home board for the identical reason:
   // `home-board-mock.mjs`'s EMPTY_RELATIONS answers `/rest/v1/coa_accounts` with an honest `[]`
   // for every subject, so with this hook after it the claim form's account pickers would hold

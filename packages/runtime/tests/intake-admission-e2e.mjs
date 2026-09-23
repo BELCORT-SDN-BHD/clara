@@ -72,23 +72,20 @@ import { tmpdir } from "node:os";
 import { crc32 } from "node:zlib";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-// Fail-closed local gate, one notch wider than `intake-e2e.mjs`'s: the same loopback
-// requirement and the same two sanctioned CI throwaways, PLUS this wave's per-ticket rig
-// databases (`clara_<three digits>`, RIG.md), because a wave worker cannot create a
-// second migrated database on its own cluster — migration 0154 pins the CLUSTER-WIDE
-// `clara%` role count, so a second from-scratch chain would destroy the rig.
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|intake_ci|\d{3})$/;
-if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("intake-admission-e2e is hard-gated to loopback + PGDATABASE in {clara_rt_test,clara_intake_ci,clara_<ddd>}");
-}
-if (!process.env.WORKFLOW_POSTGRES_URL
-    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|intake_ci|\d{3})(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
-  throw new Error("intake-admission-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + the same throwaway database");
-}
+// Fail-closed local gate (#1018: shared with every other standalone World e2e driver), one notch
+// wider than `intake-e2e.mjs`'s: the same loopback requirement and the same two sanctioned CI
+// throwaways, PLUS this wave's per-ticket rig databases (`clara_<three digits>`, RIG.md), because
+// a wave worker cannot create a second migrated database on its own cluster — migration 0154 pins
+// the CLUSTER-WIDE `clara%` role count, so a second from-scratch chain would destroy the rig.
+assertLocalDbGate({
+  label: "intake-admission-e2e",
+  pattern: allowedDbPattern(`${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.INTAKE_CI}|${DB_NAME_SHAPE.PER_TICKET}`),
+  checkDsnString: true,
+});
 
 process.env.RELAY_TEST_MODE = "1";
 process.env.CLARA_START_WORLD = "1";

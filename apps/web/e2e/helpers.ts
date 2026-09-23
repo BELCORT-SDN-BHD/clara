@@ -116,8 +116,23 @@ export function watchReactFaults(page: Page): { seen: () => string[]; faults: ()
  * It also does not emulate `reducedMotion: 'reduce'`: several walks assert the full-motion
  * arm on the same page they scan, and a scan-only media emulation would make the scan measure
  * a page the rest of the cell never saw.
+ *
+ * IT ALSO BUYS THE SCAN ITS TIME (#864 fix round, 2026-09-23). Every call here is, by this
+ * function's own contract and by `settle-before-scan-census.test.ts`'s cell, immediately ahead of
+ * one full-page `AxeBuilder.analyze()` — the single most expensive thing any cell in this suite
+ * does (14.4 s alone, 33 s under load; `CELL_BUDGET.scan` prices it at 35 s). So the grant belongs
+ * HERE, for exactly the reason `signInTo`'s own `grantCellBudget(CELL_BUDGET.signIn)` belongs
+ * there: a cell that scans three times gets three times the headroom and a cell that never scans
+ * gets none, with nobody having to remember a number at the call site. Before this, three files
+ * (`identity-finish`, `staff-expense-claim`, `trade-invoice`) had each written this same grant into
+ * their OWN local scan wrapper by hand and the other thirty-odd had not — the review's finding
+ * SPEC-864-B counted 17 cells across 15 files running 2+ real scans against the flat 30 s default
+ * with no budget of their own. One shared place, every file.
+ *
+ * Still a ceiling, never a wait: `grantCellBudget` only raises the cell's timeout.
  */
 export async function settleForScan(page: Page): Promise<void> {
+  grantCellBudget(CELL_BUDGET.scan);
   await page.waitForFunction(() => {
     const entering = document.querySelectorAll(".enter-content, .enter-panel");
     for (const element of entering) {
@@ -148,8 +163,17 @@ export async function settleForScan(page: Page): Promise<void> {
  * is a sentence about the work — three fixture-driven state changes and two full-page axe
  * scans — so adding a face or a poll to a cell cannot silently re-open the same failure, and
  * a cell that blows a budget this size is a real stall rather than a slow host. The a11y
- * finish walk's own `test.setTimeout(30_000 * (FACES.length + 1))` is the same idea, written
- * before there was a shared place to put it.
+ * finish walk once carried its own hand-rolled `test.setTimeout(30_000 * (FACES.length + 1))`
+ * for the same idea, written before this shared place existed to put it — #864 folded it (and
+ * every other hand-rolled per-cell/per-describe timeout in this suite) into `cellBudgetMs`,
+ * held green by `cell-budget-census.test.ts` (README.md's own "Per-cell timeout policy"
+ * section names it).
+ *
+ * WHERE EACH UNIT IS SPENT (#864 fix round). Two of the three are granted automatically, at the
+ * point the work happens: `signInTo` grants `signIn` and `settleForScan` grants `scan`, both
+ * additively, so the headroom follows the calls a cell actually makes — including the ones inside
+ * a loop, which no count written at the top of a cell can track. `poll` is the one a cell still
+ * states for itself, because a fixture wait has no shared chokepoint to hang a grant on.
  *
  * A BUDGET IS A CEILING, NEVER A WAIT. Nothing below makes any cell slower: a cell that
  * finishes in 8 s still finishes in 8 s. The per-assertion timeouts are what actually bound

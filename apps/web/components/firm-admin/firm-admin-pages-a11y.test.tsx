@@ -223,18 +223,14 @@ test("/admin/vendor-bindings page composition (PageHeader + the real VendorBindi
         for (let i = 0; i < 3; i++) await h.settle();
         const pageText = textOf(h.container as never);
         assert.match(pageText, /Vendor identity bindings/, "the page's own h1 must render");
-        // 裁-18a (mohe-grill-rulings, 2026-08-28): re-true pin. The pre-hardening copy claimed
-        // "not required to be different people" -- the DB now REFUSES a self-sign (a person
-        // separation on top of the rank floor, unconditional even for a single-admin firm),
-        // so that claim would be actively wrong if it survived. Pinning both halves: the
-        // corrected phrase renders, and the retired phrase does not.
-        assert.match(pageText, /did not propose it/, "pageDescription must state the signer<>proposer rule, corrected");
-        assert.doesNotMatch(pageText, /not required to be different people/, "the retired, now-false claim must not render");
-        // rev-hb F1 (independent review, 2026-08-29): the copy must name BOTH exits in the
-        // OWNER'S OWN RULED WORDS (裁-18c), not merely state that the rule exists -- a solo
-        // firm reading only "requires an admin who did not propose it" has no idea what to DO.
-        assert.match(pageText, /let Clara propose it, or add a second admin/, "pageDescription must name both lawful exits, verbatim");
-        assert.doesNotMatch(pageText, /a different admin signs it/, "the retired phrasing (tells a genuinely solo firm to use a person who does not exist) must not render");
+        // #921 [0273] re-true pin. Propose and sign are RETIRED outright — clara_authenticated's
+        // EXECUTE on both doors is revoked for every rank, so 裁-18a's signer<>proposer copy
+        // ("did not propose it", "let Clara propose it, or add a second admin") describes a rule
+        // that no longer has a door to guard; it would be actively misleading if it survived.
+        // Full history of that pin: git blame on this file before #921.
+        assert.match(pageText, /Proposing and signing are retired/, "pageDescription must say propose/sign are retired");
+        assert.doesNotMatch(pageText, /did not propose it/, "the retired signer<>proposer copy must not render — there is no Sign door left to guard");
+        assert.doesNotMatch(pageText, /let Clara propose it, or add a second admin/, "the retired two-exits copy must not render — neither exit is offered any more");
         // #614 D6: bindings are readable history, not a processing gate — the
         // panel states that up front, persistently, not only in a dialog.
         assert.match(

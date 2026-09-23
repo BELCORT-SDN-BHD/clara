@@ -29,7 +29,9 @@ import { StateBanner } from "@/components/common/state";
 import { isRuntimeError } from "@/lib/documents/runtime-wire";
 import {
   isKeyedFallback,
+  isSourceRereadConflict,
   parseOpeningSource,
+  refreshOpeningSource,
   type OpeningParseOutcome,
 } from "@/lib/registers/opening-source";
 
@@ -50,39 +52,60 @@ export function OpeningParseAction({
 }) {
   const t = useTranslations("OpeningCarryDown.source");
   const [running, setRunning] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [settled, setSettled] = useState<Settled | null>(null);
 
-  const run = async () => {
-    setRunning(true);
+  /** Both acts settle the SAME banner: a person performed one act on one basis and is owed one
+   *  standing answer, not two competing ones. */
+  const perform = async (
+    act: () => Promise<OpeningParseOutcome>,
+    moved: (o: OpeningParseOutcome) => boolean,
+    setBusy: (b: boolean) => void,
+  ) => {
+    setBusy(true);
     try {
-      const outcome = await parseOpeningSource(seedId);
+      const outcome = await act();
       setSettled({ state: "outcome", outcome });
-      if (outcome.kind === "parsed") await onParsed();
+      if (moved(outcome)) await onParsed();
     } catch (e) {
       // A DELIBERATE ABORT is not a failure and must not paint one (runtime-wire.ts's carve-out).
       if (e instanceof Error && e.name === "AbortError") return;
       setSettled({ state: "failed", kind: isRuntimeError(e) ? e.kind : "transport" });
     } finally {
-      setRunning(false);
+      setBusy(false);
     }
   };
+
+  const run = () => perform(() => parseOpeningSource(seedId), (o) => o.kind === "parsed", setRunning);
+  // #986 — the way forward from the re-read conflict. A SEPARATE verb, never a retry of the read:
+  // reading the document again would refuse again, on purpose.
+  const refresh = () => perform(() => refreshOpeningSource(seedId), (o) => o.kind === "refreshed", setRefreshing);
 
   return (
     <div className="flex flex-col gap-2" data-testid="opening-parse-action">
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" disabled={busy || running} onClick={run}>
+        <Button variant="outline" size="sm" disabled={busy || running || refreshing} onClick={run}>
           {running ? t("readingDocument") : t("readDocumentTrigger")}
         </Button>
         <p className="text-xs text-muted-foreground">{t("readDocumentHint")}</p>
       </div>
-      {settled ? <OpeningParseOutcomeBanner settled={settled} /> : null}
+      {settled ? <OpeningParseOutcomeBanner settled={settled} onRefresh={refresh} refreshing={refreshing} /> : null}
     </div>
   );
 }
 
 /** Exported for the unit battery: the whole point of this component is the branch table below, and
  *  a test that had to drive a network call to see it would be testing the fetch, not the copy. */
-export function OpeningParseOutcomeBanner({ settled }: { settled: Settled }) {
+export function OpeningParseOutcomeBanner({
+  settled,
+  onRefresh,
+  refreshing = false,
+}: {
+  settled: Settled;
+  /** #986 — supplied by the action; absent when the banner is rendered read-only. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
+}) {
   const t = useTranslations("OpeningCarryDown.source");
 
   if (settled.state === "failed") {
@@ -98,6 +121,16 @@ export function OpeningParseOutcomeBanner({ settled }: { settled: Settled }) {
     return (
       <StateBanner tone="neutral" title={t("outcome.parsedTitle")}>
         {t("outcome.parsedBody", { n: o.lines })}
+      </StateBanner>
+    );
+  }
+  if (o.kind === "refreshed") {
+    // BOTH NUMBERS, ALWAYS. "5 read, 3 retired" and "5 read, 5 retired" are different facts about
+    // the document — the first says the new reading found lines the old one did not — and a
+    // surface that printed only the new count would hide that.
+    return (
+      <StateBanner tone="neutral" title={t("outcome.refreshedTitle")}>
+        {t("outcome.refreshedBody", { n: o.lines, retired: o.retired })}
       </StateBanner>
     );
   }
@@ -124,6 +157,58 @@ export function OpeningParseOutcomeBanner({ settled }: { settled: Settled }) {
     );
   }
   if (o.kind === "refused") {
+    // #986 — THE ONE REFUSAL ON THIS LANE THAT CARRIES AN ACT.
+    //
+    // `source_reread_since_parse` is honest and correct — a second reading of the document is not
+    // a retry of the parse, and the pinned (seed, document) key exists to say so — but until this
+    // ticket it was also the END of the road: the basis's lines then cite a reading the document
+    // has superseded, which `approve_opening_seed` refuses too, so the only way on was to abandon
+    // the basis. It is rendered in WORDS with the remedy beside it, never as the raw token.
+    //
+    // Every OTHER refusal keeps the plain block. A closed registry or a moved tie is not something
+    // refreshing can fix, and offering the button there would be a control that cannot work.
+    if (isSourceRereadConflict(o) && onRefresh) {
+      return (
+        <StateBanner tone="warning" title={t("outcome.rereadTitle")}>
+          <p className="break-words">{t("outcome.rereadBody")}</p>
+          <Button variant="outline" size="sm" className="mt-2" disabled={refreshing} onClick={onRefresh}>
+            {refreshing ? t("outcome.refreshing") : t("outcome.refreshTrigger")}
+          </Button>
+        </StateBanner>
+      );
+    }
+    // #986 / ADV-05 — THE THREE REFUSALS THE REFRESH DOOR ITSELF MINTS, IN WORDS.
+    //
+    // `o.reason` is rendered verbatim below because most refusals on this lane carry the
+    // DATABASE'S own sentence, and paraphrasing one would throw away the only thing that tells a
+    // person what to look at. The three tokens 0286 adds are not sentences — they are machine
+    // words, and `no_reread_to_refresh` is the single likeliest outcome of the new act (a
+    // colleague, or a second tab, refreshed the basis first). A professional meeting
+    // "Refused · CLR31 · no_reread_to_refresh" has been told nothing at all.
+    //
+    // Each is its own branch with its own literal key, never a computed one: a lookup table over
+    // `t()` would compile while a key was missing and fail in the face.
+    if (o.reason === "no_reread_to_refresh") {
+      return (
+        <StateBanner tone="info" title={t("outcome.noRereadTitle")} code={o.code ?? undefined}>
+          <p className="break-words">{t("outcome.noRereadBody")}</p>
+        </StateBanner>
+      );
+    }
+    if (o.reason === "stale_extraction_version") {
+      return (
+        <StateBanner tone="warning" title={t("outcome.staleReadingTitle")} code={o.code ?? undefined}>
+          <p className="break-words">{t("outcome.staleReadingBody")}</p>
+        </StateBanner>
+      );
+    }
+    if (o.reason === "refresh_extraction_mixed") {
+      return (
+        <StateBanner tone="warning" title={t("outcome.mixedReadingTitle")} code={o.code ?? undefined}>
+          <p className="break-words">{t("outcome.mixedReadingBody")}</p>
+        </StateBanner>
+      );
+    }
     return (
       <StateBanner tone="warning" title={t("outcome.refusedTitle")} code={o.code ?? undefined}>
         <p className="break-words">{o.reason}</p>

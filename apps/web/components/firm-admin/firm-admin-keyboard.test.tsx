@@ -1,5 +1,6 @@
-// GATE (c) — keyboard-walk tests for T10's door dialogs: propose/sign/revoke
-// on the vendor-bindings panel, and the share dialog on ClaraFullScreenThread.
+// GATE (c) — keyboard-walk tests for T10's door dialogs: revoke on the
+// vendor-bindings panel (propose/sign retired, #921 [0273]), and the share
+// dialog on ClaraFullScreenThread.
 // See test/keyboardWalk.ts's header for exactly what this environment can and
 // cannot prove about real key-event dispatch. The P3 workbench lesson: a
 // keyboard gate found six permanently-unopenable doors five code reviews
@@ -13,7 +14,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { FirmScopeProvider } from "@/components/firm-scope-provider";
 import { renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
-import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
+import { checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { VendorBindingsPanel } from "./vendor-bindings-panel";
 import { ClaraFullScreenThread } from "../clara/ClaraFullScreenThread";
@@ -75,7 +76,11 @@ function App(children: unknown, heading: string) {
   });
 }
 
-// --- vendor-bindings panel: propose/sign/revoke -----------------------------
+// --- vendor-bindings panel: revoke -------------------------------------------
+//
+// #921 [0273] RETIRED the Propose and Sign dialogs outright — the two keyboard-walk cells
+// that used to open them (and the counterparties fixture that fed the Propose one) went
+// with the controls. Full history: git blame on this file before #921.
 
 const CLIENTS = [{ id: "c1", name: "Acme Sdn Bhd", status: "active", created_at: "2026-01-01T00:00:00Z" }];
 const BINDINGS = [
@@ -92,11 +97,10 @@ const BINDINGS = [
     evidence_count: 5, resolution_count: 4, divergence_documents: 0,
   },
 ];
-const COUNTERPARTIES = [{ id: "cp3", name: "Supplier Three Sdn Bhd", registration_normalized: "202401017777" }];
 
-// F2's own read: the Sign/Revoke dialogs now mount VendorBindingDetailView on
-// open, which fetches get_vendor_binding — mocked here so opening either
-// dialog in these keyboard-walk tests exercises the real detail render.
+// F2's own read: the Revoke dialog now mounts VendorBindingDetailView on
+// open, which fetches get_vendor_binding — mocked here so opening it in this
+// keyboard-walk test exercises the real detail render.
 const BINDING_DETAIL = {
   binding: {
     id: "b1", firm_id: "f1", client_id: "c1", counterparty_id: "cp1", status: "proposed",
@@ -112,7 +116,6 @@ const BINDING_DETAIL = {
 function mockVendorBindingsFetch(u: string): Response {
   if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
   if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
-  if (u.includes("/rest/v1/counterparties")) return jsonResponse(COUNTERPARTIES);
   if (u.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
   throw new Error(`unexpected fetch: ${u}`);
 }
@@ -134,68 +137,23 @@ async function mountVendorBindingsWithClientSelected() {
   return { h, body };
 }
 
-test("Propose binding dialog: opens on click, reaches its counterparty select and Confirm/Cancel, leaves its trigger reachable again on close", async () => {
+test("no Propose or Sign trigger reaches the keyboard walk — ticket 921 [0273] retired both doors", async () => {
   await withMockedEnv(
     async (u) => mockVendorBindingsFetch(String(u)),
     async () => {
       const { h, body } = await mountVendorBindingsWithClientSelected();
       try {
-        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Propose binding"));
-        assert.ok(trigger, "the Propose binding trigger must render");
-
-        (trigger as unknown as { focus: () => void }).focus();
-        assert.equal(activeElement(), trigger, "keyboard focus must actually reach the trigger before activation");
-
-        await h.fireEvent(trigger as never, "click");
-        for (let i = 0; i < 4; i++) await h.settle();
-
-        const bodyText = textOf(body as never);
-        assert.match(bodyText, /Cancel/, "opening the dialog must reveal its Cancel control");
-        assert.match(bodyText, /Supplier Three Sdn Bhd/, "the counterparty select's own real option must be reachable");
-        assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the dialog is open");
-
-        const cancelButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
-        assert.ok(cancelButton, "the Cancel control must render as a real <button>");
-        await h.fireEvent(cancelButton as never, "click");
-        for (let i = 0; i < 4; i++) await h.settle();
-
-        const triggerAfterClose = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Propose binding"));
-        assert.ok(
-          triggerAfterClose && focusableElements(h.container as never).includes(triggerAfterClose as never),
-          "the trigger must be reachable again after the dialog closes — focus is not stranded on a removed node",
+        assert.equal(
+          findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Propose binding")),
+          null,
+          "the Propose trigger must not render",
         );
-      } finally {
-        await h.unmount();
-        for (let i = 0; i < 3; i++) await h.settle();
-      }
-    },
-  );
-});
-
-test("Sign dialog: the trigger is enabled from first render for a PROPOSED binding — never pre-gated on a client-side role guess", async () => {
-  await withMockedEnv(
-    async (u) => mockVendorBindingsFetch(String(u)),
-    async () => {
-      const { h, body } = await mountVendorBindingsWithClientSelected();
-      try {
-        const signTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign");
-        assert.ok(signTrigger, "the Sign trigger must render for the proposed binding");
-        assert.equal((signTrigger as unknown as { disabled: boolean }).disabled, false, "the trigger is never gated — every viewer sees it, the DB's own rank check is the wall");
-
-        await h.fireEvent(signTrigger as never, "click");
-        for (let i = 0; i < 6; i++) await h.settle();
-
-        // F2 (independent review): the consent must show what it approves —
-        // the detail view's own real content, not merely "no crash".
-        assert.match(textOf(body as never), /u1234567/, "the Sign dialog's own detail view (get_vendor_binding) must have actually rendered");
-
-        const confirmButton = findIn(
-          body as never,
-          (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign" && (n as unknown) !== (signTrigger as unknown),
+        assert.equal(
+          findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign"),
+          null,
+          "the Sign trigger must not render",
         );
-        assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger");
-        assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "Sign has no required field — Confirm is enabled once open");
-        assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the Sign dialog is open");
+        assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations on the retired-controls panel");
       } finally {
         await h.unmount();
         for (let i = 0; i < 3; i++) await h.settle();

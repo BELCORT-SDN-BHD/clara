@@ -63,7 +63,11 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   // `type` discriminant, nothing here reaches a parts array, and the value never crosses the
   // wire: `readKnowledgePack`'s answer is consumed as a context pack, not emitted as a part.
   ["packages/runtime/lib/knowledge.mjs","unavailable","...extra","3355fdebe1a460252983373a2683034f469e0303a8d9f5b235af0b290d1f47cc","0"],
-  ["packages/runtime/lib/leader.mjs","startLeaderLoop","...deps","49066b818c86b899f96fb154d4d209d82ba66ab32cda080df1a98955086e5c11","0"],
+  // #928 re-fingerprinted: the D-b adjustment belt's daily-cadence wiring (`adjRuns: adjDue`)
+  // was retired out of this same `runReconcilerSweep({...deps, ...})` call in the same
+  // statement (0045's daily sweep — owner ruling #788), so the statement sha moved. The spread
+  // itself is unchanged — the leader's own dependency bag, reviewed at its original landing.
+  ["packages/runtime/lib/leader.mjs","startLeaderLoop","...deps","a886357abef69b3fc6f38e14168225ec31ae010162ddaabaf177f1769ecd45b5","0"],
   ["packages/runtime/lib/local-facts.mjs","startLocalFactsLoop","...deps","3b9e8229f7c90ba3f1dfa279566ba51229284b34bea8f8cd97f4165076879792","0"],
   ["packages/runtime/lib/matcher.mjs","computeLaneTwo","...matchCandidates(inputs)","1974a767b2495bcc7826d833b8ee9c799a795732f9552f7acbd91159ef1517b3","0"],
   ["packages/runtime/lib/matcher.mjs","runMatcherCycle","...opts","4c46f54080f7886c233769c4db255ef669cd429fb443e5f82ab4957233512657","0"],
@@ -124,6 +128,14 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/lib/reconciler-wake.mjs","reconcileWakeEngineTasks","...a","3ede989171f7d26660abc37f7818e34db641c3601fb9f70583fdb24e8187b59a","0"],
   ["packages/runtime/lib/reconciler-wake.mjs","reconcileWakeEngineTasks","...b","3ede989171f7d26660abc37f7818e34db641c3601fb9f70583fdb24e8187b59a","0"],
   ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...deps","81708a9233752a17848ce1af02f37620eaab87f435dd5f7b7f8d1b8ecffa3a57","0"],
+  // #928 RE-FINGERPRINTED the sixteen entries below: `runReconcilerSweep`'s summary statement
+  // LOST `...adj` (the D-b adjustment belt, retired — owner ruling #788), so the STATEMENT sha
+  // moved for every spread inside it, exactly as #640 and #636 record below for the same
+  // statement's two prior widenings. Each remaining spread is unchanged — a per-lane result bag
+  // folded into one sweep summary, reviewed at its own original landing — and re-pinning rather
+  // than widening keeps the ledger's property: a tuple invalidates itself when its statement
+  // changes, whether that change is a gain or a loss.
+  //
   // #852 — the chat lane's clarification belt moves INSIDE the sweep (it ran from leader.mjs only
   // because of an import cycle that lib/hook-resume.mjs removed), so its counters join the SAME
   // reviewed return statement. Adding a spread to it re-fingerprints every sibling tuple below:
@@ -131,32 +143,31 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   // property that makes a tuple invalidate itself. The spread itself is the belt's own counter
   // bag — `chatClarifyResumed/Expired/Landed/ProbeFailed/SettleFailed`, five numbers — the same
   // shape every sibling carries, and it can no more reach a parts array than they can.
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...chatClarify","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...expiry","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...tasks","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...autodraftTasks","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentTasks","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentIntakes","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...intakeRecovery","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...spool","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...sst","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...lint","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...fa","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...adj","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...chatClarify","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...expiry","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...tasks","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...autodraftTasks","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentTasks","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentIntakes","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...intakeRecovery","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...spool","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...sst","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...lint","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...fa","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
   // #640 RE-FINGERPRINTED the fifteen entries above and below: `runReconcilerSweep`'s summary
   // statement gained `...plans` (the accounting-plan occurrence belt), so the STATEMENT sha moved
   // for every spread inside it. Each spread itself is unchanged — a per-lane result bag folded
   // into one sweep summary, reviewed at its own original landing — and re-pinning rather than
   // widening keeps the ledger's property: a tuple invalidates itself when its statement changes.
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...plans","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...wake","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...work","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...plans","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...wake","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...work","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
   // #636 — the intake-batch cancellation belt joins the SAME reviewed return statement. Adding a
   // spread to it re-fingerprints every sibling tuple above (the fingerprint is the sha of the
   // whole normalised statement), which is why this block moved in one piece rather than gaining
   // a line: the spread itself is the belt's own counters, the same shape every sibling carries.
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...batchCancels","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...prune","074d6876d3e56a31fa18b57803d7e6bd49df40f8c713a79a82f45da4fce87ad1","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...batchCancels","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...prune","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.DATABASE_URL)","b7fac4efda9fec1f95de524d660835ef17527255af69ad9dd7265e7ba2ba9af3","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.WORKFLOW_POSTGRES_URL)","d0fce5da9b74af277287fa27a5f72d05e08862412c14ba9094b890c334abad93","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...pg","314c243f644ce3eb9f984091d1f53d513440baeaf360b08bd57dd99785a6a2e6","0"],

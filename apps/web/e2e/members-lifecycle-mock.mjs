@@ -30,20 +30,43 @@
 // `SHARED_RPC_VERBS` applies to verbs two lanes answer.
 //
 // =============================================================================================
-// WHAT THE INVITE LEG CAN AND CANNOT PROVE HERE, stated rather than papered over.
+// WHAT THE INVITE LEG CAN AND CANNOT PROVE HERE (#1022 widened this from wave 1's own note).
 //
 // `POST /api/invite` is a REAL Next route. Before it calls `clara.invite_member` it checks
 // whether this deployment can send mail at all (`lib/members/invite-mail.ts`'s
-// `inviteMailCapability`), and the harness deliberately sets no `RESEND_API_KEY` — for the same
-// reason `e2e/run.mjs` deliberately sets no `STRIPE_SECRET_KEY`: a key here would send a real
-// outbound request to a third party from every test run. `RESEND_ENDPOINT` is a module constant
-// with no base override, so there is nothing to point at the mock either.
+// `inviteMailCapability`) — every real deployment reads FOUR required variables, and until #1022
+// `e2e/run.mjs` deliberately left them unset (the same reason it deliberately sets no
+// `STRIPE_SECRET_KEY`: a key here would send a real outbound request to a third party from every
+// test run), so the invite leg always stopped at `mail_not_configured`.
 //
-// So the invite leg drives the real dialog, the real courier round trip and the real settled
-// banner for the outcome this harness can honestly produce (`mail_not_configured` — nothing was
-// created), and the PENDING-ROW half of AC1 is walked over a row this lane seeds. The invite
-// door's own behaviour — the token, the pending row it really mints, the CLR10 duplicate wall —
-// is proven in the DB battery under real roles, which is where that claim belongs.
+// #1022 changed what the harness can honestly produce, WITHOUT changing what leaves this
+// machine. `run.mjs` now sets all four required variables to harness-only placeholders, PLUS TWO
+// test-only overrides `invite-mail.ts` resolves ITSELF, fenced to loopback (ADV-1's own fence):
+// `CLARA_E2E_INVITE_MAIL_ENDPOINT` (#874) redirects `send()`'s POST here instead of Resend, and
+// `CLARA_E2E_INVITE_IDENTITY_ENDPOINT` (#1022) redirects `admin()`'s Supabase client — spent by
+// BOTH `canMintFor`'s `listUsers` and `mintSupabaseTokenHash`'s `generateLink` — here instead of
+// a real Supabase project. Both point at THIS SAME mock origin, under `/e2e-supabase`, so both
+// land on the handlers below: `GET /auth/v1/admin/users` (an empty directory — nobody this
+// harness invites is already a confirmed user) and `POST /auth/v1/admin/generate_link` (a fixed
+// hashed token), plus `POST /e2e-invite-mail-capture`, which records the message `send()` posted
+// instead of relaying it anywhere. All three carry this file's own `if (!ours) return false;`
+// guard — the mail-capture one only since the code-review fix round (SPEC-1022-2): it shipped
+// WITHOUT the guard its two siblings carry while this header said every new handler had it, and
+// `run.mjs` sets `CLARA_E2E_INVITE_MAIL_ENDPOINT` for every e2e run, so that path was live for
+// every lane. The census that would have caught it could not see any of the three either
+// (SPEC-1022-1): `HANDLER_OPENER` learned `/auth/…` and `/e2e-…` openers in the same round, and
+// all four of this lane's non-`/rest/` handlers are censused now.
+//
+// So the invite leg now drives the real dialog, the real courier round trip, the REAL
+// `clara.invite_member` verb this lane answers below, and a settled SUCCESS banner with a new
+// PENDING ROW rendering — the journey AC2 asks for — with NO outbound call to a real Supabase
+// project or a real mail provider at any point: both calls terminate on this same process. The
+// invite door's own behaviour — the token's real shape, the CLR10 duplicate wall, the role
+// ceiling — is still the DB battery's claim under real least-privileged roles
+// (`packages/db/tests/p4t1-invite.test.mjs`); this lane's `invite_member` handler mints a
+// REALISTIC receipt (the exact three keys `0147`'s own body returns, `invite_id`/`token_hash`/
+// `expires_at`, plus the plaintext `token` merged in above persistence) for ONE happy path and
+// the ONE duplicate-email refusal a single-session walk can reach, never the whole wall.
 
 // =============================================================================================
 // AND THE ACCEPTANCE LEG (round-1 F4): TWO SHAPES THIS HARNESS HAD NO ANSWER FOR AT ALL.
@@ -89,6 +112,14 @@ export const MEMBERS_LIFECYCLE = {
   inviteeSubject: "66666666-6666-4666-8666-666666666661",
   previewPendingToken: "e2e-clara-invite-pending",
   previewRevokedToken: "e2e-clara-invite-revoked",
+  /** #1022 — THE NEW-INVITE LEG. A fresh address (never the seeded pending one above, so the
+   *  duplicate-email refusal below is reachable independently), and the fixed identifiers the
+   *  `invite_member` and `generate_link` handlers mint for it: a realistic but NOT random shape,
+   *  so a walk can assert on the exact receipt rather than merely "something truthy". */
+  newInviteEmail: "another-hire@larkin.test",
+  newInvite: "5e5e5e5e-5555-4555-8555-555555555572",
+  newInvitePlaintextToken: "e2e-members-lifecycle-new-invite-plaintext",
+  newInviteHashedToken: "e2e-members-lifecycle-new-invite-hashed",
 };
 
 /** The RPC verbs this lane owns, and the ALLOW-LIST its own dispatch runs on: the guard below
@@ -106,7 +137,11 @@ export const MEMBERS_LIFECYCLE_RPC_VERBS = new Set([
   "remove_member",
   "revoke_invite",
   "preview_invite",
+  // #1022 — the real invite door, so the invite leg can drive all the way to a pending row
+  // instead of stopping at the courier's own `mail_not_configured` capability gate.
+  "invite_member",
   "e2e_members_lifecycle_reset",
+  "e2e_members_lifecycle_invite_trace",
 ]);
 
 function seed() {
@@ -116,6 +151,10 @@ function seed() {
      *  second actor this harness has no second session for. */
     callerRole: "owner",
     callerRoleRank: 3,
+    // #1022 — what the identity-provisioning and mail-transport seams RECEIVED this test run,
+    // reset alongside every other fixture so one walk's evidence never leaks into the next.
+    identityCalls: { listUsers: 0, generateLink: 0 },
+    capturedMail: null,
     members: [
       {
         membership_id: MEMBERS_LIFECYCLE.ownerMembership,
@@ -245,6 +284,62 @@ export async function handleMembersLifecycleSupabase(request, response, path, ur
     return true;
   }
 
+  // ---- #1022: the identity-provisioning admin calls, and the mail capture ------------------
+  //
+  // Both are reached only when `CLARA_E2E_INVITE_MAIL_ENDPOINT`/`CLARA_E2E_INVITE_IDENTITY_ENDPOINT`
+  // are set (`run.mjs`) AND the signed-in caller driving the invite is `ours` — the identity-
+  // provisioning calls are issued by `admin()`, built from the SERVICE-ROLE config, never from the
+  // browser's own session, so `ours` here means "the last address this harness saw sign in",
+  // which is this lane's own owner persona for the one walk that reaches this code at all
+  // (`members-invite-walk.spec.ts`). Scoped anyway, on the same principle every other handler in
+  // this file states: an unscoped admin-directory answer is a shared endpoint waiting to be
+  // claimed by whichever lane trips it next.
+  if (request.method === "GET" && path === "/auth/v1/admin/users") {
+    if (!ours) return false;
+    state.identityCalls.listUsers += 1;
+    // An EMPTY directory — every page. Nobody this harness invites is already a confirmed
+    // Supabase user, so `canMintFor` sees the empty first page and answers `{ok:true}` on this
+    // one round trip; `CAN_MINT_MAX_PAGES`'s own ceiling is the DB battery's claim, not this
+    // mock's (`invite-mail-transport.test.ts` already proves the ceiling in isolation).
+    sendJson(response, 200, { users: [] }, cors);
+    return true;
+  }
+
+  if (request.method === "POST" && path === "/auth/v1/admin/generate_link") {
+    if (!ours) return false;
+    const body = await readCachedJson(request);
+    state.identityCalls.generateLink += 1;
+    if (body?.type !== "invite" || typeof body?.email !== "string") {
+      sendJson(response, 400, { error_code: "validation_failed", msg: "type and email are required" }, cors);
+      return true;
+    }
+    // `_generateLinkResponse` (installed `@supabase/auth-js`) reads `hashed_token` off the TOP
+    // LEVEL of this body — verified against the shipped client, not assumed.
+    sendJson(response, 200, {
+      hashed_token: MEMBERS_LIFECYCLE.newInviteHashedToken,
+      action_link: `${MEMBERS_LIFECYCLE.firmName}-invite-link`,
+      verification_type: "invite",
+      email: body.email,
+    }, cors);
+    return true;
+  }
+
+  // The mail-transport seam's own destination for THIS lane's walk (#874's mechanism, #1022's
+  // wiring): `productionInviteMailer.send()` posts here instead of `RESEND_ENDPOINT` whenever
+  // `CLARA_E2E_INVITE_MAIL_ENDPOINT` is set, so the exact body a real deployment would have sent
+  // to Resend is observable — and captured, never relayed anywhere else.
+  if (request.method === "POST" && path === "/e2e-invite-mail-capture") {
+    if (!ours) return false;
+    const body = await readCachedJson(request);
+    state.capturedMail = {
+      to: Array.isArray(body?.to) ? body.to[0] : null,
+      subject: typeof body?.subject === "string" ? body.subject : null,
+      html: typeof body?.html === "string" ? body.html : null,
+    };
+    sendJson(response, 200, { id: "e2e-captured-mail" }, cors);
+    return true;
+  }
+
   // `clara.preview_invite` (0224), scoped by the CLARA token the `ct` parameter carries — the
   // one this lane minted, never a persona: at this point in the journey the invitee is signed in
   // as nobody this harness tracks. TWO tokens, because the step has two browser-observable
@@ -280,6 +375,17 @@ export async function handleMembersLifecycleSupabase(request, response, path, ur
     return true;
   }
 
+  // #1022 — THE READ HALF OF THE SAME CONTROL SHAPE: what the identity and mail seams actually
+  // RECEIVED, so a walk can assert positive evidence that both intercepts fired (not merely that
+  // the journey happened to look right) — the same "observe what would have been sent" claim
+  // #874's own unit suite makes, here made available to a BROWSER walk instead of a node:test one.
+  if (request.method === "POST" && path === "/rest/v1/rpc/e2e_members_lifecycle_invite_trace") {
+    const body = await readCachedJson(request);
+    if (body?.persona !== MEMBERS_LIFECYCLE.email) return false;
+    sendJson(response, 200, { identityCalls: state.identityCalls, capturedMail: state.capturedMail }, cors);
+    return true;
+  }
+
   if (request.method === "GET" && path === "/rest/v1/caller_context") {
     if (!ours) return false;
     sendJson(response, 200, [{
@@ -305,10 +411,47 @@ export async function handleMembersLifecycleSupabase(request, response, path, ur
     return true;
   }
 
-  // ---- the three governed writes this walk drives to settlement -------------------------------
+  // ---- the four governed writes this walk drives to settlement --------------------------------
   // Each MUTATES this lane's own fixtures and answers the door's real receipt shape. The walk's
   // assertions are made on the RE-READ that follows, never on the receipt — which is the
   // hydrate-never-trust contract the panel itself is built on.
+
+  // #1022 — `clara.invite_member`, re-derived from `0147`'s own body: the SAME three-key receipt
+  // shape `_finish_op` persists (`invite_id`, `token_hash`, `expires_at`), with the PLAINTEXT
+  // `token` merged in above persistence exactly as that migration's own tail comment describes.
+  // Real-shaped, not the whole wall: this mock proves the ONE happy path and the ONE duplicate
+  // refusal a single-session walk can reach; the role ceiling, the op_key replay contract and
+  // every other branch are `packages/db/tests/p4t1-invite.test.mjs`'s claim, not this lane's.
+  if (request.method === "POST" && path === "/rest/v1/rpc/invite_member") {
+    if (!ours) return false;
+    const body = await readCachedJson(request);
+    const email = typeof body?.p_email === "string" ? body.p_email : "";
+    const role = typeof body?.p_role === "string" ? body.p_role : "";
+    if (state.invites.some((i) => i.email === email && i.status === "pending")) {
+      sendJson(response, 400, { code: "CLR10", message: "an invite is already pending for this email" }, cors);
+      return true;
+    }
+    const expiresAt = "2099-09-01T00:00:00Z";
+    state.invites.push({
+      id: MEMBERS_LIFECYCLE.newInvite,
+      firm_id: MEMBERS_LIFECYCLE.firmId,
+      email,
+      role,
+      status: "pending",
+      invited_by: MEMBERS_LIFECYCLE.subject,
+      created_at: "2026-09-23T00:00:00Z",
+      expires_at: expiresAt,
+      accepted_at: null,
+      revoked_at: null,
+    });
+    sendJson(response, 200, {
+      invite_id: MEMBERS_LIFECYCLE.newInvite,
+      token_hash: "e2e-members-lifecycle-new-invite-token-hash",
+      expires_at: expiresAt,
+      token: MEMBERS_LIFECYCLE.newInvitePlaintextToken,
+    }, cors);
+    return true;
+  }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/set_member_role") {
     if (!ours) return false;

@@ -32,10 +32,16 @@
 //   no adjustment/difference control (#671 refunds and write-offs, #675 certification);
 //   no exception RESOLVE control (#671) — it links into the Exceptions tab instead;
 //   no suspense account and no write-off anywhere (no bank verb has one, and none is invented);
-//   no page/region citation (0038's lane contract states per-line region citations are not
-//   carried, and `bank_statement_lines` has no region column) — a named residual, not a gap
-//   filled with an invented number;
 //   no settlement door (`SettleLineForm` is unchanged and still mounted per line).
+//
+// #990 (owner ruling 2026-09-20): the detail pane's `srcCitation` row renders the line's OWN
+// source citation — the printed page, on the machine (OCR/witness) intake lane, when one is
+// present — and an explicit sentence (never a blank) on every other state: the CSV/hand-keyed
+// lanes structurally never carry one, and a machine-lane line with no citation YET says so in
+// different words (0291's own residual: the column exists, no live producer states one yet).
+// `lib/bank/citation.ts`'s `citationLabel` is the ONE place that decides which sentence, shared
+// with `MatchingOutcome` so the two surfaces can never render a different verdict for the same
+// line.
 
 import { useCallback, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -48,6 +54,7 @@ import { listBankAccounts, listBankStatements } from "@/lib/bank/reads";
 import { matchBankLine, unmatchBankMatch } from "@/lib/bank/match-doors";
 import { entryGeneration } from "@/lib/bank/match-opkey";
 import { formatMyr } from "@/lib/bank/money";
+import { citationLabel } from "@/lib/bank/citation";
 import type { MatchReceipt } from "@/lib/bank/matching-context-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -431,6 +438,10 @@ export function MatchingSection({
                         unmatched: formatMyr(ctx.coverage.tie?.unmatched_cents ?? 0),
                       })}
                     </dd>
+                    <dt className="text-muted-foreground">{t("srcCitation")}</dt>
+                    <dd data-testid="detail-citation">
+                      {citationLabel(t, ctx.statement.ingest_mode, ctx.line.citation_page)}
+                    </dd>
                   </dl>
 
                   <MatchingExceptionFace clientId={clientId} exception={ctx.exception} block={ctx.booking_block} />
@@ -481,6 +492,8 @@ export function MatchingSection({
                       counterpartyName={
                         (candidates.data ?? []).find((c) => (outcome.entry_ids ?? []).includes(c.entry_id))?.counterparty_name ?? null
                       }
+                      ingestMode={ctx.statement.ingest_mode}
+                      citationPage={ctx.line.citation_page}
                     />
                   )}
                 </>

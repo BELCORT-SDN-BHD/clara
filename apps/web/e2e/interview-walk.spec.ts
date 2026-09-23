@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+import { cellBudgetMs, settleForScan } from "./helpers";
+
 import { CLIENT_SEG_KEYS } from "../lib/interview/api";
 
 /**
@@ -45,12 +47,15 @@ import { CLIENT_SEG_KEYS } from "../lib/interview/api";
  * shared COMPLETE/CANCEL/RACE fixtures every test above consumes and mutates; this runner
  * provisions none such.
  *
- * THIS ARM IS NOT PROVEN ANYWHERE TODAY — not here, not in a mock lane. #897 (open, not
- * delivered) is where it belongs and where it is tracked; do not read this comment as coverage.
- * The mock-lane fixture (the OPEN/unanswered park) and the interview-runtime handlers a walk
- * would need have not been built. Whoever picks up #897 should read that ticket's own report for
- * the traced reason: `InterviewRunCard.tsx`'s typed answer is a plain, un-persisted `useState`,
- * so a walk asserting survival across this exact escalation has nothing true to assert yet.
+ * DELIVERED, in `agentic-finish-walk.spec.ts`'s own #897 arm (that file's P6-5 mock lane —
+ * client C, a fixture with nothing else this file's own COMPLETE/CANCEL/RACE clients touch).
+ * That arm drives the rail's escalate control to the full-screen route and back, and asserts
+ * both AC1 halves: a typed-but-unsubmitted answer survives both remounts (rail -> full-screen
+ * and back — `InterviewRunCard.tsx`'s draft now reads/writes `claraThreadStore.interviewDrafts`,
+ * keyed by clientId, instead of the plain `useState` that lost it), and keyboard focus returns
+ * to the escalate control the way back (`lib/clara/rail-focus-return.ts`, the SAME
+ * `sessionStorage` take-once idiom `lib/firm/portfolio-focus-return.ts` established for the same
+ * class of problem — the browser does not restore focus across either leg on its own).
  */
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -204,6 +209,7 @@ async function completeAccountingBasis(page: Page): Promise<void> {
 }
 
 test("client interview completes every tracked segment, unlocks Commit, and passes an axe scan", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 18 }));
   const target = fixture("COMPLETE");
   test.skip(!target, "review/merge supplies the isolated COMPLETE client/thread fixture");
   await establishSession(page);
@@ -226,6 +232,7 @@ test("client interview completes every tracked segment, unlocks Commit, and pass
   await expect(commitConfirm).toBeEnabled({ timeout: 30_000 });
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
+  await settleForScan(page);
   const axe = await new AxeBuilder({ page })
     .include('[aria-label="Client onboarding interview"]')
     .withTags(WCAG_TAGS)
@@ -234,6 +241,7 @@ test("client interview completes every tracked segment, unlocks Commit, and pass
 });
 
 test("a separate interview run performs typed runtime-then-DB cancellation", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 8 }));
   const target = fixture("CANCEL");
   test.skip(!target, "review/merge supplies the isolated CANCEL client/thread fixture");
   await establishSession(page);
@@ -250,6 +258,7 @@ test("a separate interview run performs typed runtime-then-DB cancellation", asy
 });
 
 test("two browser contexts answering the same park converge on confirmed state without a false success or refusal", async ({ browser, context, page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 10 }));
   const target = fixture("RACE");
   test.skip(!target, "review/merge supplies the isolated RACE client/thread fixture");
 
@@ -305,6 +314,7 @@ test("two browser contexts answering the same park converge on confirmed state w
 });
 
 test("the Tax tab is reachable by nav-click and by ⌘K, and its three honest notes render (FS-8, P6-T IA shell)", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 2 }));
   const target = fixture("COMPLETE");
   test.skip(!target, "review/merge supplies the isolated COMPLETE client/thread fixture");
   await establishSession(page);

@@ -1,19 +1,20 @@
 // lib/firm-admin/vendor-bindings.ts — wire-shape pinning (T10 rung-6 battery).
 // Proves each wrapper sends the EXACT function name + args this module's own
 // header grounds against the live rig census (0028_vendor_identity_binding.
-// sql, LIVE-UNTOUCHED), that `proposeVendorIdentityBinding` sends the
-// closed-key `{client_id, counterparty_id}` shape the DB requires and no
-// other, and that a refusal survives verbatim.
+// sql, LIVE-UNTOUCHED), and that a refusal survives verbatim.
+//
+// #921 [0273]: the propose/sign wire-shape cells (and loadVendorCounterparties',
+// its picker-only sibling) went with the wrappers they pinned — migration 0273
+// revoked clara_authenticated's EXECUTE on both doors for every rank, so
+// pinning their wire shape would pin a call no human can ever make. Full
+// history: git blame on this file before #921.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   listVendorBindings,
   getVendorBinding,
-  proposeVendorIdentityBinding,
-  signVendorIdentityBinding,
   revokeVendorIdentityBinding,
-  loadVendorCounterparties,
 } from "./vendor-bindings";
 import { isDoorRefusal } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -101,30 +102,6 @@ test("getVendorBinding posts to get_vendor_binding with p_binding only", async (
   assert.deepEqual(s.body, { p_binding: "b1" });
 });
 
-test("proposeVendorIdentityBinding posts p_proposal as EXACTLY {client_id, counterparty_id} (the DB's own closed-key check) plus a fresh op_key", async () => {
-  const { impl, seen } = captureFetch({ binding_id: "b1", status: "proposed" });
-  await withMockedFetch(impl, async () => {
-    await proposeVendorIdentityBinding(fakeSession(), "c1", "cp1");
-  });
-  const s = seen.first();
-  assert.match(s.url, /\/rpc\/propose_vendor_identity_binding$/);
-  assert.deepEqual(s.body.p_proposal, { client_id: "c1", counterparty_id: "cp1" });
-  assert.deepEqual(Object.keys(s.body.p_proposal as object).sort(), ["client_id", "counterparty_id"]);
-  assert.equal(typeof s.body.p_op_key, "string");
-  assert.ok((s.body.p_op_key as string).length > 0);
-});
-
-test("signVendorIdentityBinding posts to sign_vendor_identity_binding with p_binding only", async () => {
-  const { impl, seen } = captureFetch({ binding_id: "b1", status: "live" });
-  await withMockedFetch(impl, async () => {
-    await signVendorIdentityBinding(fakeSession(), "b1");
-  });
-  const s = seen.first();
-  assert.match(s.url, /\/rpc\/sign_vendor_identity_binding$/);
-  assert.equal(s.body.p_binding, "b1");
-  assert.equal(typeof s.body.p_op_key, "string");
-});
-
 test("revokeVendorIdentityBinding posts p_binding/p_reason to revoke_vendor_identity_binding", async () => {
   const { impl, seen } = captureFetch({ binding_id: "b1", status: "revoked", approved_entries: 2 });
   await withMockedFetch(impl, async () => {
@@ -136,27 +113,11 @@ test("revokeVendorIdentityBinding posts p_binding/p_reason to revoke_vendor_iden
   assert.equal(s.body.p_reason, "Vendor changed bank details, re-verifying.");
 });
 
-test("loadVendorCounterparties reads counterparties scoped by client_id/kind=vendor/not-merged/not-retired, name ascending", async () => {
-  const rows = [{ id: "cp1", name: "Acme Sdn Bhd", registration_normalized: "202401012345" }];
-  const { impl, seen } = captureFetch(rows);
-  await withMockedFetch(impl, async () => {
-    const out = await loadVendorCounterparties(fakeSession(), "c1");
-    assert.deepEqual(out, rows);
-  });
-  const s = seen.first();
-  assert.match(s.url, /\/rest\/v1\/counterparties\?/);
-  assert.match(s.url, /client_id=eq\.c1/);
-  assert.match(s.url, /kind=eq\.vendor/);
-  assert.match(s.url, /merged_into=is\.null/);
-  assert.match(s.url, /retired_at=is\.null/);
-  assert.match(s.url, /order=name\.asc/);
-});
-
-test("a governed refusal (CLR04, sign requires admin) survives verbatim through signVendorIdentityBinding", async () => {
+test("a governed refusal (CLR04) survives verbatim through revokeVendorIdentityBinding", async () => {
   const { impl } = captureFetch({ code: "CLR04", message: "insufficient rank" }, 400);
   await withMockedFetch(impl, async () => {
     await assert.rejects(
-      () => signVendorIdentityBinding(fakeSession(), "b1"),
+      () => revokeVendorIdentityBinding(fakeSession(), "b1", "a reason"),
       (e: unknown) => {
         assert.ok(isDoorRefusal(e));
         assert.equal((e as { code: string }).code, "CLR04");

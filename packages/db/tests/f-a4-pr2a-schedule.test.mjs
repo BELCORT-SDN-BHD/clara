@@ -12,8 +12,22 @@ import assert from "node:assert/strict";
 import { noteLane } from "./rig-runtime-helpers.mjs";
 import {
   ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, evaluate, uniq, caught,
-  proposeTemplate as propose, pair,
+  proposeTemplate as propose, pair, mintTemplate, proposeDoorRetired,
 } from "./f-a4-pr2a-fixtures.mjs";
+
+// [#927] `clara.propose_adjustment_template` became one typed refusal at migration 0282 (owner
+// ruling #788: retire the 0045 recurring-adjustment template lane). Two kinds of cell live in this
+// file and they part here:
+//   * a cell whose subject is the RESOLVER, the storage layer or the books mints its subject
+//     through `mintTemplate` -- the same row, written directly above the frontier -- and keeps
+//     every assertion it ever had;
+//   * a cell whose subject IS the propose door's own congruence validation (W41-W43) asserts the
+//     door's retirement above the frontier and runs the whole law below it. Those validations
+//     still guard `clara._propose_adjustment_template_core`, which the PARKED agent prepayment
+//     limb (`clara.wake_establish_prepayment_schedule`) still reaches -- 0282 leaves that core
+//     untouched by design -- but no live caller can supply an arbitrary schedule any more, so the
+//     wall has no reachable violator to be driven with. That residual is recorded in the fix
+//     report rather than left as a silent green.
 
 let skipped = 0;
 const markSkip = () => { skipped += 1; };
@@ -35,7 +49,7 @@ test("fa4p2a.W36 every null-schedule template resolves to EXACTLY its canonical 
   // names the fixture it needs ("a pre-migration template carrying a live occurrence history"), so
   // it is minted here, through the governed door, and the population is measured INCLUDING it.
   const seed = await prepaidScene("w36seed", { cents: 90000 });
-  const seeded = await propose(seed.alice, {
+  const seeded = await mintTemplate(seed.alice, {
     client: seed.client, name: `w36seed-${uniq()}`, start: "2025-02-01", end: "2025-04-30",
     lines: pair(seed.target, seed.prepaid, 30000) });          // NO schedule -- a null-schedule row
   assert.ok(seeded?.template_id, "the cell could not mint its own null-schedule template");
@@ -77,7 +91,7 @@ test("fa4p2a.W36-mutant a template that DOES carry a schedule resolves DIFFERENT
   // that refusal on purpose; here we simply use the lawful producer.
   const sc = await prepaidScene("w36m", { cents: 30000 });
   const lines = pair(sc.target, sc.prepaid, 10000);
-  const r = await propose(sc.alice, {
+  const r = await mintTemplate(sc.alice, {
     client: sc.client, name: `w36m-${uniq()}`, start: "2025-02-01", end: "2025-03-31", lines,
     schedule: [
       { period_start: "2025-02-01", period_end: "2025-02-28", lines: pair(sc.target, sc.prepaid, 12000) },
@@ -102,7 +116,7 @@ test("fa4p2a.W36-immutability a sign-time edit to `schedule` is refused by the S
   // column inherits that for free, which is why F2 wall 3 needed no trigger recut.
   const sc = await prepaidScene("w36i", { cents: 30000 });
   const lines = pair(sc.target, sc.prepaid, 10000);
-  const r = await propose(sc.alice, {
+  const r = await mintTemplate(sc.alice, {
     client: sc.client, name: `w36i-${uniq()}`, start: "2025-02-01", end: "2025-02-28", lines,
     schedule: [{ period_start: "2025-02-01", period_end: "2025-02-28", lines: pair(sc.target, sc.prepaid, 10000) }] });
   const e = await caught(() => rootQuery(
@@ -231,6 +245,10 @@ test("fa4p2a.W41 a schedule period posting to a BANK account not present in `lin
   // the eligibility reads look at `lines`, so an incongruent schedule would slip past every one of
   // them and post to a bank control. Clause (a) is what makes them correct BY CONSTRUCTION.
   const sc = await prepaidScene("w41", { cents: 30000 });
+  // [#927] This wall lives in the propose door, which retired at 0282 -- see the header.
+  if (await proposeDoorRetired(sc.alice, {
+    client: sc.client, lines: pair(sc.target, sc.prepaid, 10000),
+    law: "fa4p2a.W41 the schedule/lines congruence wall (clause a)" })) return;
   const bank = (await rootQuery(
     "select coa_account_code from clara.bank_accounts where client_id = $1 limit 1", [sc.client])).rows[0];
   const bankCode = bank?.coa_account_code ?? "170-C56";
@@ -255,6 +273,10 @@ test("fa4p2a.W41 a schedule period posting to a BANK account not present in `lin
 test("fa4p2a.W41-mutant the CONGRUENT schedule proposes cleanly -- clause (a) is not refusing everything", async (t) => {
   if (prepayGate(t, markSkip)) return;
   const sc = await prepaidScene("w41m", { cents: 30000 });
+  // [#927] This wall lives in the propose door, which retired at 0282 -- see the header.
+  if (await proposeDoorRetired(sc.alice, {
+    client: sc.client, lines: pair(sc.target, sc.prepaid, 10000),
+    law: "fa4p2a.W41-mutant the congruence wall's own control" })) return;
   const lines = pair(sc.target, sc.prepaid, 10000);
   const r = await propose(sc.alice, {
     client: sc.client, name: `w41m-${uniq()}`, start: "2025-02-01", end: "2025-04-30", lines,
@@ -270,6 +292,10 @@ test("fa4p2a.W41-mutant the CONGRUENT schedule proposes cleanly -- clause (a) is
 test("fa4p2a.W42 a schedule period out of balance by ONE SEN refuses at propose", async (t) => {
   if (prepayGate(t, markSkip)) return;
   const sc = await prepaidScene("w42", { cents: 30000 });
+  // [#927] This wall lives in the propose door, which retired at 0282 -- see the header.
+  if (await proposeDoorRetired(sc.alice, {
+    client: sc.client, lines: pair(sc.target, sc.prepaid, 10000),
+    law: "fa4p2a.W42 the per-period balance wall" })) return;
   const lines = pair(sc.target, sc.prepaid, 10000);
   const bad = [{ account_code: sc.target, debit_cents: 10001, credit_cents: 0, description: "d" },
                { account_code: sc.prepaid, debit_cents: 0, credit_cents: 10000, description: "c" }];
@@ -287,6 +313,10 @@ test("fa4p2a.W42 a schedule period out of balance by ONE SEN refuses at propose"
 test("fa4p2a.W43 coverage: an EMPTY schedule and a GAP both refuse at propose", async (t) => {
   if (prepayGate(t, markSkip)) return;
   const sc = await prepaidScene("w43", { cents: 30000 });
+  // [#927] This wall lives in the propose door, which retired at 0282 -- see the header.
+  if (await proposeDoorRetired(sc.alice, {
+    client: sc.client, lines: pair(sc.target, sc.prepaid, 10000),
+    law: "fa4p2a.W43 the coverage wall" })) return;
   const lines = pair(sc.target, sc.prepaid, 10000);
   const empty = await caught(() => propose(sc.alice, {
     client: sc.client, name: `w43e-${uniq()}`, start: "2025-02-01", end: "2025-03-31", lines,
@@ -310,6 +340,10 @@ test("fa4p2a.W43-lineshape (C1a) a scheduled line with BOTH sides positive refus
   // sum equal -- the schedule PROPOSES, a human SIGNS it, and the poster then aborts at journal
   // insertion. The refusal would arrive after the signature, on a template already live.
   const sc = await prepaidScene("w43ls", { cents: 30000 });
+  // [#927] This wall lives in the propose door, which retired at 0282 -- see the header.
+  if (await proposeDoorRetired(sc.alice, {
+    client: sc.client, lines: pair(sc.target, sc.prepaid, 10000),
+    law: "fa4p2a.W43-lineshape the C1a line-shape wall" })) return;
   const lines = pair(sc.target, sc.prepaid, 10000);
   const bothSides = [
     { account_code: sc.target, debit_cents: 10000, credit_cents: 10000, description: "d" },
@@ -344,6 +378,10 @@ test("fa4p2a.W43-boundary (C1b) a CONTIGUOUS schedule on the wrong boundaries re
   // mid-schedule, after a signature. The wall now compares each entry against the period the
   // poster will actually derive.
   const sc = await prepaidScene("w43b", { cents: 30000 });
+  // [#927] This wall lives in the propose door, which retired at 0282 -- see the header.
+  if (await proposeDoorRetired(sc.alice, {
+    client: sc.client, lines: pair(sc.target, sc.prepaid, 10000),
+    law: "fa4p2a.W43-boundary the C1b boundary wall" })) return;
   const lines = pair(sc.target, sc.prepaid, 10000);
   const e = await caught(() => propose(sc.alice, {
     client: sc.client, name: `w43b-${uniq()}`, start: "2025-01-01", end: "2025-03-31", lines,
@@ -414,7 +452,7 @@ test("fa4p2a.W43-resolver a period the schedule does not cover raises a TYPED re
   // UPDATE to `schedule` with CLR38, which cell W36-immutability pins.)
   const sc = await prepaidScene("w43r", { cents: 30000 });
   const lines = pair(sc.target, sc.prepaid, 10000);
-  const r = await propose(sc.alice, {
+  const r = await mintTemplate(sc.alice, {
     client: sc.client, name: `w43r-${uniq()}`, start: "2025-02-01", end: "2025-02-28", lines,
     schedule: [
       { period_start: "2025-02-01", period_end: "2025-02-28", lines: pair(sc.target, sc.prepaid, 10000) },

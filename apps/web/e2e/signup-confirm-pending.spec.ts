@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { settleForScan } from "./helpers";
+
 // Reads the harness's own origin (interview-walk.spec.ts's precedent) instead of
 // re-hardcoding the default. The literal made this file green ONLY on port 3100, and
 // TWO trains hit it independently on the same day — chat parity's browser leg ran on
@@ -83,7 +85,10 @@ test.beforeEach(async ({ page }) => {
  */
 const CONFIRM_WALL_WIRED = process.env.CLARA_E2E_CONFIRM_WALL_WIRED === "1";
 
+/** #1017 — settles the shared contract (opacity AND animations, ./helpers) before every scan
+ *  this function runs; it previously scanned directly with no settle at all. */
 async function expectAccessible(page: Page, face: string): Promise<void> {
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, `${face} axe violations`).toEqual([]);
 }

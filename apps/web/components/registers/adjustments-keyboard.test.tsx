@@ -90,12 +90,11 @@ test("adjustments workbench: every door trigger is keyboard-reachable, in DOM or
     const h = await renderComponent(App());
     try {
       for (let i = 0; i < 5; i++) await h.settle();
-      // A live template with a pending pair reversal exercises every trigger
-      // this train's ceremony can show at once: Propose (always), Retire (live,
-      // not retired), Run now, Reverse pair (correctable run), Approve/Cancel
-      // (pending pair) — Sign is deliberately absent (only a proposed template
-      // shows it, and this fixture's template is already live).
-      const triggers = ["Propose template", "Retire", "Run now", "Reverse pair", "Approve", "Cancel"];
+      // [#927] A live template with a pending pair reversal exercises every trigger
+      // this train's (now retire-only) ceremony can show at once: Retire (live, not
+      // retired), Reverse pair (correctable run), Approve/Cancel (pending pair).
+      // Propose/Sign/Run-now are gone with their doors (migration 0282).
+      const triggers = ["Retire", "Reverse pair", "Approve", "Cancel"];
       for (const label of triggers) {
         const t = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes(label));
         assert.ok(t, `the ${label} trigger must render as a real <button>`);

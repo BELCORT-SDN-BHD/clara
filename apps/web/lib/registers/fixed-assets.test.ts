@@ -5,9 +5,11 @@ import {
   getFixedAsset,
   faRegisterTie,
   completeFixedAssetParticulars,
+  completeIntent,
   reviseFixedAssetParticulars,
   reviseIntent,
   disposeFixedAsset,
+  disposeIntent,
 } from "./fixed-assets";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -94,13 +96,14 @@ test("faRegisterTie: POSTs /rpc/fa_register_tie with p_client + p_as_of, resolve
   assert.deepEqual(resolved, tieOut);
 });
 
-test("completeFixedAssetParticulars: posts the exact door body shape, with a fresh op_key", async () => {
+test("completeFixedAssetParticulars: posts the exact door body shape, with the CALLER's key", async () => {
   const { impl, calls } = captureFetch({ asset_id: "a1", client_id: "c1", particulars_complete: true });
   await withMockedFetch(impl, async () => {
     await completeFixedAssetParticulars(fakeSession("tok"), {
       clientId: "c1",
       assetId: "a1",
       particulars: { method: "straight_line", useful_life_months: 60, start_date: "2026-01-01" },
+      opKey: "decided-complete",
     });
   });
   assert.equal(calls.length, 1);
@@ -109,8 +112,44 @@ test("completeFixedAssetParticulars: posts the exact door body shape, with a fre
   assert.equal(body.p_client, "c1");
   assert.equal(body.p_asset, "a1");
   assert.deepEqual(body.p_particulars, { method: "straight_line", useful_life_months: 60, start_date: "2026-01-01" });
-  assert.equal(typeof body.p_op_key, "string");
-  assert.ok((body.p_op_key as string).length > 0);
+  assert.equal(body.p_op_key, "decided-complete");
+});
+
+// #978 — the door mints NOTHING of its own: two calls with the SAME caller-supplied key post the
+// SAME p_op_key both times, which is what makes a retry after a lost response a replay of one
+// completion rather than a second one (`clara.complete_fixed_asset_particulars`'s own
+// `_reserve_op` dedupe, 0249:350-352, is what turns that replayed key into the same receipt).
+test("completeFixedAssetParticulars: calling it twice with the SAME key posts the SAME p_op_key both times — no key is minted internally", async () => {
+  const { impl, calls } = captureFetch({ asset_id: "a1", client_id: "c1", particulars_complete: true });
+  const args = {
+    clientId: "c1",
+    assetId: "a1",
+    particulars: { method: "straight_line", useful_life_months: 60, start_date: "2026-01-01" } as const,
+    opKey: "decided-complete",
+  };
+  await withMockedFetch(impl, async () => {
+    await completeFixedAssetParticulars(fakeSession("tok"), args);
+    await completeFixedAssetParticulars(fakeSession("tok"), args);
+  });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]!.body.p_op_key, "decided-complete");
+  assert.equal(calls[1]!.body.p_op_key, "decided-complete", "the retry carries the SAME key, not a fresh one");
+});
+
+test("#978 completeIntent: one decision while the form is unchanged, a new one the moment any particular is edited", () => {
+  const base = {
+    clientId: "c1", assetId: "a1",
+    particulars: { method: "straight_line" as const, useful_life_months: 36, start_date: "2026-01-01" },
+  };
+  assert.equal(completeIntent(base), completeIntent({ ...base }), "the same completion is ONE decision");
+  assert.equal(completeIntent(base),
+    completeIntent({ ...base, particulars: { start_date: "2026-01-01", useful_life_months: 36, method: "straight_line" } }),
+    "…and the particulars' key ORDER is not part of the decision");
+  assert.notEqual(completeIntent(base),
+    completeIntent({ ...base, particulars: { ...base.particulars, useful_life_months: 48 } }),
+    "…changing the life is a different completion");
+  assert.notEqual(completeIntent(base), completeIntent({ ...base, assetId: "a2" }),
+    "…and so is a different asset");
 });
 
 test("reviseFixedAssetParticulars: posts p_effective_from AND the change classification alongside the particulars", async () => {
@@ -164,7 +203,7 @@ test("#651 reviseIntent: one decision while the form is unchanged, a new one the
     "…and so is re-writing the reason");
 });
 
-test("disposeFixedAsset: posts every door argument by exact p_ name, cost portion defaults to null", async () => {
+test("disposeFixedAsset: posts every door argument by exact p_ name, cost portion defaults to null, WITH the caller's key", async () => {
   const { impl, calls } = captureFetch({ status: "posted", entry_id: "e1", asset_id: "a1", nbv_cents: 0, gain_cents: 0, stub_cents: 0 });
   await withMockedFetch(impl, async () => {
     await disposeFixedAsset(fakeSession("tok"), {
@@ -176,6 +215,7 @@ test("disposeFixedAsset: posts every door argument by exact p_ name, cost portio
       gainAccount: "4900",
       lossAccount: "5900",
       memo: "Scrapped",
+      opKey: "decided-dispose",
     });
   });
   const body = calls[0]!.body;
@@ -189,5 +229,44 @@ test("disposeFixedAsset: posts every door argument by exact p_ name, cost portio
   assert.equal(body.p_loss_account, "5900");
   assert.equal(body.p_memo, "Scrapped");
   assert.equal(body.p_cost_portion_cents, null);
-  assert.equal(typeof body.p_op_key, "string");
+  assert.equal(body.p_op_key, "decided-dispose");
+});
+
+// #978 — the door mints NOTHING of its own: two calls with the SAME caller-supplied key post the
+// SAME p_op_key both times, which is what makes a retry after a lost response a replay of one
+// disposal rather than a second one (`clara.dispose_fixed_asset`'s own `_reserve_op` dedupe,
+// 0041:3662-3672, is what turns that replayed key into the same receipt).
+test("disposeFixedAsset: calling it twice with the SAME key posts the SAME p_op_key both times — no key is minted internally", async () => {
+  const { impl, calls } = captureFetch({ status: "posted", entry_id: "e1", asset_id: "a1", nbv_cents: 0, gain_cents: 0, stub_cents: 0 });
+  const args = {
+    clientId: "c1", assetId: "a1", disposalDate: "2026-08-27", proceedsCents: 50000,
+    proceedsAccount: "1010", gainAccount: "4900", lossAccount: "5900", memo: "Scrapped",
+    opKey: "decided-dispose",
+  };
+  await withMockedFetch(impl, async () => {
+    await disposeFixedAsset(fakeSession("tok"), args);
+    await disposeFixedAsset(fakeSession("tok"), args);
+  });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]!.body.p_op_key, "decided-dispose");
+  assert.equal(calls[1]!.body.p_op_key, "decided-dispose", "the retry carries the SAME key, not a fresh one");
+});
+
+test("#978 disposeIntent: one decision while the money facts are unchanged, a new one the moment any of them move — memo has no field to differ in, because the argument type excludes it", () => {
+  const base = {
+    clientId: "c1", assetId: "a1", disposalDate: "2026-08-27", proceedsCents: 50000,
+    proceedsAccount: "1010", gainAccount: "4900", lossAccount: "5900",
+  };
+  assert.equal(disposeIntent(base), disposeIntent({ ...base }), "the same disposal is ONE decision");
+  assert.notEqual(disposeIntent(base), disposeIntent({ ...base, proceedsCents: 60000 }),
+    "…changing the proceeds is a different disposal");
+  assert.notEqual(disposeIntent(base), disposeIntent({ ...base, disposalDate: "2026-08-28" }),
+    "…and so is moving the disposal date");
+  assert.notEqual(disposeIntent(base), disposeIntent({ ...base, costPortionCents: 10000 }),
+    "…and so is naming a partial-disposal cost portion");
+  assert.notEqual(disposeIntent(base), disposeIntent({ ...base, proceedsAccount: null }),
+    "…and so is dropping the proceeds account");
+  // #978 — `clara.dispose_fixed_asset`'s own dedupe hash EXCLUDES the memo (0041:3667-3671: two
+  // calls sharing an op_key and differing only in their note are the SAME disposal relabelled),
+  // so the client's decision key follows the same rule.
 });

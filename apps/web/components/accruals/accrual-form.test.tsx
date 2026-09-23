@@ -467,12 +467,16 @@ test("652.form: an accepted accrual navigates to its own address and retires the
 });
 
 test("652.form: an overlap warning is persistent, and it does NOT block the accrual it reports", async () => {
+  // #929/0283 retired the 0045 template arm: the real backend can only ever answer
+  // "accounting_plan_overlap", keyed by plan_id — this fixture is kept in that exact shape rather
+  // than the retired arm's, even though the component itself never branches on either field
+  // (it reads only `.name`; see lib/accruals/api.ts's own header note).
   const h = await renderComponent(App({
     submit: async () => ({
       ...ACCEPTED,
       overlap_warning: {
-        kind: "adjustment_template_overlap",
-        templates: [{ template_id: "t1", name: "Monthly rent template", cadence: "monthly", accounts: ["6100"] }],
+        kind: "accounting_plan_overlap",
+        templates: [{ plan_id: "p1", name: "Monthly rent plan", cadence: "monthly", accounts: ["6100"] }],
       },
     }),
   }));
@@ -481,7 +485,7 @@ test("652.form: an overlap warning is persistent, and it does NOT block the accr
     await clickSubmit(h);
     assert.match(h.text(), /The accrual was recorded\./,
       "the warning says the accrual EXISTS — it is advisory, and the database only warns");
-    assert.match(h.text(), /Monthly rent template/);
+    assert.match(h.text(), /Monthly rent plan/);
   } finally {
     await h.unmount();
   }

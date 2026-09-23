@@ -76,14 +76,15 @@ import { ClientIdentityCandidateList } from "./client-identity-candidates";
  * SAME predicate the palette filters with (never a copy of it — 裁-107a), and `runDoAction`
  * performs the one governed call and reports where to look. So this inherits 裁-141's
  * pre-filter, the fail-closed-twice discipline, and `do-action-floors.test.ts`'s drift guard
- * for free, and adds no new call site for `begin_client_onboarding`.
+ * for free, and adds no new call site for the birth door (`clara.open_client_onboarding` since
+ * #899; `do-dispatch.ts`'s own "beginClientOnboarding" case is the one place that changed).
  *
  * THE TWO GATES ARE DIFFERENT QUESTIONS, and each is asked of the right thing. The TRIGGER
  * asks "could this caller ever dispatch this?" — `meetsFloor` against the action's own
  * transcribed floor, which is the first conjunct of `isDoActionPermitted` called from the same
  * module, not a re-derivation of it. The CONFIRM asks the full question, name included, and
  * `runDoAction` asks it a third time before touching the door. The DATABASE is still the wall
- * behind all three: `begin_client_onboarding` is `security definer` with its own admin
+ * behind all three: `clara.open_client_onboarding` is `security definer` with its own admin
  * `_human_ctx` floor and raises CLR04 for a caller under it, rendered here VERBATIM.
  */
 /**
@@ -147,7 +148,6 @@ export function AddClientControl({ onCreated }: { onCreated: () => void }) {
   }
   if (!meetsFloor(env.data.ctx, spec.floor)) return null;
 
-  const doEnv: DoActionEnv = { ...env.data, query: name };
   const typed = name.trim();
   // The candidates on screen answer for `checkedFor`. Anything else and they are stale by
   // construction, so nothing about them may gate this Confirm.
@@ -155,6 +155,18 @@ export function AddClientControl({ onCreated }: { onCreated: () => void }) {
   const answered = checkStands && checkOutcome === "answered";
   const acknowledgementOwed = answered && arity === 1 && !acknowledged;
   const walled = checkStands && checkOutcome === "walled";
+
+  // #899: forwarded to clara.open_client_onboarding's own p_acknowledged_candidate through
+  // do-dispatch.ts's "beginClientOnboarding" case — the door structurally cannot clear its own
+  // arity-1 wall without it, so this is no longer decoration on top of a client-side gate: it is
+  // what makes the acknowledged path actually succeed. `candidates[0]?.id` is safe to read only
+  // when `answered && arity === 1`, which is exactly `acknowledgementOwed`'s own precondition
+  // minus the tick itself, so gating on `acknowledged` alone here is sufficient.
+  const doEnv: DoActionEnv = {
+    ...env.data,
+    query: name,
+    identityAcknowledgedCandidate: answered && arity === 1 && acknowledged ? (candidates[0]?.id ?? null) : null,
+  };
   // UNREACHABLE THROUGH THE LIVE DOOR, AND SAID ANYWAY (review round 2). `walled` and
   // `acknowledgementOwed` describe HOW the read answered, and neither of them describes an
   // ambiguity the read ANSWERED rather than refused — 0219 raises at arity >= 2 and never returns

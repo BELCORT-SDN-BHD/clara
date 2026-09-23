@@ -1,0 +1,138 @@
+{
+  "axis": "SPEC",
+  "wave": 3,
+  "lane": "05",
+  "branch": "riders/w3-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "head": "72c2c6891",
+  "tickets": [908, 909, 927, 928, 929],
+  "spec_sources": [
+    "gh issue view 908 --comments (Agent Brief 2026-09-17T17:02:59Z)",
+    "gh issue view 909 --comments (Agent Brief 2026-09-17T17:03:04Z + scope note 2026-09-18T04:51:57Z)",
+    "gh issue view 927 (body; no comments)",
+    "gh issue view 928 (body; no comments)",
+    "gh issue view 929 --comments (triage correction 2026-09-19T16:21:49Z -- the newest and live brief)"
+  ],
+  "verdict": "reject",
+  "summary": "#908 and #909 are faithful and tight. #929 matches its corrected brief. #927's three doors, its migration, its web retirement and its new browser walk all do what the ticket asks and were re-driven here -- but 0282 closes doors that THIRTEEN other packages/db test files drive, and 69 cells go red on the fully-migrated estate the per-PR db-estate job builds. That is a landed CI regression, not a scope question. Three further undisclosed residuals: a weekly CI drill that will break the same way, an agent-lane creation path that survives the retirement, and two shipped source comments that claim #929 did work it did not do.",
+  "re_run_evidence": [
+    "packages/db: plan-schedule-yield-wall + plan-overlap-sibling-arm + plan-overlap-template-arm-retired, full gate chain -- 15/15 pass",
+    "packages/db: the eight x42-adj batteries + accounting-plans.test.mjs, full gate chain -- 69/69 pass",
+    "packages/runtime: reconcile-belt-isolation-unit.test.mjs -- 24/24 pass",
+    "apps/web: adjustments.test.ts + adjustments-a11y + adjustments-keyboard + accrual-form + prepayments-keyboard -- 38/38 pass",
+    "apps/web: adjustments-render-states + adjustments-workbench -- 3/3 pass",
+    "e2e on triple 3540/3541/3542: adjustments-retired-walk.spec.ts -- 2/2 pass; plans-walk.spec.ts -- 9/9 pass",
+    "node scripts/check-frozen-workflows.mjs -- OK (312 frozen, 55 use-workflow, 3 retired)",
+    "node packages/runtime/scripts/check-parts-parity.mjs -- OK",
+    "clara_l05 catalog probes via node pg (ACLs, wake_fn_allowlist, wake_engine_sources, schema_migrations = 271 / 0283)"
+  ],
+  "findings": [
+    {
+      "id": "L05-SPEC-01",
+      "ticket": 927,
+      "severity": "blocker",
+      "kind": "requirement implemented but wrongly scoped -- landed CI regression",
+      "title": "0282 closes three doors that THIRTEEN other packages/db test files drive: 69 cells red on the fully-migrated estate the per-PR CI job builds",
+      "evidence": "Ticket line: 'The eight x42-adj db batteries and the six web tests for the lane are updated to the retired shape and stay green.' Those eight are green (re-run: 69/69). But grep over packages/db/tests for propose_adjustment_template / sign_adjustment_template / run_adjustment_manual names far more callers, and re-run against clara_l05 at 271 migrations (0283 applied), with the full gate chain and CLARA_RIG_DB=1, gives 69 FAILING cells in 13 files: x42-r11-lineage 18/18, x42-r10-p1-lineage 7/7, x42-r10-remedy 7/7, x42-r8-m1-collision 7/7, x42-r10-o3 6/8, x42-r7-class 6/6, x42-r9-mirror 4/6, x42-r9-remedy 4/4, f-a4-pr2a-books 4/7, x42-r10-o2 2/3, f-a4-pr2a-census 2/10, x42-r10-p1-recovery 1/1, f-a4-pr2a-wrapper 1/21. Error census over the failures: 'clara.run_adjustment_manual is retired (#927)...' / 'clara.propose_adjustment_template is retired (#927)...' / 'clara.sign_adjustment_template is retired (#927)...', all sqlstate CLR10 -- i.e. every one is 0282's own refusal, not a pre-existing red. Example stack: packages/db/tests/x42-r10-p1-recovery.test.mjs:81 -> tests/x42-adj-core.mjs:400 humanCall. This is not an out-of-CI surface: .github/workflows/ci.yml:226 db-estate runs on every PR (if: needs.changes.outputs.code != 'false'), and .github/actions/db-estate-suite/action.yml runs `pnpm -r --filter '!@clara/runtime' --filter '!clara' --if-present test` after `pnpm db:migrate`; packages/db's own test script ends in \"tests/**/*.test.mjs\", so all thirteen files run against a 0001->0283 estate. None of the three lane reports mentions any of these files; the lane only ran the eight it was told to.",
+      "required_fix": "Retarget every db cell that drives propose_adjustment_template / sign_adjustment_template / run_adjustment_manual at the retired shape, the same way #927 retargeted the eight (x42-adj-helpers.mjs's SURGERY-5 direct-INSERT fixture plus runOccurrence() already give the pattern), or gate each file's premise on 0282 the way tests/adjustment-template-doors-retired-preintegration-gate.mjs does for the new cells. Then run the whole packages/db suite once against the lane database and report the count."
+    },
+    {
+      "id": "L05-SPEC-02",
+      "ticket": 927,
+      "severity": "major",
+      "kind": "requirement implemented but wrongly -- an 'out of scope' claim not checked against CI",
+      "title": "The Wave-D-b upgrade drill CI runs weekly drives all three closed doors against the FULL migration chain; three reports call it out-of-scope without noting CI arms its reset gate",
+      "evidence": "packages/db/tests/x42-0045-b2-upgrade.test.mjs:100-142 drives propose_adjustment_template, then sign_adjustment_template, then run_adjustment_manual as its '(f) HEADLINE SMOKE' and asserts each answers. Its chain is the WHOLE migrations directory: tests/x42-split-upgrade-kit.mjs:51 sets MIG_DIR = process.env.CLARA_MIGRATIONS_DIR || ../migrations, and .github/actions/closed-wave-upgrade-drills/action.yml:258-287 runs the highest D-b drill with NO CLARA_MIGRATIONS_DIR and with CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1, from ci.yml:432 closed-wave-drills (weekly schedule + workflow_dispatch). So the reset gate IS armed in CI and the chain DOES include 0282. #927's report says only 'RESET-GATED -- CLARA_RIG_ALLOW_RESET=1 only, never set by this session ... flagged rather than fixed'; #928 and #929 restate it the same way. The bounded copy is safe by contrast: ci.yml:470 db-slice-frontiers / .github/actions/frontier-leg/action.yml:98-134 sets CLARA_MIGRATIONS_DIR to a 0001..0045 chain. Not executed here: RIG.md forbids setting CLARA_RIG_ALLOW_RESET on a lane cluster, so this is confirmed by reading the drill, the kit and the action, plus the measured fact that the same three calls raise CLR10 on a 0283 estate.",
+      "required_fix": "Retarget the drill's headline smoke (or bound its chain to the D-b frontier as frontier-leg already does) inside this wave, or raise the follow-up to an owner-visible blocker on the scheduled sweep rather than a routine 'worth filing' line."
+    },
+    {
+      "id": "L05-SPEC-03",
+      "ticket": 927,
+      "severity": "major",
+      "kind": "requirement partial against the parent ruling; undisclosed consequence",
+      "title": "A creation path into the retired lane survives: the agent wake door still mints a 'proposed' adjustment_templates row that the now-closed sign door can never advance",
+      "evidence": "Parent ruling quoted in #927's own body: '#788 (owner ruling 2026-09-18: retire the 0045 recurring-adjustment template lane fully)'. packages/db/migrations/0140_f_a4_pr_2a_prepayment_limb.sql:3314 / :3633 / :3674 wires clara.wake_establish_prepayment_schedule -> clara._agent_prepayment_schedule_core -> clara._propose_adjustment_template_core, which INSERTs the template row directly; 0282 pins _propose_adjustment_template_core byte-unchanged and never touches the wake door. Measured on clara_l05: wake_establish_prepayment_schedule acl = {clara_fn_owner=X/clara_fn_owner,clara_wake_interactive=X/clara_fn_owner}, and clara.wake_fn_allowlist carries (close_prep, wake_establish_prepayment_schedule). 0140's own comment calls that verb 'DRAFT-ONLY BY CONSTRUCTION ... shown at the sign door' -- the sign door now always refuses, so the artifact it produces is unusable, and 0282's own prestate ('zero clara.adjustment_templates rows are non-retired') would refuse to re-apply on an estate that has one. Mitigation measured, not assumed: clara.wake_engine_sources shows close_prep enabled=false today, so nothing drives it right now. #927's report addresses this call path only under 'Successor contract: None' ('never through the human propose_adjustment_template door this file recuts -- and is pinned byte-unchanged') and never states the consequence; no follow-up in any of the three reports names it.",
+      "required_fix": "Either close or park the wake door in the same retirement, or record the residual explicitly (report plus a filed ticket) so the owner decides -- 'retire fully' currently leaves one live minting path whose only completion door is closed."
+    },
+    {
+      "id": "L05-SPEC-04",
+      "ticket": 928,
+      "severity": "major",
+      "kind": "claim in the diff that is false on the branch",
+      "title": "leader.mjs and reconciler.mjs ship comments asserting '#929 removes the DB surface (clara.adjustment_run_due / clara.run_adjustment_occurrence) itself' -- #929 does no such thing",
+      "evidence": "packages/runtime/lib/leader.mjs, in the retired-cadence block: '#927 already closed the human-facing write doors first, and #929 removes the DB surface itself'. packages/runtime/lib/reconciler.mjs, in the retirement banner above reconcilePlanOccurrences's export: '#929 removes the DB surface (clara.adjustment_run_due / clara.run_adjustment_occurrence) itself.' On this branch packages/db/migrations/0283_retire_plan_overlap_template_arm.sql recuts ONLY clara._plan_overlap_warning; it contains no reference to adjustment_run_due or run_adjustment_occurrence, and 0282 pins both bodies byte-unchanged in its prestate AND its tail. Measured on clara_l05 after 0283: both functions still exist and still hold EXECUTE for clara_runtime. #929's own newest Agent Brief (the triage correction) scopes the ticket to CONTEXT.md plus the overlap arm and never mentions the DB surface. AGENTS.md rule 6: a statement about the state of the world needs a checkable source; this one is contradicted by the branch it ships on.",
+      "required_fix": "Correct both comments to say what actually happened (the belt retires ahead of a callee that NO ticket in this lane removes), or point them at a filed successor ticket that does own the DB surface."
+    },
+    {
+      "id": "L05-SPEC-05",
+      "ticket": 928,
+      "severity": "minor",
+      "kind": "requirement partial",
+      "title": "AC1's second half -- 'a full leader cycle on a rig with the world bootstrapped issues no call into the retired module' -- was never driven",
+      "evidence": "Ticket line: 'a cell proves the daily trigger is absent and that a full leader cycle on a rig with the world bootstrapped issues no call into the retired module.' The three new cells in packages/runtime/tests/reconcile-belt-isolation-unit.test.mjs call runReconcilerSweep(client, {...}) against a scripted client -- no world, no database. leader-state.test.mjs (the only file that drives a real startLeaderLoop) is 4 SKIP here for the documented pg_dump-absent Windows reason. Re-run confirms 24/24 pass and 0 skips in the belt-isolation file, and the call site really is deleted from leader.mjs and reconciler.mjs, so this is a partial, not a wrong. The report discloses the substitution and argues it from the pre-existing autopost-retirement battery in the same file.",
+      "required_fix": "Integrator re-runs leader-state.test.mjs once under WSL/Linux with pg_dump on PATH, or the AC is explicitly relaxed in the lane record."
+    },
+    {
+      "id": "L05-SPEC-06",
+      "ticket": 927,
+      "severity": "minor",
+      "kind": "requirement satisfied by substitution",
+      "title": "AC5 names 'the firm-navigation walk'; a new dedicated spec was written instead",
+      "evidence": "Ticket line: 'The migration applies on a from-scratch chain; the firm-navigation walk covers the retired tab.' apps/web/e2e/firm-navigation-walk.spec.ts is unedited and a grep for 'adjustment' over it returns nothing. The lane added apps/web/e2e/adjustments-retired-walk.spec.ts plus adjustments-retired-mock.mjs instead, registered in e2e-fixture-ownership.test.ts LANE_MOCKS/LANE_DECLARATIONS and wired into serve-built.mjs. The substitution was checked and it holds: apps/web/lib/navigation/tree.ts:382 records that #640 repointed the sidebar's 'Adjustments' row to /clients/:id/plans, so ?tab=adjustments is not a sidebar destination the navigation walk could reach. Re-run on this lane's triple: 2/2 pass against the real built bundle, including 'Propose template' / 'Sign' / 'Run now' at toHaveCount(0) on the exact proposed-status row that used to render Sign.",
+      "required_fix": "None beyond recording the substitution; flagged because the AC's own words were not met literally."
+    },
+    {
+      "id": "L05-SPEC-07",
+      "ticket": 927,
+      "severity": "minor",
+      "kind": "requirement implemented under a reading the ticket does not settle",
+      "title": "'Renders history read-only' still ships four live write controls, and the run-due banner can still announce a period nothing can post",
+      "evidence": "Ticket line: 'The Registers -> Adjustments tab renders history read-only with the retirement notice.' apps/web/components/registers/adjustments-register.tsx keeps RetireTemplateDialog on every non-retired row and the whole pair-reversal ceremony (Reverse / Approve / Cancel); the new e2e walk deliberately drives Retire end to end. The implementer's own report records this as a judgement call and argues it from the ticket body's D6 sentence ('Correction and reversal-pair doors ... stay exactly as they are'), which names correction and reversal-pair doors but not retire. Separately, apps/web/components/registers/adjustment-run-due-banner.tsx still renders the info-tone 'a period is due' branch, while #928 removed the sweep and #927 closed the manual run -- so on a client that still carries a live template the tab can invite an act no mechanism can perform. In practice 0282's prestate leaves zero non-retired rows on a migrated estate, so the banner reads 'nothing_due' today.",
+      "required_fix": "Owner or orchestrator to settle the reading; if 'read-only' is meant literally, Retire goes too and the due banner loses its due branch."
+    },
+    {
+      "id": "L05-SPEC-08",
+      "ticket": 927,
+      "severity": "minor",
+      "kind": "requirement implemented but its own guard is unreachable after the suite runs",
+      "title": "The lane's own fixtures mint non-retired templates and never clean up, so 0282's live-template prestate cannot pass on a lane database after the batteries run",
+      "evidence": "AC1 requires 'a prestate that refuses to apply when any live template exists on the estate', and 0282 has it (select count(*) from clara.adjustment_templates where status <> 'retired'). But packages/db/tests/x42-adj-helpers.mjs liveTemplate() now mints its row by direct INSERT (SURGERY 5) with no cleanup, and #909's plan-overlap-sibling-arm.test.mjs does the same -- which is exactly the trap #927 itself hit and cleared by hand (its report records ten stray #909 rows retired manually before the migration would apply). Measured on clara_l05 right after this review's re-runs: clara.adjustment_templates holds 312 'live', 78 'proposed', 61 'retired'. A CLARA_MIGRATION_REDO=0282_retire_adjustment_template_doors on any lane database that has run the suite will now be refused by 0282's own guard.",
+      "required_fix": "Give the fixture an after()/cleanup that retires what it mints, or record the manual remedy in RIG.md so the integrator is not surprised the way #927 was."
+    },
+    {
+      "id": "L05-SPEC-09",
+      "ticket": 909,
+      "severity": "note",
+      "kind": "requirement partial, documented",
+      "title": "The sibling arm self-excludes by basis identity, so two independent plans with byte-identical bases hide each other from the advisory",
+      "evidence": "Brief line: '_plan_overlap_warning gains a sibling-plan arm ... naming every other live plan of the client whose basis lines intersect.' 0281_plan_overlap_sibling_arm.sql ARM 2 excludes with 'r.basis is distinct from p_basis' (carried verbatim into 0283), because the function takes no plan id and the brief forbade widening the signature ('the three plan-creating doors ... unchanged'). 0281's header states the limitation in full and argues it: the advisory is advisory, so a false negative costs a missed warning, never a wrong refusal. p909.no-overlap and p909.mutual both re-run green here (6/6 in that file).",
+      "required_fix": "None required; recorded so the orchestrator can decide whether a follow-up should pass the plan id."
+    },
+    {
+      "id": "L05-SPEC-10",
+      "ticket": 909,
+      "severity": "note",
+      "kind": "transient wrongness inside the lane, resolved at the branch head",
+      "title": "#909 shipped the widened advisory while the three forms still told the firm 'a live recurring adjustment template ... already posts'",
+      "evidence": "Brief line: 'the three plan doors and their forms render the widened warning unchanged.' At commit 9f2320187 a sibling-plan match rendered plans.overlapBody / accruals.overlapBody / prepayments.overlapBody, all of which named a recurring adjustment template -- a sentence the new arm made false. #929 (8d4fd421b) rewrites all three keys to name a sibling accounting plan and retypes templates[] from template_id to plan_id in lib/plans/api.ts, lib/accruals/api.ts and lib/prepayments/api.ts, which matches what 0281 ARM 2 and 0283 actually emit ('plan_id', p.id). Branch end state is correct; flagged only because #909's own AC blessed leaving the copy alone.",
+      "required_fix": "None."
+    },
+    {
+      "id": "L05-SPEC-11",
+      "ticket": 929,
+      "severity": "note",
+      "kind": "residual nobody owns",
+      "title": "clara.run_adjustment_occurrence and clara.adjustment_run_due keep their clara_runtime EXECUTE grant with no runtime caller left",
+      "evidence": "#928 deleted packages/runtime/lib/reconciler-adjustments.mjs whole and removed the belt registration, so nothing in the runtime image calls either function. Measured on clara_l05 after 0283: run_adjustment_occurrence acl = {clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner}; adjustment_run_due acl = {clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner,clara_authenticated=X/clara_fn_owner}. No AC in #927/#928/#929 names the grant, and #929's report does not list it among its residuals (it lists the fy_end_locked_by_annual_cadence lock and en.json's emptyTemplates key instead).",
+      "required_fix": "None inside this lane; hand to whoever retires clara.adjustment_templates itself."
+    }
+  ],
+  "clean": [
+    "#908 -- every AC met and re-driven. 0280 recuts only clara._assert_plan_schedule (one new arm, placed after every pre-existing arm), pins _accrual_schedule_yields, _plan_due_events, both doors and the accrual token helper as non-regression, and takes no grant. The brief's 'names the control at fault' is honoured (detail.field = day_of_month for a day-of-month rule, day_rule otherwise). The two named out-of-scope items (renaming the accrual token, the due-event generator) are untouched. pw908.create / .revise / .other-arms-unmoved / .accrual-entrance-unmoved / .legitimate-plans / .tail -- 6/6 pass on re-run.",
+    "#909 -- the sibling arm returns the same axis-and-message shape, merged into the one templates list; the three callers are byte-pinned and unmoved in both prestate and tail; still advisory, no refusal added. p909.mutual proves both directions through both doors; p909.no-overlap, p909.status (ended stops warning, paused keeps warning) and p909.accrual-door all pass -- 6/6 on re-run after #929's trim.",
+    "#927's own named surface -- 0282 closes exactly the three doors with one shared detail.reason ('adjustment_template_lane_retired'), CLR10, a per-door message ending 'create an accounting plan instead (Client -> Plans)', and proves it behaviourally inside its own tail by really calling each door. It re-pins exactly the five bodies 0193 fingerprinted (0193:383-384 lists propose, sign, retire, run_adjustment_occurrence, adjustment_run_due) plus six more, and re-reads every one in the tail. The web half is complete: the three writers are gone from lib/registers/adjustments.ts, ProposeTemplateDialog / SignTemplateDialog / RunNowDialog and adjustment-lines-editor.tsx are deleted, test/manifest.txt is updated, retiredNotice is added and rendered.",
+    "#929 -- tracked against the newest Agent Brief (the triage correction), correctly. CONTEXT.md's two _Avoid_ lines are edited in place at their real current line numbers; docs/ARCHITECTURE.md and docs/PRD.md are untouched (git diff over both is empty) and the ARCHITECTURE.md:500 drift line plus the C08.1 disposition are carried in the report for #683. Verified independently: docs/PRD.md contains zero occurrences of 'template'; docs/ARCHITECTURE.md's only 0045 hit is line 500, exactly as quoted. #788 is CLOSED/COMPLETED and #909 already carries its 2026-09-18 scope comment, so AC3 was genuinely pre-satisfied. 0283 deletes the template arm by name and its tail re-reads the absence; plans-walk 9/9 on this lane's triple."
+  ]
+}

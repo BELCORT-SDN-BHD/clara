@@ -55,9 +55,11 @@ import { isDoorRefusal } from "@/lib/doors";
 import { businessDateTime } from "@/lib/business-date";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import {
+  getClientCashAccountSetMembers,
   proposeClientCashAccounts,
   type CashProposal,
   type ClientFinancialPack,
+  type CurrentCashSet,
 } from "@/lib/dashboard/financial-pack";
 import { useFinancialPack } from "@/lib/dashboard/use-financial-pack";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -87,6 +89,7 @@ export function ClientFinancialSummary({
   load,
   now,
   loadProposal,
+  loadCurrentMembers,
 }: {
   clientId: string;
   /** `YYYY-MM-01` from the server-read `?period=`, or null for month-to-date. */
@@ -100,6 +103,9 @@ export function ClientFinancialSummary({
   load?: (clientId: string, month: string | null) => Promise<ClientFinancialPack>;
   now?: () => number;
   loadProposal?: (clientId: string) => Promise<CashProposal>;
+  /** #1002 — injected by the cells so a test drives the second-pass editor's own read directly;
+   *  production reads the door. */
+  loadCurrentMembers?: (clientId: string) => Promise<CurrentCashSet>;
 }) {
   const t = useTranslations("ClientFinancial");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -124,6 +130,26 @@ export function ClientFinancialSummary({
   useEffect(() => {
     if (dialogOpen) void reloadProposal();
   }, [dialogOpen, reloadProposal]);
+
+  // #1002 — THE SECOND-PASS EDITOR'S OWN READ, gated the SAME way and for the SAME reason: a
+  // second door, read only when the dialog is open, never paid for by a board that never opens
+  // it. `clara.get_client_cash_account_set_members` fills the editor's roster AND carries the
+  // published-version fact the dialog's face finally rests on: `pack.cashSet !== null` (already
+  // loaded, no extra latency) is the FIRST answer, this read is the authoritative one, and
+  // `client-cash-set-dialog.tsx`'s own `isEdit` says why the pack alone is not enough — the pack
+  // resolves its version through the PERIOD WINDOW and the publish door does not.
+  const currentMembers = useAsyncRead(
+    useCallback(
+      () => (dialogOpen
+        ? (loadCurrentMembers ?? ((id: string) => getClientCashAccountSetMembers(id, { session: sessionTokenAccessor })))(clientId)
+        : Promise.resolve(null)),
+      [clientId, dialogOpen, loadCurrentMembers],
+    ),
+  );
+  const reloadCurrentMembers = currentMembers.reload;
+  useEffect(() => {
+    if (dialogOpen) void reloadCurrentMembers();
+  }, [dialogOpen, reloadCurrentMembers]);
 
   const headingId = "client-home-money";
   // A DENIED CALLER IS NOT OFFERED THE AUTHORING DOOR. The publish door floors at admin and
@@ -214,7 +240,15 @@ export function ClientFinancialSummary({
             </div>
           </div>
 
-          <ClientCashTrend points={pack.cashPoints} cashSet={pack.cashSet} loading={loading} />
+          <ClientCashTrend
+            clientId={clientId}
+            points={pack.cashPoints}
+            cashSet={pack.cashSet}
+            composition={pack.cash.composition}
+            compositionTotal={pack.cash.compositionTotal}
+            compositionTruncated={pack.cash.compositionTruncated}
+            loading={loading}
+          />
           <ClientIncomeExpenseChart
             clientId={clientId}
             series={pack.series}
@@ -242,9 +276,13 @@ export function ClientFinancialSummary({
         clientId={clientId}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+        hasPublishedSet={pack.cashSet !== null}
         proposal={proposal.data ?? null}
         loading={proposal.loading}
         error={proposal.error}
+        currentSet={currentMembers.data}
+        membersLoading={currentMembers.loading}
+        membersError={currentMembers.error}
         onPublished={reload}
       />
     </section>

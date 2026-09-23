@@ -41,6 +41,16 @@ export type PrepaymentListRow = {
   document_id: string;
   term_start: string;
   term_end: string;
+  /** #919 — the SAME term-liveness fields `PrepaymentDetail` carries, on the list row. */
+  term_live: boolean;
+  term_superseded_by: string | null;
+  /** TRUE only when the term row was superseded AND the term that stands today states DIFFERENT
+   *  dates. The term door supersedes unconditionally, so `term_live` alone goes false on a
+   *  re-record that changed nothing — this is the fact a surface may act on (ADV-02). */
+  term_moved: boolean;
+  /** The term in force on the document today; null only if the document carries none. */
+  term_current_start: string | null;
+  term_current_end: string | null;
   prepaid_account_code: string;
   expense_account_code: string;
   total_cents: number;
@@ -97,6 +107,18 @@ export type PrepaymentDetail = {
   source_status: string | null;
   document_id: string;
   service_period_id: string;
+  /** #919 — whether `service_period_id` still names the LIVE `document_service_periods` row.
+   *  false once a bookkeeper has recorded a corrected term on the same document: the stored
+   *  allocation does not move, so this is what tells a reader the schedule is riding a
+   *  since-superseded term. */
+  term_live: boolean;
+  /** The row that superseded it, when `term_live` is false; null while it is still live. */
+  term_superseded_by: string | null;
+  /** TRUE only when the term row was superseded AND the term that stands today states DIFFERENT
+   *  dates — the fact the corrected-term banner is keyed on (ADV-02). */
+  term_moved: boolean;
+  term_current_start: string | null;
+  term_current_end: string | null;
   term_start: string;
   term_end: string;
   basis_kind: string;
@@ -211,9 +233,18 @@ export type PrepaymentCreated = {
   effective_from: string;
   effective_to: string;
   next_occurrences: readonly { due_date: string; leg: string }[];
-  /** ADVISORY, never a refusal: a live 0045 adjustment template of this client already moves one
-   *  of these accounts. Rendered as a persistent StateBanner, never a toast. */
-  overlap_warning: { kind: string; templates: readonly { template_id: string; name: string }[] } | null;
+  /** ADVISORY, never a refusal: a live SIBLING accounting plan of this client already moves one
+   *  of these accounts (`clara._plan_overlap_warning`, 0281/#909). The 0045 adjustment-template
+   *  arm this warning also used to carry was retired by #929/0283: `kind` can only ever read
+   *  `"accounting_plan_overlap"` now, and every entry is keyed by `plan_id`, never `template_id`.
+   *  Rendered as a persistent StateBanner, never a toast.
+ *
+ *  #929's fix round (0283) also settled what a `null` here MEANS. The advisory excludes the plan
+ *  the door just wrote by its own ID, not by the basis value it carries, so a sibling plan with a
+ *  byte-identical basis — total overlap — is now named rather than swallowed; and the three
+ *  plan-creating doors serialise on the client advisory rung, so two people creating overlapping
+ *  plans at the same moment no longer both read `null`. */
+  overlap_warning: { kind: string; templates: readonly { plan_id: string; name: string }[] } | null;
   configuration_only: boolean;
 };
 

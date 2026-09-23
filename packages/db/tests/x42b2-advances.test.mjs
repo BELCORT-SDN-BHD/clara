@@ -127,23 +127,46 @@ test("x42v.e7 the shared account-role reservation (design §2.1 `_acct_role_rese
   );
 
   // (d) adjustment-template line eligibility reads the same union (design §2.1).
-  await refusesNamed(
-    () => proposeTemplate(w.users.bob, {
+  // [#927] THE FOURTH CONSUMER RETIRED. `clara.propose_adjustment_template` became one typed
+  // refusal at migration 0282 (owner ruling #788), so on a database that carries the retirement
+  // this arm can no longer reach the reservation union through that door -- what a caller meets
+  // is the retirement, and that is what is asserted. The union's own law keeps three live
+  // consumers, all asserted above, and this arm runs in full on a pre-0282 chain (the d-b2 slice
+  // leg's 0001..0045 copy), where the door is still open.
+  const retired = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'retire_adjustment_template_doors$'"
+  )).rows[0].n > 0;
+  if (retired) {
+    const err = await caught(() => proposeTemplate(w.users.bob, {
       client, startDate: mon(-2).start,
       lines: [
         { account_code: ADV1, debit_cents: 10_000, credit_cents: 0, description: "advance leg" },
         { account_code: WAGES, debit_cents: 0, credit_cents: 10_000, description: "counter" },
       ],
-    }),
-    "proposing an adjustment template whose line sits on an enrolled advance code", { codes: [E.badRequest] },
-  );
-  // …the control arm: the same template on unreserved codes proposes cleanly.
-  const tmpl = await proposeTemplate(w.users.bob, {
-    client, name: `x42 e7 control ${uniqTag()}`, startDate: mon(-2).start,
-    lines: [
-      { account_code: OTHERV, debit_cents: 10_000, credit_cents: 0, description: "accrual" },
-      { account_code: WAGES, debit_cents: 0, credit_cents: 10_000, description: "counter" },
-    ],
-  });
-  assert.ok(idOf(tmpl, "template_id", "id"), `an UNRESERVED line set proposes cleanly (got ${JSON.stringify(tmpl)})`);
+    }));
+    assert.ok(err, "the propose door answers something — it must REFUSE");
+    assert.equal(JSON.parse(err.detail).reason, "adjustment_template_lane_retired",
+      "the door that read the reservation union for template lines is retired (#927)");
+    noteLane("x42v.e7 (d) — the adjustment-template consumer of the reservation union retired at 0282; asserted as a refusal here and in full on a pre-0282 chain");
+  } else {
+    await refusesNamed(
+      () => proposeTemplate(w.users.bob, {
+        client, startDate: mon(-2).start,
+        lines: [
+          { account_code: ADV1, debit_cents: 10_000, credit_cents: 0, description: "advance leg" },
+          { account_code: WAGES, debit_cents: 0, credit_cents: 10_000, description: "counter" },
+        ],
+      }),
+      "proposing an adjustment template whose line sits on an enrolled advance code", { codes: [E.badRequest] },
+    );
+    // …the control arm: the same template on unreserved codes proposes cleanly.
+    const tmpl = await proposeTemplate(w.users.bob, {
+      client, name: `x42 e7 control ${uniqTag()}`, startDate: mon(-2).start,
+      lines: [
+        { account_code: OTHERV, debit_cents: 10_000, credit_cents: 0, description: "accrual" },
+        { account_code: WAGES, debit_cents: 0, credit_cents: 10_000, description: "counter" },
+      ],
+    });
+    assert.ok(idOf(tmpl, "template_id", "id"), `an UNRESERVED line set proposes cleanly (got ${JSON.stringify(tmpl)})`);
+  }
 });

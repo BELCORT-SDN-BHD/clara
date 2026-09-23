@@ -33,9 +33,11 @@ test("each row kind opens the tab that owns its verbs", () => {
 });
 
 test("a row with no owning tab keeps the workspace root, and SAYS it is the root", () => {
-  // `seeding_proposal` is one row per CLIENT (裁-17, 0146), not one per object. Sending it to a
-  // tab would be a guess; the root is the honest destination and the label follows it, so a
-  // click's destination is never oversold.
+  // `seeding_proposal` used to be the live example here — one row per CLIENT (裁-17, 0146),
+  // with no single object to open, so the workspace root was the honest destination. That kind
+  // was RETIRED by 0288 (ticket 1012) and the queue emits no such row now, so the case is kept
+  // as the UNKNOWN-kind case it has become: a row kind this build does not know must still get
+  // the root and must still say so, never a guessed tab.
   for (const kind of ["seeding_proposal"]) {
     assert.equal(needsYouRowHref(row(kind)), `/clients/${CLIENT}`);
     assert.equal(hasOwningTab(row(kind)), false);

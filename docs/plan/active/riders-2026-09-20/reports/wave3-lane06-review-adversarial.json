@@ -1,0 +1,123 @@
+{
+  "lens": "adversarial",
+  "wave": 3,
+  "lane": "06",
+  "branch": "riders/w3-lane06",
+  "head": "c9de7580a97c9db68838ca3bf798167ae611bf6d",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "database": "127.0.0.1:55746/clara_l06 (migrations 0001..0286, 270 files)",
+  "tickets": [936, 919, 986],
+  "verdict": "accept-with-fixes",
+  "summary": "One blocker, proven twice inside rolled-back transactions: clara.correct_accrual_adjustment (0284, #936) writes the SUPERSEDED accrual row's authority window onto the new live plan revision, so a correction silently reverts any lawful plan revision that moved (effective_from, effective_to) -- restoring an authority the firm had withdrawn, or dropping one it had extended. The migration header and the correction form both claim the window comes from the LIVE revision; the code reads it from v_old. One major: #919's term_live flips on ANY re-record of a document's service period, including one with identical dates, and the detail banner then tells the firm the term 'has since been corrected' and 'needs a new schedule'. One major evidence hole: #656's whole opening battery (12 cells) skips on this database, so the regression net #986 stands on was dark. Five minor/note findings. The load-bearing (seed, document) idempotency shape #986 was asked to protect holds: the refresh door cannot parse an unparsed basis, cannot double a basis, and leaves record_opening_targets_parsed byte-identical (sha f3ffd4b0..., pinned in prestate AND tail, re-measured live).",
+  "gates_rerun_by_this_review": [
+    "packages/db tests/opening-source-reread.test.mjs + tests/accrual-correction.test.mjs + tests/prepayment-term-liveness.test.mjs with the full 87-flag gate chain -- 14 tests, 14 pass, 0 fail, 0 skipped (matches the three reports' 5 + 7 + 2)",
+    "packages/db tests/opening-ledger-source.test.mjs with the full gate chain -- 12 tests, 0 pass, 12 SKIPPED (confirms the #986 report's own headline follow-up)",
+    "node scripts/check-frozen-workflows.mjs -- OK, 312 frozen files, no manifest diff",
+    "node packages/runtime/scripts/check-parts-parity.mjs -- OK, reader superset of emittable unchanged"
+  ],
+  "findings": [
+    {
+      "id": "ADV-01",
+      "ticket": 936,
+      "severity": "blocker",
+      "kind": "correctness/accounting-authority",
+      "title": "A correction silently rewrites the plan's authority window from the superseded accrual row, undoing a lawful plan revision",
+      "file": "packages/db/migrations/0284_accrual_correction.sql",
+      "evidence": "clara.correct_accrual_adjustment takes every schedule argument from the LIVE revision (v_cur.frequency, v_cur.day_rule, v_cur.day_of_month, v_cur.timezone, v_cur.reversal_day_rule) but takes the window from the SUPERSEDED accrual row: clara.revise_accounting_plan(v_old.plan_id, v_cur.frequency, ..., v_old.effective_from, v_old.effective_to, v_basis, v_cur.reversal_day_rule, p_op_key || ':plan'). The same stale pair is passed to clara._assert_accrual_term_window and stored on the successor accrual row. DRIVEN on clara_l06 as bookkeeper 782ff7f3 (plan b09cd943, accrual 07e06ac9), each run inside one transaction that was ROLLED BACK. Run A (extension): live revision 1 window 2026-07-01..2026-08-31; a lawful direct clara.revise_accounting_plan extended it to 2026-07-01..2026-09-30 (revision 2, verified); clara.correct_accrual_adjustment (amount only, 120000 -> 777700) then produced revision 3 with effective_to back at 2026-08-31. Run B (withdrawal, the money-posting direction): the same direct revision SHORTENED the authority to 2026-07-31 (revision 2, verified); the correction produced revision 3 with effective_to 2026-08-31 -- the plan will accrue August again after the firm had withdrawn that authority. No refusal, no overlap_warning, and the receipt names no window. The file's own header claims the opposite: 'This door carries the SAME frequency, day_rule, day_of_month, timezone, reversal_day_rule and (effective_from, effective_to) the LIVE revision already has ... and passes them straight through unchanged.' apps/web/components/accruals/accrual-correction-form.tsx:186-190 repeats the claim and shows the user the stale window as the fixed authority. The lane's cell p936.basic only proves the window survives when it was never moved, so the battery cannot see this.",
+      "why_reachable": "A direct plan revision on an accrual's plan is a supported, live journey -- apps/web/app/(firm)/clients/[clientId]/plans/[planId]/revise/page.tsx -> apps/web/lib/plans/api.ts:345 callDoor('revise_accounting_plan') -- and #936's own ticket text says it is what people do today. No wall stops it: the direct revise succeeded for an ordinary bookkeeper in both runs above.",
+      "required_fix": "Pass v_cur.effective_from / v_cur.effective_to to the nested clara.revise_accounting_plan, to clara._assert_accrual_term_window and onto the successor accrual row, so a corrected service period that no longer covers the live authority is REFUSED by name (accrual_term_window_mismatch) instead of silently shrinking or restoring the window. Add a cell that moves the window through revise_accounting_plan first, then corrects, and asserts the live revision's window is unmoved."
+    },
+    {
+      "id": "ADV-02",
+      "ticket": 919,
+      "severity": "major",
+      "kind": "correctness/false-claim-on-surface",
+      "title": "term_live goes false on any re-record of the service period, including one that changes nothing, and the banner then tells the firm to rebuild the schedule",
+      "file": "packages/db/migrations/0285_prepayment_term_liveness.sql, apps/web/components/prepayments/prepayment-detail.tsx, apps/web/messages/en.json",
+      "evidence": "clara._record_document_service_period_core supersedes the live row UNCONDITIONALLY -- it compares no dates: select sp.id into v_prior ... where sp.document_id = p_document and sp.superseded_at is null for update; ... update clara.document_service_periods set superseded_by = v_new, superseded_at = now(). DRIVEN on clara_l06 inside one ROLLED-BACK transaction, as bookkeeper e7c28af4, schedule aa84b5d3 / document eb493ca9: before, get_prepayment_schedule reported term_live=true, term_superseded_by=null and list_prepayment_schedules agreed; a re-record of the IDENTICAL term (2026-05-01..2026-07-31, only the basis sentence retyped) returned superseded_id=8e75f65b (the schedule's own row) and both reads then reported term_live=false, term_superseded_by=cce98f26; the new live period's dates are byte-identical (2026-05-01..2026-07-31) and the schedule's term_start..term_end never moved. The surface then renders termSupersededBody: 'The service period this schedule was derived from has since been CORRECTED on its document. Nothing above has moved -- a corrected term needs a new schedule, not a revision of this one.' That is a false statement of fact and materially wrong advice: it tells a firm to abandon a running amortisation when nothing about the term changed. Neither read returns the superseding row's dates, so no surface can tell the two cases apart.",
+      "required_fix": "Either report the superseding row's period_start/period_end beside term_superseded_by so the surface can say whether the term actually moved (and stay silent when it did not), or restate the copy to what the data supports -- 'the term row this schedule named has been superseded' -- and drop the 'corrected' / 'needs a new schedule' instruction until the dates are known to differ."
+    },
+    {
+      "id": "ADV-03",
+      "ticket": 986,
+      "severity": "major",
+      "kind": "evidence/dark-regression-net",
+      "title": "The whole #656 opening battery skips on this database, so the net #986's no-regression claim leans on was dark for the entire ticket",
+      "file": "packages/db/tests/opening-ledger-source.test.mjs",
+      "evidence": "RE-RUN by this review with the full 87-flag gate chain against clara_l06: 12 tests, 0 pass, 0 fail, 12 SKIPPED ('rig not ready: ensureReady() found no draft_entry, or 0228_opening_ledger_source.sql is not applied'). Root cause confirmed: the file pins const PUBLISHED_REGISTRY_VERSION = 2 (line 51) as its premise probe, while clara.document_capabilities on this database reports min=3, max=3 over 240 rows -- and tests/document-capability-registry.test.mjs already pins 3 (line 101). Among the dark cells are p656.tie.approve_rebinds and p656.seed.replay, which guard exactly the approval-rebinding and replay behaviour 0286 builds on; p656.tie.stale_extraction, which the #986 report cites as the record of the 'a fresh op key is not the fix' half, is dark too. The lane flagged this honestly as its highest-value follow-up and it predates the lane's base (0245/#782 raised the version), so it is not this lane's to fix under work-order rule 5 -- but the integrator should not read #986's AC3 as covered by that battery. What DOES cover it is the lane's own p986.reread.no_regression, re-run green here, which asserts both the behaviour (a second parse of the same extraction replays the original receipt byte-identically) and the sha pin f3ffd4b07b33756f7f04f9a18d22d3092b1f84eca4d061d7609c2c235b0671c1 on clara.record_opening_targets_parsed.",
+      "required_fix": "File the one-line probe fix (>= 2, or re-pin to the live registry version) as its own ticket before the next opening-lane change, and do not count the #656 battery as green evidence in the wave's release record."
+    },
+    {
+      "id": "ADV-04",
+      "ticket": 919,
+      "severity": "minor",
+      "kind": "correctness/falsy-not-false",
+      "title": "An absent term_live paints the corrected-term warning on every prepayment",
+      "file": "apps/web/components/prepayments/prepayment-detail.tsx",
+      "evidence": "The guard is {row.term_live ? null : (<StateBanner ... data-testid=\"prepayment-term-superseded\">)}. PrepaymentDetail.term_live is typed boolean but arrives as unvalidated jsonb from clara.get_prepayment_schedule, so undefined is falsy and renders the warning. That is the exact shape of a web build reaching a database where 0285 has not applied (a web-ahead deploy, or a DB rollback that leaves the runtime up): every prepayment detail page in the firm would assert its term had been corrected and tell the bookkeeper to rebuild the schedule. The sibling surface in the same diff uses the safe form -- accrual-detail.tsx tests row.corrected_by_accrual_id !== null -- so the lane is inconsistent with itself.",
+      "required_fix": "Test row.term_live === false."
+    },
+    {
+      "id": "ADV-05",
+      "ticket": 986,
+      "severity": "minor",
+      "kind": "ux/raw-token-on-screen",
+      "title": "no_reread_to_refresh -- the refusal a second tab will hit -- reaches the professional as an untranslated machine token",
+      "file": "apps/web/components/registers/opening-parse-action.tsx, apps/web/lib/registers/opening-source.ts, apps/web/messages/en.json",
+      "evidence": "callOpeningAct maps 409 to {kind:'refused', reason, code} and OpeningParseOutcomeBanner's refused arm renders <p className=\"break-words\">{o.reason}</p> verbatim for everything that is not source_reread_since_parse. The three reasons 0286 mints -- no_reread_to_refresh, stale_extraction_version, refresh_extraction_mixed -- have no en.json entry (the diff adds only rereadTitle/rereadBody/refreshTrigger/refreshing/refreshedTitle/refreshedBody), so a bookkeeper whose colleague or second tab already refreshed sees a warning banner titled 'Refused', code CLR31, body 'no_reread_to_refresh'. opening-source.ts's own doc comment states the meaning in plain words ('somebody -- or another tab -- already refreshed this basis onto the reading the document now stands on ... re-reading the basis shows the answer'), so the sentence exists; it is just never shown. This is the single most likely refusal of the new act.",
+      "required_fix": "Give at least no_reread_to_refresh its own title and copy, on the same footing rereadBody got."
+    },
+    {
+      "id": "ADV-06",
+      "ticket": 936,
+      "severity": "minor",
+      "kind": "idempotency/key-namespace",
+      "title": "The derived nested key p_op_key || ':plan' shares a namespace with caller-chosen revise_accounting_plan keys, and the collision escapes untyped",
+      "file": "packages/db/migrations/0284_accrual_correction.sql",
+      "evidence": "clara._reserve_op keys on (firm_id, fn, op_key), so the correction's nested clara.revise_accounting_plan(..., p_op_key || ':plan') lands in the SAME (firm, 'revise_accounting_plan') namespace a caller reaches directly through apps/web/lib/plans/api.ts:345 with a key of its own choosing. DRIVEN on clara_l06 inside one ROLLED-BACK transaction: a direct clara.revise_accounting_plan under op_key 'ADV936-xxxx:plan' succeeded (revision 2); clara.correct_accrual_adjustment under 'ADV936-xxxx' then raised CLR10 'op_key reused with different args' with NO detail, because the door wraps only its OWN _reserve_op call in the typed op_key_conflict re-raise and not the nested door's. The correction under that key can never succeed afterwards. The same derived-key shape exists in clara.create_accrual_adjustment -> clara.create_accounting_plan, so this is house practice rather than a new invention, but #936 is the first place the nested door is one a human reaches directly with an arbitrary key. Web keys are crypto.randomUUID(), so this is deliberate misuse or a deadlock shape (two sessions can interleave op_receipts-then-plan against plan-then-op_receipts), not an accident.",
+      "required_fix": "Either derive the nested key from something a caller cannot name, or wrap the nested call so a CLR10 from it re-raises with a typed reason the surface can classify."
+    },
+    {
+      "id": "ADV-07",
+      "ticket": 986,
+      "severity": "minor",
+      "kind": "contract-divergence",
+      "title": "The refresh door drops the parse door's opening_fact echo wall while the header claims byte-for-byte parity",
+      "file": "packages/db/migrations/0286_opening_source_reread.sql",
+      "evidence": "MEASURED on clara_l06: select proname, position('opening_fact' in prosrc)>0 from pg_proc where proname in ('record_opening_targets_parsed','refresh_opening_targets_from_reread') returns true for the parse door and FALSE for the refresh door. clara.record_opening_targets_parsed refuses opening_extraction_fact_malformed / opening_extraction_fact_mismatch when a caller echoes a fact that contradicts the stored evidence ([R3-F1]); the refresh door ignores the key entirely. The migration's own replace-loop comment says 'Byte for byte the parse door's own per-line validation'. Impact today is contained -- nothing stores the echo, clara._assert_opening_target_fact still proves every stored triple independently, and mapRegionsToLines never emits opening_fact -- but the #986 successor contract hands this core to #985's chat tool, and the two write doors on one lane should not disagree about what a payload may claim.",
+      "required_fix": "Either run the same echo check in the refresh loop, or amend the header sentence to say which wall is deliberately not shared and why."
+    },
+    {
+      "id": "ADV-08",
+      "ticket": 986,
+      "severity": "note",
+      "kind": "idempotency/pending-receipt",
+      "title": "A pending reservation is reported to the person as a successful refresh",
+      "file": "packages/db/migrations/0286_opening_source_reread.sql, packages/runtime/lib/opening-parse.mjs",
+      "evidence": "clara._reserve_op returns jsonb_build_object('pending', true) when the key is held with no stored result. The refresh door returns it verbatim (if v_dedupe is not null then return v_dedupe; end if;), and refreshOpeningTargets then answers 202 {status:'refreshed', lines: Number(receipt.targets_recorded ?? lines.length), retired: Number(receipt.targets_retired ?? 0)} -- 'N read, 0 retired' for an act that did nothing. clara.correct_accrual_adjustment in this same lane handles the identical state explicitly (if v_dedupe ? 'pending' then raise ... CLR13 operation_in_flight), so the two new doors of one lane disagree. parseOpeningTargets carries the same fallback, so the shape is pre-existing, and reachability is low (the reservation and the receipt commit in one transaction).",
+      "required_fix": "Mirror #936's pending branch in the refresh door, or drop the ?? lines.length fallback so a receipt without targets_recorded cannot be painted as a success."
+    },
+    {
+      "id": "ADV-09",
+      "ticket": 986,
+      "severity": "note",
+      "kind": "hygiene/shared-file",
+      "title": "The six new OpeningCarryDown.source keys are indented two spaces short of the block they join",
+      "file": "apps/web/messages/en.json",
+      "evidence": "The hunk adds rereadTitle/rereadBody/refreshTrigger/refreshing/refreshedTitle/refreshedBody at 6 spaces between neighbours at 8 ('refusedTitle' above, 'deniedTitle' below). Work-order rule 7 asks for a minimal hunk at the sorted position in a file nine other lanes are editing this wave; a reindent now is one line of churn, after integration it is a conflict.",
+      "required_fix": "Reindent the six keys to 8 spaces."
+    }
+  ],
+  "things_i_tried_to_break_and_could_not": [
+    "#986 idempotency shape: the refresh door cannot perform a first parse (no_reread_to_refresh fires whenever no document target cites a different extraction), cannot double a basis (it snapshots then DELETEs the superseded set before inserting), and leaves clara.record_opening_targets_parsed byte-identical -- prestate AND tail both pin sha f3ffd4b07b33756f7f04f9a18d22d3092b1f84eca4d061d7609c2c235b0671c1, and p986.reread.no_regression re-asserts it. A replay of the original parse key returns the stored receipt without re-running the body (clara._reserve_op reads the stored result).",
+    "#986 orphaning: no foreign key in the estate references clara.opening_tb_targets (checked pg_constraint on confrelid), and clara.opening_items carries no extraction reference, so the retire DELETE cannot orphan a drafted item. clara.opening_tb_targets carries only a no-truncate trigger, so the delete breaks no append-only posture.",
+    "#986 approval after a re-read with DIFFERENT figures: clara._assert_opening_tie refuses tie_mismatch on any nonzero delta, so a refreshed basis whose drafted items no longer tie is refused loudly rather than approved wrong.",
+    "#986 tenant isolation: the DB door derives firm/client from the seed registry exactly as clara.record_opening_targets_parsed does, and the wall is readOpeningParseSubject's !seed || seed.firm_id !== firmId -> 404 -- identical masking for a missing and a foreign-firm seed, unchanged by the extraction. Both verbs share one express handler, so the bookkeeper+ floor and the F-H7 reassert cannot drift apart.",
+    "#986 receipt posture: clara.opening_target_refreshes is RLS enabled AND forced with four policies, SELECT-only for clara_authenticated (jwt_firm-scoped) and clara_runtime, no grant to clara_agent_ro or PUBLIC, append-only and no-truncate triggers; the door is SECURITY DEFINER, clara_fn_owner, search_path=clara,pg_temp, EXECUTE to clara_runtime alone. The three new db files pass 14/14 under all 87 gate flags.",
+    "#986 receipt uniqueness under replay: uq_opening_target_refreshes_to (seed_id, to_extraction_id) could raise a bare 23505 that mapOpeningDbError would not classify (500), but the authority pointer only moves forward -- clara._tf_set_authoritative_extraction_0017 is AFTER INSERT only -- and two concurrent refreshes serialize on the registry FOR UPDATE, so I could not construct the collision.",
+    "#919 inner join: clara.prepayment_schedules.service_period_id is NOT NULL with an FK to clara.document_service_periods(id), so the new INNER JOIN in list_prepayment_schedules cannot drop a row -- measured 22 schedules before and 22 after the join on clara_l06. Both doors keep their posture and ACL (clara_authenticated only, no clara_runtime, no PUBLIC), and the join reads a row the definer's own owner policy already sees in full.",
+    "#936 double correction: clara.correct_accrual_adjustment takes clara.accounting_plans FOR UPDATE before re-reading corrected_by_accrual_id, so a second correction of one row is refused by name (accrual_already_corrected) rather than by uq_accrual_adjustments_corrects; uq_accrual_adjustments_plan_revision (plan_id, revision) exists and I could not construct an interleaving that writes two detail rows at one revision.",
+    "#936 floors and masking: the door is clara_authenticated only, floors on clara._human_ctx(clara.role_rank('bookkeeper')) with a typed CLR04, and masks a foreign-firm or missing accrual identically (where id = p_accrual_id and firm_id = v_firm -> CLR11 accrual_not_found).",
+    "#936 memo: the correction form seeds memo as '' when the derived basis memo equals the purpose, which its own report flags as lossy -- it is not. clara._accrual_journal_basis defaults memo to btrim(p_purpose), so blank and purpose-equal both land on the same stored basis memo."
+  ]
+}

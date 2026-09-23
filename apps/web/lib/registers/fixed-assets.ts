@@ -71,6 +71,13 @@ export type FixedAssetRow = {
    *  under #679's lock law). */
   change_class?: "estimate" | "policy" | "error" | null;
   change_reason?: string | null;
+  /** #932 (migration 0277) — set ONLY when this row was born COMPLETE from the account's live
+   *  default depreciation policy at acquisition (never back-filled onto an existing row): the
+   *  policy's own id and version, so the register can render "particulars from <account> policy
+   *  v<N>" from a READ, never a client-side inference. Both null on every row a policy did not
+   *  birth, including every row that predates 0277. */
+  depreciation_policy_id?: string | null;
+  depreciation_policy_version?: number | null;
 };
 
 /** The three classes `ck_fixed_assets_change_class` admits. */
@@ -291,16 +298,48 @@ export function faRegisterTie(session: SessionTokenAccessor, clientId: string, a
  *  p_op_key) — bookkeeper+. COMPLETE-ONCE: refuses CLR37
  *  `fa_particulars_already_complete` on a row that already has its method
  *  set — revise_fixed_asset_particulars is the prospective-change door for
- *  that case, never a second call here. */
+ *  that case, never a second call here.
+ *
+ *  #978 — ONE DECISION, ONE KEY, the same house shape #651 wired onto the run/authority/revise
+ *  doors. This wrapper used to mint `crypto.randomUUID()` inside itself, so a retry after a lost
+ *  response was a NEW operation to the door's own `_reserve_op` dedupe (0249:350-352) rather than
+ *  a replay of the completion that had already earned its receipt. The caller now holds the key
+ *  for the life of the open decision (`completeIntent` below is the tuple it is keyed on;
+ *  `useDepreciationDecisionKey`, lib/registers/depreciation.ts, is the holder). */
 export function completeFixedAssetParticulars(
   session: SessionTokenAccessor,
-  args: { clientId: string; assetId: string; particulars: FaParticularsInput },
+  args: { clientId: string; assetId: string; particulars: FaParticularsInput; opKey: string },
 ): Promise<unknown> {
   return callDoor(
     "complete_fixed_asset_particulars",
-    { p_client: args.clientId, p_asset: args.assetId, p_particulars: args.particulars, p_op_key: crypto.randomUUID() },
+    { p_client: args.clientId, p_asset: args.assetId, p_particulars: args.particulars, p_op_key: args.opKey },
     { session },
   );
+}
+
+/** Particulars, serialised key-sorted for an INTENT TUPLE: an object built in a different key
+ *  order is the same decision, so it must produce the same string. Shared by `completeIntent` and
+ *  `reviseIntent` below, whose doors both hash the particulars into their own operation key
+ *  (`clara.complete_fixed_asset_particulars`, `clara.revise_fixed_asset_particulars`). Extracted
+ *  in the #978 fix round: the two functions carried this block verbatim, and a convention only
+ *  one of them ever changed would be a convention no longer. */
+function serializeParticulars(particulars: FaParticularsInput): string {
+  const p = particulars as Record<string, unknown>;
+  return Object.keys(p)
+    .sort()
+    .map((k) => `${k}=${JSON.stringify(p[k] ?? null)}`)
+    .join(",");
+}
+
+/** The intent tuple a PARTICULARS COMPLETION decision is identified by — exactly the tuple
+ *  `clara.complete_fixed_asset_particulars` hashes into its own operation key (0249:350-352:
+ *  `client`, `asset`, `particulars`). Editing any of them inside the open dialog is a different
+ *  decision and earns a new key; pressing Confirm twice on the same one does not. Particulars are
+ *  serialised key-sorted by `serializeParticulars` above, which `reviseIntent` shares, so an
+ *  object built in a different order is still the same intent. */
+export function completeIntent(args: { clientId: string; assetId: string; particulars: FaParticularsInput }): string {
+  const particulars = serializeParticulars(args.particulars);
+  return [args.clientId, args.assetId, particulars].join("|");
 }
 
 /** clara.revise_fixed_asset_particulars(p_client, p_asset, p_particulars,
@@ -355,7 +394,7 @@ export function reviseFixedAssetParticulars(
 /** The intent tuple a PROSPECTIVE REVISION decision is identified by: every value the door is
  *  being asked to write. Editing any of them inside the open dialog is a different decision and
  *  earns a new key; pressing Confirm twice on the same one does not. Particulars are serialised
- *  key-sorted so an object built in a different order is still the same intent. */
+ *  key-sorted by the shared `serializeParticulars` helper above. */
 export function reviseIntent(args: {
   clientId: string;
   assetId: string;
@@ -364,11 +403,7 @@ export function reviseIntent(args: {
   changeClass: FaChangeClass;
   changeReason: string;
 }): string {
-  const p = args.particulars as Record<string, unknown>;
-  const particulars = Object.keys(p)
-    .sort()
-    .map((k) => `${k}=${JSON.stringify(p[k] ?? null)}`)
-    .join(",");
+  const particulars = serializeParticulars(args.particulars);
   return [args.clientId, args.assetId, args.effectiveFrom, args.changeClass, args.changeReason, particulars]
     .join("|");
 }
@@ -383,7 +418,14 @@ export function reviseIntent(args: {
  *  lineage). One un-dead disposal draft per asset — a second call while one
  *  is outstanding refuses CLR39 `disposal_draft_outstanding`, named on the
  *  register row itself (`disposal_draft_outstanding`/`disposal_draft_entry_id`
- *  above) before the human ever opens this dialog. */
+ *  above) before the human ever opens this dialog.
+ *
+ *  #978 — ONE DECISION, ONE KEY, the same house shape #651 wired onto the run/authority/revise
+ *  doors. This wrapper used to mint `crypto.randomUUID()` inside itself, so a retry after a lost
+ *  response was a NEW operation to the door's own `_reserve_op` dedupe (0041:3662-3672) rather
+ *  than a replay of the disposal that had already earned its receipt. The caller now holds the
+ *  key for the life of the open decision (`disposeIntent` below is the tuple it is keyed on;
+ *  `useDepreciationDecisionKey`, lib/registers/depreciation.ts, is the holder). */
 export function disposeFixedAsset(
   session: SessionTokenAccessor,
   args: {
@@ -396,6 +438,7 @@ export function disposeFixedAsset(
     lossAccount: string;
     memo: string | null;
     costPortionCents?: number | null;
+    opKey: string;
   },
 ): Promise<unknown> {
   return callDoor(
@@ -409,9 +452,38 @@ export function disposeFixedAsset(
       p_gain_account: args.gainAccount,
       p_loss_account: args.lossAccount,
       p_memo: args.memo,
-      p_op_key: crypto.randomUUID(),
+      p_op_key: args.opKey,
       p_cost_portion_cents: args.costPortionCents ?? null,
     },
     { session },
   );
+}
+
+/** The intent tuple a DISPOSAL decision is identified by — exactly the tuple
+ *  `clara.dispose_fixed_asset` hashes into its own operation key (0041:3662-3672: `client`,
+ *  `asset`, `disposal_date`, `proceeds_cents`, `proceeds_account`, `gain_account`, `loss_account`,
+ *  `cost_portion_cents`). `memo` is DELIBERATELY EXCLUDED, following the door's own comment
+ *  there (0041:3667-3671): two calls sharing an op_key and differing only in their note are the
+ *  SAME disposal relabelled, so editing only the memo inside the open dialog stays ONE decision
+ *  rather than minting a new key for a relabel. */
+export function disposeIntent(args: {
+  clientId: string;
+  assetId: string;
+  disposalDate: string;
+  proceedsCents: number;
+  proceedsAccount: string | null;
+  gainAccount: string;
+  lossAccount: string;
+  costPortionCents?: number | null;
+}): string {
+  return [
+    args.clientId,
+    args.assetId,
+    args.disposalDate,
+    String(args.proceedsCents),
+    args.proceedsAccount ?? "",
+    args.gainAccount,
+    args.lossAccount,
+    args.costPortionCents == null ? "" : String(args.costPortionCents),
+  ].join("|");
 }

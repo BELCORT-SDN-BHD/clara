@@ -58,6 +58,7 @@ import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
 import { pinnedClaraWorkBannerRe, pinnedClaraWorkBundleId } from "./pinned-work-bundle.mjs";
+import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
 // THE SERVING claraWork BUNDLE, READ FROM THE REGISTRY'S OWN PIN — never retyped in this file. The
 // pin has moved v1 -> v2 (#629), v2 -> v3 (#631) and v3 -> v4 (the wave 2026-09-15 successor cut),
@@ -73,33 +74,19 @@ if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   process.exit(0);
 }
 
-// --- Fail-closed local gate (the intake-e2e / kill-resume precedent).
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
+// --- Fail-closed local gate (#1018: shared with every other standalone World e2e driver; the
+// intake-e2e / kill-resume precedent).
 // #980 · the riders wave of 2026-09-20 gives each LANE its own cluster and database
 // (`clara_l<NN>`, riders/RIG.md). This file is the ONLY driver of the shared harness's `narrate`
 // script, so it is the only place the harness's third script (`ask_question`) can be shown not to
 // have moved the other two — and it could not be run at all while the gate named two fixed
 // databases. Still loopback-only, still fail-closed on anything else.
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci|l\d{2})$/;
-if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error(
-    "work-journal-e2e is hard-gated to a loopback host + PGDATABASE in "
-    + "{clara_rt_test, clara_wave_b_ci, clara_l<NN>}");
-}
-if (!process.env.WORKFLOW_POSTGRES_URL
-    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci|l[0-9][0-9])(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
-  throw new Error("work-journal-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci|l<NN>)");
-}
-{
-  const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
-  const ok =
-    u.protocol === "postgres:"
-    && LOCAL_HOSTS.has(u.hostname)
-    && u.port === String(process.env.PGPORT ?? "")
-    && u.pathname === "/" + (process.env.PGDATABASE ?? "")
-    && [...u.searchParams.keys()].length === 0;
-  if (!ok) throw new Error("work-journal-e2e: WORKFLOW_POSTGRES_URL failed the parsed DSN gate");
-}
+assertLocalDbGate({
+  label: "work-journal-e2e",
+  pattern: allowedDbPattern(`${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.WAVE_B_CI}|${DB_NAME_SHAPE.PER_LANE}`),
+  checkDsnString: true,
+  checkDsnParsed: true,
+});
 
 const PORT = process.env.WORK_E2E_PORT || (await ephemeralPort());
 const BASE = `http://127.0.0.1:${PORT}`;

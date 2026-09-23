@@ -531,6 +531,12 @@ const WAVE_B_HUMAN_FNS = [
   "seed_fixed_asset", "approve_opening_seed",
   "supersede_opening_item", "approve_opening_correction", "reopen_opening_seed",
   "get_opening_dryrun",
+  // ticket 1012 (0288_seeding_lane_retired.sql): tick_seeding_proposal and
+  // decline_seeding_proposal are RETIRED IN PLACE -- each body is one typed refusal (CLR34
+  // seeding_lane_retired). They stay HERE, at their exact human-lane grants, on purpose: a
+  // revoked grant would answer 42501 insufficient_privilege instead of the retirement, which is
+  // the wrong sentence and the wrong shape for the web layer's refusal mapping. So this matrix
+  // is unchanged BY DESIGN, and that is the fact this comment records.
   "tick_seeding_proposal", "decline_seeding_proposal", "complete_seeding_batch",
   "cancel_seeding_batch", "get_lint_finding", "resolve_lint_finding",
 ];
@@ -538,6 +544,8 @@ const WAVE_B_RUNTIME_FNS = [
   "publish_wiki_page_version", "record_wiki_source_ingest",
   "set_wiki_synthesis_hold", "clear_wiki_synthesis_hold",
   "update_onboarding_plan", "record_opening_targets_parsed",
+  // ticket 1012 (0288): RETIRED IN PLACE, runtime grant preserved -- see the note on the two
+  // deciders in WAVE_B_HUMAN_FNS above for why a retired door keeps its grant.
   "create_seeding_batch", "run_client_lint", "run_lint_all",
   // 0019 [§3, amendment 8]: the stale-mark writer is runtime-ONLY. Listing it
   // here is what makes the rig-isolation grant matrix cover it — the human,
@@ -608,35 +616,55 @@ const EXTRACTION_0022_HUMAN_FNS = ["request_reextraction", "set_firm_high_stakes
 const FAIL_CLASSIFY_0024_RUNTIME_FNS = ["fail_classify"];
 export const FAIL_CLASSIFY_0024_COHORT = [...FAIL_CLASSIFY_0024_RUNTIME_FNS];
 
-// 0028 — the vendor identity binding ceremony (task #36). All five verbs are
-// clara_authenticated, role-floored in-body (bookkeeper for propose/revoke/reads,
-// admin for sign) — same posture as the 0016 autopost-rule ceremony. Its own
-// cohort per the "wholly present or wholly absent" discipline (see 0024's note
-// above): folding it into 0027's would make a 28-migration database report a
-// PARTIAL cohort one migration early.
-const VENDOR_BINDING_0028_HUMAN_FNS = [
+// 0028 — the vendor identity binding ceremony (task #36). All five bodies are real, resolvable
+// functions throughout — its own EXISTENCE cohort per the "wholly present or wholly absent"
+// discipline (see 0024's note above) still names all five, unconditionally, forever: folding it
+// into 0027's would make a 28-migration database report a PARTIAL cohort one migration early,
+// and #921 [0273] narrows a GRANT below, never this roster (D6 keeps every door; "Out of
+// scope: removing the lane's tables, doors or historical rows").
+const VENDOR_BINDING_0028_ALL_FNS = [
   "propose_vendor_identity_binding", "sign_vendor_identity_binding",
   "revoke_vendor_identity_binding", "list_vendor_bindings", "get_vendor_binding",
 ];
+export const VENDOR_BINDING_0028_COHORT = [...VENDOR_BINDING_0028_ALL_FNS];
 
-// 裁-18b PR-1 — the Clara vendor-binding PROPOSAL door. FOUR human doors join the
-// clara_authenticated surface: decline (the other half of the two-party shape), its named
-// reset (a decline suppresses BOTH proposal writers, so there must be a way out),
-// eligible_binding_signer_count (the sign dialog reads it to know whether to ask for 裁-32's
-// self-approval attestation) and binding_identity_review (a read-only review list; it revokes
-// nothing). Written down UNCONDITIONALLY, unlike the closed-world ROSTERS this PR also touches:
-// grantMatrixFailures sweeps the LIVE catalog and only judges functions that exist, so a name
-// here that a pinned-frontier chain has not got is simply never reached.
+// #921 [0273] (2026-09-20/21): NARROWED from all five to the three D6 keeps as human doors —
+// propose and sign are RETIRED for the human lane (migration 0273's own REVOKE; clara_authenticated
+// now gets 42501 on both, proven by vendor-binding-write-doors-revoked.test.mjs) but NEITHER is
+// DROPPED, so both stay in VENDOR_BINDING_0028_ALL_FNS's existence cohort above and simply drop
+// out of the clara_authenticated GRANT expectation here. UNLIKE #1003's [0271] retirement
+// window, this needs no bimodal arm: a REVOKE (not a DROP) never changes whether the function
+// EXISTS, only whether it is GRANTED, and grantMatrixFailures() below judges every name it finds
+// live in the catalog on EVERY frontier — an unlisted name simply reads as the correct
+// `expected=false` on both sides of 0273 once this file's own edit lands, with no frontier
+// window to hide behind. (No other lane's own local copy of this file yet knows about 0273 —
+// each lane discovers this same edit only when the wave integrates.)
+const VENDOR_BINDING_0028_HUMAN_FNS = [
+  "revoke_vendor_identity_binding", "list_vendor_bindings", "get_vendor_binding",
+];
+
+// 裁-18b PR-1 — the Clara vendor-binding PROPOSAL door. Human doors on the clara_authenticated
+// surface: its named reset (a decline suppresses BOTH proposal writers, so there must be a way
+// out — #921 leaves this door untouched: it lifts a decline on an ALREADY-EXISTING historical
+// row, exactly the "in-flight legacy visibility" D6 keeps), eligible_binding_signer_count (the
+// sign dialog reads it to know whether to ask for 裁-32's self-approval attestation) and
+// binding_identity_review (a read-only review list; it revokes nothing). `decline_vendor_
+// identity_binding` was REMOVED from this array by #921 [0273] — the third of the three doors
+// that migration revokes from clara_authenticated (propose and sign are 0028's own, above);
+// like them, it is retired-but-live, so it drops out of the GRANT expectation without leaving
+// this file's existence tracking (it carries none of its own here — see this block's own header:
+// "Written down UNCONDITIONALLY, unlike the closed-world ROSTERS"). Written down UNCONDITIONALLY,
+// unlike the closed-world ROSTERS this PR also touches: grantMatrixFailures sweeps the LIVE
+// catalog and only judges functions that exist, so a name here that a pinned-frontier chain has
+// not got is simply never reached.
 const BINDING_PROPOSAL_PR1_HUMAN_FNS = [
-  "decline_vendor_identity_binding", "reset_binding_decline",
-  "eligible_binding_signer_count", "binding_identity_review",
+  "reset_binding_decline", "eligible_binding_signer_count", "binding_identity_review",
 ];
 /** …and the two wake verbs, on `filing` AND `interactive` (G1 arm A) — the same chat-parity
  *  shape wake_file_document already set: one allowlist row per kind, the grant on both roles. */
 const BINDING_PROPOSAL_PR1_WAKE_FNS = [
   "wake_propose_vendor_identity_binding", "wake_list_binding_candidates",
 ];
-export const VENDOR_BINDING_0028_COHORT = [...VENDOR_BINDING_0028_HUMAN_FNS];
 
 // 0037 — the Wave C-a subledger (design: docs/plan/completed/wave-c-a-subledger-design.md §4.9).
 // Four human composites, clara_authenticated ONLY (bookkeeper floor in-body): which
@@ -2885,6 +2913,50 @@ const FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS = ["set_firm_document_limits"];
 export const FIRM_DOCUMENT_LIMITS_0270_COHORT = [...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS];
 // #960 END
 
+// #932 [0277, a default depreciation policy per enrolled fixed-asset account] — its own cohort,
+// bimodal like 0270's: wholly present once 0277 applies, wholly absent before it, because the
+// `db-slice-frontiers` matrix runs this package against earlier frontiers.
+//
+//   TWO NEW HUMAN DOORS, clara_authenticated ONLY, floored on bookkeeper in their own bodies
+//   (`clara._human_ctx(clara.role_rank('bookkeeper'))`, the SAME floor `upsert_fa_account_profile`
+//   takes): `set_fa_depreciation_policy` (version-forward: retires the live row if one exists,
+//   mints a fresh one at version+1) and `retire_fa_depreciation_policy` (ends the live row
+//   without replacing it). clara_runtime, both agent read roles and all four wake lanes gain
+//   ZERO: both bodies are `_human_ctx`-gated, so a lane carrying no JWT claims could not execute
+//   them even if it held the grant.
+//
+//   0277 mints NO ungranted internal of its own: the policy lookup lives inline in the two
+//   birth sites it recuts (`clara._tf_fa_acquisition_birth`, `clara._fa_on_approve`), neither of
+//   which is a NEW name — both keep their existing cohort memberships (FA_0041_UNGRANTED_FNS for
+//   `_fa_on_approve`; the trigger function is not itself a granted/ungranted roster member).
+const FA_DEFAULT_DEPRECIATION_POLICY_0277_HUMAN_FNS = [
+  "set_fa_depreciation_policy", "retire_fa_depreciation_policy",
+];
+export const FA_DEFAULT_DEPRECIATION_POLICY_0277_COHORT = [
+  ...FA_DEFAULT_DEPRECIATION_POLICY_0277_HUMAN_FNS,
+];
+// #932 END
+
+// #975 [0279, the closed-year arrears question] — its own cohort, bimodal like 0277's: wholly
+// present once 0279 applies, wholly absent before it, because the `db-slice-frontiers` matrix
+// runs this package against earlier frontiers.
+//
+//   ONE NEW HUMAN DOOR, clara_authenticated ONLY, floored on bookkeeper in its own body
+//   (`clara._human_ctx(clara.role_rank('bookkeeper'))`, the SAME floor
+//   `clara.run_depreciation_manual` takes — the person who may run the period is the person who
+//   may judge its arrears): `record_fa_arrears_resolution`. clara_runtime, both agent read roles
+//   and all four wake lanes gain ZERO: materiality is a professional judgement under IAS 8 and no
+//   machine lane may make it, and a lane carrying no JWT claims could not pass `_human_ctx` even
+//   if it held the grant.
+//
+//   0279's own internal, `clara._fa_closed_arrears`, is granted to NOBODY — it is reached only
+//   from the DEFINER bodies of the run core and the door above — and is therefore expected-false
+//   for every role in the live sweep rather than listed here. That is the same disposition 0270's
+//   `clara._firm_document_limit_ceiling` and 0234's `clara._legal_enforcement_mode` carry.
+const FA_CLOSED_YEAR_ARREARS_0279_HUMAN_FNS = ["record_fa_arrears_resolution"];
+export const FA_CLOSED_YEAR_ARREARS_0279_COHORT = [...FA_CLOSED_YEAR_ARREARS_0279_HUMAN_FNS];
+// #975 END
+
 // #1014 [0235, the document binding claim] — ONE relation and NO function name: 0235 recuts
 // clara._lock_document_binding in place (a `create or replace`, so no catalog entry enters or
 // leaves) and mints clara.document_binding_claims, the serialization token that makes a blocked
@@ -2943,6 +3015,111 @@ export const AUDIT_ACTOR_ROLE_0243_COHORT = [...AUDIT_ACTOR_ROLE_0243_UNGRANTED_
 const FIRM_SETUP_TIP_0259_HUMAN_FNS = ["dismiss_firm_setup_tip"];
 export const FIRM_SETUP_TIP_0259_COHORT = [...FIRM_SETUP_TIP_0259_HUMAN_FNS];
 // #935 END
+
+// #1007 [0275, warn before recording a trade invoice that looks like one already recorded] — its
+// own cohort, frontier-tolerant like every cohort above: wholly absent on a chain below 0275,
+// wholly present once it applies, and a PARTIAL cohort is what `cohortFailures` reports.
+//
+//   ONE HUMAN READ, clara_authenticated ONLY. `probe_trade_invoice_duplicates(uuid,text,jsonb)`
+//   answers "which already-recorded invoices of this client look like the one about to be
+//   recorded", on two independent signals (same normalised document number; same total on the
+//   same document date). It is floored on the bookkeeper rank in its own body — the floor of the
+//   recording step it precedes — and takes its firm AND actor from the session, so it is no
+//   cross-tenant oracle. clara_runtime, both agent read roles and all four wake lanes gain ZERO:
+//   the body is `_human_ctx`-gated, so a lane carrying no JWT claims could not execute it even if
+//   it held the grant (packages/runtime/lib/pools.mjs sets no request.jwt.claims).
+//
+//   A SECOND HUMAN READ, also clara_authenticated ONLY and viewer-floored in its own body:
+//   `get_trade_invoice_duplicate_ack(uuid)` answers, for one Work, which earlier invoices the
+//   person who recorded it was shown, and who acknowledged them when. The machine lanes gain ZERO
+//   on it for the same `_human_ctx` reason.
+//
+//   TWO clara_runtime DOORS, and a NEW NAME rather than a widened grant in both cases. The
+//   actor-explicit probe twin `probe_trade_invoice_duplicates_for(uuid,uuid,text,jsonb)` exists
+//   because a clara_runtime connection carries no JWT claims (packages/runtime/lib/pools.mjs sets
+//   none), so `clara._human_ctx` cannot answer for the chat lane;
+//   `record_trade_invoice_duplicate_ack(uuid,uuid,text,text,jsonb,jsonb)` writes the "recorded
+//   anyway" choice BEFORE the admission it authorises and therefore carries
+//   `clara.admit_trade_invoice_work`'s own authority model. Both are expected-false for
+//   clara_authenticated: a caller-supplied actor on a session-authenticated role is the
+//   cross-tenant-oracle shape 0219 names.
+//
+//   FOUR INTERNALS, granted to NOBODY: `_trade_invoice_reference_key` (the ONE document-number
+//   normalisation), `_trade_invoice_duplicate_matches` (the ONE matcher both entrances share, so
+//   the form and the chat lane can never be shown different answers), `_trade_invoice_probe_core`
+//   (the shared probe body) and `_trade_invoice_actor_firm` (the ONE copy of the admission door's
+//   authority preamble the two actor-explicit doors share). They are rostered here so a
+//   half-applied 0275 is reported as one, and are expected-false for every role in the live grant
+//   sweep rather than listed in ALLOWED.
+//
+//   `clara.trade_invoice_duplicate_acks` is a TABLE and so invisible to this function roster:
+//   clara_authenticated holds SELECT on it and no DML, which 0275's own tail asserts.
+const TRADE_INVOICE_DUPLICATE_0275_HUMAN_FNS = [
+  "probe_trade_invoice_duplicates", "get_trade_invoice_duplicate_ack",
+];
+const TRADE_INVOICE_DUPLICATE_0275_RUNTIME_FNS = [
+  "probe_trade_invoice_duplicates_for", "record_trade_invoice_duplicate_ack",
+];
+const TRADE_INVOICE_DUPLICATE_0275_UNGRANTED_FNS = [
+  "_trade_invoice_reference_key", "_trade_invoice_duplicate_matches", "_trade_invoice_probe_core",
+  "_trade_invoice_actor_firm",
+];
+export const TRADE_INVOICE_DUPLICATE_0275_COHORT = [
+  ...TRADE_INVOICE_DUPLICATE_0275_HUMAN_FNS, ...TRADE_INVOICE_DUPLICATE_0275_RUNTIME_FNS,
+  ...TRADE_INVOICE_DUPLICATE_0275_UNGRANTED_FNS,
+];
+// #1007 END
+// #1002 [0276, the second-pass cash-account-set membership editor's own read] — its own cohort,
+// bimodal like 0270's: wholly present once 0276 applies, wholly absent before it, because the
+// `db-slice-frontiers` matrix runs this package against earlier frontiers.
+//
+//   ONE NEW HUMAN READ: `get_client_cash_account_set_members(uuid)` — clara_authenticated ONLY,
+//   VIEWER floor (the same inline floor `propose_client_cash_accounts`, 0232, already uses,
+//   copied rather than shared). It enumerates the client's CURRENT PUBLISHED cash-account-set
+//   version's membership, each member carrying its RECORDED reason — the complement
+//   `propose_client_cash_accounts` cannot give, since that read flags `already_member` for
+//   bank-registry candidates only. clara_runtime, both agent read roles and all four wake lanes
+//   gain ZERO — no agent twin, no wake wrapper, no allowlist row, the same posture 0232's own
+//   three doors carry.
+const CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_HUMAN_FNS = ["get_client_cash_account_set_members"];
+export const CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_COHORT =
+  [...CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_HUMAN_FNS];
+// #1002 END
+// #936 [0284, a dedicated accrual-correction door] — its own cohort, the same "wholly present or
+// wholly absent" reason 0222's own carries: the `db-slice-frontiers` matrix runs this package
+// against databases pinned at earlier frontiers where 0222 has applied and 0284 has not.
+//
+//   the ONE human door — clara_authenticated ONLY. It nests clara.revise_accounting_plan
+//   (0193, UNCHANGED — lane 05's own pin) rather than recutting it, so it mints no new plan-lane
+//   body and no new runtime verb; there is no OBO twin for this ticket's scope.
+const ACCRUAL_CORRECTION_0284_HUMAN_FNS = ["correct_accrual_adjustment"];
+export const ACCRUAL_CORRECTION_0284_COHORT = [...ACCRUAL_CORRECTION_0284_HUMAN_FNS];
+
+// #986 [0286, a re-read opening document becomes re-parsable] — its own cohort, the same
+// "wholly present or wholly absent" reason 0222's and 0284's carry: the `db-slice-frontiers`
+// matrix runs this package against databases pinned at earlier frontiers where 0017 has applied
+// and 0286 has not.
+//
+//   the ONE door — clara_runtime ONLY, exactly as clara.record_opening_targets_parsed
+//   (WAVE_B_RUNTIME_FNS above) is held: a document-primary opening target is written by the lane
+//   that re-derived it from stored evidence, never by a browser that typed it. Declared here so a
+//   grant to clara_authenticated, to either agent read role or to any wake lane FAILS the matrix.
+//   0286 recuts no 0017 body and mints no human door, so nothing else moves.
+const OPENING_SOURCE_REREAD_0286_RUNTIME_FNS = ["refresh_opening_targets_from_reread"];
+export const OPENING_SOURCE_REREAD_0286_COHORT = [...OPENING_SOURCE_REREAD_0286_RUNTIME_FNS];
+// #899 [0287, client birth wall] — THE ONE NEW GRANTED NAME: `open_client_onboarding`, the
+// birth verb that folds `clara.client_identity_candidates`'s own candidate resolution into the
+// door that creates a client (arity 0 proceeds, arity 1 needs `p_acknowledged_candidate`, arity
+// >=2 raises CLR10 `name_family_collision`) — clara_authenticated ONLY, admin-floored in its own
+// body through `clara._human_ctx`; clara_runtime, clara_agent_ro and both wake roles gain ZERO
+// (0287's own tail asserts the shape). `begin_client_onboarding` is RECUT (re-pointed at the
+// shared, ungranted `clara._client_birth_core`) but mints no new name and keeps its existing
+// WAVE_B_HUMAN_FNS membership above — its grant did not move (`create or replace` preserves the
+// ACL, and 0287's own tail asserts it byte-for-byte). `create_client` is untouched by 0287 (see
+// that migration's header for why) and keeps its existing WRITERS membership above unmoved.
+const CLIENT_BIRTH_WALL_0287_HUMAN_FNS = ["open_client_onboarding"];
+export const CLIENT_BIRTH_WALL_0287_COHORT = [...CLIENT_BIRTH_WALL_0287_HUMAN_FNS];
+// #899 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -3137,6 +3314,10 @@ export const ALLOWED = {
     // clara_runtime holds it too (it echoes what the run posted), the agent role and both wake
     // roles gain ZERO.
     ...TRADE_INVOICES_0225_HUMAN_FNS,
+    // #1007 [0275] the trade-invoice duplicate probe and the read of what a warned person
+    // acknowledged — see the block above. clara_authenticated ONLY, floored in their own bodies
+    // (bookkeeper for the probe, viewer for the read); every machine lane gains ZERO.
+    ...TRADE_INVOICE_DUPLICATE_0275_HUMAN_FNS,
     // #640 [0193] the eleven accounting-plan doors — see the block above. clara_authenticated
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
@@ -3206,6 +3387,27 @@ export const ALLOWED = {
     // four wake lanes gain ZERO, and the ungranted ceiling clara._firm_document_limit_ceiling
     // holds no role at all.
     ...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS,
+    // #1002 [0276] the second-pass cash-account-set membership editor's own read — see the block
+    // above. clara_authenticated ONLY, viewer floor; clara_runtime, both agent read roles and
+    // all four wake lanes gain ZERO.
+    ...CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_HUMAN_FNS,
+    // #932 [0277] the fixed-asset default depreciation policy's set/retire doors — bookkeeper+,
+    // see the block above. clara_authenticated ONLY; clara_runtime, both agent read roles and
+    // all four wake lanes gain ZERO.
+    ...FA_DEFAULT_DEPRECIATION_POLICY_0277_HUMAN_FNS,
+    // #975 [0279] the closed-year arrears resolution door — bookkeeper+, see the block above.
+    // clara_authenticated ONLY; clara_runtime, both agent read roles and all four wake lanes gain
+    // ZERO, because materiality is a professional judgement under IAS 8 and no machine lane makes
+    // it. The ungranted internal clara._fa_closed_arrears holds no role at all.
+    ...FA_CLOSED_YEAR_ARREARS_0279_HUMAN_FNS,
+    // #936 [0284] the dedicated accrual-correction door — see the block above. clara_authenticated
+    // ONLY; clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the door
+    // nests clara.revise_accounting_plan (0193) UNCHANGED rather than recutting it.
+    ...ACCRUAL_CORRECTION_0284_HUMAN_FNS,
+    // #899 [0287] the client birth verb — see the block above. clara_authenticated ONLY;
+    // clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the ungranted
+    // shared core clara._client_birth_core holds no role at all.
+    ...CLIENT_BIRTH_WALL_0287_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3388,6 +3590,9 @@ export const ALLOWED = {
     // (the same lane clara.admit_journal_work sits in, acting OBO a named human); the read is held
     // by BOTH lanes because the run echoes what it posted.
     ...TRADE_INVOICES_0225_RUNTIME_FNS, ...TRADE_INVOICES_0225_HUMAN_FNS,
+    // [#1007, 0275] the actor-explicit probe twin and the acknowledgement writer — clara_runtime
+    // ONLY, the same lane clara.admit_trade_invoice_work sits in, acting OBO a named human.
+    ...TRADE_INVOICE_DUPLICATE_0275_RUNTIME_FNS,
     // [#636, 0229] the intake-batch write doors and the cancellation sweep — clara_runtime ONLY,
     // the same lane clara.create_document_intake sits in. The sweep is the pool's ONLY way to see
     // a cancelling parent: it holds no SELECT on clara.intake_batches and none on
@@ -3456,6 +3661,10 @@ export const ALLOWED = {
     // ONLY, the clara.admit_periodic_adjustment_work shape. It takes its actor from an argument
     // because a runtime connection carries no human JWT; the browser lane holds none of it.
     ...ACCRUAL_ADJUSTMENTS_0222_RUNTIME_FNS,
+    // [#986, 0286] the opening-source re-read remedy — clara_runtime ONLY, the same lane
+    // clara.record_opening_targets_parsed sits in (WAVE_B_RUNTIME_FNS above). See the block
+    // where the cohort is declared.
+    ...OPENING_SOURCE_REREAD_0286_RUNTIME_FNS,
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -3514,6 +3723,20 @@ export const CHECKOUT_GATE_C3_TABLES = [
 // The ONLY clara base tables that legitimately carry no RLS (migration bookkeeping + the
 // Slice-1 placeholder). Everything else in the schema MUST be RLS-enabled AND forced.
 export const RLS_EXEMPT = new Set(["schema_migrations", "slice1_smoke"]);
+
+// #857 [0290, the document_regions field_path CHECK] — NO cohort is owed here, and that is a
+// measured disposition rather than an omission, the same one #984's 0239 block above documents.
+// 0290 mints exactly one catalog name, `clara._field_path_conforms`, and revokes EXECUTE from
+// PUBLIC on it with no further GRANT: clara.document_regions carries exactly ONE role with
+// INSERT (clara_fn_owner, measured in 0290's own prestate), and an object's owner may always
+// execute a function it owns regardless of ACL, so the sibling needs no grant for the CHECK it
+// backs to fire on every real writer. An internal granted to NOBODY is expected-false for every
+// role in the live sweep rather than listed here — the same disposition 0234's
+// `_legal_enforcement_mode`, 0239's `_admit_opening_work`, 0186's `_admission_capacity_state` and
+// 0270's `_firm_document_limit_ceiling` carry. 0290 mints no relation and recuts no existing
+// function body (clara._assert_field_path is called, never touched), so there is neither a
+// TABLE cohort nor a body-drift concern to declare either.
+// #857 END
 
 /** Functions `role` can EXECUTE outside pg_catalog + clara (should be none). */
 async function reachableOutsideClara(role) {
@@ -3730,6 +3953,44 @@ export async function grantMatrixFailures() {
     failures.push(...cohortFailures("#960 0270 firm document-limits writer",
       FIRM_DOCUMENT_LIMITS_0270_COHORT, liveNames));
   }
+  // #1002 [0276] — bimodal, same reasoning as 0270's above.
+  const cashMembershipReadLive = CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_COHORT.filter((n) => liveNames.has(n));
+  if (cashMembershipReadLive.length !== 0) {
+    failures.push(...cohortFailures("#1002 0276 cash-account-set membership editor read",
+      CASH_ACCOUNT_SET_MEMBERSHIP_READ_0276_COHORT, liveNames));
+  }
+  // #932 [0277] — bimodal, same reasoning as 0270's above.
+  const depreciationPolicyLive = FA_DEFAULT_DEPRECIATION_POLICY_0277_COHORT.filter((n) => liveNames.has(n));
+  if (depreciationPolicyLive.length !== 0) {
+    failures.push(...cohortFailures("#932 0277 fixed-asset default depreciation policy",
+      FA_DEFAULT_DEPRECIATION_POLICY_0277_COHORT, liveNames));
+  }
+  // #975 [0279] — bimodal, exactly as 0277's above.
+  const closedArrearsLive = FA_CLOSED_YEAR_ARREARS_0279_COHORT.filter((n) => liveNames.has(n));
+  if (closedArrearsLive.length !== 0) {
+    failures.push(...cohortFailures("#975 0279 closed-year arrears resolution",
+      FA_CLOSED_YEAR_ARREARS_0279_COHORT, liveNames));
+  }
+  // #936 [0284] — bimodal, same reasoning as 0270's above: wholly present once 0284 applies,
+  // wholly absent before it.
+  const accrualCorrectionLive = ACCRUAL_CORRECTION_0284_COHORT.filter((n) => liveNames.has(n));
+  if (accrualCorrectionLive.length !== 0) {
+    failures.push(...cohortFailures("#936 0284 dedicated accrual-correction door",
+      ACCRUAL_CORRECTION_0284_COHORT, liveNames));
+  }
+  // #986 [0286] — bimodal, same reasoning as 0284's above: wholly present once 0286 applies,
+  // wholly absent before it.
+  const openingRereadLive = OPENING_SOURCE_REREAD_0286_COHORT.filter((n) => liveNames.has(n));
+  if (openingRereadLive.length !== 0) {
+    failures.push(...cohortFailures("#986 0286 opening-source re-read remedy",
+      OPENING_SOURCE_REREAD_0286_COHORT, liveNames));
+  }
+  // #899 [0287] — bimodal, same reasoning as 0234's/0270's above.
+  const clientBirthWallLive = CLIENT_BIRTH_WALL_0287_COHORT.filter((n) => liveNames.has(n));
+  if (clientBirthWallLive.length !== 0) {
+    failures.push(...cohortFailures("#899 0287 client birth wall",
+      CLIENT_BIRTH_WALL_0287_COHORT, liveNames));
+  }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
   // #812
@@ -3855,6 +4116,10 @@ export async function grantMatrixFailures() {
   }
   failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
   failures.push(...cohortFailures("#935 0259 firm setup education tip dismissal", FIRM_SETUP_TIP_0259_COHORT, liveNames));
+  // #1007 [0275] — the probe, its matcher and the two normalisation/body internals ship as one
+  // lane; half of them is a door with no matcher, or a matcher no entrance can reach.
+  failures.push(...cohortFailures("#1007 0275 trade-invoice duplicate probe",
+    TRADE_INVOICE_DUPLICATE_0275_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-6 apps/web read doors", CHECKOUT_GATE_C6_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));

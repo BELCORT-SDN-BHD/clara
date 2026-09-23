@@ -7,6 +7,7 @@ import {
   loadOpeningSeeds,
   loadOpeningItems,
   loadOpeningTbTargets,
+  loadOpeningTargetRefreshes,
   loadOpeningEntryRevisions,
   loadOnboardingPlanRevision,
   loadOnboardingPlansForClient,
@@ -64,6 +65,20 @@ test("loadOpeningTbTargets: GETs opening_tb_targets filtered by seed_id", async 
   );
   assert.match(seenUrl, /\/rest\/v1\/opening_tb_targets\?/);
   assert.match(seenUrl, /seed_id=eq\.s1/);
+});
+
+test("loadOpeningTargetRefreshes: GETs opening_target_refreshes for this seed, NEWEST FIRST", async () => {
+  // #986 AC2 — "the basis's state shows which". The order is load-bearing: the header names the
+  // NEWEST receipt, so a read that returned them oldest-first would print a retirement the basis
+  // has already moved past.
+  let seenUrl = "";
+  await withMockedFetch(
+    async (url) => { seenUrl = String(url); return jsonResponse([], 200); },
+    async () => { await loadOpeningTargetRefreshes(fakeSession("tok"), "s1"); },
+  );
+  assert.match(seenUrl, /\/rest\/v1\/opening_target_refreshes\?/);
+  assert.match(seenUrl, /seed_id=eq\.s1/);
+  assert.match(seenUrl, /order=refreshed_at\.desc/);
 });
 
 test("loadOpeningEntryRevisions: empty id list short-circuits with NO fetch at all", async () => {

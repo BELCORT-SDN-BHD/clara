@@ -17,10 +17,15 @@
 // JWT claims, under real RLS. `rootQuery` appears only where the subject is the CATALOG itself
 // (the privilege census) or where a fixture is being PLANTED (the substrate, never the door).
 //
-// THE ONE THING THIS BATTERY DELIBERATELY DOES NOT ASSERT is a wall inside the birth verb.
-// `p649.identity.direct_birth_residual` documents the opposite: at arity >=2 the read refuses
-// and `clara.begin_client_onboarding` still succeeds, because DECISIONS §1.3 gives this wave no
-// recut of that verb. A residual nobody wrote down is a residual nobody can close.
+// #899 (2026-09-20) CLOSED THE RESIDUAL THIS HEADER USED TO NAME. `p649.identity.
+// direct_birth_residual` below used to document the opposite of what it now proves: at arity
+// >=2 the read refused and `clara.begin_client_onboarding` still succeeded, because DECISIONS
+// §1.3 gave that wave no recut of that verb. Migration 0287_client_birth_wall.sql re-points
+// `begin_client_onboarding` at a shared core that folds this very read in ahead of the insert,
+// so the cell below now asserts the closure instead — see `packages/db/tests/
+// client-birth-wall.test.mjs` for #899's own full battery (the new `clara.open_client_
+// onboarding` door, the arity-1 acknowledgement wall, and the live census of every granted
+// client-minting body).
 
 import { after, before, test } from "node:test";
 import { randomUUID } from "node:crypto";
@@ -306,23 +311,25 @@ cell("p649.identity.arity_one — one candidate is RETURNED and does not raise: 
   assert.deepEqual(punctuation.candidates, []);
 });
 
-cell("p649.identity.direct_birth_residual — at arity >=2 the READ refuses and clara.begin_client_onboarding STILL succeeds (the named residual, documented not asserted away)", async () => {
+cell("p649.identity.direct_birth_residual — CLOSED by #899: at arity >=2 the READ refuses and clara.begin_client_onboarding now refuses the SAME way, with no prior read required", async () => {
   const w = await firmWorld("resid");
   const client = await addClient(w.firm, `Rome Public Advisory ${w.suffix}`);
-  await addCounterparty(w.firm, client, `Rome Logistics ${w.suffix}`, w.admin);
+  const cp = await addCounterparty(w.firm, client, `Rome Logistics ${w.suffix}`, w.admin);
 
   const name = `Rome Ventures ${w.suffix}`;
   await assertRaises(CLR.badRequest, () => candidatesAs(w.admin, name), "the read at arity 2");
 
-  // THE RESIDUAL, IN ONE LINE OF EVIDENCE. The wall lives at the candidates READ, not inside the
-  // birth door: DECISIONS §1.3 gives #649 no recut, and `begin_client_onboarding(text,text)`'s
-  // signature is censused by name (0017:5139-5140) so a defaulted acknowledgement parameter
-  // would create the overload 0103:1055-1070 refuses. A caller that never asks still births.
-  const born = await beginOnboardingAs(w.admin, name);
-  assert.ok(born.client_id, "the birth door is untouched by this wave and still creates the client");
-  assert.ok(born.plan_id, "…with its onboarding plan, in one transaction");
-  const row = await rootQuery("select name, status from clara.clients where id=$1", [born.client_id]);
-  assert.equal(row.rows[0].status, "onboarding");
+  // THE RESIDUAL, CLOSED. Migration 0287_client_birth_wall.sql re-points
+  // `clara.begin_client_onboarding` at a shared core that folds this very read in ahead of the
+  // insert, so a caller that never asks first can no longer birth a third same-family client —
+  // see `client-birth-wall.test.mjs`'s `p899.legacy.arity_two_now_refused` for the dedicated
+  // battery this residual's closure now lives in.
+  const err = await assertRaises(CLR.badRequest, () => beginOnboardingAs(w.admin, name),
+    "begin_client_onboarding at arity 2, no prior read");
+  assert.equal(reasonOf(err), "name_family_collision");
+  const d = detailOf(err);
+  assert.deepEqual(d.candidates.map((x) => x.id).sort(), [client, cp].sort());
+  assert.equal(await clientCount(w.firm), 1, "the pre-existing client is the only row in this firm: nothing was born");
 });
 
 cell("p649.identity.floor — admin floor: a bookkeeper and a viewer get CLR04, clara_runtime gets 42501, and a below-floor caller cannot tell a real family from a name that matches nothing", async () => {

@@ -14,6 +14,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import type {
   OpeningSeedRow,
   OpeningItemRow,
+  OpeningTargetRefreshRow,
   OpeningTbTargetRow,
   OpeningEntryRevisionRow,
   OpeningDryrun,
@@ -59,6 +60,33 @@ export function loadOpeningTbTargets(session: SessionTokenAccessor, seedId: stri
     select: OPENING_TB_TARGET_COLS,
     filters: { seed_id: `eq.${seedId}` },
     order: "line_key.asc",
+    session,
+  });
+}
+
+const OPENING_TARGET_REFRESH_COLS =
+  "id,seed_id,document_id,from_extraction_id,to_extraction_id,retired_count,recorded_count,refreshed_at";
+
+/**
+ * #986 — EVERY REFRESH THIS BASIS HAS STOOD THROUGH, newest first.
+ *
+ * AC2's second half: the prior parse's targets "are retired and replaced … and the basis's state
+ * shows which". The retire-and-replace half is the door's; THIS is where a person who was not in
+ * the room reads it back. Without it the only record of a refresh was the transient banner on the
+ * tab that ran it, so anybody arriving later saw a target set with nothing saying an earlier
+ * reading had been retired from under it.
+ *
+ * `clara_authenticated` holds SELECT on the relation under a firm-scoped policy (0286), so this is
+ * a plain table read like `loadOpeningTbTargets` beside it — no door, no new grant.
+ */
+export function loadOpeningTargetRefreshes(
+  session: SessionTokenAccessor,
+  seedId: string,
+): Promise<OpeningTargetRefreshRow[]> {
+  return getRows<OpeningTargetRefreshRow>("opening_target_refreshes", {
+    select: OPENING_TARGET_REFRESH_COLS,
+    filters: { seed_id: `eq.${seedId}` },
+    order: "refreshed_at.desc",
     session,
   });
 }

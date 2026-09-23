@@ -181,7 +181,7 @@ test("RenderJobQueuePanel: zero violations across the FULL drift journey — col
   });
 });
 
-test("SeedingBatchesPanel: zero violations, collapsed and with the Tick dialog OPEN on an open proposal", async () => {
+test("SeedingBatchesPanel: zero violations rendering an open proposal READ-ONLY, retirement notice and closers included (ticket 1012)", async () => {
   const impl = (async (u: RequestInfo | URL) => {
     const url = String(u);
     if (url.includes("/seeding_batches")) {
@@ -202,11 +202,18 @@ test("SeedingBatchesPanel: zero violations, collapsed and with the Tick dialog O
       assert.match(h.text(), /vendor_account_rule/, "the panel must show the loaded proposal");
       assert.deepEqual(checkAccessibility(body as never), [], "collapsed");
 
-      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Tick");
-      assert.ok(trigger, "the Tick trigger must render for an open proposal");
-      await h.fireEvent(trigger!, "click");
+      // 0288 (ticket 1012): an OPEN proposal carries no Tick dialog to open any more — the door
+      // is retired. The accessibility claim moves to what the panel DOES render in its place:
+      // the retirement notice, beside the two surviving closers, still zero violations.
+      assert.equal(h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Tick"), null,
+        "no Tick trigger may render for an open proposal after the retirement");
+      assert.match(h.text(), /retired/i, "the retirement notice is rendered, not a silent absence");
+
+      const cancelTrigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Cancel batch");
+      assert.ok(cancelTrigger, "the Cancel batch trigger must still render for an OPEN batch");
+      await h.fireEvent(cancelTrigger!, "click");
       for (let i = 0; i < 6; i++) await h.settle();
-      assert.match(textOf(body as never), /Tick this proposal/);
+      assert.match(textOf(body as never), /Cancel this seeding batch/);
       assert.deepEqual(checkAccessibility(body as never), [], "dialog open");
     } finally {
       await h.unmount();

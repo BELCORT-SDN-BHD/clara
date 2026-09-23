@@ -77,7 +77,7 @@ function mockEstate(identity: IdentityAnswer | (() => IdentityAnswer)) {
     }
     if (u.includes("/rest/v1/clients")) return jsonResponse([]);
     if (u.includes("/rest/v1/client_facts")) return jsonResponse([]);
-    if (u.includes("/rpc/begin_client_onboarding")) {
+    if (u.includes("/rpc/open_client_onboarding")) {
       beginCalls.push(init?.body ? JSON.parse(String(init.body)) : null);
       return jsonResponse({ client_id: NEW_CLIENT_ID, plan_id: "plan-new" });
     }
@@ -230,6 +230,11 @@ test("649 · AC1 arity 1 — the candidate is SHOWN with a real link and its rea
       await h.act(() => clickButton(dialogConfirm(h, body)));
       await settleUntil(h, () => beginCalls.length >= 1, "the birth door call after the acknowledgement");
       assert.equal(beginCalls.length, 1);
+      // #899: the acknowledgement is not just a client-side gate any more — it is what the DOOR
+      // (clara.open_client_onboarding) needs to clear its own arity-1 wall, so the exact
+      // candidate id the read returned must travel with the call, never a bare boolean.
+      assert.equal((beginCalls[0] as Record<string, unknown>).p_acknowledged_candidate, EXISTING_CLIENT,
+        "the acknowledged candidate's own id is forwarded to the door verbatim");
     } finally {
       await h.unmount();
     }

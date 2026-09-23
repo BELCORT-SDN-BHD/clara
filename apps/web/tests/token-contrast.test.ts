@@ -182,6 +182,24 @@ describe("the REAL app/globals.css pairs, end to end", () => {
     }
   });
 
+  it("#1017 · the selected document row clears 4.5:1 with a REAL margin at rest, not just a pass", () => {
+    // The owner's triage ruling (2026-09-20): the wave-1/wave-2 axe flake was not only a
+    // settle-before-scan gap — the row's RESTING pair sat close enough to the 4.5:1 floor
+    // (muted-foreground-on-muted measures 4.62:1, the tightest margin in this file outside the
+    // identity-canvas block) that anti-aliasing at a glyph edge could plausibly land a live scan on
+    // either side, twice, deterministically, on an UNCHANGED token and an UNCHANGED spec file
+    // (wave2-integration-gates-B.md, step 2). "A real margin" is asserted here the same way the
+    // base surface pairs above are: >=10:1, comfortably past anything anti-aliasing could plausibly
+    // move a measurement.
+    const r = results.find((x) => x.id === "foreground-on-muted-selected-document-row");
+    assert.ok(r, "missing pair foreground-on-muted-selected-document-row — filed-document-list.tsx's selected row must be pinned by id, not folded into foreground-on-muted's citation");
+    assert.equal(r.pass, true, `foreground-on-muted-selected-document-row regressed to failing (${r.ratio}:1)`);
+    assert.ok(
+      r.ratio >= 10,
+      `foreground-on-muted-selected-document-row has only ${r.ratio}:1 of margin above 4.5:1 — too close for anti-aliasing to be a non-issue (this is the exact #1017 defect). Never widen this margin by relaxing the threshold; fix the pair's actual colours.`,
+    );
+  });
+
   it("RETIRED, honestly: the old destructive/80 door-refusal pairs no longer exist — action-refusal.tsx and reconciliation-section.tsx now render through the shared StateBanner", () => {
     // These two ids must never silently reappear in PAIR_SPECS unless a
     // bespoke bg-destructive/5-tinted box genuinely comes back into the

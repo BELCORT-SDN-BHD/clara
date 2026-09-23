@@ -27,8 +27,6 @@ import {
   requeueRenderJob,
   cancelSeedingBatch,
   completeSeedingBatch,
-  declineSeedingProposal,
-  tickSeedingProposal,
   retireWikiPage,
 } from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -397,26 +395,13 @@ test("completeSeedingBatch posts the exact complete_seeding_batch body shape, wi
   assert.match(String(calls[0]!.body.p_op_key), /^[0-9a-f-]{36}$/);
 });
 
-test("declineSeedingProposal posts the exact decline_seeding_proposal body shape, with a fresh op_key", async () => {
-  const { impl, calls } = captureFetch({ status: "declined" });
-  await withMockedFetch(impl, async () => {
-    await declineSeedingProposal({ proposalId: "p1", reason: "not a match" }, { session: fakeSession() });
-  });
-  assert.match(calls[0]!.url, /\/rpc\/decline_seeding_proposal$/);
-  assert.equal(calls[0]!.body.p_proposal, "p1");
-  assert.equal(calls[0]!.body.p_reason, "not a match");
-  assert.match(String(calls[0]!.body.p_op_key), /^[0-9a-f-]{36}$/);
-});
-
-test("tickSeedingProposal posts the exact tick_seeding_proposal body shape, with a fresh op_key", async () => {
-  const { impl, calls } = captureFetch({ status: "ticked" });
-  await withMockedFetch(impl, async () => {
-    await tickSeedingProposal("p1", { session: fakeSession() });
-  });
-  assert.match(calls[0]!.url, /\/rpc\/tick_seeding_proposal$/);
-  assert.equal(calls[0]!.body.p_proposal, "p1");
-  assert.match(String(calls[0]!.body.p_op_key), /^[0-9a-f-]{36}$/);
-});
+// The declineSeedingProposal / tickSeedingProposal body-shape cells are GONE with their
+// wrappers (0288_seeding_lane_retired.sql, ticket 1012): both doors answer one typed refusal,
+// so a browser wrapper in front of them is a decoy rather than a door. That there is no such
+// export any more is asserted in components/reports/seeding-batches-retired.test.tsx's census
+// cell, beside the rendered proof that the panel offers no control that would call one. The two
+// CLOSERS above (cancel/complete) keep their cells unchanged — they are untouched by the
+// retirement, which is the point.
 
 test("retireWikiPage posts the exact retire_wiki_page body shape, with a fresh op_key", async () => {
   const { impl, calls } = captureFetch({ status: "retired" });

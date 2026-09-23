@@ -292,3 +292,92 @@ test("[1005]: the account and period triggers show their LABELS on first render,
     },
   );
 });
+
+// #990 (owner ruling 2026-09-20): the detail pane's source-citation row, one state at a time.
+// citation.ts's own unit tests (lib/bank/citation.test.ts) cover the three-state decision in
+// isolation; these three cells prove the detail pane actually WIRES that decision to a real
+// mounted read, through the real `get_bank_line_matching_context` wire shape (never a shortcut
+// that hands the component an already-normalised context object).
+test("[990]: a witness-lane line WITH a citation_page renders the page in the detail pane's source-citation row", async () => {
+  const ctx = {
+    ...CONTEXT,
+    statement: { ...CONTEXT.statement, ingest_mode: "witness" },
+    line: { ...CONTEXT.line, citation_page: 5 },
+  };
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rpc/list_bank_accounts")) return jsonResponse([ACCOUNT]);
+      if (url.includes("/rpc/list_bank_statements")) return jsonResponse([STATEMENT]);
+      if (url.includes("/rpc/get_bank_line_matching_context")) return jsonResponse(ctx);
+      if (url.includes("/rpc/list_bank_match_candidates")) return jsonResponse([]);
+      if (url.includes("/rpc/list_unmatched_lines")) return jsonResponse([LINE]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await mountAndSettle();
+      try {
+        assert.match(h.text(), /Page 5 of the source document/,
+          "a machine-lane line with a citation_page states the page, from the message catalogue");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("[990]: a structured-lane line renders the lane_none sentence, never a blank citation control", async () => {
+  const ctx = {
+    ...CONTEXT,
+    statement: { ...CONTEXT.statement, ingest_mode: "structured" },
+    line: { ...CONTEXT.line, citation_page: null },
+  };
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rpc/list_bank_accounts")) return jsonResponse([ACCOUNT]);
+      if (url.includes("/rpc/list_bank_statements")) return jsonResponse([STATEMENT]);
+      if (url.includes("/rpc/get_bank_line_matching_context")) return jsonResponse(ctx);
+      if (url.includes("/rpc/list_bank_match_candidates")) return jsonResponse([]);
+      if (url.includes("/rpc/list_unmatched_lines")) return jsonResponse([LINE]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await mountAndSettle();
+      try {
+        assert.match(h.text(), /This line's intake lane keeps no page or region citation\./,
+          "the CSV/structured lane states its own absence in words, never an empty control");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("[990]: a machine-lane line with no citation YET renders the not_recorded sentence, distinct from lane_none", async () => {
+  const ctx = {
+    ...CONTEXT,
+    statement: { ...CONTEXT.statement, ingest_mode: "witness" },
+    line: { ...CONTEXT.line, citation_page: null },
+  };
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rpc/list_bank_accounts")) return jsonResponse([ACCOUNT]);
+      if (url.includes("/rpc/list_bank_statements")) return jsonResponse([STATEMENT]);
+      if (url.includes("/rpc/get_bank_line_matching_context")) return jsonResponse(ctx);
+      if (url.includes("/rpc/list_bank_match_candidates")) return jsonResponse([]);
+      if (url.includes("/rpc/list_unmatched_lines")) return jsonResponse([LINE]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await mountAndSettle();
+      try {
+        assert.match(h.text(), /No source citation was recorded for this line\./,
+          "a machine lane with no citation yet is reported distinctly from a lane that structurally has none");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});

@@ -1,0 +1,88 @@
+{
+  "lens": "recheck",
+  "lane": "wave3-lane08",
+  "branch": "riders/w3-lane08",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "recheck_head": "7fbb0beeea15b1936be7769fa6eebe0121504c2f",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave3-lane08-fix.md",
+  "source_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane08-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane08-codereview-standards.json"
+  ],
+  "verdict": "accept",
+  "summary": "All 7 findings from the spec (5) and standards (2, both AGENTS.md rule-6 report-accuracy findings) review reports are confirmed fixed or confirmed correctly left alone on the current head (7fbb0beee), by re-running the underlying evidence rather than trusting the fix report's prose. SPEC-L08-01 (blocker): migration 0290's prestate clause (e) no longer raises on a zero-row clara.document_regions -- it now RAISE NOTICEs the count, matching 0291's own house shape; the tail branches into an EMPTY-table expression probe (clara._field_path_conforms driven directly) vs a POPULATED raw-insert probe, and states which branch ran. Re-ran the migration's own battery (document-regions-field-path-check.test.mjs + bank-statement-line-citation.test.mjs, full gate chain): 14/14 pass, matching the fix report's 8+6 breakdown. SPEC-L08-02 (major): reports/wave3-lane08-ticket990.md's Status line now reads PARTIAL, AC1's row states 'the door half only' and names the frozen lineShape/toWriterLines block, and CONTEXT.md already carried the 'no live producer states one yet' sentence (verified present, line 861) -- no code change was owed or made. SPEC-L08-03 (major): apps/web/e2e/README.md line 108 now states both the 49-file total and the 26-row table count with the 23 residual specs named in a new '### Specs with no coverage-map row' section; measured independently -- ls apps/web/e2e/*.spec.ts | wc -l = 49, README table rows = 26, residual list = 23, 26+23=49, no contradiction remains. spec-discovery.test.ts re-run standalone: 4/4 pass (2 x #851, 2 x #1019), including the new partition cell. SPEC-L08-04 (minor, recorded not changed): the four # #770 / # #809 lines are exactly where the fix report says (303, 305, 438, 440), each precedes a distinct real path (verified by direct sed of those line numbers), and reports/wave3-lane08-ticket1020.md's fix-round section names them and states the reasoning (AC2 byte-for-byte, shared-file-minimal-hunk, both consumers ignore # lines) -- the refutation holds; no regression since the manifest header (lines 1-34) remains byte-identical to b43bef2fb (diffed). SPEC-L08-05 (note, no action required): confirmed no code change was made or needed. SR-1 and SR-2 (major, standards): reports/wave3-lane08-ticket990.md now states 269 total migrations (independently re-queried live on clara_l08: count=269, max(version)=0291_bank_statement_line_citation) and rig-isolation.test.mjs 22 pass/1 skip/23 total (independently re-run with the full gate chain: exact match), both with the correction stated in line rather than silently edited. Nothing else broke: the lane's touched db test files (document-regions-field-path-check, bank-statement-line-citation, field-path-grammar, document-regions-unique-field-path, document-fact-validation-belt, the bank/match batteries, operation-census, rig-isolation) all re-run green with exact counts matching the fix report (14, 25, 135, 10, 23-with-1-skip); the touched web unit files (citation, matching-context-types, matching-section, matching-outcome, firm-scope-db-pins) re-run 44/44; check-test-manifest.mjs and its selftest both exit 0; pnpm typecheck exits 0; CI=true GITHUB_ACTIONS=true pnpm lint exits 0; and the whole apps/web unit suite reproduces the fix report's own number exactly (4857 tests / 4855 pass / 0 fail / 2 skip). Nothing above minor remains open.",
+  "gates_rerun": [
+    {
+      "gate": "document-regions-field-path-check.test.mjs + bank-statement-line-citation.test.mjs, full gate chain, clara_l08",
+      "result": "14 tests / 14 pass / 0 fail",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "field-path-grammar.test.mjs + document-regions-unique-field-path.test.mjs + document-fact-validation-belt.test.mjs, full gate chain",
+      "result": "25 tests / 25 pass / 0 fail",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "bank-line-existing-booking + f-a1-statements{,-2,-3} + f-a2-statement-activation + f-a3-pr1c-egress-bank-matching + f-a3-pr3-chatturn-v14-bank-parity + x38-wave-c-b-bank + x38-wave-c-b-match, full gate chain",
+      "result": "135 tests / 135 pass / 0 fail",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "operation-census.test.mjs, full gate chain",
+      "result": "10 tests / 10 pass / 0 fail",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "rig-isolation.test.mjs, full gate chain, never reset flags",
+      "result": "23 tests / 22 pass / 0 fail / 1 skip (T19, the destructive poison-role drill)",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "live migration ledger query on clara_l08 (select count(*), max(version) from clara.schema_migrations)",
+      "result": "269 | 0291_bank_statement_line_citation",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "apps/web unit: lib/bank/citation.test.ts + lib/bank/matching-context-types.test.ts + components/bank/matching-section.test.tsx + components/bank/matching-outcome.test.tsx + tests/firm-scope-db-pins.test.ts",
+      "result": "44 tests / 44 pass / 0 fail",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "e2e/spec-discovery.test.ts standalone",
+      "result": "4 tests / 4 pass",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "node apps/web/scripts/check-test-manifest.mjs + check-test-manifest.selftest.mjs",
+      "result": "exit 0 (503 files) / exit 0",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "whole apps/web unit suite (node scripts/run-tests.mjs)",
+      "result": "4857 tests / 4855 pass / 0 fail / 2 skip",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "pnpm typecheck (root)",
+      "result": "apps/web: Done, packages/runtime: Done, exit 0",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "CI=true GITHUB_ACTIONS=true pnpm lint (root)",
+      "result": "exit 0",
+      "matches_fix_report": true
+    }
+  ],
+  "per_finding_recheck": [
+    {"id": "SPEC-L08-01", "ticket": 857, "severity": "blocker", "status": "fixed", "evidence": "packages/db/migrations/0290_document_regions_field_path_check.sql's prestate clause (e), lines ~185-198: the zero-row RAISE EXCEPTION is replaced by `if v_regions = 0 then raise notice ...`, matching 0291's house shape; the bad-path census refusal (clause d, v_bad) is untouched. The tail (lines ~330-395) branches on `v_firm is null` into an EMPTY-mode expression probe (clara._field_path_conforms driven directly against 'evil.total', null, 'invoice.deposit') vs a POPULATED-mode raw-insert probe, and the closing notice states 'PROBE MODE: %'. Re-ran document-regions-field-path-check.test.mjs + bank-statement-line-citation.test.mjs with the full gate chain on clara_l08: 14/14 pass, exact match to the fix report's 8+6."},
+    {"id": "SPEC-L08-02", "ticket": 990, "severity": "major", "status": "fixed", "evidence": "reports/wave3-lane08-ticket990.md line 32: 'Status: PARTIAL (corrected in the fix round -- SPEC-L08-02)'; line 85's AC1 row states 'PARTIAL -- the door half only (SPEC-L08-02). No live producer can state a citation (frozen lineShape/toWriterLines, see Status)'. CONTEXT.md line 861 already read '... but no live producer states one yet' before this round (verified present, unchanged) -- the fix report's claim that no code change was needed is accurate."},
+    {"id": "SPEC-L08-03", "ticket": 1019, "severity": "major", "status": "fixed", "evidence": "apps/web/e2e/README.md line 108 now reads 'The checked-in suite currently contains 49 specs. The table below describes 26 of them; the remaining 23 have no row yet and are named under [Specs with no coverage-map row] ...', followed by a '### Specs with no coverage-map row' section (line 142) listing exactly 23 spec basenames, names only. Independently measured: `ls apps/web/e2e/*.spec.ts | wc -l` = 49; README table rows (grep -c on described bullets) = 26 implied, residual list count = 23; 26+23=49, no contradiction. e2e/spec-discovery.test.ts re-run standalone: 4/4 pass, including the new #1019 partition cell asserting [...described, ...residual].sort() equals the directory listing."},
+    {"id": "SPEC-L08-04", "ticket": 1020, "severity": "minor", "status": "no_action_needed", "evidence": "required_fix asked only that the four lines be named and reasoned, or explicitly left as deliberate. reports/wave3-lane08-ticket1020.md's 'Fix round -- SPEC-L08-04' section (line 96) names # #770 (303, 305) and # #809 (438, 440) and states the reasoning. Directly verified on the current head: line 303 = '# #770' / 304 = 'components/work/work-activity-view.test.tsx', 305 = '# #770' / 306 = 'components/work/work-cancel-dialog.test.tsx', 438 = '# #809' / 439 = 'lib/plans/api.test.ts', 440 = '# #809' / 441 = 'lib/plans/schedule.test.ts' -- each tag precedes a distinct real path, confirming the refutation ('not adjacent duplicates') holds. Manifest header (lines 1-34) diffed byte-identical against git show b43bef2fb:apps/web/test/manifest.txt. check-test-manifest.mjs and its selftest both re-run exit 0."},
+    {"id": "SPEC-L08-05", "ticket": 990, "severity": "note", "status": "no_action_needed", "evidence": "required_fix said none required (a note for the owner to raise on #990 if the region locator should become reachable later). No code change was made in the fix round for this finding; confirmed apps/web/lib/bank/matching-context-types.ts still exposes only citation_page, matching the finding's own description of the current, defensible state."},
+    {"id": "SR-1", "ticket": 990, "severity": "major", "status": "fixed", "evidence": "reports/wave3-lane08-ticket990.md line 150-153: 'Applied with `pnpm db:migrate` originally, **269 total migrations after** ... CORRECTED in the fix round (SR-1): this line originally read \"291 total migrations after\" ...'. Independently re-queried live on clara_l08 (127.0.0.1:55748): `select count(*), max(version) from clara.schema_migrations` -> {n: 269, mx: '0291_bank_statement_line_citation'}, exact match to the corrected figure."},
+    {"id": "SR-2", "ticket": 990, "severity": "major", "status": "fixed", "evidence": "reports/wave3-lane08-ticket990.md line 179-181: '**rig-isolation.test.mjs**: 23 tests -- **22 pass**, 1 skipped (T19, the destructive poison-role ...) ... CORRECTED in the fix round (SR-2): this line originally read \"32 pass\" ...'. Independently re-ran rig-isolation.test.mjs with the full gate chain on clara_l08: # tests 23 / # pass 22 / # fail 0 / # skipped 1, exact match to the corrected figure."}
+  ],
+  "nothing_else_broken": true,
+  "notes": "Both migrations (0290, 0291) were verified via the running test batteries rather than a manual disposable-clone re-apply: this rig has no psql/createdb on the Windows PATH (confirmed absent), consistent with #857's own report and the fix report's own 'Anything unverified' section, which already flags that the pre-deploy census and a from-scratch chain remain the integrator's job. Read the full text of both migration files (0290 in full, the changed prestate/tail sections of 0291 unchanged since the fix round did not touch it) rather than trusting the fix report's excerpts. No e2e browser walk was re-run: the fix round's two commits (ac092a422, 7fbb0beee) touch no *.spec.ts file, so none is owed by work-order rule 8; bank-match-walk.spec.ts (the one walk this lane touched, in an earlier ticket) is unchanged by this round."
+}

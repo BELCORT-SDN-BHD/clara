@@ -1,0 +1,88 @@
+{
+  "axis": "standards",
+  "lane": 5,
+  "wave": 3,
+  "branch": "riders/w3-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head_reviewed": "72c2c689110330c47ce4269769eef9c5103830e8",
+  "tickets": [908, 909, 927, 928, 929],
+  "sources_read": [
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (incl. wave-2 and wave-3 addenda)",
+    "docs/plan/active/riders-2026-09-20/RIG.md (incl. wave-2 and wave-3 addenda)",
+    "AGENTS.md",
+    "CONTEXT.md",
+    ".claude/skills/code-review/SKILL.md",
+    ".claude/skills/tdd/SKILL.md",
+    ".claude/skills/tdd/tests.md",
+    ".claude/skills/tdd/mocking.md",
+    "packages/db/README.md (diff, 0280-0283 sections)",
+    "packages/runtime/README.md (diff)",
+    "gh issue view 908/909/927/928/929 --comments (and --json title,body,comments for 927/928)",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane05-ticket908.md (referenced, not quoted)",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane05-ticket909.md (referenced, not quoted)",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane05-ticket927.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane05-ticket928.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane05-ticket929.md",
+    "packages/db/migrations/0280_plan_schedule_yield_wall.sql",
+    "packages/db/migrations/0281_plan_overlap_sibling_arm.sql",
+    "packages/db/migrations/0282_retire_adjustment_template_doors.sql",
+    "packages/db/migrations/0283_retire_plan_overlap_template_arm.sql",
+    "docs/ARCHITECTURE.md:498-502 (blueprint-drift line #929 quotes)"
+  ],
+  "verification_performed": [
+    "git log ffe63a0dd08..HEAD --oneline: confirmed the 14-commit sequence and its per-ticket grouping exactly as the three ticket reports describe.",
+    "Queried clara.schema_migrations on clara_l05 directly: 271 rows, max version 0283_retire_plan_overlap_template_arm, checksums for 0280-0283 match the tail-transcript checksums quoted in the ticket reports (0283's redo checksum 060996f1... confirmed live).",
+    "Independently re-derived sha256(prosrc) for clara._plan_overlap_warning on the live clara_l05 catalog: eda5dbb6... with 'adjustment_template_overlap' and 'clara.adjustment_templates' both absent from prosrc -- matches #929's own tail claim.",
+    "Called clara.propose_adjustment_template directly (as postgres) against the live database: raised CLR10, detail.reason='adjustment_template_lane_retired', matching 0282's own tail assertion and ticket #927's AC1 evidence verbatim.",
+    "Ran `node scripts/check-frozen-workflows.mjs` at HEAD: 'OK -- 312 frozen file(s) ... 55 \"use workflow\" module(s) all frozen+registered; 3 retired entr(ies) recorded' -- matches #928's AC2 claim exactly, no MISSING finding.",
+    "Ran `node packages/runtime/scripts/check-parts-parity.mjs` at HEAD: OK, matching #928's AC2/gates claim.",
+    "`git diff ffe63a0dd08...HEAD -- docs/ARCHITECTURE.md docs/PRD.md`: empty, confirming #929's AC2 claim that neither blueprint was edited.",
+    "Read docs/ARCHITECTURE.md:498-502 directly: the quoted blueprint-drift sentence in #929's report ('...不复制 0045 调整模板的两签仪式——两条 lane 是不同产品...') matches the file byte-for-byte at that location.",
+    "`git diff ffe63a0dd08...HEAD -- CONTEXT.md`: both edits are genuinely in-place substitutions of the existing _Avoid_ sentence (Accounting plan and Prepayment schedule sections), never appended lines -- confirms #929 AC1.",
+    "`git diff ffe63a0dd08...HEAD -- packages/db/package.json`: the four new preintegration-gate --import entries (plan-schedule-yield-wall, plan-overlap-sibling-arm, adjustment-template-doors-retired, plan-overlap-template-arm-retired) are appended at the END of the existing chain, in migration order (0280->0283) -- satisfies the gate-chain-in-migration-order house rule.",
+    "Ran the touched db battery at HEAD (`x42-adjustments.test.mjs` with its own + 0283's preintegration gates): 10/10 pass, matching ticket claims.",
+    "Ran the touched web unit files at HEAD (`adjustments-a11y.test.tsx`, `adjustments-keyboard.test.tsx`, `adjustments.test.ts`): 20/20 pass, matching the reported per-file counts (5+4+11).",
+    "grep'd packages/db/tests/rig-meta.mjs's cohort convention: a cohort entry is only owed when a migration mints a NEW granted function/relation; 0280-0283 each only recut an existing owner-only function body with no ACL change (independently confirmed via each migration's own tail ACL assertion) -- the reports' 'no rig-meta cohort owed' claim checks out against the house convention, not merely against the reports' own say-so.",
+    "CHECKED OUT commit 8ce2ff304 ('feat(web): #927 retire the Propose/Sign/Run-now controls from the Adjustments tab') in isolation and ran the THEN-untouched pre-existing test files: apps/web/lib/registers/adjustments.test.ts fails to even load ('SyntaxError: The requested module ./adjustments does not provide an export named proposeAdjustmentTemplate'), and apps/web/components/registers/adjustments-keyboard.test.tsx fails 1 assertion ('the Propose template trigger must render as a real <button>'). 3 of 10 tests across the three touched files fail at this commit. Restored the worktree to riders/w3-lane05 HEAD afterward (git status clean, HEAD back at 72c2c6891).",
+    "CHECKED OUT commit 5a3238bde ('feat(db): #927 close propose/sign/run_adjustment_manual with a typed retirement refusal') in isolation and ran the THEN-untouched pre-existing packages/db/tests/x42-adjustments.test.mjs against the (already-migrated) clara_l05: 12/12 tests fail, each raising CLR10 adjustment_template_lane_retired where the un-retargeted assertions still expected the old propose/sign/run-now lifecycle to succeed. Restored the worktree to riders/w3-lane05 HEAD afterward (git status clean).",
+    "Confirmed clara_l05's schema_migrations row count/checksum was unaffected by the two temporary checkouts above (still 271 rows, max 0283, same checksums, before and after)."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "ticket": 927,
+      "severity": "major",
+      "category": "tdd-vertical-slicing / commit-per-green-slice",
+      "title": "Two of #927's own commits land the production change before the matching test retarget, leaving pre-existing tests broken at the intermediate commit -- verified by checkout, and undisclosed in the ticket's own report",
+      "evidence": "Commit order (oldest first): 5a3238bde 'feat(db): #927 close propose/sign/run_adjustment_manual ...' THEN 1a824cae7 'test(db): #927 retarget the eight x42-adj batteries ...'; and 8ce2ff304 'feat(web): #927 retire the Propose/Sign/Run-now controls ...' THEN 4a1755b62 'test(web): #927 update the adjustments lane's unit tests ...'. Checking out 8ce2ff304 alone and running apps/web/lib/registers/adjustments.test.ts produces a hard module-load SyntaxError ('does not provide an export named proposeAdjustmentTemplate'), and adjustments-keyboard.test.tsx fails an assertion expecting a 'Propose template' button that commit already removed. Checking out 5a3238bde alone and running packages/db/tests/x42-adjustments.test.mjs against the (shared, already-migrated) clara_l05 fails 12/12, each on the new CLR10 refusal the un-retargeted assertions do not expect. Both were independently reproduced this session (see verification_performed) and the worktree was restored cleanly afterward.",
+      "required_fix": "No code fix needed at HEAD -- the final state is fully green and independently re-verified (10/10 db, 20/20 web). Flagged because WORK-ORDER.md rule 4 explicitly asks for 'commit per green slice or per small group of slices' and rule 1 assumes every landed commit is a safe resume/bisect point ('never redo landed commits; continue from them'); this pair of splits breaks that assumption for two different subsystems of the SAME ticket. The sibling tickets in this very lane hit the identical structural tension (a retirement's production edit cannot be split into a smaller red-green step) and handled it correctly: #928's report carries an explicit '## Vacuity control (work-order rule 4)' section documenting that the production edit landed first and the red-then-green proof was instead done by hand (git stash revert, re-run, observe red, restore); #929's report has the identical section for its own migration. #927's report contains no equivalent disclosure or justification for either its db-side or web-side split, and its Gates section reports the whole ticket clean without noting that two of its own commits, taken alone, do not pass the tests that existed before the ticket started. The fix, for the next ticket that needs this shape, is either (a) bundle the production edit and its matching test retarget into ONE commit per subsystem (still 'a small group of slices'), or (b) keep them split but add the same '## Vacuity control' disclosure #928/#929 used."
+    },
+    {
+      "id": "F2",
+      "ticket": 929,
+      "severity": "note",
+      "category": "duplicated-code / data-clump",
+      "title": "The PlanOverlapWarning-shaped type is independently redeclared (not shared) across three lane api.ts files, and this ticket touches all three copies in lockstep",
+      "evidence": "apps/web/lib/plans/api.ts (exports the named PlanOverlapWarning type), apps/web/lib/accruals/api.ts, and apps/web/lib/prepayments/api.ts each carry their own inline `{ kind: string; templates: readonly {...}[] }` shape; #929's template_id -> plan_id rename had to be applied identically in all three.",
+      "required_fix": "No fix required by this ticket. The triplication predates this diff (git blame on all three files shows the shape existed before #909/#929) and this diff only mirrors the pre-existing pattern consistently rather than introducing new duplication; the three lanes (accruals, plans, prepayments) already own separate api.ts modules by established repo structure. Worth a shared type the next time any of the three needs another field, not a defect of this ticket's own work."
+    },
+    {
+      "id": "F3",
+      "ticket": 908,
+      "severity": "note",
+      "category": "migration-house-shape",
+      "title": "0280-0283 ship with no rig-meta.mjs cohort entry",
+      "evidence": "packages/db/tests/rig-meta.mjs is untouched by this diff (absent from `git diff --stat`); all four migrations (0280-0283) only `create or replace function` an existing owner-only function on its existing signature, with no new relation and no ACL change (independently confirmed via each migration's own tail ACL/owner/search_path re-read).",
+      "required_fix": "No fix required. rig-meta.mjs's cohorts exist to census GRANTED surface (a role gaining or losing a grant); a body recut with no grant change genuinely owes none, matching the file's own documented precedent for migration 0271 ('THE RETIREMENT WINDOW', also grant-free). Confirmed against the house convention directly, not merely against the tickets' own say-so."
+    }
+  ],
+  "hard_violations": [],
+  "smells": [
+    "F2 (duplicated-code / data-clump), pre-existing, not introduced by this diff -- see findings."
+  ],
+  "test_quality_issues": [
+    "F1 (commit-per-green-slice / red-before-green), ticket #927 only -- see findings. Test CONTENT quality itself is good throughout: every cell drives a public door (propose/sign/run-manual/retire/create_accounting_plan/etc.) through real actor personas, expected values are independent literals or named typed-refusal tokens rather than recomputed values, and the one internal-collaborator-shaped access this session checked (packages/db/tests/x42-adj-helpers.mjs's SURGERY 5 direct INSERT in `insertTemplateRaw`/`liveTemplate`) is fixture SETUP for doors the ticket itself retired, not a side-channel verification of the seam under test -- it reuses the door's own internal canonicalisers (`clara._adj_canon_lines`/`_adj_template_hash`) so the fixture row is byte-identical to what the door used to produce, and every actual assertion still drives the door under test through its public interface."
+  ],
+  "summary": "Migration house law (header, prestate sha256(prosrc) pins measured live on clara_l05, the change, tail assertions with a real behavioural call-and-catch proof rather than prosrc inspection alone, a preintegration-gate module with a stable stem, the gate-chain entry in migration order, owner/SECURITY DEFINER/search_path/ACL preservation on every recut body, no new relation so FORCE RLS is not applicable, no rig-meta cohort where none is owed) is fully and correctly followed across all four migrations (0280-0283), and every load-bearing claim spot-checked this session -- live sha256(prosrc) re-derivation, a real door call reproducing the CLR10 refusal, the frozen-workflow and parts-parity checks, the ARCHITECTURE.md:498-502 quote, the CONTEXT.md in-place edits, the gate-chain ordering, and the final green test counts for both the db and web batteries -- reproduced exactly as the ticket reports claim. No PRD/ARCHITECTURE edit, no applied migration edited (0280/0281 each touched by exactly one commit, their own), no frozen-manifest diff. The one real finding (F1, major) is a commit-hygiene violation specific to ticket #927: two of its own commits (one db, one web) land the production change before the matching test retarget, independently verified by checkout to leave pre-existing tests broken (including a hard module-load SyntaxError on the web side) at that intermediate commit -- a real breach of WORK-ORDER.md rule 4's 'commit per green slice' -- and, unlike the identical structural tension #928 and #929 hit and explicitly disclosed under their own '## Vacuity control' headings, #927's report does not disclose or justify it. Final HEAD is fully green and correct; this is a process/transparency finding about the commit sequence, not a defect in the shipped behaviour. Two note-level, no-fix-owed observations (F2, F3) are recorded for completeness."
+}

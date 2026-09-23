@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { cellBudgetMs, ensureRealFocus, signIn } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signIn } from "./helpers";
 
 // #635 (refresh spec; journey H) — `/settings/firm`'s real content, in a real browser.
 //
@@ -258,6 +258,7 @@ test("an owner lands on /settings/firm and reads five cards, with a live legal s
   // The two legacy cards are still here, unchanged.
   await expect(page.getByText(/Change-threshold control is retired/)).toBeVisible();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/firm as an owner").toEqual([]);
 });
@@ -295,6 +296,7 @@ test("a newly published version withdraws standing, the owner accepts in-app, an
   await expect(page.getByText("An owner of this firm has accepted the current versions")).toBeVisible();
   await expect(page.getByText(/Clara cannot use a model on any client's books/)).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/firm after accepting").toEqual([]);
 });
@@ -323,6 +325,7 @@ test("in prompt mode an outstanding agreement is asked for, not reported as swit
   // The remedy is still offered, and it is still the same control.
   await expect(page.getByRole("button", { name: "Accept for this firm" })).toBeVisible();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/firm in prompt mode").toEqual([]);
 });
@@ -403,6 +406,7 @@ test("a bookkeeper sees the legal standing but no commercial or usage figures, a
   await expect(page.getByText("insufficient role").first()).toBeVisible();
   await expect(page.getByText("CLR04").first()).toBeVisible();
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/firm as a bookkeeper").toEqual([]);
 });
@@ -436,6 +440,7 @@ test("the month selector changes the URL, Back restores the previous month, and 
   await expect(page).toHaveURL(/period=2026-09/);
   await expect(page.getByText("document_extraction")).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/firm with usage rows").toEqual([]);
 });
@@ -541,6 +546,7 @@ test("320px and 200% zoom carry no horizontal page scroll, and focus returns to 
     clientWidth: document.documentElement.clientWidth,
   }));
   expect(narrow.scrollWidth, "no horizontal PAGE scroll at 320px").toBeLessThanOrEqual(narrow.clientWidth + 1);
+  await settleForScan(page);
   let result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/firm at 320px").toEqual([]);
 
@@ -551,6 +557,7 @@ test("320px and 200% zoom carry no horizontal page scroll, and focus returns to 
     clientWidth: document.documentElement.clientWidth,
   }));
   expect(zoomed.scrollWidth, "no horizontal PAGE scroll at 200%").toBeLessThanOrEqual(zoomed.clientWidth + 1);
+  await settleForScan(page);
   result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/firm at 200% zoom").toEqual([]);
 });
@@ -587,6 +594,7 @@ test("an owner changes one processing cap, the page reports the new number, and 
   // NOTHING WAS WRITTEN, and the person's own number is still in the field to edit down.
   await expect(pages).toHaveValue("999999");
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/firm with the cap control").toEqual([]);
 });

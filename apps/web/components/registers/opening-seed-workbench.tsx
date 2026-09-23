@@ -12,7 +12,10 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
-import { loadOpeningItems, loadOpeningTbTargets, loadOpeningKeyedResolution } from "@/lib/registers/opening";
+import {
+  loadOpeningItems, loadOpeningTbTargets, loadOpeningKeyedResolution,
+  loadOpeningTargetRefreshes,
+} from "@/lib/registers/opening";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { isDoorRefusal } from "@/lib/doors";
 import { SectionHeader } from "@/components/common/section-header";
@@ -65,6 +68,15 @@ export function OpeningSeedWorkbench({
   // gates exactly as they are (the filename degrades to the sha, which is what the panel already
   // falls back to), and never take the whole tied-basis surface down the way a failed member of
   // the combined read above does.
+  // #986 — THE BASIS'S REFRESH RECORD, read SEPARATELY for the same reason the tie document's
+  // name is: a basis that has never been refreshed carries no receipt and this read adds nothing
+  // to the surface, so a failure here (an older database under a newer build, most of all) must
+  // degrade to "no refresh is named" rather than take the targets and the tie gates down with it.
+  const refreshRead = useAsyncRead(async () => {
+    if (!seed.tie_document_id) return [];
+    return loadOpeningTargetRefreshes(sessionTokenAccessor, seed.id);
+  });
+
   const tieDocumentRead = useAsyncRead(async () => {
     if (!seed.tie_document_id) return null;
     const { listDocumentsByIds } = await import("@/lib/documents/reads");
@@ -182,7 +194,7 @@ export function OpeningSeedWorkbench({
           {/* #656: WHERE THIS BASIS CAME FROM, on the basis itself. A professional asked to
               approve an opening position must be able to see, without opening anything, whether
               the figures were read off a document this firm holds or keyed by a person. */}
-          <OpeningSourceHeader seed={seed} targets={data?.targets ?? []} />
+          <OpeningSourceHeader seed={seed} targets={data?.targets ?? []} refreshes={refreshRead.data ?? []} />
         </div>
         <div className="flex flex-wrap gap-2">
           {/* F8 (fix round, rev-t2): un-hid — cancel_opening_seed's live

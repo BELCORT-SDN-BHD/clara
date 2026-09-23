@@ -19,6 +19,7 @@ import { renderComponent } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility, type A11yViolation } from "../../test/a11yRules";
 import messages from "../../messages/en.json";
+import { PAIR_SPECS } from "../../scripts/check-token-contrast.mjs";
 import { FiledDocumentList } from "./filed-document-list";
 import { OpenCandidateList } from "./open-candidate-list";
 import { UploadPanel } from "./upload-panel";
@@ -95,6 +96,93 @@ test("documents workbench: FiledDocumentList has zero violations (filed table, o
     createElement(FiledDocumentList, { entries: [{ filing: FILING, document: DOCUMENT }], selectedId: null, onSelect: () => {} }),
   );
   assert.deepEqual(violations, [], JSON.stringify(violations));
+});
+
+// #1017 (fix round) — THE PIN AND THE COMPONENT, HELD TOGETHER.
+//
+// The selected filed-document row's resting contrast is pinned in
+// `scripts/check-token-contrast.mjs` as `foreground-on-muted-selected-document-row` (14.32:1,
+// where the `text-muted-foreground` this row used to carry measured 4.62:1 — close enough to the
+// 4.5:1 floor that anti-aliasing at a glyph edge measured 4.49:1 and 4.36:1 on two independent
+// browser-suite runs). That pin is pure token math: it resolves `--foreground` over `--muted` out
+// of `app/globals.css` and never looks at a component, so reverting this row to
+// `text-muted-foreground` leaves it reporting 14.32:1 and green — as review finding SPEC-1017-A
+// measured. The pin's own citation claimed it would red on that regression; it would not.
+//
+// This cell is the half that makes the claim true: it renders the real component with a row
+// SELECTED and asserts the row renders exactly the pair the pin names — reading the token names
+// out of the pin itself rather than re-typing them, so renaming either half of the pin without
+// moving the component fails here too.
+const SELECTED_ROW_PIN = "foreground-on-muted-selected-document-row";
+
+/** Every node under `root`, document order — `RenderHarness.find` returns only the first match. */
+function descendants(root: unknown): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    out.push(node as Record<string, unknown>);
+    for (const child of ((node as { childNodes?: unknown[] }).childNodes ?? [])) visit(child);
+  };
+  visit(root);
+  return out;
+}
+
+/** A class attribute as its own tokens — "text-foreground" must never be matched inside
+ *  "hover:text-foreground/50", which a substring or a word-boundary test both do. */
+function tokens(classAttr: string): string[] {
+  return classAttr.split(/\s+/).filter(Boolean);
+}
+
+function classesOf(node: unknown): string {
+  const read = (node as { getAttribute?: (name: string) => string | null }).getAttribute;
+  return (typeof read === "function" ? read.call(node, "class") : null) ?? "";
+}
+
+async function renderFiledList(selectedId: string | null): Promise<{ row: Record<string, unknown>; inside: string[] }> {
+  const h = await renderComponent(
+    App(createElement(FiledDocumentList, { entries: [{ filing: FILING, document: DOCUMENT }], selectedId, onSelect: () => {} })),
+  );
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const rows = descendants(h.container).filter((n) => typeof (n as { tagName?: string }).tagName === "string" && (n as { tagName: string }).tagName.toUpperCase() === "TR");
+    const row = rows.at(-1)!;
+    return { row, inside: descendants(row).map(classesOf) };
+  } finally {
+    await h.unmount();
+  }
+}
+
+test("ticket 1017: the SELECTED filed-document row renders the pair the contrast lint pins for it", async () => {
+  const pin = PAIR_SPECS.find((p: { id: string }) => p.id === SELECTED_ROW_PIN) as
+    | { id: string; fg: (h: (name: string) => string) => string; bg: (h: (name: string) => string) => string }
+    | undefined;
+  assert.ok(pin, `${SELECTED_ROW_PIN} must exist in scripts/check-token-contrast.mjs`);
+  // Handing the pin an IDENTITY resolver reads back which two tokens it actually pins, rather
+  // than this cell re-typing them and drifting when the pin moves.
+  const identity = (name: string): string => name;
+  assert.equal(pin!.fg(identity), "foreground", "the pin's foreground token");
+  assert.equal(pin!.bg(identity), "muted", "the pin's background token");
+
+  const { row, inside } = await renderFiledList(DOCUMENT.id);
+  assert.ok(tokens(classesOf(row)).includes("bg-muted"), `the selected row must sit on the pinned ground: ${classesOf(row)}`);
+  assert.equal(
+    inside.filter((c) => tokens(c).includes("text-muted-foreground")).length,
+    0,
+    `no cell of the SELECTED row may carry text-muted-foreground — that is the 4.62:1 pair the ruling sent back: ${inside.join(" | ")}`,
+  );
+  assert.ok(
+    inside.filter((c) => tokens(c).includes("text-foreground")).length >= 3,
+    `the selected row's cells must carry text-foreground (the pinned pair): ${inside.join(" | ")}`,
+  );
+});
+
+test("ticket 1017 THE CONTROL: an UNSELECTED row still carries text-muted-foreground, so the cell above is not vacuous", async () => {
+  const { row, inside } = await renderFiledList(null);
+  assert.ok(!tokens(classesOf(row)).includes("bg-muted"), "an unselected row is not on the muted ground");
+  assert.ok(
+    inside.some((c) => tokens(c).includes("text-muted-foreground")),
+    `the unselected row's caption cells still carry text-muted-foreground (on --background, 5.01:1): ${inside.join(" | ")}`,
+  );
 });
 
 test("documents workbench: OpenCandidateList has zero violations (one open candidate)", async () => {

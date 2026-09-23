@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
-import { ensureRealFocus, signInTo } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { FIRM_SETUP_COOKIE, TIP_KEY, TIP_KEY_READ } from "./firm-setup-mock.mjs";
 
 /**
@@ -54,15 +54,12 @@ async function arm(context: BrowserContext): Promise<void> {
   await context.addCookies([{ name: FIRM_SETUP_COOKIE, value: "armed", url: origin }]);
 }
 
+/** #1017 — delegates to the shared settle-before-scan contract (./helpers) instead of this file's
+ *  own animations-only wait, which never checked the enter/mount opacity fade settleForScan also
+ *  covers. Dropping the (0,0) mouse park too: settleForScan's own header records why it is no
+ *  longer needed — the hover-state contrast it used to dodge is fixed at the token now. */
 async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
+  await settleForScan(page);
 }
 
 async function scan(page: Page, what: string): Promise<void> {
@@ -73,13 +70,15 @@ async function scan(page: Page, what: string): Promise<void> {
 }
 
 test.describe.serial("#648 · A5 firm setup", () => {
-  // TWO FULL SIGN-INS AND TWO SERVER RENDERS live inside the concurrency cell, and the axe scans
-  // add their own passes. The 30s default is a budget for a single-page cell; measured, that cell
-  // alone takes ~32s on this host. A short budget reports "the app did not converge" for a run
-  // that had simply not finished, which is a false finding.
-  test.describe.configure({ timeout: 180_000 });
+  // #864 — PER CELL, BUILT FROM cellBudgetMs, not one blanket describe-level number sized to the
+  // heaviest cell alone. TWO FULL SIGN-INS AND TWO SERVER RENDERS live inside the "stale"
+  // convergence cell, and the axe scans add their own passes — the 30s default is a budget for a
+  // single-page cell, and a short budget reports "the app did not converge" for a run that had
+  // simply not finished, which is a false finding. Each cell below states its own signIns/scans
+  // count instead of borrowing the busiest cell's number.
 
   test("firmSetup.walk.start: the firm home tile is the authorised next step, and it gates nothing", async ({ page, context }) => {
+    test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
     await arm(context);
     await signInTo(page, "/");
 
@@ -104,6 +103,7 @@ test.describe.serial("#648 · A5 firm setup", () => {
   });
 
   test("firmSetup.walk.answer: one fact is a Field, a related set is a bounded walk, and a reload resumes without re-asking", async ({ page, context }) => {
+    test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
     await arm(context);
     await signInTo(page, SETUP_URL);
 
@@ -200,6 +200,8 @@ test.describe.serial("#648 · A5 firm setup", () => {
   });
 
   test("firmSetup.walk.stale: a second browser context answers the same plan, and the first converges with its draft intact", async ({ page, context, browser }) => {
+    // TWO FULL SIGN-INS: this context's own, plus the second browser context's below.
+    test.setTimeout(cellBudgetMs({ signIns: 2, scans: 1 }));
     await arm(context);
     await signInTo(page, SETUP_URL);
 
@@ -249,6 +251,7 @@ test.describe.serial("#648 · A5 firm setup", () => {
   });
 
   test("firmSetup.walk.responsive: 320 CSS px, 200% zoom, keyboard focus return and reduced motion", async ({ page, context }) => {
+    test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
     await arm(context);
     await signInTo(page, SETUP_URL);
 
@@ -304,6 +307,9 @@ test.describe.serial("#648 · A5 firm setup", () => {
   });
 
   test("firmSetup.walk.finish: an optional fact is skipped with a reason, setup commits, and the tile clears", async ({ page, context }) => {
+    // THREE scan() passes below (confirmed facts, the skip-reason dialog, and the finished
+    // checklist) — the heaviest cell in this describe.
+    test.setTimeout(cellBudgetMs({ signIns: 1, scans: 3 }));
     await arm(context);
     await signInTo(page, SETUP_URL);
 

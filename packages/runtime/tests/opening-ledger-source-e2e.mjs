@@ -46,31 +46,22 @@ import { normalizeAzureLayout } from "../lib/egress.mjs";
 import { parseOpeningTargets } from "../lib/opening-parse.mjs";
 import { OPENING_TB_FIELD_PATH } from "../lib/opening-tb-produce.mjs";
 import { cell, HEADER, tbRow } from "./kdoc-opening-tb-testkit.mjs";
+import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
 if (process.env.CLARA_SKIP_OPENING_LEDGER_SOURCE_E2E === "1") {
   console.log("[opening-source-e2e] skipped (CLARA_SKIP_OPENING_LEDGER_SOURCE_E2E=1)");
   process.exit(0);
 }
 
-// --- Fail-closed local gate, copied from prepayment-occurrence-e2e.mjs:59-75 verbatim. The
-// numeric arm is what admits the per-ticket rig databases (`clara_656`, `clara_653`, …); the
-// intake e2e's allowlist admits only `clara_rt_test|clara_intake_ci` and would throw here.
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci|[0-9]{3,4})$/;
-if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("opening-ledger-source-e2e is hard-gated to a loopback host + PGDATABASE in {clara_rt_test,clara_wave_b_ci,clara_<digits>}");
-}
-{
-  if (!process.env.WORKFLOW_POSTGRES_URL) throw new Error("opening-ledger-source-e2e needs WORKFLOW_POSTGRES_URL");
-  const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
-  const ok =
-    u.protocol === "postgres:"
-    && LOCAL_HOSTS.has(u.hostname)
-    && u.port === String(process.env.PGPORT ?? "")
-    && u.pathname === "/" + (process.env.PGDATABASE ?? "")
-    && [...u.searchParams.keys()].length === 0;
-  if (!ok) throw new Error("opening-ledger-source-e2e: WORKFLOW_POSTGRES_URL failed the parsed DSN gate");
-}
+// --- Fail-closed local gate (#1018: shared with every other standalone World e2e driver),
+// admitting the same shapes as prepayment-occurrence-e2e.mjs. The numeric arm is what admits the
+// per-ticket rig databases (`clara_656`, `clara_653`, …); the intake e2e's allowlist admits only
+// `clara_rt_test|clara_intake_ci` and would throw here.
+assertLocalDbGate({
+  label: "opening-ledger-source-e2e",
+  pattern: allowedDbPattern(`${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.WAVE_B_CI}|${DB_NAME_SHAPE.PER_TICKET_3_OR_4}`),
+  checkDsnParsed: true,
+});
 
 const WATCHDOG_MS = 8 * 60 * 1000;
 const watchdog = setTimeout(() => {

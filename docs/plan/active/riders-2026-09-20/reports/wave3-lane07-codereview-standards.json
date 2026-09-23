@@ -1,0 +1,42 @@
+{
+  "axis": "standards",
+  "lane": "wave3-lane07",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head_at_review": "61b7463fb8294e25e5b033e692c12527b86d69a1",
+  "tickets": [899, 1012, 889],
+  "sources_read": [
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "AGENTS.md",
+    "CONTEXT.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "gh issue view 899/1012/889 --comments",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane07-ticket899.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane07-ticket1012.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane07-ticket889.md"
+  ],
+  "verified_by_rerun": [
+    "packages/db/tests/client-birth-wall.test.mjs -> 11/11 pass (re-run on clara_l07)",
+    "packages/db/tests/merge-alias-lane.test.mjs -> 2/2 pass (re-run on clara_l07)",
+    "packages/db/tests/seeding-lane-retired.test.mjs -> 6/6 pass (re-run on clara_l07)",
+    "packages/db/tests/operation-census.test.mjs -> 10/10 pass",
+    "packages/db/tests/rig-isolation.test.mjs -> 22 pass, 1 skip (T19, reset flag correctly unset), 0 fail",
+    "packages/db/tests/sandbox-marker.test.mjs -> sbm.3 FAILS (confirmed; see finding F1)",
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files, no manifest diff",
+    "packages/db: CI=true GITHUB_ACTIONS=true npx eslint . -> clean, no output",
+    "re-measured sha256(prosrc) live on clara_l07 for clara.create_client(text,text), clara.client_identity_candidates(text,jsonb), and clara.merge_counterparties(...) -- all match the migrations' own pinned/post-splice values"
+  ],
+  "verdict": "accept",
+  "summary": "All three migrations (0287 client-birth-wall/#899, 0288 seeding-lane-retired/#1012, 0289 merge-alias-lane/#889) follow the house migration law precisely: header with rationale, prestate pins measured on the lane rig (re-verified live for 3 of them), bimodal/redo-safe construction proven both ways per the implementers' own reports, tail assertions re-reading the live catalog, a preintegration-gate module at a stable stem for each, gate-chain entries added in package.json in exact migration order, owner/SECURITY DEFINER/search_path/ACL preserved on every recut body, no new relations (so no FORCE RLS question), no applied migration edited, no frozen-manifest diff (confirmed by re-run), and no PRD/ARCHITECTURE/CONTEXT.md edits. The shared rig-meta.mjs census file carries minimal, correctly-positioned hunks for #899 (a new cohort) and #1012 (comment-only, with a well-argued reason the grant matrix must NOT move for a typed refusal to work), and #889 correctly touches it not at all. TDD discipline is followed as vertical slices per ticket (test files land in the same or an adjacent commit as their migration, never a separate all-tests-first commit), and test quality is high throughout: assertions go through real per-role sessions under real RLS (never mocked internal collaborators), independent literals back every expected value even where a cross-check against a sibling read is also asserted, and the several catalog/census cells are the repo's own documented structural-cell standard, which explicitly overrides the general seam-only preference. One pre-existing-but-newly-triggered red test (sandbox-marker.test.mjs's sbm.3) was found, confirmed by direct re-run, and traced to two comment lines in #899's already-applied 0287 migration; the #1012/#889 implementers correctly declined to touch an applied migration to fix it and disclosed it as a named follow-up rather than hiding it. This is reported here as a note for the integrator, not a rework item for this lane.",
+  "findings": [
+    {
+      "id": "F1",
+      "ticket": 899,
+      "severity": "minor",
+      "kind": "regression-disclosed",
+      "title": "sandbox-marker.test.mjs sbm.3 census is red on this branch because of prose in 0287's own comments",
+      "evidence": "Re-ran `node --test tests/sandbox-marker.test.mjs` on clara_l07: `sbm.3 no production source reads the sandbox marker` fails with actual=['packages/db/migrations/0287_client_birth_wall.sql:58 ...SANDBOX_PREFIX (\"rig_\",', 'packages/db/migrations/0287_client_birth_wall.sql:77 ...(\"rig_\"-prefixed) client...']. Both hits are inside 0287's header comments (lines 58 and 77), which quote the rig's `SANDBOX_PREFIX` (\"rig_\") as evidence for why arity-1 is not walled on the legacy door and why `create_client` is not re-pointed -- no executable code in 0287 branches on the marker. The census (sandbox-marker.test.mjs) does not strip comments before scanning production source, so this is a false positive on a test-authoring convention, not a real production leak.",
+      "required_fix": "Not owed by this lane. The #1012 report (wave3-lane07-ticket1012.md, 'Follow-ups worth filing' #1) already names this precisely and correctly declines to fix it, because doing so would mean editing 0287 after it was applied to the lane database -- forbidden by WORK-ORDER's migration law ('Never edit an applied migration'). The integrator should either accept this disclosed residual for the wave or open a follow-up ticket for a successor migration/rename that rewords the two comment lines (or teaches sandbox-marker.test.mjs to strip comments), rather than treating it as a #1012 or #889 defect."
+    }
+  ]
+}

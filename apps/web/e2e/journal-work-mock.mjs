@@ -1915,6 +1915,24 @@ export async function handleJournalWorkRpc(request, response, path, url, sendJso
     return true;
   }
 
+  // fix(integration) riders wave 3 — #1007 (0275) added clara.get_trade_invoice_duplicate_ack as a
+  // FOURTH unconditional Work-detail mount read: components/work/work-detail.tsx calls it in the
+  // SAME effect as clara.get_trade_invoice above, right after it
+  // (lib/work/trade-invoice-reads.ts's `getTradeInvoiceDuplicateAck`), for every addressable Work,
+  // trade invoice or not. Lane 02 taught this verb to no mock at all — not even its own
+  // trade-invoice-mock.mjs, whose own spec never asserts a zero-rejected-reads census the way this
+  // walk's #727 cell (journal-work-walk.spec.ts:978) does — so it fell through to
+  // serve-built.mjs's unmatched-route 404, red only here because this is the one walk that checks.
+  // NULL is the door's own honest, ordinary answer ("nobody was warned about a duplicate" —
+  // trade-invoice-reads.ts's own docstring: "by far the ordinary one"), and neither of this lane's
+  // Works was ever shown a duplicate warning.
+  if (path === "/rest/v1/rpc/get_trade_invoice_duplicate_ack") {
+    const body = await readJson(request);
+    if (body?.p_work !== JOURNAL_WORK.seededWorkId && body?.p_work !== JOURNAL_WORK.parkedCardWorkId) return false;
+    sendJson(response, 200, null, cors);
+    return true;
+  }
+
   // #658 (0230) — clara.work_knowledge_drift. The envelope below is 0230:845-848 VERBATIM (the
   // v_observed is null arm): no read-set row and no execution-trace fallback for this Work, so every
   // judgement key is null rather than a fabricated false. A null drifted is what makes the banner

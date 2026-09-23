@@ -1,0 +1,59 @@
+{
+  "axis": "standards",
+  "lane": 6,
+  "wave": 3,
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "diff_command": "git diff ffe63a0dd084e99b84c1368119845be273c421ce...HEAD",
+  "commits_command": "git log ffe63a0dd084e99b84c1368119845be273c421ce..HEAD --oneline",
+  "tickets_reviewed": [936, 919, 986],
+  "sources_consulted": [
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "AGENTS.md",
+    "CONTEXT.md",
+    ".claude/skills/code-review/SKILL.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/db/README.md, apps/web/README.md, packages/runtime/README.md (module docs the diff touches)",
+    "gh issue view 936/919/986 --json body,comments"
+  ],
+  "summary": "40 files, +4982/-141 across three tickets (#936 0284, #919 0285, #986 0286). Migration house law (prestate pins measured live, tail re-hash of every pinned body, RLS forced + 4-policy shape on the new receipt relation, ACL census, redo-safety, rig-meta.mjs cohort additions, package.json gate wiring) is followed rigorously and consistently across all three migrations; every pinned body's prestate/tail pair was cross-checked against the migration text and against packages/db/tests/rig-meta.mjs's diff. Shared files (rig-meta.mjs, package.json, tree.ts, routes.test.ts, manifest.txt, CONTEXT.md) carry minimal, appended, sorted-position hunks per WORK-ORDER rule 7. TDD test batteries (accrual-correction.test.mjs, prepayment-term-liveness.test.mjs, opening-source-reread.test.mjs, and the web/runtime unit and Playwright suites) drive real public doors/components through least-privilege personas, use independent reads to verify claims, and hit every numbered acceptance criterion in each ticket's Agent Brief; no tautological assertions, no internal-collaborator mocking, and mocks only at the fetch/PostgREST system boundary were found. No hard standards violations were found. Two judgement-call findings are reported below.",
+  "findings": [
+    {
+      "ticket": 936,
+      "id": "L06-STD-1",
+      "severity": "minor",
+      "category": "smell:duplicated-code",
+      "title": "validateAccrualCorrectionDraft duplicates ~20 lines of validateAccrualDraft's own field checks, byte-for-byte",
+      "file": "apps/web/lib/work/accrual-draft.ts",
+      "lines": "246-271 (validateAccrualDraft) vs 423-446 (validateAccrualCorrectionDraft); also the amount check at 260-262 vs 437-439 and the instruction check at 273 vs 448",
+      "evidence": "The expense/liability account-code presence+unknown+distinct checks (three near-identical if/else-if blocks), the amountCents safe-integer check, the servicePeriodStart/End presence+order checks, and the instruction-required check are written out a second time in validateAccrualCorrectionDraft with identical logic, identical issue codes and identical field names as the corresponding blocks in validateAccrualDraft a few dozen lines above. The function's own comment at lines 411-413 concedes this: \"mirroring the relevant subset of validateAccrualDraft\".",
+      "why_it_matters": "This is Fowler's Duplicated Code smell (Refactoring ch.3): the same five-field validation shape now has two owners in one file. A future rule change to any of those five checks (e.g. adding a currency-precision rule, or changing accountsNotDistinct's message) must be made twice and re-verified twice; #936's own house discipline elsewhere in this same diff (see the runtime's readOpeningParseSubject extraction and openingTargetHandler factory, both explicitly built to avoid exactly this duplication) shows the team already reaches for extraction when two doors share a read/validation shape.",
+      "suggested_fix": "Extract a validateAccrualParticulars(draft, knownAccounts) helper returning the issues for the five shared fields (both account legs, amount, service period, instruction); have validateAccrualDraft call it and then append its own purpose/authority/schedule checks, and have validateAccrualCorrectionDraft call it and then append its own window-bracket checks. AccrualParticularsSource (already defined a few lines above, at 348-352, as the Pick<> both drafts share) is the natural parameter type.",
+      "standard": "code-review SKILL.md smell baseline, judgement call — not a documented repo standard, so not a hard violation; the repo does not override it here.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "ticket": 919,
+      "id": "L06-STD-2",
+      "severity": "minor",
+      "category": "test-coverage",
+      "title": "term_live/term_superseded_by are added to PrepaymentListRow and to every list-row test fixture, but the list surface never reads them and no cell drives that seam",
+      "file": "apps/web/lib/prepayments/api.ts (type, lines 44-46); apps/web/components/prepayments/prepayments-list.tsx (ScheduleRow, ~lines 85-110); apps/web/components/prepayments/prepayments-render-states.test.tsx (SCHEDULE_ROW fixture, lines 113-114)",
+      "lines": "apps/web/lib/prepayments/api.ts:44-46",
+      "evidence": "0285's migration recuts BOTH clara.get_prepayment_schedule and clara.list_prepayment_schedules to carry the flag, and the web PrepaymentListRow type gained term_live/term_superseded_by fields with SCHEDULE_ROW's test fixture updated to satisfy the type. grep across apps/web/components/prepayments/ shows term_live is read only in prepayment-detail.tsx (the DETAIL surface); prepayments-list.tsx's ScheduleRow component does not reference row.term_live anywhere, and no test in prepayments-render-states.test.tsx or elsewhere asserts anything about the flag on a list row.",
+      "why_it_matters": "#919's Agent Brief \"Desired behavior\" states: \"the detail and list surfaces render it with the sentence that a corrected term needs a new schedule.\" Only the detail surface does. The ticket's own Acceptance Criteria (the operative contract per WORK-ORDER rule 2) narrows this to \"A web cell asserts the flag renders on the detail surface\" only, with no AC naming the list — so this may be a deliberate, in-scope narrowing rather than a miss, but the prose commitment and the type-level plumbing (added to the list row's own TypeScript shape) were not carried through to a render or a test, which is the WORK-ORDER rule 4 seam discipline (\"the seams are the public interfaces the ticket's brief names\") pointing the other way from what shipped.",
+      "suggested_fix": "Either render the same StateBanner-style note on ScheduleRow in prepayments-list.tsx (with a cell asserting it), or, if the list surface is intentionally out of scope, drop term_live/term_superseded_by from PrepaymentListRow so the type does not promise a fact the surface discards, and note the narrowing explicitly in the ticket report so a reviewer does not have to rediscover it.",
+      "standard": "WORK-ORDER.md rule 4 (seam discipline) / TDD SKILL.md seam discipline, judgement call — the AC checklist (the actual contract) is satisfied; this flags a gap against the Agent Brief's prose only.",
+      "verdict": "PLAUSIBLE"
+    }
+  ],
+  "no_violations_found_in": [
+    "Migration house law: prestate pins (measured live per lane-06 database, never copied literals), tail re-hash of every pinned body, RLS enable+force with 4-policy shape and append-only/no-truncate triggers on clara.opening_target_refreshes, ACL census (clara_authenticated/clara_runtime/public/clara_agent_ro) on every new or recut door, redo-safety (#957) via create-or-replace/if-not-exists idempotent DDL, rig-meta.mjs cohort wiring for the two new-grant migrations (0284, 0286) and its deliberate absence for 0285 (no new grant to track).",
+    "No applied migration edited; no frozen-manifest diff; no PRD/ARCHITECTURE edit.",
+    "SECURITY DEFINER / owner / search_path preserved on every recut body (0193's clara.revise_accounting_plan explicitly pinned unchanged rather than recut, to avoid colliding with lane 05's own pin).",
+    "New relation clara.opening_target_refreshes: FORCE RLS, zero application-role DML (only clara_fn_owner writes; clara_authenticated/clara_runtime hold SELECT only), append-only + no-truncate triggers verified in the tail and driven in the test battery against a superuser bypass attempt.",
+    "TDD vertical-slice discipline: seams named up front in each test file's header comment, tests through public doors/components (humanQuery/roleQuery wrappers, rendered component + injected submit/session seams), independent-source expected values (worked BEE trial-balance figures, literal cents), mocks only at the fetch/PostgREST system boundary, no internal-collaborator or side-channel testing found.",
+    "Shared-file hygiene (WORK-ORDER rule 7): rig-meta.mjs, package.json, tree.ts, routes.test.ts, manifest.txt, CONTEXT.md hunks are minimal, appended in sorted/migration order, and do not touch another lane's content.",
+    "Docs-in-same-commit (WORK-ORDER rule 9): packages/db/README.md, apps/web/README.md and packages/runtime/README.md all updated in the same commits as the code they document, and CONTEXT.md gained the 'Opening source refresh' and 'Accrual correction' terms in the house term/_Avoid_ shape at appropriate alphabetical positions."
+  ]
+}

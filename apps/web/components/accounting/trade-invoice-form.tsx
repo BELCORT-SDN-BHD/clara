@@ -71,7 +71,13 @@ import {
   type NavigationScope,
 } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { submitTradeInvoiceWork, type SubmitTradeInvoiceWorkResult } from "@/lib/work/api";
+import {
+  probeTradeInvoiceDuplicates,
+  submitTradeInvoiceWork,
+  type SubmitTradeInvoiceWorkResult,
+  type TradeInvoiceDuplicateMatch,
+} from "@/lib/work/api";
+import { formatMyr } from "@/lib/bank/money";
 import {
   defaultDraftStorage,
   newIntentKey,
@@ -114,14 +120,39 @@ type PartyCandidate = {
   name?: unknown;
   registration_no?: unknown;
   tin?: unknown;
+  /** #982 · WHICH identifier reached this candidate — `registration`, `tin`, `name` or
+   *  `tin_and_name`. The door supplies it on the refusals where the person is choosing between
+   *  identifiers; where it does not, no label is rendered rather than a guessed one. */
+  matched_on?: unknown;
 };
+
+/** The four labels the door's `matched_on` vocabulary has. A value outside it renders NOTHING —
+ *  a label invented for an unknown token would be a sentence the door never said. */
+const MATCHED_ON = new Set(["registration", "tin", "name", "tin_and_name"]);
+
+/**
+ * #982 · A REFUSAL WHOSE SENTENCE DEPENDS ON WHICH IDENTIFIER WAS AMBIGUOUS. Data, not code, for
+ * the reason `TRADE_INVOICE_FIELD_DEFAULTS` is: a lane adds a row, never an arm.
+ *
+ * `party_ambiguous` used to answer with one sentence — "More than one party answers to that
+ * name." — and 0274 made the same reason reachable from a TIN no name was submitted beside, so
+ * the screen named something the submission never contained. The door already says which
+ * identifier it was; this is the mapping that stops dropping it.
+ */
+const REFUSAL_BY_MATCH: Readonly<Record<string, string>> = Object.freeze({
+  "party_ambiguous/tin": "party_ambiguous_tin",
+});
 
 type Outcome =
   | { kind: "idle" }
   | { kind: "submitting" }
   | { kind: "checking" }
+  /** #1007 · the person has been WARNED and has not chosen yet. NOTHING is admitted in this
+   *  state: it exists precisely so that the recording waits for a human decision. */
+  | { kind: "warned"; matches: TradeInvoiceDuplicateMatch[] }
   | { kind: "accepted"; workId: string; invoiceId: string | null; dueDate: string | null; dueDateSource: string | null }
-  | { kind: "refused"; reason: string; field: TradeInvoiceFieldId | null; candidates: PartyCandidate[] }
+  | { kind: "refused"; reason: string; matchedOn: string | null; field: TradeInvoiceFieldId | null;
+      candidates: PartyCandidate[] }
   | { kind: "conflict"; workId: string | null }
   | { kind: "sourceConflict"; entryId: string | null }
   | { kind: "denied" }
@@ -148,6 +179,7 @@ export function TradeInvoiceFormView({
   session = sessionTokenAccessor,
   storage = defaultDraftStorage(),
   submit = submitTradeInvoiceWork,
+  probe = probeTradeInvoiceDuplicates,
   loadAccounts,
   loadParties,
 }: {
@@ -159,6 +191,10 @@ export function TradeInvoiceFormView({
   /** The ONE write this form makes, open as a seam for the reason the composer's is: a cell must be
    *  able to drive the DECISION — accepted, refused, conflicted, lost — without a socket. */
   submit?: typeof submitTradeInvoiceWork;
+  /** #1007 · the ADVISORY read that runs before the write, open as a seam for the same reason the
+   *  write is: a cell must be able to drive "this client already has one that looks like it"
+   *  without a socket. It never refuses anything — see `onSubmit`. */
+  probe?: typeof probeTradeInvoiceDuplicates;
   /** The two reads, INDEPENDENTLY injectable, because they degrade independently: the chart read
    *  failing and the party read failing are different states with different next actions, and a
    *  cell must be able to produce either one alone. */
@@ -300,14 +336,54 @@ export function TradeInvoiceFormView({
 
   const busy = outcome.kind === "submitting" || outcome.kind === "checking";
 
-  async function send(key: string): Promise<SubmitTradeInvoiceWorkResult> {
+  async function send(key: string, acknowledged?: readonly string[]): Promise<SubmitTradeInvoiceWorkResult> {
     const wire = toTradeInvoiceWire(draft, knownCodes);
     // A LOCAL refusal never carries candidates: only the door knows which parties answer to a
     // name, so the empty list here is a fact rather than a placeholder.
     if (wire === null) return { kind: "invalid_basis", field: null, reason: "invalid_basis", candidates: [] };
     return submit(session, {
       clientId, intentKey: key, kind: wire.kind, invoice: wire.invoice, basis: wire.basis,
+      // #1007 · ABSENT unless the person was warned and chose to go ahead. An empty list would be
+      // a claim that they acknowledged nothing, which is a different thing from not being warned.
+      ...(acknowledged && acknowledged.length > 0 ? { acknowledgeDuplicates: [...acknowledged] } : {}),
     });
+  }
+
+  /**
+   * #1007 · WHAT THIS CLIENT ALREADY HAS THAT LOOKS LIKE THIS ONE.
+   *
+   * It runs BEFORE the write and it can only ever produce a WARNING: the owner ruled on
+   * 2026-09-20 that Clara warns and the person decides. So a probe that cannot answer — the read
+   * is down, the session lapsed, the door refused — returns NOTHING TO SHOW rather than
+   * propagating, and the recording goes through exactly as it would have. A failed advisory read
+   * that blocked a lawful recording would be the refusal the owner ruled out, arriving by the
+   * back door.
+   */
+  async function look(): Promise<TradeInvoiceDuplicateMatch[]> {
+    const wire = toTradeInvoiceWire(draft, knownCodes);
+    if (wire === null) return [];
+    try {
+      return await probe(session, { clientId, kind: wire.kind, invoice: wire.invoice });
+    } catch {
+      return [];
+    }
+  }
+
+  /** The one write path, shared by the plain submit and by "record it anyway". */
+  async function admit(acknowledged?: readonly string[]): Promise<void> {
+    setOutcome({ kind: "submitting" });
+    const first = await send(intentKey, acknowledged);
+    if (first.kind === "lost" && !lostOnce.current) {
+      // THE LOST-RESPONSE ARM. NO answer was observed, so the intent key is re-sent EXACTLY ONCE
+      // and the second answer is authoritative. `lost` is not `unavailable`: a replayed 202 means
+      // the first attempt DID land, and the form must not offer a distinct resubmit before it knows.
+      lostOnce.current = true;
+      setOutcome({ kind: "checking" });
+      applyResult(await send(intentKey, acknowledged));
+      return;
+    }
+    if (first.kind === "lost") { setOutcome({ kind: "unavailable", message: first.message }); return; }
+    applyResult(first);
   }
 
   function applyResult(res: SubmitTradeInvoiceWorkResult) {
@@ -336,9 +412,21 @@ export function TradeInvoiceFormView({
           counterparty_id: typeof c.counterparty_id === "string" ? c.counterparty_id : "",
           name: typeof c.name === "string" ? c.name : "",
           registration_no: typeof c.registration_no === "string" ? c.registration_no : null,
+          // #982 — the TIN is CARRIED, not dropped. LHDN MyInvois requires the buyer TIN and BRN,
+          // so a Malaysian document carries both and the TIN is sometimes the only identifier
+          // that tells two candidates apart. The door has always put it in the refusal; this
+          // mapping used to discard it, so it never reached the screen.
+          tin: typeof c.tin === "string" ? c.tin : null,
+          matched_on: typeof c.matched_on === "string" ? c.matched_on : null,
         }))
         .filter((c) => c.counterparty_id !== "" && c.name !== "");
-      setOutcome({ kind: "refused", reason: res.reason ?? "invalid_basis", field, candidates });
+      // #982 · WHICH identifier the door found ambiguous, off the same generic carrier the
+      // candidates ride. Read defensively: absent means "the door said nothing about it", and the
+      // banner then keeps the reason's own plain sentence.
+      const matchedOn = typeof res.detail?.matched_on === "string" ? res.detail.matched_on : null;
+      setOutcome({
+        kind: "refused", reason: res.reason ?? "invalid_basis", matchedOn, field, candidates,
+      });
       focusField(field);
       return;
     }
@@ -357,19 +445,15 @@ export function TradeInvoiceFormView({
       focusField(firstInvalidTradeInvoiceField(found));
       return;
     }
+    // #1007 · THE WARNING COMES BEFORE THE WRITE, and only once per decision: the person who has
+    // already been shown these matches and pressed "Record it anyway" is not asked twice.
     setOutcome({ kind: "submitting" });
-    const first = await send(intentKey);
-    if (first.kind === "lost" && !lostOnce.current) {
-      // THE LOST-RESPONSE ARM. NO answer was observed, so the intent key is re-sent EXACTLY ONCE
-      // and the second answer is authoritative. `lost` is not `unavailable`: a replayed 202 means
-      // the first attempt DID land, and the form must not offer a distinct resubmit before it knows.
-      lostOnce.current = true;
-      setOutcome({ kind: "checking" });
-      applyResult(await send(intentKey));
+    const matches = await look();
+    if (matches.length > 0) {
+      setOutcome({ kind: "warned", matches });
       return;
     }
-    if (first.kind === "lost") { setOutcome({ kind: "unavailable", message: first.message }); return; }
-    applyResult(first);
+    await admit();
   }
 
   // ---- the denied state: a viewer typing the address reaches THIS, never a blank ---------------
@@ -422,15 +506,76 @@ export function TradeInvoiceFormView({
       {outcome.kind === "checking" ? (
         <StateBanner tone="info" title={t("checking.title")}>{t("checking.body")}</StateBanner>
       ) : null}
+      {/* #1007 · THE WARNING. Not a refusal and not a toast: the recording is waiting on a person,
+          so it stays on the page, names what it found, and offers BOTH ways out. */}
+      {outcome.kind === "warned" ? (
+        <StateBanner
+          tone="warning"
+          title={t("duplicate.title")}
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                type="button"
+                onClick={() => { void admit(outcome.matches.map((m) => m.invoiceId)); }}
+              >
+                {t("duplicate.recordAnyway")}
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => setOutcome({ kind: "idle" })}
+              >
+                {t("duplicate.cancel")}
+              </Button>
+            </div>
+          }
+        >
+          {t("duplicate.body", { count: outcome.matches.length })}
+          <ul className="mt-3 flex flex-col gap-2" aria-label={t("duplicate.title")}>
+            {outcome.matches.map((m) => (
+              <li key={m.invoiceId} className="flex flex-wrap items-center gap-2">
+                <span className="text-sm">
+                  {t("duplicate.entry", {
+                    reference: m.reference ?? t("duplicate.noReference"),
+                    date: m.documentDate ?? "",
+                    // THE HOUSE MYR HELPER, as every other money display in apps/web uses it: the
+                    // currency belongs to the formatter, not to fifteen translation strings.
+                    total: formatMyr(m.totalCents),
+                  })}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {m.signals.length > 1
+                    ? t("duplicate.signals.both")
+                    : t(`duplicate.signals.${m.signals[0] ?? "same_reference"}`)}
+                </span>
+                {m.workId ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    render={<Link href={workDetailHref(clientId, m.workId)} />}
+                  >
+                    {t("duplicate.open")}
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </StateBanner>
+      ) : null}
       {outcome.kind === "refused" ? (
         <StateBanner tone="error" title={t("refused.title")} code={outcome.reason}>
-          {t(`refusals.${outcome.reason}`)}
+          {t(`refusals.${REFUSAL_BY_MATCH[`${outcome.reason}/${outcome.matchedOn ?? ""}`] ?? outcome.reason}`)}
           {outcome.candidates.length > 0 ? (
             <ul className="mt-3 flex flex-col gap-2" aria-label={t("candidates.label")}>
               {outcome.candidates.map((c, i) => {
                 const id = typeof c.counterparty_id === "string" ? c.counterparty_id : null;
                 const name = typeof c.name === "string" ? c.name : "";
                 const reg = typeof c.registration_no === "string" ? c.registration_no : null;
+                const tin = typeof c.tin === "string" ? c.tin : null;
+                const matched = typeof c.matched_on === "string" && MATCHED_ON.has(c.matched_on)
+                  ? c.matched_on : null;
                 return (
                   <li key={id ?? `candidate-${i}`} className="flex items-center gap-2">
                     <Button
@@ -446,7 +591,24 @@ export function TradeInvoiceFormView({
                     >
                       {name}
                     </Button>
-                    {reg ? <span className="text-xs text-muted-foreground">{reg}</span> : null}
+                    {reg ? (
+                      <span className="text-xs text-muted-foreground">
+                        {t("candidates.registration", { value: reg })}
+                      </span>
+                    ) : null}
+                    {tin ? (
+                      <span className="text-xs text-muted-foreground">
+                        {t("candidates.tin", { value: tin })}
+                      </span>
+                    ) : null}
+                    {/* #982 · WHICH identifier reached this candidate. The person is choosing
+                        between the identifiers the document itself carries, so a list that did
+                        not say which one reached which party would be a list of names. */}
+                    {matched ? (
+                      <span className="text-xs text-muted-foreground">
+                        {t(`candidates.matchedOn.${matched}`)}
+                      </span>
+                    ) : null}
                   </li>
                 );
               })}

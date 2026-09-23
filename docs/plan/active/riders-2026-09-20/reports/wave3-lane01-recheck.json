@@ -1,0 +1,65 @@
+{
+  "lens": "recheck",
+  "lane": "wave3-lane01",
+  "branch": "riders/w3-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "recheck_head": "adf980b088d50ab502fa052a1ccd437a182d976e",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave3-lane01-fix.md",
+  "source_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane01-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane01-codereview-standards.json"
+  ],
+  "verdict": "accept",
+  "summary": "All 13 findings from the spec and standards review reports (2 blocker, 2 major, 4 minor, 5 note) are confirmed fixed on the current head (adf980b08), by re-running the underlying evidence rather than trusting the fix report's prose. The six pre-existing packages/db batteries that migration 0273 broke are green again (re-ran the full --import gate chain from packages/db/package.json against the nine touched/adjacent files: 180 tests / 178 pass / 0 fail / 2 skip, 0 not-ok lines - exact match to the fix report's table). The false RETIRED and every-other-battery-converted claims are gone from x36-vendor-binding-helpers.mjs's header, and packages/db/README.md's new 0273 section now documents the six-battery breakage and repair accurately. The raw write-mirror builders (declineDirect/insertHumanProposedBinding/signLiveDirect) that were unused (SPEC-921-D) and undermined by no pinning cell (L01-STD-3) are gone entirely, replaced by AsFnOwner wrappers plus retiredWriteDoorQuery/asRetiredWriteDoorSession, used consistently across all six files (grep confirms zero remaining references to the old names). SPEC-890-A's add-alias cell now drives cp-alias-origin to a non-default value and asserts p_origin on both the refusal and success paths. SPEC-921-C's e2e walk now stubs two rows (live plus a differently-named historical proposed row) so the Sign assertions can fail; re-ran the e2e walk on this lane's own triple: 11 passed, exact match. SPEC-921-E's misleading comment is corrected. The three note-level no-action findings (SPEC-921-G, SPEC-890-B, L01-STD-4) are confirmed untouched by the fix round by diffing the relevant files against the review head (00ba92176) - zero diff on all three, so nothing regressed by inaction. Nothing else broke: pnpm typecheck (apps/web + packages/runtime) exits clean, CI=true GITHUB_ACTIONS=true pnpm lint exits 0, and the whole apps/web unit suite reproduces the fix report's own number exactly (4844 tests / 4842 pass / 0 fail / 2 skip). operation-census.test.mjs and rig-isolation.test.mjs also re-ran clean (10/10 and 22 pass/1 standing skip respectively). Nothing above minor remains open.",
+  "findings": [],
+  "gates_rerun": [
+    {
+      "gate": "six pre-existing packages/db batteries + new battery + dwell + rig-docs-download-door, full --import gate chain from packages/db/package.json, clara_l01",
+      "result": "180 tests / 178 pass / 0 fail / 2 skip (0 not-ok lines)",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "operation-census.test.mjs + rig-isolation.test.mjs, same gate chain",
+      "result": "33 tests / 32 pass / 0 fail / 1 skip (operation-census 10/10; rig-isolation 22 pass plus 1 standing #866 skip)",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "whole apps/web unit suite (node scripts/run-tests.mjs)",
+      "result": "4844 tests / 4842 pass / 0 fail / 2 skip",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "pnpm --filter @clara/web e2e firm-navigation-walk (3500/3501/3502)",
+      "result": "11 passed",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "pnpm typecheck",
+      "result": "apps/web: Done, packages/runtime: Done, exit 0",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "CI=true GITHUB_ACTIONS=true pnpm lint",
+      "result": "exit 0",
+      "matches_fix_report": true
+    }
+  ],
+  "per_finding_recheck": [
+    {"id": "SPEC-921-A", "ticket": 921, "severity": "blocker", "status": "fixed", "evidence": "Re-ran the exact six previously-red files plus the new battery, dwell and download-door with the full --import gate chain against clara_l01: 180/178/0/2, 0 not-ok lines. All six named files (x36-vendor-binding-ceremony, x30-f1-lcp, binding-proposal-pr-1, x31-autopost-lane-unify, x36-p-round-regressions, x36-vendor-binding-resolver) are fully green."},
+    {"id": "L01-STD-1", "ticket": 921, "severity": "blocker", "status": "fixed", "evidence": "Same rerun as SPEC-921-A (identical underlying defect). 0 failures across all six files."},
+    {"id": "SPEC-921-B", "ticket": 921, "severity": "major", "status": "fixed", "evidence": "Read packages/db/tests/x36-vendor-binding-helpers.mjs's header in full: no RETIRED claim remains; it now correctly describes the AsFnOwner wrapper strategy. packages/db/README.md's 0273 section (read in full, lines 2973-3038) now has a 'What the rig batteries did about it' subsection naming all six broken files, why none was retired, and the measured CLR04-vs-42501 distinction."},
+    {"id": "L01-STD-2", "ticket": 921, "severity": "major", "status": "fixed", "evidence": "Same evidence as SPEC-921-B."},
+    {"id": "SPEC-890-A", "ticket": 890, "severity": "minor", "status": "fixed", "evidence": "apps/web/components/registers/counterparty-door-dialogs-draft-rule.test.tsx: setFieldValue now drives cp-alias-origin to former_name on both the refusal-retry and success-reopen halves, and p_origin is asserted on the RPC call arguments rather than on the select node's unobservable .value. Re-ran within the full web suite: passes (part of the 4842-pass total)."},
+    {"id": "SPEC-921-C", "ticket": 921, "severity": "minor", "status": "fixed", "evidence": "apps/web/e2e/firm-navigation-walk.spec.ts now stubs list_vendor_bindings with two rows: a live one and a differently-named historical proposed one, with an explicit assertion that the proposed row rendered before the Sign-absence assertions run, so they can no longer vacuously pass. Re-ran pnpm --filter @clara/web e2e firm-navigation-walk on the lane's own triple: 11 passed."},
+    {"id": "SPEC-921-D", "ticket": 921, "severity": "minor", "status": "fixed", "evidence": "grep -rn for declineDirect, insertHumanProposedBinding and signLiveDirect across packages/db/ returns nothing - the unused/speculative raw mirrors were deleted, not merely wired up."},
+    {"id": "L01-STD-3", "ticket": 921, "severity": "minor", "status": "fixed", "evidence": "Same deletion as SPEC-921-D removes the hand-copied duplicate INSERT/UPDATE shapes the finding flagged; the fix report files a pinning-cell follow-up as a suggestion, matching the review's own required_fix wording ('worth a follow-up ticket')."},
+    {"id": "SPEC-921-E", "ticket": 921, "severity": "note", "status": "fixed", "evidence": "apps/web/e2e/firm-navigation-walk.spec.ts's new-block comment (read in full) now says only list_vendor_bindings is stubbed and explains why get_vendor_binding is not, and who has to add it later - matches the required_fix exactly."},
+    {"id": "SPEC-921-F", "ticket": 921, "severity": "note", "status": "fixed", "evidence": "wave3-lane01-fix.md's SPEC-921-F section states the measurement (the single live sign_vendor_identity_binding(uuid,text,text) signature, proacl re-read on clara_l01) directly in the fix report, satisfying the required_fix (state the measurement in the ticket report)."},
+    {"id": "SPEC-921-G", "ticket": 921, "severity": "note", "status": "no_action_needed", "evidence": "required_fix said none for this lane. Confirmed the wake/agent proposal door paths in packages/runtime carry no diff between the review head (00ba92176) and current HEAD."},
+    {"id": "SPEC-890-B", "ticket": 890, "severity": "note", "status": "no_action_needed", "evidence": "required_fix said none required. Confirmed apps/web/components/registers/counterparty-identity-correct.test.tsx has zero diff between the review head and current HEAD."},
+    {"id": "L01-STD-4", "ticket": 921, "severity": "note", "status": "no_action_needed", "evidence": "required_fix said none required of this lane. Confirmed packages/db/tests/rig-meta.mjs has zero diff between the review head (00ba92176) and current HEAD - the fix round did not touch it further."}
+  ],
+  "nothing_else_broken": true,
+  "notes": "The fix round's own report (wave3-lane01-fix.md) documents a non-code rig-state repair (removing a stray planted v_c3 declaration from the live clara._approve_entry_core body on clara_l01, left behind by earlier red runs) and flags it as unverified-by-pin (reasoning plus five corroborating battery reruns, no independent prosrc sha pin exists for that function). This recheck did not re-verify that repair independently since it is explicitly out of scope for this lane's diff and the fix report itself labels it unverified rather than claiming it as fact; the integrator's from-scratch chain is the stated settling point, consistent with the fix report's own framing."
+}

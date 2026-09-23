@@ -24,6 +24,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { endPool, printLaneNotes, noteLane, rootQuery, humanQuery, namedCall, opk, mon, upsertAccountClassed } from "./x41-fa-world.mjs";
+import { roleQuery, ROLES } from "./rig-helpers.mjs";
 import {
   MIG_DIR, skipUnlessReset, freshDb, buildPre0042Book,
   assertB0Floor, assertB1Floor, assertB3Floor, assertB2Floor, assertPreExistingSurfacesStillWork,
@@ -34,6 +35,24 @@ import {
 after(async () => { printLaneNotes("x42-0045-b2-upgrade"); await endPool(); });
 
 const ACCR_U45 = "480-U45";
+
+// [#927] THE DRILL RUNS AT TWO FRONTIERS, and after this migration they differ in ONE place.
+// `MIG_DIR` defaults to the WHOLE migrations directory (this kit's own header), so the weekly
+// `closed-wave-drills` job applies 0001..HEAD onto the populated pre-0042 book -- which now
+// includes 0282, where `propose_adjustment_template`, `sign_adjustment_template` and
+// `run_adjustment_manual` became typed refusals (owner ruling #788: retire the 0045
+// recurring-adjustment template lane). The `db-slice-frontiers` d-b2 leg, by contrast, points
+// CLARA_MIGRATIONS_DIR at a 0001..0045 copy, where all three are still open.
+//
+// The drill's SUBJECT is unchanged either way: the four-slice chain composes on a populated book,
+// and `auto_reversal_of` goes 0 -> 1 when its first writer fires. Below the retirement that writer
+// is reached through propose/sign/run-manual; above it the template is minted directly (the
+// x42-adj-helpers SURGERY-5 idiom, through the DB's own canon and hash bodies) and the occurrence
+// is posted through `clara.run_adjustment_occurrence` -- the machine door the retirement leaves
+// untouched, and the one the daily belt always used.
+const templateDoorsRetired = async () => Number((await rootQuery(
+  "select count(*)::int as n from clara.schema_migrations where version ~ 'retire_adjustment_template_doors$'"
+)).rows[0].n) > 0;
 
 test("D-b2 upgrade drill: the WHOLE split chain 0042→0043→0044→0045 lands on a populated book — the three adjustment relations + the two journal_entries hot-loop indexes arrive, the approve hook carries the adjustment line ABOVE the advance line (E8), every earlier slice's post-state still holds, and the template lifecycle really works", async (t) => {
   if (skipUnlessReset(t)) return;
@@ -98,7 +117,53 @@ test("D-b2 upgrade drill: the WHOLE split chain 0042→0043→0044→0045 lands 
   //     The template is AUTO-REVERSING on purpose: it is what turns `auto_reversal_of` from a
   //     dormant column into a live one, in (g) below.
   const period = mon(-2);
-  const proposed = (await humanQuery(h.w.users.bob, namedCall("propose_adjustment_template", [
+  const retired = await templateDoorsRetired();
+  let templateId = null;
+  if (retired) {
+    for (const [door, args, vals] of [
+      ["propose_adjustment_template",
+        [{ name: "p_client" }, { name: "p_name" }, { name: "p_cadence" },
+         { name: "p_start_date", cast: "date" }, { name: "p_end_date", cast: "date" },
+         { name: "p_auto_reverse", cast: "boolean" }, { name: "p_lines", cast: "jsonb" },
+         { name: "p_memo_template" }, { name: "p_op_key" }],
+        [h.client, "u45 retired probe", "monthly", period.start, mon(6).end, true,
+         JSON.stringify([
+           { account_code: EXPN, debit_cents: 50_000, credit_cents: 0, description: "u45 accrued expense" },
+           { account_code: ACCR_U45, debit_cents: 0, credit_cents: 50_000, description: "u45 accrual" },
+         ]), "u45 retired probe", opk("u45ret1")]],
+      ["sign_adjustment_template",
+        [{ name: "p_client" }, { name: "p_template" }, { name: "p_op_key" }],
+        [h.client, "00000000-0000-4000-8000-0000000000fd", opk("u45ret2")]],
+    ]) {
+      let raised = null;
+      try { await humanQuery(h.w.users.bob, namedCall(door, args), vals); }
+      catch (e) { raised = e; }
+      assert.ok(raised, `${door} answered on the upgraded book -- it must REFUSE once 0282 is applied`);
+      assert.equal(JSON.parse(raised.detail).reason, "adjustment_template_lane_retired",
+        `${door} refused for something other than #927's retirement`);
+    }
+    // The subject of (g) below is the auto-reversing occurrence, so the template is minted LIVE
+    // with the same content the proposal used to carry -- lines canonicalised and hashed by the
+    // DB's own bodies, never by hand.
+    const lines = JSON.stringify([
+      { account_code: EXPN, debit_cents: 50_000, credit_cents: 0, description: "u45 accrued expense" },
+      { account_code: ACCR_U45, debit_cents: 0, credit_cents: 50_000, description: "u45 accrual" },
+    ]);
+    templateId = (await rootQuery(
+      `with canon as (select clara._adj_canon_lines($3::jsonb) as l)
+       insert into clara.adjustment_templates(firm_id, client_id, status, name, cadence,
+           start_date, end_date, auto_reverse, lines, memo_template, content_hash,
+           proposed_by, proposed_op_key, signed_by, signed_at, signed_op_key)
+       select c.firm_id, $1::uuid, 'live', $2, 'monthly', $4::date, $5::date, true, canon.l, $6,
+              clara._adj_template_hash($2, 'monthly', $4::date, $5::date, true, canon.l, $6, null),
+              $7::uuid, $8, $7::uuid, now(), $9
+         from clara.clients c, canon where c.id = $1::uuid
+       returning id`,
+      [h.client, "u45 drill accrual", lines, period.start, mon(6).end,
+       "u45 drill accrual for {period}", h.w.users.bob, opk("u45rawp"), opk("u45raws")])).rows[0].id;
+    noteLane("D-b2 drill: the whole chain carries #927's retirement, so the lifecycle is driven through the machine door");
+  }
+  const proposed = retired ? null : (await humanQuery(h.w.users.bob, namedCall("propose_adjustment_template", [
     { name: "p_client" }, { name: "p_name" }, { name: "p_cadence" },
     { name: "p_start_date", cast: "date" }, { name: "p_end_date", cast: "date" },
     { name: "p_auto_reverse", cast: "boolean" }, { name: "p_lines", cast: "jsonb" },
@@ -108,13 +173,15 @@ test("D-b2 upgrade drill: the WHOLE split chain 0042→0043→0044→0045 lands 
       { account_code: EXPN, debit_cents: 50_000, credit_cents: 0, description: "u45 accrued expense" },
       { account_code: ACCR_U45, debit_cents: 0, credit_cents: 50_000, description: "u45 accrual" },
     ]), "u45 drill accrual for {period}", opk("u45prop")])).rows[0].result;
-  const templateId = proposed?.template_id ?? proposed?.id;
-  assert.ok(templateId, `the propose verb answers on the upgraded book — got ${JSON.stringify(proposed)}`);
-
-  const signed = (await humanQuery(h.w.users.hana, namedCall("sign_adjustment_template", [
-    { name: "p_client" }, { name: "p_template" }, { name: "p_op_key" },
-  ]), [h.client, templateId, opk("u45sign")])).rows[0].result;
-  assert.ok(signed, "the sign verb answers");
+  if (!retired) {
+    templateId = proposed?.template_id ?? proposed?.id;
+    assert.ok(templateId, `the propose verb answers on the upgraded book — got ${JSON.stringify(proposed)}`);
+    const signed = (await humanQuery(h.w.users.hana, namedCall("sign_adjustment_template", [
+      { name: "p_client" }, { name: "p_template" }, { name: "p_op_key" },
+    ]), [h.client, templateId, opk("u45sign")])).rows[0].result;
+    assert.ok(signed, "the sign verb answers");
+  }
+  assert.ok(templateId, "the drill has no template to run");
   const row = (await rootQuery("select status from clara.adjustment_templates where id=$1", [templateId])).rows[0];
   assert.equal(row.status, "live", "…and the template is LIVE on a book that pre-dates the whole unit");
 
@@ -130,11 +197,17 @@ test("D-b2 upgrade drill: the WHOLE split chain 0042→0043→0044→0045 lands 
   //     (WDB-G1/G2), and the ONLY thing linking the pair is the column D-b0 shipped three slices
   //     early. This is the assertion that pays census §4 Option A's deviation off; without it the
   //     split proves the column dormant three times and live never.
-  const ran = (await humanQuery(h.w.users.bob, namedCall("run_adjustment_manual", [
-    { name: "p_client" }, { name: "p_template" },
-    { name: "p_period_start", cast: "date" }, { name: "p_period_end", cast: "date" },
-    { name: "p_op_key" },
-  ]), [h.client, templateId, period.start, period.end, opk("u45run")])).rows[0].result;
+  const ran = retired
+    ? (await roleQuery(ROLES.runtime, namedCall("run_adjustment_occurrence", [
+        { name: "p_client" }, { name: "p_template" },
+        { name: "p_period_start", cast: "date" }, { name: "p_period_end", cast: "date" },
+        { name: "p_op_key" },
+      ]), [h.client, templateId, period.start, period.end, opk("u45runm")])).rows[0].result
+    : (await humanQuery(h.w.users.bob, namedCall("run_adjustment_manual", [
+        { name: "p_client" }, { name: "p_template" },
+        { name: "p_period_start", cast: "date" }, { name: "p_period_end", cast: "date" },
+        { name: "p_op_key" },
+      ]), [h.client, templateId, period.start, period.end, opk("u45run")])).rows[0].result;
   const occurrence = ran?.entry_id ?? ran?.entry ?? null;
   assert.ok(occurrence, `the manual run minted an occurrence entry on the upgraded book — got ${JSON.stringify(ran)}`);
   const occRow = await entryRowOf(occurrence);

@@ -9,6 +9,13 @@
 // must never coexist — a fabricated-receipt read on a governed act); F6
 // pins that the receipt's "go to the workspace" claim is a REAL link, not
 // just a sentence the doc comment used to claim without one.
+//
+// #899 fix round 1: this card is the THIRD live browser creation path, and it used to dispatch
+// straight to `clara.begin_client_onboarding`, whose arity-1 rung is deliberately unwalled — so
+// it could still mint a same-family client silently, which is exactly what the ticket exists to
+// stop. It now calls the ONE birth verb, `clara.open_client_onboarding`, with a null
+// acknowledgement: F5/F6's mocks answer THAT door, and D3 below pins the arity-1 refusal the
+// change buys.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -93,7 +100,7 @@ test("F5: a NEW begin attempt clears a STALE success receipt from an earlier, un
   let call = 0;
   const impl = (async (u: RequestInfo | URL) => {
     const url = String(u);
-    if (url.includes("/rpc/begin_client_onboarding")) {
+    if (url.includes("/rpc/open_client_onboarding")) {
       call += 1;
       if (call === 1) return jsonResponse({ client_id: "c-first", plan_id: "p-first" });
       return jsonResponse({ code: "CLR10", message: "a client with that name already exists" }, 400);
@@ -125,7 +132,7 @@ test("F5: a NEW begin attempt clears a STALE success receipt from an earlier, un
 test("F6: the success receipt renders a REAL link into the new client's workspace, not just a claim of one (mutant: remove the <Link> -> RED)", async () => {
   const impl = (async (u: RequestInfo | URL) => {
     const url = String(u);
-    if (url.includes("/rpc/begin_client_onboarding")) return jsonResponse({ client_id: "c9", plan_id: "p9" });
+    if (url.includes("/rpc/open_client_onboarding")) return jsonResponse({ client_id: "c9", plan_id: "p9" });
     throw new Error(`unexpected fetch: ${url}`);
   }) as typeof fetch;
 
@@ -145,6 +152,53 @@ test("F6: the success receipt renders a REAL link into the new client's workspac
       const propsKey = Object.keys(link!).find((k) => k.startsWith("__reactProps"));
       const href = propsKey ? (link![propsKey] as { href?: string }).href : undefined;
       assert.equal(href, "/clients/c9", "the link must point at the NEW client's own workspace, by the DB-returned id");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+test("D3 (ticket 899): the firm-altitude Begin card calls the ONE birth verb with a NULL acknowledgement, so an arity-1 identity match is REFUSED at the door and rendered verbatim — it can no longer create a same-family client silently", async () => {
+  const seen: { url: string; body: unknown }[] = [];
+  const impl = (async (u: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(u);
+    seen.push({ url, body: JSON.parse(String(init?.body ?? "{}")) });
+    if (url.includes("/rpc/open_client_onboarding")) {
+      return jsonResponse(
+        {
+          code: "CLR10",
+          message: "this name matches an existing client or counterparty in your firm; open the client register's Add Client control to review it and acknowledge before a new record is created",
+          details: JSON.stringify({ reason: "identity_acknowledgement_required", class: "client_identity", arity: 1 }),
+        },
+        400,
+      );
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await mountBegin();
+    try {
+      await begin(h, body as never, "Rome Ventures Berhad");
+
+      // THE DOOR. One call, to the birth verb — never the legacy two-argument door.
+      assert.equal(seen.length, 1, `expected exactly one door call, got ${JSON.stringify(seen.map((s) => s.url))}`);
+      const only = seen[0]!;
+      assert.match(only.url, /\/rpc\/open_client_onboarding$/);
+      const sent = only.body as Record<string, unknown>;
+      assert.equal(sent.p_name, "Rome Ventures Berhad");
+      assert.equal(sent.p_acknowledged_candidate, null,
+        "this card has no candidate read and no acknowledgement face, so it must NEVER send an acknowledgement — the door refuses and points at the register's control");
+      assert.equal(sent.p_identifier, null);
+      assert.ok(typeof sent.p_op_key === "string" && (sent.p_op_key as string).length > 0);
+
+      // THE REFUSAL, on screen, verbatim and with its typed code slot.
+      const text = textOf(body as never);
+      assert.match(text, /CLR10/);
+      assert.match(text, /identity_acknowledgement_required/);
+      assert.match(text, /acknowledge before a new record is created/);
+      assert.doesNotMatch(text, /were created\./, "a refused birth must not render a success receipt");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();

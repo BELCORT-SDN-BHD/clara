@@ -1,0 +1,68 @@
+{
+  "axis": "RECHECK",
+  "lane": "wave 3 / lane 11",
+  "branch": "riders/w3-lane11",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\int",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "head_reviewed_at_original_review": "3fc1bb17a0ad3dc5f7266517d54807cbf7fed207",
+  "head_at_recheck": "482c247c72ae703ee3d2aea2aec0404e2cabfcee",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave3-lane11-fix.md",
+  "review_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane11-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane11-codereview-standards.json"
+  ],
+  "verdict": "accept",
+  "cells_rerun_by_the_rechecker": [
+    "components/documents/documents-workbench-refresh.test.tsx -> 9 tests, 9 pass, 0 fail — three consecutive isolated runs (SPEC-1021-1/1021-2)",
+    "e2e/e2e-fixture-ownership.test.ts -> 44 tests, 44 pass, 0 fail (SPEC-1022-1)",
+    "lib/clara/threadStore.test.ts + components/clara/interview-draft-persistence.test.tsx + lib/clara/rail-focus-return.test.ts -> 24 tests, 24 pass, 0 fail (SPEC-897-1/897-2)",
+    "components/clara/{rail-boundary,composer-attachment-scope,thread-menu,thread-scope-band}.test.tsx -> 30 tests, 30 pass, 0 fail (fix.md's gate table claims 36; see finding RECHECK-1)",
+    "components/clara/thread-revoked.test.tsx -> 4 tests, 4 pass, 0 fail (SPEC-1024-1: the first-attach 403/404 pin at line 226 still renders 'You no longer have access to this reply', confirming the narrowed CONTEXT.md doc fix (SPEC-1024-2) is the only change on that path, as the report says)",
+    "e2e/operator-support-walk.spec.ts -> 13 tests, 13 pass, 0 fail (collateral check: the HANDLER_OPENER widening and the new /e2e-operator/reset declaration for SPEC-1022-1 do not break the lane's own operator-support walk)",
+    "e2e/interview-walk.spec.ts -> 4 skipped, 0 failed (docker-only cases, matches fix.md)",
+    "pnpm typecheck -> exit 0 (apps/web + packages/runtime)",
+    "CI=true GITHUB_ACTIONS=true pnpm lint -> exit 0 (only the expected Windows-only EPERM symlink SKIP)",
+    "node scripts/run-tests.mjs (whole apps/web unit suite, one full pass) -> 4870 tests, 4868 pass, 0 fail, 2 skipped — exact match to fix.md's claimed counts",
+    "browser: agentic-finish-walk -g \"897\" --repeat-each=5 -> 5 passed (SPEC-897-1's race fix; fix.md's own --repeat-each=10 not re-run in full, 5/5 is corroborating)",
+    "browser: members-invite-walk -> 5 passed, twice is not repeated here but ran once green, log shows POST /e2e-invite-mail-capture reached and answered (SPEC-1022-2)",
+    "browser: work-cancel-walk -> 10 passed, B7 arms green (SPEC-1024-1's own AC1 evidence)",
+    "inspected diffs of commits e083e8de9, c6d1e7b86, e9ef53980, 482c247c7 directly against each finding's required_fix and confirmed the code matches the fix.md narrative for SPEC-1021-1, SPEC-1021-2, SPEC-1022-1, SPEC-1022-2, SPEC-897-1, SPEC-897-2, SPEC-897-4, SPEC-1024-2",
+    "git status clean at HEAD 482c247c7, matching fix.md's stated HEAD; no stray uncommitted changes"
+  ],
+  "per_finding_recheck": [
+    { "id": "SPEC-1021-1", "ticket": 1021, "status": "verified fixed" },
+    { "id": "SPEC-1021-2", "ticket": 1021, "status": "verified fixed" },
+    { "id": "SPEC-1022-1", "ticket": 1022, "status": "verified fixed" },
+    { "id": "SPEC-1022-2", "ticket": 1022, "status": "verified fixed" },
+    { "id": "SPEC-897-1", "ticket": 897, "status": "verified fixed (race reproduced-and-fixed claim corroborated at --repeat-each=5, 5/5)" },
+    { "id": "SPEC-897-2", "ticket": 897, "status": "verified — accepted-in-writing holds; threadStore.ts header states the reasoning as described" },
+    { "id": "SPEC-897-3", "ticket": 897, "status": "verified — integrator call recorded in README, no code change implied or made" },
+    { "id": "SPEC-897-4", "ticket": 897, "status": "verified fixed — README #897 section overwritten with delivered state" },
+    { "id": "SPEC-1024-1", "ticket": 1024, "status": "verified — integrator call holds; first-attach path still maps to StreamAccessRevokedError as documented, pinned by thread-revoked.test.tsx:226 (re-run 4/4 pass)" },
+    { "id": "SPEC-1024-2", "ticket": 1024, "status": "verified fixed — CONTEXT.md _Avoid_ line narrowed as described" },
+    { "id": "SPEC-1022-3", "ticket": 1022, "status": "verified — mail_not_configured coverage confirmed still pinned at components/admin/members-walls.test.tsx:375" },
+    { "id": "STD-1", "ticket": 897, "status": "verified — stays by design, reason recorded in fix.md's Follow-ups section; review itself rated this non-blocking" },
+    { "id": "STD-2", "ticket": 897, "status": "not an assigned finding (a note); unchanged, consistent with existing repo idiom as the review said" }
+  ],
+  "findings": [
+    {
+      "id": "RECHECK-1",
+      "ticket": 897,
+      "kind": "gate-table count does not match a re-run",
+      "severity": "minor",
+      "title": "fix.md's gate table row \"the other ClaraRail consumers\" claims 36 tests, 36 pass; the four named files actually total 30",
+      "evidence": "docs/plan/active/riders-2026-09-20/reports/wave3-lane11-fix.md, Gates table: \"the other `ClaraRail` consumers | `... --test components/clara/{rail-boundary,composer-attachment-scope,thread-menu,thread-scope-band}.test.tsx` | **36 tests, 36 pass, 0 fail**\". Re-running exactly that file list at HEAD 482c247c7 (both combined and per-file) gives rail-boundary.test.tsx 6, composer-attachment-scope.test.tsx 6, thread-menu.test.tsx 13, thread-scope-band.test.tsx 5 — 30 total, 30 pass, 0 fail, matching a direct grep count of top-level test() calls in each file. All 30 cases genuinely pass; nothing is broken. The nearby file rail-chrome.test.tsx (not named in the row) adds only 4 more (34, still short of 36), so the discrepancy looks like a miscount in the report rather than a missing/renamed file.",
+      "required_fix": "Correct the gate-table row's count (30, not 36) or name whichever additional file the author intended to include. No code change; documentation-accuracy only, and it does not affect the underlying claim (all cited tests pass, no regression)."
+    }
+  ],
+  "checked_and_clean": [
+    "No regression across every test file this round touched, plus the sibling files that share ClaraRail/threadStore/HANDLER_OPENER (rail-boundary, composer-attachment-scope, thread-menu, thread-scope-band, operator-support-walk, interview-walk, thread-revoked)",
+    "typecheck and CI-mode lint both exit 0 at HEAD 482c247c7",
+    "One full whole-apps/web-suite pass at HEAD reproduces fix.md's exact counts (4870/4868/0/2), corroborating the SPEC-1021 fix without needing to repeat all five of the original runs",
+    "The #897 race-fix arm re-run at --repeat-each=5 is 5/5 green, consistent with the reported flip from 4-red/1-green to reliably green",
+    "The #1022 mail-capture guard is confirmed present in the source and the handler is confirmed still reached (server log) in a live walk",
+    "The #1024 CONTEXT.md doc-only fix does not touch any code path; thread-revoked.test.tsx:226 still pins the same (accepted, integrator-call) first-attach behaviour",
+    "git status is clean and HEAD matches the fix report's stated HEAD exactly — no drift, no stray edits"
+  ],
+  "summary": "Every SPEC and standards finding from the two original review reports is either genuinely fixed (SPEC-1021-1, SPEC-1021-2, SPEC-1022-1, SPEC-1022-2, SPEC-897-1, SPEC-897-4, SPEC-1024-2) or is a judgement call answered in writing at the place a reader would look, with the reasoning holding up under inspection (SPEC-897-2, SPEC-897-3, SPEC-1024-1, SPEC-1022-3, STD-1). Re-running the touched test files, the whole apps/web unit suite once, typecheck, CI-mode lint, and five browser walks (the #897 race arm at --repeat-each=5, members-invite-walk, work-cancel-walk, operator-support-walk, interview-walk) reproduced the fix report's claims, with one exception: the gate table's 'other ClaraRail consumers' row overstates its own test count (36 claimed vs 30 actual for the four named files) — a documentation-accuracy slip, not a functional defect, since every one of the 30 actual cases passes. Nothing else broke. Accept."
+}

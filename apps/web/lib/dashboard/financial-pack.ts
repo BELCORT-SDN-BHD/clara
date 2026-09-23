@@ -569,3 +569,81 @@ export async function publishClientCashAccountSet(
     { session: opts.session, signal: opts.signal },
   );
 }
+
+// =============================================================================================
+// #1002 — THE SECOND-PASS MEMBERSHIP EDITOR'S OWN READ. `clara.get_client_cash_account_set_members`
+// (migration 0276) enumerates the CURRENT PUBLISHED version's membership, each member carrying
+// its RECORDED reason — the complement `propose_client_cash_accounts` cannot give: that read
+// flags `already_member` for bank-registry candidates only, and never lists a member with no
+// bank-registry candidacy at all (a declared cash or petty cash account).
+// =============================================================================================
+
+export type CashSetMember = {
+  accountId: string;
+  accountCode: string;
+  name: string | null;
+  isActive: boolean;
+  memberReason: string;
+  ordinal: number | null;
+};
+
+export type CurrentCashSet = {
+  publishedVersionId: string | null;
+  revision: number | null;
+  effectiveFrom: string | null;
+  memberCount: number | null;
+  members: CashSetMember[];
+};
+
+/** No published version. Frozen so a caller cannot mutate the shared shape into something that
+ *  looks like data — the same discipline `UNKNOWN_FIGURE` above follows. */
+export const EMPTY_CURRENT_CASH_SET: CurrentCashSet = Object.freeze({
+  publishedVersionId: null,
+  revision: null,
+  effectiveFrom: null,
+  memberCount: null,
+  members: [],
+}) as CurrentCashSet;
+
+export function hydrateCurrentCashSet(raw: unknown): CurrentCashSet {
+  if (!isRecord(raw)) return EMPTY_CURRENT_CASH_SET;
+  const members: CashSetMember[] = [];
+  if (Array.isArray(raw.members)) {
+    for (const m of raw.members) {
+      if (!isRecord(m)) continue;
+      const accountId = str(m.account_id);
+      const accountCode = str(m.account_code);
+      const memberReason = str(m.member_reason);
+      // AN ENTRY MISSING ITS ID, CODE OR REASON IS DROPPED rather than rendered as a dead row —
+      // the same rule `compositionRows` above follows for an entry with no id.
+      if (accountId === null || accountCode === null || memberReason === null) continue;
+      members.push({
+        accountId,
+        accountCode,
+        name: str(m.name),
+        isActive: m.is_active === true,
+        memberReason,
+        ordinal: int(m.ordinal),
+      });
+    }
+  }
+  return {
+    publishedVersionId: str(raw.published_version_id),
+    revision: int(raw.revision),
+    effectiveFrom: str(raw.effective_from),
+    memberCount: int(raw.member_count),
+    members,
+  };
+}
+
+export async function getClientCashAccountSetMembers(
+  clientId: string,
+  opts: FinancialPackOptions = {},
+): Promise<CurrentCashSet> {
+  const raw = await callDoor<unknown>(
+    "get_client_cash_account_set_members",
+    { p_client: clientId },
+    { session: opts.session, signal: opts.signal },
+  );
+  return hydrateCurrentCashSet(raw);
+}

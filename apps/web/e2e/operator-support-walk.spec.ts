@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { signIn } from "./helpers";
+import { settleForScan, signIn } from "./helpers";
 import { OPERATOR } from "./operator-support-mock.mjs";
 
 /**
@@ -108,6 +108,7 @@ test("#615 AC1 — a bookkeeper is refused, sees NO support data and is offered 
   await expect(page.getByRole("button", { name: "Resolve" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/operator refusal state").toEqual([]);
 });
@@ -261,6 +262,7 @@ test("320px stays usable with no page-wide horizontal scroll, and is axe-clean",
   const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
   expect(scrollWidth, "no page-wide horizontal scroll at 320px").toBeLessThanOrEqual(clientWidth + 1);
 
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/operator at 320px").toEqual([]);
 });

@@ -1,0 +1,190 @@
+{
+  "lens": "recheck",
+  "lane": "wave3-lane02",
+  "branch": "riders/w3-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "recheck_head": "342287c71",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave3-lane02-fix.md",
+  "source_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane02-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane02-codereview-standards.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave3-lane02-review-adversarial.json"
+  ],
+  "verdict": "accept",
+  "summary": "All 17 findings across the three reviews (2 blocker, 2 major, 6 minor, 7 note) were checked against the current head (342287c71) by reading the actual SQL/TS bodies and re-running the underlying evidence, not by trusting the fix report's prose. Every finding's claimed fix is present and matches the fix report's description exactly: ADV-1007-1's ack read now joins through the Work's own trade_invoices row with a matched-particulars-plus-time-ordered join and a content tie-break (0275 lines 697-736); ADV-1007-2's matcher walks the merge tree with a recursive CTE over merged_into; ADV-982-1's resolve_party recut (section 10, marker #982R2) reads the name tier before treating a multi-hit TIN as a refusal, falls through on agreement, and unions both identifiers' candidates with matched_on; S-1's probe now rides packages/runtime/src/workRoutes.ts's new POST /api/work/trade-invoice/duplicates route through the same toDbTradeInvoice the admission uses, and apps/web/lib/work/api.ts's probeTradeInvoiceDuplicates posts there instead of PostgREST; S-2/S-3/STD-1 (matched_on sentence, matched_on rendering, formatMyr) are all present verbatim in trade-invoice-form.tsx and en.json; S-5's work-detail.tsx now reads getTradeInvoiceDuplicateAck; ADV-1007-3's client_inactive arm and ADV-1007-4's typed invalid_total/invalid_due_date guards are both in 0275's record_trade_invoice_duplicate_ack; STD-2/STD-3's doc corrections and the migration header's corrected 'purely additive... the ONE body it does recut is 0274's' language are all present; S-4 and ADV-982-2 are accepted deviations recorded in packages/db/README.md as the fix report claims, and STD-4 is a disclosed non-defect. Every claimed test cell (p1007.ack.rode_this_recording, p1007.probe.across_a_merge, p982.tin.shared_with_a_name, p982.tin.shared_name_decides, p1007.probe.client_inactive, p1007.ack.typed_shape, p1007.probe.never_posting, the two api.test.ts 1007.web cells) exists verbatim in the test files under those exact names. Independently re-running the full gate chain reproduced the fix report's counts exactly: packages/db touched-file battery 52/52/0/0 pass; operation-census 10/10/0; rig-isolation 23 tests/22 pass/0 fail/1 skip (T19 skip only, reset flags never set); packages/runtime trade-invoice-unit + work-routes-unit 55/55/0; check-frozen-workflows OK (312 files, no manifest diff); check-parts-parity OK; pnpm typecheck exit 0; CI=true GITHUB_ACTIONS=true pnpm lint exit 0 (no raw-colour-selector hit, no #NNNN-shaped assertion text found); the three touched web unit files (trade-invoice-form, work-detail, api.test.ts) 108/108/0 combined; the whole apps/web unit suite 4859 tests/4857 pass/0 fail/2 skip, exit 0 (exact match); the e2e trade-invoice-walk spec on the lane's own Playwright triple (3510/3511/3512) 15 passed, exit 0. Nothing above minor remains open and nothing new broke.",
+  "findings": [],
+  "gates_rerun": [
+    {
+      "gate": "packages/db — trade-invoice-duplicate-probe.test.mjs + trade-invoice-party-tin.test.mjs + trade-invoice.test.mjs, full --import gate chain from packages/db/package.json, clara_l02",
+      "result": "52 pass, 0 fail (matches fix report's 52/0)",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "packages/db/tests/operation-census.test.mjs, full gate chain",
+      "result": "10 pass, 0 fail",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "packages/db/tests/rig-isolation.test.mjs, full gate chain (reset flags never set)",
+      "result": "23 tests, 22 pass, 0 fail, 1 skip (T19 poison-role skip only)",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "packages/runtime — trade-invoice-unit.test.mjs + work-routes-unit.test.mjs",
+      "result": "55 pass, 0 fail",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "node scripts/check-frozen-workflows.mjs",
+      "result": "OK — 312 frozen files verified, 55 \"use workflow\" modules, no manifest diff",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "node packages/runtime/scripts/check-parts-parity.mjs",
+      "result": "OK — reader ⊇ emittable",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "pnpm typecheck (root)",
+      "result": "apps/web: Done, packages/runtime: Done, exit 0",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "CI=true GITHUB_ACTIONS=true pnpm lint (root)",
+      "result": "exit 0, including @clara/web's own selftest batteries and @clara/reporting-render's eslint",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "apps/web touched files: trade-invoice-form.test.tsx + work-detail.test.tsx + api.test.ts",
+      "result": "108 pass, 0 fail (combined run; work-detail alone unmounts cleanly, no hang)",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "whole apps/web unit suite (node scripts/run-tests.mjs)",
+      "result": "4859 tests, 4857 pass, 0 fail, 2 skip, exit 0",
+      "matches_fix_report": true
+    },
+    {
+      "gate": "pnpm --filter @clara/web e2e trade-invoice-walk on the lane triple (3510/3511/3512)",
+      "result": "15 passed, exit 0",
+      "matches_fix_report": true
+    }
+  ],
+  "per_finding_recheck": [
+    {
+      "id": "S-1",
+      "ticket": 1007,
+      "severity": "blocker",
+      "status": "fixed",
+      "evidence": "packages/runtime/src/workRoutes.ts:1412 adds POST /api/work/trade-invoice/duplicates, which runs the same toDbTradeInvoice the admission uses and calls clara.probe_trade_invoice_duplicates_for over the actor-explicit twin. apps/web/lib/work/api.ts:432 probeTradeInvoiceDuplicates posts to that route instead of PostgREST and no longer imports callDoor. Web unit and e2e gates above are green through this path."
+    },
+    {
+      "id": "ADV-1007-1",
+      "ticket": 1007,
+      "severity": "blocker",
+      "status": "fixed",
+      "evidence": "0275 lines 697-736: clara.get_trade_invoice_duplicate_ack now joins clara.trade_invoice_duplicate_acks to the Work's OWN clara.trade_invoices row on kind/counterparty_id/document_date/total_cents/normalised reference, requires acknowledged_at <= w.created_at, and orders by acknowledged_at desc, ack_digest desc, id desc. A Work with no trade-invoice row answers NULL. Matches the fix report's description exactly."
+    },
+    {
+      "id": "ADV-1007-2",
+      "ticket": 1007,
+      "severity": "major",
+      "status": "fixed",
+      "evidence": "0275 section 2 (clara._trade_invoice_duplicate_matches, lines ~229-298) walks merged_into with 'with recursive family' and compares ti.counterparty_id against the whole family, indexed by ix_counterparties_merged_into."
+    },
+    {
+      "id": "ADV-982-1",
+      "ticket": 982,
+      "severity": "major",
+      "status": "fixed",
+      "evidence": "0275 section 10 recuts clara._trade_invoice_resolve_party (lines 764-994, marker #982R2): the v_tin_hits > 1 arm now reads the name tier first, resolves on agreement (name reaches exactly one of the TIN holders), and otherwise unions the TIN-reached and name-reached candidates each carrying matched_on. 0274 itself is untouched (grep shows no edits to that file); the prestate at 0275 lines ~124-144 is two-valued (0274 post-image sha or a body already carrying #982R2) exactly as the fix report describes."
+    },
+    {
+      "id": "S-2",
+      "ticket": 982,
+      "severity": "minor",
+      "status": "fixed",
+      "evidence": "apps/web/messages/en.json has a distinct party_ambiguous_tin sentence and trade-invoice-form.tsx reads detail.matched_on off the refusal to pick the sentence via REFUSAL_BY_MATCH."
+    },
+    {
+      "id": "S-3",
+      "ticket": 982,
+      "severity": "minor",
+      "status": "fixed",
+      "evidence": "trade-invoice-form.tsx renders matched (from candidate.matched_on, restricted to the four-value MATCHED_ON set) via t(`candidates.matchedOn.${matched}`), and en.json has all four matchedOn labels (registration/tin/name/tin_and_name)."
+    },
+    {
+      "id": "S-4",
+      "ticket": 1007,
+      "severity": "minor",
+      "status": "accepted_deviation",
+      "evidence": "packages/db/migrations/0184_work_cancel_ordering.sql:715-716 confirms clara.settle_work_run forces v_outcome to 'completed' whenever a committed receipt exists, regardless of p_outcome — the argument the fix report makes for keeping 'expired' in the never-posting filter without a code change. Recorded as an accepted deviation per the reviewer's own required_fix option."
+    },
+    {
+      "id": "S-5",
+      "ticket": 1007,
+      "severity": "minor",
+      "status": "fixed",
+      "evidence": "apps/web/components/work/work-detail.tsx imports getTradeInvoiceDuplicateAck, calls it via loadDuplicateAck in the mount effect, and renders duplicateAck state. work-detail.test.tsx 55/55 pass with no hang (67 unmount() calls present, matching the fix report's discipline claim)."
+    },
+    {
+      "id": "STD-1",
+      "ticket": 1007,
+      "severity": "minor",
+      "status": "fixed",
+      "evidence": "trade-invoice-form.tsx imports formatMyr from @/lib/bank/money and calls formatMyr(m.totalCents); no formatCents or hardcoded \"RM {value}\" remains in the duplicate-banner path."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 1007,
+      "severity": "note",
+      "status": "fixed",
+      "evidence": "0275's REDO-SAFE section (line 104) has no duplicated sentence; it reads once, as the fix report describes."
+    },
+    {
+      "id": "STD-3",
+      "ticket": 1007,
+      "severity": "note",
+      "status": "fixed",
+      "evidence": "packages/db/README.md's 0275 section (~line 3054 onward) states the migration's own statement shapes and cross-references the fix round; no understated summary remains."
+    },
+    {
+      "id": "STD-4",
+      "ticket": 1007,
+      "severity": "minor",
+      "status": "non_defect_disclosed",
+      "evidence": "Not a code defect; the fix round's own report states it killed no process it did not start and the earlier implementer's kill was already disclosed with PIDs. No code artifact to check."
+    },
+    {
+      "id": "ADV-1007-3",
+      "ticket": 1007,
+      "severity": "minor",
+      "status": "fixed",
+      "evidence": "0275 (lines ~380-432) gives clara.probe_trade_invoice_duplicates the same client_inactive arm (detail='{\"reason\":\"client_inactive\"}') the admission twin carries, with a comment confirming this was measured, not assumed."
+    },
+    {
+      "id": "ADV-1007-4",
+      "ticket": 1007,
+      "severity": "note",
+      "status": "fixed",
+      "evidence": "0275's clara.record_trade_invoice_duplicate_ack (lines 536-660) raises typed invalid_total and invalid_due_date CLR10 exceptions before the insert, restating clara._assert_trade_invoice_basis's own guards. p1007.ack.typed_shape drives both arms and is present in trade-invoice-duplicate-probe.test.mjs."
+    },
+    {
+      "id": "ADV-1007-5",
+      "ticket": 1007,
+      "severity": "note",
+      "status": "fixed",
+      "evidence": "Fixed by the same ADV-1007-1 change: the order by clause ends in ack_digest desc, id desc, giving a deterministic content tie-break rather than a random primary key, exactly as required_fix asked as a fallback."
+    },
+    {
+      "id": "ADV-982-2",
+      "ticket": 982,
+      "severity": "note",
+      "status": "no_code_change_recorded",
+      "evidence": "packages/db/README.md's 0274 section (~line 77-87) records that a name is never a conflict partner, only the two identifiers are — the calibration the finding asked to have documented rather than changed. No code change was required by the ticket as written; this is now narrower in scope than before ADV-982-1's fix (a TIN reaching several parties no longer outranks the name silently)."
+    }
+  ],
+  "nothing_else_broken": true,
+  "notes": "Every one of the 17 findings from the three review reports (spec, standards, adversarial) was independently re-verified against the actual code on head 342287c71, not just against the fix report's own claims — reading the SQL bodies of 0275's get_trade_invoice_duplicate_ack, _trade_invoice_duplicate_matches and the recut _trade_invoice_resolve_party directly, reading workRoutes.ts's new route and api.ts's rewritten probeTradeInvoiceDuplicates, reading the CONTEXT.md and packages/db/README.md diffs, and grepping every claimed new test cell name into existence in the actual test files. The full gate chain the lane's rules require (touched db test files with the full --import chain, operation-census, rig-isolation without reset flags, runtime unit files, check-frozen-workflows, check-parts-parity, root typecheck, CI-mode lint, the whole apps/web unit suite, and the lane's e2e walk on its own Playwright triple) was re-run from scratch in this recheck session and reproduced the fix report's counts exactly in every case, with zero deltas. Nothing above minor remains open, and nothing else regressed."
+}

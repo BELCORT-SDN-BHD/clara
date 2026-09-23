@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, signInTo } from "./helpers";
+import { ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { ACC } from "./accrual-mock.mjs";
 
 /**
@@ -40,19 +40,19 @@ const LIST_URL = `/clients/${CLIENT}/accruals`;
 const NEW_URL = `/clients/${CLIENT}/accruals/new`;
 const DETAIL_URL = `/clients/${CLIENT}/accruals/${ACC.accrualId}`;
 const UNPOSTED_URL = `/clients/${CLIENT}/accruals/${ACC.unpostedAccrualId}`;
+const CORRECTABLE_URL = `/clients/${CLIENT}/accruals/${ACC.correctableAccrualId}`;
+const CORRECTABLE_CORRECT_URL = `${CORRECTABLE_URL}/correct`;
+const CORRECTED_URL = `/clients/${CLIENT}/accruals/${ACC.correctedAccrualId}`;
 
 const CONFIG_BOUNDARY = /Accepting this configuration records the accrual/;
 const SHAPE_BOUNDARY = /has no schedule and no future occurrence/;
 
+/** #1017 — delegates to the shared settle-before-scan contract (./helpers) instead of this file's
+ *  own animations-only wait, which never checked the enter/mount opacity fade settleForScan also
+ *  covers. Dropping the (0,0) mouse park too: settleForScan's own header records why it is no
+ *  longer needed — the hover-state contrast it used to dodge is fixed at the token now. */
 async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
+  await settleForScan(page);
 }
 
 async function scan(page: Page, what: string): Promise<void> {
@@ -351,4 +351,91 @@ test("accrual.walk.evidenced: reduced motion — nothing on the form MOVES, and 
     }).length,
   );
   expect(transformed, "an element on the accrual form is transformed under reduced motion").toBe(0);
+});
+
+// ===========================================================================================
+// #936 — THE DEDICATED ACCRUAL-CORRECTION DOOR. The seams this file's own header names for
+// CREATE apply again here: a real focus manager, a real navigation and a real re-read after the
+// governed write — plus one this journey adds, the CORRECTION LINEAGE rendered on two different
+// rows' own detail pages. What is FAKED is still PostgREST; `clara.correct_accrual_adjustment`'s
+// own contract — the plan revision and the accrual detail agreeing, occurrences unmoved, one
+// correction per target — is `packages/db/tests/accrual-correction.test.mjs`'s to prove.
+// ===========================================================================================
+
+test("accrual.walk.correction: the lineage renders on BOTH sides of an already-corrected pair, and reads back through a real navigation", async ({ page }) => {
+  await signInTo(page, CORRECTED_URL);
+  await expect(page.getByRole("heading", { name: ACC.correctedPurpose })).toBeVisible();
+  const successorLink = page.getByRole("link", { name: ACC.correctedSuccessorId });
+  await expect(successorLink).toBeVisible();
+  // AN ALREADY-CORRECTED ROW OFFERS NO CORRECTION CONTROL — the successor is where a further
+  // correction belongs, never a second write to a row a correction has already superseded.
+  await expect(page.getByRole("link", { name: "Correct this accrual" })).toHaveCount(0);
+
+  await successorLink.click();
+  await expect(page).toHaveURL(new RegExp(`/accruals/${ACC.correctedSuccessorId}$`));
+  await expect(page.getByRole("link", { name: ACC.correctedAccrualId })).toBeVisible();
+  // …and THIS row, being the live end of the chain, DOES offer the control.
+  await expect(page.getByRole("link", { name: "Correct this accrual" })).toBeVisible();
+
+  await scan(page, "corrected accrual detail with lineage");
+});
+
+test("accrual.walk.correction: an already-corrected accrual's own /correct route shows the refusal face, never a form that can only refuse", async ({ page }) => {
+  await signInTo(page, `${CORRECTED_URL}/correct`);
+  await expect(page.getByText("This accrual has already been corrected")).toBeVisible();
+  // 裁-187: no control whose only possible outcome is a refusal.
+  await expect(page.getByLabel("Amount accrued")).toHaveCount(0);
+  const open = page.getByRole("link", { name: "Open the successor" });
+  await expect(open).toBeVisible();
+  await open.click();
+  await expect(page).toHaveURL(new RegExp(`/accruals/${ACC.correctedSuccessorId}$`));
+});
+
+test("accrual.walk.correction: the correction form is SEEDED from the live accrual, and a SERVER refusal renders as a persistent banner on the control it names", async ({ page }) => {
+  await signInTo(page, CORRECTABLE_CORRECT_URL);
+  await ensureRealFocus(page);
+  await expect(page.getByLabel("Amount accrued")).toHaveValue("2,500.00");
+  await expect(page.getByLabel("Expense account")).toHaveValue("6100");
+  await expect(page.getByLabel("From", { exact: true })).toHaveValue("2026-07-01");
+  // THE FROZEN FACTS — no purpose control, and no schedule control: this door takes neither.
+  await expect(page.getByLabel("What is being accrued")).toHaveCount(0);
+  await expect(page.getByLabel("Authority starts")).toHaveCount(0);
+
+  // THE SAME server-refusal path CREATE exercises, reached the identical way: a liability leg the
+  // FORM admits and the DOOR refuses.
+  await page.getByLabel("Liability account").selectOption("2050");
+  await page.getByRole("button", { name: "Record the correction" }).click();
+  const refusal = page.getByText(/names the payable control account; an accrual carries no identified open item/);
+  await expect(refusal).toBeVisible();
+  await expect(page.getByLabel("Liability account")).toBeFocused();
+  await scan(page, "accrual correction form with a server refusal");
+});
+
+test("accrual.walk.correction: correcting an accrual is a real transition — the destination is the NEW accrual's own address, the lineage names the row it supersedes, and the ORIGINAL now says so and offers no further correction", async ({ page }) => {
+  await signInTo(page, CORRECTABLE_URL);
+  await expect(page.getByRole("heading", { name: ACC.correctablePurpose })).toBeVisible();
+  await page.getByRole("link", { name: "Correct this accrual" }).click();
+  await expect(page).toHaveURL(new RegExp(`/accruals/${ACC.correctableAccrualId}/correct$`));
+
+  await page.getByLabel("Amount accrued").fill("2,750.00");
+  await page.getByRole("button", { name: "Record the correction" }).click();
+
+  // THE DESTINATION IS THE NEW ACCRUAL'S OWN ADDRESS, and it RE-READS: what is on screen is
+  // `get_accrual_adjustment`'s answer for the SUCCESSOR, never the correction door's own.
+  await expect(page).toHaveURL(new RegExp(`/accruals/${ACC.correctableSuccessorId}$`));
+  await expect(page.getByRole("link", { name: ACC.correctableAccrualId })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Correct this accrual" })).toBeVisible();
+
+  // THE ORIGINAL NOW NAMES ITS SUCCESSOR, read through a REAL navigation back to it — never
+  // inferred from the write's own answer.
+  await page.goto(CORRECTABLE_URL);
+  await expect(page.getByRole("link", { name: ACC.correctableSuccessorId })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Correct this accrual" })).toHaveCount(0);
+
+  // …and the LIST shows the new row too, exactly as the create journey's own destination re-read
+  // does — a governed write's effect is proven by a re-read, never by the write's own optimistic
+  // answer.
+  // Both the original and its successor are now recorded rows.
+  await page.goto(LIST_URL);
+  await expect(page.getByRole("row").filter({ hasText: ACC.correctablePurpose })).toHaveCount(2);
 });

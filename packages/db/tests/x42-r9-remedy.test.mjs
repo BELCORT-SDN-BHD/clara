@@ -29,7 +29,8 @@ import {
   opk, endPool, printLaneNotes, printSkipCount, rootQuery, humanQuery,
   x42EnsureReady, skip42, caught, reasonToken, idOf,
   EXPA, EXPB, ACCR, CLR10, mon, addDays, lastEndedFy, clientFy,
-  runManual, reversePair, retireTemplate, proposeTemplate, signTemplate, reverseEntry,
+  runOccurrence, reversePair, retireTemplate, proposeTemplate, signTemplate, reverseEntry,
+  x42TemplatesRetiredReady, noteLane,
   accrualLines, adjWorld, freshAdjClient, freshAdjFirm, firmThresholdOf, liveTemplate,
   approveDraft, mirrorOf, glNet, templateRow,
 } from "./x42-adj-helpers.mjs";
@@ -47,9 +48,30 @@ after(async () => {
   await endPool();
 });
 
+// [#927] `propose_adjustment_template` and `sign_adjustment_template` are typed refusals from
+// migration 0282 (owner ruling #788: retire the 0045 recurring-adjustment template lane). Where a
+// cell's subject is the POSTER or the books, the template is minted directly (x42-adj-helpers'
+// SURGERY 5) and every assertion stands; where its subject is a door-only law, the door's
+// retirement is what is asserted above that frontier, and the original law runs in full on a
+// pre-0282 chain -- the d-b2 slice leg's 0001..0045 copy (.github/actions/frontier-leg).
+const templatesRetired = () => x42TemplatesRetiredReady();
+
+async function proposeDoorRetired(client, law) {
+  if (!(await templatesRetired())) return false;
+  const err = await caught(() => proposeTemplate(w.users.bob, {
+    client, name: `retired probe ${Math.random()}`, cadence: "monthly", start: mon(-3).start,
+    end: null, autoReverse: false, lines: accrualLines(100_000), memo: "retired probe" }));
+  assert.ok(err, `${law}: the propose door answers something -- it must REFUSE`);
+  assert.equal(err.code, CLR10);
+  assert.equal(reasonToken(err), "adjustment_template_lane_retired",
+    `${law}: the door that carried this law is retired (#927)`);
+  noteLane(`${law} — the propose-door half retired at 0282; asserted as a refusal here and in full on a pre-0282 chain`);
+  return true;
+}
+
 const skipHere = (t) => skip42(t, live, "the round-9 remedy/receipt/domain battery");
 
-const runRefusal = (client, template, period) => caught(() => runManual(w.users.bob, {
+const runRefusal = (client, template, period) => caught(() => runOccurrence({
   client, template, periodStart: period.start, periodEnd: period.end,
 }));
 const listRuns = async (sub, client) =>
@@ -89,7 +111,7 @@ test("x42.r9n1f [recut round 10] the refusal offers BOTH acts and neither assert
     "the fixture figure is below the firm's high-stakes floor, so reverse_entry completes in one act");
   const t1 = await liveTemplate({
     client: c1, label: "r9n1f v1", start: P.start, lines: accrualLines(600_000), memo: "v1" });
-  const r1 = await runManual(w.users.bob, {
+  const r1 = await runOccurrence({
     client: c1, template: t1.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r1.entry_id);
   await retireTemplate(w.users.hana, { client: c1, template: t1.id, reason: "the fee rose by RM1" });
@@ -124,7 +146,7 @@ test("x42.r9n1f [recut round 10] the refusal offers BOTH acts and neither assert
   // FOLLOW WHAT WAS OFFERED, and assert the TOTAL — not just the new codes.
   await reverseEntry(w.users.alice, {
     entry: dEdit.correction_entry, reason: "r9n1f follow the offered remedy", opKey: opk("r9n1f") });
-  const r2 = await runManual(w.users.bob, {
+  const r2 = await runOccurrence({
     client: c1, template: t2.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r2.entry_id);
   assert.equal(await glNet(c1, EXPA), 600_100,
@@ -136,7 +158,7 @@ test("x42.r9n1f [recut round 10] the refusal offers BOTH acts and neither assert
   const c2 = await freshAdjClient("r9n1f-live");
   const tA = await liveTemplate({
     client: c2, label: "r9n1f A", start: P.start, lines: accrualLines(2_000_000), memo: "A" });
-  const rA = await runManual(w.users.bob, {
+  const rA = await runOccurrence({
     client: c2, template: tA.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, rA.entry_id);
   const tShared = await liveTemplate({
@@ -171,7 +193,7 @@ test("x42.r9n1g every run receipt names the verb that admits its occurrence TODA
   const c1 = await freshAdjClient("r9n1g-solo");
   const t1 = await liveTemplate({
     client: c1, label: "r9n1g solo", start: P.start, lines: accrualLines(600_000), memo: "solo" });
-  const r1 = await runManual(w.users.bob, {
+  const r1 = await runOccurrence({
     client: c1, template: t1.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r1.entry_id);
   let rows = await listRuns(w.users.bob, c1);
@@ -201,7 +223,7 @@ test("x42.r9n1g every run receipt names the verb that admits its occurrence TODA
   const t2 = await liveTemplate({
     client: c2, label: "r9n1g pair", start: P.start, autoReverse: true,
     lines: accrualLines(600_000), memo: "pair" });
-  const r2 = await runManual(w.users.bob, {
+  const r2 = await runOccurrence({
     client: c2, template: t2.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(w.users.alice, r2.entry_id);
   rows = await listRuns(w.users.bob, c2);
@@ -216,7 +238,7 @@ test("x42.r9n1g every run receipt names the verb that admits its occurrence TODA
   const t3 = await liveTemplate({
     client: c3, label: "r9n1g park", start: P.start, autoReverse: true,
     lines: accrualLines(cents), memo: "park", proposer: users.keeper, signer: users.admin });
-  const r3 = await runManual(users.keeper, {
+  const r3 = await runOccurrence({
     client: c3, template: t3.id, periodStart: P.start, periodEnd: P.end });
   await approveDraft(users.owner, r3.entry_id);
   const parked = await reversePair(users.keeper, {
@@ -240,6 +262,11 @@ test("x42.r9n1h a template whose first DERIVED period end falls outside the stam
   await rootQuery("update clara.clients set fy_end_month = 11, fy_end_day = 30 where id = $1", [client]);
   assert.deepEqual(await clientFy(client), { month: 11, day: 30 },
     "the fixture's financial year is the one this cell reasons about");
+
+  // [#927] Both halves of this cell -- the propose door's derived-period-end refusal and the sign
+  // door's re-derivation of it -- are door laws retired at 0282. Above that frontier the door's
+  // retirement is asserted; the whole law runs on a pre-0282 chain (the d-b2 slice leg).
+  if (await proposeDoorRetired(client, "x42.r9n1h the derived-period-end date domain")) return;
 
   const propose = (cadence, start) => caught(() => proposeTemplate(w.users.bob, {
     client, name: `x42 r9n1h ${cadence} ${start} ${Math.random()}`, cadence, start, end: null,
@@ -313,7 +340,7 @@ test("x42.r9n1i on the ANNUAL cadence the mirror lands on day one of the NEXT fi
   const annual = await liveTemplate({
     client, label: "r9n1i annual", cadence: "annual", start: F.start, autoReverse: true,
     lines: accrualLines(6_000_000, { debit: EXPA, credit: ACCR }), memo: "r9n1i annual" });
-  const rA = await runManual(w.users.bob, {
+  const rA = await runOccurrence({
     client, template: annual.id, periodStart: F.start, periodEnd: F.end });
   await approveDraft(w.users.alice, rA.entry_id);
   const mir = await mirrorOf(rA.entry_id);
@@ -337,7 +364,7 @@ test("x42.r9n1i on the ANNUAL cadence the mirror lands on day one of the NEXT fi
     lines: accrualLines(400_000, { debit: EXPA, credit: ACCR }), memo: "r9n1i same" });
   let r2 = null;
   assert.equal(await caught(async () => {
-    r2 = await runManual(w.users.bob, {
+    r2 = await runOccurrence({
       client, template: same.id, periodStart: M1.start, periodEnd: M1.end });
   }), null,
     "the next financial year is a different stretch of calendar and the mirror shares no element with this shape");

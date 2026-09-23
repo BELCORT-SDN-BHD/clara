@@ -1,0 +1,71 @@
+{
+  "lens": "RECHECK",
+  "round": 2,
+  "wave": 3,
+  "lane": "05",
+  "branch": "riders/w3-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "fixed_point": "ffe63a0dd084e99b84c1368119845be273c421ce",
+  "prior_recheck_head": "d8ff391a8",
+  "fix_report_2": "docs/plan/active/riders-2026-09-20/reports/wave3-lane05-fix-2.md",
+  "recheck_2_head": "1db1d36a2",
+  "tickets": [908, 909, 927, 928, 929],
+  "verdict": "accept-with-fixes",
+  "summary": "Verified fix round 2 (three commits: 5d8ff0bcf, 15c73d8a8, 1db1d36a2, on top of the sixteen the branch already carried) on the current head 1db1d36a2. git status is clean. All three findings from the first recheck (RECHECK-01/02/03) were re-driven: RECHECK-02 (concurrency window) and RECHECK-03 (self-exclusion hides total overlap) are genuinely fixed by 0283's redo -- re-verified independently, not only by re-reading the fix report. RECHECK-01 (agent-lane prepayment path can still mint an unreachable 0045 template) is unchanged and still correctly deferred to an owner/orchestrator ruling per WORK-ORDER rule 5 (a product-capability retirement outside this lane's authority), still contained by the tripwire test and disclosed in three places. Independently re-run and confirmed: plan-overlap-template-arm-retired.test.mjs 6/6 pass (including p929.identical-basis and p929.concurrent-creation, the two new cells); plan-overlap-sibling-arm.test.mjs + plan-schedule-yield-wall.test.mjs + accounting-plans.test.mjs 32/32 pass; operation-census + rig-isolation 33 cells, 32 pass, 1 named skip (T19, reset-gated); pnpm typecheck PASS; CI=true GITHUB_ACTIONS=true pnpm lint exit 0; check-frozen-workflows OK (312 frozen, 55 use-workflow, 3 retired, unchanged); check-parts-parity OK; check-message-keys OK (4303 keys); the three web component test files that read overlap_warning/template_id (accrual-form.test.tsx, prepayments-keyboard.test.tsx, adjustments-render-states.test.tsx) 21/21 pass, run both combined and individually. Independently queried the live clara_l05 catalog (not trusting the report's prose) for every fact RECHECK-01/02/03 depend on: wake_establish_prepayment_schedule's ACL and its sole wake_fn_allowlist row ({close_prep}), close_prep.enabled=false, _propose_adjustment_template_core's owner-only ACL, _plan_overlap_warning now has exactly one 3-argument overload, and the 0283 migration checksum on clara_l05 (0832489a...) is byte-identical to sha256 of the committed migration file (271 total migrations) -- all match the fix report's claims exactly. One new, minor, purely cosmetic defect was found in this round's own docs commit and is listed below; it does not affect compilation, tests, or lint, and does not block accept. Nothing above minor remains open that this round introduced; the two majors that stay open (RECHECK-01, and the still-outstanding third major noted below) are pre-existing, honestly disclosed, and outside this lane's authority to close per WORK-ORDER rule 5 -- not a defect of this fix round.",
+  "regression_sweep": {
+    "db_plan_overlap_template_arm_retired": "6/6 pass (independently re-run; includes p929.identical-basis and p929.concurrent-creation)",
+    "db_sibling_arm_plus_yield_wall_plus_accounting_plans": "32/32 pass (independently re-run)",
+    "db_operation_census_and_rig_isolation": "33 cells, 32 pass, 0 fail, 1 skip (T19 poison-role, reset-gated) -- independently re-run",
+    "pnpm_typecheck": "PASS (apps/web, packages/runtime) -- independently re-run",
+    "CI_lint": "CI=true GITHUB_ACTIONS=true pnpm lint -- exit 0, independently re-run",
+    "check_frozen_workflows": "OK -- 312 frozen, 55 use-workflow, 3 retired (unchanged) -- independently re-run",
+    "check_parts_parity": "OK -- independently re-run",
+    "check_message_keys": "OK -- 4303 static keys resolve -- independently re-run",
+    "web_touched_overlap_warning_tests": "accrual-form.test.tsx 13/13, prepayments-keyboard.test.tsx 5/5, adjustments-render-states.test.tsx 3/3 -- 21/21 total, independently re-run both combined and per-file",
+    "migration_checksum_reverify": "clara.schema_migrations on clara_l05: 0283_retire_plan_overlap_template_arm checksum 0832489ac90494c17e31d90ca570bd35127ec229e8552d663534b180e7520ef3 -- independently re-derived as sha256 of the committed migration file, byte-identical; 271 total migrations",
+    "live_catalog_facts_independently_queried": "wake_establish_prepayment_schedule proacl = {clara_fn_owner=X/clara_fn_owner,clara_wake_interactive=X/clara_fn_owner}; its only clara.wake_fn_allowlist row has wake_kind={close_prep}; clara.wake_engine_sources source_key='close_prep' has enabled=false; _propose_adjustment_template_core proacl = {clara_fn_owner=X/clara_fn_owner}; clara._plan_overlap_warning has exactly 1 overload, args (p_client uuid, p_basis jsonb, p_self_plan uuid) -- all match the fix report's and migration header's claims",
+    "git_status": "clean on 1db1d36a2"
+  },
+  "findings": [
+    {
+      "id": "RECHECK2-01",
+      "source_ids": ["RECHECK-01", "L05-SPEC-03", "ADV-L05-02"],
+      "ticket": 927,
+      "severity": "major",
+      "status": "still_open_by_design",
+      "title": "The agent-lane prepayment path can still mint an unreachable 0045 adjustment template; contained and disclosed, not closed -- unchanged from the first recheck",
+      "evidence": "Independently re-queried on clara_l05 at head 1db1d36a2: clara._propose_adjustment_template_core proacl='{clara_fn_owner=X/clara_fn_owner}'; clara.wake_establish_prepayment_schedule proacl includes clara_wake_interactive; its only clara.wake_fn_allowlist row is wake_kind={close_prep} (array_agg, one row); clara.wake_engine_sources row for source_key='close_prep' has enabled=false. These are the same four facts the fix-2 report cites, and they match exactly. plan-overlap-template-arm-retired.test.mjs's p929.containment cell (re-run here, part of the 6/6 pass) still asserts and proves all three with rolled-back mutants.",
+      "why_it_stays_open": "Same reasoning as the first recheck: closing this is a product-capability decision (retiring or rerouting clara.wake_establish_prepayment_schedule onto clara.create_prepayment_schedule, 0223) that WORK-ORDER rule 5's scope discipline and the standing 'beta, nothing dark' ruling put outside a lane worker's own authority. The fix-2 report explicitly reproduces this finding again and states no code fix is owed to this lane -- confirmed correct on independent re-check.",
+      "required_fix": "Not a code fix owed to this lane. Same owner/orchestrator ruling as before is owed: retire or reroute clara.wake_establish_prepayment_schedule onto clara.create_prepayment_schedule (0223) in a ticket that owns that migration, or explicitly rule the residual acceptable and close the follow-up."
+    },
+    {
+      "id": "RECHECK2-02",
+      "source_ids": ["ADV-L05-06"],
+      "ticket": 927,
+      "severity": "minor",
+      "status": "still_open_no_fix_owed",
+      "title": "0282's live-template guard is unsatisfiable on an estate holding a non-retired template, which is this lane's own post-test state; unchanged, no fix owed inside this round's scope",
+      "evidence": "Not re-driven this round (fix-2's diff never touches 0282). Carried forward from round 1's minor findings list, correctly left undisturbed by fix-2 -- this round's own summary table does not list it, and the migration it concerns (0282) is below the redo frontier and outside RECHECK-02/03's newly-granted edit scope (0283 only).",
+      "why_it_stays_open": "Below the redo frontier; an operational/rig-state note (a #957 redo or re-apply is refused on an estate with a live template row), not a code defect of this round.",
+      "required_fix": "None owed by this lane's fix round; listed here only for completeness since the recheck instruction asks to verify every finding from prior rounds, not only the three RECHECK items."
+    },
+    {
+      "id": "RECHECK2-03",
+      "source_ids": [],
+      "ticket": 929,
+      "severity": "minor",
+      "status": "newly_introduced_cosmetic",
+      "title": "This round's own docs commit (1db1d36a2) introduces an inconsistent JSDoc indentation in the three api.ts comment blocks it edited",
+      "evidence": "apps/web/lib/plans/api.ts:221-227, apps/web/lib/accruals/api.ts:191-197 and apps/web/lib/prepayments/api.ts:218-224 each carry a paragraph break inside the PlanCreated/AccrualCreated/PrepaymentCreated overlap_warning JSDoc where the blank continuation line and the '#929's fix round (0283) also settled...' paragraph lose the block's 3-space indent (' *' instead of '   *  '), verified with `cat -A`. Purely a comment-formatting inconsistency: it does not change any emitted type, does not fail `pnpm typecheck`, and `CI=true GITHUB_ACTIONS=true pnpm lint` exits 0 with it present (re-run and confirmed in this recheck), so no gate this repo runs catches it.",
+      "why_it_stays_open": "Cosmetic only; does not rise above minor and none of the gates this repo defines treat it as an error.",
+      "required_fix": "Optional: re-indent the three continuation paragraphs to match the block's '   *  ' convention. Not required for accept."
+    }
+  ],
+  "not_findings_confirmed_fixed_this_round": [
+    "RECHECK-02 (major, ADV-L05-04) -- the plan-overlap advisory's concurrency window -- FIXED, independently re-verified: p929.concurrent-creation cell passes (2 pooled connections observed via pg_locks waiting on the client advisory rung 203005004); the three plan-creating doors (create_accounting_plan, revise_accounting_plan, _accrual_plan_core) all carry `perform pg_advisory_xact_lock(203005004, hashtext(...))` placed after op-receipt reservation and before any accounting_plans row lock, confirmed by direct grep of the migration file at lines 440, 536, 683.",
+    "RECHECK-03 (major, L05-SPEC-09/ADV-L05-03) -- the sibling advisory's self-exclusion hid total overlap -- FIXED, independently re-verified: p929.identical-basis cell passes; clara._plan_overlap_warning now takes a third argument p_self_plan uuid and excludes by `p.id is distinct from p_self_plan` (confirmed by direct grep of the migration and by querying pg_proc for the live function signature, which returns exactly `p_client uuid, p_basis jsonb, p_self_plan uuid`); the old two-argument overload is confirmed dropped (exactly one overload exists in the live catalog).",
+    "The deadlock-safety argument for the new client rung on the three plan-creating doors holds on independent re-derivation: the live catalog census of bodies containing both `pg_advisory_xact_lock(203005004` and `accounting_plans` in prosrc returns exactly 3 rows (create_accounting_plan, revise_accounting_plan, _accrual_plan_core) rather than the fix-2 report's literal '0 rows', but this is fully reconciled by the migration header's own qualifier that its 51-body census was taken BEFORE the rung was added to these same three bodies (51 pre-existing + 3 newly added by this migration = 54, which matches the current live count exactly); within those three the rung is taken strictly before any accounting_plans row lock, so no new cross-body deadlock pair is created. Not a finding.",
+    "Migration checksum, schema_migrations row count (271) and git status -- all independently re-verified and match the fix report exactly."
+  ],
+  "newly_broken": []
+}

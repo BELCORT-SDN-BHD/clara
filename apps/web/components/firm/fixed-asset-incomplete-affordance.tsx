@@ -12,7 +12,8 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { completeFixedAssetParticulars } from "@/lib/registers/fixed-assets";
+import { completeFixedAssetParticulars, completeIntent } from "@/lib/registers/fixed-assets";
+import { useDepreciationDecisionKey } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { FaParticularsFields, EMPTY_PARTICULARS, particularsReadyToSubmit } from "@/components/registers/fa-particulars-fields";
 import type { FaParticularsInput } from "@/lib/registers/fixed-assets";
@@ -23,19 +24,32 @@ export function FixedAssetIncompleteAffordance({ row, busy, error, act }: NeedsY
   const t = useTranslations("FixedAssetsDepreciation.needsYou");
   const [open, setOpen] = useState(false);
   const [particulars, setParticulars] = useState<FaParticularsInput>(EMPTY_PARTICULARS);
+  // #978 — ONE DECISION, ONE KEY, the same house shape #651 wired onto the run/authority/revise
+  // doors and #978 itself wired onto CompleteParticularsDialog/DisposeDialog
+  // (components/registers/fa-row-actions.tsx). This inline affordance has no FaDoorDialog of its
+  // own, so ITS open/close IS the decision boundary: `cancel` below and a successful submit both
+  // end it, exactly as a dialog's `onClosed` would.
+  const decision = useDepreciationDecisionKey();
 
   if (!row.asset_id || !row.client_id) return null;
   const assetId = row.asset_id;
   const clientId = row.client_id;
 
   const submit = async () => {
+    const intent = completeIntent({ clientId, assetId, particulars });
     const ok = await act(() =>
-      completeFixedAssetParticulars(sessionTokenAccessor, { clientId, assetId, particulars }).then(() => undefined),
+      completeFixedAssetParticulars(sessionTokenAccessor, { clientId, assetId, particulars, opKey: decision.key(intent) }).then(() => undefined),
     );
     if (ok) {
       setOpen(false);
       setParticulars(EMPTY_PARTICULARS);
+      decision.renew();
     }
+  };
+
+  const cancel = () => {
+    setOpen(false);
+    decision.renew();
   };
 
   return (
@@ -48,7 +62,7 @@ export function FixedAssetIncompleteAffordance({ row, busy, error, act }: NeedsY
             <Button type="button" size="sm" onClick={() => void submit()} disabled={busy || !particularsReadyToSubmit(particulars)}>
               {busy ? t("submitting") : t("submit")}
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+            <Button type="button" size="sm" variant="outline" onClick={cancel} disabled={busy}>
               {t("cancel")}
             </Button>
           </div>

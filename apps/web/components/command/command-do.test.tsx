@@ -170,7 +170,9 @@ test("a permitted row renders with the TYPED name in it, and selecting it calls 
   await withFetch(
     (url) => {
       if (url.includes("/rest/v1/caller_context")) return json(ctx("admin", 2));
-      if (url.includes("/rest/v1/rpc/begin_client_onboarding")) return json({ client_id: CLIENT_ID, plan_id: PLAN_ID });
+      // #899 (0287_client_birth_wall.sql) re-points this dispatch at clara.open_client_
+      // onboarding — see do-dispatch.ts's own "beginClientOnboarding" case.
+      if (url.includes("/rest/v1/rpc/open_client_onboarding")) return json({ client_id: CLIENT_ID, plan_id: PLAN_ID });
       throw new Error(`unexpected fetch: ${url}`);
     },
     async (calls) => {
@@ -189,13 +191,13 @@ test("a permitted row renders with the TYPED name in it, and selecting it calls 
         const row = findRowByText(h.container as Record<string, unknown>, 'Open a new client file for "ROME PUBLIC ADVISORY"');
         assert.ok(row, "the row carries the typed name — the palette's input IS the door's p_name argument");
         await h.act(() => selectRow(row));
-        await settleUntil(h, () => calls.some((c) => c.url.includes("/rest/v1/rpc/begin_client_onboarding")), "the door call");
+        await settleUntil(h, () => calls.some((c) => c.url.includes("/rest/v1/rpc/open_client_onboarding")), "the door call");
         assert.equal(
-          calls.filter((c) => c.url.includes("/rest/v1/rpc/begin_client_onboarding")).length,
+          calls.filter((c) => c.url.includes("/rest/v1/rpc/open_client_onboarding")).length,
           1,
           "exactly one governed call — never a batch, never a retry",
         );
-        assert.equal((calls.find((c) => c.url.includes("begin_client_onboarding"))!.body as Record<string, unknown>).p_name, "ROME PUBLIC ADVISORY");
+        assert.equal((calls.find((c) => c.url.includes("open_client_onboarding"))!.body as Record<string, unknown>).p_name, "ROME PUBLIC ADVISORY");
       } finally {
         await h.unmount();
       }
@@ -208,7 +210,7 @@ test("a DoorRefusal renders VERBATIM in the palette and is never retried", async
   await withFetch(
     (url) => {
       if (url.includes("/rest/v1/caller_context")) return json(ctx("admin", 2));
-      if (url.includes("/rest/v1/rpc/begin_client_onboarding")) {
+      if (url.includes("/rest/v1/rpc/open_client_onboarding")) {
         attempts += 1;
         return json({ code: "CLR04", message: "admin role or higher is required", details: '{"reason":"role_floor"}' }, 400);
       }

@@ -131,7 +131,10 @@ const CREATED = {
   ],
   frequency: "monthly", day_rule: "last_day_of_month", day_of_month: null,
   timezone: "Asia/Kuala_Lumpur", effective_from: "2026-01-31", effective_to: "2026-03-31",
-  next_occurrences: [], overlap_warning: { kind: "adjustment_template_overlap", templates: [{ template_id: "t1", name: "Monthly rent" }] },
+  // #929/0283 retired the 0045 template arm: the real backend can only ever answer
+  // "accounting_plan_overlap", keyed by plan_id — kept in that exact shape even though the
+  // component never branches on either field (it reads only `.name`).
+  next_occurrences: [], overlap_warning: { kind: "accounting_plan_overlap", templates: [{ plan_id: "p1", name: "Monthly rent plan" }] },
   configuration_only: true,
 };
 
@@ -281,7 +284,7 @@ test("prepayments.keyboard — the DERIVED PREVIEW is not in the tab order: a di
 
         // The overlap warning holds the page (it is advisory and must be read), so the derived
         // allocation is on screen with it.
-        assert.match(h.text(), /A recurring adjustment already moves these accounts/);
+        assert.match(h.text(), /Another plan already moves these accounts/);
         assert.match(h.text(), /Final period — carries the remainder/);
         const disabledSets = findAllIn(h.container, (n) =>
           n.tagName === "FIELDSET" && n.getAttribute?.("disabled") !== null && n.getAttribute?.("disabled") !== undefined);

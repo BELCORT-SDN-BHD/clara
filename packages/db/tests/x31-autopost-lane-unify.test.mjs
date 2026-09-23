@@ -47,13 +47,13 @@ import {
 } from "./wave-a-fixtures.mjs";
 import {
   FULL_ABSENT_RECEIPT,
-  propose,
+  proposeAsFnOwner,
   seedApprovedEntry,
   seedBareDocument,
   seedF123Evidence,
   seedPayableAccount,
   seedVendorCounterparty,
-  signLive, seedClientHardIdentifier
+  signLiveAsFnOwner, seedClientHardIdentifier
 } from "./x36-vendor-binding-helpers.mjs";
 
 const AMOUNT = 100_000;
@@ -490,13 +490,13 @@ test("x31.a a real EZSEC-shaped live evidence window admits end-to-end", async (
       approvedAt: `${postingDate}T09:00:00Z`,
     });
   }
-  const proposed = await propose(w.users.bob, {
+  const proposed = await proposeAsFnOwner(w.users.bob, {
     client: w.clients.A1,
     counterparty: cp.id,
   });
   // signLive (裁-18b PR-1 finding C3): signing refuses until PR-3 mints the approve-path
   // marker; the helper plants it, drives the REAL door, and restores the body byte-for-byte.
-  const binding = await signLive(w.users.alice, {
+  const binding = await signLiveAsFnOwner(w.users.alice, {
     binding: proposed.binding_id,
   });
   assert.equal(binding.status, "live");

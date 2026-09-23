@@ -58,6 +58,7 @@ const DOCUMENTS_LANE_MOCK = join(E2E_DIR, "documents-viewer-mock.mjs");
 const LANE_MOCKS = [
   "accrual-mock.mjs",
   "activity-mock.mjs",
+  "adjustments-retired-mock.mjs",
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
   "bank-match-mock.mjs",
@@ -134,8 +135,10 @@ test("N4 · no lane fixture may claim the FIRM ALTITUDE for the shared subject",
 
   // The counter-half: this lane's client rows SHOULD carry the shared subject, or its own walk
   // resolves nothing. Without this, deleting every row would satisfy the assertion above.
+  // THREE, not two, since #897 — client C's own thread (`P6_5.threadC`, the OPEN-park fixture
+  // its #897 mock-lane walk arm needs) joined threadA's and threadB's.
   const own = P6_5_SESSIONS.filter((r) => r.client_id !== null && r.created_by === subject);
-  assert.equal(own.length, 2, "the lane's two CLIENT threads are still the caller's own");
+  assert.equal(own.length, 3, "the lane's three CLIENT threads are still the caller's own");
 });
 
 /**
@@ -147,8 +150,16 @@ test("N4 · no lane fixture may claim the FIRM ALTITUDE for the shared subject",
  * so FIVE of its ten handlers were invisible to a gate whose whole job is to see them — and an
  * unscoped one among them would have passed in silence. A census that cannot see a handler
  * cannot report it unscoped, which is this file's own failure mode, one level up.
+ *
+ * SPEC-1022-1 (wave 3): the same failure mode, a second time, and this time it hid a real
+ * unscoped handler. `members-lifecycle-mock.mjs` grew four handlers under `/auth/…` and
+ * `/e2e-…` while the commit that added them stated every new handler was scoped — three were
+ * invisible here, and the fourth (`/e2e-invite-mail-capture`) was genuinely unscoped on a path
+ * `run.mjs` now sets for EVERY e2e run. Both prefixes are recognised from here on. The only
+ * other handler this widening newly sees anywhere is `operator-support-mock.mjs`'s own control
+ * endpoint, declared below with its reason rather than left silent.
  */
-const HANDLER_OPENER = /(?:path === "(\/(?:rest|api)\/[^"]+)"|verb === "([a-z0-9_]+)")/;
+const HANDLER_OPENER = /(?:path === "(\/(?:rest|api|auth)\/[^"]+|\/e2e-[^"]+)"|verb === "([a-z0-9_]+)")/;
 const HANDLER_OPENER_G = new RegExp(HANDLER_OPENER.source, "g");
 
 /** The label a census row carries, so a verb-dispatched handler reads like the route it answers. */
@@ -210,9 +221,10 @@ function handlerCensus(file: string): { path: string; scoped: boolean }[] {
  * `unscopeable` — a handler that CANNOT be scoped, with the reason recorded in source beside
  * it. An allowlist is only honest when it is short, named and argued. The two on the P6-5 lane
  * are RPCs whose request carries no SUBJECT: `list_coa_templates()` takes no arguments at all,
- * and `begin_client_onboarding` takes a free-text name rather than an id — keying on this lane's
- * own string would be scoping by a label, the "spelling is not identity" mistake applied to a
- * fixture. Both are measured to have no other caller in `apps/web/e2e`.
+ * and `open_client_onboarding` (#899; `begin_client_onboarding` before 0287_client_birth_wall.sql
+ * re-pointed this lane's own two entrances) takes a free-text name rather than an id — keying on
+ * this lane's own string would be scoping by a label, the "spelling is not identity" mistake
+ * applied to a fixture. Both are measured to have no other caller in `apps/web/e2e`.
  *
  * `debt` — a handler that COULD be scoped and simply is not. Recording those as "unscopeable"
  * would be writing a false reason into a gate, so they get their own name. All three sit on the
@@ -253,8 +265,17 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // `set_admission_capacity` writes the estate's ONE configuration row. All three are measured to
   // have no other caller anywhere in `apps/web/e2e`, and all three answer CLR04 to the bookkeeper
   // persona, so an unowned caller is REFUSED rather than served someone else's fixture.
+  //
+  // A FOURTH joined them when `HANDLER_OPENER` learned `/e2e-…` openers (SPEC-1022-1): this
+  // lane's own control endpoint, `POST /e2e-operator/reset`, which every cell in
+  // `operator-support-walk.spec.ts` calls first because `workers: 1` gives the file one server and
+  // three of its cells decide or resolve a case. It carries no request-borne subject to scope on
+  // — its body is empty and its whole job is to put THIS lane's module state back to its
+  // starting point — and the path names this lane, so no sibling walk can reach it by accident.
+  // It was unscoped and unmeasured before this round; it is unscoped and NAMED now.
   "operator-support-mock.mjs": {
     unscopeable: [
+      "/e2e-operator/reset",
       "/rest/v1/rpc/list_operator_support_queue",
       "/rest/v1/rpc/get_admission_capacity",
       "/rest/v1/rpc/set_admission_capacity",
@@ -262,7 +283,7 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
     debt: [],
   },
   "agentic-finish-mock.mjs": {
-    unscopeable: ["/rest/v1/rpc/list_coa_templates", "/rest/v1/rpc/begin_client_onboarding"],
+    unscopeable: ["/rest/v1/rpc/list_coa_templates", "/rest/v1/rpc/open_client_onboarding"],
     debt: [],
   },
   "chat-parity-mock.mjs": {
@@ -422,6 +443,13 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // `publish_client_cash_account_set` is a WRITE this lane has nothing to write to; it echoes the
   // receipt shape and changes no state, and a walk that wants the published board overlays its own
   // pack with `page.route`.
+  // #1002 appends a FOURTH: `get_client_cash_account_set_members`, the second-pass editor's own
+  // read. Same shape as its two `p_client`-carrying siblings above — it COULD be scoped and is
+  // not, because its job is the same honest-default one: opening the dialog reads it
+  // unconditionally, and an unanswered 404 would grow the editor's own failure banner on every
+  // walk that merely opens it. It holds no fixture (a null version, zero members — the same
+  // no-published-set face `EMPTY_FINANCIAL_PACK`'s own `cash.set: null` already states), so there
+  // is nothing in it for a sibling walk to resolve as its own.
   "home-board-mock.mjs": {
     unscopeable: ["/rest/v1/rpc/get_firm_portfolio_pack"],
     debt: [
@@ -429,11 +457,16 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
       "/rest/v1/rpc/get_client_work_pack",
       "/rest/v1/rpc/propose_client_cash_accounts",
       "/rest/v1/rpc/publish_client_cash_account_set",
+      "/rest/v1/rpc/get_client_cash_account_set_members",
     ],
   },
-  // #627's D4 lane. Every handler names its own client (five distinct ids, one per state)
-  // before it answers, and falls through otherwise — same shape as documents-viewer-mock.mjs
-  // above, which is the state a lane mock should be in.
+  // #627's D4 lane. Every handler names its own client (six distinct ids as of #997: the
+  // original five, one per read state, plus #997's own `clientReceipt`) before it answers, and
+  // falls through otherwise — same shape as documents-viewer-mock.mjs above, which is the state
+  // a lane mock should be in. #997's four new RPC handlers (the three governed writes plus
+  // `get_compliance_watch_disposition`) scope by `p_watch` instead of a client id — the same
+  // choice `get_document_state`'s row makes elsewhere in this file for a door whose own subject
+  // is a different kind of id — and fall through the same way.
   "tax-boundary-mock.mjs": { unscopeable: [], debt: [] },
   // #641's Work-list lane. `list_accounting_work`/`get_accounting_work_row` are brand-new RPCs no
   // other lane calls, and each carries its own `return false;` fall-through — the list handler on
@@ -505,13 +538,15 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   "firm-setup-mock.mjs": { unscopeable: [], debt: [] },
   // #649's client-creation lane. Its `/rest/v1/clients` handler is id-scoped, and for its two RPC
   // verbs the NAME is the request's own subject rather than a label for one:
-  // `clara.client_identity_candidates(p_name, p_identifier)` and
-  // `clara.begin_client_onboarding(p_name, p_op_key)` carry no id at all.
-  // `begin_client_onboarding` gates on this lane's three names and falls through for every other,
-  // because a SECOND claimant (`agentic-finish-mock.mjs`) answers it for the rest — that is the
-  // distinction that lane draws the other way, declaring the verb unscopeable because its own walk
-  // does not care which name reached it. `client_identity_candidates` has NO second claimant and
-  // the Add-client control asks it before every dispatch on every walk, so this lane answers every
+  // `clara.client_identity_candidates(p_name, p_identifier)` and (#899, 0287_client_birth_wall.sql
+  // renamed this from `clara.begin_client_onboarding`)
+  // `clara.open_client_onboarding(p_name, p_op_key, p_identifier, p_acknowledged_candidate)` carry
+  // no id at all. `open_client_onboarding` gates on this lane's three names and falls through for
+  // every other, because a SECOND claimant (`agentic-finish-mock.mjs`) answers it for the rest —
+  // that is the distinction that lane draws the other way, declaring the verb unscopeable because
+  // its own walk does not care which name reached it. `client_identity_candidates` has NO second
+  // claimant and the Add-client control asks it before every dispatch on every walk, so this lane
+  // answers every
   // OTHER name with the honest arity-0 empty rather than falling through into a 501: an unanswered
   // verb is an outage, and an empty answer carries no fixture a sibling walk could resolve as its
   // own (`home-board-mock.mjs`'s row states the same posture for its own unscoped reads). That is
@@ -577,12 +612,21 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // exact-verb allow-list before any branch (`plans-mock.mjs:286`'s shape), so a verb it does not
   // declare falls through with the request body never opened.
   //
-  // TWO OF ITS HANDLERS THIS CENSUS CANNOT SEE, named here rather than left silent: the acceptance
-  // leg answers `/auth/v1/verify` (only for `type: "invite"` AND this lane's own token_hash; the
-  // CORE branch answers `signup` and 400s the rest) and the preview door (only for one of this
-  // lane's two `ct` tokens). `HANDLER_OPENER` matches `/rest/…` and `/api/…` openers, so the auth
-  // one is outside its reach — it is scoped by token, and falls through for everything else.
+  // ITS FOUR NON-`/rest/` HANDLERS ARE CENSUSED SINCE SPEC-1022-1, not merely described here: the
+  // acceptance leg's `/auth/v1/verify` (only for `type: "invite"` AND this lane's own token_hash;
+  // the CORE branch answers `signup` and 400s the rest), the two #1022 identity-provisioning
+  // calls `admin()` makes (`/auth/v1/admin/users`, `/auth/v1/admin/generate_link`) and the #1022
+  // mail capture (`/e2e-invite-mail-capture`). `HANDLER_OPENER` reads `/auth/…` and `/e2e-…`
+  // openers from this round on, so all four are measured rather than taken on trust — which is
+  // how the mail-capture handler's MISSING guard was found: the commit that added it said every
+  // new handler was scoped by `ours`, and three of the four were invisible to the instrument that
+  // would have contradicted it. The preview door has always been visible (`/rest/v1/rpc/…`).
   "members-lifecycle-mock.mjs": { unscopeable: [], debt: [] },
+  // #927's own lane — the retired Adjustments register (`?tab=adjustments`). Every handler
+  // (`clients` by `id`, `adjustment_templates`/`adjustment_runs`/`adjustment_pair_reversals` by
+  // `client_id`, and the three RPC verbs by `p_client`) names this lane's own client id and falls
+  // through otherwise. Declares neither list, the shape a new lane mock should aim for.
+  "adjustments-retired-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -1514,15 +1558,16 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // `parkedCardWorkId`), neither of which originated from a plan. Each lane gates on its own
   // work ids and falls through otherwise, so this is a declared share, not a collision.
   get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs", "work-knowledge-mock.mjs"],
-  // #649 x P6-5 — `clara.begin_client_onboarding` is the ONE door that creates a client, so any
-  // lane whose walk creates one answers it. The two answer for DIFFERENT names and the door
-  // carries no id, so the name is the request's own subject here rather than a label for one:
-  // `client-create-mock.mjs` gates on its own three names and falls through for every other,
-  // `agentic-finish-mock.mjs` answers whatever is left (it declares the verb unscopeable above,
-  // because its own walk does not care which name reached it). ORDER IS LOAD-BEARING and is
+  // #649 x P6-5 — `clara.open_client_onboarding` is the ONE door that creates a client (#899,
+  // 0287_client_birth_wall.sql renamed it from `clara.begin_client_onboarding`, which both mocks
+  // answered under the same shape before), so any lane whose walk creates one answers it. The two
+  // answer for DIFFERENT names and the door's SUBJECT-carrying argument is the free-text name, not
+  // an id: `client-create-mock.mjs` gates on its own three names and falls through for every
+  // other, `agentic-finish-mock.mjs` answers whatever is left (it declares the verb unscopeable
+  // above, because its own walk does not care which name reached it). ORDER IS LOAD-BEARING and is
   // stated at the hook in `serve-built.mjs`: the scoped lane runs FIRST, or a #649 name would be
   // born into the other lane's fixture.
-  begin_client_onboarding: ["agentic-finish-mock.mjs", "client-create-mock.mjs"],
+  open_client_onboarding: ["agentic-finish-mock.mjs", "client-create-mock.mjs"],
   // #638 — `clara.get_work_claim_origin` is the Work detail identity block's "Staff expense claim"
   // row, and it is read on EVERY Work detail for the same structural reason the plan-origin row
   // above is: a claim is admitted with purpose `journal_entry` (migration 0221 states why a fourth
@@ -1936,10 +1981,11 @@ test("client-id census · no two lane mocks mint the SAME client id", () => {
   assert.deepEqual(clientIdCollisions(census), []);
 
   // POSITIVE CONTROL on the reader itself, over the REAL files: a lane whose whole walk turns on
-  // FIVE client ids, one per read outcome, must census as five — under-matching would make the
-  // assertion above vacuous, and there is no count here that a passing regex could fake.
+  // SIX client ids — the original five, one per read outcome, plus #997's own `clientReceipt` —
+  // must census as six — under-matching would make the assertion above vacuous, and there is no
+  // count here that a passing regex could fake.
   const d4 = [...census].filter(([, files]) => files.length === 1 && files[0] === "tax-boundary-mock.mjs");
-  assert.equal(d4.length, 5, `tax-boundary-mock.mjs names five client ids; the census found ${d4.length}`);
+  assert.equal(d4.length, 6, `tax-boundary-mock.mjs names six client ids; the census found ${d4.length}`);
   assert.ok(census.size >= 30, `the census recognised only ${census.size} client ids — it is not reading the files`);
 });
 

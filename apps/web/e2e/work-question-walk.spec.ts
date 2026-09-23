@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { settleForScan, signInTo } from "./helpers";
+import { cellBudgetMs, settleForScan, signInTo } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 
 /**
@@ -283,6 +283,7 @@ test("LEAVE PENDING is not offered on the Work's own page — that page IS the q
 const NEEDS_YOU_URL = "/work?view=needs-you";
 
 test("B4: the SAME question is answered from Needs-you, and the row leaves without dumping focus", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   await parkOnQuestion(page);
   await page.goto(NEEDS_YOU_URL);
 
@@ -359,6 +360,7 @@ test("B4: the inbox row's own form stays usable at 320 CSS px and under reduced 
 });
 
 test("B4: the URL is stable and BACK returns to where the person was", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   const workId = await parkOnQuestion(page);
   const workUrl = page.url();
 
@@ -410,6 +412,7 @@ test("B6: a transcript's work_question part renders the ACCEPTED record, and ann
 });
 
 test("B6: the DURABLE card finds a PARKED Work's question after a reload, and answers it there", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ polls: 3 }));
   // #629's follow-up review, the gap this cell closes: `work_question` (the live-stream part, above)
   // only exists while a run is executing and reaches this transcript through `GET /api/tasks/:id/
   // stream`; a browser that opens the rail after the run has already parked — or after any reload —

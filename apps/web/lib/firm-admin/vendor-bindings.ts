@@ -1,34 +1,15 @@
-// T10 (port-wave plan §4 T10, §5's vendor-bindings row): the propose/sign/
-// revoke ceremony over `clara.vendor_identity_bindings`, plus its two reads.
+// T10 (port-wave plan §4 T10, §5's vendor-bindings row): the revoke ceremony
+// over `clara.vendor_identity_bindings`, plus its two reads.
 //
 // GROUNDING (rig census, 2026-08-28 — instance-unique throwaway Postgres 17
 // migrated to the live frontier `0140`; every signature read from
-// `pg_get_functiondef` on that rig): all five doors originate at
+// `pg_get_functiondef` on that rig): all three doors below originate at
 // `0028_vendor_identity_binding.sql` and are LIVE-UNTOUCHED there — later
 // files (0029/0030/0042/0044/0046) recut OTHER bodies that CALL into this
-// machinery (`_coding_lane_core`, `_draft_entry_core`, …), never these five
+// machinery (`_coding_lane_core`, `_draft_entry_core`, …), never these
 // themselves (confirmed: `pg_get_functiondef` on the rig matches 0028's own
-// text byte-for-byte for every one of the five).
+// text byte-for-byte for every one of them).
 //
-//   - clara.propose_vendor_identity_binding(p_proposal jsonb, p_op_key text)
-//     — bookkeeper+. `p_proposal` MUST be a JSON object with EXACTLY the two
-//     keys `client_id`/`counterparty_id` — a third key, or either missing,
-//     refuses `binding_proposal_malformed` (CLR36) before anything else runs
-//     (0028:721-729). This module's own `proposeVendorIdentityBinding` builds
-//     that literal shape and no other.
-//   - clara.sign_vendor_identity_binding(p_binding uuid, p_op_key text) —
-//     ADMIN+ (0028:809, `role_rank('admin')`) AND, as of the pre-beta
-//     hardening batch (裁-18a, mohe-grill-rulings, 2026-08-28), a PERSON
-//     gate too: the live body now reads `created_by` and refuses when the
-//     signer is the same person who proposed the binding, unconditionally —
-//     no relaxation for a single-admin firm. The refusal is typed CLR04 with
-//     DETAIL reason "signer_is_proposer" and names both lawful ways out in
-//     the OWNER'S OWN RULED WORDS (let Clara propose it, or add a second
-//     admin — independent review, 2026-08-29). The UI never pre-hides the
-//     Sign trigger on a client-side
-//     role OR identity guess (team-lead security note): every viewer sees
-//     it; a caller who clicks it gets the DB's own refusal, verbatim —
-//     whether that is the rank floor or the signer≠proposer wall.
 //   - clara.revoke_vendor_identity_binding(p_binding uuid, p_reason text,
 //     p_op_key text) — bookkeeper+. `p_reason` is required
 //     (`nullif(btrim(p_reason),'')` — 0028:910-911).
@@ -40,42 +21,33 @@
 //     the LIVE function is `get_vendor_binding`, singular — no plural
 //     overload exists on the rig. This module calls the singular, live name.
 //
-// All five are EXECUTE-granted to `clara_authenticated` (rig census) — human
-// lane only; none of the five appear on `clara_agent_ro`'s or
-// `clara_runtime`'s reachable-function list.
+// All three are EXECUTE-granted to `clara_authenticated` (rig census) — human
+// lane only; none appear on `clara_agent_ro`'s or `clara_runtime`'s
+// reachable-function list.
 //
-// SCOPE NOTE: every one of these five doors is CLIENT-scoped
+// #921 [0273] (2026-09-20/21) REMOVED `proposeVendorIdentityBinding` and
+// `signVendorIdentityBinding` from this module, along with the counterparty
+// picker read (`loadVendorCounterparties`/`VendorCounterpartyRow`) that
+// existed only to feed the now-retired Propose dialog. Migration 0273
+// revoked clara_authenticated's EXECUTE on `propose_vendor_identity_binding`
+// and `sign_vendor_identity_binding` for EVERY rank — D6 keeps only
+// "historical receipts and in-flight legacy visibility". Keeping a wrapper
+// whose door no human can ever reach is not a lesser version of this module;
+// it is a call site `operation-census.test.mjs`'s `called_ungranted` sweep
+// correctly refuses (proven: removing this pair is what turns that gate
+// green again). `revoke_vendor_identity_binding` is UNCHANGED — 0273 never
+// touched it. Full history of the propose/sign wrappers: git blame on this
+// file before #921.
+//
+// SCOPE NOTE: every one of these doors is CLIENT-scoped
 // (`vendor_identity_bindings.client_id`) — there is no firm-wide vendor-
 // bindings read. The panel this module backs therefore carries its own
 // client picker (reusing `lib/firm/reads.ts`'s `loadClientRegister`,
 // unchanged) rather than assuming a cross-client listing the DB does not
 // offer.
 
-import { getRows } from "../read";
 import { callDoor } from "../doors";
 import type { SessionTokenAccessor } from "@/lib/session";
-
-/** `clara.counterparties`'s own kind='vendor', not-merged, not-retired rows
- *  for one client (rig census: `clara_authenticated` holds a direct SELECT
- *  grant on this table, RLS-scoped to the caller's own firm) — a minimal
- *  picker read for the propose-binding dialog. This is not the counterparty
- *  hygiene panel (alias/rename/merge, T8's own train, port-wave plan §4 T8) —
- *  a plain filtered SELECT, the same shape every domain's own satellite read
- *  already takes independently (e.g. lib/registers/aging.ts). */
-export type VendorCounterpartyRow = {
-  id: string;
-  name: string;
-  registration_normalized: string | null;
-};
-
-export function loadVendorCounterparties(session: SessionTokenAccessor, clientId: string): Promise<VendorCounterpartyRow[]> {
-  return getRows<VendorCounterpartyRow>("counterparties", {
-    select: "id,name,registration_normalized",
-    filters: { client_id: `eq.${clientId}`, kind: "eq.vendor", merged_into: "is.null", retired_at: "is.null" },
-    order: "name.asc",
-    session,
-  });
-}
 
 export type VendorBindingStatus = "proposed" | "live" | "revoked" | "declined" | "expired" | string;
 
@@ -160,26 +132,6 @@ export type VendorBindingDetail = {
  *  non-existent id. */
 export function getVendorBinding(session: SessionTokenAccessor, bindingId: string): Promise<VendorBindingDetail> {
   return callDoor<VendorBindingDetail>("get_vendor_binding", { p_binding: bindingId }, { session });
-}
-
-/** clara.propose_vendor_identity_binding — the payload is EXACTLY
- *  `{client_id, counterparty_id}` (0028:721-729's closed-key check); never
- *  add a third key here even for a caller that has more context. */
-export function proposeVendorIdentityBinding(
-  session: SessionTokenAccessor,
-  clientId: string,
-  counterpartyId: string,
-): Promise<unknown> {
-  return callDoor(
-    "propose_vendor_identity_binding",
-    { p_proposal: { client_id: clientId, counterparty_id: counterpartyId }, p_op_key: crypto.randomUUID() },
-    { session },
-  );
-}
-
-/** clara.sign_vendor_identity_binding — admin+. */
-export function signVendorIdentityBinding(session: SessionTokenAccessor, bindingId: string): Promise<unknown> {
-  return callDoor("sign_vendor_identity_binding", { p_binding: bindingId, p_op_key: crypto.randomUUID() }, { session });
 }
 
 /** clara.revoke_vendor_identity_binding — bookkeeper+; `reason` required. */

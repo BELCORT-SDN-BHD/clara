@@ -23,6 +23,25 @@ const env = {
   NEXT_PUBLIC_SUPABASE_URL: `${appOrigin}/e2e-supabase`,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_clara_e2e_only",
   CLARA_E2E_ROUTE_ERROR_PROBE: "1",
+  // #1022 — THE INVITE MAIL CAPABILITY, ENABLED, WITH BOTH OUTBOUND LEGS FENCED TO THIS SAME
+  // MOCK ORIGIN. Until this ticket the four required variables (`lib/members/invite-mail.ts`'s
+  // `INVITE_MAIL_ENV_NAMES`) were deliberately absent, so `inviteMailCapability` always answered
+  // `mail_not_configured` and neither outbound call the courier can make was ever reached in a
+  // browser walk. The three placeholders below are harness-only strings (`scripts/check-leaks.mjs`
+  // would flag anything credential-shaped; these are short, plainly fake, and never touch a real
+  // key format), read by a route this harness's own mock answers — no value here is ever posted
+  // anywhere outside this process. `CLARA_E2E_INVITE_MAIL_ENDPOINT` (#874) and
+  // `CLARA_E2E_INVITE_IDENTITY_ENDPOINT` (#1022) are what make that true: BOTH are loopback URLs
+  // under this SAME `/e2e-supabase` prefix (ADV-1's fence honours only a loopback host), so
+  // `productionInviteMailer`'s `send()` and its `admin()` client both land on
+  // `members-lifecycle-mock.mjs`'s own handlers rather than Resend or a real Supabase project.
+  // `members-invite-walk.spec.ts` is the one spec that reaches any of this; every other walk's
+  // `/api/invite` traffic (there is none today) would land on the same fenced mock, never outside.
+  SUPABASE_SERVICE_ROLE_KEY: "e2e-service-role",
+  RESEND_API_KEY: "e2e-resend-key",
+  INVITE_MAIL_FROM: "ClaraBook <invites@e2e.clara.test>",
+  CLARA_E2E_INVITE_MAIL_ENDPOINT: `${appOrigin}/e2e-supabase/e2e-invite-mail-capture`,
+  CLARA_E2E_INVITE_IDENTITY_ENDPOINT: `${appOrigin}/e2e-supabase`,
   // FS-4 C-6 Lane B. The confirm wall reaches C-5's ONE runtime endpoint rather
   // than a stub, and the gate the Lane-A skeleton left for exactly this moment
   // is flipped below.
