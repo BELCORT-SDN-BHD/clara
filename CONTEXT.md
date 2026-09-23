@@ -801,6 +801,22 @@ _Avoid_: A rule the product infers from an asset's own evidence (that is exactly
 particulars is not); a class finer than the account; a back-fill of an asset already waiting; a
 value an acquisition itself states (that always wins, because a policy fills only what is absent).
 
+**Depreciation particulars proposal**:
+What Clara proposes when an acquisition lands on an enrolled asset account that carries no default
+depreciation policy: a method, a useful life or rate, a residual and an in-service date, with the ONE
+line she derived them from. It travels inside the dependent particulars question and pre-fills every
+answering entrance, and it is never applied on its own — a person confirms it or edits it, and what
+is recorded is what they confirmed, under their name. A driver is proposed only where a ground
+exists: the enrolment's own rule (an enrolment with no accumulated-depreciation account admits "not
+depreciated" and nothing else), a recorded note about this client, the account's own retired policy,
+or the account's other completed assets WHERE THEY AGREE. Where nothing grounds a method the
+proposal says so and leaves it empty; only the two facts that are not estimates — the acquisition's
+posting date and a nil residual — are always proposed.
+_Avoid_: A useful life inferred from an asset's name or class; a method picked between two of the
+account's own assets that disagree; a proposal applied without a person; a value a surface repaired
+into a plausible one; treating the reason line as the question's own reason (that says why Clara is
+asking; this says where the values came from).
+
 **Depreciation change class**:
 What KIND of change a revision to an asset's depreciation particulars is, recorded on the generation
 the revision MINTED and never on the one it superseded. Three are recognised — an *estimate* change

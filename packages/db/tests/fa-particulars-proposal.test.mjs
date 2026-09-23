@@ -194,7 +194,7 @@ test("p933.read.firm_walled a person of ANOTHER firm reads nothing for the same 
 
 test("p933.wire.object_only the carrier is lawful BECAUSE source_ref is constrained to an object — a non-object is refused, so an extra key is the only shape this ticket needs", async (t) => {
   if (await gate(t)) return;
-  const w = await acqWorld();
+  await acqWorld();
   const client = await acqClient("proposal_object_only");
   const a = await armedAcquisition({ client });
   const out = await postAcquisition(a);
