@@ -712,9 +712,10 @@ The staff-advance enrolment a claim is recorded against — an account dedicated
 _Avoid_: An employee record; a user; a counterparty; a free-text name typed on each claim.
 
 **Accrual adjustment**:
-A cost a period has incurred but nobody has invoiced yet, recorded with the particulars that make it
-checkable: the amount, the expense account it charges and the non-control liability account it
-accrues into, the SERVICE PERIOD it belongs to, the rule that selects each period's amount, the
+Something a period has earned or incurred that nobody has invoiced yet, recorded with the
+particulars that make it checkable: the side it runs on, the amount, the profit-and-loss account it
+charges or earns and the non-control balance-sheet account it accrues into, the SERVICE PERIOD it
+belongs to, the rule that selects each period's amount, the
 window its authority covers, and the instruction that authorised it. Its authority window runs
 INSIDE the service period it names — it starts no earlier and ends no later, and it always ends — so
 every entry it posts falls within the term it claims to accrue for, and its schedule must reach at
@@ -725,6 +726,20 @@ event and the accounting work for it — and posts nothing.
 _Avoid_: A balanced journal entry wearing a marker; a periodic stock adjustment or a supplied
 payroll obligation (those record a movement the period's own facts establish, have no schedule and
 no future occurrence); a provision or an estimate the product worked out.
+
+**Accrual side**:
+Which way one accrual runs, and therefore which two account types its legs may name: `expense` —
+Dr the expense account / Cr a non-control accrued-liability account, for a cost nobody has billed
+yet; `revenue` — Dr a non-control asset (accrued income) / Cr the income account, for a service
+delivered and not yet invoiced. It is stated when the accrual is configured and it is not
+restatable: a correction restates what an accrual says, it never turns one side into the other.
+An accrual that states no side at all is an expense accrual, which is what every row and every
+caller that predates the revenue side means. Accrued income is presented apart from invoiced trade
+receivables, so the asset leg is checked (active, an asset, not a control account) and suggested —
+`1180 Accrued Income` on the standard chart — never rostered.
+_Avoid_: A second lane for revenue accruals; a sign on the amount; reading the side off the account
+types (the side decides which types are admissible, not the other way round); "debit side" /
+"credit side" (both legs exist on both sides — only which one is debited moves).
 
 **Accrual reversal**:
 The second leg of one accrual's schedule: the same entry with both sides exchanged, due on the first

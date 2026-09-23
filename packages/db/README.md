@@ -4861,3 +4861,93 @@ before the widened CHECK, and a prestate that reports FIRST APPLY or REDO instea
 this file's own objects — the five bodies it recuts are each pinned at their pre-image OR at this
 file's own output and must be at exactly one of the two, so a half-applied state is refused by name.
 Both branches were driven on `clara_l03`: the real first apply, then `CLARA_MIGRATION_REDO`.
+
+## 0304 — the accrual lane gains a revenue side (#942, riders wave 4, lane 03)
+
+At month end a service has been delivered and the invoice has not been issued. The accountant
+states the amount and the service period; the books should carry **Dr accrued income (an asset) /
+Cr the revenue account** on the due date and its exact reverse on the first day of the following
+month, so that when the invoice is finally issued the estimate and the invoice net to ONE revenue
+amount for the period. Before this file the lane could only accrue an expense. It is now the SAME
+lane with a **side** — one lane with a side, not a second lane, which is the owner's own 2026-09-18
+decision quoted in #942's body.
+
+**The two column names stay, and that is a constraint rather than a preference.**
+`clara.accrual_adjustments.expense_account_code` is now THE PROFIT-AND-LOSS LEG (an expense account
+under `side='expense'`, an income account under `side='revenue'`) and `liability_account_code` is
+THE BALANCE-SHEET LEG (a non-control liability, or the accrued-income asset). The names are
+historical — 0222 minted them when the lane had one side — and they are not renamed here because the
+wire keys of `p_accrual` are the same two words and the tool that sends them
+(`packages/runtime/lib/accrual-basis.ts`, `start_accrual_work`) is FROZEN: renaming them would break
+a hosted tool the moment this migration applied. Renaming the COLUMNS while keeping the KEYS would
+leave the estate with two names for one thing, which is worse. #942's report carries the rename as a
+successor-contract follow-up for the `chatTurn_v22` cut, where that tool is re-cut anyway.
+
+**An absent side is `expense`, everywhere, decided by one body.** The column is
+`not null default 'expense'`, so every row written before this file reads `expense` with no backfill
+statement at all, and `clara._accrual_side(jsonb)` answers what an absent or blank key means for the
+door, the canonical form, the basis builder and every wall — they cannot disagree about it.
+`clara._accrual_sides()` mirrors `clara._accrual_methods()`: the closed set lives in a function, the
+table's CHECK carries the same two literals, and the tail proves the two agree by DRIVING a
+byte-identical predicate on a temporary table (both members accepted; `both`, `income`, a blank and
+`Expense` each refused 23514) rather than by comparing two spellings.
+
+**The pair is judged BY the side, through the SAME predicate and the same typed refusal reasons.**
+`clara._assert_accrual_account` now judges four types instead of two, so its message grew an article
+(`must name an income account`, not `a income account`) and its non-control token names WHICH leg
+refused: `non_control_liability` renders byte-identically to what the expense side has always
+raised, and the revenue side's asset leg gets `non_control_asset`. The non-control rule is the same
+rule for the same reason on both sides — a control account reconciles to identified detail
+(CONTEXT.md, "Control account") and an accrual has none: an unbilled fee is no more an open item of
+the receivables ledger than an un-invoiced supply is one of the payables ledger.
+
+**The side decides which leg is debited, and the expense side is byte-unchanged.**
+`clara._accrual_journal_basis` builds `[Dr asset, Cr income]` under `revenue` and its old
+`[Dr expense, Cr liability]` under `expense` — the `else` arm is the old body, comment for comment,
+so no posted entry and no frozen revision basis in the estate reads differently after this file. The
+REVERSAL leg needed nothing: `clara._plan_occurrence_basis` produces it by swapping every line's
+debit and credit, which is already side-agnostic (pinned here, untouched, re-hashed in the tail).
+`clara._plan_accrual_period_line` (#937's per-period override) applies the same mirror to the figure
+a person stated for one due date, so a per-period accrual posts the right way round on either side.
+
+**The side is part of the accrual's identity, in two places.** It joins
+`clara._accrual_canonical`, so two configurations differing only in their side hash differently and
+one op key can never answer for both (`p942.op_key` drives exactly that). And
+`clara.correct_accrual_adjustment` REFUSES a correction that asks for the other side —
+`accrual_side_immutable`, CLR10, on `accrual.side`. A correction restates the particulars of the
+accrual a plan is running; flipping the side would leave a schedule whose posted periods are
+Dr expense / Cr liability and whose next period is Dr asset / Cr income, under one authority and one
+purpose. The honest act is to let that authority end and configure the other side's own accrual.
+
+**The "a document arrived inside an accrued period" read (#938, 0302) gains its revenue arm by
+saying what it is about.** The predicate was already side-agnostic — it joins the accrual's own
+profit-and-loss leg, which on a revenue accrual IS the income account, so an issued invoice or a
+receipt posting to it inside a posted, un-reversed period already surfaced the item (MEASURED before
+this file was written). What it could not do was name the side: it called every collision "a
+document-sourced entry". This file splices two additive edits onto the INSTALLED body — the sentence
+names the side (and the expense side's own words render character for character as #938 shipped
+them), and the row carries `accrual_side`, derived at json-build time from the shared `id` exactly
+as `asset_id`/`advance_id`/`authority_id` are. A SPLICE rather than an embedded recut, for a reason
+this wave makes concrete: other lanes are adding row kinds to that same body in the same wave, and a
+file that embedded its own copy would silently drop whichever arm landed at a lower migration number.
+
+**No account is minted.** `1180 Accrued Income` already exists by code and name (0295,
+`my_sme_starter` v2) under the owner's 2026-09-20 ruling that #941 and #942 SHARE one row: this file
+consumes it, and the battery's `p942.standard_chart` cell reaches it by applying the CURRENT
+published platform template through the real doors rather than by planting a look-alike.
+
+**No new granted name, so no `rig-meta.mjs` cohort** — the 0285/0303 shape, not the 0284/0302 one.
+Both functions this file adds are ungranted internals, and the tail asserts that no `clara\_%` role
+but `clara_fn_owner` can execute either.
+
+**Redo-safe by construction** ("Redo (#957)" above): `add column if not exists`,
+`drop constraint if exists` before the CHECK, `create or replace function` throughout, and a splice
+that recognises its own marker and skips rather than doubling. The prestate pins each recut body at
+its pre-image OR at this file's own output and stops dead if any is at NEITHER; a mixed read is
+reported rather than refused, because a migration applies in one transaction and the only way to see
+a mixture is a REDO of a file whose recut set grew between two redos on a development rig — which is
+how this file was built, one slice at a time. Both branches were driven on `clara_l03`: the redo on
+the live database, and the FIRST-APPLY branch of the CURRENT file inside a transaction that restored
+all ten pre-images (each re-created from 0222's or 0303's own statement and verified by sha against
+the pin), un-spliced the queue, dropped the column and the two functions, ran the whole file and
+rolled back.
