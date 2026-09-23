@@ -23,12 +23,13 @@ import {
   enrolDeferredAccount, retirePrepaymentAccount, enrolmentRow, enrolmentsFor,
   deferredRevenueScene, DEFERRED_PURPOSE, NOT_LIABILITY_AXIS,
   createRecognitionSchedule, recognitionScheduleRow, recognitionScheduleCountFor,
-  recordStatedTerm, DR_REASON, RECOGNITION_KIND, RECOGNITION_PATTERN, REVENUE_BASIS,
+  recordStatedTerm, DR_REASON, DR_AXIS, RECOGNITION_KIND, RECOGNITION_PATTERN, REVENUE_BASIS,
+  advanceReceipt,
 } from "./revenue-recognition-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 2;
+const EXPECTED_CELLS = 4;
 
 before(async () => {
   ready = await (async () => {
@@ -289,4 +290,127 @@ cell("p941.create.configures — an advance receipt with no stated term is refus
     "a second recognition schedule over one receipt");
   assert.equal(dup.detail.schedule_id, made.schedule_id);
   assert.equal(await recognitionScheduleCountFor(scene.receipt), 1);
+});
+
+// ===========================================================================================
+// AC2 / AC4 — EVERY REASON A RECEIPT CANNOT BE RECOGNISED, answered by name on the SOURCE side.
+// ===========================================================================================
+
+cell("p941.create.refusals — a draft receipt, a receipt with no liability leg, a receipt with two, an unenrolled account and a pattern this estate does not offer are each refused by name; the roster answers ahead of the shared wall; enrolling the account makes the same call succeed; and not one refusal writes a schedule", async () => {
+  const scene = await deferredRevenueScene("refuse", {
+    cents: 90000, termMonthsBack: 4, termMonths: 3, enrol: false });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#941 battery: a three-month retainer paid up front" });
+  const call = (over = {}) => createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef, ...over });
+
+  // (a) THE ROSTER ANSWERS FIRST, and it names the remedy and the panel — the axis #940's own web
+  // surface already renders, so a twin that spells it identically inherits the surface for free.
+  const notEnrolled = await assertPair(CLR.badRequest, DR_REASON.sourceUnfit, () => call(),
+    "recognising into an account nobody enrolled");
+  assert.equal(notEnrolled.detail.axis, DR_AXIS.notEnrolled);
+  assert.equal(notEnrolled.detail.deferred_account_code, scene.deferred);
+  assert.equal(notEnrolled.detail.remedy, "clara.enrol_prepayment_account");
+  assert.equal(notEnrolled.detail.panel, "client_registers_prepayment_accounts");
+  assert.equal(await recognitionScheduleCountFor(scene.receipt), 0, "…and it configured nothing");
+
+  // …AND IT IS A GATE, NOT A BAN: enrolling the very same account makes the very same call
+  // succeed. A refusal a person cannot clear would be a wall, and this one is a door.
+  await enrolDeferredAccount(scene.bob, { client: scene.client, account: scene.deferred });
+  const ok = await call();
+  assert.ok(ok.schedule_id, "once the account is on the roster the same call configures");
+  assert.equal(ok.deferred_account_code, scene.deferred);
+
+  // (b) A DRAFT RECEIPT. A schedule recognises money that is ON the books.
+  const draft = await advanceReceipt(scene, { cents: 30000, approve: false, tag: "draft" });
+  const notPosted = await assertPair(CLR.badRequest, DR_REASON.sourceUnfit,
+    () => call({ sourceEntry: draft.entry }), "recognising a receipt that has not posted");
+  assert.equal(notPosted.detail.axis, DR_AXIS.notPosted);
+  assert.equal(notPosted.detail.status, "draft");
+
+  // (c) NO CANDIDATE LEG AT ALL — a receipt taken straight to revenue has nothing deferred about
+  // it, and the count is REPORTED rather than guessed at.
+  const straight = await advanceReceipt(scene, {
+    cents: 25000, creditIncome: scene.revenue, tag: "straight" });
+  const noLeg = await assertPair(CLR.badRequest, DR_REASON.sourceUnfit,
+    () => call({ sourceEntry: straight.entry }),
+    "recognising a receipt that credits no liability");
+  assert.equal(noLeg.detail.candidate_legs, 0);
+
+  // (d) TWO CANDIDATE LEGS. Picking one of them would be the database choosing a number.
+  const second = await account(scene.alice, {
+    client: scene.client, code: "20300002", name: "Deferred maintenance revenue",
+    type: "liability" });
+  const ambiguous = await advanceReceipt(scene, {
+    cents: 40000, extraLiability: { code: second, cents: 15000 }, tag: "ambiguous" });
+  const twoLegs = await assertPair(CLR.badRequest, DR_REASON.sourceUnfit,
+    () => call({ sourceEntry: ambiguous.entry }),
+    "recognising a receipt that credits two liability accounts");
+  assert.equal(twoLegs.detail.candidate_legs, 2,
+    "the ambiguity is reported as a COUNT, so a surface can say what it found");
+  assert.equal(await recognitionScheduleCountFor(ambiguous.entry), 0);
+
+  // (e) ONE PATTERN ONLY. The argument exists so a caller can ASK; the answer names what this
+  // estate does offer rather than silently substituting it.
+  const pattern = await assertPair(CLR.badRequest, DR_REASON.patternUnsupported,
+    () => call({ sourceEntry: draft.entry, pattern: "usage" }),
+    "recognising on a usage-based pattern");
+  assert.equal(pattern.detail.pattern, "usage");
+  assert.deepEqual(pattern.detail.supported, ["straight_line"]);
+  // …and it is answered BEFORE anything about the receipt, which is why a DRAFT receipt still
+  // gets the pattern refusal rather than the not-posted one: an argument the door cannot honour
+  // is the caller's own mistake and is named first.
+  const milestone = await assertPair(CLR.badRequest, DR_REASON.patternUnsupported,
+    () => call({ pattern: "milestone" }), "recognising on a milestone pattern");
+  assert.equal(milestone.detail.pattern, "milestone");
+});
+
+// ===========================================================================================
+// AC2 — THE REVENUE ACCOUNT IS A JUDGEMENT, AND IT CARRIES ITS GROUNDS.
+// ===========================================================================================
+
+cell("p941.target.refusals — the revenue account must be named, must be on this client's chart, must be an INCOME account, must pass the estate's own eligibility wall, and must arrive with the accountant's written grounds", async () => {
+  const scene = await deferredRevenueScene("target", { cents: 90000, termMonths: 3 });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#941 battery: a three-month retainer paid up front" });
+  const call = (over = {}) => createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef, ...over });
+
+  const missing = await assertPair(CLR.badRequest, DR_REASON.targetUnderivable,
+    () => call({ revenueAccount: "   " }), "recognising with no revenue account named");
+  assert.equal(missing.detail.axis, DR_AXIS.accountMissing);
+
+  const unknown = await assertPair(CLR.badRequest, DR_REASON.targetIneligible,
+    () => call({ revenueAccount: "49999999" }), "recognising into a code this chart does not hold");
+  assert.equal(unknown.detail.axis, DR_AXIS.accountUnknown);
+  assert.equal(unknown.detail.account_code, "49999999");
+
+  // RECOGNISING AN ADVANCE CREDITS INCOME. The scene's own EXPENSE target would recognise it
+  // backwards; the deferred LIABILITY itself would move it sideways and never recognise anything.
+  const expense = await assertPair(CLR.badRequest, DR_REASON.targetIneligible,
+    () => call({ revenueAccount: scene.target }), "recognising into an expense account");
+  assert.equal(expense.detail.axis, DR_AXIS.notIncomeClass);
+  assert.equal(expense.detail.account_type, "expense");
+  const liability = await assertPair(CLR.badRequest, DR_REASON.targetIneligible,
+    () => call({ revenueAccount: scene.deferred }), "recognising into the liability itself");
+  assert.equal(liability.detail.axis, DR_AXIS.notIncomeClass);
+  assert.equal(liability.detail.account_type, "liability");
+
+  // A JUDGEMENT WITH NO RECORDED BASIS is what this wall exists to prevent.
+  const noBasis = await assertPair(CLR.badRequest, DR_REASON.targetUnderivable,
+    () => call({ revenueBasis: "   " }), "recognising with no stated grounds");
+  assert.equal(noBasis.detail.axis, DR_AXIS.basisMissing);
+
+  assert.equal(await recognitionScheduleCountFor(scene.receipt), 0,
+    "not one of the five refusals wrote a schedule");
+
+  // THE POSITIVE CONTROL, so none of the above is vacuous.
+  const made = await call();
+  assert.equal(made.revenue_account_code, scene.revenue);
 });

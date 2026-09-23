@@ -249,18 +249,29 @@ async function entryWriters() {
 export async function advanceReceipt(scene, {
   cents = 120000, deferred = DEFERRED_CODE, document = null, sha256 = null,
   sstCents = 0, sst = SST_OUTPUT_CODE, postingDate = null, tag = "receipt",
+  /** A SECOND credited liability leg, for the ambiguity cell. */
+  extraLiability = null,
+  /** Credit this INCOME account instead of a liability, for the no-candidate cell. */
+  creditIncome = null,
+  /** Leave the entry in DRAFT, for the not-posted cell. */
+  approve = true,
 } = {}) {
   const { draftEntryV3, approveEntry, freshResolution } = await entryWriters();
   const u = randomUUID().slice(0, 8);
+  const extra = extraLiability ? extraLiability.cents : 0;
   const lines = [
-    { account_code: BANK_CODE, debit_cents: cents + sstCents, credit_cents: 0,
+    { account_code: BANK_CODE, debit_cents: cents + sstCents + extra, credit_cents: 0,
       description: "advance received" },
-    { account_code: deferred, debit_cents: 0, credit_cents: cents,
-      description: "deferred revenue" },
+    { account_code: creditIncome ?? deferred, debit_cents: 0, credit_cents: cents,
+      description: creditIncome ? "revenue" : "deferred revenue" },
   ];
   if (sstCents > 0) {
     lines.push({ account_code: sst, debit_cents: 0, credit_cents: sstCents,
       description: "SST output tax" });
+  }
+  if (extraLiability) {
+    lines.push({ account_code: extraLiability.code, debit_cents: 0,
+      credit_cents: extraLiability.cents, description: "a second advance" });
   }
   const d = await draftEntryV3(scene.alice, {
     client: scene.client,
@@ -273,8 +284,10 @@ export async function advanceReceipt(scene, {
     lines,
     opKey: opk("p941-draft"),
   });
-  await approveEntry(scene.bob, {
-    entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("p941-appr") });
+  if (approve) {
+    await approveEntry(scene.bob, {
+      entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("p941-appr") });
+  }
   return { entry: d.entry_id, cents, sstCents };
 }
 
