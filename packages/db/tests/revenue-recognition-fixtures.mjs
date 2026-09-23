@@ -189,14 +189,55 @@ export async function createRecognitionScheduleFor({
   return r.rows[0].result;
 }
 
+/** The same OBO call on whatever role a cell names — the instrument for "no other lane reaches it". */
+export async function createRecognitionScheduleForAs(role, {
+  client, author, sourceEntry, revenueAccount, revenueBasis = REVENUE_BASIS,
+  purpose = "Membership fee recognition", authorityRef, opKey = null,
+  pattern = RECOGNITION_PATTERN,
+}) {
+  const r = await roleQuery(role,
+    namedCall("create_revenue_recognition_schedule_for", DR_OBO_SPECS),
+    [client, author, sourceEntry, revenueAccount, revenueBasis, purpose,
+      JSON.stringify(authorityRef), opKey ?? opk("p941-obo"), pattern]);
+  return r.rows[0].result;
+}
+
+const DR_READ_SPECS = [
+  { name: "p_firm", cast: "uuid" }, { name: "p_client", cast: "uuid" },
+  { name: "p_source_entry", cast: "uuid" },
+];
+
 /** The machine-lane read of the RECORDED term — `clara_runtime` only, no document bytes ever. */
 export async function readRecognitionSourceFor({ firm, client, sourceEntry }) {
   const r = await roleQuery(ROLES.runtime,
-    namedCall("read_revenue_recognition_source_for", [
-      { name: "p_firm", cast: "uuid" }, { name: "p_client", cast: "uuid" },
-      { name: "p_source_entry", cast: "uuid" },
-    ]), [firm, client, sourceEntry]);
+    namedCall("read_revenue_recognition_source_for", DR_READ_SPECS), [firm, client, sourceEntry]);
   return r.rows[0].result;
+}
+
+export async function readRecognitionSourceForAs(role, { firm, client, sourceEntry }) {
+  const r = await roleQuery(role,
+    namedCall("read_revenue_recognition_source_for", DR_READ_SPECS), [firm, client, sourceEntry]);
+  return r.rows[0].result;
+}
+
+/** Every clara function of the DEFERRED-REVENUE LANE with the six application roles' EXECUTE bits,
+ *  read POSITIVELY off the catalog. "The runtime role reaches the twin and the narrow read and
+ *  NOTHING ELSE" is a claim about every member of the lane, so the lane is enumerated rather than
+ *  sampled. */
+export async function recognitionLaneGrants() {
+  const r = await rootQuery(
+    `select p.oid::regprocedure::text as signature, p.proname,
+            has_function_privilege('clara_authenticated', p.oid, 'execute') as authenticated,
+            has_function_privilege('clara_runtime', p.oid, 'execute') as runtime,
+            has_function_privilege('clara_agent_ro', p.oid, 'execute') as agent_ro,
+            has_function_privilege('clara_wake_interactive', p.oid, 'execute') as wake_interactive,
+            has_function_privilege('clara_wake_proactive', p.oid, 'execute') as wake_proactive,
+            has_function_privilege('public', p.oid, 'execute') as pub
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara'
+        and (p.proname ~ 'revenue_recognition' or p.proname ~ 'deferred_revenue')
+      order by 1`);
+  return r.rows;
 }
 
 export async function getRecognitionSchedule(sub, schedule) {

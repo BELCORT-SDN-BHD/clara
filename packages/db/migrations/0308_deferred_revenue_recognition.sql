@@ -1447,6 +1447,188 @@ begin
 end $fn$;
 
 -- =====================================================================================
+-- §E2 — clara.create_revenue_recognition_schedule_for — THE ON-BEHALF TWIN, IN #915'S SHAPE.
+--
+-- The ticket asks for "an on-behalf twin door in the shape of #915", and this is that shape line
+-- for line: `clara_runtime` ONLY, the initiator in an ARGUMENT because a runtime connection
+-- carries no `request.jwt.claims` at all, FOUR walls of its own (the op key, a null author, the
+-- client ladder, the LIVE authority recheck) and then the same shared core the human door runs.
+--
+-- WHY THE FOUR WALLS AND NOTHING ELSE. Every rule that is not about WHO is calling lives in the
+-- core, so it can never be answered differently here than at the human door — which is what makes
+-- "the twin's refusal vocabulary matches the human door's" a fact rather than a promise.
+--
+-- THE AUTHORITY IS RE-CHECKED LIVE, never trusted from the caller: a membership withdrawn since
+-- the conversation began answers CLR04 `authority_lost`, and a NON-MEMBER author answers the SAME
+-- CLR11 `client_not_found` an unknown client answers, because a sentence that differed would be
+-- the existence oracle this shape exists to prevent.
+-- =====================================================================================
+create or replace function clara.create_revenue_recognition_schedule_for(
+  p_client uuid, p_author uuid, p_source_entry uuid, p_revenue_account text,
+  p_revenue_basis text, p_purpose text, p_authority_ref jsonb, p_op_key text,
+  p_pattern text default 'straight_line')
+returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare v_firm uuid; v_client_status text; v_role text; v_member_status text;
+begin
+  -- #941 — THE FOUR WALLS THIS ENTRANCE OWNS. Everything after them is the shared core.
+  if p_op_key is null or p_op_key ~ '^\s*$' then
+    raise exception 'configuring a revenue recognition schedule requires its idempotency key'
+      using errcode='CLR10', detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  -- A NULL AUTHOR IS ITS OWN REFUSAL, not a `client_not_found` in disguise: "no human was named"
+  -- and "the human named is nobody here" are different mistakes, and only the first one is the
+  -- caller's own shape. It cannot leak anything — it is answered before the client is read.
+  if p_author is null then
+    raise exception 'an on-behalf-of configuration names the human it acts for' using errcode='CLR10',
+      detail='{"reason":"invalid_author","field":"author","constraint":"present"}';
+  end if;
+  select c.firm_id, c.status into v_firm, v_client_status from clara.clients c where c.id = p_client;
+  if v_firm is null then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  select m.role, m.status into v_role, v_member_status from clara.firm_memberships m
+   where m.user_id = p_author and m.firm_id = v_firm
+   order by (m.status = 'active') desc, m.created_at desc limit 1;
+  if v_role is null then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  if v_member_status <> 'active' then
+    raise exception 'the human this configuration acts for is no longer an active member of this firm'
+      using errcode='CLR04',
+        detail='{"reason":"authority_lost","field":"author"}';
+  end if;
+  if clara.role_rank(v_role) < clara.role_rank('bookkeeper') then
+    raise exception 'configuring a revenue recognition schedule requires a bookkeeper or above'
+      using errcode='CLR04', detail='{"reason":"insufficient_role"}';
+  end if;
+  if v_client_status <> 'active' then
+    raise exception 'client is not active -- no new revenue recognition schedule'
+      using errcode='CLR10', detail='{"reason":"client_inactive"}';
+  end if;
+
+  return clara._revenue_recognition_core(p_firm => v_firm, p_client => p_client,
+    p_actor => p_author, p_lane => 'obo', p_source_entry => p_source_entry,
+    p_revenue_account => p_revenue_account, p_revenue_basis => p_revenue_basis,
+    p_purpose => p_purpose, p_authority_ref => p_authority_ref, p_op_key => p_op_key,
+    p_pattern => p_pattern);
+end $fn$;
+
+-- =====================================================================================
+-- §E3 — clara.read_revenue_recognition_source_for — THE MACHINE-LANE READ OF THE RECORDED TERM.
+--
+-- #915's `clara.read_prepayment_source_for` for this side of the books, and its two rules are the
+-- ones that matter: it returns the RECORDED term — the period a person recorded or stated, the
+-- kind of basis it rests on and the grounds they wrote — and it returns NO DOCUMENT BYTES, ever.
+-- The byte door stays 0190's, unreachable from here.
+--
+-- SCALARS, NOT RECORDS, and that is a defect #915 met on the rig rather than a style: a plpgsql
+-- `record` that no `select into` ever reaches raises "record is not assigned yet" the moment a
+-- field is read, so a memo-only receipt (no document, hence no document-carrier select) would make
+-- the read RAISE instead of reporting the absence it exists to report. Scalars start NULL, which
+-- is exactly what "nothing recorded" means here.
+-- =====================================================================================
+create or replace function clara.read_revenue_recognition_source_for(
+  p_firm uuid, p_client uuid, p_source_entry uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = clara, pg_temp as $fn$
+declare
+  v_entry record; v_legs int;
+  v_leg_code text; v_leg_cents bigint;
+  v_sp_id uuid; v_sp_start date; v_sp_end date; v_sp_kind text; v_sp_basis text;
+  v_st_id uuid; v_st_start date; v_st_end date; v_st_reason text;
+  v_sched_id uuid; v_sched_plan uuid; v_sched_source text;
+  v_term jsonb;
+begin
+  if p_firm is null or p_client is null or p_source_entry is null then
+    raise exception 'the runtime recognition-source read names firm, client and source entry'
+      using errcode='CLR10', detail='{"reason":"revenue_recognition_read_scope_required"}';
+  end if;
+  select je.id, je.status, je.document_id, je.posting_date into v_entry
+    from clara.journal_entries je
+   where je.id = p_source_entry and je.client_id = p_client and je.firm_id = p_firm;
+  if v_entry.id is null then
+    raise exception 'recognition source entry not found in your firm' using errcode='CLR11',
+      detail='{"reason":"revenue_recognition_source_not_found"}';
+  end if;
+
+  -- THE DEFERRED LEG, by the door's own predicate: exactly one CREDITED LIABILITY line that is not
+  -- the tax leg. Zero or many is reported as a COUNT rather than guessed at, for the same reason
+  -- the door refuses it.
+  select count(*)::int into v_legs
+    from clara.journal_lines jl
+    join clara.coa_accounts ca
+      on ca.client_id = jl.client_id and ca.account_code = jl.account_code
+   where jl.entry_id = p_source_entry and jl.credit_cents > 0
+     and ca.account_type = 'liability'
+     and coalesce(ca.special_acc_type, '') <> 'sst_output';
+  if v_legs = 1 then
+    select jl.account_code, jl.credit_cents into v_leg_code, v_leg_cents
+      from clara.journal_lines jl
+      join clara.coa_accounts ca
+        on ca.client_id = jl.client_id and ca.account_code = jl.account_code
+     where jl.entry_id = p_source_entry and jl.credit_cents > 0
+       and ca.account_type = 'liability'
+       and coalesce(ca.special_acc_type, '') <> 'sst_output';
+  end if;
+
+  -- THE RECORDED TERM. The document carrier first, because a document-bound receipt is the lane
+  -- 0140 built; then #939's person-stated carrier. A receipt that binds a document does not carry
+  -- a stated term at all (0305 refuses one), so the two arms cannot both answer.
+  if v_entry.document_id is not null then
+    select sp.id, sp.period_start, sp.period_end, sp.basis_kind, sp.basis
+      into v_sp_id, v_sp_start, v_sp_end, v_sp_kind, v_sp_basis
+      from clara.document_service_periods sp
+     where sp.document_id = v_entry.document_id and sp.superseded_at is null;
+  end if;
+  select t.id, t.period_start, t.period_end, t.reason
+    into v_st_id, v_st_start, v_st_end, v_st_reason
+    from clara.prepayment_stated_terms t
+   where t.source_entry_id = p_source_entry and t.superseded_at is null;
+
+  if v_sp_id is not null then
+    v_term := jsonb_build_object('source', 'document_service_period',
+      'service_period_id', v_sp_id, 'stated_term_id', null,
+      'period_start', to_char(v_sp_start,'YYYY-MM-DD'),
+      'period_end', to_char(v_sp_end,'YYYY-MM-DD'),
+      'basis_kind', v_sp_kind, 'basis_text', v_sp_basis);
+  elsif v_st_id is not null then
+    v_term := jsonb_build_object('source', 'human_stated',
+      'service_period_id', null, 'stated_term_id', v_st_id,
+      'period_start', to_char(v_st_start,'YYYY-MM-DD'),
+      'period_end', to_char(v_st_end,'YYYY-MM-DD'),
+      'basis_kind', 'human_stated', 'basis_text', v_st_reason);
+  else
+    -- ABSENCE IS REPORTED AS ABSENCE, with the DOOR that fills it — never as an empty term a run
+    -- could read as "no term is needed". The remedy named is the HUMAN one, because a service
+    -- period is human-only by law and no agent path to it exists or ever will.
+    v_term := jsonb_build_object('source', null,
+      'service_period_id', null, 'stated_term_id', null,
+      'period_start', null, 'period_end', null, 'basis_kind', null, 'basis_text', null,
+      'remedy', case when v_entry.document_id is not null
+                     then 'clara.record_document_service_period'
+                     else 'clara.record_prepayment_stated_term' end);
+  end if;
+
+  select s.id, s.plan_id, s.term_source into v_sched_id, v_sched_plan, v_sched_source
+    from clara.revenue_recognition_schedules s
+   where s.source_entry_id = p_source_entry and s.firm_id = p_firm;
+
+  return jsonb_build_object(
+    'status', 'ok', 'firm_id', p_firm, 'client_id', p_client,
+    'source_entry_id', p_source_entry,
+    'entry', jsonb_build_object('status', v_entry.status, 'document_id', v_entry.document_id,
+      'posting_date', to_char(v_entry.posting_date,'YYYY-MM-DD')),
+    'deferred', jsonb_build_object('account_code', v_leg_code,
+      'total_cents', v_leg_cents, 'candidate_legs', v_legs),
+    'term', v_term,
+    'schedule', case when v_sched_id is null then null
+                     else jsonb_build_object('schedule_id', v_sched_id, 'plan_id', v_sched_plan,
+                            'term_source', v_sched_source) end);
+end $fn$;
+
+-- =====================================================================================
 -- §F — THE MONTHLY ADMISSION ARM: the mirror of the amortisation one, and nothing else moves.
 --
 -- `clara._plan_admit_occurrence` is the ONE body that turns a due date into an
@@ -1814,6 +1996,377 @@ begin
     'admitting', (p.status = 'active'), 'occurrences', v_rows);
 end $fn$;
 
+-- =====================================================================================
+-- §H — THE THREE HUMAN READS, in 0223's own shape: a list, a detail and an attention band.
+--
+-- `clara.revenue_recognition_schedules` carries no ACL at all, so a plain PostgREST table read
+-- 42501s and there is no second path to be tempted by. All three are definer doors at the VIEWER
+-- floor with a firm predicate inside each body.
+--
+-- THE LIFECYCLE VERBS ARE THE PLAN'S, NOT A SECOND SET. Pause, resume, end, revise, preview and
+-- catch-up are 0193's already-granted doors called on this schedule's `plan_id`; minting a
+-- recognition-shaped twin of each would be two lanes disagreeing about what "paused" means.
+-- =====================================================================================
+create or replace function clara._revenue_recognition_ctx(
+  p_schedule uuid, p_min_rank integer,
+  out actor uuid, out firm uuid, out sc clara.revenue_recognition_schedules)
+returns record language plpgsql stable security definer
+set search_path = clara, pg_temp as $fn$
+begin
+  select a.actor, a.firm into actor, firm from clara._human_ctx(p_min_rank) a;
+  select * into sc from clara.revenue_recognition_schedules
+   where id = p_schedule and firm_id = firm;
+  if sc.id is null then
+    raise exception 'revenue recognition schedule not found in your firm' using errcode='CLR11',
+      detail='{"reason":"revenue_recognition_schedule_not_found"}';
+  end if;
+end $fn$;
+
+create or replace function clara.get_revenue_recognition_schedule(p_schedule uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = clara, pg_temp as $fn$
+declare
+  v_ctx record; s clara.revenue_recognition_schedules; p clara.accounting_plans; r record;
+  v_occ jsonb; v_periods jsonb; v_entry record; v_covered date;
+  v_term_live boolean; v_term_superseded_by uuid; v_term_moved boolean;
+  v_term_current_start date; v_term_current_end date;
+  v_term_stated_by uuid; v_term_stated_at timestamptz; v_term_reason text;
+begin
+  select * into v_ctx from clara._revenue_recognition_ctx(p_schedule, clara.role_rank('viewer')) c;
+  s := v_ctx.sc;
+  select * into p from clara.accounting_plans where id = s.plan_id;
+  select * into r from clara.accounting_plan_revisions
+   where plan_id = s.plan_id and superseded_at is null;
+  v_covered := clara._plan_covered_through(s.plan_id);
+  select je.posting_date, je.memo, je.status into v_entry
+    from clara.journal_entries je where je.id = s.source_entry_id;
+
+  -- EVERY OCCURRENCE, with 0193's own projection — the COMMITTED receipt only, the entry id out of
+  -- its effects, the typed refusal reason, and the Work's own settled error where the refusal
+  -- happened at POSTING rather than at admission.
+  select coalesce(jsonb_agg(x order by x ->> 'due_date'), '[]'::jsonb) into v_occ
+    from (
+      select jsonb_build_object(
+        'occurrence_id', o.id, 'due_date', to_char(o.due_date,'YYYY-MM-DD'), 'leg', o.leg,
+        'period_key', to_char(o.period_key,'YYYY-MM-DD'), 'attempt', o.attempt,
+        'revision', o.revision, 'intent_key', o.intent_key, 'work_id', o.work_id,
+        'admitted_at', o.admitted_at, 'outcome', o.outcome, 'created_at', o.created_at,
+        'attempts', o.attempts,
+        'work_status', w.status, 'work_error', w.error,
+        'receipt_id', (select rc.id from clara.operation_receipts rc
+                        where rc.work_id = o.work_id and rc.outcome = 'committed'
+                        order by rc.created_at limit 1),
+        'entry_id', (select rc.effects ->> 'entry_id' from clara.operation_receipts rc
+                      where rc.work_id = o.work_id and rc.outcome = 'committed'
+                      order by rc.created_at limit 1)) as x
+        from clara.accounting_plan_occurrences o
+        left join clara.accounting_work w on w.id = o.work_id
+       where o.plan_id = s.plan_id
+    ) t;
+
+  select coalesce(jsonb_agg(y order by y ->> 'period_end'), '[]'::jsonb) into v_periods
+    from (
+      select (l || jsonb_build_object('occurrence',
+               (select e from jsonb_array_elements(v_occ) e
+                 where e ->> 'due_date' = l ->> 'period_end' limit 1))) as y
+        from jsonb_array_elements(s.period_lines) l
+    ) u;
+
+  -- THE TERM-LIVENESS FIELDS, over the carrier this schedule actually rode. `term_live` is the
+  -- AUDIT fact (is the row this schedule rode still the live statement?). `term_moved` is the fact
+  -- a SURFACE may act on: both term doors supersede unconditionally, so a re-record that restates
+  -- the SAME dates flips `term_live` while changing nothing a firm needs to act on. The comparison
+  -- is against the term that stands TODAY, never against an intermediate row of a corrected chain.
+  if s.term_source = 'human_stated' then
+    select (t.superseded_at is null), t.superseded_by, cur.period_start, cur.period_end,
+           (t.superseded_at is not null
+              and (cur.period_start, cur.period_end)
+                    is distinct from (t.period_start, t.period_end)),
+           t.stated_by, t.stated_at, t.reason
+      into v_term_live, v_term_superseded_by, v_term_current_start, v_term_current_end,
+           v_term_moved, v_term_stated_by, v_term_stated_at, v_term_reason
+      from clara.prepayment_stated_terms t
+      left join lateral (
+        select c.period_start, c.period_end from clara.prepayment_stated_terms c
+         where c.source_entry_id = t.source_entry_id and c.superseded_at is null limit 1) cur on true
+     where t.id = s.stated_term_id;
+  else
+    select (sp.superseded_at is null), sp.superseded_by, cur.period_start, cur.period_end,
+           (sp.superseded_at is not null
+              and (cur.period_start, cur.period_end)
+                    is distinct from (sp.period_start, sp.period_end))
+      into v_term_live, v_term_superseded_by, v_term_current_start, v_term_current_end, v_term_moved
+      from clara.document_service_periods sp
+      left join lateral (
+        select c.period_start, c.period_end from clara.document_service_periods c
+         where c.document_id = sp.document_id and c.superseded_at is null limit 1) cur on true
+     where sp.id = s.service_period_id;
+  end if;
+
+  return jsonb_build_object(
+    'schedule_id', s.id, 'client_id', s.client_id, 'plan_id', s.plan_id,
+    'revision', s.revision, 'kind', p.kind, 'status', p.status, 'purpose', p.purpose,
+    'source_entry_id', s.source_entry_id,
+    'source_posting_date', case when v_entry.posting_date is null then null
+                                else to_char(v_entry.posting_date,'YYYY-MM-DD') end,
+    'source_memo', v_entry.memo, 'source_status', v_entry.status,
+    'document_id', s.document_id, 'service_period_id', s.service_period_id,
+    'term_source', s.term_source, 'stated_term_id', s.stated_term_id,
+    'term_stated_by', v_term_stated_by, 'term_stated_at', v_term_stated_at,
+    'term_reason', v_term_reason,
+    'term_live', v_term_live, 'term_superseded_by', v_term_superseded_by,
+    'term_moved', v_term_moved,
+    'term_current_start', case when v_term_current_start is null then null
+                               else to_char(v_term_current_start,'YYYY-MM-DD') end,
+    'term_current_end', case when v_term_current_end is null then null
+                             else to_char(v_term_current_end,'YYYY-MM-DD') end,
+    'term_start', to_char(s.term_start,'YYYY-MM-DD'), 'term_end', to_char(s.term_end,'YYYY-MM-DD'),
+    'basis_kind', s.basis_kind)
+    -- THE ENVELOPE IS BUILT IN TWO HALVES AND CONCATENATED, and that is a LIMIT rather than a
+    -- taste: `jsonb_build_object` is variadic and PostgreSQL refuses more than 100 arguments
+    -- (54023). `||` over two objects is the estate's own spelling for the same value.
+    || jsonb_build_object(
+    'deferred_account_code', s.deferred_account_code,
+    'revenue_account_code', s.revenue_account_code,
+    'revenue_account_basis', s.revenue_account_basis,
+    'total_cents', s.total_cents, 'period_count', s.period_count,
+    'remainder_placement', s.remainder_placement, 'recognition_pattern', s.recognition_pattern,
+    'schedule_version', s.schedule_version,
+    'created_by', s.created_by, 'created_at', s.created_at,
+    'authority_kind', p.authority_kind, 'authority_ref', p.authority_ref,
+    'authorised_by', p.authorised_by, 'authorised_at', p.authorised_at,
+    'authority_from', to_char(p.authority_from,'YYYY-MM-DD'),
+    'covered_through', case when v_covered is null then null else to_char(v_covered,'YYYY-MM-DD') end,
+    'paused_at', p.paused_at, 'paused_by', p.paused_by, 'paused_reason', p.paused_reason,
+    'ended_at', p.ended_at, 'ended_by', p.ended_by, 'ended_reason', p.ended_reason,
+    'live_revision', case when r.revision is null then null else jsonb_build_object(
+      'revision', r.revision, 'frequency', r.frequency, 'day_rule', r.day_rule,
+      'day_of_month', r.day_of_month, 'timezone', r.timezone,
+      'effective_from', to_char(r.effective_from,'YYYY-MM-DD'),
+      'effective_to', case when r.effective_to is null then null else to_char(r.effective_to,'YYYY-MM-DD') end,
+      'basis', r.basis, 'basis_digest', r.basis_digest) end,
+    'periods', v_periods, 'occurrences', v_occ,
+    -- THE BOUNDARY SENTENCE THE SURFACE MUST SAY, answered by the database rather than written
+    -- into a component: accepted configuration is not a posted occurrence.
+    'configuration_only', true);
+end $fn$;
+
+create or replace function clara.list_revenue_recognition_schedules(p_client uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = clara, pg_temp as $fn$
+declare v_actor uuid; v_firm uuid; v_rows jsonb;
+begin
+  select a.actor, a.firm into v_actor, v_firm from clara._human_ctx(clara.role_rank('viewer')) a;
+  if not exists (select 1 from clara.clients c where c.id = p_client and c.firm_id = v_firm) then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  select coalesce(jsonb_agg(x order by x ->> 'created_at' desc), '[]'::jsonb) into v_rows
+    from (
+      select jsonb_build_object(
+        'schedule_id', s.id, 'plan_id', s.plan_id, 'purpose', p.purpose, 'status', p.status,
+        'source_entry_id', s.source_entry_id, 'document_id', s.document_id,
+        'term_start', to_char(s.term_start,'YYYY-MM-DD'),
+        'term_end', to_char(s.term_end,'YYYY-MM-DD'),
+        'term_source', s.term_source, 'stated_term_id', s.stated_term_id,
+        'term_stated_by', pst.stated_by, 'term_stated_at', pst.stated_at,
+        'term_reason', pst.reason,
+        'term_live', case when s.term_source = 'human_stated'
+                          then (pst.superseded_at is null)
+                          else (dsp.superseded_at is null) end,
+        'term_superseded_by', case when s.term_source = 'human_stated'
+                          then pst.superseded_by else dsp.superseded_by end,
+        'term_moved', case when s.term_source = 'human_stated'
+                          then (pst.superseded_at is not null
+                                and (pcur.period_start, pcur.period_end)
+                                      is distinct from (pst.period_start, pst.period_end))
+                          else (dsp.superseded_at is not null
+                                and (dcur.period_start, dcur.period_end)
+                                      is distinct from (dsp.period_start, dsp.period_end)) end,
+        'term_current_start', case
+          when s.term_source = 'human_stated' then
+            case when pcur.period_start is null then null
+                 else to_char(pcur.period_start,'YYYY-MM-DD') end
+          else case when dcur.period_start is null then null
+                    else to_char(dcur.period_start,'YYYY-MM-DD') end end,
+        'term_current_end', case
+          when s.term_source = 'human_stated' then
+            case when pcur.period_end is null then null
+                 else to_char(pcur.period_end,'YYYY-MM-DD') end
+          else case when dcur.period_end is null then null
+                    else to_char(dcur.period_end,'YYYY-MM-DD') end end,
+        'deferred_account_code', s.deferred_account_code,
+        'revenue_account_code', s.revenue_account_code,
+        'total_cents', s.total_cents, 'period_count', s.period_count,
+        'recognition_pattern', s.recognition_pattern,
+        'basis_kind', s.basis_kind, 'created_at', s.created_at,
+        'effective_from', case when r.effective_from is null then null
+                               else to_char(r.effective_from,'YYYY-MM-DD') end,
+        'effective_to', case when r.effective_to is null then null
+                             else to_char(r.effective_to,'YYYY-MM-DD') end,
+        -- HOW MANY PERIODS ACTUALLY PUT MONEY ON THE BOOKS. A committed receipt, never an admitted
+        -- Work: "admitted" and "posted" are two facts and the list says the second one.
+        'posted_periods', (select count(*)::int from clara.accounting_plan_occurrences o
+                            join clara.operation_receipts rc on rc.work_id = o.work_id
+                                                            and rc.outcome = 'committed'
+                            where o.plan_id = s.plan_id),
+        'occurrence_count', (select count(*)::int from clara.accounting_plan_occurrences o
+                              where o.plan_id = s.plan_id),
+        'next_due', (select to_char(e.due_date,'YYYY-MM-DD')
+                       from clara._plan_due_events(r.effective_from, r.frequency, r.day_rule,
+                              r.day_of_month, r.auto_reverse,
+                              greatest(r.effective_from, coalesce(
+                                (select max(o.due_date) + 1 from clara.accounting_plan_occurrences o
+                                  where o.plan_id = s.plan_id), r.effective_from)),
+                              coalesce(r.effective_to, r.effective_from + 3650), 1) e limit 1)
+      ) as x
+        from clara.revenue_recognition_schedules s
+        join clara.accounting_plans p on p.id = s.plan_id
+        left join clara.accounting_plan_revisions r
+               on r.plan_id = s.plan_id and r.superseded_at is null
+        -- LEFT, never INNER, on BOTH carriers: an inner join on one of them would silently DROP
+        -- every schedule that rode the other from its own firm's list (0285's own defect, fixed by
+        -- #939 on the expense side and never repeated here).
+        left join clara.document_service_periods dsp on dsp.id = s.service_period_id
+        left join lateral (
+          select c.period_start, c.period_end from clara.document_service_periods c
+           where c.document_id = dsp.document_id and c.superseded_at is null limit 1) dcur on true
+        left join clara.prepayment_stated_terms pst on pst.id = s.stated_term_id
+        left join lateral (
+          select c.period_start, c.period_end from clara.prepayment_stated_terms c
+           where c.source_entry_id = pst.source_entry_id and c.superseded_at is null limit 1) pcur on true
+       where s.client_id = p_client and s.firm_id = v_firm
+    ) t;
+  return jsonb_build_object('client_id', p_client, 'schedules', v_rows);
+end $fn$;
+
+create or replace function clara.list_revenue_recognition_attention(p_client uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = clara, pg_temp as $fn$
+declare v_actor uuid; v_firm uuid; v_a jsonb; v_b jsonb;
+        v_a_trunc boolean := false; v_b_trunc boolean := false;
+begin
+  select a.actor, a.firm into v_actor, v_firm from clara._human_ctx(clara.role_rank('viewer')) a;
+  if not exists (select 1 from clara.clients c where c.id = p_client and c.firm_id = v_firm) then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+
+  -- ARM A — "the last period did not post". THE PAGE IS ORDERED BEFORE IT IS CUT, and the envelope
+  -- says when the cut bit: a `limit 50` with no ORDER BY hands back an ARBITRARY fifty, so on a
+  -- client with more candidates than the cap the NEWEST refusal — the one this read exists to
+  -- surface — could simply be absent with nothing saying so.
+  with cand_a as (
+      select jsonb_build_object(
+        'arm', 'refusing', 'schedule_id', s.id, 'plan_id', s.plan_id, 'purpose', p.purpose,
+        'status', p.status, 'occurrence_id', o.id,
+        'due_date', to_char(o.due_date,'YYYY-MM-DD'),
+        'period_key', to_char(o.period_key,'YYYY-MM-DD'),
+        'attempt', o.attempt, 'work_id', o.work_id,
+        -- WHERE it stopped, because the operator's next move differs: an admission refusal is a
+        -- plan-lane fact, a posting refusal is a books fact recorded on the Work.
+        'stage', case when coalesce(o.outcome ->> 'state','') = 'refused' then 'admission'
+                      else 'posting' end,
+        'code', case when coalesce(o.outcome ->> 'state','') = 'refused' then o.outcome ->> 'code'
+                     else w.error ->> 'code' end,
+        'reason', case when coalesce(o.outcome ->> 'state','') = 'refused' then o.outcome ->> 'reason'
+                       else w.error ->> 'reason' end,
+        'message', case when coalesce(o.outcome ->> 'state','') = 'refused' then o.outcome ->> 'message'
+                        else w.error ->> 'message' end,
+        'work_status', w.status,
+        'catch_up_from', to_char(o.due_date,'YYYY-MM-DD'),
+        'catch_up_to', to_char(o.due_date,'YYYY-MM-DD')) as x,
+        o.due_date as sk
+        from clara.revenue_recognition_schedules s
+        join clara.accounting_plans p on p.id = s.plan_id
+        cross join lateral (
+          select o2.* from clara.accounting_plan_occurrences o2
+           where o2.plan_id = s.plan_id
+           order by o2.due_date desc, o2.created_at desc limit 1) o
+        left join clara.accounting_work w on w.id = o.work_id
+       where s.client_id = p_client and s.firm_id = v_firm and p.status <> 'ended'
+         and (
+           coalesce(o.outcome ->> 'state','') = 'refused'
+           or (o.work_id is not null
+               and w.status in ('failed','refused','cancelled','expired')
+               and not exists (select 1 from clara.operation_receipts rc
+                                where rc.work_id = o.work_id and rc.outcome = 'committed')))
+    )
+  select coalesce(jsonb_agg(p.x order by p.sk desc, p.x ->> 'occurrence_id'), '[]'::jsonb),
+         (select count(*) from cand_a) > 50
+    into v_a, v_a_trunc
+    from (select c.x, c.sk from cand_a c order by c.sk desc, c.x ->> 'occurrence_id' limit 50) p;
+
+  -- ARM B — "received in advance, not yet recognised". THE ONLY DURABLE TRACE of a create-time
+  -- refusal, because such a refusal writes no plan and no schedule row.
+  with cand_b as (
+      select jsonb_build_object(
+        'arm', 'unrecognised', 'entry_id', je.id,
+        'posting_date', to_char(je.posting_date,'YYYY-MM-DD'), 'memo', je.memo,
+        'document_id', je.document_id,
+        'deferred_account_code', x.account_code, 'amount_cents', x.credit_cents,
+        -- WHICH CARRIER this receipt's term lives in. A document-bound receipt's term belongs to
+        -- its document; a memo-only one's belongs to the person who states it.
+        'term_carrier', case when je.document_id is not null
+                             then 'document_service_period' else 'human_stated' end,
+        'has_live_term', case when je.document_id is not null
+          then exists (select 1 from clara.document_service_periods sp
+                        where sp.document_id = je.document_id and sp.superseded_at is null)
+          else exists (select 1 from clara.prepayment_stated_terms t
+                        where t.source_entry_id = je.id and t.superseded_at is null) end,
+        -- THE NEXT ACT, as a CLOSED TOKEN. The copy is the surface's; the fact is this read's.
+        'next_step', case
+          when (case when je.document_id is not null
+                then exists (select 1 from clara.document_service_periods sp
+                              where sp.document_id = je.document_id and sp.superseded_at is null)
+                else exists (select 1 from clara.prepayment_stated_terms t
+                              where t.source_entry_id = je.id and t.superseded_at is null) end)
+            then 'configure_schedule'
+          when je.document_id is not null then 'record_document_service_period'
+          else 'state_service_period' end) as y,
+        je.posting_date as sk
+        from clara.journal_entries je
+        cross join lateral (
+          -- THE SAME CANDIDATE PREDICATE THE DOOR USES, INCLUDING THE TAX EXCLUSION: a receipt
+          -- whose only other credited liability is SST output tax has exactly ONE candidate here,
+          -- exactly as it has at the door, so the band can never advertise a receipt the door
+          -- would refuse as ambiguous — nor hide one it would accept.
+          select jl.account_code, jl.credit_cents, count(*) over () as legs
+            from clara.journal_lines jl
+            join clara.coa_accounts ca on ca.client_id = jl.client_id
+                                      and ca.account_code = jl.account_code
+           where jl.entry_id = je.id and jl.credit_cents > 0
+             and ca.account_type = 'liability'
+             and coalesce(ca.special_acc_type, '') <> 'sst_output') x
+       where je.client_id = p_client and je.status = 'approved'
+         and je.reversed_by is null
+         and x.legs = 1
+         and not exists (select 1 from clara.revenue_recognition_schedules s
+                          where s.source_entry_id = je.id)
+         -- THE ROSTER, ASKED HERE BECAUSE THE DOOR ASKS IT. Arm B is an OFFER: every row it
+         -- carries is rendered with a "configure the schedule" action, so a row whose account is
+         -- not on the client's deferred-revenue roster would be an offer that could only refuse.
+         -- The predicate is `clara._prepayment_account_enrolled`, the SAME function the door
+         -- calls, so the band and the door cannot drift apart.
+         and clara._prepayment_account_enrolled(p_client, x.account_code, 'deferred_revenue')
+         -- …AND THE SAME ELIGIBILITY WALL, shaped as the DEBIT every period will post.
+         and clara._adj_line_eligibility_breach(p_client,
+               jsonb_build_array(jsonb_build_object('account_code', x.account_code,
+                 'debit_cents', 1, 'credit_cents', 0))) is null
+    )
+  select coalesce(jsonb_agg(q.y order by q.sk desc, q.y ->> 'entry_id'), '[]'::jsonb),
+         (select count(*) from cand_b) > 50
+    into v_b, v_b_trunc
+    from (select c.y, c.sk from cand_b c order by c.sk desc, c.y ->> 'entry_id' limit 50) q;
+
+  return jsonb_build_object('client_id', p_client, 'refusing', v_a, 'unrecognised', v_b,
+    -- THE CAP, SAID OUT LOUD. A band showing fifty of nine hundred without this reads as "nothing
+    -- else is failing", which is the exact misreading the whole read exists to prevent.
+    'refusing_truncated', v_a_trunc, 'unrecognised_truncated', v_b_trunc,
+    'cap', 50,
+    'attention', v_a || v_b);
+end $fn$;
+
 reset role;
 
 -- =====================================================================================
@@ -1829,8 +2382,29 @@ revoke all on function clara._tf_revenue_recognition_schedules_append_only() fro
 revoke all on function clara._plan_revenue_recognition_period_line(uuid,date) from public;
 revoke all on function clara.create_revenue_recognition_schedule(
   uuid,uuid,text,text,text,jsonb,text,text) from public;
+revoke all on function clara.create_revenue_recognition_schedule_for(
+  uuid,uuid,uuid,text,text,text,jsonb,text,text) from public;
+revoke all on function clara.read_revenue_recognition_source_for(uuid,uuid,uuid) from public;
+
+-- THE HUMAN LANE. `clara_authenticated` and nothing else: an OBO call must name its human, and a
+-- runtime grant on the human door would be a configuration that names nobody.
 grant execute on function clara.create_revenue_recognition_schedule(
   uuid,uuid,text,text,text,jsonb,text,text) to clara_authenticated;
+-- THE MACHINE LANE. `clara_runtime` and nothing else: the agent read role and both wake roles gain
+-- ZERO, because a lane that could configure its own recognition schedule would be the agent
+-- deciding what it is allowed to do.
+grant execute on function clara.create_revenue_recognition_schedule_for(
+  uuid,uuid,uuid,text,text,text,jsonb,text,text) to clara_runtime;
+grant execute on function clara.read_revenue_recognition_source_for(uuid,uuid,uuid) to clara_runtime;
+
+-- THE THREE HUMAN READS, at the viewer floor in their own bodies. The ctx helper is ungranted.
+revoke all on function clara._revenue_recognition_ctx(uuid,integer) from public;
+revoke all on function clara.get_revenue_recognition_schedule(uuid) from public;
+revoke all on function clara.list_revenue_recognition_schedules(uuid) from public;
+revoke all on function clara.list_revenue_recognition_attention(uuid) from public;
+grant execute on function clara.get_revenue_recognition_schedule(uuid) to clara_authenticated;
+grant execute on function clara.list_revenue_recognition_schedules(uuid) to clara_authenticated;
+grant execute on function clara.list_revenue_recognition_attention(uuid) to clara_authenticated;
 
 -- =====================================================================================
 -- §TAIL — what a reader may rely on after this file, re-measured on the live catalog.
@@ -1863,7 +2437,13 @@ declare
     ['clara._obo_plan_core(text,uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)', 'v'],
     ['clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)', 'v'],
     ['clara.create_revenue_recognition_schedule(uuid,uuid,text,text,text,jsonb,text,text)', 'v'],
-    ['clara._plan_revenue_recognition_period_line(uuid,date)', 's']
+    ['clara.create_revenue_recognition_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text,text)', 'v'],
+    ['clara.read_revenue_recognition_source_for(uuid,uuid,uuid)', 's'],
+    ['clara._plan_revenue_recognition_period_line(uuid,date)', 's'],
+    ['clara._revenue_recognition_ctx(uuid,integer)', 's'],
+    ['clara.get_revenue_recognition_schedule(uuid)', 's'],
+    ['clara.list_revenue_recognition_schedules(uuid)', 's'],
+    ['clara.list_revenue_recognition_attention(uuid)', 's']
   ];
 begin
   -- 0 · THE PLAN KIND IS WIDENED IN BOTH PLACES, ADDITIVELY. The three older kinds keep their
@@ -2067,6 +2647,67 @@ begin
     raise exception '#941 tail: the recognition core does not carry BOTH plan steps -- one lane would be unreachable'
       using errcode='CLR10';
   end if;
+
+  -- 3d2 · THE TWIN AND THE MACHINE-LANE READ ARE `clara_runtime` AND NOTHING ELSE, and the twin
+  --       re-checks its named author LIVE rather than reaching for a JWT it cannot have.
+  foreach v_sig in array array[
+      'clara.create_revenue_recognition_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text,text)',
+      'clara.read_revenue_recognition_source_for(uuid,uuid,uuid)'] loop
+    if not has_function_privilege('clara_runtime', v_sig::regprocedure, 'execute') then
+      raise exception '#941 tail: clara_runtime cannot execute % -- the lane this door exists for', v_sig
+        using errcode='CLR10';
+    end if;
+    foreach v_role in array array['clara_authenticated','clara_agent_ro','clara_wake_interactive',
+                                  'clara_wake_proactive','public'] loop
+      if has_function_privilege(v_role, v_sig::regprocedure, 'execute') then
+        raise exception '#941 tail: % can execute % -- the OBO lane is clara_runtime only', v_role, v_sig
+          using errcode='CLR10';
+      end if;
+    end loop;
+  end loop;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.create_revenue_recognition_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text,text)'::regprocedure;
+  if position('clara.firm_memberships' in v_src) = 0
+     or position('authority_lost' in v_src) = 0
+     or position('insufficient_role' in v_src) = 0
+     or position('clara._human_ctx' in v_src) > 0
+     or position('clara._revenue_recognition_core(' in v_src) = 0 then
+    raise exception '#941 tail: the OBO twin does not recheck its named author LIVE, reaches for a JWT it cannot have, or does not run the shared core'
+      using errcode='CLR10';
+  end if;
+  -- …AND THE READ CARRIES NO DOCUMENT BYTES. Asserted by the ABSENCE of every byte-door spelling,
+  -- because "it returns the recorded term" is a claim and this is its evidence.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.read_revenue_recognition_source_for(uuid,uuid,uuid)'::regprocedure;
+  if position('storage_key' in v_src) > 0 or position('bytes' in v_src) > 0
+     or position('document_blob' in v_src) > 0 or position('filename' in v_src) > 0 then
+    raise exception '#941 tail: the machine-lane read reaches for document bytes' using errcode='CLR10';
+  end if;
+
+  -- 3d3 · THE WHOLE LANE'S GRANT CENSUS: `clara_runtime` reaches EXACTLY the twin and the read
+  --       among every function named for this lane, and no agent or wake role reaches any of them.
+  select count(*)::int, string_agg(p.oid::regprocedure::text, ', ' order by p.oid::regprocedure::text)
+    into v_n, v_names
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara'
+     and (p.proname ~ 'revenue_recognition' or p.proname ~ 'deferred_revenue')
+     and has_function_privilege('clara_runtime', p.oid, 'execute');
+  if v_n <> 2
+     or v_names is distinct from 'clara.create_revenue_recognition_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text,text), clara.read_revenue_recognition_source_for(uuid,uuid,uuid)' then
+    raise exception '#941 tail: clara_runtime reaches % function(s) in the deferred-revenue lane: % -- it must reach the twin and the read, and nothing else',
+      v_n, coalesce(v_names, '<none>') using errcode='CLR10';
+  end if;
+  foreach v_role in array array['clara_agent_ro','clara_wake_interactive','clara_wake_proactive'] loop
+    select count(*)::int into v_n
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'clara'
+       and (p.proname ~ 'revenue_recognition' or p.proname ~ 'deferred_revenue')
+       and has_function_privilege(v_role, p.oid, 'execute');
+    if v_n <> 0 then
+      raise exception '#941 tail: % reaches % function(s) in the deferred-revenue lane -- it must reach none',
+        v_role, v_n using errcode='CLR10';
+    end if;
+  end loop;
 
   -- 3e2 · THE MONTHLY ADMISSION ARM CARRIES BOTH LOOKUPS AND BOTH TYPED REASONS, and the
   --       amortisation half is untouched. A recognition plan that fell through to the revision's

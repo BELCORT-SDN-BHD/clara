@@ -3194,6 +3194,40 @@ export const PREPAYMENT_SCHEDULE_OBO_0307_COHORT = [
   ...PREPAYMENT_SCHEDULE_OBO_0307_RUNTIME_FNS, ...PREPAYMENT_SCHEDULE_OBO_0307_UNGRANTED_FNS,
 ];
 // #915 END
+// #941 [0308, deferred revenue: recognise a receipt paid ahead by a customer as revenue over its
+// service period] — its own cohort, the same "wholly present or wholly absent" reason 0307's
+// carries: the `db-slice-frontiers` matrix runs this package against databases pinned at earlier
+// frontiers where 0223/0305/0306/0307 have applied and 0308 has not.
+//
+//   the ONE human write and the THREE human reads — clara_authenticated ONLY. The write is
+//   bookkeeper-floored in its own body; the reads are viewer-floored with a firm predicate inside
+//   each, because clara.revenue_recognition_schedules carries no ACL at all and a plain PostgREST
+//   table read 42501s.
+const DEFERRED_REVENUE_0308_HUMAN_FNS = [
+  "create_revenue_recognition_schedule", "get_revenue_recognition_schedule",
+  "list_revenue_recognition_schedules", "list_revenue_recognition_attention",
+];
+//   …the OBO twin and the machine-lane read — clara_runtime ONLY, and NEW NAMES rather than
+//   widened grants, for #915's own reason: an on-behalf configuration names the human it acts for,
+//   and a runtime grant on the human door would be one that names nobody. The agent role and both
+//   wake roles gain ZERO, and there is no wake wrapper at all — 0308's tail asserts the absence by
+//   pg_proc census rather than by convention.
+const DEFERRED_REVENUE_0308_RUNTIME_FNS = [
+  "create_revenue_recognition_schedule_for", "read_revenue_recognition_source_for",
+];
+//   …and the UNGRANTED closure: the ONE body both entrances run, the generic OBO plan step
+//   clara._prepayment_plan_core now delegates to, the per-period line lookup the monthly admission
+//   arm calls, the schedule-scoped ctx helper and the relation's append-only trigger. Every one is
+//   reached from a definer body only (the one-ungranted-core law, 0004:6-12).
+const DEFERRED_REVENUE_0308_UNGRANTED_FNS = [
+  "_revenue_recognition_core", "_obo_plan_core", "_plan_revenue_recognition_period_line",
+  "_revenue_recognition_ctx", "_tf_revenue_recognition_schedules_append_only",
+];
+export const DEFERRED_REVENUE_0308_COHORT = [
+  ...DEFERRED_REVENUE_0308_HUMAN_FNS, ...DEFERRED_REVENUE_0308_RUNTIME_FNS,
+  ...DEFERRED_REVENUE_0308_UNGRANTED_FNS,
+];
+// #941 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -3490,6 +3524,12 @@ export const ALLOWED = {
     // ONLY, bookkeeper-floored in their own bodies; clara_runtime, both agent read roles and all
     // four wake lanes gain ZERO, and no wake wrapper for either exists anywhere in the catalog.
     ...PREPAYMENT_ACCOUNT_ROSTER_0306_HUMAN_FNS,
+    // #941 [0308] the deferred-revenue recognition write and its three reads -- see the block
+    // above. clara_authenticated ONLY: the write is bookkeeper-floored in its own body, the three
+    // reads are viewer-floored with a firm predicate inside each. clara_runtime reaches the OBO
+    // TWIN instead (declared in the runtime roster below), never these; both agent read roles and
+    // all four wake lanes gain ZERO, and no wake wrapper for any of them exists in the catalog.
+    ...DEFERRED_REVENUE_0308_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3680,6 +3720,11 @@ export const ALLOWED = {
     // OBO a named human whose membership the door re-checks LIVE. Declared here so any wider grant
     // FAILS the matrix.
     ...PREPAYMENT_SCHEDULE_OBO_0307_RUNTIME_FNS,
+    // [#941, 0308] the deferred-revenue OBO twin and its machine-lane read of the RECORDED term --
+    // clara_runtime ONLY, the same lane and the same shape as 0307's pair above, acting OBO a named
+    // human whose membership the door re-checks LIVE. Declared here so any wider grant FAILS the
+    // matrix.
+    ...DEFERRED_REVENUE_0308_RUNTIME_FNS,
     // [#636, 0229] the intake-batch write doors and the cancellation sweep — clara_runtime ONLY,
     // the same lane clara.create_document_intake sits in. The sweep is the pool's ONLY way to see
     // a cancelling parent: it holds no SELECT on clara.intake_batches and none on
@@ -4098,6 +4143,13 @@ export async function grantMatrixFailures() {
   if (oboLive.length !== 0) {
     failures.push(...cohortFailures("#915 0307 prepayment-schedule OBO twin",
       PREPAYMENT_SCHEDULE_OBO_0307_COHORT, liveNames));
+  }
+  // #941 [0308] -- bimodal, same reasoning as 0307's above: wholly present once 0308 applies,
+  // wholly absent before it.
+  const deferredLive = DEFERRED_REVENUE_0308_COHORT.filter((n) => liveNames.has(n));
+  if (deferredLive.length !== 0) {
+    failures.push(...cohortFailures("#941 0308 deferred-revenue recognition lane",
+      DEFERRED_REVENUE_0308_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

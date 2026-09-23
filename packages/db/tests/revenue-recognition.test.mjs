@@ -27,11 +27,16 @@ import {
   advanceReceipt, accountBalance, accountLines,
   wakeDuePlanOccurrences, occurrenceRows, workRow, claimWorkRun, settleWorkRun,
   mintClientObo, wakeRecordJournalEntry, receiptsForWork, requestPlanCatchUp,
+  createRecognitionScheduleFor, createRecognitionScheduleForAs,
+  readRecognitionSourceFor, readRecognitionSourceForAs, recognitionLaneGrants,
+  chatTaskRef, refusalOf, planAuthority, opReceiptsFor, roleCanExecute, ROLES, nowhere,
+  deactivateMember, reactivateMember,
+  DR_HUMAN_SIG, DR_OBO_SIG, DR_READ_SIG,
 } from "./revenue-recognition-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 8;
 
 before(async () => {
   ready = await (async () => {
@@ -500,4 +505,237 @@ cell("p941.posts.full_year — a twelve-month advance with SST output tax on the
   assert.equal(debits.filter((c) => c === 100000).length, 11);
   assert.equal(debits.filter((c) => c === 100007).length, 1,
     "exactly one period carries the cent remainder");
+});
+
+// ===========================================================================================
+// AC "an on-behalf twin door in the shape of #915" — the conversation half's DATABASE door.
+// ===========================================================================================
+
+/** A scene whose memo-only receipt already carries a stated term, so every OBO cell measures the
+ *  IDENTITY walls rather than the term arm. */
+async function oboScene(tag, over = {}) {
+  const scene = await deferredRevenueScene(tag, { cents: 90000, termMonths: 3, ...over });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#941 battery: a three-month retainer the member paid up front" });
+  return scene;
+}
+
+cell("p941.obo.configures — a runtime session with NO jwt configures a recognition schedule on behalf of a named bookkeeper, the schedule and the plan name that human and cite the conversation, the human door's ACL is untouched, every other lane is refused by Postgres before a line of the body runs, and the two entrances share ONE op-key namespace", async () => {
+  const scene = await oboScene("obo");
+  const ref = await chatTaskRef({ firm: scene.firm, client: scene.client, author: scene.bob });
+  const args = {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: ref };
+
+  const made = await createRecognitionScheduleFor({ ...args, author: scene.bob });
+  assert.ok(made.schedule_id, "the twin configures");
+  assert.equal(made.kind, RECOGNITION_KIND);
+  assert.equal(made.configuration_only, true);
+  assert.equal(made.deferred_account_code, scene.deferred);
+  assert.equal(made.revenue_account_code, scene.revenue);
+  assert.equal(made.term_source, "human_stated");
+
+  // THE AUTHOR IS THE HUMAN, NEVER THE RUN — on the schedule ROW and on the PLAN.
+  const row = await recognitionScheduleRow(made.schedule_id);
+  assert.equal(row.created_by, scene.bob, "the schedule names the human it acted for");
+  const plan = await planAuthority(made.plan_id);
+  assert.equal(plan.authorised_by, scene.bob, "…and the plan's authority is that human's");
+  assert.equal(plan.created_by, scene.bob);
+  assert.equal(plan.kind, RECOGNITION_KIND);
+  assert.equal(plan.authority_kind, "explicit_instruction");
+  assert.deepEqual(plan.authority_ref, ref, "…citing the conversation it was asked in");
+
+  // THE ACL, READ POSITIVELY IN BOTH DIRECTIONS. A grant assertion that only read "runtime can"
+  // would miss a second door being opened to a lane that must never hold it.
+  assert.equal(await roleCanExecute(ROLES.runtime, DR_OBO_SIG), true);
+  assert.equal(await roleCanExecute(ROLES.runtime, DR_READ_SIG), true);
+  for (const role of [ROLES.authenticated, ROLES.agentRo,
+    ROLES.wakeInteractive, ROLES.wakeProactive, "public"]) {
+    assert.equal(await roleCanExecute(role, DR_OBO_SIG), false, `${role} must not reach the twin`);
+    assert.equal(await roleCanExecute(role, DR_READ_SIG), false, `${role} must not reach the read`);
+  }
+  assert.equal(await roleCanExecute(ROLES.authenticated, DR_HUMAN_SIG), true);
+  assert.equal(await roleCanExecute(ROLES.runtime, DR_HUMAN_SIG), false,
+    "the human door stays human — a runtime grant there would be a configuration naming nobody");
+
+  // …AND THE WHOLE LANE, ENUMERATED rather than sampled: `clara_runtime` reaches exactly two
+  // functions of it, the agent role and both wake roles reach none, and PUBLIC reaches none.
+  const lane = await recognitionLaneGrants();
+  assert.deepEqual(lane.filter((f) => f.runtime).map((f) => f.proname).sort(),
+    ["create_revenue_recognition_schedule_for", "read_revenue_recognition_source_for"]);
+  assert.deepEqual(lane.filter((f) => f.agent_ro || f.wake_interactive || f.wake_proactive || f.pub)
+    .map((f) => f.proname), [],
+    "no agent, wake or PUBLIC principal reaches anything in this lane");
+  assert.deepEqual(lane.filter((f) => f.authenticated).map((f) => f.proname).sort(),
+    ["create_revenue_recognition_schedule", "get_revenue_recognition_schedule",
+      "list_revenue_recognition_attention", "list_revenue_recognition_schedules"],
+    "the human lane is the one write and the three reads, and nothing else");
+
+  // A LANE THAT HOLDS NO GRANT IS REFUSED BY POSTGRES, not by the body: 42501, before a single
+  // line of the twin runs.
+  await assertRaises("42501",
+    () => createRecognitionScheduleForAs(ROLES.agentRo, { ...args, author: scene.bob }),
+    "the agent read role calling the OBO twin");
+  await assertRaises("42501",
+    () => readRecognitionSourceForAs(ROLES.agentRo, {
+      firm: scene.firm, client: scene.client, sourceEntry: scene.receipt }),
+    "the agent read role calling the machine-lane read");
+
+  // ONE OP-KEY NAMESPACE. The case the brief names: a person asks Clara, the response is lost, and
+  // the person then does it themselves under the key their own client already holds.
+  const second = await oboScene("obo-key");
+  const ref2 = await chatTaskRef({ firm: second.firm, client: second.client, author: second.bob });
+  const shared = { client: second.client, sourceEntry: second.receipt,
+    revenueAccount: second.revenue, authorityRef: ref2 };
+  const key = opk("p941-shared-key");
+  const byChat = await createRecognitionScheduleFor({ ...shared, author: second.bob, opKey: key });
+  const byHuman = await createRecognitionSchedule(second.bob, { ...shared, opKey: key });
+  assert.deepEqual(byHuman, byChat,
+    "the human replay REPLAYS the chat's receipt, byte for byte, including the allocation");
+  assert.equal(await recognitionScheduleCountFor(second.receipt), 1, "exactly ONE schedule exists");
+  const receipts = await opReceiptsFor(second.firm, key);
+  assert.equal(receipts.length, 1, "ONE op receipt — the two entrances did not open two namespaces");
+  assert.equal(receipts[0].fn, "create_revenue_recognition_schedule",
+    "…under the shared verb name, which is what makes the namespace one");
+});
+
+cell("p941.obo.authority — the twin refuses a null author by name, answers a NON-MEMBER author with the same CLR11 client_not_found (message and payload) as a client this database does not hold, refuses CLR04 authority_lost for a withdrawn membership, writes nothing on any of them, and the shared rules answer identically at both entrances", async () => {
+  const scene = await oboScene("obo-auth");
+  const ref = await chatTaskRef({ firm: scene.firm, client: scene.client, author: scene.bob });
+  const call = (over = {}) => createRecognitionScheduleFor({
+    client: scene.client, author: scene.bob, sourceEntry: scene.receipt,
+    revenueAccount: scene.revenue, authorityRef: ref, opKey: opk("p941-auth"), ...over });
+
+  // 1 — A NULL AUTHOR is its own mistake, answered before the client is read, so it can leak
+  //     nothing about which clients exist.
+  const nullAuthor = await assertPair(CLR.badRequest, "invalid_author",
+    () => call({ author: null }), "an OBO configuration naming no human at all");
+  assert.equal(nullAuthor.detail.field, "author");
+
+  // 2 — A NON-MEMBER AUTHOR AND AN UNKNOWN CLIENT ARE ONE ANSWER. Compared MESSAGE AND PAYLOAD,
+  //     not merely code plus token: a sentence that differed would be the existence oracle this
+  //     shape exists to prevent.
+  const stranger = await assertPair(CLR.notFound, "client_not_found",
+    () => call({ author: scene.w.users.dave }), "an OBO configuration for a non-member");
+  const unknownClient = await assertPair(CLR.notFound, "client_not_found",
+    () => call({ client: nowhere() }), "an OBO configuration for an unknown client");
+  assert.equal(stranger.err.message, unknownClient.err.message,
+    "a non-member author and an unknown client answer the SAME sentence");
+  assert.equal(stranger.err.detail, unknownClient.err.detail, "…and the same payload");
+
+  // 3 — AUTHORITY MUST BE LIVE AT THE MOMENT THE BOOKS ARE CONFIGURED.
+  await deactivateMember(scene.alice, { firm: scene.firm, user: scene.bob });
+  try {
+    await assertPair(CLR.authz, "authority_lost", () => call(),
+      "an OBO configuration for a human whose membership was withdrawn");
+  } finally {
+    await reactivateMember({ firm: scene.firm, user: scene.bob });
+  }
+  // …and a VIEWER author is refused by rank, with the estate's own token.
+  await assertPair(CLR.authz, "insufficient_role",
+    () => call({ author: scene.w.users.carol }), "an OBO configuration for a viewer");
+
+  assert.equal(await recognitionScheduleCountFor(scene.receipt), 0, "no schedule from any refusal");
+
+  // 4 — THE SHARED RULES ANSWER IDENTICALLY AT BOTH ENTRANCES, compared as ONE value. This is what
+  //     the single shared core buys: a divergence that kept the token and changed the sentence
+  //     would still be a divergence, because the sentence is what a surface renders.
+  const shared = [
+    ["a blank purpose", { purpose: "   " }],
+    ["a blank revenue account", { revenueAccount: "   " }],
+    ["a blank revenue basis", { revenueBasis: "   " }],
+    ["an unknown revenue code", { revenueAccount: "49999999" }],
+    ["a balance-sheet target", { revenueAccount: scene.deferred }],
+    ["a pattern this estate does not offer", { pattern: "usage" }],
+    ["an unknown source entry", { sourceEntry: nowhere() }],
+    ["an authority reference of the wrong shape", { authorityRef: { kind: "nonsense", id: nowhere() } }],
+    ["an authority reference that resolves to nothing", { authorityRef: { kind: "chat_task", id: nowhere() } }],
+  ];
+  for (const [label, over] of shared) {
+    const byObo = await refusalOf(() => createRecognitionScheduleFor({
+      client: scene.client, author: scene.bob, sourceEntry: scene.receipt,
+      revenueAccount: scene.revenue, authorityRef: ref, opKey: opk("p941-m-obo"), ...over }),
+      `${label} (OBO)`);
+    const byHuman = await refusalOf(() => createRecognitionSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.receipt,
+      revenueAccount: scene.revenue, authorityRef: ref, opKey: opk("p941-m-human"), ...over }),
+      `${label} (human)`);
+    assert.deepEqual(byObo, byHuman, `${label}: the two entrances answer identically`);
+  }
+
+  // 5 — THE POSITIVE CONTROL, so the whole cell is not a list of things that fail anyway.
+  const ok = await call({ opKey: opk("p941-auth-ok") });
+  assert.ok(ok.schedule_id, "the same configuration succeeds once authority is live and the args are right");
+});
+
+cell("p941.read.recorded_term — the machine-lane read answers the RECORDED term on both carriers, reports an absent one as absent with the human door that fills it, reports the candidate-leg count rather than guessing, names the schedule once one stands, answers another firm's entry as not found, and carries no document bytes at all", async () => {
+  const scene = await oboScene("read");
+  const scope = { firm: scene.firm, client: scene.client, sourceEntry: scene.receipt };
+
+  const stated = await readRecognitionSourceFor(scope);
+  assert.equal(stated.status, "ok");
+  assert.equal(stated.source_entry_id, scene.receipt);
+  assert.equal(stated.entry.status, "approved");
+  assert.equal(stated.entry.document_id, null);
+  assert.equal(stated.deferred.account_code, scene.deferred);
+  assert.equal(Number(stated.deferred.total_cents), 90000);
+  assert.equal(stated.deferred.candidate_legs, 1);
+  assert.equal(stated.term.source, "human_stated");
+  assert.equal(stated.term.period_start, scene.termStart);
+  assert.equal(stated.term.period_end, scene.termEnd);
+  assert.equal(stated.term.basis_kind, "human_stated");
+  assert.ok(stated.term.basis_text.includes("retainer"),
+    "the grounds the person WROTE, not a paraphrase");
+  assert.equal(stated.schedule, null, "no schedule stands yet");
+
+  // AN ABSENT TERM IS REPORTED AS ABSENT, with the HUMAN door that fills it — never as an empty
+  // term a run could read as "no term is needed".
+  const bare = await advanceReceipt(scene, { cents: 45000, tag: "bare" });
+  const noTerm = await readRecognitionSourceFor({ ...scope, sourceEntry: bare.entry });
+  assert.equal(noTerm.term.source, null);
+  assert.equal(noTerm.term.period_start, null);
+  assert.equal(noTerm.term.remedy, "clara.record_prepayment_stated_term");
+
+  // A RECEIPT WITH NO CANDIDATE LEG REPORTS THE COUNT and names no account, rather than raising:
+  // the Work's own prompt has to be able to say what it found.
+  const straight = await advanceReceipt(scene, {
+    cents: 25000, creditIncome: scene.revenue, tag: "straight" });
+  const zero = await readRecognitionSourceFor({ ...scope, sourceEntry: straight.entry });
+  assert.equal(zero.deferred.candidate_legs, 0);
+  assert.equal(zero.deferred.account_code, null);
+  assert.equal(zero.deferred.total_cents, null);
+
+  // ONCE A SCHEDULE STANDS, THE READ NAMES IT — so a run can see the work is already done instead
+  // of proposing it again.
+  const made = await createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef });
+  const after = await readRecognitionSourceFor(scope);
+  assert.equal(after.schedule.schedule_id, made.schedule_id);
+  assert.equal(after.schedule.plan_id, made.plan_id);
+  assert.equal(after.schedule.term_source, "human_stated");
+
+  // ANOTHER FIRM'S ENTRY IS NOT FOUND — the scope is explicit and the answer is the same one an
+  // absent entry gets, so the read is no existence oracle.
+  await assertPair(CLR.notFound, DR_REASON.sourceNotFound,
+    () => readRecognitionSourceFor({ ...scope, firm: nowhere() }),
+    "reading a recognition source under another firm's scope");
+  await assertPair(CLR.badRequest, DR_REASON.readScopeRequired,
+    () => readRecognitionSourceFor({ ...scope, client: null }),
+    "reading with no client in scope");
+
+  // NO DOCUMENT BYTES, EVER. Asserted as an EXACT key set plus a forbidden-substring sweep over
+  // the whole answer, because a byte key added later would otherwise pass unnoticed.
+  assert.deepEqual(Object.keys(after).sort(),
+    ["client_id", "deferred", "entry", "firm_id", "schedule", "source_entry_id", "status",
+      "term"]);
+  assert.deepEqual(Object.keys(after.entry).sort(),
+    ["document_id", "posting_date", "status"]);
+  const blob = JSON.stringify(after);
+  for (const forbidden of ["storage_key", "sha256", "filename", "bytes", "content", "url"]) {
+    assert.equal(blob.includes(forbidden), false,
+      `the machine-lane read must never carry ${forbidden}`);
+  }
 });
