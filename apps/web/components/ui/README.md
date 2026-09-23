@@ -187,7 +187,16 @@ pinned registry — `pnpm ui:add pagination` refusing because the payload still 
 dependency and this guard then removing it from both `package.json` and `pnpm-lock.yaml` with no
 trace left, `avatar.tsx` itself reverted afterward since adding a real component is outside that
 fix's own scope; separately (#989), `pnpm ui:add combobox` installing `input.tsx`/`textarea.tsx`/
-`input-group.tsx`/`combobox.tsx` while `button.tsx` stays byte-identical, and `pnpm ui:add popover`
-producing a `popover.tsx` whose `cn` import already points at `@/lib/utils` with no `cn` residue
-left in `package.json`/`pnpm-lock.yaml` — is recorded in the delivering change's own report rather
-than run on every CI build, since a gate every PR runs must not depend on the network.
+`input-group.tsx`/`combobox.tsx` while `button.tsx` stays byte-identical, and `node
+scripts/ui-add.mjs popover` producing a `popover.tsx` whose `cn` import already points at
+`@/lib/utils` with no `cn` residue left in `package.json`/`pnpm-lock.yaml` — is recorded in the
+delivering change's own report rather than run on every CI build, since a gate every PR runs must
+not depend on the network.
+
+**`popover.tsx` is that run's own output, kept** (#989 fix round, 2026-09-23; review finding
+SPEC-989-A asked for the artifact the acceptance criterion names, not only a narrated rehearsal).
+It is vendored exactly as the CLI wrote it, unused by any surface yet — #667 is the ticket that
+consumes it — so the next `add` of Popover diffs against upstream cleanly. Combobox is NOT
+vendored: its closure also rewrites `input.tsx`/`textarea.tsx`/`input-group.tsx`, which each carry
+the hand-applied `focus-visible:ring-ring/70` re-cut this file documents below, and re-applying
+that hygiene belongs to the ticket that ships Combobox.
