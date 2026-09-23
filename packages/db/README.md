@@ -3002,15 +3002,25 @@ a forty-row trial balance at ONE `(extraction_id, field_path)` is forty rows eac
 passing the same per-row test a single invoice fact passes — proved live, with a REAL forty-row
 insert, in `packages/db/tests/document-regions-field-path-check.test.mjs`.
 
-**Populated rows, not an empty table.** `clara.document_regions` started EMPTY on a freshly
-migrated+seeded rig — seeding does not populate it — so the ADD CONSTRAINT would have validated
-against nothing. A preparatory script called `clara.persist_document_extraction` three times
-(THROUGH the real writer door, never a raw fixture insert) before this migration ran, leaving 14
-rows across 10 distinct `field_path` values on the lane database, including five `opening_tb.line`
-rows from one real trial balance; the migration's own prestate refuses to proceed against a
-zero-row table. `packages/db/deploy/0290-field-path-check-census.sql` is the read-only preflight a
-release session runs on hosted first — the SAME predicate the prestate itself re-checks, so
-"census says clean" and "the migration will apply" can never disagree.
+**An empty table is a lawful apply state, and the row count is measured, not refused.** Every
+fresh database starts with zero regions: CI's `db-estate-suite` deploys main's chain and then HEAD's
+onto a throwaway `clara_ci` BEFORE anything seeds, `frontier-leg` migrates a fresh service
+database, and the integrator's from-scratch chain runs on a disposable cluster. An earlier draft of
+0290 RAISED on a zero-row `clara.document_regions`, which made it unappliable on all three
+(SPEC-L08-01, riders wave 3 lane 08); the prestate now reports the count in a NOTICE — the same
+shape 0291 beside it uses — and the tail takes an EMPTY branch that proves the same three claims
+through the CHECK's own expression (`clara._field_path_conforms`) rather than through a raw insert
+it has no FK-satisfiable row to make. Which branch ran is stated in the tail notice. The wall's
+POPULATED-row proof does not live at apply time at all: it lives in
+`packages/db/tests/document-regions-field-path-check.test.mjs`, which seeds its own regions and
+drives eight raw inserts through the CHECK. On the lane database the rig happened to be populated
+first — a preparatory script called `clara.persist_document_extraction` three times (THROUGH the
+real writer door, never a raw fixture insert), leaving 14 rows across 10 distinct `field_path`
+values, including five `opening_tb.line` rows from one real trial balance — so the tail took its
+POPULATED branch there. What the prestate DOES still refuse is a stored value the new CHECK would
+reject, named row by row. `packages/db/deploy/0290-field-path-check-census.sql` is the read-only
+preflight a release session runs on hosted first — the SAME predicate the prestate itself
+re-checks, so "census says clean" and "the migration will apply" can never disagree.
 
 **Redo-safe by construction (#957).** S1 is `create or replace function`; S2 is an unconditional
 `drop constraint if exists` before `add constraint` — never a guard-by-name, which would skip

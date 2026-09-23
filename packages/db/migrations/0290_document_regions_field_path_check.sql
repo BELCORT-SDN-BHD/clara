@@ -62,17 +62,28 @@
 -- therefore accepts TWO starting states — wholly absent (first apply) or wholly present (redo) —
 -- and refuses only a HALF state, which is a defect rather than either lawful starting point.
 --
--- MEASURED ON THIS RIG NOW (wave-3 lane08; #857 is this lane's first ticket, nothing applied
--- ahead of it). clara.document_regions started EMPTY on this freshly migrated+seeded database —
--- seeding does not populate it — so a preparatory script
+-- AN EMPTY clara.document_regions IS A LAWFUL STARTING STATE, and this file applies on one. That
+-- is not a nicety: .github/actions/db-estate-suite/action.yml deploys main's chain and then
+-- HEAD's onto a throwaway clara_ci BEFORE anything seeds, .github/actions/frontier-leg migrates a
+-- fresh service database, and the integrator's from-scratch chain runs on a disposable cluster --
+-- none of them holds a region row. So the prestate MEASURES the row count and reports it (clause
+-- (e)) instead of refusing on zero, and the tail takes its EMPTY branch, proving the same three
+-- claims through the CHECK's own expression rather than through a raw insert it has no
+-- FK-satisfiable row to make.
+--
+-- MEASURED ON THIS RIG (wave-3 lane08; #857 is this lane's first ticket, nothing applied ahead of
+-- it). clara.document_regions started EMPTY on this freshly migrated+seeded database -- seeding
+-- does not populate it -- so a preparatory script
 -- (docs/plan/active/riders-2026-09-20/reports/wave3-lane08-ticket857.md names it) called
 -- clara.persist_document_extraction three times, THROUGH THE REAL WRITER DOOR, never a raw
--- fixture insert, leaving 14 rows across 10 distinct field_path values — including five
--- opening_tb.line rows from one trial balance — so the ADD CONSTRAINT below validates against
--- REAL, estate-shaped populated rows rather than an empty table, which would prove nothing. The
--- PRESTATE re-derives the same census as a second, read-only proof, independent of the ALTER's
--- own implicit row scan, and is ALSO the query a release preflight can run on hosted (see the
--- ticket report for a standalone copy).
+-- fixture insert, leaving 14 rows across 10 distinct field_path values -- including five
+-- opening_tb.line rows from one trial balance -- so on THIS database the ADD CONSTRAINT below
+-- validated against real, estate-shaped populated rows and the tail took its POPULATED branch.
+-- The wall's own populated-row proof depends on neither: it lives in
+-- packages/db/tests/document-regions-field-path-check.test.mjs, which seeds its own regions and
+-- drives eight RAW inserts through the CHECK. The PRESTATE re-derives the bad-path census as a
+-- second, read-only proof, independent of the ALTER's own implicit row scan, and is ALSO the
+-- query a release preflight can run on hosted (see the ticket report for a standalone copy).
 -- =====================================================================================
 
 set local statement_timeout = '5min';   -- runner rule: statement_timeout is the first executable statement
@@ -175,9 +186,18 @@ begin
     raise exception 'drfp prestate: % stored field_path value(s) would be refused by the new CHECK (first ten: %) -- across % total region row(s). Census them with this file''s own preflight query and either repair the producer or widen clara._assert_field_path''s roster in a NEW migration; this file will not narrow the estate silently.',
       coalesce(array_length(v_bad, 1), 0), v_bad[1:10], v_regions using errcode = 'CLR10';
   end if;
-  if v_regions = 0 and not v_fn_present then
-    raise exception 'drfp prestate: clara.document_regions holds ZERO rows -- the ADD CONSTRAINT below would validate against an empty table, which proves nothing about populated rows. Seed real regions through clara.persist_document_extraction first (this ticket''s report names the script), never a raw fixture insert.'
-      using errcode = 'CLR10';
+  -- (e) A ZERO-ROW TABLE IS A LAWFUL FIRST-APPLY STATE, NOT A DEFECT, so it is MEASURED and
+  -- REPORTED here and never refused. Every fresh database starts exactly there:
+  -- .github/actions/db-estate-suite/action.yml's FIRST step applies main's chain and then HEAD's
+  -- onto a throwaway clara_ci BEFORE anything seeds; .github/actions/frontier-leg/action.yml
+  -- migrates a fresh service database; and the integrator's from-scratch chain runs on a
+  -- disposable cluster. An earlier draft of this file RAISED here, which made 0290 unappliable on
+  -- every one of them. 0291 -- this lane's own sibling -- is the house shape and reports its
+  -- table's row count in a notice for the same reason. The POPULATED-row proof does not live at
+  -- apply time at all: it lives in packages/db/tests/document-regions-field-path-check.test.mjs,
+  -- which seeds its own regions through the real doors and drives the CHECK against them.
+  if v_regions = 0 then
+    raise notice 'drfp prestate: clara.document_regions holds ZERO rows -- a lawful first-apply state (a fresh CI database, a frontier leg, or a from-scratch chain). The ADD CONSTRAINT below installs the wall for every FUTURE writer; the populated-row proof runs in this ticket''s own battery, packages/db/tests/document-regions-field-path-check.test.mjs, which seeds its own regions.';
   end if;
 
   raise notice 'drfp prestate: clean (redo=%) -- clara._assert_field_path is at its live 0191 body (immutable, clara_fn_owner-owned), clara_fn_owner is the ONLY role with INSERT on clara.document_regions, and all % stored field_path value(s) already conform.', v_fn_present, v_regions;
@@ -238,6 +258,7 @@ declare
   v_extraction uuid;
   v_refused boolean;
   v_prosrc_sha text;
+  v_probe_mode text;
 begin
   -- THE FUNCTION, structurally: IMMUTABLE, INVOKER (not DEFINER), clara_fn_owner-owned,
   -- search_path pinned, and ungranted to PUBLIC.
@@ -298,47 +319,89 @@ begin
     raise exception 'drfp tail: 0201''s uq_document_regions_extraction_field_path is gone' using errcode = 'CLR10';
   end if;
 
-  -- LIVE PROBES. Reuse an extraction this file's own prestate already required to exist and
-  -- conform (never a scratch firm/document minted here) -- any row proves the FK is satisfiable.
+  -- LIVE PROBES, in whichever of the two lawful shapes this database admits.
+  --
+  -- POPULATED (a rig, a staging or the deployed estate): reuse an extraction that already exists
+  -- -- never a scratch firm/document minted here -- because any existing row proves the FK is
+  -- satisfiable, and drive the CHECK through a RAW INSERT, which is precisely the writer AC2
+  -- exists to wall.
+  --
+  -- EMPTY (a fresh CI database, a frontier leg, a from-scratch chain -- see the prestate's
+  -- clause (e)): there is no FK-satisfiable (firm_id, extraction_id) pair to borrow and this file
+  -- mints none, so the same three claims are proved ONE LEVEL DOWN, by evaluating the CHECK's OWN
+  -- expression -- clara._field_path_conforms, which is literally what the installed
+  -- `CHECK (clara._field_path_conforms(field_path))` calls per row, and whose exact text this
+  -- tail has already asserted above. That pairing is the whole argument: the constraint check
+  -- above proves the table calls this expression, and these probes prove the expression refuses.
+  -- The raw-insert proof is not lost, only deferred to the first database that has a row --
+  -- including this ticket's own battery, packages/db/tests/document-regions-field-path-check.test.mjs,
+  -- which seeds its regions and then drives eight raw inserts through the wall.
+  --
+  -- Which branch ran is STATED in the closing notice, never blurred.
   select count(*) into v_regions_before from clara.document_regions;
   select r.firm_id, r.extraction_id into v_firm, v_extraction from clara.document_regions r limit 1;
+
   if v_firm is null then
-    raise exception 'drfp tail: clara.document_regions is unexpectedly empty for the live probes' using errcode = 'CLR10';
-  end if;
+    v_probe_mode := 'expression (clara.document_regions is EMPTY -- first apply on a fresh database)';
 
-  -- Probe 1 — an UNREGISTERED-namespace raw insert is refused with the grammar's OWN CLR10,
-  -- never Postgres's generic 23514. Nothing is written: a failed INSERT commits nothing.
-  v_refused := false;
-  begin
-    insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content)
-      values (v_firm, v_extraction, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
-              'evil.total', 'drfp tail refusal probe -- unregistered namespace');
-  exception
-    when sqlstate 'CLR10' then v_refused := true;
-  end;
-  if not v_refused then
-    raise exception 'drfp tail: an unregistered-namespace field_path (evil.total) was accepted by a RAW insert -- ck_document_regions_field_path_grammar did not fire' using errcode = 'CLR10';
-  end if;
+    -- Probe 1e -- an UNREGISTERED-namespace path is refused by the CHECK's own expression with the
+    -- grammar's OWN CLR10, never a generic 23514.
+    v_refused := false;
+    begin
+      perform clara._field_path_conforms('evil.total');
+    exception
+      when sqlstate 'CLR10' then v_refused := true;
+    end;
+    if not v_refused then
+      raise exception 'drfp tail: clara._field_path_conforms accepted an unregistered-namespace path (evil.total) -- the expression this CHECK installs does not refuse' using errcode = 'CLR10';
+    end if;
 
-  -- Probe 2 — a NULL field_path and a well-formed field_path BOTH still insert on a raw write,
-  -- exactly as the grammar always admitted them. Forced rollback via a private sentinel SQLSTATE
-  -- this migration invents and catches nowhere else, so an unrelated failure inside the block
-  -- (a real bug) propagates loudly instead of being swallowed.
-  begin
-    insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content)
-      values (v_firm, v_extraction, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
-              null, 'drfp tail null-path probe');
-    -- 'invoice.deposit' rather than 'invoice.total': the chosen extraction (any row this file's
-    -- own prestate already required to exist) may already carry 'invoice.total' from the
-    -- estate's real seeding, and 0201's OWN partial unique key (untouched by this file) would
-    -- then refuse a same-key duplicate — a different, unrelated wall this probe must not trip.
-    insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content)
-      values (v_firm, v_extraction, 'page_polygon', '{"page":1,"polygon":[0,0.1,1,0.2]}'::jsonb,
-              'invoice.deposit', 'drfp tail well-formed-path probe');
-    raise exception 'drfp tail rollback-only probe -- both inserts above succeeded, discard them' using errcode = 'DRFP1';
-  exception
-    when sqlstate 'DRFP1' then null; -- expected: both inserts succeeded; this block's own savepoint discards them
-  end;
+    -- Probe 2e -- a NULL path and a well-formed path both still pass, exactly as the grammar has
+    -- always admitted them (a CHECK whose expression is NULL passes too; this one returns true).
+    if clara._field_path_conforms(null) is distinct from true then
+      raise exception 'drfp tail: a NULL field_path no longer passes the expression this CHECK installs -- clara.document_regions.field_path is nullable by design' using errcode = 'CLR10';
+    end if;
+    if clara._field_path_conforms('invoice.deposit') is distinct from true then
+      raise exception 'drfp tail: a well-formed registered-namespace path no longer passes the expression this CHECK installs' using errcode = 'CLR10';
+    end if;
+  else
+    v_probe_mode := 'raw insert (clara.document_regions is populated)';
+
+    -- Probe 1 — an UNREGISTERED-namespace raw insert is refused with the grammar's OWN CLR10,
+    -- never Postgres's generic 23514. Nothing is written: a failed INSERT commits nothing.
+    v_refused := false;
+    begin
+      insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content)
+        values (v_firm, v_extraction, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
+                'evil.total', 'drfp tail refusal probe -- unregistered namespace');
+    exception
+      when sqlstate 'CLR10' then v_refused := true;
+    end;
+    if not v_refused then
+      raise exception 'drfp tail: an unregistered-namespace field_path (evil.total) was accepted by a RAW insert -- ck_document_regions_field_path_grammar did not fire' using errcode = 'CLR10';
+    end if;
+
+    -- Probe 2 — a NULL field_path and a well-formed field_path BOTH still insert on a raw write,
+    -- exactly as the grammar always admitted them. Forced rollback via a private sentinel SQLSTATE
+    -- this migration invents and catches nowhere else, so an unrelated failure inside the block
+    -- (a real bug) propagates loudly instead of being swallowed.
+    begin
+      insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content)
+        values (v_firm, v_extraction, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
+                null, 'drfp tail null-path probe');
+      -- 'invoice.deposit' rather than 'invoice.total': the chosen extraction (any row this file's
+      -- own prestate already required to exist) may already carry 'invoice.total' from the
+      -- estate's real seeding, and 0201's OWN partial unique key (untouched by this file) would
+      -- then refuse a same-key duplicate — a different, unrelated wall this probe must not trip.
+      insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content)
+        values (v_firm, v_extraction, 'page_polygon', '{"page":1,"polygon":[0,0.1,1,0.2]}'::jsonb,
+                'invoice.deposit', 'drfp tail well-formed-path probe');
+      raise exception 'drfp tail rollback-only probe -- both inserts above succeeded, discard them' using errcode = 'DRFP1';
+    exception
+      when sqlstate 'DRFP1' then null; -- expected: both inserts succeeded; this block's own savepoint discards them
+    end;
+
+  end if;
 
   select count(*) into v_regions_after from clara.document_regions;
   if v_regions_after <> v_regions_before then
@@ -352,6 +415,6 @@ begin
     raise exception 'drfp tail: the two 0201 plural literals no longer conform to the grammar this CHECK enforces' using errcode = 'CLR10';
   end if;
 
-  raise notice 'drfp tail: OK -- clara._field_path_conforms is live (immutable, invoker, clara_fn_owner-owned, ungranted to PUBLIC and every application role), ck_document_regions_field_path_grammar reads exactly "CHECK (clara._field_path_conforms(field_path))", clara._assert_field_path is untouched (sha %), every other constraint/trigger/index on clara.document_regions survives by name, and three live rolled-back probes confirm a RAW insert of an unregistered-namespace path is refused with CLR10 while a NULL path and a well-formed path both still insert -- with clara.document_regions holding the same % row(s) before and after.',
-    v_prosrc_sha, v_regions_before;
+  raise notice 'drfp tail: OK -- clara._field_path_conforms is live (immutable, invoker, clara_fn_owner-owned, ungranted to PUBLIC and every application role), ck_document_regions_field_path_grammar reads exactly "CHECK (clara._field_path_conforms(field_path))", clara._assert_field_path is untouched (sha %), and every other constraint/trigger/index on clara.document_regions survives by name. PROBE MODE: % -- in it, an unregistered-namespace path is refused with the grammar''s own CLR10 while a NULL path and a well-formed path both pass, and clara.document_regions holds the same % row(s) before and after.',
+    v_prosrc_sha, v_probe_mode, v_regions_before;
 end $drfp_tail$;
