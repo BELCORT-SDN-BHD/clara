@@ -151,6 +151,15 @@ set role clara_fn_owner;
 -- §A THE RECORD DOOR, RECUT. 0279 §B2's body, byte for byte, plus ONE new wall: reopen_prior is
 --    refused while the year is still CLOSING, because the remedy it names cannot be reached from
 --    there. Nothing else in this body moves.
+--
+--    ONE THING THIS FILE DELIBERATELY DOES NOT CHANGE (ADV-L04-6, note). `p_period_start` and
+--    `p_period_end` are stored verbatim and nothing validates them: they are CALLER-ASSERTED
+--    PROVENANCE ONLY, recording which run the person was looking at when they judged. No money
+--    and no decision moves on them -- the figure that is re-measured and enforced is the year's
+--    arrears, and the year is checked against the client -- so a wrong pair makes the record read
+--    as a judgement about a run that never happened, and nothing worse. Validating them against
+--    the client's cadence window is a real improvement and a real widening of the ticket; it is
+--    named in the lane's fix report as a follow-up rather than taken here without a brief.
 -- =====================================================================================
 create or replace function clara.record_fa_arrears_resolution(p_client uuid, p_fiscal_year uuid,
     p_choice text, p_arrears_cents bigint, p_period_start date, p_period_end date,

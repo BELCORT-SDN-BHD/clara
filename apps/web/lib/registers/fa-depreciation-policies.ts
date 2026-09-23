@@ -56,7 +56,11 @@ export function loadFaDepreciationPolicies(session: SessionTokenAccessor, client
  *  `p_reason` is NOT in that fingerprint and is not in this tuple either, the same way `p_memo`
  *  sits outside `clara.dispose_fixed_asset`'s: editing the reason is not a different decision.
  *  Editing anything the door DOES hash is, and earns a new key; pressing Confirm twice on the
- *  same one does not. */
+ *  same one does not.
+ *
+ *  `reason` is ACCEPTED and ignored rather than excluded from the type, so a caller can hand this
+ *  the very object it is about to send the door — and so the exclusion is a fact a test can
+ *  demonstrate at runtime instead of one only the compiler knows. */
 export function setPolicyIntent(args: {
   clientId: string;
   assetAccount: string;
@@ -64,6 +68,7 @@ export function setPolicyIntent(args: {
   usefulLifeMonths: number | null;
   rateBps: number | null;
   residualCents: number | null;
+  reason?: string | null;
 }): string {
   return [
     args.clientId, args.assetAccount, args.method,
@@ -73,7 +78,7 @@ export function setPolicyIntent(args: {
 
 /** The intent tuple a POLICY-RETIRE decision is identified by — `clara.retire_fa_depreciation_policy`
  *  hashes exactly (`client`, `asset`) and nothing else. */
-export function retirePolicyIntent(args: { clientId: string; assetAccount: string }): string {
+export function retirePolicyIntent(args: { clientId: string; assetAccount: string; reason?: string | null }): string {
   return [args.clientId, args.assetAccount].join("|");
 }
 

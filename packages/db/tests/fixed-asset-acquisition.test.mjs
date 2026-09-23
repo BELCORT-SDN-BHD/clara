@@ -718,7 +718,7 @@ async function gateConvention(t) {
   return true;
 }
 
-test("p639.belt.convention_comment both trigger bodies carry the belt/birth convention in the catalog, the birth's is a byte-exact accretion onto 0277's own text, and neither body moved", async (t) => {
+test("p639.belt.convention_comment both trigger bodies carry the belt/birth convention in the catalog, the birth's is a byte-exact accretion onto 0277's own text, the belt's body is byte-unchanged and the birth's has lost no earlier marker", async (t) => {
   if (await gate(t) || await gateConvention(t)) return;
 
   const belt = (await rootQuery(
@@ -761,15 +761,32 @@ test("p639.belt.convention_comment both trigger bodies carry the belt/birth conv
       `convention_comment: the birth's EARLIER provenance marker "${marker}" survived the accretion`);
   }
 
-  // NEITHER BODY MOVED — this ticket is documentation-only.
+  // #882 IS DOCUMENTATION-ONLY, AND THE BELT'S BODY PROVES IT BY BYTE. The belt has not been
+  // recut since 0041 and 0278 did not touch it, so its sha is a durable pin and stays one.
   const crypto = await import("node:crypto");
   const sha256 = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
   assert.equal(sha256(belt.prosrc),
     "be97ea51a8db4d69a32da6986a1f0ab7b136c7dc8432913fe783354a3e4c8b5a",
     "convention_comment: clara._tf_fa_movement_belt's body is byte-unchanged");
-  assert.equal(sha256(birth.prosrc),
-    "c2c62b2997a6dd9a1202e509954b6f1b311ab5c704064b9a71d806e8fb456c50",
-    "convention_comment: clara._tf_fa_acquisition_birth's body is byte-unchanged");
+
+  // THE BIRTH'S BODY IS NOT BYTE-FROZEN BY THIS TICKET, and a cell that pinned it here would
+  // claim it was. #882 asserts that 0278 moved nothing; whether the body is at 0277's bytes is a
+  // fact each RECUTTING migration pins in its own prestate and tail (0277's, then 0280's, which
+  // lawfully recut both birth sites to decline a policy that no longer fits its enrolment). What
+  // survives every such recut — and what this cell therefore asserts — is that no earlier
+  // marker was lost along the way.
+  for (const marker of [
+    "if new.is_opening_balance then return null; end if;",
+    "if new.reversal_of is not null then return null; end if;",
+    "if new.flags ? 'fa_disposal' then return null; end if;",
+    "if new.origin = 'scheduled_run' then return null; end if;",
+    "coalesce(new.approved_at, new.created_at) >= fp.enrolled_at",
+    "from clara.fa_account_depreciation_policies",
+    "on conflict (acquisition_line_id) do nothing",
+  ]) {
+    assert.equal(birth.prosrc.split(marker).length - 1, 1,
+      `convention_comment: the birth body still carries "${marker}" exactly once`);
+  }
 });
 
 // ===========================================================================================
