@@ -489,13 +489,22 @@ test("T16b clara.wake_secret is txn-local and cleared after the transaction", as
 // T16 CRITICAL-1 — a human writer must IGNORE a foreign wake credential present in
 // the same session: the write lands in the JWT (human) firm, never the credential's.
 // ===========================================================================
-test("T16 CRITICAL-1: a human create_client ignores a foreign wake_secret (lands in the jwt firm)", async (t) => {
+// [#1038] clara.create_client's clara_authenticated grant is withdrawn -- this cell now proves
+// the SAME fact (a human writer ignores a foreign wake_secret) through open_client_onboarding,
+// the granted human client-minting door #899 left in create_client's place. The name's LEADING
+// TOKEN must not be `world.prefix` itself -- buildWorld() and earlier cells in this shared module
+// world already mint several same-family `${prefix}_*` clients (A1/A2, T23's bkClient/
+// adminClient, …), so `${world.prefix}_crit1` collides at arity 2 through the wall
+// open_client_onboarding enforces (create_client never did). A dedicated, randomised leading
+// token sidesteps that family entirely -- this cell is about wake-secret-ignoring, not the wall.
+test("T16 CRITICAL-1: a human open_client_onboarding ignores a foreign wake_secret (lands in the jwt firm)", async (t) => {
   if (unready(t)) return;
   const { users, firms } = world;
   const credB = await mintWake({ kind: "interactive", firm: firms.B }); // a VALID firm-B credential
+  const name = `crit1${randomUUID().slice(0, 8)} Holdings`;
   let clientId;
   await withActor({ role: ROLES.authenticated, jwtSub: users.alice, wakeSecret: credB.secret, transaction: true }, async (c) => {
-    const r = await c.query("select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [`${world.prefix}_crit1`, opk()]);
+    const r = await c.query("select clara.open_client_onboarding(p_name => $1, p_op_key => $2) as receipt", [name, opk()]);
     clientId = r.rows[0].receipt.client_id;
   });
   const firmOf = await rootQuery("select firm_id from clara.clients where id = $1", [clientId]);

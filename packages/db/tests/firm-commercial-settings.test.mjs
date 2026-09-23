@@ -23,7 +23,7 @@ import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   CLR, assertRaises, opk, rootQuery, humanQuery, insertUser, addMember, setMemberRole,
-  membershipId, ensureReady, endPool,
+  membershipId, ensureReady, endPool, createClientRaw,
 } from "./rig-fixtures.mjs";
 import {
   firmScene, acceptKind, acceptBothKinds, readLegalBaseline, publishNextVersion,
@@ -152,11 +152,10 @@ test("p635.db.legal_standing_live_true an active owner holding BOTH acceptances 
   // is limb (a) AND limb (b); with an ACTIVE client in place limb (b) is true, so the two must
   // agree. `_accounting_work_egress_live` is UNGRANTED (0195:911) — read as root, deliberately,
   // because no human may call it and this cell is comparing the door to the wall.
-  const clientRow = await humanQuery(
-    sc.owner, "select clara.create_client(p_name => $1, p_op_key => $2) as receipt",
-    [`P635 live client`, opk("live_client")],
-  );
-  const clientId = clientRow.rows[0].receipt.client_id;
+  // [#1038] clara.create_client's clara_authenticated grant is withdrawn; createClientRaw
+  // reaches the same unwalled verb through the rig's own root+jwt idiom.
+  const clientRow = await createClientRaw(sc.owner, { name: "P635 live client", opKey: opk("live_client") });
+  const clientId = clientRow.client_id;
   await rootQuery("update clara.clients set status = 'active' where id = $1", [clientId]); // LABELLED FIXTURE DML
   const basis = await rootQuery(
     "select clara._accounting_work_egress_live($1,$2) as b", [sc.firm, clientId],

@@ -20,7 +20,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   rootQuery, humanQuery, endPool, buildWorld, opk, sha, ROLES,
-  ingestDocument, assertRaises, getPool,
+  ingestDocument, assertRaises, getPool, createClientRaw,
 } from "./rig-fixtures.mjs";
 
 let world = null;
@@ -696,12 +696,13 @@ test("pi-C2 · P-3 — the ROME family is >=2 over clients UNION counterparties,
     // the shape of a vacuous green: a corpus cell must be poisoned by nothing it did not name.
     const owner = world.users.alice;
     const uniq = world.prefix.replace(/[^a-z0-9]/gi, "");
-    const c1 = (await humanQuery(owner, "select clara.create_client($1,$2) as r",
-      [`ROME PROPERTIES ${uniq}`, opk("cli")])).rows[0].r.client_id;
-    await humanQuery(owner, "select clara.create_client($1,$2)",
-      [`ROME SECRETARY ${uniq}`, opk("cli")]);
-    await humanQuery(owner, "select clara.create_client($1,$2)",
-      [`BEE CREATIVE SOLUTION ${uniq}`, opk("cli")]);
+    // [#1038] clara.create_client's clara_authenticated grant is withdrawn; createClientRaw
+    // reaches the same unwalled verb through the rig's own root+jwt idiom -- these three MUST
+    // stay unwalled (ROME PROPERTIES / ROME SECRETARY are same-family by construction, the
+    // subject of this cell's own P-3 assertion below).
+    const c1 = (await createClientRaw(owner, { name: `ROME PROPERTIES ${uniq}`, opKey: opk("cli") })).client_id;
+    await createClientRaw(owner, { name: `ROME SECRETARY ${uniq}`, opKey: opk("cli") });
+    await createClientRaw(owner, { name: `BEE CREATIVE SOLUTION ${uniq}`, opKey: opk("cli") });
     // ROME PUBLIC ADVISORY returns as a COUNTERPARTY, never a BELCORT client (constraint 13).
     await humanQuery(owner, "select clara.create_counterparty($1,'vendor',$2,null,null,$3)",
       [c1, `ROME PUBLIC ADVISORY ${uniq}`, opk("cp")]);

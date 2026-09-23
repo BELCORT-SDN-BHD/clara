@@ -18,8 +18,7 @@ import {
   AGENT_USER_ID,
   HIGH_STAKES_CENTS,
   ROUTINE_CENTS,
-  humanQuery, // [R3-F2] the raw-creator contract probe
-
+  createClientRaw, // [#1038] the raw-creator contract probe (was humanQuery, now the rig's root+jwt idiom)
   assertRaises,
   balanced,
   opk,
@@ -97,8 +96,7 @@ test("§1 emission: human writers each emit exactly their contract event, ids/ac
   // is now exactly client.onboarding_started (client.created is retired from the
   // creator; activation emits client.activated at Gate-O commit).
   let m = await maxSeq(firm);
-  const rawClient = (await humanQuery(owner,
-    "select clara.create_client(p_name => $1, p_op_key => $2) as r", [`${prefix}_raw`, opk()])).rows[0].r.client_id;
+  const rawClient = (await createClientRaw(owner, { name: `${prefix}_raw`, opKey: opk() })).client_id;
   ev = await eventsSince(firm, m);
   assert.deepEqual(types(ev), ["client.onboarding_started"], "create_client emits exactly client.onboarding_started [R3-F2]");
   assert.equal(ev[0].client_id, rawClient, "the birth event carries the new client id");

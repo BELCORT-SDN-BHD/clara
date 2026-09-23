@@ -6,8 +6,14 @@
 import { ROLES, rootQuery } from "./rig-helpers.mjs";
 
 // The exact §5 EXECUTE matrix (v1 §5 as amended by v2 §A/§B/§F).
+// #1038 [0316]: create_client REMOVED from this list -- its clara_authenticated grant is
+// withdrawn (closing #899's own named residual; see 0316_create_client_human_grant_withdrawn.sql
+// and client-birth-wall.test.mjs's rewritten p899.census cells). The exact-match sweep below now
+// expects clara_authenticated to hold ZERO EXECUTE on it and fails loudly if the grant returns.
+// open_client_onboarding (CLIENT_BIRTH_WALL_0287_COHORT below) is the granted human door in its
+// place; the body and every OTHER role's posture (all zero, unmoved) are untouched.
 export const WRITERS = [
-  "create_firm", "add_member", "set_member_role", "remove_member", "create_client", "upsert_account",
+  "create_firm", "add_member", "set_member_role", "remove_member", "upsert_account",
   // Slice-5 retires ingest_document; verified documents now enter through the
   // runtime intake finalizer and the legacy name retains no application grant.
   "record_client_resolution", "draft_entry", "approve_entry", "reverse_entry", "record_notification",

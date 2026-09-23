@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import {
   opk, rootQuery, roleQuery, ROLES, humanQuery, insertUser, addMember, membershipId, removeMember,
-  namedCall, getPool,
+  namedCall, getPool, createClientRaw,
 } from "./rig-fixtures.mjs";
 
 // ---------------------------------------------------------------------------
@@ -92,9 +92,10 @@ export async function firmDrift(sub) {
  */
 export async function newInterviewClient(admin, firm, { tag, answers = {} } = {}) {
   const name = `rig_prb_${tag ?? "c"}_${randomUUID().slice(0, 8)}`;
-  const created = await humanQuery(
-    admin, "select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [name, opk("cli")]);
-  const client = created.rows[0].receipt.client_id;
+  // [#1038] clara.create_client's clara_authenticated grant is withdrawn; createClientRaw
+  // reaches the same unwalled verb through the rig's own root+jwt idiom.
+  const created = await createClientRaw(admin, { name, opKey: opk("cli") });
+  const client = created.client_id;
 
   const plan = (await rootQuery(
     "select id, revision_token from clara.onboarding_plans where client_id = $1 and state = 'open' order by created_at desc limit 1",
