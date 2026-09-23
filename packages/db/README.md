@@ -4821,3 +4821,15 @@ computed against that carrier, and `next_step` as a closed token: `configure_sch
 because the copy is the surface's and the fact is the database's. `clara._adj_line_eligibility_breach`
 is now the only thing keeping an ordinary memo-only receivable out of the band, so
 `p939.attention.memo_only` drives that wall on this lane rather than assuming it carries over.
+
+**The closed-wave floor moves in the same PR that moves it.** Registering `prepayment_schedule` v2
+adds a ninth row to `clara.evaluator_versions`, and three closed-world censuses count that roster by
+name and version: `delta-contract.test.mjs`, `delta-catalog-phase.mjs` and
+`epsilon-contract.test.mjs`. Each of them also runs the test-time one-way deploy ceremony over every
+registered closure EXCEPT a named exclusion list — so without an entry the ceremony flips v2 on
+sight (measured on the lane rig the moment 0305 applied: the floor read one too many, and
+`_tf_evaluator_deploy_once` makes that flip irreversible without disabling the trigger). v2 joins
+`evaluate_fs_pack_agent` v1, `evaluate_metric` v2 and `prepayment_schedule` v1 on the exclusion list
+for the reason all three are there: evaluator versions are BORN undeployed and the flip is a
+separate ceremony act. The rosters are extended, never loosened — each addition is conditional on
+the row existing, so the censuses stay exact on a pre-0305 chain too.

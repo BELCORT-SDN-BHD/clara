@@ -534,10 +534,26 @@ await t.test("both evaluator closures are exact, independent, and registered —
   if (prepayRegistered) {
     expected.set("prepayment_schedule@v1", ["clara.prepayment_schedule_v1(uuid,uuid)"]);
   }
+  // #939's prepayment_schedule v2 (migration 0305), the memo-only lane's evaluator: v1's formula
+  // with the amount, the released account, the released SIDE and the term supplied as arguments,
+  // so the DOOR picks the source leg and the term source. ONE member for exactly v1's reason — it
+  // calls no other clara function and reads no table, which is what keeps the freeze meaningful.
+  // Named here rather than absorbed into a bumped total, because this census is CLOSED-WORLD by
+  // design; added CONDITIONALLY, because the row does not exist on a pre-0305 chain.
+  const prepayV2Registered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name='prepayment_schedule' and version=2 and firm_id is null) as ok"))
+    .rows[0].ok;
+  if (prepayV2Registered) {
+    expected.set("prepayment_schedule@v2",
+      ["clara.prepayment_schedule_v2(bigint,text,text,date,date)"]);
+  }
   /** Closures whose deploy state this census does NOT assert: each owns its own separate ceremony.
-   *  PR-2a's joins them because it ships DARK until PR-2b's runtime ceremony flips it. */
+   *  PR-2a's joins them because it ships DARK until PR-2b's runtime ceremony flips it, and #939's
+   *  v2 joins them for the same reason: evaluator versions are BORN undeployed and the flip is a
+   *  separate one-way ceremony act, so the covered-five census must not assert its state either. */
   const OWNS_ITS_OWN_CEREMONY = new Set([
-    "evaluate_fs_pack_agent@v1", "evaluate_metric@v2", "prepayment_schedule@v1"]);
+    "evaluate_fs_pack_agent@v1", "evaluate_metric@v2",
+    "prepayment_schedule@v1", "prepayment_schedule@v2"]);
   const members = (await rootQuery(`select e.evaluator_name,e.version,e.deployed,m.ordinal,m.member_signature,encode(m.body_sha256,'hex') stored,encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(m.member_signature))::text,'UTF8')),'hex') live,encode(e.closure_sha256,'hex') aggregate from clara.evaluator_versions e join clara.evaluator_version_members m on m.evaluator_version_id=e.id order by e.evaluator_name,e.version,m.ordinal`)).rows;
   // FRESH once here, reused below: fs_pack_agent owns its OWN ceremony (f-a5 cell D), so its
   // deployed flag is never asserted by this closed-world census either way -- only the covered
@@ -664,8 +680,15 @@ await t.test("freeze verifier positively reads registered live bodies, deploymen
   // pre-PR-2a chain contributes nothing.
   const prepayDeployed = (await rootQuery(
     "select deployed from clara.evaluator_versions where evaluator_name='prepayment_schedule' and version=1 and firm_id is null")).rows[0]?.deployed === true;
+  // #939's prepayment_schedule v2 is the FOURTH closure that owns its own separate ceremony, and
+  // it is added here for the reason #1016 recorded about the third: this hand-derived expectation
+  // must mirror clara.verify_evaluator_freeze()'s own count(*) where deployed for EVERY evaluator
+  // that ships dark, not just some of them — the verifier itself draws no such distinction.
+  const prepayV2Deployed = (await rootQuery(
+    "select deployed from clara.evaluator_versions where evaluator_name='prepayment_schedule' and version=2 and firm_id is null")).rows[0]?.deployed === true;
   assert.equal(result.verified_deployed,
-    fresh ? 0 : 5 + (fsPackDeployed ? 1 : 0) + (card1V2Deployed ? 1 : 0) + (prepayDeployed ? 1 : 0),
+    fresh ? 0 : 5 + (fsPackDeployed ? 1 : 0) + (card1V2Deployed ? 1 : 0) + (prepayDeployed ? 1 : 0)
+      + (prepayV2Deployed ? 1 : 0),
     JSON.stringify(result));
   // SIX registered closures at this frontier: delta's evaluate_metric +
   // assess_metric_cell_independent, F-A1's evaluate_witness_fact_state (v1) +
@@ -686,7 +709,14 @@ await t.test("freeze verifier positively reads registered live bodies, deploymen
   // PR-2b), which is why it is counted here but excluded from the deployment census.
   const prepayRegistered = (await rootQuery(
     "select exists(select 1 from clara.evaluator_versions where evaluator_name='prepayment_schedule' and version=1 and firm_id is null) as ok")).rows[0].ok;
+  // NINE once #939 registers prepayment_schedule v2 — a NEW closure on exactly the same terms once
+  // more: the count moves by one and every predecessor keeps its row. Measured rather than
+  // assumed, so this cell stays exact on a pre-0305 chain too, and counted here although it is
+  // excluded from the deployment census, because REGISTRATION and DEPLOYMENT are two facts.
+  const prepayV2Registered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name='prepayment_schedule' and version=2 and firm_id is null) as ok")).rows[0].ok;
   assert.equal(result.verified_registered,
-    6 + (card1V2Registered ? 1 : 0) + (prepayRegistered ? 1 : 0), JSON.stringify(result));
+    6 + (card1V2Registered ? 1 : 0) + (prepayRegistered ? 1 : 0) + (prepayV2Registered ? 1 : 0),
+    JSON.stringify(result));
 });
 }

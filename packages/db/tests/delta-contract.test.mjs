@@ -26,8 +26,24 @@ const CEREMONY_EXCLUDED_V2 = Object.freeze({ evaluator_name: "evaluate_metric", 
  *  since the flag is about traffic and not about immutability. Keyed BY NAME AND VERSION like
  *  card 1's, and added here in the SAME PR that registers it — the closed-wave floor rule. */
 const CEREMONY_EXCLUDED_V3 = { evaluator_name: "prepayment_schedule", version: 1 };
+/** THE FOURTH EXCLUSION — #939's clara.prepayment_schedule_v2 (migration 0305), the memo-only
+ *  lane's evaluator: v1's formula with the amount, the released account, the released side and the
+ *  term supplied as ARGUMENTS so the DOOR picks the source leg and the term source. It is
+ *  registered `deployed = false` for the same reason v1 is — evaluator versions are BORN
+ *  undeployed and the flip is a separate one-way ceremony act under the bare migration principal
+ *  (0060's `_tf_evaluator_deploy_once`) — and the freeze binds regardless, because the flag is
+ *  about traffic and not about immutability. Without this entry the covered-five ceremony flips it
+ *  on sight and the floor reads one too many, which is exactly what this rig reported the moment
+ *  0305 applied.
+ *
+ *  ADDED IN THE SAME PR THAT REGISTERS IT — the closed-wave floor rule (packages/db/README.md,
+ *  "Migration and deployment behavior"): a PR that moves a catalog object a closed-wave floor
+ *  counts trues that floor itself. Keyed BY NAME AND VERSION like the three above, and it HAS to
+ *  be: prepayment_schedule v1 is already excluded and a name-only predicate would have covered
+ *  both by accident rather than by decision. */
+const CEREMONY_EXCLUDED_V4 = { evaluator_name: "prepayment_schedule", version: 2 };
 const EXCLUDED_PAIRS_SQL =
-  "(('evaluate_fs_pack_agent',1),('evaluate_metric',2),('prepayment_schedule',1))";
+  "(('evaluate_fs_pack_agent',1),('evaluate_metric',2),('prepayment_schedule',1),('prepayment_schedule',2))";
 
 /** Pre-integration gating, stated once for the whole delta contract: a PACKAGE-WIDE run may precede
  *  the delta migrations, so `tests/delta-preintegration-gate.mjs` (preloaded by the package test
@@ -84,6 +100,12 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       [CEREMONY_EXCLUDED_V3.evaluator_name, CEREMONY_EXCLUDED_V3.version])).rows[0];
     const v3Registered = v3Row !== undefined;
     const v3Deployed = v3Registered && v3Row.deployed === true;
+    // #939's prepayment_schedule v2, on the same three-state footing for the same reason.
+    const v4Row = (await rootQuery(
+      "select deployed from clara.evaluator_versions where evaluator_name=$1 and version=$2 and firm_id is null",
+      [CEREMONY_EXCLUDED_V4.evaluator_name, CEREMONY_EXCLUDED_V4.version])).rows[0];
+    const v4Registered = v4Row !== undefined;
+    const v4Deployed = v4Registered && v4Row.deployed === true;
     // CLOSED-WORLD ROSTER, extended rather than loosened: F-A1 (Wave-F Track A, migrations
     // 0091/0092) registers two further closures — clara.evaluate_witness_fact_state_v1, the
     // witness-pair corroboration predicate, and clara.evaluate_witness_identity_v1, its identity
@@ -118,6 +140,9 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       // entirely on a pre-PR-2a chain, and when present it carries its OWN ceremony's deploy state
       // rather than the covered-five's -- it ships DARK until PR-2b flips it.
       ...(v3Registered ? [{ ...CEREMONY_EXCLUDED_V3, deployed: v3Deployed }] : []),
+      // #939's prepayment_schedule v2, measured the same way: absent on a pre-0305 chain, and when
+      // present it carries its OWN ceremony's deploy state rather than the covered-five's.
+      ...(v4Registered ? [{ ...CEREMONY_EXCLUDED_V4, deployed: v4Deployed }] : []),
     ]);
     await withActor({ transaction: true }, async (db) => {
       const identity = (await db.query("select current_user,session_user")).rows[0];
@@ -144,7 +169,8 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       // admits this row like any other by watching the gate stop refusing.
       // FIVE is what this ceremony COVERS. Each EXCLUDED row adds one to the deployed total only
       // if its OWN separate, one-way ceremony already ran in a prior invocation.
-      const extra = (fsPackDeployed ? 1 : 0) + (v2Deployed ? 1 : 0) + (v3Deployed ? 1 : 0);
+      const extra = (fsPackDeployed ? 1 : 0) + (v2Deployed ? 1 : 0) + (v3Deployed ? 1 : 0)
+        + (v4Deployed ? 1 : 0);
       assert.equal((await db.query(
         "select count(*)::int n from clara.evaluator_versions where deployed",
       )).rows[0].n, 5 + extra);
@@ -160,6 +186,7 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
         ...(fsPackDeployed ? [] : [{ evaluator_name: CEREMONY_EXCLUDED, version: 1 }]),
         ...(v2Registered && !v2Deployed ? [{ ...CEREMONY_EXCLUDED_V2 }] : []),
         ...(v3Registered && !v3Deployed ? [{ ...CEREMONY_EXCLUDED_V3 }] : []),
+        ...(v4Registered && !v4Deployed ? [{ ...CEREMONY_EXCLUDED_V4 }] : []),
       ].sort((x, y) => (x.evaluator_name < y.evaluator_name ? -1
         : x.evaluator_name > y.evaluator_name ? 1 : x.version - y.version)),
       "the only closures this ceremony leaves undeployed are the ones that own their own flip");
