@@ -83,16 +83,20 @@ never removes them. Migration
 [0154_binding_proposal_pr_1.sql](migrations/0154_binding_proposal_pr_1.sql)'s tail pins the
 cluster-wide `clara%` role count at the literal `14`, a measured proof that 0154 itself mints no
 role. `0154` is applied and immutable; this section documents the hazard around it, it does not
-change it. Two migrations after 0154 mint four more roles:
+change it. Three migrations after 0154 mint six more roles:
 [0160_checkout_gate_c2_stripe_events.sql](migrations/0160_checkout_gate_c2_stripe_events.sql)
 (`clara_stripe_webhook`, `clara_stripe_webhook_login`) and
 [0163_checkout_gate_c3_folded_door.sql](migrations/0163_checkout_gate_c3_folded_door.sql)
-(`clara_auth_wall`, `clara_auth_wall_login`), each guarded by `if not exists` so a normal single
-from-scratch chain only creates them once.
+(`clara_auth_wall`, `clara_auth_wall_login`) and
+[0309_invite_preview_public_door.sql](migrations/0309_invite_preview_public_door.sql)
+(`clara_invite_preview`, `clara_invite_preview_login` — #871's signed-out invite preview), each
+guarded by `if not exists` so a normal single from-scratch chain only creates them once.
 
 Re-applying the WHOLE chain from scratch into a **fresh database on a cluster that already ran the
-chain once** hits those four leftover roles before it reaches 0154 again: the count already reads
-`18`, not `14`, and 0154 raises `CLR10` — a cluster-reuse hazard, not a migration defect.
+chain once** hits those six leftover roles before it reaches 0154 again: the count already reads
+`20`, not `14`, and 0154 raises `CLR10` — a cluster-reuse hazard, not a migration defect. (0309
+carries its own prestate census of `18` at its own point in the chain, so the same reuse on a
+cluster that already has its pair is named there too, by that file rather than by 0154.)
 
 **Preferred:** one from-scratch chain per cluster (a fresh disposable Postgres cluster, or a fresh
 container/instance). [tests/README.md](tests/README.md) states the same rule for the test rig.
@@ -117,9 +121,13 @@ The exact statements it runs, for the record (base role before its `_login` twin
 `rolesMintedAfterPin()` reads off the migration files, `apply()` iterates, and
 `role-census-reset.test.mjs`'s "rcr.mint against the REAL migrations directory" cell pins):
 `drop role clara_stripe_webhook; drop role clara_stripe_webhook_login; drop role
-clara_auth_wall; drop role clara_auth_wall_login;` — after which a from-scratch chain is
-**expected** to pass 0154's census (14) and let migrations 0160/0163 recreate the four roles
-fresh partway through the same chain (back to 18). **Verified end to end (2026-09-20)**: a
+clara_auth_wall; drop role clara_auth_wall_login; drop role clara_invite_preview; drop role
+clara_invite_preview_login;` — after which a from-scratch chain is
+**expected** to pass 0154's census (14) and let migrations 0160/0163/0309 recreate the six roles
+fresh partway through the same chain (back to 20). **Verified end to end (2026-09-20)**, on the
+chain as it stood then — 229 files, four post-pin roles, 18 live; #871's 0309 adds the fifth and
+sixth without changing a line of the recipe, because the script derives its roster from the
+migration files themselves: a
 genuinely separate, disposable PostgreSQL 17 cluster was provisioned for this proof alone —
 `sudo pg_createcluster 17 l04chk --port=55799`, `pg_hba.conf` edited to the same trust lines this
 rig's own lane clusters carry — never RIG.md's shared lane cluster at 55744, so its "never run a
@@ -145,8 +153,9 @@ lacked was a cluster with the chain to spare, not a working fix, and `pg_createc
 `pg_dropcluster` (from this host's already-installed `postgresql-common` package) supplies
 exactly that without needing a second physical machine. The script reads 0154's pinned literal and the
 post-0154 role manifest from the migration files themselves (never a hand-kept copy), so a future
-migration minting another role is picked up automatically. Verified on this package's own rig
-(`packages/db/tests/role-census-reset.test.mjs`): the live cluster's count (18) minus its four
+migration minting another role is picked up automatically — #871's 0309 is the first one that did,
+and it needed no edit here beyond this paragraph's arithmetic. Verified on this package's own rig
+(`packages/db/tests/role-census-reset.test.mjs`): the live cluster's count (20) minus its six
 minted roles matches 0154's pin (14) exactly, and dropping/recreating the two `_login` roles
 (no direct grants, membership only) round-trips cleanly with the checkout-gate-c2 (18/18) and
 checkout-gate-c3 (69/69) batteries re-run green afterward. The two base roles
@@ -4730,3 +4739,89 @@ shared `fixed-asset-acquisition-fixtures.mjs`, so it is dormant below 0216):
 
 Vacuity control: with the fixture changed to park the question WITHOUT a proposal, cells 1–3 go
 red and 4–5 stay green; the fixture was then restored byte for byte.
+
+## 0309 — a signed-out invitee can see which firm and role an invite names (#871, riders wave 4 lane 05)
+
+**The question, in plain words.** Someone clicks an invite link. Before they sign in, can the page
+tell them which firm and which role it is for? Until this migration, no: the only preview door,
+`clara.preview_invite` (0224), needs a signed-in caller whose verified address equals the invite's,
+and no server credential in the estate could read an invite either. The ticket's original brief
+proposed the service-role key; riders wave 2 stopped it with evidence (that key holds ZERO
+privilege on schema `clara` — `grep -rn service_role packages/db/migrations` returns nothing — and
+`docs/plan/active/refresh-wave-2026-09-14/brief-620.md` had already disqualified it as a
+privileged-read mechanism). **The owner ruled on 2026-09-23**: build a server-only database door on
+the auth-wall pattern instead.
+
+**What landed.**
+
+* `clara.preview_invite_by_token(p_token text, p_origin_digest bytea) returns jsonb` — SECURITY
+  DEFINER, owned by `clara_fn_owner`, `search_path = clara, pg_temp`, and EXECUTE granted to
+  exactly one role. Three outcomes, all RETURNED:
+  `{"outcome":"preview","firm_name","role","status","masked_email"}` for an OPEN invite,
+  `{"outcome":"not_previewable"}` for an unknown, expired, revoked or accepted token, and
+  `{"outcome":"rate_limited","retry_after_seconds"}` from its own wall.
+* `clara_invite_preview` (NOLOGIN group, holds the one EXECUTE and no relation privilege anywhere)
+  and `clara_invite_preview_login` (NOLOGIN shell, member of it) — 0163's role pair, one lane over.
+  **No LOGIN attribute and no password is in this file**; the credential is an out-of-band operator
+  ceremony, and the migration's own tail REFUSES `rolcanlogin` on either role so one cannot arrive
+  by migration. See the release runbook for the ceremony.
+* `clara.invite_preview_attempts` — the wall's evidence: the token's sha256, the peppered origin
+  digest, a timestamp. Forced RLS with a single owner policy, append-only, no truncate, no
+  application grant, mirroring `clara.confirmation_attempts` (0163 §3).
+
+**Why every refusal is RETURNED rather than raised.** `raise exception` aborts the transaction and
+rolls back the attempt row this door just inserted — a raising refusal would make the wall vacuous,
+and enumerating tokens would cost nothing and leave no evidence.
+`clara.claim_confirmation_attempt` answers `allowed:false` for the same reason. The only two
+exceptions are caller-side input-shape facts that depend on no invite and no window: `a token is
+required` and `a digest is required`, both CLR10.
+
+**Why its own evidence table and not `clara.confirmation_attempts`.** That table IS the applicant's
+five OTP guesses. Routing previews through it either settles them `'rejected'` — five invite-link
+loads would then lock out every signup behind the same address for fifteen minutes — or settles
+them `'accepted'`, which the counting predicate EXCLUDES, leaving the preview unwalled. The SHAPE
+is what this file reuses: two limbs (token, origin), a 15-minute window, a ceiling of 5, advisory
+locks in numeric order, each limb's own wait computed independently and the maximum advertised
+(0163's own BLOCKER-1 correction, because the row just inserted counts toward both limbs' future
+windows). A walled preview degrades the landing page to "sign-in without the preview block"; it
+never refuses a journey.
+
+**The five-state derivation is shared, not forked.** The status CASE expression is copied character
+for character out of `clara.preview_invite`'s live body (0224 §A as widened by #872 / 0269 §2), and
+§D.T7 asserts on the LIVE catalog — whitespace-normalised, in both directions — that the same
+expression sits in both bodies. A shared SQL function was refused for 0269's own measured reason:
+Postgres checks EXECUTE against the INVOKING role for every function named in a view's body, so a
+helper `clara.firm_invites_visible` could call would need a grant to `clara_authenticated`, and
+PostgREST would expose it as a bare cross-tenant rank oracle.
+
+**The role census stays lawful.** 0154's tail pins the cluster-wide `clara%` role count at 14 at
+its own point in the chain; `scripts/migrate.mjs` applies files in ascending numeric order, so a
+role minted at 0309 does not exist when 0154 runs. 0309 carries its own census (18 before, 20
+after). The #867 cluster-reuse recipe now drops six roles instead of four and needed no code
+change — `role-census-reset.mjs` derives its roster from the migration files themselves.
+
+**Battery** (`tests/invite-preview-public.test.mjs`, 12 cells, every door call made through
+`set role clara_invite_preview` — never `rootQuery`, which is superuser and proves nothing about
+reachability):
+
+* `p871.door.open` ×2 — the four fields and the mask for a live pending token; and the read mints
+  nothing (no user, no membership, no op receipt, the invite still `pending`).
+* `p871.door.no_oracle` — an unknown, an expired, a revoked and an accepted token answer
+  BYTE-IDENTICALLY.
+* `p871.door.five_states` — all five effective statuses are reached (asserted against
+  `clara.firm_invites_visible`, read as the owner, as the independent source of truth), the door
+  agrees with the roster in every one, and re-promoting a demoted issuer returns BOTH surfaces to
+  `pending`.
+* `p871.grant.only_the_group` — the exact ACL text (grantor included), seventeen other roles
+  refused EXECUTE, and the group plus its shell allowed.
+* `p871.grant.credential_less` — both roles NOLOGIN with no escalation bit, the exact membership
+  chain, and zero relation privilege.
+* `p871.grant.from_scratch` — exactly one migration mints the pair, its number is above 0154, and
+  the migrator sorts numerically.
+* `p871.wall.origin_limb` / `p871.wall.token_limb` — five served, the sixth walled, on each limb;
+  an unknown token spends the budget exactly as a real one does; six evidence rows.
+* `p871.wall.digests` / `p871.wall.evidence` — the two raised input facts leave no attempt behind;
+  the evidence table's columns, RLS posture and append-only guard, the last proven by driving a
+  DELETE into it.
+* `p871.derivation` — the shared expression is present in both live bodies, with a mutated-string
+  vacuity control.

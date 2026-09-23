@@ -325,6 +325,18 @@ _Avoid_: Resending the same invitation; a pending invitation shown as a member; 
 creation of a new firm as a synonym for joining one; a per-firm seat count as a reason to refuse
 one (see **Admission capacity**).
 
+**Signed-out invite preview**:
+What the invite landing page can say about an invitation BEFORE anyone signs in: the firm's display
+name, the invited role, the effective status and a masked address — nothing else, and only while
+the invitation is still open. It is served by a server-only database door no browser, no client
+credential and no service key can reach, and an unknown, expired, revoked or already-accepted token
+gets ONE and the same answer, so possession of a link never reveals whether it exists. Reading it
+is a courtesy, not an admission: rate-limited, and when it is refused the page simply carries on to
+sign-in without the block.
+_Avoid_: A synonym for the signed-in preview (that one proves the reader's address and is a
+different door); a verdict on whether the invitation will be accepted — only `accept_invite`
+decides that; treating a hidden preview as a dead link.
+
 **Issuer lapsed**:
 The fifth effective status a still-`pending` invitation can read, computed at READ TIME by one
 expression the invitee's preview and the admin roster BOTH carry, when the invitation's issuer no

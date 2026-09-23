@@ -67,13 +67,23 @@ test("rcr.mint finds a role-creating migration after the pin, ignores one at or 
   }
 });
 
-test("rcr.mint against the REAL migrations directory finds exactly the four #867 roles", () => {
+// #871 [0309] widened this census from four roles to SIX. `rolesMintedAfterPin()` needed no edit --
+// it derives its roster from the migration files themselves -- but this cell pins the DERIVED
+// answer, so a role minted without its roles-bootstrap/CHAIN_MINTED_ROLES twin still lands here
+// rather than only in the #867 recipe's runtime behaviour.
+test("rcr.mint against the REAL migrations directory finds exactly the six post-pin roles (#867's four, plus #871's pair)", () => {
   const roles = rolesMintedAfterPin();
   assert.deepEqual(
     roles.map((r) => r.name),
-    ["clara_stripe_webhook", "clara_stripe_webhook_login", "clara_auth_wall", "clara_auth_wall_login"],
+    [
+      "clara_stripe_webhook", "clara_stripe_webhook_login", "clara_auth_wall", "clara_auth_wall_login",
+      "clara_invite_preview", "clara_invite_preview_login",
+    ],
   );
-  assert.ok(roles.every((r) => /^01(60|63)_/.test(r.file)), `every role traces to 0160 or 0163: ${roles.map((r) => r.file)}`);
+  assert.ok(
+    roles.every((r) => /^(01(60|63)|0309)_/.test(r.file)),
+    `every role traces to 0160, 0163 or 0309: ${roles.map((r) => r.file)}`,
+  );
 });
 
 test("rcr.pin against the REAL 0154 reads the literal 14", () => {
@@ -81,13 +91,13 @@ test("rcr.pin against the REAL 0154 reads the literal 14", () => {
   assert.equal(pinned, 14);
 });
 
-test("rcr.check on this rig: 18 live, dropping the 4 minted roles matches 0154's pin of 14", async () => {
+test("rcr.check on this rig: 20 live, dropping the 6 minted roles matches 0154's pin of 14", async () => {
   const lines = [];
   const result = await check({ log: (s) => lines.push(s) });
   assert.equal(result.pinned, 14);
-  assert.equal(result.minted.length, 4);
-  assert.ok(result.currentCount >= 18, `expected at least the 18 roles this rig's chain mints, got ${result.currentCount}`);
-  assert.equal(result.wouldReadAfterDrop, result.currentCount - 4);
+  assert.equal(result.minted.length, 6);
+  assert.ok(result.currentCount >= 20, `expected at least the 20 roles this rig's chain mints, got ${result.currentCount}`);
+  assert.equal(result.wouldReadAfterDrop, result.currentCount - 6);
   // L04-S14: assert the value directly (14), not `wouldReadAfterDrop === 14` restated
   // as `matchesPin`'s own definition -- that comparison can never fail, because
   // matchesPin IS `wouldReadAfterDrop === pinned` and pinned was already asserted
@@ -103,6 +113,11 @@ test("rcr.check on this rig: 18 live, dropping the 4 minted roles matches 0154's
   assert.ok(byName.clara_stripe_webhook.deps.length > 0, "clara_stripe_webhook is granted real table privileges on this rig");
   assert.equal(byName.clara_auth_wall.exists, true);
   assert.ok(byName.clara_auth_wall.deps.length > 0, "clara_auth_wall is granted real table privileges on this rig");
+  // #871 [0309]: the invite-preview group holds ONE function EXECUTE grant and no table grant, so
+  // its shared dependency is an ACL entry on a routine rather than on a relation -- still a real
+  // dependent, still BLOCKED, which is the honest live state of this rig.
+  assert.equal(byName.clara_invite_preview.exists, true);
+  assert.ok(byName.clara_invite_preview.deps.length > 0, "clara_invite_preview holds the EXECUTE grant on its own door");
   assert.equal(result.safeToApply, false, "a live checkout-gate rig is never safe to apply against directly");
   assert.ok(lines.some((l) => l.includes("does NOT match") === false && l.includes("MATCHES")), "check logs the arithmetic verdict");
 });
