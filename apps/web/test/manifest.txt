@@ -241,6 +241,7 @@ components/plans/plans-render-states.test.tsx
 components/prepayments/prepayments-a11y.test.tsx
 components/prepayments/prepayments-keyboard.test.tsx
 components/prepayments/prepayments-render-states.test.tsx
+components/prepayments/prepayments-roster-gate.test.tsx
 components/prepayments/prepayments-term-source.test.tsx
 components/registers/EnrolAccountDialog.test.ts
 components/registers/accounts-a11y.test.tsx

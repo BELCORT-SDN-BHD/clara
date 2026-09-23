@@ -537,6 +537,15 @@ export function staffAdvancesHref(clientId: string): string {
   return `${clientBase(clientId)}/registers?tab=staffAdvances`;
 }
 
+/** `/clients/:clientId/registers?tab=fixedAssets` — the Registers view that carries the #940
+ *  PREPAYMENT-ACCOUNT roster panel, beside the fixed-asset account profiles. Named as its own
+ *  helper rather than spelled at each call site because the prepayment surfaces link here for a
+ *  reason of their own — the roster gates amortisation, and a refusal that names a panel has to be
+ *  able to reach it — so a later move of that panel is one edit here, not three. */
+export function prepaymentAccountsHref(clientId: string): string {
+  return `${clientBase(clientId)}/registers?tab=fixedAssets`;
+}
+
 /** `/clients/:clientId/work/:workId` — one durable Work record's own address.
  *  The id is percent-encoded here even though every caller holds a uuid: this
  *  function builds a URL, and a URL builder that trusts its input is how a

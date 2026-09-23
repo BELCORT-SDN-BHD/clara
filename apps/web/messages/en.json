@@ -6924,6 +6924,12 @@
       "stateTermIssueOrder": "The last day covered falls on or after the first.",
       "stateTermIssueReason": "Say why that period before recording it.",
       "stateTermRefusalTitle": "The service period was not recorded"
+      ,
+      "rosterEmptyTitle": "No prepayment account is enrolled for this client",
+      "rosterEmptyBody": "Only an account the firm has enrolled as holding prepayments can be amortised. Until one is enrolled, nothing here can be configured — including prepayments that are already posted.",
+      "rosterEmptyLink": "Open the Registers page",
+      "refusalNotEnrolled": "That prepayment’s account is not enrolled as a prepayment account for this client. Enrol it on the client’s Registers page, then configure the schedule again.",
+      "refusalNotEnrolledLink": "Open the Registers page"
     },
     "PrepaymentAccounts": {
       "heading": "Prepayment accounts",
