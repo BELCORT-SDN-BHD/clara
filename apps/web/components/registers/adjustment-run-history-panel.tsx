@@ -1,9 +1,8 @@
 "use client";
 
-// Run history — run_adjustment_manual (bookkeeper+) plus every run's own
-// correction affordance, sourced from list_adjustment_runs (the ONE RPC this
-// train wires; see lib/registers/adjustments.ts's header for why). A run is
-// offered "Reverse pair" only when the DB's own projection says
+// Run history — every run's own correction affordance, sourced from
+// list_adjustment_runs (the ONE RPC this train wires; see lib/registers/adjustments.ts's
+// header for why). A run is offered "Reverse pair" only when the DB's own projection says
 // `correctable: true` AND `correction_verb === "clara.reverse_adjustment_pair"`
 // — a solo occurrence's own correction (`clara.reverse_entry`) is T6's door,
 // not this train's, and is rendered as an honest note rather than a second,
@@ -14,6 +13,10 @@
 // below sends `r.correction_entry` — the DB's OWN resolved occurrence id —
 // not `r.entry_id` re-derived by inference. See adjustments.ts's own field
 // comment for the full grounding.
+//
+// [#927, riders wave 3] `RunNowDialog` (run_adjustment_manual) is RETIRED WITH ITS DOOR
+// (migration 0282) and removed from this file, along with the `onRunNow` prop —
+// `adjustments-register.tsx` no longer passes one. Reverse-pair is D6-untouched and stays.
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
@@ -23,63 +26,8 @@ import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/common/native-select";
 import { AdjustmentDoorDialog } from "./AdjustmentDoorDialog";
-import type { AdjustmentTemplateRow, AdjustmentRunWithCorrection } from "@/lib/registers/adjustments";
-
-function RunNowDialog({
-  templates,
-  busy,
-  onSubmit,
-}: {
-  templates: AdjustmentTemplateRow[];
-  busy: boolean;
-  onSubmit: (templateId: string, periodStart: string, periodEnd: string) => Promise<boolean>;
-}) {
-  const t = useTranslations("AdjustmentsAccounts.runNow");
-  const liveTemplates = templates.filter((tpl) => tpl.status === "live");
-  const [templateId, setTemplateId] = useState("");
-  const [periodStart, setPeriodStart] = useState("");
-  const [periodEnd, setPeriodEnd] = useState("");
-  const canSubmit = templateId !== "" && periodStart !== "" && periodEnd !== "";
-
-  return (
-    <AdjustmentDoorDialog
-      triggerLabel={t("trigger")}
-      title={t("title")}
-      description={t("description")}
-      confirmLabel={t("trigger")}
-      busy={busy}
-      confirmDisabled={!canSubmit}
-      onConfirm={() => onSubmit(templateId, periodStart, periodEnd)}
-    >
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="adj-run-template">{t("templateLabel")}</Label>
-          <NativeSelect id="adj-run-template" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-            <option value="">{t("selectTemplate")}</option>
-            {liveTemplates.map((tpl) => (
-              <option key={tpl.id} value={tpl.id}>
-                {tpl.name}
-              </option>
-            ))}
-          </NativeSelect>
-          {liveTemplates.length === 0 ? <p className="text-xs text-muted-foreground">{t("noLiveTemplates")}</p> : null}
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="adj-run-start">{t("periodStartLabel")}</Label>
-            <Input id="adj-run-start" type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} required />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="adj-run-end">{t("periodEndLabel")}</Label>
-            <Input id="adj-run-end" type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} required />
-          </div>
-        </div>
-      </div>
-    </AdjustmentDoorDialog>
-  );
-}
+import type { AdjustmentRunWithCorrection } from "@/lib/registers/adjustments";
 
 function ReversePairDialog({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: string) => Promise<boolean> }) {
   const t = useTranslations("AdjustmentsAccounts.reversePair");
@@ -105,16 +53,12 @@ function ReversePairDialog({ busy, onSubmit }: { busy: boolean; onSubmit: (reaso
 }
 
 export function AdjustmentRunHistoryPanel({
-  templates,
   runs,
   busy,
-  onRunNow,
   onReversePair,
 }: {
-  templates: AdjustmentTemplateRow[];
   runs: AdjustmentRunWithCorrection[];
   busy: boolean;
-  onRunNow: (templateId: string, periodStart: string, periodEnd: string) => Promise<boolean>;
   onReversePair: (occurrenceEntryId: string, reason: string) => Promise<boolean>;
 }) {
   const t = useTranslations("AdjustmentsAccounts.runHistory");
@@ -166,9 +110,6 @@ export function AdjustmentRunHistoryPanel({
           </TableBody>
         </DataTableCard>
       )}
-      <div>
-        <RunNowDialog templates={templates} busy={busy} onSubmit={onRunNow} />
-      </div>
     </div>
   );
 }

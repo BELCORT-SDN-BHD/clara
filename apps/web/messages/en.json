@@ -3630,6 +3630,7 @@
       }
     },
     "adjustments": {
+      "retiredNotice": "This lane is retired. Set up recurring or reversing entries as an accounting plan instead (Client → Plans).",
       "templatesHeading": "Templates",
       "runsHeading": "Runs",
       "emptyTemplates": "No recurring adjustment templates for this client.",
@@ -4735,38 +4736,6 @@
       "cancel": "Cancel",
       "working": "Working…"
     },
-    "linesEditor": {
-      "lineNo": "#",
-      "account": "Account",
-      "debit": "Debit",
-      "credit": "Credit",
-      "selectAccount": "Select an account…",
-      "removeLine": "Remove line",
-      "presentationSumLabel": "Sum (presentation only)",
-      "notBalanced": "Debits and credits do not balance yet — the DB will refuse an unbalanced entry.",
-      "addLine": "Add line"
-    },
-    "proposeTemplate": {
-      "trigger": "Propose template",
-      "title": "Propose a recurring adjustment template",
-      "description": "An admin must sign this before it can run. Lines are the template's own recipe — every occurrence posts them unchanged.",
-      "nameLabel": "Name",
-      "cadenceLabel": "Cadence",
-      "cadence": {
-        "monthly": "Monthly",
-        "annual": "Annual"
-      },
-      "autoReverseLabel": "Auto-reverse each occurrence at the start of the next period",
-      "startDateLabel": "Start date",
-      "endDateLabel": "End date (optional)",
-      "memoLabel": "Memo template",
-      "memoHint": "The memo every occurrence carries — required, since it is the only description a scheduled run posts with."
-    },
-    "signTemplate": {
-      "trigger": "Sign",
-      "title": "Sign \"{name}\"",
-      "description": "Signing is admin-only. This re-checks the template's dates are still the first/last day of a period under the client's CURRENT fiscal year — a stale window refuses rather than posting on the wrong dates."
-    },
     "retireTemplate": {
       "trigger": "Retire",
       "title": "Retire \"{name}\"",
@@ -4794,16 +4763,6 @@
       "soloOccurrenceNote": "This run is a solo occurrence, not an auto-reverse pair — correct it from the Journals tab.",
       "wallFallback": "Not correctable right now ({wall}).",
       "unavailable": "Could not load run history — see the error above."
-    },
-    "runNow": {
-      "trigger": "Run now",
-      "title": "Run an adjustment manually",
-      "description": "The period must exactly match the live template's own cadence window, and must have already ended.",
-      "templateLabel": "Template",
-      "selectTemplate": "Select a live template…",
-      "noLiveTemplates": "No live templates yet — sign one above first.",
-      "periodStartLabel": "Period start",
-      "periodEndLabel": "Period end"
     },
     "reversePair": {
       "trigger": "Reverse pair",
