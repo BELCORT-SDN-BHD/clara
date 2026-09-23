@@ -6196,6 +6196,8 @@
     }
   },
   "WorkQuestion": {
+    "proposalLabel": "Clara's proposal",
+    "proposalHelp": "A suggestion, not a decision. Change anything that is not right — what is recorded is what you confirm, under your name.",
     "reasonLabel": "Why it is needed:",
     "sourceLabel": "Supporting source:",
     "versionLabel": "Question {version}",

@@ -74,6 +74,13 @@ function idOf(n: unknown): string {
   const props = key ? (n as Record<string, Record<string, unknown>>)[key] : undefined;
   return String(props?.id ?? "");
 }
+/** The `data-testid` of a harness node. The stub DOM implements `getAttribute`, but `h.find`'s
+ *  predicate parameter is untyped, so the cast lives in ONE place rather than at every call. */
+function tidOf(n: unknown): string {
+  const el = n as { getAttribute?: (k: string) => string | null } | null;
+  return String(el?.getAttribute?.("data-testid") ?? "");
+}
+
 function valueOf(n: unknown): unknown {
   if (n === null || typeof n !== "object") return undefined;
   const key = Object.keys(n).find((k) => k.startsWith("__reactProps"));
@@ -150,10 +157,11 @@ test("p933.needsyou.prefill the queue's inline form comes up carrying the propos
 test("p933.needsyou.reason the same one line Clara derived it from is on screen in the queue too", async () => {
   const { h, teardown } = await openInlineForm();
   try {
-    const note = h.find((n) => String(n.getAttribute?.("data-testid") ?? "") === "fa-proposal-note");
+    const note = h.find((n) => tidOf(n) === "fa-proposal-note");
     assert.ok(note, "reason: the queue's entrance accounts for its pre-fill exactly as the asset page does");
-    assert.match(textOf(note!), /This client's record states a depreciation policy for 1510/);
-    assert.match(textOf(note!), /what you confirm/);
+    const said = textOf(note as never);
+    assert.match(said, /This client's record states a depreciation policy for 1510/);
+    assert.match(said, /what you confirm/);
   } finally {
     await teardown();
   }
@@ -183,7 +191,7 @@ test("p933.needsyou.the_edit the door receives the person's values, never the pr
 test("p933.needsyou.no_proposal nothing parked means the ordinary empty form — today's behaviour, unchanged", async () => {
   const { h, teardown } = await openInlineForm({ rows: [] });
   try {
-    assert.ok(!h.find((n) => String(n.getAttribute?.("data-testid") ?? "") === "fa-proposal-note"),
+    assert.ok(!h.find((n) => tidOf(n) === "fa-proposal-note"),
       "no_proposal: no note, because there is nothing to account for");
     assert.equal(valueOf(field(h, "-start")), "", "no_proposal: and no date anybody has to notice and clear");
   } finally {

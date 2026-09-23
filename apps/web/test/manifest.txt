@@ -319,6 +319,7 @@ components/work/work-knowledge-block.test.tsx
 components/work/work-question-drift-banner.test.tsx
 components/work/work-question-form.test.tsx
 components/work/work-question-panel.test.tsx
+components/work/work-question-proposal.test.tsx
 components/work/work-restate.test.tsx
 components/work/work-saved-views.test.tsx
 e2e/cell-budget-census.test.ts
