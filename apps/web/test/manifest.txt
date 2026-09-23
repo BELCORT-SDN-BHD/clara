@@ -292,6 +292,7 @@ components/reports/reports-components.test.tsx
 components/reports/reports-offer-refusal.test.tsx
 components/reports/reports-snapshots-seeding-a11y.test.tsx
 components/reports/reports-snapshots-seeding-keyboard.test.tsx
+components/reports/seeding-batches-retired.test.tsx
 components/shell-responsive.test.tsx
 components/tax/tax-a11y.test.tsx
 components/tax/tax-boundary-states.test.tsx

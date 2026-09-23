@@ -414,69 +414,15 @@ test("firm needs-you inbox: uncoded_filing / coding_task / lint_finding rows, di
   );
 });
 
-// 裁-17 (mohe-grill-rulings-2026-08-28.md): the NINTH row_kind, rendered through
-// the REAL registry dispatch (NEEDS_YOU_AFFORDANCES via getNeedsYouAffordance),
-// never a standalone render of SeedingProposalAffordance. Discriminating
-// post-condition: the deep link's href names the OWNING TAB
-// (/clients/:id/reports, where T9's SeedingBatchesPanel is mounted), never the
-// client-workspace root (/clients/:id) — a link to the root would ALSO match a
-// substring-only assertion, which is exactly why this asserts the full href.
-const SEEDING_ENVELOPE: ReviewQueueEnvelope = {
-  counts: { ready: 0, needs_review: 1, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
-  sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
-  rows: [
-    {
-      row_kind: "seeding_proposal", section: "needs_review", client_id: "c1", counterparty_id: null, filing_id: null,
-      entry_id: null, question_id: null, task_id: null, document_id: null, lane: null, auto: false,
-      rule_backed: false, high_stakes: false, aged_since: "2026-08-01T00:00:00Z", amount_cents: null, period: null,
-      question_text: "2 open seeding proposals pending review", created_at: "2026-08-01T00:00:00Z", id: "c1",
-      coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
-      client_name: "Acme Sdn Bhd", batch_ids: ["b1", "b2"], open_proposal_count: 2, authority_id: null,
-    },
-  ],
-  next_cursor: null,
-};
-
-function mockSeedingFetch(u: string): Response {
-  if (u.includes("/rpc/list_review_queue")) return jsonResponse(SEEDING_ENVELOPE);
-  if (u.includes("/rest/v1/firm_open_questions_visible")) return jsonResponse([]);
-  if (u.includes("/rest/v1/client_identifier_promotions_visible")) return jsonResponse([]);
-  if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
-  throw new Error(`unexpected fetch: ${u}`);
-}
-
-test("firm needs-you inbox: a seeding_proposal row, dispatched through the REAL registry, links to the client's Reports tab (owning tab, not the workspace root)", async () => {
-  await withMockedEnv(
-    async (u) => mockSeedingFetch(String(u)),
-    async () => {
-      const h = await renderComponent(
-        createElement(NextIntlClientProvider, {
-          locale: "en",
-          messages,
-          children: createElement("div", null, createElement("h1", null, "Needs you"), createElement(NeedsYouInbox)),
-        }),
-      );
-      try {
-        for (let i = 0; i < 4; i++) await h.settle();
-        assert.match(h.text(), /2 open seeding proposals pending review/, "the seeding_proposal row must have actually loaded");
-        // needs-you-row.tsx ALSO renders a generic "Open client" link to the
-        // workspace root on EVERY row (client_id present or not) — that link is
-        // NOT this affordance's own, so its presence is expected, not a defect.
-        // The discriminating assertion is that the REGISTRY-dispatched link
-        // (SeedingProposalAffordance, via getNeedsYouAffordance) ALSO renders,
-        // and points at the OWNING TAB specifically. #614 D6: the fragment
-        // targets ReportsPage.tsx's "Internal processing" section directly.
-        const reportsLink = h.find((n) => n.tagName === "A" && (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("href") === "/clients/c1/reports#internal-processing");
-        assert.ok(reportsLink, "the registry dispatched a REAL link to the owning tab (/clients/c1/reports#internal-processing)");
-        assert.match(textOf(reportsLink as never), /Review in Reports/, "the deep-link text is the affordance's own label, not the generic \"Open client\" text");
-        const violations = checkAccessibility(h.container as never);
-        assert.deepEqual(violations, [], JSON.stringify(violations));
-      } finally {
-        await h.unmount();
-      }
-    },
-  );
-});
+// 裁-17's NINTH row_kind, `seeding_proposal`, had its own cell here: an envelope carrying one
+// such row, dispatched through the REAL registry, asserting the deep link named the OWNING TAB
+// (/clients/:id/reports#internal-processing) rather than the workspace root. 0288
+// (ticket 1012, owner ruling 2026-09-20 on ticket 983) RETIRED the row kind — the queue emits
+// no such row for any client — so the cell is removed rather than fed an envelope the DB can no
+// longer produce. What replaced its claim: components/reports/seeding-batches-retired.test.tsx
+// proves the Reports panel it used to bridge into is now read-only with a retirement notice,
+// and packages/db/tests/ninth-rowkind-seeding-proposal.test.mjs proves no client produces the
+// row at all.
 
 test("firm needs-you inbox: the uncoded_filing row's open_coding_task dialog, driven through the REAL registry to a real confirm, posts the door and the trigger row's error clears — discriminating post-condition", async () => {
   await withMockedEnv(

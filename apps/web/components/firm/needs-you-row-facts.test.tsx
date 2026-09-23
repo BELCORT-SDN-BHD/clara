@@ -55,7 +55,8 @@ test("reviewQueueWhyKey: the LANE decides when the DB classified the row, the SE
   assert.equal(reviewQueueWhyKey({ lane: "needs_review", section: "needs_review" }), "laneNeedsReview");
   assert.equal(reviewQueueWhyKey({ lane: "ready", section: "needs_review" }), "laneReady");
   // The six kinds the queue never lane-classifies (coding_task, compliance_watch,
-  // lint_finding, fixed_asset_incomplete, staff_advance_incomplete, seeding_proposal)
+  // lint_finding, fixed_asset_incomplete, staff_advance_incomplete — seeding_proposal was
+  // retired with its lane by 0288, ticket 1012)
   // all arrive with lane NULL and fall back to their own section.
   assert.equal(reviewQueueWhyKey({ lane: null, section: "needs_you" }), "sectionNeedsYou");
   assert.equal(reviewQueueWhyKey({ lane: null, section: "needs_review" }), "sectionNeedsReview");
@@ -83,7 +84,6 @@ test("reviewQueuePeriodKind: exactly the three kinds whose `period` has its own 
   assert.equal(reviewQueuePeriodKind("uncoded_filing"), "uncoded_filing");
   assert.equal(reviewQueuePeriodKind("compliance_watch"), "compliance_watch");
   assert.equal(reviewQueuePeriodKind("open_question"), null);
-  assert.equal(reviewQueuePeriodKind("seeding_proposal"), null);
 });
 
 test("waitingDays: floors whole days, clamps a future instant to 0, and answers null on nothing to measure", () => {

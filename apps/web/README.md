@@ -1382,6 +1382,44 @@ interview-runtime mock subsystem (an OPEN/unanswered park fixture plus
 `/api/runtime/interview/*` handlers reachable through the rail) that this lane scoped as a
 genuine multi-piece build, not a same-shape addition to an existing fixture.
 
+## Ticket 1012 — the prior-GL seeding lane is retired, and the browser says so
+
+Owner ruling 2026-09-20 (on ticket 983): the prior-GL seeding lane gets no browser entrance,
+because the product direction is the Client KB — nobody pre-registers by hand what Clara can learn
+from a source. Migration `0288_seeding_lane_retired.sql` recut `clara.create_seeding_batch`,
+`clara.tick_seeding_proposal` and `clara.decline_seeding_proposal` to one typed refusal (`CLR34`,
+`detail.reason = "seeding_lane_retired"`). Three things changed here, and one deliberately did not.
+
+**`SeedingBatchesPanel` is read-only, and it says why.** The Tick and Decline dialogs are gone,
+and a `StateBanner` carrying `ReportsSnapshotsSeeding.seeding.retiredNotice` renders in their
+place. The banner is the point: the beta rule is that nothing is switched off silently, so a
+person who filed a prior general ledger last month and comes back for the tick-list is told the
+lane is retired rather than finding the buttons simply absent. Every past batch and proposal stays
+on screen with its state, kind and payload — the retirement deletes nothing.
+
+**The two CLOSERS stay.** `Cancel batch` and `Complete batch` still render on an OPEN batch,
+because a batch left open at the moment of retirement must still be closeable by the firm that
+owns it, or its history is stranded open forever. `lib/reports/api.ts` keeps both wrappers and
+both reads, and has NO `tickSeedingProposal` / `declineSeedingProposal` any more: a wrapper in
+front of a door that refuses everything is a decoy a future surface could be wired to.
+`components/reports/seeding-batches-retired.test.tsx` holds all three claims — the rendered
+absence, the rendered notice, and a census cell over the module's own exports.
+
+**The `seeding_proposal` needs-you row is gone with its row kind.** 0288 §C spliced the CTE out of
+`clara.list_review_queue`, so the queue emits no such row for any client — including one that
+still owns OPEN proposals, which is the whole point: a row nobody can act on is worse than no row.
+`REVIEW_QUEUE_ROW_KINDS` is back to TEN entries, the registry entry and
+`components/firm/seeding-proposal-affordance.tsx` are deleted, and `NeedsYou.rowKind.*` and
+`NeedsYou.reviewSeedingProposals` lose their strings. This is the first time a row kind has been
+REMOVED from that closed world; `lib/firm/needs-you.ts`'s own grounding note records the five
+places the walk touched, in reverse.
+
+**What did NOT change: `ReviewQueueRow`'s three seeding-only fields.** `client_name`, `batch_ids`
+and `open_proposal_count` are still typed, because the DB still emits them — 0288 keeps them in
+the shared column vector rather than recut all ten surviving CTEs, so they are now null on every
+row. The type states what the envelope CONTAINS, not what is useful in it; dropping them would
+make the type disagree with the read. Nothing in the UI consumes them any more.
+
 ## #981 — the durable-Work refusal carrier, read once
 
 `lib/work/api.ts` is the only reader of the runtime's durable-Work refusal bodies (they never go

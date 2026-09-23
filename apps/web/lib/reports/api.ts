@@ -404,22 +404,15 @@ export async function completeSeedingBatch(batchId: string, opts: Opts = {}): Pr
   return callDoor("complete_seeding_batch", { p_batch: batchId, p_op_key: crypto.randomUUID() }, opts);
 }
 
-/** clara.decline_seeding_proposal(p_proposal, p_reason, p_op_key) — admin+. */
-export async function declineSeedingProposal(
-  args: { proposalId: string; reason: string },
-  opts: Opts = {},
-): Promise<unknown> {
-  return callDoor(
-    "decline_seeding_proposal",
-    { p_proposal: args.proposalId, p_reason: args.reason, p_op_key: crypto.randomUUID() },
-    opts,
-  );
-}
-
-/** clara.tick_seeding_proposal(p_proposal, p_op_key) — admin+. */
-export async function tickSeedingProposal(proposalId: string, opts: Opts = {}): Promise<unknown> {
-  return callDoor("tick_seeding_proposal", { p_proposal: proposalId, p_op_key: crypto.randomUUID() }, opts);
-}
+// #1012 (0288_seeding_lane_retired.sql, owner ruling 2026-09-20 on #983): there is NO wrapper
+// for clara.tick_seeding_proposal or clara.decline_seeding_proposal, and there never was one for
+// clara.create_seeding_batch (runtime-lane only). All three answer one typed refusal — CLR34,
+// detail.reason = 'seeding_lane_retired' — because the product direction is the Client KB, where
+// nobody pre-registers by hand what Clara can learn from a source. A wrapper in front of a door
+// that refuses everything is a decoy a future surface could be wired to, so the two that existed
+// are removed rather than left to relay a refusal. The two CLOSERS above (cancel/complete) stay:
+// a batch left open at the retirement must still be closeable by the firm that owns it, and both
+// reads stay so every past batch and proposal is still readable.
 
 /** clara.retire_wiki_page(p_page, p_reason, p_op_key) — bookkeeper+. */
 export async function retireWikiPage(
