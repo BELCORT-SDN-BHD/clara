@@ -11,6 +11,7 @@ import { test } from "node:test";
 
 import { DO_ACTIONS, findDoAction, isDoActionPermitted, permittedDoActions, type DoActionEnv } from "./do-actions";
 import { loadDoEnv, runDoAction } from "./do-dispatch";
+import { isDoorRefusal } from "@/lib/doors";
 import type { CallerContextRow } from "@/lib/identity/caller-context";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -67,8 +68,8 @@ async function withFetch(impl: (url: string, init?: RequestInit) => Response, ru
 // ---------------------------------------------------------------------------
 
 test("every Do row is gated on the floor its own door enforces, and the DB's rank is what meets it", () => {
-  // begin_client_onboarding is `_human_ctx(role_rank('admin'))` at 0017:2497, NOT bookkeeper.
-  // A bookkeeper who saw this row would meet CLR04 on click.
+  // open_client_onboarding is `_human_ctx(role_rank('admin'))` (0287_client_birth_wall.sql §B),
+  // NOT bookkeeper. A bookkeeper who saw this row would meet CLR04 on click.
   assert.deepEqual(idsFor({ ctx: BOOKKEEPER, client: null, query: "ROME PROPERTIES" }), []);
   assert.deepEqual(idsFor({ ctx: ADMIN, client: null, query: "ROME PROPERTIES" }), ["beginClientOnboarding"]);
   assert.deepEqual(idsFor({ ctx: OWNER, client: null, query: "ROME PROPERTIES" }), ["beginClientOnboarding"]);
@@ -210,10 +211,12 @@ test("SECURITY: an action outside the live allowlist executes NOTHING, even when
 });
 
 test("SECURITY: a permitted action calls its door with exactly the arguments the live body takes", async () => {
+  // #899: this dispatch now reaches clara.open_client_onboarding, not clara.begin_client_
+  // onboarding — see do-dispatch.ts's own "beginClientOnboarding" case.
   const spec = findDoAction("beginClientOnboarding")!;
   await withFetch(
     (url) => {
-      if (url.includes("/rest/v1/rpc/begin_client_onboarding")) {
+      if (url.includes("/rest/v1/rpc/open_client_onboarding")) {
         return json({ client_id: CLIENT_ID, plan_id: PLAN_ID });
       }
       throw new Error(`unexpected fetch: ${url}`);
@@ -222,16 +225,105 @@ test("SECURITY: a permitted action calls its door with exactly the arguments the
       const result = await runDoAction(spec, { ctx: ADMIN, client: null, query: "  ROME PROPERTIES  " }, session);
       assert.deepEqual(result, { kind: "navigated", href: `/clients/${CLIENT_ID}` }, "the destination is the DB's OWN returned client id");
 
-      const door = calls.find((c) => c.url.includes("/rest/v1/rpc/begin_client_onboarding"));
+      const door = calls.find((c) => c.url.includes("/rest/v1/rpc/open_client_onboarding"));
       assert.ok(door);
       const body = door.body as Record<string, unknown>;
       assert.equal(body.p_name, "ROME PROPERTIES", "trimmed — the door refuses a blank name and never sees the padding");
       assert.equal(typeof body.p_op_key, "string");
+      // The palette never asks the identity read, so both new parameters travel as null — the
+      // door's OWN arity-1/arity->=2 wall is what clears or refuses this call, never a client-
+      // side guess (0287's header).
+      assert.equal(body.p_identifier, null);
+      assert.equal(body.p_acknowledged_candidate, null);
       assert.deepEqual(
         Object.keys(body).sort(),
-        ["p_name", "p_op_key"],
-        "exactly the two parameters clara.begin_client_onboarding(p_name text, p_op_key text) declares",
+        ["p_acknowledged_candidate", "p_identifier", "p_name", "p_op_key"],
+        "exactly the four parameters clara.open_client_onboarding(p_name text, p_op_key text, p_identifier jsonb, p_acknowledged_candidate uuid) declares",
       );
+    },
+  );
+});
+
+test("#899: the palette cannot create a two-match client — the door's own arity->=2 refusal propagates VERBATIM, and nothing is dispatched twice or navigated to", async () => {
+  // THE PALETTE NEVER ASKS clara.client_identity_candidates first (unlike AddClientControl):
+  // it dispatches the typed name straight to the birth door, so this is the one path where the
+  // DOOR'S OWN structural wall — not a client-side pre-check — is the only thing standing
+  // between a typed name and a third same-family client. This is what 0287_client_birth_wall.sql
+  // closed p649.identity.direct_birth_residual FOR.
+  const spec = findDoAction("beginClientOnboarding")!;
+  await withFetch(
+    (url) => {
+      if (url.includes("/rest/v1/rpc/open_client_onboarding")) {
+        return json(
+          {
+            code: "CLR10",
+            message: "this name matches 2 existing clients or counterparties in your firm; decide which business this is before another record is created",
+            details: JSON.stringify({
+              reason: "name_family_collision", class: "client_identity", name: "ROME VENTURES", arity: 2,
+              candidates: [{ id: CLIENT_ID, name: "Rome Public Advisory", party_kind: "client", match_reason: "name_family" }],
+            }),
+          },
+          400,
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async (calls) => {
+      await assert.rejects(
+        () => runDoAction(spec, { ctx: ADMIN, client: null, query: "ROME VENTURES" }, session),
+        (err: unknown) => {
+          assert.ok(isDoorRefusal(err), "a DoorRefusal, not a swallowed failure");
+          assert.equal((err as { code: string }).code, "CLR10");
+          assert.equal((err as { reason: string | null }).reason, "name_family_collision");
+          return true;
+        },
+      );
+      assert.equal(calls.length, 1, "exactly one call left the browser — never a retry, never a second attempt");
+    },
+  );
+});
+
+test("#899: the palette cannot create a one-match client silently either — it carries no acknowledgement face, so the door's own arity-1 wall refuses and names the register's control, VERBATIM", async () => {
+  // env.identityAcknowledgedCandidate is set only by a face that showed a candidate and read a
+  // tick (AddClientControl) — the palette never sets it, so this dispatch reaches
+  // clara.open_client_onboarding exactly as the arity->=2 cell above does: p_identifier and
+  // p_acknowledged_candidate both null. open_client_onboarding requires an acknowledgement at
+  // EVERY arity 1, not only clears it like the legacy begin_client_onboarding door does — this is
+  // what "refuses and points at the register's control" (0899's own Agent Brief) means in code.
+  const spec = findDoAction("beginClientOnboarding")!;
+  await withFetch(
+    (url) => {
+      if (url.includes("/rest/v1/rpc/open_client_onboarding")) {
+        return json(
+          {
+            code: "CLR10",
+            message: "this name matches an existing client or counterparty in your firm; open the client register's Add Client control to review it and acknowledge before a new record is created",
+            details: JSON.stringify({
+              reason: "identity_acknowledgement_required", class: "client_identity", name: "TIMUR VENTURES", arity: 1,
+              candidates: [{ id: CLIENT_ID, name: "Timur Public Advisory", party_kind: "client", match_reason: "name_family" }],
+            }),
+          },
+          400,
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async (calls) => {
+      await assert.rejects(
+        () => runDoAction(spec, { ctx: ADMIN, client: null, query: "TIMUR VENTURES" }, session),
+        (err: unknown) => {
+          assert.ok(isDoorRefusal(err), "a DoorRefusal, not a swallowed failure");
+          assert.equal((err as { code: string }).code, "CLR10");
+          assert.equal((err as { reason: string | null }).reason, "identity_acknowledgement_required");
+          assert.match((err as { message: string }).message, /client register's Add Client control/,
+            "the DB's own message, rendered verbatim, is what points the human at the register — not a client-side sentence");
+          return true;
+        },
+      );
+      const door = calls.find((c) => c.url.includes("/rest/v1/rpc/open_client_onboarding"));
+      assert.equal((door!.body as Record<string, unknown>).p_acknowledged_candidate, null,
+        "the palette forwards no acknowledgement — it has no candidate face to read one from");
+      assert.equal(calls.length, 1, "exactly one call left the browser — never a retry, never a second attempt");
     },
   );
 });

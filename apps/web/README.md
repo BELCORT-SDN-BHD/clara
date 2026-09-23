@@ -224,8 +224,9 @@ so the firm intake surface mounts the same control rather than copying a second 
 
 The client register's **Add client** control reuses ⌘K's own dispatch rather than minting a second
 call site. Confirm asks `clara.client_identity_candidates` before it reaches
-`clara.begin_client_onboarding`, and the answer decides what happens next — the three arities the
-owner ruled on 2026-09-15:
+`clara.open_client_onboarding` (#899; `clara.begin_client_onboarding` before
+`0287_client_birth_wall.sql` re-pointed this control at the new birth verb), and the answer decides
+what happens next — the three arities the owner ruled on 2026-09-15:
 
 - **0** — nothing in the firm answers to that name. The same click goes straight on to the door.
 - **1** — the candidate is **shown**, with a real link to the record and the reason it matched, and
@@ -246,19 +247,28 @@ text. **There is no client-side duplicate rule and there must not be one**: the 
 not be granted to any application role (a live census in migration 0103 raises on any such grant),
 which is why the browser is given a definer wrapper and never the predicate.
 
-**The wall is the READ, not the birth door.** A caller that never asks can still call
-`begin_client_onboarding` and a client is born — a named residual, kept honest by
-`packages/db/tests/client-onboarding-identity.test.mjs`'s `p649.identity.direct_birth_residual`.
+**The wall used to be the READ, not the birth door — #899 moved it.**
+`0287_client_birth_wall.sql` folds `clara.client_identity_candidates`' own candidate resolution
+into the door itself, through one ungranted shared core (`clara._client_birth_core`) both granted
+doors call: a caller that never asks can no longer create a two-or-more same-family client, through
+either door. `packages/db/tests/client-onboarding-identity.test.mjs`'s
+`p649.identity.direct_birth_residual` now asserts that closure (the name is kept so the history
+reads honestly); `packages/db/tests/client-birth-wall.test.mjs` is #899's own battery.
 
-**⌘K is a SECOND entrance to that door, and it does not ask.** `DO_ACTIONS`'
-`beginClientOnboarding` (`lib/command/do-actions.ts`) is dispatched straight from the palette
-(`components/command/command-palette.tsx`), with no `client_identity_candidates` read anywhere in
-that path — `agentic-finish-walk.spec.ts`'s 裁-37 arm proves it green, dispatching with zero
-identity reads in the whole run. So the arities above are the register control's wall, not the
-product's: the same name typed into the palette is born unchecked. That is a **named residual**,
-not a claim, and it is a face-level sibling of the birth-door one above — closing it means giving
-the palette an arity-1 acknowledgement of its own (a design, not a one-liner), or moving the wall
-into the door, which needs the new birth verb the residual above describes.
+**⌘K is a SECOND entrance to the SAME door, and it still does not ask — and does not need to.**
+`DO_ACTIONS`' `beginClientOnboarding` (`lib/command/do-actions.ts`) dispatches through
+`open_client_onboarding` (`lib/command/do-dispatch.ts`'s own case) with no
+`client_identity_candidates` read anywhere in that path, exactly as before #899. What changed is
+that the door reached at the end of that path now carries its own wall at **every** arity ≥ 1, not
+only ≥ 2: `open_client_onboarding` requires an acknowledgement at arity 1 for every caller, and the
+palette never has a candidate to acknowledge, so it forwards none. At arity ≥ 2 the door refuses
+CLR10 `name_family_collision`; at arity 1 it refuses CLR10 `identity_acknowledgement_required` —
+both VERBATIM, both rendered by the palette's existing DoorRefusal handling, never a client-side
+guess (`lib/command/do-actions.test.ts`'s "the palette cannot create a two-match client" cell,
+`agentic-finish-walk.spec.ts`'s 裁-37 arm). The refusal message itself names the register's Add
+Client control as where to go next — the brief's "refuses and points at the register's control",
+not a second acknowledgement face grafted onto the palette. Only the register's own control can
+clear the arity-1 wall, because only it has somewhere to show the candidate and read the tick.
 
 **Committing an onboarding plan writes neither Knowledge nor the client's own record.** Two
 separate, named acts follow it at the same call site, and they are treated differently on purpose:

@@ -72,7 +72,7 @@ export type DoActionId = "beginClientOnboarding" | "startClientInterview" | "boo
  *
  * A transcribed floor is a PROJECTION of the door, not the door (review law 3), and the whole
  * ⌘K "Do" pre-filter is built out of transcriptions. The day a migration lowers
- * `apply_coa_template` to viewer, or raises `begin_client_onboarding` to owner, every number
+ * `apply_coa_template` to viewer, or raises `open_client_onboarding` to owner, every number
  * in this file goes quietly stale: the palette keeps offering exactly what it offered
  * yesterday, and the only thing that notices is a professional meeting a CLR04 on a row that
  * looked available. The DB stays correct throughout — this is an honest-affordance drift, not
@@ -107,8 +107,17 @@ export type ClientDoContext = {
 export type DoActionEnv = {
   ctx: CallerContextRow | null;
   client: ClientDoContext | null;
-  /** The text typed into the palette — the name argument `begin_client_onboarding` takes. */
+  /** The text typed into the palette — the name argument `open_client_onboarding` takes. */
   query: string;
+  /** #899: the ONE identity candidate a caller has ACKNOWLEDGED for `query`, forwarded verbatim
+   *  to `clara.open_client_onboarding`'s own `p_acknowledged_candidate`. Set only by a face that
+   *  first read `clara.client_identity_candidates` and got the human's acknowledgement at arity
+   *  1 (`AddClientControl`); `undefined`/`null` everywhere else, including the palette, which
+   *  never asks — so the palette clears its own arity-1 case at the DOOR rather than pre-hiding
+   *  the wall client-side (0287's header: "refuses and points at the register's control"). A
+   *  stale or wrong id here simply fails to clear that door's own wall; it is never trusted as
+   *  proof of anything client-side. */
+  identityAcknowledgedCandidate?: string | null;
 };
 
 export interface DoActionSpec {
@@ -121,7 +130,7 @@ export interface DoActionSpec {
    * are `admin`, not the `bookkeeper` an "onboarding is bookkeeper work" reading would
    * assume, and a palette that guessed would have offered a bookkeeper two rows that CLR04
    * on click:
-   *   begin_client_onboarding      0017_wave_b.sql:2497  `_human_ctx(role_rank('admin'))`
+   *   open_client_onboarding       0287_client_birth_wall.sql §B `_human_ctx(role_rank('admin'))`
    *   bootstrap_client_plan        0017_wave_b.sql:2574  `_human_ctx(role_rank('admin'))`
    *   /api/interview/client/start  packages/runtime/src/interviewRoutes.ts:280 —
    *                                `isBookkeeperPlus(p.role)`, and the DB re-validates the
@@ -141,10 +150,15 @@ export const DO_ACTIONS: readonly DoActionSpec[] = [
     // The palette's own input IS the door's `p_name` argument — type a name, dispatch the
     // file. Offered at every altitude because the door mints a brand-new client and takes
     // no existing client id (OnboardingChecklistCard's own header records that shape).
+    //
+    // #899: dispatches through `clara.open_client_onboarding`, not `clara.begin_client_
+    // onboarding` — see `do-dispatch.ts`'s own case. The DoActionId keeps its name (nothing
+    // else in this file's own shape needs to change), but the door reached at runtime moved, so
+    // the floor is transcribed from THAT body now.
     id: "beginClientOnboarding",
     altitude: "any",
     floor: "admin",
-    floorSource: { kind: "sql", fn: "begin_client_onboarding" },
+    floorSource: { kind: "sql", fn: "open_client_onboarding" },
     keywords: ["begin", "onboard", "new client", "open a file"],
     ready: (env) => env.query.trim().length > 0,
   },
