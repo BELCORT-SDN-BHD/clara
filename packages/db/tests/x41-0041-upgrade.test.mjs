@@ -184,7 +184,16 @@ async function buildChart(sub, client) {
 async function seedCarryDownAsset(w, {
   label, method = "straight_line", rateBps = null, accum = 100_000, land = false,
 }) {
-  const o = await wb.onboardingClient(w.users.hana, `u41k_${label}_${randomUUID().slice(0, 6)}`);
+  // [#1041] THE UNIQUE PART LEADS. `clara.name_family_token` (0103) takes the LEADING token of
+  // a normalised name, so `u41k_<label>_<hex>` made all four seeds below one family `u41k` —
+  // and #899 [0287] refuses the THIRD same-family birth in a firm. This drill migrates to the
+  // REAL frontier partway through, so the wall is live by seed three and the whole
+  // closed-wave-drills job died here on dispatch run 35893727271 (CLR10, "this name matches 2
+  // existing clients or counterparties in your firm"). Same remedy as `wb-fixtures.mjs`'s own
+  // `onboardingClient()` default and commit 26ada6131: the label stays readable, it just stops
+  // being the family. Proven against the live wall by
+  // `tests/drill-fixture-name-family.test.mjs`, which this rig CAN run.
+  const o = await wb.onboardingClient(w.users.hana, `u41k${randomUUID().slice(0, 8)}_${label}`);
   await wb.seedOpeningCoa(w.users.alice, o.client);
   await buildChart(w.users.alice, o.client);
   const doc = await wb.openingDoc(w.users.alice, { firm: w.firms.A, client: o.client });
