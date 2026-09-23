@@ -284,7 +284,356 @@ revoke all on function clara._payroll_answers_ok(jsonb, text) from public;
 comment on function clara._payroll_answers_ok(jsonb, text) is
   '#945: the payroll family''s OWN closed answer vocabulary — eleven run-level questions and six per-employee cells, every one of them answered, `not_printed` a first-class answer, an unknown key at any level a refusal. Deliberately NOT an arm of clara._witness_answers_ok: a versioned workflow may not couple its shape to another family''s frozen files. Ungranted; its only caller is clara.persist_payroll_facts, which runs as the owner.';
 
+-- =====================================================================================
+-- §D  THE DETERMINISTIC EVALUATOR (AC2) — clara.evaluate_payroll_run_state_v1(jsonb, jsonb).
+--
+--     THE MODEL NEVER SUMS. That is the owner decision this body exists to make true: the two
+--     channel envelopes carry QUOTES — what the page prints, per run-level question and per
+--     employee row — and every arithmetic result in the fact state is produced HERE, in SQL,
+--     from those quotes. There is no arm in which a figure the model computed reaches a fact.
+--
+--     WHAT IT DOES, in the brief's own order: it sums each column across the quoted rows, checks
+--     every row's own identity (gross minus employee EPF, SOCSO, EIS and PCB equals net),
+--     cross-checks a printed totals row against those sums where the page prints one, and
+--     compares the text-channel and vision-channel readings — the same pair discipline the
+--     invoice lane uses. What it produces is a FACT STATE for the run: per question, whether the
+--     figure is established, disagreed or missing, and why.
+--
+--     IT CALLS NO OTHER clara FUNCTION, and that is structural rather than stylistic (0140's own
+--     recorded reason): registering a closure in clara.evaluator_versions freezes EVERY member
+--     body estate-wide, so an N-member registration is N bodies a later lane can never recut.
+--     The rendering-to-cents normalization is therefore written INLINE — once, in the flattening
+--     statement — instead of reaching for clara._normalize_invoice_cents, which is a member of
+--     the F-A1 witness closure and would drag that whole freeze in here.
+--
+--     IT READS NO TABLE EITHER, so it is genuinely IMMUTABLE: same two envelopes, same state,
+--     forever. That is what makes a stored fact state reproducible from its own inputs.
+--
+--     THE CHANNEL COMPARISON IS ON THE FIGURE, NOT THE RENDERING. "1,000.00" and "1000.00" are
+--     the same figure read twice, and refusing them as a disagreement would manufacture conflict
+--     out of typography. Two renderings agree when their normalized cents agree; when neither
+--     normalizes (an unreadable rendering) they agree when the rendering itself matches.
+--
+--     A ROW EITHER CHANNEL READS DIFFERENTLY IS NOT AN AGREED ROW, and no column sums over a
+--     document with a contested, unbalanced or uncheckable row: a partial sum is a figure no
+--     page states. This is the one place where being strict costs a number, and it is the right
+--     trade — the fact state says WHY nothing was established, and a person reads the page.
+--
+--     REFUSALS, not exceptions. A malformed envelope returns a typed refusal object; the door in
+--     §F is what refuses a malformed read at the write boundary (through §C's vocabulary gate).
+--
+--     REDO-SAFE: `create or replace function` (the freeze registration in §D.1 is guarded).
+-- =====================================================================================
+create or replace function clara.evaluate_payroll_run_state_v1(p_text jsonb, p_vision jsonb)
+  returns jsonb language plpgsql immutable
+  set search_path = clara, pg_temp as $eval$
+declare
+  -- The eleven run-level questions, in the brief's own order.
+  v_run text[] := array['payroll.run.period','payroll.run.gross_pay',
+    'payroll.run.epf_employee','payroll.run.epf_employer',
+    'payroll.run.socso_employee','payroll.run.socso_employer',
+    'payroll.run.eis_employee','payroll.run.eis_employer',
+    'payroll.run.pcb','payroll.run.hrdf_levy','payroll.run.net_pay'];
+  -- The SIX run-level questions that have a per-employee counterpart, paired with it. The four
+  -- employer-side columns and the levy are deliberately absent: a payslip row does not print the
+  -- employer's own contribution, so nothing sums them and nothing pretends to.
+  v_sum_run text[] := array['payroll.run.gross_pay','payroll.run.epf_employee',
+    'payroll.run.socso_employee','payroll.run.eis_employee',
+    'payroll.run.pcb','payroll.run.net_pay'];
+  v_sum_row text[] := array['payroll.row.gross_pay','payroll.row.epf_employee',
+    'payroll.row.socso_employee','payroll.row.eis_employee',
+    'payroll.row.pcb','payroll.row.net_pay'];
+  v_flat jsonb;              -- every quote from both channels, normalized, as one array
+  v_rows_text int; v_rows_vision int;
+  v_contested int[]; v_agreed int[]; v_unbalanced int[]; v_unchecked int[];
+  v_facts jsonb := '{}'::jsonb;
+  v_established text[] := array[]::text[];
+  v_disagreed text[] := array[]::text[];
+  v_missing text[] := array[]::text[];
+  v_i int; v_j int; v_f text; v_rf text;
+  v_t_state text; v_t_raw text; v_t_cents bigint;
+  v_v_state text; v_v_raw text; v_v_cents bigint;
+  v_printed_cents bigint; v_printed_raw text;
+  v_computed bigint; v_computable boolean;
+  v_state text; v_reason text; v_basis text; v_fact jsonb;
+begin
+  if p_text is null or p_vision is null
+     or jsonb_typeof(p_text->'payroll'->'answers') <> 'object'
+     or jsonb_typeof(p_vision->'payroll'->'answers') <> 'object' then
+    return jsonb_build_object('state_version','v1','refusal','payroll_envelope_malformed',
+      'reason','each channel must carry a payroll envelope with an answers object');
+  end if;
+
+  -- -------------------------------------------------------------------------------------
+  -- 1 · FLATTEN AND NORMALIZE, ONCE. Every quote from both channels — run answers and row cells
+  --     alike — becomes one element carrying its channel, scope, row number, key, state, verbatim
+  --     rendering and normalized cents. The rendering-to-cents rule is written HERE and nowhere
+  --     else in this body: trim, drop an accounting parenthesis pair (recording its sign), drop
+  --     an RM/MYR prefix, drop thousands separators and spaces, then require a plain decimal of
+  --     at most thirteen integer digits and two decimal places. Anything else normalizes to NULL
+  --     — an unreadable rendering, never a guess.
+  -- -------------------------------------------------------------------------------------
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'ch', q.ch, 'scope', q.scope, 'row_no', q.row_no, 'k', q.k,
+           'st', q.st, 'rw', q.rw, 'cents', n.cents)), '[]'::jsonb)
+    into v_flat
+    from (
+      select s.ch, 'run'::text as scope, null::int as row_no, a.key as k,
+             a.value->>'state' as st, a.value->>'raw' as rw
+        from (select 'text'::text as ch, p_text as env
+              union all
+              select 'vision'::text, p_vision) s,
+             lateral jsonb_each(s.env->'payroll'->'answers') a
+      union all
+      select s.ch, 'row'::text, (r.value->>'row_no')::int, c.key,
+             c.value->>'state', c.value->>'raw'
+        from (select 'text'::text as ch, p_text as env
+              union all
+              select 'vision'::text, p_vision) s,
+             lateral jsonb_array_elements(
+               case when jsonb_typeof(s.env->'payroll'->'rows') = 'array'
+                    then s.env->'payroll'->'rows' else '[]'::jsonb end) r,
+             lateral jsonb_each(r.value->'cells') c
+       where jsonb_typeof(r.value->'cells') = 'object'
+         and (r.value->>'row_no') ~ '^[1-9][0-9]*$'
+    ) q
+    cross join lateral (
+      select upper(btrim(coalesce(q.rw,''))) as u
+    ) z0
+    cross join lateral (
+      select regexp_replace(regexp_replace(regexp_replace(
+               z0.u, '^\(|\)$', '', 'g'), '(MYR|RM)', '', 'g'), '[,[:space:]]', '', 'g') as cl
+    ) z1
+    cross join lateral (
+      select case
+               when q.st <> 'value' then null::bigint
+               when z1.cl ~ '^-?[0-9]{1,13}(\.[0-9]{1,2})?$'
+                 then (case when z0.u ~ '^\(.*\)$' then -1 else 1 end)
+                      * round(z1.cl::numeric * 100)::bigint
+               else null::bigint
+             end as cents
+    ) n;
+
+  -- -------------------------------------------------------------------------------------
+  -- 2 · THE ROWS. A row is AGREED when both channels quoted it and every one of its six cells
+  --     carries the same figure on both; anything else is CONTESTED. Then each agreed row's own
+  --     identity is checked — and a row that cannot be checked (a cell the page does not print,
+  --     or a rendering that does not normalize) is UNCHECKED, never assumed to balance.
+  -- -------------------------------------------------------------------------------------
+  select count(distinct row_no) into v_rows_text
+    from jsonb_to_recordset(v_flat) as c(ch text, scope text, row_no int, k text, st text, rw text, cents bigint)
+   where ch = 'text' and scope = 'row';
+  select count(distinct row_no) into v_rows_vision
+    from jsonb_to_recordset(v_flat) as c(ch text, scope text, row_no int, k text, st text, rw text, cents bigint)
+   where ch = 'vision' and scope = 'row';
+
+  with cells as (
+    select * from jsonb_to_recordset(v_flat)
+      as c(ch text, scope text, row_no int, k text, st text, rw text, cents bigint)
+     where scope = 'row'
+  ), keyed as (
+    -- The comparison key: the FIGURE when it normalizes, the rendering when it does not.
+    select ch, row_no, k, st, coalesce(cents::text, 'RAW:' || coalesce(rw,'')) as fig
+      from cells
+  ), per_row as (
+    select row_no,
+           count(*) filter (where ch = 'text') as n_text,
+           count(*) filter (where ch = 'vision') as n_vision,
+           count(distinct (k, st, fig)) as distinct_readings
+      from keyed group by row_no
+  )
+  select coalesce(array_agg(row_no order by row_no) filter (
+           where n_text = array_length(v_sum_row,1)
+             and n_vision = array_length(v_sum_row,1)
+             and distinct_readings = array_length(v_sum_row,1)), array[]::int[]),
+         coalesce(array_agg(row_no order by row_no) filter (
+           where not (n_text = array_length(v_sum_row,1)
+                  and n_vision = array_length(v_sum_row,1)
+                  and distinct_readings = array_length(v_sum_row,1))), array[]::int[])
+    into v_agreed, v_contested
+    from per_row;
+
+  with cells as (
+    select * from jsonb_to_recordset(v_flat)
+      as c(ch text, scope text, row_no int, k text, st text, rw text, cents bigint)
+     where scope = 'row' and ch = 'text' and row_no = any(v_agreed)
+  ), pivot as (
+    select row_no,
+           max(cents) filter (where k = 'payroll.row.gross_pay') as gross,
+           max(cents) filter (where k = 'payroll.row.epf_employee') as epf,
+           max(cents) filter (where k = 'payroll.row.socso_employee') as socso,
+           max(cents) filter (where k = 'payroll.row.eis_employee') as eis,
+           max(cents) filter (where k = 'payroll.row.pcb') as pcb,
+           max(cents) filter (where k = 'payroll.row.net_pay') as net,
+           count(*) filter (where cents is null) as unreadable_cells
+      from cells group by row_no
+  )
+  select coalesce(array_agg(row_no order by row_no) filter (
+           where unreadable_cells = 0 and gross - (epf + socso + eis + pcb) <> net), array[]::int[]),
+         coalesce(array_agg(row_no order by row_no) filter (
+           where unreadable_cells > 0), array[]::int[])
+    into v_unbalanced, v_unchecked
+    from pivot;
+
+  -- -------------------------------------------------------------------------------------
+  -- 3 · THE ELEVEN QUESTIONS. Each one's verdict, in a fixed precedence: what the two channels
+  --     say about it first, then whether the rows can speak to it at all, then the cross-check.
+  -- -------------------------------------------------------------------------------------
+  for v_i in 1 .. array_length(v_run,1) loop
+    v_f := v_run[v_i];
+    select st, rw, cents into v_t_state, v_t_raw, v_t_cents
+      from jsonb_to_recordset(v_flat) as c(ch text, scope text, row_no int, k text, st text, rw text, cents bigint)
+     where ch = 'text' and scope = 'run' and k = v_f;
+    select st, rw, cents into v_v_state, v_v_raw, v_v_cents
+      from jsonb_to_recordset(v_flat) as c(ch text, scope text, row_no int, k text, st text, rw text, cents bigint)
+     where ch = 'vision' and scope = 'run' and k = v_f;
+
+    v_rf := null; v_computed := null; v_computable := false;
+    v_printed_cents := null; v_printed_raw := null;
+    v_state := null; v_reason := null; v_basis := null;
+
+    -- Which per-employee column, if any, sums to this question.
+    for v_j in 1 .. array_length(v_sum_run,1) loop
+      if v_sum_run[v_j] = v_f then v_rf := v_sum_row[v_j]; end if;
+    end loop;
+
+    -- THE COLUMN SUM, computed only over a row set that can honestly be summed: at least one
+    -- agreed row, no contested row, no unbalanced row, no unchecked row, and every agreed row
+    -- printing a readable figure in this column.
+    if v_rf is not null and array_length(v_agreed,1) > 0
+       and coalesce(array_length(v_contested,1),0) = 0
+       and coalesce(array_length(v_unbalanced,1),0) = 0
+       and coalesce(array_length(v_unchecked,1),0) = 0 then
+      select count(*) filter (where cents is null) = 0, sum(cents)
+        into v_computable, v_computed
+        from jsonb_to_recordset(v_flat) as c(ch text, scope text, row_no int, k text, st text, rw text, cents bigint)
+       where ch = 'text' and scope = 'row' and k = v_rf and row_no = any(v_agreed);
+      if not v_computable then v_computed := null; end if;
+    end if;
+
+    if v_t_state is null or v_v_state is null then
+      v_state := 'unanswered'; v_reason := 'a channel did not answer this question';
+    elsif v_f = 'payroll.run.period' then
+      -- THE ONE NON-MONETARY QUESTION: compared as a rendering, because a month is not a figure.
+      if v_t_state <> v_v_state or (v_t_state = 'value' and btrim(v_t_raw) is distinct from btrim(v_v_raw)) then
+        v_state := 'channels_disagree'; v_reason := 'text_and_vision_read_different_figures';
+      elsif v_t_state = 'not_printed' then
+        v_state := 'not_printed'; v_reason := 'no_printed_total';
+      else
+        v_state := 'established'; v_printed_raw := btrim(v_t_raw); v_basis := 'printed_value';
+      end if;
+    elsif v_t_state <> v_v_state
+       or coalesce(v_t_cents::text, 'RAW:' || coalesce(v_t_raw,''))
+          is distinct from coalesce(v_v_cents::text, 'RAW:' || coalesce(v_v_raw,'')) then
+      v_state := 'channels_disagree'; v_reason := 'text_and_vision_read_different_figures';
+    elsif v_t_state = 'value' and v_t_cents is null then
+      v_state := 'unreadable'; v_reason := 'rendering_is_not_a_figure'; v_printed_raw := v_t_raw;
+    elsif v_rf is not null and coalesce(array_length(v_contested,1),0) > 0 then
+      v_state := 'rows_contested'; v_reason := 'the two channels read a quoted row differently';
+      if v_t_state = 'value' then v_printed_cents := v_t_cents; v_printed_raw := v_t_raw; end if;
+    elsif v_rf is not null and (coalesce(array_length(v_unbalanced,1),0) > 0
+                             or coalesce(array_length(v_unchecked,1),0) > 0) then
+      v_state := 'rows_unbalanced';
+      v_reason := case when coalesce(array_length(v_unbalanced,1),0) > 0
+                       then 'row_identity_failed' else 'row_identity_uncheckable' end;
+      if v_t_state = 'value' then v_printed_cents := v_t_cents; v_printed_raw := v_t_raw; end if;
+    elsif v_t_state = 'not_printed' then
+      v_state := 'not_printed'; v_reason := 'no_printed_total';
+    elsif v_computed is not null and v_computed is distinct from v_t_cents then
+      v_state := 'totals_mismatch'; v_reason := 'printed_total_disagrees_row_sum';
+      v_printed_cents := v_t_cents; v_printed_raw := v_t_raw;
+    else
+      v_state := 'established'; v_printed_cents := v_t_cents; v_printed_raw := v_t_raw;
+      v_basis := case when v_rf is null then 'printed_total_no_row_counterpart'
+                      when v_computed is not null then 'printed_total_agrees_row_sum'
+                      else 'printed_total_no_rows' end;
+    end if;
+
+    v_fact := jsonb_build_object(
+      'state', v_state,
+      'printed_raw', to_jsonb(v_printed_raw),
+      'printed_cents', to_jsonb(v_printed_cents),
+      'computed_cents', to_jsonb(v_computed),
+      'row_field', to_jsonb(v_rf),
+      'text_raw', to_jsonb(case when v_t_state = 'value' then v_t_raw end),
+      'vision_raw', to_jsonb(case when v_v_state = 'value' then v_v_raw end),
+      'reason', to_jsonb(v_reason),
+      'basis', to_jsonb(v_basis));
+    v_facts := v_facts || jsonb_build_object(v_f, v_fact);
+
+    if v_state = 'established' then v_established := v_established || v_f;
+    elsif v_state = 'not_printed' then v_missing := v_missing || v_f;
+    else v_disagreed := v_disagreed || v_f;
+    end if;
+  end loop;
+
+  return jsonb_build_object(
+    'state_version','v1',
+    'rows', jsonb_build_object(
+      'text', v_rows_text, 'vision', v_rows_vision,
+      'agreed', coalesce(array_length(v_agreed,1),0),
+      'balanced', coalesce(array_length(v_agreed,1),0)
+                  - coalesce(array_length(v_unbalanced,1),0)
+                  - coalesce(array_length(v_unchecked,1),0),
+      'contested', to_jsonb(v_contested),
+      'unbalanced', to_jsonb(v_unbalanced),
+      'unchecked', to_jsonb(v_unchecked)),
+    'facts', v_facts,
+    'established', to_jsonb(v_established),
+    'disagreed', to_jsonb(v_disagreed),
+    'missing', to_jsonb(v_missing));
+end $eval$;
+
+revoke all on function clara.evaluate_payroll_run_state_v1(jsonb, jsonb) from public;
+
+comment on function clara.evaluate_payroll_run_state_v1(jsonb, jsonb) is
+  '#945: the payroll run''s deterministic evaluator. Two channel envelopes in, one fact state out: the column sums over the quoted employee rows, each row''s own gross-minus-deductions identity, the cross-check against a printed totals row where the page prints one, and the text-vs-vision comparison. The MODEL never sums — every arithmetic result here is produced by this body from quoted renderings. It reads no table and calls no other clara function, which is what keeps its clara.evaluator_versions closure at ONE member and the freeze meaningful; a changed formula is a _v2, never an edit.';
+
 reset role;
+
+-- -------------------------------------------------------------------------------------
+-- §D.1  THE FREEZE REGISTRATION, single-member by construction (0140's shape).
+--
+--       THE search_path HERE IS LOAD-BEARING, NOT COSMETIC (0059:243-245's recorded reason,
+--       restated by 0091 and 0140): clara.verify_evaluator_freeze() reproduces the closure hash
+--       under pg_catalog,pg_temp, so a registration performed under ANY OTHER search_path stores
+--       a hash the verifier CANNOT reproduce and every later apply reds.
+--
+--       deployed = false: the deploy-lock flip is a one-way ceremony act under 0060's
+--       _tf_evaluator_deploy_once, never a migration's to make. The freeze binds regardless —
+--       the flag is about traffic, not about immutability.
+--
+--       REDO-SAFE: the registration is deleted and re-inserted only when this file is re-run, so
+--       the recorded hash always describes the body that is live. The delete is scoped to THIS
+--       evaluator name and version and can therefore touch nobody else's closure.
+-- -------------------------------------------------------------------------------------
+set local search_path = pg_catalog, pg_temp;
+do $w945_freeze$
+declare e uuid; h bytea;
+begin
+  delete from clara.evaluator_version_members m
+    using clara.evaluator_versions ev
+   where m.evaluator_version_id = ev.id
+     and ev.evaluator_name = 'evaluate_payroll_run_state' and ev.version = 1;
+  delete from clara.evaluator_versions
+   where evaluator_name = 'evaluate_payroll_run_state' and version = 1;
+
+  select sha256(convert_to(string_agg(
+           encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text, 'UTF8')), 'hex'),
+           '' order by o), 'UTF8')) into h
+    from (values (0, 'clara.evaluate_payroll_run_state_v1(jsonb,jsonb)')) m(o, s);
+  insert into clara.evaluator_versions(evaluator_name, version, entrypoint_signature,
+      closure_sha256, migration_version, deployed)
+    values ('evaluate_payroll_run_state', 1, 'clara.evaluate_payroll_run_state_v1(jsonb,jsonb)', h,
+      '0296_payroll_summary_typed_facts', false)
+    returning id into e;
+  insert into clara.evaluator_version_members(evaluator_version_id, ordinal, member_signature,
+      body_sha256, firm_id)
+    select e, o, s, sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text, 'UTF8')), null::uuid
+      from (values (0, 'clara.evaluate_payroll_run_state_v1(jsonb,jsonb)')) m(o, s);
+end
+$w945_freeze$;
+set local search_path = clara, pg_temp;
 
 -- =====================================================================================
 -- §Z  TAIL. Everything this file claims to have done, re-derived from the live catalog.
