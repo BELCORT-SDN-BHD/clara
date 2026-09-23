@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
-import { settleForScan } from "./helpers";
+import { cellBudgetMs, settleForScan } from "./helpers";
 
 // Read from the environment, matching `signup-confirm-pending.spec.ts` and the
 // Playwright config. A hardcoded origin here silently defeats the lane's
@@ -204,6 +204,11 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm opens", async ({ page }) => {
+  // #864 — FOUR scan() passes below, and this file never signs in through the shared helper (it
+  // signs UP, a different form: see sign-in-census.test.ts's own header), so there is no automatic
+  // CELL_BUDGET.signIn floor standing under it either. The flat 30 s default is the whole budget
+  // for four real AxeBuilder passes, which is exactly the host-contention flake #864 exists to fix.
+  test.setTimeout(cellBudgetMs({ scans: 4 }));
   const email = `e2e-checkout-${Date.now()}@example.test`;
   await reachLegalStage(page, email);
 
@@ -359,6 +364,8 @@ test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm o
 });
 
 test("THE LEGAL STAGE AT 320 CSS px, AT 200% ZOOM, AND UNDER REDUCED MOTION", async ({ page }) => {
+  // #864 — two scan() passes, no shared sign-in (see "THE WHOLE JOURNEY" above).
+  test.setTimeout(cellBudgetMs({ scans: 2 }));
   // The journey-state gap this round closed: the stage that asks somebody to
   // sign two agreements had no geometry and no motion assertion at all. It is
   // ONE extra reach of the existing journey rather than a second copy of it —
@@ -420,6 +427,8 @@ test("THE LEGAL STAGE AT 320 CSS px, AT 200% ZOOM, AND UNDER REDUCED MOTION", as
 });
 
 test("REFUSAL POLARITY — a wrong code and a LOCKED wall render their own cards", async ({ page }) => {
+  // #864 — two scan() passes, no shared sign-in.
+  test.setTimeout(cellBudgetMs({ scans: 2 }));
   const email = `e2e-wrong-${Date.now()}@example.test`;
   await page.goto("/signup");
   await page.getByLabel("Email").fill(email);
@@ -607,6 +616,8 @@ async function reachAcceptedHolding(page: Page, prefix: string) {
 }
 
 test("THE WAIT CONVERGES: session → processing → paid → the firm opens", async ({ page }) => {
+  // #864 — two scan() passes, no shared sign-in.
+  test.setTimeout(cellBudgetMs({ scans: 2 }));
   // JOURNEY A1's core claim, walked: "stages resume from persisted
   // intent/webhook/claim" and "late payment confirmation has a waiting
   // explanation and recovery link". Every transition below is applied to the
@@ -693,6 +704,8 @@ test("A FAILED PAYMENT SAYS SO, and Try again opens a NEW intent", async ({ page
 });
 
 test("AN EXPIRED CHECKOUT offers a fresh start, and a CANCELLED one says so", async ({ page }) => {
+  // #864 — two scan() passes, no shared sign-in.
+  test.setTimeout(cellBudgetMs({ scans: 2 }));
   await reachAcceptedHolding(page, "e2e-expired");
   await control(page, { checkoutOpen: true, intentStatus: "expired", intentSessionId: null });
   await page.reload();
@@ -783,6 +796,8 @@ test("RESUME NEVER MINTS A SECOND SESSION", async ({ page }) => {
 });
 
 test("ADMISSION FULL: the face offers no way to pay, and the door refuses before it is asked to", async ({ page }) => {
+  // #864 — two scan() passes, no shared sign-in.
+  test.setTimeout(cellBudgetMs({ scans: 2 }));
   await reachAcceptedHolding(page, "e2e-capacity");
   await control(page, { capacityFull: true });
   await page.reload();
@@ -866,6 +881,8 @@ test("TWO CONTEXTS RACE THE CLAIM: one firm, and the loser is not shown a failur
 });
 
 test("THE WAITING FACES AT 320 CSS px, AT 200% ZOOM, UNDER REDUCED MOTION, AND ACROSS BACK", async ({ page }) => {
+  // #864 — two scan() passes, no shared sign-in.
+  test.setTimeout(cellBudgetMs({ scans: 2 }));
   // The journey-state gap this closes: two faces a person can sit on for
   // minutes — the one where their bank is deciding and the one where their card
   // was refused — had no geometry, no motion and no history assertion at all.
