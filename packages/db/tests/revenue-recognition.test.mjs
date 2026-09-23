@@ -24,12 +24,14 @@ import {
   deferredRevenueScene, DEFERRED_PURPOSE, NOT_LIABILITY_AXIS,
   createRecognitionSchedule, recognitionScheduleRow, recognitionScheduleCountFor,
   recordStatedTerm, DR_REASON, DR_AXIS, RECOGNITION_KIND, RECOGNITION_PATTERN, REVENUE_BASIS,
-  advanceReceipt,
+  advanceReceipt, accountBalance, accountLines,
+  wakeDuePlanOccurrences, occurrenceRows, workRow, claimWorkRun, settleWorkRun,
+  mintClientObo, wakeRecordJournalEntry, receiptsForWork, requestPlanCatchUp,
 } from "./revenue-recognition-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 4;
+const EXPECTED_CELLS = 5;
 
 before(async () => {
   ready = await (async () => {
@@ -413,4 +415,89 @@ cell("p941.target.refusals — the revenue account must be named, must be on thi
   // THE POSITIVE CONTROL, so none of the above is vacuous.
   const made = await call();
   assert.equal(made.revenue_account_code, scene.revenue);
+});
+
+// ===========================================================================================
+// AC1 / AC3 / AC4 — THE BOOKS. Twelve months really post, the liability really clears to zero,
+// and the SST output line the invoice put on the receipt is never moved.
+// ===========================================================================================
+
+cell("p941.posts.full_year — a twelve-month advance with SST output tax on the same receipt recognises twelve months through the plan lane, each period posting Dr deferred revenue / Cr revenue for its own amount with the remainder in the final period, clearing the liability to exactly zero and recognising exactly the advance, while the SST output account keeps the ONE line the receipt gave it", async () => {
+  // THE SHAPE OF A REAL MALAYSIAN MEMBERSHIP RECEIPT: RM 12,000.07 of service billed ahead plus
+  // RM 720.00 of service tax, banked as one sum. The tax is a liability owed to the Royal
+  // Malaysian Customs Department and is not part of what this schedule may ever touch.
+  const scene = await deferredRevenueScene("posts", {
+    cents: 1200007, termMonthsBack: 13, termMonths: 12, sstCents: 72000 });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#941 battery: a twelve-month membership taken in advance, tax charged on the same receipt" });
+
+  const deferredBefore = await accountBalance(scene.client, scene.deferred);
+  const revenueBefore = await accountBalance(scene.client, scene.revenue);
+  const sstBefore = await accountBalance(scene.client, scene.sst);
+  assert.equal(deferredBefore, -1200007n,
+    "the receipt credited the liability with the service amount only");
+  assert.equal(sstBefore, -72000n, "…and the tax with the tax");
+  assert.equal(revenueBefore, 0n, "nothing is revenue yet");
+
+  const made = await createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef });
+  assert.equal(Number(made.total_cents), 1200007,
+    "the schedule is over the DEFERRED leg, never the receipt's banked total of 1,272,007");
+  assert.equal(made.period_count, 12);
+
+  // THE PLAN LANE, DRIVEN RATHER THAN ASSERTED. The nightly scan admits the LATEST due period
+  // only (`clara._plan_admissible_event`, measured), so a term that ended before today is caught
+  // up through the estate's OWN window door — a bookkeeper asking for the periods the schedule
+  // owes. The catch-up admits at most twelve events, which is exactly a year of months.
+  await wakeDuePlanOccurrences({ limit: 100 });
+  await requestPlanCatchUp(scene.bob, {
+    plan: made.plan_id, from: made.effective_from, to: made.effective_to });
+  const admitted = (await occurrenceRows(made.plan_id)).filter((o) => o.work_id);
+  assert.equal(admitted.length, 12,
+    "twelve due periods were admitted, one Work each — the schedule owes a month a month");
+
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  for (const occ of admitted) {
+    const w = await workRow(occ.work_id);
+    await claimWorkRun({ task: w.current_task_id, runId: opk("p941-run") });
+    const entry = await wakeRecordJournalEntry(obo.secret, {
+      client: scene.client, work: occ.work_id, logicalOpId: w.logical_op_id, basis: w.basis });
+    assert.equal(entry.posted, true, `the period due ${occ.due_date} really reached the books`);
+    await settleWorkRun({
+      task: w.current_task_id, outcome: "completed", result: { entry_id: entry.entry_id } });
+    const receipts = await receiptsForWork(occ.work_id);
+    assert.equal(receipts.filter((x) => x.outcome === "committed").length, 1,
+      "exactly one committed receipt stands for each period");
+  }
+
+  // THE LIABILITY CLEARS TO EXACTLY ZERO, which is the whole acceptance row, and the revenue
+  // recognised is exactly the advance. Balances are summed off the POSTED ledger, never off the
+  // schedule's own projection.
+  assert.equal(await accountBalance(scene.client, scene.deferred), 0n,
+    "the deferred-revenue liability clears to zero at the end of the service period");
+  assert.equal(await accountBalance(scene.client, scene.revenue), -1200007n,
+    "…and exactly the advance has become revenue, remainder and all");
+
+  // THE TAX LEG NEVER MOVED. Not "the total is the same" — the ACCOUNT still carries the ONE line
+  // the receipt gave it, so nothing in this lane can have touched it and netted out.
+  assert.equal(await accountBalance(scene.client, scene.sst), sstBefore,
+    "the SST output tax liability is exactly where the receipt left it");
+  const sstLines = await accountLines(scene.client, scene.sst);
+  assert.equal(sstLines.length, 1, "exactly ONE posted line ever touched the tax account");
+  assert.equal(sstLines[0].entry_id, scene.receipt, "…and it is the receipt itself");
+  assert.equal(Number(sstLines[0].credit_cents), 72000);
+
+  // THE TWELVE ENTRIES ARE THE MIRROR OF AN AMORTISATION: Dr the liability, Cr the revenue, each
+  // for its own period's amount, with the cent remainder in the last one.
+  const drLines = await accountLines(scene.client, scene.deferred);
+  assert.equal(drLines.length, 13, "the receipt's credit plus twelve debits");
+  const debits = drLines.filter((l) => Number(l.debit_cents) > 0)
+    .map((l) => Number(l.debit_cents));
+  assert.equal(debits.length, 12);
+  assert.equal(debits.filter((c) => c === 100000).length, 11);
+  assert.equal(debits.filter((c) => c === 100007).length, 1,
+    "exactly one period carries the cent remainder");
 });
