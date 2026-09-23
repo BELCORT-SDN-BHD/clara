@@ -183,12 +183,15 @@ export type AccrualCreated = {
     code?: string;
   } | null;
   next_occurrences: readonly { due_date: string; leg: string }[];
-  /** ADVISORY, never a refusal: a live 0045 adjustment template of this client already moves one of
-   *  these accounts. `clara._plan_overlap_warning` only WARNS (0193:1155) and this lane does not
-   *  add a refusal on top of it — three scheduled-adjustment carriers can legitimately overlap. */
+  /** ADVISORY, never a refusal: a live SIBLING accounting plan of this client already moves one of
+   *  these accounts (`clara._plan_overlap_warning`, 0281/#909). This lane does not add a refusal
+   *  on top of it — three scheduled-adjustment carriers can legitimately overlap. The 0045
+   *  adjustment-template arm this warning also used to carry was retired by #929/0283: `kind` can
+   *  only ever read `"accounting_plan_overlap"` now, and every entry is keyed by `plan_id`, never
+   *  `template_id`. */
   overlap_warning: {
     kind: string;
-    templates: readonly { template_id: string; name: string; cadence: string; accounts: readonly string[] }[];
+    templates: readonly { plan_id: string; name: string; cadence: string; accounts: readonly string[] }[];
   } | null;
 };
 
