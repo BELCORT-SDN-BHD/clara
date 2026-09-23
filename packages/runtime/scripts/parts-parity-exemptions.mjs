@@ -316,6 +316,15 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/workflows/invoiceFacts.v1.azure.mjs","normalizeAzureInvoice","...readVendorIdentityFromLines([]).receipt","e3a5f7e0b59c7815efee105101d60892864e3eaf69e6688e1e712e11289a2afd","0"],
   ["packages/runtime/workflows/invoiceFacts.v1.azure.mjs","normalizeAzureInvoice","...readCustomerIdentityFromLines([]).receipt","42e2c733fde1b2fdbb82fc950309ba91dc51de0a0f9025de67bf5a58bea8d521","0"],
   ["packages/runtime/workflows/invoiceFacts.v1.azure.mjs","normalizeAzureInvoice","...readCurrencyFromLines([]).receipt","c44c9f91f59e8684d0202f12c151891b88bd7903108ac2b209c68082d35cd161","0"],
+  // payrollFacts_v1 (#945). The metered-channel wrapper, carried over from the witness lane
+  // UNCHANGED — the two statement fingerprints below are byte-identical to
+  // witnessFacts.v3.behavior.mjs's rows further down, which is the evidence that nothing about
+  // the wrapper moved in this family. Neither is a Clara part construction: one merges a usage
+  // bag the metering row reads, the other merges a channel result this closure never assigns a
+  // `type` to. payrollFacts emits no `parts[]` entry at all — it writes to the database and
+  // returns a receipt.
+  ["packages/runtime/workflows/payrollFacts.v1.behavior.mjs","withMeteredChannel","...(out.usage ?? {})","eb1f116bd1e79af670968f3ac7d4aa7a81fc29a8475d9b136a3ab0fbc23c06c9","0"],
+  ["packages/runtime/workflows/payrollFacts.v1.behavior.mjs","withMeteredChannel","...out","6d340dfea25133a71c60f9fb625992d27930b6f9eb8abf205fee061488bb59cd","0"],
   ["packages/runtime/workflows/statementFacts.v1.behavior.mjs","handleFailure","...out","41e339d574cccb0ccc13077fd088b0f9028e179440d80f747234f32d9a5b7817","0"],
   ["packages/runtime/workflows/statementFacts.v1.engine.mjs","fetchWithin","...init","74e9d4414560a4081038a41c381b49c3e463af96bab3b17b279bf3e8ea415d75","0"],
   ["packages/runtime/workflows/statementFacts.v1.engine.mjs","normalizeAzureBankStatement","...topFields","7b06ce8feb9b6499cd5ced56ee6386afac2d2cab06c5a68df2d1885ac2c43e6a","0"],

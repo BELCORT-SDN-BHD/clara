@@ -829,7 +829,7 @@ That second census covers **every** kind whose task can become a run, not only `
 |---|---|---|
 | `clara.agent_tasks` `chat_turn` / `autodraft` / `accounting_work` | `chatTurn` / `autoDraft` / `claraWork` | statically, from the registry-resolved enqueue deps in `plugins/startWorld.ts` |
 | `clara.agent_tasks` `wake` / `close_prep` | whatever `clara.wake_engine_sources.workflow_export` says | READ from the database per row, the way `lib/wake-engine.mjs` dispatches it (by the originating event's type for `wake`, by `task_kind` for the `direct_queue` carrier) |
-| `clara.document_processing_tasks` (7 lanes) | `documentIngest` / `invoiceFacts` / `statementFacts` / `witnessFacts` | the same allowlist `reconciler-documents.mjs` enqueues by |
+| `clara.document_processing_tasks` (8 lanes) | `documentIngest` / `invoiceFacts` / `statementFacts` / `witnessFacts` / `payrollFacts` | the same allowlist `reconciler-documents.mjs` enqueues by |
 | `clara.document_processing_tasks` `classify` / `local_facts` | none | they ride a consumer loop; named explicitly so they are not mistaken for unknown lanes |
 
 `held` counts as live: a wake task is BORN held and only becomes `running` when the engine claims it,
