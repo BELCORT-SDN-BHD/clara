@@ -20,11 +20,14 @@ import {
   functionsMatching, nowhereId, prepaymentScene, scheduleV1, scheduleV2, monthEndAfter, maxTermScene,
   STATED_TERM_REASON, STATED_TERM_DOOR_SIG, EVALUATOR_V2_SIG, PREPAY_REASON,
   createPrepaymentSchedule, scheduleTermSource, scheduleCountFor, unapprovedEntry, ambiguousAssetEntry,
+  getPrepaymentSchedule, scheduleRow, monthStartBack, opk,
+  wakeDuePlanOccurrences, occurrenceRows, workRow, claimWorkRun, settleWorkRun,
+  mintClientObo, wakeRecordJournalEntry, receiptsForWork,
 } from "./prepayment-stated-term-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 4;
+const EXPECTED_CELLS = 5;
 
 before(async () => {
   ready = await (async () => {
@@ -391,4 +394,90 @@ cell("p939.create.memo_only — with no stated term the door refuses prepayment_
       client: scene.client, sourceEntry: twoLegs,
       expenseAccount: scene.target, authorityRef: scene.authorityRef }),
     "a memo-only recognition debiting two asset accounts");
+});
+
+// ===========================================================================================
+// AC4 — A CORRECTED STATEMENT NEVER MOVES A RUNNING SCHEDULE.
+// ===========================================================================================
+
+cell("p939.supersede.running — a stated term corrected AFTER its schedule has posted a period moves nothing: the stored allocation, the term the schedule rode, its occurrences and its COMMITTED receipt are byte-identical afterwards, the schedule keeps naming the statement it was derived from, and a second schedule over the same recognition is still refused by name", async () => {
+  const scene = await statedTermScene("supersede", {
+    cents: 90000, termMonthsBack: 4, termMonths: 3, memoCents: 90000 });
+  const stated = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd });
+  const created = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+
+  // ---- ONE PERIOD ACTUALLY POSTS. Not an admitted Work: a COMMITTED receipt, which is the only
+  // thing that means money reached the books — and the fact AC4 is about.
+  await wakeDuePlanOccurrences({ limit: 100 });
+  const occBefore = await occurrenceRows(created.plan_id);
+  assert.equal(occBefore.length, 1, "one scan admits the latest due event at or before today");
+  const workId = occBefore[0].work_id;
+  assert.ok(workId, "…and it admitted a Work");
+  const w = await workRow(workId);
+  await claimWorkRun({ task: w.current_task_id, runId: opk("p939-run") });
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  const posted = await wakeRecordJournalEntry(obo.secret, {
+    client: scene.client, work: workId, logicalOpId: w.logical_op_id, basis: w.basis });
+  assert.equal(posted.posted, true, "the amortisation charge really reached the books");
+  await settleWorkRun({
+    task: w.current_task_id, outcome: "completed", result: { entry_id: posted.entry_id } });
+  const receiptsBefore = await receiptsForWork(workId);
+  assert.equal(receiptsBefore.filter((r) => r.outcome === "committed").length, 1,
+    "exactly one committed receipt stands before the correction");
+
+  const rowBefore = await scheduleRow(created.schedule_id);
+  const detailBefore = await getPrepaymentSchedule(scene.bob, created.schedule_id);
+
+  // ---- THE CORRECTION. A genuinely DIFFERENT term — one month later at both ends — stated through
+  // the same door, which supersedes the statement this schedule rode.
+  const newStart = await monthStartBack(3);
+  const newEnd = await monthEndAfter(newStart, 2);
+  assert.notEqual(newStart, scene.termStart, "the correction really states different dates");
+  const corrected = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: newStart, end: newEnd,
+    reason: "#939 battery: the client's bank statement showed the payment covered a later year" });
+  assert.equal(corrected.superseded_id, stated.stated_term_id,
+    "the correction superseded exactly the statement this schedule rode");
+
+  // ---- NOTHING MOVED. The relation is append-only by trigger, but a trigger proves only that an
+  // UPDATE would raise; this proves the correction path does not even try.
+  const rowAfter = await scheduleRow(created.schedule_id);
+  assert.deepEqual(rowAfter.period_lines, rowBefore.period_lines,
+    "the stored allocation is byte-identical after the correction");
+  assert.equal(rowAfter.term_start, scene.termStart, "…and the schedule still carries the term it rode");
+  assert.equal(rowAfter.term_end, scene.termEnd);
+  assert.equal(rowAfter.total_cents, rowBefore.total_cents);
+  assert.equal(rowAfter.period_count, rowBefore.period_count);
+  const sourceAfter = await scheduleTermSource(created.schedule_id);
+  assert.equal(sourceAfter.stated_term_id, stated.stated_term_id,
+    "the schedule keeps naming the SUPERSEDED statement — it is a derived record and says what it was derived from");
+  assert.equal(sourceAfter.term_source, "human_stated");
+
+  // THE POSTED PERIOD AND ITS RECEIPT ARE UNTOUCHED — the sentence AC4 asks for, driven rather
+  // than asserted.
+  const occAfter = await occurrenceRows(created.plan_id);
+  assert.deepEqual(occAfter.map((o) => [o.due_date, o.work_id, o.attempt]),
+    occBefore.map((o) => [o.due_date, o.work_id, o.attempt]),
+    "the occurrences are the same rows, in the same state");
+  const receiptsAfter = await receiptsForWork(workId);
+  assert.deepEqual(receiptsAfter.map((r) => [r.id, r.outcome]),
+    receiptsBefore.map((r) => [r.id, r.outcome]),
+    "the committed receipt is the same receipt");
+  const detailAfter = await getPrepaymentSchedule(scene.bob, created.schedule_id);
+  assert.deepEqual(detailAfter.periods, detailBefore.periods,
+    "and the read's period projection did not move either");
+
+  // ---- RE-DERIVING IN PLACE IS NOT A PATH THIS ESTATE OFFERS. A second schedule over the same
+  // recognition is refused BY NAME and names the schedule that already stands, so a surface sends
+  // the person there rather than offering a second configuration.
+  await assertPair(CLR.conflict, PREPAY_REASON.scheduleExists,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.memoEntry,
+      expenseAccount: scene.target, authorityRef: scene.authorityRef }),
+    "configuring a second schedule over a recognition whose term was corrected");
 });
