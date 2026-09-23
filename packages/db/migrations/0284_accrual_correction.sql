@@ -97,6 +97,19 @@
 do $t936_pre$
 declare
   v_sha text;
+  -- INTEGRATION (riders wave 3, lanes 05 x 06). This file's header says lane 05 pins
+  -- clara.revise_accounting_plan's body as UNCHANGED, which is why this door NESTS it rather than
+  -- recutting it. Lane 05's LATER fix round changed that fact: 0283_retire_plan_overlap_template_arm
+  -- recuts the plan lane's three writers to take the client advisory rung and pass their own plan
+  -- id, and its own prestate records both shas as literals -- pre-image
+  -- 87c9f1e9... (the one pinned below, measured before 0283) and its own output 8a6e69ef... .
+  -- 0283 sorts BEFORE this file, so on an integrated chain the live body is 0283's output and the
+  -- unconditional pin below would refuse a migration that has nothing to do with the change.
+  -- This ONE signature is therefore accepted at either value; every other pin stays exact, and
+  -- what this file actually depends on -- that it nests the plan-revision door rather than
+  -- recutting it -- is untouched by 0283, which moves the rung and the plan id, not the nesting.
+  c_revise_after_0283 constant text :=
+    '8a6e69efac967592592bf3e8d08683145e5b43456a63fe673788337349382886';
   v_pins text[][] := array[
     ['clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)',
      '87c9f1e9bcf493493dd805585ade921b679afda97a62daa18334ef61258f431f'],
@@ -156,7 +169,8 @@ begin
     end if;
     select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
       from pg_proc p where p.oid = v_pins[v_i][1]::regprocedure;
-    if v_sha is distinct from v_pins[v_i][2] then
+    if v_sha is distinct from v_pins[v_i][2]
+       and not (v_pins[v_i][1] like 'clara.revise_accounting_plan(%' and v_sha = c_revise_after_0283) then
       raise exception '#936 prestate: % has DRIFTED from its measured pre-image -- this file must not touch it, so re-measure before applying (got %)',
         v_pins[v_i][1], v_sha using errcode='CLR10';
     end if;
@@ -360,6 +374,11 @@ reset role;
 do $t936_tail$
 declare
   v_sha text; v_src text; v_posture text; v_n int; r text; v_i int;
+  -- The same lanes-05x06 integration note the prestate above carries, for the same one signature:
+  -- what this census asserts is that THIS FILE moved nothing, and 0283 -- which applies before it
+  -- -- is the one lawful reason the plan-revision door's body differs from the measured pre-image.
+  c_revise_after_0283 constant text :=
+    '8a6e69efac967592592bf3e8d08683145e5b43456a63fe673788337349382886';
   v_pins text[][] := array[
     ['clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)',
      '87c9f1e9bcf493493dd805585ade921b679afda97a62daa18334ef61258f431f'],
@@ -459,7 +478,8 @@ begin
   for v_i in 1 .. array_length(v_pins, 1) loop
     select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
       from pg_proc p where p.oid = v_pins[v_i][1]::regprocedure;
-    if v_sha is distinct from v_pins[v_i][2] then
+    if v_sha is distinct from v_pins[v_i][2]
+       and not (v_pins[v_i][1] like 'clara.revise_accounting_plan(%' and v_sha = c_revise_after_0283) then
       raise exception '#936 tail: % MOVED while this file applied -- it must not have (got %)',
         v_pins[v_i][1], v_sha using errcode='CLR10';
     end if;
