@@ -931,3 +931,104 @@ test("S5 · fail_agreement_facts settles a running task terminally, under the la
   );
   assert.equal(ev.rows[0].n, 1, "the lane's OWN failure twin, never the invoice lane's");
 });
+
+// ---------------------------------------------------------------------------
+// S6 — the capability registry (AC3)
+// ---------------------------------------------------------------------------
+
+/** The SIX formats the router's pdf/image arm actually serves — a pdf and the five raster
+ *  formats whose mime is image/*. Transcribed from the router's own mime test, not read back out
+ *  of the registry. */
+const AGREEMENT_READ_FORMATS = ["heic", "jpeg", "pdf", "png", "tiff", "webp"];
+
+const capability = async (format, kind) =>
+  (await rootQuery("select clara._document_capability($1,$2) as c", [format, kind])).rows[0].c;
+
+test("S6 · the agreement contract's typed-facts axis stops being stored-only, and its reason sentence says what is read and what is posted", async (t) => {
+  if (unready(t)) return;
+
+  for (const format of AGREEMENT_READ_FORMATS) {
+    const c = await capability(format, "agreement_contract");
+    assert.equal(c.custody, "supported", `${format}: custody is unmoved by #948`);
+    assert.equal(c.byte_extraction, "supported", `${format}: byte extraction is unmoved by #948`);
+    assert.equal(c.typed_facts, "supported", `${format}: the pair now has a reader`);
+    assert.equal(
+      c.business_operation,
+      "supported",
+      `${format}: #948 is the reading AND the posting half in one file — Clara carries these typed facts into a posted acquisition, and the registry says so`,
+    );
+    assert.equal(
+      /terminates this pair cleanly/.test(c.basis),
+      false,
+      `${format}: the reason sentence must not still describe the dead end #948 removed`,
+    );
+    assert.match(c.basis, /Typed facts are persisted with source regions by/,
+      `${format}: the reason sentence names the engine that reads it`);
+    assert.match(c.basis, /never/i, `${format}: …and still says what Clara will not do`);
+    assert.equal(c.limits.agreement_non_financing, "accepted_limitation",
+      `${format}: a tenancy or supply agreement creates no asset at signing — a permanent boundary, not a future build`);
+    assert.equal(c.limits.agreement_non_financing_reason, "no_entry_exists_at_signing_for_a_non_financing_agreement");
+    assert.equal(c.limits.agreement_asset_account, "accepted_limitation",
+      `${format}: the asset account comes from the client's own enrolments, never from the prose the page prints`);
+    assert.equal(c.limits.agreement_asset_account_reason, "resolved_from_client_enrolment_never_from_prose");
+  }
+
+  // The formats the router does NOT serve for this kind are untouched: a docx agreement has no
+  // reader on this lane and the registry still says so.
+  for (const format of ["csv", "tsv", "xlsx", "docx", "ofx"]) {
+    const c = await capability(format, "agreement_contract");
+    assert.equal(c.typed_facts, "stored_only",
+      `${format}: the router's agreement arm is on the pdf/image branch only — this pair still has no reader`);
+    assert.equal(c.business_operation, "stored_only", `${format}: …and drives nothing`);
+    assert.equal(c.limits.agreement_non_financing, undefined,
+      `${format}: a limit is only stated where the capability it bounds exists`);
+  }
+  const xml = await capability("xml", "agreement_contract");
+  assert.equal(xml.typed_facts, "unsupported", "xml x agreement_contract is unmoved — the local lane reads MyInvois UBL only");
+});
+
+test("S6 · the registry re-publishes at ONE new version, and nobody else's row moved", async (t) => {
+  if (unready(t)) return;
+
+  const r = (
+    await rootQuery(
+      `select count(distinct registry_version)::int as versions, min(registry_version)::int as v,
+              count(*)::int as rows from clara.document_capabilities`,
+    )
+  ).rows[0];
+  assert.equal(r.versions, 1, "the registry publishes exactly one version — a re-derivation is whole or it is drift");
+  assert.equal(r.v, 6, "…and it is 6 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5, #948 to 6)");
+  assert.equal(r.rows, 240, "#948 inserts and deletes no registry row");
+
+  const drift = (
+    await rootQuery(
+      `select count(*)::int as n from clara.document_capabilities c
+         left join clara.document_capability_version_high_water h
+           on h.format = c.format and h.document_kind = c.document_kind
+        where h.format is null or h.registry_version is distinct from c.registry_version`,
+    )
+  ).rows[0].n;
+  assert.equal(drift, 0, "the high-water mark rose with the registry, every pair, through #846's ordinary writer path");
+
+  // Nothing but the six agreement_contract rows carries an agreement limit.
+  const moved = (
+    await rootQuery(
+      `select format, document_kind from clara.document_capabilities
+        where limits ? 'agreement_non_financing' order by format`,
+    )
+  ).rows;
+  assert.deepEqual(moved.map((x) => x.format), AGREEMENT_READ_FORMATS);
+  assert.deepEqual([...new Set(moved.map((x) => x.document_kind))], ["agreement_contract"]);
+
+  // The payroll summary's own six rows are exactly where #945 left them: this file re-published
+  // the registry's VERSION, it did not restate anybody else's verdict.
+  const payroll = (
+    await rootQuery(
+      `select typed_facts, business_operation from clara.document_capabilities
+        where document_kind='payroll_summary' and mime_type='application/pdf'`,
+    )
+  ).rows[0];
+  assert.equal(payroll.typed_facts, "supported");
+  assert.equal(payroll.business_operation, "stored_only",
+    "#946 left the payroll pair's operation axis at stored_only; #948 does not widen another ticket's row");
+});

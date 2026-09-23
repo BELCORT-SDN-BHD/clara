@@ -122,10 +122,25 @@ const BUSINESS_OPERATION_LEVELS = Object.freeze([...LEVELS, "proposal_only"]);
  *  unaffected, and the six csv/tsv/xlsx/docx/ofx/xml payroll rows keep their pre-#945 verdicts
  *  because the router's payroll arm never reaches them.
  *
+ *  6 since #948's `0299_agreement_contract_acquisition.sql`, which republished the WHOLE registry
+ *  again and changed CONTENT on the SIX `agreement_contract` rows the facts router now has a
+ *  reader for (heic/jpeg/pdf/png/tiff/webp — the pairs whose mime is application/pdf or image/*,
+ *  which is exactly the branch 0299's new `contract_facts` arm sits on). `typed_facts` moves from
+ *  `stored_only` to `supported`, `limits` gains two two-key pairs in #782's own shape
+ *  (`agreement_non_financing` / `agreement_asset_account`, both `accepted_limitation`), and the
+ *  basis sentence describing the router's dead end is replaced by one naming what is read and
+ *  what is posted. UNLIKE #945, `business_operation` DOES move on those six rows, to `supported`:
+ *  0296 was the reading half with its posting half in a later file, whereas 0299 carries these
+ *  typed facts into a posted acquisition itself, which is the column's own published definition
+ *  of `supported`. The honesty cell at the foot of this file is one-directional
+ *  (`business_operation` never `supported` where `typed_facts` is not), so it is satisfied rather
+ *  than affected; the payroll rows are untouched, and the six csv/tsv/xlsx/docx/ofx/xml agreement
+ *  rows keep their pre-#948 verdicts because the router's agreement arm never reaches them.
+ *
  *  A future republication re-bases HERE, in one place, and says why beside the number — the
  *  precedent for editing this battery in the same commit as the migration is `af3b5955` (#779),
  *  which shipped 0207 and +147 lines of this file together. */
-const PUBLISHED_REGISTRY_VERSION = 5;
+const PUBLISHED_REGISTRY_VERSION = 6;
 
 let live = false;
 let executed = 0;
@@ -588,8 +603,11 @@ monotoneCell("an UPDATE that LOWERS registry_version for an existing (format, ki
     // Raise first, so the refusal below is unambiguously the TRANSITION wall and not the
     // column's own `registry_version >= 1` positivity CHECK: a "one lower than the current
     // value" probe against a low published version could be 0 and would trip that CHECK too.
-    // 5 → 3 stays a clean transition test at every published version this registry has had.
-    await c.query(`update clara.document_capabilities set registry_version = 5 ${PDF_INVOICE}`);
+    // Raised to one ABOVE whatever the registry publishes and then lowered to 3, so the probe
+    // stays a clean transition test at every published version this registry has had — a raise
+    // to a literal below the published version would itself be the refusal under test (#948:
+    // measured, when 0299 carried the registry to 6 and the literal `5` became a lowering).
+    await c.query(`update clara.document_capabilities set registry_version = ${PUBLISHED_REGISTRY_VERSION + 1} ${PDF_INVOICE}`);
     // A savepoint, so the REFUSED statement aborts only its own sub-transaction and the row can
     // still be re-read afterwards — the refusal is the subject, and an aborted outer transaction
     // would hide whether the stored value moved.
@@ -610,7 +628,8 @@ monotoneCell("an UPDATE that LOWERS registry_version for an existing (format, ki
     return (await c.query(`select registry_version from clara.document_capabilities ${PDF_INVOICE}`))
       .rows[0].registry_version;
   });
-  assert.equal(stored, 5, "the refused UPDATE must leave the stored registry_version exactly as it was");
+  assert.equal(stored, PUBLISHED_REGISTRY_VERSION + 1,
+    "the refused UPDATE must leave the stored registry_version exactly as it was");
 });
 
 monotoneCell("an UPDATE that RAISES registry_version, and one that leaves it UNCHANGED while changing another column, both still succeed", async () => {

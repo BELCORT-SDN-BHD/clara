@@ -5120,3 +5120,21 @@ freeze registration (`clara.evaluator_versions` is historical and `clara.evaluat
 append-only, which is the point of a freeze): that block INSERTs when absent and, when present,
 re-derives the closure hash and refuses by name if it moved — so an edit to the evaluator body fails
 loudly and its only lawful repair is a `_v2`.
+
+**§G the capability registry is re-derived (AC3).** `stored_only` on the agreement contract's
+typed-facts axis was DERIVED from the router's own dead end and said so in words, so §E and this
+re-derivation are one change. BOTH axes move on the six pdf/image formats, which is where #945 and
+#948 differ: 0296 moved `typed_facts` alone because #945 was the reading half and #946 shipped the
+posting half in a later file, whereas 0299 carries these typed facts into a posted acquisition
+itself — the column's own published definition of `business_operation = supported`. #946's payroll
+row is NOT touched; this file re-publishes the registry's VERSION, it does not restate another
+ticket's verdict. Two limits are named in #782's two-key shape, both `accepted_limitation` because
+both are permanent: `agreement_non_financing` (a tenancy or supply contract creates no asset at
+signing, so there is no entry to draft — the accounting, not a gap) and `agreement_asset_account`
+(the page prints prose, and the account comes from the client's own enrolments, never from a guess).
+The registry-wide raise is a SET-TO-LITERAL `= 6 where registry_version <> 6`, never `+ 1`: that
+form is redo-safe AND composes with another lane raising to the same literal in the same wave.
+`tests/document-capability-registry.test.mjs`'s `PUBLISHED_REGISTRY_VERSION` re-bases to 6 in the
+same commit (that file's own instruction, and `af3b5955`/#779's precedent), and its lowering probe
+now raises to `PUBLISHED_REGISTRY_VERSION + 1` instead of the literal `5`, which had itself become
+a lowering.

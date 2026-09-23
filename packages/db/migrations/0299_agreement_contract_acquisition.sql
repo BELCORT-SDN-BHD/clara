@@ -1719,3 +1719,90 @@ comment on function clara.fail_agreement_facts(uuid, text) is
   '#948: the terminal settle for a RUNNING contract_facts task -- clara.fail_witness_facts'' shape exactly, with the agreement lane''s own admitted code vocabulary (its two enqueue-time gate verdicts included) and its own lane-true event twin, so an agreement refusal never reaches the spine as a phantom invoice failure. clara_runtime only.';
 
 reset role;
+
+-- =====================================================================================
+-- §G  THE CAPABILITY REGISTRY IS RE-DERIVED (AC3).
+--
+--     THE REGISTRY IS A DERIVED CLAIM, NOT AN OPINION. `stored_only` on the agreement contract's
+--     typed-facts axis was DERIVED from the router's own dead end — its reason sentence said so
+--     in words ("The facts router terminates this pair cleanly (skipped_kind / skipped_type): the
+--     document stays stored and readable and Clara derives no typed facts from it"). §E removed
+--     that dead end, so leaving the registry alone would not be conservatism, it would be a false
+--     statement about what this estate does. The two changes are one change.
+--
+--     BOTH AXES MOVE HERE, WHICH IS WHERE #945 AND #948 DIFFER. 0296 moved `typed_facts` and
+--     deliberately left `business_operation` at `stored_only`, because #945 was the reading half
+--     and #946 shipped the posting half in a later file. #948 is BOTH halves in one file: §H-§K
+--     below carry these typed facts into a posted acquisition, which is the column's own
+--     published definition of `supported` ("supported where Clara can carry typed facts into
+--     it"). Leaving it at `stored_only` would understate the estate exactly as leaving
+--     `typed_facts` there would overstate the dead end. #946's payroll row is NOT touched: this
+--     file re-publishes the registry's VERSION, it does not restate another ticket's verdict.
+--
+--     SIX FORMATS MOVE, AND ONLY SIX. The router's agreement arm sits on the pdf/image mime
+--     branch, so exactly the pairs whose mime is application/pdf or image/* gain a reader: pdf,
+--     png, jpeg, tiff, webp, heic. csv/tsv/xlsx/docx and ofx keep `stored_only` — a spreadsheet
+--     of agreement terms has no reader on this lane and the registry must not imply one — and xml
+--     keeps `unsupported`, because the local lane reads MyInvois UBL only.
+--
+--     THE TWO LIMITS ARE NAMED, IN #782's OWN TWO-KEY SHAPE, and both are `accepted_limitation`
+--     rather than `planned`, because both are permanent boundaries this lane is BUILT to hold:
+--       agreement_non_financing — a tenancy, an operating lease or a supply contract creates no
+--         asset and no liability on the day it is signed, so there is no entry for this lane to
+--         draft. That is the accounting, not a gap in the build: #949's contract-terms record
+--         reads such an agreement, and it still posts nothing at signing.
+--       agreement_asset_account — the page prints what was acquired as PROSE, and no reading of
+--         prose is an account code. The asset account is resolved from the CLIENT'S OWN
+--         enrolments (clara.fa_account_profiles, active); none or several is a named refusal a
+--         person clears, never a guess. That is the standing owner ruling applied verbatim.
+--
+--     UPDATE, NEVER DELETE-THEN-INSERT (#846's wall), and the version raise is REGISTRY-WIDE
+--     (0228's precedent, 0245's second use, 0296's third) because the registry's one-version law
+--     is enforced by both the live battery and 0244's deferred uniformity trigger.
+--
+--     REDO-SAFE: the raise is a SET-TO-LITERAL guarded by `where registry_version <> 6`, not
+--     0245's `+ 1`. A `+ 1` re-run would carry the registry to 7 and every later reader's
+--     expectation with it. The same literal form also makes this file SAFE BESIDE another lane
+--     that raises to 6 in the same wave: two SET-TO-6 statements compose, two `+ 1`s do not.
+-- =====================================================================================
+set role clara_fn_owner;
+
+-- G1 · THE CONTENT. Additive on `limits` (0228's `limits || jsonb` idiom, which keeps any key a
+--      later file adds), and an outright rewrite of the three columns whose old values described
+--      the dead end. Scoped by MIME rather than by a transcribed format list, so it names the
+--      same six pairs the router's own branch does.
+update clara.document_capabilities
+   set typed_facts = 'supported',
+       business_operation = 'supported',
+       basis = 'Bytes are sealed at intake and read by ' || engine_byte
+             || '. Typed facts are persisted with source regions by llm-openai:gpt-5.6-terra:agreement-witness-v1: '
+             || 'what the agreement calls itself, the financier, the signing date, what was acquired, the cash price, '
+             || 'the deposit or trade-in, the amount financed, the total charges, the total payable, the term and the '
+             || 'instalment, and every row of a printed repayment schedule with its principal and interest split. '
+             || 'Clara reports what the page prints and a deterministic evaluator does every sum and the '
+             || 'classification — she never adds anything up herself, never decides from anything but the rendering '
+             || 'the page uses for itself, and a figure the page does not print is reported as not printed rather '
+             || 'than filled with zero. Where the page is a hire purchase or a finance lease whose arithmetic holds, '
+             || 'the acquisition it creates on the day of signing is posted unattended into the fixed-asset lane, '
+             || 'with the liability recognised against the financier and the deposit leg where the agreement states '
+             || 'one; the depreciation particulars come from the account''s own policy and are never invented here. '
+             || 'Anything else goes to Needs you naming the condition that failed.',
+       limits = limits || jsonb_build_object(
+         'agreement_non_financing', 'accepted_limitation',
+         'agreement_non_financing_reason', 'no_entry_exists_at_signing_for_a_non_financing_agreement',
+         'agreement_asset_account', 'accepted_limitation',
+         'agreement_asset_account_reason', 'resolved_from_client_enrolment_never_from_prose')
+ where document_kind = 'agreement_contract'
+   and (mime_type = 'application/pdf' or mime_type like 'image/%')
+   and (typed_facts <> 'supported' or business_operation <> 'supported'
+        or not (limits ? 'agreement_non_financing'));
+
+-- G2 · THE REGISTRY-WIDE RAISE. One statement, every row, to the literal this file publishes at,
+--      so `count(distinct registry_version)` stays 1 — enforced by the live battery AND by 0244's
+--      deferred constraint trigger. 0207's wall sees each row's transition and permits it because
+--      it is a raise; 0244's high-water writer raises every pair's mark in lockstep.
+update clara.document_capabilities
+   set registry_version = 6
+ where registry_version <> 6;
+
+reset role;
