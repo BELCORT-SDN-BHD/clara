@@ -189,24 +189,48 @@ function FloorNote({ preview }: { preview: FaRunPreview }) {
   );
 }
 
-/** Periods the due oracle skipped because their financial year is closed. A skip nobody can see is
- *  the same defect as a silent post. */
+/** Periods the due oracle skipped because their financial year is closed, and — since #975 (0279)
+ *  — the arrears those months carry and whether anybody has judged them yet. A skip nobody can see
+ *  is the same defect as a silent post; an amount nobody states is the same defect as a silent
+ *  ruling, because under IAS 8 the fold is only lawful where the omission is IMMATERIAL and that
+ *  is the accountant's judgement, never this product's. */
 function SkippedClosed({ preview }: { preview: FaRunPreview }) {
   const t = useTranslations("FixedAssetsDepreciation.preview");
   const closed = preview.skipped_closed ?? [];
-  if (closed.length === 0) return null;
+  const arrears = preview.closed_arrears;
+  const years = arrears?.fiscal_years ?? [];
+  if (closed.length === 0 && years.length === 0) return null;
   return (
     <div data-testid="fa-preview-skipped-closed">
       <StateBanner tone="warning" className="text-xs">
-        <span>{t("skippedClosedHeading", { count: closed.length })}</span>
-        <ul className="mt-1 flex flex-col gap-0.5">
-          {closed.map((c) => (
-            <li key={`${c.period_start}-${c.period_end}`}>
-              {c.period_start} – {c.period_end}
-              {c.fy_label ? ` (${c.fy_label})` : ""}
-            </li>
-          ))}
-        </ul>
+        {closed.length > 0 ? (
+          <>
+            <span>{t("skippedClosedHeading", { count: closed.length })}</span>
+            <ul className="mt-1 flex flex-col gap-0.5">
+              {closed.map((c) => (
+                <li key={`${c.period_start}-${c.period_end}`}>
+                  {c.period_start} – {c.period_end}
+                  {c.fy_label ? ` (${c.fy_label})` : ""}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {years.length > 0 ? (
+          <ul className="mt-1 flex flex-col gap-0.5" data-testid="fa-preview-closed-arrears">
+            {years.map((y) => (
+              <li key={y.fiscal_year_id}>
+                {t("arrearsAmount", {
+                  amount: fmtCents(y.arrears_cents),
+                  year: y.fy_label ?? `${y.fy_starts_on} – ${y.fy_ends_on}`,
+                })}{" "}
+                {y.resolution === null
+                  ? t("arrearsUnanswered")
+                  : t(y.resolution.choice === "fold_current" ? "arrearsFolded" : "arrearsRestated")}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <p className="mt-1">{t("skippedClosedNote")}</p>
       </StateBanner>
     </div>

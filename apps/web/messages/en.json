@@ -4729,7 +4729,11 @@
       "floor": "This authority reaches periods from {from} onward. Anything earlier needs an explicit catch-up run by a bookkeeper.",
       "skippedHeading": "{count} asset(s) will be skipped",
       "skippedClosedHeading": "{count} period(s) were skipped because their financial year is closed",
-      "skippedClosedNote": "A closed period is never run in its own right. Its arrears are charged by the next open period, and each charge row still carries the month it belongs to.",
+      "skippedClosedNote": "A closed period is never run in its own right, and its months are not lost. Before the next open period's run posts them, Clara states what they come to and asks you whether the omission is immaterial — IAS 8 permits folding it into the current period only then; a material one is restated in the year it belongs to. Each charge row still carries the month it belongs to.",
+      "arrearsAmount": "{amount} belongs to financial year {year}.",
+      "arrearsUnanswered": "This has not been answered yet, so the run is waiting for you.",
+      "arrearsFolded": "You judged it immaterial, so it is folded into the current period.",
+      "arrearsRestated": "You judged it material, so it is restated in that year once the year is reopened.",
       "skip": {
         "incomplete": "waiting on depreciation particulars",
         "not_in_service": "not yet in service",

@@ -92,6 +92,15 @@ test.describe("#651 · depreciation under an explicit policy", () => {
     await expect(dialog.getByTestId("fa-preview-skipped-closed")).toContainText(DEP.fyLabel);
     await expect(dialog.getByTestId("fa-preview-skipped-closed")).toContainText(DEP.closedPeriodStart);
 
+    // #975 — AND WHAT THOSE MONTHS COME TO, because the next run may not fold them forward until a
+    // person has judged them. The amount, the year, and the fact that nobody has answered yet: a
+    // surface that only said "skipped" would let a professional believe the charge is automatic.
+    await expect(dialog.getByTestId("fa-preview-closed-arrears")).toContainText("RM 250.00");
+    await expect(dialog.getByTestId("fa-preview-closed-arrears")).toContainText(DEP.fyLabel);
+    await expect(dialog.getByTestId("fa-preview-closed-arrears"))
+      .toContainText("has not been answered yet");
+    await expect(dialog.getByTestId("fa-preview-skipped-closed")).toContainText("IAS 8");
+
     // CONFIRM, then the RE-READ. The runs table gains the row because the surface re-read.
     await dialog.getByRole("button", { name: "Run this period" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 20_000 });

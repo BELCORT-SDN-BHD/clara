@@ -337,6 +337,21 @@ const PREVIEW = (clientId) => ({
     fy_label: DEP.fyLabel,
     fy_status: "closed",
   }],
+  // #975 [0279] — and what those skipped months come to, which the next run may not fold forward
+  // until a person has judged it material or not (IAS 8). Unanswered here, so the walk sees the
+  // question rather than a ruling.
+  closed_arrears: {
+    arrears_cents: 25000,
+    fiscal_years: [{
+      fiscal_year_id: DEP.fiscalYearId,
+      fy_label: DEP.fyLabel,
+      fy_status: "closed",
+      fy_starts_on: DEP.closedPeriodStart,
+      fy_ends_on: DEP.closedPeriodEnd,
+      arrears_cents: 25000,
+      resolution: null,
+    }],
+  },
   charges: [{
     asset_id: DEP.assetId,
     description: DEP.assetName,

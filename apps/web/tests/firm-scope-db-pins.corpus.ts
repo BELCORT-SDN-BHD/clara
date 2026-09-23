@@ -263,4 +263,16 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "90656f46a5a89cc64e97938694c0e5139ab0d5eb6e8ab9cdeb8022a4cb380acb",
     },
   ],
+  // #975 [0279] (riders wave 3, lane 04) — the closed-year arrears question. Same family as
+  // 0277's entry directly above: every recut body is written out as a whole literal
+  // `create or replace function … as $$ … $$`, static DDL the lexer reads directly, and the file's
+  // ONLY dynamic SQL is the standard bulk-ACL loop over its own one new door.
+  [
+    "0279_fa_closed_year_arrears.sql",
+    {
+      reason:
+        "Reviewed: the file's only dynamic SQL is the standard 0038:8056-8064 / 0041:4404-4423 bulk-ACL idiom, `execute format('revoke|grant|alter function owner …', f)` looped over a ONE-element literal array naming this file's own new door, clara.record_fa_arrears_resolution. That site emits GRANT / REVOKE / ALTER FUNCTION OWNER statements only; it never calls pg_get_functiondef, never reads a live catalog body and never interpolates a relation name, so it cannot produce a CREATE [OR REPLACE] VIEW of any spelling by construction, and the file contains no `create view` of any spelling — static or spliced — at all. Everything else this migration installs is STATIC DDL the lexer inspects directly: one new table (clara.fa_arrears_resolutions) with its indexes, RLS policies and two triggers, one new ungranted internal (clara._fa_closed_arrears), one new door, and four whole recut function bodies (clara._fa_run_period_core, clara._fa_oldest_unmet_period, clara.preview_depreciation_run, clara.run_depreciation_period_for). The recut bodies' prestate pins each LIVE pre-image sha256 measured on the lane-04 rig, and the tail re-reads the installed bodies' markers, volatility, ACL and owner.",
+      sha256: "ca9ede2bd4b065a8d3b4e67bde07b5afffbe937b2c1c083e580baf563de5a640",
+    },
+  ],
 ]);

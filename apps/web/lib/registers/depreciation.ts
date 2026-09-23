@@ -218,14 +218,46 @@ export type FaPreviewSkip = { asset_id: string; reason: string };
 export type FaPreviewLeg = { account_code: string; debit_cents: number; credit_cents: number };
 
 /** A period the due oracle SKIPPED because its fiscal year is closing or closed. It will never be
- *  run in its own right; the arrears are charged by the next OPEN period's run, and the charge
- *  rows still carry their own months, so nothing is lost and nothing is silent. */
+ *  run in its own right. Its months are NOT lost: they are carried by the next OPEN period's
+ *  charge — but, since #975 (0279), only once the accountant has judged them. See
+ *  `FaClosedArrears` below, and `CONTEXT.md`'s "Closed-year arrears resolution". */
 export type FaSkippedClosedPeriod = {
   period_start: string;
   period_end: string;
   fiscal_year_id: string;
   fy_label: string | null;
   fy_status: string;
+};
+
+/** #975 [0279] — the ONE answer a person may give to the closed-year arrears question. Under
+ *  IAS 8 a material prior-period error is restated in the year it belongs to and only an
+ *  immaterial one is folded into the current period, so materiality is ASKED for and never
+ *  inferred. `fold_current` lets the next open period's run carry the months; `reopen_prior`
+ *  keeps them where they belong and points at `clara.reopen_fiscal_year`. */
+export type FaArrearsResolution = {
+  id: string;
+  choice: "fold_current" | "reopen_prior";
+  arrears_cents: number;
+  decided_by: string;
+  decided_at: string;
+  reason: string | null;
+};
+
+/** #975 [0279] — what the NEXT run would fold forward out of closing or closed fiscal years, and
+ *  whether anybody has judged it yet. Reported beside `skipped_closed` rather than inside it: a
+ *  closed year can carry arrears with no period skipped at all. Always present, EMPTY rather than
+ *  absent, so a reader never has to tell "none" from "this build does not say". */
+export type FaClosedArrears = {
+  arrears_cents: number;
+  fiscal_years: Array<{
+    fiscal_year_id: string;
+    fy_label: string | null;
+    fy_status: string;
+    fy_starts_on: string;
+    fy_ends_on: string;
+    arrears_cents: number;
+    resolution: FaArrearsResolution | null;
+  }>;
 };
 
 export type FaRunPreview = {
@@ -240,6 +272,7 @@ export type FaRunPreview = {
   authority_from?: string | null;
   authority_ref?: FaAuthorityRef | null;
   skipped_closed?: FaSkippedClosedPeriod[];
+  closed_arrears?: FaClosedArrears;
   charges: FaPreviewCharge[];
   skipped: FaPreviewSkip[];
   legs: FaPreviewLeg[];
