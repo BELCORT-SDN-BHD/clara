@@ -37,6 +37,7 @@ import {
   validateAccrualCorrectionDraft, validateAccrualDraft, writeAccrualDraft,
   type AccrualCorrectionDraft, type AccrualDraft,
 } from "./accrual-draft";
+import { accrualScheduleDues } from "@/lib/accruals/api";
 import type { DraftStorage } from "./journal-draft";
 
 const USER = "11111111-1111-4111-8111-111111111111";
@@ -363,6 +364,7 @@ function goodCorrectionDraft(over: Partial<AccrualCorrectionDraft> = {}): Accrua
     servicePeriodStart: "2026-07-01",
     servicePeriodEnd: "2026-07-31",
     method: "stated_amount",
+    periodAmounts: [],
     instruction: "the client's standing instruction of 2026-06-30",
     memo: "",
     sourceDocumentId: "",
@@ -370,7 +372,13 @@ function goodCorrectionDraft(over: Partial<AccrualCorrectionDraft> = {}): Accrua
   };
 }
 
-const CORRECTION_WINDOW = { effectiveFrom: "2026-07-01", effectiveTo: "2026-07-31" };
+// #937 widened the second argument from the two window dates to the LIVE revision's whole
+// schedule: a corrected per-period set has to cover the due dates the running plan will reach, and
+// that needs the frequency and the day rule too. Monthly, month end, July 2026 -> one due date.
+const CORRECTION_WINDOW = {
+  effectiveFrom: "2026-07-01", effectiveTo: "2026-07-31",
+  frequency: "monthly" as const, dayRule: "last_day_of_month" as const, dayOfMonth: null,
+};
 
 test("936.correction: a complete correction raises nothing", () => {
   assert.deepEqual(validateAccrualCorrectionDraft(goodCorrectionDraft(), CORRECTION_WINDOW, KNOWN), []);
@@ -397,7 +405,8 @@ test("936.correction: the two legs, their roles and their distinctness — the s
 test("936.correction: no purpose, authority or schedule issue exists to raise — an EMPTY draft names only what this draft carries", () => {
   const issues = validateAccrualCorrectionDraft(
     { expenseAccountCode: "", liabilityAccountCode: "", amountCents: 0, servicePeriodStart: "",
-      servicePeriodEnd: "", method: "stated_amount", instruction: "", memo: "", sourceDocumentId: "" },
+      servicePeriodEnd: "", method: "stated_amount", periodAmounts: [], instruction: "", memo: "",
+      sourceDocumentId: "" },
     CORRECTION_WINDOW, KNOWN);
   const fields = issues.map((i) => i.field);
   assert.ok(!fields.includes("purpose" as never), "there is no purpose control to fail");
@@ -494,4 +503,184 @@ test("936.correction: the shared particulars answer identically on both validato
     assert.deepEqual(correction, shared,
       `the two validators disagree about ${JSON.stringify(over)}`);
   }
+});
+
+// ==============================================================================================
+// 4c · #937 — THE PER-PERIOD AMOUNTS. Each rule here MIRRORS a wall
+//      `clara._assert_accrual_period_amounts` (0303) enforces; the database is the authority and
+//      these exist so the mistake is named beside the control rather than a round trip later.
+// ==============================================================================================
+
+const JULY_END = "2026-07-31";
+const AUG_END = "2026-08-31";
+
+/** A CREATE draft under the per-period rule, over a two-month window whose schedule reaches
+ *  exactly 2026-07-31 and 2026-08-31. */
+function perPeriodDraft(over: Partial<AccrualDraft> = {}): AccrualDraft {
+  return goodDraft({
+    method: "stated_period_amount",
+    amountCents: 650000,
+    servicePeriodStart: "2026-07-01",
+    servicePeriodEnd: "2026-08-31",
+    effectiveFrom: "2026-07-01",
+    effectiveTo: "2026-08-31",
+    periodAmounts: [
+      { dueDate: JULY_END, amountCents: 300000 },
+      { dueDate: AUG_END, amountCents: 350000 },
+    ],
+    ...over,
+  });
+}
+
+test("937.periods: a complete per-period set over the schedule's own due dates raises nothing", () => {
+  assert.deepEqual(validateAccrualDraft(perPeriodDraft(), KNOWN), []);
+});
+
+test("937.periods: accrualScheduleDues is the list the block offers — the schedule's own due dates inside the window, and nothing else", () => {
+  assert.deepEqual(
+    accrualScheduleDues("monthly", "last_day_of_month", null, "2026-07-01", "2026-08-31"),
+    [JULY_END, AUG_END]);
+  assert.deepEqual(
+    accrualScheduleDues("quarterly", "last_day_of_month", null, "2026-01-01", "2026-12-31"),
+    ["2026-01-31", "2026-04-30", "2026-07-31", "2026-10-31"]);
+  assert.deepEqual(accrualScheduleDues("monthly", "last_day_of_month", null, "2026-08-31", "2026-07-01"),
+    [], "a window that ends before it starts offers nothing rather than a guess");
+  assert.deepEqual(accrualScheduleDues("monthly", "day_of_month", null, "2026-07-01", "2026-08-31"),
+    [], "…and neither does a day-of-month rule with no day yet");
+});
+
+test("937.periods: the per-period rule REQUIRES a set, and the constant rule REFUSES one", () => {
+  assert.deepEqual(validateAccrualDraft(perPeriodDraft({ periodAmounts: [] }), KNOWN),
+    [{ field: "periodAmounts", code: "periodAmountsRequired" }]);
+  // Under `stated_amount` the mapper drops the key entirely, so the draft carrying rows is the
+  // form's own transient state and raises nothing — sending them is what the door refuses.
+  const constant = goodDraft({ periodAmounts: [{ dueDate: JULY_END, amountCents: 1 }] });
+  assert.deepEqual(validateAccrualDraft(constant, KNOWN), []);
+  assert.equal("period_amounts" in toAccrualParticulars(constant), false,
+    "…and the key is never sent beside a rule that does not perform it");
+});
+
+test("937.periods: an unstated period, a zero, a blank date and a duplicate are each named on the block", () => {
+  assert.deepEqual(
+    validateAccrualDraft(perPeriodDraft({
+      amountCents: 300000,
+      periodAmounts: [{ dueDate: JULY_END, amountCents: 300000 }],
+    }), KNOWN),
+    [{ field: "periodAmounts", code: "periodAmountMissing" }],
+    "the schedule reaches August and nobody stated it");
+  assert.deepEqual(
+    validateAccrualDraft(perPeriodDraft({
+      periodAmounts: [{ dueDate: JULY_END, amountCents: 0 }, { dueDate: AUG_END, amountCents: 650000 }],
+    }), KNOWN),
+    [{ field: "periodAmounts", code: "periodAmountRequired" }]);
+  assert.deepEqual(
+    validateAccrualDraft(perPeriodDraft({
+      periodAmounts: [{ dueDate: "", amountCents: 300000 }, { dueDate: AUG_END, amountCents: 350000 }],
+    }), KNOWN),
+    [{ field: "periodAmounts", code: "periodDueDateRequired" }]);
+  assert.deepEqual(
+    validateAccrualDraft(perPeriodDraft({
+      periodAmounts: [{ dueDate: JULY_END, amountCents: 300000 }, { dueDate: JULY_END, amountCents: 350000 }],
+    }), KNOWN),
+    [{ field: "periodAmounts", code: "periodAmountDuplicate" }]);
+});
+
+test("937.periods: a date the schedule does not produce is named, which is the wall a RESTORED draft can still hit after its schedule moved", () => {
+  assert.deepEqual(
+    validateAccrualDraft(perPeriodDraft({
+      periodAmounts: [{ dueDate: "2026-07-15", amountCents: 300000 }, { dueDate: AUG_END, amountCents: 350000 }],
+    }), KNOWN).map((i) => i.code).sort(),
+    ["periodAmountMissing", "periodAmountNotScheduled"],
+    "the 15th is not a due date, and 2026-07-31 is therefore also unstated");
+});
+
+test("937.periods: the exact-sum rule — the stated periods add up to the accrual's own total, or the block says so", () => {
+  assert.deepEqual(
+    validateAccrualDraft(perPeriodDraft({ amountCents: 700000 }), KNOWN),
+    [{ field: "periodAmounts", code: "periodAmountsUnbalanced" }],
+    "650,000 stated against a 700,000 total");
+});
+
+test("937.periods: the final-period remainder governs an EVEN split and nothing else", () => {
+  // 100001 over two periods is 50000 + 50000 with one cent over, and that cent belongs to the LAST
+  // period (the prepayment lane's `final_period` rule, which 0303 enforces at the door).
+  const misplaced = perPeriodDraft({
+    amountCents: 100001,
+    periodAmounts: [{ dueDate: JULY_END, amountCents: 50001 }, { dueDate: AUG_END, amountCents: 50000 }],
+  });
+  assert.deepEqual(validateAccrualDraft(misplaced, KNOWN),
+    [{ field: "periodAmounts", code: "periodRemainderMisplaced" }]);
+  const placed = perPeriodDraft({
+    amountCents: 100001,
+    periodAmounts: [{ dueDate: JULY_END, amountCents: 50000 }, { dueDate: AUG_END, amountCents: 50001 }],
+  });
+  assert.deepEqual(validateAccrualDraft(placed, KNOWN), []);
+  // A GENUINELY UNEVEN SET NEVER ENTERS THE ARM: neither amount is the equal-split base, so the
+  // convention — which says where a DIVISION's leftover cent goes — has nothing to say about it.
+  const uneven = perPeriodDraft({
+    amountCents: 100001,
+    periodAmounts: [{ dueDate: JULY_END, amountCents: 40001 }, { dueDate: AUG_END, amountCents: 60000 }],
+  });
+  assert.deepEqual(validateAccrualDraft(uneven, KNOWN), []);
+});
+
+test("937.periods: the set crosses the wire in the DATABASE's own spelling, under the rule that performs it", () => {
+  const particulars = toAccrualParticulars(perPeriodDraft());
+  assert.deepEqual(particulars.period_amounts, [
+    { due_date: JULY_END, amount_cents: 300000 },
+    { due_date: AUG_END, amount_cents: 350000 },
+  ]);
+  assert.deepEqual(particulars.method, { rule: "stated_period_amount" });
+});
+
+test("937.periods: a refusal naming ONE row of the set focuses the block — 0303 can index the path, and there is one control for it", () => {
+  assert.equal(fieldForAccrualPath("accrual.period_amounts"), "periodAmounts");
+  assert.equal(fieldForAccrualPath("accrual.period_amounts[2].amount_cents"), "periodAmounts");
+  assert.equal(fieldForAccrualPath("accrual.period_amounts[0].due_date"), "periodAmounts");
+});
+
+test("937.periods: the draft round-trips through storage, and a half-understood set is no draft at all", () => {
+  const store = memoryStorage();
+  writeAccrualDraft(SCOPE, { opKey: "op-937", draft: perPeriodDraft() }, store);
+  assert.deepEqual(readAccrualDraft(SCOPE, store)?.draft.periodAmounts, [
+    { dueDate: JULY_END, amountCents: 300000 },
+    { dueDate: AUG_END, amountCents: 350000 },
+  ]);
+  for (const rows of ['[{"dueDate":"2026-07-31","amountCents":12.5}]',
+    '[{"dueDate":"2026-07-31"}]', '[{"amountCents":1}]', '[null]', '"nope"']) {
+    store.setItem(accrualDraftKey(SCOPE), JSON.stringify({
+      opKey: "op-937", draft: { ...perPeriodDraft(), periodAmounts: JSON.parse(rows) },
+    }));
+    assert.equal(readAccrualDraft(SCOPE, store), null,
+      `a half-understood set seeds nothing: ${rows}`);
+  }
+  // …and a draft written BEFORE this lane existed reads as "no periods stated" rather than null.
+  const older: Record<string, unknown> = { ...perPeriodDraft() };
+  delete older.periodAmounts;
+  store.setItem(accrualDraftKey(SCOPE), JSON.stringify({ opKey: "op-937", draft: older }));
+  assert.deepEqual(readAccrualDraft(SCOPE, store)?.draft.periodAmounts, []);
+});
+
+test("937.periods: a CORRECTION restates the set against the LIVE revision's own schedule", () => {
+  const correction = {
+    ...goodCorrectionDraft({ method: "stated_period_amount", amountCents: 650000,
+      servicePeriodStart: "2026-07-01", servicePeriodEnd: "2026-08-31" }),
+    periodAmounts: [
+      { dueDate: JULY_END, amountCents: 300000 },
+      { dueDate: AUG_END, amountCents: 350000 },
+    ],
+  };
+  const window = {
+    effectiveFrom: "2026-07-01", effectiveTo: "2026-08-31",
+    frequency: "monthly" as const, dayRule: "last_day_of_month" as const, dayOfMonth: null,
+  };
+  assert.deepEqual(validateAccrualCorrectionDraft(correction, window, KNOWN), []);
+  // BOTH ARE TRUE AND BOTH ARE SAID: the set is 350,000 short of the accrual's own total AND a
+  // period the live schedule reaches has no amount. The form renders the FIRST of them beside the
+  // block, so the preparer is sent to the arithmetic they can see.
+  assert.deepEqual(
+    validateAccrualCorrectionDraft({ ...correction, periodAmounts: [correction.periodAmounts[0]!] },
+      window, KNOWN).map((i) => i.code),
+    ["periodAmountsUnbalanced", "periodAmountMissing"],
+    "…and dropping August leaves the set short of the total, with August unstated");
 });

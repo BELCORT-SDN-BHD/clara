@@ -467,6 +467,9 @@ const DETAIL = (accrualId) => {
     plan: { ...PLAN(), purpose: row.purpose },
     occurrences,
     reversal: occurrences.find((o) => o.leg === "reversal") ?? null,
+    // #937 — the door always answers with the key; [] under the stated_amount rule every accrual
+    // in this mock uses, so the correction form's per-period block stays unrendered here.
+    period_amounts: [],
   };
 };
 

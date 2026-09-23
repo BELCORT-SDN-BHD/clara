@@ -115,6 +115,8 @@ const ROW: AccrualDetail = {
   },
   occurrences: [],
   reversal: null,
+  // #937 — the amounts a person stated per period; [] under the stated_amount rule this row uses.
+  period_amounts: [],
 };
 
 const CORRECTED: AccrualCorrected = {
@@ -438,6 +440,84 @@ test("936.correction.form: an overlap warning is persistent, and it does NOT blo
     await clickSubmit(h);
     assert.match(h.text(), /The accrual was recorded\./);
     assert.match(h.text(), /Monthly rent template/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ==============================================================================================
+// #937 — A PER-PERIOD ACCRUAL IS CORRECTED THROUGH THIS FORM. The relation is append-only, so a
+// changed period amount is a CORRECTION and nothing else; the form seeds the block from what the
+// door recorded, and sends the restated set in the database's own spelling.
+// ==============================================================================================
+
+/** The same row, under the per-period rule: a two-month window whose schedule reaches 2026-07-31
+ *  and 2026-08-31, with 3,000 and 3,500 already recorded against them. */
+const PER_PERIOD_ROW: AccrualDetail = {
+  ...ROW,
+  amount_cents: 650000,
+  effective_to: "2026-08-31",
+  service_period_end: "2026-08-31",
+  method: { rule: "stated_period_amount" },
+  period_amounts: [
+    { due_date: "2026-07-31", amount_cents: 300000 },
+    { due_date: "2026-08-31", amount_cents: 350000 },
+  ],
+};
+
+test("937.correct: the block is SEEDED from what the door recorded, and a restated set crosses the wire in the database's own spelling", async () => {
+  const sent: { accrualId: string; accrual: unknown; opKey: string }[] = [];
+  const h = await renderComponent(App({
+    row: PER_PERIOD_ROW,
+    submit: async (input) => { sent.push(input); return CORRECTED; },
+  }));
+  try {
+    assert.match(h.text(), /The amount stated for each period separately/,
+      "the rule is SHOWN on this form — changing which rule selects the figures is a plan decision");
+    // TWO ROWS, WITH THE RECORDED FIGURES IN THEM — the block is seeded from the door's answer,
+    // not from a blank set the preparer would have to retype.
+    assert.ok(byId(h, `${F("periodAmounts")}-due-0`) && byId(h, `${F("periodAmounts")}-due-1`),
+      "one row per recorded period");
+    assert.equal((byId(h, `${F("periodAmounts")}-amount-0`) as { value?: string }).value, "3,000.00");
+    assert.equal((byId(h, `${F("periodAmounts")}-amount-1`) as { value?: string }).value, "3,500.00");
+    assert.match(h.text(), /Stated: RM 6,500\.00\. This matches the total\./);
+
+    // JULY IS RESTATED DOWNWARDS AND AUGUST UPWARDS, so the set still sums to the same total.
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-0`), "change", (n) => setFieldValue(n, "2800.00"));
+    await h.settle();
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-1`), "change", (n) => setFieldValue(n, "3700.00"));
+    await h.settle();
+    await h.fireEvent(byId(h, F("instruction")), "change",
+      (n) => setFieldValue(n, "The client's standing instruction of 2026-06-30, restated."));
+    await h.settle();
+    await clickSubmit(h);
+
+    assert.equal(sent.length, 1);
+    const particulars = sent[0]!.accrual as { period_amounts?: unknown; method?: unknown };
+    assert.deepEqual(particulars.method, { rule: "stated_period_amount" });
+    assert.deepEqual(particulars.period_amounts, [
+      { due_date: "2026-07-31", amount_cents: 280000 },
+      { due_date: "2026-08-31", amount_cents: 370000 },
+    ]);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("937.correct: a restated set that no longer adds up to the total is refused at the block, before any round trip", async () => {
+  const sent: unknown[] = [];
+  const h = await renderComponent(App({
+    row: PER_PERIOD_ROW,
+    submit: async (input) => { sent.push(input); return CORRECTED; },
+  }));
+  try {
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-0`), "change", (n) => setFieldValue(n, "2800.00"));
+    await h.settle();
+    await clickSubmit(h);
+    assert.equal(sent.length, 0, "nothing is sent while the set and the total disagree");
+    assert.match(h.text(), /The stated periods do not add up to the total accrued over the window/);
+    assert.equal(focusedId(), `${F("periodAmounts")}-amount-0`,
+      "…and the focus lands on the block that holds the mistake");
   } finally {
     await h.unmount();
   }

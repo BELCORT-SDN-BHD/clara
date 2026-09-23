@@ -162,7 +162,10 @@ declare
      '9975f948944d2351c49eaa1c178f0dd9dc5572d446a7f9338ef9d5ede0b0fd79'],
     ['clara._plan_admit_occurrence(uuid,date,text,text,boolean)',
      'a34744199379ebf9fbdcbbd19cd68768ef228409533f19dfcf0daa0c3393ec46',
-     '6980feab1f7d7851ab07c76f7af6d0114423bd016f39d30d4c5a324d1a05337b']
+     '6980feab1f7d7851ab07c76f7af6d0114423bd016f39d30d4c5a324d1a05337b'],
+    ['clara.get_accrual_adjustment(uuid)',
+     '98c967f6ae3e806e30c24e719d9a2eddc7f11ec1456b68b51ef402aee0d605c0',
+     '835c9dc7e419d480a0084ab84292f02e2bcb3fb99d3ef00dea85d50721641599']
   ];
   -- The bodies this file CALLS or RELIES ON and must not move. Measured on clara_l03 after this
   -- lane's #938 (0302) landed — pin what is LIVE, never a literal copied from an older header.
@@ -242,17 +245,13 @@ begin
     end if;
     select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
       from pg_proc p where p.oid = v_recut[v_i][1]::regprocedure;
-    if v_sha = v_recut[v_i][2] then
-      if v_redo then
-        raise exception '#937 prestate: % is at its PRE-IMAGE while clara.accrual_period_amounts already exists -- a half-applied state, not a redo',
-          v_recut[v_i][1] using errcode='CLR10';
-      end if;
-    elsif v_sha = v_recut[v_i][3] then
-      if v_first then
-        raise exception '#937 prestate: % already carries THIS FILE''s body while clara.accrual_period_amounts is absent -- a half-applied state',
-          v_recut[v_i][1] using errcode='CLR10';
-      end if;
-    else
+    -- EITHER VALUE IS LAWFUL, and the PAIR is what makes this file redo-safe: a first apply finds
+    -- the pre-image everywhere, a plain redo finds this file's own output everywhere, and an
+    -- EDIT-then-redo round -- which is the whole reason #957's redo mode exists, and the reason
+    -- this file may still change before it merges -- finds a MIXTURE: the bodies the edit newly
+    -- touched at their pre-image, the rest at this file's output. What is never lawful is a THIRD
+    -- value: that is another migration, or a hand edit, on a body this file owns.
+    if v_sha <> v_recut[v_i][2] and v_sha <> v_recut[v_i][3] then
       raise exception '#937 prestate: % has DRIFTED from BOTH its measured pre-image and this file''s own output -- re-measure before applying (got %)',
         v_recut[v_i][1], v_sha using errcode='CLR10';
     end if;
@@ -270,7 +269,7 @@ begin
     end if;
   end loop;
 
-  raise notice '#937 prestate: clean (%) -- the five bodies this file recuts are each at exactly one of their two admitted values, and the twenty-four bodies it calls or relies on are byte-identical to their measured pre-images.',
+  raise notice '#937 prestate: clean (%) -- the six bodies this file recuts are each at exactly one of their two admitted values, and the twenty-four bodies it calls or relies on are byte-identical to their measured pre-images.',
     case when v_first then 'FIRST APPLY' else 'REDO' end;
 end
 $t937_pre$;
@@ -887,6 +886,76 @@ end $function$
 ;
 
 -- =====================================================================================
+-- §G2 THE DETAIL READ ANSWERS WITH THEM. clara.get_accrual_adjustment is recut to return
+--     "period_amounts" ("[]" under the stated_amount rule) so the correction surface can seed its
+--     own controls from what is actually recorded, rather than a per-period accrual being
+--     correctable only through the door. Its GRANT is untouched -- "create or replace" preserves
+--     an ACL, and the tail asserts it.
+-- =====================================================================================
+CREATE OR REPLACE FUNCTION clara.get_accrual_adjustment(p_accrual uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $function$
+declare v_actor uuid; v_firm uuid; a clara.accrual_adjustments; p clara.accounting_plans;
+        r record; v_occ jsonb; v_reversal jsonb;
+begin
+  select x.actor, x.firm into v_actor, v_firm from clara._human_ctx(clara.role_rank('viewer')) x;
+  -- NO EXISTENCE ORACLE ACROSS FIRMS: the firm predicate is part of the lookup, so an accrual id
+  -- belonging to somebody else's firm answers exactly as an id naming nothing does.
+  select * into a from clara.accrual_adjustments where id = p_accrual and firm_id = v_firm;
+  if a.id is null then
+    raise exception 'accrual adjustment not found in your firm' using errcode='CLR11',
+      detail='{"reason":"accrual_not_found"}';
+  end if;
+  select * into p from clara.accounting_plans where id = a.plan_id;
+  select * into r from clara.accounting_plan_revisions
+   where plan_id = a.plan_id and revision = a.revision;
+  v_occ := clara._accrual_occurrences(a.plan_id);
+  select e into v_reversal from jsonb_array_elements(v_occ) x(e)
+   where x.e ->> 'leg' = 'reversal' order by x.e ->> 'due_date' desc limit 1;
+
+  return jsonb_build_object(
+    'accrual_id', a.id, 'client_id', a.client_id, 'purpose', a.purpose,
+    'expense_account_code', a.expense_account_code,
+    'liability_account_code', a.liability_account_code,
+    'amount_cents', a.amount_cents, 'currency', a.currency,
+    'effective_from', to_char(a.effective_from,'YYYY-MM-DD'),
+    'effective_to', case when a.effective_to is null then null else to_char(a.effective_to,'YYYY-MM-DD') end,
+    'service_period_start', to_char(a.service_period_start,'YYYY-MM-DD'),
+    'service_period_end', to_char(a.service_period_end,'YYYY-MM-DD'),
+    'term_source', a.term_source, 'method', a.method,
+    -- #937 - THE AMOUNTS A PERSON STATED PER PERIOD, or [] under the stated_amount rule. The
+    -- correction surface seeds its own controls from exactly this, so a per-period accrual can be
+    -- restated through the browser instead of only through the door; a reader gets what WILL post
+    -- for each due date rather than only the window's total.
+    'period_amounts', (select coalesce(jsonb_agg(jsonb_build_object(
+                                'due_date', to_char(pa.due_date,'YYYY-MM-DD'),
+                                'amount_cents', pa.amount_cents) order by pa.due_date), '[]'::jsonb)
+                         from clara.accrual_period_amounts pa where pa.accrual_id = a.id),
+    'document_service_period_id', a.document_service_period_id,
+    'source_document_id', a.source_document_id,
+    'authority_kind', a.authority_kind, 'authority_ref', a.authority_ref,
+    'instruction', a.instruction, 'recorded_by', a.recorded_by, 'created_at', a.created_at,
+    'corrects_accrual_id', a.corrects_accrual_id,
+    'corrected_by_accrual_id', a.corrected_by_accrual_id,
+    'revision', a.revision,
+    'plan', jsonb_build_object('plan_id', p.id, 'kind', p.kind, 'status', p.status,
+      'purpose', p.purpose, 'authorised_by', p.authorised_by, 'authorised_at', p.authorised_at,
+      'authority_from', to_char(p.authority_from,'YYYY-MM-DD'),
+      'current_revision', p.current_revision,
+      'frequency', r.frequency, 'day_rule', r.day_rule, 'day_of_month', r.day_of_month,
+      'timezone', r.timezone, 'basis', r.basis, 'basis_digest', r.basis_digest,
+      'auto_reverse', r.auto_reverse, 'reversal_day_rule', r.reversal_day_rule),
+    'occurrences', v_occ,
+    'reversal', v_reversal,
+    'posted', exists (select 1 from jsonb_array_elements(v_occ) y(e)
+                       where y.e ->> 'leg' = 'primary' and y.e ->> 'entry_id' is not null));
+end $function$
+;
+
+-- =====================================================================================
 -- §H THE ADMISSION CORE ASKS THE ACCRUAL RESOLVER the way it already asks the amortisation one.
 --    Recut from the INSTALLED body (never re-typed): three edits, all inside the #653 seam --
 --    the reason and message of a missing line become variables, the accrual arm is added beside
@@ -1192,13 +1261,14 @@ reset role;
 -- =====================================================================================
 do $t937_tail$
 declare
-  v_n int; v_sha text; v_i int; v_src text; v_expr text; v_ok boolean; r text;
+  v_n int; v_sha text; v_i int; v_src text; v_expr text; v_probe_expr text; v_ok boolean; r text;
   v_rules text[];
   v_methods_sha constant text := 'f3fdd04bac3bf925fe39dc5a552bfa97269136859ec83ee147d2e8d08ff0aef1';
   v_canonical_sha constant text := 'f7b2af98a7dcf0e3bb64434a12a6feb89431a551f37481bf9d888079a9c43a1b';
   v_finish_sha constant text := 'bbeb43099d0cee972a62b7a81c9eebe13620b94120c45ed05dc2c5e57287624b';
   v_correct_sha constant text := '9975f948944d2351c49eaa1c178f0dd9dc5572d446a7f9338ef9d5ede0b0fd79';
   v_admit_sha constant text := '6980feab1f7d7851ab07c76f7af6d0114423bd016f39d30d4c5a324d1a05337b';
+  v_get_sha constant text := '835c9dc7e419d480a0084ab84292f02e2bcb3fb99d3ef00dea85d50721641599';
   v_pins text[][] := array[
     ['clara._plan_occurrence_basis(jsonb,date,text,uuid,jsonb)',
      'cef3264e2a8956dc3d08259b6c1f6bf90bd5c155c7f473f88504f778f611829e'],
@@ -1310,8 +1380,18 @@ begin
   end loop;
 
   -- 3 · THE CENSUS (AC2): clara._accrual_methods() and the table CHECK admit exactly the same
-  --     rules. Not a text comparison -- the constraint's OWN expression is evaluated, once per
-  --     member of the function's own answer, and once per withdrawn rule.
+  --     rules. Not a text comparison of the two spellings, and NOT a dynamic `execute` of the
+  --     constraint's rendered expression either -- the estate's own SQL census
+  --     (apps/web/test/sqlFunctionCensus.ts) refuses a migration whose `execute` it cannot resolve
+  --     statically, and that rule is right: a migration that builds SQL at run time cannot be
+  --     read by the tooling that audits what migrations do.
+  --
+  --     So the predicate is DRIVEN, on a temporary table carrying the SAME literal CHECK this file
+  --     wrote onto clara.accrual_adjustments, and the two are tied together by comparing their
+  --     RENDERED expressions (pg_get_expr over conbin, whitespace-normalised) -- which is what
+  --     makes the temporary table a true stand-in rather than a second opinion. Every rule the
+  --     function offers is then INSERTED and must be accepted, and every withdrawn rule, a rule
+  --     object with a second key, and a non-object must each raise 23514.
   v_rules := clara._accrual_methods();
   if array_length(v_rules, 1) <> 2
      or not ('stated_amount' = any (v_rules)) or not ('stated_period_amount' = any (v_rules)) then
@@ -1324,43 +1404,74 @@ begin
   if v_expr is null then
     raise exception '#937 tail: accrual_adjustments_method_check is absent' using errcode='CLR10';
   end if;
-  foreach r in array v_rules loop
-    execute format('select (%s) from (values (%L::jsonb)) as t(method)', v_expr,
-              jsonb_build_object('rule', r)::text) into v_ok;
-    if v_ok is distinct from true then
-      raise exception '#937 tail: clara._accrual_methods() offers %, which the table CHECK refuses -- the two must agree', r
-        using errcode='CLR10';
-    end if;
-  end loop;
+
+  create temporary table t937_method_probe (
+    method jsonb not null
+      check (jsonb_typeof(method) = 'object'
+             and (method - 'rule') = '{}'::jsonb
+             and (method ->> 'rule') in ('stated_amount','stated_period_amount'))
+  ) on commit drop;
+  select pg_get_expr(conbin, conrelid) into v_probe_expr from pg_constraint
+   where conrelid = 't937_method_probe'::regclass and contype = 'c';
+  if regexp_replace(v_probe_expr, '\s+', ' ', 'g')
+     is distinct from regexp_replace(v_expr, '\s+', ' ', 'g') then
+    raise exception '#937 tail: the probe predicate (%) is not the one on clara.accrual_adjustments (%)',
+      v_probe_expr, v_expr using errcode='CLR10';
+  end if;
+
+  -- EVERY RULE THE FUNCTION OFFERS IS ACCEPTED BY THE PREDICATE.
+  insert into t937_method_probe(method)
+    select jsonb_build_object('rule', x) from unnest(v_rules) x;
+  select count(*)::int into v_n from t937_method_probe;
+  if v_n <> array_length(v_rules, 1) then
+    raise exception '#937 tail: the CHECK accepted % of the % rules clara._accrual_methods() offers -- the two must agree',
+      v_n, array_length(v_rules, 1) using errcode='CLR10';
+  end if;
+
+  -- …AND NOTHING ELSE IS. The two withdrawn rules (owner ruling 2026-09-18), a blank, an
+  -- unenumerated word, a method object carrying a second key, and a non-object.
   foreach r in array array['source_document_amount','prior_period_amount','','anything'] loop
-    execute format('select (%s) from (values (%L::jsonb)) as t(method)', v_expr,
-              jsonb_build_object('rule', r)::text) into v_ok;
-    if v_ok is not distinct from true then
+    v_ok := false;
+    begin
+      insert into t937_method_probe(method) values (jsonb_build_object('rule', r));
+      v_ok := true;
+    exception when check_violation then
+      v_ok := false;
+    end;
+    if v_ok then
       raise exception '#937 tail: the table CHECK admits %, which clara._accrual_methods() does not offer', r
         using errcode='CLR10';
     end if;
   end loop;
-  -- …and the method object still carries its rule and NOTHING else.
-  execute format('select (%s) from (values (%L::jsonb)) as t(method)', v_expr,
-            '{"rule":"stated_period_amount","cents":1}') into v_ok;
-  if v_ok is not distinct from true then
-    raise exception '#937 tail: the table CHECK admits a method object carrying a second key'
-      using errcode='CLR10';
-  end if;
+  foreach v_probe_expr in array array['{"rule":"stated_period_amount","cents":1}','[]','"stated_amount"'] loop
+    v_ok := false;
+    begin
+      insert into t937_method_probe(method) values (v_probe_expr::jsonb);
+      v_ok := true;
+    exception when check_violation then
+      v_ok := false;
+    end;
+    if v_ok then
+      raise exception '#937 tail: the table CHECK admits the malformed method %', v_probe_expr
+        using errcode='CLR10';
+    end if;
+  end loop;
+  drop table t937_method_probe;
 
   -- 4 · THE FIVE RECUT BODIES are at THIS file's own output, and each carries the marker that
   --     makes its change legible.
-  for v_i in 1 .. 5 loop
+  for v_i in 1 .. 6 loop
     select case v_i when 1 then 'clara._accrual_methods()'
                     when 2 then 'clara._accrual_canonical(jsonb)'
                     when 3 then 'clara._accrual_finish(uuid,uuid,uuid,text,jsonb,jsonb,text,jsonb,date,date,text)'
                     when 4 then 'clara.correct_accrual_adjustment(uuid,jsonb,text)'
-                    else 'clara._plan_admit_occurrence(uuid,date,text,text,boolean)' end into v_src;
+                    when 5 then 'clara._plan_admit_occurrence(uuid,date,text,text,boolean)'
+                    else 'clara.get_accrual_adjustment(uuid)' end into v_src;
     select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
       from pg_proc p where p.oid = v_src::regprocedure;
     if v_sha is distinct from (case v_i when 1 then v_methods_sha when 2 then v_canonical_sha
                                         when 3 then v_finish_sha when 4 then v_correct_sha
-                                        else v_admit_sha end) then
+                                        when 5 then v_admit_sha else v_get_sha end) then
       raise exception '#937 tail: % is not at this file''s own output (got %)', v_src, v_sha
         using errcode='CLR10';
     end if;
@@ -1407,6 +1518,20 @@ begin
         'clara.correct_accrual_adjustment(uuid,jsonb,text)'::regprocedure, 'execute') then
     raise exception '#937 tail: the correction door gained a grant it never had' using errcode='CLR10';
   end if;
+  -- ...and so did the DETAIL READ's: clara_authenticated alone, exactly as 0222 left it.
+  if not has_function_privilege('clara_authenticated',
+        'clara.get_accrual_adjustment(uuid)'::regprocedure, 'execute')
+     or has_function_privilege('public', 'clara.get_accrual_adjustment(uuid)'::regprocedure, 'execute')
+     or has_function_privilege('clara_runtime', 'clara.get_accrual_adjustment(uuid)'::regprocedure, 'execute') then
+    raise exception '#937 tail: the accrual detail read''s grant moved' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.get_accrual_adjustment(uuid)'::regprocedure;
+  if position('clara.accrual_period_amounts' in v_src) = 0
+     or position('''period_amounts''' in v_src) = 0 then
+    raise exception '#937 tail: the accrual detail read does not answer with period_amounts'
+      using errcode='CLR10';
+  end if;
 
   -- 5 · THIS FILE RECUT NOTHING ELSE -- and clara._plan_occurrence_basis in particular is still
   --     IMMUTABLE and byte-identical, which is AC1's own words.
@@ -1432,6 +1557,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#937 tail: OK -- clara.accrual_period_amounts is append-only, RLS-forced, ACL-less and keyed on (accrual_id, due_date); clara._plan_accrual_period_line is STABLE, SECURITY DEFINER, pinned and reachable by no application role; clara._accrual_methods() and accrual_adjustments_method_check admit exactly stated_amount and stated_period_amount, proven by evaluating the constraint''s OWN expression once per rule and refusing the two withdrawn ones; the five recut bodies are at this file''s own output and carry their markers; the correction door''s grant is unmoved; and the twenty-four bodies this file depends on -- clara._plan_occurrence_basis among them, still IMMUTABLE -- hash byte-identically to their measured pre-images.';
+  raise notice '#937 tail: OK -- clara.accrual_period_amounts is append-only, RLS-forced, ACL-less and keyed on (accrual_id, due_date); clara._plan_accrual_period_line is STABLE, SECURITY DEFINER, pinned and reachable by no application role; clara._accrual_methods() and accrual_adjustments_method_check admit exactly stated_amount and stated_period_amount, proven by DRIVING a temporary table carrying the byte-identical predicate with every rule the function offers and refusing the two withdrawn ones, a blank, an unenumerated word, a second key and a non-object; the six recut bodies are at this file''s own output and carry their markers; the correction door''s and the detail read''s grants are unmoved, and the read answers with period_amounts; and the twenty-four bodies this file depends on -- clara._plan_occurrence_basis among them, still IMMUTABLE -- hash byte-identically to their measured pre-images.';
 end
 $t937_tail$;

@@ -135,6 +135,8 @@ type Translate = (key: string, values?: Record<string, string | number>) => stri
 export function methodLabel(t: Translate, rule: string): string {
   const labels: Record<string, string> = {
     stated_amount: t("methodStatedAmount"),
+    // #937 — the second rule the ledger performs. An unenumerated value still prints as itself.
+    stated_period_amount: t("methodStatedPeriodAmount"),
   };
   return labels[rule] ?? rule;
 }

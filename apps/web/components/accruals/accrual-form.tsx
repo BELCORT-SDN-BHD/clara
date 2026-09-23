@@ -56,9 +56,10 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { isDoorRefusal } from "@/lib/doors";
 import {
-  ACCRUAL_DAY_OF_MONTH_MAX, ACCRUAL_DAY_RULES, ACCRUAL_FREQUENCIES,
-  createAccrual, derivedAccrualLines, type AccrualCreated,
+  ACCRUAL_DAY_OF_MONTH_MAX, ACCRUAL_DAY_RULES, ACCRUAL_FREQUENCIES, ACCRUAL_METHODS,
+  accrualScheduleDues, createAccrual, derivedAccrualLines, type AccrualCreated,
 } from "@/lib/accruals/api";
+import { AccrualPeriodAmountsBlock } from "./accrual-period-amounts";
 import {
   accrualDraftKey, accrualFieldElementId, clearAccrualDraft, emptyAccrualDraft,
   fieldForAccrualPath, firstInvalidAccrualField, readAccrualDraft, toAccrualParticulars,
@@ -176,16 +177,33 @@ export function AccrualFormView({
     [showIssues, draft, knownCodes],
   );
 
+  // #937 — the due dates THIS schedule produces, which the per-period block offers rather than
+  // asking a preparer to type. Recomputed from the schedule controls, so moving the day rule moves
+  // the list the same keystroke.
+  const dues = useMemo(
+    () => accrualScheduleDues(draft.frequency, draft.dayRule,
+      draft.dayRule === "day_of_month" ? Number(draft.dayOfMonth.trim()) : null,
+      draft.effectiveFrom, draft.effectiveTo),
+    [draft.frequency, draft.dayRule, draft.dayOfMonth, draft.effectiveFrom, draft.effectiveTo],
+  );
+
+  // THE PREVIEW SHOWS THE FIRST PERIOD THAT WILL POST, not the window's total. Under
+  // `stated_period_amount` the accrual's own `amount_cents` is the TOTAL and no entry ever carries
+  // it; previewing it would be showing a line the ledger will not write.
+  const previewPeriod = draft.method === "stated_period_amount"
+    ? [...draft.periodAmounts].sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0] ?? null
+    : null;
   const lines = useMemo(
     () => derivedAccrualLines({
       expenseAccountCode: draft.expenseAccountCode,
       liabilityAccountCode: draft.liabilityAccountCode,
-      amountCents: draft.amountCents,
+      amountCents: previewPeriod === null ? draft.amountCents : previewPeriod.amountCents,
       servicePeriodStart: draft.servicePeriodStart,
       servicePeriodEnd: draft.servicePeriodEnd,
+      periodDueDate: previewPeriod?.dueDate ?? null,
     }).map((l) => ({ ...l, description: l.description })),
     [draft.expenseAccountCode, draft.liabilityAccountCode, draft.amountCents,
-      draft.servicePeriodStart, draft.servicePeriodEnd],
+      draft.servicePeriodStart, draft.servicePeriodEnd, previewPeriod],
   );
 
   // PERSIST ON EVERY EDIT. Not debounced: the payload is small, the storage is synchronous, and a
@@ -475,16 +493,31 @@ export function AccrualFormView({
           </Field>
         </div>
 
-        {/* THE SELECTION RULE IS STATED, NOT OFFERED. Migration 0222 admits exactly one rule
-            because exactly one is performed: the configuration freezes the stated amount into the
-            plan revision's basis and every occurrence posts it. A select listing rules that all
-            post the same cents would invite a preparer to record an intention the ledger never
-            carries out, so this says what will happen instead of asking. */}
-        <div className="flex flex-col gap-1">
-          <h4 className="text-sm font-medium">{t("fieldMethod")}</h4>
-          <p className="text-sm">{methodOption(t, draft.method)}</p>
-          <p className="text-xs text-muted-foreground">{t("methodHint")}</p>
-        </div>
+        {/* THE SELECTION RULE IS NOW A REAL CHOICE (#937), because two rules are now PERFORMED and
+            they post different cents. It was a STATEMENT while migration 0222 admitted one rule —
+            a select listing rules that all post the same cents would have invited a preparer to
+            record an intention the ledger never carries out. `stated_amount` accrues the one
+            figure below in every period; `stated_period_amount` accrues the figure stated for each
+            period, and a period nobody states is refused rather than filled in. */}
+        <Field
+          id={accrualFieldElementId("method")}
+          label={t("fieldMethod")}
+          error={message("method")}
+          hint={t("methodHint")}
+          className="min-w-40"
+        >
+          <NativeSelect
+            id={accrualFieldElementId("method")}
+            ref={(node) => registerField("method", node)}
+            value={draft.method}
+            disabled={busy}
+            onChange={(e) => set("method", e.target.value as AccrualDraft["method"])}
+          >
+            {ACCRUAL_METHODS.map((rule) => (
+              <option key={rule} value={rule}>{methodOption(t, rule)}</option>
+            ))}
+          </NativeSelect>
+        </Field>
       </section>
 
       <section className="flex flex-col gap-3">
@@ -492,8 +525,9 @@ export function AccrualFormView({
         <div className="flex flex-wrap gap-3">
           <Field
             id={accrualFieldElementId("amountCents")}
-            label={t("fieldAmount")}
+            label={draft.method === "stated_period_amount" ? t("fieldAmountTotal") : t("fieldAmount")}
             error={message("amountCents")}
+            hint={draft.method === "stated_period_amount" ? t("amountTotalHint") : undefined}
             className="min-w-40 flex-1"
           >
             <MoneyInput
@@ -560,6 +594,22 @@ export function AccrualFormView({
             </NativeSelect>
           </Field>
         </div>
+
+        {/* #937 — THE PER-PERIOD BLOCK, present only under the rule that performs it. Under
+            `stated_amount` there is nothing to state here and the block is not rendered at all. */}
+        {draft.method === "stated_period_amount" ? (
+          <AccrualPeriodAmountsBlock
+            t={t}
+            id={accrualFieldElementId("periodAmounts")}
+            rows={draft.periodAmounts}
+            dues={dues}
+            totalCents={draft.amountCents}
+            disabled={busy}
+            error={message("periodAmounts")}
+            onChange={(rows) => set("periodAmounts", rows)}
+            registerField={(node) => registerField("periodAmounts", node)}
+          />
+        ) : null}
 
         {accountsRead.loading ? (
           // THE LOADING STATE IS THE SHAPE OF WHAT IS COMING, not a spinner: the preview grid is
@@ -756,10 +806,12 @@ function Field({
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
 function methodOption(t: Translate, rule: string): string {
-  // ONE RULE, and an HONEST raw-value fallback for anything outside it (the adjustments-register
-  // N10 idiom): a value this build has not enumerated prints as itself, never as a key path.
+  // TWO RULES (#937), and an HONEST raw-value fallback for anything outside them (the
+  // adjustments-register N10 idiom): a value this build has not enumerated prints as itself,
+  // never as a key path.
   const labels: Record<string, string> = {
     stated_amount: t("methodStatedAmount"),
+    stated_period_amount: t("methodStatedPeriodAmount"),
   };
   return labels[rule] ?? rule;
 }
@@ -785,6 +837,15 @@ function issueText(t: Translate, code: string): string {
     dayOfMonthAbsent: t("issueDayOfMonthAbsent"),
     reversalCollides: t("issueReversalCollides"),
     scheduleYieldsNone: t("issueScheduleYieldsNone"),
+    // #937 — one sentence per wall `clara._assert_accrual_period_amounts` raises.
+    periodAmountsRequired: t("issuePeriodAmountsRequired"),
+    periodDueDateRequired: t("issuePeriodDueDateRequired"),
+    periodAmountRequired: t("issuePeriodAmountRequired"),
+    periodAmountDuplicate: t("issuePeriodAmountDuplicate"),
+    periodAmountsUnbalanced: t("issuePeriodAmountsUnbalanced"),
+    periodRemainderMisplaced: t("issuePeriodRemainderMisplaced"),
+    periodAmountMissing: t("issuePeriodAmountMissing"),
+    periodAmountNotScheduled: t("issuePeriodAmountNotScheduled"),
   };
   return codes[code] ?? code;
 }

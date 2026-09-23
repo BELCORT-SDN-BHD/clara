@@ -26,7 +26,7 @@ import {
   CLR, assertPair,
   freshAccrualClient, accrual, createAccrualAdjustment, postPlanWork, requestPlanCatchUp,
   reviseAccountingPlan, occurrenceRows, instructionRef, todayInPlanZone, shiftMonths,
-  accrualCount, ACHART, ACCRUAL_TZ,
+  accrualCount, getAccrualAdjustment, ACHART, ACCRUAL_TZ,
 } from "./accrual-adjustments-fixtures.mjs";
 import { correctAccrualAdjustment } from "./accrual-correction-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
@@ -630,4 +630,39 @@ test("p937.resolver — clara._plan_accrual_period_line answers NULL for a date 
       where p.oid = 'clara._plan_accrual_period_line(uuid,date)'::regprocedure`);
   assert.deepEqual(meta.rows[0], { vol: "s", definer: true, pub: false, human: false, runtime: false },
     "STABLE, SECURITY DEFINER, and reachable by no application role");
+});
+
+// ===========================================================================================
+// p937.read — THE DETAIL READ ANSWERS WITH WHAT WILL POST FOR EACH PERIOD.
+// ===========================================================================================
+
+test("p937.read — clara.get_accrual_adjustment returns period_amounts for a per-period accrual and an empty array for a constant one, under the least-privileged human who may see it", async (t) => {
+  if (await gate937(t)) return;
+  const client = await freshAccrualClient(ALICE(), "p937read");
+  const ref = await instructionRef({ client, author: BOB() });
+  const s = await span(2);
+  const dues = await monthEndsBetween(s.from, s.to);
+
+  const perPeriodAccrual = await createAccrualAdjustment(BOB(), {
+    client, authorityRef: ref,
+    accrual: perPeriod({ dues, amounts: [300000, 350000], start: s.from, end: s.to }),
+    frequency: "monthly", dayRule: "last_day_of_month",
+    effectiveFrom: s.from, effectiveTo: s.to, timezone: ACCRUAL_TZ, opKey: opk("p937-read-a"),
+  });
+  const constantAccrual = await createAccrualAdjustment(BOB(), {
+    client, authorityRef: ref,
+    accrual: accrual({ cents: 120000, servicePeriodStart: s.from, servicePeriodEnd: s.to }),
+    frequency: "monthly", dayRule: "last_day_of_month",
+    effectiveFrom: s.from, effectiveTo: s.to, timezone: ACCRUAL_TZ, opKey: opk("p937-read-b"),
+  });
+
+  const detail = await getAccrualAdjustment(BOB(), perPeriodAccrual.accrual_id);
+  assert.deepEqual(detail.period_amounts,
+    [{ due_date: dues[0], amount_cents: 300000 }, { due_date: dues[1], amount_cents: 350000 }],
+    "the read answers with the figure each due date will post, oldest first");
+  assert.equal(detail.method.rule, "stated_period_amount");
+
+  const flat = await getAccrualAdjustment(BOB(), constantAccrual.accrual_id);
+  assert.deepEqual(flat.period_amounts, [],
+    "a stated_amount accrual answers with an EMPTY array rather than null — the key always exists");
 });
