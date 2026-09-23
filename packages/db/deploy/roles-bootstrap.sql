@@ -290,7 +290,7 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- 3. VERIFY (evidence — the DR drill / dr-verify diffs this against the source
---    census). Expect: 19 clara_% roles total (18 schema lanes + clara_storage_docs), all
+--    census). Expect: 21 clara_% roles total (20 schema lanes + clara_storage_docs), all
 --    rolcanlogin=f rolsuper=f rolbypassrls=f connlimit=-1; clara_agent_ro carries
 --    {default_transaction_read_only=on}; clara_storage_docs is rolinherit=f, the rest rolinherit=t.
 -- ---------------------------------------------------------------------------

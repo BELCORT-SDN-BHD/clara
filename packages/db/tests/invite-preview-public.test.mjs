@@ -27,26 +27,36 @@
 // where this estate already draws the line: `pending` and `issuer_lapsed` are the NON-BLOCKING
 // statuses (apps/web/lib/firm/invite-preview.ts, #872's owner ruling), and those two are the ones
 // the door reports by name; the three that mean "there is nothing left to accept" are behind the
-// single refusal. So the five-state cell asserts, for each of the five, that the door's answer
-// AGREES with the roster's own status for the same row — reported verbatim where the invite is
-// open, refused identically where it is closed — and §T7 of the migration pins the DERIVATION
-// itself as byte-shared with `clara.preview_invite`, so the two can never fork.
+// single refusal. So the five-state cell drives ALL THREE READERS for the same invite in each of
+// the five states — the roster, the SIGNED-IN `clara.preview_invite`, and this door — and
+// asserts: the roster and the signed-in preview agree in all five; the signed-out door reports
+// that same status, firm name, role and MASK verbatim in the two open ones; and the single refusal
+// in the other three, where naming the status would be the existence oracle the ruling forbids.
+// §D.T7 / §D.T7b of the migration additionally pin the status derivation AND the mask as
+// byte-shared with `clara.preview_invite`, so neither can fork between releases.
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention).
 
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CLR, rootQuery, humanQuery, roleQuery, insertUser, createFirm, seedAdmission, opk,
-  ensureReady, endPool, membershipId, setMemberRole,
+  ensureReady, endPool, membershipId, setMemberRole, withActor,
 } from "./rig-fixtures.mjs";
-import { inviteMember, revokeInvite, acceptInvite, expireInvite, freshPersona } from "./p4t1-fixtures.mjs";
+import { CHAIN_MINTED_ROLES } from "./rig-cluster-reset.mjs";
+import {
+  inviteMember, revokeInvite, acceptInvite, expireInvite, freshPersona, humanEmailQuery,
+} from "./p4t1-fixtures.mjs";
 
 const DOOR = "clara.preview_invite_by_token(text,bytea)";
 const GROUP_ROLE = "clara_invite_preview";
 const LOGIN_ROLE = "clara_invite_preview_login";
 const MIGRATION = "0309_invite_preview_public_door.sql";
+const MIGRATION_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations", MIGRATION);
 
 let ready = false;
 
@@ -197,7 +207,7 @@ test("p871.door.no_oracle: an UNKNOWN, an EXPIRED, a REVOKED and an ACCEPTED tok
     "the expired row is still stored 'pending' (expiry is computed live), and nothing else moved");
 });
 
-test("p871.door.five_states: in EVERY one of the five effective states the door agrees with the roster read about the same invite", async (t) => {
+test("p871.door.five_states: in EVERY one of the five effective states the roster, the SIGNED-IN preview and this door agree about the same invite", async (t) => {
   if (unready(t)) return;
   const sc = await scene("five");
 
@@ -207,24 +217,38 @@ test("p871.door.five_states: in EVERY one of the five effective states the door 
     return r.rows[0] ? r.rows[0].status : null;
   };
 
+  /** THE SIGNED-IN PREVIEW (#625's clara.preview_invite), driven as the INVITED address's own
+   *  session -- the third reader the 2026-09-23 ruling names. It reports its own effective status
+   *  in all five states (p625.preview.status_faces), so this is a driven comparison rather than an
+   *  inference from a shared expression (spec review SPEC-871-B, 2026-09-24). */
+  const signedIn = async (persona, token) => {
+    const r = await humanEmailQuery(
+      persona.sub, persona.email, "select clara.preview_invite(p_token => $1) as result", [token],
+    );
+    return r.rows[0].result;
+  };
+
   const seen = [];
 
   // 1 -- pending
   const pendingP = freshPersona("five_pending");
   const pending = await inviteMember(sc.admin, { email: pendingP.email, role: "bookkeeper", opKey: opk("f5p") });
-  seen.push(["pending", await roster(pending.invite_id), await previewByToken(pending.token)]);
+  seen.push(["pending", await roster(pending.invite_id), await previewByToken(pending.token),
+    await signedIn(pendingP, pending.token)]);
 
   // 2 -- expired
   const expiredP = freshPersona("five_expired");
   const expired = await inviteMember(sc.admin, { email: expiredP.email, role: "viewer", opKey: opk("f5e") });
   await expireInvite(expired.invite_id);
-  seen.push(["expired", await roster(expired.invite_id), await previewByToken(expired.token)]);
+  seen.push(["expired", await roster(expired.invite_id), await previewByToken(expired.token),
+    await signedIn(expiredP, expired.token)]);
 
   // 3 -- revoked
   const revokedP = freshPersona("five_revoked");
   const revoked = await inviteMember(sc.admin, { email: revokedP.email, role: "viewer", opKey: opk("f5r") });
   await revokeInvite(sc.admin, { invite: revoked.invite_id, opKey: opk("f5rv") });
-  seen.push(["revoked", await roster(revoked.invite_id), await previewByToken(revoked.token)]);
+  seen.push(["revoked", await roster(revoked.invite_id), await previewByToken(revoked.token),
+    await signedIn(revokedP, revoked.token)]);
 
   // 4 -- accepted
   const acceptedP = freshPersona("five_accepted");
@@ -232,14 +256,16 @@ test("p871.door.five_states: in EVERY one of the five effective states the door 
   await acceptInvite(acceptedP.sub, acceptedP.email, {
     token: accepted.token, displayName: "Five Accepted", opKey: opk("f5ac"),
   });
-  seen.push(["accepted", await roster(accepted.invite_id), await previewByToken(accepted.token)]);
+  seen.push(["accepted", await roster(accepted.invite_id), await previewByToken(accepted.token),
+    await signedIn(acceptedP, accepted.token)]);
 
   // 5 -- issuer_lapsed: a STILL-PENDING invite whose issuer no longer holds admin standing (#872).
   const lapsedP = freshPersona("five_lapsed");
   const lapsed = await inviteMember(sc.admin, { email: lapsedP.email, role: "viewer", opKey: opk("f5l") });
   const adminMembership = await membershipId(sc.firm, sc.admin);
   await setMemberRole(sc.owner, { membership: adminMembership, role: "bookkeeper", opKey: opk("f5demote") });
-  seen.push(["issuer_lapsed", await roster(lapsed.invite_id), await previewByToken(lapsed.token)]);
+  seen.push(["issuer_lapsed", await roster(lapsed.invite_id), await previewByToken(lapsed.token),
+    await signedIn(lapsedP, lapsed.token)]);
 
   // The roster is the INDEPENDENT source of truth: it must have produced all five, in order.
   assert.deepEqual(
@@ -248,13 +274,32 @@ test("p871.door.five_states: in EVERY one of the five effective states the door 
     "the five states were actually reached -- otherwise the comparison below is vacuous",
   );
 
+  // THE SIGNED-IN PREVIEW AGREES WITH THE ROSTER IN ALL FIVE STATES. Two independent readers, one
+  // derivation -- this is the half of AC3 that holds verbatim everywhere.
+  assert.deepEqual(
+    seen.map(([, , , inPreview]) => inPreview.status),
+    ["pending", "expired", "revoked", "accepted", "issuer_lapsed"],
+    "the signed-in preview reports the same five effective statuses the roster does, for the same five invites",
+  );
+
   const OPEN = new Set(["pending", "issuer_lapsed"]);
-  for (const [label, rosterStatus, answer] of seen) {
+  for (const [label, rosterStatus, answer, inPreview] of seen) {
+    assert.equal(inPreview.status, rosterStatus,
+      `${label}: the signed-in preview and the roster agree about this invite`);
     if (OPEN.has(rosterStatus)) {
       assert.equal(answer.outcome, "preview", `${label}: an OPEN invite previews`);
       assert.equal(answer.status, rosterStatus,
         `${label}: the door reports the roster's own effective status, verbatim`);
+      assert.equal(answer.status, inPreview.status,
+        `${label}: ...and the SIGNED-OUT door reports exactly what the SIGNED-IN preview reports`);
+      assert.equal(answer.firm_name, inPreview.firm_name, `${label}: one firm name, two doors`);
+      assert.equal(answer.role, inPreview.role, `${label}: one role, two doors`);
+      assert.equal(answer.masked_email, inPreview.masked_email,
+        `${label}: one MASK, two doors -- the signed-out page never publishes more address than the signed-in one`);
     } else {
+      // A CLOSED invite: the signed-in preview still names its status to the invited address (it
+      // has already proved who it is), while the signed-out door answers the ONE refusal. The
+      // ruling's "never an existence oracle" is what makes the two differ here, deliberately.
       assert.deepEqual(answer, { outcome: "not_previewable" },
         `${label}: a CLOSED invite gets the single refusal, identical to an unknown token's`);
     }
@@ -400,6 +445,101 @@ test("p871.grant.from_scratch: exactly ONE migration mints these two roles, and 
 });
 
 // ---------------------------------------------------------------------------
+// S2 -- the migration's own PRESTATE, against the census a LIVE project has
+// ---------------------------------------------------------------------------
+
+test("p871.prestate.hosted_shaped: the prestate names the roles it needs and NEVER pins an absolute clara% count -- the old pin would have aborted the hosted release window", async (t) => {
+  if (unready(t)) return;
+  const sql = readFileSync(MIGRATION_PATH, "utf8");
+
+  // (1) THE ROSTER IS THE CHAIN'S OWN, derived rather than re-typed here. `CHAIN_MINTED_ROLES` is
+  // itself derived from deploy/roles-bootstrap.sql at module load (rig-cluster-reset.mjs's drift
+  // guard), so this comparison has an INDEPENDENT source of truth on both sides.
+  const block = sql.slice(
+    sql.indexOf("-- (b) THE CHAIN-MINTED ROLES"),
+    sql.indexOf("if v_bad <> '(none)' then"),
+  );
+  assert.ok(block.length > 0, "the prestate's (b) section is where this cell says it is");
+  const roster = [...block.matchAll(/\('(clara_[a-z0-9_]+)'\)/g)].map((m) => m[1]).sort();
+  const expected = CHAIN_MINTED_ROLES.filter((r) => r !== GROUP_ROLE && r !== LOGIN_ROLE).slice().sort();
+  assert.deepEqual(roster, expected,
+    "the prestate requires exactly the chain-minted roles that exist BEFORE this file, by name");
+
+  // (2) AND NOWHERE IN THE PRESTATE IS A CLUSTER-WIDE clara% COUNT COMPARED WITH A LITERAL. That
+  // shape is unsound on any live project, because deploy/storage-provision.sql mints roles the
+  // migration chain never does (adversarial ADV-L05-01, 2026-09-24).
+  const prestate = sql.slice(sql.indexOf("do $pre$"), sql.indexOf("end $pre$;"));
+  assert.ok(
+    !/rolname like 'clara%'[\s\S]{0,240}?<>\s*\d+/.test(prestate),
+    "the prestate must not compare a cluster-wide clara% census with a literal",
+  );
+
+  // (3) DRIVEN, on a HOSTED-SHAPED census: one role the chain never mints, present. The roster
+  // predicate must still admit; the census the file no longer pins must read 19, which is exactly
+  // what the removed `<> 18` pin would have aborted on.
+  await withActor({}, async (client) => {
+    await client.query("begin");
+    try {
+      await client.query("create role clara_p871_deploy_probe nologin noinherit");
+      const shaped = await client.query(
+        "select count(*)::int as n from pg_roles where rolname like 'clara%'",
+      );
+      assert.equal(shaped.rows[0].n, 21,
+        "the transaction is hosted-shaped: this file's own two roles plus one deploy-minted role");
+
+      const missing = await client.query(
+        `select coalesce(string_agg(t.name, ', ' order by t.name), '(none)') as missing
+           from unnest($1::text[]) t(name) where to_regrole(t.name) is null`,
+        [roster],
+      );
+      assert.equal(missing.rows[0].missing, "(none)",
+        "the prestate's roster predicate still admits a cluster carrying deploy-minted roles");
+
+      // VACUITY CONTROL, and the reproduction of the blocker: the REMOVED absolute form, run on
+      // the same transaction with this file's own two roles discounted, reads 19 and not 18 --
+      // i.e. the shipped pin raised CLR10 here and stopped the hosted migrate step at 0309.
+      const old = await client.query(
+        "select count(*)::int - 2 as pre_0309 from pg_roles where rolname like 'clara%'",
+      );
+      assert.equal(old.rows[0].pre_0309, 19,
+        "the removed `<> 18` pin would have aborted on this census -- which is why it is gone");
+    } finally {
+      await client.query("rollback");
+    }
+  });
+
+  // ...and the lane cluster is exactly as it was.
+  const after = await rootQuery(
+    "select count(*)::int as n from pg_roles where rolname = 'clara_p871_deploy_probe'",
+  );
+  assert.equal(after.rows[0].n, 0, "the probe role never survives the rollback");
+});
+
+test("p871.prestate.first_or_redo: the prestate admits all-four-absent and all-four-present, and refuses every half", async (t) => {
+  if (unready(t)) return;
+  const sql = readFileSync(MIGRATION_PATH, "utf8");
+  // The file is re-applied by CLARA_MIGRATION_REDO during a fix round, so every statement it owns
+  // must survive a second run over its own effects (packages/db/README.md, "Redo (#957)").
+  for (const shape of [
+    "create table if not exists clara.invite_preview_attempts",
+    "create index if not exists ix_invite_preview_attempts_token_attempted",
+    "create index if not exists ix_invite_preview_attempts_origin_attempted",
+    "drop policy if exists p_invite_preview_attempts_owner",
+    "drop trigger if exists t_invite_preview_attempts_append_only",
+    "drop trigger if exists t_invite_preview_attempts_no_truncate",
+    "create or replace function clara.preview_invite_by_token",
+  ]) {
+    assert.ok(sql.includes(shape), `0309 must be redo-safe: missing "${shape}"`);
+  }
+  assert.ok(/a half-applied state this file will not repair/.test(sql),
+    "and a partial state is refused rather than repaired -- the file cannot know which half is older");
+  // The tail's census check is RELATIVE to what the prestate recorded, and mode-aware, so a redo
+  // (delta 0) is as lawful as a first apply (delta 2).
+  assert.ok(/v_delta := case when v_mode = 'REDO' then 0 else 2 end;/.test(sql),
+    "the tail's role-census delta is relative and mode-aware");
+});
+
+// ---------------------------------------------------------------------------
 // S4 -- the rate wall
 // ---------------------------------------------------------------------------
 
@@ -452,11 +592,82 @@ test("p871.wall.origin_limb: five previews from one address are served, the sixt
   assert.deepEqual(Object.keys(sixth).sort(), ["outcome", "retry_after_seconds"],
     "a walled answer names no limb -- which budget was exhausted is not a caller's business");
 
-  // THE EVIDENCE: six rows for this digest, four of them for tokens that name nothing.
+  // THE EVIDENCE: FIVE rows for this digest -- one per ADMITTED call, four of them for tokens that
+  // name nothing. The sixth call was refused and left nothing behind, which is what bounds the
+  // table and stops a refusal from extending the window that refused it (ADV-L05-04).
   const rows = await rootQuery(
     "select count(*)::int as n from clara.invite_preview_attempts where origin_digest = $1", [digest],
   );
-  assert.equal(rows.rows[0].n, 6, "every call left evidence, including the refused one -- that is what makes the window converge");
+  assert.equal(rows.rows[0].n, 5, "every ADMITTED call left evidence; the refused one left none");
+});
+
+test("p871.wall.bounded: a sustained flood on ONE link leaves exactly five rows and does NOT slide the window -- a stranger with the link cannot wall a real invitee for ever", async (t) => {
+  if (unready(t)) return;
+  const sc = await scene("wall_bounded");
+  const invitee = freshPersona("wall_bounded");
+  const issued = await inviteMember(sc.admin, { email: invitee.email, role: "viewer", opKey: opk("wb871") });
+
+  // TWELVE reads of one link, each from a DIFFERENT address, so only the TOKEN limb can refuse.
+  // This is the shape of the attack the adversarial round drove: a forwarded e-mail, a retrying
+  // client or a crawler holding a public URL.
+  const answers = [];
+  for (let i = 0; i < 12; i += 1) answers.push(await previewByToken(issued.token, originDigest()));
+  assert.deepEqual(
+    answers.map((a) => a.outcome),
+    ["preview", "preview", "preview", "preview", "preview",
+     "rate_limited", "rate_limited", "rate_limited", "rate_limited", "rate_limited",
+     "rate_limited", "rate_limited"],
+    "five served, seven walled",
+  );
+
+  const hash = await rootQuery("select sha256(convert_to(btrim($1), 'UTF8')) as h", [issued.token]);
+  const rows = await rootQuery(
+    "select count(*)::int as n from clara.invite_preview_attempts where token_hash = $1", [hash.rows[0].h],
+  );
+  assert.equal(rows.rows[0].n, 5,
+    "the table is BOUNDED at the ceiling: seven refusals wrote nothing, so an unauthenticated flood of a PUBLIC page cannot grow an append-only, unprunable relation without limit");
+
+  const waits = answers.slice(5).map((a) => a.retry_after_seconds);
+  for (const w of waits) assert.ok(Number.isInteger(w) && w >= 0 && w <= 900, `wait inside the clamp: ${w}`);
+});
+
+test("p871.wall.no_slide: with an AGED window the advertised wait is the oldest ADMITTED attempt's own expiry, and a refusal never pushes it out", async (t) => {
+  if (unready(t)) return;
+  const sc = await scene("wall_slide");
+  const invitee = freshPersona("wall_slide");
+  const issued = await inviteMember(sc.admin, { email: invitee.email, role: "viewer", opKey: opk("ws871") });
+
+  // A WORKED EXAMPLE, planted rather than produced, so the expected numbers come from the
+  // timestamps and not from re-running the door's own arithmetic. Five attempts on this token, at
+  // 14, 13, 12, 11 and 10 minutes ago -- all inside the quarter-hour window, the ceiling reached.
+  const hash = (await rootQuery("select sha256(convert_to(btrim($1), 'UTF8')) as h", [issued.token])).rows[0].h;
+  await rootQuery(
+    `insert into clara.invite_preview_attempts(token_hash, origin_digest, attempted_at)
+     select $1, $2, now() - (m || ' minutes')::interval from unnest(array[14,13,12,11,10]) m`,
+    [hash, randomBytes(32)],
+  );
+
+  // The oldest attempt expires 15 minutes after it happened, i.e. in about ONE minute. That is the
+  // whole of the wait a walled caller should be told about, and it is what a future call actually
+  // needs: once that row leaves the window four remain, which is under the ceiling.
+  const first = await previewByToken(issued.token, originDigest());
+  assert.equal(first.outcome, "rate_limited", "the ceiling is reached, so this read is walled");
+  assert.ok(first.retry_after_seconds >= 55 && first.retry_after_seconds <= 61,
+    `the wait is the OLDEST attempt's own expiry (~60s), got ${first.retry_after_seconds}`);
+
+  // THE SECOND REFUSAL IS MEASURED AGAINST THE SAME FIVE ROWS. Were a refusal still counted -- the
+  // shipped-first ordering -- this call would read a window of six and answer with the THIRD
+  // planted row's expiry (~180s) instead: every reload would push a real invitee's link further
+  // out, which is the self-perpetuating lockout ADV-L05-04 measured.
+  const second = await previewByToken(issued.token, originDigest());
+  assert.equal(second.outcome, "rate_limited");
+  assert.ok(second.retry_after_seconds <= first.retry_after_seconds && second.retry_after_seconds >= 45,
+    `a refusal may never push the wait OUT (first ${first.retry_after_seconds}s, second ${second.retry_after_seconds}s)`);
+
+  const rows = await rootQuery(
+    "select count(*)::int as n from clara.invite_preview_attempts where token_hash = $1", [hash],
+  );
+  assert.equal(rows.rows[0].n, 5, "the two refusals wrote nothing: the five planted rows are all there is");
 });
 
 test("p871.wall.token_limb: one token polled from five different addresses is served, the sixth is rate-limited", async (t) => {
@@ -507,7 +718,7 @@ test("p871.wall.evidence: the attempts table holds the token hash, the peppered 
   );
 });
 
-test("p871.derivation: the shared status expression is present in BOTH bodies on the live catalog (and the pin is not vacuous)", async (t) => {
+test("p871.derivation: the shared status expression AND the shared MASK are present in BOTH bodies on the live catalog (and neither pin is vacuous)", async (t) => {
   if (unready(t)) return;
   const SHARED = `case
            when i.status = 'pending' and i.expires_at <= now() then 'expired'
@@ -518,6 +729,16 @@ test("p871.derivation: the shared status expression is present in BOTH bodies on
              then 'issuer_lapsed'
            else i.status
          end as status`;
+  // THE MASK GETS ITS OWN PIN. The status forking would make two readers disagree about one invite;
+  // the MASK forking would make the SIGNED-OUT, public page publish more of a stranger's address
+  // than the signed-in one does -- and the masked address is the one field the 2026-09-23 ruling
+  // says must never widen. Nothing pinned it until spec review SPEC-871-C asked for it.
+  const MASK = `v_at := position('@' in inv.email);
+  if v_at > 1 then
+    v_masked := left(inv.email, 1) || '***@' || substr(inv.email, v_at + 1);
+  else
+    v_masked := '***';
+  end if;`;
   const strip = (s) => s.replace(/\s+/g, "");
   const bodies = await rootQuery(
     `select t.sig, p.prosrc from (values ($1),($2)) t(sig) join pg_proc p on p.oid = t.sig::regprocedure`,
@@ -527,11 +748,20 @@ test("p871.derivation: the shared status expression is present in BOTH bodies on
   for (const row of bodies.rows) {
     assert.ok(strip(row.prosrc).includes(strip(SHARED)),
       `${row.sig} must carry the SHARED five-state expression verbatim -- a fork is how the two reads start disagreeing about one invite`);
+    assert.ok(strip(row.prosrc).includes(strip(MASK)),
+      `${row.sig} must carry the SHARED masking block verbatim -- a fork is how a public page starts publishing more address than a signed-in one`);
   }
-  // Vacuity control: the same comparison against a MUTATED expression must fail, so a green above
+  // Vacuity control: the same comparisons against MUTATED expressions must fail, so a green above
   // means "the text matched", never "the matcher matches anything".
-  const mutated = SHARED.replace("'issuer_lapsed'", "'issuer_departed'");
+  const mutatedStatus = SHARED.replace("'issuer_lapsed'", "'issuer_departed'");
+  const mutatedMask = MASK.replace("left(inv.email, 1)", "left(inv.email, 3)");
   for (const row of bodies.rows) {
-    assert.ok(!strip(row.prosrc).includes(strip(mutated)), `${row.sig}: the matcher is not vacuous`);
+    assert.ok(!strip(row.prosrc).includes(strip(mutatedStatus)), `${row.sig}: the status matcher is not vacuous`);
+    assert.ok(!strip(row.prosrc).includes(strip(mutatedMask)), `${row.sig}: the mask matcher is not vacuous`);
   }
+  // ...and the migration's OWN tail carries both pins, so a later recut of either body is caught by
+  // the chain itself and not only by this battery.
+  const sql = readFileSync(MIGRATION_PATH, "utf8");
+  assert.ok(/the two reads have FORKED/.test(sql), "the tail pins the status expression in both bodies");
+  assert.ok(/the two masks have FORKED/.test(sql), "the tail pins the masking block in both bodies");
 });

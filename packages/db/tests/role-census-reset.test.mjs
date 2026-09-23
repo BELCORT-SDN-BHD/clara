@@ -80,9 +80,14 @@ test("rcr.mint against the REAL migrations directory finds exactly the six post-
       "clara_invite_preview", "clara_invite_preview_login",
     ],
   );
+  // THE STEM, NEVER THE NUMBER. A number is claimed at merge: keying on `^0309_` would make this
+  // cell a landmine the integrator has to remember the moment #871's file is renumbered, which is
+  // the anti-pattern tests/invite-preview-public-preintegration-gate.mjs states in as many words
+  // (adversarial ADV-L05-07, 2026-09-24). The two older files ARE merged and immutable, so their
+  // numbers are part of their identity; #871's is not yet.
   assert.ok(
-    roles.every((r) => /^(01(60|63)|0309)_/.test(r.file)),
-    `every role traces to 0160, 0163 or 0309: ${roles.map((r) => r.file)}`,
+    roles.every((r) => /^01(60|63)_|_invite_preview_public_door\.sql$/.test(r.file)),
+    `every role traces to 0160, 0163 or the invite-preview door: ${roles.map((r) => r.file)}`,
   );
 });
 

@@ -95,8 +95,12 @@ guarded by `if not exists` so a normal single from-scratch chain only creates th
 Re-applying the WHOLE chain from scratch into a **fresh database on a cluster that already ran the
 chain once** hits those six leftover roles before it reaches 0154 again: the count already reads
 `20`, not `14`, and 0154 raises `CLR10` — a cluster-reuse hazard, not a migration defect. (0309
-carries its own prestate census of `18` at its own point in the chain, so the same reuse on a
-cluster that already has its pair is named there too, by that file rather than by 0154.)
+names the roles it relies on rather than counting them: its prestate lists the eighteen chain-minted
+`clara%` roles BY NAME and merely RECORDS the cluster-wide count, so its own tail can prove a delta
+of exactly two. An absolute count there would have been wrong on any live project — hosted also
+carries `clara_storage_docs`, from `deploy/storage-provision.sql`, which the chain never mints — and
+the first cut of 0309 did pin one; the adversarial round measured it aborting on a hosted-shaped
+census, 2026-09-24.)
 
 **Preferred:** one from-scratch chain per cluster (a fresh disposable Postgres cluster, or a fresh
 container/instance). [tests/README.md](tests/README.md) states the same rule for the test rig.
@@ -4790,21 +4794,58 @@ locks in numeric order, each limb's own wait computed independently and the maxi
 windows). A walled preview degrades the landing page to "sign-in without the preview block"; it
 never refuses a journey.
 
-**The five-state derivation is shared, not forked.** The status CASE expression is copied character
-for character out of `clara.preview_invite`'s live body (0224 §A as widened by #872 / 0269 §2), and
-§D.T7 asserts on the LIVE catalog — whitespace-normalised, in both directions — that the same
-expression sits in both bodies. A shared SQL function was refused for 0269's own measured reason:
+**This wall COUNTS BEFORE IT WRITES, and 0163 does not.** A call the window already refuses leaves
+no row at all. That is a deliberate departure from the shape being mirrored, and it buys two things
+0163 does not need: the evidence table is BOUNDED at five rows per key per quarter-hour, and a
+refusal can never extend the window that refused it. The first cut inserted first — measured on
+`clara_l05` inside a rolled-back transaction, with five attempts planted at 14/13/12/11/10 minutes
+ago, the shipped body answered `retry_after_seconds` 120, then 180, then 240 on three successive
+refusals and left eight rows; the shipped fix answers ~60, ~60 and leaves five. Since the writer is
+an UNAUTHENTICATED page GET (`/invite/:token`), the old ordering let anyone holding a forwarded
+invite link keep a real invitee's preview shut for as long as they kept reloading (adversarial
+ADV-L05-04, 2026-09-24). Because the arithmetic no longer has to carry a just-inserted row, the
+offset is the plain one: with `v_count` rows in a limb's window a future call is admitted once
+`v_count - 4` have expired, the last of which is the ascending row at `offset v_count - 5`.
+
+**The table is still unprunable as shipped, and pruning it is a MIGRATION rather than a job.**
+`clara._tf_append_only()` raises for every role including the table's owner, and TRUNCATE is
+blocked, so a retention lane must disable and re-enable that trigger inside its own migration as the
+table owner. The follow-up on #871 says so in those words. The bound above is what makes that
+follow-up housekeeping rather than an availability question.
+
+**The five-state derivation AND the mask are shared, not forked.** The status CASE expression and
+the masking block are both copied character for character out of `clara.preview_invite`'s live body
+(0224 §A as widened by #872 / 0269 §2), and §D.T7 / §D.T7b assert on the LIVE catalog —
+whitespace-normalised, in both directions — that each sits in both bodies. The mask earns its own
+pin because it is the one field the ruling says must never widen: a later recut of the signed-in
+mask alone would otherwise let the PUBLIC page publish more of a stranger's address than the
+signed-in one, silently (spec review SPEC-871-C, 2026-09-24). A shared SQL function was refused for 0269's own measured reason:
 Postgres checks EXECUTE against the INVOKING role for every function named in a view's body, so a
 helper `clara.firm_invites_visible` could call would need a grant to `clara_authenticated`, and
 PostgREST would expose it as a bare cross-tenant rank oracle.
 
-**The role census stays lawful.** 0154's tail pins the cluster-wide `clara%` role count at 14 at
-its own point in the chain; `scripts/migrate.mjs` applies files in ascending numeric order, so a
-role minted at 0309 does not exist when 0154 runs. 0309 carries its own census (18 before, 20
-after). The #867 cluster-reuse recipe now drops six roles instead of four and needed no code
-change — `role-census-reset.mjs` derives its roster from the migration files themselves.
+**The role census stays lawful, and 0309 pins no absolute count.** 0154's tail pins the
+cluster-wide `clara%` role count at 14 at its own point in the chain; `scripts/migrate.mjs` applies
+files in ascending numeric order, so a role minted at 0309 does not exist when 0154 runs. 0309's own
+prestate names the eighteen chain-minted roles it relies on and RECORDS the cluster count without
+pinning it; its tail then proves the file moved that count by exactly two (or, on a redo, by
+nothing). An absolute pin there was the first cut's defect: a live project also carries
+`clara_storage_docs`, so hosted reads 19 where a disposable from-scratch cluster reads 18, and the
+integrator's from-scratch proof could never have caught it. `deploy/roles-bootstrap.sql`'s VERIFY
+census is trued in the same commit (21 total = 20 schema lanes + `clara_storage_docs`). The #867
+cluster-reuse recipe now drops six roles instead of four and needed no code change —
+`role-census-reset.mjs` derives its roster from the migration files themselves.
 
-**Battery** (`tests/invite-preview-public.test.mjs`, 12 cells, every door call made through
+**0309 is REDO-SAFE (#957).** Its prestate reports FIRST (all four of its own objects absent) or
+REDO (all four present) and refuses every half-applied state; every statement is
+`create table if not exists` / `create index if not exists` / `drop policy`‑or‑`trigger if exists`
+before each create / `create or replace function`, so `CLARA_MIGRATION_REDO=0309_invite_preview_public_door`
+re-applies an edited unmerged file without hand surgery. The FIRST branch, which a redo can never
+enter, was driven by hand on `clara_l05` inside a rolled-back transaction: the four objects dropped,
+a deploy-shaped extra role created so the census read 19, the whole file run verbatim (tail OK,
+roles 19 → 21), then rolled back with the lane database unmoved.
+
+**Battery** (`tests/invite-preview-public.test.mjs`, 16 cells, every door call made through
 `set role clara_invite_preview` — never `rootQuery`, which is superuser and proves nothing about
 reachability):
 
@@ -4813,9 +4854,11 @@ reachability):
 * `p871.door.no_oracle` — an unknown, an expired, a revoked and an accepted token answer
   BYTE-IDENTICALLY.
 * `p871.door.five_states` — all five effective statuses are reached (asserted against
-  `clara.firm_invites_visible`, read as the owner, as the independent source of truth), the door
-  agrees with the roster in every one, and re-promoting a demoted issuer returns BOTH surfaces to
-  `pending`.
+  `clara.firm_invites_visible`, read as the owner, as the independent source of truth), the
+  SIGNED-IN `clara.preview_invite` is driven for the same five invites as the invited address and
+  agrees with the roster in every one, this door reports that same status, firm name, role and mask
+  verbatim in the two open states and the single refusal in the other three, and re-promoting a
+  demoted issuer returns BOTH surfaces to `pending`.
 * `p871.grant.only_the_group` — the exact ACL text (grantor included), seventeen other roles
   refused EXECUTE, and the group plus its shell allowed.
 * `p871.grant.credential_less` — both roles NOLOGIN with no escalation bit, the exact membership
@@ -4823,9 +4866,23 @@ reachability):
 * `p871.grant.from_scratch` — exactly one migration mints the pair, its number is above 0154, and
   the migrator sorts numerically.
 * `p871.wall.origin_limb` / `p871.wall.token_limb` — five served, the sixth walled, on each limb;
-  an unknown token spends the budget exactly as a real one does; six evidence rows.
+  an unknown token spends the budget exactly as a real one does; five evidence rows (the refused
+  call writes none).
+* `p871.wall.bounded` — twelve reads of one link from twelve addresses: five served, seven walled,
+  and exactly five rows left behind.
+* `p871.wall.no_slide` — a worked example with five attempts PLANTED at 14/13/12/11/10 minutes ago,
+  so the expected wait comes from the timestamps and not from re-running the door's arithmetic: the
+  advertised wait is the oldest attempt's own expiry (~60s) and a second refusal never pushes it
+  out. Under the pre-fix ordering the same example answered 120s then 180s.
+* `p871.prestate.hosted_shaped` — the prestate's role roster equals the chain's own
+  `CHAIN_MINTED_ROLES` minus this file's pair, no cluster-wide count is compared with a literal
+  anywhere in it, and the roster still admits inside a rolled-back transaction carrying a
+  deploy-shaped extra role (where the removed `<> 18` pin would have raised).
+* `p871.prestate.first_or_redo` — the file carries every redo-safe statement shape and refuses a
+  half-applied state, and its tail's census delta is relative and mode-aware.
 * `p871.wall.digests` / `p871.wall.evidence` — the two raised input facts leave no attempt behind;
   the evidence table's columns, RLS posture and append-only guard, the last proven by driving a
   DELETE into it.
-* `p871.derivation` — the shared expression is present in both live bodies, with a mutated-string
-  vacuity control.
+* `p871.derivation` — the shared status expression AND the shared masking block are present in both
+  live bodies, each with a mutated-string vacuity control, and the migration's tail carries both
+  pins.

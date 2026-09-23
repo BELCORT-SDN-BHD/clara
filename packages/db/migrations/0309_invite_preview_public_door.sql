@@ -85,13 +85,17 @@
 -- owner's ruling spells it: "never an existence oracle for a token that does not match (a wrong,
 -- expired, revoked or unknown token gets one and the same answer)". The value is a jsonb constant
 -- with ONE key, so "identical" is a byte comparison rather than a promise, and there is no field a
--- caller could read to tell the four apart. Timing is not an oracle either: the wall's INSERT and
--- both window counts run BEFORE the lookup, on every arm.
+-- caller could read to tell the four apart. Timing is not an oracle either: both window counts run
+-- BEFORE the lookup on every arm, and an arm the wall refuses returns before the lookup whether
+-- the token names an invite or names nothing.
 --
--- THE FIVE-STATE DERIVATION IS SHARED, NOT FORKED. The status CASE expression below is COPIED
--- CHARACTER FOR CHARACTER out of `clara.preview_invite`'s live body (0224 §A as widened by 0269
--- §2), including its aliases, and §D.T7 asserts -- on the LIVE catalog, whitespace-normalised --
--- that the same expression is present in BOTH bodies. So a future ticket that recuts one of them
+-- THE FIVE-STATE DERIVATION AND THE MASK ARE SHARED, NOT FORKED. The status CASE expression AND
+-- the masking block below are both COPIED CHARACTER FOR CHARACTER out of `clara.preview_invite`'s
+-- live body (0224 §A as widened by 0269 §2), including their aliases, and §D.T7 / §D.T7b assert --
+-- on the LIVE catalog, whitespace-normalised -- that each is present in BOTH bodies. The mask
+-- earns its own pin for the reason the ruling gives it: the masked address is the one field this
+-- ticket says must never widen, so a later recut of the signed-in mask alone must be a red cell
+-- rather than a silently wider answer on a PUBLIC page (spec review SPEC-871-C, 2026-09-24). So a future ticket that recuts one of them
 -- and not the other is caught by a cell rather than by a person seeing two different answers about
 -- one invite. A shared SQL FUNCTION was considered and refused for 0269's own measured reason:
 -- Postgres checks EXECUTE against the INVOKING role for every function named in a view's body, so
@@ -115,11 +119,18 @@
 -- Two independent limbs, a 15-minute window and a ceiling of 5 -- 0163's own numbers -- keyed on
 -- (a) the invite token's sha256 and (b) the PEPPERED digest of the proxy-observed client address
 -- the courier supplies (packages/runtime/lib/rate-wall-courier.mjs; absent or unparseable ⇒ the
--- route never calls this door at all). Both advisory locks are taken in numeric order, the
--- evidence row lands BEFORE either window is evaluated, and each limb's own wait is computed
--- independently and the MAXIMUM advertised -- the BLOCKER-1 correction 0163's body carries in
--- full, mirrored here rather than re-derived, because the row this call just inserted counts
--- toward BOTH limbs' future windows.
+-- route never calls this door at all). Both advisory locks are taken in numeric order, BOTH
+-- WINDOWS ARE COUNTED BEFORE ANYTHING IS WRITTEN, and each limb's own wait is computed
+-- independently and the MAXIMUM advertised.
+--
+-- COUNT FIRST, WRITE ONLY WHEN ADMITTING -- and that is where this wall's ORDERING departs from
+-- 0163's, deliberately. 0163 inserts first and counts after, so its own BLOCKER-1 correction has to
+-- carry the just-inserted row into both limbs' future windows (`offset v_count - 4`, guarded at
+-- `>= 4`). Here the refused call writes NOTHING, so the arithmetic is the plain one -- with
+-- `v_count` rows already in the window a future call is admitted once `v_count - 4` of them have
+-- expired, the last of which is the ascending row at `offset v_count - 5` -- and the wall gains
+-- two properties 0163 does not need: the table is BOUNDED at five rows per key per quarter-hour,
+-- and a flood CANNOT slide a real invitee's window forward (see WHAT THE EVIDENCE TABLE HOLDS).
 --
 -- WHY ITS OWN EVIDENCE TABLE AND NOT `clara.confirmation_attempts`. The brief says "the estate's
 -- existing entry rate wall", and the first cut of this file called
@@ -141,9 +152,29 @@
 -- WHAT THE EVIDENCE TABLE HOLDS. `token_hash` (the same sha256 the invite row is keyed by), the
 -- peppered origin digest, and a timestamp -- no address, no e-mail, no plaintext token.
 -- Append-only and no-truncate like `clara.confirmation_attempts`, forced-RLS with a single owner
--- policy, and no grant to any application role: only the definer body writes or reads it. Like
--- 0163's own attempts table it has NO retention sweep; a retention lane for both is recorded as a
--- follow-up on #871 rather than invented here.
+-- policy, and no grant to any application role: only the definer body writes or reads it.
+--
+-- AND IT IS BOUNDED, WHICH THE FIRST CUT OF THIS FILE WAS NOT. The wall COUNTS BEFORE IT WRITES:
+-- a call the window already refuses leaves NO row behind. The first cut inserted first and counted
+-- after, which cost two things an adversarial round measured (ADV-L05-04, 2026-09-24): the table
+-- grew one unprunable row per request from a PUBLIC, unauthenticated page GET, and -- worse --
+-- every REFUSED reload slid the window forward, so anyone holding an invite link could keep a real
+-- invitee's preview shut indefinitely (measured: twelve sequential calls left twelve rows and
+-- pinned `retry_after_seconds` at the 900-second ceiling from the sixth on). Counting first bounds
+-- the table at FIVE rows per key per quarter-hour and makes the wall self-clearing: fifteen minutes
+-- after the fifth ADMITTED call the window is empty whatever the flood did.
+-- `clara.confirmation_attempts` does not need this -- it is reached from a form POST inside the
+-- signup flow, and an 'accepted' stamp removes its rows from both windows -- which is why this file
+-- mirrors its SHAPE and not its ordering.
+--
+-- IT STILL HAS NO RETENTION SWEEP, AND PRUNING IT IS A MIGRATION RATHER THAN A JOB. The append-only
+-- trigger raises unconditionally for EVERY role including the table's owner (measured:
+-- `set role clara_fn_owner; delete from clara.invite_preview_attempts where attempted_at < ...`
+-- raises 'invite_preview_attempts is append-only'), and TRUNCATE is blocked too. So a retention
+-- lane must disable and re-enable that trigger inside its OWN migration, as the table owner; it
+-- cannot be written as a background job against the shipped surface. The follow-up on #871 says so
+-- in those words, and the bound above is what makes that follow-up housekeeping rather than an
+-- availability question.
 
 set local statement_timeout = '5min';
 set local lock_timeout = '15s';
@@ -157,34 +188,86 @@ set local lock_timeout = '15s';
 create temporary table _p871_prestate (k text primary key, v jsonb) on commit drop;
 
 do $pre$
-declare v_names text; v_sha text; v_n int; v_bad text;
+declare v_names text; v_sha text; v_n int; v_bad text; v_present int; v_mode text;
 begin
-  -- (a) NOTHING THIS FILE MINTS MAY ALREADY EXIST. First-apply is the ONLY branch: this file has
-  -- no "already live" arm, so it is not bimodal and a redo over its own effects is refused here
-  -- rather than half-applied (riders WORK-ORDER, wave-3 addendum).
-  if to_regprocedure('clara.preview_invite_by_token(text,bytea)') is not null then
-    raise exception '#871 prestate: clara.preview_invite_by_token already exists' using errcode='CLR10';
-  end if;
-  if to_regclass('clara.invite_preview_attempts') is not null then
-    raise exception '#871 prestate: clara.invite_preview_attempts already exists' using errcode='CLR10';
-  end if;
-  select coalesce(string_agg(rolname, ',' order by rolname), '(none)') into v_names
-    from pg_roles where rolname in ('clara_invite_preview','clara_invite_preview_login');
-  if v_names <> '(none)' then
-    raise exception '#871 prestate: the invite-preview roles must be wholly absent; found %', v_names
+  -- (a) FIRST OR REDO, AND NEVER HALF OF EITHER. This file owns FOUR objects: the door, the
+  -- evidence table and the two roles. All four absent is a FIRST apply; all four present is the
+  -- supported #957 REDO over this file's own effects (`CLARA_MIGRATION_REDO`,
+  -- packages/db/README.md "Redo (#957)"), which every statement below is written to survive:
+  -- `create table if not exists`, `create index if not exists`, `drop policy`/`drop trigger if
+  -- exists` before each create, `create or replace function`, and role creation already guarded by
+  -- `if not exists`. ANY OTHER COUNT is a half-applied database and is refused rather than
+  -- repaired, because this file cannot know which half is the older one.
+  --
+  -- The pins in (c) below are NOT bimodal: this file recuts no body, so every pinned sha is the
+  -- same on both branches, and a redo cannot hide a drift behind its own post-image.
+  select (case when to_regprocedure('clara.preview_invite_by_token(text,bytea)') is not null then 1 else 0 end)
+       + (case when to_regclass('clara.invite_preview_attempts') is not null then 1 else 0 end)
+       + (select count(*)::int from pg_roles
+           where rolname in ('clara_invite_preview','clara_invite_preview_login'))
+    into v_present;
+  if v_present = 0 then
+    v_mode := 'FIRST';
+  elsif v_present = 4 then
+    v_mode := 'REDO';
+    raise notice '#871 prestate: this file''s own four objects are already present -- this is a REDO (#957) over its own effects, which the if-not-exists / create-or-replace shape below makes safe.';
+  else
+    raise exception '#871 prestate: % of this file''s four objects (door, attempts table, group role, login shell) are present -- a half-applied state this file will not repair', v_present
       using errcode='CLR10';
   end if;
-  insert into _p871_prestate values ('new_roles_absent', to_jsonb(v_names));
+  insert into _p871_prestate values ('mode', to_jsonb(v_mode));
 
-  -- (b) THE CLUSTER-WIDE clara% ROLE CENSUS at THIS file's point in the chain. 0154 pins 14 at its
-  -- own point and is untouched by a role minted 155 files later; this is the same measurement
-  -- taken here, so §D can prove the delta is exactly two.
-  select count(*)::int into v_n from pg_roles where rolname like 'clara%';
-  if v_n <> 18 then
-    raise exception '#871 prestate: expected 18 clara-prefixed roles before this file (0002/0006/0009/0121/0126/0160/0163), found % -- a cluster carrying leftovers from an earlier from-scratch chain needs scripts/role-census-reset.mjs first (packages/db/README.md, #867)', v_n
+  -- (b) THE CHAIN-MINTED ROLES THIS FILE'S PREMISES REST ON, BY NAME -- NEVER AN ABSOLUTE
+  -- CLUSTER-WIDE CENSUS.
+  --
+  -- The first cut of this file raised unless `count(*) from pg_roles where rolname like 'clara%'`
+  -- read EXACTLY 18, and that pin would have ABORTED the hosted wave-4 migrate step. A cluster-wide
+  -- count is not a property of the migration chain: a live project also carries roles the chain
+  -- never mints -- `clara_storage_docs`, from `deploy/storage-provision.sql`, which
+  -- `docs/plan/active/riders-2026-09-20/RELEASE-W2-RUNBOOK.md` step 3 counts among the hosted-only
+  -- role differences and which `deploy/roles-bootstrap.sql`'s own census names beside the schema
+  -- lanes ("N schema lanes + clara_storage_docs"). MEASURED (adversarial ADV-L05-01, 2026-09-24):
+  -- against a hosted-shaped census the shipped pin raised CLR10 'expected 18 ... found 19' and sent
+  -- the operator to `scripts/role-census-reset.mjs`, which on hosted is the wrong and destructive
+  -- thing to do; and the integrator's from-scratch proof runs on a DISPOSABLE cluster, which has no
+  -- clara_storage_docs, so that proof could never have caught it.
+  --
+  -- What this file actually needs is that the chain-minted roles its grants and its tail talk about
+  -- EXIST. 0160 and 0163 -- the two role-minting migrations whose pair shape this file mirrors --
+  -- assert PRESENCE and ABSENCE and never a count (0160:57-59,119-122 and 0163:58-62,164-167), and
+  -- that is the precedent followed here. The count is still RECORDED, so §D.T4 can prove this file
+  -- moved it by exactly two (or, on a REDO, by nothing) whatever it started at.
+  -- `packages/db/tests/invite-preview-public.test.mjs`'s p871.prestate.hosted_shaped drives this
+  -- roster against a hosted-shaped census and shows the old absolute pin failing on the same
+  -- transaction.
+  select coalesce(string_agg(t.name, ', ' order by t.name), '(none)') into v_bad
+    from (values
+      -- 0002_foundation.sql -- the six group roles
+      ('clara_fn_owner'),('clara_authenticated'),('clara_agent_ro'),
+      ('clara_wake_interactive'),('clara_wake_proactive'),('clara_runtime'),
+      -- 0006_runtime_core.sql -- the two login shells
+      ('clara_runtime_login'),('clara_agent_read_login'),
+      -- 0009_coding_floor.sql
+      ('clara_wake_write_login'),
+      -- 0121_f_a3_pr1b_agent_limb.sql -- the bank wake lane
+      ('clara_wake_bank'),('clara_wake_bank_login'),
+      -- 0126_f_a7_beta_filing_verb.sql
+      ('clara_wake_filing'),
+      -- 0131_f_a6_freeform_read.sql
+      ('clara_freeform_ro'),('clara_freeform_login'),
+      -- 0160_checkout_gate_c2_stripe_events.sql
+      ('clara_stripe_webhook'),('clara_stripe_webhook_login'),
+      -- 0163_checkout_gate_c3_folded_door.sql -- the pair whose shape this file mirrors
+      ('clara_auth_wall'),('clara_auth_wall_login')
+    ) t(name)
+   where to_regrole(t.name) is null;
+  if v_bad <> '(none)' then
+    raise exception '#871 prestate: a chain-minted role this file relies on is absent: % -- this database did not run the migration chain that mints them', v_bad
       using errcode='CLR10';
   end if;
+  select count(*)::int into v_n from pg_roles where rolname like 'clara%';
   insert into _p871_prestate values ('role_count_before', to_jsonb(v_n));
+  raise notice '#871 prestate: the 18 chain-minted clara roles this file relies on are all present; the cluster-wide clara%% census reads % and is RECORDED, not pinned -- a live project also carries deploy-minted roles such as clara_storage_docs.', v_n;
 
   -- (c) THE BODIES THIS FILE COPIES FROM, CALLS OR MUST NOT MOVE.
   select string_agg(format('%s live %s expected %s', t.sig, encode(sha256(convert_to(p.prosrc,'UTF8')),'hex'), t.pin), '; ')
@@ -282,22 +365,28 @@ grant usage on schema clara to clara_invite_preview;
 -- §B -- THE WALL'S EVIDENCE. `clara.confirmation_attempts` (0163 §3) is the shape being mirrored:
 -- forced RLS with a single owner policy, append-only, no truncate, no application grant.
 -- =================================================================================================
-create table clara.invite_preview_attempts (
+-- REDO-SAFE BY CONSTRUCTION (#957): every statement below survives being run a second time over
+-- this file's own effects, so `CLARA_MIGRATION_REDO=0309_invite_preview_public_door` can re-apply
+-- an edited unmerged file without hand surgery on the ledger.
+create table if not exists clara.invite_preview_attempts (
   id            uuid        primary key default gen_random_uuid(),
   token_hash    bytea       not null check (octet_length(token_hash)=32),
   origin_digest bytea       not null check (octet_length(origin_digest)=32),
   attempted_at  timestamptz not null default now()
 );
-create index ix_invite_preview_attempts_token_attempted
+create index if not exists ix_invite_preview_attempts_token_attempted
   on clara.invite_preview_attempts(token_hash, attempted_at desc);
-create index ix_invite_preview_attempts_origin_attempted
+create index if not exists ix_invite_preview_attempts_origin_attempted
   on clara.invite_preview_attempts(origin_digest, attempted_at desc);
 alter table clara.invite_preview_attempts enable row level security;
 alter table clara.invite_preview_attempts force row level security;
+drop policy if exists p_invite_preview_attempts_owner on clara.invite_preview_attempts;
 create policy p_invite_preview_attempts_owner on clara.invite_preview_attempts
   for all to clara_fn_owner using (true) with check (true);
+drop trigger if exists t_invite_preview_attempts_append_only on clara.invite_preview_attempts;
 create trigger t_invite_preview_attempts_append_only before delete on clara.invite_preview_attempts
   for each row execute function clara._tf_append_only();
+drop trigger if exists t_invite_preview_attempts_no_truncate on clara.invite_preview_attempts;
 create trigger t_invite_preview_attempts_no_truncate before truncate on clara.invite_preview_attempts
   for each statement execute function clara._tf_no_truncate();
 
@@ -307,7 +396,7 @@ comment on table clara.invite_preview_attempts is
 -- =================================================================================================
 -- §C -- THE DOOR. SECURITY DEFINER, pinned search_path, owned by clara_fn_owner.
 -- =================================================================================================
-create function clara.preview_invite_by_token(p_token text, p_origin_digest bytea)
+create or replace function clara.preview_invite_by_token(p_token text, p_origin_digest bytea)
 returns jsonb
 language plpgsql
 security definer
@@ -315,8 +404,7 @@ set search_path = clara, pg_temp
 as $preview_by_token$
 declare
   v_hash bytea;
-  v_attempt uuid;
-  v_attempted_at timestamptz;
+  v_now timestamptz;
   v_token_count integer;
   v_origin_count integer;
   v_token_lock bigint;
@@ -356,47 +444,51 @@ begin
     perform pg_catalog.pg_advisory_xact_lock(v_origin_lock);
     perform pg_catalog.pg_advisory_xact_lock(v_token_lock);
   end if;
-  insert into clara.invite_preview_attempts(token_hash, origin_digest)
-  values (v_hash, p_origin_digest)
-  returning id, attempted_at into v_attempt, v_attempted_at;
 
+  -- COUNT BOTH WINDOWS FIRST. Under the two locks above this count is stable for the rest of the
+  -- call, so counting before writing is not a check-then-act race -- it is the same serialized
+  -- decision, taken one statement earlier.
+  v_now := now();
   select count(*)::int into v_token_count
     from clara.invite_preview_attempts a
-   where a.id <> v_attempt and a.token_hash = v_hash
-     and a.attempted_at > v_attempted_at - interval '15 minutes';
+   where a.token_hash = v_hash
+     and a.attempted_at > v_now - interval '15 minutes';
   select count(*)::int into v_origin_count
     from clara.invite_preview_attempts a
-   where a.id <> v_attempt and a.origin_digest = p_origin_digest
-     and a.attempted_at > v_attempted_at - interval '15 minutes';
+   where a.origin_digest = p_origin_digest
+     and a.attempted_at > v_now - interval '15 minutes';
 
   if v_token_count >= 5 or v_origin_count >= 5 then
-    -- EACH LIMB'S OWN WAIT, AND THE MAXIMUM IS ADVERTISED -- 0163's BLOCKER-1 correction, mirrored:
-    -- the row THIS call just inserted counts toward BOTH limbs' future windows, so a wait computed
-    -- from only the limb that fired can advertise a moment at which the other limb still refuses.
-    -- The `>= 4` guard is 0163's too: a limb with fewer than four priors can never be the reason a
-    -- future call is refused, and running the offset formula unguarded there manufactures a wait
-    -- from a prior that constrains nothing.
-    if v_token_count >= 4 then
+    -- A REFUSED CALL WRITES NOTHING. That is what bounds this table at five rows per key per
+    -- window and what stops a flood from holding a real invitee's link shut: a refusal no longer
+    -- extends the very window that refused it (ADV-L05-04, 2026-09-24).
+    --
+    -- EACH LIMB'S OWN WAIT, AND THE MAXIMUM IS ADVERTISED, because a wait computed from only the
+    -- limb that fired can name a moment at which the other limb still refuses. With `v_count` rows
+    -- already in a limb's window, a future call is admitted once `v_count - 4` of them have
+    -- expired; the last of those to expire is the ascending row at `offset v_count - 5`. A limb
+    -- under its ceiling constrains no future call, so its own wait is zero.
+    if v_token_count >= 5 then
       select least(900, greatest(0, ceil(extract(epoch from
-               ((a.attempted_at + interval '15 minutes') - v_attempted_at)))))::int
+               ((a.attempted_at + interval '15 minutes') - v_now)))))::int
         into v_retry_token
         from clara.invite_preview_attempts a
-       where a.id <> v_attempt and a.token_hash = v_hash
-         and a.attempted_at > v_attempted_at - interval '15 minutes'
+       where a.token_hash = v_hash
+         and a.attempted_at > v_now - interval '15 minutes'
        order by a.attempted_at asc
-       offset v_token_count - 4 limit 1;
+       offset v_token_count - 5 limit 1;
     else
       v_retry_token := 0;
     end if;
-    if v_origin_count >= 4 then
+    if v_origin_count >= 5 then
       select least(900, greatest(0, ceil(extract(epoch from
-               ((a.attempted_at + interval '15 minutes') - v_attempted_at)))))::int
+               ((a.attempted_at + interval '15 minutes') - v_now)))))::int
         into v_retry_origin
         from clara.invite_preview_attempts a
-       where a.id <> v_attempt and a.origin_digest = p_origin_digest
-         and a.attempted_at > v_attempted_at - interval '15 minutes'
+       where a.origin_digest = p_origin_digest
+         and a.attempted_at > v_now - interval '15 minutes'
        order by a.attempted_at asc
-       offset v_origin_count - 4 limit 1;
+       offset v_origin_count - 5 limit 1;
     else
       v_retry_origin := 0;
     end if;
@@ -406,6 +498,11 @@ begin
     -- naming them would tell a prober which of two budgets it exhausted.
     return jsonb_build_object('outcome', 'rate_limited', 'retry_after_seconds', v_retry_after);
   end if;
+
+  -- ADMITTED: now the attempt is evidence, and it is spent whether the token names an invite or
+  -- names nothing -- enumeration costs exactly what a legitimate read costs.
+  insert into clara.invite_preview_attempts(token_hash, origin_digest)
+  values (v_hash, p_origin_digest);
 
   -- THE EFFECTIVE STATUS, computed by the expression clara.preview_invite and
   -- clara.firm_invites_visible already share (0141:532-534 as widened by #872 / 0269) -- copied
@@ -470,7 +567,7 @@ reset role;
 do $p871_tail$
 declare
   v_posture text; v_src text; v_ret text; v_signed_in text; v_frag text; v_n int; v_pre int;
-  v_names text; v_sha text; v_pre_txt text; r text;
+  v_names text; v_sha text; v_pre_txt text; r text; v_mode text; v_delta int;
   -- THE SHARED DERIVATION, quoted once. Whitespace-normalised before every comparison, so an
   -- indentation change in either body is not a false red while a CHANGED PREDICATE is a true one.
   c_status_case constant text := $frag$case
@@ -482,6 +579,13 @@ declare
              then 'issuer_lapsed'
            else i.status
          end as status$frag$;
+  -- THE SHARED MASK, quoted once: one leading character, three FIXED stars, the domain.
+  c_mask_block constant text := $mask$v_at := position('@' in inv.email);
+  if v_at > 1 then
+    v_masked := left(inv.email, 1) || '***@' || substr(inv.email, v_at + 1);
+  else
+    v_masked := '***';
+  end if;$mask$;
 begin
   -- (T.1) THE DOOR'S POSTURE: owner, SECURITY DEFINER, pinned search_path and the EXACT ACL TEXT,
   -- grantor included -- so a WITH GRANT OPTION or a PUBLIC grant cannot hide behind a
@@ -557,12 +661,18 @@ begin
     raise exception '#871 tail: the invite-preview lane holds table privileges it must not: %', v_names using errcode='CLR10';
   end if;
 
-  -- (T.4) THE CLUSTER ROLE CENSUS MOVED BY EXACTLY TWO. 0154's own pin (14, at its own point in
-  -- the chain) is untouched by a role minted here -- migrations apply in ascending numeric order.
+  -- (T.4) THE CLUSTER ROLE CENSUS MOVED BY EXACTLY THIS FILE'S OWN TWO ROLES, AND BY NOTHING ELSE
+  -- -- a RELATIVE delta against the count §0(b) recorded, never an absolute pin (see §0(b) for why
+  -- an absolute one is unsound on a live project). 0154's own pin (14, at its own point in the
+  -- chain) is untouched by a role minted here: migrations apply in ascending numeric order. On a
+  -- REDO the two roles were already present when §0(b) counted, so the lawful delta is zero.
   select (v #>> '{}')::int into v_pre from _p871_prestate where k = 'role_count_before';
+  select v #>> '{}' into v_mode from _p871_prestate where k = 'mode';
   select count(*)::int into v_n from pg_roles where rolname like 'clara%';
-  if v_n <> v_pre + 2 then
-    raise exception '#871 tail: the clara role count moved from % to %, expected exactly +2', v_pre, v_n using errcode='CLR10';
+  v_delta := case when v_mode = 'REDO' then 0 else 2 end;
+  if v_n <> v_pre + v_delta then
+    raise exception '#871 tail: the clara role count moved from % to % on a % apply, expected exactly +%', v_pre, v_n, v_mode, v_delta
+      using errcode='CLR10';
   end if;
 
   -- (T.5) THE EVIDENCE TABLE: forced RLS, exactly one policy, both guard triggers, no grant.
@@ -627,6 +737,19 @@ begin
     raise exception '#871 tail: clara.preview_invite no longer carries the shared status expression -- the two reads have FORKED' using errcode='CLR10';
   end if;
 
+  -- (T.7b) THE MASK IS SHARED TOO, and it gets its own pin because it is the field the ruling
+  -- singles out: "never the address itself". The status CASE forking would make two readers
+  -- disagree; the MASK forking would make a PUBLIC, signed-out page publish more of a stranger's
+  -- address than the signed-in one does, silently. Same live-catalog, whitespace-normalised
+  -- comparison, in both directions.
+  v_frag := regexp_replace(c_mask_block, '\s+', '', 'g');
+  if position(v_frag in regexp_replace(v_src, '\s+', '', 'g')) = 0 then
+    raise exception '#871 tail: the new door does not carry the shared masking block' using errcode='CLR10';
+  end if;
+  if position(v_frag in regexp_replace(v_signed_in, '\s+', '', 'g')) = 0 then
+    raise exception '#871 tail: clara.preview_invite no longer carries the shared masking block -- the two masks have FORKED' using errcode='CLR10';
+  end if;
+
   -- (T.8) NOTHING THIS FILE PROMISED NOT TO TOUCH HAS MOVED.
   select v #>> '{}' into v_pre_txt from _p871_prestate where k = 'preview_invite_acl';
   select coalesce(array_to_string(p.proacl, ','), '<null>') into v_names
@@ -649,5 +772,5 @@ begin
     raise exception '#871 tail: a pinned body moved under this migration -- %', v_names using errcode='CLR10';
   end if;
 
-  raise notice '#871 tail OK: clara.preview_invite_by_token is SECURITY DEFINER, owned by clara_fn_owner, EXECUTE-reachable by clara_invite_preview (and its NOLOGIN shell) and by nobody else -- no anon, no service_role, no runtime, no authenticated; both new roles are NOLOGIN and credential-less; the clara role census moved 18 -> 20 with 0154''s own pin untouched; the wall''s evidence table is forced-RLS, owner-only, append-only and grant-free; the answer carries neither the token, the inviter nor the unmasked address; the ONE refusal is a single-key constant spelled once; and the five-state status expression is byte-shared with clara.preview_invite, whose ACL, body and roster view are all unmoved.';
+  raise notice '#871 tail OK: clara.preview_invite_by_token is SECURITY DEFINER, owned by clara_fn_owner, EXECUTE-reachable by clara_invite_preview (and its NOLOGIN shell) and by nobody else -- no anon, no service_role, no runtime, no authenticated; both new roles are NOLOGIN and credential-less; the cluster clara role census moved by exactly this file''s own two roles (a RELATIVE delta, never an absolute pin -- a live project also carries deploy-minted roles) with 0154''s own pin untouched; the wall''s evidence table is forced-RLS, owner-only, append-only and grant-free; the answer carries neither the token, the inviter nor the unmasked address; the ONE refusal is a single-key constant spelled once; and the five-state status expression AND the masking block are both byte-shared with clara.preview_invite, whose ACL, body and roster view are all unmoved.';
 end $p871_tail$;
