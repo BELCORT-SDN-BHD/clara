@@ -22,6 +22,9 @@
 // fixture whose creating door is gone — 0287's own "rootQuery appears only to PLANT a
 // fixture"). Every ASSERTION still runs through a real door or a real per-role session.
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -35,7 +38,7 @@ import {
   batchRow, proposalRows, eventsOf,
 } from "./wave-b/wb-fixtures.mjs";
 
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 6;
 const RETIRED_REASON = "seeding_lane_retired";
 
 let live = false;
@@ -330,4 +333,52 @@ cell("p1012.registry.prior_gl_rows_state_the_retirement_not_an_absent_entrance",
          on h.format = c.format and h.document_kind = c.document_kind
       where h.format is null or h.registry_version is distinct from c.registry_version`)).rows[0];
   assert.equal(drift.n, 0, "no pair's high-water mark disagrees with the published registry");
+});
+
+/** 0288's own file text. Read from disk, because the claim below is about what the migration
+ *  does NOT contain — a fact no catalog read can establish. */
+function migration0288() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return readFileSync(join(here, "..", "migrations", "0288_seeding_lane_retired.sql"), "utf8");
+}
+
+cell("p1012.reads.history_stays_readable_and_firm_scoped", async () => {
+  const onb = await onboardingClient(w.users.hana);
+  const doc = await priorGlSource(onb.client);
+  const batch = await plantHistoricalBatch(onb.client, doc, ["wf:r1", "wf:r2"]);
+
+  // THE READS, through a real per-role session under real RLS — never rootQuery, which would
+  // prove only that the rows exist.
+  const seen = await humanQuery(w.users.alice,
+    `select b.id, b.state, b.source_sha256,
+            (select count(*)::int from clara.seeding_proposals p where p.batch_id = b.id) as proposals
+       from clara.seeding_batches b where b.id = $1`, [batch]);
+  assert.equal(seen.rowCount, 1, "a firm member still reads their own firm's seeding batch after the retirement");
+  assert.equal(seen.rows[0].state, "open", "…with its state");
+  assert.equal(seen.rows[0].source_sha256, doc.sha256, "…and its source binding");
+  assert.equal(seen.rows[0].proposals, 2, "…and both proposals are readable through the same session");
+
+  const props = await humanQuery(w.users.alice,
+    "select proposal_key, proposal_kind, state, payload from clara.seeding_proposals where batch_id = $1 order by proposal_key",
+    [batch]);
+  assert.deepEqual(props.rows.map((r) => [r.proposal_key, r.proposal_kind, r.state]),
+    [["wf:r1", "wiki_fact", "proposed"], ["wf:r2", "wiki_fact", "proposed"]],
+    "every proposal reads back with its key, kind and state");
+  assert.equal(props.rows[0].payload.slug, "profile", "…and its payload, verbatim");
+
+  // FIRM SCOPE IS UNCHANGED: firm B's owner reads none of it.
+  const dave = await humanQuery(w.users.dave,
+    "select count(*)::int as n from clara.seeding_batches where id = $1", [batch]);
+  assert.equal(dave.rows[0].n, 0, "a member of another firm still reads nothing — the retirement loosens no scope");
+
+  // AND THE MIGRATION TOUCHES NO ROW OF EITHER RELATION, by construction rather than by
+  // counting: its whole text contains no UPDATE, DELETE or INSERT against them. (The one INSERT
+  // it does carry is into the probe's own discarded fixture rows, inside a subtransaction that
+  // is forced to roll back — which is why the assertion below is on the WRITE VERBS against
+  // these two relation names, not on the word `insert`.)
+  const sql = migration0288().toLowerCase();
+  for (const verb of ["update clara.seeding_batches", "update clara.seeding_proposals",
+    "delete from clara.seeding_batches", "delete from clara.seeding_proposals"]) {
+    assert.equal(sql.includes(verb), false, `0288 must contain no "${verb}" — history is not rewritten`);
+  }
 });

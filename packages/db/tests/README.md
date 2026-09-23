@@ -1799,6 +1799,11 @@ doors carrying the retirement marker) throws rather than skipping.
   BOTH `basis` and `limits`, no row anywhere still carries `browser_entrance`, every `prior_gl`
   row keeps `business_operation = stored_only`, the registry publishes one version at or above 4,
   and every high-water mark agrees.
+- `p1012.reads.*` — a planted batch and its proposals read back through a REAL per-role session
+  under real RLS, with state, source binding, kind and payload intact, and a member of another
+  firm reads none of it. The other half of the same claim is structural and cannot be measured
+  from the catalog: 0288's own file text contains no `update`/`delete` against either relation,
+  so history is not rewritten BY CONSTRUCTION rather than by counting rows.
 
 **History is PLANTED, not minted.** After 0288 no door can create a seeding batch, so the
 pre-retirement state these cells read is written by root INSERT — the same posture
