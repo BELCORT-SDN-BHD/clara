@@ -12,7 +12,9 @@
 //   2. Non-overlapping account sets warn about nothing, even on a client already carrying an
 //      overlapping sibling, and even across two clients that happen to share account codes.
 //   3. The existing 0045 template-arm cells (`accounting-plans.test.mjs`'s own
-//      `p640.schedule.overlap`) stay green, UNEDITED by this file.
+//      `p640.schedule.overlap`) stay green, UNEDITED by this file. [UPDATE, #929/0283: this claim
+//      described 0281 alone. #929 retires the template arm entirely, which DOES edit
+//      `p640.schedule.overlap` (its own ticket, its own commit) — see that file's header.]
 //   4. From-scratch apply (proven by the migration's own prestate/tail; this file assumes 0281 is
 //      already applied and is frontier-gated on it).
 //
@@ -21,8 +23,13 @@
 //      amortisation_schedule) — the exact "an accrual plan and an amortisation plan on the same
 //      account" shape the Agent Brief's own "Current behavior" names.
 //   6. An ENDED sibling stops warning; a PAUSED one keeps warning.
-//   7. A basis overlapping BOTH a live template and a sibling plan at once keeps the template's
-//      own `kind` label (0909's documented, transitional choice) and names both in one list.
+//   7. [RETIRED, #929/0283 — was: "A basis overlapping BOTH a live template and a sibling plan at
+//      once keeps the template's own `kind` label (0909's documented, transitional choice) and
+//      names both in one list." The cell that proved this, `p909.combined-with-template`, is
+//      removed below: 0281's own header called this note "moot" once #929 deletes the template
+//      arm, and it has been. The current-contract equivalent (a live template row is invisible,
+//      alone or alongside a sibling plan) is proven in
+//      `tests/plan-overlap-template-arm-retired.test.mjs`, frontier-gated on 0283.]
 //   8. At least one of the three plan-creating doors OTHER than `create_accounting_plan` itself
 //      is actually DRIVEN (the wave-3 addendum's own rule: "a door's behaviour is asserted only
 //      after it was driven") — `clara.create_accrual_adjustment`, which calls
@@ -42,7 +49,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, endPool, printLaneNotes, printSkipCount, buildWorkWorld, freshWorkClient, opk, basis,
+  rootQuery, endPool, printLaneNotes, printSkipCount, buildWorkWorld, freshWorkClient, basis,
   instructionRef, createAccountingPlan, reviseAccountingPlan, pauseAccountingPlan,
   endAccountingPlan, PLAN_KIND,
   // the accrual door's own surface (claim 8)
@@ -228,45 +235,14 @@ test("p909.status — an ENDED sibling stops warning; a PAUSED sibling keeps war
   assert.ok(!names.includes("Rig status to-be-ended"), "an ended plan is never named");
 });
 
-test("p909.combined-with-template — a basis overlapping BOTH a live 0045 template and a sibling plan keeps the template's own kind label and names both", async (t) => {
-  if (unready(t)) return;
-  const client = await freshWorkClient(ALICE(), "p909combo");
-  const ref = await instructionRef({ client, author: ALICE() });
-  const from = "2026-07-01";
-  const probeBasis = basis({ memo: "Rig combo shared basis" });
-  const codes = probeBasis.lines.map((l) => l.account_code);
-
-  const sibling = await createAccountingPlan(ALICE(), {
-    client, authorityRef: ref, purpose: "Rig combo sibling plan",
-    effectiveFrom: from, basis: basis({ memo: "Rig combo sibling basis" }),
-  });
-  assert.equal(sibling.overlap_warning, null);
-
-  const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [client])).rows[0].firm_id;
-  await rootQuery(
-    `insert into clara.adjustment_templates(firm_id, client_id, status, name, cadence, start_date,
-        auto_reverse, lines, memo_template, content_hash, proposed_by, proposed_op_key,
-        signed_by, signed_at)
-       values ($1,$2,'live','Rig combo template','monthly',$3,false,
-               $4::jsonb,'rig combo template', repeat('f',64), $5, $6, $5, now())`,
-    [firm, client, from,
-      JSON.stringify(codes.map((c, i) => ({ account_code: c, debit_cents: i === 0 ? 100 : 0, credit_cents: i === 0 ? 0 : 100 }))),
-      ALICE(), opk("p909-combo-tpl")]);
-
-  const probe = await createAccountingPlan(ALICE(), {
-    client, authorityRef: ref, purpose: "Rig combo probe",
-    effectiveFrom: from, basis: probeBasis,
-  });
-  assert.ok(probe.overlap_warning);
-  assert.equal(probe.overlap_warning.kind, "adjustment_template_overlap",
-    "the template's own kind label wins when both arms match -- #909's documented, transitional choice");
-  assert.equal(probe.overlap_warning.templates.length, 2, "both the template and the sibling plan are named");
-  const byName = Object.fromEntries(probe.overlap_warning.templates.map((x) => [x.name, x]));
-  assert.ok(byName["Rig combo template"], "the template entry is present");
-  assert.ok(byName["Rig combo template"].template_id, "...keyed by template_id, honestly");
-  assert.ok(byName["Rig combo sibling plan"], "the sibling plan entry is present");
-  assert.ok(byName["Rig combo sibling plan"].plan_id, "...keyed by plan_id, honestly");
-});
+// p909.combined-with-template — RETIRED by #929/0283. This cell used to prove that a basis
+// overlapping BOTH a live 0045 template and a sibling plan kept the template's own kind label and
+// named both (0281's own documented, transitional choice for the then-empty combined case). 0281's
+// own header predicted this note would become moot once #929 deleted the template arm; it has —
+// the template arm no longer exists, so there is no "combined" case left to prove here. The
+// equivalent proof for the CURRENT contract (a live template row is invisible, alone or alongside
+// a sibling plan) now lives in tests/plan-overlap-template-arm-retired.test.mjs's
+// "p929.template-alone" and "p929.template-with-sibling" cells, frontier-gated on 0283.
 
 test("p909.accrual-door — clara.create_accrual_adjustment (an outer door, not the shared function directly) surfaces the widened warning", async (t) => {
   if (unready(t)) return;
@@ -311,8 +287,13 @@ test("p909.tail — outside-in re-proof of 0281's own tail: both arms are presen
   assert.match(row.src, /clara\.accounting_plans/, "the sibling arm no longer scans clara.accounting_plans");
   assert.match(row.src, /clara\.accounting_plan_revisions/, "the sibling arm no longer scans clara.accounting_plan_revisions");
   assert.match(row.src, /is distinct from p_basis/, "the self-exclusion guard is missing");
-  assert.match(row.src, /adjustment_template_overlap/, "the existing template arm's kind is missing -- 0281 must ADD, not rewrite");
-  assert.match(row.src, /clara\.adjustment_templates/, "the existing template arm is missing");
+  // The two assertions that used to pin the 0045 template arm's own PRESENCE here
+  // (adjustment_template_overlap / clara.adjustment_templates) were REMOVED by #929/0283, which
+  // retires that arm -- their presence stopped being an invariant true across every frontier
+  // "0281 or later" the moment 0283 landed. The ABSENCE proof now lives in
+  // tests/plan-overlap-template-arm-retired.test.mjs's own "p929.tail" cell, frontier-gated on
+  // 0283, so this cell keeps describing only what remains true unconditionally from 0281 on: the
+  // sibling arm's own tokens, re-asserted above, and the posture/non-regression pins below.
   assert.equal(row.owner, "clara_fn_owner");
   assert.equal(row.secdef, true);
   assert.equal(row.vol, "s", "clara._plan_overlap_warning must stay STABLE");
