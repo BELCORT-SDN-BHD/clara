@@ -39,6 +39,7 @@
 
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 import {
   CLR, PG, ROLES, assertRaises, opk, rootQuery, humanQuery, roleQuery, ensureReady, endPool,
@@ -105,7 +106,13 @@ async function world() {
  *  OPEN, TIED basis. Everything is built through audited writers. */
 async function tiedScene(tag, { asOf = "2026-01-01" } = {}) {
   const w = await world();
-  const { client, plan } = await onboardingClient(w.users.alice, `p986_${tag}_${opk("c")}`);
+  // #899 (0287): the client birth wall refuses a THIRD client whose name shares a family
+  // token with two existing ones, and clara.name_family_token is the FIRST alphanumeric
+  // token of the name -- so `p986_<tag>_<opk>` put every fixture client of this file in one
+  // family, in the ONE firm this file shares, and the third onwards were refused. The unique
+  // part leads now, exactly as wb-fixtures.mjs's own onboardingClient() default and
+  // opening-ledger-source.test.mjs's own tiedScene were recut to do.
+  const { client, plan } = await onboardingClient(w.users.alice, `p986${randomUUID().slice(0, 8)}_${tag}_${opk("c")}`);
   await seedOpeningCoa(w.users.alice, client);
   const doc = await openingDoc(w.users.alice, { firm: w.firms.A, client });
   const receipt = await createOpeningSeed(w.users.alice, {
