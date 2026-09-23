@@ -14,7 +14,7 @@
 // to a posted entry. `packages/db/tests/accrual-adjustments.test.mjs` and
 // `packages/runtime/tests/accrual-e2e.mjs` own those against a real Postgres.
 //
-// THE FIXTURE IS STATEFUL IN EXACTLY TWO WAYS, and both are the walk's own journeys:
+// THE FIXTURE IS STATEFUL IN THREE WAYS, and each is a walk's own journey:
 //
 //   1. `create_accrual_adjustment` APPENDS to the list and REFUSES a set of particulars that names
 //      no service period — so the walk's create cell is a real transition (submit → the surface
@@ -22,6 +22,11 @@
 //   2. It records every op key it was sent, so the walk can prove that a resubmit of the SAME
 //      decision carries the SAME key. That is the whole of the lost-response story and no canned
 //      answer can show it.
+//   3. #936's `correct_accrual_adjustment` writes a SUCCESSOR row for the CORRECTABLE accrual and
+//      stamps the original's `corrected_by_accrual_id` — the same real-transition and op-key-replay
+//      proof, plus the ONE new refusal this door adds (`accrual_already_corrected`). A SEPARATE,
+//      already-corrected pair (`correctedAccrualId`/`correctedSuccessorId`) proves the LINEAGE
+//      READ without depending on this stateful journey.
 import { readCachedJson } from "./mock-dispatch.mjs";
 
 
@@ -44,6 +49,16 @@ export const ACC = {
   documentId: "65aaaaaa-6500-4650-8650-650650650650",
   purpose: "Monthly office rent accrual",
   unpostedPurpose: "Quarterly audit fee accrual",
+  // #936 — the dedicated correction door's own subjects. A CORRECTABLE accrual (never yet
+  // corrected, so the walk can DRIVE a real correction), and an ALREADY-corrected pair (so the
+  // lineage read and the "already corrected" refusal face can each be proven without depending on
+  // the stateful correction journey).
+  correctableAccrualId: "65bbbbbb-6500-4650-8650-650650650650",
+  correctablePurpose: "Monthly software subscription accrual",
+  correctableSuccessorId: "65eeeeee-6500-4650-8650-650650650650",
+  correctedAccrualId: "6500cccc-6500-4650-8650-650650650650",
+  correctedSuccessorId: "6500dddd-6500-4650-8650-650650650650",
+  correctedPurpose: "Monthly delivery contract accrual",
 };
 
 /** The ONLY RPC verbs this lane's dispatch chain recognises — the allow-list `readCachedJson`'s own
@@ -58,21 +73,34 @@ export const ACCRUAL_RPC_VERBS = new Set([
   "list_accrual_adjustments",
   "get_accrual_adjustment",
   "create_accrual_adjustment",
+  "correct_accrual_adjustment",
   "list_spoken_for_documents",
 ]);
 
-const state = { created: false, opKeys: [], refusals: 0 };
+const state = {
+  created: false, opKeys: [], refusals: 0,
+  // #936 — whether the CORRECTABLE accrual has been corrected during this walk, and the op keys
+  // `correct_accrual_adjustment` was sent, for the identical lost-response proof CREATE already has.
+  corrected: false, correctOpKeys: [],
+};
 
 export function resetAccruals() {
   state.created = false;
   state.opKeys = [];
   state.refusals = 0;
+  state.corrected = false;
+  state.correctOpKeys = [];
 }
 
 /** Every op key `create_accrual_adjustment` was sent, oldest first — the walk's lost-response cell
  *  asserts that a resubmit of the same decision repeats the key rather than minting a second. */
 export function accrualOpKeys() {
   return [...state.opKeys];
+}
+
+/** The same proof, for `correct_accrual_adjustment` (#936). */
+export function accrualCorrectOpKeys() {
+  return [...state.correctOpKeys];
 }
 
 const CLIENT = () => ({
@@ -239,9 +267,103 @@ const CREATED = {
   posted: false,
 };
 
-const LIST = () => (state.created ? [CREATED, UNPOSTED, POSTED] : [UNPOSTED, POSTED]);
+// #936 — A CORRECTABLE accrual: configured, never yet corrected, so the walk can DRIVE a real
+// correction and watch the list/detail RE-READ afterwards.
+const CORRECTABLE = {
+  ...UNPOSTED,
+  accrual_id: ACC.correctableAccrualId,
+  purpose: ACC.correctablePurpose,
+  expense_account_code: "6100",
+  amount_cents: 250000,
+  effective_from: "2026-07-01",
+  effective_to: "2026-07-31",
+  service_period_start: "2026-07-01",
+  service_period_end: "2026-07-31",
+  created_at: "2026-07-03T02:00:00.000Z",
+  occurrence_count: 0,
+};
+
+// #936 — AN ALREADY-corrected pair, present from the walk's first read: the ORIGINAL names its
+// successor and the SUCCESSOR names the row it corrects, in both directions — proving the lineage
+// READ without depending on the stateful correction journey above.
+const CORRECTED_ORIGINAL = {
+  ...UNPOSTED,
+  accrual_id: ACC.correctedAccrualId,
+  purpose: ACC.correctedPurpose,
+  amount_cents: 300000,
+  created_at: "2026-06-15T02:00:00.000Z",
+  occurrence_count: 0,
+};
+const CORRECTED_SUCCESSOR = {
+  ...CORRECTED_ORIGINAL,
+  accrual_id: ACC.correctedSuccessorId,
+  amount_cents: 360000,
+  created_at: "2026-07-04T02:00:00.000Z",
+};
+
+/** The row `correct_accrual_adjustment` writes DURING the walk, once `state.corrected` flips —
+ *  the SAME shape `create_accrual_adjustment`'s own `CREATED` is for the create journey. */
+const CORRECTABLE_SUCCESSOR = {
+  ...CORRECTABLE,
+  accrual_id: ACC.correctableSuccessorId,
+  amount_cents: 275000,
+  created_at: "2026-07-05T02:00:00.000Z",
+};
+
+const LIST = () => [
+  ...(state.created ? [CREATED] : []),
+  UNPOSTED, POSTED, CORRECTABLE, CORRECTED_ORIGINAL,
+  ...(state.corrected ? [CORRECTABLE_SUCCESSOR] : []),
+  CORRECTED_SUCCESSOR,
+];
 
 const OCCURRENCES = (accrualId) => {
+  if (accrualId === ACC.unpostedAccrualId) {
+    // THE ORPHAN WALL AS HISTORY: a reversal due event that was REACHED and REFUSED because its
+    // own accrual has posted nothing. `primary_state` says WHICH of the three ways it fails to
+    // stand behind it, which is the fact a reader of an accrual most needs.
+    return [
+      {
+        occurrence_id: "65c1c1c1-6500-4650-8650-650650650650",
+        leg: "primary",
+        due_date: "2026-09-30",
+        period_key: "2026-07-01",
+        attempt: 1,
+        revision: 1,
+        work_id: ACC.workId,
+        work_status: "queued",
+        work_error: null,
+        admitted_at: "2026-09-30T00:00:11.000Z",
+        outcome: { state: "admitted", logical_op_id: `work:${ACC.workId}:journal_entry:1`, replayed: false },
+        reverses_entry_id: null,
+        receipt_id: null,
+        entry_id: null,
+      },
+      {
+        occurrence_id: "65c2c2c2-6500-4650-8650-650650650650",
+        leg: "reversal",
+        due_date: "2026-10-01",
+        period_key: "2026-07-01",
+        attempt: 1,
+        revision: 1,
+        work_id: null,
+        work_status: null,
+        work_error: null,
+        admitted_at: null,
+        outcome: {
+          state: "refused",
+          code: "CLR13",
+          reason: "reversal_before_primary",
+          message: "this reversal has no posted accrual behind it to reverse",
+          primary_state: "not_posted",
+          primary_due_date: "2026-09-30",
+        },
+        reverses_entry_id: null,
+        receipt_id: null,
+        entry_id: null,
+      },
+    ];
+  }
   if (accrualId === ACC.accrualId) {
     return [
       {
@@ -278,54 +400,40 @@ const OCCURRENCES = (accrualId) => {
       },
     ];
   }
-  // THE ORPHAN WALL AS HISTORY: a reversal due event that was REACHED and REFUSED because its own
-  // accrual has posted nothing. `primary_state` says WHICH of the three ways it fails to stand
-  // behind it, which is the fact a reader of an accrual most needs.
-  return [
-    {
-      occurrence_id: "65c1c1c1-6500-4650-8650-650650650650",
-      leg: "primary",
-      due_date: "2026-09-30",
-      period_key: "2026-07-01",
-      attempt: 1,
-      revision: 1,
-      work_id: ACC.workId,
-      work_status: "queued",
-      work_error: null,
-      admitted_at: "2026-09-30T00:00:11.000Z",
-      outcome: { state: "admitted", logical_op_id: `work:${ACC.workId}:journal_entry:1`, replayed: false },
-      reverses_entry_id: null,
-      receipt_id: null,
-      entry_id: null,
-    },
-    {
-      occurrence_id: "65c2c2c2-6500-4650-8650-650650650650",
-      leg: "reversal",
-      due_date: "2026-10-01",
-      period_key: "2026-07-01",
-      attempt: 1,
-      revision: 1,
-      work_id: null,
-      work_status: null,
-      work_error: null,
-      admitted_at: null,
-      outcome: {
-        state: "refused",
-        code: "CLR13",
-        reason: "reversal_before_primary",
-        message: "this reversal has no posted accrual behind it to reverse",
-        primary_state: "not_posted",
-        primary_due_date: "2026-09-30",
-      },
-      reverses_entry_id: null,
-      receipt_id: null,
-      entry_id: null,
-    },
-  ];
+  // EVERY OTHER ACCRUAL (CREATED, and #936's own correctable/corrected fixtures) has reached no
+  // due date at all — a plain empty schedule, never a canned reversal refusal that was never this
+  // row's own fact.
+  return [];
 };
 
+/** Every row this fixture can answer `get_accrual_adjustment` for, by id — `LIST()`'s own
+ *  membership plus the row `correct_accrual_adjustment` writes once `state.corrected` is set,
+ *  which `LIST()` already folds in. */
+function rowById(accrualId) {
+  return LIST().find((r) => r.accrual_id === accrualId) ?? null;
+}
+
+/** The correction lineage `clara.get_accrual_adjustment` derives — 0222's own columns, first
+ *  WRITTEN by `clara.correct_accrual_adjustment` (0284). Dynamic for the CORRECTABLE pair, since
+ *  the walk creates that pointer during the journey; static for the pre-existing pair. */
+function lineageFor(accrualId) {
+  if (accrualId === ACC.correctableAccrualId) {
+    return { corrects_accrual_id: null, corrected_by_accrual_id: state.corrected ? ACC.correctableSuccessorId : null };
+  }
+  if (accrualId === ACC.correctableSuccessorId) {
+    return { corrects_accrual_id: ACC.correctableAccrualId, corrected_by_accrual_id: null };
+  }
+  if (accrualId === ACC.correctedAccrualId) {
+    return { corrects_accrual_id: null, corrected_by_accrual_id: ACC.correctedSuccessorId };
+  }
+  if (accrualId === ACC.correctedSuccessorId) {
+    return { corrects_accrual_id: ACC.correctedAccrualId, corrected_by_accrual_id: null };
+  }
+  return { corrects_accrual_id: null, corrected_by_accrual_id: null };
+}
+
 const DETAIL = (accrualId) => {
-  const row = accrualId === ACC.accrualId ? POSTED : accrualId === ACC.unpostedAccrualId ? UNPOSTED : CREATED;
+  const row = rowById(accrualId) ?? CREATED;
   const occurrences = OCCURRENCES(accrualId);
   return {
     ...row,
@@ -333,8 +441,7 @@ const DETAIL = (accrualId) => {
     authority_kind: "explicit_instruction",
     authority_ref: { kind: "accounting_work", id: ACC.authorityWorkId },
     instruction: "The client's standing instruction of 2026-06-30, minuted by the engagement partner.",
-    corrects_accrual_id: null,
-    corrected_by_accrual_id: null,
+    ...lineageFor(accrualId),
     plan: { ...PLAN(), purpose: row.purpose },
     occurrences,
     reversal: occurrences.find((o) => o.leg === "reversal") ?? null,
@@ -422,8 +529,12 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
   }
 
   if (verb === "get_accrual_adjustment") {
-    const known = [ACC.accrualId, ACC.unpostedAccrualId]
-      .concat(state.created ? [ACC.createdAccrualId] : []);
+    const known = [
+      ACC.accrualId, ACC.unpostedAccrualId, ACC.correctableAccrualId,
+      ACC.correctedAccrualId, ACC.correctedSuccessorId,
+    ]
+      .concat(state.created ? [ACC.createdAccrualId] : [])
+      .concat(state.corrected ? [ACC.correctableSuccessorId] : []);
     if (!known.includes(body.p_accrual)) return false;
     sendJson(response, 200, DETAIL(body.p_accrual), cors);
     return true;
@@ -468,6 +579,48 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
         leg: "primary",
       },
       next_occurrences: [{ due_date: "2026-08-31", leg: "primary" }],
+      overlap_warning: null,
+    }, cors);
+    return true;
+  }
+
+  // #936 — THE DEDICATED CORRECTION DOOR. Two stateful facts, mirroring create's own two: it
+  // records every op key it was sent (the lost-response proof), and an already-corrected target
+  // is refused BY NAME rather than silently accepted twice.
+  if (verb === "correct_accrual_adjustment") {
+    state.correctOpKeys.push(String(body.p_op_key ?? ""));
+    const target = body.p_accrual_id;
+    if (target === ACC.correctedAccrualId
+        || (target === ACC.correctableAccrualId && state.corrected)) {
+      sendJson(response, 400, {
+        code: "CLR10",
+        message: "this accrual has already been corrected; correct its successor instead",
+        details: `{"reason":"accrual_already_corrected","corrected_by_accrual_id":"${
+          target === ACC.correctedAccrualId ? ACC.correctedSuccessorId : ACC.correctableSuccessorId}"}`,
+      }, cors);
+      return true;
+    }
+    if (target !== ACC.correctableAccrualId) return false;
+    // THE SAME server-refusal shape CREATE exercises, on the SAME liability leg — reached the
+    // identical way: a leg the FORM admits and the DOOR refuses.
+    const accrual = body.p_accrual ?? {};
+    if (accrual.liability_account_code === "2050") {
+      sendJson(response, 400, {
+        code: "CLR10",
+        message: "accrual.liability_account_code names the payable control account; an accrual carries no identified open item",
+        details: '{"reason":"accrual_account_relationship","field":"accrual.liability_account_code","constraint":"non_control_liability","account_code":"2050","account_class":"payable"}',
+      }, cors);
+      return true;
+    }
+    state.corrected = true;
+    sendJson(response, 200, {
+      accrual_id: ACC.correctableSuccessorId,
+      corrects_accrual_id: ACC.correctableAccrualId,
+      plan_id: ACC.planId,
+      revision_id: "65f1f1f1-6500-4650-8650-650650650650",
+      revision: 2,
+      superseded_revision: 1,
+      status: "active",
       overlap_warning: null,
     }, cors);
     return true;

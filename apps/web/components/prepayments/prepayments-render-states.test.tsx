@@ -110,6 +110,11 @@ const SCHEDULE_ROW = {
   total_cents: 100000,
   period_count: 12,
   basis_kind: "human_stated",
+  term_live: true,
+  term_superseded_by: null,
+  term_moved: false,
+  term_current_start: "2026-01-01",
+  term_current_end: "2026-12-31",
   created_at: "2026-01-15T00:00:00Z",
   effective_from: "2026-01-31",
   effective_to: "2026-12-31",
@@ -193,6 +198,11 @@ const DETAIL = {
   source_status: "approved",
   document_id: DOC,
   service_period_id: "sp-1",
+  term_live: true,
+  term_superseded_by: null,
+  term_moved: false,
+  term_current_start: "2026-01-01",
+  term_current_end: "2026-03-31",
   term_start: "2026-01-01",
   term_end: "2026-03-31",
   basis_kind: "human_stated",
@@ -394,6 +404,82 @@ test("prepayments.detail — the derived facts, the judged account WITH its stat
       assert.match(text, /Final period — carries the remainder/);
       assert.equal(byTestId(h.container, "prepayment-period-posted").length, 2);
       assert.equal(byTestId(h.container, "prepayment-period-refused").length, 1);
+      // #919 — a LIVE term renders no superseded-term banner.
+      assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 0);
+      assert.doesNotMatch(text, /a corrected term needs a new schedule/);
+    });
+  });
+});
+
+test("prepayments.detail — ticket 919: a schedule whose term row has since been superseded renders the corrected-term banner, naming that a new schedule (not a revision) is what a corrected term needs", async () => {
+  const SUPERSEDED = {
+    ...DETAIL, term_live: false, term_superseded_by: "sp-2", term_moved: true,
+    term_current_start: "2026-01-01", term_current_end: "2027-01-31",
+  };
+  await withMockedEnv(rpcRouter({ get_prepayment_schedule: SUPERSEDED }), async () => {
+    await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
+      assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 1);
+      assert.match(h.text(), /a corrected term needs a new schedule/);
+    });
+  });
+});
+
+test("prepayments.detail — ticket 919 / ADV-02: a term row SUPERSEDED BY A RE-RECORD THAT MOVED NOTHING renders no banner, and neither does an ABSENT flag", async () => {
+  // `clara._record_document_service_period_core` supersedes the live row UNCONDITIONALLY — it
+  // compares no dates — so `term_live` goes false when a bookkeeper re-records the SAME term (a
+  // second verification against the same invoice, a retyped basis sentence). A surface keyed on
+  // `term_live` told that firm its term "has since been corrected" and that its running
+  // amortisation needed rebuilding. Both are false.
+  const RESTATED = {
+    ...DETAIL, term_live: false, term_superseded_by: "sp-2", term_moved: false,
+    term_current_start: DETAIL.term_start, term_current_end: DETAIL.term_end,
+  };
+  await withMockedEnv(rpcRouter({ get_prepayment_schedule: RESTATED }), async () => {
+    await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
+      assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 0,
+        "the term row moved, the TERM did not — there is nothing for this firm to act on");
+      assert.doesNotMatch(h.text(), /a corrected term needs a new schedule/);
+    });
+  });
+
+  // AND AN ABSENT FLAG PAINTS NOTHING (ADV-04). `term_moved` arrives as unvalidated jsonb; a web
+  // build ahead of its database, or a rolled-back migration under a live runtime, hands back a
+  // row without it. A truthiness test would then warn on EVERY prepayment in the firm.
+  const legacy: Record<string, unknown> = { ...DETAIL };
+  delete legacy.term_live;
+  delete legacy.term_superseded_by;
+  delete legacy.term_moved;
+  await withMockedEnv(rpcRouter({ get_prepayment_schedule: legacy }), async () => {
+    await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
+      assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 0,
+        "a read that says nothing about the term must not be rendered as a correction");
+    });
+  });
+});
+
+test("prepayments.list — ticket 919: the list surface carries the corrected-term word too, and only for a term that MOVED", async () => {
+  // The Agent Brief asks BOTH surfaces for the flag, and the list is where a person meets eleven
+  // schedules at once: a stale one with no mark beside ten healthy ones is the misreading this
+  // whole lane exists to prevent.
+  const MOVED = {
+    ...SCHEDULE_ROW, schedule_id: "aaaaaaaa-1111-4222-8333-444444444444",
+    purpose: "Prepaid insurance amortisation",
+    term_live: false, term_superseded_by: "sp-2", term_moved: true,
+    term_current_start: "2026-01-01", term_current_end: "2027-01-31",
+  };
+  const RESTATED = {
+    ...SCHEDULE_ROW, schedule_id: "bbbbbbbb-1111-4222-8333-444444444444",
+    purpose: "Prepaid subscription amortisation",
+    term_live: false, term_superseded_by: "sp-3", term_moved: false,
+  };
+  await withMockedEnv(rpcRouter({
+    list_prepayment_schedules: { client_id: CLIENT, schedules: [MOVED, RESTATED, SCHEDULE_ROW] },
+    list_prepayment_attention: { client_id: CLIENT, refusing: [], unscheduled: [] },
+  }), async () => {
+    await drive(createElement(PrepaymentsList, { clientId: CLIENT }), (h) => {
+      assert.equal(byTestId(h.container, "prepayment-row-term-corrected").length, 1,
+        "exactly ONE of the three rows had its term moved; the other two must carry nothing");
+      assert.match(h.text(), /Term corrected/, "and it is a WORD, never a colour alone");
     });
   });
 });

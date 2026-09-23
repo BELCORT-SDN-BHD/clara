@@ -201,6 +201,58 @@ test("`no_opening_tb_lines` is INFORMATION with the keyed path named, not an err
 });
 
 // ---------------------------------------------------------------------------------------------
+// 2b — #986: the ONE refusal on this lane that carries an act, driven in a real browser.
+// ---------------------------------------------------------------------------------------------
+
+test("ticket 986: a re-read document offers the refresh by name, and running it brings the basis onto the new reading", async ({ page }) => {
+  await signInTo(page, OPENING);
+  await createBasisWithDocument(page);
+
+  // The conflict the runtime mints when the tie document has been read again: the parse op key is
+  // stable per (seed, document) while the payload is keyed by region id, so `_reserve_op` refuses
+  // the same key with different args. Driven at the wire, so the surface under test is the real one.
+  await page.route("**/api/runtime/opening/parse-targets", (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "conflict", reason: "source_reread_since_parse" }),
+    }));
+  let refreshCalls = 0;
+  await page.route("**/api/runtime/opening/refresh-targets", (route) => {
+    refreshCalls += 1;
+    return route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "refreshed", lines: 5, retired: 3 }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Read this document" }).click();
+
+  // THE FACT, IN WORDS. Before #986 this banner printed the raw token under "Refused" and there
+  // was nothing to do about it — the basis could be neither read again nor approved.
+  await expect(page.getByText(/The document was read again/)).toBeVisible();
+  expect(await page.getByTestId("opening-parse-action").textContent())
+    .not.toMatch(/source_reread_since_parse/);
+
+  const refresh = page.getByRole("button", { name: "Refresh from the new reading" });
+  await expect(refresh).toBeVisible();
+  await expectAccessible(page, "opening tab, re-read conflict");
+
+  await refresh.click();
+
+  // BOTH NUMBERS. "5 read, 3 retired" says the new reading found lines the old one did not.
+  await expect(page.getByText(/5 line\(s\) were read from the new reading/)).toBeVisible();
+  await expect(page.getByText(/3 line\(s\) from the reading it left behind were retired/)).toBeVisible();
+  expect(refreshCalls, "the act must call the refresh verb, never the read again").toBe(1);
+
+  // AND IT IS THE REFRESH VERB THAT RAN: the read trigger is still there and still operable, but
+  // pressing it again would refuse again, which is exactly why the act is a second verb.
+  await expect(page.getByRole("button", { name: "Read this document" })).toBeEnabled();
+  await expectAccessible(page, "opening tab, refreshed");
+});
+
+// ---------------------------------------------------------------------------------------------
 // 3 — the URL, the keyboard and the small viewport.
 // ---------------------------------------------------------------------------------------------
 

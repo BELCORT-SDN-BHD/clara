@@ -39,6 +39,7 @@ components/accounting/staff-expense-claim-form.test.tsx
 components/accounting/trade-invoice-form-a11y.test.tsx
 components/accounting/trade-invoice-form-keyboard.test.tsx
 components/accounting/trade-invoice-form.test.tsx
+components/accruals/accrual-correction-form.test.tsx
 components/accruals/accrual-form.test.tsx
 components/accruals/accruals-list.test.tsx
 components/admin/invite-dialog-a11y.test.tsx
@@ -235,6 +236,7 @@ components/parts/v16-cards-a11y.test.tsx
 components/parts/v16-read-cards.test.tsx
 components/parts/work-cards.test.tsx
 components/password-policy.test.tsx
+components/plans/plan-revise-form.test.tsx
 components/plans/plans-render-states.test.tsx
 components/prepayments/prepayments-a11y.test.tsx
 components/prepayments/prepayments-keyboard.test.tsx
@@ -283,6 +285,7 @@ components/registers/opening-parse-action.test.tsx
 components/registers/opening-refusal-and-staleness.test.tsx
 components/registers/opening-register-fix-round.test.tsx
 components/registers/opening-register.test.tsx
+components/registers/opening-source-header.test.tsx
 components/registers/opening-target-document-panel.test.tsx
 components/registers/opening-tie-gates.test.tsx
 components/registers/register-refresh-siblings.test.tsx

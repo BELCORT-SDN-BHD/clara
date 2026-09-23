@@ -3607,3 +3607,234 @@ re-judgement.
 
 **Why a separate file rather than an edit to 0279.** #957's redo path re-applies only the HIGHEST
 applied version, and 0279 is no longer it. The number is provisional and claimed at MERGE.
+## 0284 — a dedicated accrual-correction door (#936, riders wave 3, lane 06)
+
+`0284_accrual_correction.sql` closes the bug measured during #907's review: the only way to
+change an accrual's amount was `clara.revise_accounting_plan` (0193), which advances the plan to a
+new revision while `clara.accrual_adjustments` (0222) — keyed on `(plan_id, revision)` — stayed at
+the FIRST revision, because the accrual configuration door only ever writes the first one. A reader
+joining plan → revision → accrual detail then saw the OLD amount beside the NEW one the ledger
+would post from the next due date on.
+
+**The choice, and why it is the only one of the ticket's two the lane could take.** The Agent Brief
+offered two shapes — the plan revision door itself writes the accrual detail, or a dedicated
+correction door writes a successor row. Lane 05 (#908) pins `clara.revise_accounting_plan`'s body
+as UNCHANGED in its own migration, so recutting it here would collide with that pin at
+integration. `clara.correct_accrual_adjustment` therefore NESTS `clara.revise_accounting_plan` —
+calling it, never recutting it — exactly as `clara.create_accrual_adjustment` already nests
+`clara.create_accounting_plan` (0222 §D).
+
+**What the file adds, and what it does not.** One function, its grant, and nothing else: no table,
+no column, no trigger, no index. `corrects_accrual_id`, `corrected_by_accrual_id`,
+`t_accrual_adjustments_append_only`'s one-admitted-update arm and the partial unique index
+`uq_accrual_adjustments_corrects` all already existed in 0222 — the ticket's own acceptance line
+("the columns and the unique index exist; no writer does today") is why. The door carries the LIVE
+revision's own schedule and authority window through to the nested `revise_accounting_plan` call
+unchanged; it corrects what was STATED (amount, either leg, term, method, instruction), never when
+or how often the plan runs.
+
+**"The LIVE revision" means the live revision** (review round 1, ADV-01 — driven on the lane rig
+inside rolled-back transactions). An accrual's plan is reachable by the GENERIC plan-revision door
+a bookkeeper uses today, so a firm may lawfully move its window afterwards — withdrawing future
+authority it no longer grants, or extending it. `clara.accrual_adjustments.effective_from/
+effective_to` is a fact derived when that row was written, and after such a revision it is STALE.
+The first cut of this file read five schedule arguments from the live revision and the
+`(effective_from, effective_to)` pair from the SUPERSEDED accrual row, so a correction silently
+reverted a lawful plan revision: it restored an authority the firm had withdrawn — the
+money-posting direction, since the plan then accrues months nobody authorised — or dropped one it
+had extended, with no refusal and no overlap warning. Every use of the window now reads the live
+revision, which also means `clara._assert_accrual_term_window` judges the corrected term against
+the authority that is actually live: a term that no longer brackets it is refused by name
+(`accrual_term_window_mismatch`) instead of quietly shrinking the window to fit. The term-window
+wall consequently sits in the WORLD half, after the reservation branch and under the RUNG-1 lock,
+because one of its two operands is mutable world state; only `clara._assert_accrual_particulars`,
+which reads nothing but the payload, stays above the reservation. The tail census pins both: the
+two `v_cur` uses must be present and `v_old.effective_from`/`v_old.effective_to` must be ABSENT
+from the body, because an assertion about what IS present cannot catch a second, forgotten use of
+the stale pair.
+
+**The derived nested key's collision is typed** (ADV-06). `clara._reserve_op` keys on
+`(firm_id, fn, op_key)`, so the nested `p_op_key || ':plan'` shares the
+`(firm, 'revise_accounting_plan')` namespace with keys a caller chooses for that door DIRECTLY —
+and #936 is the first place the nested door is one a human reaches with an arbitrary key of their
+own. The nested call is wrapped: an UNTYPED CLR10 out of it (which is exactly `_reserve_op`'s own
+detail-less "op_key reused with different args") re-raises with
+`{"reason":"plan_op_key_conflict"}`, and every other refusal re-raises byte-identically through a
+bare `raise`, so nothing the plan door already classifies is masked or renamed. Already-posted occurrences and their reversals are consequently
+untouched by construction — `clara.accounting_plan_occurrences` is never written by this door, and
+a past occurrence keeps naming the revision it ran under, exactly as 0193's own supersede-and-keep
+shape already guarantees for every other revision.
+
+**The race this door closes itself.** Two concurrent corrections of the same accrual would both
+pass an unlocked read of `corrected_by_accrual_id` and then collide on
+`uq_accrual_adjustments_corrects` as a bare `23505` neither could classify. The door instead takes
+RUNG 1 — the same `accounting_plans` row lock `clara.revise_accounting_plan` itself takes — BEFORE
+re-reading `corrected_by_accrual_id`, so a second caller targeting the same accrual (always the
+same plan) blocks on that lock and, once it proceeds, is refused by name
+(`accrual_already_corrected`) rather than by an unclassifiable constraint error.
+
+**Migration triad.** `tests/accrual-correction-preintegration-gate.mjs` (stem
+`accrual_correction$`), `ACCRUAL_CORRECTION_0284_COHORT`/`ACCRUAL_CORRECTION_0284_HUMAN_FNS` in
+`tests/rig-meta.mjs` (spread into `ALLOWED[clara_authenticated]` and its own bimodal
+`cohortFailures()` call, the wave-2 `0270` pattern), and the gate's `--import` token in
+`package.json`'s test script, last in migration order. Battery:
+`tests/accrual-correction.test.mjs`, frontier-gated on the same stem, extending
+`tests/accrual-adjustments-fixtures.mjs` (0222's own) rather than building a second world.
+
+**Redo-safe by construction**: the one statement that changes the catalog is
+`create or replace function`; the grant/revoke pair is idempotent. The prestate asserts nothing
+about this file's own function being absent.
+
+## 0285 — the prepayment schedule reads gain a term-liveness flag (#919, riders wave 3, lane 06)
+
+`0285_prepayment_term_liveness.sql` closes the gap #919's Agent Brief names: `clara.
+prepayment_schedules.service_period_id` (0223) echoes the `clara.document_service_periods` row a
+schedule was DERIVED from, but neither `clara.get_prepayment_schedule` nor
+`clara.list_prepayment_schedules` ever said whether that row was still the LIVE one on its
+document. 0223's own header already states the design in full — a corrected term supersedes the
+row and the stored allocation never moves, because a re-derived schedule is a NEW schedule on a
+NEW plan — but nothing on the read side made "this schedule is riding a since-superseded term"
+visible without a person already holding that rule as tribal knowledge.
+
+**What the file adds, and what it does not.** `term_live` (boolean), `term_superseded_by` (uuid,
+null while live), `term_moved` (boolean) and the live term itself as `term_current_start` /
+`term_current_end`, joined from `clara.document_service_periods` on `service_period_id`, on
+BOTH reads — no new argument, no floor change, no new relation, no new grant, no recut of
+`clara.record_document_service_period` or any other 0140/0223 body. The join is safe inside each
+definer body without minting one: both reads already run as `clara_fn_owner`, and
+`document_service_periods` carries the same RLS-forced, owner-exempt-nothing-but-the-owner-policy
+posture `prepayment_schedules` does (`p_dsp_owner … for all to clara_fn_owner using (true)`,
+0140), pinned in this file's own prestate and re-measured in its tail.
+
+**Why `term_moved` exists beside `term_live`** (review round 1, ADV-02 — driven on the lane rig
+inside a rolled-back transaction). `clara._record_document_service_period_core` (0140) supersedes
+the live row UNCONDITIONALLY: it compares no dates. So `term_live` goes FALSE on ANY re-record of a
+document's service period, including one that restates the term byte for byte — a second
+verification against the same invoice, a retyped basis sentence. A surface keyed on `term_live`
+alone therefore told a firm that its term "has since been corrected" and that "a corrected term
+needs a new schedule" when nothing about the term had moved: a false statement of fact, and
+materially wrong advice about a running amortisation. The two facts are different in kind and both
+are reported. `term_live`/`term_superseded_by` are the AUDIT pair — which row this schedule was
+derived from, and whether it is still the live statement of the term. `term_moved` is the one a
+SURFACE may act on: true only when the row is superseded AND the term that stands today states a
+different `(period_start, period_end)`. The comparison is against the document's one
+`superseded_at is null` row (`uq_document_service_period_live`), never against `superseded_by`'s,
+so a twice-corrected term answers about the term in force rather than an intermediate one.
+
+**The prestate pin is bimodal, and the FIRST branch was proved by hand.** This file RECUTS the two
+bodies it pins, so after one apply their live `sha256(prosrc)` is no longer the 0223 pre-image the
+prestate was measured against; an unconditional pin would refuse its own redo (the wave-3
+work-order addendum names exactly this trap). The prestate admits two pre-images per body and says
+which it found — the 0223 sha (`FIRST`) or a body already carrying this file's own `term_live`
+field beside its `#919` attribution (`REDO`) — and refuses a body matching neither. Half and half
+is not a mode: one read at its pre-image and the other already recut means something outside this
+file moved one of them, and the prestate refuses rather than papering over it. Because
+`CLARA_MIGRATION_REDO` only ever takes the `REDO` branch, the `FIRST` branch was driven by hand:
+inside one transaction that was rolled back, 0223's own two `create function` statements were
+re-run as `create or replace` to restore the pre-images (both re-measured equal to the pinned
+shas), this prestate block was executed verbatim, and it reported `FIRST`.
+
+**Why a join, never a stored column.** `clara.prepayment_schedules` is APPEND-ONLY IN FULL
+(`_tf_prepayment_schedules_append_only`) precisely because every column on it is a fact derived at
+creation. Whether the term row it names is *still* live is not such a fact — it can change at any
+later moment a bookkeeper corrects the term on the same document — so it is computed against the
+CURRENT catalog on every read rather than stored and left to go stale on a row this estate has
+already promised never to touch again.
+
+**Migration triad.** `tests/prepayment-term-liveness-preintegration-gate.mjs` (stem
+`prepayment_term_liveness$`) and the gate's `--import` token in `package.json`'s test script, last
+in migration order. No `rig-meta.mjs` cohort: this file mints no new function and changes no
+grant, so there is nothing for `ALLOWED`/`cohortFailures()` to track — the `0257_firm_setup_
+applicability.sql` precedent (a same-shape recut of an existing read) carries none either. Battery:
+`tests/prepayment-term-liveness.test.mjs`, frontier-gated on the same stem, reusing
+`tests/prepayment-schedule-fixtures.mjs`'s own scene builder and verb wrappers rather than building
+a second world.
+
+**Redo-safe by construction**: the two statements that change the catalog are
+`create or replace function`; the prestate asserts nothing about this file's own additions being
+absent.
+
+## 0286 — a re-read opening document becomes re-parsable (#986, riders wave 3, lane 06)
+
+`0286_opening_source_reread.sql` closes the dead end #656 measured and filed (its `656-final.md`
+residual R4 / follow-up F4). A tied opening basis's document-primary targets are recorded from ONE
+reading of the tie document by `clara.record_opening_targets_parsed` (0017), under an op key the
+runtime mints as `openingparse:<seed>:<document>` — deliberately stable per (seed, document), so a
+retried POST cannot double a basis — while the payload that key hashes is keyed by REGION ID. When
+the document is genuinely READ AGAIN, two walls close at once: the re-parse refuses (`_reserve_op`
+sees the same key with different args, CLR10, mapped by the runtime to the typed conflict
+`source_reread_since_parse`) and so does the APPROVAL (`clara.approve_opening_seed` re-runs
+`clara._assert_opening_target_fact` over every target, and `_assert_opening_extraction_ref` refuses
+a citation whose extraction is superseded — CLR31 `extraction_not_accepted`). The basis can be
+neither re-parsed nor approved; the only escape was to cancel it and start another, discarding
+every drafted opening item with it.
+
+**And a fresh op key is not the fix.** Handing the parse door a random key after a re-read succeeds
+and leaves the OLD targets standing beside the new ones — the new reading mints new region ids and
+therefore new `line_key`s, and `uq_opening_tb_targets_key` is on (seed_id, line_key). A three-line
+trial balance would carry six targets and tie to nothing. That is what the stable key exists to
+prevent, and it is why the remedy has to RETIRE the superseded set rather than merely record
+another one.
+
+**What the file adds.** (1) `clara.opening_target_refreshes` — an append-only, FORCE-RLS receipt
+relation: one row per refresh naming the basis, the document, the reading LEFT and the reading
+ARRIVED AT, the retired and recorded counts, and the retired rows VERBATIM. (2)
+`clara.refresh_opening_targets_from_reread(uuid,jsonb,uuid,uuid,text)` — ONE door, `clara_runtime`
+only, exactly as `record_opening_targets_parsed` is, whose op key carries the NEW EXTRACTION
+(`openingreread:<seed>:<document>:<extraction>`). It runs the parse door's own front-door walls, then
+three of its own (`stale_extraction_version` — the reading refreshed onto must be the document's
+authoritative run; `refresh_extraction_mixed` — every line cites that one reading;
+`no_reread_to_refresh` — the basis must already stand on a different reading), retires the stale
+targets, records the new ones through the same field-level fact assertion, and writes the receipt.
+(3) Nothing else: no column on `clara.opening_tb_targets`, no trigger on it, no recut of any 0017
+body, no new grant to any human or agent lane.
+
+**Why a receipt relation and not a `state` column on the targets.** `clara.opening_items` carries
+the estate's supersede-chain shape (`state`, `superseded_by_item`, `supersedes_item_id`) and was the
+first candidate. Measured, it does not fit: `clara._opening_seed_deltas`, `clara._assert_opening_tie`,
+`clara.get_opening_dryrun`, `clara.approve_opening_seed`'s two target sweeps, 0056's close-model read
+and 0239's three `opening_balance_work` reads ALL sum or scan `clara.opening_tb_targets` with no
+state predicate. A retired state on that table would silently make nine bodies wrong until each was
+recut — in the one lane whose whole point is that a stale figure must never stand quietly beside a
+fresh one. The live target set stays exactly "the rows in the table", which is what all nine already
+believe, and the supersession is recorded where a reader can ask for it.
+
+**The caller's echo is walled the same way the parse door walls it** (review round 1, ADV-07).
+`clara.record_opening_targets_parsed` admits an OPTIONAL `opening_fact` on a line — a parser
+echoing the triple it believes it read — and accepts that echo only when it is exactly the triple
+the database independently proved from the cited region, refusing
+`opening_extraction_fact_malformed` / `opening_extraction_fact_mismatch` otherwise. The first cut
+of this file ran the field-level fact assertion but IGNORED the key, so the refresh door silently
+accepted a payload the parse door would have refused, while its own header claimed "byte for byte
+the parse door's own per-line validation". Two write doors on one lane must not disagree about
+what a payload may CLAIM — the more so because #986's successor contract hands this core to #985's
+chat tool — so the wall runs here too, in the same position, with the same two tokens, and pinned
+by the tail census. It is a wall, never a source of figures: nothing stored is taken from the echo.
+
+**The reservation comes before the precondition the door consumes**, and the ordering was measured
+(`tests/opening-source-reread.test.mjs`, `p986.reread.refresh_walls`, found the other order on its
+first run). Everything above `_reserve_op` is a FRONT-DOOR wall — the same set the parse door checks
+before ITS reservation — and a replay is honoured only while those hold. `no_reread_to_refresh` is
+different in kind: a successful refresh makes it false, because the stale targets it names are the
+ones the door has just retired, so checking it first made a retried POST refuse instead of replaying
+its own receipt.
+
+**Migration triad.** `tests/opening-source-reread-preintegration-gate.mjs` (stem
+`opening_source_reread$`, detected off the CATALOG rather than a migration number) and the gate's
+`--import` token in `package.json`'s test script, last in migration order; a
+`OPENING_SOURCE_REREAD_0286_COHORT` in `tests/rig-meta.mjs`, spread into `ALLOWED[clara_runtime]`
+and given its own bimodal `cohortFailures()` call. Battery: `tests/opening-source-reread.test.mjs`,
+standing on the real-producer fixture `tests/wave-b/wb-opening-producer.mjs` — its own module
+because a test file cannot import another test file without running its cells, and #656's battery
+grew the same helper inline. Every `opening_tb.line` region it creates goes through
+`clara.persist_document_extraction`, never a raw INSERT, so a genuine second reading supersedes the
+first and moves `documents.authoritative_extraction_id` exactly as production does.
+
+**Redo-safe by construction**: `create table if not exists`, `create index if not exists`,
+`alter table … enable/force row level security`, `drop policy if exists` before each `create policy`,
+`create or replace trigger` (PostgreSQL 14+; this estate runs 17), `create or replace function`, and
+an idempotent `grant`. The prestate asserts nothing about this file's own door or relation being
+absent, and there is no backfill and no data-dependent branch anywhere in the prestate or the tail.
+A `CLARA_MIGRATION_REDO` of this file was exercised during authoring; note that `create table if not
+exists` SKIPS an existing relation, so a redo that also changed the table's own definition would
+need the table dropped first — the redo used here changed only the function body.

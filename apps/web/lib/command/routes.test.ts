@@ -273,6 +273,11 @@ const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   // row), so both hrefs are built from an id at render time and there is no literal to find.
   { pattern: "/clients/[clientId]/accruals/new", builder: "accrualCreateHref" },
   { pattern: "/clients/[clientId]/accruals/[accrualId]", builder: "accrualDetailHref" },
+  // #936 — the correction route, on the SAME footing `planReviseHref` states for `/revise`: it is
+  // reached from the accrual detail's own "Correct this accrual" control and from the lineage
+  // pointer's successor link, both of which HOLD the accrual id already, so the href is built at
+  // render time and there is no literal to find.
+  { pattern: "/clients/[clientId]/accruals/[accrualId]/correct", builder: "accrualCorrectHref" },
   // #653's two prepayment destinations, for exactly the reason #640's three are: each is reached
   // from a surface that HOLDS the thing — the attention band's "configure the schedule" row (which
   // carries the recognition entry in its query string), the list row, the detail's own controls —

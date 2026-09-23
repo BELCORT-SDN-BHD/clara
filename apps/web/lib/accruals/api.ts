@@ -212,6 +212,33 @@ export async function loadAccruals(
   return answer?.accruals ?? [];
 }
 
+/**
+ * #936 — THE ACCRUAL AN ACCOUNTING PLAN'S FIGURES ARE STATED ON, or null when the plan is not
+ * accrual-backed. Pure; it selects over rows `loadAccruals` already read.
+ *
+ * WHY A SELECTOR AND NOT A FIELD ON THE PLAN READ. `clara.get_accounting_plan` does not say
+ * whether a plan carries an accrual detail row, and `kind` cannot stand in for it: an accrual's
+ * plan is a `reversing_journal`, and so is an ordinary reversing journal nobody configured from an
+ * accrual (MEASURED on the lane rig: 115 reversing plans with an accrual and 3 without). The
+ * honest discriminator is `clara.accrual_adjustments.plan_id`, which `list_accrual_adjustments`
+ * already returns to this client's own surfaces.
+ *
+ * THE LIVE ROW IS THE HIGHEST REVISION. A corrected accrual leaves BOTH rows on the relation —
+ * that is the whole of #936's lineage — and `uq_accrual_adjustments_plan_revision (plan_id,
+ * revision)` makes the newest revision the one the plan is running under.
+ */
+export function liveAccrualForPlan(
+  rows: readonly AccrualListRow[],
+  planId: string,
+): AccrualListRow | null {
+  let live: AccrualListRow | null = null;
+  for (const row of rows) {
+    if (row.plan_id !== planId) continue;
+    if (live === null || row.revision > live.revision) live = row;
+  }
+  return live;
+}
+
 export async function loadAccrual(accrualId: string, o: Opts = {}): Promise<AccrualDetail | null> {
   if (!isUuidShape(accrualId)) return null;
   return callDoor<AccrualDetail | null>("get_accrual_adjustment", { p_accrual: accrualId }, opts(o));
@@ -298,6 +325,42 @@ export function accrualScheduleYields(
     if (due >= from) return true;
   }
   return false;
+}
+
+// ── correct (#936) ─────────────────────────────────────────────────────────
+
+/** The answer `clara.correct_accrual_adjustment` hands back. It NAMES the row it supersedes
+ *  (`corrects_accrual_id`) — the pointer the detail surface renders as lineage — and the plan
+ *  revision the corrected basis now lives on. Like `AccrualCreated`, this is a REPORT of what the
+ *  database did, never a value the form paints as state: the form navigates to the NEW accrual's
+ *  own address and that destination re-reads. */
+export type AccrualCorrected = {
+  accrual_id: string;
+  corrects_accrual_id: string;
+  plan_id: string;
+  revision_id: string;
+  revision: number;
+  superseded_revision: number;
+  status: string;
+  overlap_warning: AccrualCreated["overlap_warning"];
+};
+
+export type CorrectAccrualInput = {
+  /** The accrual being corrected — the row this call supersedes. */
+  accrualId: string;
+  /** The CORRECTED particulars, in the database's own field spelling — the same shape
+   *  `CreateAccrualInput.accrual` carries. The door reads no schedule, purpose or authority
+   *  argument: those are the live plan revision's own, carried through unchanged. */
+  accrual: AccrualParticulars;
+  opKey: string;
+};
+
+export async function correctAccrual(input: CorrectAccrualInput, o: Opts = {}): Promise<AccrualCorrected> {
+  return callDoor<AccrualCorrected>(
+    "correct_accrual_adjustment",
+    { p_accrual_id: input.accrualId, p_accrual: input.accrual, p_op_key: input.opKey },
+    opts(o),
+  );
 }
 
 /** The two derived journal lines an accrual posts, for the DISABLED preview the form renders. It

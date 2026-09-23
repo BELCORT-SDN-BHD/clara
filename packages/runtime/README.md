@@ -308,14 +308,17 @@ optional attachment, and a SIGKILL between the database commit and the workflow 
 advance arm — where the allocation is minted by a deferred constraint trigger at commit, so only a
 real World can show the four writes are one transaction.
 
-This is a general rule, not per-file guidance: none of the standalone e2es
-(`tests/interview-e2e.mjs`, `tests/version-cutover-e2e.mjs`, `tests/work-journal-e2e.mjs`,
-`tests/work-question-e2e.mjs`, `tests/work-cancel-e2e.mjs`,
-`tests/periodic-adjustment-e2e.mjs`, `tests/staff-expense-claim-e2e.mjs`) may share a host with another suite
-WHILE it is actually running. `db-live-gates` runs each battery alone — one at a time on the same
-rig, never concurrently with anything else that could touch the same rows or steal the same lease
-clock. Running one locally while another suite hammers the same database at the same time is the
-one setup CI does not reproduce and these e2es do not defend against.
+This is a general rule, not per-file guidance, and it deliberately NAMES NO FILE (#919 — the list
+here previously said "five" while enumerating seven, itself already stale against the actual set):
+none of the standalone e2es this package ships that
+[`db-live-gates/action.yml`](../../.github/actions/db-live-gates/action.yml) wires by path may
+share a host with another suite WHILE it is actually running — grep that action for
+`world-gate.mjs` (or `.output/server` for the three intake legs it drives directly) for the
+CURRENT, authoritative set and its order, rather than trust a count restated here to stay in sync.
+`db-live-gates` runs each battery alone — one at a time on the same rig, never concurrently with
+anything else that could touch the same rows or steal the same lease clock. Running one locally
+while another suite hammers the same database at the same time is the one setup CI does not
+reproduce and these e2es do not defend against.
 
 `tests/version-cutover-e2e.mjs` is the one exception to needing a *clean* rig, not to the rule
 above: its rollback preflight — per-name and inventory-shaped alike — is scoped to the
@@ -1380,13 +1383,49 @@ because emitting nothing is exactly what the lane did before the module existed.
 - CLR10 `op_key reused with different args` — the parse's op key is stable per (seed, document) so a
   retry cannot double a basis, while the payload it hashes is keyed by region id. Re-reading the
   tie document therefore makes a second parse a replay CONFLICT, which the generic arm reported as
-  `malformed_lines`. It is now a typed 409 `source_reread_since_parse`. **Named residual**: the
-  answer is honest but still a dead end; re-parsing a re-read document needs either an op key
-  carrying the extraction or a door that re-points existing targets.
+  `malformed_lines`. It is now a typed 409 `source_reread_since_parse`, and #986 (below) is the way
+  forward from it.
 
 `tests/opening-ledger-source-e2e.mjs` is the standalone leg that runs the whole chain on real
 Postgres. It bootstraps **no Workflow World**, measured rather than skipped: no workflow touches the
 opening lane, so AC7's database-boundary clause applies.
+
+### The re-read remedy (#986)
+
+`source_reread_since_parse` was honest and still a dead end: the basis's targets then cite an
+extraction the document has superseded, so `clara.approve_opening_seed` refuses them too
+(`extraction_not_accepted`), and the only escape was to cancel the basis and start another. And a
+fresh op key is NOT the fix — it succeeds and leaves the old targets standing beside the new ones,
+because a second reading mints new region ids and therefore new `line_key`s.
+
+`refreshOpeningTargets` (same module) is the second door, reached at
+`POST /api/opening/refresh-targets` with the same bookkeeper+ floor, the same single clara_runtime
+transaction and the same F-H7 re-assertion. It shares the parse's WHOLE read half —
+`readOpeningParseSubject`, extracted from `parseOpeningTargets` without changing one branch — and
+calls `clara.refresh_opening_targets_from_reread` (migration 0286) under
+`openingRefreshOpKey(seed, document, extraction)`: a retried refresh of the same reading replays,
+a LATER reading is a new act. It answers 202 `{status:'refreshed', lines, retired}`, and 409
+`{status:'refused', reason:'no_reread_to_refresh'}` on a basis nobody re-read, so it can never
+become a second road past the pinned parse key.
+
+**`openingOpKey` did not move**, and that is the point: `parseOpeningTargets` refuses a re-read
+exactly as it did before, and `clara.record_opening_targets_parsed`'s body sha is pinned in 0286's
+prestate AND tail.
+
+**A receipt with no counts is not a successful refresh** (review round 1, ADV-08).
+`clara._reserve_op` answers `{pending:true}` when the key is held with no stored result, and the
+door returns that envelope verbatim on its dedupe branch. Reading the counts as
+`targets_recorded ?? lines.length` painted that envelope as a 202 "N read, 0 retired" — an act
+that did nothing, reported as news. `refreshOpeningTargets` now answers a typed 409
+`{status:'refused', code:'CLR13', reason:'operation_in_flight'}` for a receipt carrying no
+`targets_recorded`, and the counts it does report are the RECEIPT's own, never the payload's
+length: how many lines the new reading carried and how many the reading it left behind had are
+facts about the DOCUMENT, not about what this process happened to send. The state is hard to reach
+(the door takes `opening_seed_registry FOR UPDATE` before its reservation, so two callers
+serialize and the reservation and the receipt commit together), which is exactly why it must not
+be papered over. A DB-side mirror of #936's own `pending` branch was considered and left out: no
+cell could ever drive it through the door, so it would be untestable defensive code inside a
+migration whose tail census cannot reach behaviour.
 ## The intake batch lane (#636)
 
 `lib/intake-batches.mjs` is a NEW, NON-FROZEN module carrying every line of batch logic:

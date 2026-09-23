@@ -34,8 +34,8 @@ import { test } from "node:test";
 import {
   accrualDraftKey, accrualFieldElementId, clearAccrualDraft, emptyAccrualDraft,
   fieldForAccrualPath, firstInvalidAccrualField, readAccrualDraft, toAccrualParticulars,
-  validateAccrualDraft, writeAccrualDraft,
-  type AccrualDraft,
+  validateAccrualCorrectionDraft, validateAccrualDraft, writeAccrualDraft,
+  type AccrualCorrectionDraft, type AccrualDraft,
 } from "./accrual-draft";
 import type { DraftStorage } from "./journal-draft";
 
@@ -349,6 +349,90 @@ test("652.valid: the first invalid field is the first control in reading order",
 });
 
 // ==============================================================================================
+// 4b · #936 — THE CORRECTION DRAFT. Fewer fields than CREATE (no purpose, authority or schedule —
+//      `clara.correct_accrual_adjustment` takes none of those as arguments), and the ONE rule
+//      CREATE does not have: the fixed authority window is never a control the correction draft
+//      names, so a term that would fall outside it is named at the TERM, not at the window.
+// ==============================================================================================
+
+function goodCorrectionDraft(over: Partial<AccrualCorrectionDraft> = {}): AccrualCorrectionDraft {
+  return {
+    expenseAccountCode: "6100",
+    liabilityAccountCode: "2020",
+    amountCents: 120000,
+    servicePeriodStart: "2026-07-01",
+    servicePeriodEnd: "2026-07-31",
+    method: "stated_amount",
+    instruction: "the client's standing instruction of 2026-06-30",
+    memo: "",
+    sourceDocumentId: "",
+    ...over,
+  };
+}
+
+const CORRECTION_WINDOW = { effectiveFrom: "2026-07-01", effectiveTo: "2026-07-31" };
+
+test("936.correction: a complete correction raises nothing", () => {
+  assert.deepEqual(validateAccrualCorrectionDraft(goodCorrectionDraft(), CORRECTION_WINDOW, KNOWN), []);
+});
+
+test("936.correction: a SILENT TERM and a stated ZERO are named exactly as CREATE names them", () => {
+  assert.deepEqual(
+    validateAccrualCorrectionDraft(goodCorrectionDraft({ servicePeriodStart: "" }), CORRECTION_WINDOW, KNOWN),
+    [{ field: "servicePeriodStart", code: "silentTerm" }]);
+  assert.deepEqual(
+    validateAccrualCorrectionDraft(goodCorrectionDraft({ amountCents: 0 }), CORRECTION_WINDOW, KNOWN),
+    [{ field: "amountCents", code: "amountRequired" }]);
+});
+
+test("936.correction: the two legs, their roles and their distinctness — the same rule CREATE enforces", () => {
+  assert.deepEqual(
+    validateAccrualCorrectionDraft(goodCorrectionDraft({ liabilityAccountCode: "6100" }), CORRECTION_WINDOW, KNOWN),
+    [{ field: "liabilityAccountCode", code: "accountsNotDistinct" }]);
+  assert.deepEqual(
+    validateAccrualCorrectionDraft(goodCorrectionDraft({ expenseAccountCode: "9999" }), CORRECTION_WINDOW, KNOWN),
+    [{ field: "expenseAccountCode", code: "accountUnknown" }]);
+});
+
+test("936.correction: no purpose, authority or schedule issue exists to raise — an EMPTY draft names only what this draft carries", () => {
+  const issues = validateAccrualCorrectionDraft(
+    { expenseAccountCode: "", liabilityAccountCode: "", amountCents: 0, servicePeriodStart: "",
+      servicePeriodEnd: "", method: "stated_amount", instruction: "", memo: "", sourceDocumentId: "" },
+    CORRECTION_WINDOW, KNOWN);
+  const fields = issues.map((i) => i.field);
+  assert.ok(!fields.includes("purpose" as never), "there is no purpose control to fail");
+  assert.ok(!fields.includes("authorityWorkId" as never), "there is no authority control to fail");
+  assert.ok(!fields.includes("frequency" as never), "there is no schedule control to fail");
+});
+
+test("936.correction: a corrected term that would fall outside the FIXED authority window is named at the TERM, not at the window — the window is not this draft's control to fix", () => {
+  const before = validateAccrualCorrectionDraft(
+    goodCorrectionDraft({ servicePeriodStart: "2026-07-15" }), CORRECTION_WINDOW, KNOWN);
+  assert.deepEqual(before, [{ field: "servicePeriodStart", code: "windowBeforeTerm" }],
+    "the fixed window starts 2026-07-01, before a term restated to start 2026-07-15");
+  const after = validateAccrualCorrectionDraft(
+    goodCorrectionDraft({ servicePeriodEnd: "2026-07-15" }), CORRECTION_WINDOW, KNOWN);
+  assert.deepEqual(after, [{ field: "servicePeriodEnd", code: "windowAfterTerm" }],
+    "the fixed window ends 2026-07-31, after a term restated to end 2026-07-15");
+});
+
+test("936.correction: toAccrualParticulars accepts the correction draft structurally — no second wire mapping", () => {
+  const particulars = toAccrualParticulars(goodCorrectionDraft({ memo: "Restated memo", sourceDocumentId: "  " }));
+  assert.deepEqual(particulars, {
+    expense_account_code: "6100",
+    liability_account_code: "2020",
+    amount_cents: 120000,
+    currency: "MYR",
+    service_period_start: "2026-07-01",
+    service_period_end: "2026-07-31",
+    term_source: "human_stated",
+    method: { rule: "stated_amount" },
+    instruction: "the client's standing instruction of 2026-06-30",
+    memo: "Restated memo",
+  }, "an untrimmed blank source_document_id is dropped, exactly as CREATE's own wire test proves");
+});
+
+// ==============================================================================================
 // 5 · The wire shape.
 // ==============================================================================================
 
@@ -372,4 +456,42 @@ test("652.wire: the optional particulars appear only when they were given, and a
   const full = toAccrualParticulars(goodDraft({ memo: "  July rent  ", sourceDocumentId: " d-1 " }));
   assert.equal(full.memo, "July rent");
   assert.equal(full.source_document_id, "d-1");
+});
+
+// ==============================================================================================
+// L06-STD-1 — THE FIVE PARTICULARS ARE ONE RULE WITH ONE OWNER.
+//
+// The two validators each carried a byte-identical copy of the account-leg, amount, term and
+// instruction checks, so a change to any of them had to be made twice and re-verified twice. They
+// now share `validateAccrualParticulars`. This cell pins the property that made the duplication
+// worth removing: over the SAME particulars, the correction validator's answer IS the create
+// validator's answer with the create-only issues removed — so the two forms can never come to
+// disagree about what a valid accrual states.
+// ==============================================================================================
+
+test("936.correction: the shared particulars answer identically on both validators", () => {
+  const CREATE_ONLY = new Set(["purpose", "authorityWorkId", "effectiveFrom", "effectiveTo",
+    "frequency", "dayRule", "dayOfMonth"]);
+  const cases: Array<Partial<AccrualCorrectionDraft>> = [
+    {},
+    { expenseAccountCode: "" },
+    { liabilityAccountCode: "" },
+    { expenseAccountCode: "9999" },
+    { liabilityAccountCode: "9999" },
+    { liabilityAccountCode: "6100" },
+    { amountCents: 0 },
+    { amountCents: 1.5 },
+    { servicePeriodStart: "" },
+    { servicePeriodEnd: "" },
+    { servicePeriodEnd: "2026-06-01" },
+    { instruction: "" },
+  ];
+  for (const over of cases) {
+    const shared = validateAccrualDraft(goodDraft(over as Partial<AccrualDraft>), KNOWN)
+      .filter((i) => !CREATE_ONLY.has(i.field));
+    const correction = validateAccrualCorrectionDraft(goodCorrectionDraft(over), CORRECTION_WINDOW, KNOWN)
+      .filter((i) => i.code !== "windowBeforeTerm" && i.code !== "windowAfterTerm");
+    assert.deepEqual(correction, shared,
+      `the two validators disagree about ${JSON.stringify(over)}`);
+  }
 });

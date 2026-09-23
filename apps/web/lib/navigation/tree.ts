@@ -631,6 +631,15 @@ export function accrualDetailHref(clientId: string, accrualId: string): string {
   return `${clientBase(clientId)}/accruals/${encodeURIComponent(accrualId)}`;
 }
 
+/** `/clients/:clientId/accruals/:accrualId/correct` — a NEW accrual-detail row correcting this
+ *  one (#936). CORRECTING IS NOT EDITING, and the route name says so: `clara.
+ *  correct_accrual_adjustment` writes a SUCCESSOR row and keeps the superseded one, exactly the
+ *  distinction `planReviseHref` states for the plan lane's own `/revise` route. The id is
+ *  percent-encoded for the reason `workDetailHref` states. */
+export function accrualCorrectHref(clientId: string, accrualId: string): string {
+  return `${clientBase(clientId)}/accruals/${encodeURIComponent(accrualId)}/correct`;
+}
+
 /** `/clients/:clientId/prepayments` — the C8/C9 prepayment list (#653). */
 export function prepaymentsHref(clientId: string): string {
   return `${clientBase(clientId)}/prepayments`;

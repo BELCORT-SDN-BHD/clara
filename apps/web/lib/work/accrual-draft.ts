@@ -243,34 +243,10 @@ export function validateAccrualDraft(
   if (t(draft.purpose) === "") issues.push({ field: "purpose", code: "purposeRequired" });
   if (t(draft.authorityWorkId) === "") issues.push({ field: "authorityWorkId", code: "authorityRequired" });
 
-  if (t(draft.expenseAccountCode) === "") {
-    issues.push({ field: "expenseAccountCode", code: "expenseAccountRequired" });
-  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.expenseAccountCode))) {
-    issues.push({ field: "expenseAccountCode", code: "accountUnknown" });
-  }
-  if (t(draft.liabilityAccountCode) === "") {
-    issues.push({ field: "liabilityAccountCode", code: "liabilityAccountRequired" });
-  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.liabilityAccountCode))) {
-    issues.push({ field: "liabilityAccountCode", code: "accountUnknown" });
-  }
-  if (t(draft.expenseAccountCode) !== "" && t(draft.expenseAccountCode) === t(draft.liabilityAccountCode)) {
-    issues.push({ field: "liabilityAccountCode", code: "accountsNotDistinct" });
-  }
-
-  if (!Number.isSafeInteger(draft.amountCents) || draft.amountCents <= 0) {
-    issues.push({ field: "amountCents", code: "amountRequired" });
-  }
-
-  // THE TERM. Both halves, and its own code rather than a generic "required", because the
-  // preparer's next move differs: they have to go and find out, not fix a typo.
-  if (t(draft.servicePeriodStart) === "") issues.push({ field: "servicePeriodStart", code: "silentTerm" });
-  if (t(draft.servicePeriodEnd) === "") issues.push({ field: "servicePeriodEnd", code: "silentTerm" });
-  if (t(draft.servicePeriodStart) !== "" && t(draft.servicePeriodEnd) !== ""
-      && draft.servicePeriodEnd < draft.servicePeriodStart) {
-    issues.push({ field: "servicePeriodEnd", code: "servicePeriodOrder" });
-  }
-
-  if (t(draft.instruction) === "") issues.push({ field: "instruction", code: "instructionRequired" });
+  // THE FIVE PARTICULARS BOTH DRAFTS CARRY, in the order their controls appear. Shared with the
+  // #936 correction draft rather than written twice: the codes, the fields and the order are one
+  // rule each, and a rule with two owners is one that gets changed in one place.
+  issues.push(...validateAccrualParticulars(draft, knownAccounts));
 
   if (t(draft.effectiveFrom) === "") issues.push({ field: "effectiveFrom", code: "effectiveFromRequired" });
   // THE AUTHORITY ENDS, AND IT ENDS INSIDE THE TERM IT ACCRUES FOR (0222's SIXTH MEASUREMENT,
@@ -337,15 +313,79 @@ export function firstInvalidAccrualField(issues: readonly AccrualIssue[]): Accru
   return issues[0]?.field ?? null;
 }
 
+/**
+ * THE FIVE PARTICULARS EVERY ACCRUAL DRAFT STATES — both account legs, the amount, the term and
+ * the instruction — validated once, in the order their controls appear.
+ *
+ * WHY IT IS SHARED (standards review L06-STD-1). `validateAccrualDraft` (create) and
+ * `validateAccrualCorrectionDraft` (#936) each carried a byte-identical copy of these checks: the
+ * same five fields, the same issue codes, the same order. That is Fowler's Duplicated Code with
+ * the sharpest edge it has — the two copies are a rule of the ACCOUNTING domain, so a later change
+ * to one (a currency-precision rule, a reworded `accountsNotDistinct`) silently makes the create
+ * form and the correction form disagree about what a valid accrual is.
+ *
+ * The parameter is `AccrualParticularsSource`, the same `Pick` `toAccrualParticulars` takes, so
+ * either draft shape satisfies it structurally. Each caller appends its OWN issues around this
+ * call: create adds purpose, authority and the schedule window; a correction adds the brackets of
+ * the window it may not move.
+ */
+export function validateAccrualParticulars(
+  draft: AccrualParticularsSource,
+  knownAccounts: ReadonlySet<string> | null = null,
+): AccrualIssue[] {
+  const issues: AccrualIssue[] = [];
+  const t = (v: string) => v.trim();
+
+  if (t(draft.expenseAccountCode) === "") {
+    issues.push({ field: "expenseAccountCode", code: "expenseAccountRequired" });
+  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.expenseAccountCode))) {
+    issues.push({ field: "expenseAccountCode", code: "accountUnknown" });
+  }
+  if (t(draft.liabilityAccountCode) === "") {
+    issues.push({ field: "liabilityAccountCode", code: "liabilityAccountRequired" });
+  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.liabilityAccountCode))) {
+    issues.push({ field: "liabilityAccountCode", code: "accountUnknown" });
+  }
+  if (t(draft.expenseAccountCode) !== "" && t(draft.expenseAccountCode) === t(draft.liabilityAccountCode)) {
+    issues.push({ field: "liabilityAccountCode", code: "accountsNotDistinct" });
+  }
+
+  if (!Number.isSafeInteger(draft.amountCents) || draft.amountCents <= 0) {
+    issues.push({ field: "amountCents", code: "amountRequired" });
+  }
+
+  // THE TERM. Both halves, and its own code rather than a generic "required", because the
+  // preparer's next move differs: they have to go and find out, not fix a typo.
+  if (t(draft.servicePeriodStart) === "") issues.push({ field: "servicePeriodStart", code: "silentTerm" });
+  if (t(draft.servicePeriodEnd) === "") issues.push({ field: "servicePeriodEnd", code: "silentTerm" });
+  if (t(draft.servicePeriodStart) !== "" && t(draft.servicePeriodEnd) !== ""
+      && draft.servicePeriodEnd < draft.servicePeriodStart) {
+    issues.push({ field: "servicePeriodEnd", code: "servicePeriodOrder" });
+  }
+
+  if (t(draft.instruction) === "") issues.push({ field: "instruction", code: "instructionRequired" });
+
+  return issues;
+}
+
 /** The `id` attribute of one control, so a label, its error and a focus call all name one element. */
 export function accrualFieldElementId(field: AccrualFieldId): string {
   return `accrual-${field}`;
 }
 
+/** The nine particulars fields both the CREATE draft and the #936 CORRECTION draft carry — a
+ *  `Pick`, not the full `AccrualDraft`, so `toAccrualParticulars` below accepts either shape
+ *  structurally and a correction needs no second copy of this mapping. */
+type AccrualParticularsSource = Pick<
+  AccrualDraft,
+  "expenseAccountCode" | "liabilityAccountCode" | "amountCents" | "servicePeriodStart"
+  | "servicePeriodEnd" | "method" | "instruction" | "memo" | "sourceDocumentId"
+>;
+
 /** The draft as the door's `p_accrual` argument, in the DATABASE's own field spelling. Only what
  *  0222 reads: the schedule, the window and the authority are the door's OWN arguments, and a key
  *  the database never reads could carry no refusal. */
-export function toAccrualParticulars(draft: AccrualDraft): {
+export function toAccrualParticulars(draft: AccrualParticularsSource): {
   expense_account_code: string;
   liability_account_code: string;
   amount_cents: number;
@@ -379,4 +419,51 @@ export function toAccrualParticulars(draft: AccrualDraft): {
     memo === "" ? {} : { memo },
     document === "" ? {} : { source_document_id: document },
   );
+}
+
+// ── #936: THE ACCRUAL CORRECTION DRAFT ──────────────────────────────────────
+//
+// A CORRECTION IS NOT A CREATION, and its draft says so by carrying fewer fields: no purpose, no
+// authority, no schedule. `clara.correct_accrual_adjustment` takes none of those as arguments —
+// the plan's purpose is unchanged and the schedule (frequency/day_rule/day_of_month/timezone) and
+// the authority window (effective_from/effective_to) are the LIVE revision's own, carried through
+// server-side (the migration's own header). What a correction restates is the nine particulars
+// `AccrualParticularsSource` above already names, so this draft is exactly that shape plus nothing.
+
+export type AccrualCorrectionDraft = AccrualParticularsSource;
+
+/** The authority window a correction may NOT move — read off the accrual being corrected, never
+ *  typed. `validateAccrualCorrectionDraft` mirrors `clara._assert_accrual_term_window` against it
+ *  so a corrected term that would fall outside it is refused HERE, beside the control that holds
+ *  the mistake, rather than at a round trip. */
+export type AccrualCorrectionWindow = { effectiveFrom: string; effectiveTo: string };
+
+/**
+ * Every refusal a correction can raise BEFORE a round trip: the five shared particulars, and then
+ * the one rule that is this draft's alone — the fixed authority window must stay bracketed by the
+ * term. There is no purpose, authority or schedule issue to raise: this draft carries none of
+ * those controls.
+ */
+export function validateAccrualCorrectionDraft(
+  draft: AccrualCorrectionDraft,
+  window: AccrualCorrectionWindow,
+  knownAccounts: ReadonlySet<string> | null = null,
+): AccrualIssue[] {
+  const t = (v: string) => v.trim();
+  const issues: AccrualIssue[] = validateAccrualParticulars(draft, knownAccounts);
+
+  // THE FIXED AUTHORITY WINDOW BRACKETS THE STATED TERM (0222's SIXTH MEASUREMENT, the same wall
+  // `validateAccrualDraft` mirrors for CREATE) — but the MISTAKE, if any, is in the term a
+  // correction is free to restate, never in the window a correction cannot move. So the issue
+  // lands on the service-period control, the one the preparer can actually act on here.
+  const termStands = t(draft.servicePeriodStart) !== "" && t(draft.servicePeriodEnd) !== ""
+    && draft.servicePeriodEnd >= draft.servicePeriodStart;
+  if (termStands && window.effectiveFrom < draft.servicePeriodStart) {
+    issues.push({ field: "servicePeriodStart", code: "windowBeforeTerm" });
+  }
+  if (termStands && window.effectiveTo > draft.servicePeriodEnd) {
+    issues.push({ field: "servicePeriodEnd", code: "windowAfterTerm" });
+  }
+
+  return issues;
 }

@@ -112,6 +112,18 @@ an extracted or inferred period; a term the product derived from an invoice's ow
 a date range it saw, or a conversation it summarised; treating a corrected term as something a
 revision re-derives — a re-derived allocation is a new schedule.
 
+**Corrected term**:
+A service period a person has RE-STATED with different dates, so what the document is taken to say
+about the span it buys has changed. It is not the same fact as a superseded term ROW: recording a
+period on a document that already carries a live one supersedes the old row whatever the new one
+says, so a second verification that restates the same two dates supersedes a row and corrects
+nothing. Only a corrected term makes an allocation already derived from the old one wrong, and only
+a corrected term is grounds for telling a firm its schedule has to be rebuilt.
+_Avoid_: Reading "the row this schedule rode is no longer live" as "the term was corrected" — the
+first is bookkeeping about rows, the second is a statement about the client's affairs, and a
+surface that confuses them tells a firm to abandon a running amortisation for no reason; treating a
+corrected term as something a revision re-derives — a re-derived allocation is a new schedule.
+
 **Plan catch-up**:
 Admitting due events that already passed, over a window a person names. Oldest first, bounded per
 request, and never reaching back past the date the plan's authority starts.
@@ -258,6 +270,15 @@ One line of the printed source, as stated, mapped or not yet mapped to an accoun
 tie-out compares the books against, never a posting in its own right.
 _Avoid_: Calling an unmapped target an error — it is work a person has still to do; calling a
 target a journal line.
+
+**Opening source refresh**:
+Bringing an opening basis's targets onto a NEW reading of the same tie document, after the document
+was genuinely read again. The targets standing on the reading the document has left are retired and
+replaced, line by line, from the new one — never re-pointed and never left beside it — and the act
+leaves a receipt naming the reading left, the reading arrived at, and the retired rows verbatim.
+_Avoid_: Calling it a re-parse — parsing one reading twice is still refused, and that refusal is
+what the refresh exists beside, not instead of; calling it a correction — nobody changed what the
+document says, only which reading of it the basis stands on.
 
 **Opening Work**:
 The Work record an approved opening batch carries: one per approval — the seed batch, then one per
@@ -697,6 +718,19 @@ because that accrual was admitted — and a reversal the lane reached before the
 refused, with which of the three ways the accrual failed to stand behind it.
 _Avoid_: A correction; a cancellation; a separately authorised entry; treating an admitted accrual
 as a posted one.
+
+**Accrual correction**:
+A restatement of an accrual's own particulars — amount, either account leg, the service period, the
+method or the instruction — that advances its schedule to a NEW plan revision and writes a
+SUCCESSOR accrual-adjustment row for it, naming the row it supersedes. The superseded row is kept,
+stamped with which row corrected it, and is otherwise unchanged; occurrences the schedule has
+already admitted keep naming the revision they ran under, so a correction reaches only what has not
+yet come due. It moves neither the schedule nor the authority window — those are the LIVE revision's
+own, carried through unchanged — because a correction restates what was STATED, not when or how
+often the plan runs.
+_Avoid_: The generic plan revision alone (it advances the schedule but leaves the accrual's own
+detail naming the first revision — #936's own bug); editing a posted entry; a second correction of
+an already-corrected row (refused by name: one correction per target).
 
 **Calculation method**:
 The rule that says WHICH stated amount each of a schedule's periods uses. It selects among amounts a
