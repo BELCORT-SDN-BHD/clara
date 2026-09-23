@@ -732,11 +732,18 @@ with a refusal instead of the receipt it had already earned. `lib/registers/depr
 `useDepreciationDecisionKey` mints one key per OPEN DECISION, keyed on the intent tuple, and holds
 it until the decision changes or ends — on `components/work/work-cancel-dialog.tsx:95`'s shape. The
 tuples are `depreciationIntent` (client, period start, period end), `authorityIntent` (the act, the
-authority, the value being decided) and `reviseIntent` (every value the revision door is asked to
-write, particulars key-sorted). **Signing is where a person actually meets this**: the sign door's
-replay identity is {client, authority}, so a second key reaches 0227's `authority_already_live` arm
-and refuses. `completeFixedAssetParticulars` and `disposeFixedAsset` still mint their own key —
-#639's original shape, untouched by this branch and carried as a follow-up.
+authority, the value being decided), `reviseIntent` (every value the revision door is asked to
+write, particulars key-sorted), `completeIntent` and `disposeIntent` (#978 — each exactly the tuple
+its own door's `_reserve_op` dedupe hashes into its operation key; `disposeIntent` deliberately
+EXCLUDES the memo, following `clara.dispose_fixed_asset`'s own comment that a relabel is the same
+disposal). **Signing is where a person actually meets this**: the sign door's replay identity is
+{client, authority}, so a second key reaches 0227's `authority_already_live` arm and refuses.
+`completeFixedAssetParticulars` and `disposeFixedAsset` (`lib/registers/fixed-assets.ts`) took the
+LAST two follow-up call sites: `CompleteParticularsDialog`/`DisposeDialog`
+(`components/registers/fa-row-actions.tsx`) and the needs-you inline
+`FixedAssetIncompleteAffordance` (`components/firm/fixed-asset-incomplete-affordance.tsx`, which has
+no `FaDoorDialog` of its own — its own open/close IS the decision boundary) all hold a key now;
+#639's original mint-per-call shape is gone.
 
 **Five readings of one asset, addressable.** `fixed-asset-detail.tsx`' tab id lives in `?tab=`, so a
 pasted link lands on the reading it names and Back leaves the page rather than walking five tabs.
