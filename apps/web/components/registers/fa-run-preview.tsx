@@ -20,10 +20,12 @@
 // unresolved questions or errors by default"). `incomplete` and `disposal_draft_outstanding` are
 // work somebody still owes, so a list containing either renders OPEN.
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState, StateBanner } from "@/components/common/state";
@@ -39,15 +41,28 @@ export function useSkipSentence() {
   return (reason: string) => (known.has(reason) ? t(`skip.${reason}`) : t("skip.unknown", { reason }));
 }
 
+/** #975 — what the caller does with a judgement this body collects. The BODY never calls a door:
+ *  the panel that owns the session and the decision key does, exactly as it does for the run
+ *  itself. Absent (the default) the two controls are not rendered at all and the block is a
+ *  statement rather than a question. */
+export type RecordArrearsHandler = (args: {
+  fiscalYearId: string;
+  choice: "fold_current" | "reopen_prior";
+  arrearsCents: number;
+  reason: string;
+}) => Promise<unknown>;
+
 export function FaRunPreviewBody({
   preview,
   loading,
   error,
+  onRecordArrears,
 }: {
   preview: FaRunPreview | null;
   loading: boolean;
   /** A refusal from the preview read itself, rendered VERBATIM above whatever already loaded. */
   error?: string | null;
+  onRecordArrears?: RecordArrearsHandler;
 }) {
   const t = useTranslations("FixedAssetsDepreciation.preview");
   const tc = useTranslations("Common");
@@ -89,7 +104,7 @@ export function FaRunPreviewBody({
           {known.includes(reason) ? t(`notDue.${reason}`) : t("notDue.generic", { reason: reason || "—" })}
         </EmptyState>
         <FloorNote preview={preview} />
-        <SkippedClosed preview={preview} />
+        <SkippedClosed preview={preview} onRecordArrears={onRecordArrears} />
       </div>
     );
   }
@@ -171,7 +186,7 @@ export function FaRunPreviewBody({
         </Collapsible>
       ) : null}
 
-      <SkippedClosed preview={preview} />
+      <SkippedClosed preview={preview} onRecordArrears={onRecordArrears} />
     </div>
   );
 }
@@ -189,12 +204,89 @@ function FloorNote({ preview }: { preview: FaRunPreview }) {
   );
 }
 
+/** #975 — THE TWO RESOLUTIONS, AS TWO CONTROLS, NEITHER PRESELECTED. The run now refuses until
+ *  somebody judges the closed year's arrears, so a surface that only STATED the question would
+ *  have made depreciation unrunnable for that client — a wall, not a prompt, which is exactly what
+ *  the standing "nothing dark" ruling forbids. Under IAS 8 folding is lawful only where the
+ *  omission is immaterial, so the wording of each control is the JUDGEMENT it records, never the
+ *  mechanical effect: a person is being asked about materiality, not about plumbing.
+ *
+ *  The optional note rides with the judgement. It is not required by the door, and this surface
+ *  does not require it either — a judgement nobody could file because they had not yet typed a
+ *  sentence would be the same wall in a smaller shape. */
+function ArrearsChoice({
+  year,
+  onRecordArrears,
+}: {
+  year: NonNullable<FaRunPreview["closed_arrears"]>["fiscal_years"][number];
+  onRecordArrears: RecordArrearsHandler;
+}) {
+  const t = useTranslations("FixedAssetsDepreciation.preview");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const record = (choice: "fold_current" | "reopen_prior") => async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onRecordArrears({
+        fiscalYearId: year.fiscal_year_id,
+        choice,
+        // THE AMOUNT THAT WAS SHOWN, carried through unchanged. The door re-measures it and
+        // refuses if it moved, so a judgement can never be filed against a figure nobody saw.
+        arrearsCents: year.arrears_cents,
+        reason: note.trim(),
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      <label className="sr-only" htmlFor={`fa-arrears-note-${year.fiscal_year_id}`}>
+        {t("arrearsNoteLabel")}
+      </label>
+      <Input
+        id={`fa-arrears-note-${year.fiscal_year_id}`}
+        data-testid={`fa-arrears-note-${year.fiscal_year_id}`}
+        value={note}
+        disabled={busy}
+        placeholder={t("arrearsNotePlaceholder")}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      <div className="flex flex-wrap gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          data-testid={`fa-arrears-fold-${year.fiscal_year_id}`}
+          onClick={record("fold_current")}
+        >
+          {t("arrearsFoldAction")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          data-testid={`fa-arrears-restate-${year.fiscal_year_id}`}
+          onClick={record("reopen_prior")}
+        >
+          {t("arrearsRestateAction")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** Periods the due oracle skipped because their financial year is closed, and — since #975 (0279)
  *  — the arrears those months carry and whether anybody has judged them yet. A skip nobody can see
  *  is the same defect as a silent post; an amount nobody states is the same defect as a silent
  *  ruling, because under IAS 8 the fold is only lawful where the omission is IMMATERIAL and that
  *  is the accountant's judgement, never this product's. */
-function SkippedClosed({ preview }: { preview: FaRunPreview }) {
+function SkippedClosed({
+  preview, onRecordArrears,
+}: { preview: FaRunPreview; onRecordArrears?: RecordArrearsHandler }) {
   const t = useTranslations("FixedAssetsDepreciation.preview");
   const closed = preview.skipped_closed ?? [];
   const arrears = preview.closed_arrears;
@@ -217,7 +309,7 @@ function SkippedClosed({ preview }: { preview: FaRunPreview }) {
           </>
         ) : null}
         {years.length > 0 ? (
-          <ul className="mt-1 flex flex-col gap-0.5" data-testid="fa-preview-closed-arrears">
+          <ul className="mt-1 flex flex-col gap-1.5" data-testid="fa-preview-closed-arrears">
             {years.map((y) => (
               <li key={y.fiscal_year_id}>
                 {t("arrearsAmount", {
@@ -227,6 +319,9 @@ function SkippedClosed({ preview }: { preview: FaRunPreview }) {
                 {y.resolution === null
                   ? t("arrearsUnanswered")
                   : t(y.resolution.choice === "fold_current" ? "arrearsFolded" : "arrearsRestated")}
+                {y.resolution === null && onRecordArrears ? (
+                  <ArrearsChoice year={y} onRecordArrears={onRecordArrears} />
+                ) : null}
               </li>
             ))}
           </ul>

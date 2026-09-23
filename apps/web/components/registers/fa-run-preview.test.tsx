@@ -19,18 +19,21 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 
-import { renderComponent, textOf } from "../../test/hookHarness";
+import { renderComponent, textOf, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { FaRunPreviewBody } from "./fa-run-preview";
 import { intlApp, faPreview, findAll, tid, attr } from "./fa-depreciation-test-fixtures";
 
 enableDomInspection();
 
-const render = (props: { preview?: unknown; loading?: boolean; error?: string | null }) =>
+const render = (props: {
+  preview?: unknown; loading?: boolean; error?: string | null; onRecordArrears?: unknown;
+}) =>
   renderComponent(intlApp(createElement(FaRunPreviewBody, {
     preview: (props.preview ?? null) as never,
     loading: props.loading ?? false,
     error: props.error ?? null,
+    onRecordArrears: props.onRecordArrears as never,
   })));
 
 test("preview.figures the period is the DATABASE'S, the amounts and both legs render exactly, and the dialog says what it will do", async () => {
@@ -246,5 +249,75 @@ test("preview.closed_arrears the amount the next run would fold forward is STATE
     assert.doesNotMatch(text, /not been answered/i);
   } finally {
     await answered.unmount();
+  }
+});
+
+// #975 — THE QUESTION MUST BE ANSWERABLE FROM THE SCREEN. The run now REFUSES until a person has
+// judged the closed year's arrears, so a surface that only stated the question would have made
+// depreciation unrunnable for that client: a wall, not a prompt. The two resolutions are two
+// controls, neither preselected, and the handler is given exactly what the door needs.
+test("preview.closed_arrears_answer the two resolutions are offered as controls, neither preselected, and each hands the door its own choice with the year and the amount", async () => {
+  const calls: Array<{ fiscalYearId: string; choice: string; arrearsCents: number; reason: string }> = [];
+  const h = await render({
+    preview: faPreview({
+      skipped_closed: [],
+      closed_arrears: {
+        arrears_cents: 25_000,
+        fiscal_years: [{
+          fiscal_year_id: "fy9", fy_label: "2025", fy_status: "closed",
+          fy_starts_on: "2025-01-01", fy_ends_on: "2025-12-31",
+          arrears_cents: 25_000, resolution: null,
+        }],
+      },
+    }),
+    onRecordArrears: async (a: { fiscalYearId: string; choice: string; arrearsCents: number; reason: string }) => {
+      calls.push(a);
+    },
+  });
+  try {
+    for (let i = 0; i < 3; i++) await h.settle();
+    const fold = h.find((n) => tid(n) === "fa-arrears-fold-fy9");
+    const restate = h.find((n) => tid(n) === "fa-arrears-restate-fy9");
+    assert.ok(fold && restate, "both resolutions are reachable, and neither is chosen for the person");
+
+    await h.act(() => { clickButton(fold as never); });
+    for (let i = 0; i < 3; i++) await h.settle();
+    assert.equal(calls.length, 1);
+    assert.deepEqual(
+      { fiscalYearId: calls[0]!.fiscalYearId, choice: calls[0]!.choice, arrearsCents: calls[0]!.arrearsCents },
+      { fiscalYearId: "fy9", choice: "fold_current", arrearsCents: 25_000 },
+      "the door is handed the YEAR it is about and the AMOUNT that was judged, never a recomputed one",
+    );
+
+    await h.act(() => { clickButton(restate as never); });
+    for (let i = 0; i < 3; i++) await h.settle();
+    assert.equal(calls[1]!.choice, "reopen_prior", "…and the other control is the other resolution");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("preview.closed_arrears_answered an ANSWERED year offers no controls — the standing ruling replaces the question", async () => {
+  const h = await render({
+    preview: faPreview({
+      skipped_closed: [],
+      closed_arrears: {
+        arrears_cents: 25_000,
+        fiscal_years: [{
+          fiscal_year_id: "fy9", fy_label: "2025", fy_status: "closed",
+          fy_starts_on: "2025-01-01", fy_ends_on: "2025-12-31", arrears_cents: 25_000,
+          resolution: { id: "r9", choice: "fold_current", arrears_cents: 25_000, decided_by: "u1", decided_at: "2026-01-01T00:00:00Z", reason: null },
+        }],
+      },
+    }),
+    onRecordArrears: async () => {},
+  });
+  try {
+    for (let i = 0; i < 3; i++) await h.settle();
+    assert.equal(h.find((n) => tid(n) === "fa-arrears-fold-fy9"), null,
+      "a judgement already made is not asked for again");
+    assert.equal(h.find((n) => tid(n) === "fa-arrears-restate-fy9"), null);
+  } finally {
+    await h.unmount();
   }
 });

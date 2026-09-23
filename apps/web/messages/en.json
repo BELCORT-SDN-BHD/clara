@@ -4734,6 +4734,10 @@
       "arrearsUnanswered": "This has not been answered yet, so the run is waiting for you.",
       "arrearsFolded": "You judged it immaterial, so it is folded into the current period.",
       "arrearsRestated": "You judged it material, so it is restated in that year once the year is reopened.",
+      "arrearsNoteLabel": "Why you judged it this way (optional)",
+      "arrearsNotePlaceholder": "Why you judged it this way (optional)",
+      "arrearsFoldAction": "It is immaterial — fold it into this period",
+      "arrearsRestateAction": "It is material — restate it in that year",
       "skip": {
         "incomplete": "waiting on depreciation particulars",
         "not_in_service": "not yet in service",

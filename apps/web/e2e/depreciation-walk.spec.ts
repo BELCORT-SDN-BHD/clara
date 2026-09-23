@@ -101,6 +101,16 @@ test.describe("#651 · depreciation under an explicit policy", () => {
       .toContainText("has not been answered yet");
     await expect(dialog.getByTestId("fa-preview-skipped-closed")).toContainText("IAS 8");
 
+    // …AND IT CAN BE ANSWERED FROM HERE. The run refuses until somebody judges that amount, so a
+    // screen that only stated the question would have made depreciation unrunnable for this
+    // client. Both resolutions are offered, neither preselected; answering re-reads the preview,
+    // and what comes back is the standing ruling rather than the question again.
+    await expect(dialog.getByTestId(`fa-arrears-restate-${DEP.fiscalYearId}`)).toBeVisible();
+    await dialog.getByTestId(`fa-arrears-fold-${DEP.fiscalYearId}`).click();
+    await expect(dialog.getByTestId("fa-preview-closed-arrears"))
+      .toContainText("You judged it immaterial", { timeout: 20_000 });
+    await expect(dialog.getByTestId(`fa-arrears-fold-${DEP.fiscalYearId}`)).toHaveCount(0);
+
     // CONFIRM, then the RE-READ. The runs table gains the row because the surface re-read.
     await dialog.getByRole("button", { name: "Run this period" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 20_000 });

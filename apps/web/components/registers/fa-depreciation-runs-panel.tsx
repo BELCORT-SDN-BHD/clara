@@ -34,6 +34,7 @@ import { EmptyState, StateBanner } from "@/components/common/state";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import {
   listDepreciationRuns, runDepreciationManual, previewDepreciationRun,
+  recordFaArrearsResolution,
   depreciationIntent, useDepreciationDecisionKey, faSkipListStartsOpen,
   type FaRunPreview,
 } from "@/lib/registers/depreciation";
@@ -175,6 +176,11 @@ function RunDialog({
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const decision = useDepreciationDecisionKey();
+  // #975 — THE JUDGEMENT KEEPS ITS OWN KEY. `useDepreciationDecisionKey` holds exactly ONE key at
+  // a time and re-mints it whenever the intent changes, so sharing the run's would hand a retried
+  // judgement a fresh key — and a fresh key records a SECOND judgement instead of resolving to the
+  // one already made. Its own instance keeps the run's key and this one independent.
+  const arrearsDecision = useDepreciationDecisionKey();
 
   // THE PREVIEW IS READ WHEN THE DIALOG OPENS, never on a timer and never eagerly for every client
   // on the page: it is a per-client arithmetic pass, and a panel that ran it unasked would ask the
@@ -211,6 +217,7 @@ function RunDialog({
         // otherwise a run that was withdrawn and is being made again would be answered with the
         // receipt of the run that was withdrawn.
         decision.renew();
+        arrearsDecision.renew();
         setPreview(null);
         setPreviewError(null);
       }}
@@ -224,7 +231,32 @@ function RunDialog({
         }, onPosted);
       }}
     >
-      <FaRunPreviewBody preview={preview} loading={previewing} error={previewError} />
+      <FaRunPreviewBody
+        preview={preview}
+        loading={previewing}
+        error={previewError}
+        // #975 — THE JUDGEMENT IS RECORDED HERE, where the session and the refusal channel already
+        // live, and the preview is RE-READ afterwards rather than optimistically repainted: the
+        // door re-measures the amount and may refuse, so the only honest source for "what does the
+        // run see now" is the run's own preview. A refusal rides `act`'s own channel and stands in
+        // this dialog exactly as a refused run does.
+        onRecordArrears={async ({ fiscalYearId, choice, arrearsCents, reason }) => {
+          const ok = await act(async () => {
+            await recordFaArrearsResolution(sessionTokenAccessor, {
+              clientId,
+              fiscalYearId,
+              choice,
+              arrearsCents,
+              periodStart: preview?.period_start ?? null,
+              periodEnd: preview?.period_end ?? null,
+              reason: reason === "" ? null : reason,
+              opKey: arrearsDecision.key(`arrears:${clientId}:${fiscalYearId}:${choice}`),
+            });
+          });
+          if (ok) await load();
+          return ok;
+        }}
+      />
     </FaDoorDialog>
   );
 }

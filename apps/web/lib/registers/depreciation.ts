@@ -169,6 +169,39 @@ export async function getDepreciationRun(session: SessionTokenAccessor, runId: s
   return out.run;
 }
 
+/** clara.record_fa_arrears_resolution(p_client, p_fiscal_year, p_choice, p_arrears_cents,
+ *  p_period_start, p_period_end, p_reason, p_op_key) — bookkeeper+, the SAME floor the manual run
+ *  takes: the person who may run the period is the person who may judge its arrears. No machine
+ *  role holds EXECUTE, because materiality is a professional judgement under IAS 8.
+ *
+ *  THE AMOUNT IS THE ONE THAT WAS SHOWN, not one this surface recomputes. The door RE-MEASURES it
+ *  and refuses CLR37 `fa_arrears_resolution_invalid` axis `arrears_changed` when it has moved
+ *  since the question was asked — a judgement filed against a stale figure is a ruling nobody
+ *  made. The other axes are `choice`, `not_this_client`, `year_not_closed` and `no_arrears`. */
+export function recordFaArrearsResolution(
+  session: SessionTokenAccessor,
+  args: {
+    clientId: string; fiscalYearId: string; choice: "fold_current" | "reopen_prior";
+    arrearsCents: number; periodStart: string | null; periodEnd: string | null;
+    reason: string | null; opKey: string;
+  },
+): Promise<unknown> {
+  return callDoor(
+    "record_fa_arrears_resolution",
+    {
+      p_client: args.clientId,
+      p_fiscal_year: args.fiscalYearId,
+      p_choice: args.choice,
+      p_arrears_cents: args.arrearsCents,
+      p_period_start: args.periodStart,
+      p_period_end: args.periodEnd,
+      p_reason: args.reason,
+      p_op_key: args.opKey,
+    },
+    { session },
+  );
+}
+
 /** clara.run_depreciation_manual(p_client, p_period_start, p_period_end,
  *  p_op_key) — bookkeeper+. The period must be EXACTLY the live authority's
  *  own cadence window (CLR38 `not_cadence_aligned` otherwise — the door
