@@ -227,7 +227,10 @@ test("the vendor-bindings panel offers NO propose or sign control at any rank �
     await page.goto("/settings/vendor-bindings");
     await expect(page.getByRole("heading", { name: "Vendor identity bindings", level: 1 })).toBeVisible();
     await page.getByLabel("Client").selectOption({ label: "Rome Properties" });
-    await expect(page.getByText("Example Supplier Sdn Bhd")).toBeVisible();
+    // exact: true — the row's own fingerprint line ALSO carries this name, lowercased, inside
+    // `Vendor name "example supplier sdn bhd" · invoice prefix …`, and Playwright's getByText is
+    // a case-insensitive substring match by default, so the un-exact query hits both.
+    await expect(page.getByText("Example Supplier Sdn Bhd", { exact: true })).toBeVisible();
 
     // BY ROLE and BY TEXT, both personas — #921's own retirement, not a rank floor.
     await expect(page.getByRole("button", { name: "Propose binding", exact: true })).toHaveCount(0);
