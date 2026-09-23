@@ -1207,10 +1207,14 @@ rows in front of `waitForQueueDrain`, and only the first of them is residue:
    `censusUnboundTasks` counts it.
 2. **What the first run mints ITSELF — the reason a settle-then-run on a fresh clone still exits
    1.** The first leader cycle of EVERY process runs the SST compliance-watch belt
-   (`lib/reconciler-sst.mjs`; `lastSstRun` starts null, so `sstReconcileDue` is true at boot and
-   daily thereafter). Every active client that qualifies for a watch and has none yet takes that
-   belt's `created` branch, which appends a `compliance.watch_transition` domain event; the relay
-   routes each to a `notification` wake decision, and the drain projects each as a `held`
+   (`lib/reconciler-sst.mjs` is the belt BODY; the cadence that makes it due lives in
+   `lib/leader.mjs:184`, `let lastSstRun = 0`, which is what makes
+   `sstReconcileDue(lastSstRun, Date.now())` true on the first cycle after every boot and daily
+   after that — `lastSstRun` is never DECLARED in `reconciler-sst.mjs`, only mentioned in its
+   cadence-law comment, so do not go looking for it there). Every active client that qualifies for
+   a watch and has none yet takes that belt's `created` branch, which appends a
+   `compliance.watch_transition` domain event; the relay routes each to a `notification` wake
+   decision, and the drain projects each as a `held`
    `clara.agent_tasks` wake row plus a `held` `clara.wakes_outbox` row. Nothing settles a
    `notification` wake inside the 30 s window, so the leg exits 1 at `waitForQueueDrain` on rows
    that existed nowhere when the clone was taken. It is ONE-SHOT per client: once the watch rows
@@ -1230,9 +1234,10 @@ update clara.agent_tasks set status='cancelled' where status in ('queued','held'
 
 3. **The real run**, and every run after it, exits **0**.
 
-Measured, lane 07, 2026-09-24, on TWO INDEPENDENT clones of `clara_l07` (`clara_881`, `clara_882`),
-each settled BEFORE its first run — so that the settle-then-run recipe this section used to give was
-itself the thing under test:
+Measured, lane 07, 2026-09-24, on THREE INDEPENDENT clones of `clara_l07` (`clara_881`, `clara_882`,
+and `clara_883` in a later session that re-ran the whole recipe from scratch), each settled BEFORE
+its first run — so that the settle-then-run recipe this section used to give was itself the thing
+under test:
 
 | clone | state entering the run | run | result |
 |---|---|---|---|
@@ -1241,6 +1246,9 @@ itself the thing under test:
 | `clara_882` | settled; `clara.compliance_watches` **empty** | 1, Windows | same shape: **exit 1**, `polls=143`, the same 8 `held` wake rows |
 | `clara_882` | settled again; the 8 watches now exist | 2, Windows | **exit 0**, `drained (polls=5, waited=1131ms)` |
 | `clara_882` | the settle now cancels **0** rows — run 2 left nothing `held` | 3, **WSL as `runner`** (`/opt/node/bin/node tests/intake-admission-e2e.mjs`, the shape the integrator re-runs runtime tests in) | **exit 0**, `drained (polls=4, waited=813ms)` |
+| `clara_883` | settled (8 outbox + 21 task rows cancelled); `clara.compliance_watches` **empty** | 1, Windows | 8/8 legs PASS, **exit 1** — `TIMED OUT after 30000ms (polls=141)`, the same 8 `held` `kind='wake'` rows. Counts across this one run: `clara.compliance_watches` 0 -> **8**, `compliance.watch_transition` 0 -> **8**, `held` `wakes_outbox` 0 -> **8**. |
+| `clara_883` | settled again (8 + 8 rows cancelled); the 8 watches now exist | 2, Windows | `INTAKE ADMISSION E2E: PASS (8 legs …)`, **exit 0**, `[queue-drain] drained (polls=4, waited=854ms)`. The belt examined **184** clients on this run and created **no** further watch — the one-shot is spent. |
+| `clara_883` | **no settle at all** — run 2 left nothing `held` | 3, **WSL as `runner`** (`/opt/node/bin/node tests/intake-admission-e2e.mjs`) | **exit 0**, `drained (polls=4, waited=813ms)`, 8/8 legs PASS |
 
 What this section said in fix round 1 — settle first and the run passes — did not survive an
 independent re-run: two fresh clones, settled and run once, exited 1 both times on exactly those
@@ -1248,10 +1256,21 @@ eight rows. It also mis-named the mechanism ("the next boot re-creates them from
 new rows come from NEW `clara.wake_intents` for NEW `compliance.watch_transition` events, not from
 the cancelled outbox rows, whose own intents are already `consumed` and are never re-drained.
 
-**WHAT THIS MAY MEAN FOR CI — NAMED, AND UNVERIFIED HERE.** On the prime run the belt examined 181
-active clients (`clara.compliance_eval_runs`) and created exactly 8 watch rows; none of the eight
-belonged to a client this database was SEEDED with — all eight were created hours after the
-database's earliest rows, by earlier e2e runs against it. In the `db-live-gates` job
+**HOW TO CHECK THIS YOURSELF — AND THE COUNTER THAT WILL LIE TO YOU.** The belt writes a receipt row
+per run in `clara.compliance_eval_runs` (`clients_examined`, `clients_changed`, `clients_failed`).
+The examined count is NOT a constant to pin: it is every `status='active'` client at that moment and
+it drifts, because each run of this leg leaves one behind (`clara_883` read **183** on the prime run
+and **184** on the next). The trap is `clients_changed`: it — and the belt's own log line
+`[reconcile] sst watches examined=183 changed=0 failed=0` — read **0** on the very run that created
+the eight watches, because a CREATION is not counted as a change. So do not take the belt's counters
+as evidence that it did nothing. The checkable evidence is the two counts moving 0 -> 8 across the
+run, and each new row's own event payload: `"kind": "created"`, `"state_before": null`,
+`"state_after": "monitored"`, on a `clara.compliance_watches` row with `watch_kind='sst_registration'`
+(all eight written inside half a second, during the belt's single pass). None of the eight belonged
+to a client this database was SEEDED with — all eight were created hours after the database's
+earliest rows, by earlier e2e runs against it.
+
+**WHAT THIS MAY MEAN FOR CI — NAMED, AND UNVERIFIED HERE.** In the `db-live-gates` job
 `tests/intake-e2e.mjs` runs first against the same fresh `clara_intake_ci`, so any client IT leaves
 behind that qualifies for a watch would have that watch created by THIS leg's own first boot, and
 this leg's drain would then see the same `held` `notification` wakes. Nothing here settles that
