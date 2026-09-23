@@ -151,23 +151,32 @@ test("p933.wire.answerable a question carrying the proposal still ANSWERS, and t
     "answerable: …and the proposal stands unedited beside it, so the departure is legible a year later");
 });
 
-test("p933.read.by_asset the two register-side entrances find the proposal by asset id alone, under the human role's own firm-scoped policy", async (t) => {
+test("p933.read.by_asset the two register-side entrances find the proposal from an asset id alone, under the human role's own firm-scoped policy", async (t) => {
   if (await gate(t)) return;
-  const { w, asset, opened } = await parkedWithProposal("proposal_by_asset");
+  const { w, client, asset, opened } = await parkedWithProposal("proposal_by_asset");
 
-  // THE EXACT READ `apps/web/lib/registers/fa-particulars-proposal.ts` ISSUES. The asset page
-  // dialog and the Needs-you inline form hold an asset id and NO question id (the
-  // `fixed_asset_incomplete` queue row carries `asset_id` and nothing else), so the question is
-  // found by its source_ref — the same filter PostgREST compiles `source_ref->>asset_id=eq.<id>`
-  // into, issued here as the human, so the GRANT and the POLICY behind it are what is proven.
+  // THE READ `apps/web/lib/registers/fa-particulars-proposal.ts` ISSUES, statement for statement.
+  // The asset page dialog and the Needs-you inline form hold an asset id and a client id and NO
+  // question id (the `fixed_asset_incomplete` queue row carries `asset_id` alone), so they read
+  // the client's PENDING questions under the human role and locate the asset's own by its
+  // `source_ref` — the two ordinary column filters `getRows` builds, issued here as the human, so
+  // the column GRANT on `source_ref` and the POLICY behind it are what is proven.
   const r = await humanQuery(w.users.bob,
     `select id, source_ref from clara.agent_interruptions
-      where status = 'pending' and work_id is not null and source_ref->>'asset_id' = $1
-      order by created_at desc limit 2`, [asset.id]);
-  assert.equal(r.rows.length, 1, "by_asset: exactly the one pending question this asset is parked on");
-  assert.equal(r.rows[0].id, opened.question_id);
-  assert.deepEqual(r.rows[0].source_ref.proposal, PROPOSAL,
+      where status = 'pending' and client_id = $1
+      order by created_at desc limit 50`, [client]);
+  const mine = r.rows.filter((row) => (row.source_ref ?? {}).asset_id === asset.id);
+  assert.equal(mine.length, 1, "by_asset: exactly the one pending question this asset is parked on");
+  assert.equal(mine[0].id, opened.question_id);
+  assert.deepEqual(mine[0].source_ref.proposal, PROPOSAL,
     "by_asset: …and the block reaches the register's own entrances unchanged");
+
+  // AND THE NARROWER SERVER-SIDE FORM IS LAWFUL TOO, measured rather than assumed, so a later
+  // tightening of that read is a one-line change and not a question.
+  const narrow = await humanQuery(w.users.bob,
+    `select id from clara.agent_interruptions
+      where status = 'pending' and source_ref->>'asset_id' = $1`, [asset.id]);
+  assert.equal(narrow.rows.length, 1, "by_asset: a jsonb-path filter on source_ref is admitted to the human role");
 });
 
 test("p933.read.firm_walled a person of ANOTHER firm reads nothing for the same asset id — no proposal and no existence oracle", async (t) => {
