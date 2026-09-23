@@ -19,14 +19,16 @@ import {
   enrolPrepaymentAccount, retirePrepaymentAccount, enrolmentRow, enrolmentsFor,
   liveEnrolmentCount, roleCanExecute, reserveAsFixedAssetCost, bindBankAccount, nowhereRosterId,
   plainAssetRecognition, createPrepaymentSchedule, scheduleCountFor, ineligibleAssetEntry,
-  listPrepaymentAttention,
+  listPrepaymentAttention, extraRecognition, recordPeriod, scheduleRow, getPrepaymentSchedule,
+  wakeDuePlanOccurrences, occurrenceRows, workRow, claimWorkRun, settleWorkRun,
+  mintClientObo, wakeRecordJournalEntry, receiptsForWork,
   PREPAY_REASON, PREPAID_NOT_ENROLLED_AXIS,
   ROSTER_REASON, ROSTER_AXIS, ROSTER_PURPOSE, ENROL_DOOR_SIG, RETIRE_DOOR_SIG,
 } from "./prepayment-account-roster-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 4;
+const EXPECTED_CELLS = 5;
 
 before(async () => {
   ready = await (async () => {
@@ -370,4 +372,83 @@ cell("p940.attention.arm_b_roster — arm B lists only recognitions whose debite
     assert.equal(live.rows[0].n, 1,
       `the band offered ${row.prepaid_account_code}, which the door's roster question would refuse`);
   }
+});
+
+// ===========================================================================================
+// AC4 — MONTHLY ADMISSION DOES NOT CONSULT THE ROSTER.
+//
+// Owner decision 5: "retiring an account closes it to new schedules; running schedules continue to
+// term end". This cell does not assert that by reading the migration — it RETIRES the account and
+// then drives a real period all the way to a committed receipt.
+// ===========================================================================================
+
+cell("p940.retire.future_only — a schedule configured on an enrolled account keeps posting after the account is retired: the occurrence is admitted, the Work is claimed and the entry REALLY posts with a committed receipt, the stored allocation is byte-identical, no roster row is back-filled by any of it, and only a NEW schedule is refused", async () => {
+  const scene = await statedTermScene("future", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  const created = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+  const rowBefore = await scheduleRow(created.schedule_id);
+  const detailBefore = await getPrepaymentSchedule(scene.bob, created.schedule_id);
+  const rosterBefore = await enrolmentsFor(scene.client, scene.prepaid);
+  assert.equal(rosterBefore.filter((x) => x.active).length, 1,
+    "the scene's prepaid account is enrolled, which is why the schedule exists at all");
+
+  // ---- THE ACCOUNT IS RETIRED FROM THE ROSTER, BEFORE A SINGLE PERIOD HAS POSTED. This is the
+  // worst case for decision 5: nothing about this schedule has yet reached the books.
+  await retirePrepaymentAccount(scene.bob, { client: scene.client, account: scene.prepaid });
+  assert.equal((await enrolmentsFor(scene.client, scene.prepaid)).filter((x) => x.active).length, 0,
+    "no live enrolment stands on this account any more");
+
+  // ---- AND A PERIOD STILL POSTS. Not an admitted Work: a COMMITTED receipt, which is the only
+  // thing that means money reached the books.
+  await wakeDuePlanOccurrences({ limit: 100 });
+  const occ = await occurrenceRows(created.plan_id);
+  assert.equal(occ.length, 1, "the monthly scan admitted the due period, roster or no roster");
+  const workId = occ[0].work_id;
+  assert.ok(workId, "…and it admitted a Work");
+  const w = await workRow(workId);
+  await claimWorkRun({ task: w.current_task_id, runId: opk("p940-run") });
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  const posted = await wakeRecordJournalEntry(obo.secret, {
+    client: scene.client, work: workId, logicalOpId: w.logical_op_id, basis: w.basis });
+  assert.equal(posted.posted, true,
+    "the amortisation charge really reached the books on an account since retired from the roster");
+  await settleWorkRun({
+    task: w.current_task_id, outcome: "completed", result: { entry_id: posted.entry_id } });
+  const receipts = await receiptsForWork(workId);
+  assert.equal(receipts.filter((r) => r.outcome === "committed").length, 1,
+    "exactly one committed receipt stands");
+
+  // ---- NOTHING ABOUT THE SCHEDULE MOVED. Retiring an enrolment ends an interval and nothing else.
+  const rowAfter = await scheduleRow(created.schedule_id);
+  assert.deepEqual(rowAfter.period_lines, rowBefore.period_lines,
+    "the stored allocation is byte-identical after the retirement");
+  assert.equal(rowAfter.term_start, rowBefore.term_start);
+  assert.equal(rowAfter.term_end, rowBefore.term_end);
+  assert.equal(rowAfter.prepaid_account_code, rowBefore.prepaid_account_code);
+  const detailAfter = await getPrepaymentSchedule(scene.bob, created.schedule_id);
+  assert.deepEqual(detailAfter.periods.map((x) => [x.period_start, x.period_end]),
+    detailBefore.periods.map((x) => [x.period_start, x.period_end]),
+    "…and the read's period projection did not move either (its occurrence did, because one posted)");
+
+  // ---- NO BACK-FILL. Configuring a schedule, retiring the account and posting a period between
+  // them changed the roster exactly once — the retirement this cell performed.
+  const rosterAfter = await enrolmentsFor(scene.client, scene.prepaid);
+  assert.equal(rosterAfter.length, rosterBefore.length,
+    "no enrolment row was minted by the schedule, the scan, the Work or the posting");
+  assert.equal(rosterAfter.filter((x) => x.active).length, 0,
+    "…and nothing re-enrolled the account behind the retirement");
+
+  // ---- ONLY THE FUTURE IS CLOSED. A NEW schedule on the same account is refused by name; the
+  // running one is untouched, which is the whole of decision 5 in two assertions.
+  const nextOne = await extraRecognition(scene, {
+    cents: 33000, postingDate: scene.postingDate, tag: "future" });
+  await recordPeriod(scene.bob, {
+    document: nextOne.document, start: scene.termStart, end: scene.termEnd });
+  const refused = await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: nextOne.entry, expenseAccount: scene.target,
+      authorityRef: scene.authorityRef }),
+    "a NEW schedule on a since-retired account");
+  assert.equal(refused.detail.axis, PREPAID_NOT_ENROLLED_AXIS);
 });
