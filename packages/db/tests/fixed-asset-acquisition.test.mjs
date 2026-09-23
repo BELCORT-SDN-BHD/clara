@@ -676,6 +676,103 @@ test("p639.belt.same_txn_retire_approve an entry approved in the SAME transactio
 });
 
 // ===========================================================================================
+// 5c · #882(b) — THE CONVENTION, IN THE CATALOG. Migration 0278 gives both trigger bodies a
+//     `comment on function` stating the SAME convention `p639.belt.same_txn_retire_approve` just
+//     drove — so a reader who consults `pg_proc`/`\df+` and never opens this test file, or the
+//     migration, still finds the reason the two triggers disagree, on EITHER function.
+// ===========================================================================================
+
+const FA_BELT_BIRTH_CONVENTION_STEM = "fa_belt_birth_convention$";
+let _conventionReady = null;
+async function conventionReady() {
+  if (_conventionReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [FA_BELT_BIRTH_CONVENTION_STEM]);
+      _conventionReady = r.rows[0].n > 0;
+    } catch {
+      _conventionReady = false;
+    }
+  }
+  return _conventionReady;
+}
+
+async function gateConvention(t) {
+  if (await conventionReady()) return false;
+  // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud (work order rule 4 / L09-ADV-08's
+  // house convention). The package-wide sweep preloads this ticket's OWN pre-integration gate
+  // module (named in the refusal below), which sets the flag below to declare "a database below
+  // this migration is an expected pre-integration state". A worker running this file directly
+  // preloads nothing, so a chain missing the convention comment fails HERE rather than reporting a
+  // green run over a cell that quietly executed no assertion.
+  if (process.env.CLARA_ALLOW_MISSING_FA_BELT_BIRTH_CONVENTION !== "1") {
+    throw new Error(
+      `#882 belt/birth convention comment absent (no ${FA_BELT_BIRTH_CONVENTION_STEM} row in `
+      + "clara.schema_migrations) and CLARA_ALLOW_MISSING_FA_BELT_BIRTH_CONVENTION is unset -- "
+      + "this is a FOCUSED run and must fail loudly, not skip. Preload "
+      + "./tests/fa-belt-birth-convention-preintegration-gate.mjs for an estate sweep against a "
+      + "pre-PR chain.");
+  }
+  t.skip(`#882 belt/birth convention comment absent (no ${FA_BELT_BIRTH_CONVENTION_STEM} migration applied)`);
+  return true;
+}
+
+test("p639.belt.convention_comment both trigger bodies carry the belt/birth convention in the catalog, the birth's is a byte-exact accretion onto 0277's own text, and neither body moved", async (t) => {
+  if (await gate(t) || await gateConvention(t)) return;
+
+  const belt = (await rootQuery(
+    "select p.prosrc, obj_description(p.oid, 'pg_proc') as comment from pg_proc p "
+    + "where p.oid = 'clara._tf_fa_movement_belt()'::regprocedure")).rows[0];
+  const birth = (await rootQuery(
+    "select p.prosrc, obj_description(p.oid, 'pg_proc') as comment from pg_proc p "
+    + "where p.oid = 'clara._tf_fa_acquisition_birth()'::regprocedure")).rows[0];
+
+  assert.ok(belt.comment, "convention_comment: the belt carries a catalog comment");
+  for (const term of ["#882 (0278)", "fa_belt_unregistered_movement", "fp.active", "CLOSED interval"]) {
+    assert.ok(belt.comment.includes(term),
+      `convention_comment: the belt's comment names "${term}"`);
+  }
+
+  assert.ok(birth.comment, "convention_comment: the birth trigger carries a catalog comment");
+  // BYTE-EXACT ACCRETION, independently re-derived here (never trusting the migration's own tail
+  // alone): 0277's own text, read live from `0277_fa_default_depreciation_policy.sql` at the
+  // moment this file was written, is a PREFIX of the birth's live comment — never rewritten.
+  const p977Text = "#639: the LANE-AGNOSTIC fixed-asset acquisition birth. A deferred constraint "
+    + "trigger on clara.journal_entries, named to fire before t_je_fa_movement_belt (deferred "
+    + "triggers fire in alphabetical trigger-name order -- measured on clara_639, PG 17.11). "
+    + "Idempotent against clara._fa_on_approve arm 4 through the same on conflict "
+    + "(acquisition_line_id) do nothing. #972 (0247): the join carries the 0041 §1.2 enrolment "
+    + "watermark as the exact negation of clara.fa_register_tie's own pre-enrolment test. #932 "
+    + "(0277): when the account carries a live clara.fa_account_depreciation_policies row, the "
+    + "register row is born COMPLETE from it (method, life-or-rate, residual, and a "
+    + "depreciation_start_date of the acquisition's OWN posting date) and stamps the policy's id "
+    + "and version; an account with no policy still births the pending row exactly as before.";
+  assert.equal(birth.comment.slice(0, p977Text.length), p977Text,
+    "convention_comment: 0277's own text is an untouched PREFIX of the birth's live comment");
+  assert.ok(birth.comment.length > p977Text.length,
+    "convention_comment: …and the comment grew past it");
+  for (const term of ["#882 (0278)", "fa_belt_unregistered_movement", "CLOSED approved_at interval", "_tf_fa_movement_belt"]) {
+    assert.ok(birth.comment.includes(term),
+      `convention_comment: the birth's new sentence names "${term}"`);
+  }
+  for (const marker of ["#639", "#972 (0247)", "#932 (0277)"]) {
+    assert.ok(birth.comment.includes(marker),
+      `convention_comment: the birth's EARLIER provenance marker "${marker}" survived the accretion`);
+  }
+
+  // NEITHER BODY MOVED — this ticket is documentation-only.
+  const crypto = await import("node:crypto");
+  const sha256 = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
+  assert.equal(sha256(belt.prosrc),
+    "be97ea51a8db4d69a32da6986a1f0ab7b136c7dc8432913fe783354a3e4c8b5a",
+    "convention_comment: clara._tf_fa_movement_belt's body is byte-unchanged");
+  assert.equal(sha256(birth.prosrc),
+    "c2c62b2997a6dd9a1202e509954b6f1b311ab5c704064b9a71d806e8fb456c50",
+    "convention_comment: clara._tf_fa_acquisition_birth's body is byte-unchanged");
+});
+
+// ===========================================================================================
 // 6 · THE PARTICULARS. The human door is 0041's; the `_for` overload is this slice's, OBO the
 //     initiator, and NEITHER writes a journal.
 // ===========================================================================================

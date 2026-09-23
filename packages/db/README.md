@@ -3032,3 +3032,55 @@ Frontier gate: `tests/fa-depreciation-policy-preintegration-gate.mjs`, keyed on 
 `db-slice-frontiers` matrix runs this package against earlier frontiers). Both new doors are
 `clara_authenticated`-only, `_human_ctx`-floored at bookkeeper — `clara_runtime` and every agent/wake
 lane gain zero.
+
+## 0278 — the belt and the birth trigger disagree on purpose, and now the catalog says so (#882(b), riders wave 3 lane 04)
+
+`0278_fa_belt_birth_convention.sql` is a comment-only migration: two `comment on function`
+statements, no row moved, no function minted. #882 triaged that `clara._tf_fa_movement_belt`
+(0041) and `clara._tf_fa_acquisition_birth` (0216, recut by 0247 then 0277) read an account's
+enrolment with two DIFFERENT signals — the belt a CLOSED `approved_at` interval, the birth the
+CURRENT `fp.active` flag — and that the two only ever disagree at one instant: an entry approved
+in the SAME transaction that retires its cost account's enrolment profile. `now()` being
+transaction-constant means that transaction stamps `retired_at` EXACTLY EQUAL to `approved_at`; the
+belt's closed interval still matches at that equality instant while the birth's `fp.active` reads
+false by the time it fires, so the birth declines to register the row and the belt then refuses the
+whole transaction CLR40 `fa_belt_unregistered_movement`.
+
+**The owner ruling (2026-09-18) was already settled: no trigger change.** The same-transaction
+retire-and-approve instant is reachable by NO production door — `clara.retire_fa_account_profile`
+is human-only and always its own transaction — so today's refusal stays. What #882(b) actually owed
+was that the convention lived only in triage prose and in 0041's own in-body `--` comment
+(2680-2689), never in either function's catalog `comment on function`, and never naming the OTHER
+trigger's differing signal. 0278 writes it on both sides: the belt's comment (its first ever) states
+its own closed-interval design AND names the birth's `fp.active` reading; the birth's comment
+(already accretive across `#639`/0216, `#972`/0247, `#932`/0277) gains one more sentence doing the
+same from the other direction.
+
+**The birth's accretion is a proven byte-exact prefix, never a rewrite.** `comment on function`
+replaces the whole comment, so 0278's literal for `clara._tf_fa_acquisition_birth` opens with
+0277's own text copied VERBATIM from `0277_fa_default_depreciation_policy.sql:601-609` — never
+retyped from a printed value — and the tail hashes the first 842 characters (0277's own measured
+`comment_len`) against 0277's measured pre-image sha256, so a single mistyped character in the
+copied prefix would fail the tail rather than silently corrupting the earlier provenance. Both
+bodies' `prosrc` are pinned in the prestate and re-pinned in the tail at the SAME sha256 — this
+file recuts neither.
+
+**No new function, no new grant, no rig-meta cohort.** Both trigger bodies are already granted
+exactly as 0041/0216 left them (`revoke all ... from public`); `tests/rig-meta.mjs`'s
+`cohortFailures()` / `grantMatrixFailures()` need no new roster entry — the same finding 0265
+(#839) and 0266 (#880) each recorded above for their own comment/projection-only migrations.
+
+**Redo-safe by construction**: `comment on function ... is '<literal>'` is a flat SET, so applying
+this file twice sets the identical final text both times; no branch is needed in the change section
+itself. The prestate is still bimodal on the one thing a redo could otherwise hide (accepts either
+the pre-#882 catalog state or 0278's own already-applied text) — this run on `clara_l04` was a
+GENUINE FIRST APPLY, so the prestate's first-apply branch was exercised directly, not merely
+asserted.
+
+Frontier gate: `tests/fa-belt-birth-convention-preintegration-gate.mjs`, keyed on the stem
+`fa_belt_birth_convention$` (never the migration number). The frontier-gated cells are
+`p639.belt.same_txn_retire_approve` (drives the production Work lane — `wake_record_journal_entry`
+— through a hand-opened transaction that also retires the profile, and pins the refusal from
+scratch, gated only by 0216/0041's own stems since the BEHAVIOUR predates 0278) and
+`p639.belt.convention_comment` (reads `pg_proc`/`obj_description` and pins the catalog text itself,
+gated on 0278's own stem) in `tests/fixed-asset-acquisition.test.mjs`.
