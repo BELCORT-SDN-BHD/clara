@@ -1029,7 +1029,16 @@ create or replace function clara.read_prepayment_source_for(
     p_firm uuid, p_client uuid, p_source_entry uuid) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare
-  v_entry record; v_legs int; v_leg record; v_sp record; v_st record; v_sched record;
+  -- SCALARS, NOT RECORDS, and the reason is a defect this file met on the rig: a plpgsql `record`
+  -- that no `select into` ever reaches raises `record "v_sp" is not assigned yet` the moment a
+  -- field is read — so a memo-only recognition (no document, hence no document-carrier select)
+  -- would make the read RAISE instead of reporting the absence it exists to report. Scalars start
+  -- NULL, which is exactly what "nothing recorded" means here.
+  v_entry record; v_legs int;
+  v_leg_code text; v_leg_cents bigint;
+  v_sp_id uuid; v_sp_start date; v_sp_end date; v_sp_kind text; v_sp_basis text;
+  v_st_id uuid; v_st_start date; v_st_end date; v_st_reason text;
+  v_sched_id uuid; v_sched_plan uuid; v_sched_source text;
   v_term jsonb;
 begin
   if p_firm is null or p_client is null or p_source_entry is null then
@@ -1052,7 +1061,7 @@ begin
       on ca.client_id = jl.client_id and ca.account_code = jl.account_code
    where jl.entry_id = p_source_entry and jl.debit_cents > 0 and ca.account_type = 'asset';
   if v_legs = 1 then
-    select jl.account_code, jl.debit_cents into v_leg
+    select jl.account_code, jl.debit_cents into v_leg_code, v_leg_cents
       from clara.journal_lines jl
       join clara.coa_accounts ca
         on ca.client_id = jl.client_id and ca.account_code = jl.account_code
@@ -1063,26 +1072,28 @@ begin
   -- lane 0140 built; then #939's person-stated carrier. A recognition that binds a document does
   -- not carry a stated term at all (0305 refuses one), so the two arms cannot both answer.
   if v_entry.document_id is not null then
-    select sp.id, sp.period_start, sp.period_end, sp.basis_kind, sp.basis into v_sp
+    select sp.id, sp.period_start, sp.period_end, sp.basis_kind, sp.basis
+      into v_sp_id, v_sp_start, v_sp_end, v_sp_kind, v_sp_basis
       from clara.document_service_periods sp
      where sp.document_id = v_entry.document_id and sp.superseded_at is null;
   end if;
-  select t.id, t.period_start, t.period_end, t.reason into v_st
+  select t.id, t.period_start, t.period_end, t.reason
+    into v_st_id, v_st_start, v_st_end, v_st_reason
     from clara.prepayment_stated_terms t
    where t.source_entry_id = p_source_entry and t.superseded_at is null;
 
-  if v_sp.id is not null then
+  if v_sp_id is not null then
     v_term := jsonb_build_object('source', 'document_service_period',
-      'service_period_id', v_sp.id, 'stated_term_id', null,
-      'period_start', to_char(v_sp.period_start,'YYYY-MM-DD'),
-      'period_end', to_char(v_sp.period_end,'YYYY-MM-DD'),
-      'basis_kind', v_sp.basis_kind, 'basis_text', v_sp.basis);
-  elsif v_st.id is not null then
+      'service_period_id', v_sp_id, 'stated_term_id', null,
+      'period_start', to_char(v_sp_start,'YYYY-MM-DD'),
+      'period_end', to_char(v_sp_end,'YYYY-MM-DD'),
+      'basis_kind', v_sp_kind, 'basis_text', v_sp_basis);
+  elsif v_st_id is not null then
     v_term := jsonb_build_object('source', 'human_stated',
-      'service_period_id', null, 'stated_term_id', v_st.id,
-      'period_start', to_char(v_st.period_start,'YYYY-MM-DD'),
-      'period_end', to_char(v_st.period_end,'YYYY-MM-DD'),
-      'basis_kind', 'human_stated', 'basis_text', v_st.reason);
+      'service_period_id', null, 'stated_term_id', v_st_id,
+      'period_start', to_char(v_st_start,'YYYY-MM-DD'),
+      'period_end', to_char(v_st_end,'YYYY-MM-DD'),
+      'basis_kind', 'human_stated', 'basis_text', v_st_reason);
   else
     -- ABSENCE IS REPORTED AS ABSENCE, with the DOOR that fills it — never as an empty term a run
     -- could read as "no term is needed". The remedy named is the human one, because a service
@@ -1095,7 +1106,7 @@ begin
                      else 'clara.record_prepayment_stated_term' end);
   end if;
 
-  select s.id, s.plan_id, s.term_source into v_sched
+  select s.id, s.plan_id, s.term_source into v_sched_id, v_sched_plan, v_sched_source
     from clara.prepayment_schedules s
    where s.source_entry_id = p_source_entry and s.firm_id = p_firm;
 
@@ -1104,12 +1115,12 @@ begin
     'source_entry_id', p_source_entry,
     'entry', jsonb_build_object('status', v_entry.status, 'document_id', v_entry.document_id,
       'posting_date', to_char(v_entry.posting_date,'YYYY-MM-DD')),
-    'prepaid', jsonb_build_object('account_code', v_leg.account_code,
-      'total_cents', v_leg.debit_cents, 'candidate_legs', v_legs),
+    'prepaid', jsonb_build_object('account_code', v_leg_code,
+      'total_cents', v_leg_cents, 'candidate_legs', v_legs),
     'term', v_term,
-    'schedule', case when v_sched.id is null then null
-                     else jsonb_build_object('schedule_id', v_sched.id, 'plan_id', v_sched.plan_id,
-                            'term_source', v_sched.term_source) end);
+    'schedule', case when v_sched_id is null then null
+                     else jsonb_build_object('schedule_id', v_sched_id, 'plan_id', v_sched_plan,
+                            'term_source', v_sched_source) end);
 end $$;
 
 -- =====================================================================================

@@ -21,13 +21,15 @@ import {
   roleCanExecute, ROLES, opk, nowhere,
   extraExpenseAccount, refusalOf, memoOnlyRecognition, setClientStatus,
   plainAssetRecognition, ineligibleAssetEntry, enrolPrepaymentAccount, bindBankAccount,
-  extraRecognition, recordPeriod,
+  extraRecognition, recordPeriod, recordStatedTerm,
+  readPrepaymentSourceFor, readPrepaymentSourceForAs, prepaymentLaneGrants,
+  READ_SIG, READ_REASON,
   OBO_REASON, TWIN_SIG, HUMAN_SIG, AMORTISATION_KIND, PREPAY_BASIS,
 } from "./prepayment-schedule-obo-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 7;
 
 before(async () => {
   ready = await (async () => {
@@ -432,4 +434,179 @@ async () => {
     }), "an OBO configuration against an enrolled account that has since been bound as a bank account");
   assert.equal(walled.detail.axis, "prepaid_account_ineligible");
   assert.equal(walled.detail.breach.axis, "bank_account");
+});
+
+// ===========================================================================================
+// THE MACHINE-LANE READ — THE RECORDED TERM, AND NOT ONE BYTE MORE.
+// ===========================================================================================
+
+cell("p915.read.recorded_term — on a clara_runtime connection the read answers the RECORDED term "
+  + "for both carriers, names the human door when there is none, carries no document bytes and no "
+  + "key that could hold one, answers a foreign entry exactly as an id naming nothing does, and no "
+  + "other lane can call it at all",
+async () => {
+  const scene = await prepaymentScene("obo-read");
+  const scope = { firm: scene.firm, client: scene.client };
+
+  // 1 — THE DOCUMENT CARRIER. Everything here is a fact a PERSON recorded: the period through
+  //     `clara.record_document_service_period`, and the basis text in their own words.
+  const doc = await readPrepaymentSourceFor({ ...scope, sourceEntry: scene.entry });
+  assert.equal(doc.status, "ok");
+  assert.equal(doc.source_entry_id, scene.entry);
+  assert.equal(doc.entry.status, "approved");
+  assert.equal(doc.entry.document_id, scene.document);
+  assert.equal(doc.entry.posting_date, scene.postingDate);
+  assert.equal(doc.prepaid.account_code, scene.prepaid);
+  assert.equal(Number(doc.prepaid.total_cents), scene.cents);
+  assert.equal(doc.prepaid.candidate_legs, 1);
+  assert.equal(doc.term.source, "document_service_period");
+  assert.equal(doc.term.period_start, scene.termStart);
+  assert.equal(doc.term.period_end, scene.termEnd);
+  assert.equal(doc.term.basis_kind, "human_stated",
+    "the carrier records WHO said it, and only a person ever does");
+  assert.equal(doc.term.basis_text,
+    "f-a4-pr2a battery: the invoice states the service term on its face",
+    "…and the run reads the grounds the person gave, which is what it may cite");
+  assert.ok(doc.term.service_period_id, "naming the carrier row it came from");
+  assert.equal(doc.term.stated_term_id, null);
+  assert.equal(doc.schedule, null, "nothing amortises this recognition yet");
+
+  // NO BYTES, AND NO KEY THAT COULD EVER HOLD ONE. Asserted as the EXACT key set rather than as
+  // "storage_key is absent": a later widening that added a `document` object with bytes inside it
+  // would pass an absence test and fail this one.
+  assert.deepEqual(Object.keys(doc).sort(),
+    ["client_id", "entry", "firm_id", "prepaid", "schedule", "source_entry_id", "status", "term"]);
+  assert.deepEqual(Object.keys(doc.entry).sort(), ["document_id", "posting_date", "status"]);
+  for (const forbidden of ["storage_key", "sha256", "bytes", "content", "url", "filename"]) {
+    assert.equal(JSON.stringify(doc).includes(forbidden), false,
+      `the machine-lane read must never carry ${forbidden}`);
+  }
+
+  // 2 — AND IT SEES THE SCHEDULE ONCE THERE IS ONE, so a run can say "already amortised" instead of
+  //     driving the door to find out.
+  const ref = await chatTaskRef({ firm: scene.firm, client: scene.client, author: scene.bob });
+  const made = await createPrepaymentScheduleFor({
+    client: scene.client, author: scene.bob, sourceEntry: scene.entry,
+    expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-read-made") });
+  const after = await readPrepaymentSourceFor({ ...scope, sourceEntry: scene.entry });
+  assert.equal(after.schedule.schedule_id, made.schedule_id);
+  assert.equal(after.schedule.plan_id, made.plan_id);
+  assert.equal(after.schedule.term_source, "document_service_period");
+
+  // 3 — THE MEMO-ONLY LANE, BEFORE AND AFTER A PERSON STATES THE TERM. Before, the read reports the
+  //     ABSENCE and names the human door that fills it — never an empty term a run could read as
+  //     "no term is needed".
+  const memo = await memoOnlyRecognition(scene, { cents: 45000 });
+  const bare = await readPrepaymentSourceFor({ ...scope, sourceEntry: memo.entry });
+  assert.equal(bare.entry.document_id, null, "no document at all on this lane");
+  assert.equal(bare.term.source, null);
+  assert.equal(bare.term.period_start, null);
+  assert.equal(bare.term.remedy, "clara.record_prepayment_stated_term");
+  assert.equal(Number(bare.prepaid.total_cents), 45000);
+
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: memo.entry,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#915 battery: the supplier's email states the twelve-month term" });
+  const stated = await readPrepaymentSourceFor({ ...scope, sourceEntry: memo.entry });
+  assert.equal(stated.term.source, "human_stated");
+  assert.equal(stated.term.period_start, scene.termStart);
+  assert.equal(stated.term.period_end, scene.termEnd);
+  assert.equal(stated.term.basis_kind, "human_stated");
+  assert.equal(stated.term.basis_text,
+    "#915 battery: the supplier's email states the twelve-month term");
+  assert.ok(stated.term.stated_term_id);
+  assert.equal(stated.term.service_period_id, null);
+
+  // 4 — NO EXISTENCE ORACLE. A real entry read under the WRONG client, a real entry read under the
+  //     wrong FIRM and an id naming nothing all answer the same sentence and the same payload.
+  const nowhereEntry = await assertPair(CLR.notFound, READ_REASON.sourceNotFound,
+    () => readPrepaymentSourceFor({ ...scope, sourceEntry: nowhere() }), "an entry id naming nothing");
+  const wrongClient = await assertPair(CLR.notFound, READ_REASON.sourceNotFound,
+    () => readPrepaymentSourceFor({
+      firm: scene.firm, client: scene.w.clients.A2, sourceEntry: scene.entry }),
+    "a real entry read under another client of the same firm");
+  const wrongFirm = await assertPair(CLR.notFound, READ_REASON.sourceNotFound,
+    () => readPrepaymentSourceFor({
+      firm: scene.w.firms.B, client: scene.client, sourceEntry: scene.entry }),
+    "a real entry read under another firm");
+  assert.equal(wrongClient.err.message, nowhereEntry.err.message);
+  assert.equal(wrongFirm.err.message, nowhereEntry.err.message);
+  assert.equal(wrongFirm.err.detail, nowhereEntry.err.detail);
+
+  // 5 — THE SCOPE IS REQUIRED, and a missing one is its own refusal rather than a null-shaped
+  //     answer that a caller might read as "nothing is recorded".
+  await assertPair(CLR.badRequest, READ_REASON.scopeRequired,
+    () => readPrepaymentSourceFor({ firm: null, client: scene.client, sourceEntry: scene.entry }),
+    "a read with no firm");
+
+  // 6 — AND NO OTHER LANE CAN CALL IT AT ALL: 42501 from Postgres, before a line of the body runs.
+  assert.equal(await roleCanExecute(ROLES.runtime, READ_SIG), true);
+  for (const role of [ROLES.authenticated, ROLES.agentRo,
+    ROLES.wakeInteractive, ROLES.wakeProactive, "public"]) {
+    assert.equal(await roleCanExecute(role, READ_SIG), false,
+      `${role} must not reach the machine-lane read`);
+  }
+  await assertRaises("42501",
+    () => readPrepaymentSourceForAs(ROLES.authenticated, { ...scope, sourceEntry: scene.entry }),
+    "the human lane calling the machine-lane read");
+});
+
+// ===========================================================================================
+// AC5 — THE GRANT CENSUS: THE RUNTIME ROLE REACHES THE TWIN AND THE READ, AND NOTHING ELSE.
+// ===========================================================================================
+
+cell("p915.grants.census — over the WHOLE prepayment/amortisation lane of the clara schema, "
+  + "clara_runtime reaches exactly the OBO twin and the machine-lane read; the agent role and the "
+  + "proactive wake role reach nothing at all; the interactive wake role still reaches only the "
+  + "legacy template door #1036 owns; and no member of the lane is executable by PUBLIC",
+async () => {
+  const lane = await prepaymentLaneGrants();
+  assert.ok(lane.length >= 15,
+    `the census must enumerate the lane, not sample it (saw ${lane.length} functions)`);
+
+  const named = (pick) => lane.filter(pick).map((r) => r.signature).sort();
+
+  // 1 — THE RUNTIME LANE, ENUMERATED. This is the acceptance criterion itself: an exact set, not a
+  //     membership test, so a later grant to any other prepayment function fails here.
+  assert.deepEqual(named((r) => r.runtime), [
+    "clara.create_prepayment_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text)",
+    "clara.read_prepayment_source_for(uuid,uuid,uuid)",
+  ]);
+
+  // 2 — THE AGENT READ ROLE AND THE PROACTIVE WAKE ROLE REACH NOTHING in this lane, and the
+  //     INTERACTIVE one reaches exactly the legacy wake door that was already there — measured
+  //     rather than assumed, because "this ticket granted the wake lane nothing" is a claim about
+  //     what is there now, and #1036 is the ticket that reroutes that door onto this one.
+  assert.deepEqual(named((r) => r.agent_ro), []);
+  assert.deepEqual(named((r) => r.wake_proactive), []);
+  assert.deepEqual(named((r) => r.wake_interactive),
+    ["clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)"]);
+
+  // 3 — NOTHING IN THE LANE IS PUBLIC, and the three internals are reachable from a definer body
+  //     and from nowhere else (the one-ungranted-core law).
+  assert.deepEqual(named((r) => r.pub), []);
+  const internals = lane.filter((r) => ["_prepayment_schedule_core", "_prepayment_plan_core",
+    "_prepayment_account_enrolled"].includes(r.proname));
+  assert.equal(internals.length, 3, "the two cores and #940's roster predicate");
+  for (const r of internals) {
+    assert.deepEqual(
+      [r.authenticated, r.runtime, r.agent_ro, r.wake_interactive, r.wake_proactive, r.pub],
+      [false, false, false, false, false, false],
+      `${r.signature} must hold no application grant at all`);
+  }
+
+  // 4 — THE HUMAN LANE IS UNTOUCHED BY THIS TICKET: the four #653/#939/#940 doors and the three
+  //     reads still hold clara_authenticated, and the human write door still does NOT hold
+  //     clara_runtime — which is what makes the twin a second door rather than a widened grant.
+  assert.deepEqual(named((r) => r.authenticated), [
+    "clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)",
+    "clara.enrol_prepayment_account(uuid,text,text,text,text)",
+    "clara.get_prepayment_schedule(uuid)",
+    "clara.list_prepayment_attention(uuid)",
+    "clara.list_prepayment_schedules(uuid)",
+    "clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)",
+    "clara.retire_prepayment_account(uuid,text,text,text)",
+  ]);
+  assert.equal(lane.find((r) => r.signature === HUMAN_SIG).runtime, false);
 });
