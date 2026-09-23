@@ -320,6 +320,23 @@ export async function sweepChainMintedRoles({ log = () => {} } = {}) {
 }
 
 /**
+ * THE NAME GRAMMAR every throwaway drill database must satisfy: a plain, already-lowercase SQL
+ * identifier. `dropDatabase` below interpolates the name into `drop database if exists ${name}`
+ * UNQUOTED (a database name cannot be a bind parameter), so this is first of all an injection
+ * wall — but it is also the only shape that ROUND-TRIPS, which is why a mixed-case drill name is
+ * refused rather than quoted through. Measured on PostgreSQL 17 (#1041, lane 07, 2026-09-24):
+ * `create database clara_case_probe_A_ci` case-folds and `pg_database` gets
+ * `clara_case_probe_a_ci`, while `PGDATABASE=clara_case_probe_A_ci` is a LITERAL libpq name and
+ * raises `3D000 database "clara_case_probe_A_ci" does not exist`. A CI step that mints its
+ * database with one and connects with the other names two different databases in its own two
+ * lines; widening this grammar would have hidden that, so `clara_waveA_upgrade_ci` became
+ * `clara_wave_a_upgrade_ci` instead. `tests/ci-drill-database-names.test.mjs` holds every
+ * literal database name in the two dispatch-only composite actions to this regexp, and asks
+ * PostgreSQL's own `quote_ident` for the round-trip half.
+ */
+export const CONFORMING_DB_NAME = /^[a-z][a-z0-9_]*$/;
+
+/**
  * Drop one throwaway `*_ci` database by name (the CI action's own between-step
  * cleanup only — never called by an in-file drill cycle, which must not drop the
  * database it is itself connected through). Connects via whatever target the
@@ -329,7 +346,7 @@ export async function sweepChainMintedRoles({ log = () => {} } = {}) {
  * @param {{ log?: (msg: string) => void }} [opts]
  */
 export async function dropDatabase(name, { log = () => {} } = {}) {
-  if (!/^[a-z][a-z0-9_]*$/.test(name)) {
+  if (!CONFORMING_DB_NAME.test(name)) {
     throw new Error(`dropDatabase: refusing a non-conforming database name ${JSON.stringify(name)}`);
   }
   assertDestructiveAllowed({ action: `drop database "${name}"` });

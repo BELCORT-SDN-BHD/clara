@@ -1442,7 +1442,7 @@ follow-up, not closed by that ticket).
 **#1023 closed that gap.** All three now have their own step in
 `.github/actions/closed-wave-upgrade-drills/action.yml`, following the established pattern
 exactly: their own throwaway `*_ci` database (the same name each file's own header recipe already
-documented — `clara_0186_upgrade_ci`, `clara_runtime_upgrade_ci`, `clara_waveA_upgrade_ci`), both
+documented — `clara_0186_upgrade_ci`, `clara_runtime_upgrade_ci`, `clara_wave_a_upgrade_ci`), both
 destructive flags, and a between-step cluster cleanup. All 14 audited files now have a CI leg;
 only T19 still never exercises its destructive path anywhere but the ordinary battery's skip.
 `reset-gate-routing.test.mjs` carries the structural proof: it parses the action file itself and
@@ -1456,6 +1456,30 @@ assertion at the wrong step (review SPEC-1023-03, with its own cell) — sets bo
 locally, safely, and on a shared rig is still only the ROUTING and (since #1023) the WIRING —
 never that the destructive body itself has actually been exercised, which remains CI's job alone
 (RIG.md: this rig must never set `CLARA_RIG_ALLOW_RESET`).
+
+**The drill database-name grammar (#1041).** A throwaway drill database is named by a plain,
+already-lowercase SQL identifier — `CONFORMING_DB_NAME` (`/^[a-z][a-z0-9_]*$/`), exported by
+`rig-cluster-reset.mjs` and enforced by its own `dropDatabase`. Two reasons, and the second is the
+one that decides the rule when a name and the grammar disagree:
+
+1. `dropDatabase` interpolates the name into `drop database if exists <name>` UNQUOTED (a database
+   name cannot be a bind parameter), so the grammar is an injection wall.
+2. **A name outside the grammar does not round-trip.** `create database <x>` case-folds an
+   unquoted identifier while `PGDATABASE` is a LITERAL libpq name, so a mixed-case drill name
+   names two different databases in the two lines of its own step. Measured on PostgreSQL 17
+   (lane 07, 2026-09-24): `create database clara_case_probe_A_ci` puts `clara_case_probe_a_ci` in
+   `pg_database`, and connecting with `PGDATABASE=clara_case_probe_A_ci` raises
+   `3D000 database "clara_case_probe_A_ci" does not exist`.
+
+So when #1023's `clara_waveA_upgrade_ci` was refused by the cleanup step on the first dispatch
+after riders wave 3 (run 35893727271), the remedy was to move the NAME, not to widen the grammar:
+widening it would have let the step reach its own second defect. The name is now
+`clara_wave_a_upgrade_ci` in the action, in `wave-a-upgrade.test.mjs`'s header recipe and in
+`reset-gate-routing.test.mjs`'s `NEWLY_COVERED`, and
+`ci-drill-database-names.test.mjs` holds EVERY literal database name in
+`.github/actions/closed-wave-upgrade-drills` and `.github/actions/frontier-leg` to both halves —
+the grammar (imported from `rig-cluster-reset.mjs`, never re-spelled) and the round trip, which it
+asks PostgreSQL's own `quote_ident` rather than re-implementing.
 
 ## `fixed-asset-acquisition.test.mjs` `p639.birth.opening_excluded` / `p639.birth.opening_admitted` — #884
 

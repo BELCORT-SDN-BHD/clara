@@ -267,7 +267,7 @@ const CLOSED_WAVE_ACTION = path.join(REPO_ROOT, ".github", "actions", "closed-wa
 const NEWLY_COVERED = [
   { file: "checkout-convergence-upgrade.test.mjs", db: "clara_0186_upgrade_ci" },
   { file: "rig-runtime-upgrade.test.mjs", db: "clara_runtime_upgrade_ci" },
-  { file: "wave-a-upgrade.test.mjs", db: "clara_waveA_upgrade_ci" },
+  { file: "wave-a-upgrade.test.mjs", db: "clara_wave_a_upgrade_ci" },
 ];
 
 /** The composite-action step (its `- name:` line through the next step's, or EOF) whose `run:`
@@ -302,7 +302,7 @@ test("#1023 a step is located by its INVOCATION line, never by a comment above i
     "    # see tests/wave-a-upgrade.test.mjs for what the step below proves",
     "    - name: Wave-A 0011 fresh-vs-upgrade parity drill (isolated DB)",
     "      run: |",
-    "        PGDATABASE=clara_waveA_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \\",
+    "        PGDATABASE=clara_wave_a_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \\",
     "          node --test tests/wave-a-upgrade.test.mjs",
   ].join("\n");
   const step = stepInvoking(yaml, "wave-a-upgrade.test.mjs");
