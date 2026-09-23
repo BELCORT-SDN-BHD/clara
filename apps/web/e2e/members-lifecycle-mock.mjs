@@ -508,3 +508,73 @@ export async function handleMembersLifecycleSupabase(request, response, path, ur
 
   return false;
 }
+
+// =============================================================================================
+// #871 — THE SIGNED-OUT PREVIEW LEG, ON THE RUNTIME SIDE.
+//
+// The invite landing page now reads `clara.preview_invite_by_token` BEFORE anyone signs in, and
+// it does so from `apps/web`'s SERVER through the runtime's `POST /api/invite-preview` — never
+// from the browser and never over PostgREST. So this lane answers on the MOCK RUNTIME rather than
+// on the `/e2e-supabase` prefix, which is what makes the browser leg drive the real server
+// component, the real courier module and the real `Authorization`/client-IP headers it sends.
+//
+// SCOPED BY TOKEN, like this lane's `preview_invite` branch and for the same reason: at this
+// point in the journey the visitor is signed in as nobody this harness tracks, so a persona
+// cannot scope it. A token this lane did not mint falls through to the next handler.
+//
+// WHAT THIS LEG DOES NOT PROVE. The door, its single no-oracle refusal, its mask, its five-state
+// derivation and its rate wall are `packages/db/tests/invite-preview-public.test.mjs`'s claim
+// under real least-privileged roles, and the route's own gates (the bearer, the trusted header,
+// the peppered digest) are `packages/runtime/tests/p871-invite-preview-db.test.mjs`'s. What the
+// browser adds is the part neither can hold: that the block RENDERS, above the control that
+// consumes the link, on a page nobody has signed in to.
+export async function handleMembersInvitePreviewRuntime(request, response, url) {
+  if (request.method !== "POST" || url.pathname !== "/api/invite-preview") return false;
+  const body = await readCachedJson(request);
+  const token = body?.token;
+  if (token !== MEMBERS_LIFECYCLE.previewPendingToken && token !== MEMBERS_LIFECYCLE.previewRevokedToken) {
+    return false;
+  }
+  // THE TWO HEADERS THE WEB MUST SEND. Asserted HERE rather than trusted, because "the server
+  // route holds the credential" is exactly the property this leg exists to show: a missing bearer
+  // or a missing client address answers the runtime's own 401/503 instead of a preview, and the
+  // walk then sees no block at all.
+  const bearer = request.headers.authorization;
+  if (bearer !== "Bearer e2e-auth-wall-service-token") {
+    sendRuntimeJson(response, 401, { error: "unauthorized" });
+    return true;
+  }
+  if (!request.headers["x-clara-client-ip"]) {
+    sendRuntimeJson(response, 503, { outcome: "unavailable" });
+    return true;
+  }
+  if (token === MEMBERS_LIFECYCLE.previewRevokedToken) {
+    // THE ONE REFUSAL, with the route's own status and its one-key body: an unknown, expired,
+    // revoked or already-accepted token is told apart by nothing.
+    sendRuntimeJson(response, 404, { outcome: "not_previewable" });
+    return true;
+  }
+  sendRuntimeJson(response, 200, {
+    outcome: "preview",
+    preview: {
+      firm_name: MEMBERS_LIFECYCLE.firmName,
+      role: "bookkeeper",
+      status: "pending",
+      masked_email: `${MEMBERS_LIFECYCLE.inviteeEmail[0]}***@${MEMBERS_LIFECYCLE.inviteeEmail.split("@")[1]}`,
+    },
+  });
+  return true;
+}
+
+/** The mock runtime is a plain `http` server, so this lane sends its own bytes there (the
+ *  `/e2e-supabase` dispatcher's `sendJson` belongs to the app origin). Mirrors
+ *  `trade-invoice-mock.mjs`'s own `send`. */
+function sendRuntimeJson(response, status, body) {
+  const text = JSON.stringify(body);
+  response.writeHead(status, {
+    "content-type": "application/json",
+    "content-length": Buffer.byteLength(text),
+    "access-control-allow-origin": "*",
+  });
+  response.end(text);
+}

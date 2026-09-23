@@ -414,9 +414,20 @@ own transaction and a reader that could not read is not a verdict. A settled acc
 JOINED stage naming the firm and the accepted role, with an explicit control to enter the
 workspace — the journey never navigates on its own.
 
-Pre-authentication preview is a NAMED RESIDUAL: `clara.preview_invite` is granted to
-`clara_authenticated` only and this estate declares no `anon` role, so showing an invitation to a
-signed-out visitor needs a server route holding a service key, which is a separate ticket.
+CLOSED (ticket 871, migration 0309). Pre-authentication preview WAS a named residual, and the
+paragraph here used to say it "needs a server route holding a service key". That premise was
+measured and found false in riders wave 2 — the service-role key holds no privilege at all on
+schema `clara` — and the owner ruled on 2026-09-23 for a **server-only database door on the
+auth-wall pattern** instead. `app/(entry)/invite/[token]/page.tsx` now reads
+`lib/firm/invite-preview-public.ts` on the SERVER before the page is sent: a courier to the
+runtime's `POST /api/invite-preview`, which calls `clara.preview_invite_by_token` as a NOLOGIN
+group role no client credential is a member of. The block renders above the control that consumes
+the link, with the firm, the role and the masked address; an unknown, expired, revoked or
+already-accepted token gets ONE identical refusal, and the signed-out surface renders NOTHING for
+it — no verdict, no second place that blocks an invitation, the sign-in step unchanged. The read
+is rate-walled (fifteen minutes, five per token and five per address) and a walled read simply
+leaves the block out. The credential never reaches the browser: this app holds only
+`CLARA_AUTH_WALL_SERVICE_TOKEN` and the runtime holds the DSN.
 
 CLOSED (ticket 872, migration 0269): a fifth, READ-TIME-ONLY effective status, `issuer_lapsed`,
 now covers exactly the gap the paragraph below used to describe. When a still-`pending`

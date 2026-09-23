@@ -213,6 +213,7 @@ components/firm/work-question-affordance.test.tsx
 components/invite-accept-a11y.test.tsx
 components/invite-accept-form.test.tsx
 components/invite-accept-keyboard.test.tsx
+components/invite-accept-signed-out-preview.test.tsx
 components/journals/formatted-date.test.tsx
 components/journals/journal-entries-table.test.tsx
 components/journals/journals-a11y.test.tsx
@@ -404,6 +405,7 @@ lib/firm/capacity-doors.test.ts
 lib/firm/commercial-format.test.ts
 lib/firm/commercial-reads.test.ts
 lib/firm/home-facts.test.ts
+lib/firm/invite-preview-public.test.ts
 lib/firm/invite-preview.test.ts
 lib/firm/navigation-label.test.ts
 lib/firm/needs-you-gaps.test.ts
