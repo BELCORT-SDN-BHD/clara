@@ -546,12 +546,28 @@ export async function main(argv, env, deps = {}) {
   // than doing a zero-length no-op.
   const backups = partialSkip && !isDryRun ? backupProtectedFiles(blocked) : null;
 
-  const code = spawnAdd(forcedArgv);
-
+  // #989 fix round (review finding SPEC-989-B) — THE RESTORE IS NOT ON THE HAPPY PATH.
+  // Forcing `--overwrite` means the protected file IS written by the CLI and put back afterwards;
+  // it is not left untouched, and saying otherwise would tell an operator the wrong thing. So the
+  // restore runs in a `finally`: a throw out of `spawnAdd`, or the host OOM this CLI has already
+  // been measured hitting, must not decide whether `button.tsx` stays as upstream's file. The one
+  // window this cannot close is the process being killed outright (Ctrl-C, SIGKILL) between the
+  // write and the restore — the protected files are all tracked in git, so the recovery there is
+  // `git checkout -- <path>`, and the line below says so before anything is written.
   if (backups) {
-    restoreProtectedFiles(backups);
     const which = blocked.length === 1 ? "file" : "files";
-    log(`[ui-add] SKIPPED ${blocked.length} protected ${which} — restored to its pre-install content, never silently overwritten: ${blocked.join(", ")}. Everything else in the payload installs normally. Set ${OVERRIDE_ENV_VAR}=1 to overwrite ${blocked.length === 1 ? "it" : "them"} instead.`);
+    log(`[ui-add] the pinned CLI is about to OVERWRITE ${blocked.length} protected ${which} and this guard will restore ${blocked.length === 1 ? "it" : "them"} straight after: ${blocked.join(", ")}. If this run is killed in between, restore by hand with \`git checkout -- ${blocked.join(" ")}\`.`);
+  }
+
+  let code;
+  try {
+    code = spawnAdd(forcedArgv);
+  } finally {
+    if (backups) {
+      restoreProtectedFiles(backups);
+      const which = blocked.length === 1 ? "file" : "files";
+      log(`[ui-add] SKIPPED ${blocked.length} protected ${which} — overwritten by the CLI and RESTORED byte for byte to its pre-install content, never silently left as the upstream file: ${blocked.join(", ")}. Everything else in the payload installs normally. Set ${OVERRIDE_ENV_VAR}=1 to overwrite ${blocked.length === 1 ? "it" : "them"} instead.`);
+    }
   }
 
   // #969 fix round (L05B-S03) — a non-zero exit here is NOT "nothing was written". MEASURED

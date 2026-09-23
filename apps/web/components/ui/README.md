@@ -36,8 +36,13 @@ not to call the CLI.
 
 **If SOME of the payload is protected and some is not (#989)** — Combobox's own closure today:
 `button.tsx` protected, `input.tsx`/`textarea.tsx`/`input-group.tsx`/`combobox.tsx` not — the
-wrapper installs everything that is not protected and leaves the protected file(s) untouched,
-rather than refusing the whole payload. It does this by forcing the pinned CLI's own
+wrapper installs everything that is not protected and leaves the protected file(s) BYTE-IDENTICAL
+across the run, rather than refusing the whole payload. Byte-identical, not untouched: the
+protected file is genuinely written by the CLI and put back by this guard immediately afterwards
+(the restore is in a `finally`, so a throw or a host OOM out of the CLI cannot leave upstream's
+file in place). The one window that leaves is the process being killed outright between the write
+and the restore; the run says so before it starts, and every protected file is tracked in git, so
+`git checkout -- <path>` is the recovery. It does this by forcing the pinned CLI's own
 `-o/--overwrite` (never duplicated if the caller already passed it) so a non-interactive run does
 not hang on a per-file "already exists, overwrite?" prompt for the OTHER, non-protected
 already-vendored files in the same closure — MEASURED (2026-09-23): with stdin closed, that

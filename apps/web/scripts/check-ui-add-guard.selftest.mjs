@@ -362,6 +362,44 @@ await testCase("[AC1][AC2] a payload naming ONE protected file alongside install
   assert(!/REFUSING/.test(said), "a partial install must never say REFUSING — it is not aborted");
 });
 
+await testCase("[AC2] a partial install whose CLI THROWS still restores the protected file — the restore is not on the happy path", async () => {
+  // Review finding SPEC-989-B: the restore used to sit AFTER `spawnAdd(...)` with no try/finally,
+  // and the only copy of the owner-ruled content lives in this process's memory. The protected
+  // file IS written by the forced `--overwrite` and put back afterwards, so anything that escapes
+  // the spawn — a throw, a host OOM killing the child mid-write — decided whether button.tsx
+  // stayed upstream's file. It now restores on every exit path, and the failure is still raised.
+  const restoreCalls = [];
+  const fakeBackup = new Map([["components/ui/button.tsx", { existed: true, content: Buffer.from("ORIGINAL BUTTON BYTES") }]]);
+  const boom = new Error("the pinned CLI died mid-write");
+  let raised = null;
+  try {
+    await main(["combobox"], {}, fakeDeps(COMBOBOX_PAYLOAD, [], {
+      spawnAdd: () => { throw boom; },
+      backupProtectedFiles: () => fakeBackup,
+      restoreProtectedFiles: (backups) => { restoreCalls.push(backups); return backups.size; },
+    }));
+  } catch (err) {
+    raised = err;
+  }
+  assert(raised === boom, `the failure must still reach the caller, not be swallowed by the restore; got ${raised}`);
+  assert(restoreCalls.length === 1 && restoreCalls[0] === fakeBackup,
+    `the protected file must be restored even when the CLI throws; restore was called ${restoreCalls.length} time(s)`);
+});
+
+await testCase("[AC2] the SKIPPED report says the protected file was WRITTEN and put back, not that it was left untouched", async () => {
+  // The same finding's second half: "never silently overwritten" is delivered as
+  // force-overwrite-then-restore. An operator reading the run's own output has to be told that,
+  // because it is what makes a killed run recoverable-by-hand rather than mysterious.
+  const lines = [];
+  await main(["combobox"], {}, fakeDeps(COMBOBOX_PAYLOAD, [], {
+    backupProtectedFiles: () => new Map([["components/ui/button.tsx", { existed: true, content: Buffer.from("X") }]]),
+    log: (l) => lines.push(String(l)),
+  }));
+  const said = lines.join("\n");
+  assert(/overwritten by the CLI and RESTORED|written by the CLI and restored/i.test(said),
+    `the report must say the protected file was written and restored, not merely skipped; it said:\n${said}`);
+});
+
 await testCase("[AC3] the SAME partial payload WITH the override: proceeds as the override always did — no forced --overwrite, no backup, no restore, the protected file is genuinely overwritten", async () => {
   const spawnCalls = [];
   const backupCalls = [];
