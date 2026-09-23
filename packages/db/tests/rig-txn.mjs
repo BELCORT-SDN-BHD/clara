@@ -10,7 +10,7 @@
 // parent, so we never pass them. If lane-M adds another NOT NULL-without-default
 // column, these INSERTs fail loudly — a real finding, not a silent skip.
 
-import { getPool, namedCall, opk, ROLES } from "./rig-helpers.mjs";
+import { getPool, namedCall, opk, rootQuery, ROLES } from "./rig-helpers.mjs";
 
 /**
  * Attempt a TRUNCATE (as superuser) and return the resulting error, retrying the
@@ -240,4 +240,66 @@ export async function raceApprove({ entry, expectedRevision, subA, subB }) {
     }
   }
   return out;
+}
+
+/** #929 / ADV-L05-04 — race TWO human-lane calls that must serialise on a client-level advisory
+ * rung. `c1` opens a transaction and runs its call, holding whatever rung the door takes; `c2`
+ * then runs its own call on a second connection and is expected to WAIT on that rung until `c1`
+ * commits, so that `c2` reads what `c1` wrote instead of reading around it.
+ *
+ * Whether c2 really waited is OBSERVED, not timed: `pg_locks` is polled for an ungranted advisory
+ * lock at `lockClassId` (a two-argument `pg_advisory_xact_lock(classid, objid)` lands there with
+ * `objsubid = 2`), and the poll stops the moment c2's own promise settles — so a door that does
+ * NOT take the rung returns `waited:false` in milliseconds rather than after the timeout.
+ *
+ * Returns `{ a, b, bError, waited }`, where `a`/`b` are the two calls' `result` columns.
+ */
+export async function raceTwoHumanCalls({
+  subA, sqlA, paramsA, subB, sqlB, paramsB, lockClassId, waitMs = 10000,
+}) {
+  const claims = (sub) => JSON.stringify({ sub, role: "authenticated" });
+  const c1 = await getPool().connect();
+  const c2 = await getPool().connect();
+  let settled = false;
+  try {
+    await c1.query(`set role ${ROLES.authenticated}`);
+    await c1.query("begin");
+    await c1.query("select set_config('request.jwt.claims', $1, true)", [claims(subA)]);
+    const ra = await c1.query(sqlA, paramsA); // c1's transaction stays OPEN, holding the rung
+
+    await c2.query(`set role ${ROLES.authenticated}`);
+    await c2.query("begin");
+    await c2.query("select set_config('request.jwt.claims', $1, true)", [claims(subB)]);
+    const p2 = c2.query(sqlB, paramsB).then(
+      (r) => { settled = true; return { ok: true, r }; },
+      (e) => { settled = true; return { ok: false, e }; });
+
+    let waited = false;
+    const deadline = Date.now() + waitMs;
+    while (!settled && Date.now() < deadline) {
+      const w = await rootQuery(
+        `select count(*)::int as n from pg_locks
+          where locktype = 'advisory' and classid = $1 and not granted`, [lockClassId]);
+      if (w.rows[0].n > 0) { waited = true; break; }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    await c1.query("commit");
+    const out = await p2;
+    await c2.query("commit").catch(() => c2.query("rollback").catch(() => {}));
+    return {
+      a: ra.rows[0].result,
+      b: out.ok ? out.r.rows[0].result : null,
+      bError: out.ok ? null : out.e,
+      waited,
+    };
+  } finally {
+    if (!settled) { await c2.query("rollback").catch(() => {}); }
+    for (const c of [c1, c2]) {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {}); // RESET ALL does NOT reset the role
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+  }
 }

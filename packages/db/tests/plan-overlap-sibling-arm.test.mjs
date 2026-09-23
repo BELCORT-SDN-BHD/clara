@@ -58,20 +58,17 @@ import {
 
 const MIGRATION = "0281_plan_overlap_sibling_arm.sql";
 const STEM = "plan_overlap_sibling_arm$";
-const FN = "clara._plan_overlap_warning(uuid,jsonb)";
+const FN_NAME = "_plan_overlap_warning";
 const FN_ACL = "{clara_fn_owner=X/clara_fn_owner}";
 
-/** The three callers 0281's own prestate/tail pin as non-regression — their own sha256(prosrc),
- *  MEASURED on this rig at 269 migrations (0001->0280) before 0281 existed, and asserted UNMOVED
- *  by 0281's own prestate/tail. This file's own outside-in re-proof, never transcribed. */
-const NONREGRESSION = [
-  { fn: "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)",
-    sha: "84b67058244bfe795245ee224733bd0b09940331b1cf75f4cb6654d84e88d6c4" },
-  { fn: "clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)",
-    sha: "87c9f1e9bcf493493dd805585ade921b679afda97a62daa18334ef61258f431f" },
-  { fn: "clara._accrual_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,int,text,date,date,jsonb)",
-    sha: "b3bd10065ed7a117ff3a324eff7ebebfcd06adaac38300fc9d77b99ef1759da8" },
-];
+/* The three callers' sha256(prosrc) pins this file used to carry (84b67058… / 87c9f1e9… /
+ * b3bd1006…) are REMOVED, for exactly the reason the template-arm pins below were: they stopped
+ * being an invariant true across every frontier "0281 or later" the moment 0283 landed. 0283's fix
+ * round RECUTS all three (the client advisory rung, and the caller's own plan id passed to this
+ * function), so a hard pin here would be a claim about which migrations are applied, dressed up as
+ * a claim about 0281. The pre-images live on as the FRESH-APPLY half of 0283's own prestate, and
+ * the post-recut bodies are pinned outside-in in
+ * tests/plan-overlap-template-arm-retired.test.mjs's own RECUT list, frontier-gated on 0283. */
 
 let world = null;
 let ready = false;
@@ -273,20 +270,31 @@ test("p909.accrual-door — clara.create_accrual_adjustment (an outer door, not 
   assert.ok(acc.overlap_warning.templates[0].accounts.includes("6100"));
 });
 
-test("p909.tail — outside-in re-proof of 0281's own tail: both arms are present, the three callers are unmoved, and the posture is unmoved", async (t) => {
+test("p909.tail — outside-in re-proof of 0281's own tail: the sibling arm is present, it self-excludes the caller's own plan, and the posture is unmoved", async (t) => {
   if (unready(t)) return;
+  // Resolved BY NAME, not by signature: 0281 shipped `(uuid,jsonb)` and 0283's fix round replaced
+  // it with `(uuid,jsonb,uuid)`. What is true at EVERY frontier from 0281 on is that clara carries
+  // exactly ONE function of this name — which is itself the claim worth asserting here, since a
+  // surviving second overload would be a second definition of "does this plan overlap".
   const r = await rootQuery(
     `select p.prosrc as src, pg_get_userbyid(p.proowner) as owner, p.prosecdef as secdef,
             p.provolatile as vol, coalesce(p.proacl::text,'(null)') as acl,
             coalesce(array_to_string(p.proconfig,','),'<none>') as cfg
-       from pg_proc p where p.oid = to_regprocedure($1)`,
-    [FN]);
-  assert.equal(r.rowCount, 1, "clara._plan_overlap_warning does not resolve");
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = $1`,
+    [FN_NAME]);
+  assert.equal(r.rowCount, 1, "clara._plan_overlap_warning does not resolve at exactly one signature");
   const row = r.rows[0];
   assert.match(row.src, /accounting_plan_overlap/, "the new sibling-plan kind is missing");
   assert.match(row.src, /clara\.accounting_plans/, "the sibling arm no longer scans clara.accounting_plans");
   assert.match(row.src, /clara\.accounting_plan_revisions/, "the sibling arm no longer scans clara.accounting_plan_revisions");
-  assert.match(row.src, /is distinct from p_basis/, "the self-exclusion guard is missing");
+  // THE SELF-EXCLUSION, stated the way it is true at every frontier from 0281 on: 0281 excluded
+  // the caller's own plan by BASIS VALUE and 0283's fix round replaced that with the caller's own
+  // plan ID (which is what closes the byte-identical-sibling blind spot). Either shape satisfies
+  // 0281's own claim — that the door's own freshly-written row never warns about itself — and
+  // p929.identical-basis proves the stronger post-0283 contract.
+  assert.match(row.src, /is distinct from (?:p_basis|p_self_plan)/,
+    "the self-exclusion guard is missing entirely -- the creating door would warn about its own row");
   // The two assertions that used to pin the 0045 template arm's own PRESENCE here
   // (adjustment_template_overlap / clara.adjustment_templates) were REMOVED by #929/0283, which
   // retires that arm -- their presence stopped being an invariant true across every frontier
@@ -299,11 +307,4 @@ test("p909.tail — outside-in re-proof of 0281's own tail: both arms are presen
   assert.equal(row.vol, "s", "clara._plan_overlap_warning must stay STABLE");
   assert.equal(row.cfg, "search_path=clara, pg_temp");
   assert.equal(row.acl, FN_ACL, "0281 must not grant EXECUTE to any application role");
-
-  for (const sig of NONREGRESSION) {
-    const c = await rootQuery(
-      `select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha
-         from pg_proc p where p.oid = to_regprocedure($1)`, [sig.fn]);
-    assert.equal(c.rows[0].sha, sig.sha, `${sig.fn} moved -- 0281 asserts it is untouched`);
-  }
 });
