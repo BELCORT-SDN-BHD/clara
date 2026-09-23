@@ -3120,3 +3120,71 @@ signature or edit any of the three plan-creating doors or their web forms — th
 states why that was unnecessary rather than merely deferred. The cross-lane direction and the
 refuse-vs-advise question #909 was originally filed with are #788's, closed as split into
 #927 → #928 → #929.
+
+## 0282 — the 0045 recurring-adjustment template lane's three human-write doors close (#927)
+
+**Context.** #788 (owner ruling, 2026-09-18): "retire the 0045 recurring-adjustment template lane
+fully" — the hosted census the same day found ZERO rows in `clara.adjustment_templates`, of any
+status, so no data migration is owed. The ruling is delivered in three tracer-bullet tickets,
+#927 → #928 → #929. This is #927, step one: it closes the three doors that could ever CREATE or
+ADVANCE a template's schedule — `clara.propose_adjustment_template`, `clara.sign_adjustment_
+template` and `clara.run_adjustment_manual` — leaving everything else in the lane exactly as it
+was. #928 removes the daily runtime sweep next (the only OTHER way a period could ever fall due);
+#929 drops the plan-overlap advisory's now-dead template arm and rewrites the product record.
+
+**What 0282 does.** `0282_retire_adjustment_template_doors.sql` recuts the three doors' bodies —
+same signatures, same owner, same `SECURITY DEFINER` flag, same `search_path`, same
+`clara_authenticated`-only ACL — to `raise exception` unconditionally, before touching any
+argument, any table or `clara._human_ctx`: the door is closed to every caller alike, not merely
+re-floored. All three share ONE token — `errcode = 'CLR10'`, `detail.reason =
+'adjustment_template_lane_retired'` — and a message naming the specific verb that no longer exists,
+ending by pointing at the surviving lane ("create an accounting plan instead — Client → Plans").
+No new relation, no new grant, no `DROP`.
+
+**The prestate guard: no non-retired template may exist when this file lands.** A `proposed` row
+could never be signed again (sign closes in the same transaction); a `live` row could never run
+another occurrence by hand again (manual-run closes too) and, once #928 lands, never again at all —
+either shape would be this file silently orphaning a schedule a firm is still relying on. Only
+`status = 'retired'` is admitted; a from-scratch chain carries no row at all and passes vacuously.
+Measured on `clara_l05` (riders wave 3, lane 05) before this file was authored: ten leftover
+`status='live'` rows from #909's own rig fixtures (`plan-overlap-sibling-arm.test.mjs`'s "Rig combo
+template" / "Rig overlap template" cells, born 2026-09-20 by direct `INSERT`, never cleaned up
+because that file's own fixture never retires them) — retired by hand through the still-open
+`retire_adjustment_template` door before applying, which is the guard's own intended remedy for any
+lane that meets it non-empty; never a silent `DELETE` (retire, never delete, is this table's own
+law throughout 0045).
+
+**What stays exactly as it is (D6: "historical receipts and in-flight legacy visibility are
+retained"), and how the prestate/tail prove it.** `clara.retire_adjustment_template`
+(`66a113f25326…d8b45`), the reversal-pair machine (`reverse_adjustment_pair` `f167cab16f5c…8580`,
+`approve_pair_reversal` `5fa46ad5ca2a…d9d`, `cancel_pair_reversal` `ad7e0fc6ebee…8192`), the
+correction door (`_adj_correction_door` `5b22b62819fe…93e52`) and the three reads
+(`list_adjustment_templates` `97cabd663904…75ff`, `list_adjustment_runs` `197872e84d54…c93f`,
+`get_adjustment_run` `ff75553cab62…8ac3`) are pinned by pre-image `sha256(prosrc)` in §0 and
+re-pinned unchanged in §T — none of those seven bodies is touched, recut or re-granted. Also pinned
+non-regression, for the same reason: `clara.run_adjustment_occurrence` (`d61707e27aa4…8a252`) and
+`clara.adjustment_run_due` (`f01e9e403a73…26052`) — #928, not this file, retires the runtime belt
+that is their only remaining caller, so the doors themselves must keep working exactly as today
+until it does — and `clara._propose_adjustment_template_core` (`b975d0af972d…9ee810`), the OLD
+propose door's own former callee, still reachable through `clara._agent_prepayment_schedule_core`
+(0140), which this file does not go near.
+
+**Prestate/tail.** Pins (pre-image `sha256(prosrc)`, MEASURED on `clara_l05`, 281 migrations,
+`0001->0281`, 2026-09-21): `clara.propose_adjustment_template` (`1319ba44fe95…3c7cd5`),
+`clara.sign_adjustment_template` (`e7ace43b0043…88c2dff`) and `clara.run_adjustment_manual`
+(`45c4546994c7…f1edc6`), each redo-tolerant by construction (#957) — the prestate recognises either
+the measured pre-#927 pre-image or this file's own prior output (the `adjustment_template_lane_
+retired` token in the body), and refuses a MIXED state (some old, some already recut) outright
+rather than building on a partial prior apply. The tail does not merely re-read `prosrc`: it CALLS
+all three, as `clara_fn_owner` (no PostgREST session needed — none of the three reaches
+`_human_ctx` any more), and asserts the caught `CLR10`'s `detail.reason` is exactly
+`adjustment_template_lane_retired` — a behavioural proof, not only a static one — before re-reading
+owner/`SECURITY DEFINER`/`search_path`/ACL and the nine non-regression pins above.
+
+**What 0282 does not do.** It does not touch `clara.retire_adjustment_template`, the reversal-pair
+machine, the correction door, any read, `run_adjustment_occurrence`, `adjustment_run_due` or
+`_propose_adjustment_template_core` — the section above states why each survives rather than
+merely asserting it. It does not remove the daily runtime sweep (#928) or rewrite `CONTEXT.md` /
+`ARCHITECTURE.md` / `PRD.md` or the plan-overlap advisory's template arm (#929). It does not
+migrate data — the prestate's own guard is what makes that safe, not a claim that no live template
+could exist.
