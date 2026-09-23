@@ -2969,3 +2969,66 @@ re-creation of 0244's own trigger at 0244's spelling, so a database carrying the
 comes back), `create or replace function`, and an idempotent `comment on`. The prestate reports
 FIRST or REDO, and its pin for the ONE body this file recuts is two-valued by construction —
 0244's pre-image or 0272's own post-image, both measured.
+
+## 0277 — a default depreciation policy per enrolled fixed-asset account (#932, riders wave 3 lane 04)
+
+`0277_fa_default_depreciation_policy.sql` mints `clara.fa_account_depreciation_policies` (append-
+only, version-forward, keyed on the same `(client_id, asset_account_code)` pair
+`clara.fa_account_profiles` already uses — no finer class, one live policy per account by a partial
+unique index) and its two bookkeeper+ doors, `clara.set_fa_depreciation_policy` /
+`clara.retire_fa_depreciation_policy`. Setting a policy never mutates a prior version: it retires
+the live row (if any) and inserts a fresh one at `version + 1`, mirroring
+`clara.upsert_fa_account_profile`'s own law for the enrolment it is keyed on.
+
+**BOTH birth sites, not one — measured, not assumed.** `clara._fa_on_approve` arm 4 fires
+SYNCHRONOUSLY inside the approve statement (through `clara._subledger_on_approve`, every approve
+writer's own call); `clara._tf_fa_acquisition_birth` is a DEFERRED constraint trigger that fires at
+COMMIT, after arm 4 already ran. Both target the same conflict key
+(`on conflict (acquisition_line_id) do nothing`), and 0247's own comment on the trigger already
+says which one wins for an ordinary acquisition. Driven on the lane-04 rig before this file's final
+cut: a policy planted only in the deferred trigger (0247's own scope) left an ordinary
+`buyAsset`-shaped approve still birthing the pre-0277 pending row, because arm 4 got there first
+with no policy logic of its own. 0277 therefore recuts BOTH sites with the SAME policy lookup and
+the same two-branch column choice — the trigger for the Work lane (where arm 4 is never reached)
+and arm 4 for every other lane (where the trigger's own insert is absorbed by the conflict target).
+It also recuts `clara._fa_asset_json` (0216's recut, the one source both `clara.list_fixed_assets`
+and `clara.get_fixed_asset` read a row through) to surface the two new provenance columns,
+`depreciation_policy_id` / `depreciation_policy_version`, on `clara.fixed_assets`.
+
+**The ticket's own triage comment is stale — its sequencing note is superseded here.** The comment
+on #932 was checked against `origin/main` at 0233 / `dc9acfe1`, before riders existed, and pins
+0227's text for `clara._fa_validate_particulars` and the two completion doors. Wave 2 already
+recut all three (0249's fold) and 0247 already recut `clara._tf_fa_acquisition_birth` on top of
+0216. 0277's own prestate pins the LIVE text of every body it touches or relies on, MEASURED on the
+lane-04 database moments before the file was written (267 files / 0272), never transcribed from an
+earlier migration's own header — the riders wave-3 addendum's own rule (RIG.md).
+
+**What 0277 does NOT touch**, pinned unmoved in its prestate/tail: `clara.upsert_fa_account_profile`
+/ `clara.retire_fa_account_profile` and the enrolment belt watermark (AC1's own requirement);
+`clara._fa_validate_particulars`, either completion door, `clara._fa_assert_completion_not_a_change`,
+`clara._fa_assert_particulars_completable` (a policy-born row is populated directly from the
+policy's own already-validated columns, never through the validator, and a SUBSEQUENT change still
+goes through `clara.revise_fixed_asset_particulars`, the existing prospective revision door);
+`clara._fa_compute_charges`, `clara._fa_asset_charges`, `clara.fa_register_tie` (the depreciation
+engine needs no change — AC4's "picked up on its next run" is a consequence of the row being
+COMPLETE, not a new arithmetic path).
+
+**"Stated particulars always win" (AC2) has nothing to override, today.** There is no mechanism yet
+for an acquisition entry itself to carry particulars at posting time (grepped, none exists), so a
+policy can never have anything stated to override; `packages/db/tests/fa-depreciation-policy.test.mjs`
+(`p932.frozen`) drives the one way this estate CAN prove the law — a policy-born row is a COMPLETE
+row like any other, so `complete_fixed_asset_particulars` refuses it `fa_particulars_already_complete`
+exactly as it would a hand-completed one, and `revise_fixed_asset_particulars` still reaches it.
+
+**Redo-safe by construction**: every schema/door section is naturally redo-safe
+(`create table if not exists`, guarded `alter table ... add column/constraint`,
+`create or replace function/trigger`); only the three recut bodies' prestate pins need a redo
+branch, keyed on `clara.set_fa_depreciation_policy`'s own presence as the "this is a redo of 0277
+itself" signal.
+
+Frontier gate: `tests/fa-depreciation-policy-preintegration-gate.mjs`, keyed on the stem
+`fa_default_depreciation_policy$` (never the migration number, claimed at merge). Rig-meta cohort:
+`FA_DEFAULT_DEPRECIATION_POLICY_0277_COHORT` in `tests/rig-meta.mjs`, bimodal like 0270's (the
+`db-slice-frontiers` matrix runs this package against earlier frontiers). Both new doors are
+`clara_authenticated`-only, `_human_ctx`-floored at bookkeeper — `clara_runtime` and every agent/wake
+lane gain zero.
