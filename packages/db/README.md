@@ -3220,7 +3220,7 @@ header does not say. The behaviour is correct either way; only the record was wr
 applied and immutable, and is not the highest applied version, so #957's redo cannot reach it — the
 correction lives here and in `0283`'s own header.
 
-## 0283 — the plan-overlap advisory loses its 0045 template arm (#929)
+## 0283 — the plan-overlap advisory loses its 0045 template arm, and the arm that survives is fixed twice (#929)
 
 **Context.** #788 (owner ruling, 2026-09-18): "retire the 0045 recurring-adjustment template lane
 fully," delivered in three tracer-bullet tickets. #927 closed the three human-write doors; #928
@@ -3233,37 +3233,75 @@ that table.
 
 **What 0283 does.** `0283_retire_plan_overlap_template_arm.sql` recuts `clara._plan_overlap_warning`
 a second time: 0281's own ARM 1 (the `clara.adjustment_templates` scan and its `UNION ALL`) is
-deleted outright; 0281's ARM 2 (the sibling-plan scan) survives verbatim, unindented to the top
-level. `kind` collapses from a two-branch `case` to the single literal `'accounting_plan_overlap'`
-— the only value this function can ever answer from here on. No signature change, no new relation,
-no new door, no data migration (a live `clara.adjustment_templates` row, historical or a rig
-fixture, simply stops being named — it is neither read nor written by this file). The three
-plan-creating doors and their web forms (`apps/web/components/{plans,accruals,prepayments}-
-form.tsx`) read only `overlap_warning.templates.map((x) => x.name)` and never branch on `kind`
-(0281's own header, unmoved), so none of them needed a code change; the `PlanOverlapWarning`-
-shaped TypeScript types (`lib/{plans,accruals,prepayments}/api.ts`) and the `overlapTitle`/
-`overlapBody` copy in `messages/en.json` were corrected in the same commit to stop describing a
-"recurring adjustment template" that can no longer exist, and no longer carry a `template_id`
-field that can no longer appear.
+deleted outright; 0281's ARM 2 (the sibling-plan scan) survives, unindented to the top level.
+`kind` collapses from a two-branch `case` to the single literal `'accounting_plan_overlap'` — the
+only value this function can ever answer from here on. No new relation, no new door, no data
+migration (a live `clara.adjustment_templates` row, historical or a rig fixture, simply stops being
+named — it is neither read nor written by this file). The three plan-creating doors and their web
+forms (`apps/web/components/{plans,accruals,prepayments}-form.tsx`) read only
+`overlap_warning.templates.map((x) => x.name)` and never branch on `kind` (0281's own header,
+unmoved), so no FORM needed a code change; the `PlanOverlapWarning`-shaped TypeScript types
+(`lib/{plans,accruals,prepayments}/api.ts`) and the `overlapTitle`/`overlapBody` copy in
+`messages/en.json` were corrected in the same commit to stop describing a "recurring adjustment
+template" that can no longer exist, and no longer carry a `template_id` field that can no longer
+appear.
 
-**Prestate/tail.** Pins (pre-image `sha256(prosrc)`, MEASURED on `clara_l05`, 282 migrations,
-`0001->0282`, 2026-09-23): `clara._plan_overlap_warning`
-(`33b23167bf67f911a13b7523a4eb109e406ec2a10367b444c687d2461abc1e0b`, 0281's own two-arm output,
-unmoved by 0282), and as non-regression `clara.create_accounting_plan`
-(`84b67058244bfe795245ee224733bd0b09940331b1cf75f4cb6654d84e88d6c4`), `clara.revise_accounting_plan`
-(`87c9f1e9bcf493493dd805585ade921b679afda97a62daa18334ef61258f431f`) and
-`clara._accrual_plan_core` (`b3bd10065ed7a117ff3a324eff7ebebfcd06adaac38300fc9d77b99ef1759da8`) —
-the same three sha's 0281 itself pinned, re-confirmed byte-for-byte unmoved here. Redo-tolerant
-(#957): the prestate recognises either the measured pre-0283 pre-image or this file's own prior
-output (`adjustment_template_overlap` and `clara.adjustment_templates` both ABSENT from `prosrc`,
-the sibling arm's own tokens present), and refuses a mixed or unrecognised body outright. The tail
-re-reads `prosrc` and asserts the template tokens are GONE (not merely re-asserts the sibling
-tokens are present, as 0281's own tail does) before re-confirming the three callers' pins and the
-posture (owner, `SECURITY DEFINER`, `search_path`, `STABLE`, owner-only ACL). Measured: applied
-FIRST (the fresh-apply branch, confirmed by the prestate's own notice), then exercised via
-`CLARA_MIGRATION_REDO=0283_retire_plan_overlap_template_arm` (the redo branch, "own prior
-output," confirmed by the same notice) as this ticket's own vacuity control — see
-`tests/plan-overlap-template-arm-retired.test.mjs`'s own header for the red-then-green trace.
+**…and what its FIX ROUND (2026-09-23, second round) added to the same file.** Two review findings
+were defects in the arm that SURVIVES the retirement, not in the retirement. Round one deferred
+both on the ground that the honest fix recuts three caller bodies four migrations pin
+byte-unchanged; that ground was withdrawn in round two, because 0280–0283 are one unmerged lane's
+own migrations, 0283 is the highest applied version (so #957's redo can reach it), and the pins in
+0280/0281/0282 run BEFORE this file in every chain and still see the pre-images they name. Wave 3
+reserved `0280–0283` for this lane and `0284` onward belongs to another, so a fourth file was never
+an option: this one grows, and its NAME is now narrower than its content.
+
+- **FIX 1 — self-exclusion by identity.** All three doors compute this advisory AFTER writing their
+  own plan row or their own new live revision, so the function has always had to exclude the
+  caller's own plan. 0281 excluded it by BASIS VALUE (`r.basis is distinct from p_basis`), which
+  also hid every OTHER plan carrying the same basis — total overlap, the case a human most needs
+  told. Measured on `clara_l05`: 7 `(client, basis_digest)` groups held 28 live plans with
+  byte-identical bases (four at a time, 4 ms apart, from the rig's own seed) and the advisory
+  answered `NULL` for them. The signature becomes
+  `clara._plan_overlap_warning(p_client uuid, p_basis jsonb, p_self_plan uuid)`, the predicate
+  becomes `p.id is distinct from p_self_plan`, and **the two-argument signature is dropped** so the
+  blind spot cannot be reached through a surviving overload. Not a by-value heuristic instead:
+  excluding "the most recently written identical-basis plan" would make `revise_accounting_plan`
+  warn a firm about the very plan it is revising, and a warning that names your own row teaches the
+  reader to skip the key.
+- **FIX 2 — the concurrency window.** The advisory is computed inside the creating transaction, so
+  two sessions creating overlapping plans for one client each read the other's row as uncommitted
+  and BOTH answered null. All three doors now take the client advisory rung
+  `pg_advisory_xact_lock(203005004, hashtext(<client>::text))` — the same rung
+  `clara.retire_adjustment_template` takes — after their op-receipt reservation (0037 §K's own
+  order) and above any `clara.accounting_plans` row lock (0238's order for this rung). Censused
+  before it was added: of the 51 bodies that take 203005004, **none** reads or locks
+  `clara.accounting_plans`, so the only new ordered pair is "client rung → plan row" and no body
+  holds a plan row while waiting for that rung.
+
+**Prestate/tail.** The prestate decides which of two admissible starting shapes it is looking at
+BY SIGNATURE — a fact about the catalog, not a marker inside a body, which is what the wave-3
+addendum asks for — and then every pin on the branch it picked is a hard sha:
+
+| | FRESH APPLY (two-argument advisory live, no three-argument one) | REDO #957 (three-argument live, no two-argument one) |
+|---|---|---|
+| `clara._plan_overlap_warning` | `33b23167…1e0b` (0281's own two-arm output) | `c2566349…f7dc` |
+| `clara.create_accounting_plan` | `84b67058…d6c4` | `99f60787…b424` |
+| `clara.revise_accounting_plan` | `87c9f1e9…431f` | `8a6e69ef…2886` |
+| `clara._accrual_plan_core` | `b3bd1006…9da8` | `31adc6d4…9bc5` |
+
+Both signatures present at once, or neither, is refused rather than guessed past. The tail re-reads
+`prosrc` and asserts: the template tokens are GONE; the two-argument signature is gone and exactly
+one `_plan_overlap_warning` resolves; the surviving arm self-excludes by `p.id is distinct from
+p_self_plan` and NO LONGER by basis value; each of the three callers takes the client rung, passes
+its own plan id, and takes that rung above any `clara.accounting_plans` row lock; all three keep
+their ACLs across the recut; `revise_accounting_plan` still re-reads `plan_ended` under the plan row
+lock (0193's review finding S4, which `p640.revision.end_race` also censuses); and the recut
+advisory keeps its owner, `SECURITY DEFINER` flag, `search_path`, `STABLE` volatility and owner-only
+ACL. **Both branches were exercised for real on `clara_l05`**: the pre-image was restored by
+re-running 0281's own `§A` statement, then `CLARA_MIGRATION_REDO=0283_retire_plan_overlap_template_arm`
+reported `FRESH APPLY`; a second redo over that result reported `REDO (#957)`. See
+`tests/plan-overlap-template-arm-retired.test.mjs` for the outside-in re-proof and the
+red-then-green trace of both fixes.
 
 **What stays exactly as it is.** `clara.adjustment_templates` keeps every row it has (live,
 proposed or retired); `clara.list_adjustment_templates`, `clara.list_adjustment_runs`,
@@ -3278,8 +3316,10 @@ case) is removed, with a pointer to this migration's own dedicated file,
 `p640.schedule.overlap` is retargeted the same way, gated locally on this migration's own stem.
 
 **What 0283 does not do.** It does not touch `clara.adjustment_templates` or any of its readers —
-D6's retained historical surface is untouched. It does not recut `clara.create_accounting_plan`,
-`clara.revise_accounting_plan` or `clara._accrual_plan_core`. It does not edit `CONTEXT.md`'s two
+D6's retained historical surface is untouched. It recuts `clara.create_accounting_plan`,
+`clara.revise_accounting_plan` and `clara._accrual_plan_core`, but only by the two edits FIX 1 and
+FIX 2 name: every other line of those three bodies is reproduced from the pre-image the table above
+pins. It does not edit `CONTEXT.md`'s two
 `_Avoid_` lines (a separate, non-migration commit in this same ticket), `docs/ARCHITECTURE.md` or
 `docs/PRD.md` — the blueprints are never edited outside a #683 sync; this ticket's closing report
 carries the `ARCHITECTURE.md:500` blueprint-drift line and the C08.1 nested-obligation disposition
@@ -3308,10 +3348,12 @@ Retiring or rerouting the limb at `clara.create_prepayment_schedule` (0223) is a
 #788 split did not publish, so it is deliberately not done here; instead the containment is a live
 cell — `tests/plan-overlap-template-arm-retired.test.mjs`'s `p929.containment`, whose two
 rolled-back mutants flip the flag and widen the allowlist — which goes red with the remedy in its
-message the day anyone unparks `close_prep` or registers that wrapper under a live wake kind. 0283's own header carries the same statement, together with the withdrawal of
-0281's "a coincidence this estate has never produced" justification for the sibling arm's
-by-value self-exclusion (measured false on this rig: 7 `(client, basis_digest)` groups hold 28 live
-plans with byte-identical bases, and the advisory answers NULL for them), and the concurrency
-window the advisory cannot close from inside the creating transaction. The header edit was
-re-applied through `CLARA_MIGRATION_REDO=0283_retire_plan_overlap_template_arm`; the ledger
-checksum is now `28e630178b35012c062d89c084844435d59896a951d6666236ab4f6f79ca3af7`.
+message the day anyone unparks `close_prep` or registers that wrapper under a live wake kind.
+0283's own header carries the same statement. It is the ONE finding of the three the fix rounds
+left open: unlike FIX 1 and FIX 2 it is not a wrong answer in code this lane wrote but a product
+capability nobody has ruled on, so the ruling — retire the limb, or reroute it onto
+`clara.create_prepayment_schedule` (0223), or accept the residual — is owed before the code is.
+The two sibling-arm defects it used to sit beside are NOT open: 0281's "a coincidence this estate
+has never produced" justification was withdrawn as measurably false and then fixed (FIX 1), and the
+concurrency window is closed (FIX 2). Ledger checksum after the fix round's two redos:
+`0832489ac90494c17e31d90ca570bd35127ec229e8552d663534b180e7520ef3`.
