@@ -14,6 +14,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   assertStatedTermLanePresent, endPool, rootQuery, CLR, assertPair, assertRaises,
   statedTermScene, recordStatedTerm, statedTermRow, statedTermsFor, roleCanExecute,
@@ -300,10 +301,28 @@ cell("p939.evaluator.frozen — clara.prepayment_schedule_v2 is registered as it
   assert.equal(v2.entrypoint_signature, EVALUATOR_V2_SIG);
   assert.equal(v2.members, 1,
     "…and v2's is too: it calls no other clara function, so its closure can honestly have one entry");
-  assert.equal(v2.deployed, false,
-    "evaluator versions are born undeployed — the flip is a one-way ceremony act, not this file's");
   assert.equal(v2.migration_version, "0305_prepayment_stated_term",
     "the registration names the file that minted it");
+
+  // THE CLAIM IS ABOUT THE MIGRATION, AND IS ASSERTED THERE (riders wave 4 CI fix; the same
+  // finding lane 01 recorded as SPEC-02 against its own two evaluator cells).
+  // `clara.evaluator_versions.deployed` is GLOBAL, ONE-WAY state, and three batteries in this
+  // suite run a deployment ceremony over it before this file's name is reached in the package
+  // run order (delta-contract, epsilon-contract and f-a5-reporting-agency-pr1). So reading
+  // `deployed === false` off the live row asserts nothing about 0305 and everything about which
+  // files happened to run first — the dependency the wave-3 addendum forbids in so many words
+  // ("no test may depend on rows left in the database by another test file"). What this cell
+  // means is that 0305 REGISTERS the evaluator and never deploys it; that is a fact about the
+  // FILE, and the file is the one place no other battery can move.
+  const mig0305 = readFileSync(
+    new URL("../migrations/0305_prepayment_stated_term.sql", import.meta.url), "utf8");
+  assert.match(mig0305, /insert into clara\.evaluator_versions/i,
+    "0305 must be the file that registers this evaluator");
+  assert.equal(/'0305_prepayment_stated_term',\s*false\)/.test(mig0305), true,
+    "0305 must register the evaluator with deployed = false — evaluator versions are BORN "
+    + "undeployed and the flip is a one-way ceremony act, never a migration's to make");
+  assert.equal(/update\s+clara\.evaluator_versions/i.test(mig0305), false,
+    "0305 must not UPDATE clara.evaluator_versions: the deploy flip is not this file's act");
 
   // THE FREEZE IS MEASURED, never restated: the member hash is recomputed LIVE off
   // pg_get_functiondef — the same instrument clara.verify_evaluator_freeze() uses between every

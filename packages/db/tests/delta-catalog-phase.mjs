@@ -547,6 +547,34 @@ await t.test("both evaluator closures are exact, independent, and registered —
     expected.set("prepayment_schedule@v2",
       ["clara.prepayment_schedule_v2(bigint,text,text,date,date)"]);
   }
+  // #945's evaluate_payroll_run_state v1 (migration 0296) and #948's
+  // evaluate_agreement_contract_state v1 (migration 0299), riders wave 4 lane 01. ONE member
+  // each, and for the same reason 0140's is single-member: each body reads no table and calls no
+  // other clara function (each file's own D.1 block says so, and payroll-summary-facts.test.mjs
+  // and agreement-contract-acquisition.test.mjs both assert the no-clara-call property off the
+  // live body), so the closure the freeze binds is genuinely the one entrypoint.
+  //
+  // THEY ARE **COVERED** BY THE CEREMONY, unlike the four in OWNS_ITS_OWN_CEREMONY below: neither
+  // ships dark. Nothing in the estate reads their `deployed` flag — the live catalog census of
+  // bodies touching clara.evaluator_versions names only the metric/report/prepayment families —
+  // so there is no pre-flip refusal for a battery of theirs to witness and no separate ceremony
+  // to own the flip. Named here rather than absorbed into a bumped total, because this census is
+  // CLOSED-WORLD by design; added CONDITIONALLY, because the rows do not exist on a pre-0296 /
+  // pre-0299 chain and a roster demanding them there would fail for a frontier reason.
+  const payrollRegistered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name='evaluate_payroll_run_state' and version=1 and firm_id is null) as ok"))
+    .rows[0].ok;
+  if (payrollRegistered) {
+    expected.set("evaluate_payroll_run_state@v1",
+      ["clara.evaluate_payroll_run_state_v1(jsonb,jsonb)"]);
+  }
+  const agreementRegistered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name='evaluate_agreement_contract_state' and version=1 and firm_id is null) as ok"))
+    .rows[0].ok;
+  if (agreementRegistered) {
+    expected.set("evaluate_agreement_contract_state@v1",
+      ["clara.evaluate_agreement_contract_state_v1(jsonb,jsonb)"]);
+  }
   /** Closures whose deploy state this census does NOT assert: each owns its own separate ceremony.
    *  PR-2a's joins them because it ships DARK until PR-2b's runtime ceremony flips it, and #939's
    *  v2 joins them for the same reason: evaluator versions are BORN undeployed and the flip is a
@@ -601,8 +629,8 @@ await t.test("both evaluator closures are exact, independent, and registered —
   assert.ok(registered.every((row) => /^[0-9a-f]{64}$/.test(row.hash)), "every registered closure carries a valid hash");
   const covered = registered.filter((row) => !OWNS_ITS_OWN_CEREMONY.has(`${row.evaluator_name}@v${row.version}`));
   assert.ok(covered.every((row) => row.deployed === !fresh), fresh
-    ? "the five covered closures are undeployed (fresh witness)"
-    : "the five covered closures are deployed -- monotone, a prior run's one-way ceremony (re-run shape)");
+    ? `the ${covered.length} covered closures are undeployed (fresh witness)`
+    : `the ${covered.length} covered closures are deployed -- monotone, a prior run's one-way ceremony (re-run shape)`);
   assert.equal(new Set(registered.map((row) => row.hash)).size, registered.length,
     "every registered closure hashes differently — a shared aggregate would mean two rows freeze one body set");
 });
@@ -686,9 +714,22 @@ await t.test("freeze verifier positively reads registered live bodies, deploymen
   // that ships dark, not just some of them — the verifier itself draws no such distinction.
   const prepayV2Deployed = (await rootQuery(
     "select deployed from clara.evaluator_versions where evaluator_name='prepayment_schedule' and version=2 and firm_id is null")).rows[0]?.deployed === true;
+  // RIDERS WAVE 4, LANE 01: #945's evaluate_payroll_run_state v1 (0296) and #948's
+  // evaluate_agreement_contract_state v1 (0299) are COVERED closures, not dark ones — neither is
+  // in delta-contract.test.mjs's excluded pairs — so each one that is REGISTERED on this database
+  // also gets DEPLOYED by the ceremony and belongs in this deployment census. Measured rather
+  // than assumed, exactly like the four dark rows above, so the cell stays exact on a pre-0296
+  // chain too.
+  const payrollRegistered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name='evaluate_payroll_run_state' and version=1 and firm_id is null) as ok"))
+    .rows[0].ok;
+  const agreementRegistered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name='evaluate_agreement_contract_state' and version=1 and firm_id is null) as ok"))
+    .rows[0].ok;
+  const coveredNew = (payrollRegistered ? 1 : 0) + (agreementRegistered ? 1 : 0);
   assert.equal(result.verified_deployed,
-    fresh ? 0 : 5 + (fsPackDeployed ? 1 : 0) + (card1V2Deployed ? 1 : 0) + (prepayDeployed ? 1 : 0)
-      + (prepayV2Deployed ? 1 : 0),
+    fresh ? 0 : 5 + coveredNew + (fsPackDeployed ? 1 : 0) + (card1V2Deployed ? 1 : 0)
+      + (prepayDeployed ? 1 : 0) + (prepayV2Deployed ? 1 : 0),
     JSON.stringify(result));
   // SIX registered closures at this frontier: delta's evaluate_metric +
   // assess_metric_cell_independent, F-A1's evaluate_witness_fact_state (v1) +
@@ -715,8 +756,14 @@ await t.test("freeze verifier positively reads registered live bodies, deploymen
   // excluded from the deployment census, because REGISTRATION and DEPLOYMENT are two facts.
   const prepayV2Registered = (await rootQuery(
     "select exists(select 1 from clara.evaluator_versions where evaluator_name='prepayment_schedule' and version=2 and firm_id is null) as ok")).rows[0].ok;
+  // ELEVEN once riders wave 4 lane 01 registers evaluate_payroll_run_state v1 (0296) and
+  // evaluate_agreement_contract_state v1 (0299) — two NEW closures on exactly the same terms as
+  // every predecessor: each moves the count by one and every earlier row keeps its own. Both are
+  // counted from the same measured flags the deployment census above uses, because REGISTRATION
+  // and DEPLOYMENT are two facts and these two rows happen to carry both.
   assert.equal(result.verified_registered,
-    6 + (card1V2Registered ? 1 : 0) + (prepayRegistered ? 1 : 0) + (prepayV2Registered ? 1 : 0),
+    6 + (card1V2Registered ? 1 : 0) + (prepayRegistered ? 1 : 0) + (prepayV2Registered ? 1 : 0)
+      + coveredNew,
     JSON.stringify(result));
 });
 }
