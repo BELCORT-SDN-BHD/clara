@@ -185,7 +185,15 @@ begin
       -- rig and wrong on the chain. It is therefore admitted at EITHER value. Nothing else is
       -- loosened: every other pin in this array stays exact. Precedent: wave 3's 0284.
        or (v_recut[v_i][1] = 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)'
-           and v_sha = 'f9b19cf61ba2c1728b4c4ccc5d02e997b9a882779db4925cd1d267e92a669e63') then
+           and v_sha = 'f9b19cf61ba2c1728b4c4ccc5d02e997b9a882779db4925cd1d267e92a669e63')
+      -- …and the SAME shape for clara._plan_admit_occurrence, which lane 03's
+      -- 0303_accrual_period_amounts.sql recuts at a LOWER number to add the accrual arm beside
+      -- 0223's amortisation one. This file's own paste now carries THREE arms (amortisation,
+      -- lane 03's reversing_journal, and this file's revenue_recognition_schedule), derived from
+      -- 0303's post-image rather than from the pre-0303 body this lane measured, so it adds its
+      -- arm instead of overwriting lane 03's.
+       or (v_recut[v_i][1] = 'clara._plan_admit_occurrence(uuid,date,text,text,boolean)'
+           and v_sha = '6980feab1f7d7851ab07c76f7af6d0114423bd016f39d30d4c5a324d1a05337b') then
       v_modes := v_modes || v_recut[v_i][1] || '=FIRST ';
     elsif position('#941' in v_src) > 0 then
       v_modes := v_modes || v_recut[v_i][1] || '=REDO ';
@@ -1712,7 +1720,11 @@ declare
   v_old_work uuid; v_old_status text; v_reattempt boolean := false;
   v_primary_entry uuid; v_primary_state text;
   v_line jsonb; v_line_missing boolean := false;  -- #653
-  v_line_reason text; v_line_message text;        -- #941
+  -- #937 - THE NAME OF THE REFUSAL A MISSING LINE RECORDS. Two lanes now resolve a per-due-date
+  -- line (amortisation, 0223; accrual, 0303) and a missing one is a DIFFERENT fact in each, so
+  -- the reason and its sentence travel in variables instead of being literals inside the one
+  -- shared refusal block below.
+  v_line_reason text; v_line_message text; v_accrual_rule text;
 begin
   -- RUNG 1.
   select * into p from clara.accounting_plans where id = p_plan for update;
@@ -1749,8 +1761,8 @@ begin
       'effective_to', case when r.effective_to is null then null else to_char(r.effective_to,'YYYY-MM-DD') end,
       'leg_ceiling', case when v_ceiling = 'infinity'::date then null else to_char(v_ceiling,'YYYY-MM-DD') end);
   end if;
-  -- THE DUE GATE, on the house legal date. A plan due TOMORROW in Kuala Lumpur is not admitted
-  -- today, whatever zone the session opened in.
+  -- THE DUE GATE, on the house legal date (see clara._plan_admissible_event above). A plan due
+  -- TOMORROW in Kuala Lumpur is not admitted today, whatever zone the session opened in.
   if p_due > clara._book_today() then
     return jsonb_build_object('admitted', false, 'plan_id', p.id, 'reason', 'not_yet_due',
       'due_date', to_char(p_due,'YYYY-MM-DD'));
@@ -1824,12 +1836,38 @@ begin
   if p.kind = 'amortisation_schedule' then
     v_line := clara._plan_amortisation_period_line(p.id, p_due);
     v_line_missing := (v_line is null);
-    v_line_reason  := 'amortisation_period_line_missing';
+    v_line_reason := 'amortisation_period_line_missing';
     v_line_message := 'this amortisation schedule has no period line ending on this due date';
+  elsif p.kind = 'reversing_journal' then
+    -- #937 - THE SAME SEAM FOR AN ACCRUAL WHOSE AMOUNT A PERSON STATED PER PERIOD. The accrual
+    -- detail is read the way the web layer's own `liveAccrualForPlan` reads it -- the HIGHEST
+    -- revision on the plan, which is the live one (0284's correction lineage leaves both rows) --
+    -- rather than `= r.revision`, because a lawful `clara.revise_accounting_plan` moves the plan
+    -- to a revision the accrual detail does not name and the accrual is still the one running.
+    -- A plain reversing journal nobody configured from an accrual answers NULL here and takes
+    -- neither arm, so the constant basis keeps posting for it exactly as before.
+    select (a.method ->> 'rule') into v_accrual_rule
+      from clara.accrual_adjustments a
+     where a.plan_id = p.id
+     order by a.revision desc, a.created_at desc
+     limit 1;
+    -- THE REVERSAL LEG RESOLVES ITS OWN PRIMARY'S LINE, never its own date: a reversal exists to
+    -- undo one period's accrual and must undo the amount that period actually posted. It is
+    -- resolved only once a POSTED accrual stands behind it (`v_primary_entry`), so a reversal with
+    -- nothing behind it falls through to the orphan wall below and is refused THERE, by its own
+    -- honest name, instead of being told its period has no stated amount.
+    if v_accrual_rule = 'stated_period_amount'
+       and (p_leg = 'primary' or v_primary_entry is not null) then
+      v_line := clara._plan_accrual_period_line(p.id,
+                  case when p_leg = 'reversal' then v_primary_due else p_due end);
+      v_line_missing := (v_line is null);
+      v_line_reason := 'accrual_period_amount_missing';
+      v_line_message := 'this accrual has no amount stated for this period';
+    end if;
   elsif p.kind = 'revenue_recognition_schedule' then
     v_line := clara._plan_revenue_recognition_period_line(p.id, p_due);
     v_line_missing := (v_line is null);
-    v_line_reason  := 'revenue_recognition_period_line_missing';
+    v_line_reason := 'revenue_recognition_period_line_missing';
     v_line_message := 'this recognition schedule has no period line ending on this due date';
   end if;
   v_basis := clara._plan_occurrence_basis(r.basis, p_due, p_leg, v_primary_entry, v_line);
@@ -1862,8 +1900,8 @@ begin
   -- #653 - THE MISSING PERIOD LINE. Recorded on the occurrence rather than raised, exactly as
   -- the orphan wall below is: the refusal is legible in the plan's own history, nothing is
   -- admitted, and the SAME row becomes admissible if a schedule later covers the date. A
-  -- corrected term does NOT re-derive an existing schedule, so this is the typed way a due date
-  -- outside the derived allocation answers.
+  -- corrected term does NOT re-derive an existing schedule (0223 SB's own comment says why),
+  -- so this is the typed way a due date outside the derived allocation answers.
   if v_line_missing then
     v_outcome := jsonb_build_object('state','refused','code','CLR10',
       'reason', v_line_reason,
