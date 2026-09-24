@@ -5190,3 +5190,24 @@ and `same_agreement` — another document's approved, unreversed entry whose
 `flags->'agreement_acquisition'` carries the same financier, signing date and cash price. Those three
 printed terms ARE the agreement's identity; a reversed entry is never a duplicate, so a reversal
 re-opens the agreement.
+
+**§K/§L/§M the post, and the lane posting what it reads.** `entry_post_receipts.via_wake_kind` gains
+`contract_facts` — widened rather than borrowed, because writing `autodraft` on an agreement receipt
+would file acquisitions under the invoice lane's name for anyone reading receipts by lane.
+`clara._post_agreement_acquisition(uuid)` asks the gate and acts: ready means one document-bound,
+filing-bound approved entry with its legs, its receipt (`approval_arm = agreement_unattended`,
+`model_snapshot.provider = clara_db`, because no model took part — the frozen evaluator did every sum
+at read time) and an `entry.posted` event; blocked means nothing at all is written and the verdict
+comes back. It RETURNS rather than raises, because it runs inside the read's own transaction and a
+raise would lose the facts a person needs to clear the block.
+
+*The fixed asset is born by the trigger, not by this file.* Nothing in §L calls anything
+fixed-asset-specific. The entry debits the account the client ENROLLED, so
+`clara._tf_fa_acquisition_birth` (0216) fires on `approved`, inserts the `clara.fixed_assets` row
+and reads the account's own accumulated-depreciation and expense codes and its live policy (#932) for
+the particulars — measured end to end by a cell that reads the register row back. §M splices the
+post into `clara.persist_agreement_facts` (never re-typed; the postcheck re-reads the committed
+catalog in both branches), because the questionnaire family is frozen and a posting step with no
+model in it does not deserve a new workflow, a new lane and a reconciler arm. The settle receipt
+gains a `posting` object; the idempotent-replay arm returns before the post, so re-settling a done
+task neither re-posts nor re-refuses.

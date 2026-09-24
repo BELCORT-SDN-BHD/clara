@@ -2594,3 +2594,336 @@ comment on function clara._agreement_posting_verdict(uuid) is
   '#948: THE UNATTENDED GATE for an agreement contract -- the closed rung roster the brief names, walked in order, every rung carrying an explicit verdict and the FIRST failure being the reason a person is told. It is 0297 §D''s shape condition for condition, plus the two rungs this family has and the payroll lane does not: WHICH KIND of agreement the page says it is, and WHICH fixed-asset account the client enrolled. It WRITES NOTHING (STABLE): clara._post_agreement_acquisition acts on it and clara.list_review_queue DERIVES its agreement_posting_blocked row from it, so the decision the lane took and the sentence a person reads are the same body and cannot drift. Judges the NEWEST agreement pair banked for the document. Ungranted: reached from those two callers alone.';
 
 reset role;
+
+-- =====================================================================================
+-- §K  THE RECEIPT SAYS WHICH LANE POSTED -- clara.entry_post_receipts.via_wake_kind gains
+--     `contract_facts`.
+--
+--     `clara._tf_assert_agent_post_receipt` requires EXACTLY ONE receipt for every agent-approved
+--     entry, in either clara.entry_post_receipts (the document lane) or clara.operation_receipts
+--     (the accounting-operation lane). An acquisition is a DOCUMENT post, so it writes the
+--     document-shaped one -- and that table's `via_wake_kind` vocabulary was closed to the kinds
+--     that could reach it before this lane existed.
+--
+--     WIDENED RATHER THAN BORROWED, for 0297 §E's own recorded reason: writing `autodraft` on an
+--     agreement receipt would be the cheaper edit and it would be a lie -- no autodraft wake
+--     credential exists for this post, no model was woken, and an auditor reading receipts by lane
+--     would find acquisitions filed under the invoice lane's name. The column keeps its name
+--     because the table's reader contract does; `contract_facts` is the lane name the task, the
+--     event twin and the capability registry already use.
+--
+--     REDO-SAFE: drop-if-exists then add, the estate's constraint-swap idiom. `payroll_facts`
+--     (0297) is carried forward verbatim -- this is a WIDENING of the live clause, never a
+--     re-typing of an older one.
+-- =====================================================================================
+alter table clara.entry_post_receipts
+  drop constraint if exists entry_post_receipts_via_wake_kind_check;
+alter table clara.entry_post_receipts
+  add constraint entry_post_receipts_via_wake_kind_check
+  check (via_wake_kind = any (array['autodraft'::text, 'interactive'::text, 'bank_agent'::text,
+                                    'payroll_facts'::text, 'contract_facts'::text]));
+
+-- =====================================================================================
+-- §L  THE POST -- clara._post_agreement_acquisition(uuid) returns jsonb.
+--
+--     Asks §J, and acts. Ready: one draft entry, its legs, the approval, the receipt, the event.
+--     Blocked: NOTHING AT ALL is written, and the verdict comes back so the caller can record it
+--     in its own settle receipt. There is no third outcome.
+--
+--     WHY IT RETURNS INSTEAD OF RAISING (0297 §F's reason, unchanged). This body runs INSIDE the
+--     agreement worker's own persist transaction (§M). A raise would abort the READ as well as the
+--     post -- the worker would retry, read again, and be refused again, and the facts a person
+--     needs in order to clear the block would never land.
+--
+--     THE ENTRY IS A DOCUMENT ENTRY, BOUND TO THE FILING. `origin='document'`, with
+--     `document_id`, `source_doc_sha256` and `filing_id` all set, which is what makes the filing's
+--     `uncoded_filing` row disappear the moment this entry exists and come back if it is reversed.
+--
+--     AND THAT BINDING IS WHAT BIRTHS THE FIXED ASSET. Nothing below calls anything
+--     fixed-asset-specific. `clara._tf_fa_acquisition_birth` (0216) is a deferred constraint
+--     trigger on clara.journal_entries: it fires when this entry reaches `approved`, sees a line
+--     debiting an account this client ENROLLED in clara.fa_account_profiles, and inserts the
+--     clara.fixed_assets row itself -- reading the account's own accumulated-depreciation and
+--     expense codes and its live depreciation policy (#932) for the particulars. AC4's "the
+--     depreciation particulars come from the enrolled account's policy and are never invented" is
+--     therefore true of this file structurally: it writes no depreciation column anywhere.
+--
+--     THE ACTOR IS THE ESTATE'S OWN AGENT IDENTITY (clara.agent_user_id()), as maker and as
+--     checker. clara.journal_entries.maker_actor is NOT NULL and references a real user, so an
+--     unattended post has to name someone; naming the agent identity is what makes
+--     clara._tf_assert_agent_post_receipt fire (it resolves users.is_agent) and therefore what
+--     makes the receipt STRUCTURAL rather than a convention. `last_human_editor` stays NULL
+--     because no human touched it.
+--
+--     THE MARKER `flags->'agreement_acquisition'` IS WRITTEN AT THE DRAFT INSERT AND NOWHERE ELSE,
+--     because clara._tf_entry_immutable's draft->approved allowset does not include `flags`. It
+--     carries the agreement's own identity -- the financier, the signing date and the cash price --
+--     so the duplicate guard can ask "is this agreement already posted" of the ledger itself
+--     rather than of a side table nobody else maintains. Same footing as 0297's `payroll_run` and
+--     0194's `payroll_obligation` markers.
+--
+--     TIER C -- CONVERSION ON NAMED PAIRS ONLY, copied from the invoice and payroll lanes. The
+--     gate is meant to have answered everything, and these are the estate walls that could still
+--     speak: the one-open-draft-per-filing unique, the source-binding wall, and the closed-period
+--     wall (which §J's `period_open` rung already asks about, so that arm is the race, not the
+--     case). An unlisted error PROPAGATES: an acquisition post must never turn an unknown defect
+--     into a quiet "not posted".
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._post_agreement_acquisition(p_document uuid)
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp as $paa$
+declare
+  v jsonb; v_entry uuid; v_receipt uuid; v_lines jsonb; v_flags jsonb; v_memo text;
+  v_client uuid; v_firm uuid; v_filing uuid; v_sha text; v_posting date;
+  v_extraction uuid; v_engine text; v_code text; v_detail text; v_reason text; v_pair boolean;
+  v_class text; v_label text;
+begin
+  v := clara._agreement_posting_verdict(p_document);
+  if v->>'verdict' <> 'ready' then
+    return jsonb_build_object('posted', false, 'entry_id', null,
+      'reason', v->'reason', 'rung', v->'rung', 'rung_vector', v->'rung_vector');
+  end if;
+
+  v_client := (v->>'client_id')::uuid;
+  v_firm := (v->>'firm_id')::uuid;
+  v_filing := (v->>'filing_id')::uuid;
+  v_sha := v->>'source_doc_sha256';
+  v_extraction := (v->>'extraction_id')::uuid;
+  v_posting := (v->>'posting_date')::date;
+  v_class := v->>'agreement_class';
+  select t.engine_id into v_engine from clara.document_processing_tasks t
+   where t.document_id = p_document and t.lane = 'contract_facts' and t.status = 'done'
+   order by t.version_n desc limit 1;
+
+  -- THE LEGS, in the plan's own order, in the estate's own line shape.
+  select jsonb_agg(jsonb_build_object(
+           'account_code', l->>'account_code',
+           'debit_cents',  case when l->>'side' = 'debit'  then (l->>'cents')::bigint else 0 end,
+           'credit_cents', case when l->>'side' = 'credit' then (l->>'cents')::bigint else 0 end,
+           'description',  l->>'description') order by ord)
+    into v_lines
+    from jsonb_array_elements(v->'plan'->'legs') with ordinality as t(l, ord);
+  -- The estate's own canonicaliser: it re-checks that every code resolves to an ACTIVE account of
+  -- this client and that the entry balances. Its rounding arm cannot fire here -- §I already
+  -- refused anything that did not balance to the cent -- and that is the point of asking it: two
+  -- independent bodies now agree the entry is postable before a row is written.
+  v_lines := clara._validate_entry_lines(v_client, v_lines);
+
+  v_label := case when v_class = 'finance_lease' then 'Finance lease' else 'Hire purchase' end;
+  v_memo := v_label || ' acquisition'
+    || coalesce(' -- ' || left(nullif(v->'plan'->>'asset_description',''), 120), '')
+    || coalesce(' (' || nullif(v->'plan'->>'financier','') || ')', '');
+  v_flags := jsonb_build_object('agreement_acquisition', jsonb_build_object(
+    'agreement_class', v_class,
+    'agreement_date', to_char(v_posting, 'YYYY-MM-DD'),
+    'financier', v->'plan'->>'financier',
+    'cash_price_cents', v->'plan'->>'cash_price_cents',
+    'document_id', p_document,
+    'extraction_id', v_extraction,
+    'plan_version', coalesce(v->'plan'->>'plan_version','v1')));
+
+  begin
+    insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
+        document_id, source_doc_sha256, filing_id, maker_actor, last_human_editor, flags)
+      values (v_client, 'draft', v_posting, v_memo, 'document',
+        p_document, v_sha, v_filing, clara.agent_user_id(), null, v_flags)
+      returning id into v_entry;
+
+    insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents,
+        description)
+      select v_entry, x.idx, x.elem->>'account_code',
+        (x.elem->>'debit_cents')::bigint, (x.elem->>'credit_cents')::bigint,
+        x.elem->>'description'
+      from jsonb_array_elements(v_lines) with ordinality as x(elem, idx);
+    perform clara._assert_balanced(v_entry);
+
+    update clara.journal_entries
+       set status = 'approved', checker_actor = clara.agent_user_id(), approved_at = now(),
+           updated_at = now()
+     where id = v_entry;
+
+    -- THE RECEIPT. `model_snapshot` names the DETERMINISTIC producer, not a model, because no
+    -- model took part in this post: §D's frozen evaluator did every sum and the classification at
+    -- read time and §I resolved every account from the chart. `gate_verdicts` carries the
+    -- reading's own extraction and the engine id of the call that produced it, so the model that
+    -- READ the page is still reachable from the receipt.
+    insert into clara.entry_post_receipts(id, firm_id, client_id, entry_id, acting_actor,
+        on_behalf_of, via_wake_kind, model_snapshot, rationale, gate_verdicts, approval_arm,
+        maker_active_at_approval, op_key)
+      values (gen_random_uuid(), v_firm, v_client, v_entry, clara.agent_user_id(),
+        null, 'contract_facts',
+        jsonb_build_object('provider','clara_db','model','agreement_entry_plan','version','v1'),
+        v_label || ' acquisition posted unattended from an agreement whose two readings agreed, whose printed figures held, and whose accounts all resolved in this client''s chart.',
+        jsonb_build_object('extraction_id', v_extraction, 'engine_id', v_engine,
+          'rung_vector', v->'rung_vector', 'plan', v->'plan'),
+        'agreement_unattended',
+        -- NULL rather than false-by-inference: this lane has no on_behalf_of, so there is no maker
+        -- whose membership could be active or lapsed (the invoice lane's own law 68).
+        null, 'agreement-post:' || p_document::text)
+      returning id into v_receipt;
+
+    perform clara._append_event(v_firm, 'entry.posted', v_client, clara.agent_user_id(), null,
+      null, v_entry, p_document, null,
+      jsonb_build_object('post_receipt_id', v_receipt, 'approval_arm', 'agreement_unattended',
+        'agreement_class', v_class, 'agreement_date', to_char(v_posting,'YYYY-MM-DD'),
+        'rung_vector', v->'rung_vector'));
+
+    perform clara._audit(v_firm, null, null, null, 'post_agreement_acquisition', null,
+      jsonb_build_object('document', p_document, 'entry', v_entry, 'receipt', v_receipt,
+        'agreement_class', v_class, 'agreement_date', to_char(v_posting,'YYYY-MM-DD'),
+        'debit_cents', v->'plan'->'debit_cents'));
+
+    return jsonb_build_object('posted', true, 'entry_id', v_entry, 'post_receipt_id', v_receipt,
+      'posting_date', to_char(v_posting,'YYYY-MM-DD'),
+      'agreement_class', v_class,
+      'reason', null, 'rung', null, 'rung_vector', v->'rung_vector');
+
+  exception when others then
+    get stacked diagnostics v_code = returned_sqlstate, v_detail = pg_exception_detail;
+    begin
+      v_reason := nullif(v_detail,'')::jsonb->>'reason';
+    exception when others then
+      v_reason := null;
+    end;
+    if v_code = '23505' then
+      -- uq_journal_entries_one_open_draft_filing: somebody else's open draft is already on this
+      -- filing. A person decides which of the two is the acquisition; this lane never overwrites.
+      v_pair := true; v_reason := 'filing_already_drafted';
+    elsif v_code = 'CLR19' then
+      -- The closed-period wall. §J's `period_open` rung asks the same question first, so reaching
+      -- here means the year closed between the verdict and the write.
+      v_pair := true; v_reason := 'period_closed';
+    else
+      v_pair := (v_code, coalesce(v_reason,'')) in (
+        ('CLR13','source_already_posted'),
+        ('CLR21','double_coded'));
+      if v_pair then v_reason := 'duplicate_entry'; end if;
+    end if;
+    if not v_pair then raise; end if;
+    return jsonb_build_object('posted', false, 'entry_id', null,
+      'reason', coalesce(v_reason, 'duplicate_entry'), 'rung', 'post_wall',
+      'rung_vector', v->'rung_vector', 'clr', v_code);
+  end;
+end $paa$;
+
+revoke all on function clara._post_agreement_acquisition(uuid) from public;
+
+comment on function clara._post_agreement_acquisition(uuid) is
+  '#948: the UNATTENDED post for a hire-purchase or finance-lease agreement. Asks clara._agreement_posting_verdict and acts: ready means one document-bound, filing-bound approved entry with its legs, its clara.entry_post_receipts row (via_wake_kind `contract_facts`, approval_arm `agreement_unattended`) and an entry.posted event; blocked means NOTHING is written and the verdict is returned so the caller can record it. It calls nothing fixed-asset-specific -- the entry debits the account the client ENROLLED, and clara._tf_fa_acquisition_birth (0216) makes the register row itself from the account''s own policy. It RETURNS rather than raises, because it runs inside the agreement read''s own transaction and a raise would lose the facts a person needs in order to clear the block. Ungranted: reached from clara.persist_agreement_facts alone.';
+
+reset role;
+
+-- =====================================================================================
+-- §M  THE LANE POSTS WHAT IT READS -- clara.persist_agreement_facts calls the post (AC4).
+--
+--     SPLICED, NEVER RE-TYPED (the 0017:1553 / 0093 / 0260 / 0297 idiom). This reads the INSTALLED
+--     definition off the catalog, asserts each anchor occurs EXACTLY ONCE, replaces only at those
+--     anchors and executes the result. Everything §F wrote that this section does not name is
+--     preserved BY CONSTRUCTION rather than by a careful human copy, and the postcheck re-reads
+--     the committed catalog to prove the untouched regions survived.
+--
+--     WHY HERE AND NOT IN A RUNTIME STEP. The agreement questionnaire family is a FROZEN workflow
+--     family and the work order forbids editing a frozen body. A new posting step would need a new
+--     family, a new task lane and a reconciler arm -- for an act with no model in it. The persist
+--     door is already the ONE writer of agreement facts and already runs at exactly the moment the
+--     state it posts from comes into existence, so the post belongs in the same transaction: an
+--     acquisition is never read-but-unposted for a window nobody can see.
+--
+--     WHAT THE CALLER GETS. The settle receipt gains a `posting` object -- `posted`, the
+--     `entry_id`, and on a refusal the `reason`, the `rung` and the whole vector -- so the worker
+--     (and a person reading the task) can see what the read led to without a second query.
+--
+--     REPLAY IS UNAFFECTED. The idempotent-replay arm returns before this point, so re-settling a
+--     done task neither re-posts nor re-refuses: the entry that exists is the one this call made.
+-- =====================================================================================
+do $w948_persist$
+declare
+  v_sig text := 'clara.persist_agreement_facts(uuid,jsonb,jsonb,integer)';
+  v_def text; v_next text; v_anchor text; v_repl text;
+  v_n int; v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+
+  if position('_post_agreement_acquisition' in v_def) > 0 then
+    raise notice '#948 §M: clara.persist_agreement_facts already calls the post -- splice already applied, nothing to do (redo)';
+  else
+    -- SPLICE (1): the declaration this splice needs.
+    --
+    -- EVERY anchor and replacement below is ONE dollar-quoted literal, never a `||` chain with
+    -- chr(10): apps/web/test/sqlFunctionCensus.ts proves what a migration's dynamic `execute`
+    -- installs by RECONSTRUCTING the statement from its parts, and it cannot evaluate chr()
+    -- (0297 §G's own measured note).
+    v_anchor := $q948a$  v_cited_id uuid; v_cited_locator jsonb; v_locator jsonb;$q948a$;
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §M splice (1): the declare anchor appears % time(s), expected 1', v_n
+        using errcode = 'CLR10';
+    end if;
+    v_repl := $q948b$  v_cited_id uuid; v_cited_locator jsonb; v_locator jsonb;
+  v_posting jsonb;   -- #948: what the post made of this read$q948b$;
+    v_next := replace(v_def, v_anchor, v_repl);
+
+    -- SPLICE (2): the post, and the settle receipt that reports it.
+    v_anchor := $q948c$  return jsonb_build_object('task_id',p_task,'document_id',t.document_id,
+    'engine_id',t.engine_id,'version_n',t.version_n,
+    'text_extraction_id',v_text_id,'vision_extraction_id',v_vision_id,
+    'status','done','replayed',false);$q948c$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#948 §M splice (2): the final-return anchor appears % time(s), expected 1', v_n
+        using errcode = 'CLR10';
+    end if;
+    v_repl := $q948d$  -- 12. #948 · THE POST. The facts are banked and the state is judged, so a financing
+  --     agreement posts its acquisition here -- inside this transaction, under its own gate,
+  --     with no human and no model in the loop. A blocked or non-financing agreement writes
+  --     NOTHING and reports why; the derived Needs-you row (clara.list_review_queue,
+  --     row_kind=agreement_posting_blocked) is what puts that reason in front of a person, and
+  --     it clears itself when the block does.
+  v_posting := clara._post_agreement_acquisition(t.document_id);
+
+  return jsonb_build_object('task_id',p_task,'document_id',t.document_id,
+    'engine_id',t.engine_id,'version_n',t.version_n,
+    'text_extraction_id',v_text_id,'vision_extraction_id',v_vision_id,
+    'status','done','replayed',false,'posting',v_posting);$q948d$;
+    v_next := replace(v_next, v_anchor, v_repl);
+
+    if v_next = v_def then
+      raise exception '#948 §M splice: no byte moved -- refusing a no-op apply' using errcode = 'CLR10';
+    end if;
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#948 §M postcheck: persist_agreement_facts changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode = 'CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#948 §M postcheck: prosrc sha256 did not change -- the splice was a no-op'
+        using errcode = 'CLR10';
+    end if;
+    raise notice '#948 §M: clara.persist_agreement_facts spliced -- the agreement lane now posts what it reads. owner (%) and ACL byte-unchanged. prosrc sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+
+  -- BOTH BRANCHES: the §F regions this section must not have disturbed are re-read from the
+  -- COMMITTED catalog, so a redo proves them too.
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('clara.evaluate_agreement_contract_state_v1(v_text_env, v_vision_env)' in v_def) = 0
+     or position('''contract'', jsonb_build_object(''channel'',''text''' in v_def) = 0
+     or position('document.agreement_facts_completed' in v_def) = 0
+     or position('_post_agreement_acquisition' in v_def) = 0 then
+    raise exception '#948 §M postcheck: the recut body lost one of §F''s own regions (the evaluator call, the text-channel store, or the completed event) or did not gain the post'
+      using errcode = 'CLR10';
+  end if;
+end
+$w948_persist$;

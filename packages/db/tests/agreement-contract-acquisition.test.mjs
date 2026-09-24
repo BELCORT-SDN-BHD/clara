@@ -717,8 +717,8 @@ test("S4 · every other kind's route through the recut router is unchanged", asy
 
 /** Drive an agreement contract all the way to a CLAIMED, running task through the real doors,
  *  and hand back everything the persist call needs. */
-async function runningAgreementTask(client) {
-  const doc = await agreementDoc(client);
+async function runningAgreementTask(client, existing = null) {
+  const doc = existing ?? (await agreementDoc(client));
   await enqueueInvoiceFacts(doc.documentId);
   const task = (
     await rootQuery(
@@ -1067,14 +1067,20 @@ async function agreementChart(client, sub = world.users.alice) {
 /** A client whose chart carries the four liability codes AND exactly one ACTIVE fixed-asset
  *  enrolment — which is the only thing that makes an asset account resolvable, and the same
  *  precondition clara._tf_fa_acquisition_birth needs before it will birth a register row. */
-async function enrolledClient(label) {
+async function enrolledClient(label, { creditor = true } = {}) {
   const sub = world.users.alice;
   const client = await createClient(sub, { name: `${world.prefix}_948${label}`, opKey: opk("cli-948") });
   await upsertAccount(sub, { client, code: "9990", name: "Rounding", type: "equity", special: "rounding", opKey: opk("coa-948") });
   await upsertAccount(sub, { client, code: FA_COST, name: "Motor Vehicles — cost", type: "asset", opKey: opk("coa-948") });
   await upsertAccount(sub, { client, code: FA_ACCUM, name: "Motor Vehicles — accumulated depreciation", type: "asset", opKey: opk("coa-948") });
   await upsertAccount(sub, { client, code: FA_EXPENSE, name: "Depreciation", type: "expense", opKey: opk("coa-948") });
-  await agreementChart(client, sub);
+  // `creditor:false` leaves 2430 out of the chart, which blocks the post at `accounts_resolve`.
+  // A cell that needs a READ without a POST asks for that deliberately, rather than depending on
+  // the order in which this ticket's sections happened to land.
+  for (const a of AGREEMENT_ACCOUNTS) {
+    if (a.code === "2430" && !creditor) continue;
+    await upsertAccount(sub, { client, code: a.code, name: a.name, type: a.type, opKey: opk("coa-948") });
+  }
   await upsertFaProfile(sub, {
     client, assetAccount: FA_COST, accumAccount: FA_ACCUM, expenseAccount: FA_EXPENSE, opKey: opk("enrol-948"),
   });
@@ -1316,7 +1322,7 @@ test("S7 · printed figures that do not hold stop the draft: the price identity,
 /** Drive an agreement contract all the way through the REAL doors — filed, routed, claimed,
  *  read — and hand back the document and what the persist call made of it. */
 async function readAgreement(client, opts = {}) {
-  const doc = await runningAgreementTask(client);
+  const doc = await runningAgreementTask(client, opts.document ?? null);
   const [textEnv, visionEnv] = bothChannels(opts);
   const receipt = await persist(
     doc.taskId,
@@ -1457,7 +1463,7 @@ test("S8 · the conditions the brief names, each driven: unread, unfiled, channe
 
   // (b) NOT FILED. The same document after its filing is retired: the entry this lane posts is
   //     bound to a live filing, so there is nothing left to bind to.
-  const c2 = await enrolledClient("unfiled");
+  const c2 = await enrolledClient("unfiled", { creditor: false });
   const d2 = await readAgreement(c2);
   const f2 = (
     await rootQuery("select id, revision_token from clara.document_filings where document_id=$1 and retired_at is null", [d2.documentId])
@@ -1500,8 +1506,11 @@ test("S8 · the conditions the brief names, each driven: unread, unfiled, channe
   // (f) ALREADY POSTED. A live entry on this very filing: this lane never overwrites another
   //     writer's work, and the refusal POINTS at the entry so a person can tell a correction from
   //     a re-upload.
+  // The hand-booked entry lands BEFORE the read, which is the real order of events this rung
+  // exists for: somebody booked the acquisition by hand and then the agreement was scanned.
   const c6 = await enrolledClient("dup");
-  const d6 = await readAgreement(c6);
+  const filedDoc = await agreementDoc(c6);
+  const sha6 = (await rootQuery("select sha256 from clara.documents where id=$1", [filedDoc.documentId])).rows[0].sha256;
   const res = await freshResolution(sub, c6);
   const hand = await draftEntry(human(sub), {
     client: c6, resolution: res, postingDate: "2026-03-14", memo: "Hand-booked acquisition",
@@ -1509,11 +1518,173 @@ test("S8 · the conditions the brief names, each driven: unread, unfiled, channe
       { account_code: FA_COST, debit_cents: 12000000, credit_cents: 0, description: "Lorry" },
       { account_code: "2430", debit_cents: 0, credit_cents: 12000000, description: "Financier" },
     ],
-    document: d6.documentId, sha256: d6.sha, opKey: opk("dup-948"),
+    document: filedDoc.documentId, sha256: sha6, opKey: opk("dup-948"),
   });
+  const d6 = await readAgreement(c6, { document: filedDoc });
   const dup = await verdict(d6.documentId);
   assert.equal(dup.rung, "no_duplicate_entry");
   assert.equal(dup.reason, "duplicate_entry");
   assert.equal(dup.detail.duplicate.entry_id, hand.entry_id);
   assert.match(dup.sentence, /already/i);
+});
+
+
+// ---------------------------------------------------------------------------
+// S9 — the post, and the lane posting what it reads (AC4, AC6)
+// ---------------------------------------------------------------------------
+
+const entriesOf = async (client) => (
+  await rootQuery(
+    `select id, status, posting_date::text, memo, origin, document_id, filing_id, flags, source_doc_sha256
+       from clara.journal_entries where client_id=$1 order by created_at`,
+    [client],
+  )
+).rows;
+
+const linesOf = async (entry) => (
+  await rootQuery(
+    "select account_code, debit_cents, credit_cents, description from clara.journal_lines where entry_id=$1 order by line_no",
+    [entry],
+  )
+).rows;
+
+test("S9 · the whole walk: an agreement is read, the acquisition posts unattended, and the BIRTH TRIGGER makes the fixed asset", async (t) => {
+  if (unready(t)) return;
+
+  const client = await enrolledClient("post");
+  const doc = await readAgreement(client);
+
+  // The settle receipt says what the read led to, so a worker sees it without a second query.
+  assert.equal(doc.receipt.status, "done");
+  assert.equal(doc.receipt.posting.posted, true, `${JSON.stringify(doc.receipt.posting)}`);
+  assert.equal(doc.receipt.posting.reason, null);
+
+  const entries = await entriesOf(client);
+  assert.equal(entries.length, 1, "exactly one entry, made by the lane itself");
+  const e = entries[0];
+  assert.equal(e.status, "approved", "unattended means approved, not left as a draft for nobody");
+  assert.equal(e.posting_date, "2026-03-14", "dated the day the agreement was SIGNED");
+  assert.equal(e.origin, "document");
+  assert.equal(e.document_id, doc.documentId, "bound to the document it was read from");
+  assert.ok(e.filing_id, "…and to the filing, which is what makes the uncoded row disappear");
+  assert.equal(e.source_doc_sha256, doc.sha);
+
+  // The marker the duplicate guard keys on: the agreement's own identity, on the ledger itself.
+  assert.equal(e.flags.agreement_acquisition.financier, "Maybank Islamic Berhad");
+  assert.equal(e.flags.agreement_acquisition.agreement_date, "2026-03-14");
+  assert.equal(e.flags.agreement_acquisition.cash_price_cents, "12000000");
+  assert.equal(e.flags.agreement_acquisition.agreement_class, "hire_purchase");
+
+  const lines = await linesOf(e.id);
+  assert.equal(lines.length, 4);
+  assert.deepEqual(
+    lines.map((l) => [l.account_code, Number(l.debit_cents), Number(l.credit_cents)]),
+    [[FA_COST, 12000000, 0], ["2440", 840000, 0], ["2430", 0, 10840000], ["2010", 0, 2000000]],
+    "the gross hire-purchase entry, leg for leg",
+  );
+
+  // THE RECEIPT. `via_wake_kind` names the lane that actually posted — never `autodraft`, which
+  // would file an agreement under the invoice lane's name for anyone reading receipts by lane.
+  const receipt = (
+    await rootQuery(
+      "select via_wake_kind, approval_arm, model_snapshot, gate_verdicts, op_key from clara.entry_post_receipts where entry_id=$1",
+      [e.id],
+    )
+  ).rows[0];
+  assert.equal(receipt.via_wake_kind, "contract_facts");
+  assert.equal(receipt.approval_arm, "agreement_unattended");
+  assert.equal(receipt.model_snapshot.provider, "clara_db",
+    "no model took part in this post: the frozen evaluator did every sum at read time");
+  assert.equal(receipt.gate_verdicts.extraction_id, doc.receipt.text_extraction_id,
+    "…and the reading it acted on is still reachable from the receipt");
+
+  const posted = (
+    await rootQuery(
+      "select count(*)::int n from clara.domain_events where client_id=$1 and event_type='entry.posted'",
+      [client],
+    )
+  ).rows[0].n;
+  assert.equal(posted, 1);
+
+  // AC4's real subject. This lane called NOTHING fixed-asset-specific; clara._tf_fa_acquisition_birth
+  // (0216) saw an approved entry debiting an ENROLLED account and made the register row itself.
+  const assets = (
+    await rootQuery(
+      `select description, acquired_date::text, cost_cents, asset_account_code,
+              accum_depr_account_code, depr_expense_account_code, acquisition_entry_id
+         from clara.fixed_assets where client_id=$1`,
+      [client],
+    )
+  ).rows;
+  assert.equal(assets.length, 1, "the acquisition reached the fixed-asset lane as that lane's own birth event");
+  assert.equal(assets[0].asset_account_code, FA_COST);
+  assert.equal(Number(assets[0].cost_cents), 12000000, "at the printed cash price");
+  assert.equal(assets[0].acquired_date, "2026-03-14");
+  assert.equal(assets[0].acquisition_entry_id, e.id);
+  // The depreciation particulars came from the ENROLMENT, never from anything #948 wrote.
+  assert.equal(assets[0].accum_depr_account_code, FA_ACCUM);
+  assert.equal(assets[0].depr_expense_account_code, FA_EXPENSE);
+});
+
+test("S9 · a blocked agreement writes NOTHING, and the settle receipt carries the reason", async (t) => {
+  if (unready(t)) return;
+
+  const client = await enrolledClient("blocked", { creditor: false });
+  const doc = await readAgreement(client);
+
+  assert.equal(doc.receipt.status, "done", "the READ still completes — the facts a person needs to clear the block are banked");
+  assert.equal(doc.receipt.posting.posted, false);
+  assert.equal(doc.receipt.posting.reason, "account_missing");
+  assert.equal(doc.receipt.posting.rung, "accounts_resolve");
+  assert.ok(doc.receipt.posting.rung_vector.filed, "the whole vector travels with the refusal");
+
+  assert.deepEqual(await entriesOf(client), [], "not one entry");
+  assert.equal(
+    (await rootQuery("select count(*)::int n from clara.fixed_assets where client_id=$1", [client])).rows[0].n,
+    0,
+    "…and not one fixed asset",
+  );
+  assert.equal(
+    (await regionsOf(doc.documentId)).length,
+    RUN_FIELDS.length,
+    "the typed facts are banked all the same: a refusal to POST is never a refusal to READ",
+  );
+});
+
+test("S9 · the SAME agreement read twice posts once (AC6), and a replay of the settle posts nothing further", async (t) => {
+  if (unready(t)) return;
+
+  const client = await enrolledClient("twice");
+  const first = await readAgreement(client);
+  assert.equal(first.receipt.posting.posted, true);
+
+  // A second scan of the same contract: a different document, the same printed terms.
+  const second = await readAgreement(client);
+  assert.equal(second.receipt.posting.posted, false);
+  assert.equal(second.receipt.posting.reason, "duplicate_entry");
+  assert.equal(second.receipt.posting.rung, "no_duplicate_entry");
+
+  const v = await verdict(second.documentId);
+  assert.equal(v.detail.duplicate.scope, "same_agreement",
+    "the guard recognised the AGREEMENT, not merely the document — the re-upload case the brief names");
+  assert.equal(v.detail.duplicate.entry_id, (await entriesOf(client))[0].id);
+  assert.match(v.sentence, /already posted/i);
+
+  assert.equal((await entriesOf(client)).length, 1, "one agreement, one acquisition");
+  assert.equal(
+    (await rootQuery("select count(*)::int n from clara.fixed_assets where client_id=$1", [client])).rows[0].n,
+    1,
+    "…and one fixed asset, never two",
+  );
+
+  // A worker that re-settles the first (done) task replays: the entry that exists is the one that
+  // call made, and nothing is posted or refused a second time.
+  const replay = await persist(
+    first.taskId,
+    call(envelope(), { pin: first.extractionId, promptHash: "agreement-text-v1" }),
+    call(envelope({ channel: "vision" }), { pin: first.sha, promptHash: "agreement-vision-v1" }),
+  );
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.posting, undefined, "a replay does not re-run the post at all");
+  assert.equal((await entriesOf(client)).length, 1);
 });
