@@ -658,7 +658,7 @@ _Avoid_: The entire balance of an account as a substitute for identifying what r
 
 **Trade invoice**:
 A client's own accounting document that creates a receivable or a payable: a sales invoice the client issued, or a supplier bill the client received. It names one counterparty, the date the document itself carries, an exact total, and the journal it posts — and it is recorded once, as one accounting act, with the receivable or payable it creates. Its LINES are the journal it posts — a bookkeeper's coding judgement — and never the line items printed on the document.
-_Avoid_: A firm's own billing document for its accounting fees (that would be a subscription invoice, and Clara has none); a credit note, which corrects an invoice rather than being one; a quotation, a proforma or a statement; the document's own printed line items, which Clara does not yet read.
+_Avoid_: A firm's own billing document for its accounting fees (that would be a subscription invoice, and Clara has none); a credit note, which corrects an invoice rather than being one; a quotation, a proforma or a statement; the document's own printed line items, which Clara does not read — a standing, accepted limitation rather than a deferred feature, because nothing she posts through admits a per-line field.
 
 **Due-date basis**:
 How an open item's due date was decided: STATED on the document, derived from the COUNTERPARTY'S agreed payment terms, or honestly ABSENT because neither states one. Terms run from the DOCUMENT date — "30 days" is thirty days after the invoice, not after the day somebody keyed it in — and the basis is recorded beside the date so a reader can tell a date the document gave from one the terms produced.
@@ -758,7 +758,7 @@ _Avoid_: A rate, a proration or an allocation the product performs; a formula; a
 form that no lane applies; anything a caller can extend without a new named rule.
 
 **Supplied obligation particulars**:
-The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it derives none of them.
+The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it computes none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
 
 **Fixed asset acquisition**:
