@@ -81,6 +81,10 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/lib/opening-parse.mjs": {
+      "sha256": "423f0ca6e4cf8cd7ffee37f841e2e76420cb7cc2f8494840e72bc146806c65b7",
+      "note": "#985 (the 2026-09-25 cut phase) - frozen BY CLOSURE, not by marker: chatTurn_v22's read_opening_source tool calls this module's parseOpeningTargets, the same route core src/openingRoutes.ts calls, so the freeze lint hash-locks it. THE COST IS EXACTLY THIS FILE: it has no relative imports of its own, so nothing travels with it, and #656 kept it that way on purpose (its OPENING_TB_REFUSAL_ENVELOPE_KEY comment spells the producer's envelope key out rather than importing lib/opening-tb-produce.mjs, 'the door must not gain an import edge into the producer, which would freeze the producer the day a Clara tool imports this door'). Its four other importers (src/openingRoutes.ts, lib/opening-tb-cells.mjs, lib/opening-tb-produce.mjs, lib/egress.mjs) keep importing it and stay editable; what is frozen is this file's own text. A behavioural change to the opening parse is therefore a NEW module plus a chatTurn successor that imports it, never an edit here (owner ruling 2026-09-15, packages/runtime/README.md). NOT deploy-locked yet."
+    },
     "packages/runtime/lib/periodic-adjustment-basis.ts": {
       "sha256": "9670d5b96365a1c7613e25846069ad569be9bce95fc0865c7795f1b5220b6a5a",
       "note": "#643 — frozen BY CLOSURE, not by marker: chatTurn_v19 imports the adjustment schemas and basis builders, so check-frozen-workflows.mjs's import closure hash-locks this file and apps/web does NOT import it — nothing under apps/web imports @clara/runtime and no @clara/* package is in apps/web's dependencies. The periodic-adjustment form keeps a hand-maintained MIRROR of these rules in apps/web/lib/work/periodic-adjustment.ts (its header calls every rule there a mirror of one the database enforces); this hash lock does not cover it. Note corrected 2026-09-17 (wave 2026-09-15, successors re-review R2): the earlier sentence said the web form IMPORTS this module, which it cannot — the file's bytes and sha256 are untouched, only this prose moved. DEPLOY ORDER: migration 0194 must be live BEFORE this image serves a chat turn. NOT deploy-locked yet.",
@@ -870,6 +874,26 @@
       "sha256": "5970ba50eaeba1d1727ea12a35cbd802f375623b9fab6310fc905f3ae215c176",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/chatTurn.v22.impl.ts": {
+      "sha256": "3f2c7a09a6e217c095971920d6f29d5225232662b41248d3d7104abaf2fa9431",
+      "note": "#985 - chatTurn_v22's steps. runModelSegmentStepV22 is the one new step (the bundle gate derives that exact name from the registry pin); every other step is v10's or v21's, reached by import, so a run journalled under v21 resumes on identical step identities. NOT deploy-locked yet."
+    },
+    "packages/runtime/workflows/chatTurn.v22.prompt.ts": {
+      "sha256": "1e10364dd69dac910fbbe8ca7a9ce1f99a8f38be53b99db005944f25c4fd6d1a",
+      "note": "#985 - chatTurn_v22's prompt: v21's text plus ONE stanza, READING AN OPENING SOURCE. No new wire kind (ClaraPartV22 IS ClaraPartV21 by reference) and no new C-19 coding-intent arm - the tool mints no terminal card, so a successful read must not collect the coding-incomplete refusal. NOT deploy-locked yet."
+    },
+    "packages/runtime/workflows/chatTurn.v22.tools.ts": {
+      "sha256": "6d9ebff13f54adc6698c4cf06a5c67a788012bf32d6729f46b5d3706896179b1",
+      "note": "#985 - chatTurn_v22's tool map: buildToolsV21's thirty-nine by import plus read_opening_source. The tool calls the route core parseOpeningTargets(client, {seedId, firmId, reassert}) on a clara_runtime connection and never clara.record_opening_targets_parsed itself, and it restates the browser route's bookkeeper+ floor through clara.resolve_chat_principal rather than importing lib/authz.mjs (which would freeze the runtime's auth boundary for every route). NOT deploy-locked yet."
+    },
+    "packages/runtime/workflows/chatTurn.v22.ts": {
+      "sha256": "c6aba4b64ecb99a7cf4def9a387a647dfc0b1db605324f70e8e13d3116fd3156",
+      "note": "#985 - chatTurn_v22, the cut phase's chat successor and the body the contracts after it land in. No coupled migration: every door read_opening_source touches has been live since 0017 and 0006, and v21's own deploy-order obligations (0225, 0227, 0230) are inherited unchanged because v22 carries v21's whole tool map. NOT deploy-locked yet."
+    },
+    "packages/runtime/workflows/chatTurn.v22.usage.ts": {
+      "sha256": "0dba7493fa5f919952c3c488d35d55ece7c2264bd1cfdfbd4c4cac26e6796c83",
+      "note": "#985 - chatTurn_v22's engine stamp, chatturn-v22. The recorder stays v15's and is reached by import; only the label moves, and check-workflow-bundle.mjs refuses a built bundle that does not carry it. NOT deploy-locked yet."
     },
     "packages/runtime/workflows/chatTurn.v3.errors.ts": {
       "sha256": "ab2b374a20443976058c5b90ee601d6e7c25226c8191ac36d8959372a85628cb",

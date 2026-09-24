@@ -423,6 +423,18 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   ["packages/runtime/workflows/chatTurn.v21.ts","chatTurn_v21","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
   ["packages/runtime/workflows/chatTurn.v21.ts","chatTurn_v21","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/chatTurn.v21.ts","chatTurn_v21","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  // chatTurn_v22 (the 2026-09-25 cut phase, #985). IDENTICAL in kind to v18's, v19's, v20's and
+  // v21's three sites, and ALL THREE FINGERPRINTS ARE AGAIN BYTE-IDENTICAL TO v19's, v20's AND
+  // v21's — which is the ledger, rather than a reviewer's eye, establishing that this cut carried
+  // the park/resume statements over unchanged rather than rewriting them. `tool-call`,
+  // `tool-result` and `json` are the AI SDK's OWN message-content discriminants, not Clara
+  // transcript part kinds; they are constructed here to replay the parked clarify call and to feed
+  // the human's answer back to the model as that tool's result. v22 adds NO transcript part kind
+  // at all — its one new tool, `read_opening_source`, mints no card and its result rides v10's
+  // generic `tool_result` promotion.
+  ["packages/runtime/workflows/chatTurn.v22.ts","chatTurn_v22","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
+  ["packages/runtime/workflows/chatTurn.v22.ts","chatTurn_v22","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  ["packages/runtime/workflows/chatTurn.v22.ts","chatTurn_v22","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"tool-result\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"json\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   // #629 — claraWork_v2's resume message. IDENTICAL in kind to v1's two sites above: `tool-result`
