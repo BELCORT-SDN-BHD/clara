@@ -164,6 +164,24 @@ export const KNOWN_FACT_PATHS: readonly string[] = [
   "payroll.run.pcb",
   "payroll.run.hrdf_levy",
   "payroll.run.net_pay",
+  // #948 — the eleven questions the agreement lane writes (packages/db/migrations/0299's
+  // `clara._agreement_answers_ok` vocabulary, which is the same closed set
+  // clara.persist_agreement_facts writes a region for). Here for the same reason the paths above
+  // are. Nothing below the run level is listed: `uq_document_regions_extraction_field_path`
+  // admits ONE region per field path per extraction, so a scheduled instalment could not have a
+  // region of its own — the printed schedule lives in the envelope, and these eleven ARE the
+  // typed facts.
+  "contract.agreement.kind",
+  "contract.agreement.financier",
+  "contract.agreement.agreement_date",
+  "contract.agreement.asset_description",
+  "contract.agreement.cash_price",
+  "contract.agreement.deposit",
+  "contract.agreement.amount_financed",
+  "contract.agreement.total_charges",
+  "contract.agreement.total_payable",
+  "contract.agreement.term_months",
+  "contract.agreement.instalment_amount",
 ];
 
 /** #945 — a `payroll.*` fact. The payroll lane is the ONE lane that writes a region for an answer
@@ -173,6 +191,15 @@ export const KNOWN_FACT_PATHS: readonly string[] = [
  *  region there means something else and must keep its own wording. */
 export function isPayrollFactPath(path: string | null): boolean {
   return path !== null && path.startsWith("payroll.");
+}
+
+/** #948 — a `contract.*` fact. The agreement lane is the SECOND lane that writes a region for an
+ *  answer the page does NOT print (carrying no rendering and no cents), for the same reason the
+ *  payroll lane does: "the agreement prints no finance charge" and "the finance charge is zero"
+ *  are different facts, and an interest-free instalment plan is a real agreement. Its own
+ *  predicate rather than a widened `isPayrollFactPath`, so each lane keeps its own claim. */
+export function isAgreementFactPath(path: string | null): boolean {
+  return path !== null && path.startsWith("contract.");
 }
 
 export function isKnownFactPath(path: string | null): boolean {

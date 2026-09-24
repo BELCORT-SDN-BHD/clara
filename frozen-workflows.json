@@ -106,6 +106,26 @@
       "note": "#631 — frozen BY CLOSURE, not by marker: claraWork_v3 imports the trace writer, so check-frozen-workflows.mjs's import closure hash-locks this file; a redaction hardening therefore needs a new module or a v4 closure (ARCHITECTURE §10). DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — see #815. NOT deploy-locked yet.",
       "deployed": true
     },
+    "packages/runtime/workflows/agreementFacts.v1.behavior.mjs": {
+      "sha256": "ca335310315b3250444b26b8cc55ae25d027b61bc2aab5425b005e3265f0a5aa",
+      "note": "#948 \u2014 every decision the lane makes, kept out of the steps so it is unit-testable without a workflow engine, a database or a model. Not one arithmetic operation on a quoted figure and not one keyword test on a quoted heading appears in it: the column sums, the row identities, the price identity, the schedule reconciliation, the CLASSIFICATION and the channel comparison are all clara.evaluate_agreement_contract_state_v1's, inside the persist transaction."
+    },
+    "packages/runtime/workflows/agreementFacts.v1.dispatch.mjs": {
+      "sha256": "94cee62ec159b59a0ee3ffecabd19258dc1285a381e57912f2df7f9eda8430a5",
+      "note": "#948 \u2014 this family's OWN database reads and settle verbs rather than an import of witnessFacts.v1.dispatch.mjs or payrollFacts.v1.dispatch.mjs, both of which are frozen: an agreement fix needing one more read there would be an edit to another lane's frozen closure. It DOES reuse clara.witness_citation_regions, which is a region NUMBERING and not a questionnaire \u2014 inventing a third numbering would guarantee they drift."
+    },
+    "packages/runtime/workflows/agreementFacts.v1.impl.ts": {
+      "sha256": "b6192327a229f6d38be48a226251dad315089b74a56227ef11bea91ec9731d5b",
+      "note": "#948 \u2014 the four memoized steps: claim, text read, vision read, one atomic persist. The two reads are separate steps so a completed text read is not paid for twice on a replay. Reads its OWN services slot (__claraAgreementFactsServicesV1), because the slot carries the engine snapshot the behaviour refuses to egress without matching."
+    },
+    "packages/runtime/workflows/agreementFacts.v1.prompts.mjs": {
+      "sha256": "9d8dfb603c94bd42869672e820926e00803efb4b253ce7eb232b549818a958eb",
+      "note": "#948 \u2014 the questionnaire, inside the closure by the same decision every sibling family made (a prompt tweak is a behavioural change and must be a new version). It carries the inert-data posture and the never-infer-never-compute rule VERBATIM from the invoice family's live prompt \u2014 pinned byte-for-byte by packages/runtime/tests/agreement-facts-v1.test.mjs, so \"verbatim\" is a checked fact \u2014 and adds the two rules this family needs: she never sums or subtracts one printed figure from another, and she never CLASSIFIES the page (she quotes what it calls itself; a deterministic evaluator reads that quote against a closed roster and decides)."
+    },
+    "packages/runtime/workflows/agreementFacts.v1.ts": {
+      "sha256": "6bdf6fd2b475030a5d47bc44ee4b7d0aff41d5f16c78a1b2c425e07f754dc15f",
+      "note": "#948 \u2014 agreementFacts_v1, the agreement contract's OWN questionnaire family on the contract_facts lane migration 0299 mints. A BRAND-NEW CLASS, never a version of witnessFacts and never of payrollFacts, and the ticket says why in its own first acceptance criterion: the questionnaire lives in a frozen closure of its own. Parent #926, owner ruling 2026-09-18 (option G). Deploy order is DATABASE FIRST (0299's header): the persist door validates the answer envelope, so an image answering a wider questionnaire than the live validator admits would be refused on every persist."
+    },
     "packages/runtime/workflows/autoDraft.v1.errors.ts": {
       "sha256": "382e1fc75eef8159ba1fc7465c6f7d7858c51a6bd533aaa750d99667a3c87187",
       "note": "",

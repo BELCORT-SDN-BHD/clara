@@ -325,6 +325,14 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   // returns a receipt.
   ["packages/runtime/workflows/payrollFacts.v1.behavior.mjs","withMeteredChannel","...(out.usage ?? {})","eb1f116bd1e79af670968f3ac7d4aa7a81fc29a8475d9b136a3ab0fbc23c06c9","0"],
   ["packages/runtime/workflows/payrollFacts.v1.behavior.mjs","withMeteredChannel","...out","6d340dfea25133a71c60f9fb625992d27930b6f9eb8abf205fee061488bb59cd","0"],
+  // agreementFacts_v1 (#948). The metered-channel wrapper again, carried over UNCHANGED — the two
+  // statement fingerprints below are byte-identical to payrollFacts.v1.behavior.mjs's rows
+  // immediately above, which IS the evidence that nothing about the wrapper moved in this family.
+  // Neither is a Clara part construction: one merges a usage bag the metering row reads, the
+  // other merges a channel result this closure never assigns a `type` to. agreementFacts emits no
+  // `parts[]` entry at all — it writes to the database and returns a receipt.
+  ["packages/runtime/workflows/agreementFacts.v1.behavior.mjs","withMeteredChannel","...(out.usage ?? {})","eb1f116bd1e79af670968f3ac7d4aa7a81fc29a8475d9b136a3ab0fbc23c06c9","0"],
+  ["packages/runtime/workflows/agreementFacts.v1.behavior.mjs","withMeteredChannel","...out","6d340dfea25133a71c60f9fb625992d27930b6f9eb8abf205fee061488bb59cd","0"],
   ["packages/runtime/workflows/statementFacts.v1.behavior.mjs","handleFailure","...out","41e339d574cccb0ccc13077fd088b0f9028e179440d80f747234f32d9a5b7817","0"],
   ["packages/runtime/workflows/statementFacts.v1.engine.mjs","fetchWithin","...init","74e9d4414560a4081038a41c381b49c3e463af96bab3b17b279bf3e8ea415d75","0"],
   ["packages/runtime/workflows/statementFacts.v1.engine.mjs","normalizeAzureBankStatement","...topFields","7b06ce8feb9b6499cd5ced56ee6386afac2d2cab06c5a68df2d1885ac2c43e6a","0"],

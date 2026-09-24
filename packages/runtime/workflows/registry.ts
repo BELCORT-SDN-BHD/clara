@@ -42,6 +42,7 @@ import { statementFacts_v1 } from "./statementFacts.v1.js";
 import { statementFacts_v2 } from "./statementFacts.v2.js";
 import { statementFacts_v3 } from "./statementFacts.v3.js";
 import { payrollFacts_v1 } from "./payrollFacts.v1.js";
+import { agreementFacts_v1 } from "./agreementFacts.v1.js";
 import { witnessFacts_v1 } from "./witnessFacts.v1.js";
 import { witnessFacts_v2 } from "./witnessFacts.v2.js";
 import { witnessFacts_v3 } from "./witnessFacts.v3.js";
@@ -390,6 +391,14 @@ export const workflows = {
   // waits for this image, and this image WAITS rather than egressing if it meets a database
   // whose engine literal disagrees with its own snapshot.
   payrollFacts: payrollFacts_v1,
+  // #948 ADDS A BRAND-NEW CLASS, `agreementFacts: agreementFacts_v1` — the agreement contract's
+  // own questionnaire family on the `contract_facts` lane migration 0299 mints. Nothing is
+  // REPOINTED: no earlier version exists, so this entry takes traffic the moment the lane has a
+  // task, and the only thing that could have been taking it before is the router's skipped_kind
+  // dead end 0299 removed. DEPLOY ORDER IS DATABASE FIRST (0299's header): a queued agreement
+  // task simply waits for this image, and this image WAITS rather than egressing if it meets a
+  // database whose engine literal disagrees with its own snapshot.
+  agreementFacts: agreementFacts_v1,
   // H-17: REPOINTED v9 -> v10. The unattended coder mapped three different counterparty-identity
   // uniques onto one untokened, question-shaped CLR23 and called every OTHER unique violation
   // double_coded, which is success-shaped. v10 replaces that substring test with an exact,

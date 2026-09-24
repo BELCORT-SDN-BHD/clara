@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState, StateBanner } from "@/components/common/state";
-import { isPayrollFactPath, type EvidenceRegion } from "@/lib/documents/extract-shape";
+import { isAgreementFactPath, isPayrollFactPath, type EvidenceRegion } from "@/lib/documents/extract-shape";
 import type { SourceRevisionResult } from "@/lib/documents/types";
 import { cn } from "@/lib/utils";
 import { DocumentRevisionDialog, isRevisableFieldPath } from "./document-revision-dialog";
@@ -78,6 +78,20 @@ function factLabel(path: string | null, t: (key: string) => string): string {
     case "payroll.run.pcb": return t("factLabel.payrollPcb");
     case "payroll.run.hrdf_levy": return t("factLabel.payrollHrdfLevy");
     case "payroll.run.net_pay": return t("factLabel.payrollNetPay");
+    // #948 — the agreement lane's eleven questions. `kind` is labelled "What the agreement calls
+    // itself", not "Agreement type", because the value IS the page's own words: a deterministic
+    // evaluator classifies them and this UI must not imply it already has.
+    case "contract.agreement.kind": return t("factLabel.agreementKind");
+    case "contract.agreement.financier": return t("factLabel.agreementFinancier");
+    case "contract.agreement.agreement_date": return t("factLabel.agreementDate");
+    case "contract.agreement.asset_description": return t("factLabel.agreementAsset");
+    case "contract.agreement.cash_price": return t("factLabel.agreementCashPrice");
+    case "contract.agreement.deposit": return t("factLabel.agreementDeposit");
+    case "contract.agreement.amount_financed": return t("factLabel.agreementAmountFinanced");
+    case "contract.agreement.total_charges": return t("factLabel.agreementTotalCharges");
+    case "contract.agreement.total_payable": return t("factLabel.agreementTotalPayable");
+    case "contract.agreement.term_months": return t("factLabel.agreementTermMonths");
+    case "contract.agreement.instalment_amount": return t("factLabel.agreementInstalment");
     default: return path; // the honest unknown arm: the path IS the label
   }
 }
@@ -104,7 +118,12 @@ export function hasFactLabelArm(path: string): boolean {
 function factValue(region: EvidenceRegion, t: (key: string) => string): string {
   if (region.monetary_cents !== null) return (region.monetary_cents / 100).toFixed(2);
   if (region.text_content !== null) return region.text_content;
-  if (isPayrollFactPath(region.field_path)) return t("factNotPrinted");
+  // #948 — the agreement lane writes the same kind of row for the same reason: a term the page
+  // does not print (an interest-free plan's charges, an agreement with no deposit) lands carrying
+  // no rendering and no cents, and "the page is silent" must survive to the screen instead of
+  // being read as zero. Its own predicate rather than a widened payroll one, so each lane's claim
+  // stays its own.
+  if (isPayrollFactPath(region.field_path) || isAgreementFactPath(region.field_path)) return t("factNotPrinted");
   return t("evidenceNoValue");
 }
 

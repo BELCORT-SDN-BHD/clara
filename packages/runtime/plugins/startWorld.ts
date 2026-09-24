@@ -52,6 +52,7 @@ import { makeStatementWitnessServices } from "../workflows/statementFacts.v2.ser
 import { makeWitnessFactsServices } from "../workflows/witnessFacts.v1.services.mjs";
 import { makeWitnessFactsServicesV2 } from "../workflows/witnessFacts.v2.services.mjs";
 import { makePayrollFactsServicesV1 } from "../workflows/payrollFacts.v1.services.mjs";
+import { makeAgreementFactsServicesV1 } from "../workflows/agreementFacts.v1.services.mjs";
 import { stopIntakeIngress } from "../lib/spool.mjs";
 import { startManagedScanner } from "../lib/scan.mjs";
 
@@ -245,6 +246,10 @@ export default definePlugin(() => {
   // stamp that is not its own, so it must never share witnessFacts' slot. Injected
   // unconditionally: the image must be able to run the lane the moment a task appears on it.
   (globalThis as unknown as { __claraPayrollFactsServicesV1?: unknown }).__claraPayrollFactsServicesV1 = makePayrollFactsServicesV1();
+  // #948: agreementFacts_v1's OWN bundle, in its OWN slot, for the same reason — it carries its
+  // OWN engine snapshot (`llm-openai:{model}:agreement-witness-v1`) and the frozen behaviour
+  // refuses to egress under a stamp that is not its own.
+  (globalThis as unknown as { __claraAgreementFactsServicesV1?: unknown }).__claraAgreementFactsServicesV1 = makeAgreementFactsServicesV1();
   const localFactsServices = makeDocumentServices();
 
   // Register intake first. The HTTP shutdown gate rejects new requests immediately;
@@ -384,6 +389,13 @@ export default definePlugin(() => {
         // lane='payroll_facts' and the reconciler warns-once + waits — never falls through to
         // documentIngest (the explicit-allowlist protection).
         enqueuePayrollFacts: (taskId: string) => start(workflows.payrollFacts, [{ task_id: taskId }]),
+        // #948: the contract_facts lane rides its own workflow (agreementFacts_v1), resolved
+        // through the registry `workflows` object exactly like every other facts lane
+        // (freeze-lint enqueue-provenance law — a direct workflow-file import handed to start()
+        // fails CI). Without this dep, reconciler-documents.mjs's enqueueForLane returns
+        // undefined for lane='contract_facts' and the reconciler warns-once + waits — never falls
+        // through to documentIngest (the explicit-allowlist protection).
+        enqueueAgreementFacts: (taskId: string) => start(workflows.agreementFacts, [{ task_id: taskId }]),
         // The MyInvois local_facts lane (Wave A2) has NO WDK workflow — a facts task is
         // driven by processLocalFactsTask directly (claim/parse/persist). The claim gate
         // makes this reconciler belt idempotent against the local_facts leader loop below.

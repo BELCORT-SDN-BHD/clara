@@ -52,6 +52,7 @@ let warnedClassifyEnqueueGap = false;
 let warnedStatementFactsEnqueueGap = false;
 let warnedWitnessFactsEnqueueGap = false;
 let warnedPayrollFactsEnqueueGap = false;
+let warnedAgreementFactsEnqueueGap = false;
 /** Lanes this image does not recognise at all, warned once each (see enqueueForLane). */
 const warnedUnknownLanes = new Set();
 
@@ -105,6 +106,11 @@ function enqueueForLane(deps, lane) {
   // lane above it — an unknown lane is never fallen through to documentIngest, which would run a
   // generic OCR pass outside the typed witness_extraction consent gate this lane answers to.
   if (lane === "payroll_facts") return deps.enqueuePayrollFacts;
+  // #948: the agreement contract's own lane (migration 0299). An EXPLICIT entry, for the same
+  // reason every lane above it is one — an unknown lane is never fallen through to
+  // documentIngest, which would run a generic OCR pass outside the typed witness_extraction
+  // consent gate this lane answers to.
+  if (lane === "contract_facts") return deps.enqueueAgreementFacts;
   if (lane === "local_facts") return deps.enqueueLocalFacts;
   if (lane === "classify") return undefined; // owned by the classify leader loop, never documentIngest
   if (!warnedUnknownLanes.has(String(lane))) {
@@ -438,6 +444,10 @@ export async function reconcileDocumentTasks(client, deps) {
         if (task.lane === "payroll_facts" && !warnedPayrollFactsEnqueueGap) {
           warnedPayrollFactsEnqueueGap = true;
           log("[reconcile] payroll_facts re-enqueue skipped: deps.enqueuePayrollFacts not wired — a payroll task is NEVER driven through documentIngest (that would run a generic OCR pass outside the typed witness_extraction consent gate; supervisor must provide enqueuePayrollFacts)");
+        }
+        if (task.lane === "contract_facts" && !warnedAgreementFactsEnqueueGap) {
+          warnedAgreementFactsEnqueueGap = true;
+          log("[reconcile] contract_facts re-enqueue skipped: deps.enqueueAgreementFacts not wired — an agreement task is NEVER driven through documentIngest (that would run a generic OCR pass outside the typed witness_extraction consent gate; supervisor must provide enqueueAgreementFacts)");
         }
         if (task.lane === "classify" && !warnedClassifyEnqueueGap) {
           warnedClassifyEnqueueGap = true;
