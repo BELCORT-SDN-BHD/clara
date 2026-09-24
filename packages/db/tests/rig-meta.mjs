@@ -2947,6 +2947,37 @@ const CLIENT_FINANCIAL_PACK_0232_HUMAN_FNS = [
 ];
 export const CLIENT_FINANCIAL_PACK_0232_COHORT = [...CLIENT_FINANCIAL_PACK_0232_HUMAN_FNS];
 // #660 END
+// #1000 [0320, the model lane's entrance to the client home's money band] — its OWN cohort,
+// bimodal on the same terms 0232's is, and the amendment to the block above.
+//
+//   WHAT CHANGED ABOVE, so the 0232 block is not left describing a world that ended. Its
+//   "0232 ships NO agent twin, no wake wrapper and no allowlist row" is still true OF 0232, and
+//   `p660.pack.no_agent_reach` still passes door by door: clara_runtime, clara_agent_ro and every
+//   clara_wake_* role hold NOTHING on `get_client_financial_pack`, `propose_client_cash_accounts`
+//   or `publish_client_cash_account_set`. What #1000 added is a SEPARATE door onto the same
+//   computation, which is the shape 0232's header said it was deliberately not taking THEN and
+//   which the ticket asked for: "a door closed to the agent role is reached the house way, with a
+//   wake wrapper, its grant and its allowlist row". `get_client_financial_pack` is also no longer
+//   SECURITY INVOKER — it is a VIEWER-floored SECURITY DEFINER delegate, because the core it now
+//   calls is granted to nobody.
+//
+//   ONE model-lane door — `wake_get_client_financial_pack`, EXECUTE to clara_agent_ro ALONE (the
+//   role the chat lane's read pool SET ROLEs to) with ONE clara.wake_fn_allowlist row, for the
+//   `interactive` kind. clara_runtime gains nothing (the act lane has no business reading a
+//   client's money band), clara_wake_interactive gains nothing (the write pool COMMITs; this is a
+//   read), clara_authenticated gains nothing (a human has their own door). The floor is the
+//   credential's own and is STRICTLY ABOVE the read's VIEWER floor: clara.wake_context re-validates
+//   the on_behalf_of human as an ACTIVE BOOKKEEPER+ on every use.
+const CLIENT_FINANCIAL_PACK_WAKE_0320_AGENT_FNS = ["wake_get_client_financial_pack"];
+//   …and the UNGRANTED core both entrances run. It is #660's own body with three anchored edits
+//   (0320's tail proves that by reversing them and hashing), granted to NOBODY and reached only
+//   from a definer door — the one-ungranted-core law, 0004:6-12. It is listed here so
+//   `cohortFailures` reports a HALF-applied 0320 rather than a silently narrower boundary.
+const CLIENT_FINANCIAL_PACK_WAKE_0320_UNGRANTED_FNS = ["_client_financial_pack_core"];
+export const CLIENT_FINANCIAL_PACK_WAKE_0320_COHORT = [
+  ...CLIENT_FINANCIAL_PACK_WAKE_0320_AGENT_FNS, ...CLIENT_FINANCIAL_PACK_WAKE_0320_UNGRANTED_FNS,
+];
+// #1000 END
 // #635 [0233, the firm's real legal, commercial and model-usage state] — its own cohort, and
 // the FIRST on this roster that deliberately is NOT "wholly absent" before its migration.
 //
@@ -3704,7 +3735,14 @@ export const ALLOWED = {
     // #624 0191: the capability registry and the four states exist precisely so that neither
     // lane infers from a filename what Clara can do with a file. An agent that could not read
     // the registry would be the lane most likely to guess, so all four readers are shared.
-    ...DOCUMENT_CAPABILITY_0191_SHARED_FNS]),
+    ...DOCUMENT_CAPABILITY_0191_SHARED_FNS,
+    // #1000 [0320] the ONE wake wrapper this role holds, and the first wake_* name it has ever
+    // held. Every other wake wrapper in the estate is granted to a clara_wake_* write role; this
+    // one is a READ, it runs inside the read pool's read-only transaction, and least privilege
+    // says a read-only role is the narrower home for it. The KIND gate sits on top of the EXECUTE
+    // exactly as it does for the bank and close families: one `interactive` allowlist row, so a
+    // credential of any other kind is refused by assert_wake_allowed even holding this grant.
+    ...CLIENT_FINANCIAL_PACK_WAKE_0320_AGENT_FNS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...BINDING_PROPOSAL_PR1_WAKE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
     // [Wave-F Track A, F-A5b card 1] wake_compose_metric_preview_v2 -- 'interactive' ONLY,
     // permanently (CD-16), beside its untouched v1 twin in AUTHORING_0077_WAKE_FNS.
@@ -4368,6 +4406,14 @@ export async function grantMatrixFailures() {
   const financialPackLive = CLIENT_FINANCIAL_PACK_0232_COHORT.filter((n) => liveNames.has(n));
   if (financialPackLive.length !== 0) {
     failures.push(...cohortFailures("#660 0232 client financial-pack read lane", CLIENT_FINANCIAL_PACK_0232_COHORT, liveNames));
+  }
+  // #1000 [0320] — bimodal on the same terms as 0232's above: wholly present once 0320 applies,
+  // wholly absent before it. A PARTIAL cohort here means the wake door exists without the core it
+  // delegates to, or the reverse — a half-applied lane, which cohortFailures() fails by design.
+  const packWakeLive = CLIENT_FINANCIAL_PACK_WAKE_0320_COHORT.filter((n) => liveNames.has(n));
+  if (packWakeLive.length !== 0) {
+    failures.push(...cohortFailures("#1000 0320 client financial-pack model-lane entrance",
+      CLIENT_FINANCIAL_PACK_WAKE_0320_COHORT, liveNames));
   }
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).

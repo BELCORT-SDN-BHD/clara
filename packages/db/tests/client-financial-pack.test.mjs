@@ -147,6 +147,35 @@ function assertEnvelope(group, label) {
   assert.equal(group.period.timezone, "Asia/Kuala_Lumpur", `${label}: period.timezone`);
 }
 
+/**
+ * #1000 [0320] — WHICH BODY CARRIES THE COMPUTATION on the chain under test.
+ *
+ * 0320 moved `clara.get_client_financial_pack`'s body, byte for byte, into
+ * `clara._client_financial_pack_core` — ONE definition with two entrances, the human door and
+ * the model lane's `clara.wake_get_client_financial_pack` — and left the door itself a
+ * VIEWER-floored delegate. Every STRUCTURAL cell in this file reads the name this answers, so a
+ * cell that pins "the pack computes no X" keeps pinning the computation instead of going quietly
+ * vacuous against a three-line delegate, and still runs on a `db-slice-frontiers` chain below
+ * 0320, where the door IS the body. The BEHAVIOURAL cells are unaffected: they drive the door.
+ */
+let _computeBody = null;
+async function packComputeBody() {
+  if (_computeBody === null) {
+    const r = await rootQuery(
+      "select count(*)::int as n from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+      + "where n.nspname = 'clara' and p.proname = '_client_financial_pack_core'");
+    _computeBody = r.rows[0].n > 0 ? "_client_financial_pack_core" : "get_client_financial_pack";
+  }
+  return _computeBody;
+}
+/** That body's `prosrc`, for the structural cells. */
+async function packComputeSrc() {
+  const r = await rootQuery(
+    "select prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+    + "where n.nspname = 'clara' and p.proname = $1", [await packComputeBody()]);
+  return r.rows[0].prosrc;
+}
+
 /** RM `n` in exact minor units — never a float anywhere in this file. */
 const rm = (n) => n * 100;
 /** Dr bank / Cr sales: money in. */
@@ -303,11 +332,8 @@ test("p660.pack.statement_balance_never_cash — a bank_statements row with a di
   assert.equal(BigInt(after_.cash.value_cents), BigInt(rm(800)));
   assert.ok(after_.excluded_by_design.includes("statement_balance"));
   // The structural half, independent of whether the fixture row could be planted on this chain.
-  const src = await rootQuery(
-    "select prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
-    + "where n.nspname = 'clara' and p.proname = 'get_client_financial_pack'");
-  assert.equal(src.rows[0].prosrc.includes("bank_statements"), false,
-    "the pack's body mentions clara.bank_statements");
+  assert.equal((await packComputeSrc()).includes("bank_statements"), false,
+    `the pack's body (clara.${await packComputeBody()}) mentions clara.bank_statements`);
   if (!planted) t.diagnostic("bank_statements fixture row could not be planted on this chain; the prosrc half still holds");
 });
 
@@ -612,10 +638,8 @@ test("p660.pack.reversal_and_negative_not_clamped — a reversal and a negative 
   assert.equal(BigInt(p.income.value_cents), BigInt(rm(-300)));
   assert.equal(BigInt(p.profit.value_cents), BigInt(rm(-300)));
   assert.equal(BigInt(p.cash.value_cents), BigInt(rm(-300)));
-  const src = await rootQuery(
-    "select prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
-    + "where n.nspname = 'clara' and p.proname = 'get_client_financial_pack'");
-  assert.equal(src.rows[0].prosrc.includes("greatest("), false, "the pack's body carries a clamp");
+  assert.equal((await packComputeSrc()).includes("greatest("), false,
+    `the pack's body (clara.${await packComputeBody()}) carries a clamp`);
 });
 
 // ===========================================================================================
@@ -1271,7 +1295,7 @@ test("p660.pack.as_of_is_book_day — the pack's default as-of, its month anchor
   const bodies = (await rootQuery(
     "select p.proname, regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') as src "
     + "from pg_proc p where p.pronamespace = 'clara'::regnamespace "
-    + "and p.proname in ('get_client_financial_pack','propose_client_cash_accounts')")).rows;
+    + "and p.proname = any($1)", [[await packComputeBody(), "propose_client_cash_accounts"]])).rows;
   assert.equal(bodies.length, 2, "both #660 reads exist exactly once each");
   for (const b of bodies) {
     assert.ok(b.src.includes("clara.book_today()"),
