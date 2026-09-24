@@ -1014,6 +1014,23 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
+  if (request.method === "POST"
+      && (path === "/rest/v1/rpc/get_rent_settlement_candidates"
+        || path === "/rest/v1/rpc/get_tenancy_deposit_coding")) {
+    // #949 (fix round) — RentSettlementsSection mounts on the /bank MATCHING tab beside #947's
+    // payroll panel, so these two reads now fire on every spec that opens that tab, and two of
+    // them (bank-match-walk, payroll-settlement-walk) have no tenancy fixture and need none. The
+    // SAME reasoning #626 records for get_my_preferences, #634 for list_entry_links and #639 for
+    // list_fixed_assets above: a generic, honest EMPTY answer here keeps every other spec's page
+    // free of an unhandled-route 404 for a call it never asked about, and a lane that OWNS the
+    // answer claims the verb earlier in the chain and never reaches this default.
+    //
+    // EMPTY IS HONEST HERE: a client with no confirmed rent plan has no open month of rent and no
+    // recorded deposit, which is exactly what the panel then renders — its own empty copy.
+    sendJson(response, 200, [], cors);
+    return;
+  }
+
   // #619 — A TYPED CONTRACT, not a plain message string: `code` is a stable, machine-checkable
   // marker (so a cell that means to assert "this route was never mocked" can match on it rather
   // than parsing prose), and `method`/`path` name exactly what reached here unanswered — the
