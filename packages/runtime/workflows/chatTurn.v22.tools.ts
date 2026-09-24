@@ -39,8 +39,16 @@ import {
   tradeInvoiceFromInput,
   type StartTradeInvoiceWorkInputV2,
 } from "../lib/trade-invoice-basis.v2.js";
+import {
+  START_STAFF_EXPENSE_CLAIM_WORK_TOOL,
+  claimFromInputV2,
+  localClaimRefusalV2,
+  startStaffExpenseClaimWorkInputSchemaV2,
+  type StartStaffExpenseClaimWorkInputV2,
+} from "../lib/staff-expense-claim-basis.v2.js";
 
 export { START_TRADE_INVOICE_WORK_TOOL, startTradeInvoiceWorkInputSchemaV2, TRADE_INVOICE_REFUSALS_V2 };
+export { START_STAFF_EXPENSE_CLAIM_WORK_TOOL, startStaffExpenseClaimWorkInputSchemaV2 };
 
 /** The tool name, as the model sees it and as every census counts it. */
 export const READ_OPENING_SOURCE_TOOL = "read_opening_source";
@@ -1139,6 +1147,108 @@ export async function runRefreshOpeningSource(
   }
 }
 
+
+// =============================================================================================
+// `start_staff_expense_claim_work` — ROSTER ENTRY A5 (#931): one claim, several advances.
+//
+// v20 serves this tool and v22 REPLACES it under the same name. The door is UNCHANGED, argument
+// order included; what widened is `p_claim`, which now carries the allocation list migration 0301
+// reads. `stableOpKey` hashes the list too, which is correct rather than unfortunate: a different
+// split is a different claim, and the door answers `intent_payload_conflict` for the same key with
+// a changed one.
+//
+// THE THING THE TOOL WILL NOT DO IS DECIDE. A split of two or more lines is refused locally,
+// before any round trip, until `allocations_confirmed` says a person agreed to it — and the
+// refusal hands the model the exact list to read back. Proposing one is
+// `proposeAllocationsByDate`'s job and only ever a proposal.
+// =============================================================================================
+
+export type StartStaffExpenseClaimWorkResultV22 =
+  | {
+      ok: true;
+      work_accepted: WorkAcceptedPartV19;
+      task_id: string;
+      status: string;
+      claim_id: string;
+      replayed: boolean;
+    }
+  | ToolRefusalV22;
+
+export async function runStartStaffExpenseClaimWorkV22(
+  ctx: ToolCtx,
+  input: StartStaffExpenseClaimWorkInputV2,
+  modelId: string,
+): Promise<StartStaffExpenseClaimWorkResultV22> {
+  if (!ctx.clientId) {
+    return noClientRefusalV22(
+      "staff_claim_needs_client_pin",
+      "This conversation is not bound to a client, so it cannot start a staff expense claim.",
+    );
+  }
+  const local = localClaimRefusalV2(input);
+  if (local) return local;
+
+  const clientId = ctx.clientId;
+  const intentKey = stableOpKey(ctx.taskId, START_STAFF_EXPENSE_CLAIM_WORK_TOOL, input);
+  const claim = claimFromInputV2(input);
+  try {
+    const receipt = await pools().withRuntime(async (c: PgExec) => {
+      const sessionId = await sessionOfTaskV22(c, ctx.taskId);
+      const sourceRefs = [{ kind: "chat_task", task_id: ctx.taskId, session_id: sessionId }];
+      const r = await c.query(
+        "select clara.admit_staff_expense_claim_work($1::uuid, $2::uuid, $3::text, $4::jsonb,"
+        + " $5::text, $6::jsonb, $7::text) as r",
+        [
+          clientId,
+          ctx.createdBy,
+          intentKey,
+          JSON.stringify(claim),
+          "clara_interpreted",
+          JSON.stringify(sourceRefs),
+          modelId,
+        ],
+      );
+      return (r.rows[0]?.r ?? null) as Record<string, unknown> | null;
+    });
+    if (!receipt || receipt.work_id == null) {
+      return internalFaultV22("The staff expense claim could not be started. Nothing was recorded.");
+    }
+    return {
+      ok: true,
+      work_accepted: {
+        type: "work_accepted",
+        work_id: String(receipt.work_id),
+        client_id: clientId,
+        // THE PURPOSE IS `journal_entry`, AND IT IS NOT A PLACEHOLDER — 0221's amendment rules
+        // that a claim rides the existing purpose; `clara.get_work_claim_origin` is what labels it
+        // as a claim on the Work surfaces, never a purpose value. #931 adds no wire kind.
+        purpose: "journal_entry",
+        logical_op_id: String(receipt.logical_op_id ?? ""),
+      },
+      task_id: String(receipt.task_id ?? ""),
+      status: String(receipt.status ?? "queued"),
+      claim_id: String(receipt.claim_id ?? ""),
+      replayed: receipt.replayed === true,
+    };
+  } catch (error) {
+    // The door's typed refusal, carried with its OWN message: 0301 attaches `shortfall_cents`,
+    // `outstanding_cents`, `boundary_date` and the `advance_id` to `advance_allocation_mismatch`,
+    // so the model can say exactly how many sen to move off which advance without a second read.
+    const refused = authoringRefusal(error as DbErrorV22);
+    if (refused.ok !== false || !isGovernedRefusalV22(refused.code)) {
+      return internalFaultV22("The staff expense claim could not be started.");
+    }
+    return {
+      ok: false,
+      code: refused.code,
+      reason: refused.reason,
+      fix: refused.fix,
+      message: refused.message,
+      details: refused.details,
+    };
+  }
+}
+
 export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
   return Object.assign({}, buildToolsV21(ctx, modelId, segment), {
     // A1 + A2 — the SAME NAME v21 serves, REPLACED rather than added. `Object.assign` takes the
@@ -1175,6 +1285,22 @@ export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
         + "zero — an empty cash figure means nobody has said which accounts are cash yet.",
       inputSchema: readClientFinancialPackInputSchema,
       execute: (input: ReadClientFinancialPackInput) => runReadClientFinancialPack(ctx, input),
+    }),
+    [START_STAFF_EXPENSE_CLAIM_WORK_TOOL]: tool({
+      description:
+        "Start an accounting Work that records ONE staff expense claim for the client pinned to "
+        + "this conversation. Amounts are integer CENTS. Say how it is settled: reimbursement, "
+        + "already settled, or applied against a staff advance. ONE CLAIM MAY COME OFF SEVERAL "
+        + "ADVANCES: when the human names more than one, give `advance_allocations` — one line per "
+        + "advance with how many sen come off each, adding up to the claim exactly — read the split "
+        + "back to them in ringgit and sen, and only then set `allocations_confirmed`. NEVER decide "
+        + "a split on your own: this register records the list that was CONFIRMED and refuses a "
+        + "silent first-in-first-out. For a single advance, `advance_id` alone is the same claim. "
+        + "This does NOT post the entry — it queues durable Work that posts it under the human's "
+        + "own authority, rechecked at commit. Say you have QUEUED it.",
+      inputSchema: startStaffExpenseClaimWorkInputSchemaV2,
+      execute: (input: StartStaffExpenseClaimWorkInputV2) =>
+        runStartStaffExpenseClaimWorkV22(ctx, input, modelId),
     }),
     [REFRESH_OPENING_SOURCE_TOOL]: tool({
       description:

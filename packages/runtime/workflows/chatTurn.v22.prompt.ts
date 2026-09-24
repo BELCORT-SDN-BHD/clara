@@ -212,10 +212,34 @@ export const OPENING_REFRESH_CHAT_GUIDANCE = [
   "has already brought it forward — say that, rather than describing it as a failure.",
 ].join("\n");
 
+
+// --- A5 · #931's allocation paragraph ------------------------------------------------------
+//
+// #931's contract carries `STAFF_EXPENSE_CLAIM_CHAT_GUIDANCE` verbatim with ONE paragraph inserted
+// after "SAY HOW IT IS SETTLED, …". That stanza is inside frozen `SYSTEM_PROMPT_V20`, so the
+// paragraph is appended here with its own heading instead, and the words are #931's own.
+
+export const CLAIM_ALLOCATIONS_V22_CHAT_GUIDANCE = [
+  "ONE CLAIM MAY COME OFF SEVERAL ADVANCES — an addition to the staff-expense paragraph above.",
+  "",
+  "If the human names more than one advance — \"settle it against the March and May advances\" —",
+  "give advance_allocations: one line per advance, with how many sen come off each, adding up to",
+  "the claim exactly. If they name the advances but not the amounts, propose the split OLDEST",
+  "ADVANCE FIRST, each taking what it still has outstanding, read it back to them in ringgit and",
+  "sen, and only then set allocations_confirmed. Never decide a split on your own: the register",
+  "records the list that was CONFIRMED, and a silent first-in-first-out is exactly what this",
+  "register refuses. For a single advance, advance_id alone is the same claim.",
+  "",
+  "IF THE ADVANCES CANNOT COVER THE CLAIM, SAY SO RATHER THAN BALANCING IT. Name what each advance",
+  "still has outstanding and how much of the claim is left over; never invent a line, and never",
+  "stretch an advance past what it carries. What happens to the remainder is the human's decision.",
+].join("\n");
+
 export const SYSTEM_PROMPT_V22 =
   `${SYSTEM_PROMPT_V21}\n\n${OPENING_SOURCE_CHAT_GUIDANCE}\n\n${CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`
   + `\n\n${TRADE_INVOICE_V22_CHAT_GUIDANCE}`
-  + `\n\n${OPENING_REFRESH_CHAT_GUIDANCE}`;
+  + `\n\n${OPENING_REFRESH_CHAT_GUIDANCE}`
+  + `\n\n${CLAIM_ALLOCATIONS_V22_CHAT_GUIDANCE}`;
 
 // --- the promotions -----------------------------------------------------------------------
 
