@@ -923,10 +923,33 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
       + "applies_when, no pack content — which is why granting it to clara_authenticated does "
       + "not breach #783."],
   ]);
+  // RIDERS WAVE 4 — #949 (0300) ADDS ONE READ OF THIS RELATION, declared here rather than folded
+  // into the cohort above for the reason every entry since 2026-09-15 gives: it states what it
+  // does with the relation, and the loop underneath MEASURES the claim on the live body. BIMODAL
+  // like the 0230 five (0300 comes long after 0220, so a database at this battery's frontier may
+  // legitimately not carry it), and excluded from the stray list unconditionally so the census
+  // fires the same way on every frontier.
+  //
+  // THE RISK THIS GATE NAMES IS "a firm preference is becoming an authority somewhere", and it is
+  // not what happens here — which is why the entry carries a fourth property the loop below does
+  // not check and this cell asserts separately: the body is UNGRANTED, reachable by no
+  // application role at all. The rent plan #949 creates cites clara.contract_plan_confirmations,
+  // a named person's own act; clara.create_accounting_plan still refuses a knowledge_record
+  // reference outright, which is this cell's own second half and is asserted below, untouched.
+  const TENANCY_0300_CONSUMERS = new Map([
+    ["_client_reporting_framework",
+      "#949 (0300) — the lessee-accounting branch's framework read. It SELECTs the live "
+      + "reporting_framework records in scope (a live CLIENT record shadowing a live FIRM record, "
+      + "each inside its effective window) to decide whether Clara may DRAFT a rent plan or must "
+      + "ASK the accountant for a written professional judgement. It decides nothing about what "
+      + "may be POSTED, it writes nothing anywhere, it is STABLE, and it is granted to no "
+      + "application role."],
+  ]);
+  const tenancyLive = readers.some((r) => r.proname === "_client_reporting_framework");
   const retrievalLive = readers.some((r) => r.proname === "retrieve_knowledge");
   const strays = readers
     .filter((r) => !COHORT.has(r.proname) && !READ_ONLY_CONSUMERS.has(r.proname)
-      && !RETRIEVAL_0230_CONSUMERS.has(r.proname))
+      && !RETRIEVAL_0230_CONSUMERS.has(r.proname) && !TENANCY_0300_CONSUMERS.has(r.proname))
     .map((r) => r.sig);
   assert.deepEqual(strays, [],
     "a function outside the knowledge cohort reads clara.knowledge_records -- a firm preference is becoming an authority somewhere");
@@ -947,9 +970,11 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
   assert.equal(WRITES_KNOWLEDGE.test(writerProbe[0].prosrc), true,
     "the DML predicate below cannot see a real writer -- it would excuse anything");
 
-  const declaredConsumers = retrievalLive
-    ? [...READ_ONLY_CONSUMERS, ...RETRIEVAL_0230_CONSUMERS]
-    : [...READ_ONLY_CONSUMERS];
+  const declaredConsumers = [
+    ...READ_ONLY_CONSUMERS,
+    ...(retrievalLive ? RETRIEVAL_0230_CONSUMERS : []),
+    ...(tenancyLive ? TENANCY_0300_CONSUMERS : []),
+  ];
   for (const [name, reason] of declaredConsumers) {
     const rows = readers.filter((r) => r.proname === name);
     assert.ok(rows.length > 0,
@@ -963,6 +988,19 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
         `${b.sig} writes clara.knowledge_records -- it is not a read-only consumer`);
       assert.notEqual(b.provolatile, "v", `${b.sig} is VOLATILE -- a read-only knowledge consumer is stable or immutable`);
     }
+  }
+
+  // …AND #949's OWN READER IS UNGRANTED, which is the property that makes "it authorises
+  // nothing" structural rather than a promise: no application role can call it at all, so the
+  // only way to it is through a definer body that has already settled the firm and the client.
+  if (tenancyLive) {
+    const acl = (await rootQuery(
+      `select coalesce(array_length(array(
+          select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+           where a.grantee <> p.proowner), 1), 0)::int as n
+         from pg_proc p where p.oid = 'clara._client_reporting_framework(uuid)'::regprocedure`)).rows[0].n;
+    assert.equal(acl, 0,
+      "clara._client_reporting_framework must be reachable by NO application role — a knowledge read that any role could call is the second way in this cell exists to refuse");
   }
 
   // …AND THE PLAN LANE STILL REFUSES ONE BY ITS OWN DOOR (0193:1486-1489), measured through the

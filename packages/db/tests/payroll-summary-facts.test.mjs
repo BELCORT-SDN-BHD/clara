@@ -40,6 +40,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { rootQuery, ensureReady, endPool, buildWorld } from "./rig-fixtures.mjs";
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, docTasks, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
@@ -536,7 +537,21 @@ test("S3 · the evaluator is a closed, single-member closure: it calls no other 
   assert.equal(ev.length, 1);
   assert.equal(ev[0].entrypoint_signature, "clara.evaluate_payroll_run_state_v1(jsonb,jsonb)");
   assert.equal(ev[0].migration_version, "0296_payroll_summary_typed_facts");
-  assert.equal(ev[0].deployed, false, "the deploy flip is a one-way ceremony act, never a migration's to make");
+  // THE CLAIM IS ABOUT THE MIGRATION, AND IS ASSERTED THERE (fix round, finding SPEC-02).
+  // clara.evaluator_versions.deployed is GLOBAL, one-way state, and the suite's own
+  // migrate-evaluator-freeze battery flips every evaluator as part of its ceremony — so a cell
+  // reading `deployed === false` off the live row goes permanently red the moment the whole
+  // suite runs, which is exactly the dependency the wave-3 addendum forbids ("no test may depend
+  // on rows left in the database by another test file"). What this cell means is that 0296
+  // REGISTERS the evaluator and never deploys it; that is a fact about the file, and the file is
+  // the one place no other battery can move.
+  const mig0296 = readFileSync(new URL("../migrations/0296_payroll_summary_typed_facts.sql", import.meta.url), "utf8");
+  assert.match(mig0296, /insert into clara\.evaluator_versions/i,
+    "0296 must be the file that registers this evaluator");
+  assert.equal(/'0296_payroll_summary_typed_facts',\s*false\)/.test(mig0296), true,
+    "0296 must register the evaluator with deployed = false");
+  assert.equal(/update\s+clara\.evaluator_versions/i.test(mig0296), false,
+    "the deploy flip is a one-way ceremony act, never a migration's to make: 0296 must not UPDATE clara.evaluator_versions");
 });
 
 // ---------------------------------------------------------------------------
@@ -910,7 +925,13 @@ test("S6 · the registry re-publishes at ONE new version, and nobody else's row 
     )
   ).rows[0];
   assert.equal(r.versions, 1, "the registry publishes exactly one version — a re-derivation is whole or it is drift");
-  assert.equal(r.v, 5, "…and it is 5 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5)");
+  // RE-BASED BY #948 IN THE SAME LANE (fix round, finding SPEC-01). #945 raised the published
+  // registry to 5; #948's 0299 re-derived it again for the agreement pairs and raised it to 6,
+  // and this pin — #945's own — was left behind, so the lane's head did not pass its own gates.
+  // The SINGLE SOURCE for the number is document-capability-registry.test.mjs's
+  // PUBLISHED_REGISTRY_VERSION; a wave that republishes re-bases BOTH, and this comment is here
+  // so the next one finds the second site.
+  assert.equal(r.v, 6, "…and it is 6 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5, #948 to 6)");
   assert.equal(r.rows, 240, "#945 inserts and deletes no registry row");
 
   const drift = (

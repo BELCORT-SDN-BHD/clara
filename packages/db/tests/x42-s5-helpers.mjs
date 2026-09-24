@@ -146,6 +146,19 @@ export function findAdvisory(obj, depth = 0) {
 // x42-s5c-clock.test.mjs.6 is what walks it.
 // ---------------------------------------------------------------------------
 
+// RIDERS WAVE 4, LANE 01 (#949, 0300) — ONE NAME, and it is the case this roster's own
+// instruction cannot reach. clara._tenancy_rent_plan_draft DERIVES NO DATE from the zone: it
+// passes 'Asia/Kuala_Lumpur' as the p_timezone ARGUMENT of clara.create_accounting_plan, which
+// the plan lane requires as a NAME (clara._assert_plan_schedule and
+// clara._adj_run_occurrence_core, both already on this roster, are what consume it). There is no
+// authority to call instead — clara._book_today() returns a DATE, not a zone — so the standing
+// advice "call the authority" cannot be followed and joining the roster is the declared cost,
+// the same shape 0046's clara.preview_ocr_sales_evidence carries above. The two bodies of the
+// same file that DID spell the conversion (clara._client_reporting_framework and
+// clara._tenancy_escalation_state) were corrected to call clara._book_today() instead and are
+// deliberately NOT here (fix round, finding SPEC-10).
+const KL_ROSTER_0300_TENANCY = ["_tenancy_rent_plan_draft"];
+
 /** No `::date` suffix required anywhere — the shape arms (A)/(A2)..(A5) of S5.25 miss. */
 export const S5_25_BARE_TOKEN_RE = "\\m(now\\(\\)|current_timestamp\\M|localtimestamp\\M|clock_timestamp\\(\\)"
   + "|statement_timestamp\\(\\)|transaction_timestamp\\(\\))";
@@ -1410,6 +1423,27 @@ const FIRM_SETUP_EDUCATION_TIPS_0259_CLOCK_NAMES = ["dismiss_firm_setup_tip"];
 // DEFAULT; 0194's `_adj_*` bodies either sit on this roster already (`_adj_run_occurrence_core`)
 // or take their dates from the period arithmetic they are handed.
 
+// RIDERS WAVE 4, LANE 01 (0296..0300, #945/#946/#947/#948/#949) — NINE NAMES, and every one of
+// them reads a bare `now()` as an INSTANT stamped on a row, never as a date the books turn on.
+// The ledger date these bodies post on is read from the document or handed to them; where one of
+// them needed today's legal date it calls clara._book_today() (fix round, finding SPEC-10 — two
+// bodies spelled the conversion and were corrected rather than rostered).
+//   · persist_payroll_facts / fail_payroll_facts (0296) and persist_agreement_facts /
+//     fail_agreement_facts (0299) — the four lane-settling doors, stamping settled_at/failed_at
+//     on a processing task and the extraction rows they write.
+//   · _post_payroll_run (0297) and _post_agreement_acquisition (0299) — the two unattended
+//     posts: approved_at/updated_at on the entry they flip. The POSTING DATE is the page's own.
+//   · _settle_payroll_net_pay_core (0298) and _settle_rent_payable_core (0300) — the two human
+//     accept acts: approved_at/updated_at again. The posting date is the BANK LINE's entry_date.
+//   · record_contract_terms (0300) — recorded_at/superseded_at on an append-only term row.
+const PAYROLL_FACTS_0296_CLOCK_NAMES = ["fail_payroll_facts", "persist_payroll_facts"];
+const PAYROLL_POSTING_0297_CLOCK_NAMES = ["_post_payroll_run"];
+const PAYROLL_SETTLEMENT_0298_CLOCK_NAMES = ["_settle_payroll_net_pay_core"];
+const AGREEMENT_0299_CLOCK_NAMES = [
+  "_post_agreement_acquisition", "fail_agreement_facts", "persist_agreement_facts",
+];
+const TENANCY_0300_CLOCK_NAMES = ["_settle_rent_payable_core", "record_contract_terms"];
+
 // #720 [0198, chat-clarify expiry] — ADDS NO NAME AND MOVES NONE, and that is MEASURED rather than
 // assumed: 0198 creates no body at all. It RECUTS exactly one, `clara.expire_due_interruptions`,
 // which already sits on WORK_QUESTIONS_0180_CLOCK_NAMES above, and the recut deletes a predicate
@@ -1571,6 +1605,13 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("fa_closed_year_arrears$")) {
     names.push(...FA_ARREARS_RESOLUTION_0279_CLOCK_NAMES);
   }
+  // RIDERS WAVE 4, lane 01 (0296..0300) - stem-gated, never number-gated, for the reason
+  // :207-214 gives. See the five arrays' shared header above for what each body stamps.
+  if (await appliedStem("payroll_summary_typed_facts$")) names.push(...PAYROLL_FACTS_0296_CLOCK_NAMES);
+  if (await appliedStem("payroll_summary_posting$")) names.push(...PAYROLL_POSTING_0297_CLOCK_NAMES);
+  if (await appliedStem("payroll_net_pay_settlement$")) names.push(...PAYROLL_SETTLEMENT_0298_CLOCK_NAMES);
+  if (await appliedStem("agreement_contract_acquisition$")) names.push(...AGREEMENT_0299_CLOCK_NAMES);
+  if (await appliedStem("tenancy_terms_rent_plan$")) names.push(...TENANCY_0300_CLOCK_NAMES);
   return names.sort();
 }
 
@@ -1861,5 +1902,7 @@ export async function s5KlDuplicationRoster(query) {
   if (await appliedStem("client_financial_pack$")) names.push(...KL_ROSTER_0232_CLIENT_FINANCIAL);
   // RIDERS WAVE 2 - stem-gated, never number-gated.
   if (await appliedStem("document_ingest_window_myt$")) names.push(...KL_ROSTER_0252_DOCUMENT_INGEST_WINDOW);
+  // RIDERS WAVE 4, LANE 01 (#949, 0300) - stem-gated, never number-gated.
+  if (await appliedStem("tenancy_terms_rent_plan$")) names.push(...KL_ROSTER_0300_TENANCY);
   return names.sort().join(" ");
 }

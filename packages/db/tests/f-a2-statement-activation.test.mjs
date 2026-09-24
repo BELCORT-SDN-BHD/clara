@@ -364,8 +364,15 @@ test("f-a2.activation.i the INVOICE witness arm is untouched -- this migration e
   // exactly what the payroll lane does, and minting a second purpose would leave the lane dark
   // until a capture surface existed for it). Counted, because a FOURTH would mean a later
   // splice hit something it was not aimed at.
-  assert.equal(src.split("and a.purpose='witness_extraction'").length - 1, 3,
-    "exactly three witness_extraction activation lookups -- the re-keyed statement arm, the untouched llm_witness arm and #945's payroll arm");
+  // …AND A FOURTH SINCE #948 (migration 0299), for the SAME recorded reason 0296 gives and
+  // which #948's own file restates: the contract_facts lane sends a client's document bytes to a
+  // model in order to READ them, which is precisely what witness_extraction is the consent for,
+  // and minting a second purpose would leave that lane dark until a capture surface existed for
+  // it. Re-based here in the fix round (finding SPEC-03): #945 moved this pin from 2 to 3 and
+  // wrote "a fourth would still be a finding"; 0299 added the fourth in the same lane and left
+  // the pin at 3. A FIFTH is still a finding.
+  assert.equal(src.split("and a.purpose='witness_extraction'").length - 1, 4,
+    "exactly four witness_extraction activation lookups -- the re-keyed statement arm, the untouched llm_witness arm, #945's payroll arm and #948's contract arm");
 });
 
 // ===========================================================================

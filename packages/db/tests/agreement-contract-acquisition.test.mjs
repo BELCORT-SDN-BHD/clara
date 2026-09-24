@@ -39,6 +39,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { rootQuery, ensureReady, endPool, buildWorld, createClient, upsertAccount, draftEntry, freshResolution } from "./rig-fixtures.mjs";
 import { fiscalYear } from "./depreciation-history-fixtures.mjs";
 import { retireDocumentFiling } from "./rig-docs-fixtures.mjs";
@@ -575,7 +576,17 @@ test("S3j · the evaluator's registered closure is exactly one member, and it ca
   assert.equal(ver.length, 1, "registered in the same migration that creates it");
   assert.equal(ver[0].entrypoint_signature, "clara.evaluate_agreement_contract_state_v1(jsonb,jsonb)");
   assert.equal(ver[0].migration_version, "0299_agreement_contract_acquisition");
-  assert.equal(ver[0].deployed, false, "the deploy flip is a ceremony act, never a migration's");
+  // THE CLAIM IS ABOUT THE MIGRATION, AND IS ASSERTED THERE (fix round, finding SPEC-02) — see
+  // payroll-summary-facts.test.mjs's S3 for the full reason: `deployed` is global one-way state
+  // that the suite's own migrate-evaluator-freeze battery flips, so reading it off the live row
+  // makes this cell depend on another file's writes.
+  const mig0299 = readFileSync(new URL("../migrations/0299_agreement_contract_acquisition.sql", import.meta.url), "utf8");
+  assert.match(mig0299, /insert into clara\.evaluator_versions/i,
+    "0299 must be the file that registers this evaluator");
+  assert.equal(/'0299_agreement_contract_acquisition',\s*false\)/.test(mig0299), true,
+    "0299 must register the evaluator with deployed = false");
+  assert.equal(/update\s+clara\.evaluator_versions/i.test(mig0299), false,
+    "the deploy flip is a ceremony act, never a migration's");
 
   const members = (
     await rootQuery("select member_signature from clara.evaluator_version_members where evaluator_version_id = $1", [
@@ -1392,25 +1403,34 @@ test("S8 · the gate WRITES NOTHING: two reads of a blocked agreement leave the 
 
   const client = await enrolledClient("quiet");
   const doc = await readAgreement(client, { answers: { "contract.agreement.kind": value("Tenancy Agreement") } });
-  const before = (
-    await rootQuery(
+  // SCOPED, LIKE ITS TWO NEIGHBOURS (fix round, finding L01-STD-1). clara.audit_log carries no
+  // client_id, so a first cut counted it database-wide — and that cell was OBSERVED failing on a
+  // direct re-run (94806 -> 94811) because ANY other writer on this shared rig, test file or
+  // agent, appends to the same table between the two reads. The wave-3 addendum forbids a test
+  // that depends on rows another file leaves; an unscoped count is wider still. The high-water
+  // id is the isolation-safe form of the same claim: nothing this gate did appended a row, no
+  // matter who else is writing.
+  const auditHighWater = async () =>
+    (await rootQuery("select coalesce(max(id), 0)::bigint as m from clara.audit_log")).rows[0].m;
+  const counts = async () =>
+    (await rootQuery(
       `select (select count(*) from clara.journal_entries where client_id=$1)::int e,
-              (select count(*) from clara.domain_events where client_id=$1)::int v,
-              (select count(*) from clara.audit_log)::int a`,
+              (select count(*) from clara.domain_events where client_id=$1)::int v`,
       [client],
-    )
-  ).rows[0];
+    )).rows[0];
+  const before = await counts();
+  const auditBefore = await auditHighWater();
   await verdict(doc.documentId);
   await verdict(doc.documentId);
-  const after = (
+  const after = await counts();
+  assert.deepEqual(after, before, "no entry and no event — a blocked agreement leaves no refusal record to reconcile");
+  const auditAfterMine = (
     await rootQuery(
-      `select (select count(*) from clara.journal_entries where client_id=$1)::int e,
-              (select count(*) from clara.domain_events where client_id=$1)::int v,
-              (select count(*) from clara.audit_log)::int a`,
-      [client],
+      "select count(*)::int as n from clara.audit_log where id > $1 and fn like '%agreement%'",
+      [auditBefore],
     )
-  ).rows[0];
-  assert.deepEqual(after, before, "no entry, no event, no audit row — a blocked agreement leaves no refusal record to reconcile");
+  ).rows[0].n;
+  assert.equal(auditAfterMine, 0, "no audit row — the gate is a read, and a read writes nothing");
 });
 
 test("S8 · a tenancy agreement is READ and never reaches the fixed-asset lane (AC5)", async (t) => {
