@@ -99,9 +99,13 @@ export async function readMigrationFrontier(deps = {}) {
  * target would strand. Both are COPIED rather than aliased, so a caller cannot mutate the
  * registry's frozen roster through the response.
  *
+ * #1035 — `contracts` rides the same shape once more: the ids of the door contracts this image
+ * understands (`lib/runtime-contracts.mjs`), which is what a rollback preflight compares against
+ * the applied schema's own rules when the target is RUNNING rather than on disk.
+ *
  * @param {{env?:NodeJS.ProcessEnv, names?:ReadonlyArray<string>, bundles?:ReadonlyArray<object>,
  *          bodies?:ReadonlyArray<string>, pins?:Readonly<Record<string,string>>,
- *          withRuntime?:Function, timeoutMs?:number}} [deps]
+ *          contracts?:ReadonlyArray<string>, withRuntime?:Function, timeoutMs?:number}} [deps]
  */
 export async function buildInfo(deps = {}) {
   const env = deps.env ?? process.env;
@@ -131,6 +135,13 @@ export async function buildInfo(deps = {}) {
     // the reason); the result is the same fresh, unaliased object.
     bodies: [...(deps.bodies ?? [])],
     pins: Object.fromEntries(Object.entries(deps.pins ?? {})),
+    // #1035 — the DOOR CONTRACTS this image understands, declared by lib/runtime-contracts.mjs and
+    // passed in by the route beside `bodies`. Always present, empty when nothing was passed: a
+    // rollback preflight reading a TARGET's build-info must be able to tell "declares none" — the
+    // honest answer of every image built before 0254, and one that REFUSES at 0254 and above —
+    // from "this payload predates the field", and it gets the former from an empty array beside a
+    // `bodies` list that is not. Copied rather than aliased, like every other roster here.
+    contracts: [...(deps.contracts ?? [])],
     // The frozen agent bundles this image serves, by id + digest. Copied rather than aliased so a
     // caller cannot mutate a frozen module's object through the response.
     bundles: (deps.bundles ?? []).map((b) => JSON.parse(JSON.stringify(b))),

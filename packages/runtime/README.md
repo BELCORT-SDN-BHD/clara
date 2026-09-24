@@ -810,13 +810,70 @@ same will eventually ship on the second one. The database target comes from the 
 sources fails closed.
 
 It counts **three** things, because it is three questions. The third is the DATABASE's own vote,
-and it is the one no census can see: from `0195_work_egress_purpose_and_execution_trace` on, a
-target that does not carry `claraWork_v3` is REFUSED with reason `frontier_requires_body`,
+and it is the one no census can see. The rule table lives in `lib/rollback-preflight.mjs`
+(`FRONTIER_RULES`), it is global — no `--scope` clears it, because it counts no rows — and it is
+not drainable. It holds two kinds of rule.
+
+**(a) A body the applied schema requires.** From `0195_work_egress_purpose_and_execution_trace` on,
+a target that does not carry `claraWork_v3` is REFUSED with reason `frontier_requires_body`,
 however clean the estate is — 0195's posting core requires a consumed `accounting_work` egress
 authorisation, no other body can obtain one, and 0195 grandfathers pre-v3 bundles past that wall,
 so a pre-v3 image would run the whole Work lane with the wall in force and nothing subject to it.
-The rule table lives in `lib/rollback-preflight.mjs` (`FRONTIER_BODY_RULES`), it is global — no
-`--scope` clears it — and it is not drainable: ship a target that carries the named body.
+The answer is a target that carries the named body.
+
+**(b) A door contract the applied schema changed (#1035).** A migration can change what a door
+RETURNS, and then an older image runs every parked body perfectly and misreads the answer. Two
+have shipped, and the preflight said `ALLOWED` for both at a hosted window before this rule
+existed:
+
+| from | the door | what the old image does instead |
+|---|---|---|
+| `0254_intake_refusal_record` | `clara.create_document_intake` commits a ceiling-refused intake and returns `refused: true` instead of raising CLR18 | reads an `intake_id` off the refusal, mints an upload capability, answers **201** to the uploader, and re-drives the intake on every recovery sweep |
+| `0279_fa_closed_year_arrears` | `clara.run_depreciation_period` answers `status: 'parked'` instead of posting when a closed year's arrears need a materiality judgement | counts the park as a **post** and, since the due probe still answers `due: true`, chases the same period to the per-client cap |
+
+The target proves it understands a contract by **declaring** it. `lib/runtime-contracts.mjs` is the
+image's own roster: one `clara.contract` marker per contract, carried as a literal in the built
+bundle, and served as ids on `/api/build-info`'s `contracts`. The preflight scans the target
+artifact for the markers (`--target-bundle`) or reads the ids off the target's own build-info
+(`--target-build-info`), so the decision is a **measurement of the image** and never a list of
+image tags somebody keeps by hand. An image that declares nothing — every image built before this
+mechanism — reads as "does not understand", which is the whole point: that is exactly the image a
+rollback is pointed at. Refusal reason: `frontier_requires_contract`.
+
+A contract refusal has **neither** of the two answers a census refusal has: retaining a body
+teaches the target nothing about what the door now returns, and there is no queue to drain. Ship a
+target that declares the contract, or roll the schema back first — which is its own ceremony.
+
+Adding a rule is one row in `FRONTIER_RULES`, and adding a marker is one entry in
+`RUNTIME_CONTRACTS` naming the module and the line of it that only exists when the behaviour does.
+`tests/runtime-contracts.test.mjs` reads both, so a marker whose behaviour was deleted reds a cell
+instead of lying to a preflight, and `tests/rollback-preflight.test.mjs` fails any rule that names
+a migration the chain does not contain.
+
+### The release runbook's step 9, since #1035
+
+Every wave's release runbook has a **step 9 — rollback preflight demonstration, READ ONLY**. Before
+#1035 that step could not cite this command as the authority for a runtime rollback: at the wave-2
+window it answered `ALLOWED` for an image that would misread `clara.create_document_intake`
+(`0254`), and the wave-3 runbook had to write the same caveat again by hand for
+`clara.run_depreciation_period` (`0279`) — "the preflight will say ALLOWED, because its rule table
+knows nothing about a door's return contract". It does now. **Step 9 cites the preflight as the
+authority again**, and the next runbook copies this paragraph rather than re-deriving it:
+
+> **9. Rollback preflight demonstration, READ ONLY, do NOT roll back.** Run
+> `node packages/runtime/scripts/rollback-preflight.mjs --target-bundle <the previous image's
+> extracted index.mjs>` (or `--target-build-info <that image's /api/build-info>`) through the LIVE
+> machine's DSN, with the bundle extracted from a SECOND probe on the old image, never from the live
+> machine. **THREE** gates, and say which is being demonstrated: (a) `FRONTIER_RULES`' body rules;
+> (b) `FRONTIER_RULES`' DOOR-CONTRACT rules — an image that declares no `clara.contract` marker is
+> refused `frontier_requires_contract`, and the refusal names the migration, the contract and the
+> frontier the database is at; (c) the stranded-body census. Exit 0 = ALLOWED, 1 = REFUSED, 2 =
+> could not answer, and 2 is never read as either of the others. A refused runtime rollback is the
+> command's answer, not an opinion to be weighed at 3 a.m.
+>
+> What step 9 still does NOT cover, and the runbook still says in its own words: a rollback BELOW
+> the migration frontier is a database ceremony this command does not speak to — it must be drafted
+> before a window, never during an incident.
 
 The other two are the censuses. Non-terminal `workflow.workflow_runs`,
 grouped by name with the parked body derived from the row itself; **and** live tasks bound to NO
@@ -1113,7 +1170,7 @@ pressing anything. It starts where `intake-e2e.mjs` stops: that one owns the tra
 (CORS, the streaming PUT, the token lock, the upload capability never crossing workflow
 step IO); this one owns the chain AFTER the bytes are read.
 
-Seven legs. **Leg 1** has three arms and ZERO `clara.request_autodraft` anywhere in the
+Eight legs. **Leg 1** has three arms and ZERO `clara.request_autodraft` anywhere in the
 automatic lane — asserted from the source of `intake.mjs`, `intake-lanes.mjs`,
 `intake-recovery.mjs`, `autodraft.mjs`, `facts-gate.mjs` and `intakeRoutes.ts`, with a
 control proving the door exists (it is #614's RECOVERY act, not a gate):
@@ -1132,11 +1189,25 @@ control proving the door exists (it is #614's RECOVERY act, not a gate):
   it opened itself (origin `sweep`; the door's own CLR10 makes a run-bound `one_click`
   impossible). The door's verdict is read back and printed VERBATIM.
 
-**Residual, named.** Arm (c) proves the door is REACHED, not that a coding task is
-admitted: `_coding_lane_core` refuses this fixture's document (`tier_a_fails`,
-`direction_unresolved`, `vendor_unresolved`, `no_consent` — measured on clara_633) and
-routes it to `needs_you`. A Tier-A-complete document needs counterparty resolution, a
-resolved direction and coding consent — the autodraft lane's own fixture, not this one's.
+**Residual, named — and #877's correction.** Arm (c) proves the door is REACHED on ITS
+OWN document, not that a coding task is admitted THERE: `_coding_lane_core` refuses that
+fixture on FOUR counts — `tier_a_fails` (it states no tax breakdown, so the structured
+Tier-A arithmetic tie is incomplete), `direction_unresolved`, `vendor_unresolved` and
+`no_consent` — and routes it to `needs_you`. Measured on clara_l07, and the leg prints the
+door's exact reasons rather than a fixed list, so all four are read off that printout. #633 owns exactly that reach-and-skip claim. **Leg 8 (#877)**
+closes the remaining gap in its own leg: a Tier-A-complete fixture — an explicit type 01,
+a net/tax tie, a tax breakdown that sums (migration 0023 §A's structured arm) — plus a
+name-only vendor counterparty already in the client's books (`clara.draft_entry` +
+`clara.approve_entry`, mirroring `packages/db/tests/wave-a-fixtures.mjs`'s
+`primeReadyFiling`, read for the preconditions and not duplicated), a resolved purchase
+direction and a live LEGACY coding-lane consent (`clara.grant_client_egress` — distinct
+from arm (b)'s TYPED `document_processing` purpose grant), driven through the SAME
+automatic chain. `clara.admit_autodraft_task` answers `admitted` BY NAME — read off its
+own durable idempotency receipt in `clara.op_receipts` (keyed
+`autodraft:<filing>:sweep`), because `clara.sweep_run_items.outcome` is a DIFFERENT,
+later fact written only once the minted task SETTLES and whose CHECK-constrained enum has
+no `admitted` member — and the minted task reads back from `clara.agent_tasks` (via
+`clara.autodraft_attempts`) tied to the document's own live filing.
 
 Legs 2–7: (2) a failed extraction yields `awaiting_extraction` and never a kind (0177's
 router); (3) duplicate bytes adopt onto the EXISTING document while the same name with
@@ -1172,6 +1243,88 @@ assertions already poll everything they admit to a terminal status first, so a c
 well under a second. `tests/intake-batch-e2e.mjs` deliberately does NOT call it: it is the last leg
 on this database in the CI job and its own §5 scope ends with live rows on purpose (a declared-fact
 wait, a quota wait, an unassigned failed upload) that nothing downstream needs drained.
+
+**Running it against a REUSED database: the FIRST boot is a PRIME run whose drain WILL fail, so the
+order is run -> settle -> run, never settle -> run (#877, fix round 2).** CI builds this file's
+database fresh in the same job, so the point only arises on a rig. TWO different things put `held`
+rows in front of `waitForQueueDrain`, and only the first of them is residue:
+
+1. **Residue, which a settle does clear.** A `clara.wakes_outbox` row left `held` by an earlier
+   ticket's session is projected as a `held` `clara.agent_tasks` wake row by `lib/drain.mjs`'s wake
+   phase the moment ANY full server boots against that database — including this leg's own — and
+   `censusUnboundTasks` counts it.
+2. **What the first run mints ITSELF — the reason a settle-then-run on a fresh clone still exits
+   1.** The first leader cycle of EVERY process runs the SST compliance-watch belt
+   (`lib/reconciler-sst.mjs` is the belt BODY; the cadence that makes it due lives in
+   `lib/leader.mjs:184`, `let lastSstRun = 0`, which is what makes
+   `sstReconcileDue(lastSstRun, Date.now())` true on the first cycle after every boot and daily
+   after that — `lastSstRun` is never DECLARED in `reconciler-sst.mjs`, only mentioned in its
+   cadence-law comment, so do not go looking for it there). Every active client that qualifies for
+   a watch and has none yet takes that belt's `created` branch, which appends a
+   `compliance.watch_transition` domain event; the relay routes each to a `notification` wake
+   decision, and the drain projects each as a `held`
+   `clara.agent_tasks` wake row plus a `held` `clara.wakes_outbox` row. Nothing settles a
+   `notification` wake inside the 30 s window, so the leg exits 1 at `waitForQueueDrain` on rows
+   that existed nowhere when the clone was taken. It is ONE-SHOT per client: once the watch rows
+   exist, no later boot mints them again.
+
+On a DISPOSABLE clone, therefore:
+
+1. **Prime run** — `node tests/intake-admission-e2e.mjs`. All 8 legs PASS and it still exits 1 at
+   `waitForQueueDrain`. That is expected; this run is what burns the one-shot watch creations.
+2. **Settle**, through the estate's own lawful transitions (the outbox rows cannot be deleted at
+   all):
+
+```
+update clara.wakes_outbox set status='cancelled' where status='held';
+update clara.agent_tasks set status='cancelled' where status in ('queued','held','running','awaiting_input');
+```
+
+3. **The real run**, and every run after it, exits **0**.
+
+Measured, lane 07, 2026-09-24, on THREE INDEPENDENT clones of `clara_l07` (`clara_881`, `clara_882`,
+and `clara_883` in a later session that re-ran the whole recipe from scratch), each settled BEFORE
+its first run — so that the settle-then-run recipe this section used to give was itself the thing
+under test:
+
+| clone | state entering the run | run | result |
+|---|---|---|---|
+| `clara_881` | settled; `clara.compliance_watches` **empty** | 1, Windows | 8/8 legs PASS, **exit 1** — `TIMED OUT after 30000ms (polls=141)` on **8** `held` unbound `kind='wake'` tasks. The run had just written the database's first 8 `clara.compliance_watches` rows and its first 8 `compliance.watch_transition` events (both counts were 0 on the clone and on `clara_l07`). |
+| `clara_881` | settled again; the 8 watches now exist | 2, Windows | `INTAKE ADMISSION E2E: PASS (8 legs …)`, **exit 0**, `[queue-drain] drained (polls=4, waited=796ms)` |
+| `clara_882` | settled; `clara.compliance_watches` **empty** | 1, Windows | same shape: **exit 1**, `polls=143`, the same 8 `held` wake rows |
+| `clara_882` | settled again; the 8 watches now exist | 2, Windows | **exit 0**, `drained (polls=5, waited=1131ms)` |
+| `clara_882` | the settle now cancels **0** rows — run 2 left nothing `held` | 3, **WSL as `runner`** (`/opt/node/bin/node tests/intake-admission-e2e.mjs`, the shape the integrator re-runs runtime tests in) | **exit 0**, `drained (polls=4, waited=813ms)` |
+| `clara_883` | settled (8 outbox + 21 task rows cancelled); `clara.compliance_watches` **empty** | 1, Windows | 8/8 legs PASS, **exit 1** — `TIMED OUT after 30000ms (polls=141)`, the same 8 `held` `kind='wake'` rows. Counts across this one run: `clara.compliance_watches` 0 -> **8**, `compliance.watch_transition` 0 -> **8**, `held` `wakes_outbox` 0 -> **8**. |
+| `clara_883` | settled again (8 + 8 rows cancelled); the 8 watches now exist | 2, Windows | `INTAKE ADMISSION E2E: PASS (8 legs …)`, **exit 0**, `[queue-drain] drained (polls=4, waited=854ms)`. The belt examined **184** clients on this run and created **no** further watch — the one-shot is spent. |
+| `clara_883` | **no settle at all** — run 2 left nothing `held` | 3, **WSL as `runner`** (`/opt/node/bin/node tests/intake-admission-e2e.mjs`) | **exit 0**, `drained (polls=4, waited=813ms)`, 8/8 legs PASS |
+
+What this section said in fix round 1 — settle first and the run passes — did not survive an
+independent re-run: two fresh clones, settled and run once, exited 1 both times on exactly those
+eight rows. It also mis-named the mechanism ("the next boot re-creates them from the outbox"): the
+new rows come from NEW `clara.wake_intents` for NEW `compliance.watch_transition` events, not from
+the cancelled outbox rows, whose own intents are already `consumed` and are never re-drained.
+
+**HOW TO CHECK THIS YOURSELF — AND THE COUNTER THAT WILL LIE TO YOU.** The belt writes a receipt row
+per run in `clara.compliance_eval_runs` (`clients_examined`, `clients_changed`, `clients_failed`).
+The examined count is NOT a constant to pin: it is every `status='active'` client at that moment and
+it drifts, because each run of this leg leaves one behind (`clara_883` read **183** on the prime run
+and **184** on the next). The trap is `clients_changed`: it — and the belt's own log line
+`[reconcile] sst watches examined=183 changed=0 failed=0` — read **0** on the very run that created
+the eight watches, because a CREATION is not counted as a change. So do not take the belt's counters
+as evidence that it did nothing. The checkable evidence is the two counts moving 0 -> 8 across the
+run, and each new row's own event payload: `"kind": "created"`, `"state_before": null`,
+`"state_after": "monitored"`, on a `clara.compliance_watches` row with `watch_kind='sst_registration'`
+(all eight written inside half a second, during the belt's single pass). None of the eight belonged
+to a client this database was SEEDED with — all eight were created hours after the database's
+earliest rows, by earlier e2e runs against it.
+
+**WHAT THIS MAY MEAN FOR CI — NAMED, AND UNVERIFIED HERE.** In the `db-live-gates` job
+`tests/intake-e2e.mjs` runs first against the same fresh `clara_intake_ci`, so any client IT leaves
+behind that qualifies for a watch would have that watch created by THIS leg's own first boot, and
+this leg's drain would then see the same `held` `notification` wakes. Nothing here settles that
+either way — that job is dispatch-only and was not dispatched for this branch (#1041) — so it is
+named rather than asserted: a drain timeout there listing `kind='wake'`, `status='held'` rows is
+this, not a flake.
 
 **RELEASE RISK, NAMED RATHER THAN DISCOVERED LATER (L06-967-C, fix round 1):** the drain converts
 today's noisy-but-passing CI run into a RED one on exactly the input #967 was filed about. A capped

@@ -36,15 +36,28 @@
 //       consumer calling `clara.admit_autodraft_task` for that filing, ON ITS OWN. The
 //       door's own verdict is read back and printed VERBATIM, never dressed as success.
 //
-// THE RESIDUAL, NAMED. Arm (c) proves the admission door is REACHED automatically; it
-// does not prove an admitted CODING TASK, because `_coding_lane_core` refuses this
-// fixture's document (`tier_a_fails`, `direction_unresolved`, `vendor_unresolved`,
-// `no_consent` — measured on clara_633) and routes it to `needs_you` instead. A document
-// that satisfies Tier A needs counterparty resolution, a resolved direction and coding
-// consent — the autodraft lane's own fixture, not this ticket's. #633 owns the chain up
-// to the door and says exactly that.
+// THE RESIDUAL, NAMED — AND #877's CORRECTION. Arm (c) proves the admission door is
+// REACHED automatically; on its OWN fixture it still does not prove an admitted CODING
+// TASK, because `_coding_lane_core` refuses that particular document on FOUR counts and
+// routes it to `needs_you` instead: `tier_a_fails` (a real MyInvois invoice with no
+// stated tax breakdown, so its structured Tier-A arithmetic tie is incomplete),
+// `direction_unresolved`, `vendor_unresolved` and `no_consent`. All four are read off the
+// door's own printout — arm (c) asserts on the reasons the door names rather than on a
+// fixed list, and the leg prints them verbatim — measured on clara_l07, 2026-09-24:
+// `{"clr":"CLR29","lane":"needs_you","reason":"lane_changed","reasons":["tier_a_fails",
+// "direction_unresolved","vendor_unresolved","no_consent"]}`. Naming only the first would
+// understate the residual by three, which is how leg 8's own fixture reads as a
+// one-thing-away variant of arm (c)'s when it is four. #633 owns exactly that
+// reach-and-skip claim, and arm (c) still proves it, unchanged. #877 was the remaining gap this note used to leave open — "a document that
+// satisfies Tier A needs counterparty resolution, a resolved direction and coding
+// consent" — and it is CLOSED below, in its own leg (8): a Tier-A-complete fixture
+// (an explicit type 01, a net/tax tie, a tax breakdown that sums), a vendor counterparty
+// already in the client's books, a resolved purchase direction and a live coding-lane
+// consent, driven through the SAME automatic chain, so `clara.admit_autodraft_task`
+// answers `admitted` — BY NAME — and a real task row exists, tied to the document's own
+// live filing.
 //
-// SEVEN LEGS:
+// EIGHT LEGS:
 //   1. upload -> ingest -> classify -> facts -> `admit_autodraft_task`, with ZERO
 //      `request_autodraft` anywhere in the automatic lane (three arms, above).
 //   2. a FAILED extraction never yields a kind (0177's router returns
@@ -62,6 +75,27 @@
 //      coding lane.
 //   7. C-37 — a real OFX and a real XLSX travel begin->PUT->finalize, and the registry's
 //      published levels for those pairs are exactly what a surface may claim.
+//   8. #877 — A GENUINELY ADMITTED CODING TASK, not merely a door reached: with every
+//      `_coding_lane_core` precondition satisfied, `admit_autodraft_task` answers
+//      `admitted` by name and the minted task reads back tied to the document's live
+//      filing, with no human act and no `request_autodraft` anywhere in the trip.
+//      WHERE THE TRIP BEGINS, said plainly because the claim is only as good as its
+//      boundary: at the bytes. Everything before them — two accounts, a birth entry
+//      drafted and approved, a coding-lane consent — is the client's PRE-EXISTING state,
+//      set up through the real human doors exactly as `primeReadyFiling` sets up its own,
+//      and it is human by construction. Between the bytes landing and the admission there
+//      is ONE human act, `fileToClient`, which is leg 1(c)'s own unchanged claim; the
+//      recovery door appears nowhere at all, in the setup or after it (the file's
+//      AUTOMATIC_LANE source census).
+//      NAMED RESIDUAL (per the brief's own "name it, don't seed around it"): the
+//      sales-direction lane (`customer_ambiguous`, the `_sales_lane_active` gate), the
+//      F1 vendor-REGISTRATION-binding arms (`vendor_bound`, `binding_ambiguous` —
+//      `_resolve_vendor_binding`, migrations 0028/0030) and the amount/multi-document
+//      hard refusals (`high_stakes`, `multi_doc`, `near_duplicate`) are none of them
+//      reachable through THIS fixture's own automatic chain without seeding a state the
+//      chain itself would never produce, so this leg does not attempt them; #633's own
+//      `_coding_lane_core`/`admit_autodraft_task` unit and DB-battery coverage
+//      (packages/db/tests/wave-a-*.test.mjs) already owns each one directly.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -748,6 +782,231 @@ async function main() {
   assert.equal(xlsxRow.custody, "supported");
   console.log(`[leg 7] PASS — OFX lane=none and published levels: ofx(${ofxRow.byte_extraction}/${ofxRow.typed_facts}) xlsx(${xlsxRow.byte_extraction}/${xlsxRow.typed_facts})`);
 
+  // =========================================================================
+  // LEG 8 — #877: A TIER-A-COMPLETE FIXTURE REACHES `admitted`, BY NAME.
+  // =========================================================================
+  //
+  // THE SEAM. Exactly arm (c)'s own seam — upload -> local_facts `done` ->
+  // `document.invoice_facts_completed` -> the autodraft consumer calling
+  // `clara.admit_autodraft_task` for the filing, on its own — but on a document whose
+  // facts satisfy EVERY `_coding_lane_core` precondition for `ready` instead of one that
+  // fails `tier_a_fails`/`vendor_unresolved`. `primeReadyFiling`
+  // (packages/db/tests/wave-a-fixtures.mjs:383) is read for exactly those
+  // preconditions — a name-only vendor counterparty already in the client's books, so a
+  // later name-only facts match reads `name_match_unregistered` (non-ambiguous) rather
+  // than birthing a new one or colliding with a registered vendor — and is NOT
+  // duplicated: that fixture drives the invoice_facts LANE directly at the DB battery
+  // level, while this leg drives the REAL upload -> structured_parse -> local_facts
+  // chain a browser actually produces, on the structured (`clara-myinvois:v1`) Tier-A
+  // arm rather than the OCR one.
+  //
+  // PRECONDITION SETUP (human, real doors — the client's PRE-EXISTING state, same as
+  // `readyFiling`'s own "the raw material a sweep admits" comment says of its fixture).
+  // None of this is the automatic chain under test; the one human act AFTER the bytes
+  // land is `fileToClient`, exactly leg 1(c)'s own claim.
+  const READY_VENDOR_NAME = "GENUINE ADMIT SDN BHD";
+  const READY_EXP_ACCOUNT = "877-EXP";
+  const READY_AP_ACCOUNT = "877-AP";
+  await rig.humanQuery(
+    owner,
+    "select clara.upsert_account(p_client => $1, p_code => $2, p_name => $3, p_type => $4, p_op_key => $5)",
+    [client, READY_EXP_ACCOUNT, "#877 e2e expense", "expense", rig.opk("acct")],
+  );
+  await rig.humanQuery(
+    owner,
+    "select clara.upsert_account(p_client => $1, p_code => $2, p_name => $3, p_type => $4, p_account_class => $5, p_op_key => $6)",
+    [client, READY_AP_ACCOUNT, "#877 e2e payables", "liability", "payable", rig.opk("acct")],
+  );
+
+  // Birth the vendor counterparty through the REAL doors — a manual (non-document) entry
+  // citing a fresh `record_client_resolution`, drafted AND approved by the owner (both
+  // well under the firm's high-stakes threshold, so no distinct-checker/attestation wall
+  // applies — the same self-approval shape `primeReadyFiling` itself relies on).
+  const birthRes = await rig.humanQuery(
+    owner,
+    `select clara.record_client_resolution(p_client=>$1::uuid, p_subject_kind=>'manual',
+       p_subject=>null::uuid, p_confidence=>0.98::numeric, p_method=>'human',
+       p_evidence=>'{"source":"p877-e2e"}'::jsonb, p_op_key=>$2::text) as r`,
+    [client, rig.opk("res")],
+  );
+  const birthResAnswer = birthRes.rows[0].r;
+  const birthResolution = typeof birthResAnswer === "string" ? birthResAnswer : (birthResAnswer.resolution_id ?? birthResAnswer.id);
+  assert.ok(birthResolution, `leg 8: record_client_resolution named its row (got ${JSON.stringify(birthResAnswer)})`);
+
+  const birthDraft = await rig.humanQuery(
+    owner,
+    `select clara.draft_entry(p_client=>$1::uuid, p_resolution=>$2::uuid, p_posting_date=>$3::date,
+       p_memo=>$4::text, p_lines=>$5::jsonb, p_proposed_counterparty=>$6::jsonb, p_op_key=>$7::text) as r`,
+    [
+      client, birthResolution, "2026-01-05", "#877 e2e: birth the vendor counterparty this fixture cites",
+      JSON.stringify([
+        { account_code: READY_EXP_ACCOUNT, debit_cents: 100, credit_cents: 0, description: "#877 birth seed" },
+        { account_code: READY_AP_ACCOUNT, debit_cents: 0, credit_cents: 100, description: "#877 birth seed" },
+      ]),
+      JSON.stringify({ new: { name: READY_VENDOR_NAME } }),
+      rig.opk("draft"),
+    ],
+  );
+  const birthEntry = birthDraft.rows[0].r;
+  assert.ok(birthEntry?.entry_id, `leg 8: draft_entry minted the birth entry (got ${JSON.stringify(birthEntry)})`);
+  await rig.humanQuery(
+    owner,
+    "select clara.approve_entry(p_entry=>$1::uuid, p_expected_revision=>$2::uuid, p_op_key=>$3::text)",
+    [birthEntry.entry_id, birthEntry.revision_token, rig.opk("approve")],
+  );
+  const birthedCounterparty = await rig.rootQuery(
+    "select id from clara.counterparties where client_id=$1 and kind='vendor' and name_normalized=$2 and registration_normalized is null",
+    [client, READY_VENDOR_NAME.toLowerCase().replace(/[^a-z0-9]/g, "")],
+  );
+  assert.equal(birthedCounterparty.rowCount, 1, "leg 8: the vendor counterparty exists, name-only, before the document ever arrives");
+
+  // The LEGACY, purpose-blind coding-lane consent `_coding_lane_core`'s `no_consent` reads
+  // (`clara.client_egress_consents`) — distinct from `ensureClassifyConsent`'s TYPED
+  // `document_processing` purpose grant above, which only gates classification.
+  await rig.humanQuery(
+    owner,
+    "select clara.grant_client_egress(p_client=>$1::uuid, p_evidence_document=>null::uuid, p_scope_note=>$2::text, p_op_key=>$3::text)",
+    [client, "#877 e2e: standing coding-lane consent", rig.opk("grantegr")],
+  );
+
+  // The mock classifier (this file's "ONE model for BOTH lanes" override, above) marks EVERY
+  // document `invoice`, so several of legs 1-7's own documents opened their OWN sweep run
+  // (`admitDocument`'s per-document contract, `lib/autodraft.mjs`) once their facts settled
+  // `done` or `failed`. A sweep run closes only on `clara.reconcile_sweep_runs()`, which the
+  // consumer otherwise runs every `CLARA_AUTODRAFT_CATCHUP_SECONDS` (default 300s) — far
+  // longer than this whole file's run. Left alone, those already-COMPLETE runs (their one
+  // item already written) stay `open` and eat the firm's `max_concurrent_sweeps` budget, so
+  // THIS leg's own admission is refused `refused_concurrency` by state leg 8 did not create,
+  // never by anything `_coding_lane_core` itself refuses. Reconciling here is reading the
+  // estate's own idle-cleanup door directly (the SAME one #967's `queue-drain.mjs` and this
+  // consumer's own catch-up pass already call) — not a widened gate and not a seeded-around
+  // lane reason, because `refused_concurrency` is a resource-scheduling refusal, not one of
+  // `_coding_lane_core`'s own preconditions.
+  //
+  // IT IS ORDER-DEPENDENT, and that is the thing to re-check (review SPEC-877-B): it clears the
+  // runs legs 1-7 opened, so it must run AFTER the last of them has opened its own. Adding a leg
+  // between this one and leg 1, or moving leg 8 up, puts a sweep run outside the reconcile and
+  // returns this leg to `refused_concurrency` — a red that names a resource, never the lane.
+  await rig.rootQuery("select clara.reconcile_sweep_runs() as r");
+
+  // -------------------------------------------------------------------------
+  // THE AUTOMATIC TRIP ITSELF, on the structured Tier-A arm (migration 0023 §A): an
+  // explicit type 01, a stated net AND tax that tie to the gross, and a tax breakdown
+  // that sums to the tax total — the one thing arm (c)'s own UBL fixture omits.
+  // -------------------------------------------------------------------------
+  const READY_UBL_INVOICE = `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>ADMISSION-E2E-READY-1</cbc:ID>
+  <cbc:IssueDate>2026-02-10</cbc:IssueDate>
+  <cbc:InvoiceTypeCode listVersionID="1.1">01</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>MYR</cbc:DocumentCurrencyCode>
+  <cac:AccountingSupplierParty><cac:Party>
+    <cac:PartyLegalEntity><cbc:RegistrationName>${READY_VENDOR_NAME}</cbc:RegistrationName></cac:PartyLegalEntity>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    <cac:PartyLegalEntity><cbc:RegistrationName>ADMISSION E2E BUYER SDN BHD</cbc:RegistrationName></cac:PartyLegalEntity>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="MYR">60.00</cbc:TaxAmount>
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="MYR">1000.00</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="MYR">60.00</cbc:TaxAmount>
+      <cac:TaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>6</cbc:Percent></cac:TaxCategory>
+    </cac:TaxSubtotal>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:TaxExclusiveAmount currencyID="MYR">1000.00</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="MYR">1060.00</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="MYR">1060.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>`;
+
+  const ready = await upload(jwt, Buffer.from(READY_UBL_INVOICE, "utf8"), "genuine-admit-invoice.xml", "application/xml");
+  assert.equal(ready.refusedAt, null, `leg 8: the UBL upload was refused at ${ready.refusedAt}`);
+  const readyDoc = ready.receipt.document_id;
+  assert.ok(readyDoc, "leg 8: the invoice was adopted");
+  await fileToClient(rig, owner, readyDoc, client, "leg8-ready");
+
+  const readyFacts = await poll(
+    rig,
+    "select status, error_code from clara.document_processing_tasks where document_id=$1 and lane='local_facts' order by version_n desc limit 1",
+    [readyDoc],
+    (row) => row?.status === "done",
+    "leg 8: the local facts pass runs itself to done, with no human act",
+  );
+  assert.equal(readyFacts.status, "done", "leg 8: the facts pass settled with no human act");
+
+  const readyFilingRow = await rig.rootQuery(
+    "select id from clara.document_filings where document_id=$1 and retired_at is null", [readyDoc],
+  );
+
+  // A PRECONDITION SANITY CHECK, not the claim under test: reads `_coding_lane_core`
+  // directly (never re-derives its predicate), so a red HERE fails on the fixture's own
+  // preconditions rather than being confused with a race against the sweep below.
+  const laneCheck = await rig.rootQuery(
+    "select lane, reasons from clara._coding_lane_core($1, $2)", [client, readyFilingRow.rows[0].id],
+  );
+  assert.equal(
+    laneCheck.rows[0].lane, "ready",
+    `leg 8: the fixture's own preconditions must read 'ready' before admission is even asked — saw ${JSON.stringify(laneCheck.rows[0])}`,
+  );
+
+  // AC2 — the minted task, read back from the catalogue (`clara.agent_tasks`, via its one
+  // identity link `clara.autodraft_attempts`) and tied to the document's live filing.
+  // Polled, not read once: the automatic chain's own event dispatch has to land first, and
+  // THIS is the wait for "the autodraft consumer calls admit_autodraft_task, on its own".
+  const mintedTask = await poll(
+    rig,
+    `select t.id, t.kind, t.status, t.client_id, aa.filing_id
+       from clara.autodraft_attempts aa join clara.agent_tasks t on t.id = aa.task_id
+      where aa.filing_id = $1`,
+    [readyFilingRow.rows[0].id],
+    (row) => row !== null,
+    "leg 8: the autodraft consumer calls admit_autodraft_task for the #877 fixture, on its own",
+  );
+  assert.equal(mintedTask.kind, "autodraft", "leg 8: the catalogue's own kind for an admitted coding task");
+  assert.equal(mintedTask.client_id, client, "leg 8: tied to the right client");
+  assert.equal(mintedTask.filing_id, readyFilingRow.rows[0].id, "leg 8: tied to the document's live filing, not merely 'a' filing");
+
+  // AC1 — the outcome is `admitted`, BY NAME, read straight off the DOOR'S OWN durable
+  // idempotency receipt (`clara.op_receipts`, keyed on `admit_autodraft_task`'s
+  // deterministic `autodraft:<filing>:sweep` op_key, `_reserve_op`/`_finish_op`) — the
+  // exact JSONB the door itself returned, never a downstream projection. THIS IS
+  // DELIBERATE, NOT A CONVENIENCE READ: `clara.sweep_run_items.outcome` (what leg 1(c)
+  // reads) is a DIFFERENT fact, written only once the minted task later SETTLES
+  // (`drafted`/`posted`/`skipped_lane`/`noop_existing`/`refused_attempts`/
+  // `refused_concurrency` — measured on clara_l07, the mint pipeline itself writes no
+  // `sweep_run_items` row at all) — its CHECK-constrained enum has no `admitted` member,
+  // so asserting on it here would silently be asserting on the settle door's answer
+  // instead of the admission door's. A document this fixture's own mock model cannot
+  // draft (no tool call — a deliberately minimal, honest model, same as every other leg)
+  // still settles that later task `failed` (CLR21 `coding_incomplete`, a REAL but separate
+  // claim this ticket's out-of-scope explicitly leaves to the autodraft lane's own
+  // fixture); the receipt below is unaffected by that, because it is the ADMISSION
+  // decision, already durable before the settle ever runs.
+  const admissionReceipt = await rig.rootQuery(
+    "select result from clara.op_receipts where fn='admit_autodraft_task' and op_key=$1",
+    [`autodraft:${readyFilingRow.rows[0].id}:sweep`],
+  );
+  assert.equal(admissionReceipt.rowCount, 1, "leg 8: the admission door's own idempotency receipt exists");
+  const receipt = admissionReceipt.rows[0].result;
+  assert.equal(
+    receipt.outcome, "admitted",
+    `leg 8: #877's whole claim is a genuine admission, not a reach-and-skip — saw ${JSON.stringify(receipt)}`,
+  );
+  assert.equal(receipt.task_id, mintedTask.id, "leg 8: the admitted receipt names the SAME task the catalogue holds");
+
+  // AC3 — no human act and no recovery door anywhere in THIS trip: `fileToClient` above
+  // is the one human act (leg 1(c)'s own claim, unchanged), and the AUTOMATIC_LANE static
+  // source assertion near the top of this file already proves zero `request_autodraft` in
+  // the automatic lane that produced this outcome.
+  console.log(
+    `[leg 8] PASS — #877: a Tier-A-complete, fully resolved fixture reached 'admitted' on its own `
+    + `(filing ${readyFilingRow.rows[0].id}, task ${mintedTask.id})`,
+  );
+
   void firm;
   await writeFile(join(scratch, "done"), "ok");
 
@@ -756,10 +1015,17 @@ async function main() {
   // the NEXT CI leg's (#636 intake-batch-e2e.mjs) fresh engine finds and re-attempts it — the
   // measured ~1.27M-line cross-leg noise this ticket fixes. tests/queue-drain.mjs's own header says
   // why this belongs at the END of THIS leg rather than at the START of the next one.
+  //
+  // ON A RIG CLONE, THE FIRST RUN FAILS HERE AND THAT IS EXPECTED (#877, fix round 2). The first
+  // leader cycle of every process runs the SST compliance-watch belt, and each watch it CREATES
+  // mints a `held` `notification` wake this window never settles — so the run that burns those
+  // one-shot creations exits 1 here with all 8 legs green. The order is run -> settle -> run, not
+  // settle -> run; the recipe, the two-clone measurement and the CI risk it names are in
+  // packages/runtime/README.md beside this file's own section. Do not widen the deadline.
   const { waitForQueueDrain } = await import("./queue-drain.mjs");
   await waitForQueueDrain(rig, { log: (m) => console.log(m) });
 
-  console.log("INTAKE ADMISSION E2E: PASS (7 legs — no human gate, no kind from a failed read, duplicates converge, mixed batch independent, replayed finalize idempotent, H-53 custody, C-37 OFX/XLSX)");
+  console.log("INTAKE ADMISSION E2E: PASS (8 legs — no human gate, no kind from a failed read, duplicates converge, mixed batch independent, replayed finalize idempotent, H-53 custody, C-37 OFX/XLSX, #877 genuine admission)");
   process.exit(0);
 }
 

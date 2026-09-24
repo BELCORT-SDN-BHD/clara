@@ -126,10 +126,11 @@ import { buildPreviousVersionImage, OVERLAP_MIN_CORES, removeScratchTree, should
 import { RUNTIME_SOURCE_ROOTS, assertBuiltBundleFresh } from "./built-bundle-gate.mjs";
 import {
   bodyIdentifierOf,
-  frontierBodyViolations,
+  frontierRuleViolations,
   preflight,
   readMigrationFrontier,
   supportedBodiesFromBundle,
+  supportedContractsFromBundle,
 } from "../lib/rollback-preflight.mjs";
 import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
@@ -449,7 +450,11 @@ async function main() {
   // its own verdicts to the Works it staged, so foreign rows cannot decide them, and refusing on
   // them would make the drill unrunnable on every rig that has ever run anything else.
   {
-    const inventory = await preflight({ query, supported: supportedBodiesFromBundle(readFileSync(runtimeBundle, "utf8")) });
+    const inventory = await preflight({
+      query,
+      supported: supportedBodiesFromBundle(readFileSync(runtimeBundle, "utf8")),
+      contracts: supportedContractsFromBundle(readFileSync(runtimeBundle, "utf8")),
+    });
     const liveWorkTasks = inventory.unbound.tasks.filter((t) => t.kind === "accounting_work");
     if (inventory.runs.length > 0 || liveWorkTasks.length > 0) {
       console.error(
@@ -610,6 +615,13 @@ async function main() {
   // STATIC PROOF that A is a genuine rollback target, read off the ARTIFACT rather than the source.
   const bodiesA = supportedBodiesFromBundle(readFileSync(built.serverEntry, "utf8"));
   const bodiesB = supportedBodiesFromBundle(readFileSync(runtimeBundle, "utf8"));
+  // #1035 — and the OTHER half of each artifact's self-description, read the same way. Both images
+  // are built from this tree (the scratch copy rewrites registry.ts and nothing else), so both
+  // declare the same contracts; they are read per artifact rather than shared so this stays a
+  // measurement of each bundle. Passing them keeps the frontier leg below about the BODY rule it
+  // was written for instead of refusing on a contract neither image is missing.
+  const contractsA = supportedContractsFromBundle(readFileSync(built.serverEntry, "utf8"));
+  const contractsB = supportedContractsFromBundle(readFileSync(runtimeBundle, "utf8"));
   // The database's own frontier, read ONCE and printed, so the frontier-rule leg below reads as a
   // fact about THIS chain rather than as an assertion about a constant.
   const frontierVersion = await readMigrationFrontier(query);
@@ -738,6 +750,11 @@ async function main() {
     assert.ok(infoB.body.bodies.includes(pair.previous), "…and reports that it STILL carries the predecessor body");
     assert.ok(infoB.body.bodies.includes(pair.pinned), "…and the successor");
     assert.deepEqual([...infoB.body.bodies].sort(), [...bodiesB].sort(), "the route's roster and the ARTIFACT's own directives agree exactly");
+    // #1035 — the same agreement for the CONTRACT half. The preflight has two doors onto a target
+    // (`--target-bundle` and `--target-build-info`) and they must speak one vocabulary, or the
+    // answer would depend on which door an operator happened to reach.
+    assert.deepEqual([...(infoB.body.contracts ?? [])].sort(), [...contractsB].sort(),
+      "build B's /api/build-info reports the same contract ids its bundle declares");
     console.log(`[tb-e2e] B /api/build-info: pins.claraWork=${infoB.body.pins.claraWork}, ${infoB.body.bodies.length} bodies, frontier ${infoB.body.frontier?.max_version}`);
 
     // --- W2: admitted by the SUCCESSOR image -------------------------------
@@ -770,7 +787,7 @@ async function main() {
     // is "allowed". The GLOBAL verdict over the same read is REFUSED, because W2 is parked on a body
     // A does not carry, and that is the verdict the CLI's exit code follows. A scope narrows the
     // question; it may never widen the answer.
-    const scopedToW1 = await preflight({ query, supported: bodiesA, scope: { workIds: [w1.work_id] } });
+    const scopedToW1 = await preflight({ query, supported: bodiesA, contracts: contractsA, scope: { workIds: [w1.work_id] } });
     assert.equal(scopedToW1.scoped.verdict, "allowed", "scoped to W1, the answer is honestly yes");
     assert.equal(scopedToW1.verdict, "refused", "…and the GLOBAL verdict, which the exit code follows, is NO");
     assert.ok(
@@ -840,7 +857,7 @@ async function main() {
     console.log(`[tb-e2e] RESUME W2: completed on ${pair.pinned}, 1 receipt @ ${String(v2Digest).slice(0, 12)}…`);
 
     // --- PREFLIGHT once both have settled ---------------------------------
-    const drained = await preflight({ query, supported: bodiesA, scope: { workIds: [w1.work_id, w2.work_id] } });
+    const drained = await preflight({ query, supported: bodiesA, contracts: contractsA, scope: { workIds: [w1.work_id, w2.work_id] } });
     assert.equal(drained.scoped.verdict, "allowed", "with BOTH Works terminal, the SAME build-A target now ALLOWS — the inventory tracks live state, not a snapshot");
     console.log("[tb-e2e] preflight: with both Works settled, rollback to A is now ALLOWED");
 
@@ -883,20 +900,24 @@ async function main() {
     // Every body the applied schema demands, as the rule table itself answers it for an empty
     // roster. A frontier that carried no rule at all would make this whole leg vacuous, so it is a
     // control rather than a lookup.
-    const requiredBodies = [...new Set(frontierBodyViolations(frontierVersion, []).map((v) => v.body))];
+    // #1035 — the table now holds door-CONTRACT rules beside the body rule, so the body half is
+    // selected by its own `requirement` rather than taken whole. This leg is about the bodies.
+    const bodyRuleViolations = (bodies) =>
+      frontierRuleViolations(frontierVersion, { bodies, contracts: contractsA }).filter((v) => v.requirement === "body");
+    const requiredBodies = [...new Set(bodyRuleViolations([]).map((v) => v.body))];
     assert.ok(
       requiredBodies.length > 0,
       `control: a database at ${frontierVersion} must carry at least one frontier body rule; got ${JSON.stringify(requiredBodies)}`,
     );
     assert.ok(
-      frontierBodyViolations(frontierVersion, []).some((v) => v.migration.startsWith("0195_")),
+      bodyRuleViolations([]).some((v) => v.migration.startsWith("0195_")),
       "control: 0195's rule is one of them — this is the leg it was written for",
     );
     // BUILD A'S OWN ANSWER, STATED RATHER THAN ASSUMED: exactly the required bodies it does not
     // carry, no more and no fewer.
     const aMissing = requiredBodies.filter((b) => !bodiesA.includes(b));
     assert.deepEqual(
-      [...drained.frontier.violations.map((v) => v.body)].sort(),
+      [...drained.frontier.violations.filter((v) => v.requirement === "body").map((v) => v.body)].sort(),
       [...aMissing].sort(),
       `build A's frontier violations are exactly the required bodies it lacks; got ${JSON.stringify(drained.frontier.violations)}`,
     );
@@ -904,7 +925,7 @@ async function main() {
     // THE TARGET THE RULE IS ABOUT — an image from before the rule existed. Build A's roster minus
     // the required bodies IS build A at the v2 -> v3 pair (the subtraction removes nothing there).
     const preRuleBodies = bodiesA.filter((b) => !requiredBodies.includes(b));
-    const preRule = await preflight({ query, supported: preRuleBodies, scope: { workIds: [w1.work_id, w2.work_id] } });
+    const preRule = await preflight({ query, supported: preRuleBodies, contracts: contractsA, scope: { workIds: [w1.work_id, w2.work_id] } });
     assert.equal(preRule.verdict, "refused",
       `the GLOBAL verdict refuses a drained rollback to a pre-rule target (reasons ${JSON.stringify(preRule.reasons)})`);
     assert.ok(preRule.reasons.includes("frontier_requires_body"),
@@ -918,6 +939,7 @@ async function main() {
     const withRequired = await preflight({
       query,
       supported: [...new Set([...preRuleBodies, ...requiredBodies])],
+      contracts: contractsA,
       scope: { workIds: [w1.work_id, w2.work_id] },
     });
     assert.deepEqual(withRequired.frontier.violations, [], `adding ${requiredBodies.join(", ")} satisfies the applied schema's rule`);
@@ -938,7 +960,10 @@ async function main() {
     // The pre-rule roster goes in through `--supported`, the third of the three doors, for the
     // reason above — `--target-bundle <A>` reads a REAL artifact, and at a pair whose predecessor
     // already carries the required body that artifact is not a pre-rule target at all.
-    const cliA = await runPreflightCli(["--supported", preRuleBodies.join(",")]);
+    // `--supported-contracts` carries build A's OWN markers (#1035), so the contract rules are
+    // satisfied on both sides and the exit code below is the BODY rule's alone — the same
+    // isolation the `withRequired` control gives the object form.
+    const cliA = await runPreflightCli(["--supported", preRuleBodies.join(","), "--supported-contracts", contractsA.join(",")]);
     assert.equal(cliA.code, 1, `rollback-preflight --supported <pre-rule roster> must exit 1 (got ${cliA.code})\n${cliA.stdout}\n${cliA.stderr}`);
     assert.match(cliA.stderr, /frontier_requires_body/, "…naming the reason");
     assert.match(cliA.stderr, /0195_work_egress_purpose_and_execution_trace/, "…the migration whose rule is in force");

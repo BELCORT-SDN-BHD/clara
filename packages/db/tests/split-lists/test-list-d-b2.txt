@@ -21,7 +21,47 @@
 #   eighteen as-built-ladder cells (nine round-11, six round-12, three round-13). It was written
 #   at round 11 and run by hand every round since; a cell nobody lists is a cell CI cannot lose
 #   loudly, which is what this floor exists to prevent.
-#!cells-floor: 168
+#
+# [#1041] THE FLOOR COUNTS CELLS, NOT PASSES, AND THE SKIPS HAVE THEIR OWN BOUND. The leg used to
+# compare PASSES, which answered "is the cell still there" and "does it still assert at THIS
+# frontier" with one number — and only the first is a deletion. `.github/actions/frontier-leg`
+# now preloads the package's whole preintegration gate chain (an old frontier IS an estate sweep
+# against a pre-integration chain), so a cell whose premise migration sits above this frontier
+# SKIPS lawfully and a pass-floor would read it as deleted. The leg therefore asserts three
+# things: `fail` is 0, the cells the run REPORTS (pass + skip) meet `#!cells-floor:`, and the
+# cells that SKIP stay within `#!skips-max:`. RE-MEASURED whole at this slice's own frontier on
+# the lane-07 cluster, 2026-09-24, gate chain preloaded, --test-concurrency=1:
+#   169 cells = 161 pass / 0 fail / 8 skip over 35 files.
+#   THE PASS SIDE IS 161 AND NOT 168, AND BOTH HALVES OF THE DIFFERENCE ARE ACCOUNTED:
+#     -4  #927 [0282] retired propose_/sign_adjustment_template and run_adjustment_manual
+#         and re-aimed x42.k1 / x42.t1 / x42.t2 / x42.t3 at the RETIREMENT. 0282 is far
+#         above this frontier, so the estate's own gate
+#         (adjustment-template-doors-retired-preintegration-gate.mjs, preloaded by the leg)
+#         skips them here. They cannot pass at 0045 — the doors are LIVE at 0045 — and
+#         asserting the pre-retirement behaviour instead would change what this list
+#         asserts.
+#     -3  commit 1a824cae7 ("#927 retarget the eight x42-adj batteries"):
+#         x42-adjustments.test.mjs 12 -> 10 cells (the five dead propose/sign lifecycle
+#         cells t1-t5 replaced by three closed-door cells) and x42-adj-canon.test.mjs
+#         2 -> 1 (rewritten to prove the refusal is unconditional on line shape). A
+#         LAWFUL retirement, counted here rather than absorbed: it is why the cell floor
+#         is 169 and not the 172 this header measured when the split landed.
+#!cells-floor: 169
+#!skips-max: 8
+#
+# THE ISOLATED DRILL'S OWN BOUND [#1041, review SPEC-1041-B]. The two numbers above bound the
+# LIST; `x42-0045-b2-upgrade.test.mjs` is not in it (a drill runs ALONE, in its own throwaway
+# database, in the leg's step (4)) and is excluded from the totality gate by design — so a cell
+# deleted inside it was invisible to every gate this repo has, and since #1041 that step preloads
+# the gate chain too, which can stand a cell DOWN rather than red. The drill's bound is declared
+# HERE, in the slice's own list, rather than in the drill: a floor a deletion can edit in the same
+# hunk bounds nothing. MEASURED on the lane-07 cluster, 2026-09-24, at this slice's frontier with
+# the gate chain preloaded and the reset gate WITHHELD — the state in which every cell reports and
+# skips, so the run's own `# tests` line IS the cell count: 1 cell(s). The skip bound is 0
+# because the ONLY skip the four drills carry is `skipUnlessReset`, and step (4) is the one place
+# that gate is granted (`ci-frontier-leg-contract.test.mjs`'s `p1041.drill.only-skip` census).
+#!drill-cells-floor: 1
+#!drill-skips-max: 0
 #
 # THE RESET-GATED DRILL RUNS ALONE, in its own throwaway DB — NOT in this list:
 #   PGDATABASE=clara_x42_b2_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \

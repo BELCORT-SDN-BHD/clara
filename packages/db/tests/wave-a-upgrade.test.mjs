@@ -5,7 +5,7 @@
 // runner's idempotent re-run + duplicate-version refusal; two independent bootstraps
 // reach an identical surface. Contract-blind. RESET-GATED (drops schema clara) → it
 // SKIPS unless CLARA_RIG_ALLOW_RESET=1 and MUST run ALONE on an ISOLATED DB:
-//   PGDATABASE=clara_waveA_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \
+//   PGDATABASE=clara_wave_a_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \
 //     node --test packages/db/tests/wave-a-upgrade.test.mjs
 //
 // (#845: the name must look disposable to `rig-reset-guard.mjs`'s `guardedReset`, which this file
@@ -13,7 +13,7 @@
 // `.`/`_`/`-` segment, or it refuses.
 //
 // #1023 GAVE THIS FILE A CI LEG: the `Wave-A 0011 fresh-vs-upgrade parity drill (isolated DB)`
-// step in `.github/actions/closed-wave-upgrade-drills/action.yml` creates `clara_waveA_upgrade_ci`
+// step in `.github/actions/closed-wave-upgrade-drills/action.yml` creates `clara_wave_a_upgrade_ci`
 // and runs the recipe above verbatim, in the `closed-wave-drills` job reached on a schedule or a
 // workflow_dispatch. Run it by hand against a throwaway database, never a shared rig.)
 

@@ -39,6 +39,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import * as rig from "./rig.mjs";
 // The wake/close_prep planters by IMPORT rather than retyped: they encode producer contracts
@@ -51,7 +53,7 @@ import {
   AGENT_TASK_KINDS_FROM_SOURCES,
   DOCUMENT_LANE_CLASSES,
   DOCUMENT_LANES_WITHOUT_WORKFLOW,
-  FRONTIER_BODY_RULES,
+  FRONTIER_RULES,
   LIVE_DOCUMENT_TASK_STATUSES,
   LIVE_TASK_STATUSES,
   TASK_STATUSES_WITHOUT_BODY,
@@ -60,15 +62,21 @@ import {
   censusNonTerminalRuns,
   censusUnboundTasks,
   classOfBody,
-  frontierBodyViolations,
+  frontierRefusalLines,
+  frontierRuleViolations,
+  frontierViolationPhrase,
   migrationOrdinal,
   preflight,
   readMigrationFrontier,
   refusalFooterLines,
   strandedBodyCensus,
   supportedBodiesFromBundle,
+  supportedContractsFromBundle,
   taskIsStranded,
 } from "../lib/rollback-preflight.mjs";
+// #1035 — the roster the markers come FROM, by import: a cell that retyped the ids would pass
+// while the artifact carried something else entirely.
+import { RUNTIME_CONTRACTS, RUNTIME_CONTRACT_IDS } from "../lib/runtime-contracts.mjs";
 
 /** The literal members of a `check (col = any (array[...]))` constraint, read from the catalog.
  *  The point of reading them is that a future migration's new kind/lane/status reds this file
@@ -325,6 +333,45 @@ test("637.pf: supportedBodiesFromBundle reads BODY directives and rejects STEP d
   assert.deepEqual(supportedBodiesFromBundle(bundle), ["claraWork_v1", "claraWork_v2", "closeExampleV1"]);
   assert.deepEqual(supportedBodiesFromBundle(""), []);
   assert.deepEqual(supportedBodiesFromBundle(null), []);
+});
+
+// ---------------------------------------------------------------------------
+// #1035 — THE SECOND THING A BUNDLE DECLARES: which DOOR CONTRACTS the image understands.
+//
+// A body roster answers "can this image RUN the parked work". It cannot answer "does this image
+// read what the doors now RETURN", and that is the question 0254 and 0279 posed. An image declares
+// the contracts it understands through `lib/runtime-contracts.mjs`, whose markers are literals the
+// built artifact carries; this scan is the reading half.
+//
+// ZERO IS A REAL ANSWER HERE, and that is the difference from the body scan. A bundle registering
+// zero BODIES is unreadable and the CLI refuses it outright; a bundle carrying zero MARKERS is the
+// honest self-description of every image built before this mechanism existed — which is exactly
+// the target a rollback is usually pointed at.
+// ---------------------------------------------------------------------------
+
+test("#1035: supportedContractsFromBundle reads the contract markers a bundle carries, and zero is an answer", () => {
+  const bundle = [
+    'const a = "clara.contract//intake_refusal_record_v1";',
+    'const b = "clara.contract//fa_parked_run_v1";',
+    // Twice in one artifact is once: a marker is a declaration, not a count.
+    'const c = "clara.contract//fa_parked_run_v1";',
+  ].join(String.fromCharCode(10));
+  assert.deepEqual(supportedContractsFromBundle(bundle), ["fa_parked_run_v1", "intake_refusal_record_v1"]);
+  // The PREFIX ALONE IS NOT A DECLARATION. It is in every bundle that carries the roster module,
+  // and reading it as a contract would make every image claim a contract it never named.
+  assert.deepEqual(supportedContractsFromBundle('const p = "clara.contract//";'), []);
+  // A pre-0254 image: no markers at all, and nothing in a body directive to mistake for one.
+  assert.deepEqual(supportedContractsFromBundle('const a = "workflows/claraWork.v1//claraWork_v1";'), []);
+  assert.deepEqual(supportedContractsFromBundle(""), []);
+  assert.deepEqual(supportedContractsFromBundle(null), []);
+});
+
+// THE ROSTER AND THE SCAN MEET HERE. Every marker this tree declares must be readable back out of
+// an artifact that carries it, BY THE READER THE PREFLIGHT ACTUALLY USES. A marker the scan cannot
+// find is a declaration no rollback will ever see.
+test("#1035: every marker this image declares is one the bundle scan reads back", () => {
+  const asBundle = RUNTIME_CONTRACTS.map((c) => `const x = ${JSON.stringify(c.marker)};`).join(String.fromCharCode(10));
+  assert.deepEqual(supportedContractsFromBundle(asBundle), [...RUNTIME_CONTRACT_IDS].sort());
 });
 
 // ---------------------------------------------------------------------------
@@ -791,14 +838,14 @@ test("637.pf: the BOOT census names the bodies live runs are parked on that THIS
 const emptyCensusQuery = async () => ({ rows: [] });
 
 test("637.pf: the frontier rule is a TABLE, and 0195 -> claraWork_v3 is its first row", () => {
-  assert.equal(Object.isFrozen(FRONTIER_BODY_RULES), true);
-  const r = FRONTIER_BODY_RULES.find((x) => x.migration.startsWith("0195_"));
-  assert.ok(r, `0195 must be in the rule table; got ${JSON.stringify(FRONTIER_BODY_RULES.map((x) => x.migration))}`);
+  assert.equal(Object.isFrozen(FRONTIER_RULES), true);
+  const r = FRONTIER_RULES.find((x) => x.migration.startsWith("0195_"));
+  assert.ok(r, `0195 must be in the rule table; got ${JSON.stringify(FRONTIER_RULES.map((x) => x.migration))}`);
   assert.deepEqual([...r.requires], ["claraWork_v3"]);
   assert.ok(r.why && r.why.length > 0, "a rule states WHY, so a later reader can judge whether it still holds");
   // Every row is ordinal-comparable, which is the whole mechanism: a rule whose migration name has
   // no leading ordinal could never come into force.
-  for (const rule of FRONTIER_BODY_RULES) {
+  for (const rule of FRONTIER_RULES) {
     assert.equal(typeof migrationOrdinal(rule.migration), "number", `${rule.migration} has no 4-digit ordinal`);
   }
   assert.equal(migrationOrdinal("0194_periodic_adjustments"), 194);
@@ -807,7 +854,7 @@ test("637.pf: the frontier rule is a TABLE, and 0195 -> claraWork_v3 is its firs
 });
 
 test("637.pf: BELOW the frontier the rule is not in force — 0194 + a target without claraWork_v3 ALLOWS", async () => {
-  assert.deepEqual(frontierBodyViolations("0194_periodic_adjustments", ["claraWork_v2", "chatTurn_v18"]), []);
+  assert.deepEqual(frontierRuleViolations("0194_periodic_adjustments", { bodies: ["claraWork_v2", "chatTurn_v18"], contracts: [] }), []);
   const out = await preflight({
     query: emptyCensusQuery,
     supported: ["claraWork_v1", "claraWork_v2", "chatTurn_v18"],
@@ -819,7 +866,7 @@ test("637.pf: BELOW the frontier the rule is not in force — 0194 + a target wi
   assert.equal(out.frontier.version, "0194_periodic_adjustments");
   assert.equal(out.frontier.measured, true, "…and it SAYS it looked — a rule nobody measured is not a pass");
   // A database with nothing applied at all is the same answer for the same reason.
-  assert.deepEqual(frontierBodyViolations(null, []), []);
+  assert.deepEqual(frontierRuleViolations(null, { bodies: [], contracts: [] }), []);
 });
 
 test("637.pf: AT the frontier a target without claraWork_v3 is REFUSED, naming 0195 AND the body", async () => {
@@ -838,7 +885,7 @@ test("637.pf: AT the frontier a target without claraWork_v3 is REFUSED, naming 0
     "the refusal NAMES the migration whose rule is in force");
   assert.equal(out.frontier.violations[0].body, "claraWork_v3", "…and the body the target is missing");
   // A LATER frontier keeps the rule in force: `>= 0195`, not `== 0195`.
-  assert.equal(frontierBodyViolations("0231_something_later", ["claraWork_v2"]).length, 1);
+  assert.equal(frontierRuleViolations("0231_something_later", { bodies: ["claraWork_v2"], contracts: [] }).length, 1);
 });
 
 test("637.pf: AT the frontier a target WITH claraWork_v3 allows — the rule is about the roster, not the number", async () => {
@@ -849,10 +896,10 @@ test("637.pf: AT the frontier a target WITH claraWork_v3 allows — the rule is 
   });
   assert.equal(out.verdict, "allowed");
   assert.deepEqual(out.frontier.violations, []);
-  assert.deepEqual(out.frontier.rules, FRONTIER_BODY_RULES.map((r) => r.migration),
+  assert.deepEqual(out.frontier.rules, FRONTIER_RULES.map((r) => r.migration),
     "the result says WHICH rules were checked, so an empty violations list is a measured pass");
   // EXACT identifier, not class: a predecessor of the required body does not satisfy the rule.
-  assert.equal(frontierBodyViolations("0195_work_egress_purpose_and_execution_trace", ["claraWork_v2"]).length, 1);
+  assert.equal(frontierRuleViolations("0195_work_egress_purpose_and_execution_trace", { bodies: ["claraWork_v2"], contracts: [] }).length, 1);
 });
 
 test("637.pf: NO SCOPE CLEARS THE FRONTIER RULE — it counts no rows, so it cannot be narrowed away", async () => {
@@ -869,6 +916,167 @@ test("637.pf: NO SCOPE CLEARS THE FRONTIER RULE — it counts no rows, so it can
   // reason the scope can neither cause nor clear, which is the #637 review B2 lesson inverted.
   assert.equal(out.scoped.verdict, "allowed", "the scoped question is still answered on its own terms");
   assert.equal(out.scoped.reasons.includes("frontier_requires_body"), false);
+});
+
+// ---------------------------------------------------------------------------
+// #1035 — THE OTHER RULE THE SAME TABLE HOLDS: a door whose RETURN CONTRACT the schema changed.
+//
+// 0195's rule is "the target must carry this BODY". 0254's and 0279's are "the target must
+// UNDERSTAND this ANSWER", and no census can see either: with the estate fully drained both
+// censuses are clean and every other leg says ALLOWED — which is exactly what the preflight
+// answered on 2026-09-23 for an image that would have answered 201 to a refused upload
+// (RELEASE-W2-RUNBOOK.md § RESULTS, step 9) and again in the wave-3 window for one that would
+// re-drive a parked depreciation run (RELEASE-W3-RUNBOOK.md, step 9).
+//
+// These cells are PURE, for the reason the 0195 cells state: the rule is a function of a version
+// string and two rosters, and making them need a rig would make them measure the rig.
+// ---------------------------------------------------------------------------
+
+/** Every migration file name in the chain, without its extension — the authority AC4 checks a rule
+ *  against. Read from disk rather than listed here: a rule may not name a migration that does not
+ *  exist, and a hand-kept copy of the chain would be the second thing to go stale. */
+function migrationChain() {
+  const dir = fileURLToPath(new URL("../../db/migrations", import.meta.url));
+  return new Set(readdirSync(dir).filter((f) => f.endsWith(".sql")).map((f) => f.slice(0, -4)));
+}
+
+/** The body roster the previous hosted image carried, BY SHAPE: 55 identifiers including the one
+ *  0195's rule names, and not one contract marker. The count and the claraWork_v3 are what make it
+ *  the 2026-09-23 case rather than an arbitrary old image — that image satisfied every body rule,
+ *  which is precisely why the preflight said ALLOWED. The names beyond claraWork_v3 are stand-ins:
+ *  this cell is about the marker that is absent, and a real roster transcribed here would go stale
+ *  at the next cut without changing what is being proven. */
+function previousHostedImageBodies() {
+  const bodies = [];
+  for (let i = 1; i <= 55; i += 1) bodies.push(`claraWork_v${i}`);
+  return bodies;
+}
+
+test("#1035: the rule table is ONE table — the body rule and both door-contract rules stand in it together", () => {
+  assert.equal(Object.isFrozen(FRONTIER_RULES), true);
+  const byMigration = (prefix) => FRONTIER_RULES.find((r) => r.migration.startsWith(prefix));
+  assert.ok(byMigration("0195_"), "the body rule is still here");
+  const intake = byMigration("0254_");
+  const fa = byMigration("0279_");
+  assert.ok(intake, `0254 must be in the rule table; got ${JSON.stringify(FRONTIER_RULES.map((r) => r.migration))}`);
+  assert.ok(fa, `0279 must be in the rule table; got ${JSON.stringify(FRONTIER_RULES.map((r) => r.migration))}`);
+  assert.deepEqual([...intake.requiresContracts], ["intake_refusal_record_v1"]);
+  assert.deepEqual([...fa.requiresContracts], ["fa_parked_run_v1"]);
+  // A door-contract rule needs no body, and the body rule needs no contract: the two requirement
+  // lists are both present on every row, so a new rule cannot forget one and be read as empty.
+  for (const rule of FRONTIER_RULES) {
+    assert.ok(Array.isArray(rule.requires) && Array.isArray(rule.requiresContracts), `${rule.migration} carries both lists`);
+    assert.ok(rule.requires.length + rule.requiresContracts.length > 0, `${rule.migration} requires SOMETHING`);
+    assert.ok(rule.why && rule.why.length > 0, `${rule.migration} states WHY`);
+    assert.equal(typeof migrationOrdinal(rule.migration), "number", `${rule.migration} has no 4-digit ordinal`);
+  }
+});
+
+test("#1035: BELOW 0254 a marker-less target ALLOWS; AT 0254 it is REFUSED, naming the rule and the migration", async () => {
+  const carried = { bodies: ["claraWork_v3"], contracts: [] };
+  // Below the migration the rule does not exist yet, and saying so is honest rather than lax.
+  assert.deepEqual(frontierRuleViolations("0253_batch_cancel_reissue", carried), []);
+  const below = await preflight({
+    query: emptyCensusQuery, supported: ["claraWork_v3"], contracts: [], frontier: "0253_batch_cancel_reissue",
+  });
+  assert.equal(below.verdict, "allowed", "an image that predates 0254 is a lawful target for a database that also does");
+
+  const out = await preflight({
+    query: emptyCensusQuery, supported: ["claraWork_v3"], contracts: [], frontier: "0254_intake_refusal_record",
+  });
+  assert.equal(out.verdict, "refused", "at 0254 an image that cannot read a refused intake is not shippable");
+  assert.deepEqual(out.reasons, ["frontier_requires_contract"],
+    "…on ITS OWN reason, distinct from a missing body: one is drainable state, the other is a rule in the schema");
+  assert.deepEqual(out.runs, [], "nothing is in flight — neither census contributed");
+  assert.equal(out.frontier.violations.length, 1);
+  assert.equal(out.frontier.violations[0].migration, "0254_intake_refusal_record", "the refusal NAMES the migration");
+  assert.equal(out.frontier.violations[0].requirement, "contract");
+  assert.equal(out.frontier.violations[0].contract, "intake_refusal_record_v1", "…and the marker the target does not carry");
+  assert.match(String(out.frontier.violations[0].why), /201/, "…and what the operator's image would actually do wrong");
+
+  // AT the same frontier, WITH the marker: allowed. The rule is about the declaration, not the date.
+  const withMarker = await preflight({
+    query: emptyCensusQuery, supported: ["claraWork_v3"], contracts: ["intake_refusal_record_v1"],
+    frontier: "0254_intake_refusal_record",
+  });
+  assert.equal(withMarker.verdict, "allowed");
+  assert.deepEqual(withMarker.frontier.violations, []);
+  assert.deepEqual(withMarker.frontier.contracts, ["intake_refusal_record_v1"],
+    "the result says WHICH markers it measured, so an empty violations list is a measured pass");
+});
+
+test("#1035: 0279's rule refuses a target that would count a PARKED depreciation run as a post", async () => {
+  const at0279 = { bodies: ["claraWork_v3"], contracts: ["intake_refusal_record_v1"] };
+  assert.deepEqual(frontierRuleViolations("0278_fa_belt_birth_convention", at0279), [], "below 0279 the rule is not in force");
+  const v = frontierRuleViolations("0279_fa_closed_year_arrears", at0279);
+  assert.equal(v.length, 1, `exactly the one rule that came into force; got ${JSON.stringify(v)}`);
+  assert.equal(v[0].migration, "0279_fa_closed_year_arrears");
+  assert.equal(v[0].contract, "fa_parked_run_v1");
+  // A LATER frontier keeps it in force: `>=`, not `==`. And an image carrying both markers clears both.
+  assert.equal(frontierRuleViolations("0295_wave4_chart_rows", at0279).length, 1);
+  assert.deepEqual(
+    frontierRuleViolations("0295_wave4_chart_rows", { bodies: ["claraWork_v3"], contracts: [...RUNTIME_CONTRACT_IDS] }),
+    [],
+  );
+});
+
+test("#1035: the previous hosted image's bundle shape — 55 bodies, no marker — is REFUSED at 0272", async () => {
+  // THE 2026-09-23 CASE, reproduced. The preflight answered ALLOWED for `refresh-ddb5a125` against
+  // a database at 0272: its 55 bodies satisfied 0195's rule and both censuses were clean, and
+  // nothing in the command knew about the intake door's new return contract.
+  const bundle = previousHostedImageBodies().map((b) => `x("workflows/${b.replace(/_v(\d+)$/, ".v$1")}//${b}");`).join(String.fromCharCode(10));
+  const bodies = supportedBodiesFromBundle(bundle);
+  assert.equal(bodies.length, 55, "the shape under test is a 55-body bundle");
+  const contracts = supportedContractsFromBundle(bundle);
+  assert.deepEqual(contracts, [], "…carrying no contract marker at all, which is what an image from before this mechanism looks like");
+
+  const out = await preflight({ query: emptyCensusQuery, supported: bodies, contracts, frontier: "0272_document_capability_wall_completion" });
+  assert.equal(out.verdict, "refused", "the answer the 2026-09-23 window should have gotten");
+  assert.ok(out.reasons.includes("frontier_requires_contract"));
+  assert.equal(out.reasons.includes("frontier_requires_body"), false,
+    "…and NOT on a body: that image carried claraWork_v3, which is exactly why the old command allowed it");
+  assert.deepEqual(out.frontier.violations.map((x) => x.migration), ["0254_intake_refusal_record"],
+    "at 0272 only 0254's contract rule is in force — 0279 is not applied yet");
+  // The refusal an operator reads, at the seam the CLI prints from: the rule and the migration by name.
+  const lines = frontierRefusalLines(out).join(String.fromCharCode(10));
+  assert.match(lines, /frontier_requires_contract/, "the reason is named");
+  assert.match(lines, /0254_intake_refusal_record/, "the migration whose rule is in force is named");
+  assert.match(lines, /intake_refusal_record_v1/, "…and the marker the target does not carry");
+  assert.match(lines, /0272_document_capability_wall_completion/, "…and the frontier the database is actually at");
+});
+
+test("#1035: every rule names a migration that EXISTS in the chain", () => {
+  const chain = migrationChain();
+  assert.ok(chain.size > 200, `the chain read is implausible (${chain.size} files) — this cell must FAIL closed, not pass vacuously`);
+  for (const rule of FRONTIER_RULES) {
+    assert.ok(
+      chain.has(rule.migration),
+      `FRONTIER_RULES names ${rule.migration}, which is not a file in packages/db/migrations — a rule keyed on a `
+        + "migration that does not exist can never come into force, and nothing else would notice",
+    );
+  }
+});
+
+test("#1035: THIS image satisfies every rule its own table carries — a build that did not could not be released either", () => {
+  // The rules are about a TARGET, and the current image is the first target anyone ships. A rule
+  // requiring a marker this tree does not declare would refuse the forward release too.
+  const missing = frontierRuleViolations("9999_far_future", { bodies: [], contracts: [...RUNTIME_CONTRACT_IDS] })
+    .filter((v) => v.requirement === "contract");
+  assert.deepEqual(missing, [], `this image declares ${JSON.stringify([...RUNTIME_CONTRACT_IDS])} and the rule table wants more`);
+});
+
+test("#1035: NO SCOPE CLEARS A CONTRACT REFUSAL EITHER — it counts no rows, so it cannot be narrowed away", async () => {
+  const out = await preflight({
+    query: emptyCensusQuery,
+    supported: ["claraWork_v3"],
+    contracts: [],
+    scope: { workIds: ["00000000-0000-4000-8000-000000000001"] },
+    frontier: "0279_fa_closed_year_arrears",
+  });
+  assert.equal(out.verdict, "refused", "the GLOBAL verdict — the one the exit code follows — still refuses");
+  assert.ok(out.reasons.includes("frontier_requires_contract"));
+  assert.equal(out.scoped.verdict, "allowed", "…and the scoped question is still answered on its own terms");
+  assert.equal(out.scoped.reasons.includes("frontier_requires_contract"), false);
 });
 
 test("637.pf: the frontier is READ from clara.schema_migrations when the caller does not supply one", { skip: SKIP }, async () => {
@@ -903,4 +1111,49 @@ test("637.pf: a read that THROWS is never answered as 'allowed'", { skip: SKIP }
 
 test("637.pf: teardown", { skip: SKIP }, async () => {
   await rig.endPool();
+});
+
+// ONE DESCRIPTION OF A VIOLATION, FOR BOTH THINGS THAT PRINT ONE [#1035, review F1].
+//
+// `frontierRefusalLines` exists because "a second inline copy of a rule drifts from the verdict
+// that used it" — this module's own stated law, the one `refusalFooterLines` and `taskIsStranded`
+// already cite. The CLI's `printFrontier` carried exactly such a second copy: its own
+// `requirement === "contract"` ternary, three lines away from the import. Both output paths now
+// read one describer, so a third kind of rule cannot reach one of them and miss the other.
+
+test("#1035/F1: one describer answers for a body rule and for a contract rule", () => {
+  const body = frontierViolationPhrase({ requirement: "body", body: "claraWork_v5", contract: null, migration: "0195_x" });
+  assert.equal(body.reason, "frontier_requires_body");
+  assert.equal(body.needs, "claraWork_v5");
+  assert.match(body.lack, /does NOT carry/, "a body the target does not CARRY");
+
+  const contract = frontierViolationPhrase({ requirement: "contract", body: null, contract: "intake_refusal_record_v1", migration: "0254_x" });
+  assert.equal(contract.reason, "frontier_requires_contract");
+  assert.match(contract.needs, /intake_refusal_record_v1 door contract/);
+  assert.match(contract.lack, /does NOT declare/, "a contract the target does not DECLARE — declaring is what a marker is");
+
+  // The verdict's own refusal lines are built from it, and still name every load-bearing token.
+  const lines = frontierRefusalLines({
+    frontier: {
+      version: "0272_document_capability_wall_completion",
+      violations: [{ requirement: "contract", body: null, contract: "intake_refusal_record_v1", migration: "0254_intake_refusal_record", why: null }],
+    },
+  });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /frontier_requires_contract/);
+  assert.match(lines[0], /0254_intake_refusal_record/);
+  assert.match(lines[0], /intake_refusal_record_v1/);
+  assert.match(lines[0], /0272_document_capability_wall_completion/);
+});
+
+test("#1035/F1: the CLI's own per-violation print carries no second copy of the rule", () => {
+  const cli = readFileSync(fileURLToPath(new URL("../scripts/rollback-preflight.mjs", import.meta.url)), "utf8");
+  const start = cli.indexOf("function printFrontier(");
+  assert.ok(start > 0, "scripts/rollback-preflight.mjs no longer has printFrontier — this census must be repointed, not deleted");
+  const end = cli.indexOf("\nasync function main(", start);
+  const body = cli.slice(start, end === -1 ? cli.length : end);
+  assert.equal(/requirement\s*===/.test(body), false,
+    "printFrontier branches on v.requirement itself instead of calling the shared describer — that is the second "
+    + "inline copy this module's own design law forbids: it drifts from the refusal the verdict prints");
+  assert.match(body, /frontierViolationPhrase\(/, "…it must build its line from the shared describer");
 });

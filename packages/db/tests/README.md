@@ -155,6 +155,66 @@ it, and a cohort row in [rig-meta.mjs](rig-meta.mjs) that names every object the
 the rig census stays wholly-present-or-wholly-absent. `counterparty-identity.test.mjs` +
 `counterparty-identity-preintegration-gate.mjs` (migration `0215`, #647) is the current example.
 
+**The chain has one roster, and one way to read it (#1041).** `package.json`'s `test` script IS
+the gate chain; `scripts/print-gate-chain.mjs` prints it as `--import` flags so a caller that is
+not `pnpm test` never grows a second copy. `ci-frontier-leg-contract.test.mjs` holds that output
+to the gate modules ON DISK, in both directions — a gate that ships without joining the `test`
+script is a gate no sweep preloads, and a chain entry with no file kills every run that preloads
+it. Use it wherever a sweep needs the chain by hand:
+
+```
+GATES="$(node scripts/print-gate-chain.mjs)"
+node --test --test-concurrency=1 $GATES tests/<file>.test.mjs
+```
+
+**`db-slice-frontiers` is an estate sweep, and preloads the whole chain.** The leg replays the
+CURRENT corpus against a chain that stops at this slice's own migration (0042–0045), so every
+premise migration above that frontier is legitimately absent — the exact state a gate exists for,
+and the one #927's own refusal message tells the reader to preload for. Until #1041 the leg ran a
+bare `node --test`, and four d-b2 cells plus one d-b0 cell died loudly on that sentence (dispatch
+run 35893727271). A gate never turns a PASSING cell into a skip: its flag is read only on the
+branch where the premise is missing, which is a branch that fails without it.
+
+**Every run in that leg is bounded, and no bound lives in the file it bounds (#1041).** Preloading
+the chain buys the sweep the right to stand a cell down, so each of the leg's three runs declares
+what it expects to see:
+
+| the run | its floor | its skip bound | declared in |
+|---|---|---|---|
+| the slice list (step 3) | `#!cells-floor:` | `#!skips-max:` | `split-lists/test-list-d-bN.txt` |
+| the cross-slice contract roster (3c) | `#!cells-floor:` | `#!skips-max-d-bN:`, one per frontier | `split-lists/test-list-contracts.txt` |
+| the slice's isolated deploy drill (4) | `#!drill-cells-floor:` | `#!drill-skips-max:` (0) | `split-lists/test-list-d-bN.txt` |
+
+The floor is `pass + skip` — the cells the run REPORTS — because a lawfully gated cell is not a
+deleted one; `fail = 0` keeps its own line. The roster's skip bound is per frontier because a
+contract's arms go live as the frontier rises, so one number would bound only the lowest. The
+drill's bound is 0 and sits in the SLICE'S LIST rather than in the drill, for the same reason every
+floor does: a bound a deletion can edit in the same hunk bounds nothing. The drill's 0 rests on a
+census — `skipUnlessReset` is the only stand-down any of the four drills carries, and step (4) is
+the one place that gate is granted. `ci-frontier-leg-contract.test.mjs` holds all of it: the
+declarations, the drill floor against the drill's own cell count, and the action steps that read
+them; `partition-total` refuses a missing declaration on the PR itself, days before anyone
+dispatches the legs.
+
+**A fixture that runs at two frontiers is not a gate.** A gate lets a cell stand down; a
+FRONTIER-COMPAT fixture keeps the cell running on both sides of the migration that changed a
+door's grammar. `fa-authority-sign-compat.mjs` holds both of the x41 rig's:
+`signTakesAuthorityRef()` (0227 moved the sign door's ARITY — feature-detected off
+`to_regprocedure`) and `reviseTakesChangeClass()` (0227 added the `change_class` /
+`change_reason` KEYS inside `p_particulars` — keyed on the migration's stem in
+`clara.schema_migrations`, because a key leaves no signature to detect and probing the door's own
+body would ask the subject under test what it should be).
+`fa-rig-frontier-compat.test.mjs` cross-checks the second against the live door from the other
+side.
+
+A DELIBERATE DEVIATION FROM #1041'S OWN BRIEF, recorded so the brief is not later read as what
+shipped (review SPEC-1041-A). The brief asked for "their gate module, or a premise check of the
+same shape" for the `change_class` grammar cells. Both of those let a cell STAND DOWN when its
+premise is missing, and at the d-b0 frontier that would have quietly dropped 26 cells out of the
+slice's own floor — the measurement the leg exists to make. The compat fixture keeps all 26
+running on both sides instead, at the cost the reader should know: at frontier 0042 those cells
+exercise the PRE-0227 revise grammar, which is the grammar that frontier actually has.
+
 ## document_regions.field_path literals, kept honest (#857)
 
 `clara._assert_field_path` (migration 0191) is enforced at `clara.persist_document_extraction`
@@ -1507,7 +1567,7 @@ follow-up, not closed by that ticket).
 **#1023 closed that gap.** All three now have their own step in
 `.github/actions/closed-wave-upgrade-drills/action.yml`, following the established pattern
 exactly: their own throwaway `*_ci` database (the same name each file's own header recipe already
-documented — `clara_0186_upgrade_ci`, `clara_runtime_upgrade_ci`, `clara_waveA_upgrade_ci`), both
+documented — `clara_0186_upgrade_ci`, `clara_runtime_upgrade_ci`, `clara_wave_a_upgrade_ci`), both
 destructive flags, and a between-step cluster cleanup. All 14 audited files now have a CI leg;
 only T19 still never exercises its destructive path anywhere but the ordinary battery's skip.
 `reset-gate-routing.test.mjs` carries the structural proof: it parses the action file itself and
@@ -1521,6 +1581,30 @@ assertion at the wrong step (review SPEC-1023-03, with its own cell) — sets bo
 locally, safely, and on a shared rig is still only the ROUTING and (since #1023) the WIRING —
 never that the destructive body itself has actually been exercised, which remains CI's job alone
 (RIG.md: this rig must never set `CLARA_RIG_ALLOW_RESET`).
+
+**The drill database-name grammar (#1041).** A throwaway drill database is named by a plain,
+already-lowercase SQL identifier — `CONFORMING_DB_NAME` (`/^[a-z][a-z0-9_]*$/`), exported by
+`rig-cluster-reset.mjs` and enforced by its own `dropDatabase`. Two reasons, and the second is the
+one that decides the rule when a name and the grammar disagree:
+
+1. `dropDatabase` interpolates the name into `drop database if exists <name>` UNQUOTED (a database
+   name cannot be a bind parameter), so the grammar is an injection wall.
+2. **A name outside the grammar does not round-trip.** `create database <x>` case-folds an
+   unquoted identifier while `PGDATABASE` is a LITERAL libpq name, so a mixed-case drill name
+   names two different databases in the two lines of its own step. Measured on PostgreSQL 17
+   (lane 07, 2026-09-24): `create database clara_case_probe_A_ci` puts `clara_case_probe_a_ci` in
+   `pg_database`, and connecting with `PGDATABASE=clara_case_probe_A_ci` raises
+   `3D000 database "clara_case_probe_A_ci" does not exist`.
+
+So when #1023's `clara_waveA_upgrade_ci` was refused by the cleanup step on the first dispatch
+after riders wave 3 (run 35893727271), the remedy was to move the NAME, not to widen the grammar:
+widening it would have let the step reach its own second defect. The name is now
+`clara_wave_a_upgrade_ci` in the action, in `wave-a-upgrade.test.mjs`'s header recipe and in
+`reset-gate-routing.test.mjs`'s `NEWLY_COVERED`, and
+`ci-drill-database-names.test.mjs` holds EVERY literal database name in
+`.github/actions/closed-wave-upgrade-drills` and `.github/actions/frontier-leg` to both halves —
+the grammar (imported from `rig-cluster-reset.mjs`, never re-spelled) and the round trip, which it
+asks PostgreSQL's own `quote_ident` rather than re-implementing.
 
 ## `fixed-asset-acquisition.test.mjs` `p639.birth.opening_excluded` / `p639.birth.opening_admitted` — #884
 

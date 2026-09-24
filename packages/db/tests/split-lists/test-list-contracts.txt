@@ -15,10 +15,30 @@
 #     fails by name, and a line here with no file fails too.
 # The roster therefore GROWS in the PR that ships the contract, and nowhere else.
 #
-# NO CELL FLOOR HERE, on purpose: a contract's cell count legitimately CHANGES with the
-# frontier (each arm skips on the side of the boundary it does not describe), so a fixed
-# floor would be a lie at three frontiers out of four. The frontier leg asserts `fail = 0`
-# and prints the pass/skip split instead.
+# THE CELL FLOOR, AND WHY THE SKIP BOUND IS PER-FRONTIER [#1041, review SPEC-1041-B]. This
+# roster used to declare no floor at all, on the reasoning that "a contract's cell count
+# legitimately CHANGES with the frontier". What changes with the frontier is the PASS count —
+# each arm skips on the side of the boundary it does not describe — and the number of CELLS the
+# roster RUNS does not move at all. That is the same conflation #1041 took out of the four slice
+# lists, and until it was fixed here the roster step asserted nothing but `fail = 0`: a gate
+# module (the frontier leg preloads the whole preintegration chain since #1041) that stood a
+# contract cell down would have left this step green with less measured.
+#
+# So: `#!cells-floor:` is ONE number the run must meet at every frontier, and the skip bound is
+# FOUR, one per leg, because a bound measured at the lowest frontier bounds nothing at the other
+# three. MEASURED on the lane-07 cluster, 2026-09-24 — one throwaway database per frontier
+# (0001..0042/0043/0044/0045), the gate chain preloaded, `--test-concurrency=1`:
+#   d-b0 (0042): 12 cells · 4 pass · 0 fail · 8 skip
+#   d-b1 (0043): 12 cells · 6 pass · 0 fail · 6 skip
+#   d-b3 (0044): 12 cells · 8 pass · 0 fail · 4 skip
+#   d-b2 (0045): 12 cells · 8 pass · 0 fail · 4 skip
+# Raise the floor in this file when a contract gains a cell; NEVER lower either number to go
+# green. `packages/db/tests/ci-frontier-leg-contract.test.mjs` holds both to the leg.
+#!cells-floor: 12
+#!skips-max-d-b0: 8
+#!skips-max-d-b1: 6
+#!skips-max-d-b3: 4
+#!skips-max-d-b2: 4
 #
 # D-b0 SHIPPED TWO OF THE THREE. x42x-b1-b3-line-booking-walls.test.mjs was deliberately ABSENT
 # there: at the D-b0 frontier neither of the two slices it describes exists, so it was vacuous
