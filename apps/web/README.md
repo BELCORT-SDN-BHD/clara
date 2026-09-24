@@ -447,9 +447,10 @@ renders with a real read; enrol → retire (the freshly-enrolled account has zer
 never hits CLR10 `advance_outstanding_on_retire`) → book a 300.00 application → complete
 particulars, end to end, with the summary's outstanding figure and missing-particulars count both
 re-reading correctly afterward; the per-account statement panel then shows the booked application's
-row and the reduced closing balance. The lane owns `staff_advance_summary`/`staff_advance_tie`/
-`staff_advance_statement` exclusively for its own client — `staff-expense-claim-mock.mjs`'s own
-header records that it deliberately declines all three, leaving them to whichever lane needs them.
+row and the reduced closing balance. The lane owns `staff_advance_tie`/`staff_advance_statement`
+exclusively for its own client, and OWNED `staff_advance_summary` exclusively too until #930 gave
+`staff-expense-claim-mock.mjs` an advance-chooser read of its own — the two mocks now each answer
+that one verb for their own `client_id` and fall through on the other's (see #930's own section).
 
 ## Close and bank operating order
 
@@ -1822,3 +1823,92 @@ Pinned as its own id, `foreground-on-muted-selected-document-row` (kept separate
 reason several other pairs in that file are kept separate), with a margin-specific assertion in
 `tests/token-contrast.test.ts` — shown red against the pre-fix pairing (4.62:1 against a `>=10:1`
 bar) before the fix, green after. Never fixed by relaxing a threshold.
+
+## #930 — the staff-expense-claim advance leg gets a chooser, not a typed id
+
+`staff-expense-claim-form.tsx`'s advance-application arm asked for the advance it discharges as a
+bare UUID in a free-text box — a preparer had to already know (or go look up) the internal id.
+#881's owner ruling split multi-advance allocation into two tickets (#930 → #931); this is the
+first: the rule stays exactly what #638 shipped (one claim, one advance, no silent FIFO), only HOW
+it is named changes.
+
+**The control is now a `NativeSelect`, fed by `getStaffAdvanceSummary`** — the SAME
+`staff_advance_summary` read `staff-advance-allocations-editor.tsx`'s own candidates come from,
+called once (as of today) and narrowed CLIENT-SIDE to the chosen claimant's own rows as the
+claimant changes: `account_code` equal to `claimantAccountCode`, and
+`isOutstandingAdvance(lib/registers/staff-advances-doors.ts)` — the very SYMBOL
+`staff-advances-register.tsx`'s own `outstandingAdvances` filters its allocation editor's
+candidates by, so the two surfaces cannot disagree about what "still outstanding" means. (Both
+sides first wrote `outstanding_cents > 0 && !voided` out in full, with a comment on one asserting
+they were identical; a comment is a promise, not a wall.) Each option names its booking date and outstanding amount
+(`fmtCents`/`Common.centsUnsafe`, the allocations editor's own formatter). Choosing one still only
+writes `draft.advanceId`, so `validateClaimDraft`, `toClaimWire` and the refusal→control mapping in
+`lib/work/staff-expense-claim.ts` are BYTE-IDENTICAL to before — proved by the pre-existing submit
+cells in `staff-expense-claim-form.test.tsx`, which needed no change beyond the control's own
+`tagName`. A claimant with nothing outstanding sees the chooser with only its placeholder and a
+one-line reason (`data-testid="advance-no-candidates"`); the pre-existing `advanceId` UUID
+validation already refuses an empty choice, so no NEW refusal rule was needed for "cannot submit".
+
+**The e2e fixture.** `staff-expense-claim-mock.mjs` used to decline `staff_advance_summary`
+entirely (a verb it shared with whichever register lane wanted it); it now answers that verb for
+its own `SEC.clientId` — one outstanding advance, Farah's — the same "each mock answers its own
+`client_id`, falls through on any other" shape `staff-advances-register-mock.mjs` already used, so
+the two never collide (see the fix to #879's own section above). The SETTLEMENT-switch walk selects
+that advance from the rendered list (asserting the option's own date and amount first) instead of
+typing its id.
+
+**#931**, already filed, widens this arm to an explicit allocation LIST across several advances at
+once (the owner's ruling: an allocation list with a one-click date-ordered suggestion, the stored
+record always the confirmed list) and is the ticket that touches `chatTurn_v22`'s own successor
+contract; this ticket's chooser is its first, single-advance step and does not anticipate that
+shape beyond leaving `advanceId` exactly where #931 will need to read it from.
+
+## #931 — one claim, several advances: the chooser becomes the first line of a confirmed list
+
+#930 replaced the typed advance id with a chooser. #931 makes that chooser **the first line of an
+allocation list**, so one staff expense claim can discharge several of the claimant's open
+advances. The parent ruling (#881, 2026-09-18) is the whole design: *an explicit allocation list
+with a one-click date-ordered suggestion; the stored record is always the confirmed list*, which is
+how an ordering can be offered on screen without becoming the silent FIFO WD-R10 forbids.
+
+**The draft.** `ClaimDraft.advanceId` is gone; `ClaimDraft.advanceAllocations` is the whole list
+(`lib/work/staff-expense-claim.ts`). `claimAllocations(draft)` is the ONE reader: an UNAPPORTIONED
+list of one returns that advance with the WHOLE claim on it, derived rather than typed, which is
+why the amount column is hidden on the untouched chooser. `allocationsAreApportioned(rows)` is the
+predicate both that reader and the form's `amountLabel` consult, and it is why DELETING a line of a
+confirmed split does not restate the survivor: a one-line list whose row already carries a figure
+KEEPS that figure, the amount column stays on screen, and a claim it no longer covers is a list
+that does not add up (`allocationsNotExact`), exactly as a suggestion the advances cannot cover
+already was. Handing the survivor the whole claim would have sent a number nobody confirmed,
+caught only when the estate's cap happened to refuse it. `allocationFieldId(i, key)` is the other half of
+the contract — index 0's advance keeps the control id `advanceId`, so #930's label, error text,
+focus and the server path `claim.advance_id` all still land on it.
+
+**The suggestion.** `suggestAllocationsByDate(candidates, totalCents)` is pure: oldest `issue_date`
+first (ties broken by `advance_id`, so the same claim suggests the same split on every machine),
+each advance taking as much as it still has outstanding, stopping when the claim is settled. When
+the advances cannot cover the claim it names everything outstanding and stops — the shortfall stays
+visible as a list that does not add up, because inventing the difference or trimming the claim
+would be the form deciding something only the preparer can.
+
+**The editor is the register's own.** `components/registers/staff-advance-allocations-editor.tsx`
+now takes `lineCount` as OPTIONAL (a claim composes no GL lines — the door derives them — so it
+names none and writes no `line_no`), plus `newRow`, `optionLabel`, `rowProps` and `amountLabel`.
+The register's call is unchanged in behaviour; `BookApplicationDialog` only gained the explicit
+`newRow` the generic parameter needs.
+
+**The wire.** A one-line list crosses exactly as #638's claim did — `advanceId`, no
+`advanceAllocations` key — because the door normalises both spellings into the same one-element
+list, so sending the key would be a second spelling of one claim. Two or more lines send both: the
+list, and the head under `advanceId` for the claim row's own NOT NULL column.
+
+**Restoring an older draft.** `readClaimDraft` migrates a draft filed BEFORE this ticket (a single
+`advanceId`, no list) into its one-line self, so a preparer who left the page mid-claim comes back
+to their claim rather than to an empty settlement arm. Anything malformed is refused whole, like
+every other field there.
+
+**Where the rules really live.** `clara._assert_claim_basis` (migration 0301) re-asks all of it at
+admission, and adds the three the browser cannot know: every advance belongs to this claimant on an
+enrolled account, each allocation passes the temporal over-application cap ON ITS OWN, and the
+refusal names the advance, its outstanding on the day and the shortfall. The form's rules are
+mirrors, never a second authority.

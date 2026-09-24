@@ -169,6 +169,26 @@ export type StaffAdvanceSummaryRow = {
   enrolment_active: boolean;
 };
 
+/**
+ * IS THERE STILL SOMETHING TO ALLOCATE AGAINST ON THIS ADVANCE?
+ *
+ * The ONE reading of "still outstanding", shared by every surface that offers an advance to
+ * discharge: the staff-advance register's own allocation editor, and #930's chooser on the staff
+ * expense claim form. It was written out twice, with a comment on one side asserting the two were
+ * byte-identical — which is a promise, not a wall: a third condition added on one side would leave
+ * the two surfaces silently disagreeing about which advances a person may pick.
+ *
+ * `outstanding_cents` is DB-derived (`clara._adv_outstanding`) and is never summed or netted here
+ * (hard constraint 2); this predicate only reads it.
+ *
+ * WHAT IT DELIBERATELY DOES NOT ASK. Incomplete particulars and a retired enrolment are both still
+ * money owed. The register shows them and the door decides; narrowing the offer here would hide a
+ * real balance from the preparer.
+ */
+export function isOutstandingAdvance(row: StaffAdvanceSummaryRow): boolean {
+  return row.outstanding_cents > 0 && !row.voided;
+}
+
 export type StaffAdvanceSummaryPolicyNote = { fact: string; note: string; source_note: string | null };
 
 export type StaffAdvanceSummary = {

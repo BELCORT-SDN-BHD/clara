@@ -9,6 +9,16 @@
 // staff_advance_summary read, already narrowed to rows with
 // `outstanding_cents > 0` and not voided — a DB-derived list, never a
 // client-side guess at what is still owed.
+//
+// #931 — A SECOND CALLER, AND WHAT IT MADE OPTIONAL. A staff expense claim
+// settled by advance application now names SEVERAL advances too, and the
+// ticket asks that its editor be THIS one rather than a second table that
+// drifts. Everything a claim does not have is optional rather than faked:
+// it composes no GL lines (its journal is DERIVED by
+// `clara._claim_journal_basis`), so it passes no `lineCount` and writes no
+// `line_no`; it is already scoped to ONE claimant, so it labels a candidate
+// by the facts that tell two of THAT person's advances apart. The
+// register's own call is unchanged in behaviour and in type.
 
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -16,34 +26,77 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { NativeSelect } from "@/components/common/native-select";
 import { MoneyInput } from "@/components/common/money-input";
 import { fmtCents } from "@/lib/registers/money";
-import type { StaffAdvanceAllocationInput, StaffAdvanceSummaryRow } from "@/lib/registers/staff-advances-doors";
+import type { StaffAdvanceSummaryRow } from "@/lib/registers/staff-advances-doors";
 
-export function StaffAdvanceAllocationsEditor({
+/**
+ * THE SHAPE EVERY CALLER'S ALLOCATION ROW SHARES: which advance, how many sen, and — only where
+ * the caller is composing the GL legs itself — which line position carries the leg.
+ *
+ * `line_no` is OPTIONAL because #931's caller has no lines to name. The register's own row type
+ * still requires one; the generic parameter below is what lets both keep their own shape instead
+ * of one widening to the other.
+ */
+export type AdvanceAllocationRow = {
+  line_no?: number;
+  advance_id: string;
+  amount_cents: number;
+};
+
+export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
   allocations,
   onChange,
   candidates,
   lineCount,
+  newRow,
+  optionLabel,
+  rowProps,
+  amountLabel,
 }: {
-  allocations: StaffAdvanceAllocationInput[];
-  onChange: (allocations: StaffAdvanceAllocationInput[]) => void;
+  allocations: T[];
+  onChange: (allocations: T[]) => void;
   /** Outstanding advances this application could settle — the caller's own
    *  staff_advance_summary read, already filtered to `outstanding_cents > 0`. */
   candidates: StaffAdvanceSummaryRow[];
   /** The lines editor's current line count — bounds the line_no picker so an
-   *  allocation can never name a line that does not exist in this call. */
-  lineCount: number;
+   *  allocation can never name a line that does not exist in this call. OMITTED by a caller whose
+   *  journal is DERIVED rather than composed: then no line column is rendered and no `line_no` is
+   *  written. */
+  lineCount?: number;
+  /** The row that "add" mints. The caller owns the shape, so neither caller's type has to widen to
+   *  the other's. */
+  newRow: () => T;
+  /** How one candidate reads in the chooser. The register names the account and the person because
+   *  it lists EVERY enrolment's advances; a caller already scoped to one claimant says so with the
+   *  facts that actually tell two of that person's advances apart. */
+  optionLabel?: (candidate: StaffAdvanceSummaryRow) => string;
+  /** Extra props for ONE row's own control (an id, a ref, an error wiring) — how a caller keeps an
+   *  existing control id on the line that used to be its only one (#930 → #931) and addresses every
+   *  later line by its own field path. */
+  rowProps?: (index: number, key: "advance" | "amount") => Record<string, unknown>;
+  /** The amount column's label, or `null` to hide the column entirely — a one-line list takes the
+   *  whole amount by construction, so there is nothing to apportion and no figure to retype. */
+  amountLabel?: string | null;
 }) {
   const t = useTranslations("StaffAdvances.allocationsEditor");
   const tc = useTranslations("Common");
 
-  function updateAllocation(index: number, patch: Partial<StaffAdvanceAllocationInput>) {
+  const showLineNo = lineCount !== undefined;
+  const showAmount = amountLabel !== null;
+  const label = optionLabel
+    ?? ((c: StaffAdvanceSummaryRow) => [
+      c.account_code,
+      c.person_label,
+      `${fmtCents(c.outstanding_cents, tc("centsUnsafe"))} ${t("outstandingSuffix")}`,
+    ].join(" — "));
+
+  function updateAllocation(index: number, patch: Partial<T>) {
     onChange(allocations.map((a, i) => (i === index ? { ...a, ...patch } : a)));
   }
   function removeAllocation(index: number) {
     onChange(allocations.filter((_, i) => i !== index));
   }
   function addAllocation() {
-    onChange([...allocations, { line_no: 1, advance_id: candidates[0]?.advance_id ?? "", amount_cents: 0 }]);
+    onChange([...allocations, newRow()]);
   }
 
   return (
@@ -51,54 +104,62 @@ export function StaffAdvanceAllocationsEditor({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-20">{t("lineNo")}</TableHead>
+            {showLineNo ? <TableHead className="w-20">{t("lineNo")}</TableHead> : null}
             <TableHead>{t("advance")}</TableHead>
-            <TableHead className="text-right">{t("amount")}</TableHead>
+            {showAmount ? (
+              <TableHead className="text-right">{amountLabel ?? t("amount")}</TableHead>
+            ) : null}
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {allocations.map((a, i) => (
             <TableRow key={i}>
-              <TableCell>
-                <NativeSelect
-                  aria-label={t("lineNo")}
-                  value={String(a.line_no)}
-                  onChange={(e) => updateAllocation(i, { line_no: Number(e.target.value) })}
-                  className="w-full"
-                >
-                  {Array.from({ length: lineCount }, (_, n) => n + 1).map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </TableCell>
+              {showLineNo ? (
+                <TableCell>
+                  <NativeSelect
+                    aria-label={t("lineNo")}
+                    value={String(a.line_no)}
+                    onChange={(e) => updateAllocation(i, { line_no: Number(e.target.value) } as Partial<T>)}
+                    className="w-full"
+                  >
+                    {Array.from({ length: lineCount ?? 0 }, (_, n) => n + 1).map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </TableCell>
+              ) : null}
               <TableCell>
                 <NativeSelect
                   aria-label={t("advance")}
+                  {...(rowProps?.(i, "advance") ?? {})}
                   value={a.advance_id}
-                  onChange={(e) => updateAllocation(i, { advance_id: e.target.value })}
+                  onChange={(e) => updateAllocation(i, { advance_id: e.target.value } as Partial<T>)}
                   className="w-full"
                 >
                   <option value="">{t("selectAdvance")}</option>
                   {candidates.map((c) => (
                     <option key={c.advance_id} value={c.advance_id}>
-                      {c.account_code} — {c.person_label} — {fmtCents(c.outstanding_cents, tc("centsUnsafe"))} {t("outstandingSuffix")}
+                      {label(c)}
                     </option>
                   ))}
                 </NativeSelect>
               </TableCell>
-              <TableCell>
-                <MoneyInput
-                  aria-label={t("amount")}
-                  cents={a.amount_cents}
-                  mode="unsigned"
-                  onValueChange={(change) => {
-                    if (change.ok) updateAllocation(i, { amount_cents: change.cents ?? 0 });
-                  }}
-                />
-              </TableCell>
+              {showAmount ? (
+                <TableCell>
+                  <MoneyInput
+                    aria-label={amountLabel ?? t("amount")}
+                    {...(rowProps?.(i, "amount") ?? {})}
+                    cents={a.amount_cents}
+                    mode="unsigned"
+                    onValueChange={(change) => {
+                      if (change.ok) updateAllocation(i, { amount_cents: change.cents ?? 0 } as Partial<T>);
+                    }}
+                  />
+                </TableCell>
+              ) : null}
               <TableCell>
                 <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeAllocation(i)} aria-label={t("removeAllocation")}>
                   ×

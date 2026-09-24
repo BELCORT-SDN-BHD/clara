@@ -34,6 +34,7 @@ import type { SubmitClaimWorkResult } from "../../lib/work/api";
 import type { CoaAccountRow } from "../../lib/journals/types";
 import type { NavigationScope } from "../../lib/firm/navigation";
 import type { StaffAdvanceEnrolmentRow } from "../../lib/work/staff-expense-claim-reads";
+import type { StaffAdvanceSummary } from "../../lib/registers/staff-advances-doors";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -44,6 +45,10 @@ const USER = "11111111-1111-4111-8111-111111111111";
 const FIRM = "22222222-2222-4222-8222-222222222222";
 const CLIENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ADVANCE = "33333333-3333-4333-8333-333333333333";
+const FARAH_ADVANCE = "55555555-5555-4555-8555-555555555555";
+const OTHER_CLAIMANT_ADVANCE = "66666666-6666-4666-8666-666666666666";
+const VOIDED_ADVANCE = "77777777-7777-4777-8777-777777777777";
+const SETTLED_ADVANCE = "88888888-8888-4888-8888-888888888888";
 
 const BOOKKEEPER: NavigationScope & { firm_id?: string; user_id?: string } = {
   role_rank: 1,
@@ -66,6 +71,30 @@ const ACCOUNTS: CoaAccountRow[] = [
 const ENROLMENTS: StaffAdvanceEnrolmentRow[] = [
   { id: "44444444-4444-4444-8444-444444444444", account_code: "1190", person_label: "Farah binti Idris" },
 ];
+
+/** The default, EMPTY staff-advance summary — most tests never touch the advance arm at all, so
+ *  the default `loadAdvances` answers the same "nothing outstanding" shape `getStaffAdvanceSummary`
+ *  itself answers for a client with none. */
+function staffAdvanceSummary(advances: StaffAdvanceSummary["advances"]): StaffAdvanceSummary {
+  return {
+    client_id: CLIENT,
+    as_of: "2026-03-31",
+    advances,
+    outstanding_cents: advances.reduce((n, a) => n + a.outstanding_cents, 0),
+    incomplete_count: 0,
+    policy_notes: [],
+  };
+}
+
+/** One row of `staff_advance_summary`, every field named so a test reads as data, not noise. */
+function advanceRow(patch: Partial<StaffAdvanceSummary["advances"][number]>): StaffAdvanceSummary["advances"][number] {
+  return {
+    enrolment_id: "e0", account_code: "1190", person_label: "Farah binti Idris", advance_id: FARAH_ADVANCE,
+    issue_date: "2026-02-01", amount_cents: 100000, outstanding_cents: 40000, days_outstanding: 30,
+    purpose: null, reference: null, voided: false, particulars_complete: false, enrolment_active: true,
+    ...patch,
+  };
+}
 
 function memoryStorage(): DraftStorage & { map: Map<string, string> } {
   const map = new Map<string, string>();
@@ -91,6 +120,7 @@ function App(props: {
   storage?: DraftStorage | null;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
   loadEnrolments?: () => Promise<StaffAdvanceEnrolmentRow[] | null>;
+  loadAdvances?: () => Promise<StaffAdvanceSummary>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -104,6 +134,7 @@ function App(props: {
       storage: props.storage ?? null,
       loadAccounts: props.loadAccounts ?? (async () => ACCOUNTS),
       loadEnrolments: props.loadEnrolments ?? (async () => ENROLMENTS),
+      loadAdvances: props.loadAdvances ?? (async () => staffAdvanceSummary([])),
       // Rendered with a real, successful, EMPTY documents read — the state a client with no filed
       // documents is genuinely in, and the state C1's "genuinely optional" attachment must survive.
       loadDocuments: (async () => []) as never,
@@ -122,6 +153,30 @@ function byId(h: { find: (p: (n: Stub) => boolean) => Stub | null }, id: string)
 function focusedId(): string | null {
   const node = activeElement() as { getAttribute?: (k: string) => string | null } | null;
   return node?.getAttribute?.("id") ?? null;
+}
+
+/** An attribute off a stub node, or null — the house idiom
+ *  (`journal-composer.test.tsx`'s own `attrOf`) for reading an `<option>`'s own `value`. */
+function attrOf(n: Stub, name: string): string | null {
+  return (n as { getAttribute?: (k: string) => string | null }).getAttribute?.(name) ?? null;
+}
+
+/** EVERY node matching `predicate`, document order — `RenderHarness.find` answers the first only,
+ *  and a cell about the SECOND row of a repeated control needs the rest (the harness's own header
+ *  says to walk `container` directly for what `find` does not cover). */
+function findAll(node: Stub, predicate: (n: Stub) => boolean): Stub[] {
+  const out: Stub[] = [];
+  const visit = (n: Stub) => {
+    if (predicate(n)) out.push(n);
+    for (const child of ((n as { childNodes?: Stub[] }).childNodes ?? [])) visit(child);
+  };
+  visit(node);
+  return out;
+}
+
+/** Every `<option>` under a `<select>` stub, in document order. */
+function optionsOf(select: Stub): Stub[] {
+  return ((select as { childNodes?: Stub[] }).childNodes ?? []).filter((n) => n.tagName === "OPTION");
 }
 
 /** The form's own SUBMIT, fired at the form — the house idiom (a click on a `type="submit"` button
@@ -265,6 +320,114 @@ test("a LOST response is resolved by re-sending the SAME intent key, exactly onc
   }
 });
 
+// ---------------------------------------------------------------------------------------------
+// #930 — THE ADVANCE CHOOSER. Replaces the free-text "which advance" box with a control fed by
+// `staff_advance_summary` (the register's allocation editor's own read), narrowed to the CHOSEN
+// CLAIMANT's own outstanding, unvoided advances — never a client-side guess, never another
+// claimant's balance. The rule stays exactly what #638 shipped: one claim still names ONE advance,
+// and the submitted `claim.advanceId` is the chosen row's id, byte-identical to what typing it
+// produced before.
+// ---------------------------------------------------------------------------------------------
+
+function restoreAdvanceApplicationDraft(store: ReturnType<typeof memoryStorage>, advanceId: string): void {
+  const key = claimDraftKey({ userId: USER, firmId: FIRM, clientId: CLIENT });
+  store.map.set(key, JSON.stringify({
+    intentKey: "k-chooser",
+    documentId: null,
+    draft: {
+      settlement: "advance_application",
+      claimantEnrolmentId: "",
+      claimantAccountCode: "1190",
+      claimantPersonLabel: "",
+      claimantAttestation: "",
+      claimantConfirmDedicated: false,
+      claimantIdentifier: "",
+      sourceKind: "instruction",
+      instruction: "Farah's advance claim.",
+      incurredDate: "2026-03-04",
+      postingDate: "2026-03-31",
+      items: [{
+        description: "KL–Penang flight", expenseAccountCode: "6200", amountCents: 48000,
+        suppliedTaxNote: "", incurredDate: "", pendingFact: "",
+      }],
+      payableAccountCode: "2010",
+      advanceAccountCode: "1190",
+      advanceId,
+      paymentAccountCode: "",
+    },
+  }));
+}
+
+test("the advance-application arm offers a CHOOSER fed by the claimant's own outstanding advances", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  let sent: Submitted | null = null;
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}), // Farah's own outstanding advance — offered.
+      // A DIFFERENT claimant's advance — never offered here, proving the filter is BY CLAIMANT.
+      advanceRow({ account_code: "1191", person_label: "Someone Else", advance_id: OTHER_CLAIMANT_ADVANCE }),
+      // Farah's own VOIDED advance — never offered.
+      advanceRow({ advance_id: VOIDED_ADVANCE, voided: true }),
+      // Farah's own FULLY DISCHARGED advance — never offered.
+      advanceRow({ advance_id: SETTLED_ADVANCE, outstanding_cents: 0 }),
+    ]),
+    submit: async (_a, input) => { sent = input; return { kind: "accepted", workId: "w", taskId: null, logicalOpId: null, status: "queued", replayed: false, claimId: "c" }; },
+  }));
+  try {
+    await h.settle();
+    // THE FREE-TEXT BOX IS GONE (AC2): the control at this id is a real <select>, not an <input>.
+    const select = byId(h, F("advanceId"));
+    assert.equal(select.tagName, "SELECT", "the typed advance-id box is replaced by a chooser");
+    const values = optionsOf(select).map((o) => attrOf(o, "value"));
+    assert.deepEqual(values, ["", FARAH_ADVANCE],
+      "only the CLAIMANT's own outstanding, unvoided advance is offered — not another claimant's, " +
+      "not a voided one, not one already fully discharged");
+    // EACH OPTION SHOWS ITS BOOKING DATE AND OUTSTANDING AMOUNT (AC1) — never only a bare id.
+    assert.match(h.text(), /2026-02-01/, "the advance's booking date is shown");
+    assert.match(h.text(), /400\.00/, "the outstanding amount is shown, formatted from exact minor units");
+
+    // CHOOSING ONE FILLS THE CLAIM EXACTLY AS TYPING THE ID DID (AC2).
+    await h.fireEvent(select, "change", (n) => setFieldValue(n, FARAH_ADVANCE));
+    await submitForm(h);
+    assert.ok(sent, "a chosen advance is a complete claim");
+    assert.equal((sent as unknown as Submitted).claim.advanceId, FARAH_ADVANCE,
+      "the submitted claim carries the CHOSEN advance's id, exactly as typing it did before");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("a claimant with NO open advance sees the chooser EMPTY with a one-line reason, and cannot submit", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  let calls = 0;
+  const h = await renderComponent(App({
+    storage: store,
+    // This client's advances all belong to SOMEONE ELSE — Farah (the chosen claimant) has none.
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({ account_code: "1191", person_label: "Someone Else", advance_id: OTHER_CLAIMANT_ADVANCE }),
+    ]),
+    submit: async () => { calls += 1; return { kind: "denied" }; },
+  }));
+  try {
+    await h.settle();
+    const select = byId(h, F("advanceId"));
+    assert.deepEqual(optionsOf(select).map((o) => attrOf(o, "value")), [""],
+      "the chooser offers nothing to pick — the placeholder only");
+    assert.match(h.text(), /has no open advance/i, "…and says WHY in one line, rather than leaving it blank");
+
+    await submitForm(h);
+    assert.equal(calls, 0, "nothing is sent while no advance is named");
+    assert.equal(focusedId(), F("advanceId"), "the empty chooser itself takes focus, the same as an unfilled field");
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("the SETTLEMENT switch keeps every arm's typed value, and only the active leg is sent", async () => {
   // THE SWITCH IS STRUCTURAL, and this cell proves the two halves a mounted form owns. That the
   // DRAFT holds every arm is `lib/work/staff-expense-claim.test.ts`'s (one flat `ClaimDraft`); what
@@ -316,12 +479,13 @@ test("the SETTLEMENT switch keeps every arm's typed value, and only the active l
       "They have already been paid"]) {
       assert.ok(h.text().includes(label), `the settlement group offers "${label}"`);
     }
-    // The ACTIVE arm's two controls are rendered, and the one that is a plain input carries its
-    // restored value. (The account control is a native <select>, whose selected value this stub DOM
-    // does not mirror onto `.value` — so it is asserted where it actually matters, in the SUBMITTED
-    // body below, rather than through a property the harness does not model.)
+    // The ACTIVE arm's two controls are rendered. BOTH are native <select>s (#930: the "which
+    // advance" box is a chooser now, same as the account picker beside it), whose SELECTED value
+    // this stub DOM does not mirror onto `.value` on a value restored via props rather than typed —
+    // so the restored value is asserted where it actually matters, in the SUBMITTED body below,
+    // rather than through a property the harness does not model.
     byId(h, F("advanceAccountCode"));
-    assert.equal((byId(h, F("advanceId")) as { value?: unknown }).value, ADVANCE);
+    assert.equal(byId(h, F("advanceId")).tagName, "SELECT", "the typed advance-id box is a chooser now");
     // …and the OTHER arm's control is simply not mounted, while its value survives in the draft.
     assert.equal(
       h.find((n) => (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("id") === F("payableAccountCode")),
@@ -424,5 +588,187 @@ test("the DRAFT survives a remount under the same scope, and carries its intent 
     assert.equal(store.map.get(key), undefined, "and the draft is retired only once the runtime named the Work");
   } finally {
     await second.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// #931 — THE ALLOCATION LIST. One claim may discharge SEVERAL of the claimant's open advances, so
+// #930's single chooser becomes the FIRST LINE of a list (its control id, and therefore its error
+// wiring and its focus, are unchanged). "Suggest by date" pre-fills the list oldest-advance-first;
+// the person may edit any line and confirms; WHAT IS STORED IS THE CONFIRMED LIST, never the
+// suggestion — which is what keeps WD-R10's "no silent FIFO" true with an ordering on screen.
+// ---------------------------------------------------------------------------------------------
+
+const JAN_ADVANCE = "99999999-9999-4999-8999-999999999999";
+const MAR_ADVANCE = "aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+
+/** Farah's three open advances: January 400.00, February 300.00, March 50.00. */
+const THREE_OPEN = () => staffAdvanceSummary([
+  advanceRow({ advance_id: FARAH_ADVANCE, issue_date: "2026-02-01", outstanding_cents: 30000 }),
+  advanceRow({ advance_id: JAN_ADVANCE, issue_date: "2026-01-10", outstanding_cents: 40000 }),
+  advanceRow({ advance_id: MAR_ADVANCE, issue_date: "2026-03-01", outstanding_cents: 5000 }),
+]);
+
+test("ticket 931 the advance arm SUGGESTS a date-ordered split, and stores the CONFIRMED list rather than the suggestion", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");   // one item, RM 480.00, claimant 1190
+
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => THREE_OPEN(),
+    submit: async (_a, input) => {
+      sent.push(input);
+      return { kind: "accepted", workId: "w", taskId: null, logicalOpId: null, status: "queued", replayed: false, claimId: "c" };
+    },
+  }));
+  try {
+    await h.settle();
+
+    // ONE CLICK, AND THE LIST IS OLDEST FIRST. The claim is 480.00: January's 400.00 goes first and
+    // in full, February takes the remaining 80.00, and March is never named — the claim is already
+    // settled by then.
+    const suggest = h.find((n) => attrOf(n, "data-testid") === "advance-suggest");
+    assert.ok(suggest, "the arm offers a one-click date-ordered suggestion");
+    await h.fireEvent(suggest, "click");
+    await h.settle();
+
+    await submitForm(h);
+    assert.equal(sent.length, 1, "the suggestion alone is a complete, submittable claim");
+    const suggested = sent[0];
+    assert.ok(suggested);
+    assert.deepEqual(suggested.claim.advanceAllocations, [
+      { advanceId: JAN_ADVANCE, amountCents: 40000 },
+      { advanceId: FARAH_ADVANCE, amountCents: 8000 },
+    ], "oldest advance first, each taking what it still has, stopping at the claim");
+    assert.equal(suggested.claim.advanceId, JAN_ADVANCE,
+      "the head of the list fills the claim row's own structural column");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 931 the person may EDIT the suggested split, and what is stored is the list they confirmed", async () => {
+  // THE SAME claim and the SAME three advances as the cell above, so the suggestion it would
+  // produce is known: January 400.00 and February 80.00. This preparer overrides both.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => THREE_OPEN(),
+    submit: async (_a, input) => {
+      sent.push(input);
+      return { kind: "accepted", workId: "w", taskId: null, logicalOpId: null, status: "queued", replayed: false, claimId: "c" };
+    },
+  }));
+  try {
+    await h.settle();
+    const suggest = h.find((n) => attrOf(n, "data-testid") === "advance-suggest");
+    assert.ok(suggest);
+    await h.fireEvent(suggest, "click");
+    await h.settle();
+
+    // 300.00 against January and 180.00 against February — a DIFFERENT split of the same claim.
+    await h.fireEvent(byId(h, F("advanceAllocations.0.amountCents")), "change",
+      (n) => setFieldValue(n, "300.00"));
+    await h.fireEvent(byId(h, F("advanceAllocations.1.amountCents")), "change",
+      (n) => setFieldValue(n, "180.00"));
+    await submitForm(h);
+
+    assert.equal(sent.length, 1);
+    const confirmed = sent[0];
+    assert.ok(confirmed);
+    assert.deepEqual(confirmed.claim.advanceAllocations, [
+      { advanceId: JAN_ADVANCE, amountCents: 30000 },
+      { advanceId: FARAH_ADVANCE, amountCents: 18000 },
+    ], "what is stored is the CONFIRMED list, not the suggestion that proposed it");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 931 a split that does not add up to the claim is refused beside the list, and sends nothing", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  let calls = 0;
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => THREE_OPEN(),
+    submit: async () => { calls += 1; return { kind: "denied" }; },
+  }));
+  try {
+    await h.settle();
+    const suggest = h.find((n) => attrOf(n, "data-testid") === "advance-suggest");
+    assert.ok(suggest);
+    await h.fireEvent(suggest, "click");
+    await h.settle();
+    // 300.00 + 80.00 = 380.00 against a 480.00 claim: 100.00 owed to nobody.
+    await h.fireEvent(byId(h, F("advanceAllocations.0.amountCents")), "change",
+      (n) => setFieldValue(n, "300.00"));
+    await submitForm(h);
+    assert.equal(calls, 0, "nothing is sent while the split does not settle the claim");
+    assert.match(h.text(), /add up to the claim/i,
+      "…and the reason sits beside the list the preparer has to change");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 931 deleting a line of a CONFIRMED split never restates the surviving figure behind the preparer", async () => {
+  // THE SAME claim and the SAME three advances: the suggestion is January 400.00 + February 80.00
+  // on a 480.00 claim. The preparer then REMOVES the February line with the editor's own row
+  // button — the one act that used to hand January the whole 480.00 with no amount on screen.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => THREE_OPEN(),
+    submit: async (_a, input) => {
+      sent.push(input);
+      return { kind: "accepted", workId: "w", taskId: null, logicalOpId: null, status: "queued", replayed: false, claimId: "c" };
+    },
+  }));
+  try {
+    await h.settle();
+    const suggest = h.find((n) => attrOf(n, "data-testid") === "advance-suggest");
+    assert.ok(suggest);
+    await h.fireEvent(suggest, "click");
+    await h.settle();
+
+    const removeLabel = messages.StaffAdvances.allocationsEditor.removeAllocation;
+    const removes = findAll(h.container, (n) => attrOf(n, "aria-label") === removeLabel);
+    assert.equal(removes.length, 2, "the suggestion put TWO lines on screen, each with its own remove");
+    await h.fireEvent(removes[1]!, "click");
+    await h.settle();
+
+    // THE FIGURE IS STILL ON SCREEN, and it is still January's own 400.00 — the amount column does
+    // not vanish with the second line, because the list has been apportioned.
+    assert.match(h.text(), new RegExp(messages.StaffExpenseClaim.advanceAllocationAmount),
+      "the amount column stays once the list carries confirmed figures");
+    assert.ok(h.find((n) => attrOf(n, "id") === F("advanceAllocations.0.amountCents")),
+      "…and the surviving line still has its own amount control");
+
+    // NOTHING IS SENT, because 400.00 no longer settles a 480.00 claim — the shortfall is stated
+    // rather than quietly absorbed.
+    await submitForm(h);
+    assert.equal(sent.length, 0, "a list that no longer adds up sends nothing");
+    assert.match(h.text(), /add up to the claim/i,
+      "…and says so beside the list, where the preparer can act on it");
+
+    // THE PREPARER'S OWN RESTATEMENT settles it, and it crosses as the single-advance shape.
+    await h.fireEvent(byId(h, F("advanceAllocations.0.amountCents")), "change",
+      (n) => setFieldValue(n, "480.00"));
+    await submitForm(h);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.claim.advanceId, JAN_ADVANCE);
+    assert.equal(sent[0]!.claim.advanceAllocations, undefined,
+      "one advance carrying the whole claim crosses exactly as it did before ticket 931");
+  } finally {
+    await h.unmount();
   }
 });

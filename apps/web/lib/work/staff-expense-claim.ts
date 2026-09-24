@@ -68,6 +68,20 @@ export type ClaimItemDraft = {
 };
 
 /**
+ * ONE LINE OF THE CONFIRMED ALLOCATION LIST (#931): WHICH open advance this claim discharges, and
+ * how many sen of it.
+ *
+ * `amountCents` IS IGNORED WHILE THERE IS ONLY ONE LINE. A claim settled against a single advance
+ * puts the WHOLE claim on it, so asking a preparer to retype a total the form already knows would
+ * be a second statement of one figure — exactly the drift `claimTotalCents` exists to prevent. The
+ * amount column appears the moment a second line does.
+ */
+export type ClaimAllocationDraft = {
+  advanceId: string;
+  amountCents: number;
+};
+
+/**
  * ONE FLAT DRAFT HOLDING EVERY SETTLEMENT'S HALF, and that is the "preserved draft" rule rather
  * than a shortcut (appendix D #46: a Radio Group switch that discards what was typed is a control
  * that punishes a correction). The settlement switch changes which half is READ, validated and
@@ -91,7 +105,10 @@ export type ClaimDraft = {
   // — the settlement legs, one per arm —
   payableAccountCode: string;
   advanceAccountCode: string;
-  advanceId: string;
+  /** #931 — THE CONFIRMED ALLOCATION LIST, whole and in the order the preparer confirmed. Its FIRST
+   *  line is #930's advance chooser (the control still called `advanceId`), so a claim that names
+   *  one advance is a one-line list and nothing about that case moved. */
+  advanceAllocations: ClaimAllocationDraft[];
   paymentAccountCode: string;
 };
 
@@ -122,9 +139,13 @@ export function emptyClaimDraft(): ClaimDraft {
     items: [emptyClaimItem()],
     payableAccountCode: DEFAULT_PAYABLE_ACCOUNT_CODE,
     advanceAccountCode: "",
-    advanceId: "",
+    advanceAllocations: [emptyClaimAllocation()],
     paymentAccountCode: "",
   };
+}
+
+export function emptyClaimAllocation(): ClaimAllocationDraft {
+  return { advanceId: "", amountCents: 0 };
 }
 
 /**
@@ -151,7 +172,12 @@ export type ClaimFieldId =
   | `items.${number}.pendingFact`
   | "payableAccountCode"
   | "advanceAccountCode"
+  // #931 — the FIRST line of the allocation list keeps #930's own control id, so a refusal about
+  // "which advance" lands where it always did; every later line addresses its own two controls.
   | "advanceId"
+  | "advanceAllocations"
+  | `advanceAllocations.${number}.advanceId`
+  | `advanceAllocations.${number}.amountCents`
   | "paymentAccountCode";
 
 /** Either vocabulary — this form focuses controls from both. */
@@ -171,6 +197,8 @@ export type ClaimIssueCode =
   | "attestationRequired"
   | "confirmDedicatedRequired"
   | "advanceRequired"
+  | "advanceDuplicated"
+  | "allocationsNotExact"
   | "tooLong";
 
 export type ClaimIssue = { field: ClaimFieldId; code: ClaimIssueCode };
@@ -201,6 +229,97 @@ export function claimTotalCents(draft: ClaimDraft): number {
   return draft.items
     .filter((i) => !isPendingItem(i))
     .reduce((n, i) => n + (Number.isSafeInteger(i.amountCents) ? i.amountCents : 0), 0);
+}
+
+/**
+ * HAS THIS LIST BEEN APPORTIONED? — true once the preparer has said how the claim is divided, and
+ * that is a property of the ROWS, not of how many there are.
+ *
+ * A LIST OF TWO OR MORE always apportions: every line carries its own share. A LIST OF ONE
+ * apportions only when its row already holds a figure — which happens when a split was suggested
+ * or typed and then taken back to one line, never on the untouched chooser #930 renders (its row
+ * is minted at zero).
+ *
+ * ONE READER for that question, because two surfaces act on it: `claimAllocations` decides whether
+ * the figure is the row's own or the claim's, and the form decides whether the amount column is on
+ * screen. They must never disagree, or a figure is submitted that was never shown.
+ */
+export function allocationsAreApportioned(rows: readonly ClaimAllocationDraft[]): boolean {
+  if (rows.length > 1) return true;
+  const only = rows[0];
+  return only !== undefined && Number.isSafeInteger(only.amountCents) && only.amountCents > 0;
+}
+
+/**
+ * THE EFFECTIVE ALLOCATION LIST — what the claim actually discharges, with the UNAPPORTIONED
+ * one-line case's amount DERIVED from the claim rather than typed.
+ *
+ * ONE READER, so the wire, the validation and the rendered summary can never disagree about how
+ * many sen a line carries.
+ *
+ * WHY AN APPORTIONED ONE-LINE LIST KEEPS ITS OWN FIGURE. Deleting the second line of a confirmed
+ * split leaves ONE line carrying the share that line was confirmed with. Handing it the whole
+ * claim instead would restate a figure the preparer agreed to, silently and with no amount on
+ * screen — and #881's ruling is that the stored record is ALWAYS the confirmed list. What it
+ * leaves is a list that does not add up, which `validateClaimDraft` says out loud, exactly as it
+ * does for a suggestion the claimant's advances cannot cover.
+ */
+export function claimAllocations(draft: ClaimDraft): ClaimAllocationDraft[] {
+  const rows = draft.advanceAllocations;
+  if (rows.length <= 1) {
+    const only = rows[0];
+    if (only !== undefined && allocationsAreApportioned(rows)) {
+      return [{ advanceId: only.advanceId.trim(), amountCents: only.amountCents }];
+    }
+    return [{ advanceId: only?.advanceId.trim() ?? "", amountCents: claimTotalCents(draft) }];
+  }
+  return rows.map((r) => ({
+    advanceId: r.advanceId.trim(),
+    amountCents: Number.isSafeInteger(r.amountCents) ? r.amountCents : 0,
+  }));
+}
+
+/** The control that holds allocation line `index`: the first line IS #930's chooser. */
+export function allocationFieldId(index: number, key: "advanceId" | "amountCents"): ClaimFieldId {
+  if (index === 0 && key === "advanceId") return "advanceId";
+  return `advanceAllocations.${index}.${key}` as ClaimFieldId;
+}
+
+/**
+ * THE ONE-CLICK DATE-ORDERED SUGGESTION (#881's owner ruling): the claimant's open advances,
+ * OLDEST FIRST, each taking as much of the claim as it still has outstanding, until the claim is
+ * settled.
+ *
+ * IT IS A SUGGESTION, NOT A DECISION. The person may edit any line and must confirm; what is
+ * stored is the confirmed list, which is what keeps WD-R10's "no silent FIFO" true — the ordering
+ * is offered on screen, never applied behind the preparer.
+ *
+ * WHEN THE ADVANCES CANNOT COVER THE CLAIM it names everything outstanding and stops, so the
+ * shortfall is visible as a list that does not add up. Inventing the difference, or silently
+ * trimming the claim, would be the form deciding something only the preparer can.
+ *
+ * A TIE ON `issue_date` IS BROKEN BY `advance_id`, so the same claim suggests the same split on
+ * every machine.
+ */
+export function suggestAllocationsByDate(
+  candidates: ReadonlyArray<{ advance_id: string; issue_date: string; outstanding_cents: number }>,
+  totalCents: number,
+): ClaimAllocationDraft[] {
+  if (!Number.isSafeInteger(totalCents) || totalCents <= 0) return [];
+  const ordered = [...candidates]
+    .filter((c) => Number.isSafeInteger(c.outstanding_cents) && c.outstanding_cents > 0)
+    .sort((a, b) => (a.issue_date === b.issue_date
+      ? a.advance_id.localeCompare(b.advance_id)
+      : a.issue_date.localeCompare(b.issue_date)));
+  const out: ClaimAllocationDraft[] = [];
+  let remaining = totalCents;
+  for (const c of ordered) {
+    if (remaining <= 0) break;
+    const take = Math.min(c.outstanding_cents, remaining);
+    out.push({ advanceId: c.advance_id, amountCents: take });
+    remaining -= take;
+  }
+  return out;
 }
 
 /** The ONE account this settlement credits, and the control that holds it. */
@@ -328,9 +447,35 @@ export function validateClaimDraft(
   // ---- the settlement's ONE credit leg -------------------------------------------------------
   const legField = settlementFieldId(draft.settlement);
   account(legField, settlementAccountCode(draft), true);
-  if (draft.settlement === "advance_application" && !UUID_RE.test(draft.advanceId.trim())) {
-    // NO SILENT FIFO (WD-R10): a claim says WHICH advance it discharges.
-    issues.push({ field: "advanceId", code: "advanceRequired" });
+  if (draft.settlement === "advance_application") {
+    // #931 — THE CONFIRMED ALLOCATION LIST. Every rule here mirrors one migration 0301 enforces:
+    // each line names an advance (NO SILENT FIFO, WD-R10), no advance is named twice, every line
+    // of a split is real money, and a split adds up to the claim TO THE CENT.
+    const rows = claimAllocations(draft);
+    const seen = new Set<string>();
+    rows.forEach((row, i) => {
+      if (!UUID_RE.test(row.advanceId)) {
+        issues.push({ field: allocationFieldId(i, "advanceId"), code: "advanceRequired" });
+      } else if (seen.has(row.advanceId)) {
+        issues.push({ field: allocationFieldId(i, "advanceId"), code: "advanceDuplicated" });
+      } else {
+        seen.add(row.advanceId);
+      }
+      // The one-line case's amount is DERIVED, so there is no control to complain about.
+      if (rows.length === 1) return;
+      if (!Number.isSafeInteger(row.amountCents) || row.amountCents < 0) {
+        issues.push({ field: allocationFieldId(i, "amountCents"), code: "amountNotExact" });
+      } else if (row.amountCents === 0) {
+        issues.push({ field: allocationFieldId(i, "amountCents"), code: "amountRequired" });
+      }
+    });
+    // …AND IT ADDS UP TO THE CLAIM, whatever its length. An UNAPPORTIONED one-line list is the
+    // whole claim by construction, so this can only bite a list the preparer apportioned — a
+    // split that is short, or a split taken back to one line that no longer covers the claim.
+    if (rows.reduce((n, r) => n + (Number.isSafeInteger(r.amountCents) ? r.amountCents : 0), 0)
+        !== claimTotalCents(draft)) {
+      issues.push({ field: "advanceAllocations", code: "allocationsNotExact" });
+    }
   }
   const credit = settlementAccountCode(draft);
   if (credit !== "" && draft.items.some((i) => !isPendingItem(i) && i.expenseAccountCode.trim() === credit)) {
@@ -432,7 +577,15 @@ export function toClaimWire(
   if (draft.settlement === "reimbursement") out.payableAccountCode = draft.payableAccountCode.trim();
   if (draft.settlement === "advance_application") {
     out.advanceAccountCode = draft.advanceAccountCode.trim();
-    out.advanceId = draft.advanceId.trim();
+    const rows = claimAllocations(draft);
+    // THE HEAD fills `clara.staff_expense_claims.advance_id`, which is NOT NULL for this settlement.
+    out.advanceId = rows[0]?.advanceId ?? "";
+    // A ONE-LINE LIST IS THE SINGLE-ADVANCE CLAIM, and it crosses exactly as it did before #931 —
+    // the door normalises `advance_id` into the same one-element list either way, so sending the
+    // key would be a second spelling of one claim.
+    if (rows.length > 1) {
+      out.advanceAllocations = rows.map((r) => ({ advanceId: r.advanceId, amountCents: r.amountCents }));
+    }
   }
   if (draft.settlement === "already_settled") out.paymentAccountCode = draft.paymentAccountCode.trim();
   return out;
@@ -466,7 +619,8 @@ export function toClaimWire(
  */
 const CLAIM_FIELDS = new Set<string>([
   "settlement", "sourceKind", "instruction", "incurredDate", "postingDate", "items",
-  "payableAccountCode", "advanceAccountCode", "advanceId", "paymentAccountCode",
+  "payableAccountCode", "advanceAccountCode", "advanceId", "advanceAllocations",
+  "paymentAccountCode",
 ]);
 const CLAIMANT_FIELDS = new Set<string>([
   "accountCode", "personLabel", "attestation", "confirmDedicated", "identifier",
@@ -495,6 +649,19 @@ export function fieldForClaimPath(path: string | null): ClaimFieldId | null {
     const key = camel(rest.slice("claimant.".length));
     if (!CLAIMANT_FIELDS.has(key)) return null;
     return `claimant${key.charAt(0).toUpperCase()}${key.slice(1)}` as ClaimFieldId;
+  }
+
+  // #931 — `claim.advance_allocations[N].<key>`, 1-based on the wire like the items. The FIRST line
+  // is #930's own chooser, so `[1].advance_id` lands on `advanceId` rather than on a control the
+  // list editor does not render for its head.
+  const allocation = /^advance_?[Aa]llocations\[(\d+)\](?:\.(.+))?$/.exec(rest);
+  if (allocation) {
+    const index = Number(allocation[1]) - 1;
+    if (!Number.isInteger(index) || index < 0) return null;
+    if (allocation[2] === undefined) return "advanceAllocations";
+    const key = camel(allocation[2]);
+    if (key !== "advanceId" && key !== "amountCents") return null;
+    return allocationFieldId(index, key);
   }
 
   const item = /^items\[(\d+)\](?:\.(.+))?$/.exec(rest);

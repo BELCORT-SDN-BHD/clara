@@ -414,11 +414,17 @@ export type WireClaimant = {
   enrolmentId?: unknown; accountCode?: unknown; personLabel?: unknown; attestation?: unknown;
   confirmDedicated?: unknown; identifier?: unknown;
 };
+/** #931 — ONE line of the confirmed allocation list: WHICH advance, and how many sen of the claim
+ *  it discharges. `accountCode` is optional and defaults to the claim's own `advanceAccountCode`;
+ *  it is stated only when this advance sits on a DIFFERENT enrolled account. */
+export type WireClaimAllocation = {
+  advanceId?: unknown; amountCents?: unknown; accountCode?: unknown;
+};
 export type WireClaim = {
   claimant?: unknown; sourceKind?: unknown; instruction?: unknown; incurredDate?: unknown;
   postingDate?: unknown; items?: unknown; settlement?: unknown; payableAccountCode?: unknown;
-  advanceAccountCode?: unknown; advanceId?: unknown; paymentAccountCode?: unknown;
-  correctsClaimId?: unknown;
+  advanceAccountCode?: unknown; advanceId?: unknown; advanceAllocations?: unknown;
+  paymentAccountCode?: unknown; correctsClaimId?: unknown;
 };
 
 export const CLAIM_SETTLEMENTS = Object.freeze(["reimbursement", "advance_application", "already_settled"]);
@@ -583,12 +589,62 @@ export function toDbClaim(
   const account = claimText(wire[leg[1]], leg[2], 64, true);
   if (!account.ok) return { ok: false, error: account.error };
   out[leg[2]] = account.value;
+  // #931 — THE CONFIRMED ALLOCATION LIST. Only an advance application discharges anything, so only
+  // it may carry one; a list on any other settlement is refused HERE rather than travelling to the
+  // database as a field the claim's own settlement cannot explain.
+  const listed = wire.advanceAllocations !== undefined && wire.advanceAllocations !== null;
+  if (listed && wire.settlement !== "advance_application") {
+    return { ok: false, error: claimInvalid("advance_allocations", "settlement") };
+  }
   if (wire.settlement === "advance_application") {
-    if (typeof wire.advanceId !== "string" || !UUID_RE.test(wire.advanceId)) {
+    if (listed) {
+      if (!Array.isArray(wire.advanceAllocations)) {
+        return { ok: false, error: claimInvalid("advance_allocations", "array") };
+      }
+      if (wire.advanceAllocations.length < 1) {
+        return { ok: false, error: claimInvalid("advance_allocations", "at_least_one") };
+      }
+      const allocations: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < wire.advanceAllocations.length; i += 1) {
+        const path = `advance_allocations[${i + 1}]`;
+        const a = wire.advanceAllocations[i] as WireClaimAllocation;
+        if (!a || typeof a !== "object" || Array.isArray(a)) {
+          return { ok: false, error: claimInvalid(path, "object") };
+        }
+        if (typeof a.advanceId !== "string" || !UUID_RE.test(a.advanceId)) {
+          // No silent FIFO INSIDE the list either (WD-R10): every line says which advance it is.
+          return { ok: false, error: { error: "invalid_basis", field: `claim.${path}.advance_id`, reason: "advance_allocation_mismatch" } };
+        }
+        if (!isInteger(a.amountCents) || a.amountCents <= 0) {
+          return { ok: false, error: claimInvalid(`${path}.amount_cents`, "positive_integer_cents") };
+        }
+        const one: Record<string, unknown> = { advance_id: a.advanceId, amount_cents: a.amountCents };
+        const code = claimText(a.accountCode, `${path}.account_code`, 64, false);
+        if (!code.ok) return { ok: false, error: code.error };
+        if (code.value !== undefined) one.account_code = code.value;
+        allocations.push(one);
+      }
+      out.advance_allocations = allocations;
+      // THE HEAD FILLS THE STRUCTURAL COLUMN. `clara.staff_expense_claims.advance_id` is NOT NULL
+      // for this settlement; a caller that ALSO states it is passed through unchanged, so
+      // migration 0301's own `allocation_head` refusal stays reachable rather than being silently
+      // rewritten into agreement.
+      if (wire.advanceId !== undefined && wire.advanceId !== null) {
+        if (typeof wire.advanceId !== "string" || !UUID_RE.test(wire.advanceId)) {
+          return { ok: false, error: { error: "invalid_basis", field: "claim.advance_id", reason: "advance_allocation_mismatch" } };
+        }
+        out.advance_id = wire.advanceId;
+      } else {
+        // The list is non-empty by the guard above, so the head exists; `at(0)` states that to the
+        // compiler without an assertion.
+        out.advance_id = allocations[0]?.advance_id;
+      }
+    } else if (typeof wire.advanceId !== "string" || !UUID_RE.test(wire.advanceId)) {
       // No silent FIFO in this register (WD-R10): a claim says WHICH advance it discharges.
       return { ok: false, error: { error: "invalid_basis", field: "claim.advance_id", reason: "advance_allocation_mismatch" } };
+    } else {
+      out.advance_id = wire.advanceId;
     }
-    out.advance_id = wire.advanceId;
   }
   if (wire.correctsClaimId !== undefined && wire.correctsClaimId !== null) {
     if (typeof wire.correctsClaimId !== "string" || !UUID_RE.test(wire.correctsClaimId)) {

@@ -31,6 +31,7 @@ import {
   CLAIM_SOURCE_KINDS,
   emptyClaimDraft,
   emptyClaimItem,
+  type ClaimAllocationDraft,
   type ClaimDraft,
   type ClaimItemDraft,
 } from "./staff-expense-claim";
@@ -97,7 +98,7 @@ function parseDraft(raw: string): StoredClaimDraft | null {
   const texts = [
     "claimantEnrolmentId", "claimantAccountCode", "claimantPersonLabel", "claimantAttestation",
     "claimantIdentifier", "instruction", "incurredDate", "postingDate",
-    "payableAccountCode", "advanceAccountCode", "advanceId", "paymentAccountCode",
+    "payableAccountCode", "advanceAccountCode", "paymentAccountCode",
   ] as const;
   for (const key of texts) if (!isString(d[key])) return null;
   if (typeof d.claimantConfirmDedicated !== "boolean") return null;
@@ -109,12 +110,36 @@ function parseDraft(raw: string): StoredClaimDraft | null {
     items.push(item);
   }
 
+  // #931 — THE CONFIRMED ALLOCATION LIST. A draft filed BEFORE this ticket carries a single
+  // `advanceId` and no list at all; it restores as the ONE-LINE list that means the same claim,
+  // because a preparer who left the page mid-claim should come back to their claim, not to an
+  // empty settlement arm. Anything else is UNTRUSTED INPUT and is refused whole, like every field
+  // above: a half-read allocation is a figure nobody typed.
+  const allocations: ClaimAllocationDraft[] = [];
+  if (d.advanceAllocations === undefined) {
+    if (!isString(d.advanceId)) return null;
+    allocations.push({ advanceId: d.advanceId, amountCents: 0 });
+  } else {
+    if (!Array.isArray(d.advanceAllocations) || d.advanceAllocations.length < 1) return null;
+    for (const one of d.advanceAllocations) {
+      if (typeof one !== "object" || one === null) return null;
+      const row = one as Record<string, unknown>;
+      if (!isString(row.advanceId)) return null;
+      if (typeof row.amountCents !== "number" || !Number.isSafeInteger(row.amountCents)
+          || row.amountCents < 0) {
+        return null;
+      }
+      allocations.push({ advanceId: row.advanceId, amountCents: row.amountCents });
+    }
+  }
+
   const draft: ClaimDraft = { ...emptyClaimDraft() };
   for (const key of texts) draft[key] = d[key] as string;
   draft.claimantConfirmDedicated = d.claimantConfirmDedicated;
   draft.settlement = d.settlement as ClaimDraft["settlement"];
   draft.sourceKind = d.sourceKind as ClaimDraft["sourceKind"];
   draft.items = items;
+  draft.advanceAllocations = allocations;
 
   return {
     intentKey: stored.intentKey,

@@ -26,6 +26,7 @@ import {
   enrolStaffAdvanceAccount,
   retireStaffAdvanceAccount,
   type BookStaffAdvanceApplicationResult,
+  isOutstandingAdvance,
 } from "@/lib/registers/staff-advances-doors";
 import { fmtCents, shortId } from "@/lib/registers/money";
 import { SectionHeader } from "@/components/common/section-header";
@@ -73,7 +74,7 @@ export function StaffAdvancesRegister({ clientId }: { clientId: string }) {
   }
 
   const accountCodes = Array.from(new Set(data.accounts.map((a) => a.account_code))).sort();
-  const outstandingAdvances = data.summary.advances.filter((a) => a.outstanding_cents > 0 && !a.voided);
+  const outstandingAdvances = data.summary.advances.filter(isOutstandingAdvance);
   const activeAccounts = data.accounts.filter((a) => a.active);
   const retiredAccounts = data.accounts.filter((a) => !a.active);
 

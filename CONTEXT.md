@@ -707,6 +707,16 @@ _Avoid_: An AP open item; a counterparty.
 The discharge of a recorded staff advance by a stated allocation: WHICH advance, for how much, effective on the day the money actually moved. The register never infers it — a credit on an enrolled advance account that does not say which advance it discharges is refused by name.
 _Avoid_: A silent FIFO; a GL credit with no named advance.
 
+**Allocation list**:
+The advances one staff expense claim discharges and by how much, stated explicitly and confirmed by
+the person: one line per advance, adding up to the claim to the cent. The register offers a
+date-ordered suggestion (oldest advance first) as a one-click pre-fill, and what is stored is always
+the list that was confirmed — which is how an ordering can be offered without becoming a silent
+FIFO. Every advance on it belongs to the claimant on an enrolled account, and each line passes the
+advance's own temporal cap by itself.
+_Avoid_: A suggestion treated as a decision; a partial settlement; an allocation the register
+apportioned on its own.
+
 **Claimant handle**:
 The staff-advance enrolment a claim is recorded against — an account dedicated to one person, carrying the name the register shows and the professional's own written attestation. It is what lets two claims by one person be read together. NAMED LIMIT: it is a label on an ACCOUNT, not a person record, and the estate holds no staff master; two people who have never been given a dedicated account cannot be told apart by it.
 _Avoid_: An employee record; a user; a counterparty; a free-text name typed on each claim.

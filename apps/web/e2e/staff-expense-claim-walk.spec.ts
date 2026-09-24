@@ -203,7 +203,11 @@ test("t638 the SETTLEMENT switch preserves what was typed, and only the active l
   // Switch to the advance arm — a Radio Group with a FieldSet legend (appendix D #46).
   await page.getByRole("radio", { name: "It discharges an advance they already hold" }).click();
   await field(page, "advanceAccountCode").selectOption(SEC.advance);
-  await field(page, "advanceId").fill(SEC.advanceId);
+  // #930 — NO MORE TYPING AN ID: the claimant's own outstanding advance is CHOSEN from a list fed
+  // by `staff_advance_summary`, each option naming its booking date and outstanding amount.
+  await expect(field(page, "advanceId")).toContainText(SEC.advanceIssueDate);
+  await expect(field(page, "advanceId")).toContainText("400.00");
+  await field(page, "advanceId").selectOption(SEC.advanceId);
   // The reimbursement control is gone from the page while its arm is inactive.
   await expect(field(page, "payableAccountCode")).toHaveCount(0);
 
@@ -493,4 +497,48 @@ test("t638 every control has a screen-reader name, and the keyboard reaches the 
   await expect(submit).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT}/work/${SEC.workId}$`));
+});
+
+// ---------------------------------------------------------------------------------------------
+// #931 — SEVERAL ADVANCES, ONE CLAIM. The chooser #930 built is now the FIRST LINE of a list, and
+// "suggest by date" pre-fills that list oldest-advance-first. The ordering is OFFERED, never
+// applied behind the preparer (WD-R10): this cell overrides the suggestion and proves the browser
+// sends the CONFIRMED split.
+// ---------------------------------------------------------------------------------------------
+
+test("t931 the advance arm suggests a date-ordered split, and sends the split the person confirmed", async ({ page }) => {
+  await page.goto(FORM_URL);
+  await fillClaim(page);
+  await page.getByRole("radio", { name: "It discharges an advance they already hold" }).click();
+  await field(page, "advanceAccountCode").selectOption(SEC.advance);
+
+  // BOTH of Farah's open advances are offered, each naming its booking date and outstanding amount.
+  await expect(field(page, "advanceId")).toContainText(SEC.advanceIssueDate);
+  await expect(field(page, "advanceId")).toContainText(SEC.olderAdvanceIssueDate);
+  await expect(field(page, "advanceId")).toContainText("300.00");
+
+  // ONE CLICK FILLS THE LIST OLDEST FIRST: January's 300.00 in full, then 180.00 of February's,
+  // which is the whole 480.00 claim. The second line exists only because the suggestion made it.
+  await page.getByTestId("advance-suggest").click();
+  await expect(field(page, "advanceAllocations.1.advanceId")).toBeVisible();
+  await expect(field(page, "advanceId")).toHaveValue(SEC.olderAdvanceId);
+  await expect(field(page, "advanceAllocations.1.advanceId")).toHaveValue(SEC.advanceId);
+
+  // THE PERSON EDITS IT, and what is recorded is what they confirmed: 200.00 / 280.00.
+  await field(page, "advanceAllocations.0.amountCents").fill("200.00");
+  await field(page, "advanceAllocations.1.amountCents").fill("280.00");
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT}/work/`));
+
+  const answer = (await control(page, { op: "received" })) as {
+    received: Array<{ claim: Record<string, unknown> }>;
+  };
+  const claim = answer.received[0]!.claim;
+  expect(claim.settlement).toBe("advance_application");
+  expect(claim.advanceAccountCode).toBe(SEC.advance);
+  expect(claim.advanceAllocations).toEqual([
+    { advanceId: SEC.olderAdvanceId, amountCents: 20000 },
+    { advanceId: SEC.advanceId, amountCents: 28000 },
+  ]);
+  expect(claim.advanceId).toBe(SEC.olderAdvanceId);
 });
