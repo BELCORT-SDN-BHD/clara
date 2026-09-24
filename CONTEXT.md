@@ -790,6 +790,54 @@ clears.
 _Avoid_: Posting a partial entry; filling an unprinted line with zero; smoothing an imbalance into
 the rounding account; a stored refusal a person has to dismiss; a model deciding any of it.
 
+**Financing agreement**:
+An agreement that creates an asset and a liability on the day it is signed — a hire purchase or a
+finance lease, and nothing else. Which one a document is, is read off the words the page uses for
+ITSELF, against a closed list of renderings in both English and Malay; a rendering nothing on that
+list matches is OTHER, and a page that does not say so readably is NOT ESTABLISHED. Those two are
+different answers: one says the page told us something this lane does not act on, the other says
+the page did not tell us. A tenancy, an operating lease and a supply contract are read in full and
+create no entry at signing, because nothing came onto the books that day.
+_Avoid_: A category the model chose; inferring the kind from the figures or from the account it
+would post to; treating "we could not read it" as "it is not a financing agreement"; posting
+anything at all for a tenancy.
+
+**Agreement terms fact state**:
+What Clara established from reading an agreement: per question — what the agreement calls itself,
+the financier, the signing date, what was acquired, the cash price, the deposit or trade-in, the
+amount financed, the total charges, the total payable, the term and the instalment — whether the
+answer is ESTABLISHED (both readings of the page agree on what it prints, and where the page also
+prints a repayment schedule its column sums agree with the printed totals), DISAGREED (the two
+readings differ, a printed total contradicts its column, an instalment fails its own
+principal-plus-interest identity, or the rendering is not a figure at all) or MISSING (the page
+does not print it), and why — together with the two named checks the state carries: deposit plus
+amount financed equals the cash price, and the printed schedule's instalments reconcile to the
+amount financed plus the charges. Every arithmetic result in it is the database evaluator's,
+computed from quoted renderings, and so is the classification; the model quotes and never sums,
+subtracts or judges. A term the page does not print is reported as not printed — stored as a fact
+carrying no rendering and no amount, so a person can see that the page was silent rather than read
+a blank as a zero. The printed repayment schedule is kept, because it is what the agreement says
+and what a later finance-charge allocation must read.
+_Avoid_: An amount financed worked out by subtracting a deposit from a cash price; a total the
+model added up; a blank filled with zero; a deposit inferred because two printed figures differ.
+
+**Agreement posting gate**:
+The closed list of conditions a hire purchase or finance lease has to satisfy before its
+acquisition is posted with nobody watching: both readings of the page agree, every arithmetic check
+passes, the page says readably what kind of agreement it is and it is a financing one, the signing
+date is established, the fiscal year that date falls in is open, the cash price and the amount
+financed are both printed, the two named checks hold, the client has enrolled exactly one
+fixed-asset account, every account the entry needs resolves in this client's own chart, and no
+acquisition for that agreement is already posted. The conditions are asked in a fixed order and the
+FIRST one that fails is the reason a person is told; the rest are still evaluated and travel with
+it, and a condition that was never reached says so rather than passing. An agreement that fails any
+of them posts NOTHING and appears under Needs you naming what failed, which account is missing,
+which accounts it could not choose between or which entry it would duplicate. The verdict is
+derived, never stored, so it clears itself the moment the condition clears.
+_Avoid_: Posting a partial entry; choosing a fixed-asset account from the words the page uses to
+describe what was acquired; filling an unprinted term with zero; smoothing an imbalance into the
+rounding account; a stored refusal a person has to dismiss; a model deciding any of it.
+
 **Fixed asset acquisition**:
 The moment a client takes an asset onto its books: one approved journal entry whose debit lands on
 an enrolled fixed-asset cost account, and — in the SAME transaction, on whichever lane posted it —

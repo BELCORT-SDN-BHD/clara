@@ -5225,3 +5225,27 @@ rather than left to wonder why a filed agreement produced nothing. Section `need
 same model #946 recorded. The web side gains the kind in `REVIEW_QUEUE_ROW_KINDS`, its two
 `messages/en.json` phrases, its `/documents` link and a `null` affordance, with its own test file
 (`lib/firm/needs-you-agreement-posting.test.ts`) rather than more cells in the two shared ones.
+
+**§Z tail.** Everything the file claims, re-derived from the LIVE catalog after every section has
+run: the namespace live and the roster still closed (driven through the CHECK's own boolean, with
+the three neighbour namespaces re-read); `clara._field_path_conforms` byte-unmoved; all eight new
+bodies owned by `clara_fn_owner` and `search_path`-pinned, the two `clara_runtime` doors reachable
+by `clara_runtime` alone and the six internals by no application role at all; the vocabulary gate
+DRIVEN (a complete envelope admitted, a missing question and an unknown key each refused); the
+evaluator registered, frozen at ONE member and `clara.verify_evaluator_freeze()` re-run; each
+family's routing arm at its MEASURED count (a bare substring count would have been wrong —
+`llm_witness` appears 12 times in the live definition and only 2 of them are lane assignments);
+the persist door calling the post and keeping its grant; the queue projecting the new kind exactly
+once; `entry_post_receipts` admitting `contract_facts` beside what it already carried; the registry
+at ONE version with all six agreement pairs re-derived and #946's payroll row untouched; the
+published chart still carrying the four codes 0150 seeds and none appended. It ends with a
+FIXTURE-FREE probe that drives the evaluator, the date parser and the drafting body together
+against a client id that cannot exist — classifying a hire purchase, holding the price identity,
+establishing `14 March 2026`, refusing an unenrolled client by name, and refusing a tenancy with
+exactly one reason and no legs.
+
+**The FIRST-APPLY branch, proven separately** (wave-3 addendum: `CLARA_MIGRATION_REDO` can only ever
+take the marker branch). Inside one rolled-back transaction the lane database's
+`clara._assert_field_path` was restored to 0296's own body, measured back to the exact sha this
+file's prestate pins (`9783e0e7…`), and §A was run verbatim: it reported `OK (FIRST apply)`. The
+transaction was rolled back and the live body re-measured at its post-#948 sha.

@@ -3120,3 +3120,304 @@ begin
   end loop;
 end
 $w948_lrq$;
+
+-- =====================================================================================
+-- §Z  TAIL. Everything this file claims to have done, re-derived from the live catalog.
+--
+--     TWO NEW GRANTED OBJECTS, SO ONE rig-meta COHORT. clara.persist_agreement_facts and
+--     clara.fail_agreement_facts are clara_runtime doors and sit in AGREEMENT_0299_COHORT
+--     (packages/db/tests/rig-meta.mjs) together with their names in ALLOWED[clara_runtime].
+--     Every OTHER body this file adds is an INTERNAL, reached from bodies that are already
+--     granted: the persist door calls the poster, and clara.list_review_queue
+--     (clara_authenticated, viewer-floored) calls the verdict. The T17 sweep's
+--     "expected = false" over those names IS the assertion for them, and the grant check below
+--     is the second belt. #948 adds NO human door: the decision is machine-made, the terms a
+--     person reads come back through the ordinary document read, and the only new surface is the
+--     Needs-you row.
+-- =====================================================================================
+do $w948_tail$
+declare
+  v_def text; v_code text; v_n int; v_sha text; v_state jsonb; v_plan jsonb; r record;
+  v_env jsonb; v_text jsonb; v_vision jsonb;
+begin
+  -- 1 · THE GRAMMAR REGISTERS `contract` AND STILL REFUSES EVERYTHING OUTSIDE ITS ROSTER, driven
+  --     through the CHECK's own boolean sibling rather than asserted from the body text.
+  if clara._field_path_conforms('contract.agreement.cash_price') is not true
+     or clara._field_path_conforms('contract.schedule.instalment') is not true then
+    raise exception '#948 tail: a contract field path does not conform -- the namespace did not land'
+      using errcode = 'CLR10';
+  end if;
+  begin
+    perform clara._field_path_conforms('contrakt.agreement.cash_price');
+    raise exception '#948 tail: a typo''d namespace was ADMITTED -- the roster is no longer closed'
+      using errcode = 'CLR10';
+  exception when sqlstate 'CLR10' then
+    null;   -- the grammar's own refusal, which is the behaviour asserted here
+  end;
+  -- The neighbour namespaces are untouched: this file widened the roster by ONE.
+  for r in select * from (values ('invoice.total'),('payroll.run.gross_pay'),('statement.period_start')) as t(p) loop
+    if clara._field_path_conforms(r.p) is not true then
+      raise exception '#948 tail: % stopped conforming -- the recut roster dropped a neighbour', r.p
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- 2 · THE SIBLING THE CHECK EVALUATES IS BYTE-UNTOUCHED. 0299 recuts the grammar, not the wall.
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._field_path_conforms(text)'::regprocedure;
+  if v_sha is distinct from 'a97a4709117e698267fe900332cc666c818a241214894520ad773791b761cca3' then
+    raise exception '#948 tail: clara._field_path_conforms MOVED during this migration (sha %)', v_sha
+      using errcode = 'CLR10';
+  end if;
+
+  -- 3 · EVERY NEW BODY EXISTS, IS OWNED BY clara_fn_owner AND PINS ITS search_path; the internals
+  --     are EXECUTE-reachable by NO application role, and the two doors by clara_runtime alone.
+  for r in select * from (values
+      ('clara._agreement_answers_ok(jsonb,text)', false),
+      ('clara.evaluate_agreement_contract_state_v1(jsonb,jsonb)', false),
+      ('clara._agreement_signed_date(text)', false),
+      ('clara._agreement_entry_plan(uuid,jsonb)', false),
+      ('clara._agreement_posting_verdict(uuid)', false),
+      ('clara._post_agreement_acquisition(uuid)', false),
+      ('clara.persist_agreement_facts(uuid,jsonb,jsonb,integer)', true),
+      ('clara.fail_agreement_facts(uuid,text)', true)
+      ) as t(sig, runtime_door) loop
+    if to_regprocedure(r.sig) is null then
+      raise exception '#948 tail: % is absent', r.sig using errcode = 'CLR10';
+    end if;
+    if (select p.proowner::regrole::text from pg_proc p where p.oid = r.sig::regprocedure)
+       is distinct from 'clara_fn_owner' then
+      raise exception '#948 tail: % is not owned by clara_fn_owner', r.sig using errcode = 'CLR10';
+    end if;
+    if (select coalesce(array_to_string(p.proconfig, ','), '') from pg_proc p
+         where p.oid = r.sig::regprocedure) not like '%search_path=%' then
+      raise exception '#948 tail: % does not pin its search_path', r.sig using errcode = 'CLR10';
+    end if;
+    -- NOT a proacl-is-null test: `revoke all ... from public` leaves the owner's own entry
+    -- behind, so a non-null ACL here is the NORMAL shape of an ungranted body. What matters is
+    -- that PUBLIC cannot execute it, and that the two doors are reachable by clara_runtime while
+    -- the internals are reachable by no application role at all.
+    if exists (select 1 from aclexplode((select p.proacl from pg_proc p where p.oid = r.sig::regprocedure)) a
+                where a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+      raise exception '#948 tail: % is EXECUTE-reachable by PUBLIC', r.sig using errcode = 'CLR10';
+    end if;
+    if r.runtime_door then
+      if not pg_catalog.has_function_privilege('clara_runtime', r.sig, 'EXECUTE') then
+        raise exception '#948 tail: % is not reachable by clara_runtime -- the worker cannot settle', r.sig
+          using errcode = 'CLR10';
+      end if;
+      if pg_catalog.has_function_privilege('clara_authenticated', r.sig, 'EXECUTE') then
+        raise exception '#948 tail: % is reachable by clara_authenticated -- #948 mints no human door', r.sig
+          using errcode = 'CLR10';
+      end if;
+    else
+      for v_code in select unnest(array['clara_authenticated','clara_agent_ro','clara_runtime']) loop
+        if pg_catalog.has_function_privilege(v_code, r.sig, 'EXECUTE') then
+          raise exception '#948 tail: % is EXECUTE-reachable by % -- it is an internal', r.sig, v_code
+            using errcode = 'CLR10';
+        end if;
+      end loop;
+    end if;
+  end loop;
+
+  -- 4 · THE VOCABULARY GATE IS CLOSED, DRIVEN rather than asserted: a complete envelope is
+  --     admitted, the same envelope missing one answer is refused, and one carrying an extra key
+  --     is refused.
+  v_env := jsonb_build_object('contract', jsonb_build_object(
+    'channel','text',
+    'answers', (select jsonb_object_agg(f, jsonb_build_object('state','value','raw','1.00'))
+                  from unnest(array['contract.agreement.kind','contract.agreement.financier',
+                    'contract.agreement.agreement_date','contract.agreement.asset_description',
+                    'contract.agreement.cash_price','contract.agreement.deposit',
+                    'contract.agreement.amount_financed','contract.agreement.total_charges',
+                    'contract.agreement.total_payable','contract.agreement.term_months',
+                    'contract.agreement.instalment_amount']) f),
+    'rows','[]'::jsonb));
+  if not clara._agreement_answers_ok(v_env,'text') then
+    raise exception '#948 tail: a complete agreement envelope was REFUSED by its own vocabulary gate'
+      using errcode = 'CLR10';
+  end if;
+  if clara._agreement_answers_ok(
+       jsonb_set(v_env, '{contract,answers}', (v_env->'contract'->'answers') - 'contract.agreement.total_payable'),
+       'text') then
+    raise exception '#948 tail: an envelope missing contract.agreement.total_payable was ADMITTED -- every question must be answered'
+      using errcode = 'CLR10';
+  end if;
+  if clara._agreement_answers_ok(
+       jsonb_set(v_env, '{contract,answers,contract.agreement.residual_value}',
+                 jsonb_build_object('state','value','raw','1.00')),
+       'text') then
+    raise exception '#948 tail: an envelope carrying an UNKNOWN question was ADMITTED -- the vocabulary is not closed'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 5 · THE EVALUATOR IS REGISTERED AND FROZEN AT ONE MEMBER, and the freeze verifies.
+  if not exists (select 1 from clara.evaluator_versions v
+                  where v.evaluator_name = 'evaluate_agreement_contract_state' and v.version = 1) then
+    raise exception '#948 tail: the evaluator is not registered in clara.evaluator_versions'
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.evaluator_version_members m
+    join clara.evaluator_versions v on v.id = m.evaluator_version_id
+   where v.evaluator_name = 'evaluate_agreement_contract_state' and v.version = 1;
+  if v_n <> 1 then
+    raise exception '#948 tail: the registered closure has % member(s), expected exactly 1', v_n
+      using errcode = 'CLR10';
+  end if;
+  perform clara.verify_evaluator_freeze();
+
+  -- 6 · THE ROUTER'S FIVE RECUT BODIES CARRY THE NEW LANE, and every other family's route is
+  --     still exactly where it was. Counts MEASURED on this rig, never guessed.
+  for r in select * from (values
+      ('clara._enqueue_invoice_facts_core(uuid)', 'contract_facts'),
+      ('clara.enqueue_invoice_facts(uuid)', 'contract_facts'),
+      ('clara._tf_processing_task_update()', 'contract_facts'),
+      ('clara.claim_document_processing_task(uuid,text,boolean)', 'contract_facts'),
+      ('clara.release_held_document_tasks(integer)', 'contract_facts')
+      ) as t(sig, marker) loop
+    select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = r.sig::regprocedure;
+    if position(r.marker in v_def) = 0 then
+      raise exception '#948 tail: % does not carry %', r.sig, r.marker using errcode = 'CLR10';
+    end if;
+  end loop;
+  -- The ROUTING ARMS specifically, counted at the assignment that makes each one -- a bare
+  -- substring count over the whole body would also count comments and receipt arms (measured:
+  -- `llm_witness` appears 12 times in the live definition, only 2 of them as a lane assignment).
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+   where p.oid = 'clara._enqueue_invoice_facts_core(uuid)'::regprocedure;
+  for r in select * from (values
+      ($$v_lane:='llm_witness'$$, 2),
+      ($$v_lane:='statement_facts'$$, 1),
+      ($$v_lane:='payroll_facts'$$, 1),
+      ($$v_lane:='contract_facts'$$, 1),
+      ($$'skipped_kind'$$, 3)
+      ) as t(marker, want) loop
+    v_n := (length(v_def) - length(replace(v_def, r.marker, ''))) / length(r.marker);
+    if v_n <> r.want then
+      raise exception '#948 tail: the router names "%" % time(s), expected the % measured on this rig -- another family''s route moved', r.marker, v_n, r.want
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- 7 · THE PERSIST DOOR KEEPS ITS clara_runtime GRANT AND NOW CALLS THE POST; the queue keeps
+  --     its clara_authenticated grant and projects the new row kind exactly once.
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+   where p.oid = 'clara.persist_agreement_facts(uuid,jsonb,jsonb,integer)'::regprocedure;
+  if position('_post_agreement_acquisition' in v_def) = 0 then
+    raise exception '#948 tail: the persist door does not call the post -- the lane reads without posting'
+      using errcode = 'CLR10';
+  end if;
+  if not pg_catalog.has_function_privilege('clara_authenticated','clara.list_review_queue(jsonb,jsonb,integer)','EXECUTE') then
+    raise exception '#948 tail: clara.list_review_queue lost its clara_authenticated grant' using errcode = 'CLR10';
+  end if;
+  v_code := regexp_replace(regexp_replace(
+    (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = 'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure),
+    '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  v_n := (length(v_code) - length(replace(v_code, '''agreement_posting_blocked''::text row_kind', '')))
+         / length('''agreement_posting_blocked''::text row_kind');
+  if v_n <> 1 then
+    raise exception '#948 tail: the queue projects agreement_posting_blocked % time(s), expected 1', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- 8 · THE RECEIPT TABLE ADMITS THE LANE THAT POSTS, beside the four it already admitted.
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'clara.entry_post_receipts'::regclass
+       and conname = 'entry_post_receipts_via_wake_kind_check'
+       and pg_get_constraintdef(oid) like '%contract_facts%'
+       and pg_get_constraintdef(oid) like '%payroll_facts%'
+       and pg_get_constraintdef(oid) like '%autodraft%') then
+    raise exception '#948 tail: entry_post_receipts.via_wake_kind does not admit contract_facts beside the kinds it already carried'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 9 · THE REGISTRY IS RE-DERIVED, WHOLE, AT ONE VERSION, and this file appended no row to it
+  --     and no row to the published standard chart.
+  select count(distinct registry_version)::int into v_n from clara.document_capabilities;
+  if v_n <> 1 then
+    raise exception '#948 tail: the registry publishes % versions, expected exactly 1', v_n using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where document_kind = 'agreement_contract'
+     and (mime_type = 'application/pdf' or mime_type like 'image/%')
+     and typed_facts = 'supported' and business_operation = 'supported'
+     and limits ? 'agreement_non_financing' and limits ? 'agreement_asset_account';
+  if v_n <> 6 then
+    raise exception '#948 tail: % of the six pdf/image agreement pairs carry the re-derived verdict, expected 6', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where document_kind = 'payroll_summary' and mime_type = 'application/pdf'
+     and typed_facts = 'supported' and business_operation = 'stored_only';
+  if v_n <> 1 then
+    raise exception '#948 tail: #946''s payroll row moved -- this file republishes the VERSION, never another ticket''s verdict'
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.coa_template_accounts a
+    join clara.coa_templates t on t.id = a.template_id
+   where t.template_key = 'my_sme_starter' and t.state = 'published'
+     and a.account_code in ('2430','2440','2450','2010');
+  if v_n <> 4 then
+    raise exception '#948 tail: the published standard chart carries % of the four codes this lane posts to, expected the 4 that 0150 already seeds (this file appends none)', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- 10 · A FIXTURE-FREE PROBE that drives the evaluator, the date parser and the drafting body
+  --      together. It uses a client id that cannot exist, so the chart lookup and the enrolment
+  --      lookup both find nothing -- which is exactly the state whose refusals this asserts.
+  v_text := jsonb_build_object('contract', jsonb_build_object('channel','text','rows','[]'::jsonb,
+    'answers', jsonb_build_object(
+      'contract.agreement.kind', jsonb_build_object('state','value','raw','Hire Purchase Agreement'),
+      'contract.agreement.financier', jsonb_build_object('state','value','raw','Probe Bank Berhad'),
+      'contract.agreement.agreement_date', jsonb_build_object('state','value','raw','14 March 2026'),
+      'contract.agreement.asset_description', jsonb_build_object('state','value','raw','probe lorry'),
+      'contract.agreement.cash_price', jsonb_build_object('state','value','raw','120,000.00'),
+      'contract.agreement.deposit', jsonb_build_object('state','value','raw','20,000.00'),
+      'contract.agreement.amount_financed', jsonb_build_object('state','value','raw','100,000.00'),
+      'contract.agreement.total_charges', jsonb_build_object('state','not_printed'),
+      'contract.agreement.total_payable', jsonb_build_object('state','not_printed'),
+      'contract.agreement.term_months', jsonb_build_object('state','value','raw','36'),
+      'contract.agreement.instalment_amount', jsonb_build_object('state','not_printed'))));
+  v_vision := jsonb_set(v_text, '{contract,channel}', '"vision"'::jsonb);
+  v_state := clara.evaluate_agreement_contract_state_v1(v_text, v_vision);
+  if v_state->>'agreement_class' is distinct from 'hire_purchase' or (v_state->>'financing')::boolean is not true then
+    raise exception '#948 tail probe: the evaluator did not classify a page headed "Hire Purchase Agreement" (%)',
+      v_state->>'agreement_class' using errcode = 'CLR10';
+  end if;
+  if v_state->'checks'->'price_identity'->>'state' is distinct from 'holds' then
+    raise exception '#948 tail probe: 20,000 + 100,000 = 120,000 did not hold (%)',
+      v_state->'checks'->'price_identity' using errcode = 'CLR10';
+  end if;
+  v_plan := clara._agreement_entry_plan('00000000-0000-4000-8000-000000000000'::uuid, v_state);
+  if v_plan->>'posting_date' is distinct from '2026-03-14' then
+    raise exception '#948 tail probe: "14 March 2026" did not establish the signing date (posting_date %) -- the parser is not live',
+      v_plan->>'posting_date' using errcode = 'CLR10';
+  end if;
+  if (v_plan->>'ready')::boolean is not false
+     or not exists (select 1 from jsonb_array_elements(v_plan->'refusals') x
+                     where x->>'reason' = 'asset_account_unresolved') then
+    raise exception '#948 tail probe: a client with no fixed-asset enrolment did not produce a NAMED asset_account_unresolved refusal (%)', v_plan
+      using errcode = 'CLR10';
+  end if;
+  if jsonb_array_length(coalesce(v_plan->'legs','[]'::jsonb)) <> 0 then
+    raise exception '#948 tail probe: legs were drafted for a client holding no chart at all' using errcode = 'CLR10';
+  end if;
+  -- …and the non-financing branch refuses by NAME, with no complaint about accounts it never
+  -- looked up.
+  v_plan := clara._agreement_entry_plan(
+    '00000000-0000-4000-8000-000000000000'::uuid,
+    clara.evaluate_agreement_contract_state_v1(
+      jsonb_set(v_text, '{contract,answers,contract.agreement.kind}', jsonb_build_object('state','value','raw','Tenancy Agreement')),
+      jsonb_set(v_vision, '{contract,answers,contract.agreement.kind}', jsonb_build_object('state','value','raw','Tenancy Agreement'))));
+  if (v_plan->>'agreement_class') is distinct from 'tenancy'
+     or (v_plan->>'stage') is distinct from 'kind'
+     or jsonb_array_length(v_plan->'refusals') <> 1
+     or v_plan->'refusals'->0->>'reason' is distinct from 'not_a_financing_agreement' then
+    raise exception '#948 tail probe: a tenancy did not refuse by name with exactly one reason (%)', v_plan
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice '#948 tail: OK -- the contract namespace is live and the roster still closed; clara._field_path_conforms is byte-unmoved; eight new bodies are owned by clara_fn_owner and search_path-pinned, the two clara_runtime doors reachable by clara_runtime alone and the six internals by no application role; the vocabulary gate admits a complete envelope and refuses both a missing question and an unknown one; the evaluator is registered, frozen at ONE member and re-verifies; the router''s five recut bodies carry contract_facts while every other family''s routing arm stays at its measured count; the persist door calls the post and keeps its grant; the queue projects agreement_posting_blocked exactly once and keeps its clara_authenticated grant; entry_post_receipts admits contract_facts beside the kinds it already carried; the registry publishes ONE version with all six pdf/image agreement pairs re-derived and #946''s payroll row untouched; the published standard chart still carries the four codes 0150 seeds and this file appends none; and a fixture-free probe drove the evaluator, the date parser and the drafting body together -- classifying a hire purchase, holding the price identity, establishing 14 March 2026 from the page''s own rendering, refusing an unenrolled client BY NAME, and refusing a tenancy with exactly one reason and no legs.';
+end
+$w948_tail$;

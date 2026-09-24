@@ -329,4 +329,16 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "012f01664c276cbbebd1f39581db2a39315a786a8b7f6c582300e12bda0bb90b",
     },
   ],
+  // #948 [0299] (riders wave 4, lane 01) — the agreement-contract reading and acquisition lane:
+  // the SAME 0146/0168/0180/0260/0288/0297/0298 splice family for the review queue, plus the five
+  // router-side recuts the new lane needs and one recut of its own persist door. Appended at the
+  // sorted position.
+  [
+    "0299_agreement_contract_acquisition.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly SEVEN named FUNCTIONS, each read at its own literal regprocedure spelled in this file \u2014 clara._enqueue_invoice_facts_core(uuid) (one routing arm, one engine-kind arm, one consent gate and one lane-true cap emit), clara.enqueue_invoice_facts(uuid) (the invoice-twin exclusion), clara._tf_processing_task_update() (two lane-scoped verdict arms), clara.claim_document_processing_task(uuid,text,boolean) (kill switch, attempt cap, cap emit, concurrency window), clara.release_held_document_tasks(integer) (both lane lists), clara.persist_agreement_facts(uuid,jsonb,jsonb,integer) (one declaration and one call to clara._post_agreement_acquisition before its existing final return) and clara.list_review_queue(jsonb,jsonb,integer) (one agreement_rows CTE and one union arm, in the 0146/0260/0297/0298 idiom). Every anchor is asserted to occur EXACTLY once before replacing, and every anchor and replacement is a single dollar-quoted literal so each statement is reconstructible \u2014 no concatenation chain and no chr(). Six of the seven return jsonb and the seventh is a trigger function, so none can emit a view definition of any kind, and the file contains no `create view` of any spelling at all \u2014 static or spliced \u2014 so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Each splice detects its own marker in the INSTALLED body and no-ops on a redo, and every postcheck re-reads the COMMITTED catalog in either branch: the router recut for each family's routing arm at its measured count, the persist recut for the three sect-F regions it must not have disturbed, the queue recut for every one of the thirteen pre-existing row-kind markers at its exact count plus one. Every other object this migration creates is static DDL the lexer inspects directly \u2014 eight `create or replace function` statements at literal signatures (the grammar, the answer vocabulary, the evaluator, the date parser, the drafting body, the posting gate, the poster and the two lane doors), five CHECK swaps on clara.document_processing_tasks / clara.document_extractions and one on clara.entry_post_receipts, two event-type inserts and one UPDATE of clara.document_capabilities \u2014 and the file appends NO chart row at all, which its own tail re-derives.",
+      sha256: "62a51563962cb093aae152182c28afa2b278646d680ab1ff11fbdfc653db6855",
+    },
+  ],
 ]);
