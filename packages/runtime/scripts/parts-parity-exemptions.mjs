@@ -352,6 +352,17 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/workflows/statementFacts.v3.header.mjs","deriveStatementPeriod","...asIs","27d26f3548b1ae65af183a256c1496cacab289385e3e54ce0ad1cada467c4b5e","0"],
   ["packages/runtime/workflows/statementFacts.v3.header.mjs","deriveStatementPeriod","...asIs","2fe599f351fe67e04dd8becfba4ad76336d52dc6575f28a0f24bad1f0f823253","0"],
   ["packages/runtime/workflows/statementFacts.v3.header.mjs","normalizeStatementHeaderV3","...source","e11871d6f19f8ecdc74e388c15feb9f0489a28d77c7a25eb18cd33f72728e614","0"],
+  // statementFacts_v4 (#1037 — the producer half of #990's per-line source citation). The two
+  // behaviour sites are the v2/v3 statements carried over UNCHANGED: their fingerprints are
+  // byte-identical to the v2 and v3 rows above, which IS the evidence that the metered-channel
+  // wrapper did not move in this version. The third is new and is the whole of what v4 adds — a
+  // merge that copies one writer line and sets `page` and `region` on the copy. It assigns no
+  // `type` and constructs no Clara part: this closure emits no `parts[]` entry at all, it builds
+  // a jsonb payload for `clara.persist_statement_facts_v2`. No `.parts.ts` is owed and the web
+  // parts census is untouched (CUT-PLAN section 2.6), because no wire kind is added.
+  ["packages/runtime/workflows/statementFacts.v4.behavior.mjs","withMeteredStatementChannel","...(out.usage ?? {})","eb1f116bd1e79af670968f3ac7d4aa7a81fc29a8475d9b136a3ab0fbc23c06c9","0"],
+  ["packages/runtime/workflows/statementFacts.v4.behavior.mjs","withMeteredStatementChannel","...out","6d340dfea25133a71c60f9fb625992d27930b6f9eb8abf205fee061488bb59cd","0"],
+  ["packages/runtime/workflows/statementFacts.v4.citations.mjs","attachStatementLineCitations","...line","a53b3368779f4e06362aa1f80c05981ade3dbddb5e5e6f638b7458c0ed7ce867","0"],
   ["packages/runtime/workflows/witnessFacts.v1.behavior.mjs","withMeteredChannel","...(out.usage ?? {})","eb1f116bd1e79af670968f3ac7d4aa7a81fc29a8475d9b136a3ab0fbc23c06c9","0"],
   ["packages/runtime/workflows/witnessFacts.v1.behavior.mjs","withMeteredChannel","...out","6d340dfea25133a71c60f9fb625992d27930b6f9eb8abf205fee061488bb59cd","0"],
   ["packages/runtime/workflows/witnessFacts.v1.prompts.mjs","normalizeAnswer","...answer","d61b0936253c4b3c18a86fe85ab81b1b922063a2a7944a751ea72dc5c76980bf","0"],

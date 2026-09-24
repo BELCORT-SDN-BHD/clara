@@ -19,6 +19,33 @@ The registry selects the current chat, autodraft, statement/witness facts, docum
 firm interview, client onboarding, and bank/close wake workflows. Read it for the exact versions
 and retained exports; repository state alone is not evidence of a deployed image.
 
+### The pin the wave 2026-09-25 cut moved
+
+`statementFacts → statementFacts_v4`. Every superseded body stays exported and in `workflowBodies`
+— v1, v2 and v3 — because the boot census refuses to start the world database-wide if a body a
+parked run needs is missing, and that is policy (c) enforced rather than promised. What the new
+body carries, and nothing more:
+
+* **`statementFacts_v4`** (#1037, the producer half of #990) — ONE fact, on ONE channel. The TEXT
+  reader, which is the only one shown the numbered `clara.witness_citation_regions` rendering, is
+  asked to answer `region_idx` per statement line: the bracketed number of the region it read that
+  row from. `statementFacts.v4.citations.mjs` resolves that index back to the region's own page
+  and its `clara.document_regions.locator` — the same join the v2 dispatch already performs, run
+  for the column that one discards — and attaches `{page, region}` to the matching reader1 line
+  BEFORE the payload is built. So a bank statement line a person is asked to match can finally say
+  where it was read from, which is what migration 0291 (#990, applied 2026-09-20) built the
+  `citation_extraction_id` / `citation_page` / `citation_region` columns for and what no live
+  producer could state. The VISION channel is untouched: it sees no regions, and 0291's splice
+  reads reader1 alone. NO new wire kind, NO new door, NO widened `WORK_ACCEPTED_PURPOSES`, and NO
+  migration — `clara.persist_statement_facts_v2(p_task uuid, p_payload jsonb)` is unchanged in
+  name and argument order, and the refusal mapping is inherited (a malformed per-line shape is
+  CLR10 `{"reason":"chain_broken"}`, a citation on a lane with no second reader is CLR10
+  `{"reason":"internal"}`). **No deploy order**: 0291 has been live since 2026-09-20, so a v4
+  payload cannot meet a database that does not understand it, and a rollback to v3 is fail-closed
+  for free — a v3 payload simply states no citation, which is the state every line is in today.
+  A line the reader could not honestly cite persists uncited and the Matching tab says so in
+  words; #990's three-state face is unchanged by this version.
+
 ### The two pins the wave 2026-09-18 cut moved
 
 `chatTurn → chatTurn_v21`, `claraWork → claraWork_v5`. Every superseded body stays exported and in

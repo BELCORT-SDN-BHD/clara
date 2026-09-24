@@ -1529,8 +1529,16 @@
       "sha256": "cde50accd520e2e3661145d97dfe73a1e7185228ad04e004ad2656e725414c48",
       "note": ""
     },
+    "packages/runtime/workflows/statementFacts.v4.impl.ts": {
+      "sha256": "fa5d5fa70abea18cead6484b53ebea4596e5d182398b91bde9117c424fc226e8",
+      "note": ""
+    },
     "packages/runtime/workflows/statementFacts.v4.prompts.mjs": {
       "sha256": "c4daba2517125701296a74ca521b460cd32fdd6376be02db277711edd8424c56",
+      "note": ""
+    },
+    "packages/runtime/workflows/statementFacts.v4.ts": {
+      "sha256": "847c25f638509248bb12fa5524d208c0ab146ff404ad2286a1b2c52ed295ab82",
       "note": ""
     },
     "packages/runtime/workflows/steps.ts": {
