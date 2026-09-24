@@ -1987,3 +1987,89 @@ revoke all on function clara.settle_rent_payable(uuid,uuid,uuid,text) from publi
 grant execute on function clara.settle_rent_payable(uuid,uuid,uuid,text) to clara_authenticated;
 
 reset role;
+
+set role clara_fn_owner;
+
+-- =====================================================================================
+-- §I  THE DEPOSIT (AC5) -- clara.get_tenancy_deposit_coding(p_client uuid).
+--
+--     "The deposit is recorded as a term and NEVER drafted, because signing does not say the
+--     money moved; when a payment matching the deposit appears on the bank surface, the
+--     deposits-paid account is the proposed coding." (the brief.) Both halves are here, and
+--     nothing else is: there is NO write door in this section at all, deliberately. Coding a bank
+--     line is the coding lane's own act, through the doors a person already uses; what this lane
+--     owes is the OFFER -- the deposit it read, the line that could be it, and the account the
+--     standard chart already ships for exactly this.
+--
+--     `1120 Deposits Paid` is consumed by code AND name from the published standard chart
+--     (WAVE-4 LANE RULE (a)); this file inserts no chart row. A client who does not hold it is
+--     TOLD so (`proposed_account_in_chart: false`) rather than offered a code their chart cannot
+--     take -- the #948 discipline, applied to an offer instead of an entry.
+--
+--     THE WINDOW IS SIXTY DAYS, not the rent settlement's ten, and the reason is the thing being
+--     matched: a month's rent is paid within days of the month it belongs to, while a deposit is
+--     paid once, around commencement, and a tenancy signed on the 5th is routinely funded weeks
+--     before or after. Sixty days either side of the term's first day is the honest span, and a
+--     wider one would start offering unrelated payments of a round number.
+--
+--     `already_coded` IS A LEDGER READ, so the offer clears itself the moment the deposit is
+--     coded -- by any route, with no dismissal act. CONTEXT.md's Settlement candidate row
+--     discipline again, applied to a coding rather than a settlement.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+create or replace function clara.get_tenancy_deposit_coding(p_client uuid)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp
+  as $gtdc$
+declare c record;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if not exists (select 1 from clara.clients cl where cl.id = p_client and cl.firm_id = c.firm) then
+    raise exception 'client not in your firm' using errcode='CLR11';
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+        'document_id', d.document_id,
+        'deposit_cents', d.deposit_cents,
+        'printed_raw', d.printed_raw,
+        'recorded_at', d.recorded_at,
+        'basis_kind', d.basis_kind,
+        'source_region_ids', d.source_region_ids,
+        'term_start', to_char(d.term_start,'YYYY-MM-DD'),
+        'proposed_account_code', '1120',
+        'proposed_account_name', d.account_name,
+        'proposed_account_in_chart', d.account_name is not null,
+        'already_coded', d.coded_cents >= d.deposit_cents,
+        'coded_cents', d.coded_cents,
+        'candidates', case when d.coded_cents >= d.deposit_cents then '[]'::jsonb
+          else clara._rent_settlement_bank_candidates(
+                 p_client, d.deposit_cents,
+                 coalesce(d.term_start, d.recorded_at::date), 60) end)
+      order by d.recorded_at)
+    from (
+      select ct.document_id, ct.amount_cents as deposit_cents, ct.printed_raw, ct.recorded_at,
+             ct.basis_kind, to_jsonb(ct.source_region_ids) as source_region_ids,
+             (select s.term_date from clara.contract_terms s
+               where s.document_id = ct.document_id and s.term_key = 'term_start'
+                 and s.superseded_at is null) as term_start,
+             (select a.name from clara.coa_accounts a
+               where a.client_id = p_client and a.account_code = '1120' and a.is_active) as account_name,
+             coalesce((select sum(jl.debit_cents) - coalesce(sum(jl.credit_cents),0)
+                         from clara.journal_lines jl
+                         join clara.journal_entries je on je.id = jl.entry_id
+                        where jl.account_code = '1120' and je.client_id = p_client
+                          and je.status = 'approved' and je.reversed_by is null), 0) as coded_cents
+        from clara.contract_terms ct
+       where ct.client_id = p_client and ct.term_key = 'deposit' and ct.superseded_at is null
+         and ct.amount_cents > 0
+    ) d
+  ), '[]'::jsonb);
+end $gtdc$;
+
+comment on function clara.get_tenancy_deposit_coding(uuid) is
+  '#949 AC5: per client, every recorded tenancy deposit with the bank lines that could be it and 1120 Deposits Paid as the proposed coding -- an OFFER, never a posting: this lane has no write door for a deposit at all, because signing does not say the money moved. Derived entirely from live state, so it clears itself the moment the deposit is coded by any route. bookkeeper+, clara_authenticated only.';
+
+revoke all on function clara.get_tenancy_deposit_coding(uuid) from public;
+grant execute on function clara.get_tenancy_deposit_coding(uuid) to clara_authenticated;
+
+reset role;

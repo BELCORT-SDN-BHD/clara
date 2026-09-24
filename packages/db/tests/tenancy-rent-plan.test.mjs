@@ -1175,10 +1175,10 @@ async function runningTenancy(sub) {
  *  5th of February and the settlement window is ten days either side, so the entry dates the
  *  cell states must be the entry dates the estate stores. One statement per cell keeps the
  *  statement lane's adjacent-month continuity binding out of a cell that is not about it. */
-async function bankStatement(sub, { client, bank, specs }) {
+async function bankStatement(sub, { client, bank, specs, periodStart = "2026-02-01", periodEnd = "2026-02-28" }) {
   const st = await enterStatement(sub, {
     client, bankAccount: bank, keepPeriod: true,
-    periodStart: "2026-02-01", periodEnd: "2026-02-28", opening: 500000,
+    periodStart, periodEnd, opening: 5000000,
     specs, opKey: opk949("stmt"),
   });
   return st.lines;
@@ -1452,4 +1452,125 @@ test("S6 · the accept door refuses a wrong amount and a month that is already s
     settleRent(sub, { client, entry: right.id, line: again.id }));
   assert.ok(notRent, "an entry that is not an open rent month is refused too");
   assert.equal(detailOf(notRent).reason, "not_an_open_rent_month");
+});
+
+// ---------------------------------------------------------------------------
+// S7 — the deposit (AC5). Recorded as a term, never drafted; offered a coding when the money
+//      actually moves.
+// ---------------------------------------------------------------------------
+
+const depositCoding = async (sub, client) => {
+  const r = await humanQuery(sub, namedCall("get_tenancy_deposit_coding", [{ name: "p_client" }]), [client]);
+  return r.rows[0].result;
+};
+
+test("S7 · no entry is born from the agreement alone: reading a tenancy and recording its terms posts nothing", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+
+  const terms = await getTerms(sub, doc.documentId);
+  assert.equal(Number(byKey(terms.terms, "deposit").amount_cents), DEPOSIT_CENTS,
+    "the deposit is RECORDED — signing states a term");
+
+  const counts = await countsFor(client);
+  assert.equal(counts.entries, 0, "…and NOTHING is posted: signing does not say the money moved");
+  assert.equal(counts.plans, 0);
+
+  // Confirming the rent plan does not change that either: a rent plan is a rent plan.
+  await confirmPlan(sub, { client, document: doc.documentId });
+  assert.equal((await countsFor(client)).entries, 0, "confirming the rent plan books no deposit either");
+
+  const draft = await draftOf(sub, doc.documentId);
+  for (const line of draft.plan.basis.lines) {
+    assert.notEqual(Number(line.debit_cents), DEPOSIT_CENTS, "no leg of the rent plan is the deposit");
+    assert.notEqual(line.account_code, DEPOSITS_PAID, "…and the deposits-paid account is nowhere in it");
+  }
+});
+
+test("S7 · a bank line matching the recorded deposit offers Deposits Paid as the coding, and posts nothing", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  const bank = await freshBank(sub, client);
+
+  assert.deepEqual(
+    (await depositCoding(sub, client))[0].candidates,
+    [],
+    "with no bank line there is nothing to offer, and nothing is guessed",
+  );
+
+  const lines = await bankStatement(sub, {
+    client, bank, periodStart: "2026-01-01", periodEnd: "2026-01-31",
+    specs: [
+      { entryDate: "2026-01-08", description: "TENANCY DEPOSIT SRI DAMANSARA", amountCents: -DEPOSIT_CENTS },
+      { entryDate: "2026-01-09", description: "unrelated payment", amountCents: -(DEPOSIT_CENTS + 500) },
+    ],
+  });
+
+  const offers = await depositCoding(sub, client);
+  assert.equal(offers.length, 1, `one recorded deposit: ${JSON.stringify(offers)}`);
+  const offer = offers[0];
+  assert.equal(offer.document_id, doc.documentId);
+  assert.equal(Number(offer.deposit_cents), DEPOSIT_CENTS);
+  assert.equal(offer.printed_raw, "7,200.00", "the rendering the tenancy prints travels with it");
+  assert.equal(offer.proposed_account_code, DEPOSITS_PAID);
+  assert.equal(offer.proposed_account_name, "Deposits Paid", "…consumed by code AND name from this client's chart");
+  assert.equal(offer.proposed_account_in_chart, true);
+  assert.equal(offer.already_coded, false);
+  assert.equal(offer.candidates.length, 1, "only the line that is exactly the deposit");
+  assert.equal(offer.candidates[0].line_id, lines[0].id);
+  assert.equal(Number(offer.candidates[0].amount_cents), -DEPOSIT_CENTS);
+
+  assert.equal((await countsFor(client)).entries, 0, "an OFFER posts nothing: coding it is the person's act");
+});
+
+test("S7 · the offer clears itself once the deposit is coded, and says so", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  const bank = await freshBank(sub, client);
+  await bankStatement(sub, {
+    client, bank, periodStart: "2026-01-01", periodEnd: "2026-01-31",
+    specs: [{ entryDate: "2026-01-08", description: "TENANCY DEPOSIT", amountCents: -DEPOSIT_CENTS }],
+  });
+  assert.equal((await depositCoding(sub, client))[0].already_coded, false);
+
+  // The person codes it the ordinary way: Dr 1120 Deposits Paid / Cr bank.
+  const drafted = await draftEntry(human(sub), {
+    client, resolution: await freshResolution(sub, client), postingDate: "2026-01-08",
+    memo: "tenancy deposit",
+    lines: [
+      { account_code: DEPOSITS_PAID, debit_cents: DEPOSIT_CENTS, credit_cents: 0, description: "deposit" },
+      { account_code: BANKCOA, debit_cents: 0, credit_cents: DEPOSIT_CENTS, description: "bank" },
+    ],
+    opKey: opk949("dep-draft"),
+  });
+  const token = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [drafted.entry_id])).rows[0].revision_token;
+  await approveEntry(world.users.bob, { entry: drafted.entry_id, expectedRevision: token, opKey: opk949("dep-approve") });
+
+  const after = await depositCoding(sub, client);
+  assert.equal(after[0].already_coded, true, "the offer answers from the ledger, so it clears itself");
+  assert.deepEqual(after[0].candidates, [], "…and offers nothing further");
+});
+
+test("S7 · a client whose chart has no deposits-paid account is told so, never offered a code they do not hold", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const client = await freshClient(sub);
+  for (const a of TENANCY_CHART.filter((x) => x.code !== DEPOSITS_PAID)) {
+    await upsertAccount(sub, { client, code: a.code, name: a.name, type: a.type, opKey: opk949("coa") });
+  }
+  await upsertAccount(sub, { client, code: BANKCOA, name: "Maybank current (p949)", type: "asset", opKey: opk949("bankcoa") });
+  await setFramework(sub, client, "MPERS");
+  const doc = await readTenancy(sub, client);
+  await recordProposed(sub, client, doc.documentId);
+
+  const offer = (await depositCoding(sub, client))[0];
+  assert.equal(offer.proposed_account_code, DEPOSITS_PAID, "the account it WOULD propose is still named");
+  assert.equal(offer.proposed_account_in_chart, false, "…and the offer says this client does not hold it");
+  assert.equal(offer.proposed_account_name, null);
 });
