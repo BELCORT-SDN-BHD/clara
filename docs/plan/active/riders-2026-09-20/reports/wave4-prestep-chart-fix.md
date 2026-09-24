@@ -339,3 +339,172 @@ from `packages/db/package.json`'s `test` script. Never with a reset flag.
   a chart whose adoption row was deleted. Every affected row belongs to a throwaway test fixture.
 - **The hosted database is untouched.** Nothing in this fix was run anywhere but the lane database
   and the disposable cluster.
+
+---
+
+# Fix round 2 (CI: collation-dependent hash pin)
+
+Ticket #941. One defect, found by CI, in `packages/db/migrations/0295_wave4_chart_rows.sql`.
+
+## The defect
+
+GitHub Actions run 35954298990 — a from-scratch chain on the official `postgres:17` container —
+stopped in 0295's own prestate:
+
+```
+0295 prestate: my_sme_starter v1's content_sha256 has DRIFTED from its pinned value
+(measured 673ede910a7a3bb5f0b3197cbda9bdf7cfa269eb0068a3bb3ac7d6655bf9262b,
+ expected d02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df)
+```
+
+0295 pinned v1's stored `content_sha256` as a literal, at line 156 (prestate) and line 409 (tail).
+That value is not a property of the template. It is a property of the **server's collation**, so the
+pin would also have stopped the hosted migrate (Supabase is `en_US.UTF-8`). Blocker for the whole
+wave.
+
+## Proof of cause — measured, not assumed
+
+A PostgreSQL 17 cluster was created purely to reproduce it
+(`pg_createcluster 17 rigcoll -p 55779 --locale en_US.UTF-8`, after `locale-gen en_US.UTF-8`), and
+the SAME chain from the SAME worktree was run on a fresh database there. It stopped at 0295 with
+CI's exact numbers. Both servers were then read directly:
+
+| server | `datcollate` | files applied | v1 stored `content_sha256` | recomputed by `clara._coa_template_content_sha256` |
+|---|---|---|---|---|
+| `rigcoll` / `clara_coll` (built for this proof) | `en_US.UTF-8` | 288 (0295 refused) | `673ede910a7a3bb5f0b3197cbda9bdf7cfa269eb0068a3bb3ac7d6655bf9262b` | identical |
+| `rl08` / `clara_l08` (the lane rig) | `C.UTF-8` | 289 | `d02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df` | identical |
+
+Each digest reproduces from its own rows, so neither database is corrupt — the digest moves, the
+rows do not.
+
+**The mechanism, isolated.** `clara._coa_template_content_sha256(uuid)` (0150:763-785) canonicalises
+with `order by f.family_key` and `order by a.account_code`: plain TEXT ordering, which takes the
+database's default collation. Under `C` an underscore (0x5F) sorts before every lowercase letter;
+under glibc's `en_US.UTF-8` punctuation carries no primary weight. Of v1's 42 family keys, exactly
+one pair is separated by that rule, and it flips:
+
+```
+en_US.UTF-8 : ... system_roles, taxation, tax_liabilities, trade_payables ...
+C.UTF-8     : ... system_roles, tax_liabilities, taxation, trade_payables ...
+order by f.family_key collate "C"  ->  tax_liabilities, taxation   (on BOTH servers)
+```
+
+One swap reorders the `families` jsonb array, hence the digest. v1's 142 account codes are all
+4-digit today so the accounts ordering does not flip, but `ck_coa_tmpl_code` also admits the
+`NNN-XX` form, so it is exposed to the same rule and is collated here too rather than assumed safe.
+
+## The fix
+
+0295 now carries **no collation-dependent literal**.
+
+1. **One spelling of a portable digest.** `pg_temp.p295_struct_sha256(uuid)` is 0150's own canonical
+   jsonb, field for field and key for key, with `collate "C"` written onto both ORDER BYs, hashed by
+   the estate's own `clara._hash` (0004:32-33). `C` is a built-in collation defined by code point, so
+   the value is identical everywhere by construction. It lives in `pg_temp` (the 0289
+   `pg_temp.p889_n_check` idiom), so prestate and tail cannot disagree about what v1's content is.
+2. **The prestate pins that digest**, `c_v1_struct_pin =
+   d02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df` — measured identical on the
+   `en_US.UTF-8` and the `C.UTF-8` cluster. It coincides with the stored hash on a `C.UTF-8` server,
+   which is exactly why the old literal looked portable and was not.
+3. **Self-consistency moved UP into the prestate** as well as staying in the tail: v1's stored
+   `content_sha256` must equal what `clara._coa_template_content_sha256` recomputes from its rows on
+   THIS server. A v1 whose hash and rows disagree now stops the file before it writes.
+4. **The tail compares against what the prestate measured**, never a literal: the stored hash and the
+   structural digest are carried in `_p295_pre`, a `create temp table ... on commit drop` (the
+   0289:93 / 0291:119 / 0261:78 idiom), read after `reset role` by the same connecting role that
+   wrote them. `T.0` refuses if either value did not arrive, so nothing can pass vacuously.
+
+Every other pin is unchanged: the three `prosrc` pins (0295:228/230/232) are digests over function
+source text, where no ordering is involved. v2's hash is still computed at seed time on the target
+server and pinned nowhere.
+
+`packages/db/tests/wave4-chart-rows.test.mjs` carried the same literal at its S6 cell and would have
+failed CI for the same reason. It now pins the structural digest (re-derived in the test rather than
+read back from the migration) and separately asserts that v1's stored hash reproduces from its rows.
+
+## The three 0295 runs
+
+| run | server | branch | result |
+|---|---|---|---|
+| redo on the lane rig | `clara_l08`, `C.UTF-8` | REDO | `0295 prestate: clean (REDO apply)` — structural digest `d02a786a…`, stored `content_sha256` `d02a786a…` (reproduces from its rows, carried to the tail, never pinned as a literal) → `0295 tail OK` → `migrate: redid 0295_wave4_chart_rows · new checksum 5196d64d944e61ef836313cffd6bcc2d4dddd18bc808ca55f86e30544ecece0d` |
+| first apply, `en_US.UTF-8` | `clara_coll` (288 → 289) | FIRST | `0295 prestate: clean (FIRST apply)` — structural digest `d02a786a…`, stored `content_sha256` `673ede91…` (reproduces from its rows) → `0295 tail OK` → `migrate: 1 new migration(s) applied · 289 total` |
+| whole chain from scratch, `C.UTF-8` | `clara_cfresh` on a brand-new cluster | FIRST | `0295 prestate: clean (FIRST apply)` — structural digest `d02a786a…`, stored `content_sha256` `d02a786a…` (reproduces from its rows) → `0295 tail OK` → `migrate: 289 new migration(s) applied · 289 total` |
+
+The structural digest reads `d02a786a…` in all three. The stored hash reads whatever the server's
+collation produces and is never compared to a literal. v2's own hash is `6a36ad00…` on both
+`C.UTF-8` databases and `342bb554…` on the `en_US.UTF-8` one — computed at seed time, pinned
+nowhere, exactly as designed.
+
+**Two rig facts, recorded.** (a) The redo first refused by name —
+`0295 redo: my_sme_starter v2 (4d5c3644-…) already has a client adoption` — as its own message says
+it will on any lane database whose batteries have run. Following that message's instruction, 95
+adoption rows and the 45 firm-scope templates descended from v2 were deleted; every one belonged to
+a `rig_*` sandbox firm, checked by a refusal inside the same transaction before anything was
+removed. (b) The "fresh database on the lane cluster" leg is **impossible as specified**: PostgreSQL
+roles are CLUSTER-scoped, so a second Clara database on `rl08` fails at 0154 with
+`the clara role count moved from 14 to 18`. The equivalent proof was taken on a brand-new `C.UTF-8`
+cluster instead (`rigcollc`, port 55780), which is strictly stronger. The `rl08` cluster still holds
+18 `clara%` roles, unchanged.
+
+Both throwaway clusters are dropped.
+
+## Audit — the same class across the estate
+
+Scope: every `packages/db/migrations/*.sql`, every `packages/db/tests/*.mjs` (including the 106
+preintegration gates), `packages/db/scripts/`, `packages/db/lib/`, `scripts/`, and
+`docs/plan/active/riders-2026-09-20/ceremony-w3/`. 1042 64-hex literals across 151 files were
+classified mechanically, then every hit was read.
+
+**Empirical result, which is stronger than the static one: the ladder is clean.** All 289 migrations
+applied on an `en_US.UTF-8` server, so no migration pin in the estate flips between `C.UTF-8` and
+`en_US.UTF-8` today. `wave4-chart-rows`, `coa-template-pr-a`, `coa-template-pr-b` and
+`operation-census` were also run against that `en_US.UTF-8` database and pass with identical counts
+(6/6, 53/53, 43/43, 10/10).
+
+| finding | verdict |
+|---|---|
+| `0295:156` and `0295:409`, `c_v1_hash_pin` — digest over ROW CONTENT ordered by text | **NOT portable. Fixed in this round.** |
+| `wave4-chart-rows.test.mjs:422` — the same literal | **NOT portable. Fixed in this round** (same defect, same lane, would have failed CI). |
+| ~1030 literals in `v_pins text[][]` arrays and single `c_*_pre` constants (0020, 0106, 0129, 0270, 0284, 0286, 0287, 0295:228/230/232, `firm-document-limits-writer.test.mjs:409-411`, and the rest) | **Portable.** Digests over `prosrc` / `pg_get_functiondef` text. No ordering, no collation. |
+| `0258:201` — `sha256(string_agg(… order by sort_order))` over `clara.firm_setup_keys`, compared to a literal. The ONE other row-content pin in the estate | **Portable.** The ORDER BY key is an integer, and it is unique across the rows (15 rows, 15 distinct `sort_order`), so the order is total and collation-free. |
+| 68 census digests that order by a TEXT expression without `collate "C"` in a block that also holds a 64-hex literal — `p.proname` (0149, 0154, 0225, 0227, 0236, 0243, 0248, 0250), `p.oid::regprocedure::text` (0020, 0151, 0156), `conname`/`tgname` (0110, 0196, 0243, 0270), `grantee, privilege_type` (0214, 0215, 0231, 0232, 0269, 0270, 0290), `column_name` (0135, 0215), and six test files (`coa-template-pr-b`, `firm-document-limits-writer`, `firm-portfolio-pack`, `plan-overlap-template-arm-retired`, `preview-invite`, `subledger-hook-caller-roster`) | **Portable today, FRAGILE by construction.** None flips between `C.UTF-8` and `en_US.UTF-8` — proven by the 289/289 run, not argued — because no adjacent pair in any of those sorted sets is separated by the punctuation rule. But the estate is full of `_`-prefixed function names, so one new `clara._…` function landing next to an unprefixed sibling in one of these censuses reproduces this defect exactly. **For the orchestrator, not this round.** |
+| Places that already write `collate "C"` on such an ordering — 0090:1105, 0092:575, 0093:296, 0099:576, 0100:673, 0101:1005, 0221:279/1756 | The convention exists in the estate; it is simply not applied uniformly. |
+
+The general rule is now written down in `packages/db/README.md`'s 0295 section: a digest over row
+content ordered by a text expression must spell `collate "C"` before its value is pinned.
+
+## Gates, with counts
+
+Lane database `127.0.0.1:55748/clara_l08`, `PGHOST/PGPORT/PGUSER/PGDATABASE` +
+`CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1`, run as
+`node --test --test-concurrency=1 $GATES tests/<file>` where `$GATES` is the exact 106-entry
+`--import` list from `packages/db/package.json`'s `test` script. Never with a reset flag.
+
+| file | tests | pass | fail | skipped |
+|---|---|---|---|---|
+| `wave4-chart-rows.test.mjs` | 6 | 6 | 0 | 0 |
+| `coa-template-pr-a.test.mjs` | 53 | 53 | 0 | 0 |
+| `coa-template-pr-b.test.mjs` | 43 | 43 | 0 | 0 |
+| `operation-census.test.mjs` | 10 | 10 | 0 | 0 |
+| `rig-isolation.test.mjs` | 23 | 22 | 0 | 1 |
+
+`CI=true GITHUB_ACTIONS=true pnpm lint` at the worktree root: exit 0.
+
+The same four batteries against the `en_US.UTF-8` database (`172.31.199.211:55779/clara_coll`):
+6/6, 53/53, 43/43, 10/10 — the fix is proven on the collation that broke it, not only on the one
+that hid it.
+
+## Anything unverified (round 2)
+
+- **`pnpm typecheck` was not run.** No TypeScript changed: the diff is one SQL migration, one test
+  file and two Markdown files. Lint is green.
+- **Nothing was run against the hosted database.** The claim that hosted Supabase is `en_US.UTF-8`
+  is taken from the CI container's behaviour and Supabase's documented default; it was NOT measured
+  on the hosted instance. The fix does not depend on which value hosted has — after this round no
+  literal in 0295 is collation-sensitive either way — but the statement itself is unverified.
+- **The "fragile by construction" audit row is a static reading plus one empirical run.** It proves
+  those 68 sites agree between `C.UTF-8` and `en_US.UTF-8` today; it does not prove they would agree
+  under a third collation, and it is not a claim that they are correct.
+- **`clara_l08` lost more rig fixtures.** 95 adoption rows and 45 firm-scope rig templates were
+  deleted to let the redo run, and the redo re-minted v2 with a new uuid (`5b92a604-…`). All of it
+  is throwaway test-fixture data; every row was checked to belong to a `rig_*` firm first.

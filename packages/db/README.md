@@ -4683,6 +4683,41 @@ expected, not exceptional:** `wave4-chart-rows.test.mjs` S3/S5 and
 template, so after any battery run the rig's own adoption rows must be deleted before a redo (the
 refusal message says so). On a database carrying real client data, do not redo at all.
 
+**Why v1's stored `content_sha256` is NOT pinned as a literal — and what is pinned instead.** A
+published template's `content_sha256` is **collation-dependent**, so it is not a portable pin.
+`clara._coa_template_content_sha256(uuid)` (0150:763-785) canonicalises with `order by
+f.family_key` and `order by a.account_code` — plain TEXT ordering, which takes the database's
+default collation. Under `C`/`C.UTF-8` an underscore (0x5F) sorts before every lowercase letter;
+under glibc's `en_US.UTF-8` punctuation carries no primary weight, so the comparison falls to the
+letters alone. `my_sme_starter` v1's 42 family keys contain exactly one pair this separates —
+`tax_liabilities` and `taxation` — and that single swap reorders the `families` array the digest
+covers. MEASURED, on the same from-scratch chain:
+
+| server | `datcollate` | v1's stored `content_sha256` |
+|---|---|---|
+| CI's `postgres:17` container, and a local cluster made with `--locale en_US.UTF-8` | `en_US.UTF-8` | `673ede910a7a3bb5f0b3197cbda9bdf7cfa269eb0068a3bb3ac7d6655bf9262b` |
+| every rig cluster here, and a fresh cluster made with `--locale C.UTF-8` | `C.UTF-8` | `d02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df` |
+
+The rows are identical on both and each digest reproduces from its own rows, so neither database is
+corrupt — the digest is. 0295's first cut pinned the `C.UTF-8` value as a literal and stopped the
+chain on CI (run 35954298990); hosted Supabase is `en_US.UTF-8` too, so it would have stopped the
+hosted migrate for the same reason. What 0295 pins now is a **structural digest**:
+`pg_temp.p295_struct_sha256`, which is 0150's own canonical jsonb field for field with `collate "C"`
+written onto both ORDER BYs, hashed by `clara._hash`. `C` is a built-in collation defined by code
+point, so the value is the same on every server by construction — measured
+`d02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df` on both clusters above. The
+stored digest is still checked twice, but only against values the transaction itself measured: the
+prestate proves it reproduces from v1's rows through 0150's own helper, and the tail proves it is
+still the value the prestate read, carried in the temp table `_p295_pre` (the 0289/0291/0261 idiom)
+rather than re-typed. v2's hash is computed at seed time on the target server and pinned nowhere.
+
+**The general rule this file now follows.** Any digest taken over ROW CONTENT that is ordered by a
+text expression must spell `collate "C"` on that ORDER BY before its value is pinned as a literal;
+otherwise the pin records the server's `lc_collate`, not the data. Digests over a function body
+(`prosrc`, `pg_get_functiondef`) or over a migration file's bytes are unaffected — no ordering is
+involved. Several files in the ladder already write `collate "C"` for exactly this reason
+(0090:1105, 0092:575, 0093:296, 0099:576, 0100:673, 0101:1005, 0221:279).
+
 **Cells** (`tests/wave4-chart-rows.test.mjs`, gated on
 `tests/wave4-chart-rows-preintegration-gate.mjs`): S1 reads the four rows absent from v1 and
 present on v2 by code/name/type/family/flag; S2 reconstructs the world before 0295 inside a
@@ -4695,5 +4730,9 @@ across every `scope='platform'` row in `clara.coa_template_accounts`; S5 drives 
 through the same doors and shows 3900 relabelled `Accumulated Fund` and 3040 absent, with the
 override census equal to v1's row for row; S6 drives `clara.list_coa_templates()` through a real
 firm session and shows exactly ONE published `my_sme_starter` row — version 2, 146 accounts — with
-v1 retired, unmoved at 42/142 and still carrying 0150's own content hash. Each carries its own
-vacuity control (a rolled-back mutation of the exact fact under test).
+v1 retired, unmoved at 42/142 and still carrying 0150's own content: the battery pins the
+collation-independent structural digest and separately asserts that v1's stored `content_sha256`
+still reproduces from its own rows, never the stored value as a literal (see the collation note
+above). Each carries its own vacuity control (a rolled-back mutation of the exact fact under test).
+The battery is proven on both collations: all six cells pass against a `C.UTF-8` database and
+against an `en_US.UTF-8` one built from the same chain.
