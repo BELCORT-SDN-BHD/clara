@@ -145,6 +145,17 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // post, and the row exists to say so. The row's own sentence plus needs-you-links.ts's link
     // to the documents tab are the whole affordance.
     agreement_posting_blocked: null,
+    // #949 (0300, riders wave 4 lane 01): NO inline act, the #947 reasoning restated. Accepting a
+    // settlement candidate names a SPECIFIC bank line among however many a month offers -- a
+    // decision the inbox row's own fixed shape (one row, no per-candidate slot) cannot carry.
+    // needs-you-links.ts's link into the bank tab is the whole affordance.
+    rent_payable_unsettled: null,
+    // #949 (0300): NO inline act either, for a different reason. Confirming an escalation needs
+    // the accountant's WRITTEN judgement -- a stepped rent always makes the lessee branch ask,
+    // because straight-line means the total averaged over the term -- and free text is not a
+    // click. The link to the contract page, where the terms and the question are rendered
+    // together, is the whole affordance.
+    rent_escalation_pending: null,
   } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
 

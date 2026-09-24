@@ -227,6 +227,29 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // `needs_you` lane folds it into counts.needs_you already), and no new json key, so the two
   // db-side FULL_ROW_KEYS rosters are byte-unchanged.
   "agreement_posting_blocked",
+  // #949 (0300_tenancy_terms_rent_plan.sql, riders wave 4 lane 01): the FIFTEENTH kind. ONE row
+  // per month of rent recognised on a confirmed tenancy rent plan whose payment has not appeared
+  // on the bank yet -- the Settlement candidate row shape (CONTEXT.md), #657's own, third
+  // instance after #947's payroll net pay: DERIVED from clara._rent_payable_unsettled's FIFO
+  // ledger read over the plan's own payable account, stores nothing, and clears itself the moment
+  // that account's balance says the month is covered -- by this lane's own accept door, by a
+  // hand-booked cheque, or by that entry reconciled through the ordinary bank matcher -- so there
+  // is no dismissal act. A cheque is the same case: the payable stays open until the cheque
+  // appears on the statement, which is the only moment Clara can see. Section `needs_you`, lane
+  // `needs_you`. `id`/`entry_id` carry the rent entry itself; `document_id` carries the tenancy.
+  // No counts.* key is minted and no new json key, so the two db-side FULL_ROW_KEYS rosters stay
+  // byte-unchanged.
+  "rent_payable_unsettled",
+  // #949 (0300, same lane): the SIXTEENTH kind, and the second this ticket adds -- deliberately,
+  // because it is a DIFFERENT question answered in a different place. ONE row per tenancy whose
+  // recorded escalation the plan has not taken yet: DERIVED from clara._tenancy_escalation_state
+  // (a live rent plan, a live escalation term, and a live revision that does not yet carry the
+  // escalated amount), so it clears itself the moment a person confirms the revision. It appears
+  // sixty days before the date and does NOT disappear once the date passes -- an escalation that
+  // took effect and was never confirmed is exactly the case a person most needs to see. Section
+  // `needs_you`, lane `needs_you`. `id`/`task_id` carry the plan; `document_id` the tenancy. No
+  // counts.* key and no new json key either.
+  "rent_escalation_pending",
 ] as const;
 
 export type ReviewQueueRowKind = (typeof REVIEW_QUEUE_ROW_KINDS)[number];

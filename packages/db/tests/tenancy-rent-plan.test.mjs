@@ -1734,3 +1734,99 @@ test("S8 · a tenancy with no confirmed plan has nothing to revise, and says so"
   assert.ok(nothing, "and the revision door refuses rather than inventing a plan to revise");
   assert.equal(detailOf(nothing).reason, "no_confirmed_plan");
 });
+
+// ---------------------------------------------------------------------------
+// S9 — Needs you (AC4's arm and AC6's arm)
+// ---------------------------------------------------------------------------
+
+async function queueRows(sub, client) {
+  const env = await listReviewQueue(human(sub), { scope: { client_id: client }, limit: 200 });
+  return env.rows;
+}
+
+const kindRows = (rows, kind) => rows.filter((r) => r.row_kind === kind);
+
+test("S9 · an unpaid month of rent reaches Needs you, naming the month and the amount, and clears itself", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc, bank } = await runningTenancy(sub);
+  assert.deepEqual(kindRows(await queueRows(sub, client), "rent_payable_unsettled"), [],
+    "a plan with no posted month owes nothing");
+
+  const entry = await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+  const rows = kindRows(await queueRows(sub, client), "rent_payable_unsettled");
+  assert.equal(rows.length, 1, `one row: ${JSON.stringify(rows)}`);
+  const row = rows[0];
+  assert.equal(row.section, "needs_you");
+  assert.equal(row.lane, "needs_you");
+  assert.equal(row.entry_id, entry, "the row names the rent entry itself");
+  assert.equal(row.document_id, doc.documentId, "…and the tenancy it belongs to");
+  assert.equal(Number(row.amount_cents), RENT_CENTS);
+  assert.equal(row.period, "2026-02-01");
+  assert.match(row.question_text, /rent is posted/i);
+  assert.match(row.question_text, /February 2026/);
+  assert.equal(row.auto, false);
+  assert.equal(row.high_stakes, false);
+
+  const paid = await bankStatement(sub, { client, bank, specs: [rentLine("2026-02-07")] });
+  await settleRent(sub, { client, entry, line: paid[0].id });
+  assert.deepEqual(kindRows(await queueRows(sub, client), "rent_payable_unsettled"), [],
+    "settled, so the row is gone — nothing dismissed it");
+});
+
+test("S9 · a pending escalation reaches Needs you before its date, and clears when the revision is confirmed", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const soon = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const { client, doc, planId } = await escalatingTenancy(sub, { effectiveFrom: soon });
+
+  const rows = kindRows(await queueRows(sub, client), "rent_escalation_pending");
+  assert.equal(rows.length, 1, `one row: ${JSON.stringify(rows)}`);
+  const row = rows[0];
+  assert.equal(row.section, "needs_you");
+  assert.equal(row.lane, "needs_you");
+  assert.equal(row.document_id, doc.documentId);
+  assert.equal(Number(row.amount_cents), ESCALATED_CENTS, "the amount it would move to");
+  assert.equal(row.period, soon);
+  assert.match(row.question_text, /escalation|rises|review/i);
+
+  await confirmRevision(sub, {
+    client, document: doc.documentId,
+    judgement: "The clause tracks CPI; charged as incurred (MPERS 20.15(b)).",
+  });
+  assert.deepEqual(kindRows(await queueRows(sub, client), "rent_escalation_pending"), [],
+    "confirmed, so the row is gone");
+  assert.equal((await liveRevision(planId)).revision, 2);
+});
+
+test("S9 · declining leaves both rows exactly as they were: there is no dismissal act to make", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const soon = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const { client, doc } = await escalatingTenancy(sub, { effectiveFrom: soon });
+  await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+
+  const first = (await queueRows(sub, client)).filter((r) =>
+    r.row_kind === "rent_payable_unsettled" || r.row_kind === "rent_escalation_pending");
+  const second = (await queueRows(sub, client)).filter((r) =>
+    r.row_kind === "rent_payable_unsettled" || r.row_kind === "rent_escalation_pending");
+  assert.equal(first.length, 2, `both rows: ${JSON.stringify(first.map((r) => r.row_kind))}`);
+  assert.deepEqual(second, first, "two reads with no act in between are byte-identical");
+  assert.ok(doc.documentId);
+});
+
+test("S9 · the queue still projects every kind it carried before this file, and the row shape did not move", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client } = await runningTenancy(sub);
+  await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+  const rows = await queueRows(sub, client);
+  const mine = kindRows(rows, "rent_payable_unsettled")[0];
+  const uncoded = rows.find((r) => r.row_kind === "uncoded_filing");
+  assert.ok(uncoded, "the filing rows #948's own tenancy leaves behind are still projected");
+  assert.deepEqual(
+    Object.keys(mine).sort(),
+    Object.keys(uncoded).sort(),
+    "the new kind reuses the EXISTING row shape unchanged — no key more, no key fewer",
+  );
+});

@@ -242,6 +242,8 @@
       "payroll_posting_blocked": "Payroll run not posted",
       "payroll_net_pay_unsettled": "Payroll payment not found yet",
       "agreement_posting_blocked": "Agreement not posted",
+      "rent_payable_unsettled": "Rent payment not found yet",
+      "rent_escalation_pending": "Rent escalation awaiting confirmation",
       "unknown": "Unrecognized item ({kind})"
     },
     "openClient": "Open client",
@@ -257,7 +259,9 @@
       "depreciation_authority_pending": "Open the fixed assets register",
       "payroll_posting_blocked": "Open the documents tab",
       "payroll_net_pay_unsettled": "Open the bank tab",
-      "agreement_posting_blocked": "Open the documents tab"
+      "agreement_posting_blocked": "Open the documents tab",
+      "rent_payable_unsettled": "Open the bank tab",
+      "rent_escalation_pending": "Open the documents tab"
     },
     "askClara": "Ask Clara about this",
     "askPrefill": "About this {kind} in my Needs-you inbox — what should I look at first?",

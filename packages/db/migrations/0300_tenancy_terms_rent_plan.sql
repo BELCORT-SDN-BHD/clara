@@ -2306,3 +2306,181 @@ revoke all on function clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,t
 grant execute on function clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,text) to clara_authenticated;
 
 reset role;
+
+set role clara_fn_owner;
+
+-- =====================================================================================
+-- §K  NEEDS YOU -- clara.list_review_queue gains TWO row kinds (AC4's arm and AC6's arm).
+--
+--     SPLICED, NEVER RE-TYPED, additive -- the 0146/0168/0180/0260/0288/0297/0298/0299 idiom.
+--     Both rows are DERIVED and both clear themselves:
+--       rent_payable_unsettled  -- from clara._rent_payable_unsettled's FIFO ledger read, so it
+--                                  goes the moment the payable is covered by ANY route (this
+--                                  lane's own accept door, a hand-booked cheque, or that entry
+--                                  reconciled through the ordinary bank matcher). "Rent is
+--                                  posted, the payment has not appeared" is the brief's own
+--                                  sentence and it is the sentence on the row.
+--       rent_escalation_pending -- from clara._tenancy_escalation_state, so it goes the moment
+--                                  the plan's live revision carries the escalated amount.
+--     Neither mints a dismissal act, a marker or a counts.* key, and neither adds a json key --
+--     both reuse the EXISTING row shape unchanged, so the two db-side FULL_ROW_KEYS rosters stay
+--     byte-unchanged.
+--
+--     TWO KINDS IN ONE TICKET is one more than this wave's lane rule contemplates, and it is
+--     deliberate: AC4 and AC6 are two different questions a person answers differently (one
+--     accepts a settlement candidate, the other confirms a plan revision), and folding them into
+--     one kind would make the label, the link and the affordance all have to guess which. Both
+--     are appended CONTIGUOUSLY at the end of the roster, in one hunk, so the edit stays as
+--     additive as a single kind would have been.
+--
+--     `id`/`entry_id` carry the RENT ENTRY for the settlement row (there is no ambiguity to point
+--     at) and the PLAN for the escalation row; `document_id` carries the tenancy in both, so
+--     every row links back to the agreement a person would open.
+-- =====================================================================================
+do $p949_lrq$
+declare
+  v_sig text := 'clara.list_review_queue(jsonb,jsonb,integer)';
+  v_def text; v_next text; v_code text; v_anchor text; v_repl text;
+  v_n int; v_raw_n int; v_pre_cols int; v_post_cols int;
+  v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+
+  if position('rent_payable_unsettled' in v_code) <> 0 then
+    raise notice '#949 SecK: the queue already projects rent_payable_unsettled -- splice already applied, nothing to do (redo)';
+  else
+    if v_pre_sha <> 'bc7f9250bf58562e893dee83623d4e2abc6bc42480bfd69f65944a76f893ed6e' then
+      raise exception '#949 SecK prestate: clara.list_review_queue is not at its pinned post-#948 body (sha %) -- re-derive this splice against the live body', v_pre_sha
+        using errcode='CLR10';
+    end if;
+
+    v_pre_cols := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
+                  / length('null::int open_proposal_count');
+
+    v_anchor :=
+      '    union all select * from payroll_settlement_rows' || chr(10) ||
+      '    union all select * from agreement_rows' || chr(10) ||
+      '  ), keyed as (';
+    v_n := (length(v_code) - length(replace(v_code, v_anchor, ''))) / length(v_anchor);
+    v_raw_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 or v_raw_n <> v_n then
+      raise exception '#949 SecK prestate: the all_rows union tail appears % time(s) IN CODE / % in RAW text (expected 1/1) -- re-derive this splice against the LIVE body', v_n, v_raw_n
+        using errcode='CLR10';
+    end if;
+
+    v_repl := $p949u$    union all select * from payroll_settlement_rows
+    union all select * from agreement_rows
+    union all select * from rent_settlement_rows
+    union all select * from rent_escalation_rows
+  ), keyed as ($p949u$;
+    v_next := replace(v_def, v_anchor, v_repl);
+    if position('union all select * from rent_settlement_rows' in v_next) = 0
+       or position('union all select * from rent_escalation_rows' in v_next) = 0 then
+      raise exception '#949 SecK splice: the all_rows anchor did not rewrite' using errcode='CLR10';
+    end if;
+    if v_next = v_def then
+      raise exception '#949 SecK splice: no byte moved -- refusing a no-op apply' using errcode='CLR10';
+    end if;
+
+    -- The two new CTEs are inserted immediately before the (now-rewritten) `), all_rows as (`
+    -- boundary, so they land beside their siblings rather than at the top of the body.
+    v_anchor := '  ), all_rows as (' || chr(10) || '    select * from draft_rows union all select * from filing_rows';
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#949 SecK prestate: the all_rows opener appears % time(s), expected 1', v_n
+        using errcode='CLR10';
+    end if;
+    v_repl := $p949c$  ), rent_settlement_rows as (
+    -- #949 (0300): A MONTH OF RENT WHOSE PAYMENT HAS NOT APPEARED. DERIVED from
+    -- clara._rent_payable_unsettled's own FIFO ledger read over the confirmed rent plan's
+    -- payable account -- stores nothing, clears itself the moment the account's own balance says
+    -- the month is covered, by whichever route covered it (CONTEXT.md's Settlement candidate
+    -- row, #657's own shape, #947's own second instance). Section `needs_you`, lane `needs_you`.
+    -- `id`/`entry_id` carry the rent entry itself; `document_id` carries the tenancy.
+    select 2 section_rank,'rent_payable_unsettled'::text row_kind,'needs_you'::text section,
+      active_rent_client.id client_id,null::uuid counterparty_id,rpu.filing_id,rpu.entry_id,
+      null::uuid question_id,null::uuid task_id,rpu.document_id,'needs_you'::text lane,
+      false auto,false rule_backed,false high_stakes,rpu.posting_date aged_since,
+      rpu.unsettled_cents amount_cents,to_char(rpu.period_month,'YYYY-MM-DD') period,
+      'Rent is posted for ' || to_char(rpu.period_month,'FMMonth YYYY')
+        || '; the payment has not appeared.' question_text,
+      rpu.posting_date created_at,rpu.entry_id id,''::text vendor_group,
+      null::text coding_kind,null::uuid watch_id,null::text tier,null::uuid finding_id,
+      null::text client_name,null::uuid[] batch_ids,null::int open_proposal_count
+    from clara.clients active_rent_client
+    cross join lateral clara._rent_payable_unsettled(active_rent_client.id) rpu
+    where active_rent_client.firm_id=c.firm and active_rent_client.status='active'
+      and (v_client is null or active_rent_client.id=v_client)
+      and rpu.unsettled_cents > 0
+  ), rent_escalation_rows as (
+    -- #949 (0300): A STATED RENT REVIEW THE PLAN HAS NOT TAKEN YET. DERIVED from
+    -- clara._tenancy_escalation_state: a live rent plan, a live escalation term, and a live
+    -- revision that does not yet carry the escalated amount. It appears sixty days before the
+    -- date and does NOT disappear once the date passes -- an escalation that took effect and was
+    -- never confirmed is exactly the case a person most needs to see. `id`/`task_id` carry the
+    -- plan; `document_id` carries the tenancy.
+    select 2 section_rank,'rent_escalation_pending'::text row_kind,'needs_you'::text section,
+      esc_client.id client_id,null::uuid counterparty_id,null::uuid filing_id,null::uuid entry_id,
+      null::uuid question_id,(es.state->>'plan_id')::uuid task_id,es.document_id,
+      'needs_you'::text lane,
+      false auto,false rule_backed,false high_stakes,(es.state->>'effective_from')::date aged_since,
+      (es.state->>'new_cents')::bigint amount_cents,es.state->>'effective_from' period,
+      'This tenancy states a rent escalation from '
+        || to_char((es.state->>'effective_from')::date,'FMDD FMMonth YYYY')
+        || '; the plan still charges the earlier amount. Confirm the revision, or decide another treatment.' question_text,
+      (es.state->>'effective_from')::date created_at,(es.state->>'plan_id')::uuid id,
+      ''::text vendor_group,
+      null::text coding_kind,null::uuid watch_id,null::text tier,null::uuid finding_id,
+      null::text client_name,null::uuid[] batch_ids,null::int open_proposal_count
+    from clara.clients esc_client
+    cross join lateral (
+      select distinct cf.document_id from clara.contract_plan_confirmations cf
+       where cf.client_id = esc_client.id and cf.kind = 'rent_plan') cfd
+    cross join lateral (select clara._tenancy_escalation_state(cfd.document_id) state,
+                               cfd.document_id document_id) es
+    where esc_client.firm_id=c.firm and esc_client.status='active'
+      and (v_client is null or esc_client.id=v_client)
+      and (es.state->>'pending')::boolean is true
+  ), all_rows as (
+    select * from draft_rows union all select * from filing_rows$p949c$;
+    v_next := replace(v_next, v_anchor, v_repl);
+    if position('rent_settlement_rows as (' in v_next) = 0
+       or position('rent_escalation_rows as (' in v_next) = 0 then
+      raise exception '#949 SecK splice: the CTE-insertion anchor did not rewrite' using errcode='CLR10';
+    end if;
+
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#949 SecK postcheck: list_review_queue changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode='CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#949 SecK postcheck: the definition did not change -- the splice was a no-op'
+        using errcode='CLR10';
+    end if;
+
+    -- ADDITIVE, PROVEN: the shared column vector appears exactly TWO more times than it did.
+    v_post_cols := (length((select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure))
+                    - length(replace((select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure), 'null::int open_proposal_count', '')))
+                   / length('null::int open_proposal_count');
+    if v_post_cols <> v_pre_cols + 2 then
+      raise exception '#949 SecK postcheck: the shared column vector appears % time(s), expected % (two more than before the splice)', v_post_cols, v_pre_cols + 2
+        using errcode='CLR10';
+    end if;
+
+    raise notice '#949 SecK: clara.list_review_queue spliced -- two CTEs (rent_settlement_rows and rent_escalation_rows, both needs_you/needs_you, active-client-guarded, both derived) and two union arms; owner (%) and ACL byte-unchanged. definition sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+end
+$p949_lrq$;
+
+reset role;

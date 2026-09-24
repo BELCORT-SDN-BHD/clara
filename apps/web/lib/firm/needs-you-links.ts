@@ -132,6 +132,17 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // `payroll_posting_blocked` does not: the documents tab has no view that selects a single
   // document from the URL, so naming one would be a link to a view that does not exist.)
   agreement_posting_blocked: "/documents",
+  // #949 (0300) -- the bank tab, bare, for exactly the reason #947's own note above gives: the
+  // act this row names (find the bank line that paid the month's rent, accept it) lives in the
+  // Matching view, but `ACCOUNTING_ITEMS`'s own `bank` entry names no `tab`, so `?tab=matching`
+  // is not a view `CLIENT_ROUTES` emits today. A bare `/bank` lands one tab away rather than
+  // zero, which is still the honest answer.
+  rent_payable_unsettled: "/bank",
+  // #949 (0300) -- the DOCUMENTS tab, and a different tab from its sibling above on purpose. The
+  // escalation row's act is on the contract page: read what the tenancy states, decide the
+  // treatment the standard asks about, and confirm the revision. Sending it to the bank would
+  // send a person to a surface where the decision is not.
+  rent_escalation_pending: "/documents",
 });
 
 /**
