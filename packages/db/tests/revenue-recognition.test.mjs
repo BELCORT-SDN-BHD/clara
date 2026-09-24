@@ -26,7 +26,7 @@ import {
   recordStatedTerm, DR_REASON, DR_AXIS, RECOGNITION_KIND, RECOGNITION_PATTERN, REVENUE_BASIS,
   advanceReceipt, accountBalance, accountLines,
   wakeDuePlanOccurrences, occurrenceRows, workRow, claimWorkRun, settleWorkRun,
-  mintClientObo, wakeRecordJournalEntry, receiptsForWork, requestPlanCatchUp,
+  mintClientObo, wakeRecordJournalEntry, receiptsForWork, requestPlanCatchUp, endAccountingPlan,
   createRecognitionScheduleFor, createRecognitionScheduleForAs,
   readRecognitionSourceFor, readRecognitionSourceForAs, recognitionLaneGrants,
   chatTaskRef, refusalOf, planAuthority, opReceiptsFor, roleCanExecute, ROLES, nowhere,
@@ -792,7 +792,7 @@ cell("p941.term.document — a receipt bound to an issued invoice rides that doc
     "the service period this battery records is a HUMAN's, not an extraction's");
 });
 
-cell("p941.supersede.running — a corrected service period never moves a schedule that is already running: the stored allocation, the term it rode, the occurrences and the committed receipt are all byte-identical afterwards, the schedule still names the SUPERSEDED statement, and a second schedule over the same receipt is still refused", async () => {
+cell("p941.supersede.running — a corrected service period never moves a schedule that is already running: the stored allocation, the term it rode, the occurrences and the committed receipt are all byte-identical afterwards, the schedule still names the SUPERSEDED statement, a second schedule over the same receipt is still refused, and ENDING the first one does not open that door either", async () => {
   const scene = await deferredRevenueScene("supersede", { cents: 90000, termMonths: 3 });
   const stated = await recordStatedTerm(scene.bob, {
     client: scene.client, sourceEntry: scene.receipt,
@@ -857,12 +857,29 @@ cell("p941.supersede.running — a corrected service period never moves a schedu
   assert.equal(detail.term_current_end, laterEnd);
   assert.equal(detail.term_end, scene.termEnd, "while the schedule keeps the term it rode");
 
-  // A CORRECTION IS A NEW SCHEDULE FROM THE NEXT PERIOD, never a second one over this receipt.
+  // ONE RECEIPT CARRIES ONE SCHEDULE. A second one over this receipt is refused by name.
   await assertPair("CLR13", DR_REASON.scheduleExists,
     () => createRecognitionSchedule(scene.bob, {
       client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
       authorityRef: scene.authorityRef }),
     "a second schedule over a corrected receipt");
+
+  // …AND ENDING THIS ONE DOES NOT OPEN A REPLACEMENT. [L04-SPEC-04, fix round 2.] The register
+  // used to say "Configure a new one if the remaining periods are still to be recognised" on an
+  // ended schedule. `uq_revenue_recognition_schedules_source` (0308) is UNCONDITIONAL — no status
+  // predicate — so the refusal is the same after the plan has ended, and that sentence was an act
+  // nobody could perform. Driven: the plan is ended through its own door first.
+  const ended = await endAccountingPlan(scene.bob, {
+    plan: made.plan_id,
+    reason: "#941 battery: the stated term was wrong, so the firm stopped the schedule" });
+  assert.equal(ended.status, "ended", "the schedule really ended before the replacement was asked for");
+  await assertPair("CLR13", DR_REASON.scheduleExists,
+    () => createRecognitionSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+      authorityRef: scene.authorityRef }),
+    "configuring a REPLACEMENT schedule after ending the first one");
+  assert.equal(await recognitionScheduleCountFor(scene.receipt), 1,
+    "…and the receipt still carries exactly the one schedule it has always carried");
 });
 
 // ===========================================================================================

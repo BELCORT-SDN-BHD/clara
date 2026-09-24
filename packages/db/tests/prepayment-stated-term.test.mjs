@@ -21,7 +21,7 @@ import {
   STATED_TERM_REASON, STATED_TERM_DOOR_SIG, EVALUATOR_V2_SIG, PREPAY_REASON,
   createPrepaymentSchedule, scheduleTermSource, scheduleCountFor, unapprovedEntry, ambiguousAssetEntry,
   getPrepaymentSchedule, listPrepaymentSchedules, listPrepaymentAttention, memoOnlyIneligible,
-  scheduleRow, monthStartBack, opk,
+  scheduleRow, monthStartBack, opk, endAccountingPlan,
   wakeDuePlanOccurrences, occurrenceRows, workRow, claimWorkRun, settleWorkRun,
   mintClientObo, wakeRecordJournalEntry, receiptsForWork,
 } from "./prepayment-stated-term-fixtures.mjs";
@@ -401,7 +401,7 @@ cell("p939.create.memo_only — with no stated term the door refuses prepayment_
 // AC4 — A CORRECTED STATEMENT NEVER MOVES A RUNNING SCHEDULE.
 // ===========================================================================================
 
-cell("p939.supersede.running — a stated term corrected AFTER its schedule has posted a period moves nothing: the stored allocation, the term the schedule rode, its occurrences and its COMMITTED receipt are byte-identical afterwards, the schedule keeps naming the statement it was derived from, and a second schedule over the same recognition is still refused by name", async () => {
+cell("p939.supersede.running — a stated term corrected AFTER its schedule has posted a period moves nothing: the stored allocation, the term the schedule rode, its occurrences and its COMMITTED receipt are byte-identical afterwards, the schedule keeps naming the statement it was derived from, a second schedule over the same recognition is still refused by name, and ENDING the first one does not open that door either", async () => {
   const scene = await statedTermScene("supersede", {
     cents: 90000, termMonthsBack: 4, termMonths: 3, memoCents: 90000 });
   const stated = await recordStatedTerm(scene.bob, {
@@ -481,6 +481,24 @@ cell("p939.supersede.running — a stated term corrected AFTER its schedule has 
       client: scene.client, sourceEntry: scene.memoEntry,
       expenseAccount: scene.target, authorityRef: scene.authorityRef }),
     "configuring a second schedule over a recognition whose term was corrected");
+
+  // ---- AND ENDING THE SCHEDULE DOES NOT OPEN THAT PATH EITHER. [L04-SPEC-04, fix round 2.]
+  // The register used to offer "end this schedule and configure a new one" as the remedy, in three
+  // separate sentences. `uq_prepayment_schedules_source` (0223) is UNCONDITIONAL — it carries no
+  // status predicate at all — so the refusal is the SAME once the plan has ended, and the advice
+  // was an act nobody could perform. Driven rather than reasoned about: the plan is ended through
+  // its own door, and only then is the replacement asked for.
+  const ended = await endAccountingPlan(scene.bob, {
+    plan: created.plan_id,
+    reason: "#939 battery: the stated term was wrong, so the firm stopped the schedule" });
+  assert.equal(ended.status, "ended", "the schedule really ended before the replacement was asked for");
+  await assertPair(CLR.conflict, PREPAY_REASON.scheduleExists,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.memoEntry,
+      expenseAccount: scene.target, authorityRef: scene.authorityRef }),
+    "configuring a REPLACEMENT schedule after ending the first one");
+  assert.equal(await scheduleCountFor(scene.memoEntry), 1,
+    "…and the recognition still carries exactly the one schedule it has always carried");
 });
 
 // ===========================================================================================
