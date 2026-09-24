@@ -873,6 +873,152 @@ by this release and still owed at the end of the programme.
 
 ---
 
-## § RESULTS (as run, ____-__-__, UTC)
+## § RESULTS (as run, 2026-09-24, UTC)
 
-Leave blank until measured.
+**Authority.** The owner's riders plan of 2026-09-20 (each wave ends with its hosted release and the
+tickets close on hosted evidence), the release-ownership ruling of 2026-09-17, the beta ruling that
+hosted users and data are test data (#826, 2026-09-15), and the standing delegation of 2026-09-23.
+The owner followed the session by status reports and did not object. Beta ruling unchanged.
+
+**Gates 0a.** `main` = RELEASE_SHA = `6da02a8dec786015a68209d08f3391af5156081e` (PR #1053, merge of
+`integration/riders-w4` at `fb1dae78a`; the merge commit's tree is identical to the PR head's tree).
+CI on the PR: run 35982946837 SUCCESS on `fa64ecf5d`, run 36030660038 SUCCESS on the final head
+`78399fcd3` (two earlier PR runs are not the record: 35967950460 cancelled, 35969325205 red on the
+46 collisions fixed and recorded in `reports/wave4-ci-reds.md`). CI on the merge commit: run
+36034074208 SUCCESS on `6da02a8de`. `check-frozen-workflows` on RELEASE_SHA: **322 frozen file(s) /
+57 "use workflow" module(s) / 3 retired**, `node --test packages/runtime/tests/registry-view.test.mjs`
+7/7. Web rollback lever confirmed: `b659a3d4-a253-4f49-8a7e-c89306f6ab82` at 100% before the window.
+The new version's bindings checked: six secrets, `ASSETS`, four vars.
+
+**Step 1.** `fly auth whoami` = `tools@belcort.com`; one machine `48ee715b763048`, started, 2/2.
+
+**Step 2.** Probe `2870157b6de6e8` (`probe-w4`) from `refresh-46cf7c85`, World off.
+
+**Step 3, pre-window reads (17:28:58Z–17:29:xxZ, `reads-w4.mjs --prod --baseline fp-w4-hosted.json`).**
+Ledger 288 / `0293_fa_arrears_judgement_scope`, drift gate 288/288, pending set exactly the 21 files
+above the frontier, 0 PARSE GAP. Fingerprint vs the rig's hosted-frontier baseline: 10984 keys
+compared, 10970 equal, **14 env lines** (the same Supabase-only role attributes and memberships waves
+2 and 3 met, printed as environment facts, never a STOP), 0 STOP. Body-pin ledger: **136 of 136
+measurable pins at a value their own file admits**; the 53 chain-internal pins printed and never
+counted; 23 non-pin 64-hex digests each covered by a named hand check. Quiescence: no non-terminal
+task or Work, no pending interruption, workflow_runs non-terminal 0, no F10 holder, no lock on the
+relations this wave locks; the one `statement_facts running` document_processing_tasks row is the
+orphan known since 2026-09-19. **Verdict CLEAN.**
+
+**Step 3f, backup (17:30:29Z to 17:31:37Z).** Full dump
+`packages/db/backups/clara-clara-graphile-worker-workflow-workflow-drizzle-2026-09-24T17-30-29-801Z.sql`
+= 220,143,562 bytes, plus globals `clara-globals-2026-09-24T17-31-37-024Z.sql` (12,177 bytes). Run
+through the WSL wrapper (the CA-path workaround, #917): the first attempt failed because the wrapper
+must run under WSL's own node, not a Windows-path node invocation; re-run correctly under WSL and
+succeeded.
+
+**Steps 4 and 5, before the window.** Runtime image
+`registry.fly.io/clara-runtime:refresh-6da02a8d` = `sha256:be29627ca473006daa3f0432e3e924e4c2844b3f9346893fe9b4ae21417bad80`
+(265 MB), built from a detached checkout at RELEASE_SHA. Web Worker version
+`57c5dbab-5706-4a8b-a50a-a96fa37f6d97`, tag `refresh-6da02a8d`, built at `HEAD=6da02a8de`,
+`porcelain=[]`, not promoted.
+
+**Step 6, the window.** 6a: `machine stop 48ee715b763048` 17:54:08Z, `stopped` 17:54:17Z. 6b: census
+through the probe: CLEAN, no lock on `accounting_plans`, `accrual_adjustments`, `coa_templates` and
+its three child tiers, `document_capabilities`, `document_extractions`, `document_processing_tasks`,
+`entry_post_receipts`, `firm_setup_keys`, `journal_entries` or `prepayment_schedules`; the
+`statement_facts running` row is the same known orphan; no F10 holder. 6c: `migrate.mjs` through the
+probe DSN, 17:54:37Z to 17:56:10Z (1 min 33 s): **`migrate: 21 new migration(s) applied · 309
+total`**, every prestate on its FIRST-apply branch, every tail OK, no CLR, no lock wait. 6d: ledger
+**309 / `0318_knowledge_fye_pair_applicability`**: branch (iv), drive forward.
+
+**Post reads through the probe (17:56:32Z–17:56:42Z, `reads-w4.mjs --post --prod --baseline
+fp-w4-upg.json`).** Ledger 288 + 21 = 309 at 0318; every one of the 21 new rows at its file checksum;
+drift gate 309/309; fingerprint vs the UPGRADED rig baseline: 11355 keys compared, 11340 equal, 15
+env lines (the same set plus the role-level facts, nothing else). Section (f) post-reads: standard
+chart `my_sme_starter | v1/retired, v2/published | 146 | 2`; registry `240 | 1 | 6 | 6 | 6 | 240`;
+the two new lanes live on the router's roster; the two frozen evaluators registered; the accrual
+`side` column backfilled with no pre-existing row left NULL; the invite-preview role pair present,
+both NOLOGIN at this point, the door's ACL exactly `{clara_fn_owner, clara_invite_preview}`; the
+firm-setup catalogue still 15 rows with its new `user_note`; `clara.create_client`'s grant gone,
+PUBLIC holds none; the knowledge pair wall at its final four-argument signature; the receipt lane
+vocabulary at its five-member final set. **Verdict CLEAN.**
+
+**6e, the invite-preview credential ceremony (#871, migration 0309).** First attempt (17:56:42Z to
+17:56:51Z) failed: a surviving psql meta-command (`\set ON_ERROR_STOP on`) inside the multi-statement
+string made the whole thing fail to parse (`syntax error at or near "\\"`, `42601`) and nothing
+executed. Fixed by stripping every meta-command line from the ceremony script; re-run (17:57:21Z to
+17:57:34Z) succeeded. Reads printed: (1) both roles, with only the login shell carrying LOGIN; (2)
+the membership, login shell inheriting the group; (3) exactly one EXECUTE surface,
+`preview_invite_by_token(p_token text, p_origin_digest bytea)`; (4) zero table grants; (5)
+`direct_clara_usage = true` for the login shell. **Deviation from the draft's expectation:** the
+runbook's read (5) expected `direct_clara_usage = f`; on hosted the shell INHERITs the group role's
+schema USAGE, which is what lets it reach the one function. The effective EXECUTE surface is
+unchanged (still exactly the one function, zero table grants), so this is recorded as a deviation
+explained, not a defect. Smoke: `{"outcome":"not_previewable"}`, matching expectation. Secret staged
+with `fly secrets import --stage` (`CLARA_INVITE_PREVIEW_DATABASE_URL`, digest `736a9430a285a046`,
+status Staged) and applied by step 7's deploy — one restart, not two, as the runbook intended.
+
+**Step 7.** Probe destroyed 17:57:50Z. `fly deploy --image …@sha256:be29627c…` 17:57:53Z to
+17:58:32Z (reached `stopped`); `machine start` 17:58:32Z; `/ready` 200 at 17:58:55Z. **Outage:
+17:54:08Z to 17:58:55Z, 4 min 47 s** (17:54:17Z stopped to 17:58:55Z ready, 4 min 38 s of that
+without a runtime). Boot line: `serving git_sha=6da02a8dec786015a68209d08f3391af5156081e
+frontier=0318_knowledge_fye_pair_applicability(309) bodies=57 pins closeExample=closeExampleV1
+chatTurn=chatTurn_v21 claraWork=claraWork_v5 documentIngest=documentIngest_v2
+invoiceFacts=invoiceFacts_v1 statementFacts=statementFacts_v3 witnessFacts=witnessFacts_v3
+payrollFacts=payrollFacts_v1 agreementFacts=agreementFacts_v1 autoDraft=autoDraft_v10 …`; `stranded
+bodies n=0` BEFORE `durable world started pid=644`; five `clara-work/v1..v5` bundle banners;
+`CONTROL listening`; `LEADER acquired`. `/ready` pools: `runtime`, `read`, `write`, `freeform`,
+`stripe_webhook`, `auth_wall` and `invite_preview` all `ok:true`; `bank` skipped
+(`dsn_not_configured`, expected, unrelated to this wave).
+
+**Step 8.** `wrangler versions deploy 57c5dbab…@100%` 17:59:18Z to 17:59:25Z (previous
+`b659a3d4…`, tag `refresh-46cf7c85`). Signed-out smoke at 17:59:36Z: `/login`, `/favicon.ico`,
+`/icon.png` 200; `/pending`, `/api/build-info`, `/checkout/cancel` 307 to `/login?next=…`;
+`/settings/registrations`, `/admin/registrations` 307 to `/operator`; cross-origin POST
+`/auth/confirm/resend` 403; runtime `/ready` 200. The invite-link block was not exercised against a
+live token in this window (no real invite on hand); the ceremony's own smoke
+(`{"outcome":"not_previewable"}`) is the evidence for the wall. Signed-in walk: **NOT done** (no
+operator browser session); the step-8 table is the owner's next signed-in check, together with waves
+2 and 3's still-owed walks.
+
+**Step 9, rollback preflight demonstration (second probe `48e259df026098` on `refresh-46cf7c85`,
+its bundle streamed over `ssh console`, 10,917,711 bytes, sha256 `fecc69e8a423f4623ff16573d23ae4642b95e26e47b19be6e088986ee73796e3`
+verified against the machine's own `sha256sum`, match=yes).** `rollback-preflight: REFUSED
+(global)`, verdict `frontier_requires_contract`: the database is at
+`0318_knowledge_fye_pair_applicability` and the previous image, `refresh-46cf7c85`, declares 0 door
+contracts, so it does not declare the `intake_refusal_record_v1` contract 0254 requires or the
+`fa_parked_run_v1` contract 0279 requires; 0 non-terminal workflow runs, 0 live tasks unbound. This
+is the correct answer and it closes the #1035 gap the wave-2 and wave-3 windows met (both times
+`ALLOWED` when it should not have been): the runtime rollback safety work landed in this wave
+(#1033 #1035 #877 #1041) and this is its first live demonstration.
+
+**Step 10, the reads this wave owes (probe2, 18:01:09Z–18:01:21Z, then again through the same probe
+after the release smoke).** Ledger 309 / 0318. Reference table deltas measured against the
+pre-window baseline: `coa_templates` 1→2 (`v1/retired, v2/published`), `coa_template_accounts` 142
+on v1 plus 146 on v2, `coa_template_families` 42+42, `coa_template_entity_overrides` 2+2,
+`document_capabilities` 240 rows unmoved in count (registry version raised), `evaluator_versions` 11
+(9+2 payroll/agreement), eight new relations present at 0 rows
+(`accrual_period_amounts`, `contract_terms`, `contract_plan_confirmations`,
+`invite_preview_attempts`, `prepayment_account_enrolments`, `prepayment_stated_terms`,
+`revenue_recognition_schedules`, `staff_expense_claim_allocations`); `fixed_assets` 0 (0279's parked
+branch does not arise on hosted, consistent with wave 3); `accrual_adjustments`'s `side` column: no
+pre-existing row read anything but `expense`, none NULL.
+
+**Second probe reads (`probe2-w4`, 18:01:xxZ, after the 6e ceremony's smoke ran).** Fingerprint vs
+the same upgraded baseline: 11355 keys, 11339 equal, **16 env lines** (the 15 above plus
+`clara_invite_preview_login` now carrying LOGIN, which is the ceremony's own effect and not drift).
+Section (f) re-read: the invite-preview login shell now reads `true`, and
+`clara.invite_preview_attempts` carries **1** row, from the ceremony's own smoke call. Everything
+else unchanged from the first post-read.
+
+**Step 11.** No manifest to lock beyond the two new frozen families, already registered append-only
+by `check-frozen-workflows` (322 / 57 / 3, confirmed at gate 0a) — `--lock-deployed` had nothing
+further to do. Tickets: **25 closed** with the hosted evidence above (19 DONE, 5 PARTIAL: #933 #940
+#941 #942 #1036; #944 closed by the blueprint commit). Follow-ups filed during the wave: #1041,
+#1043 (closed), #1044, #1046, #1047, #1048, #1049, #1050, #1051, #1052.
+
+**Deviations from the draft.** (1) The 6e ceremony's first run failed on a surviving psql
+meta-command that made the whole multi-statement string fail to parse; fixed by stripping every
+meta-command line, then re-run clean. (2) The backup's first attempt failed because the WSL wrapper
+must run under WSL's own node rather than a Windows-path invocation; re-run correctly. (3) The
+merge-commit CI watcher first followed a stale run before locking onto 36034074208. (4) Read (5) of
+the 6e ceremony read `direct_clara_usage = true` against the runbook's expectation of `f`: on hosted
+the login shell INHERITs the group role's schema USAGE, which is what lets it reach the one granted
+function; the EXECUTE surface itself is exactly as designed, so this is an explained deviation, not
+a defect.

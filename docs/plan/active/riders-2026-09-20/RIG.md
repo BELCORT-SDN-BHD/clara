@@ -17,6 +17,8 @@ and `cd` to your worktree:
 | 08 | `C:\Users\zhant\Desktop\clara-wt\658` | 55748 | `clara_l08` | https://127.0.0.1:3570 / 3571 / 3572 |
 | 09 | `C:\Users\zhant\Desktop\clara-wt\659` | 55749 | `clara_l09` | https://127.0.0.1:3580 / 3581 / 3582 |
 | 10 | `C:\Users\zhant\Desktop\clara-wt\660` | 55750 | `clara_l10` | https://127.0.0.1:3590 / 3591 / 3592 |
+| C1 | `C:\Users\zhant\Desktop\clara-wt\635` | 55741 | `clara_l01` | https://127.0.0.1:3500 / 3501 / 3502 |
+| C2 | `C:\Users\zhant\Desktop\clara-wt\636` | 55742 | `clara_l02` | https://127.0.0.1:3510 / 3511 / 3512 |
 
 Every worktree has its dependencies installed and sits on a lane branch cut from `origin/main`
 (`dd3f8f1d` or later). Every database was migrated from scratch 0001 → 0234 (229 files) on its own
@@ -93,3 +95,21 @@ out to grep), the Defender/EICAR skip, no `pg_dump` on PATH (four runtime files)
   web-only lane (Playwright triple 3600 / 3601 / 3602). A lane-11 ticket that turns out to need a
   database stops and says so.
 - Reserved migration numbers for wave 3 start at `0273`; your prompt names yours.
+
+## Cut phase (2026-09-25)
+
+- Lane C1 (`clara-wt/635`, port 55741, db `clara_l01`) is on branch `riders/cut-lane01`; lane C2
+  (`clara-wt/636`, port 55742, db `clara_l02`) is on branch `riders/cut-lane02`. Both were cut from
+  `origin/main` at `6da02a8de`, both worktrees clean before and after, no `pnpm install` needed
+  (lockfile unchanged across the checkout range).
+- Both lane databases carried 309 files but the PRE-fix checksum of migration 0295 (the wave-4 lane
+  databases took 0295 before its collation fix), so a migrate refused. Both were rebuilt: database
+  dropped, `role-census-reset.mjs --apply` (four post-0154 roles existing and dependent-free once the
+  database was gone; cluster back to 14, 0154's pin), database recreated, `pnpm --filter @clara/db
+  migrate` from the lane's own worktree (309/309 applied, `0001` → `0318_knowledge_fye_pair_applicability`),
+  then `pnpm --filter @clara/db seed`. Both ledgers now read 309 files, max `0318`, and both hold the
+  same post-fix `0295` checksum (`5196d64d944e61ef836313cffd6bcc2d4dddd18bc808ca55f86e30544ecece0d`); a
+  second `migrate` on each reports 0 new applied and no drift.
+- `rigw2`, `rigw3` and `rigw3h` (ports 55760, 55770, 55771) were dropped on 2026-09-25 after the
+  wave-4 release; `rigw4`, `rigw4h`, `rigw4c`, `rigint`, `rigrt`, `rigreh` and `rl03` through `rl10`
+  were left untouched.
