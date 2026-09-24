@@ -24,6 +24,7 @@
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 
 import * as fx from "./relay-fixtures.mjs";
 import {
@@ -45,6 +46,17 @@ import { STATEMENT_WITNESS_ENGINE_SNAPSHOT } from "../workflows/statementFacts.v
 
 const ENGINE_ID = STATEMENT_WITNESS_ENGINE_SNAPSHOT.engineId;
 const withRuntime = (fn) => fx.asRuntime(fn);
+
+/**
+ * THE DURABLE ENGINE'S OWN MEMOIZATION CODEC, reached exactly the way the engine reaches it.
+ * `@workflow/world-postgres` stores a step's return value in `steps.output_cbor` through
+ * `Cbor()` (dist/drizzle/schema.js:74, dist/drizzle/cbor.js), which is `cbor-x`'s encode/decode —
+ * so this IS the boundary a replayed step's value crosses, not a stand-in for it. Resolved
+ * through the engine's own package rather than declared as a dependency of this one: it is that
+ * package's transitive dependency and pinning it here would let the two drift.
+ */
+const { encode: cborEncode, decode: cborDecode } = createRequire(import.meta.resolve("@workflow/world-postgres"))("cbor-x");
+const asReplayed = (value) => cborDecode(cborEncode(value));
 
 const READY = await rigReady();
 const skip = READY ? false : "statement-witness estate absent (clara.persist_statement_facts_v2 / the #990 citation columns)";
@@ -242,6 +254,52 @@ test("1037.db5 what a persisted citation is, measured: the region's OWN locator 
   // document_regions locator itself, byte for byte, so the viewer's polygon layer renders the
   // patch the reader named even though nothing can re-walk the link.
   assert.deepEqual(rows[0].citation_region, await readRegionLocator(s.regionIds[0]));
+});
+
+test("1037.db6 the WIDENED text read survives the durable engine's own memoization codec — a replayed step hands the persist the same citations", { skip }, async () => {
+  const s = await buildStatementSituation("v4cite-f", { engineId: ENGINE_ID });
+  const calls = [];
+  const header = workedHeader(s.account.digits);
+  const services = statementServices({
+    engineId: ENGINE_ID,
+    calls,
+    answer: (call) => ({
+      header: { ...header },
+      lines: WORKED_STATEMENT.lines.map((line, i) => (call.channel === "text"
+        ? { ...line, region_idx: s.idxForLine(i) }
+        : { ...line })),
+    }),
+  });
+
+  // C2-SPEC-02's named residual, measured at the seam it actually lives at. `statementWitness
+  // TextReadStep` is a memoized step, so on a replay the persist is handed the value the engine
+  // DECODED out of `steps.output_cbor` rather than the value this read returned — and what v4
+  // widened is precisely that value (one integer and one jsonb locator object per cited line).
+  // This does not run inside a durable World (no statementFacts World driver exists; that is the
+  // follow-up), but the crossing it would exercise is this one.
+  const textRead = await runStatementWitnessTextRead(services, withRuntime, s.taskId, s.claimDoc);
+  const visionRead = await runStatementWitnessVisionRead(services, withRuntime, s.taskId, s.claimDoc);
+  const replayedText = asReplayed(textRead);
+  const replayedVision = asReplayed(visionRead);
+  assert.ok(cborEncode(textRead).byteLength > 0, "the premise: the value really was encoded to bytes");
+  assert.notEqual(replayedText, textRead, "…and decoded back into a DIFFERENT object, so the crossing is real rather than an identity");
+  assert.deepEqual(replayedText, textRead, "the widened text-read value round-trips through the engine's codec unchanged");
+  assert.deepEqual(replayedVision, visionRead);
+  // Named explicitly, because these two keys are the whole of what v4 added to the crossing.
+  assert.equal(typeof replayedText.lines[0].page, "number");
+  assert.deepEqual(replayedText.lines[0].region, await readRegionLocator(s.regionIds[0]));
+
+  // And the persist is driven from the REPLAYED values, so what is asserted below is the state a
+  // resumed run would bank rather than the state the first attempt held in memory.
+  const out = await persistStatementWitnessPair(services, withRuntime, s.taskId, replayedText, replayedVision);
+  assert.equal(out.status, "done", `the replayed pair persists cleanly (${JSON.stringify(out.receipt)})`);
+  const rows = await readStatementLines(out.receipt.statement_id);
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((r) => r.citation_page), [1, 2, 3], "every citation survived the crossing");
+  for (const [i, row] of rows.entries()) {
+    assert.deepEqual(row.citation_region, await readRegionLocator(s.regionIds[i]));
+    assert.equal(row.citation_extraction_id, out.receipt.reader1_extraction_id);
+  }
 });
 
 test(`META: the statement-witness citation estate is present (${READY ? "live" : "ABSENT"})`, () => {
