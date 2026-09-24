@@ -1444,6 +1444,34 @@ const AGREEMENT_0299_CLOCK_NAMES = [
 ];
 const TENANCY_0300_CLOCK_NAMES = ["_settle_rent_payable_core", "record_contract_terms"];
 
+// RIDERS WAVE 4, LANES 03/04/05 (0302, 0305, 0306, 0309, 0317) — SEVEN NAMES, and every one of
+// them reads a bare `now()` as an INSTANT stamped on a row or compared against a stored instant,
+// never as a date the books turn on. Each was read off the live body rather than the migration
+// text, and each body's ONLY bare-token occurrence is the one named below.
+//   · skip_plan_occurrence (0302, #938) — the `'at'` key of the jsonb state it writes on the
+//     skipped occurrence: WHEN the person skipped it, beside `skipped_by`. The occurrence's own
+//     due date is the plan's and is untouched.
+//   · record_prepayment_stated_term (0305, #939) — `superseded_at` on the append-only stated-term
+//     row the correction replaces. The TERM ITSELF is two dates the person states.
+//   · enrol_prepayment_account / retire_prepayment_account (0306, #940) — `retired_at` on the
+//     roster row (the enrolment door retires a superseded profile of the same account on its way
+//     in, which is why BOTH doors carry the stamp). Configuration lifetime, never a posting.
+//   · preview_invite_by_token (0309, #871) — the signed-out preview's own `v_now := now()`,
+//     spent on the rate window and on `i.expires_at <= now()`, i.e. comparing an instant with a
+//     stored instant. It derives no date and writes none: the read is STABLE.
+//   · replace_prepayment_schedule / replace_revenue_recognition_schedule (0317, #939 AC4 /
+//     #941 AC3) — `superseded_at` on the predecessor schedule row the successor supersedes. The
+//     successor's own periods come from the corrected term and the plan lane's arithmetic.
+const ACCRUAL_BILL_CONFLICT_0302_CLOCK_NAMES = ["skip_plan_occurrence"];
+const PREPAYMENT_STATED_TERM_0305_CLOCK_NAMES = ["record_prepayment_stated_term"];
+const PREPAYMENT_ACCOUNT_ROSTER_0306_CLOCK_NAMES = [
+  "enrol_prepayment_account", "retire_prepayment_account",
+];
+const INVITE_PREVIEW_0309_CLOCK_NAMES = ["preview_invite_by_token"];
+const SCHEDULE_CORRECTION_0317_CLOCK_NAMES = [
+  "replace_prepayment_schedule", "replace_revenue_recognition_schedule",
+];
+
 // #720 [0198, chat-clarify expiry] — ADDS NO NAME AND MOVES NONE, and that is MEASURED rather than
 // assumed: 0198 creates no body at all. It RECUTS exactly one, `clara.expire_due_interruptions`,
 // which already sits on WORK_QUESTIONS_0180_CLOCK_NAMES above, and the recut deletes a predicate
@@ -1612,6 +1640,14 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("payroll_net_pay_settlement$")) names.push(...PAYROLL_SETTLEMENT_0298_CLOCK_NAMES);
   if (await appliedStem("agreement_contract_acquisition$")) names.push(...AGREEMENT_0299_CLOCK_NAMES);
   if (await appliedStem("tenancy_terms_rent_plan$")) names.push(...TENANCY_0300_CLOCK_NAMES);
+  // RIDERS WAVE 4, lanes 03/04/05 (0302, 0305, 0306, 0309, 0317) - stem-gated, never
+  // number-gated, for the reason :207-214 gives; doubly so for 0317, whose number was contested
+  // at integration (lane 06's fix-round file moved to 0318 so this one could keep it).
+  if (await appliedStem("accrual_bill_conflict$")) names.push(...ACCRUAL_BILL_CONFLICT_0302_CLOCK_NAMES);
+  if (await appliedStem("prepayment_stated_term$")) names.push(...PREPAYMENT_STATED_TERM_0305_CLOCK_NAMES);
+  if (await appliedStem("prepayment_account_roster$")) names.push(...PREPAYMENT_ACCOUNT_ROSTER_0306_CLOCK_NAMES);
+  if (await appliedStem("invite_preview_public_door$")) names.push(...INVITE_PREVIEW_0309_CLOCK_NAMES);
+  if (await appliedStem("schedule_term_correction$")) names.push(...SCHEDULE_CORRECTION_0317_CLOCK_NAMES);
   return names.sort();
 }
 
@@ -1741,8 +1777,42 @@ const KL_ROSTER_0220_FIRM_KNOWLEDGE = ["get_knowledge_applicability", "list_firm
 // `clara.create_accounting_plan` (whose `timezone` column is a one-member CHECK), and once as a
 // `'timezone'` key in the jsonb it returns. The amortisation dates themselves come from the plan
 // lane's own arithmetic. 0223's other bodies spell the zone nowhere.
+// #915 [0307] MOVED THIS NAME rather than adding one beside it, so the entry is now
+// REVERSE-gated the way begin_chat_turn's and sign_adjustment_template's are: the OBO twin
+// extracted the whole schedule body into `clara._prepayment_schedule_core` and left
+// `clara.create_prepayment_schedule` a one-line delegation that spells the zone nowhere
+// (measured: 1,413 bytes of prosrc against the core's 38,889, and the arm (B) detector no longer
+// matches it). On a database pinned before 0307 the door still carries both mentions, so the
+// name is PUSHED BACK there instead of being deleted.
 const KL_ROSTER_0223_PREPAYMENT = ["create_prepayment_schedule"];
 // WAVE 2026-09-15 END
+
+// ===========================================================================================
+// RIDERS WAVE 4, LANE 04 (0307, 0308, 0317) - arm (B), THREE stem-gated cohorts, FOUR names,
+// and every one of them is #653's own CLASS 1 adjudication inherited, not a new question: each
+// body spells 'Asia/Kuala_Lumpur' as the `p_timezone` ARGUMENT it hands
+// `clara.create_accounting_plan` (whose `timezone` column is a one-member CHECK) and again as
+// the `'timezone'` key of the jsonb it returns, and DERIVES NO DATE from either. The schedule
+// dates come from the plan lane's own arithmetic. There is no authority to call instead --
+// `clara._book_today()` answers a DATE, not a zone -- so the standing advice cannot be followed
+// and joining this roster is the declared cost, exactly as KL_ROSTER_0300_TENANCY's own header
+// records for `clara._tenancy_rent_plan_draft`.
+//
+// #915 [0307] - the on-behalf twin's extraction. `clara._prepayment_schedule_core` is where
+// `clara.create_prepayment_schedule`'s two mentions WENT (see that entry's reverse gate above),
+// so on the integrated chain this is a RELOCATION and not a second copy: the pair moves together
+// and the roster's total is unchanged across the 0307 boundary.
+const KL_ROSTER_0307_PREPAYMENT_OBO = ["_prepayment_schedule_core"];
+// #941 [0308] - the deferred-revenue twin of the same body, on the same adjudication. It is a
+// NEW name (the revenue lane did not exist before 0308), so this one is an addition.
+const KL_ROSTER_0308_REVENUE_RECOGNITION = ["_revenue_recognition_core"];
+// #939 AC4 / #941 AC3 [0317] - the two correction doors. Each opens a SUCCESSOR schedule over a
+// corrected term, which means each calls the plan door itself and hands it the same zone NAME.
+// Both are doors rather than cores, and both carry the envelope key too.
+const KL_ROSTER_0317_SCHEDULE_CORRECTION = [
+  "replace_prepayment_schedule", "replace_revenue_recognition_schedule",
+];
+// RIDERS WAVE 4, LANE 04 END
 
 // ===========================================================================================
 // WAVE 2026-09-18 (0225..0233) - arm (B), FOUR stem-gated cohorts, SEVEN names, measured on the
@@ -1894,7 +1964,12 @@ export async function s5KlDuplicationRoster(query) {
   if (await appliedStem("client_work_pack$")) names.push(...KL_ROSTER_0214_WORK_PACK);
   if (await appliedStem("counterparty_identity_provenance$")) names.push(...KL_ROSTER_0215_COUNTERPARTY_IDENTITY);
   if (await appliedStem("firm_knowledge_defaults$")) names.push(...KL_ROSTER_0220_FIRM_KNOWLEDGE);
-  if (await appliedStem("prepayment_amortisation$")) names.push(...KL_ROSTER_0223_PREPAYMENT);
+  // REVERSE-gated on 0307: the two mentions moved into the core, so the DOOR only belongs to this
+  // roster on a database that has not taken the extraction yet.
+  if (await appliedStem("prepayment_amortisation$")
+      && !(await appliedStem("prepayment_schedule_obo_twin$"))) {
+    names.push(...KL_ROSTER_0223_PREPAYMENT);
+  }
   // WAVE 2026-09-18 (0225..0233) - stem-gated, never number-gated.
   if (await appliedStem("intake_batches$")) names.push(...KL_ROSTER_0229_INTAKE_BATCHES);
   if (await appliedStem("knowledge_retrieval$")) names.push(...KL_ROSTER_0230_KNOWLEDGE_RETRIEVAL);
@@ -1904,5 +1979,10 @@ export async function s5KlDuplicationRoster(query) {
   if (await appliedStem("document_ingest_window_myt$")) names.push(...KL_ROSTER_0252_DOCUMENT_INGEST_WINDOW);
   // RIDERS WAVE 4, LANE 01 (#949, 0300) - stem-gated, never number-gated.
   if (await appliedStem("tenancy_terms_rent_plan$")) names.push(...KL_ROSTER_0300_TENANCY);
+  // RIDERS WAVE 4, LANE 04 (0307, 0308, 0317) - stem-gated, never number-gated; doubly so for
+  // 0317, whose number was contested at integration (lane 06's fix-round file moved to 0318).
+  if (await appliedStem("prepayment_schedule_obo_twin$")) names.push(...KL_ROSTER_0307_PREPAYMENT_OBO);
+  if (await appliedStem("deferred_revenue_recognition$")) names.push(...KL_ROSTER_0308_REVENUE_RECOGNITION);
+  if (await appliedStem("schedule_term_correction$")) names.push(...KL_ROSTER_0317_SCHEDULE_CORRECTION);
   return names.sort().join(" ");
 }
