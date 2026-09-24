@@ -200,6 +200,15 @@ grant clara_wake_interactive to clara_wake_write_login with inherit false, set t
 grant clara_freeform_ro      to clara_freeform_login   with inherit false, set true;
 grant clara_stripe_webhook   to clara_stripe_webhook_login;
 grant clara_auth_wall        to clara_auth_wall_login;
+-- #871 (0309): the SAME plain INHERIT-style grant 0163 writes for the auth wall, mirrored
+-- statement for statement (`grant clara_invite_preview to clara_invite_preview_login;`,
+-- 0309 §A) rather than restyled -- clara_invite_preview_login is created `inherit`, and the
+-- door's whole point is that the login shell INHERITS the one EXECUTE the group holds.
+-- WITHOUT THIS LINE the pair's roles are recreated on a DR target and their MEMBERSHIP is not:
+-- dr-verify's [4.5] clara_% membership census reported exactly that as `source-only 2` on CI
+-- run 35969325205 (this membership and the postgres one in 2b below), and a restored project
+-- would have carried a preview lane whose login could reach nothing.
+grant clara_invite_preview   to clara_invite_preview_login;
 -- 0121's own membership is INHERIT-style, deliberately unlike the trio above — the plain
 -- grant mirrors the migration's exact statement (clara_wake_bank_login is created `inherit`).
 grant clara_wake_bank       to clara_wake_bank_login;
@@ -232,6 +241,10 @@ begin
     grant clara_freeform_login   to postgres with inherit false, set true;
     grant clara_stripe_webhook_login to postgres;
     grant clara_auth_wall_login      to postgres;
+    -- #871 (0309): the same plain grant, mirroring 0163's idiom exactly. 0309 §A calls it
+    -- "test-only SET ROLE reachability" and mints no password-bearing credential; the membership
+    -- is part of the census a restored target must reproduce.
+    grant clara_invite_preview_login to postgres;
     -- 0121's own postgres membership is a plain grant (rig-testability parity with the
     -- wake_write_login precedent) — mirrored exactly, not restyled.
     grant clara_wake_bank_login  to postgres;

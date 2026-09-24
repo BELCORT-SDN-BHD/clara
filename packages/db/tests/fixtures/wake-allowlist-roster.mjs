@@ -197,6 +197,23 @@ export const CLARA_ROLE_ROSTER = [
       + "clara_auth_wall, itself NOLOGIN and without BYPASSRLS.",
   },
   {
+    role: "clara_invite_preview",
+    stem: "invite_preview_public_door",
+    applied: fnExists("clara.preview_invite_by_token(text,bytea)"),
+    why: "#871 (0309): the SIGNED-OUT invite preview's own NOLOGIN group role, on the NOLOGIN "
+      + "group + NOLOGIN shell shape FS-4 C-3 established. It holds EXACTLY ONE EXECUTE "
+      + "(clara.preview_invite_by_token, measured off the live catalog) and no table grant "
+      + "anywhere: the evidence table its rate wall counts is written by the DEFINER body, never "
+      + "by the caller.",
+  },
+  {
+    role: "clara_invite_preview_login",
+    stem: "invite_preview_public_door",
+    applied: roleExists("clara_invite_preview"),
+    why: "#871 (0309): the INHERIT login-member shell for clara_invite_preview, itself NOLOGIN "
+      + "and without BYPASSRLS — 0163's own pair shape, one migration later.",
+  },
+  {
     role: "clara_wake_filing",
     stem: "f_a7_beta_filing_verb",
     applied: fnExists("clara.wake_file_document(uuid,uuid,jsonb,text,jsonb,uuid,text)"),
