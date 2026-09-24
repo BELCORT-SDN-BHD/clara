@@ -55,10 +55,32 @@ import {
   startAccrualWorkInputSchemaV2,
   type StartAccrualWorkInputV2,
 } from "../lib/accrual-basis.v2.js";
+import {
+  START_PREPAYMENT_SCHEDULE_WORK_TOOL,
+  localPrepaymentRefusal,
+  prepaymentDoorPayload,
+  prepaymentRefusalMessage,
+  prepaymentSchedulePart,
+  startPrepaymentScheduleWorkInputSchema,
+  type PrepaymentSchedulePart,
+  type StartPrepaymentScheduleWorkInput,
+} from "../lib/prepayment-schedule-basis.js";
+import {
+  START_REVENUE_RECOGNITION_WORK_TOOL,
+  localRecognitionRefusal,
+  recognitionDoorPayload,
+  recognitionRefusalMessage,
+  revenueRecognitionPart,
+  startRevenueRecognitionWorkInputSchema,
+  type RevenueRecognitionPart,
+  type StartRevenueRecognitionWorkInput,
+} from "../lib/revenue-recognition-basis.js";
 
 export { START_TRADE_INVOICE_WORK_TOOL, startTradeInvoiceWorkInputSchemaV2, TRADE_INVOICE_REFUSALS_V2 };
 export { START_STAFF_EXPENSE_CLAIM_WORK_TOOL, startStaffExpenseClaimWorkInputSchemaV2 };
 export { START_ACCRUAL_WORK_TOOL, startAccrualWorkInputSchemaV2 };
+export { START_PREPAYMENT_SCHEDULE_WORK_TOOL, startPrepaymentScheduleWorkInputSchema };
+export { START_REVENUE_RECOGNITION_WORK_TOOL, startRevenueRecognitionWorkInputSchema };
 
 /** The tool name, as the model sees it and as every census counts it. */
 export const READ_OPENING_SOURCE_TOOL = "read_opening_source";
@@ -1382,6 +1404,199 @@ export async function runStartAccrualWorkV22(
   }
 }
 
+
+// =============================================================================================
+// `start_prepayment_schedule_work` and `start_revenue_recognition_work` — ROSTER ENTRIES A8
+// (#915) AND A9 (#941), APPLIED IN THAT ORDER because #941 copies #915's shape.
+//
+// ONE CHANGE THE TWO CARRIERS' FOOTERS BOTH NEEDED: the door is the OBO TWIN. A `clara_runtime`
+// connection carries no JWT claims (`lib/pools.mjs` issues `set role clara_runtime` and two
+// timeouts), so `clara._human_ctx` raises CLR04 on every human door, and a tool over one could
+// only ever answer a grant refusal. `p_author` is the HUMAN this turn acts for — `ctx.createdBy`,
+// the same value every other OBO tool in this closure passes — never the agent user id and never
+// the task id.
+//
+// WHAT NEITHER TOOL DOES, AND BOTH ARE BOUND BY:
+//   · D1 (#939) — the model NEVER supplies a service period. Neither input has anywhere to put
+//     one, and `clara.record_prepayment_stated_term` holds no agent grant and no wake wrapper by
+//     ruling. A migration minting that grant must not be written.
+//   · D2 (#940) — the model NEVER enrols an account and never proposes which account to enrol.
+//     `clara.enrol_prepayment_account` is `clara_authenticated`-only with no wake wrapper, asserted
+//     by `pg_proc` count in 0315's §TAIL, and the not-enrolled refusal names the PANEL instead.
+//
+// WHAT A PARKED ENROLMENT QUESTION WOULD HAVE NEEDED, AND WHY IT IS NOT HERE. #915 item 3 and
+// #941 item 3 both ask for the refusal to open a Work question. `clara.open_work_question` needs a
+// RUNNING task (0184:1643) and a hook token minted by a Work run; the schedule doors are reached
+// from the CHAT lane, where no Work exists at the moment the refusal arrives. So the chat half
+// does what it can honestly do — says which account, names the panel, and stops — and the parked
+// question is recorded as a follow-up rather than approximated.
+// =============================================================================================
+
+export type StartPrepaymentScheduleWorkResult =
+  | { ok: true; status: "configured"; schedule: PrepaymentSchedulePart; replayed: boolean }
+  | ToolRefusalV22;
+
+export type StartRevenueRecognitionWorkResult =
+  | { ok: true; status: "configured"; schedule: RevenueRecognitionPart; replayed: boolean }
+  | ToolRefusalV22;
+
+/** The refusal envelope for both schedule lanes: the door's typed `(code, detail.reason)` with the
+ *  carrier's own sentence, and a FAULT for anything that is not a governed refusal. */
+function scheduleRefusal(
+  error: unknown,
+  sentence: (reason: string, detail: Record<string, unknown>) => string,
+  internalMessage: string,
+): ToolRefusalV22 {
+  const refused = authoringRefusal(error as DbErrorV22);
+  if (refused.ok !== false) return internalFaultV22(internalMessage);
+  if (!isGovernedRefusalV22(refused.code)) return internalFaultV22(internalMessage);
+  const reason = typeof refused.reason === "string" ? refused.reason : null;
+  return {
+    ok: false,
+    code: refused.code,
+    reason: refused.reason,
+    fix: refused.fix,
+    message: reason === null ? refused.message : sentence(reason, refused.details),
+    details: refused.details,
+  };
+}
+
+export async function runStartPrepaymentScheduleWork(
+  ctx: ToolCtx,
+  input: StartPrepaymentScheduleWorkInput,
+): Promise<StartPrepaymentScheduleWorkResult> {
+  if (!ctx.clientId) {
+    return noClientRefusalV22(
+      "prepayment_schedule_needs_client_pin",
+      "This conversation is not bound to a client, so it cannot configure an amortisation schedule.",
+    );
+  }
+  const local = localPrepaymentRefusal(input);
+  if (local) {
+    return {
+      ok: false,
+      code: "CLR10",
+      reason: local.refusal,
+      fix: null,
+      message: local.message,
+      details: local.axis === undefined ? {} : { axis: local.axis },
+    };
+  }
+  const clientId = ctx.clientId;
+  const opKey = stableOpKey(ctx.taskId, START_PREPAYMENT_SCHEDULE_WORK_TOOL, input);
+  const payload = prepaymentDoorPayload(input, { clientId, taskId: ctx.taskId, opKey });
+  try {
+    const answer = await pools().withRuntime(async (c: PgExec) => {
+      const r = await c.query(
+        "select clara.create_prepayment_schedule_for("
+        + "p_client          => $1::uuid, "
+        + "p_author          => $2::uuid, "
+        + "p_source_entry    => $3::uuid, "
+        + "p_expense_account => $4::text, "
+        + "p_expense_basis   => $5::text, "
+        + "p_purpose         => $6::text, "
+        + "p_authority_ref   => $7::jsonb, "
+        + "p_op_key          => $8::text) as r",
+        [
+          payload.p_client,
+          ctx.createdBy,
+          payload.p_source_entry,
+          payload.p_expense_account,
+          payload.p_expense_basis,
+          payload.p_purpose,
+          JSON.stringify(payload.p_authority_ref),
+          payload.p_op_key,
+        ],
+      );
+      return (r.rows[0]?.r ?? null) as Record<string, unknown> | null;
+    });
+    if (!answer || answer.schedule_id == null) {
+      return internalFaultV22("The amortisation schedule could not be configured. Nothing was recorded.");
+    }
+    return {
+      ok: true,
+      status: "configured",
+      schedule: prepaymentSchedulePart(answer),
+      replayed: answer.replayed === true,
+    };
+  } catch (error) {
+    return scheduleRefusal(
+      error,
+      prepaymentRefusalMessage,
+      "The amortisation schedule could not be configured.",
+    );
+  }
+}
+
+export async function runStartRevenueRecognitionWork(
+  ctx: ToolCtx,
+  input: StartRevenueRecognitionWorkInput,
+): Promise<StartRevenueRecognitionWorkResult> {
+  if (!ctx.clientId) {
+    return noClientRefusalV22(
+      "revenue_recognition_needs_client_pin",
+      "This conversation is not bound to a client, so it cannot configure a recognition schedule.",
+    );
+  }
+  const local = localRecognitionRefusal(input);
+  if (local) {
+    return {
+      ok: false,
+      code: "CLR10",
+      reason: local.refusal,
+      fix: null,
+      message: local.message,
+      details: local.axis === undefined ? {} : { axis: local.axis },
+    };
+  }
+  const clientId = ctx.clientId;
+  const opKey = stableOpKey(ctx.taskId, START_REVENUE_RECOGNITION_WORK_TOOL, input);
+  const payload = recognitionDoorPayload(input, { clientId, taskId: ctx.taskId, opKey });
+  try {
+    const answer = await pools().withRuntime(async (c: PgExec) => {
+      // `p_pattern` IS NOT SENT. It defaults to `straight_line` and 0308 offers no other value, so
+      // an argument here could only ever produce a refusal (#941's own contract).
+      const r = await c.query(
+        "select clara.create_revenue_recognition_schedule_for("
+        + "p_client          => $1::uuid, "
+        + "p_author          => $2::uuid, "
+        + "p_source_entry    => $3::uuid, "
+        + "p_revenue_account => $4::text, "
+        + "p_revenue_basis   => $5::text, "
+        + "p_purpose         => $6::text, "
+        + "p_authority_ref   => $7::jsonb, "
+        + "p_op_key          => $8::text) as r",
+        [
+          payload.p_client,
+          ctx.createdBy,
+          payload.p_source_entry,
+          payload.p_revenue_account,
+          payload.p_revenue_basis,
+          payload.p_purpose,
+          JSON.stringify(payload.p_authority_ref),
+          payload.p_op_key,
+        ],
+      );
+      return (r.rows[0]?.r ?? null) as Record<string, unknown> | null;
+    });
+    if (!answer || answer.schedule_id == null) {
+      return internalFaultV22("The recognition schedule could not be configured. Nothing was recorded.");
+    }
+    return {
+      ok: true,
+      status: "configured",
+      schedule: revenueRecognitionPart(answer),
+      replayed: answer.replayed === true,
+    };
+  } catch (error) {
+    return scheduleRefusal(
+      error,
+      recognitionRefusalMessage,
+      "The recognition schedule could not be configured.",
+    );
+  }
+}
+
 export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
   return Object.assign({}, buildToolsV21(ctx, modelId, segment), {
     // A1 + A2 — the SAME NAME v21 serves, REPLACED rather than added. `Object.assign` takes the
@@ -1418,6 +1633,36 @@ export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
         + "zero — an empty cash figure means nobody has said which accounts are cash yet.",
       inputSchema: readClientFinancialPackInputSchema,
       execute: (input: ReadClientFinancialPackInput) => runReadClientFinancialPack(ctx, input),
+    }),
+    [START_PREPAYMENT_SCHEDULE_WORK_TOOL]: tool({
+      description:
+        "Configure the AMORTISATION of a prepayment the client has already recognised: a posted "
+        + "entry that put a cost into a prepaid asset, charged out over the period it covers. You "
+        + "name the POSTED entry, WHICH expense account each period's charge is booked to and WHY "
+        + "that account, and the schedule's purpose — and nothing else. There is no amount, no "
+        + "term, no dates and no cadence here, deliberately: the database derives every one of "
+        + "them from the entry's own prepaid leg and the service period a PERSON recorded. You "
+        + "never state a service period. If it refuses because nothing records the period, say so "
+        + "and ask a person for the first and last day it covers; if it refuses because the "
+        + "account is not enrolled, say which account and point at the client's Registers page — "
+        + "you never enrol one and never propose which to enrol. This CONFIGURES a schedule and "
+        + "posts nothing; each period's own Work puts it on the books.",
+      inputSchema: startPrepaymentScheduleWorkInputSchema,
+      execute: (input: StartPrepaymentScheduleWorkInput) => runStartPrepaymentScheduleWork(ctx, input),
+    }),
+    [START_REVENUE_RECOGNITION_WORK_TOOL]: tool({
+      description:
+        "Configure the RECOGNITION of revenue a customer has paid ahead for: a posted entry that "
+        + "put the receipt into a deferred-revenue liability, released to income over the period "
+        + "it covers. You name the POSTED entry, WHICH income account each period credits and WHY "
+        + "that account, and the schedule's purpose — and nothing else. No amount, no dates, no "
+        + "cadence and no pattern: the database derives all of them, and a service period is a "
+        + "person's to state, never yours. If it refuses because the account is not enrolled as a "
+        + "deferred-revenue account, say which account and point at the client's Registers page — "
+        + "you never enrol one. This CONFIGURES a schedule and posts nothing; say what WILL be "
+        + "recognised, never that anything has been.",
+      inputSchema: startRevenueRecognitionWorkInputSchema,
+      execute: (input: StartRevenueRecognitionWorkInput) => runStartRevenueRecognitionWork(ctx, input),
     }),
     [START_ACCRUAL_WORK_TOOL]: tool({
       description:

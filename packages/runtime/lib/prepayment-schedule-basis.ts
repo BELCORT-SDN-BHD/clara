@@ -111,6 +111,13 @@ export type StartPrepaymentScheduleWorkInput = z.infer<typeof startPrepaymentSch
  *  and this module's mirror cannot drift apart. */
 export const PREPAYMENT_REFUSAL = {
   sourceUnfit: "prepayment_source_unfit",
+  /** CLR04 on the OBO twin: the person this turn acts for has no live membership of this firm any
+   *  more, which is also what a mid-turn revocation looks like from here. */
+  authorityLost: "authority_lost",
+  /** CLR04: they are a member, and below the bookkeeper floor a schedule stands on. */
+  insufficientRole: "insufficient_role",
+  /** CLR10, and NEVER SHOWN: the successor always has the actor, so this is a wiring error. */
+  invalidAuthor: "invalid_author",
   termUnderivable: "prepayment_term_underivable",
   targetIneligible: "prepayment_target_ineligible",
   targetUnderivable: "prepayment_target_underivable",
@@ -124,6 +131,11 @@ export const PREPAYMENT_REFUSAL = {
 } as const;
 
 export type PrepaymentRefusalReason = (typeof PREPAYMENT_REFUSAL)[keyof typeof PREPAYMENT_REFUSAL];
+
+/** The axis a `prepayment_source_unfit` refusal carries when the prepaid account is simply not on
+ *  this client's prepayment roster. It is a GATE a bookkeeper clears, not a ban — and under #940's
+ *  ruling it is never a thing Clara offers to clear herself. */
+export const NOT_ENROLLED_AXIS = "prepaid_account_not_enrolled";
 
 export type LocalRefusal = { refusal: PrepaymentRefusalReason; axis?: string; message: string };
 
@@ -170,7 +182,25 @@ export function localPrepaymentRefusal(
  */
 export function prepaymentRefusalMessage(reason: string, detail?: Record<string, unknown>): string {
   switch (reason) {
+    case PREPAYMENT_REFUSAL.authorityLost:
+      return "I cannot configure that for you: your membership is no longer active in this firm.";
+    case PREPAYMENT_REFUSAL.insufficientRole:
+      return "Configuring an amortisation schedule needs a bookkeeper's authority or above.";
+    case PREPAYMENT_REFUSAL.invalidAuthor:
+      return "That schedule could not be configured. Nothing was recorded.";
     case PREPAYMENT_REFUSAL.sourceUnfit:
+      // #940's RULING, IN THE REFUSAL ITSELF. She says so, says WHICH account, and names the
+      // panel — and she never enrols one and never proposes which account should be enrolled.
+      // Whether an account holds prepayments is a judgement about this client's chart, with an
+      // unbounded blast radius, and the reason it requires is a professional's statement.
+      if (detail?.axis === NOT_ENROLLED_AXIS) {
+        return (
+          `Account ${String(detail?.prepaid_account_code ?? "that account")} is not on this `
+          + "client's prepayment roster, so I cannot amortise against it. A bookkeeper enrols it "
+          + "on the client's Registers page, with their reason — enrolling an account is a "
+          + "judgement about this client's chart, and it is theirs to make."
+        );
+      }
       return (
         "That entry cannot be amortised: a prepayment schedule amortises a POSTED entry that "
         + "debits exactly one asset account. Approve the entry first, or name the entry that "
@@ -302,19 +332,24 @@ export function prepaymentSchedulePart(answer: Record<string, unknown>): Prepaym
 //      it already created instead of answering `prepayment_schedule_exists`. (Migration 0223 asks
 //      `_reserve_op` BEFORE the duplicate check for exactly this reason; the two halves have to
 //      agree or a lost response becomes a second question.)
-//   4. ONE query, with named arguments in the database's own spelling:
+//   4. ONE query, with named arguments in the database's own spelling. IT IS THE OBO TWIN, NOT
+//      THE HUMAN DOOR (corrected at the chatTurn_v22 cut, #915 follow-up 3: the footer named the
+//      human door's seven arguments, and the runtime pool carries no JWT claims, so
+//      `clara._human_ctx` would raise CLR04 on every call):
 //
-//        select clara.create_prepayment_schedule(
+//        select clara.create_prepayment_schedule_for(
 //          p_client          => $1::uuid,
-//          p_source_entry    => $2::uuid,
-//          p_expense_account => $3::text,
-//          p_expense_basis   => $4::text,
-//          p_purpose         => $5::text,
-//          p_authority_ref   => $6::jsonb,
-//          p_op_key          => $7::text) as r
+//          p_author          => $2::uuid,   -- the HUMAN this turn acts for, never the run
+//          p_source_entry    => $3::uuid,
+//          p_expense_account => $4::text,
+//          p_expense_basis   => $5::text,
+//          p_purpose         => $6::text,
+//          p_authority_ref   => $7::jsonb,
+//          p_op_key          => $8::text) as r
 //
-//      with the seven values of `prepaymentDoorPayload(input, {clientId, taskId, opKey})` in that
-//      order. `p_authority_ref` is `{kind:"chat_task", id: ctx.taskId}` — the CONVERSATION is the
+//      with the seven values of `prepaymentDoorPayload(input, {clientId, taskId, opKey})` and the
+//      actor in that order. The key space is SHARED with the human door, which is what makes a
+//      re-run turn replay rather than collide. `p_authority_ref` is `{kind:"chat_task", id: ctx.taskId}` — the CONVERSATION is the
 //      instruction, and the door RESOLVES it against `clara.agent_tasks` in the same firm and
 //      client, so a remembered preference or an invented id cannot supply authority.
 //   5. On success: a part built by `prepaymentSchedulePart(answer)` — part kind
