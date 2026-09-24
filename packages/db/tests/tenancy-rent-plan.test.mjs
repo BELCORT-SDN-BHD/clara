@@ -1574,3 +1574,163 @@ test("S7 · a client whose chart has no deposits-paid account is told so, never 
   assert.equal(offer.proposed_account_in_chart, false, "…and the offer says this client does not hold it");
   assert.equal(offer.proposed_account_name, null);
 });
+
+// ---------------------------------------------------------------------------
+// S8 — the escalation (AC6). Recorded, surfaced before its date, revised only by a person.
+// ---------------------------------------------------------------------------
+
+const escalationOffer = async (sub, document) => {
+  const r = await humanQuery(sub, namedCall("get_tenancy_escalation_revision", [{ name: "p_document" }]), [document]);
+  return r.rows[0].result;
+};
+
+const confirmRevision = async (sub, { client, document, judgement = null, opKey = null }) => {
+  const r = await humanQuery(
+    sub,
+    namedCall("confirm_tenancy_rent_plan_revision", [
+      { name: "p_client" }, { name: "p_document" }, { name: "p_judgement" }, { name: "p_op_key" },
+    ]),
+    [client, document, judgement, opKey ?? opk949("revise")],
+  );
+  return r.rows[0].result;
+};
+
+const liveRevision = async (planId) =>
+  (
+    await rootQuery(
+      `select r.revision, r.basis, r.effective_from::text as effective_from,
+              r.effective_to::text as effective_to
+         from clara.accounting_plan_revisions r
+        where r.plan_id=$1 and r.superseded_at is null`,
+      [planId],
+    )
+  ).rows[0];
+
+/** A confirmed level-rent plan, with the escalation recorded AFTERWARDS off the side letter —
+ *  which is the real sequence: the tenancy is read and the plan started, and the rent review is
+ *  found in a clause a person reads for themselves. */
+async function escalatingTenancy(sub, { effectiveFrom = ESCALATION_FROM } = {}) {
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  const receipt = await confirmPlan(sub, { client, document: doc.documentId });
+  await recordTerms(sub, {
+    client, document: doc.documentId,
+    terms: [{
+      ...ESCALATION_TERM,
+      escalation: { effective_from: effectiveFrom, new_amount_cents: ESCALATED_CENTS, printed_raw: "3,960.00" },
+    }],
+  });
+  return { client, doc, planId: receipt.plan_id };
+}
+
+test("S8 · a stated escalation surfaces before its date, offering the revision and changing nothing", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  // Effective 30 days from today, so "before its effective date" is the case under test.
+  const soon = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const { client, doc, planId } = await escalatingTenancy(sub, { effectiveFrom: soon });
+
+  const offer = await escalationOffer(sub, doc.documentId);
+  assert.equal(offer.pending, true, `the escalation is pending: ${JSON.stringify(offer)}`);
+  assert.equal(offer.plan_id, planId);
+  assert.equal(Number(offer.current_cents), RENT_CENTS);
+  assert.equal(Number(offer.new_cents), ESCALATED_CENTS);
+  assert.equal(offer.effective_from, soon);
+  assert.ok(offer.days_until > 0, "…and it is offered BEFORE the date it takes effect");
+
+  const proposed = offer.proposed_revision;
+  assert.equal(proposed.effective_from, soon, "the revision starts on the escalation's own date");
+  const credit = proposed.basis.lines.find((l) => Number(l.credit_cents) > 0);
+  assert.equal(credit.account_code, PAYABLE_ACCOUNT, "…and still credits the payable, never the bank");
+  assert.equal(Number(credit.credit_cents), ESCALATED_CENTS);
+
+  const live = await liveRevision(planId);
+  assert.equal(live.revision, 1, "NOTHING has changed: the plan is still on its first revision");
+  assert.equal(
+    Number(live.basis.lines.find((l) => Number(l.credit_cents) > 0).credit_cents),
+    RENT_CENTS,
+    "…and still charges the ORIGINAL rent. No amount changes by itself.",
+  );
+});
+
+test("S8 · confirming the revision moves the plan, and only then", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const soon = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const { client, doc, planId } = await escalatingTenancy(sub, { effectiveFrom: soon });
+
+  // The escalation makes the lessee branch ASK (straight-line is not the month's cash rent), so
+  // the revision is admitted only against a written judgement — the same wall as the first
+  // confirmation, for the same reason.
+  const bare = await caught(() => confirmRevision(sub, { client, document: doc.documentId }));
+  assert.ok(bare, "a stepped rent is not revised on a click alone");
+  assert.equal(detailOf(bare).reason, "professional_judgement_required");
+  assert.equal(detailOf(bare).treatment_reason, "escalation_stated");
+  assert.equal((await liveRevision(planId)).revision, 1, "…and the plan did not move");
+
+  const done = await confirmRevision(sub, {
+    client, document: doc.documentId,
+    judgement: "The increase follows the CPI clause and is expected to track general inflation, "
+      + "so the cash rent is charged as incurred rather than averaged (MPERS 20.15(b)).",
+  });
+  assert.equal(done.plan_id, planId);
+  assert.equal(done.revision, 2);
+
+  const live = await liveRevision(planId);
+  assert.equal(live.revision, 2);
+  assert.equal(live.effective_from, soon);
+  assert.equal(
+    Number(live.basis.lines.find((l) => Number(l.credit_cents) > 0).credit_cents),
+    ESCALATED_CENTS,
+    "the plan now charges the escalated rent, because a person said so",
+  );
+
+  const after = await escalationOffer(sub, doc.documentId);
+  assert.equal(after.pending, false, "the row clears itself: the plan now carries the escalated amount");
+  assert.equal(after.reason, "already_revised");
+
+  const cf = (
+    await rootQuery(
+      `select kind, monthly_rent_cents, professional_judgement, treatment
+         from clara.contract_plan_confirmations where id=$1`,
+      [done.confirmation_id],
+    )
+  ).rows[0];
+  assert.equal(cf.kind, "rent_plan_revision", "the revision is its own recorded act");
+  assert.equal(Number(cf.monthly_rent_cents), ESCALATED_CENTS);
+  assert.match(cf.professional_judgement, /CPI/);
+  assert.equal(cf.treatment.reason, "escalation_stated");
+});
+
+test("S8 · an escalation whose date is far away does not nag, and a tenancy with none is silent", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const far = new Date(Date.now() + 400 * 86_400_000).toISOString().slice(0, 10);
+  const distant = await escalatingTenancy(sub, { effectiveFrom: far });
+  const offer = await escalationOffer(sub, distant.doc.documentId);
+  assert.equal(offer.pending, false, "a rent review more than a year out is not this quarter's question");
+  assert.equal(offer.reason, "not_due_yet");
+  assert.ok(offer.days_until > 60);
+
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  await confirmPlan(sub, { client, document: doc.documentId });
+  const none = await escalationOffer(sub, doc.documentId);
+  assert.equal(none.pending, false);
+  assert.equal(none.reason, "no_escalation_recorded");
+});
+
+test("S8 · a tenancy with no confirmed plan has nothing to revise, and says so", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId, [ESCALATION_TERM]);
+
+  const offer = await escalationOffer(sub, doc.documentId);
+  assert.equal(offer.pending, false);
+  assert.equal(offer.reason, "no_confirmed_plan");
+
+  const nothing = await caught(() => confirmRevision(sub, { client, document: doc.documentId, judgement: "x" }));
+  assert.ok(nothing, "and the revision door refuses rather than inventing a plan to revise");
+  assert.equal(detailOf(nothing).reason, "no_confirmed_plan");
+});

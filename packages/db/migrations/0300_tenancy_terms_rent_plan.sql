@@ -2073,3 +2073,236 @@ revoke all on function clara.get_tenancy_deposit_coding(uuid) from public;
 grant execute on function clara.get_tenancy_deposit_coding(uuid) to clara_authenticated;
 
 reset role;
+
+set role clara_fn_owner;
+
+-- =====================================================================================
+-- §J  THE ESCALATION (AC6) -- clara._tenancy_escalation_state(uuid),
+--     clara.get_tenancy_escalation_revision(uuid) and
+--     clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,text).
+--
+--     "A stated escalation surfaces under Needs you BEFORE its effective date and offers a plan
+--     revision a person confirms; no amount changes without that confirmation." (the brief.)
+--
+--     THE STATE IS DERIVED, like everything else in this lane: a live rent plan, a live
+--     `escalation` contract term, and a live revision whose credit does NOT yet carry the
+--     escalated amount. When the plan already charges the escalated rent the row is gone --
+--     `already_revised` -- with nothing to dismiss and nothing to clean up.
+--
+--     "BEFORE ITS EFFECTIVE DATE" IS SIXTY DAYS, and the number is a product choice stated out
+--     loud rather than a constant hidden in a body: a rent review needs enough notice for an
+--     accountant to decide the treatment and, where the increase is stepped, to decide whether
+--     the straight-line question changes anything. Beyond that it is next year's question and
+--     `not_due_yet` says so. The row does NOT disappear once the date passes -- an escalation
+--     that took effect and was never confirmed is exactly the case a person most needs to see.
+--
+--     THE REVISION IS THE PLAN LANE'S OWN ACT. `clara.revise_accounting_plan` is called, not
+--     re-implemented, so the authority floor, the alignment wall, the op-key reservation and the
+--     client rung all apply unchanged. What this door adds is the SECOND confirmation row
+--     (`kind='rent_plan_revision'`), which is what makes "no amount changes without that
+--     confirmation" a record and not a promise.
+--
+--     AND IT ASKS, because a stepped rent always makes the lessee branch ask: straight-line means
+--     the total rent averaged over the term, so the monthly expense differs from the month's cash
+--     rent unless the increases only follow expected general inflation. That is the same wall the
+--     first confirmation carries, for the same reason, and the message is the branch's own
+--     question.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+create or replace function clara._tenancy_escalation_state(p_document uuid)
+  returns jsonb language plpgsql stable set search_path = clara, pg_temp as $tes$
+declare
+  v_plan record; v_esc jsonb; v_from date; v_new bigint; v_cur bigint;
+  v_rev record; v_today date; v_days int; v_lead int := 60;
+begin
+  select * into v_plan from clara._tenancy_rent_plan(p_document);
+  if v_plan.plan_id is null then
+    return jsonb_build_object('pending', false, 'reason', 'no_confirmed_plan',
+      'document_id', p_document);
+  end if;
+
+  select ct.escalation into v_esc from clara.contract_terms ct
+   where ct.document_id = p_document and ct.term_key = 'escalation' and ct.superseded_at is null;
+  if v_esc is null then
+    return jsonb_build_object('pending', false, 'reason', 'no_escalation_recorded',
+      'document_id', p_document, 'plan_id', v_plan.plan_id);
+  end if;
+
+  v_from := nullif(btrim(coalesce(v_esc->>'effective_from','')),'')::date;
+  v_new := nullif(btrim(coalesce(v_esc->>'new_amount_cents','')),'')::bigint;
+
+  select r.revision, r.frequency, r.day_rule, r.day_of_month, r.timezone,
+         r.effective_from, r.effective_to, r.basis
+    into v_rev
+    from clara.accounting_plan_revisions r
+   where r.plan_id = v_plan.plan_id and r.superseded_at is null;
+  select max((l->>'credit_cents')::bigint) into v_cur
+    from jsonb_array_elements(coalesce(v_rev.basis->'lines','[]'::jsonb)) l
+   where (l->>'credit_cents')::bigint > 0;
+
+  if v_cur = v_new then
+    return jsonb_build_object('pending', false, 'reason', 'already_revised',
+      'document_id', p_document, 'plan_id', v_plan.plan_id,
+      'current_cents', v_cur, 'new_cents', v_new,
+      'effective_from', to_char(v_from,'YYYY-MM-DD'));
+  end if;
+
+  v_today := (now() at time zone 'Asia/Kuala_Lumpur')::date;
+  v_days := v_from - v_today;
+  if v_from is not null and v_days > v_lead then
+    return jsonb_build_object('pending', false, 'reason', 'not_due_yet',
+      'document_id', p_document, 'plan_id', v_plan.plan_id,
+      'current_cents', v_cur, 'new_cents', v_new, 'days_until', v_days,
+      'effective_from', to_char(v_from,'YYYY-MM-DD'), 'lead_days', v_lead);
+  end if;
+
+  return jsonb_build_object('pending', true, 'reason', null,
+    'document_id', p_document, 'plan_id', v_plan.plan_id,
+    'client_id', v_plan.client_id, 'confirmation_id', v_plan.confirmation_id,
+    'current_cents', v_cur, 'new_cents', v_new, 'days_until', v_days,
+    'effective_from', to_char(v_from,'YYYY-MM-DD'), 'lead_days', v_lead,
+    'printed_raw', v_esc->>'printed_raw',
+    'payable_account_code', v_plan.payable_account_code,
+    'rent_account_code', v_plan.rent_account_code,
+    'proposed_revision', jsonb_build_object(
+      'frequency', v_rev.frequency, 'day_rule', v_rev.day_rule,
+      'day_of_month', v_rev.day_of_month, 'timezone', v_rev.timezone,
+      'effective_from', to_char(greatest(v_from, v_rev.effective_from),'YYYY-MM-DD'),
+      'effective_to', to_char(v_rev.effective_to,'YYYY-MM-DD'),
+      'basis', jsonb_build_object(
+        'posting_date', to_char(greatest(v_from, v_rev.effective_from),'YYYY-MM-DD'),
+        'memo', v_rev.basis->>'memo', 'currency', 'MYR',
+        'lines', jsonb_build_array(
+          jsonb_build_object('account_code', v_plan.rent_account_code,
+            'debit_cents', v_new, 'credit_cents', 0, 'description', v_rev.basis->>'memo'),
+          jsonb_build_object('account_code', v_plan.payable_account_code,
+            'debit_cents', 0, 'credit_cents', v_new, 'description', v_rev.basis->>'memo')))));
+end $tes$;
+revoke all on function clara._tenancy_escalation_state(uuid) from public;
+
+comment on function clara._tenancy_escalation_state(uuid) is
+  '#949 AC6: whether this tenancy''s recorded escalation is still owed a plan revision, and the revision it would take. DERIVED from the live plan revision and the live escalation term, so it clears itself the moment the plan carries the escalated amount -- by any route, with no dismissal act. Sixty days'' notice, and it does NOT disappear once the date passes. Ungranted.';
+
+create or replace function clara.get_tenancy_escalation_revision(p_document uuid)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp
+  as $gter$
+declare c record; v_client uuid;
+begin
+  c := clara._human_ctx(clara.role_rank('viewer'));
+  select f.client_id into v_client from clara.document_filings f
+   where f.document_id = p_document and f.firm_id = c.firm and f.retired_at is null
+   order by f.filed_at desc limit 1;
+  if v_client is null then
+    raise exception 'document % is not a live filing in your firm', p_document using errcode='CLR11';
+  end if;
+  return clara._tenancy_escalation_state(p_document);
+end $gter$;
+
+comment on function clara.get_tenancy_escalation_revision(uuid) is
+  '#949 AC6: the plan revision a recorded escalation is asking for, before its effective date -- the current and escalated rent, the date, and the revision a person would confirm. Derived entirely from live state; writes nothing. viewer+, clara_authenticated only.';
+
+revoke all on function clara.get_tenancy_escalation_revision(uuid) from public;
+grant execute on function clara.get_tenancy_escalation_revision(uuid) to clara_authenticated;
+
+create or replace function clara.confirm_tenancy_rent_plan_revision(p_client uuid, p_document uuid,
+    p_judgement text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp
+  as $ctrpr$
+declare
+  c record; v_dedupe jsonb; v_firm uuid; v_state jsonb; v_tr jsonb; v_rev jsonb;
+  v_judgement text; v_confirmation uuid; v_plan record; v_result jsonb;
+begin
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'revising a rent plan requires its idempotency key' using errcode='CLR10',
+      detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
+  if v_firm is null or v_firm <> c.firm then
+    raise exception 'client is not in your firm' using errcode='CLR11';
+  end if;
+  if not exists (select 1 from clara.document_filings f
+                  where f.document_id = p_document and f.client_id = p_client
+                    and f.firm_id = c.firm and f.retired_at is null) then
+    raise exception 'document % is not a live filing of this client', p_document using errcode='CLR11';
+  end if;
+
+  v_judgement := nullif(btrim(coalesce(p_judgement,'')),'');
+
+  v_dedupe := clara._reserve_op(c.firm, 'confirm_tenancy_rent_plan_revision', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'document', p_document,
+      'judgement', v_judgement)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
+
+  v_state := clara._tenancy_escalation_state(p_document);
+  if (v_state->>'pending')::boolean is not true then
+    raise exception 'there is no escalation to confirm on this tenancy (%)', coalesce(v_state->>'reason','none')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason', coalesce(v_state->>'reason','no_escalation_recorded'),
+          'plan_id', v_state->>'plan_id')::text;
+  end if;
+
+  v_tr := clara._tenancy_lease_treatment(p_client, p_document);
+  -- A STEPPED RENT ALWAYS ASKS, so this wall is reached on every ordinary escalation. It is the
+  -- same wall the first confirmation carries and it quotes the same body's own question.
+  if (v_tr->>'drafts')::boolean is not true and v_judgement is null then
+    raise exception '%', v_tr->>'question'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','professional_judgement_required',
+          'treatment_reason', v_tr->>'reason', 'standard', v_tr->>'standard')::text;
+  end if;
+
+  select * into v_plan from clara._tenancy_rent_plan(p_document);
+  v_rev := v_state->'proposed_revision';
+
+  v_confirmation := gen_random_uuid();
+  insert into clara.contract_plan_confirmations(id, firm_id, client_id, document_id, kind,
+      monthly_rent_cents, rent_account_code, payable_account_code, term_start, term_end,
+      treatment, professional_judgement, confirmed_by)
+    values (v_confirmation, c.firm, p_client, p_document, 'rent_plan_revision',
+      (v_state->>'new_cents')::bigint,
+      v_plan.rent_account_code, v_plan.payable_account_code,
+      (v_rev->>'effective_from')::date, v_plan.term_end,
+      v_tr, v_judgement, c.actor);
+
+  -- THE PLAN LANE'S OWN DOOR, called rather than re-implemented.
+  v_result := clara.revise_accounting_plan(
+    p_plan => v_plan.plan_id,
+    p_frequency => v_rev->>'frequency',
+    p_day_rule => v_rev->>'day_rule',
+    p_day_of_month => nullif(v_rev->>'day_of_month','')::int,
+    p_timezone => v_rev->>'timezone',
+    p_effective_from => (v_rev->>'effective_from')::date,
+    p_effective_to => (v_rev->>'effective_to')::date,
+    p_basis => v_rev->'basis',
+    p_reversal_day_rule => null,
+    p_op_key => p_op_key || ':revise');
+
+  perform clara._audit(c.firm, c.actor, null, null, 'confirm_tenancy_rent_plan_revision', null,
+    jsonb_build_object('client', p_client, 'document', p_document,
+      'confirmation', v_confirmation, 'plan', v_plan.plan_id,
+      'revision', v_result->>'revision',
+      'from_cents', v_state->>'current_cents', 'to_cents', v_state->>'new_cents',
+      'judgement_given', v_judgement is not null));
+
+  return clara._finish_op(c.firm, 'confirm_tenancy_rent_plan_revision', p_op_key,
+    jsonb_build_object('document_id', p_document, 'client_id', p_client,
+      'confirmation_id', v_confirmation,
+      'plan_id', v_plan.plan_id, 'revision', (v_result->>'revision')::int,
+      'revision_id', v_result->>'revision_id',
+      'from_cents', (v_state->>'current_cents')::bigint,
+      'to_cents', (v_state->>'new_cents')::bigint,
+      'effective_from', v_rev->>'effective_from',
+      'treatment', v_tr, 'professional_judgement', v_judgement));
+end $ctrpr$;
+
+comment on function clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,text) is
+  '#949 AC6: a named person confirms the plan revision a recorded escalation asks for. The act is recorded as a second clara.contract_plan_confirmations row (kind=rent_plan_revision) and the schedule is moved through clara.revise_accounting_plan, so no amount ever changes without a record of who changed it. A stepped rent always makes the lessee branch ask, so a written professional judgement is required and the refusal quotes the branch''s own question. bookkeeper+, clara_authenticated only.';
+
+revoke all on function clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,text) from public;
+grant execute on function clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,text) to clara_authenticated;
+
+reset role;
