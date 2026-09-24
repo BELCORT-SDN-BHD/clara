@@ -1004,19 +1004,36 @@ is the second half of the same discipline: the field arrives as unvalidated json
 — a web build ahead of its database, or a rolled-back migration under a live runtime — is falsy,
 which would paint the warning on every prepayment in the firm.
 
-**And no sentence on either register offers a replacement schedule** (L04-SPEC-04). Measured on the
-lane database in `p939.supersede.running` / `p941.supersede.running`:
-`uq_prepayment_schedules_source` and `uq_revenue_recognition_schedules_source` carry no status
-predicate, so `clara.create_prepayment_schedule` and `clara.create_revenue_recognition_schedule`
-answer CLR13 `…schedule_exists` for a second schedule over the same recognition BOTH while the
-first is running and after it has been ended through `clara.end_accounting_plan`. Five strings used
-to send a person to configure one anyway — the corrected-term banner, the stated-term form, the
-ended-schedule note, the lapsed-authority explanation (`explainAuthority`; 0193's
-`clara.revise_accounting_plan` moves the SCHEDULE and never `authorised_by`, so reassigning
-authority is not a door either) and the period-line explanation (`explainPeriodLine`, the corrected-
-term case itself). Each states the limitation now and names the act that does exist. A door that
-opens a replacement is owed to an owner ruling; until it lands, neither register may be advertised
-as supporting term correction.
+**What either register may say about a SECOND schedule** (L04-SPEC-04). Two different facts, and
+running them together is what made eight sentences wrong — first in one direction and then in the
+other. Measured on the lane database:
+
+- A plain reconfiguration is still refused. `uq_prepayment_schedules_source_live` and
+  `uq_revenue_recognition_schedules_source_live` (0317) admit one LIVE schedule per recognition, so
+  `clara.create_prepayment_schedule` and `clara.create_revenue_recognition_schedule` still answer
+  CLR13 `…schedule_exists` over a recognition that carries one, running or ended
+  (`p939.supersede.running`, `p941.supersede.running`, and the last arm of `p939.replace.clean`,
+  which asks again after a replacement and gets the LIVE schedule's id back). And reassigning a
+  plan's authority is not a door either: 0193's `clara.revise_accounting_plan` moves the SCHEDULE
+  and never `authorised_by`.
+- A replacement derived from a CORRECTED TERM does exist, and it is what #939 AC4 and #941 AC3
+  name. `clara.replace_prepayment_schedule` / `clara.replace_revenue_recognition_schedule` (0317)
+  end the predecessor's plan, leave every period it has already taken up untouched, and open a new
+  schedule from the first month it has not, over the balance those months did not consume
+  (`p939.replace.clean`, `p939.replace.posted`, `p941.replace.posted`). The door refuses unless
+  the term on record has actually MOVED — a re-statement of the same two dates is not grounds
+  (`p939.replace.refuses`, axis `term_unmoved`).
+
+Eight strings used to say the first fact as though it were the whole truth, after an earlier round
+had said the opposite: the corrected-term banner and the stated-term note on both registers, the
+ended-schedule note on both, `explainAuthority` and `explainPeriodLine`. Each now says which of
+the two acts is refused and which one takes over the periods still to run.
+
+**No correction CONTROL is on either register yet.** #939 AC5 and #941 AC6 enumerate the surfaces
+those tickets buy and neither names one, so the doors are reachable from the database seam and not
+from a button. The form a replacement would need is the configuration form's authority picker over
+again, which is a surface decision rather than a wording one; the successor contract for it is in
+`docs/plan/active/riders-2026-09-20/reports/wave4-lane04-fix-3.md`.
 
 ## #939 — where a prepayment's term came from
 

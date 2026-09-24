@@ -5354,24 +5354,17 @@ pinned: it is an UPDATE with no INSERT, so its loser blocks on the row lock, mat
 takes the door's own typed `not_enrolled` arm — driven in `p940.enrol.race`'s second half rather
 than argued.
 
-### Not in this file: the correction path (L04-SPEC-04, owner-blocked)
+### Not in this file: the correction path (it is in 0317)
 
-`uq_prepayment_schedules_source` (0223) and `uq_revenue_recognition_schedules_source` (0308) are
-plain UNIQUE constraints on `source_entry_id`: no status predicate, no partial index. One
-recognition entry carries one schedule, for ever. Driven on `clara_l04` in
-`p939.supersede.running` and `p941.supersede.running`: after a stated term is corrected the door
-answers CLR13 `prepayment_schedule_exists` / `revenue_recognition_schedule_exists`, and it answers
-the SAME once the plan has been ended through `clara.end_accounting_plan` — ending opens nothing.
-So "a new schedule from the next period", which #939 AC4, #941 AC3 and owner decision 3 all name
-as the correction path, exists in no door of this estate.
-
-Nothing here builds one, because what a replacement would be derived FROM is an owner decision (the
-un-amortised balance of the schedule that ran, or a fresh recognition entry) and what happens to the
-running schedule's future periods is a second. What this lane did instead is make every surface say
-the limitation rather than advise an act the database refuses: the corrected-term banner, the
-stated-term form, the ended-schedule note, the lapsed-authority explanation and the period-line
-explanation on both registers. Until the ruling lands, neither register may be advertised as
-supporting term correction.
+`uq_prepayment_schedules_source` (0223) and `uq_revenue_recognition_schedules_source` (0308) were
+plain UNIQUE constraints on `source_entry_id`: no status predicate, no partial index, so one
+recognition entry carried one schedule for ever and the correction path #939 AC4, #941 AC3 and
+owner decision 3 all name existed in no door. Migration 0317 builds it; see
+"0317 — the term-correction doors" below. Nothing in THIS file changes, and the two cells that
+measured the old behaviour (`p939.supersede.running`, `p941.supersede.running`) still stand,
+because what they actually prove is still true: a corrected term never moves a schedule that is
+already running, and `clara.create_prepayment_schedule` still refuses a second schedule over a
+recognition that carries a LIVE one, ended or not.
 
 ### What this file deliberately does not do
 
@@ -5469,3 +5462,105 @@ mutant, and `fiscal_years.successor` refused by name then cleared by opening the
 which never drove this wrapper, are untouched);
 `tests/prepayment-account-roster.test.mjs` (`p940.enrol.race`, new: a real two-connection race on
 both roster doors).
+
+## 0317 — the term-correction doors: a mis-stated term opens a replacement schedule (#939 AC4 / #941 AC3, riders wave 4, lane 04)
+
+**What it closes.** #939 AC4, #941 AC3 and owner decision 3 (2026-09-18) all name the same act —
+"a new schedule from the next period" — and until this file the estate performed none.
+`uq_prepayment_schedules_source` (0223) and `uq_revenue_recognition_schedules_source` (0308) were
+unconditional `unique (source_entry_id)` constraints, so a replacement was refused CLR13 while the
+first schedule ran and refused identically after it had been ended through
+`clara.end_accounting_plan`. A firm that mis-stated a term was left with a wrong amortisation
+running and no remedy at all.
+
+**The derivation is PROSPECTIVE, and the ticket chose it.** "already-posted periods are never
+touched" plus "from the next period" is a change in accounting estimate applied prospectively
+(MPERS section 10 / MFRS 108): the months the plan has already taken up stand, and the balance they
+did not consume is re-spread over what is still open of the corrected term. The alternative —
+treating the first amortisation as an error, reversing it and re-deriving — is a prior-period
+correction, and the same sentence excludes it. No new professional judgement is asked of the
+estate: the judgement is the TERM, and a named person stated it through
+`clara.record_prepayment_stated_term` or `clara.record_document_service_period`.
+
+**The two doors.** `clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)` and
+`clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)` — `(p_client, p_schedule,
+p_reason, p_authority_ref, p_op_key)`, bookkeeper floor in their own bodies, `clara_authenticated`
+ONLY. There is no OBO twin and no wake wrapper, and the tail asserts the absence by pg_proc count:
+re-deriving a client's books is a judgement with a named person behind it. Each ends the
+predecessor's plan through 0193's own door with the correction's stated reason, creates a NEW plan
+under a FRESH instruction (the correction is a new decision, and the instruction that authorised
+the first schedule spoke about the first term), stamps the predecessor with its successor and
+inserts the replacement naming what it replaced.
+
+**Two shared predicates, both ungranted.** `clara._schedule_term_correction(text,uuid)` is
+`clara.get_prepayment_schedule`'s own #919 liveness predicate lifted verbatim, so the READ and the
+DOOR can never disagree about whether a term was corrected; `term_live` is the audit fact and
+`moved` is the one an act may be taken on, because both term doors supersede unconditionally and a
+re-statement of the same two dates is grounds for nothing (ADV-02).
+`clara._schedule_open_remainder(uuid,jsonb,bigint)` answers two questions that must not be
+conflated: WHERE the replacement may start is the day after the latest ADMITTED occurrence (not a
+committed receipt — an admitted Work is a month the estate has taken responsibility for, and
+re-opening it could post it twice), and WHAT it re-spreads is the total less the periods actually
+admitted, matched to their own due date. The plan scanner admits the latest due event per run, so a
+schedule whose earlier month was never picked up has a GAP before the boundary: that month's share
+is still in the prepaid account (or the deferred-revenue liability) and is part of the remaining
+balance. Charging it to a plan that is about to end would leave a balance nothing ever clears.
+
+**The uniqueness rule is qualified, never dropped.** Both relations gain the
+`clara.prepayment_stated_terms` supersession shape (`superseded_by` deferred, `superseded_at`, the
+paired CHECK) plus `replaces_schedule_id` so the chain reads forwards as well as back, and the
+unconditional constraint is replaced by a partial unique index over `superseded_at is null`. STAMP
+FIRST, INSERT SECOND is load-bearing: the predecessor must leave that index before the successor
+enters it, which is what the deferred FK is for. Both append-only triggers are recut to admit
+exactly one update — the stamp — by comparing the WHOLE row with the stamp removed, so a column
+added later is covered by construction rather than by a name list.
+
+**Four bodies recut for one reason.** `clara._prepayment_schedule_core`,
+`clara._revenue_recognition_core`, `clara.read_prepayment_source_for` and
+`clara.read_revenue_recognition_source_for` each read `where source_entry_id = … and firm_id = …`
+and take ONE row. That was one row by construction before this file; afterwards a corrected
+recognition carries a chain, and an unqualified read would hand a surface an arbitrary member of it
+— the schedule a refusal names, and the schedule claraWork is told about. Each site now asks
+`and s.superseded_at is null`; nothing else in any of the four moved.
+
+**Prestate pins, MEASURED on `clara_l04` after 0315 and before the first apply** — RECUT (bimodal:
+their measured pre-image, or a body already carrying `0317`):
+
+| signature | sha256(prosrc) |
+|---|---|
+| `clara._tf_prepayment_schedules_append_only()` | `21d1fe05f5c9cc837a6f80bd8ec36954c46a395054b2c8278b938140202aa18c` |
+| `clara._tf_revenue_recognition_schedules_append_only()` | `aaaa4202ad8c5b7adb40accf897290753763d26257c0903dcf5d743804437d5e` |
+| `clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)` | `78bbfce7ae46b3445a93689700958f727a1b795cdf483c7c522beef4f7b46ee2` |
+| `clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)` | `03417b7903a6bf04ea49199bb6af27375537d49707874025b9ec62507705bf24` |
+| `clara.read_prepayment_source_for(uuid,uuid,uuid)` | `6475458ed34d9b9ef357f8fb6e4eb9766042e30e1252c30d607fabd1a120495b` |
+| `clara.read_revenue_recognition_source_for(uuid,uuid,uuid)` | `00501a388ada95f1a7db9fccf9ad1d94f04c0067083fd3c457ee9a06ecbe06ab` |
+
+…and KEPT (neighbours both doors nest, refused if any of them moved):
+`clara.prepayment_schedule_v2` `9f5123adf67fcbf573b994efa60d27b1aa35beab8ced54ffbc4a3078896f0194`,
+`clara._prepayment_account_enrolled` `0c10eafa94824a00a5d4c7b08ae1ba093d52f0e4f2c0b953a7951b46a27948db`,
+`clara._adj_line_eligibility_breach` `727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021`,
+`clara._assert_journal_basis` `2ba8e307098f4d5c6214ad48770b84eb574f0edf55cab11f5e122b5adbcc3684`,
+`clara.end_accounting_plan` `b3d6f214b2fa8e875ad3bce966bf51557f235b3b0d046a06cdb0e208b58f870c`,
+`clara.create_accounting_plan` `c8e990986a06b132e3dad40e47225968562336b48ad6c01a4a09104784c09188`.
+The tail re-measures `clara.prepayment_schedule_v1`
+(`ecbc76053272a2abb6055740062895d6feb308ffae348a6363391190046727f2`) and v2, so this file cannot
+have moved a frozen evaluator.
+
+**The FIRST-APPLY branch of the bimodal prestate was taken for real** (wave-3 rule): the first
+apply on `clara_l04` recorded `0317 prestate OK — 7 FIRST, 0 REDO`, and every redo after it
+recorded the REDO branch for all seven. The integrator's from-scratch chain is the check that
+matters after that.
+
+**Gate module, cohort, chain.** `tests/schedule-term-correction-preintegration-gate.mjs` (env
+`CLARA_ALLOW_MISSING_SCHEDULE_TERM_CORRECTION`); `rig-meta.mjs` gains the
+`SCHEDULE_TERM_CORRECTION_0317_COHORT` (two human doors, two ungranted predicates) with its bimodal
+check and the two door names on the `clara_authenticated` roster; the `--import` entry in
+`package.json` in MIGRATION ORDER, after 0315's.
+
+**Tests.** `tests/prepayment-stated-term.test.mjs` (five new cells: `p939.replace.clean`,
+`p939.replace.posted`, `p939.replace.refuses`, `p939.replace.boundary`, `p939.replace.posture`);
+`tests/revenue-recognition.test.mjs` (`p941.replace.posted`, `p941.replace.refuses`);
+`tests/prepayment-schedule-obo.test.mjs` and `tests/revenue-recognition.test.mjs`'s own grant
+censuses each learn the one new human name, asked at the 0317 frontier rather than assumed. Each
+new cell asks that frontier itself, because the batteries they live in are gated on 0305's and
+0308's stems, which are true long before this file exists.

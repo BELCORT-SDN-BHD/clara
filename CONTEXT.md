@@ -142,9 +142,9 @@ _Avoid_: An invoice — the advance was received and posted before any schedule 
 here touches MyInvois; usage-based or milestone recognition, which needs a measure of progress this
 estate does not record and is refused by name; a schedule over the gross receipt, which would
 recognise the tax as income; revising a running schedule to correct its term — a correction
-supersedes the statement and moves no schedule, and this estate opens no replacement schedule at
-all: one recognition carries one schedule, ended or running; "configured" as a synonym for
-"recognised", which is a different fact and a different count.
+supersedes the statement and moves no schedule; the replacement is a SEPARATE schedule that takes
+over the months the first one has not recognised, and at most one schedule over a receipt is ever
+live; "configured" as a synonym for "recognised", which is a different fact and a different count.
 
 **On-behalf-of door**:
 The second entrance to a write a person may make, for the times Clara makes it FOR them in a
@@ -214,13 +214,29 @@ about the span it buys has changed. It is not the same fact as a superseded term
 period on a document that already carries a live one supersedes the old row whatever the new one
 says, so a second verification that restates the same two dates supersedes a row and corrects
 nothing. Only a corrected term makes an allocation already derived from the old one wrong, and only
-a corrected term is grounds for telling a firm the difference exists — which is as far as the estate
-goes today: one recognition carries one schedule, so the schedule itself cannot be rebuilt and a
-surface names the difference for a reviewer rather than offering a replacement.
+a corrected term is grounds for either of the two acts the estate offers: naming the difference for
+a reviewer, and opening a Replacement schedule for the months the first one has not taken up. The
+allocation already derived is never rebuilt in place — it is a derived record — and a re-statement
+that moved neither date is grounds for nothing.
 _Avoid_: Reading "the row this schedule rode is no longer live" as "the term was corrected" — the
 first is bookkeeping about rows, the second is a statement about the client's affairs, and a
 surface that confuses them tells a firm to abandon a running amortisation for no reason; treating a
 corrected term as something a revision re-derives — a re-derived allocation is a new schedule.
+
+**Replacement schedule**:
+The schedule that takes over a Prepayment schedule or a Revenue recognition schedule whose term was
+found to be wrong: the predecessor's plan is ended, its allocation is left exactly as it stands, and
+a new schedule is derived from the CORRECTED term over the months the predecessor has not taken up,
+for the balance those months did not consume. The treatment is PROSPECTIVE — a change in accounting
+estimate, not a correction of an error — because the months already taken up are never touched, and
+that is the ticketed ruling rather than a choice the code made. The predecessor and its successor
+name each other, so the chain reads both ways, and at most one schedule over a recognition is live
+at a time.
+_Avoid_: Reading it as a revision — a revision moves a plan's schedule and this is a second schedule
+with its own plan and its own authority; reading "the plan ended" as grounds for one — only a
+corrected term is, and ending a plan on its own opens nothing; expecting it to re-open a month the
+plan has already admitted a Work for, which would post that month twice; expecting it where nothing
+is left to re-spread, which is refused by name.
 
 **Plan catch-up**:
 Admitting due events that already passed, over a window a person names. Oldest first, bounded per
