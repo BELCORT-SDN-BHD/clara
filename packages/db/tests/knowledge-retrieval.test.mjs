@@ -963,13 +963,21 @@ cell("p658.census.no_recut — the eight pinned bodies are byte-identical and ge
   const fyePairWallLive = (await rootQuery(
     "select count(*)::int as n from clara.schema_migrations where version ~ $1",
     ["knowledge_fye_pair_applicability$"])).rows[0].n > 0;
+  // RE-BASED AT INTEGRATION, and for a reason worth stating so the next reader does not hunt.
+  // Lane 06 measured e54104fc... on its own rig, where this file's migration was numbered 0317.
+  // The wave's integration renumbered it to 0318 (lane 04 held 0317), and the file carries its own
+  // number in markers that sit INSIDE the bodies it installs -- "#1031 FIX ROUND (0318)" is part
+  // of the pasted text, not of the migration's prose -- so all three re-cut bodies moved by
+  // exactly that edit. The value below is measured on the integrated from-scratch chain. The
+  // file's own tail still proves the recut by REVERSE SUBSTITUTION against 0310's pinned
+  // pre-image, so what this body IS was never in question; only its comment text changed.
   const pins = [
     ["clara.get_knowledge_pack(uuid,text,uuid)", "2deb725f00229f60a2fbbcc158fe656c5635cd220ec11727c182c39dc6c693fb"],
     ["clara.list_client_knowledge(uuid)", "32999fef181b09989994d40a9c12956f6107798b55eae0b45fce2806d2e7b691"],
     ["clara._knowledge_legacy_rows(uuid,uuid)", "65f4f0f3db1ab64cfa2e4ef55cc850fa9f2176009ac5271c57030e18706ff35a"],
     ["clara._knowledge_capture_core(uuid,text,uuid,text,jsonb,jsonb,date,date,text,text,jsonb,uuid,text,text,text,text)",
       fyePairWallLive
-        ? "e54104fc7dc48056eb6a8dfe8067360c67121d02656aae2b6ced1c01f6c91171"
+        ? "9d6e6e63860cb3e03312f3d34d58315385bbac29f5714182387ffb674cf8af49"
         : "2c8526b82d54ac0aa49c77c3be277be5ecd9cad73df0fec63908d67a0681b01b"],
     ["clara._knowledge_floor(text,text)", "5e4d80691226a6b0bc80dc45c50a6089db5f3a3f7e905f782a0c99c6db8820ca"],
     ["clara.capture_knowledge(text,jsonb,text,text,text,uuid,text,jsonb,date,date,jsonb)",
