@@ -30,7 +30,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 12;
+const EXPECTED_CELLS = 15;
 
 before(async () => {
   ready = await (async () => {
@@ -674,6 +674,188 @@ cell("p939.replace.posted — a month the plan has already taken up is never re-
   assert.equal((await scheduleSupersession(replacement.schedule_id)).replaces_schedule_id,
     made.schedule_id);
   assert.equal(replacement.stated_term_id, corrected.stated_term_id);
+});
+
+cell("p939.replace.refuses — a term that was never corrected, a re-statement that moved neither date, a schedule that has already been replaced, one that names nothing, a blank reason and a viewer are each refused by NAME, and none of them writes a schedule", async () => {
+  const scene = await statedTermScene("replaceRefuses", {
+    cents: 90000, termMonthsBack: 4, termMonths: 3, memoCents: 90000 });
+  const stated = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd });
+  const made = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+
+  // ---- A CORRECTION THAT WAS NEVER MADE. The term this schedule rode is still the one on record,
+  // so there is nothing to correct TO, and the refusal names the door that would make one.
+  const live = await assertPair(CLR.badRequest, CORRECTION_REASON.termNotCorrected,
+    () => replacePrepaymentSchedule(scene.bob, {
+      client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef }),
+    "replacing a schedule whose term nobody has corrected");
+  assert.equal(live.detail.axis, CORRECTION_AXIS.termLive);
+  assert.equal(live.detail.remedy, "clara.record_prepayment_stated_term",
+    "…and it names the door that states a corrected term");
+
+  // ---- A RE-STATEMENT THAT MOVED NOTHING IS NOT GROUNDS. Both term doors supersede
+  // unconditionally, so term_live flips on a statement that repeats the same two dates; only
+  // term_moved is a fact to act on (ADV-02), and this door asks the same question the read does.
+  const same = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#939 battery: re-recorded after a review, with the same two dates" });
+  assert.equal(same.superseded_id, stated.stated_term_id, "it really superseded the predecessor");
+  const unmoved = await assertPair(CLR.badRequest, CORRECTION_REASON.termNotCorrected,
+    () => replacePrepaymentSchedule(scene.bob, {
+      client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef }),
+    "replacing a schedule after a re-statement that moved neither date");
+  assert.equal(unmoved.detail.axis, CORRECTION_AXIS.termUnmoved);
+  assert.equal(await scheduleCountFor(scene.memoEntry), 1, "neither refusal wrote a schedule");
+
+  // ---- A REAL CORRECTION, so the remaining arms have something to refuse ABOUT.
+  const newStart = await monthStartBack(3);
+  const newEnd = await monthEndAfter(newStart, 1);
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry, start: newStart, end: newEnd,
+    reason: "#939 battery: the cover began a month later than we were told" });
+
+  // A BLANK REASON. This act re-derives a client's books; an unexplained one is the
+  // judgement-without-a-basis the estate refuses everywhere else.
+  await assertPair(CLR.badRequest, "invalid_request",
+    () => replacePrepaymentSchedule(scene.bob, {
+      client: scene.client, schedule: made.schedule_id, reason: "   ",
+      authorityRef: scene.authorityRef }),
+    "replacing a schedule with no stated reason");
+
+  // A VIEWER. The floor is the bookkeeper's, the same one that states the term and configures the
+  // schedule: this door does neither more nor less than those two together.
+  await assertRaises(CLR.authz,
+    () => replacePrepaymentSchedule(scene.w.users.carol, {
+      client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef }),
+    "a viewer replacing a schedule");
+
+  // A SCHEDULE THAT NAMES NOTHING — absent and foreign answer alike, so this door is not an
+  // existence oracle for another client's schedules.
+  await assertPair(CLR.notFound, PREPAY_REASON.scheduleNotFound,
+    () => replacePrepaymentSchedule(scene.bob, {
+      client: scene.client, schedule: nowhereId(), authorityRef: scene.authorityRef }),
+    "replacing a schedule that names nothing");
+  assert.equal(await scheduleCountFor(scene.memoEntry), 1, "…and still nothing was written");
+
+  // ---- THE REPLACEMENT ITSELF, then the same call again: a schedule already replaced is closed.
+  const replacement = await replacePrepaymentSchedule(scene.bob, {
+    client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef });
+  const closed = await assertPair(CLR.conflict, CORRECTION_REASON.scheduleSuperseded,
+    () => replacePrepaymentSchedule(scene.bob, {
+      client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef,
+      reason: "#939 battery: a second correction of the same predecessor" }),
+    "replacing a schedule that has already been replaced");
+  assert.equal(closed.detail.superseded_by, replacement.schedule_id,
+    "…and it names the schedule that took over, so a surface can send the person there");
+  assert.equal(await scheduleCountFor(scene.memoEntry), 2, "exactly two rows stand on the chain");
+  assert.equal(await liveScheduleCountFor(scene.memoEntry), 1);
+});
+
+cell("p939.replace.boundary — a corrected term that ends before the first month the plan has not taken up is refused by name, and so is one whose every month has already been taken up; both name the periods already admitted and neither writes a schedule", async () => {
+  // ---- ARM 1: the corrected term ends inside the month the plan already took up.
+  const a = await statedTermScene("replaceNoOpen", {
+    cents: 90000, termMonthsBack: 2, termMonths: 4, memoCents: 90000 });
+  await recordStatedTerm(a.bob, {
+    client: a.client, sourceEntry: a.memoEntry, start: a.termStart, end: a.termEnd });
+  const madeA = await createPrepaymentSchedule(a.bob, {
+    client: a.client, sourceEntry: a.memoEntry,
+    expenseAccount: a.target, authorityRef: a.authorityRef });
+  await wakeDuePlanOccurrences({ limit: 100 });
+  const occA = await occurrenceRows(madeA.plan_id);
+  assert.equal(occA.length, 1, "one month was taken up");
+  const shortEnd = await monthEndAfter(a.termStart, 1);
+  assert.equal(String(occA[0].due_date).slice(0, 10), shortEnd,
+    "…and the corrected term below ends on exactly that month");
+  await recordStatedTerm(a.bob, {
+    client: a.client, sourceEntry: a.memoEntry, start: a.termStart, end: shortEnd,
+    reason: "#939 battery: the cover was two months, not four" });
+  const noOpen = await assertPair(CLR.badRequest, CORRECTION_REASON.noOpenPeriod,
+    () => replacePrepaymentSchedule(a.bob, {
+      client: a.client, schedule: madeA.schedule_id, authorityRef: a.authorityRef }),
+    "replacing a schedule whose corrected term leaves no open month");
+  assert.equal(noOpen.detail.admitted_periods, 1);
+  assert.equal(await scheduleCountFor(a.memoEntry), 1, "nothing was written");
+
+  // ---- ARM 2: a one-month schedule whose one month has been taken up. There is no balance left
+  // to re-spread, whatever the corrected term says, and the refusal says which periods took it.
+  const b = await statedTermScene("replaceNothingLeft", {
+    cents: 90000, termMonthsBack: 1, termMonths: 1, memoCents: 90000 });
+  await recordStatedTerm(b.bob, {
+    client: b.client, sourceEntry: b.memoEntry, start: b.termStart, end: b.termEnd });
+  const madeB = await createPrepaymentSchedule(b.bob, {
+    client: b.client, sourceEntry: b.memoEntry,
+    expenseAccount: b.target, authorityRef: b.authorityRef });
+  assert.equal(madeB.period_count, 1);
+  await wakeDuePlanOccurrences({ limit: 100 });
+  assert.equal((await occurrenceRows(madeB.plan_id)).filter((o) => o.work_id).length, 1,
+    "its one month was taken up");
+  const longerEnd = await monthEndAfter(b.termStart, 2);
+  await recordStatedTerm(b.bob, {
+    client: b.client, sourceEntry: b.memoEntry, start: b.termStart, end: longerEnd,
+    reason: "#939 battery: the cover ran three months after all" });
+  const nothing = await assertPair(CLR.badRequest, CORRECTION_REASON.nothingRemaining,
+    () => replacePrepaymentSchedule(b.bob, {
+      client: b.client, schedule: madeB.schedule_id, authorityRef: b.authorityRef }),
+    "replacing a schedule whose every month has already been taken up");
+  assert.equal(nothing.detail.admitted_periods, 1);
+  assert.equal(Number(nothing.detail.admitted_cents), 90000);
+  assert.equal(await scheduleCountFor(b.memoEntry), 1, "nothing was written");
+});
+
+cell("p939.replace.posture — the correction door is clara_fn_owner-owned, SECURITY DEFINER with its search_path pinned, reachable by clara_authenticated and by no machine principal, has no wake wrapper and no OBO twin, and replays a lost response under the same op key instead of answering that the schedule has already been replaced", async () => {
+  // THE CATALOG POSTURE, read POSITIVELY rather than as the absence of a grant statement.
+  const posture = await rootQuery(
+    `select pg_get_userbyid(p.proowner) as owner, p.prosecdef, p.provolatile,
+            coalesce(array_to_string(p.proconfig, ','), '') as cfg
+       from pg_proc p where p.oid = to_regprocedure($1)`, [REPLACE_DOOR_SIG]);
+  assert.equal(posture.rows[0].owner, "clara_fn_owner");
+  assert.equal(posture.rows[0].prosecdef, true);
+  assert.equal(posture.rows[0].cfg, "search_path=clara, pg_temp");
+
+  for (const role of ["clara_agent_ro", "clara_wake_interactive", "clara_wake_proactive",
+                      "clara_runtime"]) {
+    assert.equal(await roleCanExecute(role, REPLACE_DOOR_SIG), false,
+      `${role} must not be able to execute the correction door`);
+  }
+  assert.equal(await roleCanExecute("clara_authenticated", REPLACE_DOOR_SIG), true,
+    "the human lane holds it");
+  // NO SECOND ENTRANCE OF ANY KIND — no "_for" twin, no wake wrapper, no agent core. Read off the
+  // catalog by name pattern, so a later lane that mints one fails here rather than in review.
+  assert.deepEqual(await functionsMatching("replace_.*schedule"),
+    ["replace_prepayment_schedule", "replace_revenue_recognition_schedule"],
+    "exactly two functions carry this shape, both of them human doors");
+
+  // ---- IDEMPOTENCY. A caller whose response was lost retries under the SAME key and must get the
+  // replacement it already made, never CLR13 prepayment_schedule_superseded — which is why the
+  // reservation is taken before every other question in the body.
+  const scene = await statedTermScene("replaceReplay", {
+    cents: 90000, termMonthsBack: 4, termMonths: 3, memoCents: 90000 });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd });
+  const made = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+  const newStart = await monthStartBack(3);
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: newStart, end: await monthEndAfter(newStart, 1),
+    reason: "#939 battery: the cover began a month later than we were told" });
+
+  const key = opk("p939-replay");
+  const first = await replacePrepaymentSchedule(scene.bob, {
+    client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef,
+    opKey: key });
+  const again = await replacePrepaymentSchedule(scene.bob, {
+    client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef,
+    opKey: key });
+  assert.equal(again.schedule_id, first.schedule_id,
+    "the retry replays the replacement rather than answering that one already exists");
+  assert.equal(await scheduleCountFor(scene.memoEntry), 2, "…and wrote no third schedule");
 });
 
 // ===========================================================================================
