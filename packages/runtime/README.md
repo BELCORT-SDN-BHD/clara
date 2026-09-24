@@ -46,6 +46,31 @@ and that is policy (c) enforced rather than promised.
   **No coupled migration**: every door it touches has been live since 0017 and 0006, and v21's own
   deploy-order obligations (0225, 0227, 0230) are inherited unchanged because v22 carries v21's
   whole tool map.
+* **`chatTurn_v22`, second tool — `read_client_financial_pack`** (#1000). It answers the client
+  home's MONEY BAND: `clara.get_client_financial_pack`'s own envelope — book cash and period profit
+  over the approved ledger, each with its ten-field envelope, its coverage, six months of history,
+  its comparison and its per-account composition — carried to the model key for key. It computes
+  NOTHING: a NULL `value_cents` stays NULL (it means "nobody has said which accounts are cash yet",
+  not zero), a profit is never re-derived from income minus expense, and month-to-date is the
+  ABSENCE of a `month` argument rather than a date this process supplied. Input
+  `{client_id, as_of?, month?}` `.strict()`, both dates plain calendar days: whether a month is a
+  first day, whether an as-of is in the future and whether it falls inside the named month are the
+  READ'S OWN CLR10s, answered against `clara.book_today()`, and the tool carries them with their
+  reason and their whole detail bag rather than pre-empting them in a second vocabulary.
+  **It has a COUPLED MIGRATION, `0320_client_financial_pack_wake_read`, and the deploy order is
+  not a preference.** The read is granted to `clara_authenticated` alone and this lane carries no
+  JWT claims, so 0320 split the computation into ONE ungranted core
+  (`clara._client_financial_pack_core`, which takes the caller's firm as an argument), left the
+  human door its VIEWER-floored delegate with the same signature, envelope, refusal codes and ACL,
+  and gave this lane its own audited door: `clara.wake_get_client_financial_pack`, EXECUTE to
+  `clara_agent_ro` alone with ONE `interactive` allowlist row. **0320 must be applied before the
+  image that carries `chatTurn_v22` serves**, or this tool answers `42883` as an internal fault on
+  every call. The credential is minted ON BEHALF OF the human the turn acts for, and
+  `clara.wake_context` re-validates that person as an ACTIVE BOOKKEEPER+ on every use — a floor
+  STRICTLY ABOVE the read's own VIEWER floor, so the model lane is narrower than the door it
+  reaches and nothing was widened to open it. NO new wire kind (the envelope rides the generic
+  `tool_result` part), no new `WORK_ACCEPTED_PURPOSES`, and — like `read_opening_source` — it is
+  deliberately OUT of `hasCodingIntent_v22`: it mints no terminal card and acts on nothing.
 
 **One module joined a frozen closure at this cut**: `lib/opening-parse.mjs`, because v22's tool
 imports it. THE COST IS EXACTLY THAT FILE — it has no relative imports of its own, so nothing

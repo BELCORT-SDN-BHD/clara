@@ -43,7 +43,6 @@ const CTX = {
   createdBy: "44444444-4444-4444-8444-444444444444",
   taskId: "77777777-7777-4777-8777-777777777777",
 };
-const MODEL = "gpt-5.6-terra";
 
 /** A pack envelope in the door's OWN shape, trimmed to the keys a cell reads. Values are
  *  deliberately awkward — a NULL cash figure beside a real profit — because that is the shape the

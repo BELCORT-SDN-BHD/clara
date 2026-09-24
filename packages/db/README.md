@@ -7263,3 +7263,83 @@ PARTIAL signal rather than guessing. Both branches were exercised on the lane da
 APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
 `CLARA_MIGRATION_REDO=0318_knowledge_fye_pair_applicability` after the promotion door was put back
 at its pre-image for `kp.14`'s vacuity control.
+
+## 0320 — one body, two entrances: the model lane reaches the client home's money band (#1000, riders cut phase, lane C1)
+
+`clara.get_client_financial_pack` (0232, #660) is the ONE read behind the client home's money
+band — book cash over a governed, versioned cash account set and period profit over the approved
+ledger, each with the same ten-field envelope, six points of history and its own comparison. It was
+`STABLE SECURITY INVOKER`, floored inline on `clara.jwt_sub()`, granted to `clara_authenticated`
+alone, and scoped by forced firm-scoped RLS. The chat lane runs on pooled credentials that carry no
+`request.jwt.claims` at all, so #1000's tool could not reach it.
+
+**Four routes were measured before one was written, and three are closed by something the estate
+already decided.** (1) A grant to `clara_agent_ro` buys a door that answers CLR04 `no authenticated
+actor` on every call — "a tool that could only return a grant refusal, and that is not a
+capability". (2) A wake wrapper that sets `request.jwt.claims` from the credential's
+`on_behalf_of` is refused by name: `0082_wave_e_zeta_render_jobs_part4.sql:14-17` rules that
+"setting request.jwt.claims from a production function to borrow a human's identity is
+impersonation; in this repo that idiom appears ONLY inside migration probes, never on a production
+path". (3) A second, machine-side copy of the computation is refused by the same header
+("DUPLICATION IS REFUSED — a second copy of a gate is a second place to forget it") and by #660's
+own "one fact, one definition". (4) A SECURITY INVOKER wrapper, so the estate's own `p_*_agent` RLS
+policies would scope it, needs five new table grants and two new policies for `clara_agent_ro` —
+measured: `clara.cash_account_set_versions` and `clara.cash_account_set_members` carry no agent
+policy at all, and `clara.opening_seed_registry`, `clara.onboarding_plans` and
+`clara.onboarding_plan_items` carry one with no SELECT grant behind it. That is a widening of the
+model lane's RELATION reach, which #1000's own last acceptance criterion forbids.
+
+So 0082's remaining option is the one taken: **SPLIT**. `clara._client_financial_pack_core(p_firm,
+p_client, p_as_of, p_month)` carries the computation and is granted to NOBODY;
+`clara.get_client_financial_pack` keeps its signature, defaults, return type, envelope, refusal
+codes and ACL and becomes that core's VIEWER-floored delegate through `clara._human_ctx`; and
+`clara.wake_get_client_financial_pack` is the model lane's own audited door — EXECUTE to
+`clara_agent_ro` alone, ONE `clara.wake_fn_allowlist` row for the `interactive` kind.
+
+### The firm predicate is explicit now, and it is the whole tenancy wall
+
+Measured on the lane rig rather than recalled: `clara.clients` is FORCE ROW LEVEL SECURITY, and its
+`p_clients_owner` policy is `TO clara_fn_owner USING (true)` — so a SECURITY DEFINER body owned by
+`clara_fn_owner` sees every firm's clients (506 of them on `clara_l01`). 0232's visibility test was
+a plain existence probe that let RLS do the scoping, which was exact for an INVOKER read running AS
+a human and is not exact for this core. It now reads
+`where cl.id = p_client and cl.firm_id = p_firm`, and that ONE predicate is what keeps one firm's
+money out of another firm's answer: every other statement in the body is keyed on `p_client` and
+every one of them is inside the `if v_visible` arm. Both lanes' cells red when it is removed —
+`p1000.wake.no_oracle` on the machine side and #660's own `p660.pack.cross_firm` on the human
+side — which was driven once, on purpose, before the core was restored through
+`CLARA_MIGRATION_REDO`.
+
+### How the pasted body is proved
+
+The core's body is written out statically (no `pg_get_functiondef` splice, so no new entry in
+`apps/web/tests/firm-scope-db-pins.corpus.ts` is owed — this file contains no dynamic SQL at all),
+and it is 0232's own body with exactly THREE anchored edits: the `c record` declaration and the
+inline JWT floor removed, and the visibility test's firm predicate added. §TAIL proves it by
+REVERSE SUBSTITUTION, 0318's own idiom: it reads the installed core, puts all three pre-images
+back, and requires the result to hash to the `sha256(prosrc)` the prestate pinned. A digit changed
+anywhere in ~720 lines of accounting arithmetic reds the migration instead of shipping. The
+behavioural half is #660's own 36-cell battery, which runs unchanged against the human door.
+
+### The floor each lane carries
+
+The human lane is VIEWER, through `clara._human_ctx(clara.role_rank('viewer'))`, which raises the
+same three CLR04s (`no authenticated actor`, `actor has no active membership`, `insufficient role`)
+the inline block raised — it IS the body those three predicates were written from. The model lane is
+BOOKKEEPER+, and not by this file's choice: `clara.mint_wake_credential` refuses a below-bookkeeper
+`on_behalf_of` outright (CLR10 `authority_lost`) and `clara.wake_context` re-validates the same
+standing on EVERY use, so a demoted person's outstanding credential goes inert mid-conversation.
+The model lane is therefore STRICTLY NARROWER than the door it reaches, which is what "carrying the
+human door's role floor rather than widening either" has to mean. Both halves are driven by
+`p1000.wake.floor_is_the_credential`.
+
+### Redo-safe by construction (#957)
+
+Every object is `create or replace function` and the one row it writes is `on conflict do nothing`
+against `clara.wake_fn_allowlist`'s primary key. The prestate admits TWO pre-images for the one body
+it recuts — the measured live sha, or a body already carrying this file's `#1000` attribution — and
+refuses a PARTIAL birth (one of the two new functions present without the other) by name rather
+than completing it. Both branches were exercised on `clara_l01`: the FIRST APPLY through
+`pnpm db:migrate`, and the REDO branch through
+`CLARA_MIGRATION_REDO=0320_client_financial_pack_wake_read` after the firm predicate was removed
+from the live core for `p1000.wake.no_oracle`'s vacuity control.
