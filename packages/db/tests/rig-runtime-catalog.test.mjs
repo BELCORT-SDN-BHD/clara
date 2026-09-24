@@ -161,7 +161,10 @@ test("S4-AB1 real session authorization: bare logins hold NO ambient privilege; 
     assert.equal(packDenied, "CLR04", `get_context_pack without a credential refuses CLR04 uniformly (got ${packDenied ?? "SUCCESS"})`);
     let writer = null;
     try {
-      await c.query("select clara.create_client(p_name => 'ab1-illegal', p_op_key => 'ab1')");
+      // [#1038] create_client's clara_authenticated grant is withdrawn, so it is no longer a
+      // meaningful "a writer some human role CAN reach" contrast -- open_client_onboarding is
+      // the granted human client-minting door #899 left in its place.
+      await c.query("select clara.open_client_onboarding(p_name => 'ab1-illegal', p_op_key => 'ab1')");
     } catch (e) {
       writer = e.code;
     }

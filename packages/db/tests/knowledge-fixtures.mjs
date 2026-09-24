@@ -64,6 +64,38 @@ export async function fyeDayCohortApplied() {
   return present === flags.length;
 }
 
+/** True iff #1031's fye pair-wall cohort is applied. The cohort is TWO files that ship together
+ *  as one unit -- 0310_knowledge_fye_pair_wall.sql (the rule and the two write doors that consult
+ *  it) and its own fix round 0318_knowledge_fye_pair_applicability.sql (the rule re-cut at four
+ *  arguments so the sibling is read at the INCOMING APPLICABILITY, and 0310's three-argument form
+ *  dropped) -- so this probe asks for the shape the cohort finally ships: the FOUR-argument
+ *  ungranted rule exists AND both write doors that can touch either year-end key
+ *  (`clara._knowledge_capture_core`, `clara.correct_knowledge`) carry its call in their live body.
+ *  A marker probe rather than a bare existence check, the same reason `auditActorRoleCohortApplied`
+ *  above gives: each of those two functions has existed since 0192, so a bare `to_regprocedure` on
+ *  them would report this cohort applied estate-wide. Same "wholly present or wholly absent" law
+ *  as the cohorts above -- a database carrying 0310 WITHOUT 0318 is a half-applied cohort and is
+ *  surfaced as PARTIAL rather than skipped, which is exactly what it is. */
+export async function fyePairWallCohortApplied() {
+  const r = await rootQuery(
+    `select
+       to_regprocedure('clara._knowledge_assert_fye_pair(uuid,text,jsonb,jsonb)') is not null as rule_fn,
+       (select position('_knowledge_assert_fye_pair(' in p.prosrc) > 0 from pg_proc p
+         where p.oid = 'clara._knowledge_capture_core(uuid,text,uuid,text,jsonb,jsonb,date,date,text,text,jsonb,uuid,text,text,text,text)'::regprocedure)
+                                                                       as capture_core_calls_it,
+       (select position('_knowledge_assert_fye_pair(' in p.prosrc) > 0 from pg_proc p
+         where p.oid = 'clara.correct_knowledge(uuid,jsonb,text,text,text,text,jsonb)'::regprocedure)
+                                                                       as correct_knowledge_calls_it`,
+  );
+  const row = r.rows[0];
+  const flags = Object.values(row);
+  const present = flags.filter(Boolean).length;
+  if (present !== 0 && present !== flags.length) {
+    throw new Error(`#1031 fye pair-wall cohort is PARTIAL: ${JSON.stringify(row)}`);
+  }
+  return present === flags.length;
+}
+
 /** True iff #913's column drop (0241_knowledge_scope_default_drop.sql) is applied:
  *  `clara.knowledge_keys` no longer carries `scope_default`. Unlike the two cohorts above there
  *  is exactly one thing to lose, not several to land together, so there is no PARTIAL state a

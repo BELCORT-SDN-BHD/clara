@@ -90,6 +90,7 @@ export type AccountingItemId =
   | "periodicAdjustments"
   | "staffExpenseClaims"
   | "prepayments"
+  | "deferredRevenue"
   | "bank"
   | "receivables"
   | "assets"
@@ -401,6 +402,13 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
   // the term its document states and the period-by-period charge — which the generic plan surface
   // does not carry and should not learn.
   { id: "prepayments", segment: "prepayments", labelKey: "accounting.prepayments", icon: "route", minimumRole: "viewer" },
+  // #941 - the customer advances this client has TAKEN, and the revenue each one recognises
+  // month by month. Its own destination beside `prepayments` rather than a view of it: the two
+  // lanes are mirror images (the same evaluator, the same cadence, the same monthly Work), but a
+  // prepayment is money the client PAID ahead and an advance is money the client RECEIVED ahead,
+  // and one table for both would put an asset being released and a liability being earned side by
+  // side with a sign column to tell them apart.
+  { id: "deferredRevenue", segment: "deferred-revenue", labelKey: "accounting.deferredRevenue", icon: "route", minimumRole: "viewer" },
   { id: "accounts", segment: "registers", tab: "accounts", labelKey: "accounting.accounts", icon: "list", minimumRole: "viewer" },
   { id: "close", segment: "close", labelKey: "accounting.close", icon: "lock", minimumRole: "viewer" },
   { id: "tax", segment: "tax", labelKey: "accounting.tax", icon: "receipt", minimumRole: "viewer", beta: true },
@@ -537,6 +545,15 @@ export function staffAdvancesHref(clientId: string): string {
   return `${clientBase(clientId)}/registers?tab=staffAdvances`;
 }
 
+/** `/clients/:clientId/registers?tab=fixedAssets` — the Registers view that carries the #940
+ *  PREPAYMENT-ACCOUNT roster panel, beside the fixed-asset account profiles. Named as its own
+ *  helper rather than spelled at each call site because the prepayment surfaces link here for a
+ *  reason of their own — the roster gates amortisation, and a refusal that names a panel has to be
+ *  able to reach it — so a later move of that panel is one edit here, not three. */
+export function prepaymentAccountsHref(clientId: string): string {
+  return `${clientBase(clientId)}/registers?tab=fixedAssets`;
+}
+
 /** `/clients/:clientId/work/:workId` — one durable Work record's own address.
  *  The id is percent-encoded here even though every caller holds a uuid: this
  *  function builds a URL, and a URL builder that trusts its input is how a
@@ -660,6 +677,26 @@ export function prepaymentCreateHref(clientId: string, entryId?: string): string
  *  the same URL, and a reload lands on the same schedule. */
 export function prepaymentDetailHref(clientId: string, scheduleId: string): string {
   return `${clientBase(clientId)}/prepayments/${encodeURIComponent(scheduleId)}`;
+}
+
+/** `/clients/:clientId/deferred-revenue` — the revenue side's list (#941). */
+export function deferredRevenueHref(clientId: string): string {
+  return `${clientBase(clientId)}/deferred-revenue`;
+}
+
+/** `/clients/:clientId/deferred-revenue/new` — configure a recognition schedule (#941).
+ *  `?entry=` prefills the posted advance, so an attention row's action lands on a form that
+ *  already knows which receipt it is about. */
+export function deferredRevenueCreateHref(clientId: string, entryId?: string): string {
+  const base = `${clientBase(clientId)}/deferred-revenue/new`;
+  return entryId ? `${base}?entry=${encodeURIComponent(entryId)}` : base;
+}
+
+/** `/clients/:clientId/deferred-revenue/:scheduleId` — one derived recognition's own address
+ *  (#941), a ROUTE for the reason its prepayment twin is one: the allocation, the authority, the
+ *  period-by-period execution and every refusal is durable detail. */
+export function deferredRevenueDetailHref(clientId: string, scheduleId: string): string {
+  return `${clientBase(clientId)}/deferred-revenue/${encodeURIComponent(scheduleId)}`;
 }
 
 export function accountingHref(clientId: string, item: AccountingItem): string {

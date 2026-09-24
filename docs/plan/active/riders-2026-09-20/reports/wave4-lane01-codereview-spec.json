@@ -1,0 +1,211 @@
+{
+  "axis": "spec",
+  "lane": "wave 4 lane 01",
+  "branch": "riders/w4-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "fixed_point": "cd2925391",
+  "head": "98fb805616304734adf4259ef8f12718fcd40b26",
+  "commits_reviewed": 51,
+  "tickets": [944, 945, 946, 947, 948, 949],
+  "spec_source": "GitHub issues #944-#949 (body = Agent Brief) plus the owner ruling comment on #949 dated 2026-09-20; triage comments on #945/#946/#947/#948 read as guidance",
+  "verdict": "reject",
+  "summary": "Every ticket's own named acceptance cells are built and, run in isolation, green. But the lane's OWN gate - the repo's db suite (pnpm --filter @clara/db test, what CI runs) - is RED on this head: 5595 tests, 5452 pass, 48 fail, and 15 of the 17 top-level failures are caused by this lane and are named in no report. Three classes: (a) pins and census rosters the lane recut and never re-based (list_review_queue, claim_document_processing_task, the capability-registry version, the activation-lookup count, the approve-writer census, four x42 clock rosters); (b) two documented governance contracts broken without amendment (0020 Wave-B byte-identity on claim_document_processing_task; the knowledge-cohort census, which #949's _client_reporting_framework violates by reading clara.knowledge_records from outside the cohort); (c) two house-law walls (clara_agent_ro must have ZERO access to every new table - it can read clara.contract_plan_confirmations; no body but clara._book_today may own the Asia/Kuala_Lumpur legal date - three #949 bodies do). On top of that, two of the lane's own evaluator-closure cells assert deployed=false and go permanently red once the suite's own migrate-evaluator-freeze file runs, which the wave-3 addendum forbids by name. Spec-wise the material gaps are: #944 AC2 was skipped although CONTEXT.md is a file this lane edited 115 lines of; #946 added an eleventh gate condition (run_totals_printed) that blocks a payslip class #945's recorded owner decision exists to make usable; #949 AC4/AC5 have no human-reachable surface at all; and #945 re-serialized apps/web/messages/en.json, the wave's most contended shared file, producing ~630 lines of non-semantic churn nobody asked for.",
+  "gates_rerun_by_this_review": {
+    "packages/db full suite (pnpm --filter @clara/db test, lane rig 127.0.0.1:55741/clara_l01)": "5595 tests, 5452 pass, 48 fail, 95 skipped",
+    "tests/payroll-summary-facts + payroll-summary-posting + payroll-settlement (full gate chain)": "58 tests, 57 pass, 1 fail",
+    "tests/agreement-contract-acquisition + tenancy-rent-plan + document-capability-registry": "107 pass, 0 fail (measured before the suite-wide evaluator deploy flip)",
+    "tests/a21-classifier-gate + x-receipt-routing + f-a2-statement-activation + firm-document-limits-writer + operation-census + rig-isolation + wave4-chart-rows + plan-overlap-template-arm-retired + document-intake-capabilities": "103 tests, 99 pass, 3 fail, 1 skipped",
+    "apps/web node scripts/run-tests.mjs (whole unit suite)": "5027 tests, 5025 pass, 0 fail, 2 skipped - matches the reports"
+  },
+  "findings": [
+    {
+      "id": "SPEC-01",
+      "ticket": 948,
+      "severity": "blocker",
+      "kind": "requirement-implemented-wrongly",
+      "title": "#948's registry raise to 6 leaves #945's own battery red - the lane's head does not pass its own gates",
+      "evidence": "#948 AC3 ('The capability registry is re-derived...') is built, but 0299 raises clara.document_capabilities.registry_version to 6 while packages/db/tests/payroll-summary-facts.test.mjs:913 still asserts 5 ('...and it is 5 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5)'). Re-run on the lane rig: 'not ok 35 - S6 - the registry re-publishes at ONE new version, and nobody else's row moved / 6 !== 5'. #948's report re-based tests/document-capability-registry.test.mjs's PUBLISHED_REGISTRY_VERSION to 6 and its 'Anything unverified' section even anticipates the hazard ('if another wave-4 lane raises to 7, the integrator must re-base PUBLISHED_REGISTRY_VERSION ... and the literal in section G together') - but it missed the second pin inside its OWN lane. #948's AC6 claim 'the fixed-asset and documents batteries stay green' is therefore false: its gate table never ran payroll-summary-facts.",
+      "required_fix": "Re-base the literal at packages/db/tests/payroll-summary-facts.test.mjs:913 to the single source PUBLISHED_REGISTRY_VERSION (or import it), in a commit naming #948, and re-run both batteries together."
+    },
+    {
+      "id": "SPEC-02",
+      "ticket": 945,
+      "severity": "blocker",
+      "kind": "test-isolation",
+      "title": "Both new evaluator-closure cells assert deployed=false and go permanently red once the suite's own migrate-evaluator-freeze file runs",
+      "evidence": "packages/db/tests/payroll-summary-facts.test.mjs:539 asserts ev[0].deployed === false ('the deploy flip is a one-way ceremony act'), and tests/agreement-contract-acquisition.test.mjs's S3j does the same for evaluate_agreement_contract_state. Running the repo's own db suite flips every row: afterwards clara.evaluator_versions shows deployed=true for all ten evaluators including evaluate_payroll_run_state v1 and evaluate_agreement_contract_state v1 (read back off the rig), and re-running the two files standalone now gives 'not ok 12 - S3j - the evaluator's registered closure is exactly one member, and it calls nobody' and 'not ok 46 - S3 - the evaluator is a closed, single-member closure'. The wave-3 addendum forbids exactly this: 'No test may depend on ... rows left in the database by another test file.'",
+      "required_fix": "Drop the deployed=false assertion from both cells, or assert the ceremony invariant without depending on global state another battery commits."
+    },
+    {
+      "id": "SPEC-03",
+      "ticket": 948,
+      "severity": "blocker",
+      "kind": "pin-not-rebased",
+      "title": "#948's agreement arm makes the router's activation-lookup census 4, against a pin #945 re-based to 3",
+      "evidence": "packages/db/tests/f-a2-statement-activation.test.mjs:351 - 'exactly three witness_extraction activation lookups -- the re-keyed statement arm, the untouched llm_witness arm and #945's payroll arm / 4 !== 3'. #945's report records that it deliberately moved this pin from 2 to 3 'with 0296's own recorded reason for reusing the purpose, and a fourth would still be a finding'. 0299 added the fourth and left the pin at 3.",
+      "required_fix": "Re-base the count to 4 with 0299's own recorded reason beside it, in the shape #945 used, and re-run the file."
+    },
+    {
+      "id": "SPEC-04",
+      "ticket": 948,
+      "severity": "blocker",
+      "kind": "pin-not-rebased",
+      "title": "#948 recut clara.claim_document_processing_task again and left #945's freshly re-based sha pin red",
+      "evidence": "packages/db/tests/firm-document-limits-writer.test.mjs:438 - 'clara.claim_document_processing_task(uuid,text,boolean) MOVED -- 0270 must not touch a body that enforces a cap', expected 315336c46f0de7589955f3b509017dbe0928390e3d00ad1b7c6efba2c7bea82e (the value #945's report records it re-measured to), actual 16b4d47bd62bf827ca310b143275592759e1b1369ca212fa70666eed964c9c64. The file's own cell census then fails too: 'expected 11 cells to run, 10 did' (hook at tests/firm-document-limits-writer.test.mjs:50).",
+      "required_fix": "Re-measure the pin against the post-0299 live body with the same note shape #945 added, and re-run the file so its 11-cell census passes."
+    },
+    {
+      "id": "SPEC-05",
+      "ticket": 946,
+      "severity": "blocker",
+      "kind": "pin-not-rebased",
+      "title": "clara.list_review_queue was recut four times in this lane and the portfolio-pack no-recut pin was never re-based",
+      "evidence": "packages/db/tests/firm-portfolio-pack.test.mjs:720 - 'p659.portfolio.no_recut ... clara.list_review_queue(jsonb,jsonb,int) DRIFTED - 0231 recuts nothing, and only #974's (0260), #840/#861's (0262/0264), #880/#905's (0266/0267) and ticket 1012's (0288) own named recuts are tolerated', expected f4a34c72e567bf825d4376d043ea23cc3d8bcd2d4f0caaee3a5d052bf8a25d69 (the pre-#946 body, which #946's own prestate names as its PRE-image), actual 886df58021fbaed512000dc2a7f0a64fcabe2b93448a84ece5169b163fa47e0c. All of 0297/0298/0299/0300 splice this body. #949's report states 'No other pin of the three recut bodies exists anywhere in the repo (grepped for all three pre-image shas)' - that grep was for #949's OWN pre-images, so it could not find a pin holding the pre-wave value.",
+      "required_fix": "Add 0297-0300 to that cell's tolerated-recut roster with each file's reason, re-measure to the post-#949 sha, and re-run. The same sweep should grep the PRE-WAVE sha of every body the lane recut, not only each ticket's own pre-image."
+    },
+    {
+      "id": "SPEC-06",
+      "ticket": 945,
+      "severity": "blocker",
+      "kind": "contract-broken",
+      "title": "The lane widened clara.claim_document_processing_task's lane roster and broke 0020's documented byte-identity contract without amending it",
+      "evidence": "packages/db/tests/wave-b/wb-0020-legacy.test.mjs:641 - '[0020 section 6 - THE exact-diff pin] ... claim_document_processing_task: a ratified A7 edit is MISSING from the live body'. The contract's restoreMust patterns (tests/wave-b/wb-0020-legacy.test.mjs:440-441) admit only lane in ('ocr','invoice_facts','statement_facts'[,'llm_witness']); the live body now reads lane in ('ocr','invoice_facts','statement_facts','llm_witness','payroll_facts','contract_facts') (read off the rig catalog). 0296 added payroll_facts, 0299 added contract_facts. The test's own failure text states the rule: 'A legitimate change here needs a contract amendment, not a test edit.' No report of #945 or #948 mentions wb-0020; neither ran the wave-b batteries.",
+      "required_fix": "Amend 0020's section 6 contract for the two new lanes (widen the restoreMust patterns, re-measure the pinned prosrc shas), record the amendment where the contract lives, and re-run tests/wave-b/wb-0020-legacy.test.mjs."
+    },
+    {
+      "id": "SPEC-07",
+      "ticket": 949,
+      "severity": "blocker",
+      "kind": "contract-broken",
+      "title": "#949's clara._client_reporting_framework reads clara.knowledge_records from outside the knowledge cohort, which a census gate exists to forbid",
+      "evidence": "packages/db/tests/knowledge-firm-defaults.test.mjs:53 - 'p654.census.not_a_posting_grant - a function outside the knowledge cohort reads clara.knowledge_records -- a firm preference is becoming an authority somewhere', actual ['clara._client_reporting_framework(uuid)'], expected []. #949's report presents this reader as a feature ('The reporting-framework key gets its first reader ... it reads the key only to decide whether Clara may DRAFT, never to post') but never names the census that forbids it and never ran that battery.",
+      "required_fix": "Either admit the body into the knowledge cohort with the reason recorded where the cohort is defined, or move the framework read behind an existing cohort member. Either way an owner-visible note is owed: the gate's purpose sentence names exactly the risk this reader creates."
+    },
+    {
+      "id": "SPEC-08",
+      "ticket": 949,
+      "severity": "blocker",
+      "kind": "access-control",
+      "title": "clara_agent_ro can SELECT #949's new clara.contract_plan_confirmations, against a wall requiring zero access to every new table",
+      "evidence": "packages/db/tests/rig-runtime-visibility.test.mjs:165 - 'section 6 agent lane: clara_agent_ro has ZERO access to every new table (42501, grant-level)' fails with 'agent_ro SELECT clara.contract_plan_confirmations: expected SQLSTATE 42501 but the call SUCCEEDED (no error)'. #949's report states the RLS posture is \"clara.document_regions' own shape, policy for policy ... a firm-scoped SELECT for clara_authenticated and one for clara_agent_ro, with grant select to both\" - the copy was made without checking this wall, and the battery was not run. Standing owner ruling: access control is never loosened.",
+      "required_fix": "Revoke clara_agent_ro on clara.contract_plan_confirmations (and re-check clara.contract_terms against the same wall), or get an explicit owner ruling widening the wall with the reason recorded. Re-run tests/rig-runtime-visibility.test.mjs."
+    },
+    {
+      "id": "SPEC-09",
+      "ticket": 946,
+      "severity": "blocker",
+      "kind": "census-not-rebased",
+      "title": "The lane adds four new entry-approving writers to a pinned approve-writer census and leaves it red",
+      "evidence": "packages/db/tests/x56-rest-c.test.mjs:57 - 'A19e finalize_close authors the closing entry in-body ...; the approve-writer census grows 4 -> 5'. Expected '_approve_entry_core, _approve_opening_entry, _record_journal_entry_core, approve_wrong_client_correction, finalize_close, reopen_fiscal_year, reverse_entry'; actual adds _post_agreement_acquisition, _post_payroll_run, _settle_payroll_net_pay_core, _settle_rent_payable_core. The census bounds who may approve a journal entry; four new approvers is a design fact no report surfaces.",
+      "required_fix": "Re-base the census with each new approver's reason, and state in the integration report that this lane widened the set of bodies that may approve an entry from four to eight - an owner-visible governance change, not a test edit."
+    },
+    {
+      "id": "SPEC-10",
+      "ticket": 949,
+      "severity": "blocker",
+      "kind": "house-law",
+      "title": "Three #949 bodies derive the Asia/Kuala_Lumpur legal date themselves instead of calling clara._book_today()",
+      "evidence": "packages/db/tests/x42b2-s5c-clock.test.mjs:230 - 'x42.s5c.5 no clara object derives a date from the session clock, and the duplication roster is exactly the pinned set ... A NEW name is a second body owning the house legal date - call clara._book_today().' The three new names in the actual roster are _client_reporting_framework, _tenancy_escalation_state and _tenancy_rent_plan_draft. This is the wall that keeps the legal business date single-owner; #949's sixty-day escalation notice window and the framework's effective window both turn on that date.",
+      "required_fix": "Route all three through clara._book_today() (the roster's own instruction) and re-run tests/x42b2-s5c-clock.test.mjs; a roster amendment with a written reason is the right answer only if a body genuinely cannot."
+    },
+    {
+      "id": "SPEC-11",
+      "ticket": 946,
+      "severity": "major",
+      "kind": "census-not-rebased",
+      "title": "Three further x42 clock rosters drifted with the lane's new bodies and were not re-based",
+      "evidence": "In the full db run: 'not ok - x42.r8.tails.4 TAIL 1(a) approve-path census, widened, matches the pinned four on the real catalog', 'not ok - x42.r7.s5.census.4b the S5.25 (B) duplication roster and (B2) authority-clock pin, re-derived with the widened source', 'not ok - x42.r7.s5c.5 [round-8 M4 F2] the bare-token arm ...' and 'not ok 11 - x42.s5c.6 [F2] arm (D)'s bare-token detector and roster'. The x42.s5c.6 diff shows the lane's own new names entering arm (D): _post_agreement_acquisition, _post_payroll_run, _settle_payroll_net_pay_core, _settle_rent_payable_core, _client_reporting_framework, _tenancy_escalation_state, persist_agreement_facts, persist_payroll_facts, fail_agreement_facts, fail_payroll_facts, record_contract_terms.",
+      "required_fix": "Re-derive each roster against the live catalog in one commit naming the lane, and confirm each addition legitimately belongs in the arm it joined."
+    },
+    {
+      "id": "SPEC-12",
+      "ticket": 944,
+      "severity": "major",
+      "kind": "requirement-missing",
+      "title": "#944 AC2 was skipped although its target file is one this lane edited 115 lines of",
+      "evidence": "AC2: 'The domain glossary's typed-fact entry no longer reads as a ban on reading; it bans derivation.' The target is CONTEXT.md:761, which on this head still reads '... it derives none of them.' (grep on the branch). The #944 report stops the whole ticket on the rule forbidding edits to docs/PRD.md and docs/ARCHITECTURE.md - correct for AC1 and AC3 - but CONTEXT.md is not that file: work-order rule 7 names it as a shared file lanes edit, rule 9 REQUIRES lanes to update it, and this lane added 115 lines to it across #945/#946/#948/#949. #945's own report notices the gap ('CONTEXT.md gained a payroll term from THIS ticket, which does not close #944's own one-word derives->computes change at line 761') and still leaves it.",
+      "required_fix": "Make the one-word change at CONTEXT.md:761 ('derives' -> 'computes') in a commit naming #944, and keep AC1/AC3 as the wayfinder/to-spec follow-up the report already drafts."
+    },
+    {
+      "id": "SPEC-13",
+      "ticket": 946,
+      "severity": "major",
+      "kind": "requirement-narrowed",
+      "title": "An eleventh gate condition blocks the payslip class #945's recorded owner decision exists to make usable",
+      "evidence": "#946 AC3 enumerates the gate: 'The unattended gate requires channel agreement, every arithmetic check passing, every account resolving in the client's chart, an established month, and no already-posted payroll entry for that client and month.' 0297 adds a run_totals_printed rung (packages/db/migrations/0297_payroll_summary_posting.sql:435-443, roster at :567) refusing whenever gross or net is not established - i.e. whenever the page prints no totals row. #945's brief records the opposite owner decision: 'a payroll summary with no printed totals row is still readable, because the evaluator sums the rows', and 0296's evaluator does offer computed_cents for that case. The migration header (0297:340-353) discloses the narrowing and calls it 'a product question this ticket does not answer' - but the effect ships: a per-employee payslip with no totals row can never post and surfaces as run_totals_not_printed under Needs you.",
+      "required_fix": "Put the question to the owner before release: may the evaluator's own row sum be a posting basis? If yes the rung goes or softens; if no, #945's decision line should be amended so the two briefs stop disagreeing."
+    },
+    {
+      "id": "SPEC-14",
+      "ticket": 949,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "#949 AC4 and AC5 have no surface a person can reach - the Needs-you row points at a /bank page that says nothing about rent",
+      "evidence": "AC4: 'Each month's open rent payable is matched against candidate bank lines and offers a settlement a person accepts'. AC5: 'when a bank line matches the recorded deposit, the deposits-paid account is offered as the coding'. On this head, grep of apps/web for settle_rent_payable / get_rent_settlement_candidates / RentSettlement returns nothing: both doors exist only in 0300 and are driven only by DB cells. Meanwhile apps/web/lib/firm/needs-you-links.ts maps rent_payable_unsettled to '/bank' (bare; the default tab is accounts) and NEEDS_YOU_AFFORDANCES sets it null, so a person following the row lands on a page with no rent panel and no accept control. #947 built apps/web/components/bank/payroll-settlements-section.tsx for the identical shape; #949's own follow-up 6 records the asymmetry ('A RentSettlementsSection beside the payroll one is the obvious next surface and is recorded rather than half-built').",
+      "required_fix": "Either build the rent settlement / deposit-coding panel beside PayrollSettlementsSection before this lane is called done, or downgrade #949 to PARTIAL and file the surface as a blocking follow-up - a Needs-you row linking to a page without the act is worse than no row."
+    },
+    {
+      "id": "SPEC-15",
+      "ticket": 945,
+      "severity": "major",
+      "kind": "scope-creep",
+      "title": "#945 re-serialized apps/web/messages/en.json, the wave's most contended shared file, adding ~630 lines of churn no ticket asked for",
+      "evidence": "git show --numstat 3239e6b58 -- apps/web/messages/en.json => 652 insertions / 640 deletions, for a commit whose only asked-for change is eleven payroll factLabel keys. A semantic diff of base vs head (parsed JSON, flattened) shows 71 keys added, 0 removed, 0 values changed and identical top-level order, so the churn is purely a change of escape style: the base carried 16 u2014, 4 u2026, 4 u2019, 2 u201c/u201d and 2 u00b7 escapes; the head carries 1, 1, 2, 0 and 0. Work-order rule 7 names this file FIRST among the nine shared files and says 'Keep your hunk minimal, at the sorted position'. Nine other lanes edit it this wave; a whole-file re-encoding conflicts with every one of them.",
+      "required_fix": "Revert the escape-style change (keep only the 71 new keys at their sorted positions) before integration so the other lanes' hunks apply."
+    },
+    {
+      "id": "SPEC-16",
+      "ticket": 947,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#947 AC2's Needs-you row carries the month and the amount but not the candidates, and links one tab away from where they are",
+      "evidence": "AC2: 'A new Needs-you arm renders that row with the month, the amount and the candidates'. The projection in packages/db/migrations/0298_payroll_net_pay_settlement.sql:578-591 emits amount_cents, period and the sentence 'Payroll for <Month YYYY> is posted; the payment has not appeared.' and no candidate data; apps/web/lib/firm/needs-you-links.ts maps the kind to bare '/bank' (default tab accounts) because ACCOUNTING_ITEMS' bank entry carries no tab. The candidates do render, on /bank?tab=matching, in PayrollSettlementsSection. The report discloses both readings.",
+      "required_fix": "Land the symmetric bank tab entry in lib/navigation/tree.ts (the lane's own follow-up) so the row lands on Matching, or have the owner accept that 'the candidates' is discharged one click away."
+    },
+    {
+      "id": "SPEC-17",
+      "ticket": 949,
+      "severity": "minor",
+      "kind": "lane-rule",
+      "title": "#949 appended two row kinds where the wave rule allows one per ticket",
+      "evidence": "WAVE-4 LANE RULE (b): 'apps/web/lib/firm/needs-you.ts ... make ADDITIVE edits only, one new row kind per ticket appended at the end of its list'. #949 appends both rent_payable_unsettled and rent_escalation_pending. Both are genuinely asked for (AC4 and AC6 name two different Needs-you rows), so the ticket is right and the rule is what gives; recorded so the integrator expects two #949 entries in the shared file, not one.",
+      "required_fix": "None in code; the integrator should expect two entries from this lane's last ticket when merging the shared file."
+    },
+    {
+      "id": "SPEC-18",
+      "ticket": 948,
+      "severity": "minor",
+      "kind": "shared-file-drift",
+      "title": "needs-you.ts's own header census is now wrong: it says THIRTEEN kinds while the array carries fifteen, and the per-kind ordinals contradict it",
+      "evidence": "apps/web/lib/firm/needs-you.ts:71 still reads 'The LIVE row_kind set is therefore THIRTEEN values' and its list stops at payroll_net_pay_unsettled; REVIEW_QUEUE_ROW_KINDS actually carries 15 entries (counted on the branch), ending rent_escalation_pending. The header block calls payroll_posting_blocked 'the ELEVENTH kind live after 0288 took one away' while the array comment beside it calls the same kind 'the TWELFTH kind'. #948 and #949 appended without updating the census sentence #946 and #947 maintained.",
+      "required_fix": "Update the header census to fifteen, name all five new kinds, and make the ordinal convention consistent between the header block and the array comments."
+    },
+    {
+      "id": "SPEC-19",
+      "ticket": 947,
+      "severity": "note",
+      "kind": "requirement-discharged-by-reading",
+      "title": "'en and zh copy' is discharged in #947 and #949 without any zh copy, on a reading that needs the owner's acceptance",
+      "evidence": "#947 AC5 and #949 AC8 both say 'en and zh copy'. Verified on the branch: apps/web/messages/ contains en.json only, and apps/web/i18n/request.ts is the documented single-static-locale setup ('Adding en-GB/ms/zh later is a routing.ts + middleware change'). Both reports discharge the line with the migration header's bilingual title instead and flag it as unverified.",
+      "required_fix": "Owner confirms the reading, or the AC line is struck from the two tickets so it stops reading as an unmet criterion."
+    },
+    {
+      "id": "SPEC-20",
+      "ticket": 945,
+      "severity": "note",
+      "kind": "requirement-deferred",
+      "title": "'From-scratch apply' is claimed by no ticket in the lane and is owed to the integrator",
+      "evidence": "#945 AC7, #946 AC7, #947 AC6, #948 AC6 and #949 AC9 all name 'from-scratch apply'. Every report declines it on the same ground (a second from-scratch chain on a lane cluster is forbidden; 0154 pins the cluster-wide role count) and offers the FIRST-APPLY prestate proof in its place, which each report does document as run and passing. Five ACs therefore rest on one integrator action.",
+      "required_fix": "Run the 0001 -> 0300 chain on a disposable cluster before release and record it against all five tickets."
+    },
+    {
+      "id": "SPEC-21",
+      "ticket": 948,
+      "severity": "note",
+      "kind": "requirement-split",
+      "title": "#948 AC5's 'routed to the contract-terms record' is delivered by #949, not by #948",
+      "evidence": "AC5: 'A non-financing agreement drafts nothing and is routed to the contract-terms record instead'. #948 proves only the negative half (a tenancy drafts nothing and never reaches the fixed-asset lane); the record and the routing into it are 0300's clara.contract_terms / clara.propose_contract_terms. The ticket body itself says the record is 'its sibling ticket's', and both tickets are in this lane, so the lane as a whole satisfies it.",
+      "required_fix": "None; recorded so #948 is not read as satisfied on its own commit boundary."
+    }
+  ]
+}

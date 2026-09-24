@@ -20,7 +20,8 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, hasB3, has623, caught, cleanCloseableFY, beginClose, finalizeClose, reopenFY,
+  has0056, hasB3, has623, has946Posting, has947Settlement, has948Agreement, has949Tenancy,
+  caught, cleanCloseableFY, beginClose, finalizeClose, reopenFY,
   grantCapability, revokeCapability, freshActiveClient, proposeFY, openFY, addDaysStr,
   forgeClosedPeriodMovement, setupCloseCoa, plainEntry, BANK1, RE1, REVN, EXPN, attestCloseSig,
 } from "./x56-fixtures.mjs";
@@ -80,9 +81,24 @@ test("A19e finalize_close authors the closing entry in-body (draft then census-v
   // NAMES itself rather than reading as an off-by-one.
   const b3 = await hasB3();
   const w623 = await has623();
+  // RIDERS WAVE 4, LANE 01 — FOUR MORE, each on its own file's stem. Read x56-fixtures.mjs's
+  // has946Posting/has947Settlement/has948Agreement/has949Tenancy for what each one is and why
+  // it flips in-body; the short version is that two are unattended AGENT posts (which do not
+  // participate in maker/checker by the F-A2 D10 arm) and two are human accept acts (which do,
+  // and which leave a HIGH-STAKES entry a draft for the ordinary door rather than flipping it).
+  // Four to five was #623; five to nine is this lane, and it is a governance change stated in
+  // the lane's own fix report, not a quiet re-base.
+  const p946 = await has946Posting();
+  const s947 = await has947Settlement();
+  const a948 = await has948Agreement();
+  const t949 = await has949Tenancy();
   const expected = [
     "_approve_entry_core", "_approve_opening_entry",
+    ...(a948 ? ["_post_agreement_acquisition"] : []),
+    ...(p946 ? ["_post_payroll_run"] : []),
     ...(w623 ? ["_record_journal_entry_core"] : []),
+    ...(s947 ? ["_settle_payroll_net_pay_core"] : []),
+    ...(t949 ? ["_settle_rent_payable_core"] : []),
     "approve_wrong_client_correction", "finalize_close",
     ...(b3 ? ["reopen_fiscal_year"] : []),
     "reverse_entry",
@@ -91,7 +107,8 @@ test("A19e finalize_close authors the closing entry in-body (draft then census-v
     census.names,
     expected.join(", "),
     "the pinned four PLUS finalize_close (PLUS reopen_fiscal_year once B3 lands, PLUS "
-    + "_record_journal_entry_core once #623 lands), in collate \"C\" order",
+    + "_record_journal_entry_core once #623 lands, PLUS the riders wave-4 lane-01 four once "
+    + "0297/0298/0299/0300 land), in collate \"C\" order",
   );
   assert.equal(census.n, expected.length, `approve-writer count (got ${census.n}: ${census.names})`);
 

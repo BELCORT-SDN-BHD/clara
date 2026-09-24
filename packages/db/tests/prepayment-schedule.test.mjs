@@ -34,6 +34,7 @@ import {
   createAccountingPlan, reviseAccountingPlan, previewAccountingPlan,
   scheduleRow, scheduleRowsFor, relationPosture, functionGrants, evaluatorFreezeMatches,
   unapprovedEntry, ambiguousAssetEntry, ineligibleAssetEntry, nowhere,
+  enrolPrepaidIfRostered, prepaymentRosterGateLive,
   AMORTISATION_KIND, CONTROL_ASSET_CODE, PREPAY_REASON, TARGET_BASIS, TZ,
 } from "./prepayment-schedule-fixtures.mjs";
 
@@ -301,11 +302,30 @@ test("p653.schedule.prepaid_leg_ineligible — an APPROVED, document-bound entry
       authorityRef: scene.authorityRef,
     }),
     "a schedule whose prepaid leg is a receivable control account");
-  assert.equal(refused.detail.axis, "prepaid_account_ineligible",
-    "the refusal names the AXIS, so the surface can say which leg is wrong");
   assert.equal(refused.detail.prepaid_account_code, CONTROL_ASSET_CODE);
-  assert.equal(refused.detail.breach?.axis, "control_account",
-    `the breach is the SHARED helper's own answer, carried through: ${JSON.stringify(refused.detail)}`);
+
+  // #940 MOVED THE ANSWER ONE DOOR EARLIER, AND THIS CELL SAYS SO AT BOTH FRONTIERS. Migration
+  // 0306 asks the client's prepayment ROSTER before this wall (the brief's own order, and owner
+  // decision 6 behind it: every reason an account can never hold prepayments is stated at the
+  // ENROLMENT door, not here, where the person is doing something else). A receivable control
+  // account fails both, so after 0306 the person is told about the roster — and the WALL's
+  // judgement, which is what this cell exists to measure, is measured where it now speaks.
+  if (await prepaymentRosterGateLive()) {
+    assert.equal(refused.detail.axis, "prepaid_account_not_enrolled",
+      "the roster is asked BEFORE the wall, so an account failing both answers the roster");
+    assert.equal(refused.detail.remedy, "clara.enrol_prepayment_account",
+      "…and the refusal names the door that would fix it");
+    const atEnrolment = await assertPair("CLR37", "prepayment_account_enrolment_invalid",
+      () => enrolPrepaidIfRostered(scene.alice, { client: scene.client, code: CONTROL_ASSET_CODE }),
+      "enrolling the receivable control account as a prepayment account");
+    assert.equal(atEnrolment.detail.axis, "control_account",
+      `the wall's own judgement, carried through at the enrolment door: ${JSON.stringify(atEnrolment.detail)}`);
+  } else {
+    assert.equal(refused.detail.axis, "prepaid_account_ineligible",
+      "the refusal names the AXIS, so the surface can say which leg is wrong");
+    assert.equal(refused.detail.breach?.axis, "control_account",
+      `the breach is the SHARED helper's own answer, carried through: ${JSON.stringify(refused.detail)}`);
+  }
 
   assert.deepEqual(await scheduleRowsFor(scene.client), [], "the refusal wrote nothing");
 });
@@ -337,7 +357,8 @@ test("p653.schedule.authority_ref_unresolved — an authority_ref naming the REC
 test("p653.schedule.duplicate_race — two humans configuring the SAME recognition concurrently: the loser is answered the TYPED prepayment_schedule_exists, never a bare unique-violation naming an index", async (t) => {
   if (await assertPrepaymentCohortPresent(t)) return;
   // THE TYPED PRE-CHECK CANNOT SEE AN UNCOMMITTED WINNER, so the structural backstop
-  // (`uq_prepayment_schedules_source`) is what actually answers the loser. A bare 23505 reaches the
+  // (`uq_prepayment_schedules_source_live` since 0317; `uq_prepayment_schedules_source` before
+  // it — the index moved, the barrier did not) is what actually answers the loser. A bare 23505 reaches the
   // surface as `duplicate key value violates unique constraint "…"` — a sentence with no next act.
   // The BARRIER here is the unique index itself: B's insert queues on A's uncommitted row.
   const scene = await prepaymentScene("race", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
@@ -470,8 +491,13 @@ test("p653.kind.unsupported — depreciation and close STILL answer plan_kind_un
         dayOfMonth: null, effectiveFrom: scene.termEnd, basis: b,
       }),
       `plan kind ${kind}`);
+    // #941 (0308) widened the set by ONE more member, additively: the three kinds this cell was
+    // written for keep their exact spelling and their order, and `revenue_recognition_schedule`
+    // joins them. The claim under test is unchanged — the refusal NAMES what is supported — and a
+    // list that had dropped or reordered a member would still fail here.
     assert.deepEqual(detail.supported,
-      ["recurring_journal", "reversing_journal", "amortisation_schedule"],
+      ["recurring_journal", "reversing_journal", "amortisation_schedule",
+        "revenue_recognition_schedule"],
       "the refusal NAMES what the widened slice does support");
   }
 
@@ -559,9 +585,17 @@ test("p653.census.grants — clara.prepayment_schedules is RLS-FORCED with a NUL
   assert.deepEqual(await functionGrants("clara.prepayment_schedule_v1(uuid,uuid)"), [],
     "clara.prepayment_schedule_v1 holds NO grant — the door reaches it as a definer");
   const freeze = await evaluatorFreezeMatches();
-  assert.equal(freeze.length, 1, "the registered closure is still single-member");
-  assert.equal(freeze[0].live, freeze[0].registered,
-    "the live evaluator body still hashes to its registered clara.evaluator_versions member");
+  // #939 registered `prepayment_schedule` v2 BESIDE v1 (0305: v1's formula with the amount and the
+  // term as arguments, for the memo-only lane). The reader returns every member of every version
+  // of this evaluator NAME, so the count is now one member per registered version rather than one
+  // outright — and the property this cell exists for is unchanged and asserted per row: each
+  // registration is single-member, and each live body still hashes to what was registered.
+  const v1Member = freeze.filter((r) => r.member_signature === "clara.prepayment_schedule_v1(uuid,uuid)");
+  assert.equal(v1Member.length, 1, "0140's registration is still single-member");
+  for (const m of freeze) {
+    assert.equal(m.live, m.registered,
+      `${m.member_signature}'s live body still hashes to its registered clara.evaluator_versions member`);
+  }
 });
 
 test("p653.census.floor — a VIEWER cannot create a schedule, and a schedule id belonging to another firm answers exactly as an id naming nothing does", async (t) => {

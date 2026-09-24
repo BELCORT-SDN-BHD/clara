@@ -439,3 +439,86 @@ test("accrual.walk.correction: correcting an accrual is a real transition — th
   await page.goto(LIST_URL);
   await expect(page.getByRole("row").filter({ hasText: ACC.correctablePurpose })).toHaveCount(2);
 });
+
+// #938 — "a bill posted inside an accrued period", rendered on the SAME Accruals page beside the
+// configured-accruals table (accrual-mock.mjs's own list_review_queue handler: ONE
+// accrual_bill_conflict row for POSTED's own plan, until "reverse now" is driven). Only one of
+// the two remedies is walked here — "reverse now" — because the SAME real door
+// (request_plan_catch_up) and its real catch_up_in_future refusal are the DB battery's own claim
+// (packages/db/tests/accrual-bill-conflict.test.mjs); this cell owns what the BROWSER does with
+// the answer: the item is on screen with the accrual, the bill and the period named, the act is a
+// real governed write, and the destination RE-READS — the row is gone because a fresh
+// list_review_queue answered without it, never because the client painted an optimistic remove.
+test("accrual.walk.billConflict: a bill posted inside the accrued period is named on the Accruals page, and 'reverse now' is a real write whose destination RE-READS the row away", async ({ page }) => {
+  await signInTo(page, LIST_URL);
+
+  const conflict = page.getByText(/A document-sourced entry posted inside the accrued period/);
+  await expect(conflict).toBeVisible();
+  await expect(page.getByText("Accrued period: 2026-07-31")).toBeVisible();
+  await expect(page.getByText("Accrual amount: 1,200.00")).toBeVisible();
+  await expect(page.getByRole("link", { name: "View the document" })).toBeVisible();
+  // #942 fix round 1 — the section is TWO-SIDED now: its heading and its sentence must be true of
+  // an accrued fee as well as of a cost, and the item says which way this one runs.
+  await expect(page.getByText("Documents posted inside an accrued period")).toBeVisible();
+  await expect(page.getByText(/hit this accrual.s own profit-and-loss account/)).toBeVisible();
+  await expect(page.getByText("Expense accrual", { exact: true })).toBeVisible();
+  // …and what each remedy actually settles (ADV-02).
+  await expect(page.getByText(/Skipping affects the NEXT period only/)).toBeVisible();
+
+  await scan(page, "accrual bill conflict, before reverse now");
+
+  await page.getByRole("button", { name: "Reverse now" }).click();
+
+  // THE RE-READ, not an optimistic remove: the row is gone because list_review_queue's NEXT
+  // answer (accrual-mock.mjs's own `state.reversed` law) does not carry it.
+  await expect(conflict).toHaveCount(0);
+  // AND THE CONFIGURED-ACCRUALS TABLE BELOW IT IS UNTOUCHED — "reverse now" is scoped to the
+  // derived conflict row alone.
+  await expect(page.getByRole("row").filter({ hasText: ACC.purpose })).toContainText("Posted");
+});
+
+// ===========================================================================================
+// accrual.walk.revenue — #942: the SIDE, in a real browser.
+//
+// The DB battery owns what each side posts; this cell owns what the BROWSER does with a lane that
+// now runs two ways: the register says which way each accrual runs and can be narrowed to one, and
+// the form's side control re-labels both account legs and changes which accounts they offer — so a
+// preparer cannot choose an expense account for an accrued fee at all.
+// ===========================================================================================
+
+test("accrual.walk.revenue: the register names each accrual's side and filters to one, and the form's side control changes which accounts each leg offers", async ({ page }) => {
+  await signInTo(page, LIST_URL);
+
+  // THE REGISTER CARRIES BOTH SIDES AT ONCE, and each row says which it is.
+  const expenseRow = page.getByRole("row").filter({ hasText: ACC.purpose });
+  const revenueRow = page.getByRole("row").filter({ hasText: ACC.revenuePurpose });
+  await expect(expenseRow).toContainText("Expense");
+  await expect(revenueRow).toContainText("Revenue");
+  // THE LEGS READ IN POSTING ORDER: a revenue accrual debits the accrued-income asset.
+  await expect(revenueRow).toContainText("Dr 1180 / Cr 4000");
+  await expect(expenseRow).toContainText("Dr 6100 / Cr 2020");
+
+  await scan(page, "accruals register carrying both sides");
+
+  // AND IT NARROWS TO ONE SIDE.
+  await page.getByLabel("Show").selectOption("revenue");
+  await expect(revenueRow).toHaveCount(1);
+  await expect(expenseRow).toHaveCount(0);
+  await page.getByLabel("Show").selectOption("");
+  await expect(expenseRow).toHaveCount(1);
+
+  // THE FORM. Choosing the revenue side re-labels both legs and re-fills both pickers.
+  await page.goto(NEW_URL);
+  await expect(page.getByLabel("Expense account")).toBeVisible();
+  await page.getByLabel("Which way this accrues").selectOption("revenue");
+  await expect(page.getByLabel("Expense account")).toHaveCount(0);
+  const income = page.getByLabel("Revenue account");
+  await expect(income).toBeVisible();
+  await expect(income.locator("option")).toHaveText(["Choose an account", "4000 Sales / Fees Income"]);
+  const asset = page.getByLabel("Accrued income account");
+  await expect(asset.locator("option")).toHaveText([
+    "Choose an account", "1150 Maybank current", "1180 Accrued Income",
+  ]);
+
+  await scan(page, "accrual form on the revenue side");
+});

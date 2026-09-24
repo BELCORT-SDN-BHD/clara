@@ -51,6 +51,47 @@ export async function has623() {
   return r.rows[0].n === 1;
 }
 
+/** RIDERS WAVE 4, LANE 01 — FOUR MORE ENTRY-APPROVING WRITERS, each behind its own file's
+ *  STEM (same discipline as hasB3/has623: the number is claimed at merge, the stem is not).
+ *
+ *  THIS IS A GOVERNANCE FACT, NOT A TEST EDIT, and it is written here because this roster is
+ *  where the estate bounds who may approve a journal entry. Before this wave four bodies could;
+ *  #623 made it five; this lane makes it nine:
+ *    · clara._post_payroll_run (#946, 0297) and clara._post_agreement_acquisition (#948, 0299)
+ *      are UNATTENDED AGENT posts. They draft and then flip with this very UPDATE for the same
+ *      structural reason clara._record_journal_entry_core does — clara._tf_assert_agent_post_
+ *      receipt fires AFTER UPDATE, so an insert-approved shortcut would slip past the one wall
+ *      that makes the post receipt structural — and they carry approval_arm='agent_unattended'
+ *      with checker_actor = clara.agent_user_id(), the F-A2 (D10) arm that does not participate
+ *      in maker/checker at all.
+ *    · clara._settle_payroll_net_pay_core (#947, 0298) and clara._settle_rent_payable_core
+ *      (#949, 0300) are HUMAN accept acts (via_wake_kind='interactive'). They therefore DO
+ *      participate in maker/checker, and after the wave-4 fix round they do: each probes
+ *      clara.is_high_stakes on the entry it has just built and, where it is high-stakes, leaves
+ *      it a DRAFT for the ordinary approve door instead of flipping it — clara.reverse_entry's
+ *      own posture. The flip this census sees is the ordinary-stakes branch.
+ *  A tenth name is a finding. */
+export async function has946Posting() {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'payroll_summary_posting$'");
+  return r.rows[0].n === 1;
+}
+export async function has947Settlement() {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'payroll_net_pay_settlement$'");
+  return r.rows[0].n === 1;
+}
+export async function has948Agreement() {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'agreement_contract_acquisition$'");
+  return r.rows[0].n === 1;
+}
+export async function has949Tenancy() {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'tenancy_terms_rent_plan$'");
+  return r.rows[0].n === 1;
+}
+
 /** Q-D6's close-seal wall (`migrations/0161_qd6_close_seal_wall.sql`) — the FIFTEENTH
  *  gate-catalog row, drawer 1. Read from the LIVE CATALOG, never a filename and never a
  *  schema_migrations row, so a renumber cannot move it.

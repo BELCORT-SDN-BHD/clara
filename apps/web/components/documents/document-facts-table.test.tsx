@@ -107,6 +107,73 @@ test("[the honest unknown arm] a path from a lane this app has never seen render
   }
 });
 
+// #945 — THE PAYROLL LANE'S FACTS RENDER THE SAME WAY THE INVOICE LANE'S DO, with one thing the
+// invoice lane never had to say: a figure the page does not print gets a region of its own,
+// carrying no rendering and no cents, and it must read as NOT PRINTED. The whole reason
+// clara.persist_payroll_facts writes that row at all is so a person can tell "the page is silent
+// about the HRDF levy" from "the levy is zero" — and a blank cell, or a 0.00, would throw that
+// distinction away at the last step.
+test("ticket 945 · a payroll fact renders its human label, its raw path and the DB's own integer", async () => {
+  const h = await renderComponent(App(createElement(DocumentFactsTable, {
+    facts: [
+      region({ id: "r1", field_path: "payroll.run.gross_pay", text_content: "5,000.00", monetary_cents: 500_000 }),
+      region({ id: "r2", field_path: "payroll.run.epf_employee", text_content: "550.00", monetary_cents: 55_000 }),
+      region({ id: "r3", field_path: "payroll.run.period", text_content: "2026-08", monetary_cents: null }),
+    ],
+  })));
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /Gross pay \(payroll run\)/, "the human label must render");
+    assert.match(text, /payroll\.run\.gross_pay/, "…beside the raw path, for audit");
+    assert.match(text, /5000\.00/, "monetary_cents renders as the DB's own integer over 100");
+    assert.match(text, /Employee EPF/);
+    assert.match(text, /550\.00/);
+    assert.match(text, /Payroll period/);
+    assert.match(text, /2026-08/, "the one non-monetary question renders its text verbatim");
+    assert.doesNotMatch(text, /factLabel\./, "a translation-key path must never reach the user");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 945 · a payroll answer the page did not print reads NOT PRINTED — never 0.00, never a blank", async () => {
+  const h = await renderComponent(App(createElement(DocumentFactsTable, {
+    facts: [
+      // What clara.persist_payroll_facts writes for `state: not_printed`: a region with no
+      // rendering and no cents at all.
+      region({ id: "r1", field_path: "payroll.run.hrdf_levy", text_content: null, monetary_cents: null }),
+      region({ id: "r2", field_path: "payroll.run.gross_pay", text_content: "5,000.00", monetary_cents: 500_000 }),
+    ],
+  })));
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /not printed/i, "the page's silence is reported as silence");
+    assert.doesNotMatch(text, /\b0\.00\b/, "silence is NEVER a zero — that is the whole reason the row exists");
+    assert.match(text, /5000\.00/, "…and the figures the page DOES print are unaffected");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 945 · `not printed` is the PAYROLL lane's reading, not a new meaning for every empty region", async () => {
+  // An invoice-lane region with no value is a different thing: the invoice writer only ever
+  // writes a region for an answered field, so an empty one there is a fact with no rendering, not
+  // a reading that the page is silent. Saying "not printed" about it would be this UI asserting
+  // something the invoice lane never said.
+  const h = await renderComponent(App(createElement(DocumentFactsTable, {
+    facts: [region({ id: "r1", field_path: "invoice.total", text_content: null, monetary_cents: null })],
+  })));
+  try {
+    await h.settle();
+    assert.doesNotMatch(h.text(), /not printed/i);
+    assert.match(h.text(), /—/, "it keeps the generic no-value dash it has always had");
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("a region with no confidence says so, rather than rendering a blank cell that reads as zero", async () => {
   const h = await renderComponent(App(createElement(DocumentFactsTable, {
     facts: [region({ id: "r1", field_path: "invoice.currency", text_content: "MYR", engine_confidence: null })],

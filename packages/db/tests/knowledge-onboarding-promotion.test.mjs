@@ -11,15 +11,26 @@ import { after, before, test } from "node:test";
 import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { assertRaises, endPool, humanQuery, roleQuery, rootQuery, opk, ROLES } from "./rig-fixtures.mjs";
-import { committedPlan, knowledgeCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
+import {
+  committedPlan, fyePairWallCohortApplied, knowledgeCohortApplied, knowledgeWorld,
+} from "./knowledge-fixtures.mjs";
 
 const EXPECTED_CELLS = 13;
+const PAIR_EXPECTED_CELLS = 1; // kp.14 -- #1031's pair-wall cohort (0310 + 0318) on top of 0192
 let live = false;
+let pairWallLive = false;
 let executed = 0;
+let pairExecuted = 0;
 
-before(async () => { live = await knowledgeCohortApplied(); });
+before(async () => {
+  live = await knowledgeCohortApplied();
+  pairWallLive = live && await fyePairWallCohortApplied();
+});
 after(async () => {
   if (live) assert.equal(executed, EXPECTED_CELLS, `expected ${EXPECTED_CELLS} cells to run, ${executed} did`);
+  if (pairWallLive) {
+    assert.equal(pairExecuted, PAIR_EXPECTED_CELLS, `expected ${PAIR_EXPECTED_CELLS} pair-wall cell(s) to run, ${pairExecuted} did`);
+  }
   await endPool();
 });
 
@@ -37,6 +48,30 @@ function cell(name, fn) {
   test(name, async (t) => {
     if (gate(t)) return;
     executed += 1;
+    await fn(t);
+  });
+}
+
+/** #1031's own gate, layered on top of `gate()` exactly as knowledge-fye-day.test.mjs's does: a
+ *  database missing 0192 entirely reports THAT (deferring to `gate()`, never a second reason); a
+ *  database carrying 0192 but not the pair-wall cohort reports the pair-wall reason. */
+function pairGate(t) {
+  if (live) {
+    if (pairWallLive) return false;
+    if (process.env.CLARA_ALLOW_MISSING_FYE_PAIR_WALL_0310 === "1") {
+      console.warn("SKIP knowledge-onboarding-promotion (pair-wall cell): the 0310/0318 cohort is not applied (explicit pre-integration run).");
+      t.skip("fye pair-wall cohort absent -- explicit pre-integration run");
+      return true;
+    }
+    assert.fail("the fye pair-wall cohort is required for a focused run: apply 0310_knowledge_fye_pair_wall.sql and 0318_knowledge_fye_pair_applicability.sql");
+  }
+  return gate(t);
+}
+
+function pairCell(name, fn) {
+  test(name, async (t) => {
+    if (pairGate(t)) return;
+    pairExecuted += 1;
     await fn(t);
   });
 }
@@ -469,4 +504,55 @@ cell("kp.13 a BELOW-FLOOR caller learns nothing: a real foreign plan and a rando
   // The gate is still a gate: the plan's own admin promotes it.
   const ok = await promoteAsHuman(w.admin, plan);
   assert.equal(ok.promoted.length, 2, JSON.stringify(ok));
+});
+// =============================================================================================
+// kp.14 — #1031's OWN FIX ROUND (0318, review finding L06-SPEC-08). #1031's brief asked for this
+// door's behaviour to be UNCHANGED. 0310's pair rule raises CLR37 (the client-row door's own
+// typed reason), which was not among the two sqlstates this door's per-item `exception` arm
+// caught, so ONE impossible pair on a committed plan raised straight out of the promotion loop
+// and NOTHING was promoted -- entity_type, which has nothing to do with the year end, included.
+// 0318 adds CLR37 to that arm, so the offending key alone is withheld, which IS this door's
+// documented per-item behaviour.
+// =============================================================================================
+
+pairCell("kp.14 an IMPOSSIBLE year-end pair on a committed plan withholds that one key and promotes the rest, instead of aborting the whole promotion", async () => {
+  const w = await knowledgeWorld("p14");
+  // February plus the 31st: the pair clara.set_client_fy_end refuses on the client row, beside two
+  // keys that have nothing to do with it. `promote_plan_answers_to_knowledge` walks its items in
+  // item_key order (entity_type, fye, fye_day), so the month lands and the day is judged against it.
+  const plan = await committedPlan({ firm: w.firm, client: w.clientA, committedBy: w.admin,
+    answers: {
+      entity_type: { value: "sdn_bhd", answeredBy: w.admin },
+      fye: { value: 2, answeredBy: w.admin },
+      fye_day: { value: 31, answeredBy: w.admin },
+    } });
+
+  const receipt = await promoteAsHuman(w.admin, plan);
+
+  // THE OTHER TWO KEYS SURVIVED. Before 0318 this receipt did not exist at all -- the call raised.
+  assert.deepEqual(
+    receipt.promoted.map((x) => x.knowledge_key).sort(),
+    ["entity_type", "financial_year_end_month"],
+    `the promotion lost a key that has nothing to do with the year-end pair: ${JSON.stringify(receipt)}`);
+
+  // THE OFFENDING KEY ALONE IS WITHHELD, with the door's own per-item shape: the item key, the
+  // knowledge key, `refused`, and the sqlstate and detail the rule raised.
+  assert.equal(receipt.withheld.length, 1, JSON.stringify(receipt.withheld));
+  const [withheld] = receipt.withheld;
+  assert.equal(withheld.item_key, "fye_day");
+  assert.equal(withheld.knowledge_key, "financial_year_end_day");
+  assert.equal(withheld.reason, "refused");
+  assert.equal(withheld.sqlstate, "CLR37");
+  const detail = JSON.parse(withheld.detail);
+  assert.equal(detail.reason, "fa_particulars_invalid");
+  assert.equal(detail.axis, "fy_end");
+  assert.equal(detail.month, 2, "the withheld detail names the month the day was judged against");
+  assert.equal(detail.day, 31);
+
+  // …AND THE DAY NEVER LANDED, so Knowledge still holds no pair the client row would refuse.
+  const live_ = await listKnowledge(w.admin, w.clientA);
+  assert.deepEqual(
+    live_.records.map((r) => r.knowledge_key).sort(),
+    ["entity_type", "financial_year_end_month"],
+    "the refused day must not be live in Knowledge");
 });

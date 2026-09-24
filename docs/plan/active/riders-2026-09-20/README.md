@@ -63,7 +63,7 @@ comment and close on every ticket.
 
 25 tickets plus the ONE successor cut. Reserved migration numbers `0295` to `0314` (a gap after wave 3 for its fix-round extras). Three rules added since wave 2: a fix round that needs ANOTHER migration takes a number from the wave's overflow block (`0315` and up for wave 4), never the next free number, because in wave 3 lane 04's fix round took 0280 and 0281 out of lane 05's reservation and the two lanes collided at integration (lane 04's files were renumbered to 0292 and 0293); and, from the scan: `apps/web/lib/firm/needs-you.ts` (the review-queue row kinds) is a SHARED file touched from four lanes, and the three tickets that instantiate a Settlement candidate row (#938, #947, #949) reuse the shape CONTEXT.md documents rather than minting a sibling.
 
-**Pre-step, before the lanes are cut:** the ONE standard-chart migration (`0295`), built alone as the first half of #941 by the owner's ruling (whichever lands first adds the rows): `2030 Deferred Revenue`, `1180 Accrued Income`, `Salaries Payable`, `Rent Payable`. It merges into the wave-4 base so every lane consumes the rows by name and none inserts them.
+**Pre-step, before the lanes are cut:** the ONE standard-chart migration (`0295`), built alone as the first half of #941 by the owner's ruling (whichever lands first adds the rows): `2030 Deferred Revenue`, `1180 Accrued Income`, `Salaries Payable`, `Rent Payable`. It merges into the wave-4 base so every lane consumes the rows by name and none inserts them. LANDED 2026-09-24 on `riders/w4-chart` (the wave-4 base): a published template is frozen (CLR08), so 0295 mints `my_sme_starter` version 2 (v1 plus `1180`, `2030`, `2040 Salaries Payable`, `2050 Rent Payable`), carries the 0156 society entity overrides onto it, and RETIRES v1 under the ruling recorded on #941 (the picker offers one starter; every existing adoption keeps its copied chart). The wave-4 hosted preflight reads whether any client holds a live `proposed` adoption of v1 (re-proposing against v2 supersedes it by the existing 0156 logic).
 
 | lane | worktree | theme | tickets (reserved migration) | adversarial lens |
 |---|---|---|---|---|
@@ -73,11 +73,47 @@ comment and close on every ticket.
 | 04 | `clara-wt/651` | prepayments, the account roster, deferred revenue | #939 (0305) #940 (0306) #915 (0307) #941 second half (0308) #1036 (0315, the wake door rerouted onto the live prepayment door; wave-3 lane 05's disclosed residual), in that order | yes |
 | 05 | `clara-wt/655` | depreciation proposal, signed-out invite preview | #933 (none) #871 (0309) | yes |
 | 06 | `clara-wt/656` | Knowledge and firm-setup correctness, fixture hygiene | #1031 (0310) #1032 (0311) #1038 (0316, the shared fixtures off clara.create_client; wave-3 #899's residual) | no |
-| 07 | `clara-wt/657` | runtime readiness, rollback safety, autodraft coverage | #1033 #1035 #877 (none) | no |
+| 07 | `clara-wt/657` | runtime readiness, rollback safety, autodraft coverage, the dispatch-only CI legs | #1041 #1035 #1033 #877 (none), in that order | no |
 
 **The cut phase (after every lane above has merged):** `chatTurn_v22` / `claraWork_v6`, own tickets #985, #1000, #1030 (reserved `0312` to `0314`) plus #1037 (the statement-facts successor that carries page and region: a SECOND frozen family cut in the same phase, wave-3 #990's producer half), carrying every successor contract on the roster (`scratch scan-w4-notes.md`: confirmed from waves 2 and 3: #982, #1007, #986; optional: #960; out of this cut: #990, which targets the statement-facts family; from wave 4: #915, #931, #933, #937, #941, #942, #949). Preconditions: the merged wave-4 head, `check-frozen-workflows` clean on it (the frozen-manifest lock), the roster re-read against the merged reports, the two-build cutover drill on a fresh cluster, and one chat and one Work walk on each successor body.
 
 Then a short sweep wave for whatever wave 4's own review finds, until no ticket outside the #597 mainline is open.
+
+### Wave 4 as integrated
+
+Wave 4 landed on `integration/riders-w4` at final head `fb1dae78a`. Twenty-one migrations: `0295` to
+`0311` in lane order, then the overflow block `0315` to `0318` once the duplicate-overflow-number
+collision below was resolved. Lane 04's third fix round kept `0317`; lane 06's fix-round file, which
+had taken the same number, was renumbered to `0318`. The pre-step and the seven lanes merged in the
+order 01, 02, 03, 05, 06, 07, 04, with lane 04 last on its third recheck's ACCEPT and lane 07 merged
+twice, the second time for its closed-wave drill fixes.
+
+### Rules added in wave 4
+
+1. **The orchestrator assigns overflow migration numbers on request; a fix worker never picks one.**
+   Two fix rounds each took "the next free number in the overflow block" and both landed on `0317`,
+   the same failure wave 3 met one level down at `0280`/`0281`.
+2. **Pin what is live, and name the rig a pin was measured on.** Every merge collision this wave
+   traces to a lane measuring a pin on a rig that lacked a sibling lane's migration. The lane reports
+   that named the rig made the integration fast; the ones that did not cost a chain run each.
+3. **A lane can be green and still be wrong about a body another lane owns.** When two lanes touch
+   one body, the later file recuts from the earlier file's post-image, and no cell on either branch
+   alone catches it; the merger reads the two files against each other.
+4. **A disclosed residual is only safe when nothing measures it.** `_obo_plan_core`'s wall was
+   disclosed and left standing; the other lane's own parity cells then failed on it. Grep the other
+   lane's cells before trusting a disclosure to hold.
+5. **A renumber reaches inside installed bodies.** `0318` carries its own number in markers that sit
+   in its pasted text, so renaming the file moved three installed bodies and the one test that pins
+   them. Grep the installed text, not only the file's prose.
+6. **Never pin a digest over text-ordered row content as a literal (collation).** `0295`'s
+   `content_sha256` literal moved between `C.UTF-8` rigs and `en_US.UTF-8` servers (CI, hosted
+   Supabase) because its canonical ordering carried no collation. Pin function bodies, or a
+   `collate "C"` structural digest, instead; the hosted preflight recomputes the digest from the
+   file's own helper body rather than comparing it to a stored literal.
+7. **A lane's recheck scope includes the web pins corpus whenever a migration file changed, even a
+   comment.** Lane 01's second fix round rewrote a design-rationale comment above a migration and
+   re-applied it, moving the file's content hash. The lane's own recheck battery never reached the
+   web pins test, so the stale pin only surfaced at the integration gate.
 
 ## Wave 3 lanes (planned 2026-09-20 from the scan of the integrated wave-2 head)
 

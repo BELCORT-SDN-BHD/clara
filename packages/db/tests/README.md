@@ -155,6 +155,83 @@ it, and a cohort row in [rig-meta.mjs](rig-meta.mjs) that names every object the
 the rig census stays wholly-present-or-wholly-absent. `counterparty-identity.test.mjs` +
 `counterparty-identity-preintegration-gate.mjs` (migration `0215`, #647) is the current example.
 
+**The chain has one roster, and one way to read it (#1041).** `package.json`'s `test` script IS
+the gate chain; `scripts/print-gate-chain.mjs` prints it as `--import` flags so a caller that is
+not `pnpm test` never grows a second copy. `ci-frontier-leg-contract.test.mjs` holds that output
+to the gate modules ON DISK, in both directions — a gate that ships without joining the `test`
+script is a gate no sweep preloads, and a chain entry with no file kills every run that preloads
+it. Use it wherever a sweep needs the chain by hand:
+
+```
+GATES="$(node scripts/print-gate-chain.mjs)"
+node --test --test-concurrency=1 $GATES tests/<file>.test.mjs
+```
+
+**`db-slice-frontiers` is an estate sweep, and preloads the whole chain.** The leg replays the
+CURRENT corpus against a chain that stops at this slice's own migration (0042–0045), so every
+premise migration above that frontier is legitimately absent — the exact state a gate exists for,
+and the one #927's own refusal message tells the reader to preload for. Until #1041 the leg ran a
+bare `node --test`, and four d-b2 cells plus one d-b0 cell died loudly on that sentence (dispatch
+run 35893727271). A gate never turns a PASSING cell into a skip: its flag is read only on the
+branch where the premise is missing, which is a branch that fails without it.
+
+**Every run in that leg is bounded, and no bound lives in the file it bounds (#1041).** Preloading
+the chain buys the sweep the right to stand a cell down, so each of the leg's three runs declares
+what it expects to see:
+
+| the run | its floor | its skip bound | declared in |
+|---|---|---|---|
+| the slice list (step 3) | `#!cells-floor:` | `#!skips-max:` | `split-lists/test-list-d-bN.txt` |
+| the cross-slice contract roster (3c) | `#!cells-floor:` | `#!skips-max-d-bN:`, one per frontier | `split-lists/test-list-contracts.txt` |
+| the slice's isolated deploy drill (4) | `#!drill-cells-floor:` | `#!drill-skips-max:` (0) | `split-lists/test-list-d-bN.txt` |
+
+The floor is `pass + skip` — the cells the run REPORTS — because a lawfully gated cell is not a
+deleted one; `fail = 0` keeps its own line. The roster's skip bound is per frontier because a
+contract's arms go live as the frontier rises, so one number would bound only the lowest. The
+drill's bound is 0 and sits in the SLICE'S LIST rather than in the drill, for the same reason every
+floor does: a bound a deletion can edit in the same hunk bounds nothing. The drill's 0 rests on a
+census — `skipUnlessReset` is the only stand-down any of the four drills carries, and step (4) is
+the one place that gate is granted. `ci-frontier-leg-contract.test.mjs` holds all of it: the
+declarations, the drill floor against the drill's own cell count, and the action steps that read
+them; `partition-total` refuses a missing declaration on the PR itself, days before anyone
+dispatches the legs.
+
+**A fixture that runs at two frontiers is not a gate.** A gate lets a cell stand down; a
+FRONTIER-COMPAT fixture keeps the cell running on both sides of the migration that changed a
+door's grammar. `fa-authority-sign-compat.mjs` holds both of the x41 rig's:
+`signTakesAuthorityRef()` (0227 moved the sign door's ARITY — feature-detected off
+`to_regprocedure`) and `reviseTakesChangeClass()` (0227 added the `change_class` /
+`change_reason` KEYS inside `p_particulars` — keyed on the migration's stem in
+`clara.schema_migrations`, because a key leaves no signature to detect and probing the door's own
+body would ask the subject under test what it should be).
+`fa-rig-frontier-compat.test.mjs` cross-checks the second against the live door from the other
+side.
+
+**And a fixture premise a MIGRATION can move (#1041).** `restoreAuthorityWindowAfterApply()`, in
+the same module, is the upgrade-drill twin of `backdateAuthorityFloor()`. 0227 D8 stamps
+`authority_from` on a depreciation authority at the first day of its SIGNING month and freezes it,
+and a period is due only once it has ENDED — so a rig that signs by the clock is floored out of its
+own arrears and the due oracle answers `period_not_ended`. Every x41 cell avoids that by
+back-dating at sign time (`liveAuthority()`), but the Wave-D-b drills cannot: they sign at the 0041
+frontier, where the column does not exist yet, and 0227's backfill stamps the row inside the very
+`migrate()` call the drill is measuring. That is what turned `closed-wave-drills` red at its last
+drill on dispatch 35957081528. A REAL firm upgrading to 0227 carries an authority signed months
+ago, so its sweep is untouched; only a book signed in the current month is floored, and the drill's
+book is one purely because of the rig clock. The helper therefore asserts the backfill first — the
+stamp equals the documented rule, and it really does sit above this book's whole depreciation
+history — and only then restores the floor a genuinely pre-0227 authority would carry. It detects
+the frontier off `information_schema` rather than off `signTakesAuthorityRef()`, which is memoised
+per process and is asked at the PRE-apply frontier, so after an apply its answer is stale by
+construction.
+
+A DELIBERATE DEVIATION FROM #1041'S OWN BRIEF, recorded so the brief is not later read as what
+shipped (review SPEC-1041-A). The brief asked for "their gate module, or a premise check of the
+same shape" for the `change_class` grammar cells. Both of those let a cell STAND DOWN when its
+premise is missing, and at the d-b0 frontier that would have quietly dropped 26 cells out of the
+slice's own floor — the measurement the leg exists to make. The compat fixture keeps all 26
+running on both sides instead, at the cost the reader should know: at frontier 0042 those cells
+exercise the PRE-0227 revise grammar, which is the grammar that frontier actually has.
+
 ## document_regions.field_path literals, kept honest (#857)
 
 `clara._assert_field_path` (migration 0191) is enforced at `clara.persist_document_extraction`
@@ -400,26 +477,57 @@ no new relation or grant to independently anchor a cell to.
 
 `firm-setup-applicability.test.mjs` is frontier-gated on its own stable stem
 (`firm_setup_applicability$`), the `firm_setup_polish$` idiom, and preloads
-`firm-setup-applicability-preintegration-gate.mjs` in the package run. Four cells, one per
-acceptance criterion, all through `humanQuery`: `p891.mpers.entity_type` seeds a Sdn Bhd and a
-sole proprietorship through the doors and shows the eligibility item seeded (`pending`) for the
-first and permanently unseeded for the second, even after a later reconciliation; `p891.tin.
-turnover` does the same for the TIN item against the turnover answer, including the unanswered
-(`'undetermined'`) case before either firm states a turnover band; `p891.counter.excludes` answers
-turnover above the exemption threshold, reconciles (TIN joins `counter.required_total` at 9,
-unanswered), answers TIN (joins `required_answered` too), then RE-answers turnover back under the
-threshold and shows TIN drop out of BOTH sides of the counter on the very next read while its own
-recorded answer is untouched — the regression this file's own migration header measured and
-guarded against (`p648.commit.outstanding`'s `required_total=8` invariant, which answers
-`entity_type` as `'sdn_bhd'` without ever re-seeding, stays true only because a conditional item's
-counter contribution requires it to be ACTUALLY SEEDED, not merely live-applicable); `p891.answer.
-survives` answers `mpers_eligibility` while `entity_type='sdn_bhd'`, then corrects `entity_type`
-away and shows the item's own `state`/`answer` untouched while its reported `applicability` and
-`required` flip live. All four cells were run against a deliberately broken variant of the
-migration (seed's applicability filter removed, `get_firm_setup`'s applicability/counter/`v_unseeded`
+`firm-setup-applicability-preintegration-gate.mjs` in the package run. Two cells still describe
+#891's own subject, untouched: `p891.mpers.entity_type` seeds a Sdn Bhd and a sole proprietorship
+through the doors and shows the eligibility item seeded (`pending`) for the first and permanently
+unseeded for the second, even after a later reconciliation; `p891.answer.survives` answers
+`mpers_eligibility` while `entity_type='sdn_bhd'`, then corrects `entity_type` away and shows the
+item's own `state`/`answer` untouched while its reported `applicability` and `required` flip live.
+The other two of #891's original four cells — `p891.tin.turnover` and `p891.counter.excludes` —
+pinned TIN's old seeded-or-not shape and were REWRITTEN by **#1032** (below) to the new
+required-or-optional one; the "Firm setup TIN required-or-optional" section that follows owns their
+replacements. All four ORIGINAL cells were run, at the time, against a deliberately broken variant
+of 0257 (seed's applicability filter removed, `get_firm_setup`'s applicability/counter/`v_unseeded`
 guards reverted, applied via the `CLARA_MIGRATION_REDO` mechanism on this lane's own rig) and failed
 for the reasons this file's own assertions name, then re-run green after restoring the migration
 byte-for-byte — the vacuity control.
+
+## Firm setup TIN required-or-optional (#1032, `0311_firm_setup_tin_required.sql`)
+
+Owner's ruling 2026-09-23 (Option A, #1032, citing #891's own remainder): the TIN item is seeded
+for every firm now, required once the turnover answer makes MyInvois mandatory and optional
+otherwise, never seeded-or-not. Its cells live INSIDE `firm-setup-applicability.test.mjs` (the
+door under test, `clara._firm_setup_applicability`, is the same one), gated on their OWN stable
+stem (`firm_setup_tin_required$`, never 0257's — the `activity-feed.test.mjs` multi-stem-in-one-
+file idiom, "0183, gated on its OWN stem rather than 0181's": a database carrying 0257 but not yet
+0311 must skip these cells loudly rather than assert a shape `tin` can no longer take) and preload
+`firm-setup-tin-required-preintegration-gate.mjs` in the package run. Three cells:
+`p1032.tin.always_seeded_required_or_optional` seeds three firms (turnover unanswered, answered
+`'<RM1M'`, answered `'RM1M-5M'`) and shows TIN seeded (`pending`, never `unseeded`) in all three,
+reading `optional`/`false` in the first two and `required`/`true` in the third, with
+`counter.required_total` moving from 8 to 9 only in the third and the counter/`required_outstanding`
+arithmetic invariant holding throughout; a sub-threshold firm is also shown ABLE to volunteer an
+answer anyway. `p1032.tin.flip_keeps_answer_both_ways` answers TIN while optional, then answers
+turnover mandatory (TIN flips to required, answer untouched) then answers turnover back exempt
+(TIN flips back to optional, answer STILL untouched) — AC3's "both ways". `p1032.commit.
+refuses_until_tin_answered_when_required` answers every statically-required item plus a mandatory
+turnover, leaves TIN pending, and shows BOTH `defer_firm_setup_item` (`CLR10
+firm_setup_item_required`) and `commit_firm_setup` (`CLR10 required_items_outstanding` naming
+`tin`) refuse it — then answers TIN and commits; a second, separate firm with turnover below the
+threshold commits with TIN left pending and unanswered, on purpose, proving the ticket's own "the
+commit door ignores it" for the optional branch. `mpers_eligibility`'s own branch of
+`_firm_setup_applicability` and the unconditional `else` for the other ten rows are asserted
+byte-identical to 0257 in the migration's own tail, which is why its two cells above needed no
+change at all.
+
+`firm-setup-user-notes.test.mjs`'s `p934.notes.accountant_text` pins `tin`'s `user_note` literally
+(an INDEPENDENT source of truth transcribed from its own owner ruling, never re-derived from the
+migration) and was updated to 0311's new sentence — "otherwise skip with a reason" stopped being
+true the moment TIN became answerable rather than inapplicable. `firm-setup.test.mjs`'s
+`p648.seed.reconcile` / `p648.seed.empty` needed their literal seeded-row counts moved too (10→11,
+13→14 respectively): TIN is now among the rows a first reconciliation inserts even when its
+dependency (`turnover`) is unanswered, where before #1032 it was held back the same way
+`mpers_eligibility` still is.
 
 `firm-setup.test.mjs` (#648) and `firm-setup-polish.test.mjs` (#895) both needed narrow, direct
 consequences of #891's seed-time change fixed alongside it: `p648.seed.reconcile` /
@@ -562,14 +670,16 @@ Counterparty fixtures are planted as post-images: `clara.counterparties` carries
 trigger (CLR08) and `ck_counterparties_merge_retirement` admits retirement only as a merge, so a
 retired counterparty is inserted with both `merged_into` and `retired_at` set.
 
-## `client-birth-wall.test.mjs` (0287, #899)
+## `client-birth-wall.test.mjs` (0287/#899, 0316/#1038)
 
-Fourteen cells over the two granted doors `0287_client_birth_wall.sql` wires to the shared, ungranted
-`clara._client_birth_core`, plus a live catalogue census. Frontier-gated on the live catalog through
+Eleven cells over the two granted doors `0287_client_birth_wall.sql` wires to the shared, ungranted
+`clara._client_birth_core`. Frontier-gated on the live catalog through
 `client-birth-wall-preintegration-gate.mjs`: a package-wide run against a chain below 0287 SKIPS
 loudly, a focused run FAILS, and a PARTIAL cohort (some but not all of `_client_birth_core`,
 `open_client_onboarding` and the re-pointed `begin_client_onboarding` present) throws rather than
-skipping — the estate's "wholly present or wholly absent" rule.
+skipping — the estate's "wholly present or wholly absent" rule. A SEPARATE, SECOND group of four
+cells (the live catalogue census) lives in the same file, gated on ITS OWN stem — see "#1038 (0316)
+cells" below.
 
 - `p899.new_verb.*` — `clara.open_client_onboarding`, called with **no prior read**: arity 0
   creates; arity ≥ 2 refuses with the same CLR10 `name_family_collision` token and candidate rows
@@ -587,16 +697,41 @@ skipping — the estate's "wholly present or wholly absent" rule.
   `client-onboarding-identity.test.mjs`'s own `p649.identity.direct_birth_residual`); arity 0 and
   arity 1 are unchanged from before 0287 — the deliberate scope boundary the migration's own header
   argues for, proved here rather than left assumed.
-- `p899.census.*` — a live, catalogue-derived sweep of every granted human/agent/wake-reachable
-  body that mints a `clara.clients` row (directly, or by delegating to `_client_birth_core`), plus a
-  belt asserting `_client_birth_core` itself holds no application-role grant. **These cells BOUND
-  the one residual; they do not claim the ticket's census criterion is met, because it is not.**
-  `clara.create_client` is still granted and still unwalled, so the roster of unwalled granted
-  minters is asserted to be exactly `["create_client"]` — a new member is a regression and an empty
-  array means the residual was closed and both this census and the criterion should be rewritten.
-  `create_client_residual_is_bounded` then measures the reach: the catalogue comment marking the
-  verb superseded is live, no product tree calls it, and the single operator script that does runs
-  as the superuser rather than on the grant. See `packages/db/README.md`, "The client birth wall".
+### #1038 (0316) cells
+
+Four cells, gated on their own stem (`create_client_human_grant_withdrawn$`) rather than 0287's —
+the `firm-setup-applicability.test.mjs` / `TIN_REQUIRED_STEM` idiom (a database carrying 0287
+without 0316 skips these loudly instead of asserting a shape the catalogue can no longer
+produce), preloaded via `create-client-grant-withdrawn-preintegration-gate.mjs`:
+
+- `p899.census.no_unwalled_granted_client_minters` — the SAME live, catalogue-derived sweep of
+  every granted human/agent/wake-reachable body that mints a `clara.clients` row (directly, or by
+  delegating to `_client_birth_core`), plus the belt asserting `_client_birth_core` itself holds no
+  application-role grant, that the 0287-era `granted_client_minters_and_the_one_residual` cell
+  used to run. **The criterion is now MET, not merely bounded**: `clara.create_client` no longer
+  appears in the granted-minter sweep at all (0316 withdrew its only grant among the five roles
+  checked), so the unwalled-minter set is asserted EMPTY — a non-empty result is a regression.
+- `p899.census.create_client_residual_closed` — the catalogue comment names `#1038`/"withdrawn";
+  no product tree calls the verb (unchanged from 0287); the one non-test caller anywhere
+  (`scripts/onboard-rpr.mjs`) runs as the postgres superuser with a jwt GUC, unaffected by the
+  revoke; and a DIRECT `has_function_privilege('clara_authenticated', …) = false` re-measurement.
+- `p899.census.create_client_refuses_the_human_grant` — the vacuity control: the EXACT call shape
+  the 0287-era `create_client_documented_exception` cell once proved SUCCEEDING (two same-family
+  clients, no wall) now REFUSES `42501 insufficient_privilege`.
+- `p899.census.no_test_file_calls_create_client_directly` — AC1: sweeps every `.mjs` file under
+  `packages/db/tests` (test files included, unlike `sweepFor`'s PRODUCT_TREES sweep above) for the
+  literal `clara.create_client(`, exempting only `rig-fixtures.mjs` (the one fixture helper,
+  `createClientRaw`/`createClient`) and this file itself (whose own refusal cell above calls the
+  literal SQL on purpose). See `packages/db/README.md`, "`clara.create_client`'s human grant
+  withdrawn (0316, #1038)".
+
+Every OTHER `packages/db/tests` file that used to call `clara.create_client` directly (not through
+`rig-fixtures.mjs`'s shared helper) now calls `createClientRaw(sub, {name, opKey})` instead —
+`audit-actor-role.test.mjs`, `coa-template-pr-b-helpers.mjs`, `f-a7-pi.test.mjs`,
+`firm-commercial-settings.test.mjs`, `firm-portfolio-pack.test.mjs`, `rig-events.test.mjs` and
+`wave-b/wb-r3.test.mjs`. `wave-b/wb-g-opkeys.test.mjs`'s own `create_client` fixture entry was
+REMOVED (not repointed): the writer it tests drops out of that file's grant-derived inventory the
+moment the grant is gone, so a table entry for it would fail that file's own "stale" assertion.
 
 ## Batteries with their own frontier gate
 
@@ -931,6 +1066,13 @@ to mint a world or to read a catalog back for a census.
   cannot over-correct into silencing a client that really was reading the firm default.
 - `p658.census.no_recut` — the eight pinned bodies byte-identical, `get_context_pack` at exactly
   one overload, one `pg_proc` row per installed name, and the CORE tier small and enumerable.
+  TWO of the eight are pinned in BOTH generations, each branching on the ledger row of the
+  migration that recut it: `clara.answer_work_question` on #885's `0268`, and
+  `clara._knowledge_capture_core` on #1031's `0318` (the second of that ticket's two files to
+  touch the body — `0310` mints the year-end pair rule and splices the call, `0318` re-cuts the
+  rule at four arguments so the sibling is read at the incoming applicability). A recutting
+  ticket comes back into THIS file and re-measures the pin against the new body, in its own
+  commit: the pin never updates itself.
 
 Fixtures: `knowledge-retrieval-fixtures.mjs`. Gate: `knowledge-retrieval-preintegration-gate.mjs`
 (preloaded, the battery SKIPS loudly below 0230; a FOCUSED run without it FAILS loudly — both
@@ -1442,7 +1584,7 @@ follow-up, not closed by that ticket).
 **#1023 closed that gap.** All three now have their own step in
 `.github/actions/closed-wave-upgrade-drills/action.yml`, following the established pattern
 exactly: their own throwaway `*_ci` database (the same name each file's own header recipe already
-documented — `clara_0186_upgrade_ci`, `clara_runtime_upgrade_ci`, `clara_waveA_upgrade_ci`), both
+documented — `clara_0186_upgrade_ci`, `clara_runtime_upgrade_ci`, `clara_wave_a_upgrade_ci`), both
 destructive flags, and a between-step cluster cleanup. All 14 audited files now have a CI leg;
 only T19 still never exercises its destructive path anywhere but the ordinary battery's skip.
 `reset-gate-routing.test.mjs` carries the structural proof: it parses the action file itself and
@@ -1456,6 +1598,30 @@ assertion at the wrong step (review SPEC-1023-03, with its own cell) — sets bo
 locally, safely, and on a shared rig is still only the ROUTING and (since #1023) the WIRING —
 never that the destructive body itself has actually been exercised, which remains CI's job alone
 (RIG.md: this rig must never set `CLARA_RIG_ALLOW_RESET`).
+
+**The drill database-name grammar (#1041).** A throwaway drill database is named by a plain,
+already-lowercase SQL identifier — `CONFORMING_DB_NAME` (`/^[a-z][a-z0-9_]*$/`), exported by
+`rig-cluster-reset.mjs` and enforced by its own `dropDatabase`. Two reasons, and the second is the
+one that decides the rule when a name and the grammar disagree:
+
+1. `dropDatabase` interpolates the name into `drop database if exists <name>` UNQUOTED (a database
+   name cannot be a bind parameter), so the grammar is an injection wall.
+2. **A name outside the grammar does not round-trip.** `create database <x>` case-folds an
+   unquoted identifier while `PGDATABASE` is a LITERAL libpq name, so a mixed-case drill name
+   names two different databases in the two lines of its own step. Measured on PostgreSQL 17
+   (lane 07, 2026-09-24): `create database clara_case_probe_A_ci` puts `clara_case_probe_a_ci` in
+   `pg_database`, and connecting with `PGDATABASE=clara_case_probe_A_ci` raises
+   `3D000 database "clara_case_probe_A_ci" does not exist`.
+
+So when #1023's `clara_waveA_upgrade_ci` was refused by the cleanup step on the first dispatch
+after riders wave 3 (run 35893727271), the remedy was to move the NAME, not to widen the grammar:
+widening it would have let the step reach its own second defect. The name is now
+`clara_wave_a_upgrade_ci` in the action, in `wave-a-upgrade.test.mjs`'s header recipe and in
+`reset-gate-routing.test.mjs`'s `NEWLY_COVERED`, and
+`ci-drill-database-names.test.mjs` holds EVERY literal database name in
+`.github/actions/closed-wave-upgrade-drills` and `.github/actions/frontier-leg` to both halves —
+the grammar (imported from `rig-cluster-reset.mjs`, never re-spelled) and the round trip, which it
+asks PostgreSQL's own `quote_ident` rather than re-implementing.
 
 ## `fixed-asset-acquisition.test.mjs` `p639.birth.opening_excluded` / `p639.birth.opening_admitted` — #884
 

@@ -16,6 +16,8 @@ import { completeFixedAssetParticulars, completeIntent } from "@/lib/registers/f
 import { useDepreciationDecisionKey } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { FaParticularsFields, EMPTY_PARTICULARS, particularsReadyToSubmit } from "@/components/registers/fa-particulars-fields";
+import { FaProposalNote } from "@/components/registers/fa-proposal-note";
+import { useFaParticularsProposal } from "@/components/registers/use-fa-particulars-proposal";
 import type { FaParticularsInput } from "@/lib/registers/fixed-assets";
 import { ErrorMessage } from "./data-state";
 import type { NeedsYouAffordanceProps } from "./needs-you-affordances";
@@ -35,6 +37,14 @@ export function FixedAssetIncompleteAffordance({ row, busy, error, act }: NeedsY
   const assetId = row.asset_id;
   const clientId = row.client_id;
 
+  // #933 — CLARA'S PROPOSAL, READ WHEN THE FORM OPENS. THIS ROW KNOWS NO QUESTION: a
+  // `fixed_asset_incomplete` queue row carries `asset_id` and `client_id` and nothing about Work
+  // (`lib/firm/needs-you.ts`), so the proposal is found through the asset's own parked question
+  // rather than handed down. It is the SAME block the asset page dialog and the conversation form
+  // read, through the one hook both register-side entrances share, which is what makes three
+  // entrances one proposal instead of three opinions.
+  const seedFromProposal = useFaParticularsProposal({ clientId, assetId }, setParticulars);
+
   const submit = async () => {
     const intent = completeIntent({ clientId, assetId, particulars });
     const ok = await act(() =>
@@ -42,14 +52,22 @@ export function FixedAssetIncompleteAffordance({ row, busy, error, act }: NeedsY
     );
     if (ok) {
       setOpen(false);
-      setParticulars(EMPTY_PARTICULARS);
+      seedFromProposal.clear();
       decision.renew();
     }
+  };
+
+  const openForm = () => {
+    setOpen(true);
+    seedFromProposal.seed();
   };
 
   const cancel = () => {
     setOpen(false);
     decision.renew();
+    // CLOSING ENDS THE DECISION, and the seed goes with it — the same boundary #978 pinned for
+    // this affordance's operation key. Re-opening is a fresh read, never a stale proposal.
+    seedFromProposal.clear();
   };
 
   return (
@@ -57,6 +75,7 @@ export function FixedAssetIncompleteAffordance({ row, busy, error, act }: NeedsY
       {error ? <ErrorMessage error={error} /> : null}
       {open ? (
         <div className="flex flex-col gap-2">
+          <FaProposalNote proposal={seedFromProposal.proposal} />
           <FaParticularsFields idPrefix={`needsyou-fa-${assetId}`} value={particulars} onChange={setParticulars} />
           <div className="flex gap-2">
             <Button type="button" size="sm" onClick={() => void submit()} disabled={busy || !particularsReadyToSubmit(particulars)}>
@@ -68,7 +87,7 @@ export function FixedAssetIncompleteAffordance({ row, busy, error, act }: NeedsY
           </div>
         </div>
       ) : (
-        <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)} disabled={busy}>
+        <Button type="button" size="sm" variant="outline" onClick={openForm} disabled={busy}>
           {t("heading")}
         </Button>
       )}

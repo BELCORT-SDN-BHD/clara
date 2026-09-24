@@ -54,8 +54,26 @@ export const PREPAY = {
   documentId: "65555555-6536-4653-8653-653653653653",
   workId: "65666666-6536-4653-8653-653653653653",
   postedEntryId: "65777777-6536-4653-8653-653653653653",
+  // #939 — THE MEMO-ONLY LANE. A prepayment posted with NO document: the ledger admits the memo
+  // journal, nothing can read a term off it, and until a named person states the service period
+  // there is no schedule to configure. Same id space, same tail, so the ownership census still
+  // sees one lane.
+  memoEntryId: "65888888-6536-4653-8653-653653653653",
+  memoScheduleId: "65999999-6536-4653-8653-653653653653",
+  memoPlanId: "65aaaaaa-6536-4653-8653-653653653653",
+  statedTermId: "65bbbbbb-6536-4653-8653-653653653653",
+  // #940 — THE ROSTER LANE'S OWN RECOGNITION AND SCHEDULE. Its own ids, so the roster walk can
+  // drive a full enrol -> amortise journey without consuming either of the two transitions the
+  // refusal and memo-only cells own. Same id space, same tail, so the ownership census still sees
+  // one lane.
+  rosterEntryId: "65ccc0cc-6536-4653-8653-653653653653",
+  rosterScheduleId: "65ddd0dd-6536-4653-8653-653653653653",
+  rosterPlanId: "65eee0ee-6536-4653-8653-653653653653",
+  enrolmentId: "65fff0ff-6536-4653-8653-653653653653",
+  rosterPurpose: "Prepaid rent, amortised after enrolment",
   purpose: "Annual software subscription",
   refusingPurpose: "Annual software subscription",
+  memoPurpose: "Prepaid insurance, no invoice",
 };
 
 /** The ONLY RPC verbs this lane's dispatch chain recognises — the allow-list `readJson`'s own call
@@ -66,19 +84,38 @@ export const PREPAY_RPC_VERBS = new Set([
   "get_prepayment_schedule",
   "list_prepayment_attention",
   "create_prepayment_schedule",
+  "record_prepayment_stated_term",
   "pause_accounting_plan",
   "resume_accounting_plan",
   "end_accounting_plan",
   "request_plan_catch_up",
+  // #940 — the two roster doors. Bookkeeper floor in the real estate; this fixture fakes only the
+  // transport, exactly as it does for every other door here.
+  "enrol_prepayment_account",
+  "retire_prepayment_account",
 ]);
 
-const state = { paused: false, created: false, refusedOnce: false, catchUps: 0 };
+const state = {
+  paused: false, created: false, refusedOnce: false, catchUps: 0,
+  // #939 — THE MEMO-ONLY LANE'S OWN TWO TRANSITIONS, and both are the walk's journey rather than
+  // canned answers: a person states the service period, and only then can the schedule be
+  // configured. Making them real transitions is what proves the surface RE-READS after each write
+  // instead of painting its own optimistic answer.
+  statedTerm: false, memoCreated: false,
+  // #940 — THE ROSTER'S OWN TWO TRANSITIONS. `enrolled` starts TRUE because every other cell in
+  // this walk configures a schedule, and a client with an empty roster can configure nothing: the
+  // roster gates amortisation ahead of the shared eligibility wall. The roster cell retires it,
+  // watches the consequence, enrols it again and amortises — and leaves it true.
+  enrolled: true, rosterCreated: false,
+};
 
 export function resetPrepayments() {
   state.paused = false;
   state.created = false;
   state.refusedOnce = false;
   state.catchUps = 0;
+  state.statedTerm = false;
+  state.memoCreated = false;
 }
 
 export function prepaymentCatchUps() {
@@ -95,11 +132,28 @@ const CLIENT = () => ({
   created_at: "2026-01-01T00:00:00.000Z",
 });
 
+// #940 — `account_class` is SPELLED, not omitted. The prepayment-account panel offers only
+// non-control accounts (`account_class === null`), which an absent field is not: a row without it
+// would leave the enrol dropdown empty and the cell would fail for the wrong reason.
 const ACCOUNTS = () => [
-  { client_id: PREPAY.clientId, account_code: "19000001", name: "Prepayments", account_type: "asset", is_active: true },
-  { client_id: PREPAY.clientId, account_code: "59000001", name: "Software subscriptions", account_type: "expense", is_active: true },
-  { client_id: PREPAY.clientId, account_code: "59000002", name: "Insurance", account_type: "expense", is_active: true },
+  { client_id: PREPAY.clientId, account_code: "19000001", name: "Prepayments", account_type: "asset", account_class: null, is_active: true },
+  { client_id: PREPAY.clientId, account_code: "59000001", name: "Software subscriptions", account_type: "expense", account_class: null, is_active: true },
+  { client_id: PREPAY.clientId, account_code: "59000002", name: "Insurance", account_type: "expense", account_class: null, is_active: true },
 ];
+
+/** #940 — THE PER-CLIENT PREPAYMENT-ACCOUNT ROSTER, as the panel reads it: the LIVE population
+ *  only, which is exactly what the schedule door asks. Empty while retired, which is the state the
+ *  roster cell drives the form into. */
+const ROSTER_ROWS = () => (state.enrolled ? [{
+  id: PREPAY.enrolmentId,
+  account_code: "19000001",
+  purpose: "prepayment",
+  reason: "this account holds the client's prepaid insurance and prepaid rent, and nothing else",
+  active: true,
+  enrolled_at: "2026-04-01T00:00:00.000Z",
+  created_by: PREPAY.firmId,
+  retired_at: null,
+}] : []);
 
 const status = () => (state.paused ? "paused" : "active");
 
@@ -167,6 +221,16 @@ const DETAIL = () => {
     source_status: "approved",
     document_id: PREPAY.documentId,
     service_period_id: "65e1e1e1-6536-4653-8653-653653653653",
+    term_source: "document_service_period",
+    stated_term_id: null,
+    term_stated_by: null,
+    term_stated_at: null,
+    term_reason: null,
+    term_live: true,
+    term_superseded_by: null,
+    term_moved: false,
+    term_current_start: "2026-01-01",
+    term_current_end: "2026-03-31",
     term_start: "2026-01-01",
     term_end: "2026-03-31",
     basis_kind: "human_stated",
@@ -208,13 +272,25 @@ const DETAIL = () => {
   };
 };
 
-const LIST = () => [{
+const LIST = () => [...(state.memoCreated ? [MEMO_LIST_ROW()] : []), {
   schedule_id: PREPAY.scheduleId,
   plan_id: PREPAY.planId,
   purpose: PREPAY.purpose,
   status: status(),
   source_entry_id: PREPAY.entryId,
   document_id: PREPAY.documentId,
+  // #939 — this schedule's term came from the document's own service period, which is what the
+  // list marker and the term-source filter distinguish it by.
+  term_source: "document_service_period",
+  stated_term_id: null,
+  term_stated_by: null,
+  term_stated_at: null,
+  term_reason: null,
+  term_live: true,
+  term_superseded_by: null,
+  term_moved: false,
+  term_current_start: "2026-01-01",
+  term_current_end: "2026-03-31",
   term_start: "2026-01-01",
   term_end: "2026-03-31",
   prepaid_account_code: "19000001",
@@ -231,6 +307,204 @@ const LIST = () => [{
   occurrence_count: 3,
   next_due: null,
 }];
+
+/** #939 — THE STATED TERM this lane's memo-only recognition is amortised over, once a person has
+ *  stated it. Three whole months, so its allocation is the same 33,333 / 33,333 / 33,335 the
+ *  document-backed schedule shows — provenance is the ONLY difference, which is the ticket's own
+ *  sentence and the thing the walk reads off the screen. */
+const STATED = {
+  start: "2026-05-01",
+  end: "2026-07-31",
+  reason: "the client paid twelve months of cover by bank transfer and confirmed the dates by e-mail",
+  statedAt: "2026-04-20T02:00:00.000Z",
+  statedBy: "11111111-1111-1111-1111-111111111111",
+};
+
+const MEMO_LINES = () => [
+  { period_start: "2026-05-01", period_end: "2026-05-31", debit_cents: 0, credit_cents: 33333,
+    account_code: "19000001", amount_cents: 33333,
+    prepaid_account_code: "19000001", expense_account_code: "59000002" },
+  { period_start: "2026-06-01", period_end: "2026-06-30", debit_cents: 0, credit_cents: 33333,
+    account_code: "19000001", amount_cents: 33333,
+    prepaid_account_code: "19000001", expense_account_code: "59000002" },
+  { period_start: "2026-07-01", period_end: "2026-07-31", debit_cents: 0, credit_cents: 33335,
+    account_code: "19000001", amount_cents: 33335,
+    prepaid_account_code: "19000001", expense_account_code: "59000002" },
+];
+
+const MEMO_LIST_ROW = () => ({
+  schedule_id: PREPAY.memoScheduleId,
+  plan_id: PREPAY.memoPlanId,
+  purpose: PREPAY.memoPurpose,
+  status: "active",
+  source_entry_id: PREPAY.memoEntryId,
+  // NULL, and that is the point: there is no document, so the surface must not offer one.
+  document_id: null,
+  term_source: "human_stated",
+  stated_term_id: PREPAY.statedTermId,
+  term_stated_by: STATED.statedBy,
+  term_stated_at: STATED.statedAt,
+  term_reason: STATED.reason,
+  term_live: true,
+  term_superseded_by: null,
+  term_moved: false,
+  term_current_start: STATED.start,
+  term_current_end: STATED.end,
+  term_start: STATED.start,
+  term_end: STATED.end,
+  prepaid_account_code: "19000001",
+  expense_account_code: "59000002",
+  total_cents: 100001,
+  period_count: 3,
+  basis_kind: "human_stated",
+  created_at: "2026-04-20T02:10:00.000Z",
+  effective_from: "2026-05-31",
+  effective_to: "2026-07-31",
+  posted_periods: 0,
+  occurrence_count: 0,
+  next_due: "2026-05-31",
+});
+
+const MEMO_DETAIL = () => ({
+  schedule_id: PREPAY.memoScheduleId,
+  client_id: PREPAY.clientId,
+  plan_id: PREPAY.memoPlanId,
+  revision: 1,
+  kind: "amortisation_schedule",
+  status: "active",
+  purpose: PREPAY.memoPurpose,
+  source_entry_id: PREPAY.memoEntryId,
+  source_posting_date: "2026-04-20",
+  source_memo: "annual insurance premium, paid in advance, no invoice received",
+  source_status: "approved",
+  document_id: null,
+  service_period_id: null,
+  term_source: "human_stated",
+  stated_term_id: PREPAY.statedTermId,
+  term_stated_by: STATED.statedBy,
+  term_stated_at: STATED.statedAt,
+  term_reason: STATED.reason,
+  term_live: true,
+  term_superseded_by: null,
+  term_moved: false,
+  term_current_start: STATED.start,
+  term_current_end: STATED.end,
+  term_start: STATED.start,
+  term_end: STATED.end,
+  basis_kind: "human_stated",
+  prepaid_account_code: "19000001",
+  expense_account_code: "59000002",
+  expense_account_basis: "an insurance premium is charged to insurance",
+  total_cents: 100001,
+  period_count: 3,
+  remainder_placement: "final_period",
+  // v2, because the memo-only lane rides clara.prepayment_schedule_v2 — the same formula with the
+  // amount and the term supplied rather than read.
+  schedule_version: "v2",
+  created_by: STATED.statedBy,
+  created_at: "2026-04-20T02:10:00.000Z",
+  authority_kind: "explicit_instruction",
+  authority_ref: { kind: "accounting_work", id: PREPAY.workId },
+  authorised_by: STATED.statedBy,
+  authorised_at: "2026-04-20T02:10:00.000Z",
+  authority_from: "2026-05-31",
+  covered_through: null,
+  paused_at: null, paused_by: null, paused_reason: null,
+  ended_at: null, ended_by: null, ended_reason: null,
+  live_revision: {
+    revision: 1, frequency: "monthly", day_rule: "last_day_of_month", day_of_month: null,
+    timezone: "Asia/Kuala_Lumpur", effective_from: "2026-05-31", effective_to: "2026-07-31",
+    basis: {
+      posting_date: "2026-05-31", memo: "Prepayment amortisation: Prepaid insurance, no invoice",
+      currency: "MYR",
+      lines: [
+        { account_code: "59000002", debit_cents: 33333, credit_cents: 0, description: "amortisation charge" },
+        { account_code: "19000001", debit_cents: 0, credit_cents: 33333, description: "prepaid release" },
+      ],
+    },
+    basis_digest: "d".repeat(64),
+  },
+  periods: MEMO_LINES().map((l) => ({ ...l, occurrence: null })),
+  occurrences: [],
+  configuration_only: true,
+});
+
+const MEMO_CREATED = () => ({
+  ...MEMO_DETAIL(),
+  revision_id: "65cccccc-6536-4653-8653-653653653653",
+  period_lines: MEMO_LINES(),
+  frequency: "monthly",
+  day_rule: "last_day_of_month",
+  day_of_month: null,
+  timezone: "Asia/Kuala_Lumpur",
+  effective_from: "2026-05-31",
+  effective_to: "2026-07-31",
+  next_occurrences: [],
+  overlap_warning: null,
+});
+
+/** #940 — the roster lane's schedule, once it exists. A document-bound one, so the ONLY thing that
+ *  ever stood between it and the books was the roster. */
+const ROSTER_DETAIL = () => ({
+  ...MEMO_DETAIL(),
+  schedule_id: PREPAY.rosterScheduleId,
+  plan_id: PREPAY.rosterPlanId,
+  purpose: PREPAY.rosterPurpose,
+  source_entry_id: PREPAY.rosterEntryId,
+  source_posting_date: "2026-04-22",
+  source_memo: "quarterly rent, paid in advance",
+  document_id: PREPAY.documentId,
+  service_period_id: PREPAY.documentId,
+  term_source: "document_service_period",
+  stated_term_id: null,
+  term_stated_by: null,
+  term_stated_at: null,
+  term_reason: null,
+  basis_kind: "document_stated",
+  schedule_version: "v1",
+  expense_account_code: "59000001",
+  expense_account_basis: "rent is charged to rent",
+});
+
+const ROSTER_CREATED = () => ({
+  ...MEMO_CREATED(),
+  ...ROSTER_DETAIL(),
+  revision_id: "65bbb0bb-6536-4653-8653-653653653653",
+});
+
+/** #940 — the ROSTER refusal, with 0140's own `prepayment_source_unfit` token and the NEW axis
+ *  that names the enrolment door and the panel. One axis, not a second vocabulary. */
+const NOT_ENROLLED_REFUSAL = {
+  code: "CLR10",
+  message: "account 19000001 is not enrolled as a prepayment account for this client",
+  details: JSON.stringify({
+    reason: "prepayment_source_unfit",
+    reason_text: "account 19000001 is not enrolled as a prepayment account for this client",
+    axis: "prepaid_account_not_enrolled",
+    prepaid_account_code: "19000001",
+    source_entry: PREPAY.rosterEntryId,
+    remedy: "clara.enrol_prepayment_account",
+    panel: "client_registers_prepayment_accounts",
+  }),
+  hint: null,
+};
+
+/** #939 — the memo-only lane's own create-time refusal: no document AND no stated term, so the
+ *  payload names the CARRIER and the DOOR that fills it rather than `journal_entries.document_id`,
+ *  which is what the old answer named and which told a firm its prepayment could never be
+ *  amortised at all. */
+const STATED_TERM_REFUSAL = {
+  code: "CLR10",
+  message: "this recognition binds no document and nobody has stated its service period",
+  details: JSON.stringify({
+    reason: "prepayment_term_underivable",
+    reason_text: "this recognition binds no document and nobody has stated its service period",
+    missing: "prepayment_stated_terms",
+    remedy: "clara.record_prepayment_stated_term",
+    source_entry: PREPAY.memoEntryId,
+  }),
+  hint: null,
+};
 
 /** ARM A — the live schedule whose most recent period charged nothing, at the POSTING core. */
 const ATTENTION_REFUSING = () => (state.paused ? [] : [{
@@ -256,16 +530,55 @@ const ATTENTION_REFUSING = () => (state.paused ? [] : [{
 /** ARM B — the posted prepayment nothing amortises. Its document states NO term until the walk's
  *  first create attempt has been refused; that is what makes the two halves of the arm visible
  *  in one journey. */
-const ATTENTION_UNSCHEDULED = () => (state.created ? [] : [{
-  arm: "unscheduled",
-  entry_id: PREPAY.unscheduledEntryId,
-  posting_date: "2026-04-14",
-  memo: "annual insurance premium, paid in advance",
-  document_id: PREPAY.documentId,
-  prepaid_account_code: "19000001",
-  amount_cents: 240000,
-  has_live_term: state.refusedOnce,
-}]);
+// #940 — EVERY ARM-B ROW IS GATED ON THE ROSTER, because every one of them is an OFFER: the
+// surface renders it with a "configure the schedule" action, and the door would refuse it on an
+// account nobody enrolled. That is the database's own predicate (migration 0306 recuts
+// `clara.list_prepayment_attention` to ask the SAME `clara._prepayment_account_enrolled` the door
+// asks); this fixture mirrors it so the walk cannot show an offer the estate would not.
+const ATTENTION_UNSCHEDULED = () => (!state.enrolled ? [] : [
+  ...(state.created ? [] : [{
+    arm: "unscheduled",
+    entry_id: PREPAY.unscheduledEntryId,
+    posting_date: "2026-04-14",
+    memo: "annual insurance premium, paid in advance",
+    document_id: PREPAY.documentId,
+    // #939 — this one's term belongs to its document, so its next act is that document.
+    term_carrier: "document_service_period",
+    prepaid_account_code: "19000001",
+    amount_cents: 240000,
+    has_live_term: state.refusedOnce,
+    next_step: state.refusedOnce ? "configure_schedule" : "record_document_service_period",
+  }]),
+  // #939 — THE MEMO-ONLY CANDIDATE. Before this ticket arm B filtered `document_id is not null`,
+  // so this prepayment was invisible: posted, unamortised, and nothing on any screen saying so.
+  ...(state.memoCreated ? [] : [{
+    arm: "unscheduled",
+    entry_id: PREPAY.memoEntryId,
+    posting_date: "2026-04-20",
+    memo: "annual insurance premium, paid in advance, no invoice received",
+    document_id: null,
+    term_carrier: "human_stated",
+    prepaid_account_code: "19000001",
+    amount_cents: 100001,
+    has_live_term: state.statedTerm,
+    next_step: state.statedTerm ? "configure_schedule" : "state_service_period",
+  }]),
+  // #940 — THE ROSTER LANE'S OWN CANDIDATE: document-bound, term already stated, and waiting only
+  // on the account being on the roster. It is the recognition the roster cell amortises once it has
+  // enrolled the account again.
+  ...(state.rosterCreated ? [] : [{
+    arm: "unscheduled",
+    entry_id: PREPAY.rosterEntryId,
+    posting_date: "2026-04-22",
+    memo: "quarterly rent, paid in advance",
+    document_id: PREPAY.documentId,
+    term_carrier: "document_service_period",
+    prepaid_account_code: "19000001",
+    amount_cents: 100001,
+    has_live_term: true,
+    next_step: "configure_schedule",
+  }]),
+]);
 
 const CREATED = () => ({
   schedule_id: PREPAY.scheduleId,
@@ -278,6 +591,8 @@ const CREATED = () => ({
   source_entry_id: PREPAY.unscheduledEntryId,
   document_id: PREPAY.documentId,
   service_period_id: "65e2e2e2-6536-4653-8653-653653653653",
+  term_source: "document_service_period",
+  stated_term_id: null,
   basis_kind: "human_stated",
   term_start: "2026-01-01",
   term_end: "2026-03-31",
@@ -409,6 +724,35 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
     return false;
   }
 
+  // #940 — THE ROSTER RELATION, read directly by the Registers panel and by the configure form.
+  // `clara.prepayment_account_enrolments` carries a real SELECT grant to clara_authenticated under
+  // forced RLS, so this is a relation read rather than an rpc — which is also why the verb census
+  // in `e2e-fixture-ownership.test.ts` cannot see it.
+  if (request.method === "GET" && path === "/rest/v1/prepayment_account_enrolments") {
+    if (clientFilter === `eq.${PREPAY.clientId}`) {
+      sendJson(response, 200, ROSTER_ROWS(), cors);
+      return true;
+    }
+    return false;
+  }
+
+  // #940 — THE FIXED-ASSET HALF OF THE REGISTERS TAB, answered EMPTY for this lane's client only.
+  // The prepayment-account panel lives beside the fixed-asset account profiles, so the roster cell
+  // has to render that whole tab; these four reads are what it asks for, and every one of them
+  // answers the honest empty shape its own door answers for a client with no fixed assets. The
+  // FIXTURES for those surfaces belong to `fixed-asset-mock.mjs` and `depreciation-mock.mjs`, which
+  // run FIRST in `serve-built.mjs`'s chain and fall through for a client that is not theirs.
+  if (request.method === "GET" && path === "/rest/v1/fa_account_profiles") {
+    if (clientFilter !== `eq.${PREPAY.clientId}`) return false;
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+  if (request.method === "GET" && path === "/rest/v1/fa_account_depreciation_policies") {
+    if (clientFilter !== `eq.${PREPAY.clientId}`) return false;
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+
   // The DETAIL read's own route, scoped to this lane's own client exactly as
   // `journal-work-mock.mjs` and `work-list-mock.mjs` scope their own copies of it. The authority
   // Select no longer arrives here (#809 — see `prepaymentWorkListPage` above).
@@ -424,6 +768,60 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
   const verb = path.slice("/rest/v1/rpc/".length);
   if (!matchVerb(PREPAY_RPC_VERBS, verb)) return false;
   const body = await readJson(request);
+
+  // #940 — THE TWO ROSTER DOORS. Bookkeeper floor in the real estate; this fixture fakes the
+  // transport only. Both are real TRANSITIONS rather than canned answers: the panel and the form
+  // both RE-READ afterwards, and what they then show is this state, never their own optimism.
+  if (verb === "enrol_prepayment_account") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    state.enrolled = true;
+    sendJson(response, 200, {
+      enrolment_id: PREPAY.enrolmentId, client_id: PREPAY.clientId,
+      account_code: body.p_account, purpose: body.p_purpose, reason: body.p_reason,
+      enrolled_by: PREPAY.firmId, active: true,
+    }, cors);
+    return true;
+  }
+  if (verb === "retire_prepayment_account") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    state.enrolled = false;
+    sendJson(response, 200, {
+      enrolment_id: PREPAY.enrolmentId, client_id: PREPAY.clientId,
+      account_code: body.p_account, purpose: body.p_purpose,
+      retired_by: PREPAY.firmId, active: false,
+    }, cors);
+    return true;
+  }
+
+  // #940 — the four FIXED-ASSET reads the Registers tab makes, empty for this lane's client.
+  if (verb === "list_fixed_assets") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    sendJson(response, 200, {
+      client_id: PREPAY.clientId, as_of: "2026-04-22", assets: [], incomplete_count: 0,
+    }, cors);
+    return true;
+  }
+  if (verb === "fa_register_tie") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    sendJson(response, 200, {
+      client_id: PREPAY.clientId, as_of: "2026-04-22", tie: true, accounts: [],
+      incomplete_count: 0, pending_draft_count: 0,
+    }, cors);
+    return true;
+  }
+  if (verb === "get_depreciation_authority") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    sendJson(response, 200, {
+      client_id: PREPAY.clientId, authority: null, ramp_earned: false,
+      fy_end: { month: 12, day: 31, fallback: true }, high_stakes_threshold_cents: 1000000,
+    }, cors);
+    return true;
+  }
+  if (verb === "list_depreciation_runs") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    sendJson(response, 200, { client_id: PREPAY.clientId, runs: [] }, cors);
+    return true;
+  }
 
   if (verb === "list_prepayment_schedules") {
     if (body.p_client !== PREPAY.clientId) return false;
@@ -443,13 +841,65 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
   }
 
   if (verb === "get_prepayment_schedule") {
+    if (body.p_schedule === PREPAY.rosterScheduleId) {
+      sendJson(response, 200, ROSTER_DETAIL(), cors);
+      return true;
+    }
+    if (body.p_schedule === PREPAY.memoScheduleId) {
+      sendJson(response, 200, MEMO_DETAIL(), cors);
+      return true;
+    }
     if (body.p_schedule !== PREPAY.scheduleId) return false;
     sendJson(response, 200, DETAIL(), cors);
     return true;
   }
 
+  // #939 — THE ONE HUMAN DOOR that makes a memo-only prepayment schedulable. Bookkeeper floor,
+  // no agent grant, no wake wrapper: every value here was typed by the person at the screen.
+  if (verb === "record_prepayment_stated_term") {
+    if (body.p_client !== PREPAY.clientId) return false;
+    if (body.p_source_entry !== PREPAY.memoEntryId) return false;
+    state.statedTerm = true;
+    sendJson(response, 200, {
+      stated_term_id: PREPAY.statedTermId,
+      client_id: PREPAY.clientId,
+      source_entry_id: PREPAY.memoEntryId,
+      period_start: body.p_period_start,
+      period_end: body.p_period_end,
+      reason: body.p_reason,
+      stated_by: STATED.statedBy,
+      superseded_id: null,
+    }, cors);
+    return true;
+  }
+
   if (verb === "create_prepayment_schedule") {
     if (body.p_client !== PREPAY.clientId) return false;
+    // #939 — THE MEMO-ONLY LANE. With no stated term the door refuses and the payload names the
+    // stating door as the remedy; once a term stands the SAME door configures the schedule off
+    // clara.prepayment_schedule_v2.
+    if (body.p_source_entry === PREPAY.memoEntryId) {
+      if (!state.statedTerm) {
+        sendJson(response, 400, STATED_TERM_REFUSAL, cors);
+        return true;
+      }
+      state.memoCreated = true;
+      sendJson(response, 200, MEMO_CREATED(), cors);
+      return true;
+    }
+    // #940 — THE ROSTER, ASKED WHERE THE DOOR ASKS IT: after the branch on the source entry and
+    // BEFORE the authority is resolved, which is the real body's own order (0306 §D inserts the
+    // roster question immediately before the shared eligibility wall, and both sit ahead of the
+    // expense-target and authority half).
+    if (body.p_source_entry === PREPAY.rosterEntryId) {
+      if (!state.enrolled) {
+        sendJson(response, 400, NOT_ENROLLED_REFUSAL, cors);
+        return true;
+      }
+      state.rosterCreated = true;
+      sendJson(response, 200, ROSTER_CREATED(), cors);
+      return true;
+    }
     // THE DOOR RESOLVES THE AUTHORITY FIRST, so this fixture does too: a payload citing anything
     // but this client's own instruction Work is answered `authority_ref_unresolved`, which is what
     // the real door answers and the only thing a fabricated authority could ever get.

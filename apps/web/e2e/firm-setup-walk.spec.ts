@@ -285,9 +285,10 @@ test.describe.serial("#648 · A5 firm setup", () => {
     await answer.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("firm-setup-item-form")).toBeVisible();
-    // #934 — a second item, the owner-approved ACCOUNTANT sentence again, never the engineer note.
+    // #934/#1032 — a second item, the owner-approved ACCOUNTANT sentence again, never the engineer
+    // note.
     await expect(page.getByTestId("firm-setup-item-form")).toContainText(
-      "The firm's MyInvois TIN. Required when annual turnover is RM1 million or more; otherwise skip with a reason.",
+      "The firm's MyInvois TIN. Required once the firm's turnover makes MyInvois mandatory (RM1 million or more); optional below that, and you may still record it if the firm has registered for MyInvois voluntarily.",
     );
     await page.getByTestId("firm-setup-cancel").click();
     await expect(page.getByTestId("firm-setup-item-form")).toHaveCount(0);

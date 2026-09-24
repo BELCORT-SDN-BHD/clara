@@ -16,7 +16,9 @@ import {
   completeStaffAdvanceParticulars,
   enrolStaffAdvanceAccount,
   retireStaffAdvanceAccount,
+  isOutstandingAdvance,
 } from "./staff-advances-doors";
+import type { StaffAdvanceSummaryRow } from "./staff-advances-doors";
 import { isDoorRefusal } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -181,4 +183,38 @@ test("a governed refusal (e.g. CLR10 advance_outstanding_on_retire) survives ver
       },
     );
   });
+});
+
+
+// ---------------------------------------------------------------------------------------------
+// isOutstandingAdvance — ONE reading of "there is still something to allocate against", shared by
+// every surface that offers an advance to discharge. It was written twice (the register's own
+// allocation editor and #930's claim-form chooser) with a comment on one side asserting the two
+// were identical; a comment is not a wall, so this is the symbol both now import.
+// ---------------------------------------------------------------------------------------------
+
+function summaryRow(over: Partial<StaffAdvanceSummaryRow> = {}): StaffAdvanceSummaryRow {
+  return {
+    enrolment_id: "e1", account_code: "1190", person_label: "Farah binti Idris",
+    advance_id: "a1", issue_date: "2026-01-10", amount_cents: 40000,
+    outstanding_cents: 40000, days_outstanding: 60, purpose: null, reference: null,
+    voided: false, particulars_complete: true, enrolment_active: true,
+    ...over,
+  };
+}
+
+test("isOutstandingAdvance: a positive DB-derived outstanding that has not been voided, and nothing else", () => {
+  assert.equal(isOutstandingAdvance(summaryRow()), true, "money still owed on a live advance");
+  assert.equal(isOutstandingAdvance(summaryRow({ outstanding_cents: 0 })), false,
+    "fully discharged: there is nothing left to allocate against");
+  assert.equal(isOutstandingAdvance(summaryRow({ voided: true })), false,
+    "a voided advance is not offered, whatever its figure says");
+  assert.equal(isOutstandingAdvance(summaryRow({ outstanding_cents: 1 })), true,
+    "one sen is still an outstanding advance");
+
+  // NOT part of the reading, and deliberately so: an advance whose PARTICULARS are still
+  // incomplete, or whose enrolment has since been retired, is still money owed — the register
+  // shows it and the door decides. Widening this predicate would hide it from a preparer.
+  assert.equal(isOutstandingAdvance(summaryRow({ particulars_complete: false })), true);
+  assert.equal(isOutstandingAdvance(summaryRow({ enrolment_active: false })), true);
 });

@@ -115,9 +115,26 @@ export async function createFirm(sub, { name, token, opKey }) {
   return r.rows[0].receipt.firm_id;
 }
 
+/** [#1038] `clara.create_client`'s `clara_authenticated` grant is WITHDRAWN
+ *  (0316_create_client_human_grant_withdrawn.sql), closing #899's own named residual. This is the
+ *  ONE place in `packages/runtime/tests` that reaches the raw, unwalled verb; it is the exact
+ *  twin of `packages/db/tests/rig-fixtures.mjs`'s `createClientRaw`, and it runs the SAME house
+ *  idiom `packages/db/scripts/onboard-rpr.mjs` already used for its own non-test call site: the
+ *  pooled connection stays at its base identity (the postgres superuser -- `withActor`'s
+ *  `role: null` branch, `reset role`), which bypasses EXECUTE grants entirely exactly like every
+ *  migration and seed file does, while `request.jwt.claims` is hand-set so `clara._human_ctx`
+ *  resolves the SAME actor/firm/floor a granted `clara_authenticated` caller would have had.
+ *  Returns the RAW receipt's client id, still 'onboarding' -- `createClient` below wraps this and
+ *  then drives the Gate-O activation bridge; a caller that specifically wants the un-bridged
+ *  onboarding client (wave-b-wiki-projection-consumer.test.mjs's two cells) calls this directly. */
+export async function createClientRaw(sub, { name, opKey }) {
+  const r = await withActor({ jwtSub: sub },
+    (c) => c.query("select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [name, opKey]));
+  return r.rows[0].receipt.client_id;
+}
+
 export async function createClient(sub, { name, opKey }) {
-  const r = await humanQuery(sub, "select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [name, opKey]);
-  const id = r.rows[0].receipt.client_id;
+  const id = await createClientRaw(sub, { name, opKey });
   await activateOnboardingClient(sub, id);
   return id;
 }

@@ -46,6 +46,9 @@ import {
   RETIREMENT_WITNESS_SIG, RETIREMENT_STEM_RE, RETIRED_BANK_RULE_SIGS, SURVIVING_BANK_LINE_SIGS,
   sigExists, sigGrantedTo, assertB3ProducerSuccession,
 } from "./x42-b3-retirement-succession.mjs";
+// #1041 — the authority window 0227's backfill stamps mid-apply; that module's own header says
+// why the drills need a second site and why `signTakesAuthorityRef()` cannot be the switch here.
+import { restoreAuthorityWindowAfterApply } from "./fa-authority-sign-compat.mjs";
 
 export const RESET_OK = process.env.CLARA_RIG_ALLOW_RESET === "1";
 export const MIG_DIR =
@@ -234,8 +237,11 @@ export async function buildPre0042Book() {
   await signAuthority(w.users.hana, { client, authority: idOf(propAuth, "authority_id", "id") });
 
   // Drive the sweep through the DUE ORACLE (D-a refuses an out-of-order period), and STOP at
-  // the first real charge so there is genuinely work still due AFTER the apply.
+  // the first real charge so there is genuinely work still due AFTER the apply. The period the
+  // oracle chose is kept (#1041): it is where this book's depreciation history BEGINS, and the
+  // post-apply probe needs it to restore the authority window 0227's backfill stamps.
   let rampEntryId = null;
+  let rampPeriod = null;
   for (let i = 0; i < 24; i++) {
     const due = await runDue(client);
     if (!due?.due) break;
@@ -247,6 +253,7 @@ export async function buildPre0042Book() {
       await approveEntry(sub, { entry: entryId, expectedRevision: row.revision_token, opKey: opk(`u42ramp${i}`) });
     }
     rampEntryId = entryId;
+    rampPeriod = { start: due.period_start, end: due.period_end };
     break;
   }
   assert.ok(rampEntryId, "mandatory setup: draining the due oracle minted at least one depreciation charge");
@@ -283,7 +290,7 @@ export async function buildPre0042Book() {
   const exceptionId = (await rootQuery("select id from clara.bank_line_exceptions where line_id=$1 and status='open'", [stmt.lines[2].id])).rows[0]?.id;
   assert.ok(exceptionId, "mandatory setup: an OPEN bank exception exists pre-apply");
 
-  return { w, sub, client, asset: born.id, rampEntryId, bankAccountId, stmt, liveMatch, pendingMatch, exceptionId };
+  return { w, sub, client, asset: born.id, rampEntryId, rampPeriod, bankAccountId, stmt, liveMatch, pendingMatch, exceptionId };
 }
 
 // --- the shared POST-APPLY claims, per slice ------------------------------------
@@ -371,8 +378,19 @@ export async function assertB2Floor() {
 /** THE SHARED "PRE-EXISTING BEHAVIOUR SURVIVES" PROBE. Every drill runs it: a depreciation
  *  run still posts (driven by the due oracle, because D-a refuses an out-of-order period —
  *  buildPre0042Book deliberately stopped after its first charge), and an ordinary bank settle
- *  still lives. This is the claim that makes a drill a DEPLOY drill rather than a schema diff. */
+ *  still lives. This is the claim that makes a drill a DEPLOY drill rather than a schema diff.
+ *
+ *  THE AUTHORITY WINDOW COMES FIRST (#1041). When the chain being applied reaches 0227, the apply
+ *  itself stamps `authority_from` on this book's already-signed authority — at the first day of
+ *  the SIGNING month, which for a rig that signs by the clock is THIS month, so the due oracle is
+ *  correctly floored out of the book's own arrears and answers `period_not_ended`. That is the
+ *  window, not the arithmetic, and the drill is here for the arithmetic: the helper below asserts
+ *  the backfill landed and then restores the floor a genuinely pre-0227 authority would carry,
+ *  through the estate's ONE labelled fixture site. Below 0227 it does nothing at all. */
 export async function assertPreExistingSurfacesStillWork(h, label) {
+  assert.ok(h.rampPeriod?.start,
+    `[${label}] mandatory setup: the pre-apply book recorded the period its first charge ran`);
+  await restoreAuthorityWindowAfterApply(h.client, { firstPeriodStart: h.rampPeriod.start, label });
   const due2 = await runDue(h.client);
   assert.ok(due2?.due, `[${label}] mandatory setup: a depreciation period is still due after the apply`);
   const run2 = await runPeriod({ client: h.client, periodStart: due2.period_start, periodEnd: due2.period_end });

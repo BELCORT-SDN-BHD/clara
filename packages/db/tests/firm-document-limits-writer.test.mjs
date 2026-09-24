@@ -417,8 +417,18 @@ test("#960 cell 9 · the enforcing doors are unmoved, and the new surface is exa
       "e8b50f0d10da45be4caf6e278248750a4b1e862148dc879fbe38e7a5b4a02408",
     "clara._tf_firm_document_limits_upsert()":
       "e07fabd4e475ae29ac8b5fa6a4f8477f72698df26110bfe8d4f3e456aa1f8eb2",
+    // RE-MEASURED AGAIN (wave 4, 2026-09-24), AND THEN ONCE MORE IN THE SAME LANE (fix round,
+    // finding SPEC-04). #945's 0296 recuts this body for the payroll_facts lane — the kill
+    // switch, the per-lane attempt cap, the lane-true cap emit and the per-lane concurrency
+    // window — and #948's 0299 recuts it AGAIN for the contract_facts lane, which the first
+    // re-base missed: the pin named 0296's post-image and the head carried 0299's. The claim
+    // here is "0270 must not move a body that enforces a cap", and 0270 still does not; the pin
+    // names what the ordered chain leaves live at this frontier, exactly as the four 0252-recut
+    // pins above already do. Both 0296 and 0299 are higher in the same ordered chain than 0270,
+    // and they are consecutive files in it, so the post-0296 / pre-0299 body is not a state a
+    // database rests in and one flat value is right rather than a generation ladder.
     "clara.claim_document_processing_task(uuid,text,boolean)":
-      "01e517bf575806a01f93441bbc2459856e1f4f12624b312c3ba670ebf111b9a0",
+      "16b4d47bd62bf827ca310b143275592759e1b1369ca212fa70666eed964c9c64",
     "clara.get_firm_commercial_state()":
       "347141ee22b52c125ff845451051f03354f1f0e9d57cc43d759253f3273ed19e",
     "clara.settle_ingest_reservation(uuid,integer,text)":

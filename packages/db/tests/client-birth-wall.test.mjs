@@ -11,15 +11,20 @@
 //     (`p899.legacy.*`). Arity 1 is DELIBERATELY UNCHANGED — 0287's own header measures why —
 //     and one cell here proves that boundary rather than leaving it assumed.
 //   * `p899.census.*` — a live, catalogue-derived sweep of every granted, client-minting body.
-//     It BOUNDS the one residual rather than claiming it away: `clara.create_client` is still
-//     granted to `clara_authenticated` and still has no wall, so the ticket's "no granted human
-//     role can reach a client-minting verb that lacks the wall" is NOT satisfied by these cells
-//     and must not be read as satisfied. What they do prove is how far the residual reaches —
-//     it is SUPERSEDED in the catalogue, and no product surface (the browser trees, the runtime
-//     trees) calls it at all. 0287's header carries the evidence for why closing it needs an
-//     estate-wide fixture migration of its own: re-pointing or ungranting it would turn
-//     `buildWorld()`/`buildWaveBWorld()` and `name-only-guard.test.mjs` red for a fixture-naming
-//     coincidence unrelated to what any of them test.
+//     `clara.create_client` is `begin_client_onboarding`/`open_client_onboarding`'s ONE sibling
+//     that mints a client with no identity wall at all — the reason it is a residual and not a
+//     third walled door.
+//
+// #1038 (riders wave 4, lane 06, migration 0316_create_client_human_grant_withdrawn.sql) CLOSES
+// that residual: `clara.create_client`'s `clara_authenticated` grant is WITHDRAWN, so no human
+// role can execute it any more (its body stays exactly as 0287 left it — unwalled — because the
+// rig's own shared fixtures and `packages/db/scripts/onboard-rpr.mjs` still need that shape; they
+// reach it as the postgres superuser with a hand-set `request.jwt.claims` GUC instead, never
+// through a grant). The census cells below that depended on the OLD (still-granted) shape are
+// REWRITTEN, gated on 0316's OWN stem (`GRANT_WITHDRAWN_STEM` below) rather than 0287's alone —
+// the `firm-setup-applicability.test.mjs` / `TIN_REQUIRED_STEM` idiom: a database carrying 0287
+// but not yet 0316 skips them loudly instead of asserting a shape the catalogue can no longer
+// produce.
 //
 // EVERY ASSERTION GOES THROUGH `humanQuery` — a real per-role session under real RLS. `rootQuery`
 // appears only to PLANT a fixture (client-onboarding-identity.test.mjs's own posture: going
@@ -33,7 +38,7 @@ import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import {
-  CLR, assertRaises, endPool, humanQuery, opk, rootQuery,
+  CLR, PG, assertRaises, endPool, humanQuery, opk, rootQuery,
 } from "./rig-fixtures.mjs";
 // The two-session machinery (two dedicated pooled clients, a human session on each, and a block
 // PROVEN from pg_blocking_pids rather than a sleep) is REUSED from the estate's own helpers
@@ -41,7 +46,7 @@ import {
 // battery's fixtures, and it imports nothing but rig-helpers.
 import { asHumanSession, twoSessions, waitBlockedByOrThrow } from "./binding-proposal-pr-1-helpers.mjs";
 
-const EXPECTED_CELLS = 14;
+const EXPECTED_CELLS = 11;
 let live = false;
 let executed = 0;
 
@@ -64,9 +69,32 @@ async function birthWallCohortApplied() {
   return present === flags.length;
 }
 
-before(async () => { live = await birthWallCohortApplied(); });
+// #1038 (0316_create_client_human_grant_withdrawn.sql) — its OWN stem, separate from 0287's
+// above (the `firm-setup-applicability.test.mjs` / `TIN_REQUIRED_STEM` idiom, verbatim): a
+// database carrying 0287 but not yet 0316 must skip the cells below loudly rather than assert a
+// shape `create_client`'s grant can no longer take.
+const GRANT_WITHDRAWN_STEM = "create_client_human_grant_withdrawn$";
+let grantWithdrawnLive = false;
+let grantWithdrawnExecuted = 0;
+const GRANT_WITHDRAWN_EXPECTED_CELLS = 4;
+
+/** True iff a migration whose version matches 0316's stable stem is recorded applied. */
+async function grantWithdrawnCohortApplied() {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [GRANT_WITHDRAWN_STEM]);
+  return r.rows[0].n > 0;
+}
+
+before(async () => {
+  live = await birthWallCohortApplied();
+  grantWithdrawnLive = await grantWithdrawnCohortApplied();
+});
 after(async () => {
   if (live) assert.equal(executed, EXPECTED_CELLS, `expected ${EXPECTED_CELLS} cells to run, ${executed} did`);
+  if (grantWithdrawnLive) {
+    assert.equal(grantWithdrawnExecuted, GRANT_WITHDRAWN_EXPECTED_CELLS,
+      `expected ${GRANT_WITHDRAWN_EXPECTED_CELLS} #1038 grant-withdrawn cells to run, ${grantWithdrawnExecuted} did`);
+  }
   await endPool();
 });
 
@@ -84,6 +112,24 @@ function cell(name, fn) {
   test(name, async (t) => {
     if (gate(t)) return;
     executed += 1;
+    await fn(t);
+  });
+}
+
+function gateGrantWithdrawn(t) {
+  if (grantWithdrawnLive) return false;
+  if (process.env.CLARA_ALLOW_MISSING_CREATE_CLIENT_GRANT_WITHDRAWN === "1") {
+    console.warn("SKIP client-birth-wall (#1038 cells): 0316 is not applied (explicit pre-integration run).");
+    t.skip("0316 cohort absent -- explicit pre-integration run");
+    return true;
+  }
+  assert.fail("the #1038 create_client-grant-withdrawn cells require 0316_create_client_human_grant_withdrawn.sql for a focused run");
+}
+
+function cellGrantWithdrawn(name, fn) {
+  test(name, async (t) => {
+    if (gateGrantWithdrawn(t)) return;
+    grantWithdrawnExecuted += 1;
     await fn(t);
   });
 }
@@ -376,14 +422,15 @@ cell("p899.legacy.arity_zero_unchanged — begin_client_onboarding's own ordinar
 // The census
 // ===========================================================================
 
-cell("p899.census.granted_client_minters_and_the_one_residual — a live, catalogue-derived sweep of every granted human-reachable body that mints a clara.clients row, DIRECTLY or by delegating to clara._client_birth_core. It BOUNDS the residual; it does NOT claim the ticket's no-unwalled-granted-minter criterion is met, because it is not", async () => {
+cellGrantWithdrawn("p899.census.no_unwalled_granted_client_minters — #1038 CLOSES the residual the #899 cells once bounded: a live, catalogue-derived sweep of every granted human-reachable body that mints a clara.clients row, DIRECTLY or by delegating to clara._client_birth_core, now finds NO minter without the wall -- the ticket's own criterion (\"no granted human role can reach a client-minting verb that lacks the wall\") is MET, not merely bounded", async () => {
   // TWO SHAPES OF MINTER, because §A of 0287 moved the literal `insert into clara.clients(` out
   // of every granted door and into one ungranted shared core: a census that only grepped granted
   // bodies for that literal text (0017's own historical tail did exactly that) would now see
   // NOTHING, since `open_client_onboarding` and `begin_client_onboarding` no longer contain it —
   // they DELEGATE. So a minter is either (a) a granted body with the literal insert in its own
   // text, or (b) a granted body that calls `_client_birth_core(`, the one ungranted body that
-  // still carries it.
+  // still carries it. `create_client` never appears in this sweep any more: 0316 withdrew its
+  // ONLY grant among the five roles this sweep checks, so it simply has no row to match.
   const r = await rootQuery(
     `select p.proname,
             regexp_replace(lower(p.prosrc), '\\s+', '', 'g') as norm
@@ -398,7 +445,7 @@ cell("p899.census.granted_client_minters_and_the_one_residual — a live, catalo
              or regexp_replace(lower(p.prosrc), '\\s+', '', 'g') like '%_client_birth_core(%')`,
   );
   const minters = [...new Set(r.rows.map((x) => x.proname))].sort();
-  assert.deepEqual(minters, ["begin_client_onboarding", "create_client", "open_client_onboarding"],
+  assert.deepEqual(minters, ["begin_client_onboarding", "open_client_onboarding"],
     `the set of granted client-minting bodies changed -- update this census deliberately if that is intended (got ${JSON.stringify(minters)})`);
 
   // clara._client_birth_core ITSELF must not appear here: it is granted to nobody, so a row for
@@ -415,21 +462,16 @@ cell("p899.census.granted_client_minters_and_the_one_residual — a live, catalo
   );
   assert.equal(coreGrant.rows[0].n, 0, "clara._client_birth_core must not be human/agent/wake reachable");
 
-  // A minter HAS THE WALL when its own body either carries the read directly (create_client, if
-  // it ever were re-pointed) or delegates to the shared core that does (open_client_onboarding,
-  // begin_client_onboarding both call `clara._client_birth_core(`, whose OWN body — pinned by
-  // 0287's tail — calls `clara.client_identity_candidates`).
+  // A minter HAS THE WALL when its own body either carries the read directly or delegates to the
+  // shared core that does (open_client_onboarding, begin_client_onboarding both call
+  // `clara._client_birth_core(`, whose OWN body — pinned by 0287's tail — calls
+  // `clara.client_identity_candidates`).
   const hasWall = (norm) => norm.includes("client_identity_candidates(") || norm.includes("_client_birth_core(");
   const unwalled = [...new Set(r.rows.filter((x) => !hasWall(x.norm)).map((x) => x.proname))].sort();
-  // THE RESIDUAL, STATED AS A RESIDUAL. This assertion does not say the ticket's census
-  // criterion holds -- it says the gap is exactly one named body and cannot grow unnoticed. The
-  // criterion itself ("no granted human role can reach a client-minting verb that lacks the
-  // wall") is OPEN while this array is non-empty; the next two cells bound how far it reaches.
-  assert.deepEqual(unwalled, ["create_client"],
-    `the set of granted client-minting bodies WITHOUT the wall changed (got ${JSON.stringify(unwalled)}). `
-    + "It must be exactly the one open residual 0287's header measures -- a NEW member is a regression, "
-    + "and an EMPTY array means the residual was finally closed, so this census and the ticket's own "
-    + "acceptance criterion should both be rewritten rather than left asserting a gap that no longer exists");
+  // THE CRITERION, MET: this array is EMPTY. A non-empty result here is a regression -- some
+  // granted body reaches clara.clients without going through the wall again.
+  assert.deepEqual(unwalled, [],
+    `the set of granted client-minting bodies WITHOUT the wall must be EMPTY now that #1038 has withdrawn create_client's grant (got ${JSON.stringify(unwalled)})`);
 });
 
 // The trees a browser or the runtime actually ships. Same "production" the operation census and
@@ -468,44 +510,113 @@ function sweepFor(root, pattern) {
   return hits;
 }
 
-cell("p899.census.create_client_residual_is_bounded — the one unwalled granted minter is SUPERSEDED in the live catalogue and reachable from no product surface: the gap the ticket's census criterion names is open, but it ends at the rig and one superuser operator script", async () => {
+cellGrantWithdrawn("p899.census.create_client_residual_closed — the one unwalled granted minter #899 bounded is now UNGRANTED to clara_authenticated: the catalogue says so, no product surface ever called it, and the one non-test caller (the operator script) was always root+jwt rather than the grant", async () => {
   // (a) THE CATALOGUE SAYS IT, not only a migration header a reader must go and find. A comment
   // is the one statement about a function every client of pg_proc can read.
   const comment = (await rootQuery(
     "select obj_description('clara.create_client(text,text)'::regprocedure, 'pg_proc') as c")).rows[0].c;
   assert.ok(comment, "clara.create_client carries no catalogue comment at all");
-  for (const token of ["superseded", "open_client_onboarding", "#899"]) {
+  for (const token of ["superseded", "open_client_onboarding", "#1038", "withdrawn"]) {
     assert.ok(comment.toLowerCase().includes(token.toLowerCase()),
-      `clara.create_client's comment must name ${token} -- a residual nobody wrote down is a residual nobody can close (got: ${JSON.stringify(comment)})`);
+      `clara.create_client's comment must name ${token} -- a closure nobody wrote down is a closure nobody can verify (got: ${JSON.stringify(comment)})`);
   }
 
-  // (b) NO PRODUCT SURFACE CALLS IT. The browser trees and every runtime tree the operation
-  // census counts as a production call site are swept for the name itself.
+  // (b) NO PRODUCT SURFACE CALLS IT. Unchanged by #1038 -- the browser trees and every runtime
+  // tree the operation census counts as a production call site are swept for the name itself.
   const productHits = PRODUCT_TREES.flatMap((root) => sweepFor(root, /\bcreate_client\b/));
   assert.deepEqual(productHits, [],
-    "a product surface reaches clara.create_client -- the residual is no longer confined to the rig, "
-    + "and this ticket's wall can be walked around from a browser or the runtime");
+    "a product surface reaches clara.create_client -- it can be walked around from a browser or the runtime");
 
-  // (c) THE ONE NON-TEST CALLER ANYWHERE is the beta onboarding operator script, and it does NOT
-  // ride the clara_authenticated grant: it runs as the postgres superuser with a jwt GUC (its own
-  // "HUMAN-CONTEXT IDIOM" header). So withdrawing that grant would not break it -- what would
-  // break is the rig's own shared fixture and the RBAC cells that pin create_client as a human
-  // door, which is why closing this residual needs a migration of those call sites first.
+  // (c) THE ONE NON-TEST CALLER ANYWHERE is the beta onboarding operator script, and it never
+  // rode the clara_authenticated grant: it runs as the postgres superuser with a jwt GUC (its own
+  // "HUMAN-CONTEXT IDIOM" header) -- unaffected by #1038's revoke, exactly as 0287's own header
+  // predicted.
   const operator = readFileSync(join(REPO_ROOT, "packages/db/scripts/onboard-rpr.mjs"), "utf8");
   assert.ok(/clara\.create_client\(/.test(operator), "the operator script no longer calls create_client -- re-derive this census");
   assert.equal(/set\s+role\s+clara_authenticated/.test(operator), false,
-    "the operator script now SET ROLEs to clara_authenticated, so it would depend on the very grant this residual is about");
+    "the operator script SET ROLEs to clara_authenticated -- it would now depend on the grant #1038 withdrew");
+
+  // (d) THE DIRECT PROOF, independent of (a)-(c): clara_authenticated genuinely lacks EXECUTE.
+  const grant = await rootQuery(
+    "select has_function_privilege('clara_authenticated', 'clara.create_client(text,text)'::regprocedure, 'execute') as ok");
+  assert.equal(grant.rows[0].ok, false, "clara_authenticated must not hold EXECUTE on clara.create_client");
 });
 
-cell("p899.census.create_client_documented_exception — the residual, named and evidenced rather than silent: create_client still creates without the wall, and buildWorld()'s own two-same-family-client shape is why 0287 does not touch it", async () => {
-  const w = await firmWorld("cc_resid");
-  const a1 = (await humanQuery(w.admin, "select clara.create_client(p_name => $1, p_op_key => $2) as r",
-    [`rig_${w.suffix}_A1`, opk("p899cc")])).rows[0].r;
-  // A SECOND same-leading-token ("rig") client in the SAME firm -- exactly buildWorld()'s own
-  // A1/A2 shape -- succeeds silently, because create_client is not re-pointed.
-  const a2 = (await humanQuery(w.admin, "select clara.create_client(p_name => $1, p_op_key => $2) as r",
-    [`rig_${w.suffix}_A2`, opk("p899cc")])).rows[0].r;
-  assert.ok(a1.client_id);
-  assert.ok(a2.client_id);
-  assert.notEqual(a1.client_id, a2.client_id);
+cellGrantWithdrawn("p899.census.create_client_refuses_the_human_grant — #1038's own vacuity control: the EXACT call shape this file's history once proved SUCCEEDING (two same-family clients, no wall) now REFUSES 42501 insufficient_privilege, because clara_authenticated no longer holds EXECUTE", async () => {
+  const w = await firmWorld("cc_closed");
+  await assert.rejects(
+    () => humanQuery(w.admin, "select clara.create_client(p_name => $1, p_op_key => $2) as r",
+      [`rig_${w.suffix}_A1`, opk("p899cc")]),
+    (err) => {
+      assert.equal(err.code, PG.insufficientPrivilege,
+        `expected ${PG.insufficientPrivilege} insufficient_privilege, got ${err.code ?? "no error"}`);
+      return true;
+    },
+    "a human clara_authenticated session must no longer be able to execute clara.create_client at all",
+  );
+  // Nothing was born: the refusal is at the grant, before the function body ever runs.
+  const n = await rootQuery("select count(*)::int as n from clara.clients where firm_id = $1", [w.firm]);
+  assert.equal(n.rows[0].n, 0, "a grant-level refusal creates nothing");
+});
+
+// THE TWO FIXTURE TREES THIS CENSUS WALKS. The first cut of this cell (#1038, before the lane's
+// own fix round) swept `packages/db/tests` ALONE, so `packages/runtime/tests/relay-fixtures.mjs`
+// -- the OTHER shared fixture that mints clients, referenced by ~90 runtime batteries -- kept
+// calling the verb through the withdrawn grant and failed 42501 on every database carrying 0316
+// while this census stayed green. Both fixture trees are swept now, so a call site outside
+// packages/db can never hide from it again.
+const CREATE_CLIENT_CENSUS_TREES = ["packages/db/tests", "packages/runtime/tests"];
+
+// The TWO legitimate call sites for the raw, unwalled clara.create_client( verb -- one shared
+// fixture per test tree, each reaching it as the base identity with a hand-set jwt claim (the
+// root+jwt idiom 0316's own header names), and everywhere else in either tree reaching it, if at
+// all, only through that tree's fixture. This file itself is the THIRD legitimate reference: its
+// own p899.census.create_client_refuses_the_human_grant cell above calls the literal SQL
+// directly, on purpose, to prove the refusal.
+const CREATE_CLIENT_CENSUS_EXEMPT = new Set([
+  "packages/db/tests/rig-fixtures.mjs",
+  "packages/runtime/tests/relay-fixtures.mjs",
+  "packages/db/tests/client-birth-wall.test.mjs",
+]);
+
+/** Every .mjs file under CREATE_CLIENT_CENSUS_TREES naming `clara.create_client(` directly, as
+ *  `path:line`, EXCLUDING the exempt files above. Unlike `sweepFor` (PRODUCT_TREES only), this
+ *  walks test files too -- `.test.mjs` names are the whole POINT of this sweep, not excluded by
+ *  name. */
+function sweepTestsForCreateClient() {
+  const hits = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      if (entry.name.startsWith(".")) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) { if (!SKIP_DIRS.has(entry.name)) walk(full); continue; }
+      if (!entry.name.endsWith(".mjs")) continue;
+      const rel = relative(REPO_ROOT, full).split(sep).join("/");
+      if (CREATE_CLIENT_CENSUS_EXEMPT.has(rel)) continue;
+      readFileSync(full, "utf8").split("\n").forEach((line, i) => {
+        if (/\bclara\.create_client\(/.test(line)) hits.push(`${rel}:${i + 1}  ${line.trim().slice(0, 100)}`);
+      });
+    }
+  };
+  for (const root of CREATE_CLIENT_CENSUS_TREES) walk(join(REPO_ROOT, root));
+  return hits.sort();
+}
+
+// HOW AC1 IS MET, STATED PLAINLY (#1038's fix round, review finding L06-SPEC-09). AC1's letter is
+// "No test fixture calls the direct door". It is met by the brief's OWN PARENTHETICAL -- "or a
+// fixture-only door that no human role can execute" -- and NOT by the literal clause: the two
+// shared fixtures still name clara.create_client, but 0316 withdrew its clara_authenticated
+// grant, so it IS now a door no human role can execute, and the fixtures reach it only as the
+// base identity (the route every migration and seed file already takes). The OTHER route #899's
+// own follow-up named -- migrating 48+ batteries onto clara.open_client_onboarding -- is NOT
+// taken here and stays open; fixture-minted clients therefore still bypass the identity-collision
+// wall #899 put on the product entrance, which is why this file's own wall cells drive
+// open_client_onboarding directly rather than through a fixture.
+cellGrantWithdrawn("p899.census.no_test_file_calls_create_client_directly — AC1 (met by the brief's parenthetical, see the note above): one shared fixture per test tree (rig-fixtures.mjs, relay-fixtures.mjs) is the ONE call site; every other file in packages/db/tests and packages/runtime/tests reaches clara.create_client, if at all, only through it", async () => {
+  const hits = sweepTestsForCreateClient();
+  assert.deepEqual(hits, [],
+    "a packages/db/tests or packages/runtime/tests file calls clara.create_client( directly, outside its tree's "
+    + "designated fixture -- route it through createClientRaw()/createClient() (rig-fixtures.mjs for the db "
+    + "batteries, relay-fixtures.mjs for the runtime ones) instead, or add it to CREATE_CLIENT_CENSUS_EXEMPT "
+    + "above if the direct call is deliberate (as this file's own refusal cell is)");
 });

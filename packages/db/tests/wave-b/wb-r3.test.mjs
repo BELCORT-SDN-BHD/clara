@@ -11,7 +11,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  CLR, CLR30 as CLR_OPENING, rootQuery, humanQuery, opk,
+  CLR, CLR30 as CLR_OPENING, rootQuery, humanQuery, opk, createClientRaw,
   assertRaises, assertRaisesOneOf, endPool, printLaneNotes,
   fail0017, wbEnsureReady,
   buildWaveBWorld, onboardingClient, seedOpeningCoa, openingDoc, WB_COA,
@@ -99,10 +99,10 @@ test("[R3-F1b]: cross-engine same-version ambiguity — the non-authoritative ru
 
 test("[R3-F2a]: the LEGACY create_client births ONBOARDING + a plan — no Gate-O bypass", async () => {
   fail0017(live);
-  // the RAW verb, bypassing the fixture bridge:
-  const receipt = (await humanQuery(w.users.alice,
-    "select clara.create_client(p_name => $1, p_op_key => $2) as r",
-    [`wbr3_legacy_${opk("x")}`, opk("cli")])).rows[0].r;
+  // the RAW verb, bypassing the fixture bridge. [#1038] clara.create_client's clara_authenticated
+  // grant is withdrawn; createClientRaw reaches the same unwalled verb through the rig's own
+  // root+jwt idiom.
+  const receipt = await createClientRaw(w.users.alice, { name: `wbr3_legacy_${opk("x")}`, opKey: opk("cli") });
   const client = receipt.client_id;
   assert.equal((await clientRow(client)).status, "onboarding", "the legacy creator now births 'onboarding'");
   const plan = await rootQuery(

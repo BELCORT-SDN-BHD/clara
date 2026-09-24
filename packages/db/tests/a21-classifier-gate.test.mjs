@@ -193,19 +193,35 @@ test("P3 set_document_kind is the audited HUMAN override: a bookkeeper corrects 
 // The facts gate — kind routes; NULL kind classifies first; receipts.
 // ===========================================================================
 
-test("§5 a payroll_summary NEVER reaches invoice_facts: the enqueue produces NO runnable invoice_facts task — only the skipped_kind receipt", async (t) => {
+// #945 (migration 0296) MOVED HALF OF THIS CELL'S SUBJECT and the cell moved with it. Until
+// then a payroll_summary fell through the router's kind ladder to the terminal
+// `invoice_facts/failed/skipped_kind` receipt, and this cell asserted that receipt by name.
+// #926's owner ruling (2026-09-18, option G) reopened payroll reading, and 0296 gave the kind
+// its OWN `payroll_facts` lane. The half of this cell that was ALWAYS the point — a payroll
+// summary never enters the INVOICE lane — is unchanged and still asserted here; the
+// skipped_kind half now belongs to a kind that genuinely has no reader. The payroll lane's own
+// behaviour (the live task, the consent gate, the idempotent re-fire) is proved by
+// packages/db/tests/payroll-summary-facts.test.mjs's S4 cells, not duplicated here.
+test("§5 a payroll_summary NEVER reaches invoice_facts, and a kind with no reader still terminates as skipped_kind", async (t) => {
   if (skipHere(t)) return;
   const client = world.clients.A1;
   const cited = await pdfDoc(client, { kind: "payroll_summary" });
   await enqueueInvoiceFacts(cited.documentId);
-  // INTEGRATION (CLASS T, adjudication #11): the skipped_kind receipt LIVES on
-  // the document_processing_tasks trail as a TERMINAL failed invoice_facts row
-  // (never claimed, attempt_count 0) — the gate holds when no row is runnable.
   const rows = (await docTasks(cited.documentId)).filter((x) => x.lane === "invoice_facts");
-  assert.equal(rows.filter((x) => ["queued", "held_egress", "running", "done"].includes(x.status)).length, 0,
-    "NO runnable/completed invoice_facts task exists for a payroll_summary (the classifier gate holds)");
-  const receipt = rows.find((x) => x.status === "failed" && x.error_code === "skipped_kind");
-  assert.ok(receipt, `the gate leaves a skipped_kind receipt on the doc's task trail (got: ${rows.map((x) => `${x.lane}/${x.status}/${x.error_code}`).join(",")})`);
+  assert.equal(rows.length, 0,
+    `NO invoice_facts task of any status exists for a payroll_summary (got: ${rows.map((x) => `${x.status}/${x.error_code}`).join(",")})`);
+
+  // The skipped_kind arm itself is untouched by 0296 and still serves every kind with no
+  // reader. INTEGRATION (CLASS T, adjudication #11): the receipt LIVES on the
+  // document_processing_tasks trail as a TERMINAL failed invoice_facts row (never claimed,
+  // attempt_count 0) — the gate holds when no row is runnable.
+  const other = await pdfDoc(client, { kind: "tax_correspondence" });
+  await enqueueInvoiceFacts(other.documentId);
+  const otherRows = (await docTasks(other.documentId)).filter((x) => x.lane === "invoice_facts");
+  assert.equal(otherRows.filter((x) => ["queued", "held_egress", "running", "done"].includes(x.status)).length, 0,
+    "NO runnable/completed invoice_facts task exists for a kind with no reader (the classifier gate holds)");
+  const receipt = otherRows.find((x) => x.status === "failed" && x.error_code === "skipped_kind");
+  assert.ok(receipt, `the gate leaves a skipped_kind receipt on the doc's task trail (got: ${otherRows.map((x) => `${x.lane}/${x.status}/${x.error_code}`).join(",")})`);
   assert.equal(receipt.attempt_count, 0, "the receipt row was never claimed and consumes no attempts");
   assert.equal(receipt.started_at, null, "the receipt row never ran (a receipt, not a task)");
 });

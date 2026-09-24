@@ -16,6 +16,7 @@ import {
   roleQuery,
   rootQuery,
   runAs,
+  withActor, // [#1038] createClientRaw's root+jwt call, below
 } from "./rig-helpers.mjs";
 // C33.6: the sandbox marker's ONE home. `buildWorld` used to spell `rig_<clock>_<hex>` inline;
 // `sandboxName()` mints the identical shape and gives the convention a name a cell can read
@@ -64,9 +65,29 @@ export async function removeMember(sub, { membership, opKey }) {
   await humanQuery(sub, "select clara.remove_member(p_membership => $1, p_op_key => $2)", [membership, opKey]);
 }
 
+/** [#1038] `clara.create_client`'s `clara_authenticated` grant is WITHDRAWN (0316_create_client_
+ *  human_grant_withdrawn.sql) -- closing #899's own named residual. This is now the ONE place in
+ *  the whole estate that reaches the raw, unwalled verb directly; every direct caller below used
+ *  to run it through `humanQuery` (the grant this migration revokes). It now runs the SAME house
+ *  idiom `packages/db/scripts/onboard-rpr.mjs` already used for its own one non-test call site,
+ *  and that `seeds/0002_core_seed.sql` names first: the pooled connection stays at its base
+ *  identity (the postgres superuser -- `withActor`'s `role: null` branch, `reset role`), which
+ *  bypasses EXECUTE grants entirely, exactly like every migration and seed file already does;
+ *  `request.jwt.claims` is hand-set so `clara._human_ctx` resolves the SAME actor/firm/floor a
+ *  granted `clara_authenticated` caller would have gotten. Returns the RAW jsonb receipt,
+ *  unactivated ('onboarding' status) -- `createClient` below wraps this and then drives the
+ *  legacy activation bridge; a caller that specifically wants the raw, un-bridged shape (e.g.
+ *  rig-events.test.mjs's own raw-creator contract probe, wb-r3.test.mjs's own legacy-creator
+ *  cell, and a dozen more across packages/db/tests) calls this directly instead. */
+export async function createClientRaw(sub, { name, opKey }) {
+  const r = await withActor({ jwtSub: sub },
+    (c) => c.query("select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [name, opKey]));
+  return r.rows[0].receipt; // {client_id}
+}
+
 export async function createClient(sub, { name, opKey }) {
-  const r = await humanQuery(sub, "select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [name, opKey]);
-  const id = r.rows[0].receipt.client_id; // receipt jsonb = {client_id}
+  const receipt = await createClientRaw(sub, { name, opKey });
+  const id = receipt.client_id; // receipt jsonb = {client_id}
   await activateLegacyClient(sub, id);
   return id;
 }

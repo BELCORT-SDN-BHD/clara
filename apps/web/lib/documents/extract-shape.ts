@@ -147,7 +147,60 @@ export const KNOWN_FACT_PATHS: readonly string[] = [
   "invoice.invoice_id",
   "invoice.invoice_date",
   "invoice.deposit",
+  // #945 — the eleven run-level questions the payroll lane writes
+  // (packages/db/migrations/0296's `clara._payroll_answers_ok` vocabulary, which is the same
+  // closed set clara.persist_payroll_facts writes a region for). They are here for the same
+  // reason the invoice paths are: a path IN this set gets a real human label, a path outside it
+  // renders as its own raw dotted text. Nothing below the run level is listed, because nothing
+  // below the run level is ever persisted — the per-employee quotes are summed and discarded.
+  "payroll.run.period",
+  "payroll.run.gross_pay",
+  "payroll.run.epf_employee",
+  "payroll.run.epf_employer",
+  "payroll.run.socso_employee",
+  "payroll.run.socso_employer",
+  "payroll.run.eis_employee",
+  "payroll.run.eis_employer",
+  "payroll.run.pcb",
+  "payroll.run.hrdf_levy",
+  "payroll.run.net_pay",
+  // #948 — the eleven questions the agreement lane writes (packages/db/migrations/0299's
+  // `clara._agreement_answers_ok` vocabulary, which is the same closed set
+  // clara.persist_agreement_facts writes a region for). Here for the same reason the paths above
+  // are. Nothing below the run level is listed: `uq_document_regions_extraction_field_path`
+  // admits ONE region per field path per extraction, so a scheduled instalment could not have a
+  // region of its own — the printed schedule lives in the envelope, and these eleven ARE the
+  // typed facts.
+  "contract.agreement.kind",
+  "contract.agreement.financier",
+  "contract.agreement.agreement_date",
+  "contract.agreement.asset_description",
+  "contract.agreement.cash_price",
+  "contract.agreement.deposit",
+  "contract.agreement.amount_financed",
+  "contract.agreement.total_charges",
+  "contract.agreement.total_payable",
+  "contract.agreement.term_months",
+  "contract.agreement.instalment_amount",
 ];
+
+/** #945 — a `payroll.*` fact. The payroll lane is the ONE lane that writes a region for an answer
+ *  the page does NOT print (carrying no rendering and no cents), because "the page is silent
+ *  about the HRDF levy" and "the levy is zero" are different facts and a person has to be able to
+ *  tell them apart. Every other lane writes a region only for an answered field, so an empty
+ *  region there means something else and must keep its own wording. */
+export function isPayrollFactPath(path: string | null): boolean {
+  return path !== null && path.startsWith("payroll.");
+}
+
+/** #948 — a `contract.*` fact. The agreement lane is the SECOND lane that writes a region for an
+ *  answer the page does NOT print (carrying no rendering and no cents), for the same reason the
+ *  payroll lane does: "the agreement prints no finance charge" and "the finance charge is zero"
+ *  are different facts, and an interest-free instalment plan is a real agreement. Its own
+ *  predicate rather than a widened `isPayrollFactPath`, so each lane keeps its own claim. */
+export function isAgreementFactPath(path: string | null): boolean {
+  return path !== null && path.startsWith("contract.");
+}
 
 export function isKnownFactPath(path: string | null): boolean {
   return path !== null && KNOWN_FACT_PATHS.includes(path);

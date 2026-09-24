@@ -23,9 +23,14 @@
 //   person records the service period on the document) or straight into the create form with the
 //   recognition prefilled.
 //
-// WHAT NEITHER ARM REACHES, said here rather than implied: a MEMO-ONLY recognition binds no
-// document, so the frozen evaluator refuses it outright and arm B's own predicate excludes it. A
-// memo-based prepayment has no amortisation path in this slice at all.
+// #939 — ARM B NOW REACHES THE MEMO-ONLY RECOGNITION TOO, and this header used to say the
+// opposite: "a memo-based prepayment has no amortisation path in this slice at all". That was true
+// while `clara.document_service_periods` was the only term carrier — the frozen evaluator refused
+// such an entry outright, so listing it would have offered an action that could only refuse.
+// Migration 0305 adds a second carrier a named person writes to, so the row is now actionable and
+// the NEXT ACT is a third one: state the service period, rather than open a document that does not
+// exist. The read answers WHICH act (`next_step`), and this band never infers it from the absence
+// of a document id.
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -123,10 +128,17 @@ function RefusingRow({ clientId, row }: { clientId: string; row: AttentionRefusi
   );
 }
 
-/** ARM B. The next act depends on whether the document already states a term, and the row says
- *  which — so a person is never sent to a form that can only refuse. */
+/** ARM B. The next act depends on whether a term already stands and on WHICH carrier it would
+ *  live in, and the row says both — so a person is never sent to a form that can only refuse, and
+ *  never to a document that does not exist. */
 function UnscheduledRow({ clientId, row }: { clientId: string; row: AttentionUnscheduled }) {
   const t = useTranslations("Prepayments");
+  // #939 — THE READ'S OWN TOKEN, with a fallback that reproduces the pre-#939 behaviour EXACTLY
+  // for a database at an earlier frontier: a live term means configure, and anything else means
+  // the document. The fallback never guesses "state the period", because on a frontier without
+  // migration 0305 there is no door to state one through.
+  const next = row.next_step
+    ?? (row.has_live_term ? "configure_schedule" : "record_document_service_period");
   return (
     <li
       className="flex flex-col gap-2 rounded-md border border-info/30 bg-info-muted/40 p-3 sm:flex-row sm:items-start sm:justify-between"
@@ -143,22 +155,30 @@ function UnscheduledRow({ clientId, row }: { clientId: string; row: AttentionUns
           <Money cents={row.amount_cents} /> · {row.prepaid_account_code}
         </span>
         <span className="max-w-prose text-xs text-muted-foreground">
-          {row.has_live_term ? t("attentionReadyToSchedule") : t("attentionNeedsTerm")}
+          {next === "configure_schedule"
+            ? t("attentionReadyToSchedule")
+            : next === "state_service_period"
+              ? t("attentionNeedsStatedTerm")
+              : t("attentionNeedsTerm")}
         </span>
       </div>
-      {row.has_live_term ? (
-        <Link
-          href={prepaymentCreateHref(clientId, row.entry_id)}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-        >
-          {t("attentionConfigure")}
-        </Link>
-      ) : (
+      {next === "record_document_service_period" && row.document_id !== null ? (
         <Link
           href={activityDocumentsHref(clientId, row.document_id)}
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
           {t("attentionOpenDocument")}
+        </Link>
+      ) : (
+        // BOTH remaining acts land on the SAME destination with the recognition prefilled: the
+        // configure form is where the statement is made and where the schedule is configured, so a
+        // person who has to do both does not have to find the page twice. The LABEL differs,
+        // because the two acts are different and the button must say which one it is.
+        <Link
+          href={prepaymentCreateHref(clientId, row.entry_id)}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          {next === "state_service_period" ? t("attentionStateTerm") : t("attentionConfigure")}
         </Link>
       )}
     </li>

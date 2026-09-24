@@ -1,0 +1,51 @@
+{
+  "axis": "standards",
+  "lane": "wave4-lane05",
+  "fixed_point": "cd2925391",
+  "diff_command": "git diff cd2925391...HEAD",
+  "commit_range_command": "git log cd2925391..HEAD --oneline",
+  "tickets_reviewed": [933, 871],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/db/README.md (house migration law, #309/#867 sections)",
+    "packages/runtime/README.md",
+    "apps/web/README.md",
+    ".claude/skills/code-review/SKILL.md (smell baseline)"
+  ],
+  "summary": "Both tickets follow documented house law closely. Migration 0309 has header, prestate pins (measured on clara_l05, not transcribed), the change, tail assertions that re-measure every premise, a stable-stem preintegration gate, a rig-meta cohort entry, and a gate-chain entry in migration order -- all present and internally consistent with what the tail actually checks. SECURITY DEFINER, search_path and ACL are correctly asserted; the new table (clara.invite_preview_attempts) is FORCE RLS with a single owner-only policy and the tail proves zero application-role grants. No applied migration was edited, no frozen workflow body or PRD/ARCHITECTURE file was touched (confirmed by diff and by the frozen-workflow census in the ticket report). Tests are written at the seams the briefs name (real HTTP routes, real least-privileged DB roles via `set role`, rendered DOM through public props), use independent literals rather than tautological recomputation, and commits pair each slice's test with its minimal implementation rather than batching red tests ahead of code. Two Duplicated Code smells (judgement calls, not violations) are worth the integrator's attention; one cross-package duplication is already disclosed and defended in the ticket report rather than hidden.",
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 933,
+      "severity": "minor",
+      "category": "duplicated-code",
+      "title": "The proposal open/seed/reset cycle is duplicated near-verbatim across two components",
+      "file": "apps/web/components/registers/fa-row-actions.tsx and apps/web/components/firm/fixed-asset-incomplete-affordance.tsx",
+      "evidence": "fa-row-actions.tsx (CompleteParticularsDialog): `const [proposal, setProposal] = useState<FaParticularsProposal | null>(null);` then an `onOpen` handler: `void loadAssetParticularsProposal(sessionTokenAccessor, { clientId, assetId: asset.id }).then((p) => { if (p === null) return; setProposal(p); setParticulars((current) => current === EMPTY_PARTICULARS ? particularsFromProposal(p, current) : current); });` and an `onClosed` handler that does `setProposal(null); setParticulars(EMPTY_PARTICULARS);`. fixed-asset-incomplete-affordance.tsx (FixedAssetIncompleteAffordance) repeats the identical shape: its own `proposal` state, an `openForm` function with the same `loadAssetParticularsProposal(...).then(...)` body and the same `current === EMPTY_PARTICULARS ? particularsFromProposal(p, current) : current` guard, and a `cancel` function that resets both `proposal` and `particulars` the same way. Both components even carry the same explanatory comment about protecting an in-flight typist from a late-arriving suggestion.",
+      "required_fix": "Extract the shared behaviour into one hook (e.g. `useAssetParticularsProposal(sessionTokenAccessor, {clientId, assetId}, {emptyValue, applyTo})` returning `{proposal, seedOnOpen, resetOnClose}`) that both components call, per Fowler's Duplicated Code remedy (extract the shared shape, call it from both). A judgement call, not a hard violation -- no documented repo standard requires or forbids this shape, and the current duplication is small enough that a reviewer may accept it as-is."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 933,
+      "severity": "note",
+      "category": "duplicated-code",
+      "title": "Two presentational \"Clara's proposal\" note components render the same shape from parallel types",
+      "file": "apps/web/components/registers/fa-proposal-note.tsx and apps/web/components/work/work-question-form.tsx (ProposalNote)",
+      "evidence": "fa-proposal-note.tsx's `FaProposalNote`: heading paragraph + reason paragraph + help paragraph, gated on `proposal === null || proposal.reason.trim() === \"\"`. work-question-form.tsx's local `ProposalNote` (lines ~927-940): the same three-paragraph shape, the same trim-and-empty gate, a different `data-testid` and a different `useTranslations` namespace (`WorkQuestion` vs `FixedAssetsDepreciation.particulars`). The two read from structurally similar but distinct `FaParticularsProposal` types (the register lib's vs `readFaParticularsProposal`'s conversation-side read).",
+      "required_fix": "A lower-confidence judgement call than STD-1: the two components read different types via different entry points (a prop vs `record.source_ref`), so a shared component would need a small adapter. Worth a look if a fourth entrance is ever added; not required now. No documented standard is violated."
+    },
+    {
+      "id": "STD-3",
+      "ticket": 933,
+      "severity": "note",
+      "category": "duplicated-code",
+      "title": "The proposal's wire-contract validation is hand-duplicated between packages/runtime and apps/web, disclosed and defended rather than hidden",
+      "file": "apps/web/lib/registers/fa-particulars-proposal.ts (readFaParticularsProposal) vs packages/runtime/lib/fa-particulars-proposal.ts (faParticularsProposalSchema)",
+      "evidence": "apps/web's `readFaParticularsProposal` re-implements, field by field, the same admission rules the runtime's zod schema (`faParticularsProposalSchema`) encodes -- method enum membership, integer bounds on useful_life_months/rate_bps/residual_cents, the date regex, the description length. The web file's own header states this plainly: \"THIS IS A SECOND IMPLEMENTATION OF ONE CONTRACT ... apps/web has no dependency on @clara/runtime ... kept in step the way lib/work/question-fields.ts keeps its own pair in step: one written grammar, one live database battery that drives it\".",
+      "required_fix": "No action required -- this is Duplicated Code per the smell baseline, but it is an explicit, reasoned exception forced by a real module boundary (no @clara/runtime import in apps/web) and it is already documented in the ticket report and in the file's own header, with a stated drift-detection mechanism (packages/db/tests/fa-particulars-proposal.test.mjs measuring the transport on a live database). Recorded here only so the integrator sees it was surfaced and weighed, not missed."
+    }
+  ]
+}

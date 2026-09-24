@@ -23,10 +23,11 @@ import {
 //     every assertion it ever had;
 //   * a cell whose subject IS the propose door's own congruence validation (W41-W43) asserts the
 //     door's retirement above the frontier and runs the whole law below it. Those validations
-//     still guard `clara._propose_adjustment_template_core`, which the PARKED agent prepayment
-//     limb (`clara.wake_establish_prepayment_schedule`) still reaches -- 0282 leaves that core
-//     untouched by design -- but no live caller can supply an arbitrary schedule any more, so the
-//     wall has no reachable violator to be driven with. That residual is recorded in the fix
+//     still guard `clara._propose_adjustment_template_core` -- 0282 leaves that core untouched by
+//     design -- but no live caller can supply an arbitrary schedule any more: `clara.wake_
+//     establish_prepayment_schedule` (0140's agent prepayment limb) no longer reaches it either,
+//     rerouted onto `clara._prepayment_schedule_core` instead (migration 0315, #1036), so the wall
+//     has no reachable violator to be driven with at all. That residual is recorded in the fix
 //     report rather than left as a silent green.
 
 let skipped = 0;

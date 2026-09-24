@@ -33,6 +33,11 @@ import { buildInfo } from "../lib/build-info.mjs";
 // ({class: identifier}) ride the same import-here-pass-in shape. `workflowNames` answers
 // "which CLASSES", which is not the question a rollback preflight asks; these two are.
 import { workflowBodies, workflowNames, workflowPins } from "../workflows/registry.js";
+// #1035 — the DOOR CONTRACTS this image understands, passed in beside the body roster. Not for the
+// TypeScript reason the others give (this module is plain ESM and resolves fine): this route is
+// what makes the payload speak for THIS image, so every roster it reports is handed to it here,
+// and a reader looking for "what does build-info claim about this build" finds them in one place.
+import { RUNTIME_CONTRACT_IDS } from "../lib/runtime-contracts.mjs";
 // #623 / C88.8 — the serving bundle identity rides the SAME import-here-pass-in shape as the
 // registry names above, and for the same reason: lib/build-info.mjs is plain-Node .mjs and cannot
 // resolve a TypeScript module without a build.
@@ -65,6 +70,11 @@ export function buildInfoRoutes(): express.Router {
         names: workflowNames,
         bodies: workflowBodies,
         pins: workflowPins,
+        // #1035 — the rollback preflight's `--target-build-info` door reads this off a RUNNING
+        // target, and its `--target-bundle` door reads the same ids out of the artifact's own
+        // markers. One vocabulary, two doors: the answer may not depend on which one an operator
+        // could reach.
+        contracts: RUNTIME_CONTRACT_IDS,
         // NEWEST FIRST, and EVERY retained body — the same roster the world-start banners log and
         // the rollback preflight enumerates. A payload that named only the pin would leave an
         // operator unable to tell, from an HTTP read alone, which bodies this process can still

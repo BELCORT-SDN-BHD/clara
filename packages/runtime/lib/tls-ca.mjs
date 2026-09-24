@@ -65,7 +65,7 @@ export const EXPECTED_CA_FINGERPRINT_SHA256 =
   "80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA";
 
 /**
- * Every DSN variable whose TLS posture this assert reads. The seven lane logins plus the two
+ * Every DSN variable whose TLS posture this assert reads. The EIGHT lane logins plus the two
  * base sources the durable engine and the relay resolve from — WORKFLOW_POSTGRES_URL is the
  * world's own DSN and gets no less scrutiny than a lane's.
  *
@@ -84,6 +84,14 @@ export const TLS_CHECKED_DSN_VARS = Object.freeze([
   "CLARA_BANK_DATABASE_URL",
   "CLARA_STRIPE_WEBHOOK_DATABASE_URL",
   "CLARA_AUTH_WALL_DATABASE_URL",
+  // #871 (0309): the signed-out invite-preview lane — the EIGHTH, added the moment
+  // lib/lane-probe.mjs's LANE_ROSTER took it. What this assert governs is the CA PIN obligation
+  // on every DSN this image connects with, and a lazily-configured lane carries it exactly like
+  // an eager one: the credential is an operator ceremony that follows 0309, and when it arrives
+  // it must arrive with `sslrootcert` and a verifying `sslmode` like every other lane's. An
+  // unset variable is simply skipped by the reader below, so listing it costs a lane that has
+  // not been provisioned nothing.
+  "CLARA_INVITE_PREVIEW_DATABASE_URL",
   "WORKFLOW_POSTGRES_URL",
   "DATABASE_URL",
 ]);

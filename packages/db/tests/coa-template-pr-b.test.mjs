@@ -928,7 +928,7 @@ test("§5.2 M3 + M4 MUTANTS: the relabel and the suppression are produced by the
   const soc1 = await newInterviewClient(world.users.alice, world.firms.A, { tag: "m3", answers: { entity_type: "society" } });
   const m3 = await withRolledBackTx(async (c) => {
     await c.query("set local role clara_fn_owner");
-    await c.query("delete from clara.coa_template_entity_overrides where entity_type = 'society' and account_code = '3900'");
+    await c.query("delete from clara.coa_template_entity_overrides where template_id = $1 and entity_type = 'society' and account_code = '3900'", [starter.id]);
     await c.query("reset role");
     await asHumanOn(c, world.users.bob, "select clara.apply_coa_template($1,$2,null::text[],$3)", [soc1, starter.id, opk("m3")]);
     const r = await c.query("select name from clara.coa_accounts where client_id = $1 and account_code = '3900'", [soc1]);
@@ -940,7 +940,7 @@ test("§5.2 M3 + M4 MUTANTS: the relabel and the suppression are produced by the
   const soc2 = await newInterviewClient(world.users.alice, world.firms.A, { tag: "m4", answers: { entity_type: "society" } });
   const m4 = await withRolledBackTx(async (c) => {
     await c.query("set local role clara_fn_owner");
-    await c.query("delete from clara.coa_template_entity_overrides where entity_type = 'society' and account_code = '3040'");
+    await c.query("delete from clara.coa_template_entity_overrides where template_id = $1 and entity_type = 'society' and account_code = '3040'", [starter.id]);
     await c.query("reset role");
     await asHumanOn(c, world.users.bob, "select clara.apply_coa_template($1,$2,null::text[],$3)", [soc2, starter.id, opk("m4")]);
     const r = await c.query("select count(*)::int as n from clara.coa_accounts where client_id = $1 and account_code = '3040'", [soc2]);
@@ -948,8 +948,13 @@ test("§5.2 M3 + M4 MUTANTS: the relabel and the suppression are produced by the
   });
   assert.equal(m4, 1, "M4: delete the suppression row and 3040 is planted alongside -- the mutant BITES");
 
-  // Both rows are back after the rollbacks.
-  assert.equal((await rootQuery("select count(*)::int as n from clara.coa_template_entity_overrides")).rows[0].n, 2,
+  // Both rows are back after the rollbacks. PER TEMPLATE, not a global census: the override table
+  // is keyed by template_id (0156:401) and the estate now ships more than one platform version
+  // (0295), so a global `count(*) = 2` would be satisfied by a version that carries NONE of them --
+  // which is exactly the omission 0295's review caught.
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.coa_template_entity_overrides where template_id = $1",
+    [starter.id])).rows[0].n, 2,
     "the shipping override rows survived both mutants");
 });
 

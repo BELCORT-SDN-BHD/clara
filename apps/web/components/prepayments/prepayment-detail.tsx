@@ -156,8 +156,14 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
             KEYED ON `term_moved`, NEVER ON `term_live` (ADV-02). `clara._record_document_service_period_core`
             supersedes the live row unconditionally — it compares no dates — so `term_live` goes
             false on a re-record that restates the term byte for byte. This banner says the term
-            "has since been corrected" and that the schedule needs rebuilding; on an unchanged term
-            that is a false statement of fact and wrong advice about a running amortisation.
+            "has since been corrected"; on an unchanged term that is a false statement of fact and
+            wrong advice about a running amortisation. What it says about the REMEDY is #939 AC4's
+            own sentence, and migration 0317 is what made it true: THIS schedule's allocation is a
+            derived record and is never edited, and the balance it has not charged is taken over by
+            `clara.replace_prepayment_schedule`, which opens a replacement from the first month the
+            plan has not taken up. It still does not offer a plain reconfiguration:
+            `uq_prepayment_schedules_source_live` admits one LIVE schedule per recognition, so
+            `clara.create_prepayment_schedule` refuses a second one whatever the first's status.
 
             `=== true`, NEVER a truthiness test. The field arrives as unvalidated jsonb from
             `clara.get_prepayment_schedule`, and an ABSENT one — a web build ahead of its database,
@@ -177,6 +183,13 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
           <Fact label={t("factTermBasis")}>
             {row.basis_kind === "human_stated" ? t("factBasisHuman") : t("factBasisExtracted")}
           </Fact>
+          {/* #939 — WHICH CARRIER the term came from. `basis_kind` above says how the term was
+              ARRIVED AT (stated by a person versus read off a page by an extraction); this says
+              WHERE IT LIVES, which is the fact that decides whether there is a document to open at
+              all. Two different questions, so two facts rather than one overloaded word. */}
+          <Fact label={t("factTermSource")}>
+            {row.term_source === "human_stated" ? t("termSourceStated") : t("termSourceDocument")}
+          </Fact>
           <Fact label={t("factPrepaid")}>{row.prepaid_account_code}</Fact>
           <Fact label={t("factExpense")}>{row.expense_account_code}</Fact>
           {/* THE JUDGEMENT'S OWN GROUNDS, rendered rather than stored and forgotten. It is the one
@@ -190,6 +203,45 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
           <Fact label={t("factEvaluator")}>{row.schedule_version}</Fact>
         </dl>
 
+        {/* #939 — WHO STATED THE TERM, WHEN AND WHY. On the memo-only lane this trio IS the
+            evidence: there is no invoice to open behind it, so the reason a named person gave is
+            the whole audit trail a reviewer has. It is rendered as its own block rather than three
+            more cells in the grid above, because it is a statement by a person and reads as one.
+            `=== "human_stated"` rather than a truthiness test on `term_reason`, for the reason the
+            corrected-term banner states: an absent field must paint nothing. */}
+        {row.term_source === "human_stated" ? (
+          <div
+            className="flex flex-col gap-2 rounded-md border border-info/30 bg-info-muted/40 p-3"
+            data-testid="prepayment-term-stated"
+          >
+            <p className="max-w-prose text-sm">{t("termStatedNote")}</p>
+            {/* #1036 fix round / ADV-02 — THE STATEMENT IS THERE AND IT IS NOT YOURS TO READ.
+                Below `clara.role_rank('bookkeeper')` the read returns the trio null and this flag
+                true (migration 0315 §E). Painting three em-dashes would read as "nobody said why",
+                which is a false statement of fact about a schedule someone DID justify -- so the
+                block says what is true and who may see it, which is the standing ruling that a
+                wall prompts rather than going dark. `=== true`, never a truthiness test: the field
+                arrives as unvalidated jsonb and an ABSENT one (a web build ahead of its database)
+                is falsy. */}
+            {row.term_reason_withheld === true ? (
+              <p
+                className="max-w-prose text-sm text-muted-foreground"
+                data-testid="prepayment-term-reason-withheld"
+              >
+                {t("termReasonWithheld")}
+              </p>
+            ) : (
+              <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Fact label={t("factTermStatedBy")}>{row.term_stated_by ?? "—"}</Fact>
+                <Fact label={t("factTermStatedAt")}>
+                  {row.term_stated_at === null ? "—" : row.term_stated_at.slice(0, 10)}
+                </Fact>
+                <Fact label={t("factTermReason")} wide>{row.term_reason ?? "—"}</Fact>
+              </dl>
+            )}
+          </div>
+        ) : null}
+
         <span className="flex flex-wrap gap-2">
           <Link
             className={buttonVariants({ variant: "outline", size: "sm" })}
@@ -197,12 +249,17 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
           >
             {t("openEntry")}
           </Link>
-          <Link
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-            href={activityDocumentsHref(clientId, row.document_id)}
-          >
-            {t("openDocument")}
-          </Link>
+          {/* #939 — NO DOCUMENT, NO LINK. A memo-only schedule's `document_id` is NULL, and a
+              button leading to `?document=null` is worse than no button: it promises evidence that
+              does not exist. */}
+          {row.document_id === null ? null : (
+            <Link
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              href={activityDocumentsHref(clientId, row.document_id)}
+            >
+              {t("openDocument")}
+            </Link>
+          )}
           <Link
             className={buttonVariants({ variant: "outline", size: "sm" })}
             href={planDetailHref(clientId, row.plan_id)}

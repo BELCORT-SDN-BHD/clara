@@ -1,0 +1,149 @@
+{
+  "axis": "spec",
+  "lane": "wave 4 · lane 07",
+  "branch": "riders/w4-lane07",
+  "fixed_point": "cd2925391",
+  "diff": "git diff cd2925391...HEAD  (35 files, +1854 / -153)",
+  "commits": [
+    "aaf2cf21b fix(ci): #1041 the Wave-A drill database name the cleanup can actually drop",
+    "d5588321c fix(db): #1041 the x41 rig speaks the revise door's grammar at BOTH frontiers",
+    "52c180092 fix(db): #1041 the d-b1 claiming-door censuses are frontier-keyed",
+    "28045cc20 fix(ci): #1041 the frontier legs preload the estate's gate chain, and the floor counts cells",
+    "574d86e66 fix(db): #1041 the 0041 drill's four seeds are four name families",
+    "f16566816 feat(runtime): #1035 an image declares the door contracts it understands",
+    "36d0b3355 fix(runtime): #1035 the rollback preflight refuses an image that misreads a door",
+    "a84401dc5 feat(runtime): #1035 /api/build-info reports the door contracts this image understands",
+    "3dc0b0184 test(runtime): #1035 both cutover drills hand the preflight their own contract roster",
+    "447ebacb7 docs(runtime): #1035 the preflight module header states both kinds of frontier rule",
+    "6a8314aac test(runtime): #1033 settleLaneUntil keeps the world/control heartbeats fresh while it polls",
+    "49bfad419 test(runtime): #877 a Tier-A-complete fixture reaches admitted, by name"
+  ],
+  "spec_sources": [
+    "gh issue view 1041 --repo BELCORT-SDN-BHD/clara (Agent Brief in the body; no later comment)",
+    "gh issue view 1035 (Agent Brief in the body; no comments)",
+    "gh issue view 1033 (Agent Brief in the body; no comments)",
+    "gh issue view 877 (body + Agent Brief comment, belcorttao 2026-09-17 — the newest word)"
+  ],
+  "verdict": "accept-with-fixes",
+  "reverification_run_by_this_reviewer": [
+    "#1041 — rebuilt the d-b0 frontier rig myself (clara_rev_b0_ci, CLARA_MIGRATIONS_DIR pointed at a 41-file copy through 0042, 41 applied): the d-b0 list WITH the derived gate chain reads 153 tests / 149 pass / 0 fail / 4 skipped, exactly the declared '#!cells-floor: 153' and '#!skips-max: 4'. WITHOUT the gates the same list reads 153 / 148 pass / 1 fail / 4 skip, the one red being 'x41.b3 the enrolled_at watermark…' — defect #2 in the report. Database dropped afterwards through rig-cluster-reset.mjs --drop-database (never --sweep-roles); the cluster is back to clara_l07, postgres, template0, template1.",
+    "#1041 — the cross-slice contract roster at 0042: 12 tests / 4 pass / 0 fail / 8 skipped, IDENTICAL with and without the gate chain, reproducing the report's claim that preloading does not quieten an asserting cell.",
+    "#1041 — the four new db cells plus the compat cell on clara_l07 @0295 under the full 106-gate chain: 9 tests / 9 pass / 0 fail / 0 skipped.",
+    "#1035 — tests/rollback-preflight.test.mjs + runtime-contracts.test.mjs + l9-build-info.test.mjs on clara_l07: 61 tests / 39 pass / 0 fail / 22 skipped (the 22 are the pre-existing WDK-World-gated cells).",
+    "#1033 — VACUITY CONFIRMED. A copy of ready.test.mjs with ONLY settleLaneUntil's two setBeat lines removed fails the new cell ('actual: false', duration 35061 ms); the unmodified cell passed 3/3 (35.1-35.3 s each). I also proved the underlying clock independently: a standalone probe that beats once and reads checkReadiness at t=1.2 s / 21.5 s / 37.1 s gives world ok:true, ok:true, ok:false (age 36540 ms) — the 30 s window is real and nothing else refreshes it.",
+    "#877 — verified the two load-bearing catalog facts on clara_l07: clara.sweep_run_items.outcome's CHECK enum is ('drafted','skipped_lane','refused_budget','refused_concurrency','refused_attempts','noop_existing','posted') with NO 'admitted' member, and clara.admit_autodraft_task's admitted path returns clara._finish_op(... 'outcome','admitted' ...) under op_key 'autodraft:<filing>:<origin>' and writes NO sweep_run_items row (the only insert past it is the noop_existing exception arm). The report's choice of op_receipts over sweep_run_items is correct.",
+    "#1041 AC5 — .github/workflows/ci.yml is byte-unchanged in this diff; at base cd2925391 it already carries `schedule: - cron: \"23 19 * * 3\"` and both dispatch-only jobs already carry `if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'`. The 'already satisfied' claim is true.",
+    "CI=true GITHUB_ACTIONS=true pnpm lint at the repo root: exit 0."
+  ],
+  "findings": [
+    {
+      "id": "SPEC-1041-B",
+      "ticket": 1041,
+      "severity": "minor",
+      "kind": "unrequested-behaviour-with-no-guard",
+      "title": "The gate chain was also preloaded into the contract-roster step (3c) and the isolated drill step (4), neither of which has a cell floor or a skip bound",
+      "evidence": "The brief asks for preloading on '.github/actions/frontier-leg and the slice lists it runs'. action.yml now also runs `GATES=\"$(node scripts/print-gate-chain.mjs)\"` in step (3c) (the cross-slice contract roster) and step (4) (the slice's own reset-gated upgrade drill). Step (3c) asserts only `FAIL = 0`; step (4) asserts nothing beyond node --test's exit code. The `#!cells-floor:` / `#!skips-max:` pair the same commit introduces is declared ONLY in tests/split-lists/test-list-d-b*.txt and checked only in step (3b) and in partition-total. A future gate module that stands a roster or drill cell down would therefore make those two steps green with less measured — the exact silent rot this ticket exists to close, and the drill step is the one that caught #899's name-family failure in run 35893727271. Nothing is masked today: I measured the roster at 0042 as 12/4/0/8 with AND without the gates.",
+      "required_fix": "Either give step (3c) and step (4) their own declared floor and skip bound (the roster already has its own list file, tests/split-lists/test-list-contracts.txt, which could carry the two directives), or state in the action why those two steps are deliberately unbounded. Acceptable as a follow-up ticket rather than a change in this wave."
+    },
+    {
+      "id": "SPEC-1041-A",
+      "ticket": 1041,
+      "severity": "minor",
+      "kind": "requirement-implemented-differently",
+      "title": "The change_class cells got a frontier-compat FIXTURE, not the gate module or premise check the brief named",
+      "evidence": "Ticket #1041, Key interfaces: '… do the same for the `change_class` grammar cells (their gate module, or a premise check of the same shape).' The diff does neither for those cells: packages/db/tests/fa-authority-sign-compat.mjs adds `reviseTakesChangeClass()` keyed on the applied-history stem `depreciation_history$`, and x41-fa-fixtures.mjs's `reviseParticulars` OMITS `change_class`/`change_reason` below 0227 instead of letting the cell stand down. Consequence, which brushes the ticket's own out-of-scope line ('Changing what the slice lists assert'): at frontier 0042 those 26 cells drive a revise payload the CURRENT door would refuse, so what they exercise there is the pre-0227 grammar. I confirmed the cells pass at 0042 (153/149/0/4) and that fa-rig-frontier-compat.test.mjs cross-checks the switch against the live door on both arms.",
+      "required_fix": "No code change demanded — the choice is argued in the report ('a gate lets a cell stand down; 26 d-b0 cells would then have dropped out') and it preserves coverage the brief's option would have lost. Record the deviation on the ticket when closing it, so the brief's 'gate module or premise check' line is not later read as what shipped."
+    },
+    {
+      "id": "SPEC-1035-A",
+      "ticket": 1035,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "The named key interface 'the release runbook template: step 9 cites the preflight as the authority' has no artifact in the diff",
+      "evidence": "Ticket #1035, Key interfaces, third bullet: 'The release runbook template: step 9 cites the preflight as the authority for a runtime rollback again once this ships.' No runbook is touched, and there is no template file in the repo — docs/plan/active/riders-2026-09-20/ holds only the as-run RELEASE-W2-RUNBOOK.md and RELEASE-W3-RUNBOOK.md. The report's reasons for not editing either are sound and I checked them: W2's § RESULTS is an as-run record dated 2026-09-23, and W3's as-run landed on main after this branch's base. The durable statement is in packages/runtime/README.md; the exact step-9 wording exists only in the ticket report's 'Deliberate choices' item 2.",
+      "required_fix": "Carry the report's step-9 paragraph into the wave-4 release runbook when it is written, and say so on the ticket, so the key interface closes on an artifact rather than on a report the next release author may not read."
+    },
+    {
+      "id": "SPEC-877-A",
+      "ticket": 877,
+      "severity": "minor",
+      "kind": "acceptance-criterion-met-under-a-reading",
+      "title": "AC3 'no human act … appears in the leg' holds only under the report's own re-reading of where the leg begins",
+      "evidence": "AC3: 'No human act and no recovery door appears in the leg.' Leg 8's code drives six human doors before the bytes ever arrive — clara.upsert_account twice, clara.record_client_resolution, clara.draft_entry, clara.approve_entry, clara.grant_client_egress — all through rig.humanQuery(owner, …), plus clara.reconcile_sweep_runs() through rig.rootQuery. The report classifies these as 'PRECONDITION SETUP … the client's PRE-EXISTING state, not the leg', citing primeReadyFiling's own distinction, and the brief's Desired behavior does require 'client state and firm state' that satisfy the lane, so the reading is defensible and is written into the file's own comment. What AC3 verifiably does get: no recovery door — the file's pre-existing AUTOMATIC_LANE source census asserts no request_autodraft across lib/intake.mjs, intake-lanes.mjs, intake-recovery.mjs, autodraft.mjs, facts-gate.mjs and src/intakeRoutes.ts, and leg 8 adds no call to it; and fileToClient is the same single human act leg 1(c) already claims.",
+      "required_fix": "None demanded. When closing #877, tick AC3 with the boundary spelled out ('no human act between the bytes landing and the admission, precondition setup excepted'), so the criterion is not later read as literally satisfied."
+    },
+    {
+      "id": "SPEC-877-D",
+      "ticket": 877,
+      "severity": "minor",
+      "kind": "evidence-gap",
+      "title": "The e2e file was never observed to exit 0: its closing waitForQueueDrain timed out on every run, and the leg ran neither on the lane database nor under WSL",
+      "evidence": "The report's gate row claims '2 clean 8/8 legs PASS', while its own Unverified section says 'The file's own closing waitForQueueDrain() step timed out in my ad hoc verification runs' on pre-existing wake residue. Both can be true (leg 8 is the last leg, the drain follows it), but it means the file's terminal line 'INTAKE ADMISSION E2E: PASS (8 legs …)' was never printed and the driver never exited 0 — which is what CI's db-live-gates job measures. The runs were against a clone (clara_877, TEMPLATE clara_l07, World bootstrapped) rather than the lane database, because local-db-gate.mjs's pattern does not admit the clara_lNN shape; and, unlike #1035, neither this leg nor #1033's new cell was run under WSL as `runner`, which the lane's own instruction asks for new runtime tests.",
+      "required_fix": "Before integration, run packages/runtime/tests/intake-admission-e2e.mjs once to completion on a database without the stray rig_muei1d59_* wake state (or drain it first) and record the exit code, and run the two new runtime cells once under WSL as `runner` per the RIG.md wave-3 addendum."
+    },
+    {
+      "id": "SPEC-877-C",
+      "ticket": 877,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "AC4's corrected residual sentence names only tier_a_fails, while arm (c)'s own printed verdict names four reasons",
+      "evidence": "AC4: 'The reached-and-skipped leg still passes and its residual sentence is corrected.' The corrected text, in intake-admission-e2e.mjs's header and in packages/runtime/README.md, says arm (c)'s document is refused because it 'states no tax breakdown, so its structured Tier-A arithmetic tie is incomplete (tier_a_fails)'. The report's own quoted leg-1 output for the same run reads reasons [\"tier_a_fails\",\"direction_unresolved\",\"vendor_unresolved\",\"no_consent\"]. The stale 'measured on clara_633' claim IS removed and the leg does print the door's exact reasons rather than a fixed list, so the correction's main defect is fixed; the replacement sentence now understates the residual by three reasons.",
+      "required_fix": "One line: restore the other three reasons (or write 'tier_a_fails among others — the leg prints them') in the header comment and in the README paragraph."
+    },
+    {
+      "id": "SPEC-877-B",
+      "ticket": 877,
+      "severity": "minor",
+      "kind": "test-environment-workaround-inside-the-leg",
+      "title": "Leg 8 calls clara.reconcile_sweep_runs() as root to clear a concurrency budget that legs 1-7 exhausted",
+      "evidence": "Inside leg 8: `await rig.rootQuery(\"select clara.reconcile_sweep_runs() as r\")`, with a comment explaining that the shared mock classifier marks every document `invoice`, so legs 1-7 each opened a sweep run that never closes inside this file's own run, and that without the reconcile leg 8's admission is refused `refused_concurrency`. AC5 says 'Any lane reason unreachable through the automatic chain is named as a residual, not seeded around.' The report's defence is accurate — refused_concurrency is a resource-scheduling refusal, not one of _coding_lane_core's own preconditions (I read the door's source: the lane predicate's reasons are open_draft, already_coded, facts_pending, multi_doc, non_myr, tier_a_fails, direction_unresolved, vendor_*, customer_ambiguous, binding_ambiguous, open_question, no_consent, parked, high_stakes, near_duplicate), and reconcile_sweep_runs is the estate's own idle-cleanup door that queue-drain.mjs and the consumer's catch-up pass already call. It remains a root-privileged act inside the leg whose only purpose is to make the admission reachable, and it couples leg 8's outcome to how many documents the earlier legs upload.",
+      "required_fix": "None demanded; keep the comment. If legs are ever reordered or added, re-check that the reconcile still runs after the last of the earlier legs' sweeps opened."
+    },
+    {
+      "id": "SPEC-1033-A",
+      "ticket": 1033,
+      "severity": "minor",
+      "kind": "acceptance-criterion-proved-by-proxy",
+      "title": "AC1 names the disconnect-and-recover cell, but the red-before-green was driven on a NEW cell; the original cell was never shown red",
+      "evidence": "AC1: 'The disconnect-and-recover fault-injection cell cannot fail due to an unrelated heartbeat going stale while it is legitimately still waiting for its own injected fault to be recorded.' The fix is in the shared helper settleLaneUntil (ready.test.mjs:503), which the original '#617 fault: a lane DISCONNECTS…' cell calls twice, so it does inherit the refresh. The evidence offered is a new cell (ready.test.mjs:595) that forces the collision with CLARA_LANE_PROBE_CYCLE_MS=50 and CLARA_LANE_PROBE_INTERVAL_MS=35000; the original cell was only ever run green. I re-ran the vacuity myself and it holds for the NEW cell (fix removed from settleLaneUntil -> 'actual: false' at 35061 ms; unmodified -> 3/3 green), so the mechanism claim is sound; the inheritance to the original cell is argued, not measured. I also confirmed settleLaneUntil has exactly two callers (the original cell's two calls and the new cell), so the refresh cannot mask another cell — in particular 'ready: world ON with a STALE control beat FAILS' does not use the helper, and AC2 holds: this ticket's only file is packages/runtime/tests/ready.test.mjs, with lib/health.mjs and lib/lane-probe.mjs untouched.",
+      "required_fix": "None demanded. If the orchestrator wants AC1 measured on its own subject, one run of the original cell with the helper's refresh removed and the same two env knobs set would close it."
+    },
+    {
+      "id": "SPEC-1041-C",
+      "ticket": 1041,
+      "severity": "note",
+      "kind": "acceptance-criterion-unconfirmable-here",
+      "title": "AC1, AC3's drill execution and the six never-run closed-wave steps are still open and need the orchestrator's dispatch; AC5 needed no ci.yml change",
+      "evidence": "AC1: 'gh workflow run ci.yml --ref <branch>: db-slice-frontiers d-b0 to d-b3 and closed-wave-drills all green; the run id is recorded in the ticket report.' AC3: 'The 0041 drill passes on the current main chain with the name-family wall live.' The report names both correctly under 'Needs the orchestrator's dispatch' and claims neither. AC3's fixture half IS proven (p1041.drill.name_family and p1041.drill.name_source, both green in my own run). AC5's ci.yml half needed no change and none was made: the weekly `schedule` trigger and both jobs' `if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'` guards all predate the base commit, verified by `git show cd2925391:.github/workflows/ci.yml`, and `git diff cd2925391...HEAD -- .github/workflows/ci.yml` is empty. The terminal `ci` job already fails closed both ways.",
+      "required_fix": "Dispatch ci.yml on riders/w4-lane07 before integration and record the run id against AC1. Do not expect a ci.yml hunk in this branch. Read the six closed-wave steps that never executed in run 35893727271 (Wave-D-b split upgrade, Hardening-A, Hardening-B, 0186 checkout-convergence, Slice-4 runtime upgrade/cutover, Wave-A 0011 parity) as first-execution results, not as regressions from this lane."
+    },
+    {
+      "id": "SPEC-1035-B",
+      "ticket": 1035,
+      "severity": "note",
+      "kind": "evidence-qualification",
+      "title": "AC3's '55 bodies' fixture uses synthetic body names, so the 2026-09-23 case is reproduced by SHAPE, not by the real roster",
+      "evidence": "AC3: 'A cell proves the previous hosted image's bundle shape (55 bodies, no marker) is refused at frontier 0272, reproducing the 2026-09-23 case.' tests/rollback-preflight.test.mjs's previousHostedImageBodies() builds claraWork_v1..claraWork_v55. The cell and the report both say so outright, and the AC itself says 'bundle shape'. The load-bearing facts ARE asserted and the cell is green in my run: 55 bodies read back by supportedBodiesFromBundle, zero contracts, refused at 0272, reasons include frontier_requires_contract and EXCLUDE frontier_requires_body, violations name only 0254 (0279 not applied at 0272), and frontierRefusalLines names the reason, the migration, the marker and the frontier.",
+      "required_fix": "None. Recorded so the closure text does not overstate it as a replay of refresh-ddb5a125's actual roster."
+    },
+    {
+      "id": "SPEC-1035-C",
+      "ticket": 1035,
+      "severity": "note",
+      "kind": "scope-beyond-the-issue",
+      "title": "The 0279 fa_parked_run_v1 rule and marker are in the diff; the issue asks only for 0254",
+      "evidence": "Ticket #1035 asks for 'one new rule for 0254, with the mechanism generalised so a future door-contract change adds one row'. The diff adds TWO rows (0254 intake_refusal_record_v1, 0279 fa_parked_run_v1) and two roster entries. This is authorised by the wave rather than by the issue: the lane work order names both instances, and RELEASE-W3-RUNBOOK.md line 619 says '#1035 now has a SECOND instance, and this wave is it.' The 0279 row has its own cell and is not speculative. Also worth recording: the ticket body spells the migration '0254_intake_ceiling_refusal_record', which is not a file in the chain; the real file is packages/db/migrations/0254_intake_refusal_record.sql, and AC4's own selftest cell is what catches that class of typo.",
+      "required_fix": "None. Name the second rule in the ticket closure so the extra row is not later read as unasked-for scope, and note the ticket body's migration-name typo."
+    },
+    {
+      "id": "SPEC-1033-B",
+      "ticket": 1033,
+      "severity": "note",
+      "kind": "cost-of-the-fixture",
+      "title": "The new repro cell costs ~35 s of wall clock, roughly doubling ready.test.mjs's own runtime",
+      "evidence": "The cell deliberately sets CLARA_LANE_PROBE_INTERVAL_MS=35000 so the wait crosses the unshrinkable 30 s heartbeat window with margin; I measured 35.1-35.3 s in each of three runs. The report's own gate row gives the whole file at 44826 ms before this cell existed. The ticket asked for a fix, not for a permanent cell; the lane prompt asked for a bounded reproduction before fixing, which this satisfies. The ticket's out-of-scope lines are respected: the knob is set per-cell and restored in `finally` (along with CLARA_LANE_PROBE_CYCLE_MS and CLARA_START_WORLD), and the injected prober is cleared by _resetLaneProbeCacheForTest, which nulls probeOverride.",
+      "required_fix": "None. Recorded so the runtime leg's duration change is expected."
+    }
+  ],
+  "summary": "Twelve findings, none blocking. The four tickets are substantially delivered and everything I could re-drive myself reproduced: #1041's d-b0 leg is genuinely green at its own frontier (153 cells / 149 pass / 0 fail / 4 skip, matching the declared floor and skip bound, against 1 fail without the gate chain), the contract roster is unchanged by preloading, #1035's rule table and bundle scan behave exactly as its cells claim, #1033's fix is a true red-to-green (I removed it and watched the cell fail at 35 s with actual:false), and #877's two load-bearing catalog facts (no 'admitted' member in sweep_run_items.outcome; the admitted path finishes an op_receipt and writes no sweep item) are correct on clara_l07. The worst item on this axis is SPEC-1041-B: the gate chain was preloaded into two frontier-leg steps that carry no cell floor and no skip bound, leaving the door open for exactly the silent rot the ticket set out to close. The rest are one documented deviation from #1041's named key interface, one #1035 key interface with no artifact in the repo, and four #877 items about how AC3/AC4/AC5 are read and about the e2e never having been observed to exit 0."
+}

@@ -69,6 +69,11 @@ import { ephemeralPort } from "./ephemeral-port.mjs";
 // #637 — the census this file used to open-code now lives in the runtime's own module, beside the
 // CLI an operator runs before a rollback. One implementation, two consumers.
 import { bodyIdentifierOf, preflight } from "../lib/rollback-preflight.mjs";
+// #1035 — this drill's "target" is a supported set it names itself, inside ONE image: this one. So
+// the contract roster it hands the preflight is this image's own declaration. Without it every
+// GLOBAL verdict here would carry `frontier_requires_contract` as well, and the legs that assert a
+// refusal would still pass — for a reason they are not about, which is the thing to avoid.
+import { RUNTIME_CONTRACT_IDS } from "../lib/runtime-contracts.mjs";
 import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
 // --- Fail-closed local gate (#1018: shared with every other standalone World e2e driver; the
@@ -237,6 +242,7 @@ async function rollbackPreflight(rig, name) {
   const out = await preflight({
     query: (sql, params) => rig.rootQuery(sql, params),
     supported: [],
+    contracts: [...RUNTIME_CONTRACT_IDS],
     scope: { nameLike: name, runIds: STAGED_RUN_IDS },
   });
   // #637 review B2 — the module now returns TWO verdicts: `verdict` is the GLOBAL one (what the
@@ -266,6 +272,7 @@ async function rollbackPreflightInventory(rig, supportedNames, runIds = STAGED_R
   const out = await preflight({
     query: (sql, params) => rig.rootQuery(sql, params),
     supported: supportedNames.map(bodyIdentifierOf),
+    contracts: [...RUNTIME_CONTRACT_IDS],
     scope: { runIds },
   });
   // The NARROWED view when this caller narrowed, the GLOBAL one when it did not — which is exactly
@@ -509,6 +516,7 @@ async function main() {
       const full = await preflight({
         query: (sql, params) => rig.rootQuery(sql, params),
         supported: [v7RowName, closeExampleName].map(bodyIdentifierOf),
+        contracts: [...RUNTIME_CONTRACT_IDS],
         scope: { runIds: STAGED_RUN_IDS },
       });
       assert.equal(full.scoped.verdict, "allowed", "#708: SCOPED to this e2e's own runs, 20 unrelated parked runs change nothing");

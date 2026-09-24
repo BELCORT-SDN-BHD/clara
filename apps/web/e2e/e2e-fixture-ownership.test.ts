@@ -65,6 +65,7 @@ const LANE_MOCKS = [
   "chat-parity-mock.mjs",
   "client-create-mock.mjs",
   "counterparty-identity-mock.mjs",
+  "deferred-revenue-mock.mjs",
   "depreciation-mock.mjs",
   "document-correction-mock.mjs",
   "documents-intake-mock.mjs",
@@ -80,12 +81,14 @@ const LANE_MOCKS = [
   "members-lifecycle-mock.mjs",
   "opening-ledger-source-mock.mjs",
   "operator-support-mock.mjs",
+  "payroll-settlement-mock.mjs",
   "periodic-adjustment-mock.mjs",
   "plans-mock.mjs",
   "prepayments-mock.mjs",
   "staff-advances-register-mock.mjs",
   "staff-expense-claim-mock.mjs",
   "tax-boundary-mock.mjs",
+  "tenancy-rent-plan-mock.mjs",
   "trade-invoice-mock.mjs",
   "work-knowledge-mock.mjs",
   "work-list-mock.mjs",
@@ -510,6 +513,18 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // own guard (`if (body?.client !== PA.clientId) return false;`) and the walk's `control()` helper
   // names the lane on every call. The state a walk injects is this lane's alone.
   "periodic-adjustment-mock.mjs": { unscopeable: [], debt: [] },
+  // #947's own lane (the payroll settlement panel, reusing #657's client id — see that module's
+  // header for why). Both its verbs (get_payroll_settlement_candidates, settle_payroll_net_pay)
+  // gate on `body.p_client !== P947.clientId` before answering. Declares neither list, the shape
+  // a new lane mock should aim for.
+  "payroll-settlement-mock.mjs": { unscopeable: [], debt: [] },
+  // #949's own lane (the Documents detail's tenancy terms-and-rent-plan panel). Its own client
+  // and its own `7e4a4c47-` document-id prefix: every table read names one of them before it
+  // answers, and all three RPC verbs (get_contract_terms, get_tenancy_rent_plan_draft,
+  // confirm_tenancy_rent_plan) gate on this lane's own document prefix or client id before
+  // answering, behind an exact-verb allow-list checked BEFORE the body is read. Declares neither
+  // list, the shape a new lane mock should aim for.
+  "tenancy-rent-plan-mock.mjs": { unscopeable: [], debt: [] },
   // #640's C9 lane. Every handler names this lane's own client id or plan id before it answers
   // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
   // aim for, declaring neither list.
@@ -604,6 +619,17 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // lifecycle doors this lane REUSES rather than re-cuts, so they are a declared share with
   // `plans-mock.mjs` below, each side gated on its own plan id.
   "prepayments-mock.mjs": { unscopeable: [], debt: [] },
+  // #941's deferred-revenue lane, built to the same shape as the prepayment lane beside it:
+  // every handler names this lane's own client id or schedule id before it answers and falls
+  // through otherwise — the four PostgREST reads (`clients` by `id`, and `coa_accounts`,
+  // `prepayment_account_enrolments` and `accounting_work` by `client_id`) and all four RPC verbs.
+  // The `prepayment_account_enrolments` read is the configure form's roster read, which
+  // `prepayments-mock.mjs` answers for ITS client and this lane for its own; it is a RELATION
+  // read rather than a door, so the verb census below cannot see it and it is declared here
+  // instead. The authority PICKER reads `clara.list_accounting_work`, answered through
+  // `deferredRevenueWorkListPage` beside the three lanes already spliced into `serve-built.mjs`'s
+  // single reader for that verb. None of this lane's four verbs is claimed by any other mock.
+  "deferred-revenue-mock.mjs": { unscopeable: [], debt: [] },
   // #625's membership-lifecycle lane, declaring neither list. Its scope is the signed-in PERSONA
   // rather than a client id, because the three relations it answers carry no client at all — they
   // are firm-altitude reads keyed on the caller. `serve-built.mjs` passes the address it already
@@ -1457,7 +1483,13 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   get_work_pending_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
   get_work_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
   answer_work_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
-  list_review_queue: ["journal-work-mock.mjs", "journals-table-mock.mjs", "tax-boundary-mock.mjs"],
+  // #938 joins as a FOURTH: the Accruals page now reads this same queue (row_kind=
+  // 'accrual_bill_conflict', scoped to its own client), through the SAME useReviewQueue hook the
+  // Needs-you inbox uses. Scoped to ACC.clientId and falls through otherwise — the same declared
+  // share, not a collision. (Sorted alphabetically — the census compares against a sorted array.)
+  list_review_queue: [
+    "accrual-mock.mjs", "journal-work-mock.mjs", "journals-table-mock.mjs", "tax-boundary-mock.mjs",
+  ],
   // #624 AC4 — `clara.get_document_state` is read from TWO surfaces by design: the Documents
   // detail panel and the Work detail's Sources tab mount the SAME component over it, because the
   // criterion is "Documents AND Work show the four states". Each lane answers only for the
@@ -1482,13 +1514,29 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // `depreciation-mock.mjs` on its own two client ids and its own asset id; neither can answer
   // for the other's walk, which is what makes these declared shares rather than collisions.
   get_fixed_asset: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
-  get_depreciation_authority: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
-  list_depreciation_runs: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
-  list_fixed_assets: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
-  fa_register_tie: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
+  // #940 — AND THE PREPAYMENT LANE JOINS FOUR OF THEM, for a reason that is placement rather than
+  // appetite: the per-client PREPAYMENT-ACCOUNT roster panel sits beside the fixed-asset account
+  // profiles on the Registers page, so the roster walk renders that whole tab and the tab's four
+  // reads have to be answered for a client `fixed-asset-mock.mjs` and `depreciation-mock.mjs` do
+  // not own. `prepayments-mock.mjs` answers each one EMPTY — the honest shape each door gives a
+  // client with no fixed assets — and gates every arm on `PREPAY.clientId` first; the two owning
+  // lanes run FIRST in `serve-built.mjs`'s chain and fall through for a client that is not theirs.
+  // `get_fixed_asset` is deliberately NOT joined: the roster walk opens no asset detail.
+  get_depreciation_authority: ["depreciation-mock.mjs", "fixed-asset-mock.mjs", "prepayments-mock.mjs"],
+  list_depreciation_runs: ["depreciation-mock.mjs", "fixed-asset-mock.mjs", "prepayments-mock.mjs"],
+  list_fixed_assets: ["depreciation-mock.mjs", "fixed-asset-mock.mjs", "prepayments-mock.mjs"],
+  fa_register_tie: ["depreciation-mock.mjs", "fixed-asset-mock.mjs", "prepayments-mock.mjs"],
   get_document_extract: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
-  list_source_dependents: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
-  list_source_revisions: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
+  // #949 joins both shares: the document detail reads them on mount in ITS lane too, and an
+  // unanswered read paints a standing failure banner over the very panel that lane's walk is
+  // about. Its arm gates on its own `7e4a4c47-` document prefix and falls through otherwise —
+  // the same property that makes the other two arms safe.
+  list_source_dependents: [
+    "document-correction-mock.mjs", "documents-viewer-mock.mjs", "tenancy-rent-plan-mock.mjs",
+  ],
+  list_source_revisions: [
+    "document-correction-mock.mjs", "documents-viewer-mock.mjs", "tenancy-rent-plan-mock.mjs",
+  ],
   // #646 x the chat-parity lane — the wrong-client wizard's first step calls `record_client_resolution`
   // (correction-wizard.tsx:146), which the chat-parity lane already answered. THE TWO ARMS ARE NOT
   // SYMMETRIC and the asymmetry is declared, not glossed: #646's arm gates on its own
@@ -1579,6 +1627,13 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   get_work_claim_origin: [
     "journal-work-mock.mjs", "plans-mock.mjs", "staff-expense-claim-mock.mjs", "work-knowledge-mock.mjs",
   ],
+  // #930 — `clara.staff_advance_summary` used to be answered by ONE lane (`staff-advances-register
+  // -mock.mjs`, for the register's own allocation editor) and deliberately declined by the other;
+  // #930 gave the staff-expense-claim form's own advance-application arm a CHOOSER fed by that same
+  // read, so a SECOND lane now answers it too. Each gates on `p_client` before answering —
+  // `staff-advances-register-mock.mjs` on `SAR.clientId`, `staff-expense-claim-mock.mjs` on
+  // `SEC.clientId` — and falls through otherwise, so neither can answer for the other's walk.
+  staff_advance_summary: ["staff-advances-register-mock.mjs", "staff-expense-claim-mock.mjs"],
   // WAVE 2026-09-18, INTEGRATION — the two OTHER doors the Work detail now reads on EVERY mount,
   // for the same structural reason get_work_claim_origin above is read: a trade invoice and a
   // knowledge read-set are both invisible in accounting_work.purpose, so the surface has to ask.
@@ -1600,7 +1655,10 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   pause_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
   resume_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
   end_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
-  request_plan_catch_up: ["plans-mock.mjs", "prepayments-mock.mjs"],
+  // #938 — "reverse now" rides this SAME door; accrual-mock.mjs answers only for ACC.planId and
+  // falls through otherwise, joining as a THIRD declared claimant rather than colliding with
+  // either.
+  request_plan_catch_up: ["accrual-mock.mjs", "plans-mock.mjs", "prepayments-mock.mjs"],
   // REVIEW-ROUND L01-SPEC-02 — five of home-board-mock.mjs's own `EMPTY_RPCS` array-dispatched
   // verbs are ALSO answered by the lane that actually owns the fixture, a real share the
   // pre-#863-fix-round census could not see at all (an array literal consumed through

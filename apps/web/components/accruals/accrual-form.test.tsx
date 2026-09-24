@@ -28,6 +28,7 @@ import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
+import { checkAccessibility } from "../../test/a11yRules";
 import { AccrualFormView } from "./accrual-form";
 import { accrualDraftKey } from "../../lib/work/accrual-draft";
 import type { DraftStorage } from "../../lib/work/journal-draft";
@@ -59,6 +60,10 @@ const ACCOUNTS: CoaAccountRow[] = [
   { client_id: CLIENT, account_code: "6100", name: "Office Rent", account_type: "expense", is_active: true },
   { client_id: CLIENT, account_code: "2020", name: "Accruals", account_type: "liability", is_active: true },
   { client_id: CLIENT, account_code: "1150", name: "Maybank current", account_type: "asset", is_active: true },
+  // #942 — the revenue side's own two legs, in the chart every new client gets: 4000 is 0150's
+  // own revenue row and 1180 Accrued Income is 0295's.
+  { client_id: CLIENT, account_code: "4000", name: "Sales / Fees Income", account_type: "income", is_active: true },
+  { client_id: CLIENT, account_code: "1180", name: "Accrued Income", account_type: "asset", is_active: true },
 ];
 
 // THE DOOR'S OWN ROW SHAPE (`lib/work/work-list.ts`'s `WorkListRow`), not the deleted direct
@@ -486,6 +491,265 @@ test("652.form: an overlap warning is persistent, and it does NOT block the accr
     assert.match(h.text(), /The accrual was recorded\./,
       "the warning says the accrual EXISTS — it is advisory, and the database only warns");
     assert.match(h.text(), /Monthly rent plan/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ==============================================================================================
+// #937 — THE PER-PERIOD AMOUNTS BLOCK, and the method control that reveals it. Four things only a
+// mounted form can prove: the rule is a CHOICE now; the block appears only under the rule that
+// performs it and offers the SCHEDULE's own due dates; a row can be added and removed with the
+// keyboard; and a per-period set crosses the wire in the database's own spelling.
+// ==============================================================================================
+
+async function chooseMethod(h: Awaited<ReturnType<typeof renderComponent>>, rule: string): Promise<void> {
+  await h.fireEvent(byId(h, F("method")), "change", (n) => setFieldValue(n, rule));
+  await h.settle();
+}
+
+function optionValues(node: Stub): string[] {
+  const kids = (node as { children?: Stub[] }).children ?? [];
+  return kids.map((k) => (k as { getAttribute?: (a: string) => string | null }).getAttribute?.("value") ?? "");
+}
+
+test("937.form: the method is a REAL choice between the two rules the ledger performs, and the withdrawn ones are not offered", async () => {
+  const h = await renderComponent(App({}));
+  try {
+    const select = byId(h, F("method"));
+    assert.equal(select.tagName, "SELECT", "a rule that changes what posts is chosen, not announced");
+    assert.deepEqual(optionValues(select), ["stated_amount", "stated_period_amount"]);
+    assert.match(h.text(), /The amount stated for each period separately/);
+    assert.doesNotMatch(h.text(), /source_document_amount|prior_period_amount/,
+      "a rule nothing performs is never offered");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("937.form: the sentence beside the method control states the rule that is SELECTED — it cannot go on saying one rule exists beside a control that offers two (ADV-05)", async () => {
+  const h = await renderComponent(App({}));
+  try {
+    // Under the default rule the hint is the one #652 shipped, minus its "one rule is recorded
+    // because one rule is performed" opening: two rules are performed now.
+    assert.match(h.text(), /accrues the amount stated above in every period of the authority window/);
+    assert.doesNotMatch(h.text(), /One rule is recorded because one rule is performed/,
+      "the form must not deny, beside the control, that the control has a second option");
+
+    await chooseMethod(h, "stated_period_amount");
+    assert.match(h.text(), /accrues the amount stated below for each due date separately/,
+      "…and under the second rule it describes THAT rule");
+    assert.doesNotMatch(h.text(), /accrues the amount stated above in every period of the authority window/,
+      "the first rule's sentence is gone, not merely joined by a second");
+  } finally {
+    await h.unmount();
+  }
+});
+test("937.form: the per-period block appears only under its own rule, and offers the SCHEDULE's own due dates", async () => {
+  const h = await renderComponent(App({}));
+  try {
+    await fill(h, { effectiveTo: "2026-08-31", servicePeriodEnd: "2026-08-31" });
+    assert.equal(h.find((n) => (n as Stub & { getAttribute?: (a: string) => string | null })
+      .getAttribute?.("id") === `${F("periodAmounts")}-due-0`), null,
+    "under stated_amount there is nothing to state per period, so no block at all");
+
+    await chooseMethod(h, "stated_period_amount");
+    assert.match(h.text(), /Amount for each period/);
+    // ONE "Add a period" PRESS PER PERIOD, and the dates come from the schedule itself — a
+    // preparer never types one, so the door's `accrual_period_amount_not_scheduled` refusal is
+    // unreachable from this surface.
+    const add = h.find((n) => n.tagName === "BUTTON"
+      && String((n as { textContent?: string }).textContent ?? "") === "Add a period");
+    assert.ok(add, "the block offers a way to add a period");
+    await h.fireEvent(add, "click");
+    await h.settle();
+    assert.deepEqual(optionValues(byId(h, `${F("periodAmounts")}-due-0`)),
+      ["", "2026-07-31", "2026-08-31"],
+      "the select offers exactly the two month-end due dates this window reaches");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("937.form: a row is added and removed, and the running total says which way the set is out", async () => {
+  const h = await renderComponent(App({}));
+  try {
+    await fill(h, { effectiveTo: "2026-08-31", servicePeriodEnd: "2026-08-31", amountCents: "6500.00" });
+    await chooseMethod(h, "stated_period_amount");
+    const press = async (label: string) => {
+      const b = h.find((n) => n.tagName === "BUTTON"
+        && String((n as { textContent?: string }).textContent ?? "") === label);
+      assert.ok(b, `no "${label}" button`);
+      await h.fireEvent(b, "click");
+      await h.settle();
+    };
+    await press("Add a period");
+    await press("Add a period");
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-0`), "change", (n) => setFieldValue(n, "3000.00"));
+    await h.settle();
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-1`), "change", (n) => setFieldValue(n, "3500.00"));
+    await h.settle();
+    assert.match(h.text(), /Stated: RM 6,500\.00\. This matches the total\./);
+
+    // REMOVING ONE LEAVES THE OTHER, and says how far short the set now is — the exact-sum rule is
+    // the door's, and a preparer typing six periods cannot hold the arithmetic in their head.
+    await press("Remove 2026-08-31");
+    assert.equal(h.find((n) => (n as Stub & { getAttribute?: (a: string) => string | null })
+      .getAttribute?.("id") === `${F("periodAmounts")}-amount-1`), null, "the second row is gone");
+    assert.match(h.text(), /Stated: RM 3,000\.00 of RM 6,500\.00 — RM 3,500\.00 short\./);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("937.form: a per-period set crosses the wire in the DATABASE's own spelling, and an incomplete one is refused before any round trip", async () => {
+  const sent: CreateAccrualInput[] = [];
+  const h = await renderComponent(App({
+    submit: async (input) => { sent.push(input); return ACCEPTED; },
+  }));
+  try {
+    await fill(h, { effectiveTo: "2026-08-31", servicePeriodEnd: "2026-08-31", amountCents: "6500.00" });
+    await chooseMethod(h, "stated_period_amount");
+    const press = async (label: string) => {
+      const b = h.find((n) => n.tagName === "BUTTON"
+        && String((n as { textContent?: string }).textContent ?? "") === label);
+      assert.ok(b, `no "${label}" button`);
+      await h.fireEvent(b, "click");
+      await h.settle();
+    };
+    await press("Add a period");
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-0`), "change", (n) => setFieldValue(n, "6500.00"));
+    await h.settle();
+
+    // AUGUST IS UNSTATED. The door would record a typed refusal on that occurrence and post
+    // nothing; the form names it at the block instead, before anything is sent.
+    await clickSubmit(h);
+    assert.equal(sent.length, 0, "nothing is sent while a period the schedule reaches has no amount");
+    assert.match(h.text(), /A period the schedule reaches has no amount/);
+    assert.equal(focusedId(), F("periodAmounts") + "-amount-0",
+      "…and the focus lands on the block that holds the mistake");
+
+    await press("Add a period");
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-0`), "change", (n) => setFieldValue(n, "3000.00"));
+    await h.settle();
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-1`), "change", (n) => setFieldValue(n, "3500.00"));
+    await h.settle();
+    await clickSubmit(h);
+    assert.equal(sent.length, 1, "a complete set is sent");
+    assert.deepEqual(sent[0]!.accrual.method, { rule: "stated_period_amount" });
+    assert.deepEqual(sent[0]!.accrual.period_amounts, [
+      { due_date: "2026-07-31", amount_cents: 300000 },
+      { due_date: "2026-08-31", amount_cents: 350000 },
+    ]);
+    assert.equal(sent[0]!.accrual.amount_cents, 650000,
+      "…beside the TOTAL for the window, which is what amount_cents means under this rule");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("937.form: the per-period block passes the structural a11y scan, and every control in it is keyboard-reachable and labelled", async () => {
+  const h = await renderComponent(App({}));
+  try {
+    await fill(h, { effectiveTo: "2026-08-31", servicePeriodEnd: "2026-08-31", amountCents: "6500.00" });
+    await chooseMethod(h, "stated_period_amount");
+    const add = h.find((n) => n.tagName === "BUTTON"
+      && String((n as { textContent?: string }).textContent ?? "") === "Add a period");
+    assert.ok(add);
+    await h.fireEvent(add, "click");
+    await h.settle();
+
+    // THE SHARED ENGINE (`test/a11yRules.ts`, the staff-advances/prepayments precedent): labels,
+    // names, roles and target sizes over the WHOLE form with the block mounted.
+    //
+    // `heading-order` IS EXCLUDED, AND ONLY IT. This cell mounts the VIEW, not its route, so the
+    // page's own h1/h2 are absent and the form's first `h3` reads as a jump — an artefact of the
+    // isolated mount that predates this lane and is true of the form with or without the block.
+    // Every other rule — label, accessible name, control role, target size — is asserted CLEAN,
+    // which is the claim #937 is making about the controls it added.
+    const findings = checkAccessibility(h.container as never)
+      .filter((v) => v.rule !== "heading-order");
+    assert.deepEqual(findings, [],
+      "the per-period block adds no structural a11y violation");
+
+    // …AND THE TWO CLAIMS A RULE ENGINE CANNOT MAKE. Every control in the block is a real
+    // interactive element in the reading order — a `<select>`, an `<input>` and `<button>`s, never
+    // a div with a click handler — so the block is operable with the keyboard alone; and each of
+    // the two per-row controls has its own `<label for>`, so a screen reader reads "Due date" and
+    // "Amount accrued" rather than two anonymous boxes in a list.
+    for (const id of [`${F("periodAmounts")}-due-0`, `${F("periodAmounts")}-amount-0`]) {
+      const control = byId(h, id);
+      assert.ok(["SELECT", "INPUT"].includes(String(control.tagName)),
+        `${id} is a real form control (got ${String(control.tagName)})`);
+      const label = h.find((n) => n.tagName === "LABEL"
+        && (n as { getAttribute?: (a: string) => string | null }).getAttribute?.("for") === id);
+      assert.ok(label, `${id} has its own label`);
+    }
+    for (const label of ["Add a period", "Remove 2026-07-31"]) {
+      const button = h.find((n) => n.tagName === "BUTTON"
+        && String((n as { textContent?: string }).textContent ?? "") === label);
+      assert.ok(button, `"${label}" is a real button, reachable by Tab and fired by Enter/Space`);
+    }
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ==============================================================================================
+// #942 — THE SIDE. It is the first thing the form asks, because it decides which accounts the two
+// legs may even offer and which way the preview posts.
+// ==============================================================================================
+
+async function chooseSide(h: Awaited<ReturnType<typeof renderComponent>>, side: string): Promise<void> {
+  await h.fireEvent(byId(h, F("side")), "change", (n) => setFieldValue(n, side));
+  await h.settle();
+}
+
+test("942.form: the side is a REAL choice, and it decides which accounts each leg offers and what they are called", async () => {
+  const h = await renderComponent(App({}));
+  try {
+    const select = byId(h, F("side"));
+    assert.equal(select.tagName, "SELECT", "a choice that changes which way the entry posts is chosen, not announced");
+    assert.deepEqual(optionValues(select), ["expense", "revenue"]);
+
+    // THE EXPENSE SIDE, unchanged: an expense account and a plain liability.
+    assert.deepEqual(optionValues(byId(h, F("expenseAccountCode"))), ["", "6100"]);
+    assert.deepEqual(optionValues(byId(h, F("liabilityAccountCode"))), ["", "2020"]);
+    assert.match(h.text(), /Expense account/);
+    assert.match(h.text(), /Liability account/);
+
+    await chooseSide(h, "revenue");
+    // THE REVENUE SIDE: an income account and the non-control assets, and both legs re-labelled.
+    assert.deepEqual(optionValues(byId(h, F("expenseAccountCode"))), ["", "4000"],
+      "only income accounts can be the profit-and-loss leg of a revenue accrual");
+    assert.deepEqual(optionValues(byId(h, F("liabilityAccountCode"))), ["", "1150", "1180"],
+      "…and the balance-sheet leg offers this client's assets");
+    assert.match(h.text(), /Revenue account/);
+    assert.match(h.text(), /Accrued income account/);
+    assert.doesNotMatch(h.text(), /Expense account/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("942.form: a revenue accrual crosses the wire with its side, and the preview shows Dr accrued income / Cr revenue", async () => {
+  const sent: CreateAccrualInput[] = [];
+  const h = await renderComponent(App({
+    submit: async (input) => { sent.push(input); return ACCEPTED; },
+  }));
+  try {
+    await chooseSide(h, "revenue");
+    await fill(h, { expenseAccountCode: "4000", liabilityAccountCode: "1180" });
+    // THE DISABLED PREVIEW IS WHAT THE DOOR WILL BUILD: the asset leg is debited and the revenue
+    // account credited, in that order.
+    const preview = h.text();
+    assert.match(preview, /accrued income/i);
+
+    await clickSubmit(h);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.accrual.side, "revenue");
+    assert.equal(sent[0]?.accrual.expense_account_code, "4000");
+    assert.equal(sent[0]?.accrual.liability_account_code, "1180");
   } finally {
     await h.unmount();
   }

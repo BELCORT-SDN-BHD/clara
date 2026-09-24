@@ -435,24 +435,42 @@ runs:
     # refusal, and that two independent bootstraps reach an identical surface. Reset-gated (drops
     # schema clara), so it SKIPS in the concurrent all-packages sweep, and had no CI leg anywhere
     # (packages/db/tests/README.md's #845 section, "no CI leg at all"). Run it FOR REAL here,
-    # ALONE, in its OWN throwaway database — the exact name (`clara_waveA_upgrade_ci`) the file's
-    # own header recipe already documents. It applies only through 0011, well below the
-    # role-minting migration 0154 (RIG.md), so like the runtime drill above it carries no in-file
-    # role sweep of its own — the shared cleanup below still runs regardless.
+    # ALONE, in its OWN throwaway database — the exact name (`clara_wave_a_upgrade_ci`) the file's
+    # own header recipe already documents. [#1041] That name was `clara_waveA_upgrade_ci` until
+    # the first dispatch after riders wave 3 ran this step (run 35893727271): the cleanup below
+    # calls `rig-cluster-reset.mjs`, whose `dropDatabase` interpolates the name into
+    # `drop database if exists <name>` UNQUOTED and therefore refuses anything but a plain
+    # lowercase identifier. The grammar is right and the NAME moved, because an unquoted
+    # `create database clara_waveA_upgrade_ci` case-folds while `PGDATABASE=` is a literal libpq
+    # name — measured: the step would have minted `clara_wavea_upgrade_ci` and then raised
+    # `3D000 database "clara_waveA_upgrade_ci" does not exist` on its own next line. Both halves
+    # moved together, and `packages/db/tests/ci-drill-database-names.test.mjs` now censuses every
+    # literal database name in this file and in frontier-leg against that grammar.
+    #
+    # THE ROLE SWEEP, AND THE STALE SENTENCE IT REPLACES [#1041]. This comment used to say the
+    # drill "applies only through 0011, well below the role-minting migration 0154 (RIG.md), so
+    # like the runtime drill above it carries no in-file role sweep of its own". That was TRUE
+    # when the drill was written and the whole chain WAS 0001..0011, and it rotted silently as the
+    # chain grew: `MIG_DIR` in that file means EVERY migration on disk, so the drill replays
+    # 0001..HEAD five times in one process and every replay after the first met 0154's cluster-wide
+    # role census at 18 instead of 14 (`CLR10`, measured 2026-09-24 — three of its four cells).
+    # Nothing here had ever caught it because this step has never once been REACHED: the job died
+    # at an earlier drill in every dispatch it has had. The file now sweeps after each `reset()`
+    # like its five siblings do, and this step grants the third gate that sweep requires.
     - name: Wave-A 0011 fresh-vs-upgrade parity drill (isolated DB)
       working-directory: packages/db
       shell: bash -e {0}
       run: |
-        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_waveA_upgrade_ci'
-        PGDATABASE=clara_waveA_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          node --test tests/wave-a-upgrade.test.mjs
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wave_a_upgrade_ci'
+        PGDATABASE=clara_wave_a_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test tests/wave-a-upgrade.test.mjs
 
     # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same mechanism,
     # this step's own database.
-    - name: Cluster cleanup — drop clara_waveA_upgrade_ci + sweep chain-minted roles
+    - name: Cluster cleanup — drop clara_wave_a_upgrade_ci + sweep chain-minted roles
       if: always()
       working-directory: packages/db
       shell: bash -e {0}
       run: |
         PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
-          node tests/rig-cluster-reset.mjs --drop-database=clara_waveA_upgrade_ci --sweep-roles
+          node tests/rig-cluster-reset.mjs --drop-database=clara_wave_a_upgrade_ci --sweep-roles

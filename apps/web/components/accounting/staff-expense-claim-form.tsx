@@ -68,6 +68,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { FieldDescription, FieldLegend, FieldSet } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { listCoaAccounts } from "@/lib/journals/api";
+import {
+  getStaffAdvanceSummary, isOutstandingAdvance, type StaffAdvanceSummary,
+} from "@/lib/registers/staff-advances-doors";
+import { StaffAdvanceAllocationsEditor } from "@/components/registers/staff-advance-allocations-editor";
+import { fmtCents } from "@/lib/registers/money";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { canOpenClientLeaf, staffExpenseClaimsHref, workDetailHref, type NavigationScope } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -88,6 +93,8 @@ import {
   IDENTIFIER_MAX_CHARS,
   PERSON_LABEL_MAX_CHARS,
   PENDING_FACT_MAX_CHARS,
+  allocationFieldId,
+  allocationsAreApportioned,
   claimTotalCents,
   defaultMemo,
   derivedLines,
@@ -96,6 +103,7 @@ import {
   fieldForClaimPath,
   firstInvalidClaimField,
   isPendingItem,
+  suggestAllocationsByDate,
   toClaimWire,
   validateClaimDraft,
   type ClaimDraft,
@@ -165,6 +173,7 @@ export function StaffExpenseClaimFormView({
   session = sessionTokenAccessor,
   loadAccounts,
   loadEnrolments,
+  loadAdvances,
   loadDocuments,
   loadSpokenFor,
 }: {
@@ -177,6 +186,10 @@ export function StaffExpenseClaimFormView({
   loadAccounts?: () => Promise<CoaAccountRow[]>;
   /** The live staff-advance enrolments, injectable for the same reason `loadAccounts` is. */
   loadEnrolments?: () => Promise<StaffAdvanceEnrolmentRow[] | null>;
+  /** #930's advance chooser — the SAME `staff_advance_summary` read the register's own allocation
+   *  editor is fed by (`staff-advance-allocations-editor.tsx`'s own header), injectable for the
+   *  same reason `loadAccounts` is. */
+  loadAdvances?: () => Promise<StaffAdvanceSummary>;
   loadDocuments?: () => Promise<EvidenceDocument[]>;
   loadSpokenFor?: () => Promise<SpokenForDocumentRow[]>;
 }) {
@@ -184,6 +197,9 @@ export function StaffExpenseClaimFormView({
   const tc = useTranslations("JournalComposer");
   /** #634's evidence copy, which spans this door, the composer and the late-attachment dialog. */
   const tmj = useTranslations("ManualJournal");
+  /** `centsUnsafe` for `fmtCents` — the same shared label the allocations editor renders its own
+   *  outstanding figures with. */
+  const tcommon = useTranslations("Common");
   const go = navigate;
 
   // THE DRAFT SCOPE, or null. A caller whose firm/user could not be read does NOT get a partial
@@ -216,6 +232,13 @@ export function StaffExpenseClaimFormView({
   const enrolmentsRead = useAsyncRead<StaffAdvanceEnrolmentRow[] | null>(() =>
     loadEnrolments ? loadEnrolments() : listStaffAdvanceEnrolments(clientId, { session }),
   );
+  // #930 — THE ADVANCE CHOOSER'S OWN READ. The client's WHOLE staff-advance summary, read once (as
+  // of today, the door's own default) and narrowed to the chosen claimant CLIENT-SIDE as the
+  // claimant changes — never re-fetched per claimant, the same "one read, filtered locally" shape
+  // `knownCodes`/`enrolledCodes` already use for the chart and the enrolment register.
+  const advancesRead = useAsyncRead<StaffAdvanceSummary>(() =>
+    loadAdvances ? loadAdvances() : getStaffAdvanceSummary(clientId, null, { session }),
+  );
   const evidence = useEvidenceReads(clientId, { session, loadDocuments, loadSpokenFor });
   const accounts = accountsRead.data ?? [];
   const enrolments = enrolmentsRead.data ?? null;
@@ -231,6 +254,23 @@ export function StaffExpenseClaimFormView({
   const enrolledCodes = useMemo(
     () => (enrolments === null ? null : new Set(enrolments.map((e) => e.account_code))),
     [enrolments],
+  );
+  /** #930 — the CLAIMANT's own outstanding, unvoided advances: `staff_advance_summary`'s
+   *  `advances`, narrowed to this account_code by `isOutstandingAdvance` — the very SYMBOL
+   *  `staff-advances-register.tsx` filters its own allocation editor's candidates by, so the two
+   *  surfaces cannot disagree about what "still outstanding" means. `[]` while the claimant is
+   *  blank or the read has not resolved: no candidate is ever guessed. */
+  const advanceCandidates = useMemo(() => {
+    const code = draft.claimantAccountCode.trim();
+    if (code === "" || advancesRead.data === null) return [];
+    return advancesRead.data.advances.filter((a) => a.account_code === code && isOutstandingAdvance(a));
+  }, [advancesRead.data, draft.claimantAccountCode]);
+  /** #931 — the draft's allocation list in the shared editor's own row shape. The claim form keeps
+   *  camelCase and the register keeps snake_case; this is the ONE place they meet, rather than one
+   *  module bending to the other's spelling. */
+  const allocationRows = useMemo(
+    () => draft.advanceAllocations.map((r) => ({ advance_id: r.advanceId, amount_cents: r.amountCents })),
+    [draft.advanceAllocations],
   );
   /** True when the chosen claimant account has NO live enrolment — the case that needs the three
    *  enrol answers. Unknown (the register could not be read) counts as "new", the conservative
@@ -630,13 +670,78 @@ export function StaffExpenseClaimFormView({
               accounts={accounts} props={controlProps("advanceAccountCode", true)}
               onPick={(v) => set("advanceAccountCode", v)} placeholder={t("accountPlaceholder")} />
           </Field>
-          {/* NO SILENT FIFO (WD-R10). The claim says WHICH advance it discharges; the register
-              never guesses, and the database refuses a claim that does not name one. */}
+          {/* NO SILENT FIFO (WD-R10). The claim says WHICH advances it discharges and by how much;
+              the register never guesses, and the database refuses a claim that does not name one.
+              #930 turned the typed id into a CHOOSER fed by the claimant's own outstanding
+              advances; #931 makes that chooser the FIRST LINE of a LIST, reusing the staff-advance
+              register's own allocation editor rather than minting a second table that drifts. The
+              first line keeps the `advanceId` control id, so its label, its error text, its focus
+              and the server paths that address it are all unchanged. */}
           <Field field="advanceId" errorText={errorFor("advanceId")} label={t("advanceId")}
             hint={t("advanceIdHelp")}>
-            <Input {...controlProps("advanceId", true)} value={draft.advanceId}
-              onChange={(e) => set("advanceId", e.target.value)} />
+            <div className="flex flex-col gap-2">
+              {/* THE ONE-CLICK SUGGESTION (#881's ruling): oldest advance first, each taking what it
+                  still has outstanding, stopping at the claim. It PRE-FILLS the list and nothing
+                  more — the person may edit any line, and what is submitted is what they confirmed,
+                  which is exactly how an ordering can be offered without becoming a silent FIFO. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" variant="outline" size="sm" data-testid="advance-suggest"
+                  disabled={busy || advanceCandidates.length === 0 || total <= 0}
+                  onClick={() => set("advanceAllocations",
+                    suggestAllocationsByDate(advanceCandidates, total))}>
+                  {t("advanceSuggestByDate")}
+                </Button>
+                <p className="text-xs text-muted-foreground">{t("advanceSuggestHelp")}</p>
+              </div>
+              <StaffAdvanceAllocationsEditor
+                allocations={allocationRows}
+                onChange={(rows) => set("advanceAllocations",
+                  rows.map((r) => ({ advanceId: r.advance_id, amountCents: r.amount_cents })))}
+                candidates={advanceCandidates}
+                newRow={() => ({ advance_id: "", amount_cents: 0 })}
+                // ALREADY SCOPED TO ONE CLAIMANT, so the option says what actually tells two of
+                // HER advances apart: when it was paid, and what is still outstanding on it.
+                optionLabel={(a) =>
+                  `${a.issue_date} — ${fmtCents(a.outstanding_cents, tcommon("centsUnsafe"))} ${t("advanceIdOutstandingSuffix")}`}
+                rowProps={(i, key) => controlProps(
+                  allocationFieldId(i, key === "advance" ? "advanceId" : "amountCents"),
+                  i === 0 && key === "advance",
+                )}
+                // AN UNAPPORTIONED ONE-LINE LIST TAKES THE WHOLE CLAIM by construction, so there
+                // is no figure to apportion and none to retype. Once the list HAS been
+                // apportioned — a suggested or typed split, including one a delete has taken back
+                // to a single line — the column stays, because the surviving line carries a figure
+                // of its own and a confirmed figure is never off screen. `claimAllocations` reads
+                // the same predicate, so what is submitted is what is shown.
+                amountLabel={allocationsAreApportioned(draft.advanceAllocations)
+                  ? t("advanceAllocationAmount") : null}
+              />
+              {errorFor("advanceAllocations") === "" ? null : (
+                <p id={`${claimFieldId("advanceAllocations")}-error`} className="text-xs text-error"
+                  role="alert" data-testid="advance-allocations-error">
+                  {errorFor("advanceAllocations")}
+                </p>
+              )}
+            </div>
           </Field>
+          {/* THE ONE-LINE REASON (AC3): a claimant with nothing outstanding sees WHY the chooser is
+              empty rather than a silent dead end — shown only once the read has actually settled,
+              so "still loading" is never mistaken for "nothing there". */}
+          {!advancesRead.loading && advancesRead.error === null && draft.claimantAccountCode.trim() !== ""
+            && advanceCandidates.length === 0 ? (
+            <p className="text-xs text-muted-foreground" data-testid="advance-no-candidates">
+              {t("advanceIdEmpty")}
+            </p>
+          ) : null}
+          {advancesRead.error !== null ? (
+            <StateBanner tone="warning" action={
+              <Button type="button" variant="outline" size="sm" onClick={() => void advancesRead.reload()}>
+                {tc("retry")}
+              </Button>
+            }>
+              {t("advancesUnavailable")}
+            </StateBanner>
+          ) : null}
         </>
       ) : null}
       {draft.settlement === "already_settled" ? (

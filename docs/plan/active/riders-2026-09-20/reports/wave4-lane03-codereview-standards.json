@@ -1,0 +1,63 @@
+{
+  "axis": "standards",
+  "lane": "wave4-lane03",
+  "base": "cd2925391",
+  "reviewer_mode": "read-only",
+  "tickets": [938, 937, 942],
+  "sources_read": [
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "AGENTS.md",
+    "CONTEXT.md",
+    ".claude/skills/tdd/SKILL.md",
+    ".claude/skills/tdd/tests.md",
+    ".claude/skills/tdd/mocking.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane03-ticket938.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane03-ticket937.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane03-ticket942.md"
+  ],
+  "cells_rerun": [
+    {"cmd": "node --test --test-concurrency=1 <full gate chain> tests/accrual-revenue-side.test.mjs", "result": "8/8 pass, matches report"},
+    {"cmd": "node --test --test-concurrency=1 <full gate chain> tests/accrual-bill-conflict.test.mjs", "result": "9/9 pass, matches report"},
+    {"cmd": "node --test --test-concurrency=1 <full gate chain> tests/accrual-period-amounts.test.mjs", "result": "12/12 pass, matches report"},
+    {"cmd": "node scripts/check-frozen-workflows.mjs", "result": "OK, 312 frozen files, no manifest diff, matches report"},
+    {"cmd": "pnpm typecheck", "result": "PASS (apps/web, packages/runtime), matches report"},
+    {"cmd": "CI=true GITHUB_ACTIONS=true pnpm --filter @clara/web lint", "result": "exit 0, no FAIL lines, matches report"},
+    {"cmd": "CI=true GITHUB_ACTIONS=true pnpm --filter @clara/db lint", "result": "exit 0, matches report"}
+  ],
+  "findings": [
+    {
+      "ticket": 942,
+      "severity": "minor",
+      "kind": "hard-violation-partial",
+      "title": "0304's tail verifies ACL preservation for two of the three externally-granted doors it recuts, not all three — list_accrual_adjustments's grant is never re-checked",
+      "file": "packages/db/migrations/0304_accrual_revenue_side.sql",
+      "line": 1364,
+      "evidence": "The migration recuts ten bodies (measured: the prestate/tail pin tables at lines ~95-127 and ~1316-1339 list _assert_accrual_account, _assert_accrual_particulars, _assert_accrual_world, _accrual_canonical, _accrual_journal_basis, _accrual_finish, correct_accrual_adjustment, get_accrual_adjustment, list_accrual_adjustments, _plan_accrual_period_line). Three of those ten are externally granted doors (grep confirms grants only on correct_accrual_adjustment, get_accrual_adjustment, list_accrual_adjustments — the rest are internal). The tail's '6 · THE DOORS' GRANTS ARE UNMOVED' section (line 1364) explicitly re-checks has_function_privilege for correct_accrual_adjustment (1367), get_accrual_adjustment (1375) and create_accrual_adjustment_for (1381), but list_accrual_adjustments never appears in any has_function_privilege call in this file (grep for 'has_function_privilege' in 0304 returns zero hits mentioning list_accrual_adjustments). The dynamic-SQL corpus entry the same commit adds for this file (apps/web/tests/firm-scope-db-pins.corpus.ts) claims in its own reason string that the tail re-checks 'every door grant it must not have moved' — which overstates what the tail actually verifies.",
+      "required_fix": "Add a has_function_privilege block for clara.list_accrual_adjustments(uuid,date,date) (clara_authenticated granted, clara_runtime and public not) alongside the other two door checks in the '6 · THE DOORS' GRANTS ARE UNMOVED' section, matching 0303's own pattern for the same two doors. Runtime risk is low (CREATE OR REPLACE FUNCTION preserves ACL by Postgres's own semantics and no explicit GRANT/REVOKE touches this function in 0304), so this is a self-verification completeness gap against the house law quoted in the review brief ('owner, SECURITY DEFINER, search_path and ACL preserved on recut bodies') and against the migration's own stated intent, not a live security defect."
+    },
+    {
+      "ticket": 938,
+      "severity": "note",
+      "kind": "smell-baseline",
+      "category": "duplicated-code",
+      "title": "The skip/reverse two-mode local state machine is duplicated verbatim between the two remedy surfaces",
+      "file": "apps/web/components/firm/accrual-bill-conflict-affordance.tsx",
+      "line": 27,
+      "evidence": "AccrualBillConflictAffordance (needs-you inbox, lines 27-91) and AccrualBillConflictItem inside apps/web/components/accruals/accrual-bill-conflicts.tsx (lines 62-140) both declare `const [skipping, setSkipping] = useState(false)` / `const [reason, setReason] = useState(\"\")`, an identical `reverseNow`/`submitSkip` pair calling the same two api.ts functions with the same argument shape, and near-identical idle/entering-a-reason JSX (Input + two Buttons vs. two Buttons). This is Fowler's Duplicated Code: extract the shared state machine (idle/entering-reason, the two handlers) into one hook (e.g. useAccrualBillConflictRemedies(row, act)) that both components call, leaving only the two render shells distinct.",
+      "required_fix": "No fix required from this reviewer — self-disclosed by the ticket #938 report's own 'Follow-ups worth filing' section ('A skip reason UX nuance... worth revisiting if a THIRD surface ever needs the same two remedies'), a defensible judgement call to keep two independently-reviewable ~40-line components rather than introduce a shared hook for two call sites. Recorded here per the smell-baseline instruction; not a blocker."
+    },
+    {
+      "ticket": 942,
+      "severity": "note",
+      "kind": "smell-baseline",
+      "category": "mysterious-name",
+      "title": "expense_account_code now sometimes holds the INCOME account, and liability_account_code sometimes holds an ASSET — the wire and column names no longer describe what they hold under side:revenue",
+      "file": "packages/db/migrations/0304_accrual_revenue_side.sql",
+      "line": 348,
+      "evidence": "CONTEXT.md's own new 'Accrual side' entry and the migration's column comment (0304, clara.accrual_adjustments.side comment) both have to spell out, in prose, that expense_account_code is the profit-and-loss leg and liability_account_code is the balance-sheet leg, because under side:revenue those columns hold an income account and an asset account respectively. The successor-contract section of the #942 report names its own zod field descriptions doing the same work ('The profit-and-loss account: the EXPENSE account... or the INCOME account it earns under side:\"revenue\"').",
+      "required_fix": "No fix required from this reviewer — the #942 report's own 'Follow-ups worth filing' #1 already names this exact rename (pl_account_code/bs_account_code) as owed at the chatTurn_v22 cut, and correctly declines to do it now because the frozen tool still sends the old wire keys and a rename would need its own migration. Recorded here per the smell-baseline instruction; the ticket's own deferral is sound engineering judgement, not an oversight."
+    }
+  ],
+  "verdict_note": "No hard violations of documented migration house law were found beyond the one ACL self-check gap above. Prestate/tail shape, FORCE RLS + zero application-role DML on the one new relation (clara.accrual_period_amounts, 0303), owner/SECURITY DEFINER/search_path preserved on every recut body, gate-chain entries appended in migration order, rig-meta cohort additive and correctly scoped, no applied migration edited, no frozen-workflow manifest diff, no PRD/ARCHITECTURE edit, shared files (needs-you.ts, needs-you-links.ts, package.json, rig-meta.mjs, test/manifest.txt, e2e-fixture-ownership.test.ts, firm-scope-db-pins.corpus.ts) all edited additively at sorted positions with no reformatting, lane rule (a) (1180 Accrued Income consumed via 'order by version desc' on the published template, never inserted) and lane rule (c) (Settlement candidate row reused as a documented NEIGHBOUR, never a family member) both independently verified against the code, and rule (d) successor contracts for start_accrual_work written in full for both #937 and #942 — all independently confirmed against source, not merely the reports' own claims. Three re-run test batteries (8/8, 9/9, 12/12), typecheck, lint (both CI mode) and check-frozen-workflows.mjs were re-executed on the lane's own rig/worktree and matched every corresponding claim in the three ticket reports."
+}

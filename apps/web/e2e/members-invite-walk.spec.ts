@@ -352,3 +352,86 @@ test("#625: a REVOKED preview BLOCKS in the browser — its own face, naming the
 
   expect(faults.faults(), "no React fault on the blocked face").toEqual([]);
 });
+
+// ---------------------------------------------------------------------------------------------
+// #871 — THE SIGNED-OUT PREVIEW, IN A REAL BROWSER.
+//
+// The owner's ruling of 2026-09-23: an invitee who has NOT signed in sees which firm and role the
+// link names. The read happens on `apps/web`'s SERVER, through the runtime's own
+// `POST /api/invite-preview` and a database door no browser and no client credential can reach —
+// so the one thing a browser leg can prove, and the only thing it claims here, is that the block
+// is rendered on the first screen, above the control that consumes the link, with no session of
+// any kind, and that the browser itself never touches the endpoint.
+//
+// The door, its single no-oracle refusal, its mask, its five-state derivation and its rate wall
+// are `packages/db/tests/invite-preview-public.test.mjs`'s claim under real least-privileged
+// roles; the route's own gates are `packages/runtime/tests/p871-invite-preview-db.test.mjs`'s.
+// Mock-backed, local, never AC7 evidence.
+// ---------------------------------------------------------------------------------------------
+
+test("#871: a SIGNED-OUT visitor sees the firm, the role and the masked address before signing in — and the browser never touches the preview endpoint", async ({ page }) => {
+  grantCellBudget(CELL_BUDGET.poll);
+  const faults = watchReactFaults(page);
+
+  // EVERY request the BROWSER makes. The credential that reaches the preview door lives on the
+  // server for the length of one render; a request from here would mean it had leaked into a
+  // client bundle.
+  const browserCalls: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/invite-preview")) browserCalls.push(request.url());
+  });
+
+  await page.goto(inviteUrl(MEMBERS_LIFECYCLE.previewPendingToken));
+
+  // NOBODY IS SIGNED IN. This walk has not called `signIn`, and the page is reached cold.
+  const preview = page.getByRole("region", { name: "Your invitation" });
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText(MEMBERS_LIFECYCLE.firmName);
+  await expect(preview).toContainText("Bookkeeper");
+  await expect(preview).toContainText("n***@larkin.test");
+  await expect(preview, "an unmasked address can never reach a signed-out page").not.toContainText(
+    MEMBERS_LIFECYCLE.inviteeEmail,
+  );
+
+  // NOTHING HAS BEEN CONSUMED. The link is still whole: no password field, and the control that
+  // spends it is still waiting to be pressed.
+  await expect(page.locator("input[type=password]")).toHaveCount(0);
+  const gate = page.getByRole("button", { name: "Accept invitation" });
+  await expect(gate).toBeVisible();
+
+  // ABOVE, as the document really orders them.
+  const order = await page.evaluate(() => {
+    const block = document.querySelector('section[aria-labelledby="invite-signed-out-preview-heading"]');
+    const button = document.querySelector("button");
+    if (!block || !button) return null;
+    // 4 === Node.DOCUMENT_POSITION_FOLLOWING: the control comes AFTER the block.
+    return (block.compareDocumentPosition(button) & 4) !== 0;
+  });
+  expect(order, "the preview must precede the control it explains").toBe(true);
+
+  expect(browserCalls, "the preview endpoint is reached by the SERVER, never by the browser").toEqual([]);
+
+  // …AND IT HANDS OVER TO THE EXISTING SIGN-IN FLOW, unchanged: the same click still verifies and
+  // still reaches the post-verification preview the signed-in door answers.
+  await gate.click();
+  await expect(page.locator("input[type=password]")).toHaveCount(1);
+
+  expect(faults.faults(), "no React fault on the signed-out invite surface").toEqual([]);
+});
+
+test("#871: a signed-out visitor whose invitation is closed sees no preview and no verdict — and the sign-in step is still offered", async ({ page }) => {
+  grantCellBudget(CELL_BUDGET.poll);
+  const faults = watchReactFaults(page);
+
+  await page.goto(inviteUrl(MEMBERS_LIFECYCLE.previewRevokedToken));
+
+  // The route answers the ONE refusal for this token. The signed-out surface says NOTHING about
+  // it: a second place that blocks an invitation is exactly what the ruling's "then hands over to
+  // the existing sign-in flow" avoids, and the post-verification preview (which has checked the
+  // reader's own address) is what renders the revoked face.
+  await expect(page.getByRole("region", { name: "Your invitation" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Accept your invitation", level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Accept invitation" })).toBeVisible();
+
+  expect(faults.faults(), "no React fault on the refused signed-out surface").toEqual([]);
+});

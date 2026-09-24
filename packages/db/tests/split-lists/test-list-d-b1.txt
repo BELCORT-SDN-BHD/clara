@@ -19,7 +19,33 @@
 # clara_wc_b1 (0041_asm + this slice's chain), E17 honoured, --test-concurrency=1:
 #   76 pass / 0 fail / 6 skip over 16 files (72 without the floor re-run, +4 with it).
 #   Raise it when you add cells; NEVER lower it to go green.
-#!cells-floor: 76
+#
+# [#1041] THE FLOOR COUNTS CELLS, NOT PASSES, AND THE SKIPS HAVE THEIR OWN BOUND. The leg used to
+# compare PASSES, which answered "is the cell still there" and "does it still assert at THIS
+# frontier" with one number — and only the first is a deletion. `.github/actions/frontier-leg`
+# now preloads the package's whole preintegration gate chain (an old frontier IS an estate sweep
+# against a pre-integration chain), so a cell whose premise migration sits above this frontier
+# SKIPS lawfully and a pass-floor would read it as deleted. The leg therefore asserts three
+# things: `fail` is 0, the cells the run REPORTS (pass + skip) meet `#!cells-floor:`, and the
+# cells that SKIP stay within `#!skips-max:`. RE-MEASURED whole at this slice's own frontier on
+# the lane-07 cluster, 2026-09-24, gate chain preloaded, --test-concurrency=1:
+#   82 cells = 76 pass / 0 fail / 6 skip over 16 files.
+#!cells-floor: 82
+#!skips-max: 6
+#
+# THE ISOLATED DRILL'S OWN BOUND [#1041, review SPEC-1041-B]. The two numbers above bound the
+# LIST; `x42-0043-b1-upgrade.test.mjs` is not in it (a drill runs ALONE, in its own throwaway
+# database, in the leg's step (4)) and is excluded from the totality gate by design — so a cell
+# deleted inside it was invisible to every gate this repo has, and since #1041 that step preloads
+# the gate chain too, which can stand a cell DOWN rather than red. The drill's bound is declared
+# HERE, in the slice's own list, rather than in the drill: a floor a deletion can edit in the same
+# hunk bounds nothing. MEASURED on the lane-07 cluster, 2026-09-24, at this slice's frontier with
+# the gate chain preloaded and the reset gate WITHHELD — the state in which every cell reports and
+# skips, so the run's own `# tests` line IS the cell count: 1 cell(s). The skip bound is 0
+# because the ONLY skip the four drills carry is `skipUnlessReset`, and step (4) is the one place
+# that gate is granted (`ci-frontier-leg-contract.test.mjs`'s `p1041.drill.only-skip` census).
+#!drill-cells-floor: 1
+#!drill-skips-max: 0
 #
 # THE RESET-GATED DRILL RUNS ALONE, in its own throwaway DB — NOT in this list:
 #   PGDATABASE=clara_x42_b1_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \

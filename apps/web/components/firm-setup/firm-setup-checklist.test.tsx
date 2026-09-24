@@ -701,13 +701,20 @@ test("fs.web.13 an item never asked (inapplicable or undetermined) is hidden; on
     ...ENVELOPE,
     items: [
       ...ENVELOPE.items,
-      // #891 — never seeded, and never will be while the predicate reads this way: hidden.
+      // #891 — never seeded, and never will be while the predicate reads this way: hidden. This IS
+      // `mpers_eligibility`'s own real, live shape (entity_type answered, not sdn_bhd) — unchanged
+      // by #1032.
       item({
         item_key: "mpers_eligibility", sort_order: 90, group_key: "accounting", kind: "capture",
         question: "Is the firm eligible to apply MPERS?", required: false, state: "unseeded",
         applicability: "inapplicable",
       }),
       // #891 — the dependency it reads is itself unanswered: also hidden, for a different reason.
+      // This exercises the GENERIC predicate (`isHiddenByApplicability`), reusing a real catalogue
+      // key the way this file's `framework` row below also does (a real key, a fixture-only
+      // scenario) — since #1032 (owner's ruling 2026-09-23), `tin` itself is seeded for every firm
+      // and its own live applicability never reads `undetermined` any more (only
+      // `required`/`optional`; `mpers_eligibility` above is the row that still can).
       item({
         item_key: "tin", sort_order: 70, group_key: "tax", kind: "capture",
         question: "What is the firm's MyInvois TIN?", required: false, state: "unseeded",
@@ -835,9 +842,16 @@ test("fs.web.15 a PENDING item that has become inapplicable is kept out of the b
   // #891 fix round (review L06-SPEC-01). `isNowInapplicable` guarded only the PER-ITEM control;
   // the group's own pending set counted the row, so a group holding two answerable facts and one
   // now-inapplicable pending row offered "Answer these 3 together" and built a three-step form
-  // whose first step asked the question the same screen marks "Not applicable". Reachable on the
-  // real doors: answer turnover >= RM1M, reconcile (TIN is seeded pending), then correct turnover
-  // back under the threshold -- measured on clara_l06, tax then holds [tin(inapplicable), fye].
+  // whose first step asked the question the same screen marks "Not applicable". This fixture
+  // exercises the GENERIC predicate with `tin`, a real catalogue key reused for a scenario it can
+  // no longer itself reach (see fs.web.13's own note): since #1032 (owner's ruling 2026-09-23),
+  // `tin` is seeded for every firm and its applicability never reads `inapplicable` any more.
+  // `mpers_eligibility` is the row that CAN still reach this shape on the real doors today: answer
+  // entity_type=sdn_bhd, reconcile (mpers_eligibility is seeded pending), then correct entity_type
+  // away from sdn_bhd -- measured on clara_l06, `p891.answer.survives`
+  // (firm-setup-applicability.test.mjs) proves the applicability flip on a real door; this fixture
+  // still uses `tin`'s own group/shape purely so the group holds three items rather than
+  // restructuring the shared `ENVELOPE` fixture other cells also read.
   const WITH_PENDING_INAPPLICABLE = {
     ...ENVELOPE,
     items: [
@@ -949,9 +963,14 @@ test("fs.web.17 a half-seeded checklist keeps its Finish section and calls the r
     seeded: false,
     items: [
       ...ENVELOPE.items,
+      // `mpers_eligibility`'s own real, reachable shape: entity_type was just answered sdn_bhd, so
+      // it reads `applicable` LIVE, but the plan has not been reconciled again yet -- still
+      // `unseeded`. (Before #1032 this fixture used `tin` for the same shape; `tin` itself can no
+      // longer be `unseeded`+`applicable` -- see fs.web.13's own note -- so this cell now uses the
+      // catalogue key that still can.)
       item({
-        item_key: "tin", sort_order: 70, group_key: "tax", kind: "capture",
-        question: "What is the firm's MyInvois TIN?", required: false, state: "unseeded",
+        item_key: "mpers_eligibility", sort_order: 90, group_key: "accounting", kind: "capture",
+        question: "Is the firm eligible to apply MPERS?", required: false, state: "unseeded",
         applicability: "applicable",
       }),
     ],
@@ -987,6 +1006,115 @@ test("fs.web.17 a half-seeded checklist keeps its Finish section and calls the r
       assert.equal(textOf(byTestId(h, "firm-setup-seed") as never), "Start firm setup");
       assert.ok(byTestId(h, "firm-setup-commit") === null,
         "a plan with no items on it offered Finish");
+    } finally { await h.unmount(); }
+  });
+});
+
+// #1032 (owner's ruling 2026-09-23, Option A) — the firm-setup TIN item is always offered; its
+// turnover-dependent applicability is now a REQUIRED-or-OPTIONAL marking, never a seeded-or-not
+// decision. `item.required` already drives the Required/Optional badge and the skip control
+// generically (fs.web.05 proves this for `mia`); these two cells prove it specifically for the
+// door's own new shape: an OPTIONAL tin renders with its marking and its accountant sentence, is
+// never mistaken for "Not applicable", is offered by the bounded group walk beside a required
+// fact (AC4's "the walk's count and step list agree"), and a REQUIRED tin hides its own skip
+// control the same way any other required item already does.
+
+const TIN_NOTE = "The firm's MyInvois TIN. Required once the firm's turnover makes MyInvois mandatory (RM1 million or more); optional below that, and you may still record it if the firm has registered for MyInvois voluntarily.";
+
+test("fs.web.18 an optional tin renders its Optional marking AND its accountant sentence, and the bounded group walk still offers it beside a required fact", async () => {
+  const OPTIONAL_TIN_ENV = {
+    ...ENVELOPE,
+    counter: { required_answered: 0, required_total: 1 },
+    items: [
+      item({
+        item_key: "turnover", sort_order: 60, group_key: "tax", kind: "must_ask",
+        question: "What is the firm's annual turnover band?", required: true, state: "pending",
+        answer_shape: "choice", answer_options: ["<RM1M", "RM1M-5M"], applicability: "applicable",
+      }),
+      item({
+        item_key: "tin", sort_order: 70, group_key: "tax", kind: "capture",
+        question: "What is the firm's MyInvois TIN?", note: TIN_NOTE,
+        required: false, state: "pending", applicability: "optional",
+      }),
+    ],
+    required_outstanding: ["turnover"],
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(OPTIONAL_TIN_ENV) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+
+      // THE ROW: an optional item's own marking reads Optional, never Required or Not applicable.
+      const row = byTestId(h, "firm-setup-item-tin");
+      assert.ok(row, "the optional tin row did not render");
+      assert.match(textOf(row as never), /Optional/, "the optional marking did not render on the row");
+      assert.doesNotMatch(textOf(row as never), /Not applicable/,
+        "an optional item was marked the way an inapplicable one is");
+      assert.equal(byTestId(h, "firm-setup-inapplicable-tin"), null);
+
+      // …AND ITS SENTENCE (AC4's "the optional marking AND its sentence"). The row itself never
+      // renders `item.note` -- only the education-tip branch does -- so the accountant sentence
+      // reaches the screen through the item form, exactly as it does for the REQUIRED tin in
+      // fs.web.19. An OPTIONAL item offers both controls, so the form is opened, read and
+      // cancelled before the bounded walk below, which is a different open state.
+      assert.ok(byTestId(h, "firm-setup-skip-tin"),
+        "an optional, pending tin must still offer the skip control a required one hides");
+      await press(h, byTestId(h, "firm-setup-answer-tin-action"), "the answer control");
+      const form = byTestId(h, "firm-setup-item-form");
+      assert.ok(form, "opening an optional, pending item rendered no form");
+      assert.match(textOf(form as never), new RegExp(TIN_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+        "the optional tin's form did not render the accountant sentence");
+      await press(h, byTestId(h, "firm-setup-cancel"), "the form's cancel control");
+      assert.equal(byTestId(h, "firm-setup-item-form"), null, "cancelling left the form open");
+
+      // THE BOUNDED GROUP WALK: two pending facts in one group -- one required (turnover), one
+      // optional (tin) -- and BOTH are offered: `isWalkStep` never excludes an item for being
+      // optional, only for being settled, a tip, or currently inapplicable. The walk's own count
+      // and its step list agree (AC4).
+      const walkTrigger = byTestId(h, "firm-setup-answer-group-tax");
+      assert.ok(walkTrigger, "the tax group offered no bounded walk for its two pending facts");
+      assert.equal(textOf(walkTrigger as never), "Answer these 2 together",
+        "the walk's own count excluded the optional pending fact");
+      await press(h, walkTrigger, "the bounded walk trigger");
+      assert.match(h.text(), /Question 1 of 2/,
+        "the walk's step list does not agree with its own count of two pending facts");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.19 a REQUIRED tin (turnover makes MyInvois mandatory) hides its own skip control, the same way any other required item already does", async () => {
+  const REQUIRED_TIN_ENV = {
+    ...ENVELOPE,
+    counter: { required_answered: 3, required_total: 4 },
+    required_outstanding: ["tin"],
+    items: [
+      ...ENVELOPE.items.map((i) => ({ ...i, state: i.required ? "answered" : i.state })),
+      item({
+        item_key: "tin", sort_order: 70, group_key: "tax", kind: "capture",
+        question: "What is the firm's MyInvois TIN?", note: TIN_NOTE,
+        required: true, state: "pending", applicability: "required",
+      }),
+    ],
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(REQUIRED_TIN_ENV) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+
+      const row = byTestId(h, "firm-setup-item-tin");
+      assert.ok(row, "the required tin row did not render");
+      assert.match(textOf(row as never), /Required/);
+      assert.equal(byTestId(h, "firm-setup-skip-tin"), null,
+        "a required tin offered the skip control a required item must never offer");
+      assert.ok(byTestId(h, "firm-setup-answer-tin-action"), "a required, pending tin offered no way to answer it");
+
+      // Opening the form shows the accountant sentence and no Optional label.
+      await press(h, byTestId(h, "firm-setup-answer-tin-action"), "the answer control");
+      const form = byTestId(h, "firm-setup-item-form");
+      assert.ok(form, "opening a required, pending item rendered no form");
+      assert.match(textOf(form as never), new RegExp(TIN_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+        "the form did not render the accountant sentence");
+      assert.doesNotMatch(textOf(form as never), /Optional/, "a required item's form said Optional");
     } finally { await h.unmount(); }
   });
 });

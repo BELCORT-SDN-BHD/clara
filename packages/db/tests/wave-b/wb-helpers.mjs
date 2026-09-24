@@ -155,7 +155,12 @@ export const WB_ACL = {
   cancel_opening_seed: ["authenticated"],
   cancel_seeding_batch: ["authenticated"],
   // [R3-F2/F5] the CoR'd legacy creator + the B-12 plan-bootstrap verb.
-  create_client: ["authenticated"],
+  // [#1038, 0316] create_client's clara_authenticated grant is WITHDRAWN (closing #899's own named
+  // residual). The row STAYS here, pinned EMPTY rather than deleted: an empty grant list makes G2
+  // assert `false` for every role, so the matrix fails loudly if the grant ever returns, and the
+  // verb stays inside WB_ALL_FNS where the R1-F13a sweep and the agent-role sweep already reach
+  // it. Same posture rig-meta.mjs's WRITERS census took for the same revoke.
+  create_client: [],
   bootstrap_client_plan: ["authenticated"],
   get_opening_dryrun: ["authenticated"],
   get_lint_finding: ["authenticated"],

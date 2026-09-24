@@ -1,0 +1,29 @@
+{
+  "axis": "standards",
+  "head": "73b78c7ab",
+  "verdict": "pass",
+  "findings": [
+    {
+      "id": "T1",
+      "severity": "minor",
+      "smell": "Shotgun Surgery (partial fix, undocumented)",
+      "title": "spoolHealth's probe file keeps the old millisecond-only temp-name scheme, and neither the JSDoc nor the README says why",
+      "file": "packages/runtime/lib/spool.mjs",
+      "line": 457,
+      "evidence": "atomicJson's temp name changed from `${path}.${pid}.${Date.now()}.tmp` to `${path}.${pid}.${randomUUID()}.tmp` (line 140), but spoolHealth's probe file at line 457 is still `join(dir, `.ready-${process.pid}-${Date.now()}`)` — the same millisecond-only uniqueness the fix just called out as the defect's root cause. Neither the new atomicJson JSDoc nor the #1043 README section (packages/runtime/README.md:1847) mentions this second site. I verified it is not actually racy the same way: spoolHealth does not rename-into-place (no renameIntoPlace call), writeFile's default 'w' flag silently overwrites a colliding path instead of throwing, and rm(..., {force:true}) swallows a second, already-missing delete — so two concurrent spoolHealth() calls landing in the same millisecond cannot throw or leave a bad file the way atomicJson could. So this is not a live bug, but the fix leaves the module with two different temp-uniqueness idioms for the same underlying purpose (a collision-proof scratch filename) without a line anywhere explaining why one needed randomUUID() and the other didn't — the next reader has to re-derive that safety argument from scratch.",
+      "fix": "One sentence in atomicJson's JSDoc (or a one-line comment at line 457) stating that spoolHealth's probe is exempt because it never renames and always force-removes, so a same-millisecond collision is inert there. Optional: switch it to randomUUID() too for idiom consistency, since the probe's per-call cost is negligible."
+    },
+    {
+      "id": "T2",
+      "severity": "nit",
+      "smell": "test bypasses the public read seam it names as its own subject",
+      "title": "p1043.collide reads the sidecar with a hand-rolled readFile+JSON.parse instead of the already-imported readTaskMeta",
+      "file": "packages/runtime/tests/intake-sidecar-race.test.mjs",
+      "line": 266,
+      "evidence": "The cell's own header states the property it pins is \"the one atomicJson's name claims: a reader of a sidecar sees a body some writer wrote, WHOLE\" — i.e., what a caller of readTaskMeta sees — yet the per-round check at line 266 does `readFile(taskMetaPath(taskId), 'utf8')` + its own try/catch JSON.parse rather than calling readTaskMeta, which is destructured from the module import at the top of the file (line 53) and IS used for the cell's final sanity check. Confirmed readTaskMeta (spool.mjs:174) does no transformation beyond open+JSON.parse — it only special-cases ENOENT and rethrows everything else, including a SyntaxError on a spliced file — so the two reads are behaviorally equivalent; this is not masking anything. The file already has precedent for raw-fs cells (p966.host, p966.stat_is_not_a_handle) that intentionally bypass the module to test the underlying OS primitive, and this cell's use of readFile plausibly follows that same local convention to get raw byte-length/parse-error diagnostics into its failure message that readTaskMeta wouldn't surface as cheaply.",
+      "fix": "Optional: a one-line comment at line 266 saying the raw read is deliberate (parity with the file's other raw-fs race cells, plus needing raw byte length for the failure message), so a future reader doesn't wonder why the already-imported readTaskMeta sits unused for 200 of 201 reads in this cell."
+    }
+  ],
+  "lint": "exit 0",
+  "test": "17 pass 0 fail"
+}

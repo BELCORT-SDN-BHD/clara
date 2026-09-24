@@ -7,7 +7,7 @@
 // than creating surface-specific questions". That is only true if ONE database record answers all
 // three, so the cells below assert that `clara.get_work_question`,
 // `clara.get_work_pending_question` and the firm inbox's `work_question` row all name the SAME
-// question id, version and client — and that the inbox's own 30-key row shape did not move to make
+// question id, version and client — and that the inbox's own 33-key row shape did not move to make
 // room for it.
 
 import { test, before, after } from "node:test";
@@ -57,6 +57,11 @@ const FULL_ROW_KEYS = [
   // have moved this roster either, so it is restated here rather than imported (this file's
   // own header comment).
   "authority_id",
+  // #942 (0304): accrual_side and accrual_plan_status, gated exactly like authority_id above —
+  // both are derived from the shared `id` at json-build time, so they are PRESENT, and null, on
+  // EVERY row; only an accrual_bill_conflict row carries a value. The envelope therefore went
+  // 31 -> 33 keys estate-wide.
+  "accrual_side", "accrual_plan_status",
 ].sort();
 
 // ===========================================================================================
@@ -170,10 +175,10 @@ test("w629.inbox.row list_review_queue offers the pending work question in needs
     "inbox.row: …and the existing needs_you count already includes them, as it does open questions");
 
   // THE ROW SHAPE DID NOT MOVE. Every row in this read — the work_question one included — still
-  // carries the exact 30-key shape the ninth row kind pinned.
+  // carries the exact 33-key shape the ninth row kind pinned.
   for (const r of env.rows) {
     assert.deepEqual([...Object.keys(r)].sort(), FULL_ROW_KEYS,
-      `inbox.row: row_kind='${r.row_kind}' carries a DIFFERENT key set than the pinned shape (now 31 keys, #974/0260 added authority_id)`);
+      `inbox.row: row_kind='${r.row_kind}' carries a DIFFERENT key set than the pinned shape (now 33 keys: #974/0260 added authority_id, #942/0304 added accrual_side and accrual_plan_status)`);
   }
 });
 

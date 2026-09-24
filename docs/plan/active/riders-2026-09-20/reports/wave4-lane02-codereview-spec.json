@@ -1,0 +1,154 @@
+{
+  "axis": "spec",
+  "wave": 4,
+  "lane": "02",
+  "branch": "riders/w4-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "fixed_point": "cd2925391",
+  "diff_command": "git diff cd2925391...HEAD",
+  "commits": [
+    "9b60e6803 feat(web): #930 staff-expense-claim advance chooser replaces the typed id",
+    "2bc755546 test(web): #930 e2e walk drives the advance chooser through the fixture",
+    "bd533dd57 docs(web): #930 README note on the advance chooser and the shared summary verb",
+    "3adafcd1d test(web): #930 declare staff_advance_summary a named shared RPC verb",
+    "84cf37952 feat(db): #931 a staff expense claim discharges several advances through a confirmed allocation list",
+    "ee159783f feat(db): #931 the per-allocation cap refusal names the advance, its outstanding and the shortfall",
+    "89bffb2a1 feat(db): #931 the derived journal carries ONE credit leg per advance account",
+    "a29f8be20 test(db): #931 the allocation list's own walls, and the single-advance shape held unchanged",
+    "c2b227187 feat(runtime): #931 the claim route carries the confirmed allocation list to the door",
+    "b3e6ff43d feat(web): #931 the advance chooser becomes the first line of a confirmed allocation list"
+  ],
+  "spec_sources": [
+    "gh issue 930 (body; 0 comments, so the body IS the newest Agent Brief)",
+    "gh issue 931 (body + belcorttao comment 2026-09-19T16:21:51Z re-pointing AC5 and Blocked-by to chatTurn_v22)",
+    "parent #881 owner ruling 2026-09-18, quoted in both lane reports"
+  ],
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    { "what": "packages/db tests/staff-expense-claim-allocations.test.mjs, full gate chain, clara_l02", "result": "9 pass / 0 fail / 0 skipped" },
+    { "what": "packages/db tests/staff-expense-claim.test.mjs (the #638 battery), full gate chain", "result": "24 pass / 0 fail" },
+    { "what": "apps/web staff-expense-claim-form.test.tsx + lib/work/staff-expense-claim.test.ts + staff-expense-claim-draft.test.ts", "result": "39 pass / 0 fail" },
+    { "what": "apps/web node scripts/run-tests.mjs (whole unit suite)", "result": "4995 tests: 4993 pass / 0 fail / 2 skipped, matching the reports exactly" },
+    { "what": "packages/runtime tests/staff-expense-claim-unit.test.mjs + tests/work-routes-unit.test.mjs", "result": "45 pass / 0 fail" },
+    { "what": "node scripts/check-frozen-workflows.mjs", "result": "OK, 312 frozen file(s), no manifest diff" },
+    { "what": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "OK" },
+    { "what": "pnpm typecheck (repo root)", "result": "apps/web Done, packages/runtime Done" },
+    { "what": "CI=true GITHUB_ACTIONS=true pnpm lint (repo root)", "result": "exit 0" }
+  ],
+  "already_satisfied_claims_checked": [
+    {
+      "claim": "#930 report: the ticket was still live, the advance arm rendered a plain Input for advanceId before the change",
+      "checked": "the diff hunk at the advanceId Field in apps/web/components/accounting/staff-expense-claim-form.tsx",
+      "verdict": "true"
+    },
+    {
+      "claim": "#930 report: git diff cd2925391..HEAD -- apps/web/lib/work/staff-expense-claim.ts is empty",
+      "checked": "git diff cd2925391..3adafcd1d --stat -- apps/web/lib/work/staff-expense-claim.ts",
+      "verdict": "true at #930's head; #931 later changed the file, as #931's report says"
+    },
+    {
+      "claim": "#931 report: the ticket was still live, advance_id was one column and the journal basis emitted ONE credit leg",
+      "checked": "0221's advance arm, whose not_this_client refusal sits at 0221:977-980, against 0301 section C",
+      "verdict": "true"
+    },
+    {
+      "claim": "#931 report AC2: the existing reasons are unmoved, p638.refusals still passes 24/24",
+      "checked": "re-ran tests/staff-expense-claim.test.mjs (24 pass / 0 fail); 0221 already raised not_this_client with the same constraint",
+      "verdict": "true"
+    },
+    {
+      "claim": "#931 report AC5: the basis module is frozen and nothing in packages/runtime/workflows or lib was edited",
+      "checked": "git diff cd2925391...HEAD --stat shows only packages/runtime/src/workRoutes.ts and tests/; freeze-lint OK at 312 files",
+      "verdict": "true"
+    },
+    {
+      "claim": "#931 report AC6: no posting-core recut, tail T.5 re-derives _record_journal_entry_core at c4396f6cb28d",
+      "checked": "read migration section H, T.5 pins eleven signatures by sha256(prosrc) including the posting core, the belt and the shared cap; the migration is applied on clara_l02, so the tail ran",
+      "verdict": "true"
+    }
+  ],
+  "findings": [
+    {
+      "id": "SPEC-931-A",
+      "ticket": 931,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "AC3's \"registers every allocation idempotently\" is asserted, never driven",
+      "evidence": "Ticket AC3: \"The derived journal carries one credit leg per advance account and the post-approve registration trigger registers every allocation idempotently.\" The first half is driven (p931.two: two clara.staff_advance_applications rows keyed to one credit leg; p931.accounts: two legs, one allocation each). The second half is not: nothing in packages/db/tests/staff-expense-claim-allocations.test.mjs re-enters clara._tf_adv_claim_application_birth for a multi-allocation claim. The report's AC3 row cites the #638 replay cells as the idempotence evidence, but packages/db/tests/staff-expense-claim.test.mjs:1048 p638.replay drives clara.admit_staff_expense_claim_work twice under one intent key; it never re-fires the post-approve trigger. The property is structurally held by uq_staff_advance_applications_line_advance plus the exists probe and the on conflict (application_line_id, advance_id) do nothing at 0301 section E, so the accounting risk is low. What is wrong is the evidence claim, against the wave-3 rule that a door's behaviour is asserted only after it was driven.",
+      "required_fix": "Either add one cell that re-enters the birth path for a two-allocation claim and asserts exactly two clara.staff_advance_applications rows with outstanding unchanged, or correct the AC3 row of docs/plan/active/riders-2026-09-20/reports/wave4-lane02-ticket931.md to say the idempotence of the LIST case rests on the unique index and the on-conflict clause and was not driven, moving it into \"Anything unverified\"."
+    },
+    {
+      "id": "SPEC-931-B",
+      "ticket": 931,
+      "severity": "minor",
+      "kind": "requirement-underspecified-decided-by-implementer",
+      "title": "\"every advance named must belong to this claimant\" gained a second arm the ticket does not describe",
+      "evidence": "Ticket: \"every advance named must belong to this claimant on an enrolled account\". Migration 0301 section C implements two arms: (a) the advance's enrolment_id IS the claim's claimant enrolment; or (b) the advance's enrolment is another LIVE enrolment of this client whose btrim(person_label) is byte-identical to the claimant's. Arm (b) admits an advance sitting on a DIFFERENT enrolment row on a string comparison of an attested label. The ticket neither asks for it nor rules it out, and it is the only thing that makes the ticket's own listed default (\"advances on different enrolled accounts may be discharged together\") reachable; p931.accounts and p931.claimant both turn on it. The implementer named it as a decision and asked for review. It is NOT a loosening: 0221 checked only which ACCOUNT the advance sat on, so nothing 0221 refused is now admitted.",
+      "required_fix": "Put the two-arm reading in front of the owner before release (arm (a) only, versus arm (a)+(b)), as the ticket report asks, and record the ruling on #931 so the staff-master successor ticket can cite it. The narrow version is a two-line change and one cell, and it makes cross-account splits unreachable."
+    },
+    {
+      "id": "SPEC-930-C",
+      "ticket": 930,
+      "severity": "minor",
+      "kind": "unasked-behaviour",
+      "title": "Dead message key: advanceIdPlaceholder, added by #930 and orphaned by #931",
+      "evidence": "9b60e6803 (#930) added \"advanceIdPlaceholder\": \"Choose an advance...\" at apps/web/messages/en.json:1719 for the NativeSelect placeholder the form rendered itself. b3e6ff43d (#931) replaced that select with the shared StaffAdvanceAllocationsEditor, which renders its own placeholder from StaffAdvances.allocationsEditor.selectAdvance. grep -rn advanceIdPlaceholder apps/web returns exactly one hit, the message file. check-message-keys does not catch an unused key, so lint stays green. en.json is one of the nine shared files work-order rule 7 asks lanes to keep minimal hunks in.",
+      "required_fix": "Delete the advanceIdPlaceholder line from apps/web/messages/en.json. No code or test references it."
+    },
+    {
+      "id": "SPEC-931-D",
+      "ticket": 931,
+      "severity": "note",
+      "kind": "requirement-deferred",
+      "title": "AC5 is not implemented: correctly routed to a successor contract, and it carries real debt",
+      "evidence": "AC5, as corrected by the owner's 2026-09-19 comment to chatTurn_v22: \"The chat tool contract widens to an allocation list in the next chatTurn successor; the tool proposes a split when unstated and parks a question for confirmation; a World e2e leg covers it.\" Nothing in packages/runtime/workflows or packages/runtime/lib changed and freeze-lint is OK at 312 files. Wave-4 lane rule (b) routes exactly this to the chatTurn_v22 / claraWork_v6 cut at the end of wave 4, and the report's successor contract carries all six required elements: tool name, zod input, door call with argument order, refusal mapping, part kind, prompt stanza. So this is compliant, not a defect. The debt: proposeAllocationsByDate has no runtime implementation or cell, advance_split_unconfirmed has no cell, the World e2e leg is unwritten, and the stableOpKey widening is untested.",
+      "required_fix": "Carry sections 1 to 10 of wave4-lane02-ticket931.md into the chatTurn_v22 ceremony's checklist verbatim, and file the World e2e leg as its own item so AC5 is not closed by the cut alone."
+    },
+    {
+      "id": "SPEC-931-E",
+      "ticket": 931,
+      "severity": "note",
+      "kind": "requirement-partial",
+      "title": "AC6's \"from-scratch apply\" is proved by a rolled-back prestate probe, not by an apply",
+      "evidence": "AC6 lists \"from-scratch apply\" among the required cells. 0301 was first-applied on clara_l02 and then redone four times with CLARA_MIGRATION_REDO; because the prestate is bimodal on its own marker, a redo can only take the \"already live\" branch. The first-apply branch was proved inside one rolled-back transaction that restored 0221's pre-images and ran 0301's prestate verbatim (report: FIRST-APPLY PRESTATE PROOF: PASS). That is what the wave-3 addendum asks a lane to do, and the same addendum says the integrator runs the true from-scratch chain, so the AC is not closable inside the lane.",
+      "required_fix": "Integrator: run the true 0001 to 0301 chain on a disposable cluster before the PR and record the result against #931 AC6. Watch section G's backfill in particular: tails T.3, T.3b and T.3c refuse rather than backfill anything they cannot state exactly, and hosted holds advance-application claims this rig does not."
+    },
+    {
+      "id": "SPEC-930-F",
+      "ticket": 930,
+      "severity": "note",
+      "kind": "unasked-behaviour",
+      "title": "Read-failure banner and retry on the advance chooser were not asked for",
+      "evidence": "No AC of #930 or #931 mentions a failure state for the staff-advance summary read. The diff adds a StateBanner with tone warning and a retry button, plus the new key advancesUnavailable. It matches how accountsRead and enrolmentsRead already behave in the same file and is the only honest thing to render when the read fails, so this is recorded as scope, not as a defect.",
+      "required_fix": "None. Recorded so the integrator sees the extra surface deliberately."
+    },
+    {
+      "id": "SPEC-931-G",
+      "ticket": 931,
+      "severity": "note",
+      "kind": "unasked-behaviour",
+      "title": "Two new head-consistency refusals and the changed-split conflict go beyond the ticket's refusal list",
+      "evidence": "AC2 enumerates the validator's refusals: exact-sum, claimant ownership, per-allocation temporal cap, typed shortfall naming the advance, and the existing no-advance and wrong-client reasons unmoved. 0301 section C additionally raises constraint allocation_head at claim.advance_id and at claim.advance_account_code when a stated head disagrees with the list's first line, and the recut canonical form makes a changed split an intent_payload_conflict (celled as p931.split.conflict). Neither is asked for. Both head refusals are unreachable from apps/web (toClaimWire always sets advanceId to rows[0]) and from the route (toDbClaim derives the head when absent), so they only bite a hand-built door call; the conflict semantics follow necessarily from putting advance_allocations in the canonical form, which AC1 requires.",
+      "required_fix": "None required. If the integrator wants the refusal surface minimal, the two allocation_head raises are the removable pair; the conflict semantics are not."
+    },
+    {
+      "id": "SPEC-930-H",
+      "ticket": 930,
+      "severity": "note",
+      "kind": "gap-between-surfaces",
+      "title": "The chooser is scoped to claimantAccountCode while the settlement leg is a separate picker, and rows carry no account_code",
+      "evidence": "#930 AC1: \"listing only advances with a positive outstanding balance for the chosen claimant\". apps/web/components/accounting/staff-expense-claim-form.tsx:262 filters candidates by draft.claimantAccountCode, while the claim's credit leg comes from the independent advanceAccountCode picker at line 669 with no default from the claimant. Two consequences, neither an AC breach: a preparer who picks a different advanceAccountCode is offered advances the door then refuses with constraint not_this_client (0221's own reason, unmoved); and the form's allocation rows carry no account_code, so every line defaults to advance_account_code and the form cannot express the cross-account split that #931's own default list allows and p931.accounts proves at the door. AC4 does not ask for it, and the lane report names it as follow-up 2.",
+      "required_fix": "None for this wave. Worth a follow-up ticket: either default advanceAccountCode from claimantAccountCode, or widen the chooser to every enrolled account of the claimant and carry account_code on each row."
+    },
+    {
+      "id": "SPEC-931-I",
+      "ticket": 931,
+      "severity": "note",
+      "kind": "requirement-satisfied-indirectly",
+      "title": "\"the register then shows one discharge per named advance\" is satisfied at the data level only",
+      "evidence": "Ticket \"What to build\": \"the register then shows one discharge per named advance\". No web register surface changed in the diff. It holds because the birth trigger mints one clara.staff_advance_applications row per allocation (p931.two asserts two rows, p931.accounts asserts one per account) and the register reads those rows generically through clara.staff_advance_statement and clara.staff_advance_summary, both unchanged. No unit cell or browser walk drives the staff-advances register showing two discharges arising from ONE claim.",
+      "required_fix": "None required. If the integrator wants it driven, the cheapest cell is an assertion on staff_advance_statement's movements for the p931.two client."
+    }
+  ],
+  "summary": "Both tickets are substantively delivered and every gate the two lane reports claim re-runs green at HEAD (db 9/9 and 24/24, web 4993/0/2, runtime 45/0, typecheck Done, CI-env lint exit 0, freeze-lint and parts-parity OK). #930's four acceptance criteria are all met and driven. #931 meets AC1, AC2, AC4 and AC6 with driven cells; AC3's one-credit-leg-per-account half is driven but its idempotence half is asserted with mis-cited evidence (SPEC-931-A); AC5 is correctly routed to the chatTurn_v22 successor contract by wave-4 lane rule (b) with all six required elements present, but leaves trackable debt (SPEC-931-D). One accounting-relevant reading the ticket never settled, arm (b) of \"belongs to this claimant\" (a byte-equal person_label across two enrolments), was decided by the implementer, flagged by them, and needs the owner's ruling before release (SPEC-931-B). One piece of residue to delete: the orphaned advanceIdPlaceholder message key (SPEC-930-C). Nothing in the diff contradicts a ticket line, no wall was loosened, and no requirement is implemented wrongly."
+}

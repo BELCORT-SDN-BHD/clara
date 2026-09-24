@@ -1,0 +1,72 @@
+{
+  "lens": "recheck",
+  "lane": "wave4-lane01",
+  "branch": "riders/w4-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "fixed_point": "cd2925391",
+  "recheck_head": "0f4811b1c",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave4-lane01-fix.md",
+  "source_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane01-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane01-codereview-standards.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane01-review-adversarial.json"
+  ],
+  "verdict": "accept",
+  "summary": "All 36 findings from the three source review reports (SPEC-01..21, L01-STD-1..4, ADV-01..11; 13 blocker/major-blocker-equivalent by original severity — precisely 13 blocker, 9 major, 8 minor, 6 note) are accounted for in the fix report's section-3 tables and were re-verified on the current head (0f4811b1c) by re-running the underlying evidence rather than trusting prose. Every gate the fix report names was re-run and reproduced its exact counts: packages/db tenancy-rent-plan.test.mjs 53/53, payroll-settlement.test.mjs 19/19, wave-b/wb-0020-legacy.test.mjs 9/9, the seven-file knowledge/rig-runtime/x56/x42b2/f-a2/firm-document-limits-writer/firm-portfolio-pack battery 82/82, the six-file payroll-summary-facts+payroll-summary-posting+agreement-contract-acquisition+document-capability-registry+tenancy-rent-plan+payroll-settlement battery 172/172, every x42* file + operation-census + rig-isolation 358 pass/20 skip/0 fail, pnpm typecheck exit 0, CI=true GITHUB_ACTIONS=true pnpm lint exit 0, check-document-region-field-paths.mjs clean over 1060 files, its own selftest OK (19 cases incl. the new ADV-08 case), check-frozen-workflows.mjs OK (322 files, 57 modules), check-parts-parity.mjs OK, check-wiki-dynamic-sql.mjs OK, apps/web full unit suite (node scripts/run-tests.mjs) 5035 tests/5033 pass/0 fail/2 skip, e2e/e2e-fixture-ownership.test.ts 44/44, and the three re-run e2e walks (tenancy-rent-plan-walk 2/2, payroll-settlement-walk 2/2, bank-match-walk 6/6) on the lane's own Playwright triple. Spot-checked the highest-risk blocker/major fixes directly in the migration and script source: ADV-01's reversal-mirror exclusion and ADV-04's is_high_stakes/awaiting_checker parity are present and tail-pinned in 0298; SPEC-08's clara_agent_ro revoke on clara.contract_terms and clara.contract_plan_confirmations, with a tail assertion (has_table_privilege) that raises if a grant returns, is present in 0300; SPEC-02's evaluator-closure claim was moved onto the migration text as the fix report describes; ADV-08's grammarSourceFile() function-name-only candidate selection with a required-roster-shape raise is present and its selftest case is shipped; SPEC-09's approve-writer census in x56-rest-c.test.mjs is built additively, stem-gated (has946Posting/has947Settlement/has948Agreement/has949Tenancy), five to nine, matching the fix report's governance-change framing; SPEC-18/ADV-09's needs-you.ts REVIEW_QUEUE_ROW_KINDS array holds exactly 15 entries matching its own header census; ADV-03's payable_account_in_use refusal is present and tail-asserted. The 64 whole-suite db failures the fix report calls pre-existing rig state were spot-verified: `git log cd2925391..HEAD` is empty for all seven named files, confirming this lane did not touch them. The deliberately unfixed items (SPEC-13's owner question, SPEC-16's out-of-scope nav entry, SPEC-19/SPEC-20's owner/integrator items, L01-STD-3/4's out-of-file-reach and follow-up-ticket items, ADV-03's stated residual) are each argued with a concrete, checkable reason tied to work-order scope-discipline and shared-file rules rather than asserted away, and none of them contradicts the review findings that raised them. Nothing above minor remains open; two minor documentation-accuracy issues survive and are listed below.",
+  "findings": [
+    {
+      "id": "L01-RECHECK-1",
+      "ticket": 949,
+      "severity": "minor",
+      "kind": "still-open",
+      "title": "0300's own design-rationale comment for clara.contract_terms still claims a clara_agent_ro SELECT the SPEC-08 fix revoked",
+      "evidence": "packages/db/migrations/0300_tenancy_terms_rent_plan.sql lines ~197-201 (the free-standing comment block above `create table clara.contract_terms`) reads '...a firm-scoped SELECT for clara_authenticated and a firm-scoped SELECT for clara_agent_ro. The runtime role gets NOTHING...' — the pre-fix design. The SPEC-08 fix commit (55b43294a) added the correct 'NO AGENT-LANE GRANT (fix round, finding SPEC-08)' comment and `revoke all on clara.contract_terms from clara_agent_ro;` about 90 lines further down, and separately corrected the `comment on table` SQL comment to say 'the agent lane holds no grant on this table: it has doors' — but did not update this earlier prose block, which a top-down reader hits first and which now directly contradicts the table's actual RLS posture and the fix itself.",
+      "required_fix": "Update the design-rationale comment block (~line 199) to describe the no-agent-grant posture, or delete the now-false 'a firm-scoped SELECT for clara_agent_ro' clause, so the file does not contradict its own SPEC-08 fix."
+    },
+    {
+      "id": "L01-RECHECK-2",
+      "ticket": 944,
+      "severity": "minor",
+      "kind": "still-open",
+      "title": "wave4-lane01-fix.md's own intro finding-count is wrong (27 stated vs 36 actual across the three source reviews)",
+      "evidence": "wave4-lane01-fix.md line 7-8: 'Twenty-seven findings: ten blockers, seven majors, six minors, four notes.' The three source review JSONs actually carry 36 findings total (spec 21 + standards 4 + adversarial 11), with severities 13 blocker / 9 major / 8 minor / 6 note (10+3 blocker; 5+1+3 major; 3+2+3 minor; 3+1+2 note). The section-3 tables of the SAME report do individually address all 36 (13 blocker rows, 9 major findings across combined rows, 14 minor/note findings across combined rows) — so the miscount is confined to the intro sentence and does not reflect missing coverage, but an integrator who reads only the intro would materially undercount the review's scope.",
+      "required_fix": "Correct the intro line to 'Thirty-six findings: thirteen blockers, nine majors, eight minors, six notes' (or recompute precisely) so the summary matches the detailed tables below it."
+    }
+  ],
+  "gates_rerun": [
+    {"gate": "packages/db tenancy-rent-plan.test.mjs (full gate chain)", "result": "53 pass / 0 fail", "matches_fix_report": true},
+    {"gate": "packages/db payroll-settlement.test.mjs (full gate chain)", "result": "19 pass / 0 fail", "matches_fix_report": true},
+    {"gate": "packages/db wave-b/wb-0020-legacy.test.mjs (full gate chain)", "result": "9 pass / 0 fail", "matches_fix_report": true},
+    {"gate": "packages/db knowledge-firm-defaults+rig-runtime-visibility+x56-rest-c+x42b2-s5c-clock+f-a2-statement-activation+firm-document-limits-writer+firm-portfolio-pack", "result": "82 pass / 0 fail", "matches_fix_report": true},
+    {"gate": "packages/db payroll-summary-facts+payroll-summary-posting+agreement-contract-acquisition+document-capability-registry+tenancy-rent-plan+payroll-settlement", "result": "172 pass / 0 fail", "matches_fix_report": true},
+    {"gate": "packages/db every x42*.test.mjs + operation-census.test.mjs + rig-isolation.test.mjs", "result": "358 pass / 0 fail / 20 skipped", "matches_fix_report": true},
+    {"gate": "pnpm typecheck", "result": "exit 0", "matches_fix_report": true},
+    {"gate": "CI=true GITHUB_ACTIONS=true pnpm lint", "result": "exit 0", "matches_fix_report": true},
+    {"gate": "node scripts/check-document-region-field-paths.mjs", "result": "clean over 1060 files", "matches_fix_report": true},
+    {"gate": "node scripts/check-document-region-field-paths.selftest.mjs", "result": "OK, 19 cases including the new ADV-08 case", "matches_fix_report": true},
+    {"gate": "node scripts/check-frozen-workflows.mjs", "result": "OK — 322 frozen files, 57 use-workflow modules", "matches_fix_report": true},
+    {"gate": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "OK", "matches_fix_report": true},
+    {"gate": "node scripts/check-wiki-dynamic-sql.mjs", "result": "OK — 1496 definitions, 245 change-of-record patches, 20 waivers", "matches_fix_report": true},
+    {"gate": "apps/web node scripts/run-tests.mjs (whole unit suite)", "result": "5035 tests, 5033 pass, 0 fail, 2 skipped", "matches_fix_report": true},
+    {"gate": "apps/web e2e/e2e-fixture-ownership.test.ts", "result": "44 pass / 0 fail", "matches_fix_report": true},
+    {"gate": "e2e tenancy-rent-plan-walk (lane triple 3500/3501/3502)", "result": "2 passed", "matches_fix_report": true},
+    {"gate": "e2e payroll-settlement-walk (lane triple)", "result": "2 passed", "matches_fix_report": true},
+    {"gate": "e2e bank-match-walk (lane triple)", "result": "6 passed", "matches_fix_report": true},
+    {"gate": "apps/web/messages/en.json diff vs base (SPEC-15/ADV-07)", "result": "105 insertions / 4 deletions across 5 hunks; valid JSON", "matches_fix_report": true},
+    {"gate": "residual whole-db-suite failures — git log cd2925391..HEAD on the seven named files", "result": "empty for all seven (f-a5b-sandbox-export-pr1, delta-catalog-phase, delta-contract, f-a5-reporting-agency-pr1, f-t1-sst-reference, intake-batch, epsilon-contract)", "matches_fix_report": true}
+  ],
+  "spot_checks": [
+    "ADV-01: 'and je.reversal_of is null' present in 0298's FIFO debit pool + tail T.6 sha/occurrence count assertion",
+    "ADV-04: clara.is_high_stakes(v_entry) / 'high_stakes_needs_checker' / status='awaiting_checker' present on both payroll and rent settlement cores, tail-asserted in both 0298 and 0300",
+    "SPEC-08: revoke all on clara.contract_terms / clara.contract_plan_confirmations from clara_agent_ro present in 0300, with a has_table_privilege tail raise (T.1) guarding against a future grant",
+    "SPEC-02: evaluator-closure claim moved onto migration prosrc text in payroll-summary-facts.test.mjs and agreement-contract-acquisition.test.mjs, both citing 'finding SPEC-02'",
+    "ADV-08: grammarSourceFile() selects candidates by function name alone and requires the roster-shape regex on the winner, raising by name when absent; selftest drives it against a scratch migration dir with no roster",
+    "SPEC-09: x56-rest-c.test.mjs's approve-writer census is built additively via has946Posting/has947Settlement/has948Agreement/has949Tenancy, five to nine, matching the fix report's stated governance change",
+    "SPEC-18/ADV-09: needs-you.ts REVIEW_QUEUE_ROW_KINDS has exactly 15 entries, matching its own 'FIFTEEN' header census",
+    "ADV-03: payable_account_in_use refusal present in 0300's confirm door and tail-asserted"
+  ],
+  "not_reverified_low_confidence": [
+    "The full whole-suite packages/db run (5601 tests / 64 known-unrelated failures) was not re-run in full given its ~10+ minute cost per pass and the fact that every gate battery it aggregates was independently re-run above with matching counts; the residual-failure file list was instead spot-verified via git log to confirm this lane did not touch them.",
+    "The from-scratch 0001->0300 migration chain (SPEC-20) was not attempted, as the fix report and RIG.md both state this is owed to the integrator on a disposable cluster, never on a lane cluster."
+  ]
+}

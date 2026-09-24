@@ -105,6 +105,11 @@ test("FixedAssetIncompleteAffordance: the real door call carries a non-empty op_
   const seen: { url: string; body: Record<string, unknown> }[] = [];
   await withMockedEnv(
     (async (url: RequestInfo | URL, init?: RequestInit) => {
+      // #933 — opening the form also READS the asset's parked question, to pre-fill from Clara's
+      // proposal. That read is not a door call and is not part of this cell's subject, so the
+      // transcript keeps the door calls alone; the read answers an empty list (nothing parked),
+      // which is this fixture's world.
+      if (String(url).includes("agent_interruptions")) return jsonResponse([]);
       seen.push({ url: String(url), body: JSON.parse(String(init?.body ?? "{}")) });
       // Every attempt refuses, so the affordance stays open (N13) and a SECOND submit is the
       // SAME decision the human is retrying, not a new one.
@@ -158,6 +163,9 @@ test("FixedAssetIncompleteAffordance: a successful submit clears the fields and 
   let callIndex = 0;
   await withMockedEnv(
     (async (url: RequestInfo | URL, init?: RequestInit) => {
+      // #933 — the proposal read that opening the form now issues is not a door call, so it never
+      // advances this cell's impl cursor and never lands an op key in the transcript.
+      if (String(url).includes("agent_interruptions")) return jsonResponse([]);
       const impl = impls[callIndex] ?? impls[0]!;
       callIndex += 1;
       return impl(url, init);

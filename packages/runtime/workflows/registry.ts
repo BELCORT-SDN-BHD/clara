@@ -41,6 +41,8 @@ import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { statementFacts_v1 } from "./statementFacts.v1.js";
 import { statementFacts_v2 } from "./statementFacts.v2.js";
 import { statementFacts_v3 } from "./statementFacts.v3.js";
+import { payrollFacts_v1 } from "./payrollFacts.v1.js";
+import { agreementFacts_v1 } from "./agreementFacts.v1.js";
 import { witnessFacts_v1 } from "./witnessFacts.v1.js";
 import { witnessFacts_v2 } from "./witnessFacts.v2.js";
 import { witnessFacts_v3 } from "./witnessFacts.v3.js";
@@ -381,6 +383,22 @@ export const workflows = {
   // (c)) — the `llm_witness` lane's parks are the deployment-window kind, so a run still resuming
   // into the frozen v2 body at cutover time is the expected case, not a corner one.
   witnessFacts: witnessFacts_v3,
+  // #945 ADDS A BRAND-NEW CLASS, `payrollFacts: payrollFacts_v1` — the payroll summary's own
+  // questionnaire family on the `payroll_facts` lane migration 0296 mints. Nothing is REPOINTED:
+  // no earlier version exists, so this entry takes traffic the moment the lane has a task, and
+  // the only thing that could have been taking it before is the router's skipped_kind dead end
+  // 0296 removed. DEPLOY ORDER IS DATABASE FIRST (0296's header): a queued payroll task simply
+  // waits for this image, and this image WAITS rather than egressing if it meets a database
+  // whose engine literal disagrees with its own snapshot.
+  payrollFacts: payrollFacts_v1,
+  // #948 ADDS A BRAND-NEW CLASS, `agreementFacts: agreementFacts_v1` — the agreement contract's
+  // own questionnaire family on the `contract_facts` lane migration 0299 mints. Nothing is
+  // REPOINTED: no earlier version exists, so this entry takes traffic the moment the lane has a
+  // task, and the only thing that could have been taking it before is the router's skipped_kind
+  // dead end 0299 removed. DEPLOY ORDER IS DATABASE FIRST (0299's header): a queued agreement
+  // task simply waits for this image, and this image WAITS rather than egressing if it meets a
+  // database whose engine literal disagrees with its own snapshot.
+  agreementFacts: agreementFacts_v1,
   // H-17: REPOINTED v9 -> v10. The unattended coder mapped three different counterparty-identity
   // uniques onto one untokened, question-shaped CLR23 and called every OTHER unique violation
   // double_coded, which is success-shaped. v10 replaces that substring test with an exact,
@@ -976,6 +994,11 @@ export { closeExampleV1 };
 export { documentIngest_v2 };
 export { invoiceFacts_v1 };
 export { witnessFacts_v3 };
+// #945: payrollFacts_v1 is the `payrollFacts:` pointer and its only version.
+export { payrollFacts_v1 };
+// #948: agreementFacts_v1 is the `agreementFacts:` pointer and its only version — the same
+// shape payrollFacts_v1 carries three lines above, for the same reason.
+export { agreementFacts_v1 };
 export { firmInterview_v3 };
 export { clientOnboarding_v4 };
 export { clientOnboarding_v5 };
@@ -1045,6 +1068,8 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "witnessFacts_v1",
   "witnessFacts_v2",
   "witnessFacts_v3",
+  "payrollFacts_v1",
+  "agreementFacts_v1",
   "autoDraft_v1",
   "autoDraft_v2",
   "autoDraft_v3",
@@ -1079,6 +1104,8 @@ export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   invoiceFacts: "invoiceFacts_v1",
   statementFacts: "statementFacts_v3",
   witnessFacts: "witnessFacts_v3",
+  payrollFacts: "payrollFacts_v1",
+  agreementFacts: "agreementFacts_v1",
   autoDraft: "autoDraft_v10",
   firmInterview: "firmInterview_v3",
   clientOnboarding: "clientOnboarding_v5",

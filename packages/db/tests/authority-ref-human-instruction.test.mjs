@@ -182,7 +182,7 @@ test("p977.definition.shape clara._authority_ref_refusal(text,uuid,uuid,uuid) ex
   }
 });
 
-test("p977.definition.one both doors READ clara._authority_ref_refusal and neither still carries its own inline chat-lane existence test; that inline test now survives in exactly one clara function — the accrual lane's core, which the owner's ruling deliberately leaves alone", async (t) => {
+test("p977.definition.one both doors READ clara._authority_ref_refusal — as does #941's on-behalf twin of the plan door, which copies that door's authority shape verbatim — and none of them still carries its own inline chat-lane existence test; that inline test now survives in exactly one clara function — the accrual lane's core, which the owner's ruling deliberately leaves alone", async (t) => {
   if (await gate(t)) return;
 
   const SIGN = "clara.sign_depreciation_authority(uuid,uuid,text,jsonb)";
@@ -208,12 +208,36 @@ test("p977.definition.one both doors READ clara._authority_ref_refusal and neith
     "the inline existence test survives in exactly the one body the ruling leaves alone "
     + "(the accrual lane's core) — never in either door, and never in a third place");
 
+  // THE THIRD READER, AND WHY IT IS ONE (riders wave 4, #941/0308). `clara._obo_plan_core` is the
+  // ON-BEHALF twin of the plan door's own plan step: #915 wrote it because
+  // `clara.create_accounting_plan` resolves its actor through `clara._human_ctx` ->
+  // `clara.jwt_sub()`, which a `clara_runtime` connection cannot satisfy, so an OBO lane cannot
+  // nest the door itself. 0308 §D copies the door's authority shape VERBATIM and says so in the
+  // body ("THE AUTHORITY SHAPE, verbatim from clara.create_accounting_plan"), and two of lane
+  // 04's own cells MEASURE that copy — `p915.obo.refusals_match` (prepayment-schedule-obo.test.mjs)
+  // and `p941.obo.authority` (revenue-recognition.test.mjs) compare the two entrances' whole
+  // refusal payloads byte for byte. So the twin reading the shared definition is #977's rule
+  // HOLDING on the machine lane, not escaping it: the alternative — a second inline existence
+  // test — is exactly the drift this ticket folded away, and 0308's own header records that the
+  // accrual lane's uncorrected copy is what taught the wave to prefer the shared read.
+  //
+  // MEASURED, never assumed: the twin does not exist on a pre-0308 database, so it joins the
+  // expected roster only when the catalog carries it. Everything else stays an EXACT closed
+  // world — a FOURTH reader still reds this cell.
+  const OBO_TWIN_SIG = "clara._obo_plan_core(text,uuid,uuid,uuid,text,text,jsonb,text,text,"
+    + "integer,text,date,date,jsonb)";
+  const oboTwinLive = (await rootQuery(
+    "select to_regprocedure($1) is not null as ok", [OBO_TWIN_SIG])).rows[0].ok;
   const readers = bodies.rows
     .filter((r) => r.proname !== "_authority_ref_refusal" && r.prosrc.includes(REFUSAL_CALL))
     .map((r) => r.proname);
   assert.deepEqual(readers,
-    ["create_accounting_plan", "sign_depreciation_authority"],
-    "…and exactly the two doors the ruling names read the one definition");
+    // `order by p.proname` above is the catalog's own C ordering (proname is `name`), so the
+    // underscore-led twin sorts first.
+    [...(oboTwinLive ? ["_obo_plan_core"] : []),
+      "create_accounting_plan", "sign_depreciation_authority"],
+    "…and exactly the two doors the ruling names — plus #941's on-behalf twin of the plan door, "
+    + "which carries that door's authority shape verbatim — read the one definition");
 });
 
 // ===========================================================================================

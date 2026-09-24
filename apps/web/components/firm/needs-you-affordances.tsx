@@ -31,6 +31,7 @@ import { CodingTaskAffordance } from "./coding-task-affordance";
 import { LintFindingAffordance } from "./lint-finding-affordance";
 import { ComplianceWatchAffordance } from "./compliance-watch-affordance";
 import { WorkQuestionAffordance } from "./work-question-affordance";
+import { AccrualBillConflictAffordance } from "./accrual-bill-conflict-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -120,6 +121,47 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // whole affordance, and the fix round made it name the view that mounts those controls
     // (`/registers?tab=fixedAssets`) rather than the workbench's default aging view.
     depreciation_authority_pending: null,
+    // #946 (0297, riders wave 4 lane 01): NO inline act, same posture as `draft` and
+    // `depreciation_authority_pending` above. Every condition this row reports is cleared
+    // somewhere else — the chart door adds a missing account, the document page shows the page
+    // whose two readings disagreed, the journals workbench holds the entry a duplicate points
+    // at — and the posting lane deliberately has no "post it anyway" door, because nothing in
+    // this lane is posted on a guess. The row's own sentence plus needs-you-links.ts's link to
+    // the documents tab are the whole affordance.
+    payroll_posting_blocked: null,
+    // #947 (0298, riders wave 4 lane 01): NO inline act. Accepting a settlement candidate names a
+    // SPECIFIC bank line among however many a run offers — a decision the inbox row's own fixed
+    // shape (one row, no per-candidate slot) cannot carry, unlike a single confirm/dismiss click.
+    // needs-you-links.ts's link into the bank tab's Matching view, where
+    // `PayrollSettlementsSection` renders every candidate with its own Accept button, is the
+    // whole affordance.
+    payroll_net_pay_unsettled: null,
+    // #948 (0299, riders wave 4 lane 01): NO inline act, the same posture as `draft` and
+    // `payroll_posting_blocked` above. Every condition this row reports is cleared somewhere else
+    // — the chart door adds a missing account, the fixed-assets register enrols the account the
+    // asset belongs to, the document page shows the page whose two readings disagreed, the
+    // journals workbench holds the entry a duplicate points at — and the posting lane
+    // deliberately has no "post it anyway" door, because nothing in this lane is posted on a
+    // guess. A non-financing agreement's row has no act AT ALL by design: there is nothing to
+    // post, and the row exists to say so. The row's own sentence plus needs-you-links.ts's link
+    // to the documents tab are the whole affordance.
+    agreement_posting_blocked: null,
+    // #949 (0300, riders wave 4 lane 01): NO inline act, the #947 reasoning restated. Accepting a
+    // settlement candidate names a SPECIFIC bank line among however many a month offers -- a
+    // decision the inbox row's own fixed shape (one row, no per-candidate slot) cannot carry.
+    // needs-you-links.ts's link into the bank tab is the whole affordance.
+    rent_payable_unsettled: null,
+    // #949 (0300): NO inline act either, for a different reason. Confirming an escalation needs
+    // the accountant's WRITTEN judgement -- a stepped rent always makes the lessee branch ask,
+    // because straight-line means the total averaged over the term -- and free text is not a
+    // click. The link to the contract page, where the terms and the question are rendered
+    // together, is the whole affordance.
+    rent_escalation_pending: null,
+    // #938 (0302, riders wave 4 lane 03): "reverse now" (clara.request_plan_catch_up, the
+    // EXISTING plan-lane door) and "skip this period's next occurrence"
+    // (clara.skip_plan_occurrence, this ticket's own new door) — see
+    // ./accrual-bill-conflict-affordance.tsx's own header for the grounding.
+    accrual_bill_conflict: AccrualBillConflictAffordance,
   } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
 

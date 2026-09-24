@@ -1,0 +1,114 @@
+{
+  "lens": "adversarial",
+  "lane": "wave4-lane04",
+  "branch": "riders/w4-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "fixed_point": "cd2925391",
+  "diff": "git diff cd2925391...HEAD  (73 files, +20849/-1197)",
+  "commits": 38,
+  "tickets": [939, 940, 915, 941, 1036],
+  "database_driven": "127.0.0.1:55744 / clara_l04 (294 migrations, 0305..0315 applied)",
+  "verdict": "accept-with-fixes",
+  "summary": "Tenant isolation, the ACL posture and the rank floors on every new and recut door held under attack: another firm's client, a viewer author, a deactivated member, the runtime role and clara_agent_ro were each refused by name with no existence oracle, and the SST-output exclusion and the integer-cent remainder are correct. Five real defects survived verification. The worst is #1036: a wake-created amortisation plan can NEVER admit an occurrence, because the plan's authorised_by is clara.agent_user_id(), which holds no firm membership -- driven side by side with an identical human-lane plan that was admitted. Two more are serious: the viewer-floor reads project the bookkeeper-walled stated reason, and the stated-term door answers a raw 23514 for three refusals its own comment and its own battery vocabulary claim it names.",
+  "findings": [
+    {
+      "id": "ADV-01",
+      "ticket": 1036,
+      "severity": "blocker",
+      "kind": "correctness",
+      "title": "A wake-created prepayment plan can never admit an occurrence: it is configured and posts nothing, every month, forever",
+      "file": "packages/db/migrations/0315_prepayment_wake_reroute.sql:250-256",
+      "evidence": "clara._prepayment_plan_core_wake writes authorised_by = created_by = p_actor, where p_actor is clara.agent_user_id(). Measured on clara_l04: select count(*) from clara.firm_memberships where user_id = clara.agent_user_id() -> 0. clara._plan_admit_occurrence (0308:1904) passes p.authorised_by to clara.admit_journal_work, whose core clara._admit_accounting_work_core resolves the author's membership and raises CLR11 client_not_found when there is none. DRIVEN, inside a transaction rolled back (scratchpad/adv6.mjs): the wake door built plan fd8933ca with next_occurrences 2025-02-28 / 03-31 / 04-30; select clara._plan_admit_occurrence(plan,'2025-02-28','primary','adv6') answered {\"admitted\":false,\"code\":\"CLR11\",\"reason\":\"client_not_found\",\"occurrence_id\":\"06cba4a0-...\"}. The SAME scene through clara.create_prepayment_schedule (plan 75224aee) answered {\"admitted\":true,\"work_id\":\"8e4cf699-...\"}. Both the human catch-up (clara.request_plan_catch_up) and the automated belt (clara.wake_due_plan_occurrences) route through that one body (pg_proc prosrc scan), so no path can post. This is exactly the failure 0308's own clara._assert_plan_schedule comment calls 'the worst failure this lane can have ... a schedule that looked configured and posted nothing, every month, with no audit row, no Work and no notification'. #1036's AC1 asks for 'a prepayment schedule WITH ITS OCCURRENCES'; the report (wave4-lane04-ticket1036.md:52) reads that as the next_occurrences PREVIEW array, and p1036.acted asserts only next_occurrences.length === 3. The whole battery is green (6/6, re-run on clara_l04), and the one cell that would have caught it -- fa4p2a.W35 'the prepaid asset reaches EXACTLY zero' -- was DELETED by this lane (packages/db/tests/f-a4-pr2a-books.test.mjs, -361 lines, no replacement added in that file).",
+      "required_fix": "Either give the wake plan an authorised_by that admit_journal_work accepts (the estate has no such human for the clocked lane, which is the architectural problem the file header names), or make the wake route refuse at configuration time rather than mint a plan that can never run, or extend the admission body for an agent-authored plan. Whatever the choice, add a cell that DRIVES clara._plan_admit_occurrence (or the catch-up door) on a wake-created plan and asserts the outcome -- the wave-3 addendum rule 'a door's behaviour is asserted only after it was driven'."
+    },
+    {
+      "id": "ADV-02",
+      "ticket": 939,
+      "severity": "major",
+      "kind": "rank-floor-bypass",
+      "title": "The viewer-floor schedule reads project the stated reason that the same migration walls at the bookkeeper floor",
+      "file": "packages/db/migrations/0305_prepayment_stated_term.sql:1320,1379 and 0308_deferred_revenue_recognition.sql:2116,2173",
+      "evidence": "0305 section A.2 creates policy p_pst_human on clara.prepayment_stated_terms using (firm_id = clara.jwt_firm() and clara.actor_role_rank() >= clara.role_rank('bookkeeper')) and states the reason in its own comment: 'this table holds a professional's STATED REASON, the same data class 0140 walled off there'. clara.get_prepayment_schedule and clara.list_prepayment_schedules enter at clara.role_rank('viewer') (0305:1227 and 0305:1363) and project t.reason as term_reason; clara.get_revenue_recognition_schedule and clara.list_revenue_recognition_schedules do the same at viewer floor (0308:2035, 0308:2173). DRIVEN on clara_l04 (scratchpad/adv3.mjs and adv4.mjs) as carol, a viewer member of the owning firm: a direct select count(*) from clara.prepayment_stated_terms where source_entry_id = $1 returned n=0 for her and n=1 for bob (bookkeeper) -- the wall works -- yet clara.get_prepayment_schedule returned term_reason = 'SECRET-GROUNDS: the partner judged the term from a phone call with the client's CFO', and so did list_prepayment_schedules[0].term_reason and both revenue-lane reads. The ASYMMETRY is the sharpest evidence that this is an oversight: clara.document_service_periods carries the IDENTICAL policy (p_dsp_human, measured off pg_policy), and the else-branch of the very same reads deliberately selects only the dates and the supersession columns -- sp.basis is never projected. Impact is live: apps/web/lib/navigation/tree.ts gives deferredRevenue and prepayments minimumRole 'viewer', and prepayment-detail.tsx:217 / deferred-revenue-detail.tsx:204 render the text.",
+      "required_fix": "Either omit term_reason (and term_stated_by / term_stated_at, which identify the professional) below clara.role_rank('bookkeeper') inside the four definer reads, or raise the read floor for those fields, and say which. The ticket's own decision 2 is 'stating a term is bookkeeper work, the same floor as recording a document's service period'; a read that hands a viewer what the table refuses them makes that floor decorative. Match the document lane either way."
+    },
+    {
+      "id": "ADV-03",
+      "ticket": 939,
+      "severity": "major",
+      "kind": "untyped-refusal",
+      "title": "record_prepayment_stated_term answers a raw check-constraint violation for the domain, the finiteness and the 120-month cap it claims to refuse by name",
+      "file": "packages/db/migrations/0305_prepayment_stated_term.sql:295-411",
+      "evidence": "The door validates only: op key present, client, source entry, posted status, not document-bound, reason non-blank, both dates present, dates not inverted. It never checks ck_pst_finite, ck_pst_domain or ck_pst_max_periods. DRIVEN as a bookkeeper on clara_l04 (scratchpad/adv1.mjs): period_start '1899-01-01' -> SQLSTATE 23514, constraint ck_pst_domain, detail null; period_end 'infinity' -> 23514 ck_pst_domain; a 200-month term (2025-01-01..2041-08-31) -> 23514 ck_pst_max_periods. None carries a detail.reason token, so no surface can classify them. The migration's own comment at 0305:176-180 asserts the opposite: 'The door refuses these BY NAME so a caller gets a reason; these exist so no OTHER writer, now or later, can get past them.' The battery's vocabulary declares three tokens for exactly these cases -- prepayment-stated-term-fixtures.mjs:78-81, datesNotFinite / datesOutOfDomain / termTooLong -- and a repo-wide grep finds them in that one file only: nothing raises them and no cell asserts them. Reachable from the UI: apps/web/components/prepayments/prepayment-form.tsx:544-547 validates presence, order and a non-blank reason and nothing else, an input type=date accepts 1899-01-01 and a fifteen-year span, and the raw error lands in ErrorMessage under 'The service period was not recorded'.",
+      "required_fix": "Add the three named refusals to the door ahead of the insert, using the tokens the battery already declares, with a cell for each; or delete the three dead vocabulary entries and correct the migration comment so it stops claiming a behaviour the door does not have. The first is what the ticket's fact-with-a-basis discipline implies."
+    },
+    {
+      "id": "ADV-04",
+      "ticket": 940,
+      "severity": "minor",
+      "kind": "race",
+      "title": "enrol_prepayment_account has no unique_violation handler: a two-session race answers the loser a bare 23505",
+      "file": "packages/db/migrations/0306_prepayment_account_roster.sql:421-434",
+      "evidence": "The version-forward block does select ... where client_id=.. and account_code=.. and purpose=.. and active limit 1 for update, then inserts. With NO live row there is nothing to lock, so two sessions both fall through and the loser meets uq_prepayment_account_enrolments_live. DRIVEN with two REAL connections, each a distinct bookkeeper of the same firm, issued concurrently (scratchpad/adv7.mjs): session A returned an enrolment; session B returned {\"code\":\"23505\",\"constraint\":\"uq_prepayment_account_enrolments_live\"} with no detail. One live row afterwards, so the invariant holds -- but the answer is unclassifiable. 0306's comment at :204-208 says 'the loser meets this index loudly rather than producing a silent double-live state', which is true and incomplete. Every sibling door this lane wrote DOES re-raise typed on the same shape: 0307:818, 0308:1373 and 0315:801 each carry exception when unique_violation then ... using errcode='CLR13', and 0306 itself carries one at :1004 for the recut schedule door -- so the pattern was known and one door was missed. clara.retire_prepayment_account (0306:460) has the same shape and no handler.",
+      "required_fix": "Wrap the insert in exception when unique_violation then and re-raise the door's own CLR37/CLR13 payload naming the live enrolment, exactly as 0307/0308/0315 do; add a two-connection cell."
+    },
+    {
+      "id": "ADV-05",
+      "ticket": 941,
+      "severity": "minor",
+      "kind": "accounting",
+      "title": "A REVERSED advance receipt can still be put on a recognition schedule, and the lane's own attention band says it should not be",
+      "file": "packages/db/migrations/0308_deferred_revenue_recognition.sql:1051-1064",
+      "evidence": "clara._revenue_recognition_core reads je.id, je.status, je.document_id, je.posting_date and refuses only status <> 'approved'. clara.reverse_entry leaves the original at status 'approved' and sets reversed_by, so a refunded advance passes. DRIVEN on clara_l04 (scratchpad/adv5.mjs): a 90000-sen advance was reversed through clara.reverse_entry as a real human (reversed = true on the row), and clara.create_revenue_recognition_schedule then returned schedule ad7c9514 with total_cents 90000 over 3 periods, effective_from 2025-01-31 -- a plan that will post Dr deferred revenue / Cr revenue 90000 against money the client got back, driving the liability 90000 into a debit balance and recognising revenue on a cancelled performance obligation (MFRS 15 / MPERS section 23, the standard this file's own header names). The two halves of the lane disagree: clara.list_revenue_recognition_attention filters je.reversed_by is null (0308:2342), as do 0305:1571 and 0306:1166, so the band will never offer the receipt the door will accept. clara.prepayment_schedule_v1 has the same gap, so the expense lane inherits it -- but the revenue arm was written fresh here, and clara.record_prepayment_stated_term even selects je.reversed_by into its record and then never reads it (0305:352).",
+      "required_fix": "Refuse a reversed source entry at both create doors with the lane's own _source_unfit token and an axis (e.g. source_reversed), matching the predicate the attention bands already use; and either use or drop the dead reversed_by read in record_prepayment_stated_term."
+    },
+    {
+      "id": "ADV-06",
+      "ticket": 1036,
+      "severity": "note",
+      "kind": "honesty",
+      "title": "An agent-wake plan is stamped authority_kind = 'explicit_instruction'",
+      "file": "packages/db/migrations/0315_prepayment_wake_reroute.sql:250-256",
+      "evidence": "The file header says the authority is 'recorded HONESTLY instead, as {kind:agent_wake, wake_kind, task_id} -- never dressed up as a person's instruction'. Only authority_ref is honest: the insert writes the literal 'explicit_instruction' into clara.accounting_plans.authority_kind, the closed one-member column a reader filters on to mean 'a person instructed this'. Measured on clara_l04: {authority_kind: 'explicit_instruction', authority_ref: {kind:'agent_wake', wake_kind:'close_prep', task_id:...}, authorised_by: clara.agent_user_id()}. The battery pins it (prepayment-wake-reroute.test.mjs:135), so the value is deliberate; the header's sentence is what is wrong.",
+      "required_fix": "Either widen the column (the file explicitly declines to, with reasons) or correct the header and the function comment so they say the column still reads explicit_instruction and only the ref and the actor distinguish the lane."
+    },
+    {
+      "id": "ADV-07",
+      "ticket": 941,
+      "severity": "note",
+      "kind": "idempotency",
+      "title": "One op key reused across the prepayment and revenue lanes collides on the nested ':plan' reservation and answers an untyped CLR10",
+      "file": "packages/db/migrations/0308_deferred_revenue_recognition.sql:1330",
+      "evidence": "The two doors take their OWN reservation under distinct fn namespaces ('create_prepayment_schedule' vs 'create_revenue_recognition_schedule'), which invites a caller to reuse one key -- but both then nest clara.create_accounting_plan with p_op_key || ':plan', one shared (firm, 'create_accounting_plan') namespace. DRIVEN (scratchpad/adv5.mjs): key K succeeded on the revenue lane, then the SAME K on the prepayment lane returned {\"code\":\"CLR10\",\"message\":\"op_key reused with different args\"} with no detail.reason. Replay discipline itself is correct: same key + same payload converged on the identical schedule id, same key + a different purpose refused. The pattern predates this lane (0222 and 0223 already share the suffix); #941 makes it a fourth caller.",
+      "required_fix": "Optional -- qualify the nested key per lane (e.g. ':rrplan'), or give clara._reserve_op's reuse raise a detail.reason so a surface can classify it."
+    },
+    {
+      "id": "ADV-08",
+      "ticket": 1036,
+      "severity": "note",
+      "kind": "process",
+      "title": "0315 ships no rig-meta cohort, which the wave-2 migration house shape lists",
+      "file": "packages/db/tests/rig-meta.mjs",
+      "evidence": "The wave-2 addendum's house shape is 'a preintegration gate module with a stable stem, a rig-meta cohort, the gate-chain entry in migration order'. 0305/0306/0307/0308 each added one (PREPAYMENT_STATED_TERM_0305_COHORT .. DEFERRED_REVENUE_0308_COHORT, rig-meta.mjs:3143-3226); a grep for '1036', '0315', 'wake_reroute' or '_prepayment_plan_core_wake' in rig-meta.mjs returns nothing. The gate module and the package.json chain entry are present and in migration order. wave4-lane04-ticket1036.md:195-199 states the omission and defends it (the one new function is ungranted, T17's grant-matrix census is over application grants, T17 run green with rig-meta untouched), so this is recorded as disclosed rather than as a defect.",
+      "required_fix": "Integrator's call: accept the disclosure, or add a one-function cohort so a half-applied estate carrying clara._prepayment_plan_core_wake without its siblings is caught."
+    }
+  ],
+  "held_under_attack": [
+    "Function ACLs: all 33 new and recut bodies audited off pg_proc.proacl -- no PUBLIC EXECUTE anywhere; the two OBO twins and the two machine reads are clara_runtime only; the wake wrapper is clara_wake_interactive only; the five cores and the v2 evaluator are ungranted. clara_authenticated and clara_agent_ro both answered 42501 on create_prepayment_schedule_for, create_revenue_recognition_schedule_for, read_prepayment_source_for and read_revenue_recognition_source_for (driven).",
+    "Tenant isolation, no existence oracle: another firm's owner on a schedule of this firm -> CLR11 prepayment_schedule_not_found / revenue_recognition_schedule_not_found; the machine reads with a foreign p_firm -> CLR11 prepayment_source_not_found / revenue_recognition_source_not_found; the OBO twins with an author of another firm -> the SAME CLR11 client_not_found a nonexistent client gets (driven, both lanes).",
+    "Rank floor on the OBO twins: a viewer author -> CLR04 insufficient_role on both lanes, with nothing written (driven).",
+    "SST output tax: a receipt of Dr bank 127200 / Cr deferred revenue 120000 / Cr SST output 7200 produced a schedule of total_cents 120000 -- the special_acc_type='sst_output' stamp excluded the tax leg structurally, and the receipt still presented exactly one candidate liability leg (driven).",
+    "Integer cents: clara.prepayment_schedule_v2 truncates the base toward zero and puts the whole remainder in the final period, so the emitted lines sum to total_cents exactly; its term guards run present -> finite -> domain in pure date comparison -> inverted -> whole months -> 120 cap, so every check precedes the interval arithmetic that could overflow. p941.posts.full_year drives the liability to exactly zero end to end.",
+    "Lock order: every plan step takes pg_advisory_xact_lock(203005004, hashtext(client)) -- the estate's one rung, matching 0249/0250/0277/0279/0283/0293 -- then the plan row FOR UPDATE, then the Work through clara.admit_journal_work. No new lock key was minted.",
+    "Migration safety on a database with real rows: 0305's add column term_source not null default 'document_service_period' is catalog-only on PG11+ and backfills the only provenance that existed, so ck_ps_term_source_carrier validates clean against rows whose service_period_id and document_id were already NOT NULL; 0308's accounting_plans_kind_check is dropped and re-added as a strict superset. No splice-by-text edit anywhere -- every body is a full create or replace, and the prestate pins are sha256(prosrc) comparisons, not anchors that could match twice or zero times.",
+    "Shared-file discipline: e2e-fixture-ownership.test.ts, serve-built.mjs, routes.ts, tree.ts, manifest.txt and packages/db/package.json are all additive at the sorted position, and the db gate chain is in migration order (0305, 0306, 0307, 0308, 0315). apps/web/lib/firm/needs-you.ts was not touched by this lane at all.",
+    "Census extensions (delta-catalog-phase, delta-contract, epsilon-contract) are conditional on the v2 evaluator row existing, so they stay exact on a pre-0305 chain -- extended, not loosened."
+  ],
+  "reruns": [
+    "node --test --test-concurrency=1 <222 gate flags> tests/prepayment-wake-reroute.test.mjs -> 6 pass, 0 fail, 0 skip (12.3s) on clara_l04. The battery is green AND the plan it configures can never post: ADV-01 is invisible to it.",
+    "Ad-hoc adversarial drivers, run against clara_l04 through the batteries' own governed fixtures (never a raw INSERT): scratchpad/adv1.mjs (ADV-03), adv2.mjs and adv3.mjs (ADV-02 plus the isolation sweep), adv4.mjs and adv5.mjs (SST, ADV-02 on the revenue lane, ADV-05, ADV-07), adv6.mjs (ADV-01, occurrence admission inside a rolled-back transaction), adv7.mjs (ADV-04, two real connections)."
+  ],
+  "unverified": [
+    "I did not run the web unit suite, pnpm lint, pnpm typecheck or any Playwright walk: those are the implementer's gates and the other two reviewers' axes. ADV-02's UI impact is read off tree.ts's minimumRole and the two detail components, not off a rendered page.",
+    "ADV-01's consequence on hosted is bounded today by clara.wake_engine_sources.close_prep being enabled = false, which #1036 leaves untouched by design. The defect is in what the ticket claims to have made safe to enable, not in anything running now."
+  ]
+}

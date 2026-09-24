@@ -361,9 +361,23 @@ test("x42.ra4 the questions this fix's own path never asks: the status predicate
   //     auto-enrols a staff-advance account from a code the caller supplies. It consults the shared
   //     union through clara._adv_enrolment_admission, the ONE delegate 0042 S5.14 (6b) accepts, and
   //     that reach is measured below rather than taken on the body's word.
+  //
+  // [#1041] AND EACH OF THE THREE IS FRONTIER-KEYED, because `db-slice-frontiers` replays this
+  // file against the chain that stops at THIS SLICE'S migration (0043) and neither #639's 0216 nor
+  // #638's 0221 is applied there — the roster was widened without that, and this cell went red on
+  // dispatch 35893727271 naming three bodies that cannot exist yet. The key is the migration's
+  // STABLE STEM in `clara.schema_migrations` (applied history), never the catalog the census is
+  // reading: asking `pg_proc` whether a body exists before asserting that it does is the vacuous
+  // census this whole cell exists to refuse. Below the stem the name is simply not expected;
+  // at or above it the roster is exact, unchanged, and still fails on a FOURTH door.
+  const doorsFor = async (stem) => (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [stem])).rows[0].n > 0;
+  const HAS_0216 = await doorsFor("fixed_asset_acquisition$");   // #639 — the two FA-side names
+  const HAS_0221 = await doorsFor("staff_expense_claims$");      // #638 — _claim_resolve_claimant
   const EXPECT_DOORS = [
-    "_adv_on_approve", "_claim_resolve_claimant", "_draft_opening_item_core",
-    "_fa_complete_particulars_core", "_fa_on_approve", "_tf_fa_acquisition_birth",
+    "_adv_on_approve", ...(HAS_0221 ? ["_claim_resolve_claimant"] : []), "_draft_opening_item_core",
+    ...(HAS_0216 ? ["_fa_complete_particulars_core"] : []), "_fa_on_approve",
+    ...(HAS_0216 ? ["_tf_fa_acquisition_birth"] : []),
     "approve_opening_correction", "approve_opening_seed", "complete_fixed_asset_particulars",
     "complete_staff_advance_particulars", "enrol_staff_advance_account",
     "retire_fa_account_profile", "retire_staff_advance_account",
@@ -387,8 +401,10 @@ test("x42.ra4 the questions this fix's own path never asks: the status predicate
   // door added later. #638's auto-enrolment is exactly such a door. The four union names and the
   // three inheritor exclusions are the migration's own; the FOURTH inheritor is this wave's, and it
   // earns the exclusion in the discriminator arm at the bottom of this cell, not here.
+  // [#1041] The fourth inheritor is #639's, keyed on the same stem as the roster above, so this
+  // list names only bodies that can be on the chain being replayed.
   const INHERITORS = ["_fa_on_approve", "revise_fixed_asset_particulars", "_adv_on_approve",
-    "_tf_fa_acquisition_birth"];
+    ...(HAS_0216 ? ["_tf_fa_acquisition_birth"] : [])];
   const UNION_NAMES = ["clara._acct_role_reserved", "clara._fa_role_claim_conflict",
     "clara._fa_assert_code_unreserved", "clara._adv_enrolment_admission"];
   const { rows: inserters } = await rootQuery(
@@ -414,6 +430,9 @@ test("x42.ra4 the questions this fix's own path never asks: the status predicate
   // replayed on this wave's one new UPDATE-side body. An UPDATE claims a code when it ASSIGNS one,
   // or brings a row back to a state that holds one; the fragment is trimmed to its SET clause for
   // (6c)'s measured reason (a retirement's `where … asset_account_code = …` is not a re-claim).
+  // [#1041] The body is #639's, so this arm runs only where 0216 is applied — the roster above is
+  // keyed on the same stem and the arm is the roster's own classification being measured.
+  if (HAS_0216) {
   const { rows: newUpd } = await rootQuery(
     `select p.proname,
        (select coalesce(string_agg(
@@ -428,6 +447,11 @@ test("x42.ra4 the questions this fix's own path never asks: the status predicate
   assert.equal(/account_code *=/.test(newUpd[0].sets) || /active *= *true/.test(newUpd[0].sets)
     || newUpd[0].sets.includes("'active'") || newUpd[0].sets.includes("'pending'"), false,
   `clara._fa_complete_particulars_core assigns a claim-bearing column (${newUpd[0].sets.slice(0, 200)}) — it is classified on this roster as a particulars writer that cannot widen a claim, and that classification has stopped being true`);
+  } else {
+    noteLane("x42.ra4(c.ii-c): #639's clara._fa_complete_particulars_core is not on this chain "
+      + "(no fixed_asset_acquisition$ row in clara.schema_migrations) — the UPDATE-side widening "
+      + "probe has no subject at this frontier and the roster above does not expect one");
+  }
 
   // (c.iii) THE RULE HAS EXACTLY ONE EXPRESSION. Three doors hand-wrote the discriminator and
   // one wrote it without the role. Nothing outside clara._fa_role_claim_conflict may state it.
@@ -472,7 +496,8 @@ test("x42.ra4 the questions this fix's own path never asks: the status predicate
        from pg_proc p where p.pronamespace = 'clara'::regnamespace
         and p.proname = any($1::text[])
       order by p.proname collate "C"`, [INHERITORS]);
-  assert.equal(inherit.length, INHERITORS.length, "all four excluded bodies are present to be checked");
+  assert.equal(inherit.length, INHERITORS.length,
+    `every excluded body is present to be checked (${INHERITORS.length} at this frontier)`);
   for (const b of inherit) {
     assert.equal(b.chooses, false,
       `clara.${b.proname} is excluded from the claiming-door census ONLY because it inherits its account codes — it now reads one from caller input, so it is a claiming door`);

@@ -1,0 +1,163 @@
+{
+  "axis": "spec",
+  "wave": 4,
+  "lane": "04",
+  "branch": "riders/w4-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "fixed_point": "cd2925391",
+  "diff_command": "git diff cd2925391...HEAD",
+  "commits": 38,
+  "tickets": [939, 940, 915, 941, 1036],
+  "spec_sources": [
+    "gh api repos/BELCORT-SDN-BHD/clara/issues/939 (body; comments endpoint empty)",
+    "gh api repos/BELCORT-SDN-BHD/clara/issues/940 (body; comments endpoint empty)",
+    "gh api repos/BELCORT-SDN-BHD/clara/issues/915 (body + 3 comments; newest 2026-09-19 wins)",
+    "gh api repos/BELCORT-SDN-BHD/clara/issues/941 (body + 2 comments; newest 2026-09-23 ruling)",
+    "gh api repos/BELCORT-SDN-BHD/clara/issues/1036 (body, orchestrator ruling 2026-09-23; no comments)",
+    "gh api repos/BELCORT-SDN-BHD/clara/issues/927/comments (the wave-3 release comment that sets the retarget-never-delete precedent)",
+    "WAVE-4 LANE 04 rules in the lane prompt; docs/plan/active/riders-2026-09-20/WORK-ORDER.md"
+  ],
+  "verdict": "reject",
+  "summary": "Four of the five tickets are built faithfully and deeply; the DB halves of #939, #940, #915 and #941 were re-driven here and answer their acceptance criteria. The branch is rejected on one measured blocker and three majors. BLOCKER: #941's migration 0308 recut clara.create_accounting_plan without updating the sha that plan-overlap-template-arm-retired.test.mjs pins, so p929.tail is RED on this branch (189 tests / 1 fail, re-run here); #941's AC 'the plan and prepayment batteries stay green' was claimed without running that battery, and #1036's AC4 'the retired-arm battery passes' is unmet. #1036's report calls the red 'pre-existing', which is true only against #1036's own commits, not against the lane base. MAJORS: #1036 routes the wake around the plan-authority wall through a new _prepayment_plan_core_wake and records an unattended act as authority_kind='explicit_instruction' (the ticket said 'the same validation a person's own creation gets' and 'out of scope: any change to the prepayment door's own rules'); #1036 deletes 24 cells from two f-a4-pr2a batteries, including W35, the prepayment lane's only end-to-end 'the prepaid asset reaches exactly zero' proof, against #927's own retarget-never-delete precedent; and the correction path both #939 AC4 and #941 AC3 name ('a new schedule from the next period') does not exist in any door, so a mis-stated term is uncorrectable.",
+  "gates_rerun_by_this_review": [
+    "node --test --test-concurrency=1 tests/plan-overlap-template-arm-retired.test.mjs -> 6 tests, 5 pass, 1 FAIL (p929.tail)",
+    "node --test --test-concurrency=1 $GATES tests/{accounting-plans,revenue-recognition,prepayment-schedule,prepayment-stated-term,prepayment-account-roster,prepayment-schedule-obo,prepayment-wake-reroute,plan-overlap-template-arm-retired,plan-overlap-sibling-arm,plan-schedule-yield-wall,coa-template-pr-a,coa-template-pr-b}.test.mjs -> 189 tests, 188 pass, 1 FAIL (p929.tail), 0 skip",
+    "node --test --test-concurrency=1 $GATES tests/{delta-contract,epsilon-contract,x42-adj-due,x42-adj-reads,x42-adjustments-stale,x42-r10-o3,x42-r11-lineage,f-a4-pr2a-wrapper,f-a4-pr2a-books,f-a4-pr2a-census,f-a4-pr2a-schedule,f-a4-pr2a-carrier,f-a4-pr1c-walls-census,prepayment-occurrences,prepayment-term-liveness,operation-census,rig-isolation}.test.mjs -> 269 tests, 268 pass, 0 fail, 1 skip",
+    "apps/web: node scripts/run-tests.mjs -> 5030 tests, 5028 pass, 0 fail, 2 skipped",
+    "catalog probes on clara_l04 (294 migrations, frontier 0315_prepayment_wake_reroute)"
+  ],
+  "findings": [
+    {
+      "id": "L04-SPEC-01",
+      "ticket": 941,
+      "severity": "blocker",
+      "kind": "requirement-implemented-wrongly",
+      "title": "0308 recut clara.create_accounting_plan without updating the sha another battery pins, leaving p929.tail RED on this branch",
+      "spec_quote": "#941 AC8: \"the plan and prepayment batteries stay green\". #1036 AC4: \"The retired-arm battery (`plan-overlap-template-arm-retired`) passes with the tripwire cell replaced\".",
+      "evidence": "Re-run here on clara_l04 at HEAD: `node --test --test-concurrency=1 tests/plan-overlap-template-arm-retired.test.mjs` -> 6 tests, 5 pass, 1 fail. The failure is p929.tail: `clara.create_accounting_plan(...) is not at the body 0283 writes` -- actual c8e990986a06b132e3dad40e47225968562336b48ad6c01a4a09104784c09188, expected 99f6078775c07440122cde4f180c2f2f11aea7fcd5f0504cb6ffe6c8776cb424. The expectation lives at packages/db/tests/plan-overlap-template-arm-retired.test.mjs:60 and is UNCHANGED by this branch (`git show cd2925391:packages/db/tests/plan-overlap-template-arm-retired.test.mjs | grep -n 99f60787` -> same line 60). The body moved because #941's migration 0308_deferred_revenue_recognition.sql recut that function to admit `revenue_recognition_schedule` (0308's own recut pin table names 99f6078775... as the pre-image). The broad sweep above (189 tests across the plan/prepayment/chart family with the full 111-entry gate chain) shows this is the ONLY red, so it is a single-line pin, not a design failure -- but it is red on the CI job that runs against a fully-migrated estate. #941's report ran only prepayment-schedule (18/18) and prepayment-account-roster (5/5) and claimed the AC on that basis. #1036's report calls it \"a PRE-EXISTING failure, not caused by this ticket ... Confirmed pre-existing by stashing every change this ticket made\" -- true against #1036's four commits, false against the lane base cd2925391, where 0308 does not exist.",
+      "required_fix": "Update packages/db/tests/plan-overlap-template-arm-retired.test.mjs:60 to the post-0308 sha c8e990986a06b132e3dad40e47225968562336b48ad6c01a4a09104784c09188, with a comment naming 0308/#941 as the migration that moved it (the file's RECUT array already carries that idiom), and re-run the battery green. Correct the 'pre-existing' sentence in wave4-lane04-ticket1036.md and the 'batteries stay green' row in wave4-lane04-ticket941.md."
+    },
+    {
+      "id": "L04-SPEC-02",
+      "ticket": 1036,
+      "severity": "major",
+      "kind": "behaviour-not-asked-for",
+      "title": "The reroute opens a new plan lane that bypasses the authority-instruction wall and records an unattended wake as authority_kind='explicit_instruction'",
+      "spec_quote": "#1036: \"The wake door establishes the prepayment schedule through the live prepayment door, with the same validation, idempotency key and refusals a person's own creation gets\" / \"Key interfaces: The live prepayment door (0223): unchanged; the wake passes the actor and idempotency context the door already expects\" / \"Out of scope: Any change to the prepayment door's own rules.\"",
+      "evidence": "0315_prepayment_wake_reroute.sql sec A adds clara._prepayment_plan_core_wake, described in its own header as \"in `clara._obo_plan_core`'s shape MINUS the authority-instruction wall\". Read at 0315:249-253, the wake lane inserts into clara.accounting_plans with authority_kind 'explicit_instruction', authority_ref {kind:'agent_wake', wake_kind, task_id}, authorised_by = created_by = clara.agent_user_id(); `grep -n \"_authority_ref_refusal\" 0315` shows the wake core never calls it (0315:206, :753 say so explicitly). 0307's own words, quoted in 0315's header, call that wall \"the wall that stops a wake run or an autodraft from authorising its own amortisation schedule\" -- #977/0250 narrowed create_accounting_plan for exactly this. The result: the estate now has a plan row whose authority_kind claims a person's explicit instruction while its ref names a clocked wake. The deviation is disclosed honestly in the migration header, packages/db/README.md's 0315 section and wave4-lane04-ticket1036.md, but it is a change to the plan-authority model that no acceptance criterion asks for and that the ticket's own out-of-scope line arguably forbids. Contained today: clara.wake_engine_sources.close_prep.enabled is still false, and packages/runtime/workflows/closePrep.v1.tools.ts deliberately omits the thirteenth tool.",
+      "required_fix": "Take this to the owner before release. Either (a) accept the unattended lane explicitly and widen clara.accounting_plans.authority_kind so an agent_wake plan is distinguishable from a person's instruction by a reader that does not parse authority_ref (the lane's own follow-up 3 says no reader branches on it today), or (b) park #1036 until that decision, leaving the dormant-and-pinned residual #927 disclosed. Do not release a plan row that calls a clocked wake an explicit_instruction."
+    },
+    {
+      "id": "L04-SPEC-03",
+      "ticket": 1036,
+      "severity": "major",
+      "kind": "coverage-deleted-beyond-scope",
+      "title": "24 cells deleted from two f-a4-pr2a batteries, including the prepayment lane's only end-to-end 'the prepaid asset reaches exactly zero' proof",
+      "spec_quote": "#1036 AC4 names one battery only: \"The retired-arm battery (`plan-overlap-template-arm-retired`) passes with the tripwire cell replaced\". #927's release comment sets the house precedent for this same residual: \"every one of those files was retargeted at the retired shape (never deleted, never skipped)\".",
+      "evidence": "git diff cd2925391...HEAD: packages/db/tests/f-a4-pr2a-wrapper.test.mjs goes from 21 cells to 2 (W13, W13-movedworld, W13-changedargs, W13-basischanged, W45, W45-straddle, W45-ceiling, W45-nulldigest, W45-frozen, W13-granularity, W13-arm2, W14, W14-mutant, W15, W16, W39, W40, W38, W38-mutant, W5 removed; only fa4p2a.W13-retired and armed-skip remain), and f-a4-pr2a-books.test.mjs from 7 cells to 3 (W35, W35-mutant, W34, W31 removed). Most removals are defensible -- their premise (a returned {status, rung_vector}, a request-digest identity, an agent_act_receipts row, a proposed template a human signs) is genuinely gone. W35 is not: \"end-to-end over the ruled convention: the prepaid asset reaches EXACTLY zero and the expense side totals the term\" is an ACCOUNTING claim about the books, and the new file's header names p1036.acted as its successor -- but p1036.acted asserts only that a schedule and its occurrence preview exist (wave4-lane04-ticket1036.md's own AC1 paragraph), it never posts a period. `grep -rln \"reaches EXACTLY zero|clears to zero\" packages/db/tests/*.mjs` now returns only revenue-recognition-fixtures.mjs, revenue-recognition.test.mjs and x40-wave-c-c-tieout.test.mjs -- the deferred-revenue side and a tie-out, not the prepayment term. Cells that still post a prepayment period (p939.supersede.running, p940.retire.future_only) drive ONE period, not the term to zero. W31's subject (a term running past the fiscal year refuses, and opening the successor year clears it) is likewise still a live rule inside the shared core, retargetable rather than retirable. This is the exact finding #927 was rejected on in wave 3 (L05-SPEC-01 / ADV-L05-01) and then fixed by retargeting.",
+      "required_fix": "Retarget rather than delete: add a cell to packages/db/tests/prepayment-wake-reroute.test.mjs (or restore W35/W35-mutant against the new lane) that drives wake12 -> configure -> admit and post EVERY occurrence -> asserts the prepaid account reaches exactly zero and the expense side totals the term, plus its stopping-one-short mutant; and restore W31's FY-past refusal against the shared core's raise. Name the retargets in the ticket report."
+    },
+    {
+      "id": "L04-SPEC-04",
+      "ticket": 939,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "The correction path both #939 and #941 name -- 'a new schedule from the next period' -- exists in no door, so a mis-stated term is uncorrectable",
+      "spec_quote": "#939 AC4: \"Superseding a stated term never alters a running schedule; a new schedule from the next period is the only correction path; a cell proves posted occurrences and their receipts are unchanged.\" #941 AC3: \"superseding a term never alters a running schedule and a new schedule from the next period is the only correction.\" #939 owner decision 3: \"A mis-stated term is corrected by superseding it and opening a new schedule from the next period; already-posted periods are never touched.\"",
+      "evidence": "Only the negative half ships. clara.prepayment_schedules carries uq_prepayment_schedules_source (one schedule per recognition entry), so after a person supersedes a wrong stated term there is no door that opens the replacement: a second create_prepayment_schedule on the same entry is refused CLR13 prepayment_schedule_exists (p653.schedule.one_per_entry in packages/db/tests/prepayment-schedule.test.mjs; p939.supersede.running asserts the same refusal after the correction). 0308 mirrors the constraint on the revenue side (one schedule per source entry, its own sec C). wave4-lane04-ticket939.md discloses it plainly (\"the positive half, opening a replacement schedule for the remaining balance, is not buildable without lifting uq_prepayment_schedules_source, which this ticket does not ask for\", follow-up 1) and wave4-lane04-ticket941.md's AC3 paragraph asserts the same sentence as if it were satisfied. Product consequence: a bookkeeper who states a 12-month term as 24 months, configures, and posts one period has no remedy on any surface -- the schedule runs to its wrong term.",
+      "required_fix": "File the follow-up as a blocking ticket (owner decision needed on what the replacement is derived from: the un-amortised balance, or a new recognition) before either lane is advertised, and until it lands make the surfaces say plainly on the stated-term form and the schedule detail that a term cannot be corrected once its schedule is running. Do not leave #941's AC3 paragraph asserting a correction path that no door offers."
+    },
+    {
+      "id": "L04-SPEC-05",
+      "ticket": 1036,
+      "severity": "minor",
+      "kind": "behaviour-not-asked-for",
+      "title": "The wake lane silently stops writing clara.agent_act_receipts, and the new cell pins that absence as correct",
+      "spec_quote": "#1036 says only \"The wake door establishes the prepayment schedule through the live prepayment door, with the same validation, idempotency key and refusals a person's own creation gets\" -- nothing about retiring the agent's own act log.",
+      "evidence": "packages/db/tests/f-a4-pr2a-wrapper.test.mjs's one surviving cell, fa4p2a.W13-retired, asserts `receiptsForTask(...) == []` for BOTH an acted and a refused wake call and that clara.agent_act_receipts does not grow across the pair. Before the reroute, wrapper 12 wrote a Tier A/B/C receipt for every verdict (the deleted W13/W14/W15/W16 family). The rerouted lane's audit is the clara.op_receipts row the shared core takes, which is the human/OBO discipline, not the agent-lane one. No live consumer breaks (packages/runtime/workflows/closePrep.v1.tools.ts omits the thirteenth tool; grep finds no other runtime caller), so the change is contained, but it is a deliberate removal of an agent-lane audit record that no acceptance criterion asked for.",
+      "required_fix": "Confirm with the owner that an unattended wake that configures a real, durable schedule owes no clara.agent_act_receipts row (the op_receipt plus the plan's authority_ref being the whole record), or have the wake lane write one. State the answer in the migration header rather than only in a test comment."
+    },
+    {
+      "id": "L04-SPEC-06",
+      "ticket": 940,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "'en and zh copy' ships as en only, on both #940's panel and #941's destination",
+      "spec_quote": "#940 AC5: \"The web Registers page gains a 'Prepayment accounts' panel ... en and zh copy.\" #941 AC6: \"... an empty state points to the roster panel; en and zh copy; the walk covers a full-year recognition.\"",
+      "evidence": "Measured on the branch: `ls apps/web/messages` -> en.json alone; `grep -n 'const locale' apps/web/i18n/request.ts` -> line 91 `const locale = \"en\";`; apps/web/i18n/ holds request.ts only. There is no zh catalogue for these strings to land in, and minting one is a routing.ts + middleware lane. Both reports state the measurement rather than glossing it (wave4-lane04-ticket940.md AC5, wave4-lane04-ticket941.md AC6 row).",
+      "required_fix": "None in this lane. Strike the zh half from #940 AC5 and #941 AC6 when they are closed, and attach it to the translation ticket the lane's follow-up 2 proposes, so the two ACs are not closed on evidence that does not exist."
+    },
+    {
+      "id": "L04-SPEC-07",
+      "ticket": 1036,
+      "severity": "note",
+      "kind": "requirement-implemented-differently",
+      "title": "The template core is asserted retired rather than retired the way its siblings were",
+      "spec_quote": "#1036 Desired behavior: \"The template core has no remaining caller and is retired the way the lane retired its siblings (its EXECUTE grant matrix and the retirement recorded in the migration's tail).\"",
+      "evidence": "0315 leaves clara._propose_adjustment_template_core byte-unchanged -- it is an UNCONDITIONAL non-regression pin (0315:938, 0315:1045-1047 re-measure the sha after the file runs and refuse if it moved). What 0315 does convert to an unconditional typed refusal is its last caller, clara._agent_prepayment_schedule_core (sec D). The tail does record the retirement in prose and assert both halves the ticket names -- zero callers schema-wide by a pg_proc.prosrc scan (0315:1033-1035) and no application grant (0315:1050) -- and AC3's literal cell requirement ('no caller in the catalogue and not executable by any application role') is met and re-driven here (p1036.template-core-retired and p1036.containment-closed both green). Recording the difference so nobody later reads 'retired' as 'the body now refuses'.",
+      "required_fix": "None required. If the owner wants the sibling shape exactly, a later migration converts the core itself to a typed refusal; the zero-caller census makes that a safe follow-up rather than a release gate."
+    },
+    {
+      "id": "L04-SPEC-08",
+      "ticket": 915,
+      "severity": "note",
+      "kind": "requirement-satisfied-by-the-alternative",
+      "title": "The three reads get no clara_runtime grant; the narrow _for read is the posture the ticket's own comment settled",
+      "spec_quote": "#915 body: \"plus `clara_runtime` grants on the three reads (or runtime-only `_for` reads)\". 2026-09-17 comment: \"the read half has no precedent (the accrual lane grants the runtime role only its write twin), so the read posture is settled here as the narrow one the module's footer recommends.\"",
+      "evidence": "Measured on clara_l04: clara_runtime holds EXECUTE on exactly clara.create_prepayment_schedule_for and clara.read_prepayment_source_for (0307 sec F, re-proved by p915.grants.census and by 0307's own TAIL); get_prepayment_schedule / list_prepayment_schedules / list_prepayment_attention remain clara_authenticated-only. The ticket offers both postures and its newest triage comment picks the narrow one, so this is satisfied, not missing. Recorded because the body's first phrasing reads like an unmet row.",
+      "required_fix": "None."
+    },
+    {
+      "id": "L04-SPEC-09",
+      "ticket": 939,
+      "severity": "note",
+      "kind": "reading-of-the-spec-confirmed",
+      "title": "'the same evaluator with a credited liability leg' is implemented as release_side => 'debit', and the books it produces are right",
+      "spec_quote": "#939 AC2: \"... so the deferred-revenue mirror can ride the same evaluator with a credited liability leg\".",
+      "evidence": "wave4-lane04-ticket939.md explicitly invites a reviewer to disagree with its reading, so it was checked. clara.prepayment_schedule_v2(bigint,text,text,date,date) takes p_release_side; #941 calls it with 'debit'. The posting body clara._plan_revenue_recognition_period_line (read live off pg_proc) emits lines[0] = deferred_account_code debit / lines[1] = revenue_account_code credit, i.e. Dr deferred revenue / Cr revenue -- exactly #941's 'posts one entry a month, Dr deferred revenue / Cr the revenue account'. The SOURCE leg is the credited liability the AC names (0308's core selects the single credit_cents>0 liability line excluding special_acc_type='sst_output'). The reading is correct; no change needed.",
+      "required_fix": "None."
+    }
+  ],
+  "already_satisfied_and_stopped_claims_checked": [
+    {
+      "claim": "#941 AC5 (standard chart rows 2030 / 1180) 'Already satisfied on this base' via the wave-4 pre-step 0295",
+      "verdict": "TRUE",
+      "evidence": "git log cd2925391 -1 -- packages/db/migrations/0295_wave4_chart_rows.sql -> c4f8ac9ba 'fix(db): #941 0295 retires my_sme_starter v1'. On clara_l04, clara.coa_templates platform rows: my_sme_starter v1 state=retired (retired_at 2026-09-23), v2 state=published. 0308 mints no chart rows (grep for coa_template inserts across 0305-0315 -> 0 hits), as this lane's rule (a) requires."
+    },
+    {
+      "claim": "#939 AC1 'the door has no agent-role grant and no wake wrapper, and a cell proves the machine role cannot reach it'",
+      "verdict": "TRUE",
+      "evidence": "Catalog probe on clara_l04: exactly one clara function matches 'prepayment_stated_term' (record_prepayment_stated_term); has_function_privilege -> clara_authenticated true, clara_agent_ro / clara_wake_interactive / clara_wake_proactive / clara_runtime all false."
+    },
+    {
+      "claim": "#939 AC2 'registered as its own single-member frozen closure'",
+      "verdict": "TRUE",
+      "evidence": "clara.evaluator_versions: prepayment_schedule v1 (0140) and v2 (0305, entrypoint clara.prepayment_schedule_v2(bigint,text,text,date,date)), both deployed=false, one member each."
+    },
+    {
+      "claim": "#940 / #941 'zh copy is unbuildable on this frontier'",
+      "verdict": "TRUE",
+      "evidence": "apps/web/messages holds en.json alone; apps/web/i18n/request.ts:91 pins const locale = \"en\". See L04-SPEC-06."
+    },
+    {
+      "claim": "#1036 'p929.tail is a PRE-EXISTING failure, not caused by this ticket'",
+      "verdict": "MISLEADING",
+      "evidence": "Pre-existing to #1036's four commits, introduced by #941's 0308 on this same branch and therefore a regression against the review's fixed point cd2925391. See L04-SPEC-01."
+    },
+    {
+      "claim": "#941 AC8 'the plan and prepayment batteries stay green'",
+      "verdict": "FALSE",
+      "evidence": "plan-overlap-template-arm-retired is a plan battery and it is red. See L04-SPEC-01."
+    },
+    {
+      "claim": "#915 / #941 / #940 'apps/web/lib/firm/needs-you.ts gains no row kind' (the four-lane shared file)",
+      "verdict": "TRUE",
+      "evidence": "The file does not appear in git diff cd2925391...HEAD --stat. Lane rule (c) is honoured: no lane-04 edit at all."
+    },
+    {
+      "claim": "#941 decision 3 'Tax is untouched; the schedule moves the revenue leg only'",
+      "verdict": "TRUE",
+      "evidence": "clara._revenue_recognition_core selects the single credited liability line with coalesce(ca.special_acc_type,'') <> 'sst_output' -- a structural exclusion, not a code match; the recognition period line moves only the deferred and revenue accounts."
+    }
+  ]
+}

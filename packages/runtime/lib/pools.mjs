@@ -55,6 +55,11 @@ import { assertFreeformPoolConfig, endFreeformPool } from "./freeform-read.mjs";
 // money lane's whole reachable surface has to be readable in one place. This file keeps the ONE
 // boot door and the ONE shutdown door by calling into it.
 import { assertCheckoutPoolConfig, endCheckoutPools } from "./checkout-pools.mjs";
+// #871: the EIGHTH pool — the signed-out invite-preview lane. Its own module for the reason that
+// module's header states (checkout-pools.mjs's census sentence is a measured claim about ITS two
+// lanes); named at the SAME boot door and closed by the SAME endPools(), which is what "beside the
+// checkout and auth-wall pools" buys.
+import { assertInvitePreviewPoolConfig, endInvitePreviewPool } from "./invite-preview-pool.mjs";
 // H-43: the DSN TLS-posture assert. Its own module for the same reason the two above are —
 // the fingerprint pin, the ported structural checks and the ceremony's ordering rule are one
 // subject, and the runtime must carry them itself because scripts/ops/ is not in the image.
@@ -188,6 +193,7 @@ export function assertProductionPoolConfig() {
   // ran. This call WARNS and names the two variables; the pools themselves still fail closed at
   // first use.
   assertCheckoutPoolConfig();
+  assertInvitePreviewPoolConfig();
   // H-43. Beside the DSN-PRESENCE loop above, the DSN TLS POSTURE assert: a DSN that pins a CA
   // must pin a valid one (fail closed — a pinned-but-broken CA otherwise fails per-connection
   // at readFileSync with a confusing error), and a production deployment that pins nothing gets
@@ -608,4 +614,5 @@ export async function endPools() {
   if (bank) await bank.end().catch(() => {});
   await endFreeformPool(); // F-A6: the fifth login's pool, owned by lib/freeform-read.mjs.
   await endCheckoutPools(); // FS-4 C-5: the sixth and seventh, owned by lib/checkout-pools.mjs.
+  await endInvitePreviewPool(); // #871: the eighth, owned by lib/invite-preview-pool.mjs.
 }

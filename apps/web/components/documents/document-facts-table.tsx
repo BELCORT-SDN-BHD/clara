@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState, StateBanner } from "@/components/common/state";
-import type { EvidenceRegion } from "@/lib/documents/extract-shape";
+import { isAgreementFactPath, isPayrollFactPath, type EvidenceRegion } from "@/lib/documents/extract-shape";
 import type { SourceRevisionResult } from "@/lib/documents/types";
 import { cn } from "@/lib/utils";
 import { DocumentRevisionDialog, isRevisableFieldPath } from "./document-revision-dialog";
@@ -65,6 +65,33 @@ function factLabel(path: string | null, t: (key: string) => string): string {
     case "invoice.invoice_id": return t("factLabel.invoiceInvoiceId");
     case "invoice.invoice_date": return t("factLabel.invoiceInvoiceDate");
     case "invoice.deposit": return t("factLabel.invoiceDeposit");
+    // #945 — the payroll lane's eleven run-level questions. Each one is a TOTAL for the run, and
+    // the label says so, because "EPF" alone on a document page could be one employee's.
+    case "payroll.run.period": return t("factLabel.payrollPeriod");
+    case "payroll.run.gross_pay": return t("factLabel.payrollGrossPay");
+    case "payroll.run.epf_employee": return t("factLabel.payrollEpfEmployee");
+    case "payroll.run.epf_employer": return t("factLabel.payrollEpfEmployer");
+    case "payroll.run.socso_employee": return t("factLabel.payrollSocsoEmployee");
+    case "payroll.run.socso_employer": return t("factLabel.payrollSocsoEmployer");
+    case "payroll.run.eis_employee": return t("factLabel.payrollEisEmployee");
+    case "payroll.run.eis_employer": return t("factLabel.payrollEisEmployer");
+    case "payroll.run.pcb": return t("factLabel.payrollPcb");
+    case "payroll.run.hrdf_levy": return t("factLabel.payrollHrdfLevy");
+    case "payroll.run.net_pay": return t("factLabel.payrollNetPay");
+    // #948 — the agreement lane's eleven questions. `kind` is labelled "What the agreement calls
+    // itself", not "Agreement type", because the value IS the page's own words: a deterministic
+    // evaluator classifies them and this UI must not imply it already has.
+    case "contract.agreement.kind": return t("factLabel.agreementKind");
+    case "contract.agreement.financier": return t("factLabel.agreementFinancier");
+    case "contract.agreement.agreement_date": return t("factLabel.agreementDate");
+    case "contract.agreement.asset_description": return t("factLabel.agreementAsset");
+    case "contract.agreement.cash_price": return t("factLabel.agreementCashPrice");
+    case "contract.agreement.deposit": return t("factLabel.agreementDeposit");
+    case "contract.agreement.amount_financed": return t("factLabel.agreementAmountFinanced");
+    case "contract.agreement.total_charges": return t("factLabel.agreementTotalCharges");
+    case "contract.agreement.total_payable": return t("factLabel.agreementTotalPayable");
+    case "contract.agreement.term_months": return t("factLabel.agreementTermMonths");
+    case "contract.agreement.instalment_amount": return t("factLabel.agreementInstalment");
     default: return path; // the honest unknown arm: the path IS the label
   }
 }
@@ -78,10 +105,26 @@ export function hasFactLabelArm(path: string): boolean {
 
 /** The displayed value. `monetary_cents` wins when present — it is the DB's own
  *  integer, and dividing by 100 here is a RENDER of that integer, never a
- *  recomputation of an amount. Otherwise the region's verbatim text. */
+ *  recomputation of an amount. Otherwise the region's verbatim text.
+ *
+ *  #945 — THE ONE ARM THAT IS NOT GENERIC. The payroll lane writes a region for
+ *  an answer the page does NOT print, carrying no rendering and no cents at
+ *  all; `clara.persist_payroll_facts` writes that row on purpose, so that "the
+ *  page is silent about the HRDF levy" survives to the screen instead of being
+ *  rounded off into a blank a reader would read as zero. Scoped to `payroll.*`
+ *  rather than applied to every valueless region, because no other lane writes
+ *  one for an unanswered field — saying "not printed" about an invoice region
+ *  would be this UI asserting something the invoice lane never said. */
 function factValue(region: EvidenceRegion, t: (key: string) => string): string {
   if (region.monetary_cents !== null) return (region.monetary_cents / 100).toFixed(2);
-  return region.text_content ?? t("evidenceNoValue");
+  if (region.text_content !== null) return region.text_content;
+  // #948 — the agreement lane writes the same kind of row for the same reason: a term the page
+  // does not print (an interest-free plan's charges, an agreement with no deposit) lands carrying
+  // no rendering and no cents, and "the page is silent" must survive to the screen instead of
+  // being read as zero. Its own predicate rather than a widened payroll one, so each lane's claim
+  // stays its own.
+  if (isPayrollFactPath(region.field_path) || isAgreementFactPath(region.field_path)) return t("factNotPrinted");
+  return t("evidenceNoValue");
 }
 
 

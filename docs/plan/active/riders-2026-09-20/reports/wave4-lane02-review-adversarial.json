@@ -1,0 +1,112 @@
+{
+  "lens": "adversarial",
+  "lane": "wave 4 / lane 02",
+  "branch": "riders/w4-lane02",
+  "fixed_point": "cd2925391",
+  "diff": "git diff cd2925391...HEAD (22 files, +3275/-68)",
+  "commits": [
+    "9b60e6803 feat(web): #930 staff-expense-claim advance chooser replaces the typed id",
+    "2bc755546 test(web): #930 e2e walk drives the advance chooser through the fixture",
+    "bd533dd57 docs(web): #930 README note on the advance chooser and the shared summary verb",
+    "3adafcd1d test(web): #930 declare staff_advance_summary a named shared RPC verb",
+    "84cf37952 feat(db): #931 a staff expense claim discharges several advances through a confirmed allocation list",
+    "ee159783f feat(db): #931 the per-allocation cap refusal names the advance, its outstanding and the shortfall",
+    "89bffb2a1 feat(db): #931 the derived journal carries ONE credit leg per advance account",
+    "a29f8be20 test(db): #931 the allocation list's own walls, and the single-advance shape held unchanged",
+    "c2b227187 feat(runtime): #931 the claim route carries the confirmed allocation list to the door",
+    "b3e6ff43d feat(web): #931 the advance chooser becomes the first line of a confirmed allocation list"
+  ],
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "A931-1",
+      "ticket": 931,
+      "severity": "blocker",
+      "kind": "race / durable data corruption",
+      "title": "Two concurrent admissions under one intent key graft the second payload's allocations onto the first claim; the confirmed list then does not add up to its claim",
+      "where": "packages/db/migrations/0301_staff_expense_claim_allocations.sql - section D, step 4 (the replay probe, lines 951-968) and step 8a (the allocation insert, lines 1020-1032)",
+      "evidence": "MEASURED with two real connections on a throwaway clone of the lane database (createdb -T clara_l02 clara_l02_probe931, dropped afterwards; pg_database verified back to four). Session 1 BEGIN and admits intent key probe931-race-key-1 with a SINGLE advance (7a78936e, 40000) and does NOT commit. Session 2 BEGIN and admits the SAME key with a SPLIT ([7a78936e 20000, 19309d92 20000]); pg_stat_activity shows it blocked on wait_event_type=Lock / wait_event=advisory, i.e. it had already passed step 4. Session 1 commits. Session 2 then returns replayed:true carrying session 1's claim_id 96bb0350-6552-474b-a269-f564e3ee79a7 and COMMITS, and that claim's confirmed list reads [(7a78936e,40000,ord 1),(19309d92,20000,ord 2)] = 60000 against a claim of 40000. Migration 0301's own tail query T.3b then counts 1 broken claim (measured output: 'T.3b (claims whose allocations do not add up): 1'). SECOND VARIANT on the same rig, key probe931-race-key-2 (session 1 head = B, session 2 list = [A,B]): session 2 dies with an UNTYPED 23505 'duplicate key value violates unique constraint uq_sec_allocations_claim_ordinal' escaping the door, instead of a CLR10 intent_payload_conflict the runtime can classify. THE CHAIN: step 4's canonical comparison is the only place a changed split is caught, and it runs BEFORE pg_advisory_xact_lock at step 6, so it cannot see an uncommitted sibling; clara._admit_accounting_work_core converges on basis_digest alone (its own replay branch, read at pg_proc), and the two payloads share a digest because #931's second measurement groups both allocations onto ONE credit leg when they sit on one account - measured: clara._journal_basis_digest(clara._claim_journal_basis(single)) = clara._journal_basis_digest(clara._claim_journal_basis(split)) = 425b6f5841654fe7384c890ce6d4ddd50f5672ef4e034cc732d187dbb2a3c73a while clara._claim_basis_canonical(single) <> clara._claim_basis_canonical(split); step 8's 'on conflict (work_id) do nothing' then silently keeps session 1's claim and step 8a's 'on conflict (claim_id, advance_id) do nothing' inserts any advance session 1's list did not name. REACHABLE, not theoretical: apps/web/components/accounting/staff-expense-claim-form.tsx line 22 states 'intentKey is minted once, when the draft starts', and the draft is restored across reloads (apps/web/lib/work/staff-expense-claim-draft.ts:145), so one draft edited into a different split and submitted twice concurrently (two tabs, or a retry while the first request is still in flight) is exactly this shape. CONSEQUENCES: (a) measured - a stored confirmed list that does not add up to its claim, which clara.get_staff_expense_claim then returns as fact; (b) measured - 0301's own tail T.3b would ABORT any later apply or CLARA_MIGRATION_REDO of 0301 on that database; (c) derived from clara._tf_adv_movement_belt arm (b), read at pg_proc ('select coalesce(sum(ap.amount_cents),0) into v_cov ... if v_cov = r.credit_cents then continue', else raise CLR40) - the claim is then permanently unpostable, because section E would register 60000 against a 40000 credit leg. The hazard is NEW in 0301: before it the door's only post-lock write was the 'do nothing' claim insert, which converged.",
+      "required_fix": "Make step 8a run only on the branch that actually created the claim, and re-assert the payload identity under the lock. Minimal shape: change the claim insert to 'on conflict (work_id) do nothing returning id into v_claim'; when v_claim is null the claim already existed, so re-read it WITH its stored basis and raise the typed intent_payload_conflict when sec.basis is distinct from v_canon (the same comparison step 4 makes), and never reach the allocation insert. Add a cell that drives the two connections above and sees the typed refusal instead of a graft, and one that sees the ordinal variant refused typed rather than as a raw 23505."
+    },
+    {
+      "id": "A931-2",
+      "ticket": 931,
+      "severity": "minor",
+      "kind": "authorisation rule weaker than the acceptance criterion",
+      "title": "'Every advance named must belong to this claimant' is enforced by comparing two enrolments' free-text person_label, so two different staff who share a name can discharge each other's advances",
+      "where": "packages/db/migrations/0301_staff_expense_claim_allocations.sql - section C world half, arm (b), lines 783-793: 'not exists (select 1 from clara.staff_advance_accounts sa2 where sa2.id = v_adv_enrol and sa2.client_id = p_client and sa2.active and btrim(sa2.person_label) = v_claim_label)'",
+      "evidence": "The wall holds for every case I could drive: an advance enrolled to another person is refused CLR10 not_this_claimant (p931.claimant, re-run green here - 33/33 across packages/db tests/staff-expense-claim-allocations.test.mjs + tests/staff-expense-claim.test.mjs with the full gate chain). But the discriminator is person_label, which clara.enrol_staff_advance_account stores as free text - its only wall is nullif(btrim(coalesce(p_person_label,'')),'') at prosrc line 32 - and clara.staff_advance_accounts carries NO check constraint on that column (psql \\d shows only ck_staff_advance_accounts_retired and the attestation check). Two dedicated accounts of ONE client whose enrolments were both labelled, say, 'Ahmad bin Ali' are therefore one person to this rule, and claimant A's claim may discharge B's advance - which is what AC2's 'every advance named must belong to this claimant' forbids. The migration header's sentence 'strictness here can only REFUSE a lawful claim ... never admit an unlawful one' is true of the case-sensitivity, not of the label-equality rule itself. In mitigation this is strictly STRONGER than 0221 (which asked only which account the advance sat on), it is named in the migration header, in packages/db/README.md and in the ticket report, and the report already asks for an owner ruling.",
+      "required_fix": "Owner ruling before release, as the report asks: either arm (a) only (the advance's own enrolment IS the claimant's - strictly correct, but it makes the AC's 'advances on different enrolled accounts may be discharged together' unreachable until a staff master lands), or keep arm (b) with a second discriminator that is not a typed name (the claim already carries clara.staff_expense_claims.claimant_identifier). Whichever is chosen, add the cell that drives two same-labelled enrolments of one client and pins the answer."
+    },
+    {
+      "id": "A931-3",
+      "ticket": 931,
+      "severity": "minor",
+      "kind": "silent restatement of a confirmed figure",
+      "title": "Deleting the second allocation line silently re-apportions the WHOLE claim onto the remaining advance, with no amount on screen",
+      "where": "apps/web/lib/work/staff-expense-claim.ts lines 242-250 (claimAllocations: 'if (rows.length <= 1) return [{ advanceId: ..., amountCents: claimTotalCents(draft) }]'), with apps/web/components/accounting/staff-expense-claim-form.tsx's amountLabel={draft.advanceAllocations.length > 1 ? ... : null} and the editor's per-row remove button at apps/web/components/registers/staff-advance-allocations-editor.tsx lines 163-167",
+      "evidence": "Read from the diff and from the editor's own controls. A preparer who has confirmed [JAN 200.00, FEB 280.00] on a 480.00 claim and then removes the FEB line is left with one line; the amount column is hidden at one line, and claimAllocations ignores the surviving row's own amountCents and assigns the full 480.00 to JAN. toClaimWire then sends advanceId=JAN with no advanceAllocations, so the door stores JAN 48000 - a figure that was never shown to the preparer, let alone confirmed. #881's ruling is that 'the stored record is always the confirmed list'; this is the one path where the stored figure is derived after the confirmation rather than from it. The estate's own wall (the per-allocation cap) catches it only when JAN cannot carry 480.00; when it can, the claim is admitted silently.",
+      "required_fix": "Either keep the amount column visible once the list has had more than one line, or, when a delete takes the list back to one line, write the derived amount into the surviving row and render it. Add a unit cell in staff-expense-claim-form.test.tsx: suggest, edit, delete the second line, submit, and assert both the wire's figure and that the figure was on screen."
+    },
+    {
+      "id": "A931-4",
+      "ticket": 931,
+      "severity": "note",
+      "kind": "door / route divergence",
+      "title": "The door admits advance_allocations: [] (falling back to the single-advance shape); the runtime route refuses it at_least_one",
+      "where": "migration 0301 section C, v_listed := jsonb_typeof(...) = 'array' and jsonb_array_length(...) > 0 (line 567), versus packages/runtime/src/workRoutes.ts toDbClaim: 'if (wire.advanceAllocations.length < 1) return claimInvalid(\"advance_allocations\", \"at_least_one\")'",
+      "evidence": "Driven on the clone inside a rolled-back transaction: a claim carrying advance_id plus advance_allocations:[] was ADMITTED by clara.admit_staff_expense_claim_work (probe T12, claim 7e7eb54f-7bfe-43f2-98c7-199c341ea273). Every other malformed shape was refused by name - T4 not_this_client, T5 the identical refusal for a uuid that names nothing (no existence oracle), T6 exact_sum 39999 vs 40000, T7 distinct across a case-varied uuid, T8 positive_integer_cents, T9 settlement, T10 over_application, T11 allocation_head. The divergence is benign today (the route is the only caller and is the stricter side), but the successor contract's section 5 states the tool's local refusals are 'mirrors of 0301's payload half ... so the tool and the door never disagree', and this is one place they do.",
+      "required_fix": "Pick one reading and state it in both: either refuse an empty array at the door (constraint at_least_one) or drop the route's at_least_one arm. The door is the cheaper place, since an empty list is a caller that meant to say something."
+    },
+    {
+      "id": "A931-5",
+      "ticket": 931,
+      "severity": "note",
+      "kind": "misleading refusal",
+      "title": "An advance the client DOES hold, on a second enrolled account, is refused not_this_client",
+      "where": "migration 0301 section C world half, lines 771-778: 'if v_adv_enrol is null or v_adv_code is distinct from v_code then raise ... constraint not_this_client'",
+      "evidence": "One branch answers two different worlds: an advance that is not this client's at all, and one that is this client's but sits on a different enrolled account. Measured: probe T4 (another client's advance) and a cross-account list both land on 'that advance is not one this client holds on 1190' with constraint not_this_client. Since apps/web never sends a per-allocation accountCode (toClaimWire emits only {advanceId, amountCents}), the cross-account split the door and the chat successor CAN express is unreachable from the form and, when reached, is named wrongly. The report already files the form half as follow-up 2; the refusal wording belongs with it.",
+      "required_fix": "Split the branch: keep not_this_client for an advance this client does not hold, and raise a distinct constraint (for example other_enrolled_account, naming both codes) when the advance exists for this client under a different account_code, so the preparer is told which account to state."
+    },
+    {
+      "id": "A930-1",
+      "ticket": 930,
+      "severity": "note",
+      "kind": "two controls that must agree, with no wall between them",
+      "title": "The chooser's candidates are filtered by the CLAIMANT's account code while the claim's settlement leg is a separate chart picker; a mismatch is only discovered at the door",
+      "where": "apps/web/components/accounting/staff-expense-claim-form.tsx, advanceCandidates: a.account_code === draft.claimantAccountCode.trim() - while the wire's advance_account_code comes from the independent advanceAccountCode control",
+      "evidence": "Read from the diff. When the preparer picks an advanceAccountCode other than the claimant's own dedicated account, the chooser still offers the claimant's advances and validateClaimDraft raises nothing; the door then refuses not_this_client (see A931-5) for an advance that is perfectly real. No accounting damage - a refusal is a refusal - but it is a round trip the form could save.",
+      "required_fix": "Either derive advanceAccountCode from the chosen claimant's enrolment, or add a client-side issue on the advanceAccountCode control when it names an account carrying none of the chosen claimant's advances."
+    },
+    {
+      "id": "A931-6",
+      "ticket": 931,
+      "severity": "note",
+      "kind": "focus target with no control",
+      "title": "Removing every allocation row leaves advanceRequired addressed to an advanceId control that is no longer in the DOM",
+      "where": "apps/web/lib/work/staff-expense-claim.ts lines 242-250 with allocationFieldId(0,'advanceId') === 'advanceId'; the editor renders one row per allocation and none when the list is empty",
+      "evidence": "Read from the diff. claimAllocations synthesises a one-element list with an empty advanceId when draft.advanceAllocations is [], so validateClaimDraft pushes {field:'advanceId', code:'advanceRequired'} and firstInvalidClaimField focuses an element id that does not exist. Recoverable, because the editor's Add button is rendered outside the row loop, but the submit attempt gives no feedback at any control.",
+      "required_fix": "Keep at least one row in the draft (make remove a no-op at length 1 for this caller), or address the issue to the advanceAllocations list error element the form already renders."
+    }
+  ],
+  "held_under_attack": [
+    "Tenant isolation on the recut door: a client of another firm answers CLR11 client_not_found (probe T1); an advance of another client answers exactly the same refusal as a uuid that names nothing (T4 vs T5) - no existence oracle.",
+    "Rank floors: an active viewer is refused CLR04 insufficient_role (T2); a removed admin is refused CLR04 actor_not_active (T3). clara_runtime holds EXECUTE on the door and clara_authenticated does not (tail T.2d / T.2e).",
+    "The new relation's grade: FORCE RLS, read policy firm_id = clara.jwt_firm(), owner policy for clara_fn_owner only, SELECT to clara_authenticated only - byte for byte the shape clara.staff_expense_claims already carries (pg_policy and information_schema.role_table_grants, read here). Three-column tenant FKs to the claim and to clara.staff_advances confirmed in pg_constraint.",
+    "Integer cents: clara._claim_cents refuses a non-number, a non-integer and a negative; PostgreSQL normalises jsonb 1e3 to '1000', so _claim_allocations' regex guard cannot be slipped by an exponent literal (measured).",
+    "Cap arithmetic and its payload: outstanding 50000, proposed 55000, resulting -5000, shortfall_cents 5000, boundary_date 2026-03-31, addressed to claim.advance_allocations[2].amount_cents (T10) - the shortfall is the cap's own -resulting_cents, not a second walk.",
+    "Exact sum (39999 vs 40000), distinctness across a case-varied uuid, a zero allocation, a list on a reimbursement, and a stated advance_id that is not the head: each refused CLR10 by name at its own indexed field path.",
+    "Lock order at posting: clara._tf_adv_claim_application_birth loops 'order by al.advance_id' and clara._adv_on_approve locks 'order by sa.id' - one ascending order over the same key in both bodies, and the pre-lock idempotence probe only REMOVES locks, so no inversion is constructible. Read, not driven.",
+    "Reversal of a multi-advance claim: clara._adv_on_approve arm (1a) loops EVERY application of the original entry ('where x.entry_id = o.id and x.kind <> correction order by x.id'), so two applications on ONE credit leg mint two corrections, and uq_staff_advance_applications_line_advance is (application_line_id, advance_id) (pg_constraint, read here), so both land. No under-correction.",
+    "Backfill safety on a database with real rows: clara.staff_expense_claims already carries amount_cents > 0, the settlement CHECK forcing advance_id NOT NULL for advance_application, and fk_staff_expense_claims_advance (advance_id, firm_id, client_id), so section G's insert can violate neither the new table's CHECK nor its FK, and T.3 cannot find an uncovered claim. The tail runs after 'reset role', but only clara_fn_owner and clara_authenticated hold SELECT on clara.staff_expense_claims (measured), so a migration role with neither RLS bypass nor clara_fn_owner membership fails LOUDLY with permission denied rather than asserting vacuously.",
+    "Frozen surfaces: node scripts/check-frozen-workflows.mjs OK (312 frozen files, no manifest diff) and node packages/runtime/scripts/check-parts-parity.mjs OK, both re-run here. apps/web/lib/firm/needs-you.ts is not in this lane's diff, so wave-4 lane rule (a) is not engaged; migration 0301 inserts no chart rows, so rule (c) is not engaged.",
+    "Gates re-run at this commit: packages/db tests/staff-expense-claim-allocations.test.mjs + tests/staff-expense-claim.test.mjs with the full gate chain = 33 pass / 0 fail / 0 skipped; tests/operation-census.test.mjs + tests/rig-isolation.test.mjs = 32 pass / 0 fail / 1 skipped (T19 poison-role, self-skipping without CLARA_RIG_ALLOW_RESET, which was never set); apps/web lib/work/staff-expense-claim.test.ts + lib/work/staff-expense-claim-draft.test.ts + components/accounting/staff-expense-claim-form.test.tsx = 39 pass / 0 fail; packages/runtime tests/staff-expense-claim-unit.test.mjs + tests/work-routes-unit.test.mjs = 45 pass / 0 fail."
+  ],
+  "not_attempted": [
+    "A browser walk and a from-scratch migration chain - the integrator owns both; the lane's own t931 e2e leg was read, not re-run.",
+    "A concurrent POST (approve) of two claims over the same PAIR of advances. The lock order is established by reading both bodies (above), not by measurement; the ticket report says the same.",
+    "pnpm typecheck and CI=true GITHUB_ACTIONS=true pnpm lint - the Standards reviewer's ground, and no finding here depends on them."
+  ],
+  "rig_hygiene": "All probing ran read-only against clara_l02 inside BEGIN/ROLLBACK, except the two-connection race, which ran on a throwaway clone (createdb -T clara_l02 clara_l02_probe931) that was dropped afterwards; pg_database is back to clara_l02 / postgres / template0 / template1 (verified) and rig-isolation is green after the drop. No reset or role-sweep flag was ever set, no role was created, and the worktree is clean (git status --porcelain empty - no tracked file was edited).",
+  "summary": "One blocker: migration 0301's new allocation insert (section D step 8a) is not race-safe under one intent key. The door's only defence against a changed split is the step-4 canonical comparison, which runs BEFORE the client advisory lock, and clara._admit_accounting_work_core converges on basis_digest alone - and two allocations on one account derive the SAME digest as the single-advance claim they replace (measured, 425b6f58...). Driven with two real connections on a clone that was then dropped, the second session's extra advance is grafted onto the first session's claim: the stored confirmed list reads 60000 against a 40000 claim, 0301's own tail T.3b counts it broken, and a second variant escapes as an untyped 23505 on uq_sec_allocations_claim_ordinal. The web mints one intentKey per draft and keeps it across edits, so the shape is reachable from the form. Everything else held under attack: tenant isolation, rank floors, no existence oracle, the exact-sum / distinctness / head / settlement walls, the per-allocation cap and its shortfall arithmetic, integer-cents parsing, the backfill's safety on a database with real rows, the reversal fan-out onto one credit leg, and the frozen chat and Work surfaces. The remaining findings are one authorisation rule the ticket's own AC is stronger than (person_label ownership, already flagged by the implementer for an owner ruling), one silent re-apportionment in the form when an allocation line is deleted, and four notes."
+}

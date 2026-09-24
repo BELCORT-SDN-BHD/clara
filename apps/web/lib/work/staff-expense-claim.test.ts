@@ -24,6 +24,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 
 import {
+  claimAllocations,
   claimTotalCents,
   derivedLines,
   emptyClaimDraft,
@@ -32,6 +33,7 @@ import {
   firstInvalidClaimField,
   isPendingItem,
   settlementAccountCode,
+  suggestAllocationsByDate,
   toClaimWire,
   validateClaimDraft,
   type ClaimDraft,
@@ -165,8 +167,13 @@ test("validate.settlement: each arm names its own leg, and the advance arm names
   const advance = good({ settlement: "advance_application", advanceAccountCode: "1190", payableAccountCode: "" });
   assert.deepEqual(validateClaimDraft(advance, CHART, ENROLLED).map((i) => [i.field, i.code]),
     [["advanceId", "advanceRequired"]], "no silent FIFO: the claim says which advance it discharges");
+  // #931 — the advance the claim discharges is now the FIRST LINE of its allocation list, and that
+  // first line is still the control #930's chooser renders (`advanceId`), so this rule is unmoved.
   assert.deepEqual(
-    validateClaimDraft({ ...advance, advanceId: "11111111-1111-4111-8111-111111111111" }, CHART, ENROLLED),
+    validateClaimDraft({
+      ...advance,
+      advanceAllocations: [{ advanceId: "11111111-1111-4111-8111-111111111111", amountCents: 0 }],
+    }, CHART, ENROLLED),
     []);
 
   const settled = good({ settlement: "already_settled", paymentAccountCode: "1150", payableAccountCode: "" });
@@ -278,6 +285,14 @@ test("field.map: every server path the door can raise lands on a control, in BOT
     ["claim.payable_account_code", "payableAccountCode"],
     ["claim.advance_account_code", "advanceAccountCode"],
     ["claim.advance_id", "advanceId"],
+    // #931 — the confirmed allocation list. The FIRST line IS #930's chooser, so a refusal about it
+    // lands on `advanceId`; every later line has its own controls.
+    ["claim.advance_allocations", "advanceAllocations"],
+    ["claim.advanceAllocations", "advanceAllocations"],
+    ["claim.advance_allocations[1].advance_id", "advanceId"],
+    ["claim.advance_allocations[2].advance_id", "advanceAllocations.1.advanceId"],
+    ["claim.advance_allocations[2].amount_cents", "advanceAllocations.1.amountCents"],
+    ["claim.advanceAllocations[2].amountCents", "advanceAllocations.1.amountCents"],
     ["claim.payment_account_code", "paymentAccountCode"],
     ["claim.settlement", "settlement"],
     ["claim.items", "items"],
@@ -342,4 +357,162 @@ test("purpose.claim: a claim Work is labelled from its ORIGIN, not from a purpos
   assert.ok(sec.value !== undefined, "the claim-origin sentence exists");
   assert.match(String(sec.value), /\{claimant\}/);
   assert.match(String(sec.value), /\{settlement\}/);
+});
+
+// ===========================================================================================
+// allocations.* — #931: the confirmed allocation list, and the date-ordered suggestion.
+// ===========================================================================================
+
+/** A claim settled by advance application, with the allocation list stated in full. */
+function advanceDraft(rows: Array<{ advanceId: string; amountCents: number }>): ClaimDraft {
+  return good({
+    settlement: "advance_application",
+    advanceAccountCode: "1190",
+    payableAccountCode: "",
+    advanceAllocations: rows,
+  });
+}
+const ADV_A = "11111111-1111-4111-8111-111111111111";
+const ADV_B = "22222222-2222-4222-8222-222222222222";
+
+test("validate.allocations: the list adds up to the claim, names each advance once, and each line is real money", () => {
+  // ONE LINE IS THE SINGLE-ADVANCE CLAIM, and it needs no amount: the whole claim goes to it, so
+  // the form derives the figure rather than asking a preparer to retype a total it already knows.
+  assert.deepEqual(validateClaimDraft(advanceDraft([{ advanceId: ADV_A, amountCents: 0 }]), CHART, ENROLLED), []);
+  assert.deepEqual(claimAllocations(advanceDraft([{ advanceId: ADV_A, amountCents: 0 }])),
+    [{ advanceId: ADV_A, amountCents: 60500 }],
+    "a one-line list takes the whole claim, whatever the row happens to hold");
+
+  // TWO LINES MUST ADD UP TO THE CLAIM, to the cent (the parent ruling takes partial settlement and
+  // over-allocation out of scope).
+  const short = advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20000 },
+  ]);
+  assert.deepEqual(validateClaimDraft(short, CHART, ENROLLED).map((i) => [i.field, i.code]),
+    [["advanceAllocations", "allocationsNotExact"]]);
+  const exact = advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500 },
+  ]);
+  assert.deepEqual(validateClaimDraft(exact, CHART, ENROLLED), []);
+
+  // EACH LINE NAMES AN ADVANCE, and the FIRST line is #930's own chooser, so its issue lands on
+  // the control that chooser renders.
+  const noHead = advanceDraft([{ advanceId: "", amountCents: 0 }]);
+  assert.deepEqual(validateClaimDraft(noHead, CHART, ENROLLED).map((i) => [i.field, i.code]),
+    [["advanceId", "advanceRequired"]], "no silent FIFO: the claim says which advance it discharges");
+  const noSecond = advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: "", amountCents: 20500 },
+  ]);
+  assert.deepEqual(validateClaimDraft(noSecond, CHART, ENROLLED).map((i) => [i.field, i.code]),
+    [["advanceAllocations.1.advanceId", "advanceRequired"]]);
+
+  // NO ADVANCE TWICE: a list naming one advance twice would make "it adds up" true while saying
+  // two different things about one advance.
+  const twice = advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_A, amountCents: 20500 },
+  ]);
+  assert.deepEqual(validateClaimDraft(twice, CHART, ENROLLED).map((i) => [i.field, i.code]),
+    [["advanceAllocations.1.advanceId", "advanceDuplicated"]]);
+
+  // EVERY LINE IS REAL MONEY, once there is more than one — and that is its OWN rule, not a
+  // consequence of the sum: a line of nothing is refused even when the list still adds up.
+  const zeroLine = advanceDraft([
+    { advanceId: ADV_A, amountCents: 60500 },
+    { advanceId: ADV_B, amountCents: 0 },
+  ]);
+  assert.deepEqual(validateClaimDraft(zeroLine, CHART, ENROLLED).map((i) => [i.field, i.code]),
+    [["advanceAllocations.1.amountCents", "amountRequired"]]);
+});
+
+test("validate.allocations.delete: taking a split back to ONE line never re-apportions a confirmed figure", () => {
+  // THE WORKED EXAMPLE, driven from the browser's own controls. The preparer confirms
+  //   [A 40,000 · B 20,500] on a 60,500 claim, then REMOVES the second line with the editor's
+  // own row button. What survives says 40,000 — 20,500 sen short of the claim.
+  //
+  // #881's ruling is that the stored record is ALWAYS the confirmed list. A one-line list whose
+  // row carries no figure is #930's chooser and still takes the whole claim (the case above);
+  // a one-line list whose row carries a figure the preparer APPORTIONED is that figure, and a
+  // claim it no longer covers is a list that does not add up — which is exactly how
+  // `suggestAllocationsByDate` already shows a shortfall. Silently handing the whole claim back
+  // to the survivor would send a number nobody confirmed, caught only when the cap happens to
+  // refuse it.
+  const deleted = advanceDraft([{ advanceId: ADV_A, amountCents: 40000 }]);
+  assert.deepEqual(claimAllocations(deleted), [{ advanceId: ADV_A, amountCents: 40000 }],
+    "the surviving line keeps the figure it was confirmed with");
+  assert.deepEqual(validateClaimDraft(deleted, CHART, ENROLLED).map((i) => [i.field, i.code]),
+    [["advanceAllocations", "allocationsNotExact"]],
+    "…and a list that no longer adds up says so, at the list's own error");
+  assert.equal(toClaimWire(deleted, CHART, ENROLLED), null, "…so nothing crosses the wire");
+
+  // PUT THE WHOLE CLAIM ON THE SURVIVOR AND IT IS LAWFUL AGAIN — the preparer's own act, with the
+  // figure on screen.
+  const restated = advanceDraft([{ advanceId: ADV_A, amountCents: 60500 }]);
+  assert.deepEqual(validateClaimDraft(restated, CHART, ENROLLED), []);
+  assert.equal(toClaimWire(restated, CHART, ENROLLED)?.advanceAllocations, undefined,
+    "…and it still crosses as the single-advance shape, because that is what it is");
+});
+
+test("wire.allocations: one advance crosses as the 2021 single shape, several as the confirmed list", () => {
+  const single = toClaimWire(advanceDraft([{ advanceId: ADV_A, amountCents: 0 }]), CHART, ENROLLED);
+  assert.equal(single?.advanceId, ADV_A);
+  assert.equal(single?.advanceAccountCode, "1190");
+  assert.equal(single?.advanceAllocations, undefined,
+    "a claim that names ONE advance crosses exactly as it did before this ticket");
+
+  const split = toClaimWire(advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500 },
+  ]), CHART, ENROLLED);
+  assert.deepEqual(split?.advanceAllocations, [
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500 },
+  ]);
+  assert.equal(split?.advanceId, ADV_A, "the head fills the claim row's own structural column");
+  assert.equal(split?.advanceAccountCode, "1190");
+
+  // The other two settlements never carry a list.
+  assert.equal(toClaimWire(good(), CHART, ENROLLED)?.advanceAllocations, undefined);
+});
+
+test("suggest.byDate: the one-click suggestion is OLDEST FIRST and stops at the claim", () => {
+  // THE WORKED EXAMPLE, stated rather than recomputed. Three outstanding advances:
+  //   Jan 40,000 · Feb 30,000 · Mar 5,000 — against a 60,500 claim.
+  // Oldest first: January takes all 40,000; February takes the remaining 20,500; March is not
+  // named at all, because the claim is already settled by then.
+  const candidates = [
+    { advance_id: ADV_B, issue_date: "2026-02-01", outstanding_cents: 30000 },
+    { advance_id: ADV_A, issue_date: "2026-01-10", outstanding_cents: 40000 },
+    { advance_id: "33333333-3333-4333-8333-333333333333", issue_date: "2026-03-01", outstanding_cents: 5000 },
+  ];
+  assert.deepEqual(suggestAllocationsByDate(candidates, 60500), [
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500 },
+  ]);
+
+  // A SUGGESTION IS NEVER A CLAIM THE PERSON DID NOT MAKE. When the claimant's advances cannot
+  // cover the claim, the suggestion stops at what IS outstanding and the shortfall stays visible
+  // as an allocation list that does not add up — the preparer decides, not the form.
+  assert.deepEqual(suggestAllocationsByDate(candidates, 100000), [
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 30000 },
+    { advanceId: "33333333-3333-4333-8333-333333333333", amountCents: 5000 },
+  ]);
+
+  // Nothing outstanding, or nothing claimed, suggests nothing rather than an empty-looking line.
+  assert.deepEqual(suggestAllocationsByDate([], 60500), []);
+  assert.deepEqual(suggestAllocationsByDate(candidates, 0), []);
+
+  // A TIE ON THE DATE IS BROKEN BY THE ADVANCE ID, so the suggestion is the same on every machine.
+  const tied = [
+    { advance_id: ADV_B, issue_date: "2026-01-10", outstanding_cents: 10000 },
+    { advance_id: ADV_A, issue_date: "2026-01-10", outstanding_cents: 10000 },
+  ];
+  assert.deepEqual(suggestAllocationsByDate(tied, 15000), [
+    { advanceId: ADV_A, amountCents: 10000 },
+    { advanceId: ADV_B, amountCents: 5000 },
+  ]);
 });

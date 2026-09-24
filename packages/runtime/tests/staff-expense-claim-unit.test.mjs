@@ -227,6 +227,10 @@ test("route.field: every path the database can raise re-spells onto a control, i
     ["claim.items[2].expense_account_code", "claim.items[2].expenseAccountCode"],
     ["claim.payable_account_code", "claim.payableAccountCode"],
     ["claim.advance_id", "claim.advanceId"],
+    // #931 — the confirmed allocation list's own indexed paths, on the same footing as the items'.
+    ["claim.advance_allocations", "claim.advanceAllocations"],
+    ["claim.advance_allocations[2].amount_cents", "claim.advanceAllocations[2].amountCents"],
+    ["claim.advance_allocations[1].advance_id", "claim.advanceAllocations[1].advanceId"],
     ["claim.corrects_claim_id", "claim.correctsClaimId"],
     // untouched vocabularies stay untouched
     ["posting_date", "posting_date"],
@@ -365,4 +369,98 @@ test("parity: the successor contract carries NO WORK_ACCEPTED_PURPOSES widening"
   assert.equal(parts.WORK_ACCEPTED_PURPOSES_V19.includes("staff_expense_claim"), false,
     "…and no claim purpose exists to widen it with — migration 0221 widened nothing");
   assert.equal(mod.START_STAFF_EXPENSE_CLAIM_WORK_TOOL, "start_staff_expense_claim_work");
+});
+
+test("route.allocations: #931 — an advance application may name SEVERAL advances, and the head fills the structural column", () => {
+  // THE WIRE the browser posts when the preparer confirms a split. camelCase in, the database's
+  // own snake_case out — `toDbClaim`'s only job, applied to one more typed field.
+  const base = { ...WIRE(), settlement: "advance_application", advanceAccountCode: "1190" };
+  delete base.payableAccountCode;
+  const A = "11111111-1111-4111-8111-111111111111";
+  const B = "22222222-2222-4222-8222-222222222222";
+
+  const split = toDbClaim({
+    ...base,
+    advanceAllocations: [
+      { advanceId: A, amountCents: 40000 },
+      { advanceId: B, amountCents: 20500, accountCode: "1191" },
+    ],
+  });
+  assert.equal(split.ok, true);
+  assert.deepEqual(split.claim.advance_allocations, [
+    { advance_id: A, amount_cents: 40000 },
+    { advance_id: B, amount_cents: 20500, account_code: "1191" },
+  ], "allocations: the database's own keys, in the order the preparer confirmed");
+  assert.equal(split.claim.advance_id, A,
+    "allocations: the HEAD fills clara.staff_expense_claims.advance_id, which is NOT NULL for this settlement");
+  assert.equal(split.claim.advance_account_code, "1190");
+  assert.equal(split.claim.amount_cents, 60500,
+    "allocations: the total is still DERIVED from the items, never taken from the caller");
+
+  // A STATED HEAD IS PASSED THROUGH RATHER THAN OVERWRITTEN, so migration 0301's own
+  // `allocation_head` refusal stays reachable: silently rewriting the caller's statement would
+  // hide a disagreement instead of naming it.
+  const statedHead = toDbClaim({
+    ...base,
+    advanceId: B,
+    advanceAllocations: [{ advanceId: A, amountCents: 60500 }],
+  });
+  assert.equal(statedHead.ok, true);
+  assert.equal(statedHead.claim.advance_id, B,
+    "allocations: what the caller said is what the database is asked to judge");
+
+  // THE SINGLE-ADVANCE SHAPE IS UNTOUCHED: no list, no key.
+  const single = toDbClaim({ ...base, advanceId: A });
+  assert.equal(single.ok, true);
+  assert.equal(single.claim.advance_allocations, undefined,
+    "allocations: a claim that names ONE advance carries no list — 0221's wire, byte for byte");
+  assert.equal(single.claim.advance_id, A);
+});
+
+test("route.allocations.refusals: #931 — every malformed allocation is refused at its own indexed path", () => {
+  const base = { ...WIRE(), settlement: "advance_application", advanceAccountCode: "1190" };
+  delete base.payableAccountCode;
+  const A = "11111111-1111-4111-8111-111111111111";
+
+  const notArray = toDbClaim({ ...base, advanceId: A, advanceAllocations: { advanceId: A } });
+  assert.equal(notArray.ok, false);
+  assert.equal(notArray.error.field, "claim.advance_allocations");
+  assert.equal(notArray.error.reason, "array");
+
+  const empty = toDbClaim({ ...base, advanceId: A, advanceAllocations: [] });
+  assert.equal(empty.ok, false);
+  assert.equal(empty.error.field, "claim.advance_allocations");
+  assert.equal(empty.error.reason, "at_least_one");
+
+  const notObject = toDbClaim({ ...base, advanceAllocations: [A] });
+  assert.equal(notObject.ok, false);
+  assert.equal(notObject.error.field, "claim.advance_allocations[1]");
+  assert.equal(notObject.error.reason, "object");
+
+  // NO SILENT FIFO INSIDE THE LIST EITHER (WD-R10): every line says WHICH advance it discharges.
+  const noAdvance = toDbClaim({
+    ...base,
+    advanceAllocations: [{ advanceId: A, amountCents: 40000 }, { amountCents: 20500 }],
+  });
+  assert.equal(noAdvance.ok, false);
+  assert.equal(noAdvance.error.field, "claim.advance_allocations[2].advance_id");
+  assert.equal(noAdvance.error.reason, "advance_allocation_mismatch");
+
+  for (const bad of [0, -1, 40000.5, "40000", null]) {
+    const amount = toDbClaim({
+      ...base, advanceAllocations: [{ advanceId: A, amountCents: bad }],
+    });
+    assert.equal(amount.ok, false, `an allocation of ${JSON.stringify(bad)} sen is not a claim`);
+    assert.equal(amount.error.field, "claim.advance_allocations[1].amount_cents");
+    assert.equal(amount.error.reason, "positive_integer_cents");
+  }
+
+  // An allocation list on a settlement that discharges nothing is refused HERE rather than
+  // travelling to the database as a field the claim's settlement cannot explain.
+  const wrongSettlement = toDbClaim({
+    ...WIRE(), advanceAllocations: [{ advanceId: A, amountCents: 60500 }],
+  });
+  assert.equal(wrongSettlement.ok, false);
+  assert.equal(wrongSettlement.error.field, "claim.advance_allocations");
+  assert.equal(wrongSettlement.error.reason, "settlement");
 });

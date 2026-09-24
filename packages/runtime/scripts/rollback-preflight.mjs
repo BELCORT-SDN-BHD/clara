@@ -11,7 +11,8 @@
 // USAGE
 //   node packages/runtime/scripts/rollback-preflight.mjs --target-bundle <path-to-index.mjs>
 //   node packages/runtime/scripts/rollback-preflight.mjs --target-build-info <file|->
-//   node packages/runtime/scripts/rollback-preflight.mjs --supported claraWork_v1,chatTurn_v17
+//   node packages/runtime/scripts/rollback-preflight.mjs --supported claraWork_v1,chatTurn_v17 \
+//     [--supported-contracts intake_refusal_record_v1,fa_parked_run_v1]
 //
 //   Scope (optional, and OFF by default — see below):
 //     --scope-run <run-id>       (repeatable)   only these workflow runs
@@ -45,17 +46,33 @@
 //      trustworthy as the person typing it, it says so loudly in its own output line, and it is
 //      listed last on purpose.
 //
-// AND THE DATABASE GETS A VOTE — THE FRONTIER RULE (wave-3, #815). Beside the two censuses this
-// command reads the database's own migration frontier (`max(clara.schema_migrations.version)`) and
-// refuses a target that does not carry a body the applied schema REQUIRES, whatever the censuses
-// say. Today there is one such rule: from `0195_work_egress_purpose_and_execution_trace` on, the
-// target must carry `claraWork_v3` — 0195's recut posting core requires a consumed
-// `accounting_work` egress authorisation and NO BODY BEFORE v3 can obtain one, so a pre-v3 image
-// would run the whole Work lane through 0195's grandfather arm with the wall in force and nothing
-// subject to it. The rule names the FLOOR, not the newest body: `claraWork_v4` (wave 2026-09-15)
-// dispatches the same way, and Appendix A policy (c) means every later image carries v3 anyway, so
-// naming v3 is what makes the rule refuse pre-v3 targets and only those. The refusal reason is
-// `frontier_requires_body` and it is GLOBAL: no scope clears it, because it counts no rows.
+// AND THE DATABASE GETS A VOTE — THE FRONTIER RULES (wave-3, #815; widened by #1035). Beside the
+// two censuses this command reads the database's own migration frontier
+// (`max(clara.schema_migrations.version)`) and refuses a target that does not satisfy a rule the
+// applied schema carries, whatever the censuses say. There are two kinds of rule, in ONE table.
+//
+//   (a) A BODY the schema requires. From `0195_work_egress_purpose_and_execution_trace` on, the
+//       target must carry `claraWork_v3` — 0195's recut posting core requires a consumed
+//       `accounting_work` egress authorisation and NO BODY BEFORE v3 can obtain one, so a pre-v3
+//       image would run the whole Work lane through 0195's grandfather arm with the wall in force
+//       and nothing subject to it. The rule names the FLOOR, not the newest body: `claraWork_v4`
+//       (wave 2026-09-15) dispatches the same way, and Appendix A policy (c) means every later
+//       image carries v3 anyway, so naming v3 is what makes the rule refuse pre-v3 targets and
+//       only those. Refusal reason: `frontier_requires_body`.
+//
+//   (b) A DOOR CONTRACT the schema changed — the class this command was blind to twice. From
+//       `0254_intake_refusal_record` on, `clara.create_document_intake` COMMITS a ceiling-refused
+//       intake and returns `refused: true`; from `0279_fa_closed_year_arrears` on,
+//       `clara.run_depreciation_period` answers `parked` instead of posting. An image from before
+//       either one runs every parked body perfectly and MISREADS the answer: it answers 201 to an
+//       uploader whose file the firm's ceiling turned away, or counts a park as a post and
+//       re-drives it every sweep. The target proves it understands the contract by DECLARING it —
+//       `lib/runtime-contracts.mjs` puts a marker in the built bundle, and this command scans the
+//       target artifact for it, so the decision is a measurement and never a list of image tags.
+//       Refusal reason: `frontier_requires_contract`. Both windows this gap cost are recorded in
+//       `docs/plan/active/riders-2026-09-20/RELEASE-W2-RUNBOOK.md` and `RELEASE-W3-RUNBOOK.md`.
+//
+// Both kinds are GLOBAL: no scope clears them, because they count no rows.
 //
 // SCOPE IS EXPLICIT, OFF BY DEFAULT, AND NEVER THE EXIT CODE. Both censuses always run in FULL; a
 // scope adds a second, narrowed verdict beside the global one. The exit code follows the GLOBAL
@@ -73,7 +90,16 @@
 // `assertNoTargetSplit` fails closed if two present sources disagree.
 
 import { readFileSync } from "node:fs";
-import { preflight, refusalFooterLines, supportedBodiesFromBundle, taskIsStranded, withWorldClient } from "../lib/rollback-preflight.mjs";
+import {
+  frontierRefusalLines,
+  frontierViolationPhrase,
+  preflight,
+  refusalFooterLines,
+  supportedBodiesFromBundle,
+  supportedContractsFromBundle,
+  taskIsStranded,
+  withWorldClient,
+} from "../lib/rollback-preflight.mjs";
 
 const argv = process.argv.slice(2);
 
@@ -91,7 +117,7 @@ const USAGE = `rollback-preflight: usage
 
   node packages/runtime/scripts/rollback-preflight.mjs --target-bundle <path>
   node packages/runtime/scripts/rollback-preflight.mjs --target-build-info <file|->
-  node packages/runtime/scripts/rollback-preflight.mjs --supported id1,id2
+  node packages/runtime/scripts/rollback-preflight.mjs --supported id1,id2 [--supported-contracts c1,c2]
 
   To get a bundle from an image REFERENCE (the door that works at rollback time):
     ctr=$(docker create <image-ref>); docker cp "$ctr:/app/.output/server/index.mjs" ./t.mjs; docker rm "$ctr"
@@ -106,14 +132,27 @@ function die(message, code = 2) {
   process.exit(code);
 }
 
-/** The target image's body roster, from exactly ONE of the three doors. */
+/** The target image's body roster AND its contract roster, from exactly ONE of the three doors.
+ *
+ *  ZERO CONTRACTS IS NEVER A DIE, and zero bodies always is (#1035). A bundle registering no bodies
+ *  is one this command could not read; a bundle declaring no CONTRACT MARKERS is the honest
+ *  self-description of every image built before that mechanism existed — which is exactly the
+ *  target a rollback points at. The empty roster is carried forward and the frontier rules decide
+ *  what it means at THIS database's frontier. */
 function resolveSupported() {
   const bundlePath = flag("--target-bundle");
   const buildInfoPath = flag("--target-build-info");
   const explicit = flag("--supported");
+  const explicitContracts = flag("--supported-contracts");
   const chosen = [bundlePath, buildInfoPath, explicit].filter((v) => v !== null);
   if (chosen.length === 0) die(`no target given.\n\n${USAGE}`);
   if (chosen.length > 1) die("give exactly ONE of --target-bundle / --target-build-info / --supported — two targets is two answers.");
+  if (explicitContracts !== null && explicit === null) {
+    // The same rule as above, for the same reason: a typed contract roster beside a MEASURED body
+    // roster would be half a description of the target, and the half that was typed is the half
+    // that can be wrong.
+    die("--supported-contracts belongs with --supported. A measured target describes its own contracts; do not type them over it.");
+  }
 
   if (bundlePath !== null) {
     let text;
@@ -129,7 +168,7 @@ function resolveSupported() {
           "it is a bundle this command could not read, and refusing is the only safe reading.",
       );
     }
-    return { bodies, source: `bundle ${bundlePath}`, verified: true };
+    return { bodies, contracts: supportedContractsFromBundle(text), source: `bundle ${bundlePath}`, verified: true };
   }
 
   if (buildInfoPath !== null) {
@@ -151,12 +190,22 @@ function resolveSupported() {
           "about itself — extract its bundle instead (see --target-bundle and the docker create/cp recipe in this file's header).",
       );
     }
-    return { bodies: parsed.bodies.map(String), source: `build-info ${buildInfoPath === "-" ? "(stdin)" : buildInfoPath}`, verified: true };
+    // An ABSENT `contracts` key is the truthful answer of an image built before #1035, and it is
+    // read as "declares none" rather than as "could not tell" — which is what makes the frontier
+    // rules refuse it at 0254 and above instead of shrugging.
+    const contracts = Array.isArray(parsed.contracts) ? parsed.contracts.map(String) : [];
+    return {
+      bodies: parsed.bodies.map(String),
+      contracts,
+      source: `build-info ${buildInfoPath === "-" ? "(stdin)" : buildInfoPath}`,
+      verified: true,
+    };
   }
 
   const bodies = explicit.split(",").map((s) => s.trim()).filter(Boolean);
   if (bodies.length === 0) die("--supported was given but named no bodies.");
-  return { bodies, source: "--supported (operator-supplied)", verified: false };
+  const contracts = (explicitContracts ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return { bodies, contracts, source: "--supported (operator-supplied)", verified: false };
 }
 
 function printCensus(label, view, supported) {
@@ -186,17 +235,23 @@ function printCensus(label, view, supported) {
  *  checked against it. A measured pass prints the frontier rather than nothing — the same reason
  *  the unbound census refuses to print an unlooked-for zero. */
 function printFrontier(frontier) {
-  console.log("  THE DATABASE'S OWN RULE (frontier vs the target's bodies — global, no scope clears it)");
+  console.log("  THE DATABASE'S OWN RULES (frontier vs the target's bodies AND its door contracts — global, no scope clears them)");
   console.log(`    clara.schema_migrations frontier: ${frontier.version ?? "NONE APPLIED"}`);
   console.log(`    rules checked: ${frontier.rules.join(", ") || "(none)"}`);
+  // MEASURED, NOT ASSUMED: an image declaring none is a real and common answer, so it is printed as
+  // such rather than left blank — blank would read as "not looked at".
+  console.log(`    contracts the target declares: ${frontier.contracts.join(", ") || "(none declared)"}`);
   for (const v of frontier.violations) {
-    console.log(`      !! ${v.migration} requires ${v.body}, which the target does NOT carry`);
+    // BY IMPORT, like the refusal loop in main(): one describer answers for both kinds of rule, so
+    // this line and the refusal the verdict prints cannot drift apart (review F1).
+    const p = frontierViolationPhrase(v);
+    console.log(`      !! ${v.migration} requires ${p.needs}, which the target ${p.lack}`);
   }
-  if (frontier.violations.length === 0) console.log("      ok  the target carries every body the applied schema requires");
+  if (frontier.violations.length === 0) console.log("      ok  the target satisfies every rule the applied schema carries");
 }
 
 async function main() {
-  const { bodies, source, verified } = resolveSupported();
+  const { bodies, contracts, source, verified } = resolveSupported();
   const runIds = flags("--scope-run");
   const workIds = flags("--scope-work");
   const taskIds = flags("--scope-task");
@@ -212,7 +267,7 @@ async function main() {
 
   let result;
   try {
-    result = await withWorldClient((query) => preflight({ query, supported: bodies, scope }));
+    result = await withWorldClient((query) => preflight({ query, supported: bodies, contracts, scope }));
   } catch (err) {
     // EXIT 2, NOT 1. A read that failed is not a refusal and must not be retried past.
     die(`the inventory read FAILED, so this command has no verdict: ${err?.message ?? err}`);
@@ -222,7 +277,9 @@ async function main() {
   if (argv.includes("--json")) {
     console.log(JSON.stringify(result, null, 2));
   } else {
-    console.log(`rollback-preflight: target supports ${bodies.length} body(ies) — from ${source}`);
+    console.log(
+      `rollback-preflight: target supports ${bodies.length} body(ies) and declares ${contracts.length} door contract(s) — from ${source}`,
+    );
     if (!verified) {
       console.log(
         "    *** UNVERIFIED SET *** this roster was TYPED, not read from the target artifact or the target's own\n"
@@ -247,15 +304,11 @@ async function main() {
     process.exit(0);
   }
   console.error("\nrollback-preflight: REFUSED (global)");
-  for (const v of result.frontier.violations) {
-    // NAMED, not merely counted: the migration whose rule is in force and the body it needs, so an
-    // operator can tell this apart from a parked-run refusal without reading the source.
-    console.error(
-      `  - frontier_requires_body: this database is at ${result.frontier.version}, and ${v.migration} `
-        + `requires the image to carry ${v.body}, which the target does NOT.`
-        + (v.why ? `\n      ${v.why}` : ""),
-    );
-  }
+  // NAMED, not merely counted: the migration whose rule is in force and the thing it needs, so an
+  // operator can tell this apart from a parked-run refusal without reading the source. BY IMPORT
+  // rather than inline — the same discipline the stranded-task loop below states in its own words:
+  // a second copy of a rule drifts from the verdict that used it.
+  for (const line of frontierRefusalLines(result)) console.error(line);
   for (const row of result.outside) {
     console.error(`  - ${row.count} non-terminal run(s) on ${row.body}, which the target image does NOT carry (${row.name}).`);
   }
@@ -277,10 +330,19 @@ async function main() {
     );
   }
   if (result.frontier.violations.length > 0) {
+    const contractOnly = result.frontier.violations.every((v) => v.requirement === "contract");
     console.error(
       "\n  The frontier refusal is NOT drainable: it is a rule in the applied schema, not a row in a queue."
-        + " Ship a target that carries the named body (or roll the SCHEMA back first, which is its own ceremony"
-        + " — a migration is not a deploy).",
+        + (contractOnly
+          // Said separately because the two admissible answers to a census refusal do not reach it:
+          // a compatibility build that RETAINS bodies does not teach an old image a new return
+          // contract, and a drain empties a queue this rule never counted.
+          ? " And a DOOR-CONTRACT refusal has neither of the census refusal's two answers: retaining a body"
+            + " teaches the target nothing about what the door now returns, and there is no queue to drain."
+            + " Ship a target that declares the named contract (or roll the SCHEMA back first, which is its own"
+            + " ceremony — a migration is not a deploy)."
+          : " Ship a target that carries the named body (or roll the SCHEMA back first, which is its own ceremony"
+            + " — a migration is not a deploy)."),
     );
   }
   for (const line of refusalFooterLines(bodies, result)) console.error(line);

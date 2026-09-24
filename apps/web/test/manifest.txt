@@ -62,6 +62,7 @@ components/bank/matching-outcome.test.tsx
 components/bank/matching-refusal.test.tsx
 components/bank/matching-residual.test.tsx
 components/bank/matching-section.test.tsx
+components/bank/payroll-settlements-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/brand-identity.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
@@ -112,6 +113,8 @@ components/common/p6-3-a11y.test.tsx
 components/common/route-error.test.tsx
 components/common/state.test.tsx
 components/common/table-scroll-region.test.tsx
+components/deferred-revenue/deferred-revenue-render-states.test.tsx
+components/deferred-revenue/deferred-revenue-roster-gate.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/correction-impact-sheet.test.tsx
@@ -137,6 +140,7 @@ components/documents/intake-batch-card.test.tsx
 components/documents/intake-batch-keyboard.test.tsx
 components/documents/intake-receipts.test.tsx
 components/documents/lint-finding-detail.test.tsx
+components/documents/tenancy-rent-plan-section.test.tsx
 components/documents/upload-panel.test.tsx
 components/e2e/money-input-harness-route.test.tsx
 components/entry/checkout-faces-a11y.test.tsx
@@ -169,6 +173,7 @@ components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm-setup/firm-setup-a11y.test.tsx
 components/firm-setup/firm-setup-checklist.test.tsx
 components/firm-setup/firm-setup-keyboard.test.tsx
+components/firm/accrual-bill-conflict-affordance.test.tsx
 components/firm/activity/activity-event-sheet.test.tsx
 components/firm/activity/activity-feed.test.tsx
 components/firm/activity/activity-filters.test.tsx
@@ -198,6 +203,7 @@ components/firm/firm-home/firm-home-states.test.tsx
 components/firm/firm-home/firm-legal-standing-tile.test.tsx
 components/firm/firm-home/firm-portfolio.test.tsx
 components/firm/fixed-asset-incomplete-affordance.test.tsx
+components/firm/fixed-asset-proposal-prefill.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-counts.test.tsx
@@ -212,6 +218,7 @@ components/firm/work-question-affordance.test.tsx
 components/invite-accept-a11y.test.tsx
 components/invite-accept-form.test.tsx
 components/invite-accept-keyboard.test.tsx
+components/invite-accept-signed-out-preview.test.tsx
 components/journals/formatted-date.test.tsx
 components/journals/journal-entries-table.test.tsx
 components/journals/journals-a11y.test.tsx
@@ -241,6 +248,8 @@ components/plans/plans-render-states.test.tsx
 components/prepayments/prepayments-a11y.test.tsx
 components/prepayments/prepayments-keyboard.test.tsx
 components/prepayments/prepayments-render-states.test.tsx
+components/prepayments/prepayments-roster-gate.test.tsx
+components/prepayments/prepayments-term-source.test.tsx
 components/registers/EnrolAccountDialog.test.ts
 components/registers/accounts-a11y.test.tsx
 components/registers/accounts-keyboard.test.tsx
@@ -259,6 +268,7 @@ components/registers/fa-authority-ceremony.test.tsx
 components/registers/fa-charge-ledger.test.tsx
 components/registers/fa-detail-tab-url.test.tsx
 components/registers/fa-particulars-fields.test.tsx
+components/registers/fa-proposal-prefill.test.tsx
 components/registers/fa-register-tie.test.tsx
 components/registers/fa-revision-timeline.test.tsx
 components/registers/fa-row-actions.test.tsx
@@ -287,6 +297,7 @@ components/registers/opening-register.test.tsx
 components/registers/opening-source-header.test.tsx
 components/registers/opening-target-document-panel.test.tsx
 components/registers/opening-tie-gates.test.tsx
+components/registers/prepayment-accounts-panel.test.tsx
 components/registers/register-refresh-siblings.test.tsx
 components/registers/staff-advance-statement-panel.test.tsx
 components/registers/staff-advances-a11y.test.tsx
@@ -317,6 +328,7 @@ components/work/work-knowledge-block.test.tsx
 components/work/work-question-drift-banner.test.tsx
 components/work/work-question-form.test.tsx
 components/work/work-question-panel.test.tsx
+components/work/work-question-proposal.test.tsx
 components/work/work-restate.test.tsx
 components/work/work-saved-views.test.tsx
 e2e/cell-budget-census.test.ts
@@ -326,6 +338,7 @@ e2e/run-args.test.ts
 e2e/settle-before-scan-census.test.ts
 e2e/sign-in-census.test.ts
 e2e/spec-discovery.test.ts
+lib/accruals/api.test.ts
 lib/bank/agency-doors.test.ts
 lib/bank/citation.test.ts
 lib/bank/doors.test.ts
@@ -336,10 +349,14 @@ lib/bank/match-opkey.test.ts
 lib/bank/match-reads.test.ts
 lib/bank/matching-context-types.test.ts
 lib/bank/money.test.ts
+lib/bank/payroll-settlement-doors.test.ts
+lib/bank/payroll-settlement-reads.test.ts
 lib/bank/reads.test.ts
 lib/bank/recon-doors.test.ts
 lib/bank/recon-reads.test.ts
 lib/bank/reload-on-change.test.ts
+lib/bank/rent-settlement-doors.test.ts
+lib/bank/rent-settlement-reads.test.ts
 lib/bank/table-reads.test.ts
 lib/business-date.test.ts
 lib/checkout/checkout-flash.test.ts
@@ -372,6 +389,7 @@ lib/command/routes.test.ts
 lib/dashboard/financial-pack.test.ts
 lib/dashboard/period.test.ts
 lib/dashboard/use-financial-pack.test.ts
+lib/deferred-revenue/schedule.test.ts
 lib/documents/batch-url-state.test.ts
 lib/documents/bytes.test.ts
 lib/documents/capability-registry.test.ts
@@ -388,6 +406,7 @@ lib/documents/reads.test.ts
 lib/documents/receipts.test.ts
 lib/documents/region-geometry.test.ts
 lib/documents/runtime-wire.test.ts
+lib/documents/tenancy-wire.test.ts
 lib/documents/useUploadQueue.test.ts
 lib/documents/work-links.test.ts
 lib/doors.test.ts
@@ -401,10 +420,15 @@ lib/firm/capacity-doors.test.ts
 lib/firm/commercial-format.test.ts
 lib/firm/commercial-reads.test.ts
 lib/firm/home-facts.test.ts
+lib/firm/invite-preview-public.test.ts
 lib/firm/invite-preview.test.ts
 lib/firm/navigation-label.test.ts
+lib/firm/needs-you-agreement-posting.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you-links.test.ts
+lib/firm/needs-you-payroll-posting.test.ts
+lib/firm/needs-you-payroll-settlement.test.ts
+lib/firm/needs-you-tenancy-rent.test.ts
 lib/firm/needs-you.test.ts
 lib/firm/portfolio-focus-return.test.ts
 lib/firm/portfolio-url-state.test.ts
@@ -460,6 +484,7 @@ lib/registers/counterparty.test.ts
 lib/registers/depreciation.test.ts
 lib/registers/fa-account-profiles.test.ts
 lib/registers/fa-depreciation-policies.test.ts
+lib/registers/fa-particulars-proposal.test.ts
 lib/registers/fa-refusal-field.test.ts
 lib/registers/fixed-assets.test.ts
 lib/registers/knowledge.test.ts
@@ -467,6 +492,7 @@ lib/registers/money.test.ts
 lib/registers/opening-doors.test.ts
 lib/registers/opening-item-doors.test.ts
 lib/registers/opening.test.ts
+lib/registers/prepayment-accounts.test.ts
 lib/registers/staff-advances-doors.test.ts
 lib/registers/staff-advances.test.ts
 lib/registration/checkout-doors.test.ts

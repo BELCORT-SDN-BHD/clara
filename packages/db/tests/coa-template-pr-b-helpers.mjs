@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import {
   opk, rootQuery, roleQuery, ROLES, humanQuery, insertUser, addMember, membershipId, removeMember,
-  namedCall, getPool,
+  namedCall, getPool, createClientRaw,
 } from "./rig-fixtures.mjs";
 
 // ---------------------------------------------------------------------------
@@ -92,9 +92,10 @@ export async function firmDrift(sub) {
  */
 export async function newInterviewClient(admin, firm, { tag, answers = {} } = {}) {
   const name = `rig_prb_${tag ?? "c"}_${randomUUID().slice(0, 8)}`;
-  const created = await humanQuery(
-    admin, "select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [name, opk("cli")]);
-  const client = created.rows[0].receipt.client_id;
+  // [#1038] clara.create_client's clara_authenticated grant is withdrawn; createClientRaw
+  // reaches the same unwalled verb through the rig's own root+jwt idiom.
+  const created = await createClientRaw(admin, { name, opKey: opk("cli") });
+  const client = created.client_id;
 
   const plan = (await rootQuery(
     "select id, revision_token from clara.onboarding_plans where client_id = $1 and state = 'open' order by created_at desc limit 1",
@@ -193,9 +194,20 @@ export async function forgeAdoptedFamilies(adoptionId, families) {
 // Root-side ground truth (superuser bypasses RLS -- ground truth, never a wall proof)
 // ---------------------------------------------------------------------------
 
+/** The platform starter the estate currently PUBLISHES -- the highest published version. This
+ *  file's battery drives clara.apply_coa_template, clara.add_coa_template_family and
+ *  clara.fork_coa_template against it, and all three refuse a template that is not published
+ *  (0156:768 `template_not_published`, 0150:869-872 `source_not_published`), so it can only ever
+ *  be the live one. It was `version = 1` until 0295 minted v2 and retired v1; every assertion in
+ *  this file reads its expectation out of the template itself (expectedChartMap, coreFamilies),
+ *  so the battery follows the shipped starter rather than pinning a version. The FIXED
+ *  42-family / 142-account artifact 0150 seeded is pinned by coa-template-pr-a.test.mjs instead,
+ *  through its own platformTemplate(). */
 export async function platformStarter() {
   const r = await rootQuery(
-    "select id, version from clara.coa_templates where scope = 'platform' and template_key = 'my_sme_starter' and version = 1");
+    `select id, version from clara.coa_templates
+      where scope = 'platform' and template_key = 'my_sme_starter' and state = 'published'
+      order by version desc limit 1`);
   return r.rows[0] ?? null;
 }
 

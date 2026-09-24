@@ -22,11 +22,14 @@
 -- a same-commit roles-bootstrap twin" law — 0160 was the first role-minting
 -- migration since this file was last synced), 0163_checkout_gate_c3_folded_door
 -- (clara_auth_wall + its clara_auth_wall_login shell — FS-4 C-3's pre-session
--- confirmation-attempt wall), and deploy/storage-provision.sql
+-- confirmation-attempt wall), 0309_invite_preview_public_door.sql (clara_invite_preview
+-- + its clara_invite_preview_login shell — #871's signed-out invite preview, the same
+-- NOLOGIN group + NOLOGIN shell shape C-3 established), and deploy/storage-provision.sql
 -- (clara_storage_docs). Derived and cross-checked against a live-shaped rig (apply
 -- 0001..0010 to a scratch DB → query pg_roles / pg_auth_members) — the census
 -- pre-0160 reproduced exactly (14 clara_% roles + clara_storage_docs); 0160 adds two
--- more and C-3 adds two more (18 schema-lane roles + clara_storage_docs).
+-- more, C-3 adds two more and 0309 adds two more (20 schema-lane roles +
+-- clara_storage_docs).
 -- CONVERGENCE SCOPE: on a FRESH target this produces the exact
 -- census. It does NOT remove unexpected EXTRA memberships/settings on a pre-existing
 -- role and it does NOT normalize NOLOGIN over a pre-existing login shell — so it is
@@ -99,14 +102,18 @@ declare
     'clara_stripe_webhook', -- 0160 (FS-4 C-2, PR #484): the Stripe webhook sweep's own
                         -- NOLOGIN group role, holding exactly the record/apply EXECUTE
                         -- surface and no table grants
-    'clara_auth_wall'   -- FS-4 C-3: the confirmation-attempt wall's own NOLOGIN group
+    'clara_auth_wall',  -- FS-4 C-3: the confirmation-attempt wall's own NOLOGIN group
+    'clara_invite_preview' -- #871 (0309): the SIGNED-OUT invite preview's own NOLOGIN group,
+                        -- holding exactly one EXECUTE (clara.preview_invite_by_token) and no
+                        -- table grant anywhere
   ];
   -- Login SHELLS: created NOLOGIN here; a LIVE project flips them to LOGIN out of band.
   logins text[] := array['clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login',
                          'clara_freeform_login',
     'clara_wake_bank_login',  -- 0121: nologin shell until PR-2's DSN/pool ceremony
     'clara_stripe_webhook_login', -- 0160: member shell for clara_stripe_webhook
-    'clara_auth_wall_login']; -- C-3: member shell for clara_auth_wall
+    'clara_auth_wall_login', -- C-3: member shell for clara_auth_wall
+    'clara_invite_preview_login']; -- #871 (0309): member shell for clara_invite_preview
 begin
   -- Fail closed: never run on a live project (a login shell already LOGIN) w/o override.
   foreach r in array logins loop
@@ -193,6 +200,15 @@ grant clara_wake_interactive to clara_wake_write_login with inherit false, set t
 grant clara_freeform_ro      to clara_freeform_login   with inherit false, set true;
 grant clara_stripe_webhook   to clara_stripe_webhook_login;
 grant clara_auth_wall        to clara_auth_wall_login;
+-- #871 (0309): the SAME plain INHERIT-style grant 0163 writes for the auth wall, mirrored
+-- statement for statement (`grant clara_invite_preview to clara_invite_preview_login;`,
+-- 0309 §A) rather than restyled -- clara_invite_preview_login is created `inherit`, and the
+-- door's whole point is that the login shell INHERITS the one EXECUTE the group holds.
+-- WITHOUT THIS LINE the pair's roles are recreated on a DR target and their MEMBERSHIP is not:
+-- dr-verify's [4.5] clara_% membership census reported exactly that as `source-only 2` on CI
+-- run 35969325205 (this membership and the postgres one in 2b below), and a restored project
+-- would have carried a preview lane whose login could reach nothing.
+grant clara_invite_preview   to clara_invite_preview_login;
 -- 0121's own membership is INHERIT-style, deliberately unlike the trio above — the plain
 -- grant mirrors the migration's exact statement (clara_wake_bank_login is created `inherit`).
 grant clara_wake_bank       to clara_wake_bank_login;
@@ -225,6 +241,10 @@ begin
     grant clara_freeform_login   to postgres with inherit false, set true;
     grant clara_stripe_webhook_login to postgres;
     grant clara_auth_wall_login      to postgres;
+    -- #871 (0309): the same plain grant, mirroring 0163's idiom exactly. 0309 §A calls it
+    -- "test-only SET ROLE reachability" and mints no password-bearing credential; the membership
+    -- is part of the census a restored target must reproduce.
+    grant clara_invite_preview_login to postgres;
     -- 0121's own postgres membership is a plain grant (rig-testability parity with the
     -- wake_write_login precedent) — mirrored exactly, not restyled.
     grant clara_wake_bank_login  to postgres;
@@ -283,7 +303,7 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- 3. VERIFY (evidence — the DR drill / dr-verify diffs this against the source
---    census). Expect: 19 clara_% roles total (18 schema lanes + clara_storage_docs), all
+--    census). Expect: 21 clara_% roles total (20 schema lanes + clara_storage_docs), all
 --    rolcanlogin=f rolsuper=f rolbypassrls=f connlimit=-1; clara_agent_ro carries
 --    {default_transaction_read_only=on}; clara_storage_docs is rolinherit=f, the rest rolinherit=t.
 -- ---------------------------------------------------------------------------

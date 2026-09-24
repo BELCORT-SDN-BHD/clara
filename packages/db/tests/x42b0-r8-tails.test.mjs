@@ -208,14 +208,37 @@ test("x42.r8.tails.4 TAIL 1(a) approve-path census, widened, matches the pinned 
   // UPDATE, deliberately — clara._tf_assert_agent_post_receipt is an AFTER UPDATE trigger, so
   // an insert-approved shortcut would slip past the one wall that makes the post receipt
   // structural. Gated on the migration STEM, never a number.
+  // [riders wave 4, lane 01] FOUR MORE, and this is a GOVERNANCE fact rather than a count that
+  // drifted: the set of bodies that may flip a journal entry to 'approved' in-body goes from
+  // five to nine. Two are UNATTENDED AGENT posts -- clara._post_payroll_run (#946) and
+  // clara._post_agreement_acquisition (#948) -- which draft and then flip with exactly this
+  // UPDATE for the same structural reason clara._record_journal_entry_core does (the agent-post
+  // receipt wall is an AFTER UPDATE trigger, so an insert-approved shortcut would slip past it)
+  // and which carry approval_arm='agent_unattended', the F-A2 D10 arm that does not participate
+  // in maker/checker at all. Two are HUMAN accept acts -- clara._settle_payroll_net_pay_core
+  // (#947) and clara._settle_rent_payable_core (#949) -- which DO participate: each probes
+  // clara.is_high_stakes on the entry it has just built and leaves a high-stakes one a DRAFT for
+  // the ordinary approve door, clara.reverse_entry's own posture, so the flip this census sees
+  // is the ordinary-stakes branch. Each is gated on its own file's STEM, never a number.
+  // A TENTH name is a finding.
   const n56a = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version like '0056_%'")).rows[0].n;
   const nB3a = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version ~ 'b3_reopen_ends_on$'")).rows[0].n;
   const n623a = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version ~ 'accounting_work_journal_successor$'")).rows[0].n;
+  const stem = async (re) =>
+    (await rootQuery(`select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`)).rows[0].n === 1;
+  const n946a = await stem("payroll_summary_posting$");
+  const n947a = await stem("payroll_net_pay_settlement$");
+  const n948a = await stem("agreement_contract_acquisition$");
+  const n949a = await stem("tenancy_terms_rent_plan$");
   // Built ADDITIVELY, in collate "C" order, so each frontier contributes exactly its own name
   // rather than a fourth hand-written full-roster branch.
   const expected = [
     "_approve_entry_core", "_approve_opening_entry",
+    ...(n948a ? ["_post_agreement_acquisition"] : []),
+    ...(n946a ? ["_post_payroll_run"] : []),
     ...(n623a === 1 ? ["_record_journal_entry_core"] : []),
+    ...(n947a ? ["_settle_payroll_net_pay_core"] : []),
+    ...(n949a ? ["_settle_rent_payable_core"] : []),
     "approve_wrong_client_correction",
     ...(n56a === 1 ? ["finalize_close"] : []),
     ...(nB3a === 1 ? ["reopen_fiscal_year"] : []),

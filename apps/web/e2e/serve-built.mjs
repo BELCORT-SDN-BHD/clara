@@ -56,6 +56,16 @@ import { handleL7Supabase } from "./bank-close-registers-mock.mjs";
 // below and bank-match-mock.mjs own header for the measurement that makes the position
 // load-bearing rather than cosmetic.
 import { handleP657Supabase } from "./bank-match-mock.mjs";
+// #947 — the payroll settlement panel on the SAME Matching tab. Answers only the two verbs
+// #657's own allow-list does not know, so position relative to it is not load-bearing (no home-
+// board EMPTY_RPCS concern either — neither verb is in that array); dispatched beside it for
+// locality. Scoped to #657's own client id (reused deliberately — see that module's header).
+import { handleP947Supabase } from "./payroll-settlement-mock.mjs";
+// #949's own lane — the Documents detail's FACTS view with a tenancy's terms-and-rent-plan panel.
+// A file-disjoint sibling of the documents-viewer lane: its own client and its own `7e4a4c47-`
+// document-id prefix, every branch scoped to them, and its RPC half guards on an exact-verb
+// allow-list BEFORE it reads the body.
+import { handleP949Supabase } from "./tenancy-rent-plan-mock.mjs";
 // The documents-viewer walk's own lane (C-07 / D2 / D3), the same file-disjoint shape.
 // Every branch inside is scoped to ITS OWN client/document/extraction ids and falls
 // through otherwise; it never claims the shared client register or the session list.
@@ -153,7 +163,7 @@ import { handlePlansSupabase } from "./plans-mock.mjs";
 // `/rest/v1/rpc/preview_invite` (0224, which no other lane and no CORE branch answers). Those
 // are EXTENSIONS, not handovers — nothing here used to answer them — and they are what lets a
 // browser leg drive `/invite/:token` past verification to the preview step.
-import { handleMembersLifecycleSupabase } from "./members-lifecycle-mock.mjs";
+import { handleMembersLifecycleSupabase, handleMembersInvitePreviewRuntime } from "./members-lifecycle-mock.mjs";
 // #649's client-creation lane — the identity-candidates read and the birth door. Both branches
 // gate on the request's own subject (for these two verbs the subject IS the free-text name: the
 // door takes no id) and fall through otherwise, so it can run anywhere in the chain below; it is
@@ -179,6 +189,12 @@ import { accrualWorkListPage, handleAccrualSupabase } from "./accrual-mock.mjs";
 // reuses. Every handler is id-scoped and its RPC half guards `readJson` on an exact-verb
 // allow-list, so it drains no other lane's request stream and can run anywhere in the chain below.
 import { handlePrepaymentsSupabase, prepaymentWorkListPage } from "./prepayments-mock.mjs";
+// #941's deferred-revenue lane — the recognition doors for an advance a customer paid ahead.
+// Every handler is id-scoped and its RPC half guards `readJson` on an exact-verb allow-list, so
+// it drains no other lane's request stream and can run anywhere in the chain below.
+import {
+  handleDeferredRevenueSupabase, deferredRevenueWorkListPage,
+} from "./deferred-revenue-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -672,6 +688,7 @@ async function handleSupabase(request, response, url) {
       // above: null means "not mine".
       ?? accrualWorkListPage(body)
       ?? prepaymentWorkListPage(body)
+      ?? deferredRevenueWorkListPage(body)
       ?? { status: 200, body: { rows: [], next_cursor: null, truncated: false } };
     sendJson(response, answer.status, answer.body, cors);
     return;
@@ -761,6 +778,8 @@ async function handleSupabase(request, response, url) {
   // that has been fixed (`e2e-fixture-ownership.test.ts`'s `arrayMembershipVerbs`), and both
   // verbs are now declared, correctly, in `SHARED_RPC_VERBS`.
   if (await handleP657Supabase(request, response, path, url, sendJson, cors)) return;
+  if (await handleP947Supabase(request, response, path, url, sendJson, cors)) return;
+  if (await handleP949Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
   // id-scoped client row (a SERVER-side layout read `page.route` cannot reach), and it falls
@@ -797,6 +816,10 @@ async function handleSupabase(request, response, url) {
   // It sits AFTER the plan lane because the two share the four plan lifecycle verbs, each gated on
   // its own plan id — a declared share rather than a collision (see e2e-fixture-ownership.test.ts).
   if (await handlePrepaymentsSupabase(request, response, path, url, sendJson, cors)) return;
+  // #941's deferred-revenue lane. Position is not load-bearing for the same reason its sibling's
+  // is not: every branch is scoped to this lane's own client or schedule id and falls through
+  // otherwise, and its four rpc verbs are owned by no other lane.
+  if (await handleDeferredRevenueSupabase(request, response, path, url, sendJson, cors)) return;
   // #656's opening lane. ABOVE the home board, and that position IS load-bearing (DECISIONS
   // §6.1's ruling on #657's finding, which is general): `home-board-mock.mjs`'s EMPTY_RELATIONS
   // answers `/rest/v1/opening_seed_registry` AND `/rest/v1/coa_accounts` with an honest `[]` for
@@ -999,6 +1022,23 @@ async function handleSupabase(request, response, url) {
     // EMPTY IS HONEST HERE, and it is what the component is built for: a Work that registered no
     // fixed asset renders no asset row at all, which is most Works.
     sendJson(response, 200, { client_id: null, as_of: null, assets: [], incomplete_count: 0 }, cors);
+    return;
+  }
+
+  if (request.method === "POST"
+      && (path === "/rest/v1/rpc/get_rent_settlement_candidates"
+        || path === "/rest/v1/rpc/get_tenancy_deposit_coding")) {
+    // #949 (fix round) — RentSettlementsSection mounts on the /bank MATCHING tab beside #947's
+    // payroll panel, so these two reads now fire on every spec that opens that tab, and two of
+    // them (bank-match-walk, payroll-settlement-walk) have no tenancy fixture and need none. The
+    // SAME reasoning #626 records for get_my_preferences, #634 for list_entry_links and #639 for
+    // list_fixed_assets above: a generic, honest EMPTY answer here keeps every other spec's page
+    // free of an unhandled-route 404 for a call it never asked about, and a lane that OWNS the
+    // answer claims the verb earlier in the chain and never reaches this default.
+    //
+    // EMPTY IS HONEST HERE: a client with no confirmed rent plan has no open month of rent and no
+    // recorded deposit, which is exactly what the panel then renders — its own empty copy.
+    sendJson(response, 200, [], cors);
     return;
   }
 
@@ -1223,6 +1263,10 @@ const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, 
   // #636, BEFORE the documents-intake runtime lane: its two routes live under
   // /api/intake/batches, a prefix that lane never claims, and the cancel route falls through on a
   // batch id it did not mint.
+  // #871, FIRST because it claims ONE exact path (`/api/invite-preview`) and, within it, only the
+  // two `ct` tokens this lane minted — so it cannot swallow anything another walk owns, and no
+  // other handler claims that prefix.
+  if (await handleMembersInvitePreviewRuntime(request, response, url)) return true;
   if (await handleIntakeBatchRuntime(request, response, url)) return true;
   if (await handleDocumentsIntakeRuntime(request, response, url)) return true;
   if (await handleChatParityRuntime(request, response, url)) return true;

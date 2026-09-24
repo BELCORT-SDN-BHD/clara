@@ -84,21 +84,85 @@ posted one; treating an amortisation period's amount as the same as every other 
 
 **Prepayment schedule**:
 The derived amortisation of ONE posted prepayment: the recognition entry that put it on the books,
-the prepaid account read off that entry's own single debited asset leg — and judged ELIGIBLE by the
-same rule every other lane uses, so a receivable control, a bank account or a reserved role is
-refused rather than amortised — the Service period its document states, the expense account a
+the prepaid account read off that entry's own single debited asset leg — ENROLLED on the client's
+Prepayment account roster, and judged ELIGIBLE by the same rule every other lane uses, so an account
+nobody enrolled, or a receivable control, a bank account or a reserved role, is refused rather than
+amortised — the Service period its document states, the expense account a
 person judged with the grounds they stated, and the exact allocation across whole calendar months
 with the remainder wholly in the final period. It is DERIVED, not typed: the amount, the period
 count, the per-period figures, the cadence and the authority window all come from the frozen
 evaluator's reading of rows this database already holds, and the only things a person supplies are
 which prepayment, under WHOSE INSTRUCTION, which expense account, why, and what the schedule is
-for. It configures an Accounting plan of kind `amortisation_schedule`; the belt
-admits each period.
-_Avoid_: A recurring adjustment template — the 0045 template lane was retired 2026-09-18 (#788,
-delivered by #927–#929), except for one PARKED agent entrance that still mints one and must be
-retired or rerouted before it is ever unparked; an editable table of period amounts; a schedule
-that pays anything — the money left the bank before the schedule existed; "configured" as a
-synonym for "posted", which is a different fact and a different count.
+for — through their own door, or through the On-behalf-of door Clara uses in a conversation, which
+records the same person and shares the same idempotency key. A PERSON IS NOT OPTIONAL: the plan the
+schedule configures is authorised by a named human, and every month's Work is admitted as that
+human, so the agent-lane close_prep wake — which names nobody by construction — refuses rather than
+configuring something no belt could ever post. It configures an Accounting plan of kind
+`amortisation_schedule`; the belt admits each period.
+_Avoid_: A recurring adjustment template — the 0045 template lane was fully retired 2026-09-18
+(#788, delivered by #927–#929); its one remaining live entrance, the agent-lane close_prep wake, was
+REROUTED onto this door rather than left parked (#1036, the 2026-09-23 integration ruling) and never
+mints one again; a schedule an unattended run configured for itself — that lane refuses by name
+(`wake_authority_absent`) because the estate has no person for it to post as; an editable table of
+period amounts; a schedule that pays anything — the money left the bank before the schedule
+existed; "configured" as a synonym for "posted", which is a different fact and a different count.
+
+**Prepayment account roster**:
+The per-client list of accounts a firm has enrolled as holding prepayments. It is the POSITIVE half
+of prepayment eligibility: the shared wall every lane uses is negative — is this leg a control
+account, a bank account, inactive, reserved by another register — and an ordinary asset account with
+none of those marks passes it, so a deposit or a prepaid tax could be amortised into expense for a
+whole term. Enrolling is a bookkeeper's judgement about THIS client's chart, recorded with the
+one-line reason the person gave and kept as an immutable interval: re-stating the reason opens a new
+enrolment rather than editing the old one, so the basis a schedule was configured under stays
+readable for as long as the schedule does. Retiring closes the account to NEW schedules only — a
+schedule already running posts to the end of its term, because nothing on the monthly admission path
+asks the roster. One roster carries both purposes a release schedule can have (a prepaid asset, and
+deferred revenue's credited liability), so a firm never has two answers to "may this account carry a
+release schedule".
+_Avoid_: A mark on the firm's standard chart template — the same template account is a prepayment
+for one client and an ordinary deposit for the next; a new member of the chart's account class,
+which the shared wall reads as a CONTROL account and would make every prepaid account ineligible; a
+back-check of schedules already running, or an automatic enrolment derived from history; reading a
+retirement as "that amortisation stops"; a second roster for deferred revenue.
+
+**Revenue recognition schedule**:
+The derived recognition of ONE receipt a customer paid ahead: the entry that put the advance on the
+books, the deferred-revenue account read off that entry's own single credited liability leg —
+ENROLLED on the client's Prepayment account roster under the deferred-revenue purpose, and judged
+ELIGIBLE by the same rule every other lane uses — the Service period its document states or a person
+stated, the revenue account a person judged with the grounds they wrote, and the exact allocation
+across whole calendar months with the remainder wholly in the final period. It posts Dr deferred
+revenue / Cr revenue, one entry a month, until the liability clears to zero. It is the mirror of a
+Prepayment schedule and rides the SAME frozen evaluator, released on the other side; it configures an
+Accounting plan of kind `revenue_recognition_schedule`, and the belt admits each period. Service tax
+is never part of it: an output-tax leg on the same receipt is not a candidate at all, because tax
+owed to the customs department is not revenue and never becomes revenue.
+_Avoid_: An invoice — the advance was received and posted before any schedule existed, and nothing
+here touches MyInvois; usage-based or milestone recognition, which needs a measure of progress this
+estate does not record and is refused by name; a schedule over the gross receipt, which would
+recognise the tax as income; revising a running schedule to correct its term — a correction
+supersedes the statement and moves no schedule; the replacement is a SEPARATE schedule that takes
+over the months the first one has not recognised, and at most one schedule over a receipt is ever
+live; "configured" as a synonym for "recognised", which is a different fact and a different count.
+
+**On-behalf-of door**:
+The second entrance to a write a person may make, for the times Clara makes it FOR them in a
+conversation. It is a separate function whose name ends `_for`, granted to the runtime lane and to
+nobody else, and it differs from the human door in exactly one thing: it takes the human's identity
+as an ARGUMENT instead of reading it from their session, because the runtime connection carries no
+session. It then proves that identity rather than trusting it — the membership must be live in this
+firm at the moment the books are written, at the same role floor the human door applies — and a
+human who is not a member of the firm at all is answered exactly as an unknown client is, so the
+pair can never be used to learn whose client is whose. Everything else is the SAME body, so the two
+entrances cannot answer one rule two ways, and both share one idempotency namespace whose key
+identifies the DECISION and not who typed it: a configuration Clara made and a person's own replay
+of it under the same key converge on one receipt and one record.
+_Avoid_: A widened grant on the human door — that would be a write with no named human at all;
+"the agent's own authority" — the authority is always the person the door acts for, and the
+instruction it cites must be a person's; a second copy of the human door's body, which is how two
+entrances start answering the same rule differently; treating an on-behalf-of write as something a
+wake or agent lane may reach, or as a way around a judgement only a person may state.
 
 **Service period**:
 The span of time an accrued or prepaid cost belongs to, stated by an identified person — for a
@@ -115,17 +179,64 @@ an extracted or inferred period; a term the product derived from an invoice's ow
 a date range it saw, or a conversation it summarised; treating a corrected term as something a
 revision re-derives — a re-derived allocation is a new schedule.
 
+**Stated service period**:
+A Service period a named person states for a prepayment that evidences NO document — the client
+paid a year of insurance and said so, the payment was recorded as a memo journal, and no invoice
+ever arrived. It is the same fact as a service period and carries the same discipline (a required
+reason, a recorded actor, supersede-never-mutate, one live statement per recognition entry, the
+same 120-month cap), but it is anchored to the RECOGNITION ENTRY rather than to a document,
+because the entry is the only durable thing it is about. A schedule derived from one behaves
+exactly like a document-backed schedule — the same whole-calendar-month straight line, the same
+remainder, the same monthly Work — so the only difference is the Term source, and the surface
+says which. It is human-stated by law for the same reason a document's period is: there is no
+agent grant and no wake wrapper, and Clara may ask the fixed two-date question but never answers
+it.
+_Avoid_: A period read off anything — a memo line, a filename, a bank narrative, a conversation
+Clara summarised; a default term; a nullable document on the document-grain carrier — the two
+carriers are separate relations and the document one is shared with the accrual lane; correcting a
+stated term by moving a running schedule — a correction supersedes the statement and a re-derived
+allocation is a new schedule.
+
+**Term source**:
+WHICH carrier a prepayment schedule's term came from: the document's own service period, or a
+person's stated service period. It is a recorded column on the schedule, paired structurally with
+the carrier it names, so a schedule can never claim a provenance it cannot point at. It is not
+the same fact as HOW the term was arrived at (stated by a person versus read off a page by an
+extraction) — that is the term's own basis kind, and a document's period can be human-stated
+while its source is still the document.
+_Avoid_: Inferring the source from the absence of a document id; treating a human-stated term as
+weaker evidence than a document's — both are a named person's statement with recorded grounds, and
+what differs is what the statement is anchored to.
+
 **Corrected term**:
 A service period a person has RE-STATED with different dates, so what the document is taken to say
 about the span it buys has changed. It is not the same fact as a superseded term ROW: recording a
 period on a document that already carries a live one supersedes the old row whatever the new one
 says, so a second verification that restates the same two dates supersedes a row and corrects
 nothing. Only a corrected term makes an allocation already derived from the old one wrong, and only
-a corrected term is grounds for telling a firm its schedule has to be rebuilt.
+a corrected term is grounds for either of the two acts the estate offers: naming the difference for
+a reviewer, and opening a Replacement schedule for the months the first one has not taken up. The
+allocation already derived is never rebuilt in place — it is a derived record — and a re-statement
+that moved neither date is grounds for nothing.
 _Avoid_: Reading "the row this schedule rode is no longer live" as "the term was corrected" — the
 first is bookkeeping about rows, the second is a statement about the client's affairs, and a
 surface that confuses them tells a firm to abandon a running amortisation for no reason; treating a
 corrected term as something a revision re-derives — a re-derived allocation is a new schedule.
+
+**Replacement schedule**:
+The schedule that takes over a Prepayment schedule or a Revenue recognition schedule whose term was
+found to be wrong: the predecessor's plan is ended, its allocation is left exactly as it stands, and
+a new schedule is derived from the CORRECTED term over the months the predecessor has not taken up,
+for the balance those months did not consume. The treatment is PROSPECTIVE — a change in accounting
+estimate, not a correction of an error — because the months already taken up are never touched, and
+that is the ticketed ruling rather than a choice the code made. The predecessor and its successor
+name each other, so the chain reads both ways, and at most one schedule over a recognition is live
+at a time.
+_Avoid_: Reading it as a revision — a revision moves a plan's schedule and this is a second schedule
+with its own plan and its own authority; reading "the plan ended" as grounds for one — only a
+corrected term is, and ending a plan on its own opens nothing; expecting it to re-open a month the
+plan has already admitted a Work for, which would post that month twice; expecting it where nothing
+is left to re-spread, which is refused by name.
 
 **Plan catch-up**:
 Admitting due events that already passed, over a window a person names. Oldest first, bounded per
@@ -325,6 +436,18 @@ _Avoid_: Resending the same invitation; a pending invitation shown as a member; 
 creation of a new firm as a synonym for joining one; a per-firm seat count as a reason to refuse
 one (see **Admission capacity**).
 
+**Signed-out invite preview**:
+What the invite landing page can say about an invitation BEFORE anyone signs in: the firm's display
+name, the invited role, the effective status and a masked address — nothing else, and only while
+the invitation is still open. It is served by a server-only database door no browser, no client
+credential and no service key can reach, and an unknown, expired, revoked or already-accepted token
+gets ONE and the same answer, so possession of a link never reveals whether it exists. Reading it
+is a courtesy, not an admission: rate-limited, and when it is refused the page simply carries on to
+sign-in without the block.
+_Avoid_: A synonym for the signed-in preview (that one proves the reader's address and is a
+different door); a verdict on whether the invitation will be accepted — only `accept_invite`
+decides that; treating a hidden preview as a dead link.
+
 **Issuer lapsed**:
 The fifth effective status a still-`pending` invitation can read, computed at READ TIME by one
 expression the invitee's preview and the admin roster BOTH carry, when the invitation's issuer no
@@ -436,8 +559,10 @@ The resumable list of facts a firm must state about itself, derived from the rea
 _Avoid_: A progress bar with no required items behind it; an onboarding approval ritual; treating optional education as a prerequisite.
 
 **Firm setup applicability**:
-Whether a firm-setup catalogue item is asked of this firm at all, derived live from an earlier answer already on the same setup record rather than stored as a flag of its own: applicable, inapplicable, or not-yet-determined while the answer it depends on is still unanswered. An inapplicable item is never asked and is excluded from the required count on both sides; an item answered before it became inapplicable keeps that answer and is reported inapplicable rather than deleted.
-_Avoid_: A stored applicability flag that can drift from the answer it depends on; asking or counting an item whose predicate is not yet determined; deleting an answer because its item became inapplicable.
+A firm-setup catalogue item's live verdict, derived from an earlier answer already on the same setup record rather than stored as a flag of its own — never re-computed by a second write path, never drifting from the answer it reads. Two shapes exist, one per item, chosen by what the dependent answer decides:
+- **Asked-or-not** (the eligibility screen alone): applicable, inapplicable, or not-yet-determined while the answer it depends on is itself unanswered. An inapplicable item is never asked and is excluded from the required count on both sides; an item answered before it became inapplicable keeps that answer and is reported inapplicable rather than deleted.
+- **Required-or-optional** (the tax identifier alone): the item is asked of every firm regardless, and reads required once the dependent answer makes it mandatory, optional otherwise — including while the dependent answer is itself still unanswered. An optional item still shows its answer form and still accepts an answer; the required count and the commit gate include it only while it reads required, and correcting the dependent answer flips the marking alone, keeping any answer already recorded either way.
+_Avoid_: A stored applicability flag that can drift from the answer it depends on; asking or counting an asked-or-not item whose predicate is not yet determined; deleting an answer because its item's marking changed; withholding a required-or-optional item's answer form while it reads optional; a second business rule inventing a third shape without one of these two owning it.
 
 **Firm setup catalogue note**:
 The one accountant-readable sentence a firm-setup catalogue item shows under its question — what the answer is used for and Clara's stated boundary, never an accounting conclusion. It is what the checklist renders; the catalogue's separate engineer note (file names, line numbers, provenance) is never shown to a user. A catalogue item can also be retired, which removes it from every firm's checklist, its counters and its required set without editing or deleting the append-only row itself — today that is a migration-time act: the catalogue carries the retire mark, but no door sets it, so retiring an item is still a reviewed schema change rather than something a person does from a screen.
@@ -484,8 +609,12 @@ A body that live, non-terminal runs are parked on and that the image now serving
 _Avoid_: A failed run; a reason to treat the Work as cancelled; a condition safe to discover after a rollback.
 
 **Rollback preflight**:
-The check run before releasing an earlier image: does that target carry every body live runs are parked on, and every class an already-admitted Work still needs. A refusal has two admissible answers — retain the bodies in a compatibility build, or complete a verified drain — and elapsed time is neither.
-_Avoid_: Rollback points as a substitute for it; "nothing looked busy" as a drain.
+The check run before releasing an earlier image: does that target carry every body live runs are parked on, every class an already-admitted Work still needs, and every runtime contract marker the applied schema now requires. A refusal has two admissible answers — retain the bodies in a compatibility build, or complete a verified drain — and elapsed time is neither. A marker refusal is a third case and neither answer reaches it: it is a rule in the applied schema rather than a row in a queue, so the only way past it is a target that carries the marker.
+_Avoid_: Rollback points as a substitute for it; "nothing looked busy" as a drain; treating a marker refusal as drainable.
+
+**Runtime contract marker**:
+An image's own declaration that it understands what one door RETURNS after a migration changed it — carried as a literal in the built artifact, so a rollback decision is a measurement of the target image rather than a list of image tags somebody keeps by hand. A marker names behaviour that exists in the image, not a build date: the marker and the code that handles the new answer stand or fall together. The rule that a given marker is REQUIRED lives with the migration frontier, not with the image, because an image built before the rule existed carries neither and that is precisely the state the rule has to detect.
+_Avoid_: A version number, a build sha or an image tag as a substitute; a marker for a change an older image reads correctly; a marker kept after the behaviour it names was removed.
 
 **Operation receipt**:
 The record that one logical operation identity committed its business effect: which run and bundle produced it, which human authority it acted for, and which objects it created. At most one committed receipt exists per logical operation identity; a replay returns it and a changed payload under that identity is refused.
@@ -658,7 +787,7 @@ _Avoid_: The entire balance of an account as a substitute for identifying what r
 
 **Trade invoice**:
 A client's own accounting document that creates a receivable or a payable: a sales invoice the client issued, or a supplier bill the client received. It names one counterparty, the date the document itself carries, an exact total, and the journal it posts — and it is recorded once, as one accounting act, with the receivable or payable it creates. Its LINES are the journal it posts — a bookkeeper's coding judgement — and never the line items printed on the document.
-_Avoid_: A firm's own billing document for its accounting fees (that would be a subscription invoice, and Clara has none); a credit note, which corrects an invoice rather than being one; a quotation, a proforma or a statement; the document's own printed line items, which Clara does not yet read.
+_Avoid_: A firm's own billing document for its accounting fees (that would be a subscription invoice, and Clara has none); a credit note, which corrects an invoice rather than being one; a quotation, a proforma or a statement; the document's own printed line items, which Clara does not read — a standing, accepted limitation rather than a deferred feature, because nothing she posts through admits a per-line field.
 
 **Due-date basis**:
 How an open item's due date was decided: STATED on the document, derived from the COUNTERPARTY'S agreed payment terms, or honestly ABSENT because neither states one. Terms run from the DOCUMENT date — "30 days" is thirty days after the invoice, not after the day somebody keyed it in — and the basis is recorded beside the date so a reader can tell a date the document gave from one the terms produced.
@@ -707,14 +836,25 @@ _Avoid_: An AP open item; a counterparty.
 The discharge of a recorded staff advance by a stated allocation: WHICH advance, for how much, effective on the day the money actually moved. The register never infers it — a credit on an enrolled advance account that does not say which advance it discharges is refused by name.
 _Avoid_: A silent FIFO; a GL credit with no named advance.
 
+**Allocation list**:
+The advances one staff expense claim discharges and by how much, stated explicitly and confirmed by
+the person: one line per advance, adding up to the claim to the cent. The register offers a
+date-ordered suggestion (oldest advance first) as a one-click pre-fill, and what is stored is always
+the list that was confirmed — which is how an ordering can be offered without becoming a silent
+FIFO. Every advance on it belongs to the claimant on an enrolled account, and each line passes the
+advance's own temporal cap by itself.
+_Avoid_: A suggestion treated as a decision; a partial settlement; an allocation the register
+apportioned on its own.
+
 **Claimant handle**:
 The staff-advance enrolment a claim is recorded against — an account dedicated to one person, carrying the name the register shows and the professional's own written attestation. It is what lets two claims by one person be read together. NAMED LIMIT: it is a label on an ACCOUNT, not a person record, and the estate holds no staff master; two people who have never been given a dedicated account cannot be told apart by it.
 _Avoid_: An employee record; a user; a counterparty; a free-text name typed on each claim.
 
 **Accrual adjustment**:
-A cost a period has incurred but nobody has invoiced yet, recorded with the particulars that make it
-checkable: the amount, the expense account it charges and the non-control liability account it
-accrues into, the SERVICE PERIOD it belongs to, the rule that selects each period's amount, the
+Something a period has earned or incurred that nobody has invoiced yet, recorded with the
+particulars that make it checkable: the side it runs on, the amount, the profit-and-loss account it
+charges or earns and the non-control balance-sheet account it accrues into, the SERVICE PERIOD it
+belongs to, the rule that selects each period's amount, the
 window its authority covers, and the instruction that authorised it. Its authority window runs
 INSIDE the service period it names — it starts no earlier and ends no later, and it always ends — so
 every entry it posts falls within the term it claims to accrue for, and its schedule must reach at
@@ -725,6 +865,20 @@ event and the accounting work for it — and posts nothing.
 _Avoid_: A balanced journal entry wearing a marker; a periodic stock adjustment or a supplied
 payroll obligation (those record a movement the period's own facts establish, have no schedule and
 no future occurrence); a provision or an estimate the product worked out.
+
+**Accrual side**:
+Which way one accrual runs, and therefore which two account types its legs may name: `expense` —
+Dr the expense account / Cr a non-control accrued-liability account, for a cost nobody has billed
+yet; `revenue` — Dr a non-control asset (accrued income) / Cr the income account, for a service
+delivered and not yet invoiced. It is stated when the accrual is configured and it is not
+restatable: a correction restates what an accrual says, it never turns one side into the other.
+An accrual that states no side at all is an expense accrual, which is what every row and every
+caller that predates the revenue side means. Accrued income is presented apart from invoiced trade
+receivables, so the asset leg is checked (active, an asset, not a control account) and suggested —
+`1180 Accrued Income` on the standard chart — never rostered.
+_Avoid_: A second lane for revenue accruals; a sign on the amount; reading the side off the account
+types (the side decides which types are admissible, not the other way round); "debit side" /
+"credit side" (both legs exist on both sides — only which one is debited moves).
 
 **Accrual reversal**:
 The second leg of one accrual's schedule: the same entry with both sides exchanged, due on the first
@@ -751,15 +905,103 @@ an already-corrected row (refused by name: one correction per target).
 **Calculation method**:
 The rule that says WHICH stated amount each of a schedule's periods uses. It selects among amounts a
 person supplied; it computes none, which is why it is a closed set of named rules rather than a
-versioned formula. Today the set holds exactly the rule the schedule performs — the amount stated on
-the record, accrued in every period of the window — because a recorded selection nobody performs is
-a promise the ledger does not keep.
+versioned formula. The set holds exactly the rules a lane performs — the amount stated on the
+record, accrued in every period of the window, and the amount stated for each period separately —
+because a recorded selection nobody performs is a promise the ledger does not keep.
 _Avoid_: A rate, a proration or an allocation the product performs; a formula; a rule offered on a
 form that no lane applies; anything a caller can extend without a new named rule.
 
+**Stated period amount**:
+The amount a person states for ONE period of an accrual, keyed to the due date that period ends on.
+The stated amounts cover every period the schedule reaches inside the authority window and sum
+exactly to the accrual's total; where an even split leaves a cent over, that cent belongs to the
+final period. Each due date posts its own stated amount and its own reversal, and a due date nobody
+stated an amount for posts nothing and records a typed refusal on that occurrence — the accrual's
+total is never used in its place. Changing one is a correction, which writes a successor accrual
+detail carrying its own amounts; the superseded detail keeps the amounts it actually ran under.
+_Avoid_: A per-period figure the product derived, averaged or read off a document; an in-place edit
+of a period already stated; a partial set completed by a fallback.
+
 **Supplied obligation particulars**:
-The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it derives none of them.
+The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it computes none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
+
+**Payroll run fact state**:
+What Clara established from reading a payroll summary: per run-level question — the month, and the
+totals for gross pay, employee and employer EPF, SOCSO and EIS, PCB and any HRDF levy, and net pay —
+whether the figure is ESTABLISHED (both readings of the page agree on what it prints, and where the
+page also prints employee rows their column sum agrees with it), DISAGREED (the two readings differ,
+the printed total contradicts the row sum, a row fails its own gross-minus-deductions identity, or
+the rendering is not a figure at all) or MISSING (the page does not print it), and why. Every
+arithmetic result in it is the database evaluator's, computed from quoted renderings; the model
+quotes and never sums. A figure the page does not print is reported as not printed — it is stored as
+a fact carrying no rendering and no amount, so a person can see that the page was silent rather than
+read a blank as a zero.
+_Avoid_: A contribution rate or threshold applied by the product; a total the model added up; a
+blank filled with zero; an employee-level figure kept after the read (the per-employee quotes exist
+only so the evaluator can sum and cross-check them, and are discarded in the same transaction).
+
+**Payroll posting gate**:
+The closed list of conditions a payroll summary has to satisfy before its entry is posted with
+nobody watching: both readings of the page agree, every arithmetic check passes, the payslip's own
+month is established, the fiscal year that month falls in is open, every account the entry needs
+resolves in this client's own chart, and no payroll entry for that client and month is already
+posted — through this lane or through the accountant-supplied obligation lane. The conditions are
+asked in a fixed order and the FIRST one that fails is the reason a person is told; the rest are
+still evaluated and travel with it. A run that fails any of them posts NOTHING and appears under
+Needs you naming what failed, which row did not balance, which account is missing or which entry it
+would duplicate. The verdict is derived, never stored, so it clears itself the moment the condition
+clears.
+_Avoid_: Posting a partial entry; filling an unprinted line with zero; smoothing an imbalance into
+the rounding account; a stored refusal a person has to dismiss; a model deciding any of it.
+
+**Financing agreement**:
+An agreement that creates an asset and a liability on the day it is signed — a hire purchase or a
+finance lease, and nothing else. Which one a document is, is read off the words the page uses for
+ITSELF, against a closed list of renderings in both English and Malay; a rendering nothing on that
+list matches is OTHER, and a page that does not say so readably is NOT ESTABLISHED. Those two are
+different answers: one says the page told us something this lane does not act on, the other says
+the page did not tell us. A tenancy, an operating lease and a supply contract are read in full and
+create no entry at signing, because nothing came onto the books that day.
+_Avoid_: A category the model chose; inferring the kind from the figures or from the account it
+would post to; treating "we could not read it" as "it is not a financing agreement"; posting
+anything at all for a tenancy.
+
+**Agreement terms fact state**:
+What Clara established from reading an agreement: per question — what the agreement calls itself,
+the financier, the signing date, what was acquired, the cash price, the deposit or trade-in, the
+amount financed, the total charges, the total payable, the term and the instalment — whether the
+answer is ESTABLISHED (both readings of the page agree on what it prints, and where the page also
+prints a repayment schedule its column sums agree with the printed totals), DISAGREED (the two
+readings differ, a printed total contradicts its column, an instalment fails its own
+principal-plus-interest identity, or the rendering is not a figure at all) or MISSING (the page
+does not print it), and why — together with the two named checks the state carries: deposit plus
+amount financed equals the cash price, and the printed schedule's instalments reconcile to the
+amount financed plus the charges. Every arithmetic result in it is the database evaluator's,
+computed from quoted renderings, and so is the classification; the model quotes and never sums,
+subtracts or judges. A term the page does not print is reported as not printed — stored as a fact
+carrying no rendering and no amount, so a person can see that the page was silent rather than read
+a blank as a zero. The printed repayment schedule is kept, because it is what the agreement says
+and what a later finance-charge allocation must read.
+_Avoid_: An amount financed worked out by subtracting a deposit from a cash price; a total the
+model added up; a blank filled with zero; a deposit inferred because two printed figures differ.
+
+**Agreement posting gate**:
+The closed list of conditions a hire purchase or finance lease has to satisfy before its
+acquisition is posted with nobody watching: both readings of the page agree, every arithmetic check
+passes, the page says readably what kind of agreement it is and it is a financing one, the signing
+date is established, the fiscal year that date falls in is open, the cash price and the amount
+financed are both printed, the two named checks hold, the client has enrolled exactly one
+fixed-asset account, every account the entry needs resolves in this client's own chart, and no
+acquisition for that agreement is already posted. The conditions are asked in a fixed order and the
+FIRST one that fails is the reason a person is told; the rest are still evaluated and travel with
+it, and a condition that was never reached says so rather than passing. An agreement that fails any
+of them posts NOTHING and appears under Needs you naming what failed, which account is missing,
+which accounts it could not choose between or which entry it would duplicate. The verdict is
+derived, never stored, so it clears itself the moment the condition clears.
+_Avoid_: Posting a partial entry; choosing a fixed-asset account from the words the page uses to
+describe what was acquired; filling an unprinted term with zero; smoothing an imbalance into the
+rounding account; a stored refusal a person has to dismiss; a model deciding any of it.
 
 **Fixed asset acquisition**:
 The moment a client takes an asset onto its books: one approved journal entry whose debit lands on
@@ -800,6 +1042,27 @@ change are born from it — an asset a prior version already birthed keeps its o
 _Avoid_: A rule the product infers from an asset's own evidence (that is exactly what Depreciation
 particulars is not); a class finer than the account; a back-fill of an asset already waiting; a
 value an acquisition itself states (that always wins, because a policy fills only what is absent).
+
+**Depreciation particulars proposal**:
+What Clara proposes when an acquisition lands on an enrolled asset account that carries no default
+depreciation policy: a method, a useful life or rate, a residual and an in-service date, with the ONE
+line she derived them from. It travels inside the dependent particulars question and pre-fills every
+answering entrance, and it is never applied on its own — a person confirms it or edits it, and what
+is recorded is what they confirmed, under their name. A driver is proposed only where a ground
+exists: the enrolment's own rule (an enrolment with no accumulated-depreciation account admits "not
+depreciated" and nothing else), a recorded note about this client, the account's own retired policy,
+or the account's other completed assets WHERE THEY AGREE. A ground speaks for a row only when its
+own account IS that row's account, on every one of those grounds alike; and grounds of one kind that
+disagree ground nothing, whether they are two assets or two recorded notes. Where nothing grounds a
+method the proposal says so and leaves it empty; only the two facts that are not estimates — the
+acquisition's posting date and a nil residual — are always proposed, and the residual is the firm's
+default rather than a value read off whatever ground supplied the method.
+_Avoid_: A useful life inferred from an asset's name or class; a method picked between two of the
+account's own assets — or two of the client's own recorded notes — that disagree; a ground borrowed
+from an account that is not this row's; a residual taken from the ground the method came from; a
+proposal applied without a person; a value a surface repaired into a plausible one; treating the
+reason line as the question's own reason (that says why Clara is asking; this says where the values
+came from).
 
 **Depreciation change class**:
 What KIND of change a revision to an asset's depreciation particulars is, recorded on the generation
@@ -923,9 +1186,58 @@ time it is read, it never becomes an object with its own lifecycle, and it clear
 moment the underlying facts stop producing it — nobody dismisses it, nobody closes it, and
 nothing has to be cleaned up when the decision is made elsewhere. It offers candidates and never
 chooses: an ambiguous case stays pending with the same one question, and choosing is the human's
-act. #657's pending bank line is its first instance.
+act. #657's pending bank line is its first instance; #947 (a posted payroll run's unsettled net
+pay, offered against candidate bank lines) is the second and #949 (a month of rent whose payable
+is still open on a confirmed tenancy plan) the third, each reusing the same shape rather than
+minting a sibling concept. #938's "a bill posted inside an accrued
+period" row (`clara.list_review_queue`, row_kind `accrual_bill_conflict`) is a NEIGHBOUR on the
+same Needs-you roster that reuses the mechanics — derived, stores nothing, self-clearing — without
+being a member of the settlement-candidate FAMILY itself: it offers no candidate to choose, only
+two remedies (skip the next occurrence, or reverse now) that act on the accrual plan directly.
+A derived row outlives its own REMEDIES: when the plan those remedies act on is ended or paused
+they both refuse, while the fact that produced the row is still on the books — so the row stays and
+the surface renders the remedies unavailable with the reason, rather than the row disappearing or
+offering a control whose only possible outcome is a refusal.
 _Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row
 that survives the fact that produced it; a suggestion the product acts on by itself.
+
+**Contract terms record**:
+What one agreement STATES, recorded per client and per agreement, one live row per term, with the
+region of the page each figure was read from. It is append-only and supersede-only: a correction
+opens a successor and the superseded reading stays readable beside it. Every row says how it came
+to be what it is — READ from a region, DERIVED from regions by a stated rule, or STATED by a named
+person — so nothing on a screen can pass a derivation off as a reading. #949's tenancy terms (the
+monthly rent, the deposit, the term's first and last day, any escalation) are its first instance.
+_Avoid_: A client fact (one live row per client and key, so two tenancies would collide, and it
+carries no region); a knowledge record (its subject is the client or the firm, never one
+agreement); an editable row; a figure with no stated provenance.
+
+**Lessee treatment branch**:
+The decision about whether Clara may draft a monthly rent expense for a lease at all, taken from
+the client's own reporting framework and the term the agreement states, and never from a default.
+MPERS Section 20 has the lessee CLASSIFY the lease first — one that transfers substantially all
+the risks and rewards of ownership is a finance lease, carried as an asset and a liability, and
+only an operating lease is expensed straight-line over the term — so level rent on an ordinary
+tenancy is the ordinary case and a lease running a decade or more ASKS for that classification;
+MFRS 16 recognises a right-of-use asset and a lease liability for a lease over twelve months, so
+only a short-term lease may be expensed straight-line; and a stated escalation makes the
+straight-line expense differ from the month's cash rent under either. Where the branch ASKS,
+Clara states the term, the rent and the escalation she read, names what the standard asks, and
+drafts nothing — a person may still confirm, against a written professional judgement that is
+recorded with the act.
+_Avoid_: A default framework; auto-posting a treatment that may not comply; averaging a stepped
+rent without a person's decision; assuming a classification the standard makes an accountant
+establish; a measurement (a discount rate, a right-of-use asset, a lease liability schedule) this
+lane cannot read.
+
+**Plan confirmation**:
+The recorded act of a named person starting or revising a recurring plan, carrying the document
+they were looking at, the figures and accounts they confirmed, and the treatment branch as it
+stood at that moment. It is what the plan lane's explicit instruction names, and it is admitted
+for the same reason a Work row is: it cannot exist without naming who asked. It is never amended
+— a changed mind is a revision, with its own confirmation.
+_Avoid_: A document standing in for an instruction; a Work minted to serve as a receipt; a chat
+turn nobody typed; an editable confirmation.
 
 **Match basis**:
 The DETERMINISTIC evidence for pairing one bank statement line with one already-approved

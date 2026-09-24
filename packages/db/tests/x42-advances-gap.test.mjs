@@ -254,7 +254,20 @@ test("x42v.g4 the register's void stamp and soft-birth still have exactly ONE wr
   // staff expense claim settled against an advance registered nothing. `0043:1418` predicted
   // exactly this cell going red on "a future second writer" — so the roster is widened WITH the
   // classification, never silently, and the arm below is what earns the widening.
-  const APP_MINTERS = ["_adv_on_approve", "_tf_adv_claim_application_birth"];
+  //
+  // [#1041] FRONTIER-KEYED, because `db-slice-frontiers` replays this file against the chain that
+  // stops at THIS SLICE'S migration (0043), where 0221 does not exist — the roster was widened
+  // without that and this cell went red on dispatch 35893727271 naming a body that cannot be
+  // there yet. The key is 0221's STABLE STEM in `clara.schema_migrations` (applied history),
+  // never `pg_proc`: asking the catalog whether the minter exists before asserting that it does
+  // is exactly the vacuous census this arm is built to refuse. Below the stem the roster is the
+  // ONE writer the file's law rests on; at or above it, both, and a THIRD still fails.
+  const has0221 = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["staff_expense_claims$"])).rows[0].n > 0;
+  const APP_MINTERS = has0221
+    ? ["_adv_on_approve", "_tf_adv_claim_application_birth"]
+    : ["_adv_on_approve"];
   const appWriters = await writers("insert[[:space:]]+into[[:space:]]+clara\\.staff_advance_applications");
   assert.deepEqual(appWriters, APP_MINTERS,
     `the bodies that mint application rows are exact (found: ${appWriters.join(", ") || "none"}) — a THIRD minter has not been classified against the maker-checker-gap law, and a missing one has taken its classification with it`);
@@ -306,13 +319,21 @@ test("x42v.g4 the register's void stamp and soft-birth still have exactly ONE wr
   // …and the SECOND minter fires at COMMIT, inside the very transaction that approves the entry,
   // so it has no draft window to read across in the first place. Measured from pg_trigger, not
   // from the body: deferrability is a catalog fact.
-  const { rows: defr } = await rootQuery(
-    `select t.tgdeferrable, t.tginitdeferred from pg_trigger t
-      where t.tgrelid = 'clara.journal_entries'::regclass
-        and t.tgname = 't_je_adv_claim_application_birth'`);
-  assert.equal(defr.length, 1, "the claim-application birth trigger is on clara.journal_entries");
-  assert.ok(defr[0].tgdeferrable && defr[0].tginitdeferred,
-    "…as a DEFERRED constraint trigger, so its cap read and its insert are the same instant — the two-moment gap this file is about cannot open inside it");
+  // [#1041] 0221's trigger, so this arm asks only where 0221 is applied — the same stem the
+  // roster above is keyed on, because this arm IS that second minter's classification.
+  if (has0221) {
+    const { rows: defr } = await rootQuery(
+      `select t.tgdeferrable, t.tginitdeferred from pg_trigger t
+        where t.tgrelid = 'clara.journal_entries'::regclass
+          and t.tgname = 't_je_adv_claim_application_birth'`);
+    assert.equal(defr.length, 1, "the claim-application birth trigger is on clara.journal_entries");
+    assert.ok(defr[0].tgdeferrable && defr[0].tginitdeferred,
+      "…as a DEFERRED constraint trigger, so its cap read and its insert are the same instant — the two-moment gap this file is about cannot open inside it");
+  } else {
+    noteLane("x42v.g4: #638's t_je_adv_claim_application_birth is not on this chain (no "
+      + "staff_expense_claims$ row in clara.schema_migrations) — one application minter at this "
+      + "frontier, which is the single-writer law this file was written against");
+  }
 
   const births = await writers("insert[[:space:]]+into[[:space:]]+clara\\.staff_advances[^_]");
   assert.deepEqual(births, ["_adv_on_approve"],

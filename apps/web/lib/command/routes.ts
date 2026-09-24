@@ -190,6 +190,13 @@ const ACCOUNTING_PRESENTATION: Record<AccountingItemId, Presentation> = {
     id: "prepayments",
     keywords: ["prepayments", "prepaid", "amortisation", "amortization", "service period", "subscription", "insurance"],
   },
+  // #941 - the words a preparer reaches for when a customer has paid ahead. Deliberately NOT
+  // "prepayments": that word belongs to the row above and means the opposite side of the books,
+  // and two rows answering one word is a palette that guesses.
+  deferredRevenue: {
+    id: "deferredRevenue",
+    keywords: ["deferred revenue", "deferred income", "advance", "advances", "unearned", "contract liability", "membership", "subscription received", "recognition"],
+  },
   accounts: { id: "registersAccounts", keywords: ["accounts", "chart of accounts", "coa", "registers"] },
   close: { id: "close", keywords: ["close", "period", "fiscal year"] },
   tax: { id: "clientTax", keywords: ["tax", "sst", "cp204", "income tax", "computation"] },

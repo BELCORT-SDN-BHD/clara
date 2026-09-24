@@ -1,0 +1,119 @@
+{
+  "lens": "recheck",
+  "lane": "wave4-lane04",
+  "branch": "riders/w4-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "fixed_point": "cd2925391",
+  "head_checked": "2d7736a6dab0c221ec64fa4d5a7219d63e9a5689",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-fix.md",
+  "review_reports_checked_against": [
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-codereview-standards.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-review-adversarial.json"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "Every coding-fixable finding from the three prior review axes (spec, standards, adversarial) was re-driven on clara_l04 at HEAD and is genuinely fixed, matching the fix report's claims number for number: p929.tail (L04-SPEC-01) is green after the sha pin follows 0308's live body; the wake lane now refuses CLR03 wake_authority_absent before ever writing a plan, clara._prepayment_plan_core_wake is dropped entirely (closing L04-SPEC-02, ADV-01, ADV-06 and eliminating STD-1's duplicated body rather than merely extracting it); W35/W35-mutant/W31 are restored (retargeted to the live door) in f-a4-pr2a-books.test.mjs, closing L04-SPEC-03; the four schedule reads null the stated reason below bookkeeper floor with a term_reason_withheld flag (ADV-02); record_prepayment_stated_term raises the three named tokens ahead of the raw check constraints (ADV-03); enrol_prepayment_account gets a unique_violation handler and retire_prepayment_account's no-handler-needed claim holds under a real two-connection race (ADV-04); both create doors and the stating door refuse a reversed source entry by name (ADV-05). Full re-runs: plan-overlap-template-arm-retired 6/6; prepayment-wake-reroute + f-a4-pr2a-books/wrapper/census 24/24; prepayment-stated-term/account-roster/schedule/schedule-obo/revenue-recognition/deferred-revenue 55/55; operation-census/rig-isolation/delta-contract/epsilon-contract/x42-adj-due/x42-adj-reads/f-a4-pr2a-schedule/f-a4-pr2a-carrier/coa-template-pr-a/coa-template-pr-b/plan-overlap-sibling-arm/plan-schedule-yield-wall/accounting-plans/accounting-plan-occurrences/prepayment-occurrences/prepayment-term-liveness/f-a4-pr1c-walls-census 366/366 (1 skip, matches the review's own known baseline skip). pnpm typecheck clean; CI=true GITHUB_ACTIONS=true pnpm lint exit 0; apps/web whole unit suite 5033 tests / 5031 pass / 0 fail / 2 skipped (exact match to the fix report); both Playwright walks on the lane triple (prepayments-walk 8/8, deferred-revenue-walk 3/3) pass; check-frozen-workflows.mjs and check-parts-parity.mjs both OK; 0315's on-disk sha256 (c6436f359bb880f452d7eb44f6558708e8871addb8549a9d8057be7c81f61c85) matches the DB-applied checksum exactly, and 0305-0308 are byte-unchanged since before the fix round. Nothing newly broken was found anywhere this recheck looked. One item remains genuinely open: L04-SPEC-04 (major, the correction-path AC named by #939 AC4 and #941 AC3) is only partly addressed -- the surfaces now state the limitation honestly instead of promising a door that doesn't exist, but no door was built to open a replacement schedule after a term is superseded. The fix report's reason for leaving it open holds: building it needs an owner ruling on what the replacement is derived from and would require lifting uq_prepayment_schedules_source, which is out of this lane's scope under WORK-ORDER.md rule 5 (no ticket-widening) and is explicitly flagged in the report as owed to the owner rather than silently dropped.",
+  "checks": [
+    {
+      "review_finding": "L04-SPEC-01",
+      "severity": "blocker",
+      "status": "fixed",
+      "evidence": "packages/db/tests/plan-overlap-template-arm-retired.test.mjs:60 pin updated to c8e990986a06b132e3dad40e47225968562336b48ad6c01a4a09104784c09188 with a comment naming 0308/#941. Re-run: node --test --test-concurrency=1 <111-entry gate chain> tests/plan-overlap-template-arm-retired.test.mjs -> 6 tests, 6 pass, 0 fail (p929.tail green)."
+    },
+    {
+      "review_finding": "L04-SPEC-02 / ADV-01 / ADV-06",
+      "severity": "blocker/major/note",
+      "status": "fixed",
+      "evidence": "0315 sec A drops clara._prepayment_plan_core_wake; the wake lane in clara._prepayment_schedule_core now answers CLR03 wake_authority_absent ahead of the op reservation and every input wall, naming the wake kind and clara.create_prepayment_schedule as remedy. Re-run: prepayment-wake-reroute.test.mjs 6/6 including p1036.refused (rolled-back close_prep flip, CLR03, zero durable rows, same scene through the human door admits) and p1036.no-agent-plan-lane (catalogue scan + driven delta). No plan row can ever be written under clara.agent_user_id() any more, so ADV-06's honesty gap (authority_kind='explicit_instruction' on an unattended run) dissolves along with ADV-01's dead-plan defect."
+    },
+    {
+      "review_finding": "STD-1",
+      "severity": "major",
+      "status": "fixed",
+      "evidence": "The duplicated ~25-line plan-write tail was in clara._prepayment_plan_core_wake, which this round deletes outright (confirmed: grep for '_prepayment_plan_core_wake' in 0315 shows only the drop statement and the tail's non-existence assertion). Duplication resolved by elimination rather than extraction -- an equally valid fix, since the vulnerable code path no longer exists."
+    },
+    {
+      "review_finding": "L04-SPEC-03",
+      "severity": "major",
+      "status": "fixed",
+      "evidence": "packages/db/tests/f-a4-pr2a-books.test.mjs re-run: fa4p2a.W35, fa4p2a.W35-mutant, fa4p2a.W31 all present and green (6/6 total in file), each retargeted to drive the live prepayment lane end to end rather than the retired propose/sign machinery, per #927's retarget-never-delete precedent."
+    },
+    {
+      "review_finding": "ADV-02",
+      "severity": "major",
+      "status": "fixed",
+      "evidence": "0315 sec E re-emits all four schedule reads with a bookkeeper-floor gate on term_reason/term_stated_by/term_stated_at plus a new term_reason_withheld flag. Re-run: p939.reads.reason_floor and p941.reads.reason_floor both pass in the 55/55 sweep."
+    },
+    {
+      "review_finding": "ADV-03",
+      "severity": "major",
+      "status": "fixed",
+      "evidence": "record_prepayment_stated_term (0315 sec F) now asks finite -> domain -> inverted -> cap in order, raising datesNotFinite / datesOutOfDomain / termTooLong with the broken bound in the payload. Re-run: p939.stated_term.bounds passes in the 55/55 sweep; 120-month term admitted at the boundary."
+    },
+    {
+      "review_finding": "ADV-04",
+      "severity": "minor",
+      "status": "fixed (enrolment) / refuted (retirement, evidence holds)",
+      "evidence": "enrol_prepayment_account (0315:2229) wraps its insert in exception when unique_violation, re-raising CLR13 prepayment_account_enrolment_raced. retire_prepayment_account is left byte-unchanged in 0306 and pinned in 0315's tail (sha 5a0fc662384760a5303c1cdffb02793967761013137d859dafe2239f118e8f63, confirmed present as an UNCONDITIONAL neighbour assertion) -- it is an UPDATE with no INSERT so the race resolves on the row lock, not a unique-violation path. Re-run: p940.enrol.race passes (covers both the enrolment race and the retirement race) in the 55/55 sweep."
+    },
+    {
+      "review_finding": "ADV-05",
+      "severity": "minor",
+      "status": "fixed",
+      "evidence": "0315 secs B/F/G add the reversed-source predicate to clara._revenue_recognition_core, clara._prepayment_schedule_core (above the document/memo branch) and record_prepayment_stated_term, each raising *_source_unfit with axis source_reversed. Re-run: p939.create.reversed and p941.create.reversed both pass in the 55/55 sweep."
+    },
+    {
+      "review_finding": "L04-SPEC-05",
+      "severity": "minor",
+      "status": "resolved-by-design-change",
+      "evidence": "Since the wake lane now writes nothing at all on any call (it refuses before any insert), the 'silent missing receipt' question dissolves rather than needing a fix; fa4p2a.W13-retired asserts zero receipt growth across an acted and a refused call, both raising. Stated in 0315's header and packages/db/README.md as the fix report claims."
+    },
+    {
+      "review_finding": "L04-SPEC-06",
+      "severity": "minor",
+      "status": "no-change-needed, confirmed",
+      "evidence": "apps/web/messages holds en.json alone; apps/web/i18n/request.ts:91 still pins const locale = \"en\". Unchanged from the original review's own measurement -- correctly left as a follow-up ticket item rather than a code fix."
+    },
+    {
+      "review_finding": "STD-2",
+      "severity": "minor",
+      "status": "no-change-needed, agreed",
+      "evidence": "The original standards review itself said 'No code change needed,' only a note for the integrator. Unchanged this round; correctly not touched."
+    },
+    {
+      "review_finding": "L04-SPEC-07 / L04-SPEC-08 / L04-SPEC-09 / ADV-07 / ADV-08",
+      "severity": "note",
+      "status": "no-change-needed, as the originating reviews themselves specified",
+      "evidence": "All five are recorded 'None required' / 'optional follow-up' / 'integrator's call' in their own originating reports; none was touched by the fix round, correctly."
+    },
+    {
+      "review_finding": "L04-SPEC-04",
+      "severity": "major",
+      "status": "still-open (partial fix; disclosed reason for staying holds)",
+      "evidence": "The surfaces (apps/web/messages/en.json termSupersededBody and stateTermBody, both prepayment and deferred-revenue registers) now state the true limitation -- 'one recognition carries one schedule, so the periods below will run to the term they were derived from; raise the difference with the reviewer' -- and say it before the term is stated where it is actionable, replacing the old copy that promised a correction door that does not exist (confirmed: git diff cd2925391...HEAD shows the exact wording change; the removed sentence 'a corrected term needs a new schedule, not a revision of this one' no longer appears in either termSupersededBody string). But the underlying capability -- a door that actually opens a replacement schedule -- was NOT built; uq_prepayment_schedules_source still refuses a second schedule per source entry (p653.schedule.one_per_entry, p939.supersede.running, both re-run green, i.e. the refusal is still in force). This is a genuine gap against #939 AC4 / #941 AC3's literal text. The fix report's reason for not closing it in this round holds under WORK-ORDER.md rule 5 (scope discipline: lifting a uniqueness constraint to build a new door is not what either ticket's brief asked for, and needs an owner ruling on what the replacement is derived from) and is prominently flagged to the orchestrator rather than silently left. Not a coding defect in what was built; a disclosed, owner-blocked follow-up."
+    }
+  ],
+  "gates_rerun": [
+    "node --test --test-concurrency=1 <111-entry gate chain> tests/plan-overlap-template-arm-retired.test.mjs -> 6 pass, 0 fail",
+    "node --test --test-concurrency=1 <gate chain> tests/prepayment-wake-reroute.test.mjs tests/f-a4-pr2a-books.test.mjs tests/f-a4-pr2a-wrapper.test.mjs tests/f-a4-pr2a-census.test.mjs -> 24 pass, 0 fail",
+    "node --test --test-concurrency=1 <gate chain> tests/prepayment-stated-term.test.mjs tests/prepayment-account-roster.test.mjs tests/prepayment-schedule.test.mjs tests/prepayment-schedule-obo.test.mjs tests/revenue-recognition.test.mjs tests/deferred-revenue.test.mjs -> 55 pass, 0 fail",
+    "node --test --test-concurrency=1 <gate chain> tests/{operation-census,rig-isolation,delta-contract,epsilon-contract,x42-adj-due,x42-adj-reads,f-a4-pr2a-schedule,f-a4-pr2a-carrier,coa-template-pr-a,coa-template-pr-b,plan-overlap-sibling-arm,plan-schedule-yield-wall,accounting-plans,accounting-plan-occurrences,prepayment-occurrences,prepayment-term-liveness,f-a4-pr1c-walls-census}.test.mjs -> 366 tests, 365 pass, 0 fail, 1 skip",
+    "pnpm typecheck (root) -> clean, apps/web and packages/runtime both Done",
+    "CI=true GITHUB_ACTIONS=true pnpm lint (root) -> exit 0",
+    "apps/web: node scripts/run-tests.mjs -> 5033 tests, 5031 pass, 0 fail, 2 skipped (exact match to fix report)",
+    "pnpm --filter @clara/web e2e prepayments-walk on lane triple (3530/3531/3532) -> 8 passed",
+    "pnpm --filter @clara/web e2e deferred-revenue-walk on lane triple -> 3 passed",
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files verified, 0 diff",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK",
+    "sha256 of packages/db/migrations/0315_prepayment_wake_reroute.sql on disk == DB-applied checksum (clara.schema_migrations) == c6436f359bb880f452d7eb44f6558708e8871addb8549a9d8057be7c81f61c85",
+    "git diff c8fdb6acc..HEAD -- 0305/0306/0307/0308 migrations -> empty (byte-unchanged since before the fix round)"
+  ],
+  "newly_broken": [],
+  "still_open": [
+    {
+      "id": "L04-SPEC-04",
+      "severity": "major",
+      "note": "Correction path for a mis-stated term (#939 AC4 / #941 AC3) still does not exist as a door; surfaces now disclose the limitation honestly instead of promising it. Owner ruling needed before either register is advertised as supporting term correction. Not a defect in this round's code; carry to the owner."
+    }
+  ]
+}

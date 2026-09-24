@@ -31,23 +31,40 @@ import {
 } from "./journal-draft";
 import {
   ACCRUAL_METHODS,
+  ACCRUAL_SIDES,
   ACCRUAL_FREQUENCIES,
   ACCRUAL_DAY_RULES,
+  accrualScheduleDues,
   accrualScheduleYields,
   type AccrualMethod,
+  type AccrualPeriodAmount,
+  type AccrualSide,
 } from "@/lib/accruals/api";
+
+/** #937 — one row of the per-period amounts block. `dueDate` is a date the SCHEDULE produces, and
+ *  the form offers those dates rather than asking for them, which is what keeps the door's
+ *  `accrual_period_amount_not_scheduled` refusal unreachable from this surface. */
+export type AccrualPeriodAmountDraft = { dueDate: string; amountCents: number };
 
 /** Every control the form owns, as strings — the form's own state shape. Cents is the one
  *  exception: `MoneyInput` speaks exact minor units and a string would invite a float. */
 export type AccrualDraft = {
   purpose: string;
   authorityWorkId: string;
+  /** #942 — which way this accrual runs. It decides which TYPES the two account controls may
+   *  offer, which leg the preview debits, and the words beside both of them. */
+  side: AccrualSide;
   expenseAccountCode: string;
   liabilityAccountCode: string;
   amountCents: number;
   servicePeriodStart: string;
   servicePeriodEnd: string;
   method: AccrualMethod;
+  /** #937 — one row per period the accountant has stated an amount for, under the
+   *  `stated_period_amount` rule. Empty under `stated_amount`, and the mapper drops the key
+   *  entirely there: the door refuses `period_amounts` beside any other rule. Cents is an exact
+   *  integer for the same reason `amountCents` is. */
+  periodAmounts: AccrualPeriodAmountDraft[];
   instruction: string;
   memo: string;
   frequency: (typeof ACCRUAL_FREQUENCIES)[number];
@@ -66,12 +83,16 @@ export function emptyAccrualDraft(): AccrualDraft {
   return {
     purpose: "",
     authorityWorkId: "",
+    // THE SIDE EVERY EXISTING ACCRUAL IS ON. A form that opened on the revenue side would be
+    // offering the rarer act first.
+    side: "expense",
     expenseAccountCode: "",
     liabilityAccountCode: "",
     amountCents: 0,
     servicePeriodStart: "",
     servicePeriodEnd: "",
     method: "stated_amount",
+    periodAmounts: [],
     instruction: "",
     memo: "",
     frequency: "monthly",
@@ -115,6 +136,7 @@ function parseDraft(raw: string): StoredAccrualDraft | null {
   const d = stored.draft as Record<string, unknown>;
 
   if (!ACCRUAL_METHODS.includes(d.method as never)) return null;
+  if (!ACCRUAL_SIDES.includes(d.side as never)) return null;
   if (!ACCRUAL_FREQUENCIES.includes(d.frequency as never)) return null;
   if (!ACCRUAL_DAY_RULES.includes(d.dayRule as never)) return null;
   const texts = [
@@ -126,11 +148,25 @@ function parseDraft(raw: string): StoredAccrualDraft | null {
   // CENTS MUST BE A SAFE INTEGER EVEN COMING OUT OF STORAGE. A JSON payload can carry 12.5 or
   // "1200"; seeding a money field from either is the floating-point coercion this lane forbids.
   if (!isCents(d.amountCents)) return null;
+  // #937 — the per-period rows, under the SAME "anything not fully recognised returns null" law:
+  // a half-understood set of period amounts would seed the form with figures nobody typed, and
+  // these are the figures that post. An ABSENT key is an older draft and reads as none.
+  const rows = d.periodAmounts === undefined ? [] : d.periodAmounts;
+  if (!Array.isArray(rows)) return null;
+  const periodAmounts: AccrualPeriodAmountDraft[] = [];
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null) return null;
+    const r = row as Record<string, unknown>;
+    if (!isString(r.dueDate) || !isCents(r.amountCents)) return null;
+    periodAmounts.push({ dueDate: r.dueDate, amountCents: r.amountCents });
+  }
 
   const draft: AccrualDraft = emptyAccrualDraft();
   for (const key of texts) draft[key] = d[key] as string;
   draft.amountCents = d.amountCents;
+  draft.periodAmounts = periodAmounts;
   draft.method = d.method as AccrualMethod;
+  draft.side = d.side as AccrualSide;
   draft.frequency = d.frequency as AccrualDraft["frequency"];
   draft.dayRule = d.dayRule as AccrualDraft["dayRule"];
 
@@ -188,18 +224,24 @@ export function clearAccrualDraft(
 // ── the field mapper ────────────────────────────────────────────────────────
 
 export type AccrualFieldId =
-  | "purpose" | "authorityWorkId" | "expenseAccountCode" | "liabilityAccountCode"
+  | "purpose" | "authorityWorkId" | "side" | "expenseAccountCode" | "liabilityAccountCode"
   | "amountCents" | "servicePeriodStart" | "servicePeriodEnd" | "method" | "instruction"
   | "memo" | "frequency" | "dayRule" | "dayOfMonth" | "effectiveFrom" | "effectiveTo"
-  | "sourceDocumentId";
+  | "sourceDocumentId" | "periodAmounts";
 
 /** The controls a SERVER refusal can land on. Everything migration 0222 can name in
  *  `detail.field` appears here and nothing else does: a mapper that promised to focus a control for
  *  a refusal that cannot arrive would be a promise the database never keeps. */
 const ACCRUAL_FIELDS = new Set<string>([
-  "purpose", "authorityWorkId", "expenseAccountCode", "liabilityAccountCode", "amountCents",
+  // #942 — 0304 names `accrual.side` in two refusals (an unsupported side at the configuration
+  // door, an attempted side flip at the correction door), so both must reach a real control.
+  "purpose", "authorityWorkId", "side", "expenseAccountCode", "liabilityAccountCode", "amountCents",
   "servicePeriodStart", "servicePeriodEnd", "method", "instruction", "memo",
   "frequency", "dayRule", "dayOfMonth", "effectiveFrom", "effectiveTo", "sourceDocumentId",
+  // #937. Migration 0303 can name this one INDEXED — `accrual.period_amounts[2].amount_cents` —
+  // because a refusal about one row has to say which row; the mapper strips the subscript and
+  // folds every one of them onto the block, which is the one control there is for it.
+  "periodAmounts",
 ]);
 
 /**
@@ -215,7 +257,7 @@ const ACCRUAL_FIELDS = new Set<string>([
 export function fieldForAccrualPath(path: string | null): AccrualFieldId | null {
   if (path === null) return null;
   const bare = path.startsWith("accrual.") ? path.slice("accrual.".length) : path;
-  const head = bare.split(".")[0] ?? bare;
+  const head = (bare.split(".")[0] ?? bare).replace(/\[\d+\]$/, "");
   const camel = head.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
   return ACCRUAL_FIELDS.has(camel) ? (camel as AccrualFieldId) : null;
 }
@@ -306,6 +348,57 @@ export function validateAccrualDraft(
     });
   }
 
+  // #937 — THE TWO PER-PERIOD RULES THAT NEED THE SCHEDULE, asked here because this is the draft
+  // that carries one. ASKED LAST, and only once the schedule itself stands up: a day number out of
+  // range or a window that yields nothing is the mistake to fix first, and "no amount is stated for
+  // any period" piled on top of it would be true of a schedule the preparer is still fixing.
+  issues.push(...validateStatedPeriodCoverage(draft, {
+    frequency: draft.frequency,
+    dayRule: draft.dayRule,
+    dayOfMonth: draft.dayRule === "day_of_month" ? dayNumber : null,
+    effectiveFrom: draft.effectiveFrom,
+    effectiveTo: draft.effectiveTo,
+  }, issues.length > 0));
+
+  return issues;
+}
+
+/** The schedule a per-period set must cover — the five plan facts `accrualScheduleDues` walks. On
+ *  the CREATE form they are controls; on the #936 correction form they are the LIVE revision's
+ *  own, read off the accrual and not editable. */
+export type AccrualScheduleFacts = {
+  frequency: (typeof ACCRUAL_FREQUENCIES)[number];
+  dayRule: (typeof ACCRUAL_DAY_RULES)[number];
+  dayOfMonth: number | null;
+  effectiveFrom: string;
+  effectiveTo: string;
+};
+
+/**
+ * #937 — every stated date is one this schedule produces, and every date it produces is stated.
+ * The second is the door's `accrual_period_amount_missing`; the first is
+ * `accrual_period_amount_not_scheduled`, which a preparer cannot reach from a form that OFFERS the
+ * dates — it is mirrored anyway, because a restored draft can carry a date a since-changed
+ * schedule no longer produces.
+ */
+export function validateStatedPeriodCoverage(
+  draft: AccrualParticularsSource,
+  schedule: AccrualScheduleFacts,
+  scheduleUnsettled = false,
+): AccrualIssue[] {
+  if (draft.method !== "stated_period_amount" || scheduleUnsettled) return [];
+  const dues = accrualScheduleDues(schedule.frequency, schedule.dayRule, schedule.dayOfMonth,
+    schedule.effectiveFrom, schedule.effectiveTo);
+  if (dues.length === 0) return [];
+  const rows = draft.periodAmounts;
+  const stated = new Set(rows.map((r) => r.dueDate));
+  const issues: AccrualIssue[] = [];
+  if (rows.some((r) => r.dueDate !== "" && !dues.includes(r.dueDate))) {
+    issues.push({ field: "periodAmounts", code: "periodAmountNotScheduled" });
+  }
+  if (dues.some((due) => !stated.has(due))) {
+    issues.push({ field: "periodAmounts", code: "periodAmountMissing" });
+  }
   return issues;
 }
 
@@ -365,6 +458,72 @@ export function validateAccrualParticulars(
 
   if (t(draft.instruction) === "") issues.push({ field: "instruction", code: "instructionRequired" });
 
+  // #937 — THE PER-PERIOD RULES THAT NEED NOTHING BUT THE PARTICULARS. Each one MIRRORS a wall
+  // `clara._assert_accrual_period_amounts` enforces; the two that need the SCHEDULE (every stated
+  // date is one the schedule produces, every produced date is stated) are asked by the callers
+  // that hold it. Nothing here is a rule of its own, and the database is the authority.
+  issues.push(...validateStatedPeriodAmounts(draft));
+
+  return issues;
+}
+
+/**
+ * #937 — the exact-sum rule and the final-period remainder, plus the shape rules under them.
+ *
+ * THE TOTAL AND ITS PARTS ARE ONE CLAIM. Under `stated_period_amount`, `amount_cents` is the TOTAL
+ * for the authority window (0303's FOURTH MEASUREMENT), so a set that does not add up to it is two
+ * different statements about one accrual — which is exactly what makes the set checkable at all.
+ *
+ * THE REMAINDER CONVENTION GOVERNS AN EVEN SPLIT AND NOTHING ELSE. When the stated set IS an equal
+ * split with one odd period — every amount is `trunc(total/n)` or `trunc(total/n) + remainder`, and
+ * exactly one is the latter — that odd period must be the LAST. July 3,000 / August 3,500 never
+ * enters this arm: the convention says where a DIVISION's leftover cent goes, not what a person may
+ * state.
+ */
+function validateStatedPeriodAmounts(draft: AccrualParticularsSource): AccrualIssue[] {
+  if (draft.method !== "stated_period_amount") return [];
+  const rows = draft.periodAmounts;
+  if (rows.length === 0) return [{ field: "periodAmounts", code: "periodAmountsRequired" }];
+
+  const issues: AccrualIssue[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (row.dueDate.trim() === "") {
+      issues.push({ field: "periodAmounts", code: "periodDueDateRequired" });
+    } else if (seen.has(row.dueDate)) {
+      issues.push({ field: "periodAmounts", code: "periodAmountDuplicate" });
+    } else {
+      seen.add(row.dueDate);
+    }
+    if (!Number.isSafeInteger(row.amountCents) || row.amountCents <= 0) {
+      issues.push({ field: "periodAmounts", code: "periodAmountRequired" });
+    }
+  }
+  // THE ARITHMETIC RULES ARE ASKED ONLY ONCE EVERY ROW STANDS UP. Summing a set that still holds a
+  // blank row would report an imbalance the preparer has not caused yet, and send them to the
+  // wrong mistake.
+  if (issues.length > 0) return issues;
+
+  const total = draft.amountCents;
+  const sum = rows.reduce((a, r) => a + r.amountCents, 0);
+  if (!Number.isSafeInteger(total) || total <= 0) return issues; // `amountRequired` already fired
+  if (sum !== total) {
+    issues.push({ field: "periodAmounts", code: "periodAmountsUnbalanced" });
+    return issues;
+  }
+
+  const base = Math.trunc(total / rows.length);
+  const remainder = total - base * rows.length;
+  if (remainder !== 0) {
+    const odd = rows.filter((r) => r.amountCents === base + remainder);
+    const atBase = rows.filter((r) => r.amountCents === base);
+    if (odd.length === 1 && atBase.length === rows.length - 1) {
+      const last = rows.reduce((a, r) => (r.dueDate > a ? r.dueDate : a), "");
+      if (odd[0]!.dueDate !== last) {
+        issues.push({ field: "periodAmounts", code: "periodRemainderMisplaced" });
+      }
+    }
+  }
   return issues;
 }
 
@@ -378,14 +537,15 @@ export function accrualFieldElementId(field: AccrualFieldId): string {
  *  structurally and a correction needs no second copy of this mapping. */
 type AccrualParticularsSource = Pick<
   AccrualDraft,
-  "expenseAccountCode" | "liabilityAccountCode" | "amountCents" | "servicePeriodStart"
-  | "servicePeriodEnd" | "method" | "instruction" | "memo" | "sourceDocumentId"
+  "side" | "expenseAccountCode" | "liabilityAccountCode" | "amountCents" | "servicePeriodStart"
+  | "servicePeriodEnd" | "method" | "instruction" | "memo" | "sourceDocumentId" | "periodAmounts"
 >;
 
 /** The draft as the door's `p_accrual` argument, in the DATABASE's own field spelling. Only what
  *  0222 reads: the schedule, the window and the authority are the door's OWN arguments, and a key
  *  the database never reads could carry no refusal. */
 export function toAccrualParticulars(draft: AccrualParticularsSource): {
+  side: AccrualSide;
   expense_account_code: string;
   liability_account_code: string;
   amount_cents: number;
@@ -394,11 +554,15 @@ export function toAccrualParticulars(draft: AccrualParticularsSource): {
   service_period_end: string;
   term_source: "human_stated";
   method: { rule: AccrualMethod };
+  period_amounts?: AccrualPeriodAmount[];
   instruction: string;
   memo?: string;
   source_document_id?: string;
 } {
   const out = {
+    // #942 — ALWAYS STATED, never left to the door's default: a surface that sends silence is
+    // asking the database to guess what the preparer chose.
+    side: draft.side,
     expense_account_code: draft.expenseAccountCode.trim(),
     liability_account_code: draft.liabilityAccountCode.trim(),
     amount_cents: draft.amountCents,
@@ -414,10 +578,17 @@ export function toAccrualParticulars(draft: AccrualParticularsSource): {
   };
   const memo = draft.memo.trim();
   const document = draft.sourceDocumentId.trim();
+  // #937 — THE KEY IS SENT ONLY UNDER THE RULE THAT PERFORMS IT. `clara._assert_accrual_period_-
+  // amounts` refuses `period_amounts` beside `stated_amount` by name, so sending `[]` there would
+  // be this form manufacturing a refusal the preparer never asked for.
+  const periods = draft.method === "stated_period_amount"
+    ? draft.periodAmounts.map((r) => ({ due_date: r.dueDate, amount_cents: r.amountCents }))
+    : null;
   return Object.assign(
     out,
     memo === "" ? {} : { memo },
     document === "" ? {} : { source_document_id: document },
+    periods === null ? {} : { period_amounts: periods },
   );
 }
 
@@ -436,7 +607,11 @@ export type AccrualCorrectionDraft = AccrualParticularsSource;
  *  typed. `validateAccrualCorrectionDraft` mirrors `clara._assert_accrual_term_window` against it
  *  so a corrected term that would fall outside it is refused HERE, beside the control that holds
  *  the mistake, rather than at a round trip. */
-export type AccrualCorrectionWindow = { effectiveFrom: string; effectiveTo: string };
+/** #937 widened it from the two window dates to the LIVE revision's whole schedule: a corrected
+ *  per-period set must cover exactly the due dates the plan that is actually running will reach,
+ *  and those need the frequency and the day rule as well as the window. Every one of the five is
+ *  read off the accrual being corrected; not one of them is a control on that form. */
+export type AccrualCorrectionWindow = AccrualScheduleFacts;
 
 /**
  * Every refusal a correction can raise BEFORE a round trip: the five shared particulars, and then
@@ -464,6 +639,11 @@ export function validateAccrualCorrectionDraft(
   if (termStands && window.effectiveTo > draft.servicePeriodEnd) {
     issues.push({ field: "servicePeriodEnd", code: "windowAfterTerm" });
   }
+
+  // #937 — and the corrected per-period set covers exactly the periods the LIVE schedule reaches.
+  // Unlike the create form, this one cannot move the schedule, so the coverage question is always
+  // settled: there is no half-typed day rule to wait for.
+  issues.push(...validateStatedPeriodCoverage(draft, window));
 
   return issues;
 }

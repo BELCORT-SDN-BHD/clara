@@ -36,7 +36,7 @@ import {
   acceptPublishedLegal, printSkipCount, WCHART,
 } from "./work-journal-fixtures.mjs";
 import {
-  createClient, createFirm, addMember, insertUser, seedAdmission, sandboxName,
+  createClient, createClientRaw, createFirm, addMember, insertUser, seedAdmission, sandboxName,
 } from "./rig-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 import { upsertAccountClassed } from "./s6-helpers.mjs";
@@ -136,9 +136,10 @@ async function namedClient(sub, name) {
  *  not, because "a client the review queue's active-client join structurally excludes" is the
  *  subject of `p659.portfolio.onboarding_disclosed`. */
 async function onboardingClient(sub, name) {
-  const r = await humanQuery(sub,
-    "select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [name, opk("p659-cli")]);
-  const client = r.rows[0].receipt.client_id;
+  // [#1038] clara.create_client's clara_authenticated grant is withdrawn; createClientRaw
+  // reaches the same unwalled, unactivated verb through the rig's own root+jwt idiom.
+  const r = await createClientRaw(sub, { name, opKey: opk("p659-cli") });
+  const client = r.client_id;
   const st = await rootQuery("select status from clara.clients where id = $1", [client]);
   assert.equal(st.rows[0].status, "onboarding", "the birth door still births an onboarding client");
   await mkChart(sub, client);
@@ -758,12 +759,39 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
   // then the right answer rather than a false red.
   const reviewQueueRecut = await migrationApplied("^0260_");
   const seedingRetired = await migrationApplied("^0288_");
+  // RIDERS WAVE 4, LANE 01 (fix round, finding SPEC-05). FOUR consecutive files of one lane
+  // splice this body again, each additively and each with its own postcheck proving every kind
+  // already there survives at its exact pre-splice marker count: #946's 0297
+  // (payroll_posting_blocked), #947's 0298 (payroll_net_pay_unsettled), #948's 0299
+  // (agreement_posting_blocked) and #949's 0300 (rent_payable_unsettled and
+  // rent_escalation_pending). The behavioural proofs live in payroll-summary-posting,
+  // payroll-settlement, agreement-contract-acquisition and tenancy-rent-plan, not here; this
+  // cell's claim is still only "0231 recuts nothing". Gated on the LAST of the four by its own
+  // STEM, never by a number: the four are consecutive in one ordered chain, so no intermediate
+  // state is one a database rests in — the same reasoning 0266/0267 carry above.
+  const wave4QueueSplices = await migrationApplied("tenancy_terms_rent_plan$");
+  // RIDERS WAVE 4 INTEGRATION. Lane 03 splices the SAME body twice more, at migration numbers
+  // ABOVE lane 01's four: #938's 0302 adds the `bill_rows` CTE and its union arm for the
+  // `accrual_bill_conflict` row kind, and #942's 0304 widens that arm (the side-naming sentence,
+  // two keys derived from the shared `id`, the per-period amount and the revenue-side predicate).
+  // Each lane is green alone and the two ladders disagree only on the integrated chain, which is
+  // the collision this generation answers. 0302's own postcheck proves the ten row kinds it knows
+  // survive at their exact pre-splice marker counts and 0304 adds no arm at all; the behavioural
+  // proofs live in accrual-bill-conflict.test.mjs and accrual-revenue-side.test.mjs, not here, and
+  // this cell's claim is still only "0231 recuts nothing". Gated on the LAST of lane 03's two by
+  // its own STEM, never by a number, for the reason every generation above carries: 0302 and 0304
+  // are files of one ordered chain, so a database resting between them is a chain that failed.
+  const wave4AccrualQueueSplices = await migrationApplied("accrual_revenue_side$");
   const activityRecut = await migrationApplied("^0264_");
   const workListWidened = await migrationApplied("^0267_");
   const workListSig = workListWidened ? "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int,timestamptz,timestamptz)" : "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)";
   const PINS = {
     "clara.list_review_queue(jsonb,jsonb,int)":
-      seedingRetired
+      wave4AccrualQueueSplices
+        ? "d5456eccb945decd9f61bba6194543d0528ee5f052776d6fdc20cf9fa0226b6b"
+        : wave4QueueSplices
+        ? "886df58021fbaed512000dc2a7f0a64fcabe2b93448a84ece5169b163fa47e0c"
+        : seedingRetired
         ? "f4a34c72e567bf825d4376d043ea23cc3d8bcd2d4f0caaee3a5d052bf8a25d69"
         : reviewQueueRecut
           ? "1641f99f4d295400bd39bd7b2cee3ac4cac2c34e7478078014e7305d99d9b570"
@@ -787,7 +815,9 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
       + `from pg_proc where oid = '${sig}'::regprocedure`);
     assert.equal(r.rows[0].sha, sha,
       `${sig} DRIFTED — 0231 recuts nothing, and only #974's (0260), #840/#861's (0262/0264), `
-      + "#880/#905's (0266/0267) and ticket 1012's (0288) own named recuts are tolerated");
+      + "#880/#905's (0266/0267), ticket 1012's (0288), riders wave 4 lane 01's "
+      + "(0297/0298/0299/0300) and riders wave 4 lane 03's (0302/0304) own named recuts are "
+      + "tolerated");
   }
   const secdef = await rootQuery(
     "select (select prosecdef from pg_proc where oid = 'clara.list_review_queue(jsonb,jsonb,int)'::regprocedure) as q, "

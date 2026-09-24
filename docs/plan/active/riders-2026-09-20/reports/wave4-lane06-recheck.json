@@ -1,0 +1,62 @@
+{
+  "axis": "recheck",
+  "wave": 4,
+  "lane": 6,
+  "branch": "riders/w4-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\656",
+  "fixed_point": "cd2925391",
+  "reviewed_head": "e470d5fe6",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave4-lane06-fix.md",
+  "source_review_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane06-codereview-spec.json (10 findings, L06-SPEC-01..10)",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane06-codereview-standards.json (2 findings, std-1, std-2)"
+  ],
+  "verdict": "accept",
+  "summary": "All 12 findings from the spec and standards reviews (L06-SPEC-01..10, std-1, std-2) were re-verified on the current head e470d5fe6, plus the new blocker-class wb-g-tail G2 defect the fix round found itself. Every 'fixed' claim was reproduced green by re-running the exact gate chain; every 'disclosed, not backfilled' claim was confirmed present in the stated doc location. No applied migration (0310, 0311, 0316) was edited; the new migration 0317 applies cleanly to 293 total and is idempotent on re-run. Every file this fix round touched passes with the full packages/db gate chain, the runtime unit files pass, apps/web's touched unit file passes 19/19, the WHOLE apps/web unit suite matches the report's claimed count exactly (4988/4986/0/2), pnpm typecheck is clean, CI=true GITHUB_ACTIONS=true pnpm lint is clean, check-frozen-workflows.mjs and check-parts-parity.mjs both report OK. One minor discrepancy: the fix report's own gate table cites 'drain.test.mjs 19/19' among the runtime batteries re-driven through the fixed fixture, but packages/runtime/tests/drain.test.mjs has exactly 3 tests (verified 3/3 pass) and no combination of drain-named or relay-fixtures-importing files found in this recheck sums to 19; this looks like a copy/miscount in the report's evidence table, not a functional regression -- every runtime battery actually identified and re-run (wave-b-wiki-projection-consumer 16/16, authz-db 3/3, classify-consumer 8/8, control-lease 5/5, intake-db 12/12, g1-wake-walls 7/7, drain.test.mjs 3/3, relay-drain.test.mjs 3/3, wb-g-tail/wb-g-opkeys/wb-r3 20/20 combined) passed. Nothing above minor remains open.",
+  "findings": [
+    {
+      "id": "RECHECK-01",
+      "ticket": 1038,
+      "severity": "minor",
+      "kind": "evidence-inaccuracy",
+      "title": "The fix report's gate table cites 'drain.test.mjs 19/19' among the runtime batteries driven through the fixed relay-fixtures.mjs, but no file or plausible file combination actually totals 19",
+      "evidence": "wave4-lane06-fix.md, 'Runtime batteries driven on clara_l06 after the fix' list and the Gates table both say 'drain 19/19'. Re-run on clara_l06: packages/runtime/tests/drain.test.mjs is 3/3 (it uses clara_rt_test via tests/rig.mjs, unrelated to the create_client fixture fix); packages/runtime/tests/relay-drain.test.mjs (the one drain-named file that does import relay-fixtures.mjs) is 3/3; queue-drain.test.mjs is 6/6; all four drain-named files combined (drain, relay-drain, queue-drain, relay-redrive-consumers) total 16, not 19; wake-engine.test.mjs (also a relay-fixtures importer) is 32/32. No combination tried reproduces 19.",
+      "required_fix": "None blocking -- every runtime battery this recheck could actually identify as touching the changed fixture passed. Worth a one-line correction to the fix report's gate table so the count is traceable, but it does not indicate an unfixed or newly-broken defect."
+    }
+  ],
+  "per_finding_recheck": [
+    { "id": "L06-SPEC-01", "ticket": 1038, "severity": "blocker", "claimed_outcome": "fixed", "recheck_verdict": "confirmed fixed", "evidence": "relay-fixtures.mjs:130-134 createClientRaw now uses withActor's root/reset-role branch with a hand-set jwt claim, the exact twin of rig-fixtures.mjs's createClientRaw; wave-b-wiki-projection-consumer.test.mjs's two inline call sites were replaced. client-birth-wall.test.mjs's CREATE_CLIENT_CENSUS_TREES now lists both packages/db/tests and packages/runtime/tests (verified at tests/client-birth-wall.test.mjs:568). Re-run: client-birth-wall.test.mjs 15/15, wave-b-wiki-projection-consumer.test.mjs 16/16, authz-db/classify-consumer/control-lease/intake-db/g1-wake-walls (all route through rig.mjs -> relay-fixtures.mjs) 3/8/5/12/7 all green." },
+    { "id": "L06-SPEC-02", "ticket": 1031, "severity": "major", "claimed_outcome": "fixed (new migration 0317)", "recheck_verdict": "confirmed fixed", "evidence": "0317_knowledge_fye_pair_applicability.sql re-cuts clara._knowledge_assert_fye_pair to read the sibling through clara._knowledge_applies_when_digest. knowledge-fye-day.test.mjs (fd.11, fd.12 included) 12/12 green on clara_l06 after apply." },
+    { "id": "L06-SPEC-03 / std-1", "ticket": 1031, "severity": "major", "claimed_outcome": "fixed", "recheck_verdict": "confirmed fixed", "evidence": "knowledge-retrieval.test.mjs's p658.census.no_recut now branches on the fyePairWallLive ledger row, pinned at the measured post-0317 sha. Re-run: knowledge-retrieval.test.mjs 28/28 (0 fail)." },
+    { "id": "L06-SPEC-04 / std-2", "ticket": 1032, "severity": "major", "claimed_outcome": "fixed", "recheck_verdict": "confirmed fixed", "evidence": "firm-setup-polish.test.mjs's p895.seed.noop literal updated 13->14. Re-run: firm-setup-polish.test.mjs 3/3." },
+    { "id": "L06-SPEC-05", "ticket": 1032, "severity": "minor", "claimed_outcome": "fixed", "recheck_verdict": "confirmed fixed", "evidence": "firm-setup-checklist.test.tsx:1062-1066 (fs.web.18) now opens the optional tin's form and asserts the TIN_NOTE literal via regex before cancelling. Re-run: firm-setup-checklist.test.tsx 19/19." },
+    { "id": "L06-SPEC-06", "ticket": 1032, "severity": "minor", "claimed_outcome": "disclosed, not backfilled", "recheck_verdict": "confirmed disclosed as claimed", "evidence": "packages/db/README.md:1066-1072 states the committed-plan gap plainly ('This is NOT specific to tin...') beside the 0311 paragraph, and names the follow-up. Reasoning (no reopen door exists; backfilling would need a product decision outside the ticket) is sound and consistent with a grep of the live catalogue's firm_setup% functions." },
+    { "id": "L06-SPEC-07", "ticket": 1031, "severity": "minor", "claimed_outcome": "disclosed", "recheck_verdict": "confirmed disclosed as claimed", "evidence": "The 29-February residual is named in 0317_knowledge_fye_pair_applicability.sql (lines ~60-64, 221, 243) and in packages/db/README.md:4908-4913, with the same reasoning the review accepted." },
+    { "id": "L06-SPEC-08", "ticket": 1031, "severity": "minor", "claimed_outcome": "fixed (withhold, do not abort)", "recheck_verdict": "confirmed fixed", "evidence": "0317's tail T.5 asserts promote_plan_answers_to_knowledge withholds CLR37 per item instead of aborting; knowledge-onboarding-promotion.test.mjs (kp.14 included) 14/14 green." },
+    { "id": "L06-SPEC-09", "ticket": 1038, "severity": "minor", "claimed_outcome": "fixed (stated plainly)", "recheck_verdict": "confirmed fixed", "evidence": "client-birth-wall.test.mjs's p899.census.no_test_file_calls_create_client_directly cell title itself now reads 'AC1 (met by the brief's parenthetical, see the note above)', and the header above it (verified) states the reinterpretation and the still-open #899 follow-up explicitly." },
+    { "id": "L06-SPEC-10", "ticket": 1038, "severity": "note", "claimed_outcome": "left as reviewer left it; follow-up named", "recheck_verdict": "confirmed as claimed", "evidence": "wb-g-opkeys.test.mjs:212 carries a comment noting create_client's deliberate removal from the grant-derived inventory; the follow-up is listed in the fix report's 'Follow-ups worth filing' #3." },
+    { "id": "wb-g-tail G2 (new, found by fix round)", "ticket": 1038, "severity": "blocker-class", "claimed_outcome": "found and fixed", "recheck_verdict": "confirmed fixed", "evidence": "WB_ACL in wave-b/wb-helpers.mjs now pins create_client's grant list empty rather than the withdrawn grant. Re-run: wb-g-tail.test.mjs cell 'G2: the ACL tuple matrix holds ROW BY ROW' passes; wb-g-tail.test.mjs + wb-g-opkeys.test.mjs + wb-r3.test.mjs combined 20/20." }
+  ],
+  "gates_reproduced": [
+    "packages/db full gate chain, files: knowledge-fye-day.test.mjs, knowledge-onboarding-promotion.test.mjs, knowledge-retrieval.test.mjs, firm-setup-polish.test.mjs, client-birth-wall.test.mjs (combined) -> 72 tests, 72 pass, 0 fail",
+    "packages/db full gate chain, knowledge-firm-defaults.test.mjs -> 21/21",
+    "packages/db full gate chain, wave-b/wb-g-tail.test.mjs + wb-g-opkeys.test.mjs + wb-r3.test.mjs (combined) -> 20/20, including 'G2: the ACL tuple matrix holds ROW BY ROW'",
+    "packages/db full gate chain, operation-census.test.mjs + rig-isolation.test.mjs + rig-runtime-catalog.test.mjs -> 39 total, 38 pass, 0 fail, 1 skipped (known rig-isolation skip)",
+    "packages/runtime unit, wave-b-wiki-projection-consumer.test.mjs -> 16/16",
+    "packages/runtime unit, authz-db/classify-consumer/control-lease/intake-db/g1-wake-walls (run individually) -> 3/3, 8/8, 5/5, 12/12, 7/7",
+    "packages/runtime unit, drain.test.mjs -> 3/3; relay-drain.test.mjs -> 3/3 (see RECHECK-01 re the report's '19/19' label)",
+    "apps/web unit, firm-setup-checklist.test.tsx -> 19/19",
+    "apps/web WHOLE unit suite (node scripts/run-tests.mjs) -> 4988 tests, 4986 pass, 0 fail, 2 skipped (exact match to the fix report)",
+    "pnpm typecheck -> clean, exit 0 (apps/web and packages/runtime both Done)",
+    "CI=true GITHUB_ACTIONS=true pnpm lint -> clean, exit 0",
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files, 55 use-workflow modules, 3 retired entries",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK",
+    "node scripts/migrate.mjs (re-run) -> 0 new migrations applied, 293 total (idempotent, matches the fix report's redo evidence)",
+    "git diff --stat across the fix round's commits confirms 0310/0311/0316 (all applied migrations) were never touched; only 0317 is new"
+  ],
+  "not_reverified": [
+    "The full packages/db whole-suite run (~5529 cells) and its claimed 58 rig-drift-only failures on clara_l06 -- not re-run in this recheck because none of the four implicated files (f-a5b-sandbox-export-pr1, f-t1-sst-reference, f-a5-reporting-agency-pr1, intake-batch) was touched by this lane's diff (confirmed via git diff cd2925391...HEAD --stat, no output for those four paths), so a regression there cannot be attributed to this lane; re-running it was out of the recheck's touched-file scope.",
+    "apps/web e2e firm-setup-walk.spec.ts -- the fix round touched no e2e file, route or component (only a unit test file), and the fix report itself notes it did not re-drive the browser walk; this recheck did not either, for the same reason.",
+    "A from-scratch 0001->0317 migration chain -- remains the integrator's job on a disposable cluster, as both reviews and the fix report note."
+  ]
+}
