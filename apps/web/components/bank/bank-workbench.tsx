@@ -29,6 +29,7 @@ import { AccountsSection } from "./accounts-section";
 import { StatementsSection } from "./statements-section";
 import { MatchingSection } from "./matching-section";
 import { PayrollSettlementsSection } from "./payroll-settlements-section";
+import { RentSettlementsSection } from "./rent-settlements-section";
 import { ExceptionsSection } from "./exceptions-section";
 import { ReconciliationSection } from "./reconciliation-section";
 import { AgencySection } from "./agency-section";
@@ -93,6 +94,11 @@ export function BankWorkbench({ clientId }: { clientId: string }) {
               line/entry matcher: a settlement is a match too, and this is where a person looks
               first for "did the payroll payment clear yet". */}
           <PayrollSettlementsSection clientId={clientId} />
+          {/* #949 (fix round, finding SPEC-14) -- the tenancy half of the same question, beside
+              the payroll one: a month of rent whose payment has not appeared, and the deposit
+              this lane can only OFFER a coding for. Without this panel the Needs-you row for an
+              unpaid month landed on a page that said nothing about rent. */}
+          <RentSettlementsSection clientId={clientId} />
           <MatchingSection clientId={clientId} selectedLineId={lineParam} onSelectLine={setLine} />
         </div>
       )}

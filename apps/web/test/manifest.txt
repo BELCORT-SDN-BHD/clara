@@ -344,6 +344,8 @@ lib/bank/reads.test.ts
 lib/bank/recon-doors.test.ts
 lib/bank/recon-reads.test.ts
 lib/bank/reload-on-change.test.ts
+lib/bank/rent-settlement-doors.test.ts
+lib/bank/rent-settlement-reads.test.ts
 lib/bank/table-reads.test.ts
 lib/business-date.test.ts
 lib/checkout/checkout-flash.test.ts
