@@ -316,9 +316,20 @@ test("v22.pack: SYSTEM_PROMPT_V22 is v21's text plus the cut's stanzas, in the o
     p.indexOf(v22Prompt.OPENING_SOURCE_CHAT_GUIDANCE) < p.indexOf(v22Prompt.CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE),
     "each ticket APPENDS its own stanza; it does not reorder the ones before it",
   );
+  // EVERY TICKET OF THIS LANE APPENDS ITS OWN, and this list is the second place that is
+  // enumerated (the first is `chat-turn-v22-tools.test.mjs`'s own census). Two cells asserting the
+  // same composition is deliberate: this one is read by whoever is working the money band, that one
+  // by whoever is working the roster, and a stanza can arrive unnoticed in neither.
   assert.equal(
     p,
-    `${v22Prompt.SYSTEM_PROMPT_V21}\n\n${v22Prompt.OPENING_SOURCE_CHAT_GUIDANCE}\n\n${v22Prompt.CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`,
-    "the whole prompt is v21 plus exactly the two exported stanzas, with nothing written inline",
+    `${v22Prompt.SYSTEM_PROMPT_V21}\n\n${v22Prompt.OPENING_SOURCE_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.TRADE_INVOICE_V22_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.OPENING_REFRESH_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.CLAIM_ALLOCATIONS_V22_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.ACCRUAL_V22_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.SCHEDULES_V22_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.PAYROLL_FACT_STATE_CHAT_GUIDANCE}`,
+    "the whole prompt is v21 plus exactly this cut's exported stanzas, with nothing written inline",
   );
 });

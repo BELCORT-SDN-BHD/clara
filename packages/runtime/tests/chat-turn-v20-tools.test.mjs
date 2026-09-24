@@ -128,9 +128,20 @@ test("v20.roster: neither non-frozen module the absent tools belong to is in thi
   const { readFile } = await import("node:fs/promises");
   const { fileURLToPath } = await import("node:url");
   const manifest = JSON.parse(await readFile(fileURLToPath(new URL("../../../frozen-workflows.json", import.meta.url)), "utf8"));
-  for (const path of ["packages/runtime/lib/prepayment-schedule-basis.ts", "packages/runtime/lib/counterparty-identity.ts"]) {
-    assert.ok(!(path in manifest.workflows), `${path} must stay OUT of the frozen manifest until its door ships`);
-  }
+  // CUT PHASE 2026-09-25 - `prepayment-schedule-basis.ts`'s DOOR SHIPPED. 0307 minted the OBO twin
+  // `clara.create_prepayment_schedule_for`, #1135 wired `start_prepayment_schedule_work` over it,
+  // and the module is hash-locked as of that import. The claim this cell makes is therefore the
+  // conditional one it always was: a module stays out of the manifest UNTIL its door ships, and the
+  // cell now records which side of that line each of the two is on. `counterparty-identity.ts` is
+  // still on the near side (#647's `clara.add_counterparty_alias_for` has never been written).
+  assert.ok(
+    !("packages/runtime/lib/counterparty-identity.ts" in manifest.workflows),
+    "counterparty-identity.ts must stay OUT of the frozen manifest until its door ships",
+  );
+  assert.ok(
+    "packages/runtime/lib/prepayment-schedule-basis.ts" in manifest.workflows,
+    "prepayment-schedule-basis.ts joined the chatTurn_v22 closure when its OBO twin shipped (0307 / #915)",
+  );
   // …and the control: the three modules this cut DID import are in it, so "absent" is not a
   // property of the manifest being empty.
   for (const path of [
