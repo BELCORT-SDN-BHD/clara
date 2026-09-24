@@ -1,7 +1,8 @@
 // Wave A2.1 — the facts-gate consumer (lib/facts-gate.mjs), DB INTEGRATION. Proves the consumer
 // reads real document.classified events and re-fires clara.enqueue_invoice_facts(document): an
-// invoice-shaped kind admits the invoice_facts lane; a payroll_summary is held with a
-// skipped_kind receipt (never a runnable invoice_facts task); the checkpoint converges. The
+// invoice-shaped kind admits the invoice_facts lane; a payroll_summary never reaches that lane
+// at all (#945/0296 gave it its own) and a kind with no reader is held with a skipped_kind
+// receipt, never a runnable invoice_facts task; the checkpoint converges. The
 // enqueue gate itself is exhaustively proven in packages/db/tests/a21-classifier-gate.test.mjs —
 // here we prove the CONSUMER WIRING end-to-end.
 //
@@ -114,15 +115,33 @@ test("cycle: an invoice-kind document.classified re-fires enqueue → an llm_wit
   assert.equal((await deadLettersForFirm(firm, FACTS_GATE_CONSUMER)).length, 0, "no facts_gate dead-letters");
 });
 
-test("cycle: a payroll_summary document.classified is HELD — a skipped_kind receipt, NEVER a runnable invoice_facts task (the classifier gate)", { skip }, async () => {
+// #945 (migration 0296) MOVED HALF OF THIS CELL'S SUBJECT, and the cell moves with it — exactly
+// as packages/db/tests/a21-classifier-gate.test.mjs's own §5 already did for the gate itself.
+// Until 0296 a payroll_summary fell through the router's kind ladder to the terminal
+// `invoice_facts / failed / skipped_kind` receipt, and this cell asserted that receipt by name.
+// #926's owner ruling (2026-09-18, option G) reopened payroll reading and 0296 gave the kind its
+// OWN `payroll_facts` lane, so a payroll_summary no longer reaches the fall-through at all and
+// the receipt it used to leave is gone. THE HALF THAT WAS ALWAYS THE POINT is unchanged and is
+// still asserted here: a payroll summary never enters the INVOICE lane. The HELD half moves to a
+// kind that genuinely has no reader — `tax_correspondence`, the same kind the db battery picked
+// for the same reason — so the consumer's wiring is still proved to drive the gate's terminal
+// arm end to end. The payroll lane's own behaviour is proved by
+// packages/db/tests/payroll-summary-facts.test.mjs's S4 cells and is not duplicated here.
+test("cycle: a payroll_summary document.classified never reaches invoice_facts, and a kind with NO reader is HELD — a skipped_kind receipt, never a runnable task (the classifier gate)", { skip }, async () => {
   const { owner, firm } = await buildFirm("fgc");
-  const document = await seedKnownKindDoc({ firm, owner, kind: "payroll_summary" });
-  await emitClassified(firm, document, owner);
+  const payroll = await seedKnownKindDoc({ firm, owner, kind: "payroll_summary" });
+  const noReader = await seedKnownKindDoc({ firm, owner, kind: "tax_correspondence" });
+  await emitClassified(firm, payroll, owner);
+  await emitClassified(firm, noReader, owner);
 
   await drainFactsGate(firm);
 
-  const rows = await factsTasks(document, "invoice_facts");
-  assert.equal(rows.filter((r) => ["queued", "held_egress", "running", "done"].includes(r.status)).length, 0, "NO runnable invoice_facts task for a payroll_summary");
+  const payrollRows = await factsTasks(payroll, "invoice_facts");
+  assert.equal(payrollRows.length, 0,
+    `NO invoice_facts task of ANY status exists for a payroll_summary (got: ${payrollRows.map((r) => `${r.status}/${r.error_code}`).join(",")})`);
+
+  const rows = await factsTasks(noReader, "invoice_facts");
+  assert.equal(rows.filter((r) => ["queued", "held_egress", "running", "done"].includes(r.status)).length, 0, "NO runnable invoice_facts task for a kind with no reader");
   assert.ok(rows.some((r) => r.status === "failed" && r.error_code === "skipped_kind"), `the gate left a skipped_kind receipt (got: ${rows.map((r) => `${r.status}/${r.error_code}`).join(",")})`);
   assert.equal(await checkpointSeq(firm, FACTS_GATE_CONSUMER), await headSeq(firm), "the checkpoint still converged (a terminal receipt is a success)");
 });
