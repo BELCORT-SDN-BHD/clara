@@ -946,12 +946,12 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
       + "application role."],
   ]);
   const tenancyLive = readers.some((r) => r.proname === "_client_reporting_framework");
-  // #1031 (0310 + its fix round 0317) ADDS ONE MORE READ, bimodal like 0230's five above and for
+  // #1031 (0310 + its fix round 0318) ADDS ONE MORE READ, bimodal like 0230's five above and for
   // the same reason: the loop underneath MEASURES the claim on the live body, and presence is
   // asserted only once this battery's own frontier carries the pair-wall cohort.
   const FYE_PAIR_WALL_0310_CONSUMERS = new Map([
     ["_knowledge_assert_fye_pair",
-      "#1031 (0310, re-cut at four arguments by 0317) — judges the financial-year-end PAIR "
+      "#1031 (0310, re-cut at four arguments by 0318) — judges the financial-year-end PAIR "
       + "(financial_year_end_month, financial_year_end_day) against the sibling key's own LIVE "
       + "value for the same client AT THE SAME APPLICABILITY. A STABLE SELECT of at most one "
       + "sibling row (state='live', scope_kind='client', client_id=$1, knowledge_key=<sibling>, "

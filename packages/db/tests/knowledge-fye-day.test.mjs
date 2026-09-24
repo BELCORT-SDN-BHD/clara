@@ -388,7 +388,7 @@ pairCell("fd.10 clara.correct_knowledge ALSO consults the pair rule -- the secon
   assert.equal(live.rows[0].revision_n, 1);
 });
 // =============================================================================================
-// #1031's OWN FIX ROUND (0317_knowledge_fye_pair_applicability.sql, review finding L06-SPEC-02).
+// #1031's OWN FIX ROUND (0318_knowledge_fye_pair_applicability.sql, review finding L06-SPEC-02).
 // 0310's rule read "the sibling year-end row for this client" with NO applicability predicate,
 // although `uq_knowledge_live` (0192) is partial over (scope, subject, key, APPLICABILITY): one
 // client may hold SEVERAL live rows of one key, one per applies_when. An unscoped, unordered read

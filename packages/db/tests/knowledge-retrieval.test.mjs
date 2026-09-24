@@ -953,10 +953,10 @@ cell("p658.census.no_recut — the eight pinned bodies are byte-identical and ge
   // (clara._knowledge_assert_fye_pair) immediately after its existing
   // clara._knowledge_assert_value call, so a day that cannot exist in the recorded month is
   // refused before it can become a second, disagreeing statement of the same fact. Nothing else
-  // in the body moves: 0317's tail proves that by REVERSE SUBSTITUTION against 0310's own pinned
+  // in the body moves: 0318's tail proves that by REVERSE SUBSTITUTION against 0310's own pinned
   // pre-image, and knowledge-fye-day.test.mjs carries the behavioural proof. This cell only has
   // to stop calling that verified recut a drift of 0230's.
-  // THE BRANCH KEYS ON 0317, the LAST of #1031's two files to touch this body. The two ship as
+  // THE BRANCH KEYS ON 0318, the LAST of #1031's two files to touch this body. The two ship as
   // ONE cohort (the rule and its applicability fix), so a database carrying 0310 alone is a
   // HALF-APPLIED cohort, and this cell failing on it is the right answer, not a false alarm --
   // knowledge-fixtures.mjs's fyePairWallCohortApplied says the same thing in its own voice.
@@ -984,7 +984,7 @@ cell("p658.census.no_recut — the eight pinned bodies are byte-identical and ge
     const r = await rootQuery(
       "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid = $1::regprocedure",
       [sig]);
-    assert.equal(r.rows[0].sha, want, `${sig} is NOT at its measured pre-0230 body -- 0230 recuts nothing, and only #885's own named recut (0268) and #1031's own named recut (0310 + 0317) are tolerated`);
+    assert.equal(r.rows[0].sha, want, `${sig} is NOT at its measured pre-0230 body -- 0230 recuts nothing, and only #885's own named recut (0268) and #1031's own named recut (0310 + 0318) are tolerated`);
   }
   const overloads = await rootQuery(
     `select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace

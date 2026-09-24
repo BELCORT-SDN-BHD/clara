@@ -1051,8 +1051,8 @@ to mint a world or to read a catalog back for a census.
   one overload, one `pg_proc` row per installed name, and the CORE tier small and enumerable.
   TWO of the eight are pinned in BOTH generations, each branching on the ledger row of the
   migration that recut it: `clara.answer_work_question` on #885's `0268`, and
-  `clara._knowledge_capture_core` on #1031's `0317` (the second of that ticket's two files to
-  touch the body — `0310` mints the year-end pair rule and splices the call, `0317` re-cuts the
+  `clara._knowledge_capture_core` on #1031's `0318` (the second of that ticket's two files to
+  touch the body — `0310` mints the year-end pair rule and splices the call, `0318` re-cuts the
   rule at four arguments so the sibling is read at the incoming applicability). A recutting
   ticket comes back into THIS file and re-measures the pin against the new body, in its own
   commit: the pin never updates itself.

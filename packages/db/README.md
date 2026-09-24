@@ -6330,12 +6330,12 @@ through fd.05 are unmoved and stay 0240-only.
 `create or replace function`; the grant/revoke pairs are idempotent. The prestate detects its own
 redo by the same signal 0248 uses — both recut bodies already calling the new rule — and refuses a
 PARTIAL signal (one caller updated, the other not) rather than guessing.
-## 0317 — the year-end pair rule reads its sibling at the incoming applicability, and an impossible pair no longer aborts a promotion (#1031 fix round, riders wave 4, lane 06)
+## 0318 — the year-end pair rule reads its sibling at the incoming applicability, and an impossible pair no longer aborts a promotion (#1031 fix round, riders wave 4, lane 06)
 
-`0317_knowledge_fye_pair_applicability.sql` fixes 0310, which is applied and therefore immutable.
+`0318_knowledge_fye_pair_applicability.sql` fixes 0310, which is applied and therefore immutable.
 It takes a number from wave 4's OVERFLOW block (`0315` and up — `riders-2026-09-20/README.md`'s
 own rule for a fix round that needs another migration), never the next free number, and 0310 and
-0317 ship together as ONE cohort: `knowledge-fixtures.mjs`'s `fyePairWallCohortApplied` probes the
+0318 ship together as ONE cohort: `knowledge-fixtures.mjs`'s `fyePairWallCohortApplied` probes the
 shape the pair wall finally takes, `tests/fye-pair-wall-preintegration-gate.mjs` gates both, and a
 database carrying 0310 alone is reported PARTIAL rather than skipped, which is what it is.
 
@@ -6379,15 +6379,15 @@ deliberately. The rule is `clara.set_client_fy_end`'s own calendar rule copied v
 that rule admits `month = 2 and day = 29`, the year-end pair carries no year to judge a leap year
 against, and the client-row door is explicitly out of #1031's scope — so refusing 29 February in
 Knowledge ALONE would re-create the very disagreement between two records of one fact that #1031
-exists to remove. Named in `clara._knowledge_assert_fye_pair`'s own body, in 0317's header and in
+exists to remove. Named in `clara._knowledge_assert_fye_pair`'s own body, in 0318's header and in
 the lane's fix report; a follow-up belongs on the CLIENT-ROW door, where both records can move
 together.
 
-**How the three pasted bodies are proved.** 0317 re-cuts three whole bodies statically (no
+**How the three pasted bodies are proved.** 0318 re-cuts three whole bodies statically (no
 `pg_get_functiondef` splice, so no new entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is
 owed — the file contains no dynamic SQL at all). Each pasted body is the LIVE pre-image plus
 exactly one named chunk, and the tail proves it by REVERSE SUBSTITUTION: it reads the installed
-body, puts the pre-0317 chunk back, and requires the result to hash to the `sha256(prosrc)` the
+body, puts the pre-0318 chunk back, and requires the result to hash to the `sha256(prosrc)` the
 prestate pinned. A change smuggled anywhere else in a pasted body reds the migration instead of
 shipping.
 
@@ -6396,5 +6396,5 @@ shipping.
 rule live, the three-argument one gone, and BOTH write doors already calling it — and refuses a
 PARTIAL signal rather than guessing. Both branches were exercised on the lane database: the FIRST
 APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
-`CLARA_MIGRATION_REDO=0317_knowledge_fye_pair_applicability` after the promotion door was put back
+`CLARA_MIGRATION_REDO=0318_knowledge_fye_pair_applicability` after the promotion door was put back
 at its pre-image for `kp.14`'s vacuity control.

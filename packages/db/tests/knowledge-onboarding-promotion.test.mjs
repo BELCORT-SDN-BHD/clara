@@ -16,7 +16,7 @@ import {
 } from "./knowledge-fixtures.mjs";
 
 const EXPECTED_CELLS = 13;
-const PAIR_EXPECTED_CELLS = 1; // kp.14 -- #1031's pair-wall cohort (0310 + 0317) on top of 0192
+const PAIR_EXPECTED_CELLS = 1; // kp.14 -- #1031's pair-wall cohort (0310 + 0318) on top of 0192
 let live = false;
 let pairWallLive = false;
 let executed = 0;
@@ -59,11 +59,11 @@ function pairGate(t) {
   if (live) {
     if (pairWallLive) return false;
     if (process.env.CLARA_ALLOW_MISSING_FYE_PAIR_WALL_0310 === "1") {
-      console.warn("SKIP knowledge-onboarding-promotion (pair-wall cell): the 0310/0317 cohort is not applied (explicit pre-integration run).");
+      console.warn("SKIP knowledge-onboarding-promotion (pair-wall cell): the 0310/0318 cohort is not applied (explicit pre-integration run).");
       t.skip("fye pair-wall cohort absent -- explicit pre-integration run");
       return true;
     }
-    assert.fail("the fye pair-wall cohort is required for a focused run: apply 0310_knowledge_fye_pair_wall.sql and 0317_knowledge_fye_pair_applicability.sql");
+    assert.fail("the fye pair-wall cohort is required for a focused run: apply 0310_knowledge_fye_pair_wall.sql and 0318_knowledge_fye_pair_applicability.sql");
   }
   return gate(t);
 }
@@ -506,12 +506,12 @@ cell("kp.13 a BELOW-FLOOR caller learns nothing: a real foreign plan and a rando
   assert.equal(ok.promoted.length, 2, JSON.stringify(ok));
 });
 // =============================================================================================
-// kp.14 — #1031's OWN FIX ROUND (0317, review finding L06-SPEC-08). #1031's brief asked for this
+// kp.14 — #1031's OWN FIX ROUND (0318, review finding L06-SPEC-08). #1031's brief asked for this
 // door's behaviour to be UNCHANGED. 0310's pair rule raises CLR37 (the client-row door's own
 // typed reason), which was not among the two sqlstates this door's per-item `exception` arm
 // caught, so ONE impossible pair on a committed plan raised straight out of the promotion loop
 // and NOTHING was promoted -- entity_type, which has nothing to do with the year end, included.
-// 0317 adds CLR37 to that arm, so the offending key alone is withheld, which IS this door's
+// 0318 adds CLR37 to that arm, so the offending key alone is withheld, which IS this door's
 // documented per-item behaviour.
 // =============================================================================================
 
@@ -529,7 +529,7 @@ pairCell("kp.14 an IMPOSSIBLE year-end pair on a committed plan withholds that o
 
   const receipt = await promoteAsHuman(w.admin, plan);
 
-  // THE OTHER TWO KEYS SURVIVED. Before 0317 this receipt did not exist at all -- the call raised.
+  // THE OTHER TWO KEYS SURVIVED. Before 0318 this receipt did not exist at all -- the call raised.
   assert.deepEqual(
     receipt.promoted.map((x) => x.knowledge_key).sort(),
     ["entity_type", "financial_year_end_month"],

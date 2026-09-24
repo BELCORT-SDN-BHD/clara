@@ -1,4 +1,4 @@
--- 0317_knowledge_fye_pair_applicability — #1031 FIX ROUND (riders wave 4, lane 06): THE
+-- 0318_knowledge_fye_pair_applicability — #1031 FIX ROUND (riders wave 4, lane 06): THE
 -- FINANCIAL-YEAR-END PAIR RULE READS ITS SIBLING AT THE INCOMING APPLICABILITY, AND AN
 -- IMPOSSIBLE PAIR NO LONGER ABORTS A WHOLE ONBOARDING PROMOTION.
 -- =====================================================================================
@@ -6,7 +6,7 @@
 -- L06-SPEC-02 major, L06-SPEC-08 minor, L06-SPEC-07 minor). This file FIXES
 -- 0310_knowledge_fye_pair_wall.sql, which is applied and therefore immutable; it takes a number
 -- from wave 4's overflow block (`0315` and up — riders-2026-09-20/README.md), never the next
--- free number, and 0310 + 0317 ship together as ONE cohort.
+-- free number, and 0310 + 0318 ship together as ONE cohort.
 --
 -- =====================================================================================
 -- DEFECT 1 (L06-SPEC-02, major) — THE SIBLING WAS READ WITHOUT ITS APPLICABILITY.
@@ -117,7 +117,7 @@ begin
        and position('_knowledge_assert_fye_pair(p_client, p_knowledge_key, p_value,' in v_live_core) > 0
        and position('r.knowledge_key, p_value,' in v_live_correct) > 0 then
       v_redo := true;
-      raise notice '#1031 fix-round prestate: the four-argument rule is live, the three-argument one is gone and both write doors already call it -- treating this as a #957 REDO of 0317 itself. Every statement below is create-or-replace / drop-if-exists, and the tail re-proves the whole post-state from scratch.';
+      raise notice '#1031 fix-round prestate: the four-argument rule is live, the three-argument one is gone and both write doors already call it -- treating this as a #957 REDO of 0318 itself. Every statement below is create-or-replace / drop-if-exists, and the tail re-proves the whole post-state from scratch.';
     else
       raise exception '#1031 fix-round prestate: clara._knowledge_assert_fye_pair(uuid,text,jsonb,jsonb) already exists but the post-state is PARTIAL (three-arg still present=%, capture core calls it=%, correct_knowledge calls it=%) -- re-derive this file against the live catalog before applying',
         v_three,
@@ -189,7 +189,7 @@ begin
   end if;
   v_sibling_key := case when p_knowledge_key = 'financial_year_end_month'
                         then 'financial_year_end_day' else 'financial_year_end_month' end;
-  -- #1031 FIX ROUND (0317): THE SIBLING IS READ AT THE INCOMING APPLICABILITY, through the SAME
+  -- #1031 FIX ROUND (0318): THE SIBLING IS READ AT THE INCOMING APPLICABILITY, through the SAME
   -- digest clara._knowledge_capture_core computes for its own supersession lookup and the SAME
   -- one uq_knowledge_live (0192) is partial over. That index is what makes this necessary: a
   -- client may hold SEVERAL live rows of one key, one per applies_when, so "the sibling row for
@@ -232,7 +232,7 @@ begin
 end $$;
 revoke all on function clara._knowledge_assert_fye_pair(uuid, text, jsonb, jsonb) from public;
 comment on function clara._knowledge_assert_fye_pair(uuid, text, jsonb, jsonb) is
-  '#1031 (0310, re-cut at four arguments by 0317): the ONE rule that judges the financial-year-end
+  '#1031 (0310, re-cut at four arguments by 0318): the ONE rule that judges the financial-year-end
   PAIR (financial_year_end_month, financial_year_end_day) against clara.set_client_fy_end''s own
   calendar rule (0041), reused verbatim. The sibling is read AT THE INCOMING APPLICABILITY,
   through clara._knowledge_applies_when_digest -- the same digest uq_knowledge_live is partial
@@ -289,7 +289,7 @@ begin
   -- #1031 (0310): THE PAIR RULE. A no-op for every key but the two year-end keys, and at firm
   -- scope; given a live client-scoped sibling for financial_year_end_month/day, refuses a pair
   -- that cannot be a real calendar day -- see clara._knowledge_assert_fye_pair's own comment.
-  -- #1031 FIX ROUND (0317): the sibling is read AT THIS CAPTURE'S OWN APPLICABILITY, which is
+  -- #1031 FIX ROUND (0318): the sibling is read AT THIS CAPTURE'S OWN APPLICABILITY, which is
   -- why the rule now takes it. uq_knowledge_live is partial over the applicability, so one
   -- client can hold several live rows of one key and an unscoped read judged an arbitrary one.
   perform clara._knowledge_assert_fye_pair(p_client, p_knowledge_key, p_value,
@@ -391,7 +391,7 @@ begin
   perform clara._knowledge_assert_value(r.knowledge_key, p_value);
   -- #1031 (0310): THE PAIR RULE, the SAME one §B's capture core consults. A correction is a
   -- second write path onto the same two keys, and had to gain this too -- see 0310's own header.
-  -- #1031 FIX ROUND (0317): at the RECORD'S OWN applicability -- a correction re-states one
+  -- #1031 FIX ROUND (0318): at the RECORD'S OWN applicability -- a correction re-states one
   -- live record in place and never moves it to another applies_when (the insert below reuses
   -- r.applies_when verbatim), so that is the applicability its sibling must be read at.
   perform clara._knowledge_assert_fye_pair(
@@ -580,7 +580,7 @@ begin
         format('Committed onboarding plan %s, interview item %s, answered %s',
                p_plan, it.item_key, it.answered_at),
         '{}'::jsonb, it.answered_by, v_via, 'skip', null, 'promote_plan_answers_to_knowledge');
-    -- #1031 FIX ROUND (0317): CLR37 TOO. The year-end pair rule refuses an impossible pair
+    -- #1031 FIX ROUND (0318): CLR37 TOO. The year-end pair rule refuses an impossible pair
     -- with the CLIENT-ROW door's own typed reason (CLR37 fa_particulars_invalid), which was
     -- not one of the two sqlstates this arm listed -- so one impossible pair raised straight
     -- out of the loop and the WHOLE promotion aborted, losing every other key with it
@@ -633,7 +633,7 @@ declare
   v_n int; v_sha text; v_pin record; v_a text; v_b text; v_c text; v_rule text;
   v_pos_assert_value int; v_pos_pair_rule int; v_pos_trust_wall int;
   c_core_new constant text := '  -- that cannot be a real calendar day -- see clara._knowledge_assert_fye_pair''s own comment.
-  -- #1031 FIX ROUND (0317): the sibling is read AT THIS CAPTURE''S OWN APPLICABILITY, which is
+  -- #1031 FIX ROUND (0318): the sibling is read AT THIS CAPTURE''S OWN APPLICABILITY, which is
   -- why the rule now takes it. uq_knowledge_live is partial over the applicability, so one
   -- client can hold several live rows of one key and an unscoped read judged an arbitrary one.
   perform clara._knowledge_assert_fye_pair(p_client, p_knowledge_key, p_value,
@@ -642,7 +642,7 @@ declare
   c_core_old constant text := '  -- that cannot be a real calendar day -- see clara._knowledge_assert_fye_pair''s own comment.
   perform clara._knowledge_assert_fye_pair(p_client, p_knowledge_key, p_value);
 ';
-  c_corr_new constant text := '  -- #1031 FIX ROUND (0317): at the RECORD''S OWN applicability -- a correction re-states one
+  c_corr_new constant text := '  -- #1031 FIX ROUND (0318): at the RECORD''S OWN applicability -- a correction re-states one
   -- live record in place and never moves it to another applies_when (the insert below reuses
   -- r.applies_when verbatim), so that is the applicability its sibling must be read at.
   perform clara._knowledge_assert_fye_pair(
@@ -652,7 +652,7 @@ declare
   c_corr_old constant text := '  perform clara._knowledge_assert_fye_pair(
     case when r.scope_kind = ''client'' then r.client_id else null end, r.knowledge_key, p_value);
 ';
-  c_prom_new constant text := '    -- #1031 FIX ROUND (0317): CLR37 TOO. The year-end pair rule refuses an impossible pair
+  c_prom_new constant text := '    -- #1031 FIX ROUND (0318): CLR37 TOO. The year-end pair rule refuses an impossible pair
     -- with the CLIENT-ROW door''s own typed reason (CLR37 fa_particulars_invalid), which was
     -- not one of the two sqlstates this arm listed -- so one impossible pair raised straight
     -- out of the loop and the WHOLE promotion aborted, losing every other key with it
@@ -755,7 +755,7 @@ begin
   end if;
 
   -- T.6 THE THREE RE-CUT BODIES ARE THEIR PINNED PRE-IMAGES PLUS EXACTLY THIS FILE'S OWN CHUNKS,
-  -- and nothing else. REVERSE SUBSTITUTION: put each pre-0317 chunk back and the whole body must
+  -- and nothing else. REVERSE SUBSTITUTION: put each pre-0318 chunk back and the whole body must
   -- hash to the sha the prestate pinned. A smuggled change anywhere else in the pasted bodies
   -- reds this migration rather than shipping.
   for v_pin in select * from (values

@@ -66,7 +66,7 @@ export async function fyeDayCohortApplied() {
 
 /** True iff #1031's fye pair-wall cohort is applied. The cohort is TWO files that ship together
  *  as one unit -- 0310_knowledge_fye_pair_wall.sql (the rule and the two write doors that consult
- *  it) and its own fix round 0317_knowledge_fye_pair_applicability.sql (the rule re-cut at four
+ *  it) and its own fix round 0318_knowledge_fye_pair_applicability.sql (the rule re-cut at four
  *  arguments so the sibling is read at the INCOMING APPLICABILITY, and 0310's three-argument form
  *  dropped) -- so this probe asks for the shape the cohort finally ships: the FOUR-argument
  *  ungranted rule exists AND both write doors that can touch either year-end key
@@ -74,7 +74,7 @@ export async function fyeDayCohortApplied() {
  *  A marker probe rather than a bare existence check, the same reason `auditActorRoleCohortApplied`
  *  above gives: each of those two functions has existed since 0192, so a bare `to_regprocedure` on
  *  them would report this cohort applied estate-wide. Same "wholly present or wholly absent" law
- *  as the cohorts above -- a database carrying 0310 WITHOUT 0317 is a half-applied cohort and is
+ *  as the cohorts above -- a database carrying 0310 WITHOUT 0318 is a half-applied cohort and is
  *  surfaced as PARTIAL rather than skipped, which is exactly what it is. */
 export async function fyePairWallCohortApplied() {
   const r = await rootQuery(
