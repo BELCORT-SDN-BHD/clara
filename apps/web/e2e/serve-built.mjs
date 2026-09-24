@@ -61,6 +61,11 @@ import { handleP657Supabase } from "./bank-match-mock.mjs";
 // board EMPTY_RPCS concern either — neither verb is in that array); dispatched beside it for
 // locality. Scoped to #657's own client id (reused deliberately — see that module's header).
 import { handleP947Supabase } from "./payroll-settlement-mock.mjs";
+// #949's own lane — the Documents detail's FACTS view with a tenancy's terms-and-rent-plan panel.
+// A file-disjoint sibling of the documents-viewer lane: its own client and its own `7e4a4c47-`
+// document-id prefix, every branch scoped to them, and its RPC half guards on an exact-verb
+// allow-list BEFORE it reads the body.
+import { handleP949Supabase } from "./tenancy-rent-plan-mock.mjs";
 // The documents-viewer walk's own lane (C-07 / D2 / D3), the same file-disjoint shape.
 // Every branch inside is scoped to ITS OWN client/document/extraction ids and falls
 // through otherwise; it never claims the shared client register or the session list.
@@ -767,6 +772,7 @@ async function handleSupabase(request, response, url) {
   // verbs are now declared, correctly, in `SHARED_RPC_VERBS`.
   if (await handleP657Supabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP947Supabase(request, response, path, url, sendJson, cors)) return;
+  if (await handleP949Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
   // id-scoped client row (a SERVER-side layout read `page.route` cannot reach), and it falls

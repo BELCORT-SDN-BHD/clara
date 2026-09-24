@@ -87,6 +87,7 @@ const LANE_MOCKS = [
   "staff-advances-register-mock.mjs",
   "staff-expense-claim-mock.mjs",
   "tax-boundary-mock.mjs",
+  "tenancy-rent-plan-mock.mjs",
   "trade-invoice-mock.mjs",
   "work-knowledge-mock.mjs",
   "work-list-mock.mjs",
@@ -516,6 +517,13 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // gate on `body.p_client !== P947.clientId` before answering. Declares neither list, the shape
   // a new lane mock should aim for.
   "payroll-settlement-mock.mjs": { unscopeable: [], debt: [] },
+  // #949's own lane (the Documents detail's tenancy terms-and-rent-plan panel). Its own client
+  // and its own `7e4a4c47-` document-id prefix: every table read names one of them before it
+  // answers, and all three RPC verbs (get_contract_terms, get_tenancy_rent_plan_draft,
+  // confirm_tenancy_rent_plan) gate on this lane's own document prefix or client id before
+  // answering, behind an exact-verb allow-list checked BEFORE the body is read. Declares neither
+  // list, the shape a new lane mock should aim for.
+  "tenancy-rent-plan-mock.mjs": { unscopeable: [], debt: [] },
   // #640's C9 lane. Every handler names this lane's own client id or plan id before it answers
   // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
   // aim for, declaring neither list.
@@ -1493,8 +1501,16 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   list_fixed_assets: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
   fa_register_tie: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
   get_document_extract: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
-  list_source_dependents: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
-  list_source_revisions: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
+  // #949 joins both shares: the document detail reads them on mount in ITS lane too, and an
+  // unanswered read paints a standing failure banner over the very panel that lane's walk is
+  // about. Its arm gates on its own `7e4a4c47-` document prefix and falls through otherwise —
+  // the same property that makes the other two arms safe.
+  list_source_dependents: [
+    "document-correction-mock.mjs", "documents-viewer-mock.mjs", "tenancy-rent-plan-mock.mjs",
+  ],
+  list_source_revisions: [
+    "document-correction-mock.mjs", "documents-viewer-mock.mjs", "tenancy-rent-plan-mock.mjs",
+  ],
   // #646 x the chat-parity lane — the wrong-client wizard's first step calls `record_client_resolution`
   // (correction-wizard.tsx:146), which the chat-parity lane already answered. THE TWO ARMS ARE NOT
   // SYMMETRIC and the asymmetry is declared, not glossed: #646's arm gates on its own
