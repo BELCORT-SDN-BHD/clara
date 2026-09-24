@@ -45,6 +45,17 @@ body carries, and nothing more:
   for free — a v3 payload simply states no citation, which is the state every line is in today.
   A line the reader could not honestly cite persists uncited and the Matching tab says so in
   words; #990's three-state face is unchanged by this version.
+* **Three properties of that resolution worth knowing before reading the code.** (1) An index is
+  resolved only against the regions THE PROMPT ACTUALLY PRINTED, not every region on the
+  extraction: the builder stops at a 60,000-char budget, so on a long statement those two sets
+  differ, and resolving against the wrong one would point a person at a patch of their own bank
+  statement the reader never saw. (2) The lookup carries a FIRM PREDICATE of its own —
+  `clara.witness_citation_regions` is SECURITY DEFINER with no firm check and the runtime read
+  policy on `clara.document_regions` has a `true` qual, and v4 is the first version that WRITES
+  what that read returns. (3) `citation_extraction_id` names the READER-1 extraction the persist
+  transaction created, not the OCR extraction the region was read from — the core stamps it and a
+  producer cannot influence it. So a stored citation is the region's locator COPIED, not a link:
+  the viewer renders it, and nothing re-walks it back to `clara.document_regions`.
 
 ### The two pins the wave 2026-09-18 cut moved
 

@@ -40,6 +40,7 @@ import {
   runStatementWitnessVisionRead as runVisionReadV3,
   persistStatementWitnessPair as persistV3,
 } from "../workflows/statementFacts.v3.behavior.mjs";
+import { readStatementWitnessRegionCitations } from "../workflows/statementFacts.v4.citations.mjs";
 import { STATEMENT_WITNESS_ENGINE_SNAPSHOT } from "../workflows/statementFacts.v2.services.mjs";
 
 const ENGINE_ID = STATEMENT_WITNESS_ENGINE_SNAPSHOT.engineId;
@@ -183,6 +184,64 @@ test("1037.db3 a row the reader could not honestly cite persists UNCITED beside 
     assert.equal(row.citation_region, null);
     assert.equal(row.citation_extraction_id, null);
   }
+});
+
+test("1037.db4 the region lookup that PERSISTS is firm-scoped — a foreign firm's page geometry can never be resolved into this firm's rows", { skip }, async () => {
+  const s = await buildStatementSituation("v4cite-d", { engineId: ENGINE_ID });
+  const other = await fx.buildFirm("v4cite-d-other");
+  const shown = new Set(s.numbered.map((n) => Number(n.idx)));
+
+  // ADV-1037-03. `clara.witness_citation_regions` is SECURITY DEFINER with no firm check and
+  // `p_document_regions_runtime_read`'s qual is `true`, so `clara_runtime` really can read every
+  // firm's regions — the isolation this cell measures is the READ's own predicate, not the
+  // estate's. Driven as the RUNTIME role, which is the role the frozen behaviour runs under.
+  const mine = await withRuntime((client) => readStatementWitnessRegionCitations(client, {
+    extractionId: s.ocrId, firmId: s.firm, shownIdxs: shown,
+  }));
+  assert.equal(mine.size, s.regionIds.length, "the owning firm resolves every one of its own seeded regions");
+
+  const theirs = await withRuntime((client) => readStatementWitnessRegionCitations(client, {
+    extractionId: s.ocrId, firmId: other.firm, shownIdxs: shown,
+  }));
+  assert.equal(theirs.size, 0, "…and a different firm resolves none of them, however valid the extraction id it holds");
+
+  // The discriminating half: the SAME rows are readable to the same role without the predicate,
+  // so the zero above is the predicate biting rather than an empty extraction.
+  const unscoped = await withRuntime((client) => client.query(
+    "select w.idx from clara.witness_citation_regions($1) w"
+    + " join clara.document_regions r on r.id = w.region_id", [s.ocrId]));
+  assert.equal(unscoped.rows.length, s.regionIds.length,
+    "the runtime role CAN see these rows unscoped — which is exactly why the read that persists carries a firm");
+});
+
+test("1037.db5 what a persisted citation is, measured: the region's OWN locator COPIED, beside an extraction id that does not navigate to it", { skip }, async () => {
+  const s = await buildStatementSituation("v4cite-e", { engineId: ENGINE_ID });
+  const { out } = await driveStatement(s, { cite: (i) => s.idxForLine(i) });
+  assert.equal(out.status, "done");
+  const rows = await readStatementLines(out.receipt.statement_id);
+  const citationExtraction = rows[0].citation_extraction_id;
+  assert.ok(citationExtraction, "the premise: this line carries a citation");
+
+  // ADV-1037-02, recorded as a cell so the report cannot over-claim it again. 0291's column
+  // comment calls citation_extraction_id "which clara.document_extractions row this line's
+  // citation was read FROM"; `clara._persist_statement_core_v2` in fact stamps v_ext1 — the
+  // READER-1 extraction this same transaction created — unconditionally, and a producer cannot
+  // influence it. The regions a v4 citation is read from belong to the OCR extraction, which is
+  // a different row. So the stored trio is not re-walkable: the locator is COPIED, not linked.
+  assert.notEqual(citationExtraction, s.ocrId, "the stamped extraction is NOT the OCR extraction the region came from");
+  assert.equal(citationExtraction, out.receipt.reader1_extraction_id, "it is the reader-1 row this transaction banked");
+  const walked = await fx.rootQuery(
+    "select count(*)::int as n from clara.document_regions where extraction_id = $1", [citationExtraction]);
+  assert.equal(walked.rows[0].n, 0,
+    "…and it carries no regions at all, so no stored column navigates from the line back to clara.document_regions");
+  const owning = await fx.rootQuery(
+    "select count(*)::int as n from clara.document_regions where extraction_id = $1", [s.ocrId]);
+  assert.equal(owning.rows[0].n, s.regionIds.length, "the regions live on the OCR extraction, which the line does not name");
+
+  // What IS true, and is the whole of what the Matching tab needs: the stored region is the
+  // document_regions locator itself, byte for byte, so the viewer's polygon layer renders the
+  // patch the reader named even though nothing can re-walk the link.
+  assert.deepEqual(rows[0].citation_region, await readRegionLocator(s.regionIds[0]));
 });
 
 test(`META: the statement-witness citation estate is present (${READY ? "live" : "ABSENT"})`, () => {

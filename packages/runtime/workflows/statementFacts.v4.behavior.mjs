@@ -75,6 +75,7 @@ import {
 import {
   attachStatementLineCitations,
   readStatementWitnessRegionCitations,
+  renderedRegionIndexes,
 } from "./statementFacts.v4.citations.mjs";
 import {
   classifyStatementWitnessFailure,
@@ -238,6 +239,12 @@ async function withStatementTerminalSettle(services, withRuntime, taskId, run) {
  * Copying v2's reader to keep one round trip would put the numbering the PROMPT shows and the
  * numbering the WRITER resolves against in two places, which is the one drift the estate's single
  * region numbering exists to prevent.
+ *
+ * AND THE PROMPT IS BUILT BEFORE THE LOOKUP IS READ, which is the ADV-1037-01 fix rather than a
+ * tidy-up: the lookup is scoped to the region indexes the prompt ACTUALLY PRINTED, and the
+ * builder's 60,000-char budget means "printed" is not "in the extraction". Both still happen
+ * before the paid model call and inside the same `withRuntime` window as the numbering, so the
+ * memoization property above is unchanged.
  */
 export async function runStatementWitnessTextRead(services, withRuntime, taskId, doc) {
   const promptHash = statementWitnessPromptHash("text");
@@ -252,10 +259,17 @@ export async function runStatementWitnessTextRead(services, withRuntime, taskId,
     if (regions.length === 0) {
       throw statementWitnessWait(`statement witness task ${taskId}'s pinned OCR extraction carries no regions`);
     }
-    // Read BEFORE the paid call, so a replay never re-reads the numbering and a numbering that
-    // moved afterwards can never re-point a line at a different patch of the page.
-    const citations = await withRuntime((client) => readStatementWitnessRegionCitations(client, pinned.id));
+    // Built FIRST, because what the reader may cite is what the reader was shown: the builder
+    // stops at its own budget and `renderedRegionIndexes` reads that decision back off the
+    // prompt. Read BEFORE the paid call either way, so a replay never re-reads the numbering and
+    // a numbering that moved afterwards can never re-point a line at a different patch of the
+    // page.
     const built = buildStatementWitnessTextPrompt({ regions });
+    const citations = await withRuntime((client) => readStatementWitnessRegionCitations(client, {
+      extractionId: pinned.id,
+      firmId: doc.firm_id,
+      shownIdxs: renderedRegionIndexes(built.prompt, regions),
+    }));
     const out = await withMeteredStatementChannel(services, withRuntime, taskId, doc, "text", promptHash, async () =>
       services.callStatementWitnessModel({
         channel: "text",

@@ -1522,11 +1522,11 @@
       "deployed": true
     },
     "packages/runtime/workflows/statementFacts.v4.behavior.mjs": {
-      "sha256": "4d7373dde60c3c36c6ad62c86df95bf08f48dd684df106e2194d0c6be1d700e1",
+      "sha256": "57288d8d4aab6c479bc8a1a8a223175a13e264343b2b32c2908f8f0d1ebd65ac",
       "note": ""
     },
     "packages/runtime/workflows/statementFacts.v4.citations.mjs": {
-      "sha256": "cde50accd520e2e3661145d97dfe73a1e7185228ad04e004ad2656e725414c48",
+      "sha256": "ff76e52ca07f93021ec1e101a25e56f4a7e44eef2321190a8b6a7dd53409ccef",
       "note": ""
     },
     "packages/runtime/workflows/statementFacts.v4.impl.ts": {
