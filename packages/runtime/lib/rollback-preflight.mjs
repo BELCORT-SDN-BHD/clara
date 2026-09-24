@@ -351,6 +351,17 @@ export const DOCUMENT_LANE_CLASSES = Object.freeze({
   statement_facts: "statementFacts",
   statement_parse: "statementFacts",
   llm_witness: "witnessFacts",
+  // RIDERS WAVE 4 — the two lanes #926's owner ruling (2026-09-18, option G) reopened.
+  // `payroll_facts` (#945 / 0296) and `contract_facts` (#948 / 0299) are in
+  // `ck_processing_task_lane_f_a1` and in reconciler-documents.mjs's `enqueueForLane` allowlist,
+  // which this map claims in its own cell to mirror EXACTLY — and both were missed here. The
+  // consequence is not a safety hole (an unmapped lane falls into the fail-closed `known:false`
+  // bucket) but a wrong answer: a live payroll or contract task would read to a rollback
+  // preflight as a lane this image has never heard of, refusing a rollback it should have
+  // allowed and saying nothing useful about why. Class names are the registry's own
+  // (`workflowPins.payrollFacts` / `.agreementFacts`), never re-spelled.
+  payroll_facts: "payrollFacts",
+  contract_facts: "agreementFacts",
 });
 
 /** Lanes that ride a CONSUMER LOOP rather than a workflow: `classify` has its own leader loop and

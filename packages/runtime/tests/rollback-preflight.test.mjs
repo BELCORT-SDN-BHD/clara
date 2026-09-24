@@ -263,6 +263,9 @@ test("637.pf: B3 — the kind/lane -> class maps cover every kind that has a wor
   assert.equal(DOCUMENT_LANE_CLASSES.statement_facts, "statementFacts");
   assert.equal(DOCUMENT_LANE_CLASSES.statement_parse, "statementFacts");
   assert.equal(DOCUMENT_LANE_CLASSES.llm_witness, "witnessFacts");
+  // Riders wave 4: the two lanes #945/0296 and #948/0299 opened, on the same footing.
+  assert.equal(DOCUMENT_LANE_CLASSES.payroll_facts, "payrollFacts");
+  assert.equal(DOCUMENT_LANE_CLASSES.contract_facts, "agreementFacts");
   // …and the two lanes that ride a consumer LOOP rather than a workflow are named, not omitted:
   // omitting them would make them look like unknown lanes and refuse every rollback forever.
   assert.equal(DOCUMENT_LANES_WITHOUT_WORKFLOW.has("classify"), true);
@@ -1085,7 +1088,17 @@ test("637.pf: the frontier is READ from clara.schema_migrations when the caller 
   // and that door is granted to clara_runtime alone.
   const version = await readMigrationFrontier(query);
   assert.match(String(version), /^\d{4}_/, `this rig's frontier is unreadable: ${JSON.stringify(version)}`);
-  const out = await preflight({ query, supported: ["claraWork_v3"] });
+  // THE CONTRACTS ROSTER IS PASSED, and #1035 is why. This cell is about the FRONTIER READ, and
+  // it says so: "the violations for THIS roster are empty". Until #1035 the rule table carried
+  // BODY rules only, so a caller that declared no contracts still satisfied every rule and the
+  // roster could be left implicit. #1035 added CONTRACT rules (0254's committed ceiling refusal,
+  // 0279's parked depreciation run), and `preflight` defaults `contracts` to `[]` — so an
+  // implicit roster now declares an image that understands NOTHING and collects two contract
+  // violations that have nothing to do with the frontier read. The production caller
+  // (scripts/rollback-preflight.mjs:270) passes the TARGET's own contracts; this image's own are
+  // RUNTIME_CONTRACT_IDS, the exact roster the #1035 cell below proves satisfies every rule.
+  const contracts = [...RUNTIME_CONTRACT_IDS];
+  const out = await preflight({ query, supported: ["claraWork_v3"], contracts });
   assert.equal(out.frontier.version, version, "preflight read the SAME frontier, without being told");
   assert.equal(out.frontier.measured, true);
   // On a rig at or past 0195 the rule is in force and a claraWork_v3-carrying target satisfies it;
@@ -1093,7 +1106,7 @@ test("637.pf: the frontier is READ from clara.schema_migrations when the caller 
   // rather than assumed, so the cell means something on both sides of the frontier.
   assert.deepEqual(out.frontier.violations, []);
   if (migrationOrdinal(version) >= 195) {
-    const missing = await preflight({ query, supported: ["claraWork_v2"] });
+    const missing = await preflight({ query, supported: ["claraWork_v2"], contracts });
     assert.ok(missing.reasons.includes("frontier_requires_body"),
       `this rig is at ${version}; a target without claraWork_v3 must refuse (got ${JSON.stringify(missing.reasons)})`);
   }
