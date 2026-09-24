@@ -237,3 +237,60 @@ export async function signAuthorityCompat(humanQuery, sub, { client, authority, 
     + "p_authority_ref => $4::jsonb) as r",
     [client, authority, opKey, JSON.stringify(r)])).rows[0].r;
 }
+
+/** THE UPGRADE-DRILL TWIN OF `backdateAuthorityFloor` (#1041): the floor a MIGRATION stamped on
+ *  an authority that was signed before the column existed.
+ *
+ *  WHY A SECOND SITE. `liveAuthority()` (x41-fa-world.mjs:259-277) back-dates at SIGN time, guarded
+ *  by `signTakesAuthorityRef()`, so every x41 cell keeps measuring the depreciation ARITHMETIC
+ *  instead of the window. The Wave-D-b upgrade drills cannot do that: they sign at the 0041
+ *  frontier, where `authority_from` does not exist yet, and the column arrives LATER — 0227's
+ *  backfill (0227:346-350) stamps every already-signed authority at the first day of its signing
+ *  month, inside the very `migrate()` call the drill is measuring. The drill's authority is signed
+ *  by the rig clock, i.e. TODAY, so the apply floors it at THIS month; a period is due only once
+ *  it has ENDED; and the shared "pre-existing behaviour survives" probe then found nothing due and
+ *  failed its own mandatory setup (`closed-wave-drills` run 35957081528, job 107497574792).
+ *
+ *  WHAT A REAL UPGRADE LOOKS LIKE, and why this is a fixture defect rather than a product one. A
+ *  firm that upgrades to 0227 carries an authority signed MONTHS ago, so the backfill floors it in
+ *  the past and its sweep goes on charging. Only a book whose authority was signed in the current
+ *  month is floored out of its own arrears, and the drill's book is one purely because the rig
+ *  clock is today. So the window is restored to the first month this book actually ran — what a
+ *  genuinely pre-0227 authority would carry — and the drill goes on proving what it was written to
+ *  prove: that the apply leaves the sweep, the poster and the bank lane working.
+ *
+ *  IT ASSERTS THE BACKFILL BEFORE IT STANDS IT DOWN. Restoring the floor silently would let a
+ *  broken backfill through, so the two claims the apply actually makes are checked first: the
+ *  stamp equals 0227 D8's documented rule (`date_trunc('month', signed_at at Asia/Kuala_Lumpur)`,
+ *  spelled out here rather than read back out of `clara._fa_month_start`), and that stamp really
+ *  does sit above this book's whole depreciation history — which is WHY the oracle went quiet.
+ *
+ *  BELOW 0227 IT IS A NO-OP, detected off `information_schema` rather than off
+ *  `signTakesAuthorityRef()`: that helper is memoised per process and the drills ask it at the
+ *  PRE-apply frontier, so after the apply its answer is stale by construction. */
+export async function restoreAuthorityWindowAfterApply(client, { firstPeriodStart, label = "drill" }) {
+  const col = await rootQuery(
+    "select 1 from information_schema.columns where table_schema = 'clara' "
+    + "and table_name = 'fa_depreciation_authorities' and column_name = 'authority_from'");
+  if (col.rowCount === 0) return { windowed: false, authorityFrom: null };
+
+  const r = await rootQuery(
+    `select a.id,
+            to_char(a.authority_from, 'YYYY-MM-DD') as stamped,
+            to_char(date_trunc('month',
+              (a.signed_at at time zone 'Asia/Kuala_Lumpur')::date), 'YYYY-MM-DD') as by_rule,
+            a.authority_from > $2::date as above_the_book
+       from clara.fa_depreciation_authorities a
+      where a.client_id = $1 and a.status = 'live'`, [client, firstPeriodStart]);
+  assert.equal(r.rowCount, 1,
+    `[${label}] the pre-apply authority is still the ONE live authority after the apply`);
+  const au = r.rows[0];
+  assert.equal(au.stamped, au.by_rule,
+    `[${label}] the apply stamped the pre-existing authority's window at the first day of its `
+    + `SIGNING month (#651 [0227] D8) — got ${au.stamped}, the rule says ${au.by_rule}`);
+  assert.equal(au.above_the_book, true,
+    `[${label}] …and that window (${au.stamped}) sits above this book's whole depreciation `
+    + `history, which starts ${firstPeriodStart} — the reason the due oracle went quiet`);
+  await backdateAuthorityFloor(au.id, firstPeriodStart);
+  return { windowed: true, authorityFrom: au.stamped };
+}

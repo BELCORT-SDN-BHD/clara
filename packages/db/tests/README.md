@@ -207,6 +207,23 @@ body would ask the subject under test what it should be).
 `fa-rig-frontier-compat.test.mjs` cross-checks the second against the live door from the other
 side.
 
+**And a fixture premise a MIGRATION can move (#1041).** `restoreAuthorityWindowAfterApply()`, in
+the same module, is the upgrade-drill twin of `backdateAuthorityFloor()`. 0227 D8 stamps
+`authority_from` on a depreciation authority at the first day of its SIGNING month and freezes it,
+and a period is due only once it has ENDED — so a rig that signs by the clock is floored out of its
+own arrears and the due oracle answers `period_not_ended`. Every x41 cell avoids that by
+back-dating at sign time (`liveAuthority()`), but the Wave-D-b drills cannot: they sign at the 0041
+frontier, where the column does not exist yet, and 0227's backfill stamps the row inside the very
+`migrate()` call the drill is measuring. That is what turned `closed-wave-drills` red at its last
+drill on dispatch 35957081528. A REAL firm upgrading to 0227 carries an authority signed months
+ago, so its sweep is untouched; only a book signed in the current month is floored, and the drill's
+book is one purely because of the rig clock. The helper therefore asserts the backfill first — the
+stamp equals the documented rule, and it really does sit above this book's whole depreciation
+history — and only then restores the floor a genuinely pre-0227 authority would carry. It detects
+the frontier off `information_schema` rather than off `signTakesAuthorityRef()`, which is memoised
+per process and is asked at the PRE-apply frontier, so after an apply its answer is stale by
+construction.
+
 A DELIBERATE DEVIATION FROM #1041'S OWN BRIEF, recorded so the brief is not later read as what
 shipped (review SPEC-1041-A). The brief asked for "their gate module, or a premise check of the
 same shape" for the `change_class` grammar cells. Both of those let a cell STAND DOWN when its
