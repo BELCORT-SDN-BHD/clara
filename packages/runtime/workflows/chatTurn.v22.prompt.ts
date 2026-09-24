@@ -38,6 +38,7 @@ import {
   READ_OPENING_SOURCE_TOOL,
   READ_CLIENT_FINANCIAL_PACK_TOOL,
   REFRESH_OPENING_SOURCE_TOOL,
+  READ_PAYROLL_FACT_STATE_TOOL,
 } from "./chatTurn.v22.tools.js";
 
 // Every unchanged predecessor symbol is REACHED BY REFERENCE rather than re-spelled, so the text
@@ -307,13 +308,40 @@ export const SCHEDULES_V22_CHAT_GUIDANCE = [
   "figure the answer did not return.",
 ].join("\n");
 
+
+// --- A11 · #945's payroll read-back --------------------------------------------------------
+//
+// The paragraph as #945 wrote it. Its load-bearing clause is the last one: a figure the page does
+// not print is NOT zero, and a model that reported one as zero would be telling a professional a
+// statutory contribution was nil.
+
+export const PAYROLL_FACT_STATE_CHAT_GUIDANCE = [
+  "READING BACK A PAYROLL SUMMARY.",
+  "",
+  `When a person asks what a payroll summary says, call ${READ_PAYROLL_FACT_STATE_TOOL} and report`,
+  "ONLY what it returns. Every figure in it is either a rendering the page printed or a sum the",
+  "database computed from quoted rows — you add nothing up yourself and you never apply a",
+  "statutory rate.",
+  "",
+  "Say which figures are established, and for each one that is not, say which of the four things",
+  "happened: the two readings disagreed, the printed total contradicted the rows, a row did not",
+  "balance, or the page simply does not print it.",
+  "",
+  "A FIGURE THE PAGE DOES NOT PRINT IS NOT ZERO and must never be reported as zero — say the page",
+  "does not print it.",
+  "",
+  "The per-employee rows are not stored and you cannot report them; if you are asked for one, say",
+  "the document was read for its run totals and the employee detail was not kept.",
+].join("\n");
+
 export const SYSTEM_PROMPT_V22 =
   `${SYSTEM_PROMPT_V21}\n\n${OPENING_SOURCE_CHAT_GUIDANCE}\n\n${CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`
   + `\n\n${TRADE_INVOICE_V22_CHAT_GUIDANCE}`
   + `\n\n${OPENING_REFRESH_CHAT_GUIDANCE}`
   + `\n\n${CLAIM_ALLOCATIONS_V22_CHAT_GUIDANCE}`
   + `\n\n${ACCRUAL_V22_CHAT_GUIDANCE}`
-  + `\n\n${SCHEDULES_V22_CHAT_GUIDANCE}`;
+  + `\n\n${SCHEDULES_V22_CHAT_GUIDANCE}`
+  + `\n\n${PAYROLL_FACT_STATE_CHAT_GUIDANCE}`;
 
 // --- the promotions -----------------------------------------------------------------------
 

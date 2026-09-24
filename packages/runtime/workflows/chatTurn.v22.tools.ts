@@ -75,6 +75,14 @@ import {
   type RevenueRecognitionPart,
   type StartRevenueRecognitionWorkInput,
 } from "../lib/revenue-recognition-basis.js";
+import {
+  PAYROLL_EXTRACT_MAX_CHARS,
+  payrollFactStateFromExtract,
+  payrollNotReadMessage,
+  payrollReadRefusal,
+  type PayrollFactState,
+  type PayrollRegion,
+} from "../lib/payroll-fact-state.js";
 
 export { START_TRADE_INVOICE_WORK_TOOL, startTradeInvoiceWorkInputSchemaV2, TRADE_INVOICE_REFUSALS_V2 };
 export { START_STAFF_EXPENSE_CLAIM_WORK_TOOL, startStaffExpenseClaimWorkInputSchemaV2 };
@@ -818,7 +826,7 @@ export function tradeInvoiceRefusalFromErrorV22(error: unknown, internalMessage:
     code: refused.code,
     reason: refused.reason,
     fix: refused.fix,
-    message: known ? TRADE_INVOICE_REFUSALS_V2[reason as string] : refused.message,
+    message: known ? (TRADE_INVOICE_REFUSALS_V2[reason as string] ?? refused.message) : refused.message,
     details: refused.details,
   };
 }
@@ -855,7 +863,9 @@ export async function runStartTradeInvoiceWorkV22(
       code: "CLR10",
       reason: local.reason,
       fix: null,
-      message: TRADE_INVOICE_REFUSALS_V2[local.reason as string],
+      // `localTradeInvoiceRefusal` only ever answers a token this map carries; the fallback
+      // is the type system asking for one, not a case a reader should expect to see.
+      message: TRADE_INVOICE_REFUSALS_V2[local.reason as string] ?? "That trade invoice could not be recorded.",
       details,
     };
   }
@@ -1597,6 +1607,139 @@ export async function runStartRevenueRecognitionWork(
   }
 }
 
+
+// =============================================================================================
+// `read_payroll_fact_state` — ROSTER ENTRY A11 (#945).
+//
+// CLASS A RATHER THAN CLASS C, AND THE DIFFERENCE IS A MEASUREMENT. The four payroll and tenancy
+// contracts of #946-#949 were deferred because their doors are `clara_authenticated`-only. This
+// one reaches `clara.get_document_extract`, which carries `clara_agent_ro` as well, so `readScoped`
+// can execute it — measured on the lane database at this cut, not transcribed.
+//
+// EVERY FIGURE IS BANKED, NOT RECOMPUTED. The reader wrote `payroll_state` into the extraction's
+// own envelope; this tool parses it out and hands it over. It adds nothing up and applies no
+// statutory rate, and a figure the state left null stays null — `Number(null)` is 0, and that
+// coercion is the exact defect the stanza forbids in words.
+// =============================================================================================
+
+/** The tool name, as the model sees it and as every census counts it. */
+export const READ_PAYROLL_FACT_STATE_TOOL = "read_payroll_fact_state";
+
+export const readPayrollFactStateInputSchema = z
+  .object({
+    client_id: z
+      .string()
+      .uuid()
+      .describe("The client this conversation is about. It must be that client and no other."),
+    document_id: z
+      .string()
+      .uuid()
+      .describe("The payroll summary document to read back. Never a figure and never an employee."),
+  })
+  .strict();
+
+export type ReadPayrollFactStateInput = z.infer<typeof readPayrollFactStateInputSchema>;
+
+export type ReadPayrollFactStateResult =
+  | {
+      ok: true;
+      status: "read";
+      client_id: string;
+      document_id: string;
+      state: PayrollFactState;
+      regions: PayrollRegion[];
+    }
+  | ToolRefusalV22;
+
+/** The document's own reading status, for the `payroll_not_read` sentence. It NAMES the status
+ *  rather than guessing, and a read that cannot answer leaves it null rather than inventing one. */
+async function documentReadingStatus(c: PgExec, documentId: string, clientId: string): Promise<string | null> {
+  try {
+    const r = await c.query("select clara.get_document_state($1::uuid, $2::uuid) as s", [documentId, clientId]);
+    const state = (r.rows[0]?.s ?? null) as Record<string, unknown> | null;
+    const status = state?.status ?? state?.state;
+    return status == null ? null : String(status);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read a payroll summary's banked fact state back.
+ *
+ * TWO WALLS AND THEN THE DOOR: the conversation is about a client at all, and the client the model
+ * named IS that client (v21's provenance wall). The firm scope, the role floor and the not-found
+ * masking are `clara.get_document_extract`'s own, and this module adds none of its own.
+ */
+export async function runReadPayrollFactState(
+  ctx: ToolCtx,
+  input: ReadPayrollFactStateInput,
+): Promise<ReadPayrollFactStateResult> {
+  if (!ctx.clientId) {
+    return noClientRefusalV22(
+      "payroll_fact_state_needs_client_pin",
+      "This conversation is not bound to a client, so there is no payroll summary of theirs to read.",
+    );
+  }
+  if (input.client_id !== ctx.clientId) {
+    return {
+      ok: false,
+      code: "CLR03",
+      reason: "client_not_in_conversation",
+      fix: "Open this conversation from the client whose payroll summary you mean, then ask again.",
+      message: "That is not the client this conversation is about, so I will not read their payroll summary here.",
+      details: { client_id: input.client_id },
+    };
+  }
+  const clientId = ctx.clientId;
+  try {
+    return await readScoped(ctx, async (c: PgExec) => {
+      // THE DOOR IS SPELLED HERE, LITERALLY, rather than interpolated from the carrier's constant:
+      // a source pin that reads an identifier proves nothing about the statement that ships, and
+      // this file is the one a reviewer greps for the verb it calls.
+      const r = await c.query(
+        "select clara.get_document_extract($1::uuid, $2::uuid, $3::int) as extract",
+        [input.document_id, clientId, PAYROLL_EXTRACT_MAX_CHARS],
+      );
+      const extract = (r.rows[0]?.extract ?? null) as unknown;
+      const parsed = payrollFactStateFromExtract(extract);
+      if (!parsed.ok) {
+        const status = await documentReadingStatus(c, input.document_id, clientId);
+        return {
+          ok: false as const,
+          code: "CLR11",
+          reason: "payroll_not_read",
+          fix: "The reading runs on its own; ask again once it has finished, or ask a person to look at the document page.",
+          message: payrollNotReadMessage(status),
+          details: status === null ? {} : { reading_status: status },
+        };
+      }
+      return {
+        ok: true as const,
+        status: "read" as const,
+        client_id: clientId,
+        document_id: input.document_id,
+        state: parsed.state,
+        regions: parsed.regions,
+      };
+    });
+  } catch (error) {
+    const refused = authoringRefusal(error as DbErrorV22);
+    if (refused.ok !== false || !isGovernedRefusalV22(refused.code)) {
+      return internalFaultV22("That payroll summary could not be read.");
+    }
+    const mapped = payrollReadRefusal(String(refused.code), refused.reason);
+    return {
+      ok: false,
+      code: mapped.code,
+      reason: mapped.reason,
+      fix: refused.fix,
+      message: mapped.message,
+      details: refused.details,
+    };
+  }
+}
+
 export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
   return Object.assign({}, buildToolsV21(ctx, modelId, segment), {
     // A1 + A2 — the SAME NAME v21 serves, REPLACED rather than added. `Object.assign` takes the
@@ -1633,6 +1776,17 @@ export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
         + "zero — an empty cash figure means nobody has said which accounts are cash yet.",
       inputSchema: readClientFinancialPackInputSchema,
       execute: (input: ReadClientFinancialPackInput) => runReadClientFinancialPack(ctx, input),
+    }),
+    [READ_PAYROLL_FACT_STATE_TOOL]: tool({
+      description:
+        "Read back what a PAYROLL SUMMARY document says, as the reader banked it: the run totals "
+        + "it established, the ones two readings disagreed about, and the ones the page simply "
+        + "does not print. Report ONLY what comes back. Every figure is either a rendering the "
+        + "page printed or a sum the database computed from quoted rows — you add nothing up and "
+        + "you never apply a statutory rate. A FIGURE THE PAGE DOES NOT PRINT IS NOT ZERO: say the "
+        + "page does not print it. The per-employee rows are not stored and you cannot report one.",
+      inputSchema: readPayrollFactStateInputSchema,
+      execute: (input: ReadPayrollFactStateInput) => runReadPayrollFactState(ctx, input),
     }),
     [START_PREPAYMENT_SCHEDULE_WORK_TOOL]: tool({
       description:

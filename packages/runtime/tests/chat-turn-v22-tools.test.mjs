@@ -339,7 +339,8 @@ test("v22.roster: v22 is v21's tool set plus EXACTLY read_opening_source and rea
   // `read_client_financial_pack`.
   assert.deepEqual(v22.filter((n) => !v21.includes(n)),
     ["read_client_financial_pack", "read_opening_source", "refresh_opening_source",
-     "start_prepayment_schedule_work", "start_revenue_recognition_work"]);
+     "read_payroll_fact_state", "start_prepayment_schedule_work",
+     "start_revenue_recognition_work"].sort());
   assert.deepEqual(v21.filter((n) => !v22.includes(n)), [], "nothing v21 could do stops being possible");
   // AND THE REPLACEMENTS ARE NAMED. A tool v21 already serves can be REPLACED under the same name
   // (#982/#1007 on the trade invoice), which a set difference cannot see: `Object.assign` takes the
@@ -350,7 +351,7 @@ test("v22.roster: v22 is v21's tool set plus EXACTLY read_opening_source and rea
   // ENUMERATED RATHER THAN ASSUMED, v21's own cell's rule: the count is measured by building the
   // map, never read off a header comment.
   assert.equal(v21.length, 39, "v21's measured roster");
-  assert.equal(v22.length, 44, "v21's thirty-nine plus five");
+  assert.equal(v22.length, 45, "v21's thirty-nine plus six");
 });
 
 test("v22.roster: the contracts this cut DEFERRED are absent BY NAME, and that is a ruling", () => {
@@ -418,6 +419,7 @@ test("v22.prompt: SYSTEM_PROMPT_V22 is v21's text plus this cut's OWN stanzas, b
   assert.match(added, /ONE CLAIM MAY COME OFF SEVERAL ADVANCES/); // #931 (A5)
   assert.match(added, /ACCRUALS — TWO THINGS HAVE CHANGED/);  // #937 + #942 (A6, A7)
   assert.match(added, /SPREADING A COST OR AN INCOME/);      // #915 + #941 + D1 + D2
+  assert.match(added, /READING BACK A PAYROLL SUMMARY/);     // #945 (A11)
   // EACH TICKET APPENDS ITS OWN, and the whole added text is exactly the exported stanzas joined
   // — nothing is written inline where no cell can see it. Extend this list when a ticket of this
   // lane adds a stanza; never replace it.
@@ -429,7 +431,8 @@ test("v22.prompt: SYSTEM_PROMPT_V22 is v21's text plus this cut's OWN stanzas, b
     + `\n\n${v22Prompt.OPENING_REFRESH_CHAT_GUIDANCE}`
     + `\n\n${v22Prompt.CLAIM_ALLOCATIONS_V22_CHAT_GUIDANCE}`
     + `\n\n${v22Prompt.ACCRUAL_V22_CHAT_GUIDANCE}`
-    + `\n\n${v22Prompt.SCHEDULES_V22_CHAT_GUIDANCE}`,
+    + `\n\n${v22Prompt.SCHEDULES_V22_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.PAYROLL_FACT_STATE_CHAT_GUIDANCE}`,
     "the added text is exactly this cut's exported stanzas, in the order they were added",
   );
 });

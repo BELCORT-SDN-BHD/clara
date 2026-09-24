@@ -353,17 +353,18 @@ export function localAccrualRefusalV2(input: StartAccrualWorkInputV2): AccrualRe
   const base = Math.floor(input.amount_cents / n);
   const remainder = input.amount_cents - base * n;
   if (remainder > 0 && remainder < n) {
-    const finalDue = scheduled[scheduled.length - 1];
+    const finalDue = scheduled.length === 0 ? null : scheduled[scheduled.length - 1];
     const carriers = set.filter((line) => line.amount_cents !== base);
-    const isEvenSplit = carriers.length === 1 && carriers[0].amount_cents === base + remainder;
-    if (isEvenSplit && carriers[0].due_date !== finalDue) {
+    const carrier = carriers.length === 1 ? carriers[0] : undefined;
+    const isEvenSplit = carrier !== undefined && carrier.amount_cents === base + remainder;
+    if (finalDue !== null && isEvenSplit && carrier.due_date !== finalDue) {
       return refuseV2(
         "accrual_period_remainder_misplaced",
         "accrual.period_amounts",
         `An even split leaves ${remainder} cent${remainder === 1 ? "" : "s"}; by convention they `
         + `belong to ${finalDue}.`,
         `Move the odd ${remainder === 1 ? "cent" : "cents"} onto ${finalDue}, or state figures that are not an even split.`,
-        { remainder_cents: remainder, final_due_date: finalDue, stated_on: carriers[0].due_date },
+        { remainder_cents: remainder, final_due_date: finalDue, stated_on: carrier.due_date },
       );
     }
   }

@@ -168,7 +168,11 @@ export function claimFromInputV2(input: StartStaffExpenseClaimWorkInputV2): Reco
   }
   out.advance_allocations = lines;
   if (input.settlement === "advance_application") {
-    out.advance_id = input.advance_id ?? allocations[0].advance_id;
+    // `.min(1)` on the schema, but the TYPE is a plain array: a caller reaching this by an import
+    // path could hand it an empty one, and `undefined` is the honest answer then — the door
+    // refuses an advance application with no advance either way.
+    const first = allocations[0];
+    out.advance_id = input.advance_id ?? (first === undefined ? undefined : first.advance_id);
   }
   return out;
 }
