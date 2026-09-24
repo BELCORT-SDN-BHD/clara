@@ -982,3 +982,299 @@ comment on function clara._tenancy_lease_treatment(uuid,uuid) is
   '#949 (owner ruling 2026-09-20): the lessee accounting branch. MPERS Section 20 with level rent DRAFTS a monthly rent expense; MFRS 16 DRAFTS only for a short-term lease of 12 months or less and otherwise ASKS (right-of-use asset + lease liability); a stated escalation ASKS under both, because straight-line means the total averaged over the term. Every answer carries the written accounting basis naming both standards, the term and the rent it read, and -- where it asks -- the question the accountant answers. It measures nothing: no discount rate, no present value, no schedule. Ungranted.';
 
 reset role;
+
+set role clara_fn_owner;
+
+-- =====================================================================================
+-- §F  THE DRAFT (AC2's first half, AC3's first half), AND THE RECORD OF THE ACT THAT CONFIRMS IT.
+--
+--     THE DRAFT IS A READ. It computes the recurring plan a person would confirm and it writes
+--     NOTHING -- no plan row, no revision, no occurrence, no entry. "The plan does not start
+--     running until a person confirms it" is true HERE by construction, and §G's confirm door is
+--     the only writer in this lane.
+--
+--     THE SHAPE OF THE PLAN IT PROPOSES. `recurring_journal` (the surviving plan lane: 0282/#927
+--     closed the 0045 template doors and pointed every caller at clara.create_accounting_plan),
+--     monthly, over the tenancy's OWN term -- effective_from the first day and effective_to the
+--     last. The due day is the term's own day of month where the plan lane admits it (1..28) and
+--     `last_day_of_month` where it does not: `clara._assert_plan_schedule` refuses a day of 29,
+--     30 or 31 precisely because those days do not exist in every month, and a tenancy that
+--     starts on the 30th charges its rent at each month's end rather than on a day that is
+--     sometimes missing.
+--
+--     THE BASIS DEBITS RENT EXPENSE AND CREDITS THE RENT PAYABLE -- NEVER A BANK ACCOUNT. The
+--     brief's own reason, restated: "a plan that pays itself out of the bank account
+--     double-counts the moment the real payment arrives on the statement and is coded, once as
+--     the plan's own credit and once as the bank line's." So the money's own movement is the
+--     BANK LINE's, matched later through §H, and this plan only ever recognises the expense and
+--     the obligation.
+--
+--     ACCOUNTS ARE RESOLVED BY CODE IN THIS CLIENT'S OWN CHART, and each leg carries the NAME it
+--     resolved to (the #948 drafting-body discipline). A code the client does not hold, or holds
+--     inactive, is a NAMED refusal carrying the code -- never a silent substitution, and never an
+--     account this lane creates. The defaults are `6100 Rental of Premises` and `2050 Rent
+--     Payable`, consumed by code and name from the published standard chart; the confirm door
+--     lets the accountant name others, which is the owner ruling's own "the accountant may still
+--     choose another liability account when confirming the plan".
+--
+--     clara.contract_plan_confirmations IS THE PERSON'S ACT. It lives here, beside the draft,
+--     because the draft READS it to say whether this tenancy already has a plan. It is
+--     append-only in the strongest sense -- no UPDATE at all, ever -- because a confirmation is a
+--     historical fact about a moment, not a record anyone later amends: a changed mind is a plan
+--     revision, which is its own confirmation row. §G explains what it carries and why it is
+--     what `clara.accounting_plans.authority_ref` names.
+--
+--     REDO-SAFE: `create or replace function`, `create table if not exists`.
+-- =====================================================================================
+
+-- The bank test, in ONE place so the draft, the confirm door and any later reader cannot disagree
+-- about what "a bank account" is. TWO independent facts this database already holds: the chart
+-- row's own `is_bank_account` flag (set when an account is mapped to a registered bank account)
+-- and the client's own live registered bank accounts. Either one is enough to refuse.
+create or replace function clara._tenancy_account_is_bank(p_client uuid, p_code text)
+  returns boolean language sql stable set search_path = clara, pg_temp as $taib$
+  select exists (select 1 from clara.coa_accounts a
+                  where a.client_id = p_client and a.account_code = p_code
+                    and coalesce(a.is_bank_account,false))
+      or exists (select 1 from clara.bank_accounts ba
+                  where ba.client_id = p_client and ba.coa_account_code = p_code and ba.active);
+$taib$;
+revoke all on function clara._tenancy_account_is_bank(uuid,text) from public;
+
+comment on function clara._tenancy_account_is_bank(uuid,text) is
+  '#949 AC3: is this account code one of the client''s own bank accounts? Two independent facts -- the chart row''s is_bank_account flag and a live registered clara.bank_accounts mapping -- so a rent plan can never credit the bank by taking the one route that was not checked. Ungranted.';
+
+create table if not exists clara.contract_plan_confirmations (
+  id                     uuid        primary key default gen_random_uuid(),
+  firm_id                uuid        not null references clara.firms(id),
+  client_id              uuid        not null,
+  document_id            uuid        not null references clara.documents(id),
+  kind                   text        not null check (kind in ('rent_plan','rent_plan_revision')),
+  monthly_rent_cents     bigint      not null check (monthly_rent_cents > 0),
+  rent_account_code      text        not null check (btrim(rent_account_code) <> ''),
+  payable_account_code   text        not null check (btrim(payable_account_code) <> ''),
+  term_start             date        not null,
+  term_end               date        not null,
+  -- THE WHOLE TREATMENT THE PERSON WAS LOOKING AT, frozen at the moment they said yes. A plan
+  -- confirmed under MPERS and a plan confirmed under MFRS against a written judgement are
+  -- different acts, and a later reader must be able to tell which one this was without
+  -- re-deriving a branch whose inputs may since have moved.
+  treatment              jsonb       not null check (jsonb_typeof(treatment) = 'object'),
+  professional_judgement text        check (professional_judgement is null
+                                            or btrim(professional_judgement) <> ''),
+  confirmed_by           uuid        not null references clara.users(id),
+  confirmed_at           timestamptz not null default now(),
+  constraint fk_contract_plan_confirmations_client foreign key (client_id, firm_id)
+    references clara.clients(id, firm_id),
+  constraint ck_contract_plan_confirmations_term check (term_end >= term_start),
+  -- WHEN THE BRANCH ASKED, A JUDGEMENT IS OWED. The standing owner ruling is "beta, nothing
+  -- dark": a compliance gate PROMPTS, it never disables. So a person may still confirm a plan the
+  -- standard may not admit -- but only by writing down the treatment they are taking, and the
+  -- table refuses the row otherwise, so no code path can drop it.
+  constraint ck_contract_plan_confirmations_judgement check (
+    ((treatment->>'drafts')::boolean is true) or professional_judgement is not null)
+);
+
+comment on table clara.contract_plan_confirmations is
+  '#949 AC2: one row per act of a named person confirming a tenancy''s rent plan (or its '
+  'revision), carrying the agreement it was confirmed against, the figures and accounts '
+  'confirmed, and the whole lessee-treatment branch as it stood at that moment. It is what '
+  'clara.accounting_plans.authority_ref names for this lane -- the explicit instruction the plan '
+  'lane requires -- and its confirmed_by is NOT NULL, which is what makes its EXISTENCE proof a '
+  'person asked (the same reasoning clara.accounting_work.initiator carries, #977''s own ruling). '
+  'No UPDATE and no DELETE: a changed mind is a revision, with its own row.';
+
+create index if not exists ix_contract_plan_confirmations_document
+  on clara.contract_plan_confirmations(document_id, kind, confirmed_at desc);
+create index if not exists ix_contract_plan_confirmations_client
+  on clara.contract_plan_confirmations(client_id, confirmed_at desc);
+
+alter table clara.contract_plan_confirmations enable row level security;
+alter table clara.contract_plan_confirmations force row level security;
+drop policy if exists p_contract_plan_confirmations_owner on clara.contract_plan_confirmations;
+create policy p_contract_plan_confirmations_owner on clara.contract_plan_confirmations
+  for all to clara_fn_owner using (true) with check (true);
+drop policy if exists p_contract_plan_confirmations_human on clara.contract_plan_confirmations;
+create policy p_contract_plan_confirmations_human on clara.contract_plan_confirmations
+  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+drop policy if exists p_contract_plan_confirmations_agent on clara.contract_plan_confirmations;
+create policy p_contract_plan_confirmations_agent on clara.contract_plan_confirmations
+  for select to clara_agent_ro using (firm_id = clara.wake_firm());
+grant select on clara.contract_plan_confirmations to clara_authenticated, clara_agent_ro;
+
+create or replace function clara._tf_contract_plan_confirmation_immutable() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $tfcpci$
+begin
+  raise exception 'a plan confirmation is a record of one moment: it is never % (revise the plan instead, which is its own confirmation)', lower(tg_op)
+    using errcode='CLR08', detail='{"reason":"contract_plan_confirmation_immutable"}';
+end $tfcpci$;
+
+comment on function clara._tf_contract_plan_confirmation_immutable() is
+  '#949: clara.contract_plan_confirmations admits INSERT alone. UPDATE and DELETE are both refused outright -- a confirmation is what a named person did at a moment, and a changed mind is a revision with its own row.';
+
+drop trigger if exists t_contract_plan_confirmations_immutable on clara.contract_plan_confirmations;
+create trigger t_contract_plan_confirmations_immutable
+  before delete or update on clara.contract_plan_confirmations
+  for each row execute function clara._tf_contract_plan_confirmation_immutable();
+drop trigger if exists t_contract_plan_confirmations_no_truncate on clara.contract_plan_confirmations;
+create trigger t_contract_plan_confirmations_no_truncate
+  before truncate on clara.contract_plan_confirmations
+  for each statement execute function clara._tf_no_truncate();
+
+create or replace function clara._tenancy_rent_plan_draft(p_client uuid, p_document uuid,
+    p_rent_account text default null, p_payable_account text default null)
+  returns jsonb language plpgsql stable set search_path = clara, pg_temp as $trpd$
+declare
+  v_tr jsonb; v_rent_code text; v_pay_code text; v_rent_name text; v_pay_name text;
+  v_refusals jsonb := '[]'::jsonb; v_start date; v_end date; v_rent bigint;
+  v_day int; v_day_rule text; v_dom int; v_memo text; v_premises text; v_state jsonb;
+  v_months int; v_basis jsonb;
+begin
+  v_tr := clara._tenancy_lease_treatment(p_client, p_document);
+  v_rent_code := coalesce(nullif(btrim(coalesce(p_rent_account,'')),''), '6100');
+  v_pay_code  := coalesce(nullif(btrim(coalesce(p_payable_account,'')),''), '2050');
+
+  v_rent := nullif(v_tr->>'monthly_rent_cents','')::bigint;
+  v_start := nullif(v_tr->>'term_start','')::date;
+  v_end := nullif(v_tr->>'term_end','')::date;
+  v_months := nullif(v_tr->>'term_months','')::int;
+
+  -- THE ACCOUNTS, by code, in THIS client's own chart. Both are resolved even when the treatment
+  -- already asks, so a person is told about a missing account once rather than twice.
+  select a.name into v_rent_name from clara.coa_accounts a
+   where a.client_id = p_client and a.account_code = v_rent_code and a.is_active;
+  if v_rent_name is null then
+    v_refusals := v_refusals || jsonb_build_array(jsonb_build_object('reason','account_not_in_chart',
+      'detail', jsonb_build_object('account_code', v_rent_code, 'role', 'rent_expense')));
+  end if;
+  select a.name into v_pay_name from clara.coa_accounts a
+   where a.client_id = p_client and a.account_code = v_pay_code and a.is_active;
+  if v_pay_name is null then
+    v_refusals := v_refusals || jsonb_build_array(jsonb_build_object('reason','account_not_in_chart',
+      'detail', jsonb_build_object('account_code', v_pay_code, 'role', 'rent_payable')));
+  elsif clara._tenancy_account_is_bank(p_client, v_pay_code) then
+    -- The wall §G enforces, reported HERE too so a person sees it before they click rather than
+    -- after: a rent plan that credited the bank would double-count the real payment.
+    v_refusals := v_refusals || jsonb_build_array(jsonb_build_object('reason','plan_credits_bank_account',
+      'detail', jsonb_build_object('account_code', v_pay_code, 'account_name', v_pay_name)));
+  end if;
+
+  if (v_tr->>'drafts')::boolean is not true or jsonb_array_length(v_refusals) > 0
+     or v_rent is null or v_start is null or v_end is null then
+    return jsonb_build_object('treatment', v_tr, 'plan', null, 'refusals', v_refusals);
+  end if;
+
+  v_day := extract(day from v_start)::int;
+  if v_day between 1 and 28 then
+    v_day_rule := 'day_of_month'; v_dom := v_day;
+  else
+    v_day_rule := 'last_day_of_month'; v_dom := null;
+  end if;
+
+  select e.envelope->'contract_state' into v_state from clara.document_extractions e
+   where e.document_id = p_document and e.engine_kind = 'agreement_text_facts' and e.status = 'done'
+   order by e.version_n desc, e.extracted_at desc limit 1;
+  v_premises := nullif(btrim(coalesce(
+    v_state->'facts'->'contract.agreement.asset_description'->>'printed_raw','')),'');
+  v_memo := 'Monthly rent'
+    || case when v_premises is null then '' else ' -- ' || left(v_premises, 200) end
+    || format(' (tenancy %s to %s)', to_char(v_start,'YYYY-MM-DD'), to_char(v_end,'YYYY-MM-DD'));
+
+  v_basis := jsonb_build_object(
+    'posting_date', to_char(v_start,'YYYY-MM-DD'),
+    'memo', v_memo, 'currency', 'MYR',
+    'lines', jsonb_build_array(
+      jsonb_build_object('account_code', v_rent_code, 'debit_cents', v_rent, 'credit_cents', 0,
+        'description', v_memo),
+      jsonb_build_object('account_code', v_pay_code, 'debit_cents', 0, 'credit_cents', v_rent,
+        'description', v_memo)));
+
+  return jsonb_build_object(
+    'treatment', v_tr, 'refusals', '[]'::jsonb,
+    'plan', jsonb_build_object(
+      'kind','recurring_journal',
+      'purpose', left('Monthly rent' || case when v_premises is null then ''
+                      else ' -- ' || v_premises end, 300),
+      'frequency','monthly', 'day_rule', v_day_rule, 'day_of_month', v_dom,
+      'timezone','Asia/Kuala_Lumpur',
+      'effective_from', to_char(v_start,'YYYY-MM-DD'),
+      'effective_to', to_char(v_end,'YYYY-MM-DD'),
+      'occurrences', v_months,
+      'rent_account_code', v_rent_code, 'rent_account_name', v_rent_name,
+      'payable_account_code', v_pay_code, 'payable_account_name', v_pay_name,
+      'monthly_rent_cents', v_rent,
+      'basis', v_basis));
+end $trpd$;
+revoke all on function clara._tenancy_rent_plan_draft(uuid,uuid,text,text) from public;
+
+comment on function clara._tenancy_rent_plan_draft(uuid,uuid,text,text) is
+  '#949 AC2/AC3: the recurring rent plan a person would confirm -- monthly, over the tenancy''s own term, debiting rent expense and crediting the rent payable, NEVER a bank account. A pure read: it writes no plan, no revision, no occurrence and no entry. A missing chart account, or a payable that is really a bank account, is a NAMED refusal and no basis is drafted at all. Ungranted; reached from clara.get_tenancy_rent_plan_draft and clara.confirm_tenancy_rent_plan.';
+
+-- The live rent plan of one agreement, derived from the confirmation the plan cites as its
+-- authority. ONE place, so the draft read, the settlement read, the escalation offer and the
+-- queue cannot disagree about which plan belongs to which tenancy.
+create or replace function clara._tenancy_rent_plan(p_document uuid)
+  returns table(plan_id uuid, status text, confirmation_id uuid, client_id uuid, firm_id uuid,
+                rent_account_code text, payable_account_code text, monthly_rent_cents bigint,
+                term_start date, term_end date, confirmed_at timestamptz)
+  language sql stable set search_path = clara, pg_temp as $trp$
+  select p.id, p.status, cf.id, cf.client_id, cf.firm_id,
+         cf.rent_account_code, cf.payable_account_code, cf.monthly_rent_cents,
+         cf.term_start, cf.term_end, cf.confirmed_at
+    from clara.contract_plan_confirmations cf
+    join clara.accounting_plans p
+      on p.authority_ref->>'kind' = 'contract_confirmation'
+     and nullif(p.authority_ref->>'id','')::uuid = cf.id
+   where cf.document_id = p_document and cf.kind = 'rent_plan' and p.status <> 'ended'
+   order by cf.confirmed_at desc
+   limit 1;
+$trp$;
+revoke all on function clara._tenancy_rent_plan(uuid) from public;
+
+comment on function clara._tenancy_rent_plan(uuid) is
+  '#949: the live (active or paused) rent plan of one tenancy, resolved through the confirmation the plan cites as its authority -- the ONE join between an agreement and its plan, so the draft read, the settlement read, the escalation offer and the queue cannot disagree. Ungranted.';
+
+create or replace function clara.get_tenancy_rent_plan_draft(p_document uuid)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp
+  as $gtrpd$
+declare c record; v_client uuid; v_state jsonb; v_draft jsonb; v_plan record;
+begin
+  c := clara._human_ctx(clara.role_rank('viewer'));
+  select f.client_id into v_client from clara.document_filings f
+   where f.document_id = p_document and f.firm_id = c.firm and f.retired_at is null
+   order by f.filed_at desc limit 1;
+  if v_client is null then
+    raise exception 'document % is not a live filing in your firm', p_document using errcode='CLR11';
+  end if;
+
+  select e.envelope->'contract_state' into v_state from clara.document_extractions e
+   where e.document_id = p_document and e.engine_kind = 'agreement_text_facts' and e.status = 'done'
+   order by e.version_n desc, e.extracted_at desc limit 1;
+  if (v_state->>'agreement_class') is distinct from 'tenancy' then
+    return jsonb_build_object('document_id', p_document, 'client_id', v_client,
+      'agreement_class', v_state->>'agreement_class',
+      'treatment', null, 'plan', null,
+      'refusals', jsonb_build_array(jsonb_build_object('reason','not_a_tenancy',
+        'detail', jsonb_build_object('agreement_class', v_state->>'agreement_class'))),
+      'confirmed', false, 'plan_id', null, 'inert', true);
+  end if;
+
+  v_draft := clara._tenancy_rent_plan_draft(v_client, p_document);
+  select * into v_plan from clara._tenancy_rent_plan(p_document);
+
+  return jsonb_build_object('document_id', p_document, 'client_id', v_client,
+    'agreement_class', 'tenancy',
+    'treatment', v_draft->'treatment', 'plan', v_draft->'plan',
+    'refusals', v_draft->'refusals',
+    'confirmed', v_plan.plan_id is not null,
+    'plan_id', v_plan.plan_id, 'plan_status', v_plan.status,
+    'inert', v_plan.plan_id is null);
+end $gtrpd$;
+
+comment on function clara.get_tenancy_rent_plan_draft(uuid) is
+  '#949 AC2: the rent plan this tenancy would run, with the lessee-treatment branch that decided whether Clara may draft it at all, and whether a person has already confirmed one. Derived entirely from live state; writes nothing. viewer+, clara_authenticated only.';
+
+revoke all on function clara.get_tenancy_rent_plan_draft(uuid) from public;
+grant execute on function clara.get_tenancy_rent_plan_draft(uuid) to clara_authenticated;
+
+reset role;

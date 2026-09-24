@@ -248,6 +248,11 @@ const regionIdFor = async (documentId, fieldPath) =>
     )
   ).rows[0]?.id ?? null;
 
+async function freshBank(sub, client) {
+  const acct = await addBankAccount(sub, { client, coaAccountCode: BANKCOA, accountNumber: `9490${Date.now()}` });
+  return acct.bank_account_id ?? acct.id;
+}
+
 async function caught(fn) {
   try {
     await fn();
@@ -717,4 +722,134 @@ test("S3 · a tenancy whose terms were never recorded drafts nothing, and says w
   assert.equal(tr.drafts, false);
   assert.equal(tr.reason, "terms_incomplete");
   assert.deepEqual(tr.missing_terms.sort(), ["monthly_rent", "term_end", "term_start"]);
+});
+
+// ---------------------------------------------------------------------------
+// S4 — the draft (AC2's first half, AC3's first half). Inert by construction.
+// ---------------------------------------------------------------------------
+
+const draftOf = async (sub, document) => {
+  const r = await humanQuery(sub, namedCall("get_tenancy_rent_plan_draft", [{ name: "p_document" }]), [document]);
+  return r.rows[0].result;
+};
+
+const countsFor = async (client) =>
+  (
+    await rootQuery(
+      `select (select count(*)::int from clara.journal_entries where client_id=$1) as entries,
+              (select count(*)::int from clara.accounting_plans where client_id=$1) as plans,
+              (select count(*)::int from clara.accounting_plan_occurrences where client_id=$1) as occurrences`,
+      [client],
+    )
+  ).rows[0];
+
+const legOf = (basis, code) => (basis?.lines ?? []).find((l) => l.account_code === code) ?? null;
+
+test("S4 · the draft debits rent expense and credits the rent payable, monthly over the agreement's own term", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+
+  const draft = await draftOf(sub, doc.documentId);
+  assert.equal(draft.treatment.drafts, true, `the branch admits this one: ${JSON.stringify(draft.treatment.reason)}`);
+  assert.deepEqual(draft.refusals, [], "no chart account is missing");
+  assert.equal(draft.confirmed, false, "a draft is not a plan");
+  assert.equal(draft.plan_id, null);
+
+  const p = draft.plan;
+  assert.equal(p.kind, "recurring_journal");
+  assert.equal(p.frequency, "monthly");
+  assert.equal(p.day_rule, "day_of_month");
+  assert.equal(p.day_of_month, 5, "the 5th, because the term starts on the 5th");
+  assert.equal(p.timezone, "Asia/Kuala_Lumpur");
+  assert.equal(p.effective_from, TERM_START);
+  assert.equal(p.effective_to, TERM_END, "the plan stops on the tenancy's own last day");
+  assert.equal(p.occurrences, 24, "24 months of rent, one per month of the term");
+
+  const debit = legOf(p.basis, RENT_ACCOUNT);
+  const credit = legOf(p.basis, PAYABLE_ACCOUNT);
+  assert.ok(debit && credit, `two legs, by code: ${JSON.stringify(p.basis.lines)}`);
+  assert.equal(Number(debit.debit_cents), RENT_CENTS, "the rent the tenancy prints, to the cent");
+  assert.equal(Number(credit.credit_cents), RENT_CENTS);
+  assert.equal(Number(debit.credit_cents), 0);
+  assert.equal(Number(credit.debit_cents), 0);
+  assert.equal(p.rent_account_name, "Rental of Premises", "each leg names the account it resolved to");
+  assert.equal(p.payable_account_name, "Rent Payable");
+  assert.equal(p.basis.currency, "MYR");
+});
+
+test("S4 · the draft is INERT: reading it twice leaves no entry, no plan and no occurrence", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+
+  const before = await countsFor(client);
+  await draftOf(sub, doc.documentId);
+  await draftOf(sub, doc.documentId);
+  const after = await countsFor(client);
+
+  assert.deepEqual(after, before, "an unconfirmed draft posts NOTHING — it is a read, not an act");
+  assert.equal(after.entries, 0, "…and there was nothing to post in the first place");
+  assert.equal(after.plans, 0);
+});
+
+test("S4 · the draft never credits a bank account, and says which account is the money's own", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  await freshBank(sub, client);
+
+  const draft = await draftOf(sub, doc.documentId);
+  const bankCodes = (
+    await rootQuery(
+      `select a.account_code from clara.coa_accounts a
+        where a.client_id=$1 and (a.is_bank_account or a.account_code in
+          (select ba.coa_account_code from clara.bank_accounts ba where ba.client_id=$1 and ba.active))`,
+      [client],
+    )
+  ).rows.map((r) => r.account_code);
+  assert.ok(bankCodes.includes(BANKCOA), "mandatory setup: the client has a registered bank account on this code");
+
+  for (const line of draft.plan.basis.lines) {
+    assert.equal(
+      bankCodes.includes(line.account_code) && Number(line.credit_cents) > 0,
+      false,
+      `no leg of the drafted basis credits a bank account: ${JSON.stringify(line)}`,
+    );
+  }
+  assert.equal(legOf(draft.plan.basis, BANKCOA), null, "the bank is nowhere in the drafted basis at all");
+});
+
+test("S4 · a chart account this client does not hold is a NAMED refusal carrying the code, never a silent substitution", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const client = await freshClient(sub);
+  // Deliberately seed only the rent expense; 2050 Rent Payable is absent from this client's chart.
+  await upsertAccount(sub, { client, code: RENT_ACCOUNT, name: "Rental of Premises", type: "expense", opKey: opk949("coa") });
+  await setFramework(sub, client, "MPERS");
+  const doc = await readTenancy(sub, client);
+  await recordProposed(sub, client, doc.documentId);
+
+  const draft = await draftOf(sub, doc.documentId);
+  assert.equal(draft.plan, null, "no basis is drafted when an account it needs is missing");
+  const refusal = draft.refusals.find((r) => r.reason === "account_not_in_chart");
+  assert.ok(refusal, `a named refusal: ${JSON.stringify(draft.refusals)}`);
+  assert.equal(refusal.detail.account_code, PAYABLE_ACCOUNT, "…carrying the code the client does not hold");
+});
+
+test("S4 · a draft whose treatment ASKS carries the question and drafts no basis", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MFRS" });
+  await recordProposed(sub, client, doc.documentId);
+
+  const draft = await draftOf(sub, doc.documentId);
+  assert.equal(draft.treatment.drafts, false);
+  assert.equal(draft.treatment.reason, "mfrs_lease_over_twelve_months");
+  assert.equal(draft.plan, null, "Clara drafts nothing when the standard may not admit the treatment");
+  assert.match(draft.treatment.question, /right-of-use asset/i, "…and the question is what a person reads instead");
+  assert.equal(Number(draft.treatment.monthly_rent_cents), RENT_CENTS, "…beside the rent she DID read");
 });
