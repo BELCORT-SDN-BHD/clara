@@ -56,8 +56,14 @@ const FN_ACL = "{clara_fn_owner=X/clara_fn_owner}";
  *  half of 0283's own prestate. This file's own outside-in re-proof that the migration's text
  *  produced exactly these bodies, never transcribed from the migration's own header. */
 const RECUT = [
+  // MOVED BY A LATER MIGRATION, and the pin follows the LIVE body rather than 0283's own.
+  // `0308_deferred_revenue_recognition.sql` (#941) recuts this door to admit the new
+  // `revenue_recognition_schedule` plan kind, and names 99f60787… as its own pre-image (0308 §0's
+  // `v_recut` table). 0283's two assertions below — the client rung above any plan row lock, and
+  // the advisory called with the plan's own id — are re-proved against the NEW body by the same
+  // loop, which is the point of pinning the text rather than the migration number.
   { fn: "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)",
-    sha: "99f6078775c07440122cde4f180c2f2f11aea7fcd5f0504cb6ffe6c8776cb424" },
+    sha: "c8e990986a06b132e3dad40e47225968562336b48ad6c01a4a09104784c09188" },
   { fn: "clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)",
     sha: "8a6e69efac967592592bf3e8d08683145e5b43456a63fe673788337349382886" },
   { fn: "clara._accrual_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,int,text,date,date,jsonb)",
