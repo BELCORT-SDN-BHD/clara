@@ -147,7 +147,20 @@ begin
     end if;
     select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
       from pg_proc p where p.oid = v_keep[v_i][1]::regprocedure;
-    if v_sha is distinct from v_keep[v_i][2] then
+    if v_sha is distinct from v_keep[v_i][2]
+      -- RIDERS WAVE 4 INTEGRATION. BIMODAL for the bodies lane 01's 0300_tenancy_terms_rent_plan.sql
+      -- ALSO moves: 0300 splices clara.create_accounting_plan's authority-kind wall and
+      -- clara._authority_ref_refusal's arm list to admit a THIRD authority_ref kind
+      -- (contract_confirmation), and on the integrated chain 0300 applies BEFORE this file. This
+      -- lane measured its pins on a rig that carried no 0300, so the pin below is right on that
+      -- rig and wrong on the chain. It is therefore admitted at EITHER value. Nothing else is
+      -- loosened: every other pin in this array stays exact. Precedent: wave 3's 0284.
+       and v_sha is distinct from (case v_keep[v_i][1]
+            when 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)'
+              then 'f9b19cf61ba2c1728b4c4ccc5d02e997b9a882779db4925cd1d267e92a669e63'
+            when 'clara._authority_ref_refusal(text,uuid,uuid,uuid)'
+              then '55c20b2008d51cc58cd4dc29b3f434965ead8450a846a73eb9f01f62d53cc208'
+            else null end) then
       raise exception '#915 prestate: % has MOVED (got %) -- the extracted core calls it verbatim; re-measure this file against it before applying',
         v_keep[v_i][1], v_sha using errcode='CLR10';
     end if;
@@ -1340,7 +1353,20 @@ begin
   for v_n in 1 .. array_length(v_keep, 1) loop
     select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
       from pg_proc p where p.oid = v_keep[v_n][1]::regprocedure;
-    if v_sha is distinct from v_keep[v_n][2] then
+    if v_sha is distinct from v_keep[v_n][2]
+      -- RIDERS WAVE 4 INTEGRATION. BIMODAL for the bodies lane 01's 0300_tenancy_terms_rent_plan.sql
+      -- ALSO moves: 0300 splices clara.create_accounting_plan's authority-kind wall and
+      -- clara._authority_ref_refusal's arm list to admit a THIRD authority_ref kind
+      -- (contract_confirmation), and on the integrated chain 0300 applies BEFORE this file. This
+      -- lane measured its pins on a rig that carried no 0300, so the pin below is right on that
+      -- rig and wrong on the chain. It is therefore admitted at EITHER value. Nothing else is
+      -- loosened: every other pin in this array stays exact. Precedent: wave 3's 0284.
+       and v_sha is distinct from (case v_keep[v_n][1]
+            when 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)'
+              then 'f9b19cf61ba2c1728b4c4ccc5d02e997b9a882779db4925cd1d267e92a669e63'
+            when 'clara._authority_ref_refusal(text,uuid,uuid,uuid)'
+              then '55c20b2008d51cc58cd4dc29b3f434965ead8450a846a73eb9f01f62d53cc208'
+            else null end) then
       raise exception '#915 tail: % moved during this file (got %)', v_keep[v_n][1], v_sha
         using errcode='CLR10';
     end if;

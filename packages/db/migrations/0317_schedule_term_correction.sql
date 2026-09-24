@@ -187,7 +187,16 @@ begin
   for v_i in 1 .. array_length(v_keep, 1) loop
     select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha
       from pg_proc p where p.oid = v_keep[v_i][1]::regprocedure;
-    if v_sha is distinct from v_keep[v_i][2] then
+    if v_sha is distinct from v_keep[v_i][2]
+      -- RIDERS WAVE 4 INTEGRATION. BIMODAL for clara.create_accounting_plan, whose body 0308
+      -- recuts: on the integrated chain 0308 recuts from 0300's post-image (it carries the third
+      -- authority_ref kind contract_confirmation that lane 01's 0300 added), so its output is
+      -- a7c108d5... rather than the c8e99098... this lane measured on a rig with no 0300. Admitted
+      -- at EITHER value; every other pin in this array stays exact. Precedent: wave 3's 0284.
+       and v_sha is distinct from (case v_keep[v_i][1]
+            when 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)'
+              then 'a7c108d5dd4febbae9f98a87b42b69468aec31f1731336b2185c8e91b1b0951c'
+            else null end) then
       raise exception '0317 prestate: % moved (expected %, live %)',
         v_keep[v_i][1], v_keep[v_i][2], coalesce(v_sha, '(absent)') using errcode='CLR10';
     end if;
@@ -2707,7 +2716,16 @@ begin
   for v_i in 1 .. array_length(v_keep, 1) loop
     select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_src
       from pg_proc p where p.oid = v_keep[v_i][1]::regprocedure;
-    if v_src is distinct from v_keep[v_i][2] then
+    if v_src is distinct from v_keep[v_i][2]
+      -- RIDERS WAVE 4 INTEGRATION. BIMODAL for clara.create_accounting_plan, whose body 0308
+      -- recuts: on the integrated chain 0308 recuts from 0300's post-image (it carries the third
+      -- authority_ref kind contract_confirmation that lane 01's 0300 added), so its output is
+      -- a7c108d5... rather than the c8e99098... this lane measured on a rig with no 0300. Admitted
+      -- at EITHER value; every other pin in this array stays exact. Precedent: wave 3's 0284.
+       and v_src is distinct from (case v_keep[v_i][1]
+            when 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)'
+              then 'a7c108d5dd4febbae9f98a87b42b69468aec31f1731336b2185c8e91b1b0951c'
+            else null end) then
       raise exception '0317 tail: % moved under this file (expected %, live %)',
         v_keep[v_i][1], v_keep[v_i][2], coalesce(v_src, '(absent)') using errcode='CLR10';
     end if;

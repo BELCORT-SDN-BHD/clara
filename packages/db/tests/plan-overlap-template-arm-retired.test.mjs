@@ -64,14 +64,17 @@ const RECUT = [
   // body to admit the new `revenue_recognition_schedule` plan kind. Lane 04 measured that recut
   // on a rig that did not carry 0300, so its own pre-image pin named 99f60787... and its output
   // was c8e99098...; on the integrated chain 0300 applies first, so 0308 recuts from 0300's
-  // post-image and carries BOTH widenings. See the integration commit that re-based 0307's and
-  // 0308's pins and put 0300's three-kind wall into 0308's pasted body.
+  // post-image and carries BOTH widenings, which makes its output a7c108d5... rather than the
+  // c8e99098... lane 04 measured. See the integration commit that re-based 0307's and 0308's pins
+  // and put 0300's three-kind wall into 0308's pasted body; that commit derives a7c108d5... from
+  // 0308's own pasted text, whose pre-edit sha256 reproduced c8e99098... exactly, and the
+  // from-scratch chain confirms it against the live catalog.
   // What this pin is FOR is unaffected by either recut and is re-checked below against the LIVE
   // body, structurally rather than by transcription: the client rung 203005004 still sits above
   // any clara.accounting_plans row lock, and the advisory is still passed this door's own plan
   // id. That is the point of pinning the text rather than the migration number.
   { fn: "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)",
-    sha: "c8e990986a06b132e3dad40e47225968562336b48ad6c01a4a09104784c09188" },
+    sha: "a7c108d5dd4febbae9f98a87b42b69468aec31f1731336b2185c8e91b1b0951c" },
   { fn: "clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)",
     sha: "8a6e69efac967592592bf3e8d08683145e5b43456a63fe673788337349382886" },
   { fn: "clara._accrual_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,int,text,date,date,jsonb)",
