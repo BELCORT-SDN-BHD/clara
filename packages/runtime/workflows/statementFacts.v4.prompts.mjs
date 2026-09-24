@@ -51,6 +51,21 @@
 // It is therefore kept OUT of `STATEMENT_LINE_FIELDS` (whose documented contract is "the exact set
 // `_stmt_lines_norm` reads") and carried in its own roster, which the hash folds separately.
 //
+// THE KEY IS REQUIRED ON THE WIRE, AND NULLABLE IN VALUE — never `.optional()` (ADV-1037-04).
+// The citation is OPTIONAL AS A FACT and that optionality is carried by the value `null`, which
+// the prompt asks for in terms. It is not carried by omitting the key, and it must not be: this
+// family calls `generateObject` through `statementFacts.v2.services.mjs`, which passes no
+// provider options, and `@ai-sdk/openai` defaults `strictJsonSchema` to TRUE — so the schema goes
+// out strict, OpenAI guarantees every required key comes back, and a schema whose `required` does
+// not list every property is refused by the API outright. `.optional()`, `.catch(null)` and
+// `.default(null)` all drop the key out of `required` (measured on zod 4.4.3 + ai 7.0.77), so
+// "tolerating" an omitted key would trade a failure nobody has seen for one every statement read
+// would hit. It is also the repo's own documented wire rule — witnessFacts.v1.prompts.mjs:24-27,
+// "a provider's strict structured-output mode is happiest with a FLAT, all-required,
+// nullable-valued object". THE COST IS STATED RATHER THAN HIDDEN: if a provider ever did answer
+// in v3's shape, the schema miss is classified `internal`, which is not retryable, so the paid
+// two-channel read settles failed instead of landing uncited. Cell 1037.t3 measures both halves.
+//
 // FROZEN BY THE SAME DECISION AS v3 (design M8): a prompt edit IS a workflow-body edit and ships
 // as statementFacts.v5 plus a ceremony.
 

@@ -23,6 +23,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { zodSchema } from "ai";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -463,4 +464,40 @@ test("1037.t2 the shown set is READ off the prompt the builder produced, and is 
   assert.equal(renderedRegionIndexes(builtSmall.prompt, [{ idx: 77, page: 1 }]).size, 0);
   assert.equal(renderedRegionIndexes(builtSmall.prompt, []).size, 0);
   assert.equal(renderedRegionIndexes(undefined, small).size, 0);
+});
+
+test("1037.t3 region_idx is a REQUIRED wire key, and that is the trade this cut makes — measured on both halves of it", () => {
+  // ADV-1037-04. The review asked whether the key should be `.optional().nullable()` so an answer
+  // in v3's shape would still land an uncited statement instead of terminally failing a paid
+  // two-channel read. It must not be, and the reason is a measurement rather than a preference.
+  //
+  // (a) THE COST OF REQUIRING IT, stated honestly: an answer missing the key is rejected, and a
+  //     schema miss in this family is classified `internal`, which `RETRYABLE` excludes — so the
+  //     whole statement settles failed rather than landing uncited.
+  const v3Shaped = { header: wireHeader(), lines: [wireLine()] };
+  const rejected = statementWitnessTextSchema.safeParse(v3Shaped);
+  assert.equal(rejected.success, false, "an answer in v3's shape does not satisfy v4's text schema");
+  assert.deepEqual(rejected.error.issues[0].path, ["lines", 0, "region_idx"]);
+  assert.equal(
+    statementWitnessTextSchema.safeParse({ header: wireHeader(), lines: [wireLine({ region_idx: null })] }).success,
+    true,
+    "…while an honest null is accepted, which is the answer the prompt actually asks for when the reader cannot name a region",
+  );
+
+  // (b) WHY IT IS NOT PAID, and why the alternative would cost more. `@ai-sdk/openai` defaults
+  //     `strictJsonSchema` to true and `statementFacts.v2.services.mjs` passes no provider
+  //     options, so the provider is handed a STRICT schema — under which OpenAI both guarantees
+  //     every required key in its answer and REFUSES a schema whose `required` does not list
+  //     every property. Making the key optional therefore does not buy tolerance; it moves the
+  //     failure from "a provider bug we have never seen" to "every statement read", and it
+  //     breaks the repo's own documented wire rule (witnessFacts.v1.prompts.mjs:24-27: "a
+  //     provider's strict structured-output mode is happiest with a FLAT, all-required,
+  //     nullable-valued object"). Asserted against the JSON Schema the SDK actually sends.
+  const wire = zodSchema(statementWitnessTextSchema).jsonSchema;
+  const line = wire.properties.lines.items;
+  assert.equal(line.additionalProperties, false, "the line object goes out closed, as strict mode demands");
+  assert.ok(line.required.includes("region_idx"), "the key the model must answer is on the wire's own required list");
+  for (const f of ["entry_date", "value_date", "description", "amount_cents", "running_balance_cents"]) {
+    assert.ok(line.required.includes(f), `${f} is required too — region_idx is not a special case`);
+  }
 });
