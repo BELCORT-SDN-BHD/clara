@@ -24,6 +24,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { deriveVersionPair, rewriteRegistryToPrevious } from "./scratch-image.mjs";
 
 import {
   runStatementWitnessTextRead,
@@ -289,4 +293,55 @@ test("1037.b2 the v4 VISION read is handed v3's schema and its own v4 prompt has
   const usage = client.log.find((q) => q.sql.startsWith("select clara.record_llm_usage_event("));
   assert.ok(usage, "the vision call is metered");
   assert.equal(usage.params[5], promptHashV4("vision"), "the metered prompt hash names v4");
+});
+
+// ---------------------------------------------------------------------------------------
+// THE TWO-BUILD CUTOVER'S OWN REQUIREMENT ON THIS CUT.
+//
+// `two-build-cutover-e2e.mjs` builds its "previous" image by REWRITING registry.ts so the class
+// pins its predecessor, and `scratch-image.mjs`'s `rewriteRegistryToPrevious` asserts five EXACT
+// textual shapes, throwing if a substitution does not apply — because a rewrite that silently did
+// not take would produce a build A identical to build B, and the drill would then pass while
+// proving nothing at all. CUT-PLAN section 2.2 states the consequence plainly: "Formatting is
+// load-bearing, not cosmetic. Deviate and the two-build drill breaks."
+//
+// So this cell drives that rewriter against the REAL registry.ts, for THIS class: it is the cheap,
+// direct proof that a build pinned at statementFacts_v3 can still be constructed from this cut's
+// five edits, which is the machinery the drill's "a run parked on v3 completes on v3" leg rests
+// on. It is not a substitute for the drill itself; see the ticket report.
+// ---------------------------------------------------------------------------------------
+
+const REGISTRY_SRC = readFileSync(
+  fileURLToPath(new URL("../workflows/registry.ts", import.meta.url)), "utf8");
+
+test("1037.x1 the statementFacts cut keeps the registry in the shape the two-build drill rewrites — v4 derives v3 as its predecessor, and all five substitutions apply", () => {
+  const pair = deriveVersionPair(REGISTRY_SRC, "statementFacts");
+  assert.deepEqual(
+    { pinned: pair.pinned, pinnedVersion: pair.pinnedVersion, previous: pair.previous, previousVersion: pair.previousVersion },
+    { pinned: "statementFacts_v4", pinnedVersion: 4, previous: "statementFacts_v3", previousVersion: 3 },
+    "the drill derives the pair from registry.ts itself — it carries no version literal of its own",
+  );
+
+  // Throws if ANY of the five substitutions does not apply. The assertions after it are what make
+  // a rewrite that took but took wrongly visible too.
+  const previous = rewriteRegistryToPrevious(REGISTRY_SRC, pair);
+  assert.match(previous, /\n {2}statementFacts: statementFacts_v3,/, "build A dispatches statementFacts to v3");
+  assert.match(previous, /\n {2}statementFacts: "statementFacts_v3"/, "…and its provenance pin says so");
+  // Each of the five CODE shapes is gone. Asserted shape by shape rather than as a bare
+  // "statementFacts_v4 does not appear": the rewriter deliberately leaves PROSE alone, so a
+  // whole-file absence test would be asserting something the drill never needed and would red on
+  // the first explanatory comment naming the successor.
+  for (const [shape, what] of [
+    [/import \{ statementFacts_v4 \} from/, "the import"],
+    [/export \{ statementFacts_v4 \};/, "the re-export"],
+    [/\n {2}"statementFacts_v4",/, "the workflowBodies entry"],
+    [/\n {2}statementFacts: statementFacts_v4,/, "the dispatch entry"],
+    [/\n {2}statementFacts: "statementFacts_v4"/, "the provenance pin"],
+  ]) {
+    assert.doesNotMatch(previous, shape, `build A carries no ${what} for the body it is meant not to carry`);
+  }
+  // v3 is still fully present in build A, which is the whole point of a predecessor image.
+  assert.match(previous, /import \{ statementFacts_v3 \} from "\.\/statementFacts\.v3\.js";/);
+  assert.match(previous, /export \{ statementFacts_v3 \};/);
+  assert.match(previous, /\n {2}"statementFacts_v3",/);
 });
