@@ -2691,6 +2691,29 @@ const WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS = [
 export const WORK_SOURCE_CORRECTION_0268_COHORT = [...WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS];
 // #885 END
 
+// #1030 [0321, the successor a source correction owes, and the rule for an edit that changes
+// nothing] — its OWN cohort, one frontier above 0268's, for the same "wholly present or wholly
+// absent" reason: folding these names into 0268's roster would red every database between the two
+// frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   ONE UNGRANTED HELPER SO FAR. `_fact_calendar_day` answers "what calendar day does this fact
+//   value spell, if any?" and exists only so the typed no-op notion can ask it without a second,
+//   weaker date parser. Ungranted like every sibling of the 0268 cohort: it is a predicate over
+//   document facts and its only callers are SECURITY DEFINER bodies that already hold a firm.
+//
+//   NOT LISTED, deliberately, and for exactly the reasons 0268's block gives for its own two
+//   omissions: `revise_document_fact` and `_question_source_corrected` are BODIES 0321 recuts
+//   without touching a name, a signature or a grant, and both are already rostered at earlier
+//   frontiers; and `_fact_value_changed` — 0321 adds a THREE-argument sibling, but `proname` is
+//   what this roster keys on and that name has been on WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS
+//   since 0268, so listing it again would make this cohort resolve on databases 0321 has not
+//   touched.
+const WORK_SOURCE_REDERIVATION_0321_UNGRANTED_FNS = ["_fact_calendar_day"];
+export const WORK_SOURCE_REDERIVATION_0321_COHORT = [
+  ...WORK_SOURCE_REDERIVATION_0321_UNGRANTED_FNS,
+];
+// #1030 END
+
 // #648 [0218, firm setup] — the FIRM's own onboarding plan gains human doors. Its OWN cohort for
 // the same "wholly present or wholly absent" reason 0192's carries: folding these names into an
 // older roster would red every database between the two frontiers, and `cohortFailures()` fails a
@@ -4431,6 +4454,13 @@ export async function grantMatrixFailures() {
     failures.push(...cohortFailures("#885 0268 source-correction supersession closure", WORK_SOURCE_CORRECTION_0268_COHORT, liveNames));
   }
   // #885 END
+  // #1030 [0321] — the re-derivation lane. Bimodal on the same terms as 0268's above.
+  const rederivationLive = WORK_SOURCE_REDERIVATION_0321_COHORT.filter((n) => liveNames.has(n));
+  if (rederivationLive.length !== 0) {
+    failures.push(...cohortFailures("#1030 0321 source-correction re-derivation lane",
+      WORK_SOURCE_REDERIVATION_0321_COHORT, liveNames));
+  }
+  // #1030 END
   // #718 END
   // #776
   failures.push(...cohortFailures("#776 0206 operator applicant-name read",

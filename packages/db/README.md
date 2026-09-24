@@ -1266,7 +1266,7 @@ A document's own *reading* now has two governed human doors and two reads, all f
 
 | Door | What it does |
 |---|---|
-| `clara.revise_document_fact(uuid,text,jsonb,int,text,text)` | Appends ONE `clara-fact-human:v1` / `invoice_facts` extraction carrying the whole fact set with one field revised. It never UPDATEs `clara.document_regions`: the kind-scoped supersede chain (0089) is what keeps the previous reading readable, and the DEFERRABLE arithmetic belt (0191) re-derives the six-term identity over the new numbers. Refusals: `stale_source_version` (CLR19, echoing the attempted value), `field_path_syntax` / `field_path_namespace` (CLR10, from `clara._assert_field_path`), `field_path_not_revisable`, `typed_facts_not_supported`, `no_facts_to_revise`, `monetary_value_malformed`, `component_must_not_be_negative`, `live_bank_statement_present`, CLR11 for a foreign document, CLR03 for an agent identity. |
+| `clara.revise_document_fact(uuid,text,jsonb,int,text,text)` | Appends ONE `clara-fact-human:v1` / `invoice_facts` extraction carrying the whole fact set with one field revised. It never UPDATEs `clara.document_regions`: the kind-scoped supersede chain (0089) is what keeps the previous reading readable, and the DEFERRABLE arithmetic belt (0191) re-derives the six-term identity over the new numbers. Refusals: `stale_source_version` (CLR19, echoing the attempted value), `field_path_syntax` / `field_path_namespace` (CLR10, from `clara._assert_field_path`), `field_path_not_revisable`, `typed_facts_not_supported`, `no_facts_to_revise`, `monetary_value_malformed`, `component_must_not_be_negative`, `live_bank_statement_present`, `value_unchanged` (#885/#1030 — a revision that leaves the recorded value where it was, judged per field against the canonical form the estate keeps for it), CLR11 for a foreign document, CLR03 for an agent identity. |
 | `clara.dismiss_orphaned_classification_question(uuid,text,text)` | Closes the dead end `clara.set_document_kind`'s own prose names (0169:236-255). It admits `origin='classification'` + `status='open'` + **zero live filings** for that (document, client) and nothing else; `clara._active_document_filing` is untouched, because `resolve_open_question` and `dismiss_open_question` ride it. |
 | `clara.list_source_revisions(uuid)` | One chronological lineage: `clara.document_fact_revisions` LEFT-JOINED read-side to `clara.filing_corrections` and to the filings a correction retired. No door ever denormalises a wrong-client refile into the new ledger. |
 | `clara.list_source_dependents(uuid)` | A READ-ONLY projection of the knowledge records, open questions and parked Work questions standing on this document. It writes nothing: automatic re-assessment is accepted-but-deferred (`docs/PRD.md:123`, owned by #658/#663). |
@@ -1347,6 +1347,30 @@ fact the reader never persisted has no prior value, and anything is a change aga
 `clara._question_source_corrected` ask it — the predicate reads revision rows through it too, so a
 row written before this guard existed cannot make a question read as source-corrected either.
 Pinned by `w885.noop.refused`.
+
+**…AND A RE-SPELLING IS NOT A CORRECTION EITHER, WHERE THE ESTATE HAS A CANONICAL FORM** (#1030,
+`0321_work_source_correction_rederivation.sql`). #885 implemented "the stored value, not the
+keystrokes" for MONEY only, so re-casing `MYR` to `myr` or respelling a date to the same calendar
+day still retired every Work parked on that document and made a carved-out question's answer
+permanently refused. The rule is now decided **per field, and the test is whether the estate has a
+canonical form for that field's value**:
+
+| field | what "unchanged" means | why |
+|---|---|---|
+| every monetary path | the normalised **cents** | 0268's own rule, unchanged and reached by delegation |
+| `invoice.currency` | the **ISO 4217 code**, case-insensitively | the standard defines the code, not its typography, and this estate stores it upper-cased everywhere it reaches the books |
+| `invoice.invoice_date` | the **calendar day**, when both sides spell one | `5 March 2026` and `2026-03-05` are the same day |
+| everything else (`invoice.vendor_name`, `invoice.invoice_id`, a registration number, …) | the **trimmed text**, exactly as before | the estate has no canonical form for a name or an identifier, so the recorded spelling IS the fact — a professional correcting `ACME SDN BHD` to the mixed case actually printed on the page is making a real correction, and folding that into the guard would leave them a door that refuses the only edit they wanted |
+
+`clara._fact_value_changed(jsonb,jsonb)` is **not** recut: it still answers exactly what it always
+answered for a caller with no field path. The typed notion is a three-argument sibling,
+`clara._fact_value_changed(jsonb,jsonb,text)`, which delegates to it for every field the estate
+does not canonicalise, and both of 0268's callers pass the path they already hold — the door's
+`p_field_path` and the predicate's `r.field_path` — so the one-notion property is kept. A NULL path
+is the two-argument answer, so a caller who does not know the field can never get the widened one.
+Pinned by `r1030.cosmetic.canonical`, `r1030.cosmetic.control` and `r1030.cosmetic.text`, and by
+0321's own §TAIL, which drives all four arms and re-derives both recut bodies by reversing their
+single substitution.
 
 **A question whose source was corrected is not answerable — even where the Work is carved out.**
 The retirement rule deliberately does not touch a Work holding a committed receipt (#676's

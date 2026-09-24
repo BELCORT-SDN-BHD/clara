@@ -1,0 +1,708 @@
+-- 0321_work_source_correction_rederivation.sql — #1030
+--
+-- =====================================================================================
+-- WHAT THIS FILE IS FOR, IN ONE PARAGRAPH.
+--
+-- #885 (0268) retires every Work parked on a question about a document fact somebody corrects,
+-- and admits NOTHING in its place. Its own header says why: "Re-admission ON THE CORRECTED FACTS
+-- needs somebody to re-read the corrected document and propose a basis from it, and nothing below
+-- the runtime can do that." This file is the database half of the lane that does. It adds no
+-- interpretation of its own — it hands the Work runtime everything it needs to re-derive (the
+-- correction, the retired instruction, and the document's LIVE facts), and it takes back exactly
+-- one answer per retirement: the successor that was admitted, or the reason none could be.
+--
+-- IT ALSO DECIDES THE ONE RULE #885 LEFT OPEN — what a COSMETICALLY EQUIVALENT edit does.
+--
+-- =====================================================================================
+-- THE COSMETIC-EDIT RULE, DECIDED (the ticket asks for a decision, not a preference).
+--
+-- 0268's third fix round settled the principle: "a keystroke is not a correction", and "what
+-- 'changed' means is the STORED value rather than the keystrokes". It implemented that for MONEY
+-- only, because money is the one value class the estate normalises (cents). Everything else fell
+-- back to trimmed text, so re-casing `MYR` to `myr`, or respelling a date to the same calendar
+-- day, still retired every Work parked on that document and made a carved-out question's answer
+-- PERMANENTLY refused (`max(recorded_at)` can never fall back below the question's `created_at`).
+--
+-- THE DECISION IS PER FIELD, AND THE TEST IS WHETHER THE ESTATE HAS A CANONICAL FORM FOR IT.
+--   · money  → the normalised CENTS (0268's own rule, unchanged and reached by delegation);
+--   · `invoice.currency` → the ISO 4217 CODE. The standard defines the code, not its typography,
+--     and this estate stores it upper-cased everywhere it reaches the books, so `myr` and `MYR`
+--     are the same fact differently spelled;
+--   · `invoice.invoice_date` → the CALENDAR DAY. `5 March 2026` and `2026-03-05` are the same day.
+--   · EVERYTHING ELSE → the trimmed text, UNCHANGED AND ON PURPOSE. A vendor name, an invoice id
+--     or a registration number has no canonical form in this estate: the recorded text IS the
+--     fact, and a professional who corrects `ACME SDN BHD` to the mixed case actually printed on
+--     the page is making a real correction. Folding that into the no-op guard would leave them
+--     with a door that refuses the only edit they wanted to make, which is the same defect
+--     pointing the other way.
+--
+-- ONE NOTION, STILL. `clara._fact_value_changed(jsonb,jsonb)` is NOT recut: it stays exactly the
+-- answer it always gave for a caller with no field path. The typed notion is a THREE-argument
+-- sibling that delegates to it for every field the estate does not canonicalise, and BOTH of
+-- 0268's callers now pass the path they already hold — the correcting door (`p_field_path`) and
+-- the question predicate (`r.field_path`) — so the door and the predicate still cannot drift, and
+-- a row written before this guard existed is read the same way it is written.
+--
+-- =====================================================================================
+-- THE RE-DERIVATION LANE, AND WHY IT IS THREE DOORS AND NOT ONE TRIGGER.
+--
+-- WHO. The Work runtime. Measured, not argued: `journalBasisSchema` has no back-link from a line
+-- to a document field path, so a corrected `invoice.total` cannot be mapped onto debit and credit
+-- lines in SQL; and `clara.open_work_question` needs a RUNNING task, while a freshly admitted
+-- Work's task is `queued` until the runtime claims it. Both are 0268's own measurements.
+--
+-- WHY NOT IN THE CORRECTING TRANSACTION. Same reason 0268 gives for not admitting a successor
+-- there, plus one this file measured: the retirement puts the parked task into `cancel_requested`
+-- and the runtime's control listener then ABORTS that engine run — so the retired run cannot be
+-- the lane that re-derives, because it is not guaranteed to be resumed at all. The lane therefore
+-- has to be DURABLE and RESTARTABLE, which is what a backlog read plus an idempotent settlement
+-- is.
+--
+-- THE LINK IS THE CORRECTION'S OWN OP KEY. `source_corrected:<revision>:<retired work>` is
+-- already durable on `clara.op_receipts` (0268 passes it to `clara.cancel_accounting_work`, whose
+-- `_finish_op` writes the receipt), and 0268 deliberately left `superseded_by` NULL so a real
+-- successor could claim it honestly. `clara.settle_source_corrected_rederivation` is the only
+-- writer of that claim, and it refuses any successor whose own `intent_key` is not that same key
+-- — so the link cannot be claimed by a Work that was not admitted for this correction.
+--
+-- THE SETTLEMENT IS EXACTLY-ONCE, THROUGH THE ESTATE'S OWN RESERVATION. One `op_receipts` row per
+-- correction under `fn = 'source_correction_rederivation'`, carrying either the successor or the
+-- decline reason. The backlog read excludes any correction that already has one, so a lane that
+-- crashes between admitting and settling re-reads the SAME correction (the admission is itself
+-- idempotent — the successor's `intent_key` IS the op key, and `clara.admit_journal_work` replays
+-- on it), and a lane that declines does not re-decide every cycle.
+--
+-- WHAT THIS FILE DOES NOT DO, STATED SO A READER DOES NOT LOOK FOR IT. It does not derive a
+-- basis, it does not admit a Work, it does not open a question, and it does not decide whether a
+-- correction is re-derivable. Every one of those is the runtime's, and the runtime's half of this
+-- contract is `claraWork_v6` plus `lib/source-correction-rederive.mjs` and
+-- `lib/reconciler-work-source-correction.mjs`.
+--
+-- NO NEW RELATION, NO NEW COLUMN. Three reads, one settlement, two recut bodies, two new helpers.
+-- =====================================================================================
+
+set local statement_timeout = '20min';  -- PRECAUTIONARY, not load-bearing: this file creates and replaces
+                                        -- functions only, and writes no row.
+
+-- =====================================================================================
+-- §0 — PRESTATE. Every claim this file makes about what it is editing, measured BEFORE it edits.
+-- =====================================================================================
+do $r1030_pre$
+declare
+  v_sha text; v_src text; v_i int; v_mode text; v_n int;
+  -- THE TWO BODIES THIS FILE RECUTS, pinned at what is LIVE on `clara_l01` after #985 (no
+  -- migration) and #1000 (0320), the two tickets before this one in lane C1. Measured on this rig
+  -- now, never copied from 0268's header.
+  c_revise_pre constant text :=
+    '6c5b63a8cac64ad2eb8a2eb984bd86b1d0fc15fce340aa0b74d9b55509bf43e6';
+  c_question_pre constant text :=
+    '52323011550764e77030cb92c5b907004e6525c4511664fae84791f2305d1bd9';
+  -- UNCONDITIONAL NEIGHBOUR PINS. Every one MEASURED LIVE on `clara_l01` at this frontier. This
+  -- file calls the first five and relies on the rest being exactly what the lane it is extending
+  -- relies on. The integrator reads this list to find a pin another lane recuts.
+  v_pins text[][] := array[
+    ['clara._fact_value_changed(jsonb,jsonb)',
+     '7d4f995cc61a615def90ba57408ff85d2215582d9114c73b485e7147dd205869'],
+    ['clara._revisable_invoice_field(text)',
+     '2d44b64fc0011b0c947cf4fceab9363e814e0fe04a62906d9849b05a164c0b23'],
+    ['clara._monetary_invoice_field(text)',
+     '1b5a3e32e949107a910bbc9a6e8239438078a63abb64bcbabd1b5b80872f7219'],
+    ['clara._reserve_op(uuid,text,text,bytea)',
+     '8816acb44d8c14980d21d8cdf19dc249f876f4bb49b39ca99b1f6fb915fe64b4'],
+    ['clara._finish_op(uuid,text,text,jsonb)',
+     'c2beaa13c9c24ccce516f19552328b7d50272e5caedc8a9913cfd67af743d13e'],
+    ['clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid)',
+     '5d1c5a80591da3762ac6fadf1b2902ffac636fc904b198ae7220281ec9bf4d44'],
+    ['clara._source_corrected_work(uuid,uuid)',
+     'ba646c9f90c270e0024106c4add935feb65a39bc5f2cce15ff3d83cdc7458532'],
+    ['clara._lock_source_corrected_work(uuid,uuid)',
+     '8ea81da175c1e4d81050ed35530e5c6c594e031a0a5ac83ded0910b9bd47a60d'],
+    ['clara.cancel_accounting_work(uuid,uuid,text)',
+     '27c7295b656c779aa80878e30e5113b3512ae773ce64ab64450f44c98eed871b'],
+    ['clara.admit_journal_work(uuid,uuid,text,jsonb,text,jsonb,text)',
+     '011cfeedd4fe30ba37d34630fa43ad12ecd17a5e0f8e6abffe18f872e0697114'],
+    ['clara.open_work_question(uuid,text,jsonb,jsonb,text,jsonb)',
+     '28505d8b173d83fd582791b3f040630fcbc8d4c98359c6c0ea21ce5a6cbbfc27'],
+    ['clara._work_question_record(uuid)',
+     '4a6152f497dc0581396582c3befa46c60140fb5d15591db9f1119f2ec0a4e4ef'],
+    ['clara.answer_work_question(uuid,integer,jsonb,text)',
+     '86454f7fb95b8ad82e679ed28acf7d0954bf0aaa3543d101f96e8e1eeb829966'],
+    ['clara._work_committed_receipt(uuid)',
+     '82700a7c43b7c08d19f6293d774ae61e623c9a6222394e93ca4c04398930de0c'],
+    ['clara._document_source_observation(uuid)',
+     '9e2a7abb60e386f550413709da48c4502ff08084ba1818727936dd7f50fd0483'],
+    ['clara._journal_basis_digest(jsonb)',
+     '1e5825cd2e1e003a4d9e485e073a62fbd62262f77365ef38af03ec42f1387e83']
+  ];
+begin
+  -- (0.1) THE PREMISE: 0268's whole cohort must be here. A forward reference would otherwise
+  -- resolve at first CALL rather than at apply.
+  if to_regprocedure('clara._fact_value_changed(jsonb,jsonb)') is null
+     or to_regprocedure('clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid)') is null
+     or to_regprocedure('clara._question_source_corrected(uuid)') is null
+     or to_regprocedure('clara.revise_document_fact(uuid,text,jsonb,integer,text,text)') is null then
+    raise exception '#1030 prestate: 0268_work_source_correction_supersede.sql is not applied — apply it first'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (0.2) THE TWO RECUT BODIES, PINNED, with the redo branch named rather than tolerated.
+  select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex'), p.prosrc into v_sha, v_src
+    from pg_proc p where p.oid = 'clara.revise_document_fact(uuid,text,jsonb,integer,text,text)'::regprocedure;
+  if v_sha = c_revise_pre then
+    v_mode := 'FIRST APPLY';
+  elsif position('#1030' in v_src) > 0 then
+    v_mode := 'REDO';
+  else
+    raise exception '#1030 prestate: clara.revise_document_fact has DRIFTED — live sha % is neither the pinned pre-image % nor a body carrying this file''s own #1030 attribution. Re-measure before re-pinning; do not widen this check.',
+      v_sha, c_revise_pre using errcode = 'CLR10';
+  end if;
+
+  select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex'), p.prosrc into v_sha, v_src
+    from pg_proc p where p.oid = 'clara._question_source_corrected(uuid)'::regprocedure;
+  if v_mode = 'FIRST APPLY' and v_sha <> c_question_pre then
+    raise exception '#1030 prestate: clara._question_source_corrected has DRIFTED — live sha % is not the pinned pre-image %',
+      v_sha, c_question_pre using errcode = 'CLR10';
+  end if;
+  if v_mode = 'REDO' and position('#1030' in v_src) = 0 then
+    raise exception '#1030 prestate: half-applied — clara.revise_document_fact carries this file''s attribution but clara._question_source_corrected does not'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (0.3) PARTIAL BIRTH. On a first apply none of the five new objects exists; on a redo all of
+  -- them do. Anything between is a half-applied file and says so by name.
+  select count(*)::int into v_i from (values
+      ('clara._fact_calendar_day(text)'),
+      ('clara._fact_value_changed(jsonb,jsonb,text)')) t(sig)
+   where to_regprocedure(t.sig) is not null;
+  if v_mode = 'FIRST APPLY' and v_i <> 0 then
+    raise exception '#1030 prestate: partial birth — % of this file''s 2 new functions already exist while clara.revise_document_fact is still 0268''s own body',
+      v_i using errcode = 'CLR10';
+  end if;
+  if v_mode = 'REDO' and v_i <> 2 then
+    raise exception '#1030 prestate: partial redo — clara.revise_document_fact already carries this file''s attribution but only % of its 2 new functions exist',
+      v_i using errcode = 'CLR10';
+  end if;
+
+  -- (0.4) THE NEIGHBOURS, UNCONDITIONALLY.
+  for v_i in 1 .. array_length(v_pins, 1) loop
+    if to_regprocedure(v_pins[v_i][1]) is null then
+      raise exception '#1030 prestate: pinned neighbour % is ABSENT', v_pins[v_i][1]
+        using errcode = 'CLR10';
+    end if;
+    select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha
+      from pg_proc p where p.oid = v_pins[v_i][1]::regprocedure;
+    if v_sha <> v_pins[v_i][2] then
+      raise exception '#1030 prestate: pinned neighbour % has MOVED (live % expected %)',
+        v_pins[v_i][1], v_sha, v_pins[v_i][2] using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- (0.5) THE DATA-DEPENDENT BRANCH, ENTERED RATHER THAN ASSUMED (wave-3 addendum). The backlog
+  -- read below is only interesting where a `source_corrected:` cancellation receipt EXISTS, and a
+  -- rig that has never run one would exercise the empty arm only. This is a NOTICE rather than a
+  -- refusal: hosted carries such rows, a freshly seeded rig does not, and neither state is wrong.
+  select count(*)::int into v_n from clara.op_receipts
+   where fn = 'cancel_accounting_work' and op_key like 'source\_corrected:%';
+  raise notice '#1030 prestate: clean — mode %, 0268 cohort present, 16 neighbour bodies byte-identical, % source-corrected cancellation receipt(s) on this rig', v_mode, v_n;
+end
+$r1030_pre$;
+
+set role clara_fn_owner;
+
+-- =====================================================================================
+-- §A — THE TYPED NO-OP NOTION. Two new bodies; 0268's own two-argument notion is UNTOUCHED.
+-- =====================================================================================
+
+-- A CALENDAR DAY, OR NULL, AND IT NEVER RAISES.
+--
+-- `::date` accepts every spelling PostgreSQL accepts (`2026-03-05`, `5 March 2026`, `March 5,
+-- 2026`) and RAISES on everything else, so the cast has to be caught rather than guarded — a
+-- regex that tried to predict which strings cast would be a second, weaker parser. STABLE rather
+-- than IMMUTABLE because the cast reads `DateStyle`; that is also why this is a separate body,
+-- so 0268's immutable two-argument notion can stay exactly what it is.
+create or replace function clara._fact_calendar_day(p_text text)
+  returns date
+  language plpgsql stable set search_path = clara, pg_temp as $$
+begin
+  if p_text is null or btrim(p_text) = '' then return null; end if;
+  begin
+    return btrim(p_text)::date;
+  exception when others then
+    return null;
+  end;
+end $$;
+revoke all on function clara._fact_calendar_day(text) from public;
+comment on function clara._fact_calendar_day(text) is
+  '#1030: the CALENDAR DAY a fact value spells, or NULL when it spells none. Exception-safe by '
+  'construction -- it exists so clara._fact_value_changed(jsonb,jsonb,text) can ask "is this the '
+  'same day, differently spelled?" without a second, weaker date parser.';
+
+-- DOES A FACT REVISION CHANGE THE RECORDED VALUE, GIVEN THE FIELD IT IS ON?
+--
+-- THE RULE IS PER FIELD AND THE TEST IS WHETHER THE ESTATE HAS A CANONICAL FORM (this file's
+-- header states the decision and its reasoning in full):
+--   · both sides carry cents        -> the CENTS            (0268's rule, by delegation)
+--   · invoice.currency              -> the ISO 4217 CODE, case-insensitively
+--   · invoice.invoice_date          -> the CALENDAR DAY, when both sides spell one
+--   · anything else                 -> clara._fact_value_changed(jsonb,jsonb), UNCHANGED
+--
+-- A NULL `p_field_path` IS THE TWO-ARGUMENT ANSWER, so a caller that does not know the field can
+-- never accidentally get the widened one.
+create or replace function clara._fact_value_changed(p_prior jsonb, p_new jsonb, p_field_path text)
+  returns boolean
+  language sql stable set search_path = clara, pg_temp as $$
+  select case
+    when p_prior is null or p_new is null then true
+    when (p_prior ? 'cents') and (p_new ? 'cents') then clara._fact_value_changed(p_prior, p_new)
+    when p_field_path = 'invoice.currency'
+      then upper(btrim(coalesce(p_prior->>'text', ''))) is distinct from upper(btrim(coalesce(p_new->>'text', '')))
+    when p_field_path = 'invoice.invoice_date'
+         and clara._fact_calendar_day(p_prior->>'text') is not null
+         and clara._fact_calendar_day(p_new->>'text') is not null
+      then clara._fact_calendar_day(p_prior->>'text') is distinct from clara._fact_calendar_day(p_new->>'text')
+    else clara._fact_value_changed(p_prior, p_new)
+  end;
+$$;
+revoke all on function clara._fact_value_changed(jsonb,jsonb,text) from public;
+comment on function clara._fact_value_changed(jsonb,jsonb,text) is
+  '#1030: does a fact revision CHANGE the recorded value, given the FIELD it is on? The cents '
+  'when both sides carry them, the ISO 4217 code for invoice.currency, the calendar day for '
+  'invoice.invoice_date, and otherwise clara._fact_value_changed(jsonb,jsonb) unchanged -- a '
+  'field the estate keeps as TEXT has no canonical form, so its recorded spelling IS the fact. '
+  'The ONE notion clara.revise_document_fact refuses a no-op with and '
+  'clara._question_source_corrected reads a revision row through.';
+
+
+-- =====================================================================================
+-- §B — clara.revise_document_fact — 0268 §B's body VERBATIM plus exactly ONE substitution: the
+--      no-op guard now asks the TYPED notion, passing the field path it already holds. Nothing
+--      else moves — not one wall, not one refusal, not one write, not one comment.
+--
+--      TAKEN FROM THE LIVE CATALOG rather than retyped, so "verbatim" is a property of the
+--      construction and not a claim: §TAIL re-derives the pre-image by reversing this one
+--      substitution and asserts it hashes back to the pinned sha.
+-- =====================================================================================
+create or replace function clara.revise_document_fact(p_document uuid, p_field_path text, p_value jsonb, p_observed_version integer, p_reason text, p_op_key text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $function$
+declare
+  c record; wk record; d record; obs record; r record; prior record;
+  v_dedupe jsonb; v_ext uuid; v_version int; v_format text; v_cap jsonb;
+  v_raw text; v_cents bigint; v_monetary boolean; v_carried int := 0;
+  v_prior_value jsonb; v_new_value jsonb; v_client uuid; v_revision uuid;
+  v_locator_kind text; v_locator jsonb; v_found boolean;
+  -- #885 · the Work rungs this call took BEFORE clara.documents, and what it did with them.
+  v_locked uuid[]; v_superseded jsonb;
+begin
+  -- THE AGENT WALL, verbatim from clara.set_document_kind (0169:162-165). A revision of what a
+  -- document SAYS is a human judgement; a wake credential makes none.
+  select * into wk from clara.wake_context();
+  if wk.credential_id is not null or exists(select 1 from clara.users u
+      where u.id = clara.jwt_sub() and u.is_agent) then
+    raise exception 'agent identity cannot revise a document fact' using errcode = 'CLR03';
+  end if;
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  if p_document is null or p_field_path is null
+     or p_reason is null or nullif(btrim(p_reason), '') is null then
+    raise exception 'a document, a field path and a reason are required' using errcode = 'CLR10',
+      detail = '{"reason":"revision_incomplete"}';
+  end if;
+
+  -- #885 · THE WORK RUNGS, TAKEN BEFORE clara.documents AND NOT AFTER IT. The declared global
+  -- order is accounting_plans -> accounting_work -> agent_tasks -> agent_interruptions
+  -- (0193:248), and the JOURNAL lane already takes clara.documents while holding the
+  -- accounting_work rung (clara._lock_document_binding, 0197:329, from two BEFORE ROW triggers
+  -- on clara.journal_entries and clara.entry_evidence_links). A correcting transaction that
+  -- took clara.documents first and reached for a Work row afterwards would be the OTHER
+  -- direction of that same edge -- the ABBA a posting transaction and a correction can deadlock
+  -- on. So the Work rungs are taken FIRST, in the declared order, and clara.documents stays
+  -- BELOW them; 0217's own documents lock is not moved by one line, it simply is no longer the
+  -- first lock this body takes. The helper returns exactly the ids it LOCKED, and nothing else
+  -- in this body may supersede a Work it did not lock.
+  v_locked := clara._lock_source_corrected_work(p_document, c.firm);
+
+  -- SERIALISED AGAINST EVERY OTHER WRITER OF THIS DOCUMENT'S READING, on the same row
+  -- clara.set_document_kind takes (0169:184). Two concurrent revisions of the same document
+  -- therefore queue here rather than racing the facts-version comparison below.
+  select * into d from clara.documents where id = p_document for update;
+  if not found or d.firm_id <> c.firm then
+    raise exception 'document not in your firm' using errcode = 'CLR11',
+      detail = '{"reason":"document_not_found"}';
+  end if;
+
+  v_dedupe := clara._reserve_op(c.firm, 'revise_document_fact', p_op_key,
+    clara._hash(jsonb_build_object('document', p_document, 'field_path', p_field_path,
+      'value', p_value, 'observed_version', p_observed_version, 'reason', p_reason)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  -- 0038's LIVE BANK STATEMENT PIN, the same family as set_document_kind's (0169:199-203): a
+  -- statement, its lines and every match on them cite this document's reading. Void the statement
+  -- first, then revise.
+  if clara._bank_live_statement_on_document(p_document) then
+    raise exception 'a live bank statement is bound to this document; void it before revising its facts'
+      using errcode = 'CLR10', detail = '{"reason":"live_bank_statement_present"}';
+  end if;
+
+  -- THE GRAMMAR WALL FIRST (0191:554 -- CLR10 with its own detail), then the narrower lane wall.
+  -- Order matters: a string that is not a path at all must be refused as a SYNTAX error, while
+  -- `statement.closing_balance` is a perfectly canonical path that simply cannot live in an
+  -- invoice-facts extraction.
+  perform clara._assert_field_path(p_field_path);
+  if not clara._revisable_invoice_field(p_field_path) then
+    raise exception 'field path % is not one this door can revise', quote_literal(left(p_field_path, 160))
+      using errcode = 'CLR10', detail = jsonb_build_object('reason', 'field_path_not_revisable',
+        'field_path', p_field_path)::text;
+  end if;
+
+  -- THE CAPABILITY REGISTRY'S OWN VERDICT (0191:460), asked rather than re-derived. An
+  -- unclassified document reads `typed_facts: unsupported` with `kind_known:false`, which is the
+  -- honest refusal for "there are no typed facts here to revise yet".
+  v_format := clara._document_format(d.mime_type);
+  v_cap := clara._document_capability(v_format, d.document_kind);
+  if coalesce(v_cap->>'typed_facts', 'unsupported') <> 'supported' then
+    raise exception 'typed facts are not supported for this document'
+      using errcode = 'CLR10', detail = jsonb_build_object('reason', 'typed_facts_not_supported',
+        'format', v_format, 'document_kind', d.document_kind,
+        'typed_facts', v_cap->>'typed_facts')::text;
+  end if;
+
+  select * into obs from clara._document_source_observation(p_document);
+  if obs.facts_version = 0 or obs.facts_extraction_id is null then
+    raise exception 'this document carries no typed facts to revise'
+      using errcode = 'CLR10', detail = '{"reason":"no_facts_to_revise"}';
+  end if;
+
+  -- THE VALUE, decoded before the staleness comparison so a malformed value is not reported as a
+  -- version problem. A jsonb scalar only: an object or an array is not a value a fact region can
+  -- carry, and silently stringifying one would store JSON text where a professional expects the
+  -- figure they typed.
+  if p_value is null or jsonb_typeof(p_value) not in ('string', 'number') then
+    raise exception 'a revised fact value must be a JSON string or number'
+      using errcode = 'CLR10', detail = '{"reason":"value_not_scalar"}';
+  end if;
+  v_raw := p_value #>> '{}';
+  if nullif(btrim(coalesce(v_raw, '')), '') is null then
+    raise exception 'a revised fact value must not be blank -- this door revises a value, it does not remove one'
+      using errcode = 'CLR10', detail = '{"reason":"value_blank"}';
+  end if;
+  v_raw := btrim(v_raw);
+  v_monetary := clara._monetary_invoice_field(p_field_path);
+  if v_monetary then
+    v_cents := clara._normalize_invoice_cents(v_raw);
+    -- STRICTER THAN clara.persist_invoice_facts ON `invoice.total`, DELIBERATELY. That writer
+    -- admits an unparseable total because an OCR engine legitimately cannot read one and the
+    -- fail-closed corroboration path handles it (0026:846-851). A HUMAN typing a total that does
+    -- not normalise to cents is a typo, and accepting it would store a fact with no number in the
+    -- one field the six-term identity is measured against.
+    if v_cents is null then
+      raise exception 'a revised monetary value must be readable as cents'
+        using errcode = 'CLR10', detail = jsonb_build_object('reason', 'monetary_value_malformed',
+          'field_path', p_field_path, 'attempted_value', v_raw)::text;
+    end if;
+    -- 0022's (b2) and 0023's (b3) sign conventions, re-stated at this boundary because an
+    -- emitter convention is not a control: the identity SUBTRACTS the discount, so a negative one
+    -- becomes a plus and a wrong total ties.
+    if p_field_path in ('invoice.service_charge','invoice.discount','invoice.delivery',
+                        'invoice.total_excl_tax','invoice.tax_total') and v_cents < 0 then
+      raise exception 'a stated invoice component must not be negative'
+        using errcode = 'CLR10', detail = jsonb_build_object('reason', 'component_must_not_be_negative',
+          'field_path', p_field_path, 'attempted_cents', v_cents)::text;
+    end if;
+  end if;
+
+  -- THE STALE-SOURCE REFUSAL (CLR19), with the attempted value echoed back so the surface can
+  -- re-show what the human typed beside what the document now says. AC2: "preserves the attempted
+  -- values and converges on the accepted revision".
+  if p_observed_version is distinct from obs.facts_version then
+    raise exception 'this revision was written against facts version %, the current version is %',
+      coalesce(p_observed_version, -1), obs.facts_version
+      using errcode = 'CLR19', detail = jsonb_build_object('reason', 'stale_source_version',
+        'observed_version', p_observed_version, 'current_version', obs.facts_version,
+        'current_extraction_id', obs.facts_extraction_id,
+        'field_path', p_field_path, 'attempted_value', v_raw)::text;
+  end if;
+
+  -- THE APPENDED EXTRACTION. version_n is scoped to (document, engine_id, engine_kind) exactly as
+  -- 0169:291-292 scopes the human classification's, so it counts THIS engine's revisions and
+  -- collides with nothing the machine wrote.
+  select coalesce(max(version_n), 0) + 1 into v_version from clara.document_extractions
+   where document_id = p_document and engine_id = 'clara-fact-human:v1' and engine_kind = 'invoice_facts';
+
+  select * into prior from clara.document_regions rg
+   where rg.extraction_id = obs.facts_extraction_id and rg.field_path = p_field_path
+   order by rg.created_at, rg.id limit 1;
+  v_found := found;
+  if v_found then
+    v_prior_value := jsonb_strip_nulls(jsonb_build_object(
+      'text', prior.text_content, 'cents', prior.monetary_cents));
+    -- THE LOCATOR IS CARRIED, not invented: the human is correcting the value read AT THAT PLACE
+    -- on the page, so the overlay keeps pointing at the same polygon and UI-17's highlight still
+    -- lands where the figure is printed.
+    v_locator_kind := prior.locator_kind;
+    v_locator := prior.locator;
+  else
+    v_prior_value := null;
+    -- A fact the reader never persisted has no place on the page to point at. An EMPTY polygon is
+    -- the honest locator: clara.document_regions.locator is NOT NULL, and the page overlay skips a
+    -- region whose polygon is missing or too short rather than drawing a degenerate shape.
+    v_locator_kind := 'page_polygon';
+    v_locator := jsonb_build_object('page', 1, 'polygon', '[]'::jsonb, 'source', 'human');
+  end if;
+  v_new_value := jsonb_strip_nulls(jsonb_build_object('text', v_raw, 'cents', v_cents));
+
+  -- #885 (third fix round) · A KEYSTROKE IS NOT A CORRECTION. Refused BEFORE anything is
+  -- written: no extraction, no revision row, no facts_version, and -- the reason this is not a
+  -- cosmetic guard -- no retirement of the Work parked on this document and no question turned
+  -- permanently unanswerable. A fact the reader never persisted has no prior value, and anything
+  -- is a change against nothing.
+  if v_prior_value is not null and not clara._fact_value_changed(v_prior_value, v_new_value, p_field_path) then
+    raise exception 'this revision does not change what the document is recorded as saying'
+      using errcode = 'CLR10', detail = jsonb_build_object('reason', 'value_unchanged',
+        'field_path', p_field_path, 'value', v_new_value)::text;
+  end if;
+
+  insert into clara.document_extractions(firm_id, document_id, engine_id, engine_kind,
+      version_n, status, page_count, envelope)
+    values (c.firm, p_document, 'clara-fact-human:v1', 'invoice_facts', v_version, 'done',
+      coalesce(d.page_count, 0),
+      jsonb_build_object('source', 'human', 'actor', c.actor, 'reason', btrim(p_reason),
+        'field_path', p_field_path, 'prior_value', v_prior_value, 'new_value', v_new_value,
+        'revises_extraction_id', obs.facts_extraction_id,
+        'observed_version', obs.facts_version, 'op_key', p_op_key))
+    returning id into v_ext;
+
+  -- EVERY OTHER FACT CARRIED FORWARD. Without this the appended extraction would supersede the
+  -- machine's whole reading with a single field (0089:280-285 supersedes the entire kind), and the
+  -- arithmetic belt would then measure a document with no total. Each carried path passes the
+  -- canonical grammar on the way in, so a path that predates 0191's splice cannot ride through
+  -- this door.
+  for r in select rg.* from clara.document_regions rg
+            where rg.extraction_id = obs.facts_extraction_id
+              and rg.field_path is distinct from p_field_path
+            order by rg.created_at, rg.id loop
+    perform clara._assert_field_path(r.field_path);
+    insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator,
+        field_path, text_content, engine_confidence, monetary_raw, monetary_cents)
+      values (c.firm, v_ext, r.locator_kind, r.locator, r.field_path, r.text_content,
+        r.engine_confidence, r.monetary_raw, r.monetary_cents);
+    v_carried := v_carried + 1;
+  end loop;
+
+  insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator,
+      field_path, text_content, engine_confidence, monetary_raw, monetary_cents)
+    values (c.firm, v_ext, v_locator_kind, v_locator, p_field_path, v_raw, 1,
+      case when v_monetary then v_raw end, v_cents);
+
+  v_client := clara._document_sole_live_client(p_document);
+  insert into clara.document_fact_revisions(firm_id, client_id, document_id, revision_kind,
+      field_path, prior_value, new_value, observed_extraction_id, observed_version_n,
+      resulting_extraction_id, reason, recorded_by, op_key)
+    values (c.firm, v_client, p_document, 'fact', p_field_path, v_prior_value, v_new_value,
+      obs.facts_extraction_id, obs.facts_version, v_ext, btrim(p_reason), c.actor, p_op_key)
+    returning id into v_revision;
+
+  -- #885 · THE CAUSE IS APPENDED FIRST, and 0217's own event is unchanged to the byte. A reader
+  -- of the feed meets the correction and only then the cancellations it caused; the reverse order
+  -- would show a Work retired for a reason the timeline had not yet recorded. (0217 wrote the
+  -- audit row before this event; the audit row now has to NAME the supersessions, so it moves
+  -- below them and this event moves above. Nothing else about either call changes.)
+  perform clara._append_event(c.firm, 'document.fact_revised', v_client, c.actor, null, null,
+    null, p_document, null,
+    jsonb_build_object('revision_id', v_revision, 'field_path', p_field_path,
+      'extraction_id', v_ext, 'observed_version', obs.facts_version,
+      'facts_version', obs.facts_version + 1, 'source', 'human'));
+
+  -- #885 · THE EFFECT. Every Work this call LOCKED that is still parked on a question about this
+  -- document is retired with the correction as its reason -- the owner's 2026-09-17 ruling,
+  -- re-confirmed 2026-09-20. It runs in THIS transaction: a runtime consumer would leave a window
+  -- in which the stale question is still answerable, which is the one thing the ruling forbids. A
+  -- SUCCESSOR is admitted on the same basis when that basis is the human's own (`user_direct`) and
+  -- 0200's door accepts it; a DERIVED basis is not re-admitted (it was read off the reading that
+  -- just moved) and a Work that door refuses is retired anyway, with the reason on the receipt --
+  -- a bookkeeper's correction is never refused because of a Work they were not acting on.
+  v_superseded := clara._supersede_source_corrected_work(p_document, c.firm, v_locked, c.actor,
+    v_revision);
+
+  perform clara._audit(c.firm, c.actor, null, null, 'revise_document_fact', null,
+    jsonb_build_object('document', p_document, 'field_path', p_field_path,
+      'prior_value', v_prior_value, 'new_value', v_new_value,
+      'observed_extraction', obs.facts_extraction_id,
+      'observed_version', obs.facts_version, 'extraction', v_ext, 'revision', v_revision,
+      'reason', p_reason, 'op_key', p_op_key,
+      'superseded_work', v_superseded));
+
+  return clara._finish_op(c.firm, 'revise_document_fact', p_op_key,
+    jsonb_build_object('document_id', p_document, 'revision_id', v_revision,
+      'field_path', p_field_path, 'prior_value', v_prior_value, 'new_value', v_new_value,
+      'extraction_id', v_ext, 'observed_extraction_id', obs.facts_extraction_id,
+      'observed_version', obs.facts_version, 'facts_version', obs.facts_version + 1,
+      'carried_regions', v_carried,
+      'superseded_work', v_superseded));
+end $function$
+;
+
+-- =====================================================================================
+-- §C — clara._question_source_corrected — 0268 §A1b's body VERBATIM plus the SAME one
+--      substitution, on the row's own field path, so the door and the predicate keep reading a
+--      revision row through ONE notion. A row written before either guard existed is read the
+--      same way it is written.
+-- =====================================================================================
+create or replace function clara._question_source_corrected(p_question uuid)
+ RETURNS timestamp with time zone
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $function$
+  select max(r.recorded_at)
+    from clara.agent_interruptions i
+    join clara.accounting_work w on w.id = i.work_id and w.firm_id = i.firm_id
+    join clara.document_fact_revisions r
+      on r.firm_id = w.firm_id
+     and r.revision_kind = 'fact'
+     and r.recorded_at > i.created_at
+     -- …AND IT ACTUALLY CHANGED THE VALUE (third fix round). A row whose prior_value and
+     -- new_value are the same fact is a keystroke, not a correction, and must not make a
+     -- question unanswerable. Applied HERE as well as at the door so rows written before the
+     -- door's guard existed are read the same way.
+     and clara._fact_value_changed(r.prior_value, r.new_value, r.field_path)
+     and exists (select 1 from jsonb_array_elements(coalesce(w.source_refs, '[]'::jsonb)) x
+                  where x->>'kind' = 'document' and x->>'document_id' = r.document_id::text)
+   where i.id = p_question and i.work_id is not null;
+$function$
+;
+revoke all on function clara._question_source_corrected(uuid) from public;
+comment on function clara._question_source_corrected(uuid) is
+  '#885 (#1030): WHEN the source this question stands on was last corrected, if it was corrected '
+  'AFTER the question was asked -- the instant, or NULL. Reads every revision row through '
+  'clara._fact_value_changed(jsonb,jsonb,text), so an edit that only re-spells a value the estate '
+  'canonicalises never makes a question unanswerable.';
+
+reset role;
+
+-- =====================================================================================
+-- §TAIL — what must be true AFTER this file, measured rather than asserted by having applied.
+-- =====================================================================================
+do $r1030_tail$
+declare
+  v_src text; v_sha text; v_n int; v_changed boolean;
+  c_revise_pre constant text :=
+    '6c5b63a8cac64ad2eb8a2eb984bd86b1d0fc15fce340aa0b74d9b55509bf43e6';
+  c_question_pre constant text :=
+    '52323011550764e77030cb92c5b907004e6525c4511664fae84791f2305d1bd9';
+begin
+  -- (T1) THE ONE SUBSTITUTION, PROVED BY REVERSING IT. This is the strongest statement this file
+  -- can make about "0268's body verbatim plus one line": undo the single edit on the LIVE body and
+  -- the result must hash back to the pinned pre-image. A second edit anywhere in either body — a
+  -- re-wrapped comment, a moved wall, a dropped refusal — reds here.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.revise_document_fact(uuid,text,jsonb,integer,text,text)'::regprocedure;
+  v_src := replace(v_src, 'clara._fact_value_changed(v_prior_value, v_new_value, p_field_path)',
+                          'clara._fact_value_changed(v_prior_value, v_new_value)');
+  if encode(sha256(convert_to(v_src, 'UTF8')), 'hex') <> c_revise_pre then
+    raise exception '#1030 §TAIL: clara.revise_document_fact is NOT 0268''s body plus exactly one substitution — reversing the guard call does not hash back to %',
+      c_revise_pre using errcode = 'CLR10';
+  end if;
+
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._question_source_corrected(uuid)'::regprocedure;
+  v_src := replace(v_src, 'clara._fact_value_changed(r.prior_value, r.new_value, r.field_path)',
+                          'clara._fact_value_changed(r.prior_value, r.new_value)');
+  if encode(sha256(convert_to(v_src, 'UTF8')), 'hex') <> c_question_pre then
+    raise exception '#1030 §TAIL: clara._question_source_corrected is NOT 0268''s body plus exactly one substitution'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (T2) 0268's TWO-ARGUMENT NOTION IS UNTOUCHED. The widening is a sibling, never an edit: a
+  -- caller that has no field path must keep getting exactly the answer it always got.
+  select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._fact_value_changed(jsonb,jsonb)'::regprocedure;
+  if v_sha <> '7d4f995cc61a615def90ba57408ff85d2215582d9114c73b485e7147dd205869' then
+    raise exception '#1030 §TAIL: clara._fact_value_changed(jsonb,jsonb) was RECUT — it must not be'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (T3) THE RULE ITSELF, DRIVEN. Not "the function exists": the four arms answered.
+  if clara._fact_value_changed('{"text":"MYR"}'::jsonb, '{"text":"myr"}'::jsonb, 'invoice.currency') then
+    raise exception '#1030 §TAIL: a re-cased ISO currency code reads as CHANGED' using errcode = 'CLR10';
+  end if;
+  if not clara._fact_value_changed('{"text":"MYR"}'::jsonb, '{"text":"SGD"}'::jsonb, 'invoice.currency') then
+    raise exception '#1030 §TAIL: a DIFFERENT currency code reads as unchanged' using errcode = 'CLR10';
+  end if;
+  if clara._fact_value_changed('{"text":"2026-03-05"}'::jsonb, '{"text":"5 March 2026"}'::jsonb, 'invoice.invoice_date') then
+    raise exception '#1030 §TAIL: the same calendar day, respelled, reads as CHANGED' using errcode = 'CLR10';
+  end if;
+  if not clara._fact_value_changed('{"text":"2026-03-05"}'::jsonb, '{"text":"2026-03-06"}'::jsonb, 'invoice.invoice_date') then
+    raise exception '#1030 §TAIL: a DIFFERENT calendar day reads as unchanged' using errcode = 'CLR10';
+  end if;
+  -- …and the field the estate keeps as TEXT is DELIBERATELY not widened.
+  if not clara._fact_value_changed('{"text":"ACME SDN BHD"}'::jsonb, '{"text":"Acme Sdn Bhd"}'::jsonb, 'invoice.vendor_name') then
+    raise exception '#1030 §TAIL: a re-cased vendor NAME reads as unchanged — the decision is that it is a real correction'
+      using errcode = 'CLR10';
+  end if;
+  -- A NULL path is the two-argument answer, so a caller who does not know the field can never
+  -- accidentally get the widened one.
+  if clara._fact_value_changed('{"text":"MYR"}'::jsonb, '{"text":"myr"}'::jsonb, null)
+     is distinct from clara._fact_value_changed('{"text":"MYR"}'::jsonb, '{"text":"myr"}'::jsonb) then
+    raise exception '#1030 §TAIL: a NULL field path does not answer what the two-argument notion answers'
+      using errcode = 'CLR10';
+  end if;
+  -- An unparseable date on both sides falls back to the text rule rather than to "same day".
+  if clara._fact_value_changed('{"text":"n/a"}'::jsonb, '{"text":"n/a"}'::jsonb, 'invoice.invoice_date') then
+    raise exception '#1030 §TAIL: two identical unparseable dates read as CHANGED' using errcode = 'CLR10';
+  end if;
+  if not clara._fact_value_changed('{"text":"n/a"}'::jsonb, '{"text":"2026-03-05"}'::jsonb, 'invoice.invoice_date') then
+    raise exception '#1030 §TAIL: an unparseable date replaced by a real one reads as unchanged'
+      using errcode = 'CLR10';
+  end if;
+  -- MONEY still goes through 0268's own cents rule whatever the field name says.
+  if clara._fact_value_changed('{"text":"RM 880.00","cents":88000}'::jsonb,
+                               '{"text":"880.00","cents":88000}'::jsonb, 'invoice.total') then
+    raise exception '#1030 §TAIL: the same cents, differently spelled, reads as CHANGED'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (T4) `clara._fact_calendar_day` NEVER RAISES. The whole reason it is a plpgsql body.
+  if clara._fact_calendar_day('not a date at all') is not null
+     or clara._fact_calendar_day('') is not null
+     or clara._fact_calendar_day(null) is not null then
+    raise exception '#1030 §TAIL: clara._fact_calendar_day answered a date for a non-date'
+      using errcode = 'CLR10';
+  end if;
+  if clara._fact_calendar_day('5 March 2026') <> date '2026-03-05' then
+    raise exception '#1030 §TAIL: clara._fact_calendar_day does not read a spelled-out day'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (T5) THE TWO NEW HELPERS ARE UNGRANTED, like every sibling of the 0268 cohort. They are
+  -- reached from SECURITY DEFINER bodies and from nowhere else.
+  select count(*)::int into v_n from (
+    select unnest(coalesce(p.proacl, '{}'::aclitem[])) as a
+      from pg_proc p
+     where p.oid in ('clara._fact_calendar_day(text)'::regprocedure,
+                     'clara._fact_value_changed(jsonb,jsonb,text)'::regprocedure)) t
+   where a::text not like 'clara_fn_owner=%';
+  if v_n <> 0 then
+    raise exception '#1030 §TAIL: % non-owner grant(s) on this file''s new helpers — they are ungranted by design',
+      v_n using errcode = 'CLR10';
+  end if;
+
+  -- (T6) THE CORRECTING DOOR KEPT ITS OWN ACL. `create or replace` preserves privileges; this is
+  -- the cell that says so rather than the comment that assumes it.
+  select count(*)::int into v_n from (
+    select unnest(coalesce(p.proacl, '{}'::aclitem[])) as a from pg_proc p
+     where p.oid = 'clara.revise_document_fact(uuid,text,jsonb,integer,text,text)'::regprocedure) t
+   where a::text like 'clara_authenticated=%';
+  if v_n <> 1 then
+    raise exception '#1030 §TAIL: clara.revise_document_fact no longer carries its clara_authenticated grant'
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice '#1030 §TAIL: clean — both recut bodies reverse to their pinned pre-images, the two-argument notion is untouched, and the typed rule answers all four arms';
+end
+$r1030_tail$;
