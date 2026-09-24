@@ -33,7 +33,9 @@ import {
   deactivateMember, reactivateMember,
   DR_HUMAN_SIG, DR_OBO_SIG, DR_READ_SIG,
   getRecognitionSchedule, listRecognitionSchedules, listRecognitionAttention,
-  extraDocument, recordPeriod, monthEndAfter,
+  extraDocument, recordPeriod, monthEndAfter, monthStartBack, planRow, functionsMatching,
+  replaceRecognitionSchedule, recognitionScheduleSupersession, liveRecognitionScheduleCountFor,
+  DR_CORRECTION_REASON, DR_CORRECTION_AXIS, DR_REPLACE_SIG,
 } from "./revenue-recognition-fixtures.mjs";
 // THE STANDARD-CHART CELL's own doors, from the chart batteries that own them: a client born
 // through clara.create_client and the onboarding commit, and clara.apply_coa_template against
@@ -44,7 +46,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 14;
+const EXPECTED_CELLS = 16;
 
 before(async () => {
   ready = await (async () => {
@@ -577,9 +579,14 @@ cell("p941.obo.configures — a runtime session with NO jwt configures a recogni
     .map((f) => f.proname), [],
     "no agent, wake or PUBLIC principal reaches anything in this lane");
   assert.deepEqual(lane.filter((f) => f.authenticated).map((f) => f.proname).sort(),
+    // 0317 (#941 AC3) adds the FIFTH name: the correction door. It is on the human roster for the
+    // same reason the create door is -- a term correction re-derives a client's books and names the
+    // person who decided it -- and it has no runtime, agent or wake counterpart, which the two
+    // assertions above pin.
     ["create_revenue_recognition_schedule", "get_revenue_recognition_schedule",
-      "list_revenue_recognition_attention", "list_revenue_recognition_schedules"],
-    "the human lane is the one write and the three reads, and nothing else");
+      "list_revenue_recognition_attention", "list_revenue_recognition_schedules",
+      "replace_revenue_recognition_schedule"],
+    "the human lane is the two writes and the three reads, and nothing else");
 
   // A LANE THAT HOLDS NO GRANT IS REFUSED BY POSTGRES, not by the body: 42501, before a single
   // line of the twin runs.
@@ -880,6 +887,181 @@ cell("p941.supersede.running — a corrected service period never moves a schedu
     "configuring a REPLACEMENT schedule after ending the first one");
   assert.equal(await recognitionScheduleCountFor(scene.receipt), 1,
     "…and the receipt still carries exactly the one schedule it has always carried");
+});
+
+// ===========================================================================================
+// AC3, SECOND HALF — "a new schedule from the next period is the only correction". The prohibition
+//   is measured in p941.supersede.running above; this is the ACT, and it is the same act the
+//   prepayment lane performs, through this lane's own door and this lane's own vocabulary.
+// ===========================================================================================
+
+cell("p941.replace.posted — after a month has been recognised, correcting the term opens a replacement over the months still open: it starts after the month the plan took up, re-spreads the liability the books still carry, ends the predecessor's plan, and leaves the recognised month and its COMMITTED receipt byte-identical", async () => {
+  // FOUR RECOGNISED MONTHS STRADDLING TODAY, so the plan's scanner takes up exactly one. 90000 sen
+  // over four months is 22500 a month with no remainder — a worked example, not a re-computation.
+  const scene = await deferredRevenueScene("replacePosted", {
+    cents: 90000, termMonthsBack: 2, termMonths: 4 });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#941 battery: the member said four months when they paid" });
+  const made = await createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef });
+  assert.equal(made.period_count, 4);
+  const rowBefore = await recognitionScheduleRow(made.schedule_id);
+
+  // ---- ONE MONTH REACHES THE BOOKS.
+  await wakeDuePlanOccurrences({ limit: 100 });
+  const occBefore = await occurrenceRows(made.plan_id);
+  assert.equal(occBefore.length, 1, "one scan admits the latest due event at or before today");
+  const secondPeriodEnd = await monthEndAfter(scene.termStart, 1);
+  assert.equal(String(occBefore[0].due_date).slice(0, 10), secondPeriodEnd,
+    "…this term's SECOND month, so the first is a gap the scanner never picked up");
+  const workId = occBefore[0].work_id;
+  const w = await workRow(workId);
+  await claimWorkRun({ task: w.current_task_id, runId: opk("p941-rep-run") });
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  const posted = await wakeRecordJournalEntry(obo.secret, {
+    client: scene.client, work: workId, logicalOpId: w.logical_op_id, basis: w.basis });
+  assert.equal(posted.posted, true, "the recognition really reached the books");
+  await settleWorkRun({
+    task: w.current_task_id, outcome: "completed", result: { entry_id: posted.entry_id } });
+  const receiptsBefore = (await receiptsForWork(workId)).filter((r) => r.outcome === "committed");
+  assert.equal(receiptsBefore.length, 1);
+
+  // ---- THE CORRECTION: the membership ran a month longer than the firm was told.
+  const newEnd = await monthEndAfter(scene.termStart, 4);
+  const corrected = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, start: scene.termStart, end: newEnd,
+    reason: "#941 battery: the signed agreement ran five months, not four" });
+
+  const replacement = await replaceRecognitionSchedule(scene.bob, {
+    client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef });
+
+  // THE PROSPECTIVE NUMBERS: one month taken up at 22500, so 67500 of the liability is still on the
+  // books and is re-spread over the three months the corrected term leaves open — 22500 each.
+  const firstOpenStart = await monthStartBack(0);
+  assert.equal(replacement.admitted_periods, 1);
+  assert.equal(Number(replacement.admitted_cents), 22500);
+  assert.equal(replacement.term_start, firstOpenStart);
+  assert.equal(replacement.term_end, newEnd);
+  assert.equal(replacement.period_count, 3);
+  assert.equal(Number(replacement.total_cents), 67500);
+  assert.deepEqual((replacement.period_lines ?? []).map((l) => Number(l.amount_cents)),
+    [22500, 22500, 22500]);
+  assert.equal(Number(replacement.admitted_cents) + Number(replacement.total_cents), 90000,
+    "what the books have recognised plus what the replacement will recognise is the receipt");
+  assert.equal(replacement.kind, RECOGNITION_KIND);
+  assert.equal(replacement.recognition_pattern, RECOGNITION_PATTERN,
+    "the one pattern this estate offers is carried forward, never re-chosen");
+  assert.equal(replacement.deferred_account_code, rowBefore.deferred_account_code);
+  assert.equal(replacement.revenue_account_code, rowBefore.revenue_account_code);
+  assert.equal(replacement.revenue_account_basis, rowBefore.revenue_account_basis,
+    "the recorded grounds for the revenue classification are carried forward with it");
+  assert.equal(replacement.stated_term_id, corrected.stated_term_id);
+  // EVERY PERIOD RELEASES THE LIABILITY BY DEBIT — the one argument that differs from the
+  // prepayment lane, and getting it wrong would post the books backwards.
+  assert.ok((replacement.period_lines ?? []).every(
+    (l) => Number(l.debit_cents) > 0 && Number(l.credit_cents) === 0),
+    "the deferred-revenue liability is released by DEBIT on every period");
+
+  // ---- NOTHING THAT ALREADY HAPPENED MOVED.
+  assert.deepEqual((await occurrenceRows(made.plan_id)).map((o) => [o.due_date, o.work_id, o.attempt]),
+    occBefore.map((o) => [o.due_date, o.work_id, o.attempt]));
+  assert.deepEqual((await receiptsForWork(workId)).filter((r) => r.outcome === "committed")
+    .map((r) => r.id), receiptsBefore.map((r) => r.id),
+    "the committed receipt is the SAME receipt");
+  const rowAfter = await recognitionScheduleRow(made.schedule_id);
+  assert.deepEqual(rowAfter.period_lines, rowBefore.period_lines);
+  assert.equal(rowAfter.term_end, rowBefore.term_end);
+  assert.equal((await planRow(made.plan_id)).status, "ended");
+  assert.equal((await planRow(replacement.plan_id)).status, "active");
+  assert.equal((await recognitionScheduleSupersession(made.schedule_id)).superseded_by,
+    replacement.schedule_id);
+  assert.equal((await recognitionScheduleSupersession(replacement.schedule_id))
+    .replaces_schedule_id, made.schedule_id);
+  assert.equal(await recognitionScheduleCountFor(scene.receipt), 2, "both stand on the record");
+  assert.equal(await liveRecognitionScheduleCountFor(scene.receipt), 1, "one of them is live");
+
+  // AND THE CREATE DOOR IS STILL NOT A SECOND CORRECTION PATH: it answers about the LIVE schedule.
+  const refused = await assertPair("CLR13", DR_REASON.scheduleExists,
+    () => createRecognitionSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+      authorityRef: scene.authorityRef }),
+    "configuring a third schedule over a receipt that already carries a replacement");
+  assert.equal(refused.detail.schedule_id, replacement.schedule_id,
+    "…and it names the schedule that STANDS, never the superseded one");
+});
+
+cell("p941.replace.refuses — the correction door refuses a term nobody corrected, a re-statement that moved neither date, a schedule already replaced, a blank reason and a viewer, each in THIS lane's vocabulary; and it is clara_authenticated's alone, with no machine lane and no wake wrapper", async () => {
+  const scene = await deferredRevenueScene("replaceRefuses", { cents: 90000, termMonths: 3 });
+  const stated = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#941 battery: the member said three months when they paid" });
+  const made = await createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef });
+
+  const live = await assertPair(CLR.badRequest, DR_CORRECTION_REASON.termNotCorrected,
+    () => replaceRecognitionSchedule(scene.bob, {
+      client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef }),
+    "replacing a schedule whose term nobody has corrected");
+  assert.equal(live.detail.axis, DR_CORRECTION_AXIS.termLive);
+  assert.equal(live.detail.remedy, "clara.record_prepayment_stated_term");
+
+  const same = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#941 battery: re-recorded after a review, with the same two dates" });
+  assert.equal(same.superseded_id, stated.stated_term_id);
+  const unmoved = await assertPair(CLR.badRequest, DR_CORRECTION_REASON.termNotCorrected,
+    () => replaceRecognitionSchedule(scene.bob, {
+      client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef }),
+    "replacing a schedule after a re-statement that moved neither date");
+  assert.equal(unmoved.detail.axis, DR_CORRECTION_AXIS.termUnmoved);
+  assert.equal(await recognitionScheduleCountFor(scene.receipt), 1, "neither wrote a schedule");
+
+  // A REAL CORRECTION, so the remaining arms have something to refuse ABOUT.
+  const newEnd = await monthEndAfter(scene.termStart, 3);
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, start: scene.termStart, end: newEnd,
+    reason: "#941 battery: the agreement ran four months" });
+
+  await assertPair(CLR.badRequest, "invalid_request",
+    () => replaceRecognitionSchedule(scene.bob, {
+      client: scene.client, schedule: made.schedule_id, reason: "  ",
+      authorityRef: scene.authorityRef }),
+    "replacing a schedule with no stated reason");
+  await assertRaises(CLR.authz,
+    () => replaceRecognitionSchedule(scene.w.users.carol, {
+      client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef }),
+    "a viewer replacing a schedule");
+  await assertPair(CLR.notFound, DR_REASON.scheduleNotFound,
+    () => replaceRecognitionSchedule(scene.bob, {
+      client: scene.client, schedule: nowhere(), authorityRef: scene.authorityRef }),
+    "replacing a schedule that names nothing");
+
+  const replacement = await replaceRecognitionSchedule(scene.bob, {
+    client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef });
+  const closed = await assertPair(CLR.conflict, DR_CORRECTION_REASON.scheduleSuperseded,
+    () => replaceRecognitionSchedule(scene.bob, {
+      client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef,
+      reason: "#941 battery: a second correction of the same predecessor" }),
+    "replacing a schedule that has already been replaced");
+  assert.equal(closed.detail.superseded_by, replacement.schedule_id);
+  assert.equal(await liveRecognitionScheduleCountFor(scene.receipt), 1);
+
+  // ---- THE POSTURE. The human lane and nothing else: a lane that could re-derive a client's
+  // revenue recognition with nobody's name on it is the agent deciding what it is allowed to do.
+  assert.equal(await roleCanExecute(ROLES.authenticated, DR_REPLACE_SIG), true);
+  for (const role of [ROLES.runtime, ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive]) {
+    assert.equal(await roleCanExecute(role, DR_REPLACE_SIG), false,
+      role + " must not reach the correction door");
+  }
+  assert.deepEqual(await functionsMatching("replace_.*schedule"),
+    ["replace_prepayment_schedule", "replace_revenue_recognition_schedule"],
+    "exactly two functions carry this shape, both of them human doors");
 });
 
 // ===========================================================================================

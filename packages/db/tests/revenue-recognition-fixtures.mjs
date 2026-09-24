@@ -103,6 +103,25 @@ export const DR_REASON = {
   sourceNotFound: "revenue_recognition_source_not_found",
 };
 
+/** #941 AC3 — THE CORRECTION PATH'S OWN TOKENS, this lane's vocabulary rather than the
+ *  prepayment lane's, for the reason the block above states: a bookkeeper recognising a customer's
+ *  advance reads the refusal on a DEFERRED REVENUE surface. The SHAPE is the prepayment lane's,
+ *  token for token, so a surface that renders one renders the other. */
+export const DR_CORRECTION_REASON = {
+  scheduleSuperseded: "deferred_revenue_schedule_superseded",
+  termNotCorrected: "deferred_revenue_term_not_corrected",
+  noOpenPeriod: "deferred_revenue_correction_no_open_period",
+  nothingRemaining: "deferred_revenue_correction_nothing_remaining",
+};
+
+export const DR_CORRECTION_AXIS = { termLive: "term_live", termUnmoved: "term_unmoved" };
+
+export const DR_REPLACE_SIG =
+  "clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)";
+
+export const DR_REPLACE_REASON =
+  "#941 battery: the member's agreement ran longer than the term we were first told";
+
 /** The ONE axis #941 adds to #940's enrolment door, beside its `not_asset_class` twin. */
 export const NOT_LIABILITY_AXIS = "not_liability_class";
 
@@ -378,6 +397,34 @@ export async function recognitionScheduleRow(id) {
             created_by, created_at, term_source, stated_term_id
        from clara.revenue_recognition_schedules where id = $1`, [id]);
   return r.rows[0] ?? null;
+}
+
+/** THE CORRECTION DOOR (#941 AC3) — the mirror of clara.replace_prepayment_schedule. */
+export async function replaceRecognitionSchedule(sub, {
+  client, schedule, reason = DR_REPLACE_REASON, authorityRef, opKey = null,
+}) {
+  const r = await humanQuery(sub, namedCall("replace_revenue_recognition_schedule", [
+    { name: "p_client", cast: "uuid" }, { name: "p_schedule", cast: "uuid" },
+    { name: "p_reason", cast: "text" }, { name: "p_authority_ref", cast: "jsonb" },
+    { name: "p_op_key", cast: "text" },
+  ]), [client, schedule, reason, JSON.stringify(authorityRef), opKey ?? opk("p941-replace")]);
+  return r.rows[0].result;
+}
+
+/** One recognition schedule's supersession stamp, read off the RELATION. */
+export async function recognitionScheduleSupersession(id) {
+  const r = await rootQuery(
+    `select id, superseded_by, superseded_at, replaces_schedule_id
+       from clara.revenue_recognition_schedules where id = $1`, [id]);
+  return r.rows[0] ?? null;
+}
+
+/** How many LIVE schedules stand over one receipt — the rule that must never break. */
+export async function liveRecognitionScheduleCountFor(sourceEntry) {
+  const r = await rootQuery(
+    `select count(*)::int as n from clara.revenue_recognition_schedules
+      where source_entry_id = $1 and superseded_at is null`, [sourceEntry]);
+  return r.rows[0].n;
 }
 
 export async function recognitionScheduleCountFor(sourceEntry) {
