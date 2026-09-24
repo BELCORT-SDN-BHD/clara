@@ -5211,3 +5211,17 @@ catalog in both branches), because the questionnaire family is frozen and a post
 model in it does not deserve a new workflow, a new lane and a reconciler arm. The settle receipt
 gains a `posting` object; the idempotent-replay arm returns before the post, so re-settling a done
 task neither re-posts nor re-refuses.
+
+**§N Needs you** — `clara.list_review_queue` gains `row_kind='agreement_posting_blocked'`, the
+FOURTEENTH kind. DERIVED from `clara._agreement_posting_verdict`, stores nothing, clears itself:
+add the missing account and the sentence changes on the next read; post the acquisition and the row
+is gone; retire the filing and it is gone. No refusal table, no attempt record, no dismissal act —
+the Settlement candidate row's own discipline (CONTEXT.md) applied to a posting block. It shows an
+agreement contract that is FILED, has been READ and whose filing carries no live entry, which off
+the ledger is exactly "was read, and did not post". A NON-FINANCING agreement gets a row too, and
+that is the point of AC5: it was read, it will never post, and a person is told what the page IS
+rather than left to wonder why a filed agreement produced nothing. Section `needs_you`, lane
+`needs_you`, no new `counts.*` key and no new json key. The row coexists with `uncoded_filing`, the
+same model #946 recorded. The web side gains the kind in `REVIEW_QUEUE_ROW_KINDS`, its two
+`messages/en.json` phrases, its `/documents` link and a `null` affordance, with its own test file
+(`lib/firm/needs-you-agreement-posting.test.ts`) rather than more cells in the two shared ones.

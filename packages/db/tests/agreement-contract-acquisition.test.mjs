@@ -42,6 +42,7 @@ import assert from "node:assert/strict";
 import { rootQuery, ensureReady, endPool, buildWorld, createClient, upsertAccount, draftEntry, freshResolution } from "./rig-fixtures.mjs";
 import { fiscalYear } from "./depreciation-history-fixtures.mjs";
 import { retireDocumentFiling } from "./rig-docs-fixtures.mjs";
+import { listReviewQueue } from "./wave-a-reads.mjs";
 import { opk, human } from "./rig-helpers.mjs";
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, docTasks, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
@@ -1687,4 +1688,79 @@ test("S9 · the SAME agreement read twice posts once (AC6), and a replay of the 
   assert.equal(replay.replayed, true);
   assert.equal(replay.posting, undefined, "a replay does not re-run the post at all");
   assert.equal((await entriesOf(client)).length, 1);
+});
+
+
+// ---------------------------------------------------------------------------
+// S10 — Needs you (AC4's "anything else goes to Needs you naming what failed")
+// ---------------------------------------------------------------------------
+
+async function queueRows(sub, client) {
+  const env = await listReviewQueue(human(sub), { scope: { client_id: client }, limit: 200 });
+  return env.rows;
+}
+
+test("S10 · a blocked agreement appears under Needs you naming the condition, and the row clears itself", async (t) => {
+  if (unready(t)) return;
+
+  const sub = world.users.alice;
+  const client = await enrolledClient("queue", { creditor: false });
+  const doc = await readAgreement(client);
+  assert.equal(doc.receipt.posting.posted, false, "mandatory setup: the acquisition is blocked");
+
+  const rows = (await queueRows(sub, client))
+    .filter((r) => r.row_kind === "agreement_posting_blocked" && r.document_id === doc.documentId);
+  assert.equal(rows.length, 1, "exactly one row for this agreement, never one per condition");
+  const row = rows[0];
+  assert.equal(row.section, "needs_you", "a person must act before this acquisition can be booked");
+  assert.equal(row.lane, "needs_you");
+  assert.equal(row.client_id, client);
+  assert.ok(row.filing_id, "…pointing at the filing the agreement was filed under");
+  assert.match(row.question_text, /2430/, `the row NAMES the account a person must add: ${row.question_text}`);
+  assert.equal(
+    row.question_text,
+    (await verdict(doc.documentId)).sentence,
+    "the words on screen are the GATE's own sentence, verbatim — one body, so they cannot drift",
+  );
+
+  // Clearing the block clears the row: nothing was stored, so there is no dismissal act and
+  // nothing to reconcile. Adding the account leaves the row saying it is READY (no entry exists
+  // yet), and posting it removes the row altogether.
+  await upsertAccount(sub, { client, code: "2430", name: "Hire Purchase Creditor", type: "liability", opKey: opk("coa-948") });
+  const readyRow = (await queueRows(sub, client)).find((r) => r.row_kind === "agreement_posting_blocked" && r.document_id === doc.documentId);
+  assert.ok(readyRow, "a read that never posted is still a person's business, even once the block is gone");
+  assert.match(readyRow.question_text, /ready to post/i, "…and the row says so rather than repeating a stale reason");
+
+  // Post it — the same door the read calls, now that its one blocked rung is clear — and the row
+  // is gone with the filing's uncoded row beside it.
+  const posted = (
+    await rootQuery("select clara._post_agreement_acquisition($1) as p", [doc.documentId])
+  ).rows[0].p;
+  assert.equal(posted.posted, true, `${JSON.stringify(posted)}`);
+  const after = (await queueRows(sub, client)).filter((r) => r.document_id === doc.documentId);
+  assert.deepEqual(
+    after.map((r) => r.row_kind),
+    [],
+    "the entry exists, so both the agreement row and the filing's uncoded row are gone — no dismissal mechanism anywhere",
+  );
+});
+
+test("S10 · a tenancy agreement's row says what it IS, and the queue's other kinds are untouched", async (t) => {
+  if (unready(t)) return;
+
+  const sub = world.users.alice;
+  const client = await enrolledClient("queueten");
+  const doc = await readAgreement(client, { answers: { "contract.agreement.kind": value("Tenancy Agreement") } });
+
+  const rows = (await queueRows(sub, client)).filter((r) => r.document_id === doc.documentId);
+  const mine = rows.filter((r) => r.row_kind === "agreement_posting_blocked");
+  assert.equal(mine.length, 1);
+  assert.match(mine[0].question_text, /tenancy/i);
+  assert.match(mine[0].question_text, /terms have been read/i,
+    "…and tells a person the reading is not lost, only that there is nothing to post");
+
+  // The row COEXISTS with `uncoded_filing`, which is the brief's own model: before an entry
+  // exists it IS an uncoded filing, and this row sits beside it saying why.
+  assert.ok(rows.some((r) => r.row_kind === "uncoded_filing"),
+    `the existing kind is untouched: ${JSON.stringify(rows.map((r) => r.row_kind))}`);
 });

@@ -241,6 +241,7 @@
       "depreciation_authority_pending": "Depreciation authority awaiting signature",
       "payroll_posting_blocked": "Payroll run not posted",
       "payroll_net_pay_unsettled": "Payroll payment not found yet",
+      "agreement_posting_blocked": "Agreement not posted",
       "unknown": "Unrecognized item ({kind})"
     },
     "openClient": "Open client",
@@ -255,7 +256,8 @@
       "staff_advance_incomplete": "Open the registers tab",
       "depreciation_authority_pending": "Open the fixed assets register",
       "payroll_posting_blocked": "Open the documents tab",
-      "payroll_net_pay_unsettled": "Open the bank tab"
+      "payroll_net_pay_unsettled": "Open the bank tab",
+      "agreement_posting_blocked": "Open the documents tab"
     },
     "askClara": "Ask Clara about this",
     "askPrefill": "About this {kind} in my Needs-you inbox — what should I look at first?",

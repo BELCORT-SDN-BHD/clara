@@ -124,6 +124,14 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // lands one tab away (the default is `accounts`) rather than zero, which is still the honest
   // answer today.
   payroll_net_pay_unsettled: "/bank",
+  // #948 (0299) — the documents tab, SHARED with `payroll_posting_blocked` and the three kinds
+  // above it, and deliberately so. A blocked acquisition is about ONE document that was read and
+  // did not post: the page whose two readings disagreed, or the agreement to re-file once the
+  // missing account exists. Its verbs are not on the journals workbench, because there is no
+  // entry yet — that absence is the row. (`?tab=` is not used here, for the same reason
+  // `payroll_posting_blocked` does not: the documents tab has no view that selects a single
+  // document from the URL, so naming one would be a link to a view that does not exist.)
+  agreement_posting_blocked: "/documents",
 });
 
 /**

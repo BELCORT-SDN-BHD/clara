@@ -135,6 +135,16 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // `PayrollSettlementsSection` renders every candidate with its own Accept button, is the
     // whole affordance.
     payroll_net_pay_unsettled: null,
+    // #948 (0299, riders wave 4 lane 01): NO inline act, the same posture as `draft` and
+    // `payroll_posting_blocked` above. Every condition this row reports is cleared somewhere else
+    // — the chart door adds a missing account, the fixed-assets register enrols the account the
+    // asset belongs to, the document page shows the page whose two readings disagreed, the
+    // journals workbench holds the entry a duplicate points at — and the posting lane
+    // deliberately has no "post it anyway" door, because nothing in this lane is posted on a
+    // guess. A non-financing agreement's row has no act AT ALL by design: there is nothing to
+    // post, and the row exists to say so. The row's own sentence plus needs-you-links.ts's link
+    // to the documents tab are the whole affordance.
+    agreement_posting_blocked: null,
   } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
 

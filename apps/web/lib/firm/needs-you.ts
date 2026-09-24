@@ -210,6 +210,23 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // (no ambiguity to point at, unlike a duplicate refusal). No counts.* key is minted and no new
   // json key, so the two db-side FULL_ROW_KEYS rosters stay byte-unchanged.
   "payroll_net_pay_unsettled",
+  // #948 (0299_agreement_contract_acquisition.sql, riders wave 4 lane 01): the FOURTEENTH kind.
+  // ONE row per filed agreement contract that has been READ and whose acquisition did not post —
+  // the two readings disagreed, the printed figures do not add up, the signing date could not be
+  // established, no fixed-asset account is enrolled (or several are), an account it needs is not
+  // in this client's chart, the period is closed, or that agreement is already posted. A
+  // NON-FINANCING agreement (a tenancy, an operating lease, a supply contract) gets a row too:
+  // it was read, it will never post, and a person is told what the page IS rather than left to
+  // wonder why a filed agreement produced nothing. Section `needs_you`, lane `needs_you`, like
+  // open_question/work_question/payroll_posting_blocked. DERIVED from
+  // clara._agreement_posting_verdict and stores nothing: it clears itself when the block clears,
+  // so there is no dismissal act and nothing to reconcile. It reuses the existing shape
+  // unchanged — `id`/`filing_id` carry the filing, `document_id` the agreement, `entry_id` the
+  // entry a DUPLICATE refusal points at, `period` the signing date, `question_text` the
+  // database's own sentence naming the condition that failed. No counts.* key is minted (its
+  // `needs_you` lane folds it into counts.needs_you already), and no new json key, so the two
+  // db-side FULL_ROW_KEYS rosters are byte-unchanged.
+  "agreement_posting_blocked",
 ] as const;
 
 export type ReviewQueueRowKind = (typeof REVIEW_QUEUE_ROW_KINDS)[number];

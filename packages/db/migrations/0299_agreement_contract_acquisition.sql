@@ -2927,3 +2927,196 @@ begin
   end if;
 end
 $w948_persist$;
+
+-- =====================================================================================
+-- §N  NEEDS YOU -- clara.list_review_queue gains row_kind='agreement_posting_blocked' (AC4).
+--
+--     "Anything else goes to Needs you naming what failed" (the brief). This is that appearance.
+--
+--     THE ROW IS DERIVED, STORES NOTHING AND CLEARS ITSELF. There is no refusal table, no attempt
+--     record and no dismissal act: the CTE asks §J the same question the poster asked, about the
+--     estate as it is NOW. Add the missing account and the sentence changes on the next read; post
+--     the acquisition and the row is gone; retire the filing and it is gone. This is the
+--     Settlement candidate row's own discipline (CONTEXT.md), applied to a posting block --
+--     derived, stores nothing, clears itself, offers the reason and never chooses.
+--
+--     WHICH AGREEMENTS IT SHOWS: an agreement contract that is FILED, has been READ (an agreement
+--     pair is banked for it) and whose filing carries NO live entry. Read off the ledger, that is
+--     exactly "was read, and did not post" -- which is why a posted acquisition has no row (its
+--     filing has an entry), a blocked one does, and one whose block was cleared but which nobody
+--     re-filed STILL does, saying it is ready. A rung only the poster knew about would leave that
+--     last state invisible, which is why §J carries the sentence rather than the queue building
+--     one.
+--
+--     A TENANCY GETS A ROW TOO, AND THAT IS THE POINT OF AC5. It was read; it will never post; a
+--     person reading the queue is told what the page IS ("This is a tenancy, which creates no
+--     asset ... its terms have been read and are on the document") rather than left to wonder why
+--     a filed agreement produced nothing. #949's contract-terms record is what that reading
+--     becomes; this row is how a person learns it exists.
+--
+--     THE ROW COEXISTS WITH `uncoded_filing`, which is the same model #946 recorded: before an
+--     entry exists the filing IS uncoded, and this row sits beside it saying WHY. Narrowing
+--     `filing_rows` to hide it would change what an existing kind means for every firm already
+--     reading that queue.
+--
+--     SECTION `needs_you`, LANE `needs_you`, like open_question / work_question /
+--     payroll_posting_blocked. NO new counts.* key is minted -- the `lane='needs_you'` filter folds
+--     it into counts.needs_you already.
+--
+--     `id` IS THE FILING'S id, and `entry_id` names the entry a DUPLICATE refusal points at, so a
+--     person can open it from the row. Both ride columns the shared vector already has; this
+--     splice adds NO json key and therefore no row-builder gate (the #629 shape).
+--
+--     SPLICED, NEVER RE-TYPED, and additive: the postcheck re-reads the committed body and asserts
+--     every pre-existing row kind survives at its exact pre-splice marker count.
+-- =====================================================================================
+do $w948_lrq$
+declare
+  v_sig text := 'clara.list_review_queue(jsonb,jsonb,integer)';
+  v_def text; v_next text; v_code text; v_anchor text; v_repl text;
+  v_n int; v_raw_n int; v_pre_cols int; v_post_cols int; r record;
+  v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(pg_get_functiondef(p.oid)::bytea),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+
+  if position('agreement_posting_blocked' in v_code) <> 0 then
+    raise notice '#948 §N: the queue already projects agreement_posting_blocked -- splice already applied, nothing to do (redo)';
+  else
+    -- The shared column vector's own trailing column, counted BEFORE so the postcheck can assert
+    -- this file added exactly one more occurrence rather than a remembered number.
+    v_pre_cols := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
+                  / length('null::int open_proposal_count');
+
+    v_anchor :=
+      '  ), all_rows as (' || chr(10) ||
+      '    select * from draft_rows union all select * from filing_rows' || chr(10) ||
+      '    union all select * from question_rows union all select * from task_rows' || chr(10) ||
+      '    union all select * from compliance_rows union all select * from lint_rows' || chr(10) ||
+      '    union all select * from fa_rows union all select * from adv_rows' || chr(10) ||
+      '    union all select * from work_question_rows' || chr(10) ||
+      '    union all select * from authority_rows' || chr(10) ||
+      '    union all select * from payroll_rows' || chr(10) ||
+      '    union all select * from payroll_settlement_rows' || chr(10) ||
+      '  ), keyed as (';
+    v_n := (length(v_code) - length(replace(v_code, v_anchor, ''))) / length(v_anchor);
+    v_raw_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 or v_raw_n <> v_n then
+      raise exception '#948 §N prestate: the all_rows union block appears % time(s) IN CODE / % in RAW text (expected 1/1) -- re-derive this splice against the LIVE body', v_n, v_raw_n
+        using errcode = 'CLR10';
+    end if;
+
+    v_repl := $agree$  ), agreement_rows as (
+    -- #948 (0299): AN AGREEMENT CONTRACT THAT WAS READ AND DID NOT POST. DERIVED, stores
+    -- nothing, clears itself: clara._agreement_posting_verdict is asked about the estate as it
+    -- is NOW, and the sentence shown is that body's own, so the words a person reads and the
+    -- decision the lane took can never drift apart. A NON-FINANCING agreement gets a row too --
+    -- it was read, it will never post, and a person is told what the page IS rather than left to
+    -- wonder why a filed agreement produced nothing. Section `needs_you`, lane `needs_you`.
+    -- `id` is the filing's id; `entry_id` names the entry a duplicate refusal points at. The
+    -- active-client guard mirrors the other kinds (0017 R1-F5).
+    select 1 section_rank,'agreement_posting_blocked'::text row_kind,'needs_you'::text section,
+      af.client_id,null::uuid counterparty_id,af.id filing_id,
+      nullif(av.v->>'existing_entry_id','')::uuid entry_id,
+      null::uuid question_id,null::uuid task_id,af.document_id,'needs_you'::text lane,
+      false auto,false rule_backed,false high_stakes,af.filed_at aged_since,
+      nullif(av.v->'plan'->>'debit_cents','')::bigint amount_cents,
+      nullif(av.v->'plan'->>'posting_date','') period,
+      av.v->>'sentence' question_text,
+      af.filed_at created_at,af.id,''::text vendor_group,
+      null::text coding_kind,null::uuid watch_id,null::text tier,null::uuid finding_id,
+      null::text client_name,null::uuid[] batch_ids,null::int open_proposal_count
+    from clara.document_filings af
+    join clara.clients active_agreement_client on active_agreement_client.id=af.client_id and active_agreement_client.status='active'
+    join clara.documents ad on ad.id=af.document_id and ad.document_kind='agreement_contract'
+    cross join lateral (select clara._agreement_posting_verdict(af.document_id) v) av
+    where af.firm_id=c.firm and af.retired_at is null
+      and (v_client is null or af.client_id=v_client)
+      and exists(select 1 from clara.document_extractions ae
+                  where ae.document_id=af.document_id and ae.engine_kind='agreement_text_facts'
+                    and ae.status='done')
+      and not exists(select 1 from clara.journal_entries aj where aj.filing_id=af.id
+        and (aj.status='draft' or (aj.status='approved' and aj.reversed_by is null)))
+  ), all_rows as (
+    select * from draft_rows union all select * from filing_rows
+    union all select * from question_rows union all select * from task_rows
+    union all select * from compliance_rows union all select * from lint_rows
+    union all select * from fa_rows union all select * from adv_rows
+    union all select * from work_question_rows
+    union all select * from authority_rows
+    union all select * from payroll_rows
+    union all select * from payroll_settlement_rows
+    union all select * from agreement_rows
+  ), keyed as ($agree$;
+    v_next := replace(v_def, v_anchor, v_repl);
+    if position('union all select * from agreement_rows' in v_next) = 0 then
+      raise exception '#948 §N splice: the all_rows anchor did not rewrite' using errcode = 'CLR10';
+    end if;
+    if v_next = v_def then
+      raise exception '#948 §N splice: no byte moved -- refusing a no-op apply' using errcode = 'CLR10';
+    end if;
+
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(pg_get_functiondef(p.oid)::bytea),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#948 §N postcheck: list_review_queue changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode = 'CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#948 §N postcheck: prosrc sha256 did not change -- the splice was a no-op'
+        using errcode = 'CLR10';
+    end if;
+
+    v_code := regexp_replace(regexp_replace(
+      (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure),
+      '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+    v_post_cols := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
+                   / length('null::int open_proposal_count');
+    if v_post_cols <> v_pre_cols + 1 then
+      raise exception '#948 §N postcheck: the shared column vector appears % time(s), expected % (one more than before the splice)', v_post_cols, v_pre_cols + 1
+        using errcode = 'CLR10';
+    end if;
+    raise notice '#948 §N: clara.list_review_queue spliced -- one agreement_rows CTE (needs_you/needs_you, active-client-guarded, derived from clara._agreement_posting_verdict) and one union arm; owner (%) and ACL byte-unchanged. prosrc sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+
+  -- BOTH BRANCHES: every pre-existing row kind survives at EXACTLY one projection site, and the
+  -- new one is present exactly once. Re-read from the COMMITTED catalog so a redo proves it too.
+  v_code := regexp_replace(regexp_replace(
+    (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure),
+    '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  for r in select * from (values
+      ($$'draft'::text row_kind$$, 1),
+      ($$'uncoded_filing'::text row_kind$$, 1),
+      ($$'open_question'::text row_kind$$, 1),
+      ($$'coding_task'::text row_kind$$, 1),
+      ($$'compliance_watch'::text row_kind$$, 1),
+      ($$'lint_finding'::text row_kind$$, 1),
+      ($$'fixed_asset_incomplete'::text row_kind$$, 1),
+      ($$'staff_advance_incomplete'::text row_kind$$, 1),
+      ($$'work_question'::text row_kind$$, 1),
+      ($$'depreciation_authority_pending'::text row_kind$$, 1),
+      ($$'payroll_posting_blocked'::text row_kind$$, 1),
+      ($$'payroll_net_pay_unsettled'::text row_kind$$, 1),
+      ($$'agreement_posting_blocked'::text row_kind$$, 1),
+      ('_is_codeable_kind', 1),
+      ('_autodraft_attempt_budget', 1),
+      ('_payroll_posting_verdict', 1),
+      ('_payroll_net_pay_unsettled', 1),
+      ('_agreement_posting_verdict', 1)
+      ) as t(marker, want) loop
+    v_n := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
+    if v_n <> r.want then
+      raise exception '#948 §N postcheck: marker "%" appears % time(s), expected % -- the splice was not additive', r.marker, v_n, r.want
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+end
+$w948_lrq$;

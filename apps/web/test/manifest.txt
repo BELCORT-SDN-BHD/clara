@@ -406,6 +406,7 @@ lib/firm/commercial-reads.test.ts
 lib/firm/home-facts.test.ts
 lib/firm/invite-preview.test.ts
 lib/firm/navigation-label.test.ts
+lib/firm/needs-you-agreement-posting.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you-links.test.ts
 lib/firm/needs-you-payroll-posting.test.ts
