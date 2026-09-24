@@ -57,6 +57,31 @@ function cell(name, fn) {
   });
 }
 
+// #939 AC4 / #941 AC3 — THIS FILE'S OWN LANE-SPECIFIC FRONTIER, layered on top of the shared one
+// above. 0305's stem is true from its own migration onward, long before 0317 exists, so the
+// correction cells need their OWN stem check — prepayment-wake-reroute.test.mjs's own idiom.
+let corrected = null;
+async function hasCorrection() {
+  if (corrected !== null) return corrected;
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'schedule_term_correction$'");
+  corrected = Number(r.rows[0].n) > 0;
+  return corrected;
+}
+async function correctionGate(t) {
+  if (await hasCorrection()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_SCHEDULE_TERM_CORRECTION !== "1") {
+    throw new Error(
+      "#939 AC4 / #941 AC3 premise 0317_schedule_term_correction.sql is not applied (no "
+      + "schedule_term_correction$ row in clara.schema_migrations) and "
+      + "CLARA_ALLOW_MISSING_SCHEDULE_TERM_CORRECTION is unset -- this is a FOCUSED run and must "
+      + "fail loudly, not skip. Preload ./tests/schedule-term-correction-preintegration-gate.mjs "
+      + "for an estate sweep against a pre-0317 chain.");
+  }
+  t.skip("0317_schedule_term_correction not applied -- probed at the live catalog");
+  return true;
+}
+
 // ===========================================================================================
 // AC1 — THE STATED-TERM CARRIER AND ITS ONE HUMAN DOOR.
 // ===========================================================================================
@@ -511,7 +536,8 @@ cell("p939.supersede.running — a stated term corrected AFTER its schedule has 
 //   re-spread over what is left of the corrected term.
 // ===========================================================================================
 
-cell("p939.replace.clean — with nothing yet posted, correcting the term and then asking for the replacement opens a NEW schedule over the corrected term for the whole amount, ends the predecessor's plan, stamps the predecessor with its successor while leaving its own allocation byte-identical, and leaves exactly ONE live schedule over the recognition", async () => {
+cell("p939.replace.clean — with nothing yet posted, correcting the term and then asking for the replacement opens a NEW schedule over the corrected term for the whole amount, ends the predecessor's plan, stamps the predecessor with its successor while leaving its own allocation byte-identical, and leaves exactly ONE live schedule over the recognition", async (t) => {
+  if (await correctionGate(t)) return;
   const scene = await statedTermScene("replaceClean", {
     cents: 90000, termMonthsBack: 4, termMonths: 3, memoCents: 90000 });
   const stated = await recordStatedTerm(scene.bob, {
@@ -589,7 +615,8 @@ cell("p939.replace.clean — with nothing yet posted, correcting the term and th
     "…and it names the schedule that STANDS, never the superseded one");
 });
 
-cell("p939.replace.posted — a month the plan has already taken up is never re-opened and never re-charged: the replacement starts the day after it, re-spreads the balance the books still carry (including a month the scanner never picked up), and the admitted occurrence with its COMMITTED receipt is byte-identical afterwards", async () => {
+cell("p939.replace.posted — a month the plan has already taken up is never re-opened and never re-charged: the replacement starts the day after it, re-spreads the balance the books still carry (including a month the scanner never picked up), and the admitted occurrence with its COMMITTED receipt is byte-identical afterwards", async (t) => {
+  if (await correctionGate(t)) return;
   // FOUR CHARGED MONTHS STRADDLING TODAY, so the plan's own scanner takes up exactly one of them
   // and the others stay open. 90000 sen over four months is 22500 a month with no remainder — a
   // worked example, so every number below comes from the term rather than from the code.
@@ -676,7 +703,8 @@ cell("p939.replace.posted — a month the plan has already taken up is never re-
   assert.equal(replacement.stated_term_id, corrected.stated_term_id);
 });
 
-cell("p939.replace.refuses — a term that was never corrected, a re-statement that moved neither date, a schedule that has already been replaced, one that names nothing, a blank reason and a viewer are each refused by NAME, and none of them writes a schedule", async () => {
+cell("p939.replace.refuses — a term that was never corrected, a re-statement that moved neither date, a schedule that has already been replaced, one that names nothing, a blank reason and a viewer are each refused by NAME, and none of them writes a schedule", async (t) => {
+  if (await correctionGate(t)) return;
   const scene = await statedTermScene("replaceRefuses", {
     cents: 90000, termMonthsBack: 4, termMonths: 3, memoCents: 90000 });
   const stated = await recordStatedTerm(scene.bob, {
@@ -755,7 +783,8 @@ cell("p939.replace.refuses — a term that was never corrected, a re-statement t
   assert.equal(await liveScheduleCountFor(scene.memoEntry), 1);
 });
 
-cell("p939.replace.boundary — a corrected term that ends before the first month the plan has not taken up is refused by name, and so is one whose every month has already been taken up; both name the periods already admitted and neither writes a schedule", async () => {
+cell("p939.replace.boundary — a corrected term that ends before the first month the plan has not taken up is refused by name, and so is one whose every month has already been taken up; both name the periods already admitted and neither writes a schedule", async (t) => {
+  if (await correctionGate(t)) return;
   // ---- ARM 1: the corrected term ends inside the month the plan already took up.
   const a = await statedTermScene("replaceNoOpen", {
     cents: 90000, termMonthsBack: 2, termMonths: 4, memoCents: 90000 });
@@ -806,7 +835,8 @@ cell("p939.replace.boundary — a corrected term that ends before the first mont
   assert.equal(await scheduleCountFor(b.memoEntry), 1, "nothing was written");
 });
 
-cell("p939.replace.posture — the correction door is clara_fn_owner-owned, SECURITY DEFINER with its search_path pinned, reachable by clara_authenticated and by no machine principal, has no wake wrapper and no OBO twin, and replays a lost response under the same op key instead of answering that the schedule has already been replaced", async () => {
+cell("p939.replace.posture — the correction door is clara_fn_owner-owned, SECURITY DEFINER with its search_path pinned, reachable by clara_authenticated and by no machine principal, has no wake wrapper and no OBO twin, and replays a lost response under the same op key instead of answering that the schedule has already been replaced", async (t) => {
+  if (await correctionGate(t)) return;
   // THE CATALOG POSTURE, read POSITIVELY rather than as the absence of a grant statement.
   const posture = await rootQuery(
     `select pg_get_userbyid(p.proowner) as owner, p.prosecdef, p.provolatile,

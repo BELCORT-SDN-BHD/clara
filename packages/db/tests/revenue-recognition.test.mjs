@@ -73,6 +73,31 @@ function cell(name, fn) {
   });
 }
 
+// #939 AC4 / #941 AC3 — THIS FILE'S OWN LANE-SPECIFIC FRONTIER, layered on top of the shared one
+// above. 0308's stem is true from its own migration onward, long before 0317 exists, so the
+// correction cells need their OWN stem check — prepayment-wake-reroute.test.mjs's own idiom.
+let corrected = null;
+async function hasCorrection() {
+  if (corrected !== null) return corrected;
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'schedule_term_correction$'");
+  corrected = Number(r.rows[0].n) > 0;
+  return corrected;
+}
+async function correctionGate(t) {
+  if (await hasCorrection()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_SCHEDULE_TERM_CORRECTION !== "1") {
+    throw new Error(
+      "#939 AC4 / #941 AC3 premise 0317_schedule_term_correction.sql is not applied (no "
+      + "schedule_term_correction$ row in clara.schema_migrations) and "
+      + "CLARA_ALLOW_MISSING_SCHEDULE_TERM_CORRECTION is unset -- this is a FOCUSED run and must "
+      + "fail loudly, not skip. Preload ./tests/schedule-term-correction-preintegration-gate.mjs "
+      + "for an estate sweep against a pre-0317 chain.");
+  }
+  t.skip("0317_schedule_term_correction not applied -- probed at the live catalog");
+  return true;
+}
+
 /** #940's roster question, read as the owner — it is granted to NOBODY by design, so a cell that
  *  reached it as a human would be measuring a grant this lane must never mint. */
 async function enrolled(client, code, purpose) {
@@ -578,15 +603,17 @@ cell("p941.obo.configures — a runtime session with NO jwt configures a recogni
   assert.deepEqual(lane.filter((f) => f.agent_ro || f.wake_interactive || f.wake_proactive || f.pub)
     .map((f) => f.proname), [],
     "no agent, wake or PUBLIC principal reaches anything in this lane");
+  // 0317 (#941 AC3) adds a FIFTH name: the correction door. It is on the human roster for the
+  // same reason the create door is -- a term correction re-derives a client's books and names the
+  // person who decided it -- and it has no runtime, agent or wake counterpart, which the two
+  // assertions above pin. The expectation asks the 0317 frontier rather than assuming it, because
+  // the db-slice-frontiers matrix runs this battery against chains where 0308 has applied and
+  // 0317 has not.
   assert.deepEqual(lane.filter((f) => f.authenticated).map((f) => f.proname).sort(),
-    // 0317 (#941 AC3) adds the FIFTH name: the correction door. It is on the human roster for the
-    // same reason the create door is -- a term correction re-derives a client's books and names the
-    // person who decided it -- and it has no runtime, agent or wake counterpart, which the two
-    // assertions above pin.
     ["create_revenue_recognition_schedule", "get_revenue_recognition_schedule",
-      "list_revenue_recognition_attention", "list_revenue_recognition_schedules",
-      "replace_revenue_recognition_schedule"],
-    "the human lane is the two writes and the three reads, and nothing else");
+      "list_revenue_recognition_attention", "list_revenue_recognition_schedules"]
+      .concat(await hasCorrection() ? ["replace_revenue_recognition_schedule"] : []).sort(),
+    "the human lane is its writes and its three reads, and nothing else");
 
   // A LANE THAT HOLDS NO GRANT IS REFUSED BY POSTGRES, not by the body: 42501, before a single
   // line of the twin runs.
@@ -895,7 +922,8 @@ cell("p941.supersede.running — a corrected service period never moves a schedu
 //   prepayment lane performs, through this lane's own door and this lane's own vocabulary.
 // ===========================================================================================
 
-cell("p941.replace.posted — after a month has been recognised, correcting the term opens a replacement over the months still open: it starts after the month the plan took up, re-spreads the liability the books still carry, ends the predecessor's plan, and leaves the recognised month and its COMMITTED receipt byte-identical", async () => {
+cell("p941.replace.posted — after a month has been recognised, correcting the term opens a replacement over the months still open: it starts after the month the plan took up, re-spreads the liability the books still carry, ends the predecessor's plan, and leaves the recognised month and its COMMITTED receipt byte-identical", async (t) => {
+  if (await correctionGate(t)) return;
   // FOUR RECOGNISED MONTHS STRADDLING TODAY, so the plan's scanner takes up exactly one. 90000 sen
   // over four months is 22500 a month with no remainder — a worked example, not a re-computation.
   const scene = await deferredRevenueScene("replacePosted", {
@@ -993,7 +1021,8 @@ cell("p941.replace.posted — after a month has been recognised, correcting the 
     "…and it names the schedule that STANDS, never the superseded one");
 });
 
-cell("p941.replace.refuses — the correction door refuses a term nobody corrected, a re-statement that moved neither date, a schedule already replaced, a blank reason and a viewer, each in THIS lane's vocabulary; and it is clara_authenticated's alone, with no machine lane and no wake wrapper", async () => {
+cell("p941.replace.refuses — the correction door refuses a term nobody corrected, a re-statement that moved neither date, a schedule already replaced, a blank reason and a viewer, each in THIS lane's vocabulary; and it is clara_authenticated's alone, with no machine lane and no wake wrapper", async (t) => {
+  if (await correctionGate(t)) return;
   const scene = await deferredRevenueScene("replaceRefuses", { cents: 90000, termMonths: 3 });
   const stated = await recordStatedTerm(scene.bob, {
     client: scene.client, sourceEntry: scene.receipt,

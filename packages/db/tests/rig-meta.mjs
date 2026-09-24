@@ -3227,6 +3227,31 @@ export const DEFERRED_REVENUE_0308_COHORT = [
   ...DEFERRED_REVENUE_0308_HUMAN_FNS, ...DEFERRED_REVENUE_0308_RUNTIME_FNS,
   ...DEFERRED_REVENUE_0308_UNGRANTED_FNS,
 ];
+// #939 AC4 / #941 AC3 [0317, the term-correction doors] — its own cohort, the same "wholly present
+// or wholly absent" reason 0308's carries: the `db-slice-frontiers` matrix runs this package
+// against databases pinned at earlier frontiers where 0305/0308 have applied and 0317 has not.
+//
+//   the TWO human doors — clara_authenticated ONLY, bookkeeper-floored in their own bodies, the
+//   same floor that states the term and configures the first schedule. clara_runtime, both agent
+//   read roles and all four wake lanes gain ZERO and there is NO obo twin and NO wake wrapper at
+//   all: re-deriving a client's amortisation or revenue recognition is a judgement with a named
+//   person behind it, and a machine grant here would be a correction nobody signed. 0317's own
+//   tail asserts the absence by pg_proc count rather than by convention.
+const SCHEDULE_TERM_CORRECTION_0317_HUMAN_FNS = [
+  "replace_prepayment_schedule", "replace_revenue_recognition_schedule",
+];
+//   …and the UNGRANTED closure: the two predicates both doors ask. `_schedule_term_correction` is
+//   `clara.get_prepayment_schedule`'s own #919 term-liveness predicate lifted so the READ and the
+//   DOOR cannot disagree about whether a term was corrected; `_schedule_open_remainder` is the one
+//   spelling of "which periods has this plan already taken up". Both are granted to NOBODY — they
+//   are reached only from a definer body, exactly as `clara._prepayment_account_enrolled` is, and
+//   law 31 says do not mint a grant no consumer needs.
+const SCHEDULE_TERM_CORRECTION_0317_UNGRANTED_FNS = [
+  "_schedule_term_correction", "_schedule_open_remainder",
+];
+export const SCHEDULE_TERM_CORRECTION_0317_COHORT = [
+  ...SCHEDULE_TERM_CORRECTION_0317_HUMAN_FNS, ...SCHEDULE_TERM_CORRECTION_0317_UNGRANTED_FNS,
+];
 // #941 END
 
 export const ALLOWED = {
@@ -3530,6 +3555,11 @@ export const ALLOWED = {
     // TWIN instead (declared in the runtime roster below), never these; both agent read roles and
     // all four wake lanes gain ZERO, and no wake wrapper for any of them exists in the catalog.
     ...DEFERRED_REVENUE_0308_HUMAN_FNS,
+    // #939 AC4 / #941 AC3 [0317] the two term-correction doors -- see the block above.
+    // clara_authenticated ONLY, bookkeeper-floored in their own bodies; clara_runtime, both agent
+    // read roles and all four wake lanes gain ZERO, and neither an OBO twin nor a wake wrapper
+    // exists for either of them anywhere in the catalog.
+    ...SCHEDULE_TERM_CORRECTION_0317_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -4150,6 +4180,13 @@ export async function grantMatrixFailures() {
   if (deferredLive.length !== 0) {
     failures.push(...cohortFailures("#941 0308 deferred-revenue recognition lane",
       DEFERRED_REVENUE_0308_COHORT, liveNames));
+  }
+  // #939 AC4 / #941 AC3 [0317] -- bimodal, same reasoning as 0308's above: wholly present once
+  // 0317 applies, wholly absent before it.
+  const correctionLive = SCHEDULE_TERM_CORRECTION_0317_COHORT.filter((n) => liveNames.has(n));
+  if (correctionLive.length !== 0) {
+    failures.push(...cohortFailures("#939 AC4 / #941 AC3 0317 schedule term correction",
+      SCHEDULE_TERM_CORRECTION_0317_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
