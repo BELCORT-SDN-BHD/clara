@@ -72,6 +72,39 @@ const EXPECTED = {
   "2050": { name: "Rent Payable", type: "liability", family: "trade_payables", ordinal: 60 },
 };
 
+/** my_sme_starter v1's content as 0150 froze it, digested COLLATION-INDEPENDENTLY. This is the
+ *  same canonical jsonb clara._coa_template_content_sha256 builds (0150:765-784), field for field
+ *  and key for key, with `collate "C"` written onto both ORDER BYs -- `C` is a built-in collation
+ *  defined by code point, so the digest is identical on every server. Re-derived here rather than
+ *  read back from 0295: a test that called the migration's own spelling could only prove the
+ *  migration agrees with itself. Measured d02a786a... on a `C.UTF-8` and an `en_US.UTF-8`
+ *  PostgreSQL 17 cluster; v1's STORED content_sha256 is d02a786a... on the first and
+ *  673ede91... on the second, which is why that value is not what this battery pins. */
+const V1_STRUCT_SHA256 = "d02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df";
+const STRUCT_SHA_SQL = `
+  select encode(clara._hash(jsonb_build_object(
+    'families', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'family_key', f.family_key, 'label', f.label, 'inclusion', f.inclusion,
+               'basis', f.basis, 'sort_ordinal', f.sort_ordinal,
+               'msic_sections', to_jsonb(f.msic_sections),
+               'msic_divisions', to_jsonb(f.msic_divisions),
+               'msic_edition', f.msic_edition,
+               'trade_natures', to_jsonb(f.trade_natures),
+               'entity_types', to_jsonb(f.entity_types)) order by f.family_key collate "C")
+        from clara.coa_template_families f where f.template_id = $1), '[]'::jsonb),
+    'accounts', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'account_code', a.account_code, 'name', a.name,
+               'account_type', a.account_type, 'account_class', a.account_class,
+               'special_acc_type', a.special_acc_type, 'family_key', a.family_key,
+               'sort_ordinal', a.sort_ordinal,
+               'tax_sensitive', a.tax_sensitive, 'add_back_class', a.add_back_class,
+               'statutory', a.statutory) order by a.account_code collate "C")
+        from clara.coa_template_accounts a where a.template_id = $1), '[]'::jsonb))), 'hex')
+      as struct_sha256,
+    encode(clara._coa_template_content_sha256($1), 'hex') as recomputed_sha256`;
+
 let world;
 let ready = false;
 let v1 = null;
@@ -419,8 +452,21 @@ test("S6 · a firm session's own template list carries exactly ONE my_sme_starte
   assert.notEqual(one.retired_at, null, "and carries its retire stamp");
   assert.equal(one.families, 42, "v1 is unmoved at 42 families");
   assert.equal(one.accounts, 142, "v1 is unmoved at 142 accounts");
-  assert.equal(one.content_sha256, "d02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df",
-    "v1's content hash is 0150's own, byte for byte");
+  // v1's CONTENT IS 0150's OWN, said in a way that survives the server it runs on. The literal
+  // that used to sit here was v1's STORED content_sha256, and that value is collation-dependent:
+  // clara._coa_template_content_sha256 (0150:763-785) canonicalises with `order by f.family_key`
+  // / `order by a.account_code`, plain TEXT ordering, so it takes the database's default
+  // collation. `tax_liabilities` and `taxation` swap between `C.UTF-8` (every rig here) and
+  // `en_US.UTF-8` (CI's postgres:17 container, and hosted Supabase), which moves the digest --
+  // measured, not argued: 0295's own header records both values and the cluster each came from.
+  // So this asserts the two things that ARE true everywhere, exactly as 0295's prestate and tail
+  // now do: the collation-INDEPENDENT structural digest equals its portable pin, and the stored
+  // digest reproduces from v1's own rows through 0150's own helper on THIS server.
+  const v1Content = (await rootQuery(STRUCT_SHA_SQL, [v1.id])).rows[0];
+  assert.equal(v1Content.struct_sha256, V1_STRUCT_SHA256,
+    "v1's content is 0150's own, field for field -- a digest over the same canonical form 0150 hashes, ordered `collate \"C\"` so it does not move with the server's lc_collate");
+  assert.equal(one.content_sha256, v1Content.recomputed_sha256,
+    "and v1's published content_sha256 still reproduces from its own rows on this server");
 
   // VACUITY CONTROL: put v1 back to published inside a rolled-back transaction and show the SAME
   // read then offers two indistinguishable starters -- the state this fix exists to remove.
