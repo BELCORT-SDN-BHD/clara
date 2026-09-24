@@ -63,6 +63,18 @@ const MIGRATIONS_DIR = "packages/db/migrations";
  * file that is. So: scan the migration directory, take every file that defines the function in
  * the shape below, and read the HIGHEST-numbered one. 0191 stays the FLOOR (it must still be
  * there, in that shape, or this script is reasoning about the wrong thing) and is never edited.
+ *
+ * AND IT THROWS RATHER THAN FALLING BACK (fix round, finding ADV-08). A first cut of this
+ * function filtered the CANDIDATE SET by BOTH the function name AND the roster shape, so a
+ * future migration that recut `clara._assert_field_path` with a different roster mechanism
+ * matched neither regex, was skipped in silence, and this lint went on reading an OLDER file's
+ * namespace roster — exactly the stale-grammar failure the header above says the 0191-by-name
+ * version was replaced to avoid, reintroduced one level down. The candidate set is now chosen by
+ * the FUNCTION NAME alone, which is the thing that cannot move without the definition moving
+ * with it; the roster shape is then REQUIRED of the file that wins, and its absence raises. Same
+ * failure posture as the 0191 floor check below, and as role-census-reset.mjs's pinnedRoleCount
+ * for 0154: a mismatch means this script is reasoning about the wrong thing, and a lint that
+ * quietly reasons about the wrong thing is worse than no lint.
  * @param {string} repoRoot
  */
 function grammarSourceFile(repoRoot) {
@@ -72,10 +84,18 @@ function grammarSourceFile(repoRoot) {
   let latest = null;
   for (const name of files) {
     const text = readFileSync(join(repoRoot, MIGRATIONS_DIR, name), "utf8");
-    if (/function\s+clara\._assert_field_path\s*\(/.test(text)
-        && /split_part\(p_path,\s*'\.',\s*1\)\s*not in\s*\(/.test(text)) {
+    if (/function\s+clara\._assert_field_path\s*\(/.test(text)) {
       latest = { rel: `${MIGRATIONS_DIR}/${name}`, text };
     }
+  }
+  if (latest && !/split_part\(p_path,\s*'\.',\s*1\)\s*not in\s*\(/.test(latest.text)) {
+    throw new Error(
+      `${latest.rel} is the LAST file to define clara._assert_field_path, but it does not carry ` +
+        "the closed namespace roster check-document-region-field-paths.mjs reads — this lint " +
+        "would otherwise fall back to an older file's roster and go on passing against a grammar " +
+        "that no longer exists. If the roster mechanism really moved, update the three regexes " +
+        "here; never let the lint read a stale file.",
+    );
   }
   return latest;
 }
