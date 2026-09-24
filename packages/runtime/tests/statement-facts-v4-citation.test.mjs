@@ -33,6 +33,10 @@ import {
   statementWitnessSchema as statementWitnessVisionSchemaV4,
 } from "../workflows/statementFacts.v4.prompts.mjs";
 import {
+  attachStatementLineCitations,
+  indexStatementRegionCitations,
+} from "../workflows/statementFacts.v4.citations.mjs";
+import {
   statementWitnessPromptHash as promptHashV3,
   STATEMENT_HEADER_FIELDS,
   STATEMENT_WITNESS_TEXT_SYSTEM_PROMPT as TEXT_SYSTEM_V3,
@@ -91,4 +95,63 @@ test("1037.p2 the prompt hash names v4 on BOTH channels — including the one wh
     );
   }
   assert.notEqual(promptHashV4("text"), promptHashV4("vision"), "the two channels stay distinguishable from each other");
+});
+
+// ---------------------------------------------------------------------------------------
+// The pure mapper. `region_idx` is an index into the PROMPT; what the DB stores is the region's
+// own `clara.document_regions.locator` and the page `clara.witness_citation_regions` published
+// for it. The mapper is what turns the first into the second, and it is the piece that has to
+// guarantee 0291's table CHECK — `(citation_page is null) = (citation_region is null)` — can
+// never be reached in a broken state by a payload this body builds.
+// ---------------------------------------------------------------------------------------
+
+/** One row as `select w.idx, w.page, r.locator from clara.witness_citation_regions($1) w join
+ *  clara.document_regions r on r.id = w.region_id` returns it. */
+const regionRow = (idx, page, locator) => ({ idx, page, locator });
+
+test("1037.c1 a region row is usable only if it can satisfy the column CHECK — a citation is both page and region, or it is nothing", () => {
+  const good = { page: 3, polygon: [0.1, 0.2, 0.9, 0.3] };
+  const byIdx = indexStatementRegionCitations([
+    regionRow(1, 3, good),
+    regionRow(2, null, { polygon: [0, 0, 1, 1] }),   // the region prints no page — nothing to cite
+    regionRow(3, 0, { polygon: [0, 0, 1, 1] }),      // 0291: citation_page >= 1
+    regionRow(4, 2, null),                            // no locator — nothing to point at
+    regionRow(5, 2, [0, 0, 1, 1]),                    // a jsonb ARRAY is not an object (0291's ck)
+    regionRow(null, 2, good),                         // an unnumbered row cannot be cited
+  ]);
+  assert.deepEqual([...byIdx.keys()], [1], "only the one row that can satisfy the CHECK is citable");
+  assert.deepEqual(byIdx.get(1), { page: 3, region: good }, "the region IS the document_regions locator, relayed whole");
+});
+
+test("1037.c2 the mapper attaches page AND region together or neither, and region_idx never reaches the writer", () => {
+  const locator = { page: 2, polygon: [0.1, 0.4, 0.8, 0.5] };
+  const byIdx = indexStatementRegionCitations([regionRow(11, 2, locator)]);
+  const wire = [
+    wireLine({ region_idx: 11 }),    // cited
+    wireLine({ region_idx: null }),  // honestly uncited
+    wireLine({ region_idx: 99 }),    // an index that names no region the reader was shown
+    wireLine(),                      // no key at all
+  ];
+  const writer = wire.map((l, i) => ({
+    line_no: i + 1,
+    entry_date: l.entry_date, value_date: l.value_date, description: l.description,
+    amount_cents: l.amount_cents, running_balance_cents: l.running_balance_cents,
+  }));
+  const out = attachStatementLineCitations(writer, wire, byIdx);
+
+  assert.equal(out.length, 4, "every line survives — an uncitable row is never dropped");
+  assert.deepEqual(
+    { page: out[0].page, region: out[0].region },
+    { page: 2, region: locator },
+    "the cited line carries the region's own page and locator",
+  );
+  for (const i of [1, 2, 3]) {
+    assert.equal("page" in out[i], false, `line ${i + 1} carries no page`);
+    assert.equal("region" in out[i], false, `line ${i + 1} carries no region`);
+  }
+  for (const line of out) {
+    assert.equal("region_idx" in line, false, "region_idx is an index into the prompt, never a payload field");
+    assert.equal(("page" in line), ("region" in line), "0291's shape guard can never be reached broken");
+  }
+  assert.deepEqual(out.map((l) => l.line_no), [1, 2, 3, 4], "line_no, the writer's own positional key, is untouched");
 });
