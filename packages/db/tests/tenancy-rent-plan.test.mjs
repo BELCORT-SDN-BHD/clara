@@ -853,3 +853,249 @@ test("S4 · a draft whose treatment ASKS carries the question and drafts no basi
   assert.match(draft.treatment.question, /right-of-use asset/i, "…and the question is what a person reads instead");
   assert.equal(Number(draft.treatment.monthly_rent_cents), RENT_CENTS, "…beside the rent she DID read");
 });
+
+// ---------------------------------------------------------------------------
+// S5 — the confirmation (AC2's second half, AC3's refusal)
+// ---------------------------------------------------------------------------
+
+const confirmPlan = async (sub, { client, document, rentAccount = null, payableAccount = null, judgement = null, opKey = null }) => {
+  const r = await humanQuery(
+    sub,
+    namedCall("confirm_tenancy_rent_plan", [
+      { name: "p_client" }, { name: "p_document" }, { name: "p_rent_account" },
+      { name: "p_payable_account" }, { name: "p_judgement" }, { name: "p_op_key" },
+    ]),
+    [client, document, rentAccount, payableAccount, judgement, opKey ?? opk949("confirm")],
+  );
+  return r.rows[0].result;
+};
+
+const planRow = async (planId) =>
+  (
+    await rootQuery(
+      `select p.status, p.kind, p.purpose, p.authority_kind, p.authority_ref, p.authorised_by,
+              p.authority_from::text as authority_from,
+              r.frequency, r.day_rule, r.day_of_month, r.timezone,
+              r.effective_from::text as effective_from, r.effective_to::text as effective_to, r.basis
+         from clara.accounting_plans p
+         join clara.accounting_plan_revisions r on r.plan_id = p.id and r.revision = p.current_revision
+        where p.id = $1`,
+      [planId],
+    )
+  ).rows[0];
+
+test("S5 · confirming records the person's own act and starts the plan under it, with the agreement as its source document", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+
+  const before = await countsFor(client);
+  assert.equal(before.plans, 0, "mandatory setup: the draft started nothing");
+
+  const receipt = await confirmPlan(sub, { client, document: doc.documentId });
+  assert.ok(receipt.plan_id, `a plan is created: ${JSON.stringify(receipt)}`);
+  assert.ok(receipt.confirmation_id);
+
+  const plan = await planRow(receipt.plan_id);
+  assert.equal(plan.status, "active", "the plan runs from the moment a person said so");
+  assert.equal(plan.kind, "recurring_journal");
+  assert.equal(plan.authority_kind, "explicit_instruction");
+  assert.equal(plan.authority_ref.kind, "contract_confirmation", "the authority is the confirming act itself");
+  assert.equal(plan.authority_ref.id, receipt.confirmation_id);
+  assert.equal(plan.frequency, "monthly");
+  assert.equal(plan.day_of_month, 5);
+  assert.equal(plan.effective_from, TERM_START);
+  assert.equal(plan.effective_to, TERM_END);
+
+  const cf = (
+    await rootQuery(
+      `select document_id, kind, monthly_rent_cents, rent_account_code, payable_account_code,
+              term_start::text as term_start, term_end::text as term_end, treatment,
+              professional_judgement, confirmed_by
+         from clara.contract_plan_confirmations where id=$1`,
+      [receipt.confirmation_id],
+    )
+  ).rows[0];
+  assert.equal(cf.document_id, doc.documentId, "the agreement is recorded as the act's source document");
+  assert.equal(cf.kind, "rent_plan");
+  assert.equal(Number(cf.monthly_rent_cents), RENT_CENTS);
+  assert.equal(cf.rent_account_code, RENT_ACCOUNT);
+  assert.equal(cf.payable_account_code, PAYABLE_ACCOUNT);
+  assert.equal(cf.term_start, TERM_START);
+  assert.equal(cf.term_end, TERM_END);
+  assert.equal(cf.treatment.standard, "MPERS Section 20", "…and the treatment it was confirmed under, frozen");
+  assert.equal(cf.professional_judgement, null, "…with no judgement owed, because the branch drafted");
+
+  const after = await countsFor(client);
+  assert.equal(after.plans, 1);
+  assert.equal(after.entries, 0, "confirming starts a schedule; it posts no entry of its own");
+
+  const draft = await draftOf(sub, doc.documentId);
+  assert.equal(draft.confirmed, true, "the draft read now says a person has confirmed one");
+  assert.equal(draft.plan_id, receipt.plan_id);
+  assert.equal(draft.inert, false);
+});
+
+test("S5 · the confirmed plan's own basis credits the rent payable, and a bank account is refused BY NAME", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  await freshBank(sub, client);
+
+  const receipt = await confirmPlan(sub, { client, document: doc.documentId });
+  const plan = await planRow(receipt.plan_id);
+  const credit = plan.basis.lines.find((l) => Number(l.credit_cents) > 0);
+  assert.equal(credit.account_code, PAYABLE_ACCOUNT, "the plan's own credit is the payable, in the STORED revision");
+  assert.equal(Number(credit.credit_cents), RENT_CENTS);
+
+  // A FRESH tenancy for the refusal: the door refuses a second confirmation of the SAME tenancy
+  // before it ever looks at the accounts, so re-using this one would prove the wrong wall.
+  const other = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, other.client, other.doc.documentId);
+  await freshBank(sub, other.client);
+  const bankCredit = await caught(() =>
+    confirmPlan(sub, { client: other.client, document: other.doc.documentId, payableAccount: BANKCOA }));
+  assert.ok(bankCredit, "naming a bank account as the plan's credit is refused");
+  assert.equal(bankCredit.code, "CLR10");
+  assert.equal(detailOf(bankCredit).reason, "plan_credits_bank_account");
+  assert.equal(detailOf(bankCredit).account_code, BANKCOA, "…carrying the account it refused");
+  assert.match(bankCredit.message, /double/i, "…and saying WHY: the statement line that pays it would be counted twice");
+  assert.equal((await countsFor(other.client)).plans, 0, "…and nothing was started");
+
+  // The DRAFT reports the same wall, so a person sees it before they click rather than after.
+  const refusedDraft = await rootQuery(
+    "select clara._tenancy_rent_plan_draft($1::uuid,$2::uuid,null,$3) as d",
+    [other.client, other.doc.documentId, BANKCOA],
+  );
+  assert.equal(
+    refusedDraft.rows[0].d.refusals.some((r) => r.reason === "plan_credits_bank_account"),
+    true,
+    "the draft names the wall too",
+  );
+});
+
+test("S5 · a treatment that ASKS is admitted only against a written professional judgement", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MFRS" });
+  await recordProposed(sub, client, doc.documentId);
+
+  const bare = await caught(() => confirmPlan(sub, { client, document: doc.documentId }));
+  assert.ok(bare, "a plan the standard may not admit is not confirmed on a click alone");
+  assert.equal(bare.code, "CLR10");
+  assert.equal(detailOf(bare).reason, "professional_judgement_required");
+  assert.equal(detailOf(bare).treatment_reason, "mfrs_lease_over_twelve_months");
+  assert.match(bare.message, /right-of-use asset/i, "…and the refusal states what the standard asks");
+  assert.equal((await countsFor(client)).plans, 0, "…and nothing was started");
+
+  const judged = await confirmPlan(sub, {
+    client, document: doc.documentId,
+    judgement: "The premises are leased month to month in substance; the 24-month term is a "
+      + "renewal option the client is not reasonably certain to exercise, so MFRS 16's short-term "
+      + "exemption is applied. Reviewed with the engagement partner on 2026-01-08.",
+  });
+  assert.ok(judged.plan_id, "a person MAY confirm it, having written down the treatment they took");
+
+  const cf = (
+    await rootQuery("select professional_judgement, treatment from clara.contract_plan_confirmations where id=$1",
+      [judged.confirmation_id])
+  ).rows[0];
+  assert.match(cf.professional_judgement, /short-term/i, "the judgement is recorded verbatim");
+  assert.equal(cf.treatment.drafts, false, "…beside the branch that asked, so a reviewer sees both");
+  assert.equal(cf.treatment.standard, "MFRS 16");
+
+  const plan = await planRow(judged.plan_id);
+  assert.match(plan.purpose, /judgement/i, "…and the plan itself says on its face that a judgement carries it");
+});
+
+test("S5 · a replayed op_key returns the same receipt and starts no second plan", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+
+  const key = opk949("replay");
+  const first = await confirmPlan(sub, { client, document: doc.documentId, opKey: key });
+  const second = await confirmPlan(sub, { client, document: doc.documentId, opKey: key });
+  assert.deepEqual(second, first, "the same key answers with the same receipt, byte for byte");
+  assert.equal((await countsFor(client)).plans, 1, "…and exactly one plan exists");
+
+  const already = await caught(() => confirmPlan(sub, { client, document: doc.documentId }));
+  assert.ok(already, "a SECOND confirmation of the same tenancy, under a new key, is refused");
+  assert.equal(detailOf(already).reason, "rent_plan_already_confirmed");
+  assert.equal(detailOf(already).plan_id, first.plan_id, "…pointing at the plan that already runs");
+});
+
+test("S5 · the plan lane resolves a contract_confirmation, and refuses one that names no row of this client", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  const receipt = await confirmPlan(sub, { client, document: doc.documentId });
+
+  // The widened arm resolves for real: create_accounting_plan itself accepts the confirmation.
+  const direct = await humanQuery(
+    sub,
+    `select clara.create_accounting_plan(p_client => $1, p_kind => 'recurring_journal',
+        p_purpose => 'p949 direct', p_authority_kind => 'explicit_instruction',
+        p_authority_ref => $2::jsonb, p_frequency => 'monthly', p_day_rule => 'day_of_month',
+        p_day_of_month => 5, p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => $3,
+        p_effective_to => $4, p_basis => $5::jsonb, p_reversal_day_rule => null,
+        p_op_key => $6) as result`,
+    [
+      client,
+      JSON.stringify({ kind: "contract_confirmation", id: receipt.confirmation_id }),
+      TERM_START, TERM_END,
+      JSON.stringify({
+        posting_date: TERM_START, memo: "p949 direct", currency: "MYR",
+        lines: [
+          { account_code: RENT_ACCOUNT, debit_cents: RENT_CENTS, credit_cents: 0 },
+          { account_code: PAYABLE_ACCOUNT, debit_cents: 0, credit_cents: RENT_CENTS },
+        ],
+      }),
+      opk949("direct"),
+    ],
+  );
+  assert.ok(direct.rows[0].result.plan_id, "the plan lane's own door takes a contract_confirmation");
+
+  // A confirmation of ANOTHER client is unresolved, not merely unauthorised.
+  const other = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, other.client, other.doc.documentId);
+  const otherReceipt = await confirmPlan(sub, { client: other.client, document: other.doc.documentId });
+
+  const foreign = await caught(() =>
+    humanQuery(
+      sub,
+      `select clara.create_accounting_plan(p_client => $1, p_kind => 'recurring_journal',
+          p_purpose => 'p949 foreign', p_authority_kind => 'explicit_instruction',
+          p_authority_ref => $2::jsonb, p_frequency => 'monthly', p_day_rule => 'day_of_month',
+          p_day_of_month => 5, p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => $3,
+          p_effective_to => $4, p_basis => $5::jsonb, p_reversal_day_rule => null,
+          p_op_key => $6) as result`,
+      [
+        client,
+        JSON.stringify({ kind: "contract_confirmation", id: otherReceipt.confirmation_id }),
+        TERM_START, TERM_END,
+        JSON.stringify({
+          posting_date: TERM_START, memo: "p949 foreign", currency: "MYR",
+          lines: [
+            { account_code: RENT_ACCOUNT, debit_cents: RENT_CENTS, credit_cents: 0 },
+            { account_code: PAYABLE_ACCOUNT, debit_cents: 0, credit_cents: RENT_CENTS },
+          ],
+        }),
+        opk949("foreign"),
+      ],
+    ));
+  assert.ok(foreign, "a confirmation belonging to another client does not authorise this one's plan");
+  assert.equal(detailOf(foreign).reason, "authority_ref_unresolved");
+
+  // And #977's own two arms still answer exactly as they did.
+  const unknownKind = await caught(() =>
+    rootQuery("select clara._authority_ref_refusal('accounting_work', gen_random_uuid(), gen_random_uuid(), gen_random_uuid())"));
+  assert.equal(unknownKind, null, "the accounting_work arm still answers rather than raising");
+  const stillUnknown = await caught(() =>
+    rootQuery("select clara._authority_ref_refusal('not_a_kind', gen_random_uuid(), gen_random_uuid(), gen_random_uuid())"));
+  assert.ok(stillUnknown, "an unknown kind still RAISES, so the next lane that widens finds that line");
+});

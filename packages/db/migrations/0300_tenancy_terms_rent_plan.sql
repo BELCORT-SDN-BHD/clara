@@ -1159,7 +1159,13 @@ begin
       'detail', jsonb_build_object('account_code', v_pay_code, 'account_name', v_pay_name)));
   end if;
 
-  if (v_tr->>'drafts')::boolean is not true or jsonb_array_length(v_refusals) > 0
+  -- THE TREATMENT VERDICT IS NOT APPLIED HERE, DELIBERATELY. This body computes the SHAPE of the
+  -- plan whenever the arithmetic and the chart allow one; the granted read (below) nulls it when
+  -- the branch says Clara may not draft, and the confirm door (SecG) admits it against a written
+  -- professional judgement. One body computing the shape and two callers applying two different
+  -- rules to it is what keeps "what Clara drafts" and "what a person may confirm" from drifting
+  -- into two arithmetics.
+  if jsonb_array_length(v_refusals) > 0
      or v_rent is null or v_start is null or v_end is null then
     return jsonb_build_object('treatment', v_tr, 'plan', null, 'refusals', v_refusals);
   end if;
@@ -1262,9 +1268,14 @@ begin
   v_draft := clara._tenancy_rent_plan_draft(v_client, p_document);
   select * into v_plan from clara._tenancy_rent_plan(p_document);
 
+  -- CLARA DRAFTS NOTHING WHEN THE STANDARD MAY NOT ADMIT THE TREATMENT (the owner's ruling). The
+  -- terms, the question and the standard still travel, because a person deciding needs to see
+  -- what she read; the basis does not, because a basis on screen is an offer to post it.
   return jsonb_build_object('document_id', p_document, 'client_id', v_client,
     'agreement_class', 'tenancy',
-    'treatment', v_draft->'treatment', 'plan', v_draft->'plan',
+    'treatment', v_draft->'treatment',
+    'plan', case when (v_draft->'treatment'->>'drafts')::boolean is true
+                 then v_draft->'plan' end,
     'refusals', v_draft->'refusals',
     'confirmed', v_plan.plan_id is not null,
     'plan_id', v_plan.plan_id, 'plan_status', v_plan.status,
@@ -1276,5 +1287,370 @@ comment on function clara.get_tenancy_rent_plan_draft(uuid) is
 
 revoke all on function clara.get_tenancy_rent_plan_draft(uuid) from public;
 grant execute on function clara.get_tenancy_rent_plan_draft(uuid) to clara_authenticated;
+
+reset role;
+
+-- =====================================================================================
+-- §G  THE CONFIRMATION (AC2's second half, AC3's refusal).
+--
+--     "The plan does not start running until a person confirms it, and that confirmation is the
+--     explicit instruction the plan lane requires, with the agreement standing as its source
+--     document." (the brief.) This section makes that literally true in the plan lane's own
+--     terms, by WIDENING what `clara.accounting_plans.authority_ref` may name -- additively, and
+--     without loosening the rule #977 put there.
+--
+--     WHY A THIRD `authority_ref` KIND RATHER THAN A REUSE. The plan lane admits two kinds today:
+--     an `accounting_work` (accepted because `clara.accounting_work.initiator` is NOT NULL, so
+--     the row cannot exist without naming the person who asked -- the owner's #977 ruling says
+--     exactly that) and a `chat_task` narrowed to a human-authored `chat_turn`. A person clicking
+--     Confirm on a contract page is NEITHER: there is no Work, and there is no chat turn. The
+--     three routes considered and rejected:
+--       · admitting a Work for the confirmation -- an `accounting_work` row is a RUN the estate
+--         will pick up and execute; minting one to serve as a receipt would start a run nobody
+--         asked for;
+--       · minting a `chat_turn` -- a turn nobody typed is a fabricated instruction, the exact
+--         thing #977 exists to stop;
+--       · naming the DOCUMENT -- a document is a thing a model read, not a person's instruction.
+--         That would REGRESS #977 rather than extend it.
+--     So the confirmation itself is the row, and `clara.contract_plan_confirmations.confirmed_by`
+--     is NOT NULL, which is the SAME property that makes an `accounting_work` acceptable. The
+--     agreement rides ON that row (`document_id`), which is how "the agreement is recorded as the
+--     source document" is satisfied without weakening what an instruction is.
+--
+--     0250's own last line invited this: "a raise rather than a quiet refusal, so a future lane
+--     that widens the admitted kinds finds this line instead of a silent 'unresolved'." §G.1 is
+--     that lane, and it splices the arm in immediately above that raise.
+--
+--     TWO SPLICES, both ADDITIVE, both marker-detecting so a redo is a no-op:
+--       G.1  clara._authority_ref_refusal(text,uuid,uuid,uuid) gains the third arm.
+--       G.2  clara.create_accounting_plan(...)'s shape wall admits the third kind by name.
+--     `clara.sign_depreciation_authority` carries the SAME shape wall and is DELIBERATELY not
+--     touched: a fixed-asset depreciation authority is not a tenancy, and widening a door for a
+--     kind that can never reach it would be widening it for nothing.
+-- =====================================================================================
+set role clara_fn_owner;
+
+do $p949_auth_arm$
+declare
+  v_sig text := 'clara._authority_ref_refusal(text,uuid,uuid,uuid)';
+  v_def text; v_next text; v_code text; v_anchor text; v_repl text;
+  v_n int; v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+
+  if position('contract_confirmation' in v_code) <> 0 then
+    raise notice '#949 G.1: clara._authority_ref_refusal already carries the contract_confirmation arm -- splice already applied, nothing to do (redo)';
+  else
+    if v_pre_sha <> 'd70256f4208f6caf20e30259958f66d08ff1b445522399fc0c7f844f2cdea435' then
+      raise exception '#949 G.1 prestate: clara._authority_ref_refusal is not at its pinned #977 body (sha %) -- re-derive this splice against the live body', v_pre_sha
+        using errcode='CLR10';
+    end if;
+
+    v_anchor := '  raise exception ''clara._authority_ref_refusal: unknown authority reference kind %'', coalesce(p_ref_kind, ''(null)'')';
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#949 G.1 prestate: the unknown-kind raise appears % time(s) in the live body (expected 1)', v_n
+        using errcode='CLR10';
+    end if;
+
+    v_repl := $p949arm$  if p_ref_kind = 'contract_confirmation' then
+    -- #949 (0300): THE TENANCY LANE'S OWN INSTRUCTION, and it is admitted for the SAME reason
+    -- the accounting_work arm is, not a weaker one: clara.contract_plan_confirmations.
+    -- confirmed_by is NOT NULL, so the row cannot exist without naming the person who confirmed
+    -- the plan. Its EXISTENCE in this firm and client is the proof this door needs. The row also
+    -- carries the agreement it was confirmed against, which is how a rent plan records its
+    -- source document without a document ever being mistaken for an instruction.
+    if exists (select 1 from clara.contract_plan_confirmations cf
+                where cf.id = p_ref_id and cf.firm_id = p_firm and cf.client_id = p_client) then
+      return null;
+    end if;
+    return 'authority_ref_unresolved';
+  end if;
+
+  raise exception 'clara._authority_ref_refusal: unknown authority reference kind %', coalesce(p_ref_kind, '(null)')$p949arm$;
+    v_next := replace(v_def, v_anchor, v_repl);
+    if position('contract_confirmation' in v_next) = 0 then
+      raise exception '#949 G.1 splice: the anchor did not rewrite' using errcode='CLR10';
+    end if;
+    if v_next = v_def then
+      raise exception '#949 G.1 splice: no byte moved -- refusing a no-op apply' using errcode='CLR10';
+    end if;
+
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#949 G.1 postcheck: clara._authority_ref_refusal changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode='CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#949 G.1 postcheck: the definition did not move -- the splice was a no-op'
+        using errcode='CLR10';
+    end if;
+
+    -- ADDITIVE, PROVEN: both arms #977 shipped survive verbatim.
+    v_def := (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure);
+    if position('if p_ref_kind = ''accounting_work'' then' in v_def) = 0
+       or position('if p_ref_kind = ''chat_task'' then' in v_def) = 0
+       or position('authority_ref_not_human_instruction' in v_def) = 0 then
+      raise exception '#949 G.1 postcheck: an arm #977 shipped no longer appears in the body'
+        using errcode='CLR10';
+    end if;
+
+    raise notice '#949 G.1: clara._authority_ref_refusal gains the contract_confirmation arm; both #977 arms survive, owner (%) and ACL byte-unchanged. definition sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+end
+$p949_auth_arm$;
+
+do $p949_plan_kind$
+declare
+  v_sig text := 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)';
+  v_def text; v_next text; v_code text; v_anchor text; v_repl text;
+  v_n int; v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+
+  if position('contract_confirmation' in v_code) <> 0 then
+    raise notice '#949 G.2: clara.create_accounting_plan already admits contract_confirmation -- splice already applied, nothing to do (redo)';
+  else
+    if v_pre_sha <> '13f0d80556e60828875203bc9a290f7d325d4d067c4079e5ef6d25632a25a055' then
+      raise exception '#949 G.2 prestate: clara.create_accounting_plan is not at its pinned live body (sha %) -- re-derive this splice against the live body', v_pre_sha
+        using errcode='CLR10';
+    end if;
+
+    v_anchor := '  if v_ref_kind is null or v_ref_kind not in (''accounting_work'',''chat_task'') then' || chr(10)
+             || '    raise exception ''a plan authority reference names an accounting_work or a chat_task''';
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#949 G.2 prestate: the authority-kind wall appears % time(s) in the live body (expected 1)', v_n
+        using errcode='CLR10';
+    end if;
+
+    v_repl := $p949kind$  -- #949 (0300): a THIRD kind, additively. clara.contract_plan_confirmations is the tenancy
+  -- lane's own record of a named person confirming a rent plan; clara._authority_ref_refusal
+  -- resolves it under the same firm-and-client ladder as the other two.
+  if v_ref_kind is null or v_ref_kind not in ('accounting_work','chat_task','contract_confirmation') then
+    raise exception 'a plan authority reference names an accounting_work, a chat_task or a contract_confirmation'$p949kind$;
+    v_next := replace(v_def, v_anchor, v_repl);
+    if position('''contract_confirmation'')' in v_next) = 0 then
+      raise exception '#949 G.2 splice: the anchor did not rewrite' using errcode='CLR10';
+    end if;
+    if v_next = v_def then
+      raise exception '#949 G.2 splice: no byte moved -- refusing a no-op apply' using errcode='CLR10';
+    end if;
+
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#949 G.2 postcheck: clara.create_accounting_plan changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode='CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#949 G.2 postcheck: the definition did not move -- the splice was a no-op'
+        using errcode='CLR10';
+    end if;
+
+    -- ADDITIVE, PROVEN: every other wall this door carries survives at its own literal.
+    v_def := (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure);
+    if position('authority_rule_unsupported' in v_def) = 0
+       or position('plan_kind_unsupported' in v_def) = 0
+       or position('clara._authority_ref_refusal(v_ref_kind, v_ref_id, v_firm, p_client)' in v_def) = 0
+       or position('authority_ref_not_human_instruction' in v_def) = 0 then
+      raise exception '#949 G.2 postcheck: a wall clara.create_accounting_plan carried before this splice is gone'
+        using errcode='CLR10';
+    end if;
+
+    raise notice '#949 G.2: clara.create_accounting_plan admits contract_confirmation beside the two kinds it carried; every other wall survives, owner (%) and ACL byte-unchanged. definition sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+end
+$p949_plan_kind$;
+
+-- =====================================================================================
+-- §G.3  clara.confirm_tenancy_rent_plan -- THE DOOR A PERSON PRESSES.
+--
+--     It records the act FIRST and creates the plan SECOND, citing the act. That order is what
+--     makes the authority resolvable inside one transaction, and it is also the honest order: the
+--     instruction exists, and then the schedule it authorises does.
+--
+--     THE FOUR REFUSALS, each by name:
+--       plan_credits_bank_account       -- the payable named is one of this client's bank
+--                                          accounts. The brief's own reason travels in the
+--                                          message: the statement line that pays the rent would
+--                                          be counted twice.
+--       account_not_in_chart            -- a code this client does not hold active.
+--       professional_judgement_required -- the lessee branch asked, and nobody wrote down the
+--                                          treatment they are taking. The message IS the branch's
+--                                          own question, so the words on screen and the decision
+--                                          the lane took come out of one body.
+--       rent_plan_already_confirmed     -- this tenancy already runs a plan, named by id. Ending
+--                                          that plan is the plan lane's own act, not this door's.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+create or replace function clara.confirm_tenancy_rent_plan(p_client uuid, p_document uuid,
+    p_rent_account text, p_payable_account text, p_judgement text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp
+  as $ctrp$
+declare
+  c record; v_dedupe jsonb; v_firm uuid; v_filing uuid; v_kind text;
+  v_draft jsonb; v_tr jsonb; v_plan jsonb; v_refusal jsonb; v_existing record;
+  v_judgement text; v_confirmation uuid; v_purpose text; v_created jsonb;
+begin
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'confirming a rent plan requires its idempotency key' using errcode='CLR10',
+      detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
+  if v_firm is null or v_firm <> c.firm then
+    raise exception 'client is not in your firm' using errcode='CLR11';
+  end if;
+  select f.id into v_filing from clara.document_filings f
+   where f.document_id = p_document and f.client_id = p_client and f.firm_id = c.firm
+     and f.retired_at is null
+   order by f.filed_at desc limit 1;
+  if v_filing is null then
+    raise exception 'document % is not a live filing of this client', p_document using errcode='CLR11';
+  end if;
+  select d.document_kind into v_kind from clara.documents d where d.id = p_document;
+  if v_kind is distinct from 'agreement_contract' then
+    raise exception 'a rent plan is confirmed against an agreement contract, not a %', coalesce(v_kind,'(unclassified)')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','confirm_wrong_kind','kind',v_kind)::text;
+  end if;
+
+  v_judgement := nullif(btrim(coalesce(p_judgement,'')),'');
+
+  v_dedupe := clara._reserve_op(c.firm, 'confirm_tenancy_rent_plan', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'document', p_document,
+      'rent_account', p_rent_account, 'payable_account', p_payable_account,
+      'judgement', v_judgement)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
+
+  -- ALREADY RUNNING? Derived from the confirmation the live plan cites, never a marker.
+  select * into v_existing from clara._tenancy_rent_plan(p_document);
+  if v_existing.plan_id is not null then
+    raise exception 'this tenancy already runs a rent plan; revise or end that plan rather than confirming a second'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','rent_plan_already_confirmed',
+          'plan_id', v_existing.plan_id, 'plan_status', v_existing.status,
+          'confirmation_id', v_existing.confirmation_id)::text;
+  end if;
+
+  v_draft := clara._tenancy_rent_plan_draft(p_client, p_document, p_rent_account, p_payable_account);
+  v_tr := v_draft->'treatment';
+
+  select value into v_refusal from jsonb_array_elements(v_draft->'refusals')
+   where value->>'reason' = 'plan_credits_bank_account' limit 1;
+  if v_refusal is not null then
+    raise exception 'a rent plan may not credit % -- it is one of this client''s own bank accounts, and a plan that pays itself out of the bank double-counts the statement line that pays it', v_refusal->'detail'->>'account_code'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','plan_credits_bank_account',
+          'account_code', v_refusal->'detail'->>'account_code',
+          'account_name', v_refusal->'detail'->>'account_name')::text;
+  end if;
+  select value into v_refusal from jsonb_array_elements(v_draft->'refusals')
+   where value->>'reason' = 'account_not_in_chart' limit 1;
+  if v_refusal is not null then
+    raise exception 'account % is not in this client''s chart (or is inactive); add it before confirming the plan', v_refusal->'detail'->>'account_code'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','account_not_in_chart',
+          'account_code', v_refusal->'detail'->>'account_code',
+          'role', v_refusal->'detail'->>'role')::text;
+  end if;
+
+  v_plan := v_draft->'plan';
+  if v_plan is null or jsonb_typeof(v_plan) <> 'object' then
+    raise exception 'there is no rent plan to confirm: %', coalesce(v_tr->>'question','the tenancy''s terms are not complete')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason', coalesce(v_tr->>'reason','terms_incomplete'),
+          'missing_terms', v_tr->'missing_terms')::text;
+  end if;
+
+  -- THE BRANCH ASKED -> A WRITTEN JUDGEMENT IS OWED (the owner's ruling, and "beta, nothing
+  -- dark": a compliance gate PROMPTS, it never disables). The message is the branch's OWN
+  -- question, so the sentence on screen and the decision the lane took come out of one body.
+  if (v_tr->>'drafts')::boolean is not true and v_judgement is null then
+    raise exception '%', v_tr->>'question'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','professional_judgement_required',
+          'treatment_reason', v_tr->>'reason', 'standard', v_tr->>'standard')::text;
+  end if;
+
+  v_confirmation := gen_random_uuid();
+  insert into clara.contract_plan_confirmations(id, firm_id, client_id, document_id, kind,
+      monthly_rent_cents, rent_account_code, payable_account_code, term_start, term_end,
+      treatment, professional_judgement, confirmed_by)
+    values (v_confirmation, c.firm, p_client, p_document, 'rent_plan',
+      (v_plan->>'monthly_rent_cents')::bigint,
+      v_plan->>'rent_account_code', v_plan->>'payable_account_code',
+      (v_plan->>'effective_from')::date, (v_plan->>'effective_to')::date,
+      v_tr, v_judgement, c.actor);
+
+  v_purpose := left((v_plan->>'purpose')
+    || case when v_judgement is null then ''
+            else format(' (confirmed on a professional judgement under %s)',
+                        coalesce(v_tr->>'standard','the applicable framework')) end, 300);
+
+  -- THE PLAN LANE'S OWN DOOR, called rather than re-implemented: every schedule check, every
+  -- overlap advisory, every idempotency and locking rule 0193 carries applies to this plan
+  -- unchanged. The authority it cites is the row inserted a moment ago.
+  v_created := clara.create_accounting_plan(
+    p_client => p_client,
+    p_kind => 'recurring_journal',
+    p_purpose => v_purpose,
+    p_authority_kind => 'explicit_instruction',
+    p_authority_ref => jsonb_build_object('kind','contract_confirmation','id',v_confirmation),
+    p_frequency => v_plan->>'frequency',
+    p_day_rule => v_plan->>'day_rule',
+    p_day_of_month => nullif(v_plan->>'day_of_month','')::int,
+    p_timezone => v_plan->>'timezone',
+    p_effective_from => (v_plan->>'effective_from')::date,
+    p_effective_to => (v_plan->>'effective_to')::date,
+    p_basis => v_plan->'basis',
+    p_reversal_day_rule => null,
+    p_op_key => p_op_key || ':plan');
+
+  perform clara._audit(c.firm, c.actor, null, null, 'confirm_tenancy_rent_plan', null,
+    jsonb_build_object('client', p_client, 'document', p_document,
+      'confirmation', v_confirmation, 'plan', v_created->>'plan_id',
+      'treatment_reason', v_tr->>'reason', 'standard', v_tr->>'standard',
+      'judgement_given', v_judgement is not null));
+
+  return clara._finish_op(c.firm, 'confirm_tenancy_rent_plan', p_op_key,
+    jsonb_build_object('document_id', p_document, 'client_id', p_client,
+      'confirmation_id', v_confirmation,
+      'plan_id', v_created->>'plan_id', 'revision_id', v_created->>'revision_id',
+      'status', v_created->>'status',
+      'occurrences', v_plan->'occurrences',
+      'next_occurrences', v_created->'next_occurrences',
+      'overlap_warning', v_created->'overlap_warning',
+      'treatment', v_tr, 'professional_judgement', v_judgement));
+end $ctrp$;
+
+comment on function clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text) is
+  '#949 AC2/AC3: a named person confirms the tenancy''s rent plan. The confirmation is recorded FIRST (clara.contract_plan_confirmations, carrying the agreement as its source document and the lessee-treatment branch as it stood), and the plan is created SECOND through clara.create_accounting_plan citing that act as its explicit instruction. It refuses a bank credit by name, a missing chart account by code, and -- where the lessee branch asked -- a confirmation with no written professional judgement, quoting the branch''s own question. bookkeeper+, clara_authenticated only.';
+
+revoke all on function clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text) from public;
+grant execute on function clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text) to clara_authenticated;
 
 reset role;
