@@ -5437,3 +5437,111 @@ posting or presentation code reads this row". `clara._client_reporting_framework
 reader, and it reads the key only to decide whether Clara may DRAFT, never to post: a live CLIENT
 record shadows a live FIRM record inside its effective window, and two live records of one scope
 carrying different codes answer `ambiguous` rather than picking.
+
+
+## Riders wave 4, lane 01 — the review fix round (0296–0300)
+
+Three reviews (spec, standards, adversarial) ran against this lane's integrated head and the
+findings were fixed in one pass. Two of this lane's own unmerged migrations were EDITED and
+re-applied; everything else was a test, a census or a surface. What changed in the database, and
+why, is recorded here because five of these are facts about what the estate now REFUSES.
+
+**The migrations edited, and the ceremony.** `CLARA_MIGRATION_REDO` takes the HIGHEST applied
+version only, and the first defect was in 0298, which sits two files below the frontier. So the
+supported path was reached the way `wave3-lane06` reached it, and the one hand step is recorded
+here in full rather than left implicit:
+
+1. `delete from clara.schema_migrations where version in ('0299_agreement_contract_acquisition',
+   '0300_tenancy_terms_rent_plan')` — one statement, returning exactly those two rows. It exists
+   only to make 0298 the highest applied version so the supported redo can take it.
+2. `CLARA_MIGRATION_REDO=0298_payroll_net_pay_settlement node scripts/migrate.mjs` — prestate
+   clean, splice reported its own marker (a redo no-op), tail OK, redone.
+3. `node scripts/migrate.mjs` — 0299 and 0300 re-applied by the ordinary path, each prestate
+   taking its own already-applied branch and each splice no-opping on its marker.
+4. 0300 was later redone twice more, by the ordinary `CLARA_MIGRATION_REDO` path, for the two
+   fixes that landed after the first pass (the MPERS threshold and the settlement core's lock
+   ordering).
+5. Final drift check: `node scripts/migrate.mjs` applies nothing and reports no checksum drift,
+   so the committed files and the applied catalog agree.
+
+**The five walls this round added to the SQL.**
+
+- *A reversal mirror is not a payment* (#947's `clara._payroll_net_pay_unsettled`, #949's
+  `clara._rent_payable_unsettled`). `clara.reverse_entry` builds its mirror with the legs
+  SWAPPED and does not copy `flags`, so reversing a posted payroll run or a month of rent left an
+  approved, non-reversed DEBIT on the payable that belonged to no payment at all — and the FIFO
+  allocated it against an OLDER, genuinely unpaid item, which then vanished from the read, from
+  Needs you and from the settlement door. Both pools now exclude `je.reversal_of is not null`,
+  and the rent read excludes it on the CREDIT side too (reversing a rent SETTLEMENT mirrors a
+  credit to the payable, which the first cut counted as a fresh month of rent). Driven in
+  `payroll-settlement.test.mjs` S7 and `tenancy-rent-plan.test.mjs` S10.
+- *A high-stakes settlement is left a DRAFT* (`clara._settle_payroll_net_pay_core`,
+  `clara._settle_rent_payable_core`). Both doors booked AND approved in one act, so one
+  bookkeeper alone could post and approve an unlimited settlement through /bank while the same
+  entry booked by hand was refused `CLR05 distinct_checker`. They now probe
+  `clara.is_high_stakes` on the entry they have just built and, where it is high-stakes, return
+  `status='awaiting_checker'` with the entry left a draft, no post receipt and no bank match —
+  `clara.reverse_entry`'s own posture for exactly this case. Nothing is dark: the entry is
+  balanced and already on the bank's own GL code, so a distinct checker approves it through
+  `clara.approve_entry` and binds it through the ordinary matcher, and until then the item stays
+  open BY THE LEDGER and keeps its Needs-you row. A second accept while one is waiting is refused
+  `settlement_awaiting_checker` rather than minting a second draft.
+- *One live rent plan per payable account* (`clara.confirm_tenancy_rent_plan`). The open-rent
+  read is a FIFO over the payable ACCOUNT's own balance, because `2050` has no subledger, so two
+  live tenancies pointed at one account shared a single payment pool and each other's months. The
+  first cut refused only a second plan on the same DOCUMENT. A fifth named refusal,
+  `payable_account_in_use`, now names the tenancy that already holds the account; the remedy is
+  the accountant's own choice the owner's ruling already gives them (its own liability account).
+  `clara._rent_payable_unsettled` accordingly emits ONE ROW PER LIVE PLAN rather than one per
+  account, and attributes a credit to the plan whose own term window contains it.
+- *The MPERS arm asks for the classification* (`clara._tenancy_lease_treatment`). The first cut
+  drafted for EVERY MPERS lease however long, which quietly assumed the OPERATING classification
+  that MPERS Section 20 makes the accountant establish. Above ten years the branch now returns
+  `drafts=false` with reason `mpers_lease_classification`, and `confirm_tenancy_rent_plan`
+  demands the written professional judgement it already knows how to demand. TEN YEARS is this
+  lane's own bound on WHEN to ask, not a threshold MPERS states (MPERS states indicators, not a
+  number): premises have an economic life measured in decades, so a two-year shoplot tenancy is
+  not in doubt while a decade-long lease is, and asking on every ordinary tenancy would be noise
+  rather than care. The number lives in one place and the owner may move it.
+- *The legal business date has ONE owner.* `clara._client_reporting_framework` and
+  `clara._tenancy_escalation_state` each spelled `(now() at time zone 'Asia/Kuala_Lumpur')::date`
+  and now call `clara._book_today()`. `clara._tenancy_rent_plan_draft` still carries the zone
+  NAME, because it passes it as `create_accounting_plan`'s `p_timezone` argument and there is no
+  authority returning a zone — that one is on the x42 arm-(B) roster with its reason.
+
+**And two grants that should never have been written.** `clara.contract_terms` and
+`clara.contract_plan_confirmations` shipped a firm-scoped `clara_agent_ro` SELECT, copied from
+`clara.document_regions`' posture. `rig-runtime-visibility.test.mjs`'s "the agent lane has ZERO
+access to every new table" sweep admits an agent table grant only where the lane has NO DOOR to
+route the read through (0192 §H's `knowledge_records` is the type case). This lane has doors. The
+grant and the agent policy are gone, and 0300's own tail now asserts both facts in-migration so a
+later recut cannot restore them quietly.
+
+**A governance change this round makes explicit.** The approve-writer census
+(`x56-rest-c.test.mjs`, 0045's own instrument) bounds who may flip a journal entry to
+`approved` in-body. It was four bodies, then five with #623. This lane makes it NINE:
+`clara._post_payroll_run` and `clara._post_agreement_acquisition` (unattended AGENT posts,
+`approval_arm='agent_unattended'`, the F-A2 D10 arm that does not participate in maker/checker at
+all) and `clara._settle_payroll_net_pay_core` and `clara._settle_rent_payable_core` (HUMAN
+accept acts, which do participate — see the high-stakes wall above). Four to nine is an
+owner-visible widening of who may approve an entry, not a test re-base, and the roster names each
+new body with its reason.
+
+**The knowledge cohort gains a declared reader.** `clara._client_reporting_framework` reads
+`clara.knowledge_records`, which #654's own census forbids from outside the knowledge cohort
+("a firm preference is becoming an authority somewhere"). It is declared in that census with its
+reason and measured there like every other declared consumer — STABLE, no DML against the
+relation — plus one property this lane owes and the loop does not check: it is UNGRANTED,
+reachable by no application role at all. The thing the census exists to stop does not happen here:
+the plan cites `clara.contract_plan_confirmations`, a named person's own act, and
+`clara.create_accounting_plan` still refuses a `knowledge_record` reference outright.
+
+**And one amendment to a frozen contract.** 0020 §6's byte-identity battery pins
+`clara.claim_document_processing_task` and `clara._enqueue_invoice_facts_core` against the
+19-migration prestate through a stack of ratified reversal layers. #945's 0296 and #948's 0299
+widened both bodies' EGRESSING-LANE roster for `payroll_facts` and `contract_facts` — the same
+four sites F-A1 PR-1 widened for `llm_witness`, for the same reason — and the contract was not
+amended, so the battery went red. AMENDMENT W4 is that amendment: four reversal pairs per member,
+the router's machine-derived by diffing the live body against 0123's own source and asserted
+byte-equal to it before transcription. Neither edit adds a call edge into the LEGACY consent
+relation, which is §6's own structural claim about these bodies.

@@ -758,7 +758,7 @@ _Avoid_: A rate, a proration or an allocation the product performs; a formula; a
 form that no lane applies; anything a caller can extend without a new named rule.
 
 **Supplied obligation particulars**:
-The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it derives none of them.
+The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it computes none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
 
 **Payroll run fact state**:
@@ -1021,16 +1021,20 @@ agreement); an editable row; a figure with no stated provenance.
 **Lessee treatment branch**:
 The decision about whether Clara may draft a monthly rent expense for a lease at all, taken from
 the client's own reporting framework and the term the agreement states, and never from a default.
-MPERS Section 20 expenses an operating lease straight-line over the term, so level rent under
-MPERS is the ordinary case; MFRS 16 recognises a right-of-use asset and a lease liability for a
-lease over twelve months, so only a short-term lease may be expensed straight-line; and a stated
-escalation makes the straight-line expense differ from the month's cash rent under either. Where
-the branch ASKS, Clara states the term, the rent and the escalation she read, names what the
-standard asks, and drafts nothing — a person may still confirm, against a written professional
-judgement that is recorded with the act.
+MPERS Section 20 has the lessee CLASSIFY the lease first — one that transfers substantially all
+the risks and rewards of ownership is a finance lease, carried as an asset and a liability, and
+only an operating lease is expensed straight-line over the term — so level rent on an ordinary
+tenancy is the ordinary case and a lease running a decade or more ASKS for that classification;
+MFRS 16 recognises a right-of-use asset and a lease liability for a lease over twelve months, so
+only a short-term lease may be expensed straight-line; and a stated escalation makes the
+straight-line expense differ from the month's cash rent under either. Where the branch ASKS,
+Clara states the term, the rent and the escalation she read, names what the standard asks, and
+drafts nothing — a person may still confirm, against a written professional judgement that is
+recorded with the act.
 _Avoid_: A default framework; auto-posting a treatment that may not comply; averaging a stepped
-rent without a person's decision; a measurement (a discount rate, a right-of-use asset, a lease
-liability schedule) this lane cannot read.
+rent without a person's decision; assuming a classification the standard makes an accountant
+establish; a measurement (a discount rate, a right-of-use asset, a lease liability schedule) this
+lane cannot read.
 
 **Plan confirmation**:
 The recorded act of a named person starting or revising a recurring plan, carrying the document
