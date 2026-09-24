@@ -23,7 +23,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
+import {
+  runStatementWitnessTextRead,
+  runStatementWitnessVisionRead,
+} from "../workflows/statementFacts.v4.behavior.mjs";
 import {
   statementWitnessPromptHash as promptHashV4,
   STATEMENT_WITNESS_TEXT_SYSTEM_PROMPT as TEXT_SYSTEM_V4,
@@ -154,4 +159,134 @@ test("1037.c2 the mapper attaches page AND region together or neither, and regio
     assert.equal(("page" in line), ("region" in line), "0291's shape guard can never be reached broken");
   }
   assert.deepEqual(out.map((l) => l.line_no), [1, 2, 3, 4], "line_no, the writer's own positional key, is untouched");
+});
+
+// ---------------------------------------------------------------------------------------
+// The TEXT CHANNEL, end to end over a scripted database. The model is a stub; everything the
+// body does around it — which schema it hands over, which numbering it resolves against, what it
+// puts on the writer line — is real. The scripted client refuses any query it was not scripted
+// for: an unscripted query is a behaviour these cells did not intend and must be loud.
+// ---------------------------------------------------------------------------------------
+
+const ENGINE_ID = "llm-openai:gpt-5.6-terra:stmt-witness-v1";
+
+/** Two numbered regions on two pages, exactly as the estate publishes them: `idx` is
+ *  `clara.witness_citation_regions`'s own ordinal, `locator` is `clara.document_regions.locator`. */
+const REGIONS = Object.freeze([
+  { idx: 1, page: 1, text_content: "02/04 TRANSFER 125.00", locator: { page: 1, polygon: [0.10, 0.20, 0.90, 0.24] } },
+  { idx: 2, page: 2, text_content: "04/04 CHEQUE 300.00", locator: { page: 2, polygon: [0.10, 0.31, 0.90, 0.35] } },
+]);
+
+function happyClient({ regions = REGIONS } = {}) {
+  const log = [];
+  return {
+    log,
+    async query(sql, params) {
+      const text = String(sql);
+      log.push({ sql: text, params });
+      if (text === "begin" || text === "commit" || text === "rollback") return { rows: [] };
+      if (text.includes("from clara.document_extractions") && text.includes("engine_kind='ocr'")) {
+        return { rows: [{ id: "00000000-0000-4000-8000-0000000e0e0e", page_count: 2 }] };
+      }
+      if (text.includes("clara.witness_citation_regions") && text.includes("w.text_content")) {
+        return { rows: regions.map((r) => ({ idx: r.idx, page: r.page, text_content: r.text_content, locator: r.locator })) };
+      }
+      if (text.includes("clara.witness_citation_regions") && text.includes("r.locator")) {
+        return { rows: regions.map((r) => ({ idx: r.idx, page: r.page, locator: r.locator })) };
+      }
+      if (text.includes("select version_n, engine_id, status from clara.document_processing_tasks")) {
+        return { rows: [{ version_n: 1, engine_id: ENGINE_ID, status: "running" }] };
+      }
+      if (text.includes("clara.resolve_document_client")) {
+        return { rows: [{ r: { status: "unique", client_id: randomUUID() } }] };
+      }
+      if (text.includes("to_regprocedure") && text.includes("as surface")) return { rows: [{ surface: true }] };
+      if (text.includes("select status from clara.document_processing_tasks")) return { rows: [{ status: "running" }] };
+      if (text.includes("clara.prepare_egress_dispatch")) {
+        return { rows: [{ v: { verdict: "granted", authorization_id: randomUUID() } }] };
+      }
+      if (text.includes("clara.consume_egress_dispatch")) return { rows: [{ v: { verdict: "granted" } }] };
+      if (text.includes("clara.record_llm_usage_event")) return { rows: [{ id: randomUUID() }] };
+      throw new Error(`happyClient: unscripted query — ${text.slice(0, 140)}`);
+    },
+  };
+}
+
+function stubServices(calls, object) {
+  return {
+    engineSnapshot: { engineId: ENGINE_ID },
+    callStatementWitnessModel: async (call) => { calls.push(call); return { object, usage: { input_tokens: 10, output_tokens: 5 } }; },
+    statementWitnessMediaType: () => "application/pdf",
+    taskTempPath: () => "/tmp/clara-1037-unused",
+    removeTempFile: async () => {},
+    downloadCanonical: async () => {},
+    log: () => {},
+  };
+}
+
+const DOC = Object.freeze({
+  firm_id: "00000000-0000-4000-8000-00000000f1f1",
+  document_id: "00000000-0000-4000-8000-00000000d0c0",
+  sha256: "0".repeat(64),
+  mime_type: "application/pdf",
+  byte_size: 1024,
+  storage_path: "docs/statement.pdf",
+  lane: "statement_facts",
+});
+
+test("1037.b1 the v4 TEXT read resolves the reader's region_idx against the published numbering and puts the REGION's own page and locator on the writer line", async () => {
+  const calls = [];
+  const client = happyClient();
+  const answer = {
+    header: wireHeader(),
+    lines: [
+      { ...wireLine({ amount_cents: -12500 }), region_idx: 1 },
+      { ...wireLine({ amount_cents: -30000 }), region_idx: 2 },
+      { ...wireLine({ amount_cents: 5000 }), region_idx: null },
+    ],
+  };
+  const out = await runStatementWitnessTextRead(stubServices(calls, answer), (fn) => fn(client), randomUUID(), DOC);
+
+  assert.equal(calls.length, 1, "exactly one model call");
+  assert.equal(calls[0].channel, "text");
+  assert.equal(calls[0].schema, statementWitnessTextSchema, "the TEXT channel is handed the schema that admits region_idx");
+  assert.match(calls[0].system, /region_idx/, "…and the v4 instruction reaches the model through the prompt, not out of band");
+
+  // The page and the locator come from the REGION ROW, never from the model's answer: the model
+  // named an index, and the estate's own numbering decided what that index points at.
+  assert.deepEqual(
+    out.lines.map((l) => ({ line_no: l.line_no, page: l.page, region: l.region })),
+    [
+      { line_no: 1, page: 1, region: REGIONS[0].locator },
+      { line_no: 2, page: 2, region: REGIONS[1].locator },
+      { line_no: 3, page: undefined, region: undefined },
+    ],
+  );
+  assert.equal("page" in out.lines[2], false, "an honestly uncited row carries neither key");
+  assert.equal("region" in out.lines[2], false);
+  for (const l of out.lines) assert.equal("region_idx" in l, false, "region_idx never reaches the writer payload");
+  assert.equal(out.pages_used, 2, "the pinned extraction's page count still rides the text read");
+});
+
+test("1037.b2 the v4 VISION read is handed v3's schema and its own v4 prompt hash — it is never asked to cite", async () => {
+  const calls = [];
+  const client = happyClient();
+  const answer = { header: wireHeader(), lines: [wireLine()] };
+  const out = await runStatementWitnessVisionRead(stubServices(calls, answer), (fn) => fn(client), randomUUID(), DOC);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].channel, "vision");
+  assert.equal(calls[0].schema, statementWitnessVisionSchemaV4, "the vision channel keeps the schema with no region_idx");
+  assert.doesNotMatch(calls[0].system, /region_idx/);
+  assert.equal(out.lines.length, 1);
+  assert.equal("page" in out.lines[0], false, "reader2 never carries a citation — 0291's core reads reader1 alone");
+  assert.equal("region" in out.lines[0], false);
+
+  // The usage row the vision channel meters must carry the V4 hash: a v4 read stamped with v3's
+  // prompt_hash would be indistinguishable from a read the previous body produced.
+  // NOT a bare substring match: `hasStatementWitnessSurface`'s probe names the same verb inside a
+  // to_regprocedure literal and carries no params at all.
+  const usage = client.log.find((q) => q.sql.startsWith("select clara.record_llm_usage_event("));
+  assert.ok(usage, "the vision call is metered");
+  assert.equal(usage.params[5], promptHashV4("vision"), "the metered prompt hash names v4");
 });

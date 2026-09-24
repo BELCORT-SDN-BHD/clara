@@ -1521,6 +1521,10 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/statementFacts.v4.behavior.mjs": {
+      "sha256": "4d7373dde60c3c36c6ad62c86df95bf08f48dd684df106e2194d0c6be1d700e1",
+      "note": ""
+    },
     "packages/runtime/workflows/statementFacts.v4.citations.mjs": {
       "sha256": "cde50accd520e2e3661145d97dfe73a1e7185228ad04e004ad2656e725414c48",
       "note": ""
