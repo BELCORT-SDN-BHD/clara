@@ -92,6 +92,13 @@ function unready(t) {
  *  so a shared digest would make each cell's budget depend on how many ran before it. */
 const originDigest = () => randomBytes(32);
 
+/** A FRESH 64-hex-char token that NAMES NOTHING, for cells that need a token guaranteed not to
+ *  match any real invite. Must be freshly random per call, the same way originDigest() is: the
+ *  wall's first limb keys on this value's own sha256 with the same ceiling of five per
+ *  quarter-hour over the same append-only, unprunable table, so a fixed literal here would let
+ *  one run's attempts collide with a re-run's inside the 15-minute window (RECHECK-01). */
+const probeToken = () => randomBytes(32).toString("hex");
+
 /** THE DOOR, driven as the ONE principal that may call it. `roleQuery` does `set role <role>` on a
  *  real connection — the same shape every other least-privilege cell in this suite uses. */
 async function previewByToken(token, digest = originDigest(), role = GROUP_ROLE) {
@@ -186,7 +193,7 @@ test("p871.door.no_oracle: an UNKNOWN, an EXPIRED, a REVOKED and an ACCEPTED tok
     token: accepted.token, displayName: "Oracle Accepted", opKey: opk("oac871"),
   });
 
-  const unknown = await previewByToken("f".repeat(64));
+  const unknown = await previewByToken(probeToken());
   const onExpired = await previewByToken(expired.token);
   const onRevoked = await previewByToken(revoked.token);
   const onAccepted = await previewByToken(accepted.token);
@@ -577,7 +584,7 @@ test("p871.wall.origin_limb: five previews from one address are served, the sixt
   // FIVE DIFFERENT tokens, so only the ORIGIN limb can be what refuses. Four of them name nothing
   // at all: enumeration must cost the same as a legitimate read.
   const answers = [];
-  for (let i = 0; i < 4; i += 1) answers.push(await previewByToken(String(i).repeat(64), digest));
+  for (let i = 0; i < 4; i += 1) answers.push(await previewByToken(probeToken(), digest));
   answers.push(await previewByToken(issued.token, digest));
   assert.deepEqual(
     answers.map((a) => a.outcome), ["not_previewable", "not_previewable", "not_previewable", "not_previewable", "preview"],
