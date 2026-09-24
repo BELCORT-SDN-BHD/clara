@@ -140,11 +140,89 @@
 -- it is four INSERTs and one UPDATE against tables 0150 already created, exactly the same claim
 -- 0278 and 0292 make for the same reason (packages/db/README.md, "0292" section). A template row
 -- is data, not a name a cohort would track.
+--
+-- WHY v1'S STORED `content_sha256` IS NOT PINNED AS A LITERAL, AND WHAT IS PINNED INSTEAD.
+-- MEASURED, never assumed. GitHub Actions run 35954298990 -- a from-scratch chain on the official
+-- `postgres:17` container -- stopped in THIS file's prestate with v1's hash reading
+-- 673ede910a7a3bb5f0b3197cbda9bdf7cfa269eb0068a3bb3ac7d6655bf9262b where every rig database here
+-- reads d02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df. Reproduced locally on a
+-- PostgreSQL 17 cluster created purely to test it (`pg_createcluster 17 rigcoll --locale
+-- en_US.UTF-8`): the SAME chain, the SAME 42 families and 142 accounts, and the two servers'
+-- stored hashes differ exactly as CI and the rig differ. On each server the hash reproduces from
+-- its own rows, so neither is corrupt -- the digest itself is what moves.
+--   THE CAUSE. `clara._coa_template_content_sha256(uuid)` (0150:763-785) canonicalises with
+-- `order by f.family_key` and `order by a.account_code` -- plain TEXT ordering, which takes the
+-- DATABASE's default collation. Under `C`/`C.UTF-8` an underscore (0x5F) sorts before every
+-- lowercase letter; under glibc's `en_US.UTF-8` punctuation carries no primary weight, so the
+-- comparison falls to the letters alone. v1's 42 family keys contain exactly one pair this
+-- separates -- `tax_liabilities` and `taxation`, which swap -- and that single swap reorders the
+-- `families` array the digest is taken over. (v1 carries only 4-digit account codes today, but
+-- `ck_coa_tmpl_code` also admits the `NNN-XX` form, so the accounts ordering is exposed to the
+-- same rule and is collated here too rather than merely assumed safe.) A literal pin of the
+-- stored digest is therefore not a statement about the TEMPLATE at all -- it is a statement about
+-- the server's `lc_collate`. It would stop this migration on CI and on hosted Supabase (both
+-- `en_US.UTF-8`) exactly as it stopped run 35954298990, while passing on every rig here.
+--   WHAT IS PINNED INSTEAD: a STRUCTURAL digest -- 0150's own canonical form, field for field,
+-- with `collate "C"` written onto both ORDER BYs. `C` is a built-in collation present on every
+-- PostgreSQL server and defined by code point, never by locale data, so the ordering and hence
+-- the digest are identical everywhere BY CONSTRUCTION rather than by luck. MEASURED on both
+-- servers above: d02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df on each. That
+-- it equals the stored hash on a `C.UTF-8` server is precisely why the old literal looked
+-- portable here and was not.
+--   THE STORED HASH IS STILL CHECKED, TWICE, but only against values this transaction MEASURED.
+-- The prestate proves it reproduces from v1's own rows through
+-- `clara._coa_template_content_sha256` (the self-consistency the tail already asserted, now
+-- asserted BEFORE the seed as well, so a v1 whose stored hash and rows disagree stops this file
+-- before it writes). The tail proves it is still the value the prestate read, carried across the
+-- blocks in `_p295_pre` rather than re-typed. v2's hash is computed at seed time on the target
+-- server and pinned nowhere, which was already true.
 -- =====================================================================================
+
+-- The values this file carries ACROSS its three blocks, so the tail can prove v1 did not move
+-- without naming a literal that only holds under one server's collation. A temp table is the
+-- estate's own idiom for exactly this (0289:93, 0291:119, 0261:78); `on commit drop` scopes it to
+-- this migration's single transaction, and the CONNECTING role owns it -- the seed block runs as
+-- clara_fn_owner and never reads it, and the tail runs after `reset role`.
+create temp table _p295_pre(k text primary key, v text) on commit drop;
+
+-- ONE spelling of the portable digest, for the same reason 0150 keeps ONE spelling of the
+-- canonical form: the prestate and the tail must not be able to disagree about what v1's content
+-- is. This IS 0150's jsonb (0150:765-784), field for field and key for key, with `collate "C"`
+-- added to both ORDER BYs and the result hashed by the estate's own `clara._hash` (0004:32-33,
+-- sha256 over the jsonb text) -- no second hashing primitive is invented here. jsonb object keys
+-- are stored in a normalised order that depends on nothing but the keys themselves, so the ONLY
+-- collation-sensitive step in the original was the two array orderings this pins down. Lives in
+-- pg_temp; each migration file runs on its own fresh connection
+-- (packages/db/scripts/migrate.mjs), so there is no cross-file collision to guard (0289's own
+-- reasoning for pg_temp.p889_n_check).
+create function pg_temp.p295_struct_sha256(p_template uuid) returns text
+  language sql stable as $p295_ss$
+  select encode(clara._hash(jsonb_build_object(
+    'families', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'family_key', f.family_key, 'label', f.label, 'inclusion', f.inclusion,
+               'basis', f.basis, 'sort_ordinal', f.sort_ordinal,
+               'msic_sections', to_jsonb(f.msic_sections),
+               'msic_divisions', to_jsonb(f.msic_divisions),
+               'msic_edition', f.msic_edition,
+               'trade_natures', to_jsonb(f.trade_natures),
+               'entity_types', to_jsonb(f.entity_types)) order by f.family_key collate "C")
+        from clara.coa_template_families f where f.template_id = p_template), '[]'::jsonb),
+    'accounts', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'account_code', a.account_code, 'name', a.name,
+               'account_type', a.account_type, 'account_class', a.account_class,
+               'special_acc_type', a.special_acc_type, 'family_key', a.family_key,
+               'sort_ordinal', a.sort_ordinal,
+               'tax_sensitive', a.tax_sensitive, 'add_back_class', a.add_back_class,
+               'statutory', a.statutory) order by a.account_code collate "C")
+        from clara.coa_template_accounts a where a.template_id = p_template), '[]'::jsonb))), 'hex');
+$p295_ss$;
 
 do $p295_pre$
 declare
   v1_id uuid; v1_version int; v1_state text; v1_fam int; v1_acc int; v1_hash text;
+  v1_struct text; v1_recomputed text;
   v2_id uuid; v_redo boolean := false; v_bad text; v_sha text; v_n int;
   c_content_sha_pre constant text :=
     'd120669e12506c1a347729008e3f11785d62c914c3955f3dd6a099fd9b20baa7';
@@ -152,7 +230,12 @@ declare
     '0fced8e2c635e5bdb306b6836b208cbae44a669f6f6549e3113017c8441d1844';
   c_child_freeze_pre constant text :=
     '504d9c613739d30c21c100d3c8c8b8dbc525ff2adeda888d554bbec0309f0ec5';
-  c_v1_hash_pin constant text :=
+  -- v1's CONTENT, digested collation-INDEPENDENTLY (see this file's header for the measurement
+  -- and the cause). Portable by construction: pg_temp.p295_struct_sha256 is 0150's own canonical
+  -- form with `collate "C"` on both orderings, and `C` is defined by code point on every server.
+  -- Measured identical on a `C.UTF-8` and an `en_US.UTF-8` PostgreSQL 17 cluster. This pin, NOT
+  -- the stored digest, is what says "v1 is still 0150's own artifact".
+  c_v1_struct_pin constant text :=
     'd02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df';
 begin
   select id, version, state into v1_id, v1_version, v1_state
@@ -192,11 +275,28 @@ begin
     raise exception '0295 prestate: my_sme_starter v1 carries % families / % accounts, expected 42 / 142 -- the platform starter has drifted from 0150''s own seed', v1_fam, v1_acc
       using errcode = 'CLR10';
   end if;
-  select encode(content_sha256, 'hex') into v1_hash from clara.coa_templates where id = v1_id;
-  if v1_hash is distinct from c_v1_hash_pin then
-    raise exception '0295 prestate: my_sme_starter v1''s content_sha256 has DRIFTED from its pinned value (measured %, expected %)', v1_hash, c_v1_hash_pin
+  -- v1's CONTENT, proven three ways, none of them a literal that depends on the server's
+  -- collation (header: WHY v1'S STORED `content_sha256` IS NOT PINNED AS A LITERAL).
+  --   (a) THE STRUCTURAL PIN. The one literal left here, and portable by construction.
+  v1_struct := pg_temp.p295_struct_sha256(v1_id);
+  if v1_struct is distinct from c_v1_struct_pin then
+    raise exception '0295 prestate: my_sme_starter v1''s CONTENT has DRIFTED from its pinned structural digest (measured %, expected %). This digest orders v1''s families and accounts with `collate "C"`, so it does not move with the server''s lc_collate -- a mismatch here means the ROWS changed, not the environment.', v1_struct, c_v1_struct_pin
       using errcode = 'CLR10';
   end if;
+  --   (b) SELF-CONSISTENCY, asserted BEFORE the seed as well as after it (it was tail-only
+  -- before): the hash v1 carries is the hash its own rows produce THROUGH 0150's own helper, on
+  -- THIS server. That is the strongest thing that can be said about the stored digest without
+  -- naming a value only one collation yields.
+  select encode(content_sha256, 'hex') into v1_hash from clara.coa_templates where id = v1_id;
+  v1_recomputed := encode(clara._coa_template_content_sha256(v1_id), 'hex');
+  if v1_hash is distinct from v1_recomputed then
+    raise exception '0295 prestate: my_sme_starter v1''s stored content_sha256 (%) does not reproduce from its own rows (clara._coa_template_content_sha256 measures %) -- the template and its published digest disagree', v1_hash, v1_recomputed
+      using errcode = 'CLR10';
+  end if;
+  --   (c) CARRIED, not re-typed. The tail asserts v1's stored hash is still THIS value -- the one
+  -- measured here, in this transaction, on this server -- which is what proves this file moved
+  -- nothing. A literal could not say that on a server whose collation differs from the author's.
+  insert into _p295_pre(k, v) values ('v1_content_sha256', v1_hash), ('v1_struct_sha256', v1_struct);
 
   -- THE FOUR CODES, AND THE 2031-2099 BAND SALARIES/RENT PAYABLE ARE CHOSEN FROM, ARE ABSENT
   -- FROM v1 -- proof this file MINTS them rather than re-stating something 0150 already shipped,
@@ -273,8 +373,8 @@ begin
     alter table clara.coa_template_accounts enable trigger t_coa_template_accounts_freeze;
   end if;
 
-  raise notice '0295 prestate: clean (% apply) -- my_sme_starter v1 (%) is %, unmoved at 42 families / 142 accounts, hash %, carries none of 1180/2030/2040/2050, and the three functions this file depends on are at their pinned bodies.',
-    case when v_redo then 'REDO' else 'FIRST' end, v1_id, v1_state, v1_hash;
+  raise notice '0295 prestate: clean (% apply) -- my_sme_starter v1 (%) is %, unmoved at 42 families / 142 accounts, structural digest % (collation-independent, pinned), stored content_sha256 % (reproduces from its own rows on this server; carried to the tail, never pinned as a literal), carries none of 1180/2030/2040/2050, and the three functions this file depends on are at their pinned bodies.',
+    case when v_redo then 'REDO' else 'FIRST' end, v1_id, v1_state, v1_struct, v1_hash;
 end
 $p295_pre$;
 
@@ -405,12 +505,26 @@ declare
   v2_id uuid; v2_fam int; v2_acc int; v2_state text; v2_hash text;
   v2_created_by uuid; v2_published_by uuid; v2_forked_from uuid;
   v_bad text; v_n int; v_row record;
-  c_v1_hash_pin constant text :=
-    'd02a786a685d484989a85e2e6a3f239ccdb5cbb8957143ede21f2fd8b12f67df';
+  v1_struct text; v1_recomputed text;
+  -- CARRIED FROM THE PRESTATE, in this same transaction, never re-typed as a literal. Both are
+  -- what the prestate MEASURED on THIS server before the seed ran, so comparing against them
+  -- proves this file moved nothing -- on any server's collation. See the file header.
+  v1_hash_pre constant text := (select v from _p295_pre where k = 'v1_content_sha256');
+  v1_struct_pre constant text := (select v from _p295_pre where k = 'v1_struct_sha256');
 begin
+  -- T.0 THE CARRIER ARRIVED. Both prestate measurements must be present, or every comparison
+  -- below that names one would be comparing against NULL. Stated as its own refusal rather than
+  -- left to surface as a confusing "expected <NULL>" further down.
+  if v1_hash_pre is null or v1_struct_pre is null then
+    raise exception '0295 tail T.0: the prestate''s v1 measurements did not reach the tail (content_sha256 %, structural %) -- _p295_pre is a temp table scoped to this transaction and both blocks must share it',
+      coalesce(v1_hash_pre, '<absent>'), coalesce(v1_struct_pre, '<absent>')
+      using errcode = 'CLR10';
+  end if;
+
   -- T.1 v1 IS RETIRED AND OTHERWISE UNTOUCHED: the retire stamp and NOTHING else -- same counts,
-  -- same pinned hash, and it still reproduces its own hash from its own rows. The retirement is a
-  -- STATE, never a content edit, so everyone who adopted v1 still reads exactly what they adopted.
+  -- the same content it entered this transaction with, and it still reproduces its own hash from
+  -- its own rows. The retirement is a STATE, never a content edit, so everyone who adopted v1
+  -- still reads exactly what they adopted.
   select id, state, retired_at is not null into v1_id, v1_state, v1_has_retired_at
     from clara.coa_templates
    where scope = 'platform' and template_key = 'my_sme_starter' and version = 1;
@@ -425,13 +539,26 @@ begin
     raise exception '0295 tail T.1: my_sme_starter v1 now carries % families / % accounts -- it MOVED', v1_fam, v1_acc
       using errcode = 'CLR10';
   end if;
-  if v1_hash is distinct from c_v1_hash_pin then
-    raise exception '0295 tail T.1: my_sme_starter v1''s content_sha256 has DRIFTED from its pinned value (measured %, expected %)', v1_hash, c_v1_hash_pin
+  -- v1's CONTENT IS UNMOVED, said three ways and not one of them a collation-dependent literal.
+  --   (a) The stored digest is still the value the PRESTATE read, in this same transaction, on
+  -- this same server. This is the assertion that actually proves "0295 did not touch v1"; the
+  -- literal it replaces proved only "this server collates like the author's" (file header).
+  if v1_hash is distinct from v1_hash_pre then
+    raise exception '0295 tail T.1: my_sme_starter v1''s content_sha256 MOVED during this migration (prestate read %, tail reads %)', v1_hash_pre, v1_hash
       using errcode = 'CLR10';
   end if;
-  if clara._coa_template_content_sha256(v1_id) is distinct from
-     (select content_sha256 from clara.coa_templates where id = v1_id) then
-    raise exception '0295 tail T.1: my_sme_starter v1''s stored content_sha256 no longer reproduces from its rows' using errcode = 'CLR10';
+  --   (b) And its ROWS are unmoved, measured collation-independently through the same one
+  -- spelling the prestate used -- so this holds identically on CI, on hosted and on every rig.
+  v1_struct := pg_temp.p295_struct_sha256(v1_id);
+  if v1_struct is distinct from v1_struct_pre then
+    raise exception '0295 tail T.1: my_sme_starter v1''s structural digest MOVED during this migration (prestate %, tail %) -- its families or accounts were edited', v1_struct_pre, v1_struct
+      using errcode = 'CLR10';
+  end if;
+  --   (c) And the stored digest still reproduces from those rows through 0150's own helper.
+  v1_recomputed := encode(clara._coa_template_content_sha256(v1_id), 'hex');
+  if v1_hash is distinct from v1_recomputed then
+    raise exception '0295 tail T.1: my_sme_starter v1''s stored content_sha256 (%) no longer reproduces from its rows (%)', v1_hash, v1_recomputed
+      using errcode = 'CLR10';
   end if;
 
   -- T.2 v2 EXISTS, IS PUBLISHED, IS MIGRATION-AUTHORED, AND ITS HASH REPRODUCES.
@@ -584,7 +711,7 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice '0295 tail OK: my_sme_starter v1 (%) is RETIRED with its retire stamp and otherwise unmoved at 42/142, hash %, so every existing adopter still reads exactly what they adopted and the picker now offers ONE starter; v2 (%) is PUBLISHED, migration-authored, forked_from v1, at 42 families / 146 accounts with the four new rows exactly as specified, no code collision across the estate''s templates, the five special markers intact, 0156''s two society entity overrides carried forward row for row so a society client adopting v2 still gets 3900 as `Accumulated Fund` and no 3040, all three freeze triggers armed, and v2 itself now refuses a sixth account exactly as v1 does.',
-    v1_id, v1_hash, v2_id;
+  raise notice '0295 tail OK: my_sme_starter v1 (%) is RETIRED with its retire stamp and otherwise unmoved at 42/142 -- stored content_sha256 % is still the value the prestate read, its structural digest % is still the pinned collation-independent one, and the stored digest still reproduces from its rows -- so every existing adopter still reads exactly what they adopted and the picker now offers ONE starter; v2 (%) is PUBLISHED, migration-authored, forked_from v1, at 42 families / 146 accounts with the four new rows exactly as specified, no code collision across the estate''s templates, the five special markers intact, 0156''s two society entity overrides carried forward row for row so a society client adopting v2 still gets 3900 as `Accumulated Fund` and no 3040, all three freeze triggers armed, and v2 itself now refuses a sixth account exactly as v1 does.',
+    v1_id, v1_hash, v1_struct, v2_id;
 end
 $p295_tail$;
