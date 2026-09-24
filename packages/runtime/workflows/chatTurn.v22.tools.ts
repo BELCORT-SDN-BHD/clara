@@ -26,7 +26,7 @@ import type { ToolRefusalV21 } from "./chatTurn.v21.tools.js";
 import { authoringRefusal, stableOpKey } from "./chatTurn.v11.tools.js";
 import type { WorkAcceptedPartV19 } from "./chatTurn.v19.parts.js";
 import { pools, readScoped, type PgExec, type ToolCtx } from "./chatTurn.v15.infra.js";
-import { parseOpeningTargets, readOpeningSeed } from "../lib/opening-parse.mjs";
+import { parseOpeningTargets, readOpeningSeed, refreshOpeningTargets } from "../lib/opening-parse.mjs";
 import {
   START_TRADE_INVOICE_WORK_TOOL,
   TRADE_INVOICE_REFUSALS_V2,
@@ -117,11 +117,13 @@ export const OPENING_SOURCE_FIXES: Readonly<Record<string, string>> = Object.fre
     "A person can key the balances on the basis instead, or bind a different document to it.",
   no_tie_document:
     "A person binds a filed opening-balance document or management account to the basis first.",
-  // WHEN THE REFRESH TOOL LANDS (#986's chat half, roster entry A3 of this cut), THIS SENTENCE
-  // NAMES IT. It does not name it today because this body does not carry that tool, and pointing
-  // a model at a tool it has not been handed is how a turn ends in an invented call.
+  // #986's chat half (roster entry A3) IS in this body now, so the act beside this refusal names
+  // the tool rather than a screen. A second READ stays refused by design — the parse's op key is
+  // stable per (seed, document) — and the way on is the refresh act.
   source_reread_since_parse:
-    "A person brings the basis onto the newest reading of the document from the client's Registers page.",
+    "Use refresh_opening_source instead: it brings the basis onto the newest reading of the "
+    + "document and retires the lines the earlier reading left. A person can also do it on the "
+    + "client's Registers page.",
 });
 
 /** The all-or-nothing law, as the act a person takes: the estate's own words on the browser
@@ -905,6 +907,238 @@ export async function runStartTradeInvoiceWorkV22(
   }
 }
 
+
+// =============================================================================================
+// `refresh_opening_source` — ROSTER ENTRY A3 (#986), AND THE MATCHED PAIR §1.10 REQUIRES.
+//
+// A SECOND TOOL BESIDE THE READ, NOT A FLAG ON IT. #986's contract states the reason in one
+// sentence: "a model that could pass `{force: true}` to the read would be able to retire a basis's
+// targets by accident". Reading a document into a basis and bringing a basis onto a NEWER reading
+// of that document are two different acts with two different op keys and two different receipts,
+// and only one of them retires lines a person may already have looked at.
+//
+// THE READ'S OWN MAPPING IS UNCHANGED, AND THAT IS #985'S RE-MEASUREMENT, SATISFIED. A second read
+// still answers `409 {status:'conflict', reason:'source_reread_since_parse'}`, because the parse's
+// op key is stable per (seed, document) and a retried read can never double a basis. What moved is
+// the ACT beside the refusal: `OPENING_SOURCE_FIXES.source_reread_since_parse` now names this tool
+// instead of describing a screen.
+// =============================================================================================
+
+/** The tool name, as the model sees it and as every census counts it. */
+export const REFRESH_OPENING_SOURCE_TOOL = "refresh_opening_source";
+
+/** #986's zod, verbatim: two identifiers and nothing else. The tied document AND the authoritative
+ *  reading are both resolved server-side, so an extraction id here could only ever name a reading
+ *  the model chose. */
+export const refreshOpeningSourceInputSchema = z
+  .object({
+    client_id: z
+      .string()
+      .uuid()
+      .describe("The client this conversation is about. It must be that client and no other."),
+    seed_id: z
+      .string()
+      .uuid()
+      .describe(
+        "The opening basis to bring onto the newest reading of its tied document. You never name "
+        + "a document, a reading, an account or an amount here.",
+      ),
+  })
+  .strict();
+
+export type RefreshOpeningSourceInput = z.infer<typeof refreshOpeningSourceInputSchema>;
+
+export type RefreshOpeningSourceResult =
+  | {
+      ok: true;
+      status: "refreshed";
+      client_id: string;
+      seed_id: string;
+      /** How many lines the NEWEST reading recorded. The core's own `targets_recorded`. */
+      lines: number;
+      /** How many lines the EARLIER reading left behind and this act retired. The news, and the
+       *  reason #986's contract says "report BOTH numbers". */
+      retired: number;
+    }
+  | ToolRefusalV22;
+
+/** The sentences the estate has for THIS act's own fixed tokens. Every other reason is carried
+ *  verbatim, for the reason the read's own map gives: a reason that names this document is the
+ *  only actionable thing in the answer. */
+export const OPENING_REFRESH_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
+  no_reread_to_refresh:
+    "There is nothing to refresh on this basis: its lines already cite the newest reading of the "
+    + "document. Somebody has already brought it forward.",
+  stale_extraction_version:
+    "The document was read again while this refresh was being prepared, so nothing was changed. "
+    + "The basis still cites the reading it cited before.",
+  refresh_extraction_mixed:
+    "This refresh cited two different readings of the document, so nothing was changed.",
+  registry_not_open:
+    "This opening basis is not open for editing, so nothing can be brought onto a newer reading.",
+  [OPENING_BASIS_NOT_FOUND]:
+    "I cannot see an opening basis with that id for this client.",
+});
+
+/** The act a PERSON takes next, never a retry this tool could make. */
+export const OPENING_REFRESH_FIXES: Readonly<Record<string, string>> = Object.freeze({
+  no_reread_to_refresh:
+    "Open the basis on the client's Registers page to see the lines it now holds.",
+  stale_extraction_version:
+    "Ask again once the document has settled: the refresh always moves the basis onto the newest "
+    + "reading, and there is no way to name an older one.",
+  registry_not_open:
+    "A person reopens the basis on the client's Registers page first.",
+  [OPENING_BASIS_NOT_FOUND]:
+    "Open the client's Registers page and check the opening basis you mean is the one this conversation is about.",
+});
+
+function refreshSentenceFor(reason: string | null, fallback: string): string {
+  const sentence = reason === null ? undefined : OPENING_REFRESH_REFUSALS[reason];
+  return sentence ?? fallback;
+}
+
+function refreshFixFor(reason: string | null, fallback: string | null): string | null {
+  const fix = reason === null ? undefined : OPENING_REFRESH_FIXES[reason];
+  return fix ?? fallback;
+}
+
+/**
+ * THE CORE'S OWN ANSWER, TURNED INTO THE TOOL ENVELOPE — #986's eight-row table, verbatim, never
+ * replaced by a generic message.
+ *
+ * EXPORTED because it is the contract a reviewer has to be able to drive: the door call around it
+ * needs a database, this decision does not.
+ */
+export function openingRefreshOutcome(
+  out: { http: number; body: Record<string, unknown> },
+  ids: { seedId: string; clientId: string },
+): RefreshOpeningSourceResult {
+  const body = out.body ?? {};
+  if (out.http === 202) {
+    // BOTH COUNTS OR NEITHER. The core's own ADV-08 rule, restated at this seam: a 202 whose
+    // counts are absent is an act that reported nothing, and reporting it as "0 recorded, 0
+    // retired" would be a figure nobody measured.
+    const lines = typeof body.lines === "number" && Number.isFinite(body.lines) ? body.lines : null;
+    const retired = typeof body.retired === "number" && Number.isFinite(body.retired) ? body.retired : null;
+    if (lines === null || retired === null) {
+      return internalFaultV22(
+        "The opening basis refresh returned no counts. Nothing can be reported from it.",
+      );
+    }
+    return { ok: true, status: "refreshed", client_id: ids.clientId, seed_id: ids.seedId, lines, retired };
+  }
+  if (out.http === 404) {
+    return {
+      ok: false,
+      code: "CLR11",
+      reason: OPENING_BASIS_NOT_FOUND,
+      fix: OPENING_REFRESH_FIXES[OPENING_BASIS_NOT_FOUND] as string,
+      message: OPENING_REFRESH_REFUSALS[OPENING_BASIS_NOT_FOUND] as string,
+      details: detailsWithBody(body, ids.seedId),
+    };
+  }
+  if (out.http === 409) {
+    const reason = typeof body.reason === "string" ? body.reason : null;
+    const code = typeof body.code === "string" ? body.code : "CLR13";
+    return {
+      ok: false,
+      code,
+      reason,
+      fix: refreshFixFor(reason, null),
+      message: refreshSentenceFor(
+        reason,
+        `The opening basis could not be refreshed: the database refused it (${code}${reason ? `, ${reason}` : ""}). Nothing was changed.`,
+      ),
+      details: detailsWithBody(body, ids.seedId),
+    };
+  }
+  if (out.http === 422) {
+    const reason = typeof body.reason === "string" ? body.reason : null;
+    return {
+      ok: false,
+      code: "unparseable",
+      reason,
+      fix: refreshFixFor(reason, ALL_OR_NOTHING_FIX),
+      message: refreshSentenceFor(
+        reason,
+        `The newest reading could not be read: ${reason ?? "the document could not be read"}. `
+          + "Nothing was changed — one unreadable line forfeits the whole document, because a "
+          + "partial opening basis is worse than none.",
+      ),
+      details: detailsWithBody(body, ids.seedId),
+    };
+  }
+  return internalFaultV22("The opening basis could not be refreshed. Nothing was changed.");
+}
+
+const refreshOpeningTargetsTyped = refreshOpeningTargets as unknown as (
+  client: PgExec,
+  args: { seedId: string; firmId: string; reassert?: () => Promise<void> },
+) => Promise<OpeningCoreAnswer>;
+
+/**
+ * Bring an opening basis onto the NEWEST reading of its tied document, through the same core the
+ * browser route calls.
+ *
+ * THE SAME FOUR WALLS THE READ STANDS BEHIND, and on the SAME floor: retiring lines a person may
+ * already have looked at is strictly more than recording lines, so the bookkeeper+ floor is the
+ * one that applies and nothing here is looser.
+ */
+export async function runRefreshOpeningSource(
+  ctx: ToolCtx,
+  input: RefreshOpeningSourceInput,
+): Promise<RefreshOpeningSourceResult> {
+  if (!ctx.clientId) {
+    return noClientRefusalV22(
+      "opening_source_needs_client_pin",
+      "This conversation is not bound to a client, so there is no opening basis of theirs to refresh.",
+    );
+  }
+  if (input.client_id !== ctx.clientId) {
+    return {
+      ok: false,
+      code: "CLR03",
+      reason: "client_not_in_conversation",
+      fix: "Open this conversation from the client whose opening basis you mean, then ask again.",
+      message: "That is not the client this conversation is about, so I will not refresh an opening basis for them here.",
+      details: { client_id: input.client_id },
+    };
+  }
+  const clientId = ctx.clientId;
+  const ids = { seedId: input.seed_id, clientId };
+  const masked = (): RefreshOpeningSourceResult =>
+    openingRefreshOutcome({ http: 404, body: { error: "not_found", message: "not found" } }, ids);
+  try {
+    return await pools().withRuntime(async (c: PgExec) => {
+      const floor = openingFloorRefusal(await liveChatPrincipal(c, ctx.createdBy), ctx.firmId);
+      if (floor) return floor;
+      const seed = await readOpeningSeedTyped(c, input.seed_id);
+      if (!seed || seed.firm_id !== ctx.firmId || seed.client_id !== clientId) return masked();
+      const reassert = async (): Promise<void> => {
+        if (openingFloorRefusal(await liveChatPrincipal(c, ctx.createdBy), ctx.firmId)) {
+          throw new Error(AUTHORITY_LOST_MARKER);
+        }
+      };
+      const out = await refreshOpeningTargetsTyped(c, { seedId: input.seed_id, firmId: ctx.firmId, reassert });
+      return openingRefreshOutcome(out, ids);
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === AUTHORITY_LOST_MARKER) {
+      return {
+        ok: false,
+        code: "CLR04",
+        reason: "authority_lost",
+        fix: "An active bookkeeper of this firm has to be the one asking.",
+        message:
+          "The authority this refresh borrows was withdrawn while the document was being read, so nothing was changed.",
+        details: {},
+      };
+    }
+    return internalFaultV22("The opening basis could not be refreshed. Nothing was changed.");
+  }
+}
+
 export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
   return Object.assign({}, buildToolsV21(ctx, modelId, segment), {
     // A1 + A2 — the SAME NAME v21 serves, REPLACED rather than added. `Object.assign` takes the
@@ -941,6 +1175,17 @@ export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
         + "zero — an empty cash figure means nobody has said which accounts are cash yet.",
       inputSchema: readClientFinancialPackInputSchema,
       execute: (input: ReadClientFinancialPackInput) => runReadClientFinancialPack(ctx, input),
+    }),
+    [REFRESH_OPENING_SOURCE_TOOL]: tool({
+      description:
+        "Bring one of this client's OPENING BASES onto the NEWEST reading of the document already "
+        + "bound to it, retiring the lines the earlier reading left. Use this — and never a second "
+        + "read — when reading refuses because the document has been read again: a second read is "
+        + "refused on purpose and will refuse again. You name only the basis; the document and the "
+        + "reading are both the database's. Report BOTH figures it returns, how many lines were "
+        + "recorded and how many were retired, and never a figure you did not get back.",
+      inputSchema: refreshOpeningSourceInputSchema,
+      execute: (input: RefreshOpeningSourceInput) => runRefreshOpeningSource(ctx, input),
     }),
     [READ_OPENING_SOURCE_TOOL]: tool({
       description:

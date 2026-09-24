@@ -34,7 +34,11 @@ import {
   hasCodingIntent_v21,
   type ClaraPartV21,
 } from "./chatTurn.v21.prompt.js";
-import { READ_OPENING_SOURCE_TOOL, READ_CLIENT_FINANCIAL_PACK_TOOL } from "./chatTurn.v22.tools.js";
+import {
+  READ_OPENING_SOURCE_TOOL,
+  READ_CLIENT_FINANCIAL_PACK_TOOL,
+  REFRESH_OPENING_SOURCE_TOOL,
+} from "./chatTurn.v22.tools.js";
 
 // Every unchanged predecessor symbol is REACHED BY REFERENCE rather than re-spelled, so the text
 // each one names is hash-locked once and a reader of either name is reading one value.
@@ -119,8 +123,8 @@ export const OPENING_SOURCE_CHAT_GUIDANCE = [
   "A REFUSAL IS FINAL FOR THIS ASK. Pass the reason on in the words it arrives in, say which act a",
   "person takes next, and do not ask again with the same basis: the answer will be the same one.",
   "A document that has been READ AGAIN since the basis was parsed is refused on purpose — a second",
-  "reading is not a retry — and a person brings the basis onto the newest reading from the",
-  "register.",
+  `reading is not a retry. The act that moves it on is ${REFRESH_OPENING_SOURCE_TOOL}, and the`,
+  "paragraph below says how; a person can also do it from the client's Registers page.",
 ].join("\n");
 
 export const CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE = [
@@ -187,9 +191,31 @@ export const TRADE_INVOICE_V22_CHAT_GUIDANCE = [
   "recording so a reviewer months later can see the preparer was warned.",
 ].join("\n");
 
+
+export const OPENING_REFRESH_CHAT_GUIDANCE = [
+  "WHEN THE DOCUMENT HAS BEEN READ AGAIN — REFRESH, DO NOT RETRY THE READ.",
+  "",
+  `If ${READ_OPENING_SOURCE_TOOL} refuses because the document has been read again since the basis`,
+  "was parsed, that refusal is deliberate and permanent for that basis: a second reading is not a",
+  "retry, and asking again returns the same answer. DO NOT RETRY THE READ.",
+  "",
+  `${REFRESH_OPENING_SOURCE_TOOL} is the way on. It brings the basis onto the NEWEST reading of the`,
+  "document already bound to it, and retires the lines the earlier reading left behind. You name",
+  "the basis and nothing else — not the document, not which reading, not an amount.",
+  "",
+  "REPORT THE TWO FIGURES IT RETURNS: how many lines were recorded, and how many were retired.",
+  "Both of them, always — a refresh that recorded nine and retired three is not 'nine lines read',",
+  "and the retired count is the part a professional needs to hear. Never a figure you inferred.",
+  "",
+  "REFRESHING IS NOT APPROVING, AND IT IS NOT A SECOND READ. It moves an open basis onto a newer",
+  "reading of the same document for a person to check. If there is nothing to refresh, somebody",
+  "has already brought it forward — say that, rather than describing it as a failure.",
+].join("\n");
+
 export const SYSTEM_PROMPT_V22 =
   `${SYSTEM_PROMPT_V21}\n\n${OPENING_SOURCE_CHAT_GUIDANCE}\n\n${CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`
-  + `\n\n${TRADE_INVOICE_V22_CHAT_GUIDANCE}`;
+  + `\n\n${TRADE_INVOICE_V22_CHAT_GUIDANCE}`
+  + `\n\n${OPENING_REFRESH_CHAT_GUIDANCE}`;
 
 // --- the promotions -----------------------------------------------------------------------
 

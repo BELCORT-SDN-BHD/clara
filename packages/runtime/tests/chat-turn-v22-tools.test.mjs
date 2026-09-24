@@ -313,8 +313,15 @@ test("v22.opening: the door is the ROUTE CORE, called with the core's own argume
   assert.match(src, /parseOpeningTargetsTyped\(c, \{ seedId: input\.seed_id, firmId: ctx\.firmId, reassert \}\)/);
   assert.ok(!/record_opening_targets_parsed/.test(src),
     "the audited writer is reached ONLY through the core the browser route calls");
-  assert.ok(!/refresh_opening_targets_from_reread|refreshOpeningTargets/.test(src),
-    "#986's second verb is a SEPARATE act and is not this tool's (roster entry A3 of this cut)");
+  // #986's second verb IS in this body now (roster entry A3), so the claim is scoped to THIS
+  // tool's own function rather than to the file: the read never refreshes.
+  const readBody = src.slice(
+    src.indexOf("export async function runReadOpeningSource"),
+    src.indexOf("export const REFRESH_OPENING_SOURCE_TOOL"),
+  );
+  assert.ok(readBody.length > 0);
+  assert.ok(!/refresh_opening_targets_from_reread|refreshOpeningTargetsTyped/.test(readBody),
+    "#986's second verb is a SEPARATE act and is not this tool's");
   // the firm is the conversation's and the seed is the model's ONLY identifier
   assert.ok(!/firmId: input\./.test(src), "no model-supplied firm ever reaches the core");
 });
@@ -331,12 +338,18 @@ test("v22.roster: v22 is v21's tool set plus EXACTLY read_opening_source and rea
   // tool cannot arrive here unnoticed: #985 added `read_opening_source`, #1000
   // `read_client_financial_pack`.
   assert.deepEqual(v22.filter((n) => !v21.includes(n)),
-    ["read_client_financial_pack", "read_opening_source"]);
+    ["read_client_financial_pack", "read_opening_source", "refresh_opening_source"]);
   assert.deepEqual(v21.filter((n) => !v22.includes(n)), [], "nothing v21 could do stops being possible");
+  // AND THE REPLACEMENTS ARE NAMED. A tool v21 already serves can be REPLACED under the same name
+  // (#982/#1007 on the trade invoice), which a set difference cannot see: `Object.assign` takes the
+  // later value silently. Each replacement is listed here by the ticket that made it.
+  for (const name of ["start_trade_invoice_work"]) {
+    assert.ok(v21.includes(name) && v22.includes(name), name);
+  }
   // ENUMERATED RATHER THAN ASSUMED, v21's own cell's rule: the count is measured by building the
   // map, never read off a header comment.
   assert.equal(v21.length, 39, "v21's measured roster");
-  assert.equal(v22.length, 41, "v21's thirty-nine plus two");
+  assert.equal(v22.length, 42, "v21's thirty-nine plus three");
 });
 
 test("v22.roster: the contracts this cut DEFERRED are absent BY NAME, and that is a ruling", () => {
@@ -400,6 +413,7 @@ test("v22.prompt: SYSTEM_PROMPT_V22 is v21's text plus this cut's OWN stanzas, b
   assert.match(added, /READING AN OPENING SOURCE/);          // #985
   assert.match(added, /THE CLIENT'S MONEY BAND/);            // #1000
   assert.match(added, /TWO THINGS HAVE CHANGED SINCE THE PARAGRAPH ABOVE/); // #982 + #1007 (A1, A2)
+  assert.match(added, /REFRESH, DO NOT RETRY THE READ/);     // #986 (A3)
   // EACH TICKET APPENDS ITS OWN, and the whole added text is exactly the exported stanzas joined
   // — nothing is written inline where no cell can see it. Extend this list when a ticket of this
   // lane adds a stanza; never replace it.
@@ -407,7 +421,8 @@ test("v22.prompt: SYSTEM_PROMPT_V22 is v21's text plus this cut's OWN stanzas, b
     added,
     `\n\n${v22Prompt.OPENING_SOURCE_CHAT_GUIDANCE}`
     + `\n\n${v22Prompt.CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`
-    + `\n\n${v22Prompt.TRADE_INVOICE_V22_CHAT_GUIDANCE}`,
+    + `\n\n${v22Prompt.TRADE_INVOICE_V22_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.OPENING_REFRESH_CHAT_GUIDANCE}`,
     "the added text is exactly this cut's exported stanzas, in the order they were added",
   );
 });
@@ -424,9 +439,11 @@ test("v22.prompt: the stanza says she may report ONLY what the read returned —
   assert.match(g, /approv/i);
   // and a refusal is passed on rather than retried
   assert.match(g, /do not ask again|ask again/i);
-  // it offers nothing this body cannot actually do
-  assert.ok(!/refresh_opening_source/.test(g),
-    "the refresh tool is roster entry A3 of this cut and this body does not carry it");
+  // #986's own re-measurement: the guidance beside the reread refusal must NAME the refresh tool
+  // rather than describe a dead end, which is only honest once this body carries it. It does now
+  // (roster entry A3).
+  assert.match(g, /refresh_opening_source/,
+    "#986: do not retry the read — name the act that moves it on");
 });
 
 // ---------------------------------------------------------------------------
