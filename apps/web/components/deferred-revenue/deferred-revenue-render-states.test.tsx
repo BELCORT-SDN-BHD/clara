@@ -437,13 +437,12 @@ test("941.detail: a schedule renders its facts, its stated-term evidence and eac
   });
 });
 
-test("941.detail: L04-SPEC-04 — an ENDED schedule offers no replacement, because one receipt carries one schedule and the door refuses a second", async () => {
-  // MEASURED on the lane database (`p941.supersede.running`): the plan is ended through
-  // `clara.end_accounting_plan` and `clara.create_revenue_recognition_schedule` STILL answers
-  // CLR13 `revenue_recognition_schedule_exists` for the same receipt —
-  // `uq_revenue_recognition_schedules_source` carries no status predicate. The ended note used to
-  // say "Configure a new one if the remaining periods are still to be recognised", which is an act
-  // nobody can perform.
+test("941.detail: L04-SPEC-04 — an ENDED schedule does not offer a plain reconfiguration, which the door still refuses, and names the one path that does take over the periods still to run: a replacement derived from a corrected term", async () => {
+  // MEASURED on the lane database (`p941.supersede.running` and `p941.replace.posted`): the plan
+  // is ended through `clara.end_accounting_plan` and `clara.create_revenue_recognition_schedule`
+  // STILL answers CLR13 `deferred_revenue_schedule_exists` for the same receipt, so "Configure a
+  // new one" is an act nobody can perform. `clara.replace_revenue_recognition_schedule` (0317) is
+  // the act #941 AC3 names, and it is reachable only once the term on record has been corrected.
   await withMockedEnv(rpcRouter({
     get_revenue_recognition_schedule: {
       ...DETAIL, status: "ended", ended_at: "2026-06-30T00:00:00Z", ended_by: "u1",
@@ -457,9 +456,11 @@ test("941.detail: L04-SPEC-04 — an ENDED schedule offers no replacement, becau
       const text = h.text();
       assert.ok(text.includes("This schedule has ended"), "the state itself is still said plainly");
       assert.ok(!/Configure a new one/.test(text),
-        "the receipt still carries this schedule, so a new one is refused");
-      assert.ok(text.includes("one recognition carries one schedule"),
-        "…and the reason is said, in the same words the corrected-term banner uses");
+        "the receipt still carries a LIVE schedule, so a plain reconfiguration is refused");
+      assert.ok(text.includes("a second schedule cannot simply be configured"),
+        "…and the reason is said rather than left to be discovered");
+      assert.ok(text.includes("replacement derived from a corrected term"),
+        "…beside the one path that does take over the periods still to run");
     } finally {
       await h.unmount();
     }

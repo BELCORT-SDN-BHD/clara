@@ -157,9 +157,13 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
             supersedes the live row unconditionally — it compares no dates — so `term_live` goes
             false on a re-record that restates the term byte for byte. This banner says the term
             "has since been corrected"; on an unchanged term that is a false statement of fact and
-            wrong advice about a running amortisation. It no longer says the schedule can be
-            rebuilt either (L04-SPEC-04): `uq_prepayment_schedules_source` admits ONE schedule per
-            recognition entry whatever the first one's status, so there is no door for that.
+            wrong advice about a running amortisation. What it says about the REMEDY is #939 AC4's
+            own sentence, and migration 0317 is what made it true: THIS schedule's allocation is a
+            derived record and is never edited, and the balance it has not charged is taken over by
+            `clara.replace_prepayment_schedule`, which opens a replacement from the first month the
+            plan has not taken up. It still does not offer a plain reconfiguration:
+            `uq_prepayment_schedules_source_live` admits one LIVE schedule per recognition, so
+            `clara.create_prepayment_schedule` refuses a second one whatever the first's status.
 
             `=== true`, NEVER a truthiness test. The field arrives as unvalidated jsonb from
             `clara.get_prepayment_schedule`, and an ABSENT one — a web build ahead of its database,

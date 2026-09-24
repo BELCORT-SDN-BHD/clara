@@ -413,17 +413,19 @@ test("prepayments.detail — the derived facts, the judged account WITH its stat
       assert.equal(byTestId(h.container, "prepayment-period-refused").length, 1);
       // #919 — a LIVE term renders no superseded-term banner.
       assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 0);
-      assert.doesNotMatch(text, /cannot be corrected/);
+      assert.doesNotMatch(text, /taken over by a replacement schedule/);
     });
   });
 });
 
-test("prepayments.detail — ticket 919: a schedule whose term row has since been superseded renders the corrected-term banner, saying plainly that THIS schedule's term cannot be corrected", async () => {
-  // [#1036 fix round / L04-SPEC-04] The banner used to say "a corrected term needs a new schedule
-  // from the next period". Measured: `uq_prepayment_schedules_source` admits ONE schedule per
-  // recognition entry and `clara.create_prepayment_schedule` answers CLR13
-  // `prepayment_schedule_exists` for a second one, so that replacement exists in NO door. The
-  // banner now states the fact instead of advice nobody can act on.
+test("prepayments.detail — ticket 919: a schedule whose term row has since been superseded renders the corrected-term banner, saying that THIS schedule's allocation is never edited and that the balance it has not charged is taken over by a replacement", async () => {
+  // [#939 AC4, migration 0317] The banner went through two wrong readings before this one. It first
+  // told a firm the schedule "needs a new schedule from the next period" when no door opened one;
+  // the fix round then made it say a replacement was impossible. Both are now wrong the other way:
+  // `clara.replace_prepayment_schedule` opens exactly that replacement once the term on record has
+  // been corrected, and `uq_prepayment_schedules_source_live` admits one LIVE schedule per
+  // recognition rather than one ever. What stays true, and is what this banner is for, is that THIS
+  // schedule's own allocation is a derived record and is never edited.
   const SUPERSEDED = {
     ...DETAIL, term_live: false, term_superseded_by: "sp-2", term_moved: true,
     term_current_start: "2026-01-01", term_current_end: "2027-01-31",
@@ -431,9 +433,12 @@ test("prepayments.detail — ticket 919: a schedule whose term row has since bee
   await withMockedEnv(rpcRouter({ get_prepayment_schedule: SUPERSEDED }), async () => {
     await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
       assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 1);
-      assert.match(h.text(), /cannot be corrected/);
-      assert.doesNotMatch(h.text(), /needs a new schedule/,
-        "the banner still promises a replacement schedule the estate has no door for");
+      assert.match(h.text(), /its own allocation is never edited/,
+        "the fact this banner exists for: a derived record is never edited in place");
+      assert.match(h.text(), /taken over by a replacement schedule derived from the corrected term/,
+        "…and the act that DOES exist is named, now that a door performs it");
+      assert.doesNotMatch(h.text(), /one recognition carries one schedule/,
+        "the fix round's flat prohibition is no longer true: one LIVE schedule, not one ever");
     });
   });
 });
@@ -452,7 +457,7 @@ test("prepayments.detail — ticket 919 / ADV-02: a term row SUPERSEDED BY A RE-
     await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
       assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 0,
         "the term row moved, the TERM did not — there is nothing for this firm to act on");
-      assert.doesNotMatch(h.text(), /cannot be corrected/);
+      assert.doesNotMatch(h.text(), /taken over by a replacement schedule/);
     });
   });
 
@@ -520,15 +525,15 @@ test("prepayments.detail — a REFUSED period reaches the explain-and-choose sur
   });
 });
 
-test("prepayments.detail — L04-SPEC-04: not one sentence on this register offers a REPLACEMENT schedule, because the estate has no door that opens one", async () => {
-  // MEASURED, not reasoned about (`p939.supersede.running`, on the lane database):
-  // `uq_prepayment_schedules_source` carries no status predicate at all, so
-  // `clara.create_prepayment_schedule` answers CLR13 `prepayment_schedule_exists` for a second
-  // schedule over the same recognition BOTH while the first is running AND after it has ended.
-  // Three sentences on this register used to send a person to do exactly that — the ended-schedule
-  // note, the lapsed-authority explanation and the period-line explanation — and the third is the
-  // corrected-term advice #939 AC4 names. A surface may state the limitation; it may not offer an
-  // act the database refuses.
+test("prepayments.detail — L04-SPEC-04: every sentence on this register that touches a second schedule names the ONE path that opens one — a corrected term — and none of them offers a plain reconfiguration the door still refuses", async () => {
+  // MEASURED, not reasoned about (`p939.replace.clean` / `p939.replace.refuses`, on the lane
+  // database): `clara.create_prepayment_schedule` still answers CLR13
+  // `prepayment_schedule_exists` for a second schedule over a recognition that already carries a
+  // LIVE one, running or ended — so "configure a new one" remains an act nobody can perform. What
+  // #939 AC4 names, and migration 0317 built, is a different act:
+  // `clara.replace_prepayment_schedule` takes over the periods the first schedule has not charged,
+  // and it is reachable only once the term on record has actually been corrected. So each of these
+  // sentences must name THAT path and must not offer the one the door refuses.
   const ENDED = { ...DETAIL, status: "ended", ended_at: "2026-03-31T00:00:00Z", ended_by: "u1",
     ended_reason: "the client cancelled the cover" };
   await withMockedEnv(rpcRouter({ get_prepayment_schedule: ENDED }), async () => {
@@ -536,9 +541,11 @@ test("prepayments.detail — L04-SPEC-04: not one sentence on this register offe
       const text = h.text();
       assert.match(text, /This schedule has ended/, "the state itself is still said plainly");
       assert.doesNotMatch(text, /Configure a new one/,
-        "an ended schedule's recognition still carries a schedule, so a new one is refused");
-      assert.match(text, /one recognition carries one schedule/,
+        "an ended schedule's recognition still carries a LIVE schedule, so a new one is refused");
+      assert.match(text, /a second schedule cannot simply be configured/,
         "…and the reason a person cannot simply reconfigure is said instead of left to be discovered");
+      assert.match(text, /replacement derived from a corrected term/,
+        "…beside the one path that does take over the periods still to run");
     });
   });
 
@@ -554,9 +561,11 @@ test("prepayments.detail — L04-SPEC-04: not one sentence on this register offe
       assert.match(text, /no longer an active member with a bookkeeper role/,
         "what the typed reason MEANS is still explained");
       assert.doesNotMatch(text, /configure a new one/i,
-        "…without offering a replacement schedule the door refuses");
+        "…without offering a reconfiguration the door refuses");
       assert.match(text, /Restoring their membership/,
-        "the ONE remedy that exists is named");
+        "the remedy for THIS refusal is named first, because it is the one that gets the plan posting again");
+      assert.match(text, /only ever opened by correcting the term/,
+        "…and the one path to a second schedule is named without being dressed up as a fix for a lapsed authority");
     });
   });
 
@@ -571,9 +580,11 @@ test("prepayments.detail — L04-SPEC-04: not one sentence on this register offe
       const text = h.text();
       assert.match(text, /falls outside the allocation this schedule was derived from/);
       assert.doesNotMatch(text, /needs a new schedule/,
-        "the corrected-term remedy this sentence offered exists in no door");
+        "the sentence never returns to advising a plain reconfiguration");
+      assert.match(text, /correcting it on record is what opens a replacement/,
+        "the corrected-term path #939 AC4 names is offered, because a door now performs it");
       assert.match(text, /raise the difference with the reviewer/i,
-        "…and the honest next act is named in its place");
+        "…and the other branch — a term that was right — still sends the person to the reviewer");
     });
   });
 });

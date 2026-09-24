@@ -346,7 +346,7 @@ test("prepayments.detail.reason_withheld — above the floor nothing is withheld
   });
 });
 
-test("prepayments.detail.correction_path — the superseded-term banner no longer promises a replacement schedule no door offers: it says plainly that a running schedule's term cannot be corrected", async () => {
+test("prepayments.detail.correction_path — the superseded-term banner names the act that exists: this schedule's own allocation is never edited, and the balance it has not charged is taken over by a replacement derived from the corrected term", async () => {
   await withMockedEnv(rpcRouter({
     get_prepayment_schedule: { ...STATED_DETAIL, term_moved: true, term_live: false },
   }), async () => {
@@ -355,13 +355,16 @@ test("prepayments.detail.correction_path — the superseded-term banner no longe
       (h) => {
         assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 1);
         const text = h.text();
-        // `uq_prepayment_schedules_source` admits ONE schedule per recognition entry, and
-        // `clara.create_prepayment_schedule` answers CLR13 prepayment_schedule_exists for a second
-        // one -- so "a new schedule from the next period" is advice no door can carry out.
+        // `clara.create_prepayment_schedule` still answers CLR13 prepayment_schedule_exists for a
+        // second schedule over a recognition that carries a live one, so the banner must not send a
+        // person back to the configuration form. `clara.replace_prepayment_schedule` (0317) is the
+        // act it names instead, and it is the one #939 AC4 asks for.
         assert.doesNotMatch(text, /needs a new schedule/i,
-          "the banner still promises a replacement schedule the estate has no door for");
-        assert.match(text, /cannot be corrected/i,
-          "the banner must say plainly that this schedule's term is fixed once it is running");
+          "the banner never sends a person back to the configuration form");
+        assert.match(text, /its own allocation is never edited/i,
+          "the banner says plainly that THIS schedule's allocation is fixed once it is derived");
+        assert.match(text, /taken over by a replacement schedule derived from the corrected term/i,
+          "…and names the act that takes over the periods it has not charged");
       },
     );
   });
