@@ -143,6 +143,12 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // treatment the standard asks about, and confirm the revision. Sending it to the bank would
   // send a person to a surface where the decision is not.
   rent_escalation_pending: "/documents",
+  // #938 (0302, riders wave 4 lane 03): the row's own id is the PLAN's, not one accrual's
+  // (see lib/firm/needs-you.ts's own grounding), so a detail deep link is not buildable the
+  // way fixed_asset_incomplete's is — the list is the honest destination, exactly as
+  // `accrualDetailHref` is unreachable from this row today. Its own top-level client segment
+  // (apps/web/app/(firm)/clients/[clientId]/accruals/page.tsx), never under `/registers`.
+  accrual_bill_conflict: "/accruals",
 });
 
 /**

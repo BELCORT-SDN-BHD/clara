@@ -722,9 +722,10 @@ The staff-advance enrolment a claim is recorded against — an account dedicated
 _Avoid_: An employee record; a user; a counterparty; a free-text name typed on each claim.
 
 **Accrual adjustment**:
-A cost a period has incurred but nobody has invoiced yet, recorded with the particulars that make it
-checkable: the amount, the expense account it charges and the non-control liability account it
-accrues into, the SERVICE PERIOD it belongs to, the rule that selects each period's amount, the
+Something a period has earned or incurred that nobody has invoiced yet, recorded with the
+particulars that make it checkable: the side it runs on, the amount, the profit-and-loss account it
+charges or earns and the non-control balance-sheet account it accrues into, the SERVICE PERIOD it
+belongs to, the rule that selects each period's amount, the
 window its authority covers, and the instruction that authorised it. Its authority window runs
 INSIDE the service period it names — it starts no earlier and ends no later, and it always ends — so
 every entry it posts falls within the term it claims to accrue for, and its schedule must reach at
@@ -735,6 +736,20 @@ event and the accounting work for it — and posts nothing.
 _Avoid_: A balanced journal entry wearing a marker; a periodic stock adjustment or a supplied
 payroll obligation (those record a movement the period's own facts establish, have no schedule and
 no future occurrence); a provision or an estimate the product worked out.
+
+**Accrual side**:
+Which way one accrual runs, and therefore which two account types its legs may name: `expense` —
+Dr the expense account / Cr a non-control accrued-liability account, for a cost nobody has billed
+yet; `revenue` — Dr a non-control asset (accrued income) / Cr the income account, for a service
+delivered and not yet invoiced. It is stated when the accrual is configured and it is not
+restatable: a correction restates what an accrual says, it never turns one side into the other.
+An accrual that states no side at all is an expense accrual, which is what every row and every
+caller that predates the revenue side means. Accrued income is presented apart from invoiced trade
+receivables, so the asset leg is checked (active, an asset, not a control account) and suggested —
+`1180 Accrued Income` on the standard chart — never rostered.
+_Avoid_: A second lane for revenue accruals; a sign on the amount; reading the side off the account
+types (the side decides which types are admissible, not the other way round); "debit side" /
+"credit side" (both legs exist on both sides — only which one is debited moves).
 
 **Accrual reversal**:
 The second leg of one accrual's schedule: the same entry with both sides exchanged, due on the first
@@ -761,11 +776,22 @@ an already-corrected row (refused by name: one correction per target).
 **Calculation method**:
 The rule that says WHICH stated amount each of a schedule's periods uses. It selects among amounts a
 person supplied; it computes none, which is why it is a closed set of named rules rather than a
-versioned formula. Today the set holds exactly the rule the schedule performs — the amount stated on
-the record, accrued in every period of the window — because a recorded selection nobody performs is
-a promise the ledger does not keep.
+versioned formula. The set holds exactly the rules a lane performs — the amount stated on the
+record, accrued in every period of the window, and the amount stated for each period separately —
+because a recorded selection nobody performs is a promise the ledger does not keep.
 _Avoid_: A rate, a proration or an allocation the product performs; a formula; a rule offered on a
 form that no lane applies; anything a caller can extend without a new named rule.
+
+**Stated period amount**:
+The amount a person states for ONE period of an accrual, keyed to the due date that period ends on.
+The stated amounts cover every period the schedule reaches inside the authority window and sum
+exactly to the accrual's total; where an even split leaves a cent over, that cent belongs to the
+final period. Each due date posts its own stated amount and its own reversal, and a due date nobody
+stated an amount for posts nothing and records a typed refusal on that occurrence — the accrual's
+total is never used in its place. Changing one is a correction, which writes a successor accrual
+detail carrying its own amounts; the superseded detail keeps the amounts it actually ran under.
+_Avoid_: A per-period figure the product derived, averaged or read off a document; an in-place edit
+of a period already stated; a partial set completed by a fallback.
 
 **Supplied obligation particulars**:
 The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it computes none of them.
@@ -1013,7 +1039,15 @@ chooses: an ambiguous case stays pending with the same one question, and choosin
 act. #657's pending bank line is its first instance; #947 (a posted payroll run's unsettled net
 pay, offered against candidate bank lines) is the second and #949 (a month of rent whose payable
 is still open on a confirmed tenancy plan) the third, each reusing the same shape rather than
-minting a sibling concept.
+minting a sibling concept. #938's "a bill posted inside an accrued
+period" row (`clara.list_review_queue`, row_kind `accrual_bill_conflict`) is a NEIGHBOUR on the
+same Needs-you roster that reuses the mechanics — derived, stores nothing, self-clearing — without
+being a member of the settlement-candidate FAMILY itself: it offers no candidate to choose, only
+two remedies (skip the next occurrence, or reverse now) that act on the accrual plan directly.
+A derived row outlives its own REMEDIES: when the plan those remedies act on is ended or paused
+they both refuse, while the fact that produced the row is still on the books — so the row stays and
+the surface renders the remedies unavailable with the reason, rather than the row disappearing or
+offering a control whose only possible outcome is a refusal.
 _Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row
 that survives the fact that produced it; a suggestion the product acts on by itself.
 

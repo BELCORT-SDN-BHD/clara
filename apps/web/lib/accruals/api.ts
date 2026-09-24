@@ -33,16 +33,40 @@ const opts = (o: Opts) => ({ session: o.session ?? sessionTokenAccessor, signal:
 
 // ── the shapes the doors answer with ────────────────────────────────────────
 
-/** The CLOSED selection-rule set migration 0222's `method` CHECK admits. It names WHICH amount a
- *  human already stated the schedule uses; it computes nothing, which is why this is an enum and
- *  not a registered evaluator closure (the migration header argues it in full).
+/** WHICH WAY ONE ACCRUAL RUNS (#942, 0304) — the closed set `clara._accrual_sides()` answers and
+ *  `ck_accrual_adjustments_side` carries.
  *
- *  ONE MEMBER, BECAUSE ONE MEMBER IS WHAT THE SCHEDULE DOES: the configuration freezes the stated
- *  amount into the plan revision's basis and every occurrence posts it. Three further rules were
- *  drafted and would each have posted the same cents — a control that records a selection nobody
- *  performs is a promise the ledger does not keep, so they wait for the lane that honours them. */
-export const ACCRUAL_METHODS = ["stated_amount"] as const;
+ *  `expense` — Dr the expense account / Cr a non-control accrued-liability account: a cost the
+ *  period incurred that nobody has billed yet. `revenue` — Dr a non-control asset (accrued income)
+ *  / Cr the income account: a service delivered that nobody has invoiced yet, reversed on the
+ *  first of the following month so the invoice and the estimate net to ONE revenue amount.
+ *
+ *  THE TWO ACCOUNT KEYS ARE HISTORICAL, and this is the one place the web layer says so out loud:
+ *  `expense_account_code` is the PROFIT-AND-LOSS leg (an expense account under `expense`, an
+ *  income account under `revenue`) and `liability_account_code` is the BALANCE-SHEET leg (a
+ *  non-control liability, or the accrued-income asset). They keep 0222's spelling because the
+ *  FROZEN `start_accrual_work` tool sends exactly those keys. */
+export const ACCRUAL_SIDES = ["expense", "revenue"] as const;
+export type AccrualSide = (typeof ACCRUAL_SIDES)[number];
+
+/** The CLOSED selection-rule set migration 0222's `method` CHECK admits, widened by #937 (0303).
+ *  It names WHICH amount a human already stated the schedule uses; it computes nothing, which is
+ *  why this is an enum and not a registered evaluator closure (0222's header argues it in full).
+ *
+ *  TWO MEMBERS, BECAUSE TWO ARE PERFORMED. `stated_amount` freezes one figure into the plan
+ *  revision's basis and every occurrence posts it. `stated_period_amount` (#937) carries one
+ *  figure per DUE DATE in `clara.accrual_period_amounts`; the admission core resolves it and hands
+ *  the shared basis builder a line override, and a period nobody stated is refused by name rather
+ *  than falling back to the constant. `source_document_amount` and `prior_period_amount` stay
+ *  withdrawn (owner ruling 2026-09-18): nothing performs them, and a control that records a
+ *  selection nobody performs is a promise the ledger does not keep. */
+export const ACCRUAL_METHODS = ["stated_amount", "stated_period_amount"] as const;
 export type AccrualMethod = (typeof ACCRUAL_METHODS)[number];
+
+/** One period's stated amount, in the DATABASE's own field spelling — the shape
+ *  `clara._assert_accrual_period_amounts` validates and `clara.get_accrual_adjustment` answers
+ *  with. `due_date` is a schedule due date, never a month label. */
+export type AccrualPeriodAmount = { due_date: string; amount_cents: number };
 
 export const ACCRUAL_FREQUENCIES = ["monthly", "quarterly", "annual"] as const;
 export const ACCRUAL_DAY_RULES = ["day_of_month", "last_day_of_month"] as const;
@@ -57,6 +81,9 @@ export type AccrualListRow = {
   plan_id: string;
   revision: number;
   purpose: string;
+  /** #942 — which way this accrual runs. A reader that does not know it cannot tell whether
+   *  `expense_account_code` names an expense or an income account. */
+  side: AccrualSide;
   expense_account_code: string;
   liability_account_code: string;
   amount_cents: number;
@@ -141,10 +168,16 @@ export type AccrualDetail = AccrualListRow & {
   /** The latest reversal leg, or null while none is due. Lifted to the top level by the door so a
    *  surface can render "reverses entry X" without walking the occurrence list itself. */
   reversal: AccrualOccurrenceRow | null;
+  /** #937 — one entry per stated period, oldest first, or `[]` under the `stated_amount` rule. The
+   *  key always exists: an absent array and an empty one would be two spellings of "none". */
+  period_amounts: readonly AccrualPeriodAmount[];
 };
 
 /** The typed particulars, in the DATABASE's own field spelling — `p_accrual`. */
 export type AccrualParticulars = {
+  /** #942 — omitted means `expense`, which is what every caller that predates the revenue side
+   *  means. This surface always states it. */
+  side: AccrualSide;
   expense_account_code: string;
   liability_account_code: string;
   amount_cents: number;
@@ -155,6 +188,10 @@ export type AccrualParticulars = {
    *  table comment, CONFIRMED AS LAW), and the type is the shape of that law. */
   term_source: "human_stated";
   method: { rule: AccrualMethod };
+  /** #937 — present ONLY under `stated_period_amount`, and REQUIRED under it. The door refuses the
+   *  key under any other rule (`accrual_period_amounts_unexpected`), so this is not an optional
+   *  extra a caller may always send. */
+  period_amounts?: readonly AccrualPeriodAmount[];
   instruction: string;
   memo?: string;
   source_document_id?: string | null;
@@ -320,6 +357,37 @@ function accrualDueNth(
  * before that wall existed and could never post — the accrual was recorded, the plan went live and
  * the list read said "No due dates reached yet" for ever (review round 2, NB1).
  */
+/**
+ * #937 — EVERY ACCRUAL DUE DATE THIS SCHEDULE PRODUCES INSIDE `[from, to]`, oldest first.
+ *
+ * It is `clara._assert_accrual_period_amounts`'s own walk (k from 0, `clara._plan_due_nth`, stop
+ * past the window), mirrored here so the form can OFFER the dates rather than ask a preparer to
+ * type them — which is what makes the door's `accrual_period_amount_not_scheduled` refusal
+ * unreachable from this surface. The database re-derives its own and remains the authority.
+ *
+ * Returns `[]` for an incomplete or nonsensical schedule; a caller shows nothing rather than a
+ * guess.
+ */
+export function accrualScheduleDues(
+  frequency: (typeof ACCRUAL_FREQUENCIES)[number],
+  dayRule: (typeof ACCRUAL_DAY_RULES)[number],
+  dayOfMonth: number | null,
+  from: string,
+  to: string,
+): string[] {
+  if (from === "" || to === "" || to < from) return [];
+  if (dayRule === "day_of_month" && !(Number.isInteger(dayOfMonth) && (dayOfMonth as number) >= 1)) {
+    return [];
+  }
+  const dues: string[] = [];
+  for (let k = 0; k < 4096; k += 1) {
+    const due = accrualDueNth(from, frequency, dayRule, dayOfMonth, k);
+    if (due > to) break;
+    if (due >= from) dues.push(due);
+  }
+  return dues;
+}
+
 export function accrualScheduleYields(
   frequency: (typeof ACCRUAL_FREQUENCIES)[number],
   dayRule: (typeof ACCRUAL_DAY_RULES)[number],
@@ -372,25 +440,117 @@ export async function correctAccrual(input: CorrectAccrualInput, o: Opts = {}): 
   );
 }
 
+// ── #938 — the two remedies for "a bill posted inside an accrued period" ───────────────────
+
+/**
+ * `clara._plan_reversal_date(p_due)` (0193:837), MIRRORED here the same way `accrualDueNth`
+ * above mirrors `clara._plan_due_nth`: the first day of the month AFTER `due`'s. This is the
+ * schedule's own fixed rule for a `reversing_journal` plan — one calendar month, regardless of
+ * the plan's frequency — and "reverse now" needs it to build the catch-up window; the database
+ * is still the sole authority over whether that date has actually arrived.
+ */
+export function accrualReversalDate(dueIso: string): string {
+  const year = Number(dueIso.slice(0, 4));
+  const month = Number(dueIso.slice(5, 7)); // 1-based; Date.UTC's 0-based month IS "next month"
+  const d = new Date(Date.UTC(year, month, 1));
+  return `${String(d.getUTCFullYear()).padStart(4, "0")}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
+
+/**
+ * "Reverse now" — the EXISTING `clara.request_plan_catch_up` door (0193), never a new one: the
+ * window runs from the flagged occurrence's own due date through its scheduled reversal date.
+ * When the reversal is already due, this admits it and the accrual_bill_conflict row clears on
+ * the next read; while it genuinely is not yet due, the door's own `catch_up_in_future` refusal
+ * (DoorRefusal) surfaces verbatim — never pretended away.
+ */
+export async function reverseAccrualNow(
+  planId: string,
+  dueDate: string,
+  o: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "request_plan_catch_up",
+    {
+      p_plan: planId,
+      p_from: dueDate,
+      p_to: accrualReversalDate(dueDate),
+      p_op_key: crypto.randomUUID(),
+    },
+    opts(o),
+  );
+}
+
+/**
+ * "Skip this period's next occurrence" — `clara.skip_plan_occurrence` (#938, 0302): removes
+ * exactly ONE future due date from the plan's schedule, named as the occurrence AFTER the
+ * flagged one's own due date. bookkeeper+; never touches the already-posted flagged occurrence
+ * itself.
+ */
+export async function skipNextAccrualOccurrence(
+  planId: string,
+  afterDue: string,
+  reason: string,
+  o: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "skip_plan_occurrence",
+    { p_plan: planId, p_after_due: afterDue, p_reason: reason, p_op_key: crypto.randomUUID() },
+    opts(o),
+  );
+}
+
 /** The two derived journal lines an accrual posts, for the DISABLED preview the form renders. It
  *  mirrors `clara._accrual_journal_basis` (0222) exactly; the database derives its own and is the
  *  authority, so nothing computed here is ever sent. */
 export function derivedAccrualLines(input: {
+  /** #942 — which leg is debited. Omitted means `expense`, the same silence the door reads. */
+  side?: AccrualSide;
   expenseAccountCode: string;
   liabilityAccountCode: string;
   amountCents: number;
   servicePeriodStart: string;
   servicePeriodEnd: string;
+  /** #937 — the due date whose STATED amount is being previewed, under `stated_period_amount`.
+   *  The database builds this line in `clara._plan_accrual_period_line` rather than in the frozen
+   *  basis, and words it differently, so a preview that kept 0222's sentence would be showing a
+   *  line the ledger will not write. Omitted under `stated_amount`. */
+  periodDueDate?: string | null;
 }): { account_code: string; debit_cents: number; credit_cents: number; description: string }[] {
+  // THE PROFIT-AND-LOSS LEG CARRIES THE TERM SENTENCE ON BOTH SIDES, and the side decides only
+  // which leg is debited — `clara._accrual_journal_basis`'s own shape. On the revenue side the
+  // balance-sheet leg comes FIRST because that is the debit, and `clara._plan_occurrence_basis`
+  // reverses by exchanging each line's own two amounts rather than by position.
+  const profitAndLoss = {
+    account_code: input.expenseAccountCode.trim(),
+    debit_cents: 0,
+    credit_cents: input.amountCents,
+    description: input.periodDueDate
+      ? `the accrual period ending ${input.periodDueDate}`
+      : `one period of the accrual term ${input.servicePeriodStart} to ${input.servicePeriodEnd}`,
+  };
+  if (input.side === "revenue") {
+    return [
+      {
+        account_code: input.liabilityAccountCode.trim(),
+        debit_cents: input.amountCents,
+        credit_cents: 0,
+        description: "accrued income",
+      },
+      profitAndLoss,
+    ];
+  }
   return [
     {
       account_code: input.expenseAccountCode.trim(),
       debit_cents: input.amountCents,
       credit_cents: 0,
-      // THE DATABASE'S OWN WORDING (`clara._accrual_journal_basis`): the revision's basis is
-      // FROZEN, so every occurrence posts this same line — and one occurrence accrues ONE PERIOD
-      // of the stated term, not the whole of it.
-      description: `one period of the accrual term ${input.servicePeriodStart} to ${input.servicePeriodEnd}`,
+      // THE DATABASE'S OWN WORDING. Under `stated_amount` that is `clara._accrual_journal_basis`'s
+      // frozen line: the revision's basis never changes, so every occurrence posts this same line
+      // — and one occurrence accrues ONE PERIOD of the stated term, not the whole of it. Under
+      // `stated_period_amount` it is `clara._plan_accrual_period_line`'s, which names the period.
+      description: input.periodDueDate
+        ? `the accrual period ending ${input.periodDueDate}`
+        : `one period of the accrual term ${input.servicePeriodStart} to ${input.servicePeriodEnd}`,
     },
     {
       account_code: input.liabilityAccountCode.trim(),

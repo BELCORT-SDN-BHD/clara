@@ -54,12 +54,15 @@ const ACCOUNTS: CoaAccountRow[] = [
   { client_id: CLIENT, account_code: "6100", name: "Office Rent", account_type: "expense", is_active: true },
   { client_id: CLIENT, account_code: "2020", name: "Accruals", account_type: "liability", is_active: true },
   { client_id: CLIENT, account_code: "1150", name: "Maybank current", account_type: "asset", is_active: true },
+  { client_id: CLIENT, account_code: "4000", name: "Sales / Fees Income", account_type: "income", is_active: true },
+  { client_id: CLIENT, account_code: "1180", name: "Accrued Income", account_type: "asset", is_active: true },
 ];
 
 /** The row being corrected — `clara.get_accrual_adjustment`'s own shape, with the authority window
  *  FIXED at 2026-07-01..2026-07-31, the same span the term must sit inside. */
 const ROW: AccrualDetail = {
   accrual_id: ACCRUAL,
+  side: "expense",
   plan_id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
   revision: 1,
   purpose: "Monthly office rent accrual",
@@ -115,6 +118,8 @@ const ROW: AccrualDetail = {
   },
   occurrences: [],
   reversal: null,
+  // #937 — the amounts a person stated per period; [] under the stated_amount rule this row uses.
+  period_amounts: [],
 };
 
 const CORRECTED: AccrualCorrected = {
@@ -175,6 +180,11 @@ function focusedId(): string | null {
 }
 
 const F = (field: string) => `accrual-${field}`;
+
+function optionValues(node: Stub): string[] {
+  const kids = (node as { children?: Stub[] }).children ?? [];
+  return kids.map((k) => (k as { getAttribute?: (a: string) => string | null }).getAttribute?.("value") ?? "");
+}
 
 async function clickSubmit(h: Awaited<ReturnType<typeof renderComponent>>): Promise<void> {
   const button = h.find((n) => n.tagName === "BUTTON" && /Record the correction|Recording/.test(String((n as { textContent?: string }).textContent ?? "")));
@@ -438,6 +448,139 @@ test("936.correction.form: an overlap warning is persistent, and it does NOT blo
     await clickSubmit(h);
     assert.match(h.text(), /The accrual was recorded\./);
     assert.match(h.text(), /Monthly rent template/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ==============================================================================================
+// #937 — A PER-PERIOD ACCRUAL IS CORRECTED THROUGH THIS FORM. The relation is append-only, so a
+// changed period amount is a CORRECTION and nothing else; the form seeds the block from what the
+// door recorded, and sends the restated set in the database's own spelling.
+// ==============================================================================================
+
+/** The same row, under the per-period rule: a two-month window whose schedule reaches 2026-07-31
+ *  and 2026-08-31, with 3,000 and 3,500 already recorded against them. */
+const PER_PERIOD_ROW: AccrualDetail = {
+  ...ROW,
+  amount_cents: 650000,
+  effective_to: "2026-08-31",
+  service_period_end: "2026-08-31",
+  method: { rule: "stated_period_amount" },
+  period_amounts: [
+    { due_date: "2026-07-31", amount_cents: 300000 },
+    { due_date: "2026-08-31", amount_cents: 350000 },
+  ],
+};
+
+test("937.correct: the block is SEEDED from what the door recorded, and a restated set crosses the wire in the database's own spelling", async () => {
+  const sent: { accrualId: string; accrual: unknown; opKey: string }[] = [];
+  const h = await renderComponent(App({
+    row: PER_PERIOD_ROW,
+    submit: async (input) => { sent.push(input); return CORRECTED; },
+  }));
+  try {
+    assert.match(h.text(), /The amount stated for each period separately/,
+      "the rule is SHOWN on this form — changing which rule selects the figures is a plan decision");
+    // TWO ROWS, WITH THE RECORDED FIGURES IN THEM — the block is seeded from the door's answer,
+    // not from a blank set the preparer would have to retype.
+    assert.ok(byId(h, `${F("periodAmounts")}-due-0`) && byId(h, `${F("periodAmounts")}-due-1`),
+      "one row per recorded period");
+    assert.equal((byId(h, `${F("periodAmounts")}-amount-0`) as { value?: string }).value, "3,000.00");
+    assert.equal((byId(h, `${F("periodAmounts")}-amount-1`) as { value?: string }).value, "3,500.00");
+    assert.match(h.text(), /Stated: RM 6,500\.00\. This matches the total\./);
+
+    // JULY IS RESTATED DOWNWARDS AND AUGUST UPWARDS, so the set still sums to the same total.
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-0`), "change", (n) => setFieldValue(n, "2800.00"));
+    await h.settle();
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-1`), "change", (n) => setFieldValue(n, "3700.00"));
+    await h.settle();
+    await h.fireEvent(byId(h, F("instruction")), "change",
+      (n) => setFieldValue(n, "The client's standing instruction of 2026-06-30, restated."));
+    await h.settle();
+    await clickSubmit(h);
+
+    assert.equal(sent.length, 1);
+    const particulars = sent[0]!.accrual as { period_amounts?: unknown; method?: unknown };
+    assert.deepEqual(particulars.method, { rule: "stated_period_amount" });
+    assert.deepEqual(particulars.period_amounts, [
+      { due_date: "2026-07-31", amount_cents: 280000 },
+      { due_date: "2026-08-31", amount_cents: 370000 },
+    ]);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("937.correct: a restated set that no longer adds up to the total is refused at the block, before any round trip", async () => {
+  const sent: unknown[] = [];
+  const h = await renderComponent(App({
+    row: PER_PERIOD_ROW,
+    submit: async (input) => { sent.push(input); return CORRECTED; },
+  }));
+  try {
+    await h.fireEvent(byId(h, `${F("periodAmounts")}-amount-0`), "change", (n) => setFieldValue(n, "2800.00"));
+    await h.settle();
+    await clickSubmit(h);
+    assert.equal(sent.length, 0, "nothing is sent while the set and the total disagree");
+    assert.match(h.text(), /The stated periods do not add up to the total accrued over the window/);
+    assert.equal(focusedId(), `${F("periodAmounts")}-amount-0`,
+      "…and the focus lands on the block that holds the mistake");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ==============================================================================================
+// #942 — A CORRECTION RESTATES AN ACCRUAL; IT NEVER TURNS ONE SIDE INTO THE OTHER.
+// `clara.correct_accrual_adjustment` refuses a side change by name (`accrual_side_immutable`), so
+// this form does not offer the change at all: the side is SHOWN, the two legs are labelled and
+// filtered by it, and it crosses the wire exactly as recorded.
+// ==============================================================================================
+
+const REVENUE_ROW: AccrualDetail = {
+  ...ROW,
+  side: "revenue",
+  purpose: "Unbilled advisory fees",
+  expense_account_code: "4000",
+  liability_account_code: "1180",
+  plan: {
+    ...ROW.plan,
+    basis: {
+      posting_date: "2026-07-01",
+      memo: "Unbilled advisory fees",
+      currency: "MYR",
+      lines: [
+        { account_code: "1180", debit_cents: 120000, credit_cents: 0 },
+        { account_code: "4000", debit_cents: 0, credit_cents: 120000 },
+      ],
+    },
+  },
+};
+
+test("942.correct: a revenue accrual's correction form shows the side, labels both legs by it, and offers NO way to change it", async () => {
+  const sent: { accrualId: string; accrual: { side?: string }; opKey: string }[] = [];
+  const h = await renderComponent(App({
+    row: REVENUE_ROW,
+    submit: async (input) => { sent.push(input as never); return CORRECTED; },
+  }));
+  try {
+    assert.match(h.text(), /Income earned, not yet invoiced/,
+      "the side is stated on the form, because it decides what the two legs below even mean");
+    assert.equal(
+      h.find((n) => (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("id") === F("side")),
+      null,
+      "a control whose only possible outcome is accrual_side_immutable is not rendered at all");
+    assert.match(h.text(), /Revenue account/);
+    assert.match(h.text(), /Accrued income account/);
+    assert.deepEqual(optionValues(byId(h, F("expenseAccountCode"))), ["", "4000"]);
+    assert.deepEqual(optionValues(byId(h, F("liabilityAccountCode"))), ["", "1150", "1180"]);
+
+    await h.fireEvent(byId(h, F("amountCents")), "change", (n) => setFieldValue(n, "1,100.00"));
+    await h.settle();
+    await clickSubmit(h);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.accrual.side, "revenue", "the side crosses the wire exactly as recorded");
   } finally {
     await h.unmount();
   }

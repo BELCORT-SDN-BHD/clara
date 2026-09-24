@@ -353,4 +353,27 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "3ecaf6f09ee6ac0ad646114100b1ab990daf0354b7515df42853943fa9da9eb4",
     },
   ],
+  // #938 [0302] (riders wave 4, lane 03) — the twelfth Needs-you row kind, the SAME
+  // 0146/0168/0180/0260/0288 splice family: ONE pg_get_functiondef splice of the SAME queue
+  // function, plus one plain `create function` (clara.skip_plan_occurrence) that is static DDL
+  // the lexer inspects directly and carries no dynamic SQL of its own.
+  [
+    "0302_accrual_bill_conflict.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at a literal signature and re-installed with one added CTE (bill_rows), one union arm, and NO new row-json builder gate (this row's `id` mirrors the PLAN id directly rather than a dedicated column, unlike asset_id/advance_id/authority_id). The insertion is derived from the body's own two CTE seams — the CTE immediately before the `all_rows` opener, the union arm immediately before the `keyed` opener, each asserted unique in code AND raw text — rather than from a literal block naming every arm that existed when the file was written, so a sibling lane's row kind landing at a lower migration number composes instead of colliding; the pre-image pin is bimodal for the same reason, and the shared column vector is asserted as a measured +1 delta rather than an absolute. The block emits no view definition at all, so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) can be a target, and its own postcheck re-derives every one of the TEN pre-existing row-kind markers at their prestate counts. Same family as 0146's, 0168's, 0180's, 0260's and 0288's splices of the same queue function. The file's other section, clara.skip_plan_occurrence, is a single `create function` at a literal signature with no dynamic SQL of any kind, and the prestate/tail blocks read the catalog and drive real functions inside a forced-rollback subtransaction.",
+      sha256: "db1cbb124f339cc0d2bebd8236139981ef1629ef68106f575332a7a4568224a7",
+    },
+  ],
+  // #942 [0304] (riders wave 4, lane 03) — the SAME 0146/0168/0180/0260/0288/0302 splice family
+  // over clara.list_review_queue, appended at the sorted position: this time the arm 0302 added
+  // gains the SIDE of the accrual it flags.
+  [
+    "0304_accrual_revenue_side.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at a literal signature and re-installed with FIVE additive edits inside the accrual_bill_conflict arm 0302 added: the question sentence gains a `case` that names the accrual’s side; the row-json builder gains two derived-from-`id` keys (accrual_side, accrual_plan_status) — the same asset_id/advance_id/authority_id idiom, so no arm’s column vector moves; the amount column resolves clara._plan_accrual_period_line for the flagged due date before falling back to the accrual's own total; and the entry predicate gains a revenue-side arm that also admits a sales_invoice trade invoice's own posting (joined through trade_invoices.work_id and the committed operation_receipts row whose effects names the entry). Each anchor is counted and must occur EXACTLY once; EACH EDIT guards itself on its own marker, so the block is a guarded no-op under the #957 redo path edit by edit rather than all-or-nothing; and its own postcheck re-derives every row-kind marker at its prestate count, each new literal exactly once, and the shared column vector at the MEASURED count this block read before it spliced (this file adds no arm). The block emits no view definition at all, so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) can be a target, by construction rather than by inspection of a rendered string. Same family as 0146’s, 0168’s, 0180’s, 0260’s, 0288’s and 0302’s splices of the same queue function. Every other section of this migration is STATIC DDL the lexer inspects directly: one `alter table … add column if not exists` with its CHECK and column comment on clara.accrual_adjustments, two new ungranted internals (clara._accrual_sides, clara._accrual_side) and ten whole recut function bodies at literal signatures, each EMBEDDED in full rather than spliced. The prestate pins every recut body at its measured pre-image OR at this file’s own output and refuses anything else; the tail re-reads the committed bodies, the column’s default, the CHECK (driven on a temporary table carrying the byte-identical predicate) and all THREE externally-granted door grants it must not have moved (clara.correct_accrual_adjustment, clara.get_accrual_adjustment and clara.list_accrual_adjustments, plus clara.create_accrual_adjustment_for's runtime-only one).",
+      sha256: "95c8bdd5507710f59fc6d7219be50320c813cc094cf92e980b36a30a745a5857",
+    },
+  ],
 ]);

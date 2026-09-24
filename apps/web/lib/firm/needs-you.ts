@@ -276,6 +276,24 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // `needs_you`, lane `needs_you`. `id`/`task_id` carry the plan; `document_id` the tenancy. No
   // counts.* key and no new json key either.
   "rent_escalation_pending",
+  // #938 (0302_accrual_bill_conflict.sql, riders wave 4 lane 03): ONE row per accrual PLAN
+  // (never per occurrence) whose EARLIEST posted, unreversed accrual occurrence has a
+  // document-sourced, approved journal entry hitting the SAME profit-and-loss account inside
+  // that occurrence's own period — the SQL's own `distinct on (plan_id) … order by plan_id,
+  // due_date` (fix round 1: this comment used to say "most recent", the opposite of what the
+  // read does, and a plan with two flagged periods is exactly where a later lane would have
+  // trusted it — pinned by the cell p938.read.two_flagged_periods). #942 (0304) widened the
+  // account to the accrual's P&L leg on EITHER side: an expense account, or the income account
+  // of an accrued fee. Section `needs_you`, lane `needs_you`. DERIVED — computed from
+  // live facts on every read, no stored lifecycle, clears itself the moment a reversal is
+  // admitted for the same period (CONTEXT.md's "Settlement candidate row" shape, applied to a
+  // bill finding an open accrual rather than a bank line finding an open item). `id` is the
+  // PLAN's own id (NOT the occurrence's, unlike asset_id/advance_id/authority_id which mirror
+  // the shared `id`): the two remedies this row offers both act on the plan
+  // (clara.skip_plan_occurrence, and clara.request_plan_catch_up for "reverse now"). `period`
+  // carries the flagged occurrence's own due date as ISO `YYYY-MM-DD` text — never a formatted
+  // month — because a remedy must name the exact occurrence back, byte for byte.
+  "accrual_bill_conflict",
 ] as const;
 
 export type ReviewQueueRowKind = (typeof REVIEW_QUEUE_ROW_KINDS)[number];
@@ -380,6 +398,23 @@ export type ReviewQueueRow = {
    *  column (the asset_id/advance_id idiom), because a client carries at most one
    *  proposed authority at a time and needs no aggregation. */
   authority_id: string | null;
+  /** #942 (0304)+: accrual_bill_conflict rows only — WHICH WAY the accrual it flags runs
+   *  (`expense` | `revenue`), derived from the shared `id` (the plan) at json-build time, the
+   *  same idiom as `authority_id` above. Null on every other row kind.
+   *
+   *  OPTIONAL ON THIS TYPE ON PURPOSE, for `work_questions` own stated reason: every fixture in
+   *  this app that constructs a row would otherwise stop compiling for a key one affordance
+   *  renders as `?? "expense"`, and a required key would be a claim that a pre-0304 database
+   *  sends one. It does not. */
+  accrual_side?: string | null;
+  /** #942 (0304, fix round 1): accrual_bill_conflict rows only — the STATUS of the plan the two
+   *  remedies act on (`active` | `paused` | `ended`), derived from the shared `id` the same way
+   *  `accrual_side` is. Both remedies are plan-lane doors that refuse a plan which is not active
+   *  (`plan_ended` / `plan_paused`), while the double count they were offered for is still on the
+   *  books — so the row STAYS (dropping it would hide a live double count) and the surface renders
+   *  the remedies unavailable with the reason instead of offering buttons that always refuse.
+   *  Optional for the same reason `accrual_side` is: a pre-0304 database sends neither. */
+  accrual_plan_status?: string | null;
 };
 
 export type ReviewQueueCounts = {

@@ -42,6 +42,7 @@ import { JournalBasisFields, type FieldNode } from "@/components/accounting/jour
 import { EvidenceChooser, useEvidenceReads } from "@/components/accounting/evidence-chooser";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { AccrualBoundaryStatement } from "./accrual-statement";
+import { AccrualPeriodAmountsBlock } from "./accrual-period-amounts";
 import { methodLabel } from "./accruals-list";
 import { listCoaAccounts } from "@/lib/journals/api";
 import type { CoaAccountRow } from "@/lib/journals/types";
@@ -50,7 +51,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { isDoorRefusal } from "@/lib/doors";
 import {
-  correctAccrual, derivedAccrualLines, loadAccrual,
+  accrualScheduleDues, correctAccrual, derivedAccrualLines, loadAccrual,
   type AccrualCorrected, type AccrualDetail,
 } from "@/lib/accruals/api";
 import {
@@ -73,12 +74,21 @@ const ACCRUAL_WRITE_FLOOR = { minimumRole: "bookkeeper" } as const;
 function draftFromAccrual(row: AccrualDetail): AccrualCorrectionDraft {
   const basisMemo = row.plan.basis?.memo ?? "";
   return {
+    // #942 — the side is CARRIED, never chosen: clara.correct_accrual_adjustment refuses a
+    // correction that asks for the other side (accrual_side_immutable), so this draft can only
+    // ever hold the one the accrual was configured with.
+    side: row.side ?? "expense",
     expenseAccountCode: row.expense_account_code,
     liabilityAccountCode: row.liability_account_code,
     amountCents: row.amount_cents,
     servicePeriodStart: row.service_period_start,
     servicePeriodEnd: row.service_period_end,
     method: (row.method?.rule as AccrualCorrectionDraft["method"]) ?? "stated_amount",
+    // #937 — the per-period amounts as the door recorded them, so a correction RESTATES them
+    // rather than starting from a blank block. A `stated_amount` accrual answers with [].
+    periodAmounts: (row.period_amounts ?? []).map((a) => ({
+      dueDate: a.due_date, amountCents: a.amount_cents,
+    })),
     instruction: row.instruction,
     memo: basisMemo === row.purpose ? "" : basisMemo,
     sourceDocumentId: row.source_document_id ?? "",
@@ -187,16 +197,36 @@ export function AccrualCorrectionFormView({
   // THE FIXED AUTHORITY WINDOW — read off the row, never off a control. `clara.
   // correct_accrual_adjustment` carries it through to the nested `revise_accounting_plan` call
   // unchanged, so a corrected term must still sit inside it.
-  const window = { effectiveFrom: row.effective_from, effectiveTo: row.effective_to };
+  // #937 — the LIVE revision's whole schedule, not just its two window dates: a corrected
+  // per-period set must cover exactly the due dates the plan that is actually running will reach.
+  // Every one of the five is read off the accrual; none is a control on this form.
+  const window = {
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+    frequency: (row.plan.frequency ?? "monthly") as "monthly" | "quarterly" | "annual",
+    dayRule: (row.plan.day_rule ?? "last_day_of_month") as "day_of_month" | "last_day_of_month",
+    dayOfMonth: row.plan.day_of_month,
+  };
+  const dues = accrualScheduleDues(window.frequency, window.dayRule, window.dayOfMonth,
+    window.effectiveFrom, window.effectiveTo);
 
   const issues: AccrualIssue[] = showIssues ? validateAccrualCorrectionDraft(draft, window, knownCodes) : [];
 
+  // #937 — under `stated_period_amount` the preview shows the FIRST period that will post, not
+  // the window's total: no entry ever carries the total, so previewing it would show a line the
+  // ledger will not write.
+  const previewPeriod = draft.method === "stated_period_amount"
+    ? [...draft.periodAmounts].sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0] ?? null
+    : null;
+  const revenueSide = draft.side === "revenue";
   const lines = derivedAccrualLines({
+    side: draft.side,
     expenseAccountCode: draft.expenseAccountCode,
     liabilityAccountCode: draft.liabilityAccountCode,
-    amountCents: draft.amountCents,
+    amountCents: previewPeriod === null ? draft.amountCents : previewPeriod.amountCents,
     servicePeriodStart: draft.servicePeriodStart,
     servicePeriodEnd: draft.servicePeriodEnd,
+    periodDueDate: previewPeriod?.dueDate ?? null,
   });
 
   const busy = phase.kind === "saving";
@@ -389,9 +419,21 @@ export function AccrualCorrectionFormView({
             />
           </Field>
         </div>
+        {/* THE METHOD IS SHOWN, NOT OFFERED, ON THIS FORM. A correction restates the figures a
+            rule selects; changing WHICH rule selects them would change what every remaining
+            period posts, and that is a plan decision, not a restatement. */}
         <div className="flex flex-col gap-1">
           <h4 className="text-sm font-medium">{t("fieldMethod")}</h4>
           <p className="text-sm">{methodLabel(t, draft.method)}</p>
+        </div>
+        {/* #942 — THE SIDE IS SHOWN, NOT OFFERED, for the same reason the method is and one more:
+            the door refuses a side change BY NAME (accrual_side_immutable), so a control for it
+            could only ever produce that refusal. It is stated here because the two account legs
+            below mean different things on the two sides. */}
+        <div className="flex flex-col gap-1">
+          <h4 className="text-sm font-medium">{t("fieldSide")}</h4>
+          <p className="text-sm">{revenueSide ? t("sideRevenue") : t("sideExpense")}</p>
+          <p className="text-sm text-muted-foreground">{revenueSide ? t("sideRevenueHint") : t("sideExpenseHint")}</p>
         </div>
       </section>
 
@@ -400,8 +442,9 @@ export function AccrualCorrectionFormView({
         <div className="flex flex-wrap gap-3">
           <Field
             id={accrualFieldElementId("amountCents")}
-            label={t("fieldAmount")}
+            label={draft.method === "stated_period_amount" ? t("fieldAmountTotal") : t("fieldAmount")}
             error={message("amountCents")}
+            hint={draft.method === "stated_period_amount" ? t("amountTotalHint") : undefined}
             className="min-w-40 flex-1"
           >
             <MoneyInput
@@ -419,7 +462,7 @@ export function AccrualCorrectionFormView({
           </Field>
           <Field
             id={accrualFieldElementId("expenseAccountCode")}
-            label={t("fieldExpenseLeg")}
+            label={revenueSide ? t("fieldIncomeLeg") : t("fieldExpenseLeg")}
             error={message("expenseAccountCode")}
             className="min-w-40 flex-1"
           >
@@ -433,16 +476,16 @@ export function AccrualCorrectionFormView({
               onChange={(e) => set("expenseAccountCode", e.target.value)}
             >
               <option value="">{t("accountChoose")}</option>
-              {accounts.filter((a) => a.is_active && a.account_type === "expense").map((a) => (
+              {accounts.filter((a) => a.is_active && a.account_type === (revenueSide ? "income" : "expense")).map((a) => (
                 <option key={a.account_code} value={a.account_code}>{a.account_code} {a.name}</option>
               ))}
             </NativeSelect>
           </Field>
           <Field
             id={accrualFieldElementId("liabilityAccountCode")}
-            label={t("fieldLiabilityLeg")}
+            label={revenueSide ? t("fieldAssetLeg") : t("fieldLiabilityLeg")}
             error={message("liabilityAccountCode")}
-            hint={t("liabilityHint")}
+            hint={revenueSide ? t("assetHint") : t("liabilityHint")}
             className="min-w-40 flex-1"
           >
             <NativeSelect
@@ -455,12 +498,28 @@ export function AccrualCorrectionFormView({
               onChange={(e) => set("liabilityAccountCode", e.target.value)}
             >
               <option value="">{t("accountChoose")}</option>
-              {accounts.filter((a) => a.is_active && a.account_type === "liability").map((a) => (
+              {accounts.filter((a) => a.is_active && a.account_type === (revenueSide ? "asset" : "liability")).map((a) => (
                 <option key={a.account_code} value={a.account_code}>{a.account_code} {a.name}</option>
               ))}
             </NativeSelect>
           </Field>
         </div>
+        {/* #937 — THE PER-PERIOD BLOCK, present only under the rule that performs it, seeded from
+            what the door actually recorded. A correction is how a stated period amount changes:
+            the relation is append-only, and the successor detail carries its own rows. */}
+        {draft.method === "stated_period_amount" ? (
+          <AccrualPeriodAmountsBlock
+            t={t}
+            id={accrualFieldElementId("periodAmounts")}
+            rows={draft.periodAmounts}
+            dues={dues}
+            totalCents={draft.amountCents}
+            disabled={busy}
+            error={message("periodAmounts")}
+            onChange={(rows) => set("periodAmounts", rows)}
+            registerField={(node) => registerField("periodAmounts", node)}
+          />
+        ) : null}
         <p className="text-xs text-muted-foreground">{t("derivedLinesNote")}</p>
         <JournalBasisFields
           lines={lines}
@@ -560,6 +619,15 @@ function issueText(t: Translate, code: string): string {
     windowBeforeTerm: t("issueWindowBeforeTerm"),
     windowAfterTerm: t("issueWindowAfterTerm"),
     instructionRequired: t("issueInstructionRequired"),
+    // #937 — the same sentences the create form renders, for the same walls.
+    periodAmountsRequired: t("issuePeriodAmountsRequired"),
+    periodDueDateRequired: t("issuePeriodDueDateRequired"),
+    periodAmountRequired: t("issuePeriodAmountRequired"),
+    periodAmountDuplicate: t("issuePeriodAmountDuplicate"),
+    periodAmountsUnbalanced: t("issuePeriodAmountsUnbalanced"),
+    periodRemainderMisplaced: t("issuePeriodRemainderMisplaced"),
+    periodAmountMissing: t("issuePeriodAmountMissing"),
+    periodAmountNotScheduled: t("issuePeriodAmountNotScheduled"),
   };
   return codes[code] ?? code;
 }

@@ -1912,3 +1912,122 @@ admission, and adds the three the browser cannot know: every advance belongs to 
 enrolled account, each allocation passes the temporal over-application cap ON ITS OWN, and the
 refusal names the advance, its outstanding on the day and the shortfall. The form's rules are
 mirrors, never a second authority.
+
+## #937 — an accrual may state an amount for each period
+
+The accrual form's method control is a real choice now. It was a STATEMENT while migration 0222
+admitted one rule (`components/accruals/accrual-form.tsx`'s own note said why: a select listing
+rules that all post the same cents invites a preparer to record an intention the ledger never
+carries out). Migration 0303 added `stated_period_amount`, which posts different cents per period,
+so the control became a `<select>` of the two rules the ledger actually performs. The two withdrawn
+rules stay out of it (owner ruling 2026-09-18).
+
+`components/accruals/accrual-period-amounts.tsx` is ONE block rendered by TWO surfaces — the create
+form (#652) and the correction form (#936) — because "what does each period accrue" is one question
+and a second copy of it is one more place for the two forms to disagree about what a valid set is.
+
+**The due date is chosen, never typed.** `accrualScheduleDues` (`lib/accruals/api.ts`) mirrors
+`clara._plan_due_nth`'s own walk — k from 0, stop past the window — and the block's `<select>`
+offers exactly those dates, so the door's `accrual_period_amount_not_scheduled` refusal is
+unreachable from this surface: a form does not offer a control whose only outcome is a refusal. A
+row whose date the schedule no longer produces (a restored draft under a schedule the preparer has
+since changed) keeps its value in the select so the figure is not silently dropped, and the
+validator names it.
+
+**The running total sits beside the controls.** The exact-sum rule is the door's
+(`accrual_period_amounts_unbalanced`), and a preparer typing six periods cannot hold the arithmetic
+in their head: the block prints what has been stated against the accrual's own total and which way
+it is out. `amount_cents` means the TOTAL for the window under this rule, so the field's own label
+and hint change with the method.
+
+**The preview shows the FIRST period that will post**, with `clara._plan_accrual_period_line`'s own
+line wording rather than the frozen basis's. No entry ever carries the window total under this rule,
+so previewing it would be showing a line the ledger will not write.
+
+**`lib/work/accrual-draft.ts` mirrors each of 0303's walls** and nothing more: shape, no duplicate
+date, the exact sum, the final-period remainder over exactly the even-split shape it governs, and —
+where the schedule is known — every stated date scheduled and every scheduled date stated.
+`AccrualCorrectionWindow` widened from two dates to the LIVE revision's whole schedule (all five
+facts read off the accrual, none of them a control on that form). `fieldForAccrualPath` strips the
+subscript 0303 can put in a refusal path, so `accrual.period_amounts[2].amount_cents` focuses the
+one control there is for it.
+
+**Narrow width and keyboard** are structural rather than asserted after the fact: every row is
+`flex flex-wrap` so the date, the amount and the remove button stack at phone width instead of
+scrolling sideways, and every control is a real `<select>`, `<input>` or `<button>` in the reading
+order with its own `<label for>`. `accrual-form.test.tsx` runs the shared `test/a11yRules.ts` scan
+over the form with the block mounted and asserts every rule clean but `heading-order`, which is an
+artefact of mounting the VIEW without its route's own h1/h2 and predates this lane.
+
+## #942 — an accrual runs one of two ways, and every surface says which
+
+The accrual lane gained a **side** (migration 0304): `expense` — Dr the expense account / Cr a
+non-control accrued liability — or `revenue` — Dr a non-control asset (accrued income) / Cr the
+income account, for a service delivered and not yet invoiced. One lane with a side, not a second
+lane, which is the owner's own decision. Everything below follows from one fact about the database
+this file states once, in `lib/accruals/api.ts`'s `ACCRUAL_SIDES` doc comment: **the two account
+keys are historical**. `expense_account_code` is the PROFIT-AND-LOSS leg (an expense account on one
+side, an income account on the other) and `liability_account_code` is the BALANCE-SHEET leg (a
+non-control liability, or the accrued-income asset). They keep 0222's spelling because the FROZEN
+`start_accrual_work` tool sends exactly those two words.
+
+**The side is the first thing the amount-and-accounts section asks**, because it decides which
+accounts the two legs may even offer. Choosing it re-labels both controls (`Expense account` /
+`Liability account` become `Revenue account` / `Accrued income account`), re-filters both pickers
+by `account_type` (expense+liability, or income+asset) and **clears both chosen codes**: the code
+a preparer picked for the other side is of the wrong TYPE for this one, and leaving it on screen
+would leave a value the door can only refuse (`accrual_account_relationship`). The disabled preview
+flips with it — `derivedAccrualLines` now mirrors `clara._accrual_journal_basis` on both sides, so
+what is previewed is still exactly what the door will build.
+
+**A correction shows the side and offers no way to change it.** `clara.correct_accrual_adjustment`
+refuses a side change by name (`accrual_side_immutable`), so a control for it could only ever
+produce that refusal — the same reasoning that already keeps the METHOD off that form. The side is
+stated in words above the two legs, which are labelled and filtered by it, and it crosses the wire
+exactly as recorded.
+
+**The register carries both sides at once**, so two things had to change or it would have printed
+the opposite of what posts for half its rows: a `Side` column, and the two legs rendered in POSTING
+order (`Dr 1180 / Cr 4000` for a revenue accrual, not the stored column order). The side filter is a
+VIEW of what was already read rather than a second round trip —
+`clara.list_accrual_adjustments` takes a client and a date window and answers with every accrual of
+that client, so narrowing here can never disagree with the rows the register holds.
+
+**The "a document arrived inside an accrued period" item names its side too.** The database's own
+sentence now says "a document-sourced invoice or receipt" for a revenue accrual and keeps #938's
+words for an expense one, and the row carries `accrual_side` (derived from the shared `id`, the
+`authority_id` idiom). It is OPTIONAL on `ReviewQueueRow` for `work_questions`' own stated reason:
+every fixture in the app would otherwise stop compiling for a key one affordance renders as
+`?? "expense"`, and a required key would claim a pre-0304 database sends one.
+
+**One locale.** This app ships `messages/en.json` alone — there is no `zh.json`, and
+`i18n/request.ts` records that adding a locale is a routing.ts + middleware change. #942's
+acceptance names "en and zh"; the en half is here, and the zh half is an i18n lane's work rather
+than a string this ticket could have added to a file that does not exist.
+
+### Fix round 1 — the two accrual surfaces became one component
+
+`components/accruals/accrual-bill-conflicts.tsx` used to carry its OWN copy of the skip/reverse
+state machine, byte-for-byte `components/firm/accrual-bill-conflict-affordance.tsx`'s. The reviews
+then found three things missing from the INBOX copy alone — the document link AC2 asks for, the
+side #942 put on the row, and the period — which is exactly how two copies of one state machine
+fail. The Accruals page now mounts the SAME component the Needs-you inbox mounts and keeps only its
+own chrome (the section, the sentence, the accrued amount to compare the document against), so the
+two surfaces cannot drift again. Three `Accruals.*` keys the item owned (`billConflictSide`,
+`billConflictPeriod`, `billConflictViewEntry`) moved to their `NeedsYou.*` twins with them.
+
+Three things that component now says which neither surface said before:
+
+* **What each remedy settles.** "Skip this period's next occurrence" is FORWARD-looking: an accrual that
+  already stands cannot be un-posted, so the flagged period keeps both amounts and keeps its row
+  until its own reversal is admitted. A person who clicks it and sees the row unchanged was
+  otherwise reading a remedy as a failure.
+* **A plan that is not active.** Both doors refuse `plan_ended` / `plan_paused` while the double
+  count is still on the books. The item stays (hiding it would hide the double count) and the
+  CONTROLS go: a control whose only possible outcome is a refusal is not offered.
+* **Both sides, in the kind label and the section copy.** The row title was "A bill arrived for an
+  accrued period" and the section body named the EXPENSE account, on a surface #942 made two-sided;
+  they now say "document" and "profit-and-loss account".
+
+The accrual form's method hint is rule-dependent for the same reason (#937): it stated that one rule
+exists, beside a control that offers two.
