@@ -235,11 +235,40 @@ export const CLAIM_ALLOCATIONS_V22_CHAT_GUIDANCE = [
   "stretch an advance past what it carries. What happens to the remainder is the human's decision.",
 ].join("\n");
 
+
+// --- A6 + A7 · the accrual amendments ------------------------------------------------------
+//
+// #937's "amount varies by period" paragraph and #942's "an accrual runs one of two ways"
+// paragraph, in the lane's own build order. `ACCRUAL_CHAT_GUIDANCE` is inside frozen
+// `SYSTEM_PROMPT_V20`, so these ride as an amendment to it and the heading says so.
+
+export const ACCRUAL_V22_CHAT_GUIDANCE = [
+  "ACCRUALS — TWO THINGS HAVE CHANGED SINCE THE ACCRUAL PARAGRAPH ABOVE.",
+  "",
+  "1 · AN ACCRUAL RUNS ONE OF TWO WAYS AND YOU MUST BE SURE WHICH BEFORE YOU RECORD ONE. A COST",
+  "the period incurred that nobody has billed yet is side: \"expense\". Work the firm has DELIVERED",
+  "and not yet invoiced is side: \"revenue\": the amount sits in an accrued-income asset until the",
+  "invoice is issued, and it is reversed on the first day of the next month so the invoice and the",
+  "estimate never both count. If the accountant has not said which, ASK — never infer it from the",
+  "account they named. On the revenue side expense_account_code is the income account being earned",
+  "and liability_account_code is the accrued-income asset (1180 Accrued Income on the standard",
+  "chart, unless they name another). Neither leg may be a control account, and the side cannot be",
+  "changed afterwards: a correction restates an accrual, it never turns one into the other.",
+  "",
+  "2 · WHEN THE AMOUNT VARIES BY PERIOD. If the accountant tells you July is three thousand and",
+  "August three thousand five hundred, record it with method: \"stated_period_amount\" and one",
+  "period_amounts entry per due date, with amount_cents set to the TOTAL for the window. If you do",
+  "not have a figure for a period the schedule reaches, ASK for it by date. Never average, never",
+  "carry a previous period forward, and never read an amount off a document: the amounts are ones",
+  "a person states. If an even split leaves a cent over, it belongs to the final period.",
+].join("\n");
+
 export const SYSTEM_PROMPT_V22 =
   `${SYSTEM_PROMPT_V21}\n\n${OPENING_SOURCE_CHAT_GUIDANCE}\n\n${CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`
   + `\n\n${TRADE_INVOICE_V22_CHAT_GUIDANCE}`
   + `\n\n${OPENING_REFRESH_CHAT_GUIDANCE}`
-  + `\n\n${CLAIM_ALLOCATIONS_V22_CHAT_GUIDANCE}`;
+  + `\n\n${CLAIM_ALLOCATIONS_V22_CHAT_GUIDANCE}`
+  + `\n\n${ACCRUAL_V22_CHAT_GUIDANCE}`;
 
 // --- the promotions -----------------------------------------------------------------------
 

@@ -343,7 +343,7 @@ test("v22.roster: v22 is v21's tool set plus EXACTLY read_opening_source and rea
   // AND THE REPLACEMENTS ARE NAMED. A tool v21 already serves can be REPLACED under the same name
   // (#982/#1007 on the trade invoice), which a set difference cannot see: `Object.assign` takes the
   // later value silently. Each replacement is listed here by the ticket that made it.
-  for (const name of ["start_trade_invoice_work", "start_staff_expense_claim_work"]) {
+  for (const name of ["start_trade_invoice_work", "start_staff_expense_claim_work", "start_accrual_work"]) {
     assert.ok(v21.includes(name) && v22.includes(name), name);
   }
   // ENUMERATED RATHER THAN ASSUMED, v21's own cell's rule: the count is measured by building the
@@ -415,6 +415,7 @@ test("v22.prompt: SYSTEM_PROMPT_V22 is v21's text plus this cut's OWN stanzas, b
   assert.match(added, /TWO THINGS HAVE CHANGED SINCE THE PARAGRAPH ABOVE/); // #982 + #1007 (A1, A2)
   assert.match(added, /REFRESH, DO NOT RETRY THE READ/);     // #986 (A3)
   assert.match(added, /ONE CLAIM MAY COME OFF SEVERAL ADVANCES/); // #931 (A5)
+  assert.match(added, /ACCRUALS — TWO THINGS HAVE CHANGED/);  // #937 + #942 (A6, A7)
   // EACH TICKET APPENDS ITS OWN, and the whole added text is exactly the exported stanzas joined
   // — nothing is written inline where no cell can see it. Extend this list when a ticket of this
   // lane adds a stanza; never replace it.
@@ -424,7 +425,8 @@ test("v22.prompt: SYSTEM_PROMPT_V22 is v21's text plus this cut's OWN stanzas, b
     + `\n\n${v22Prompt.CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`
     + `\n\n${v22Prompt.TRADE_INVOICE_V22_CHAT_GUIDANCE}`
     + `\n\n${v22Prompt.OPENING_REFRESH_CHAT_GUIDANCE}`
-    + `\n\n${v22Prompt.CLAIM_ALLOCATIONS_V22_CHAT_GUIDANCE}`,
+    + `\n\n${v22Prompt.CLAIM_ALLOCATIONS_V22_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.ACCRUAL_V22_CHAT_GUIDANCE}`,
     "the added text is exactly this cut's exported stanzas, in the order they were added",
   );
 });

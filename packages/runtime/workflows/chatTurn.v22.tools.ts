@@ -46,9 +46,19 @@ import {
   startStaffExpenseClaimWorkInputSchemaV2,
   type StartStaffExpenseClaimWorkInputV2,
 } from "../lib/staff-expense-claim-basis.v2.js";
+import {
+  ACCRUAL_TIMEZONE,
+  START_ACCRUAL_WORK_TOOL,
+  accrualFromInputV2,
+  accrualRefusalMessageV2,
+  localAccrualRefusalV2,
+  startAccrualWorkInputSchemaV2,
+  type StartAccrualWorkInputV2,
+} from "../lib/accrual-basis.v2.js";
 
 export { START_TRADE_INVOICE_WORK_TOOL, startTradeInvoiceWorkInputSchemaV2, TRADE_INVOICE_REFUSALS_V2 };
 export { START_STAFF_EXPENSE_CLAIM_WORK_TOOL, startStaffExpenseClaimWorkInputSchemaV2 };
+export { START_ACCRUAL_WORK_TOOL, startAccrualWorkInputSchemaV2 };
 
 /** The tool name, as the model sees it and as every census counts it. */
 export const READ_OPENING_SOURCE_TOOL = "read_opening_source";
@@ -1249,6 +1259,129 @@ export async function runStartStaffExpenseClaimWorkV22(
   }
 }
 
+
+// =============================================================================================
+// `start_accrual_work` — ROSTER ENTRIES A6 (#937) AND A7 (#942), CONSUMED TOGETHER.
+//
+// `reports/wave4-lane03-fix.md`: "The cut must consume BOTH together: #937's `period_amounts` key
+// and #942's `side` key land on the same `p_accrual` jsonb." The door's ARITY IS UNCHANGED — the
+// same twelve arguments in the same order — and only `p_accrual`'s shape widens.
+// =============================================================================================
+
+export type StartAccrualWorkResultV22 =
+  | {
+      ok: true;
+      work_accepted: WorkAcceptedPartV19 | null;
+      accrual_id: string;
+      plan_id: string;
+      occurrence_due_on: string | null;
+      replayed: boolean;
+    }
+  | ToolRefusalV22;
+
+/** The occurrence an accrual configuration admitted, or null. A future-dated authority has no
+ *  occurrence yet and the tool must not invent a Work id for one. v20's own helper, restated
+ *  because a deployed body does not export it. */
+function occurrenceOfV22(receipt: Record<string, unknown>): Record<string, unknown> | null {
+  const raw = receipt.occurrence;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  return raw as Record<string, unknown>;
+}
+
+function occurrenceLogicalOpIdV22(occurrence: Record<string, unknown>): string {
+  if (occurrence.logical_op_id != null) return String(occurrence.logical_op_id);
+  const outcome = occurrence.outcome;
+  if (outcome && typeof outcome === "object" && !Array.isArray(outcome)) {
+    const inner = (outcome as Record<string, unknown>).logical_op_id;
+    if (inner != null) return String(inner);
+  }
+  return "";
+}
+
+export async function runStartAccrualWorkV22(
+  ctx: ToolCtx,
+  input: StartAccrualWorkInputV2,
+): Promise<StartAccrualWorkResultV22> {
+  if (!ctx.clientId) {
+    return noClientRefusalV22(
+      "accrual_work_needs_client_pin",
+      "This conversation is not bound to a client, so it cannot configure an accrual.",
+    );
+  }
+  const local = localAccrualRefusalV2(input);
+  if (local) return local;
+
+  const clientId = ctx.clientId;
+  const opKey = stableOpKey(ctx.taskId, START_ACCRUAL_WORK_TOOL, input);
+  const accrual = accrualFromInputV2(input);
+  const authorityRef = { kind: "accounting_work", id: input.authority_work_id };
+  try {
+    const receipt = await pools().withRuntime(async (c: PgExec) => {
+      const r = await c.query(
+        "select clara.create_accrual_adjustment_for($1::uuid, $2::uuid, $3::text, $4::jsonb,"
+        + " $5::jsonb, $6::text, $7::text, $8::int, $9::text, $10::date, $11::date, $12::text) as r",
+        [
+          clientId,
+          ctx.createdBy,
+          input.purpose,
+          JSON.stringify(authorityRef),
+          JSON.stringify(accrual),
+          input.frequency,
+          input.day_rule,
+          input.day_of_month ?? null,
+          ACCRUAL_TIMEZONE,
+          input.effective_from,
+          input.effective_to,
+          opKey,
+        ],
+      );
+      return (r.rows[0]?.r ?? null) as Record<string, unknown> | null;
+    });
+    if (!receipt || receipt.accrual_id == null) {
+      return internalFaultV22("The accrual could not be configured. Nothing was recorded.");
+    }
+    const occurrence = occurrenceOfV22(receipt);
+    const workId = occurrence && occurrence.work_id != null ? String(occurrence.work_id) : "";
+    return {
+      ok: true,
+      work_accepted:
+        workId === ""
+          ? null
+          : {
+              type: "work_accepted",
+              work_id: workId,
+              client_id: clientId,
+              // 0193's `_plan_admit_occurrence` admits every occurrence through
+              // `clara.admit_journal_work` with `adjustment_basis` NULL.
+              purpose: "journal_entry",
+              logical_op_id: occurrence === null ? "" : occurrenceLogicalOpIdV22(occurrence),
+            },
+      accrual_id: String(receipt.accrual_id),
+      plan_id: String(receipt.plan_id ?? ""),
+      occurrence_due_on: occurrence && occurrence.due_date != null ? String(occurrence.due_date) : null,
+      replayed: receipt.replayed === true,
+    };
+  } catch (error) {
+    const refused = authoringRefusal(error as DbErrorV22);
+    if (refused.ok !== false || !isGovernedRefusalV22(refused.code)) {
+      return internalFaultV22("The accrual could not be configured.");
+    }
+    // #942's four (`accrual_side_immutable`, and the two changed-shape
+    // `accrual_account_relationship` constraints) get this cut's sentence; everything else keeps
+    // the door's own words, which is what v20 did for all of them.
+    const reason = refused.reason;
+    const sided = reason === "accrual_side_immutable" || reason === "accrual_account_relationship";
+    return {
+      ok: false,
+      code: refused.code,
+      reason: refused.reason,
+      fix: refused.fix,
+      message: sided ? accrualRefusalMessageV2(String(reason), refused.details) : refused.message,
+      details: refused.details,
+    };
+  }
+}
+
 export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
   return Object.assign({}, buildToolsV21(ctx, modelId, segment), {
     // A1 + A2 — the SAME NAME v21 serves, REPLACED rather than added. `Object.assign` takes the
@@ -1285,6 +1418,22 @@ export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
         + "zero — an empty cash figure means nobody has said which accounts are cash yet.",
       inputSchema: readClientFinancialPackInputSchema,
       execute: (input: ReadClientFinancialPackInput) => runReadClientFinancialPack(ctx, input),
+    }),
+    [START_ACCRUAL_WORK_TOOL]: tool({
+      description:
+        "Configure an ACCRUAL for the client pinned to this conversation. AN ACCRUAL RUNS ONE OF "
+        + "TWO WAYS and you must be sure which: `side: \"expense\"` is a cost the period incurred "
+        + "that nobody has billed yet; `side: \"revenue\"` is work the firm has DELIVERED and not "
+        + "yet invoiced, which sits in an accrued-income asset. If the accountant has not said "
+        + "which, ASK — never infer it from the account they named. Amounts are integer CENTS. The "
+        + "service period and the authority window are the HUMAN's, never a period you read out of "
+        + "a document. When the amount VARIES BY PERIOD, use `method: \"stated_period_amount\"` "
+        + "with one `period_amounts` entry per due date and `amount_cents` as the window's TOTAL; "
+        + "if you do not have a figure for a period the schedule reaches, ask for it by date — "
+        + "never average, never carry a period forward, never read one off a document. This "
+        + "configures a schedule and may admit the current period's Work; it posts nothing itself.",
+      inputSchema: startAccrualWorkInputSchemaV2,
+      execute: (input: StartAccrualWorkInputV2) => runStartAccrualWorkV22(ctx, input),
     }),
     [START_STAFF_EXPENSE_CLAIM_WORK_TOOL]: tool({
       description:
