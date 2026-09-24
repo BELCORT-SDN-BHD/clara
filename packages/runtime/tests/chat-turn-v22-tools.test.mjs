@@ -323,15 +323,20 @@ test("v22.opening: the door is the ROUTE CORE, called with the core's own argume
 // 5 · the roster
 // ---------------------------------------------------------------------------
 
-test("v22.roster: v22 is v21's tool set plus EXACTLY read_opening_source", () => {
+test("v22.roster: v22 is v21's tool set plus EXACTLY read_opening_source and read_client_financial_pack", () => {
   const v21 = Object.keys(v21Tools.buildToolsV21(CTX, MODEL, 0)).sort();
   const v22 = Object.keys(v22Tools.buildToolsV22(CTX, MODEL, 0)).sort();
-  assert.deepEqual(v22.filter((n) => !v21.includes(n)), ["read_opening_source"]);
+  // THE ONE PLACE THIS CUT'S ROSTER IS ENUMERATED. Each ticket of lane C1 edits this cell when it
+  // adds its tool, which is the estate's own pattern (v21's counts thirty-nine) and the reason a
+  // tool cannot arrive here unnoticed: #985 added `read_opening_source`, #1000
+  // `read_client_financial_pack`.
+  assert.deepEqual(v22.filter((n) => !v21.includes(n)),
+    ["read_client_financial_pack", "read_opening_source"]);
   assert.deepEqual(v21.filter((n) => !v22.includes(n)), [], "nothing v21 could do stops being possible");
   // ENUMERATED RATHER THAN ASSUMED, v21's own cell's rule: the count is measured by building the
   // map, never read off a header comment.
   assert.equal(v21.length, 39, "v21's measured roster");
-  assert.equal(v22.length, 40, "v21's thirty-nine plus one");
+  assert.equal(v22.length, 41, "v21's thirty-nine plus two");
 });
 
 test("v22.roster: the contracts this cut DEFERRED are absent BY NAME, and that is a ruling", () => {
@@ -388,12 +393,20 @@ test("v22.roster: a tool-shaped JSON object inside the client's knowledge adds N
 // 6 · the prompt
 // ---------------------------------------------------------------------------
 
-test("v22.prompt: SYSTEM_PROMPT_V22 is v21's text plus ONE paragraph, byte for byte", () => {
+test("v22.prompt: SYSTEM_PROMPT_V22 is v21's text plus this cut's OWN stanzas, byte for byte", () => {
   assert.ok(v22Prompt.SYSTEM_PROMPT_V22.startsWith(v21Prompt.SYSTEM_PROMPT_V21),
     "every prior word stays byte-identical — v21's three stanzas included");
   const added = v22Prompt.SYSTEM_PROMPT_V22.slice(v21Prompt.SYSTEM_PROMPT_V21.length);
-  assert.match(added, /READING AN OPENING SOURCE/);
-  assert.equal(added.trim(), v22Prompt.OPENING_SOURCE_CHAT_GUIDANCE, "one paragraph, and it is the exported one");
+  assert.match(added, /READING AN OPENING SOURCE/);          // #985
+  assert.match(added, /THE CLIENT'S MONEY BAND/);            // #1000
+  // EACH TICKET APPENDS ITS OWN, and the whole added text is exactly the exported stanzas joined
+  // — nothing is written inline where no cell can see it. Extend this list when a ticket of this
+  // lane adds a stanza; never replace it.
+  assert.equal(
+    added,
+    `\n\n${v22Prompt.OPENING_SOURCE_CHAT_GUIDANCE}\n\n${v22Prompt.CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`,
+    "the added text is exactly this cut's exported stanzas, in the order they were added",
+  );
 });
 
 test("v22.prompt: the stanza says she may report ONLY what the read returned — #985 AC5", () => {

@@ -23,7 +23,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { buildToolsV21 } from "./chatTurn.v21.tools.js";
 import type { ToolRefusalV21 } from "./chatTurn.v21.tools.js";
-import { pools, type PgExec, type ToolCtx } from "./chatTurn.v15.infra.js";
+import { pools, readScoped, type PgExec, type ToolCtx } from "./chatTurn.v15.infra.js";
 import { parseOpeningTargets, readOpeningSeed } from "../lib/opening-parse.mjs";
 
 /** The tool name, as the model sees it and as every census counts it. */
@@ -456,8 +456,250 @@ export async function runReadOpeningSource(
   }
 }
 
+// =============================================================================================
+// `read_client_financial_pack` — THE CLIENT HOME'S MONEY BAND, AND NOT ONE FIGURE OF IT IS OURS.
+//
+// #1000. `clara.get_client_financial_pack` (0232, #660) is the ONE read behind the client home's
+// money band: BOOK CASH over a governed, versioned cash account set and PERIOD PROFIT over the
+// approved ledger, each with the same ten-field envelope, six points of history, its own
+// comparison and its own per-account composition. It answers the whole of that in ONE call, and
+// this tool's entire job is to carry the answer across unchanged — so Clara and the person
+// looking at the client home can never be reading two different numbers.
+//
+// THE DOOR IS NOT THE HUMAN'S. The read is granted to `clara_authenticated` alone, and this lane
+// carries no JWT claims at all, so migration 0320 split the computation into ONE ungranted core
+// with two audited entrances and gave this lane its own: `clara.wake_get_client_financial_pack`,
+// EXECUTE to `clara_agent_ro` and one `interactive` allowlist row. The credential that reaches it
+// is minted ON BEHALF OF the human this turn acts for, and `clara.wake_context` re-validates that
+// person as an ACTIVE BOOKKEEPER+ of the firm on every use — a floor STRICTLY ABOVE the viewer
+// floor the read itself carries, so nothing was widened to open this lane.
+// =============================================================================================
+
+/** The tool name, as the model sees it and as every census counts it. */
+export const READ_CLIENT_FINANCIAL_PACK_TOOL = "read_client_financial_pack";
+
+/** A calendar day in the wire shape `p_as_of` and `p_month` take. It pins the SHAPE and nothing
+ *  else: whether a month is a first day, whether an as-of is in the future, and whether an as-of
+ *  falls inside the named month are the READ'S OWN questions, answered against the client's book
+ *  day (`clara.book_today()`) rather than against this process's calendar. */
+const CALENDAR_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The tool's input: a client, and at most two dates. `.strict()`, so a figure, an account code or
+ * a set id in the call is REFUSED rather than dropped — a dropped key is how "I read the money
+ * band" becomes a number nobody computed.
+ */
+export const readClientFinancialPackInputSchema = z
+  .object({
+    client_id: z
+      .string()
+      .uuid()
+      .describe("The client this conversation is about. It must be that client and no other."),
+    as_of: z
+      .string()
+      .regex(CALENDAR_DAY)
+      .optional()
+      .describe(
+        "The day to read to, as YYYY-MM-DD. Leave it out for the client's own current book day. "
+        + "A day in the future is refused: there are no actuals for it.",
+      ),
+    month: z
+      .string()
+      .regex(CALENDAR_DAY)
+      .optional()
+      .describe(
+        "One named month, given as its FIRST day (YYYY-MM-01). Leave it out for month-to-date. "
+        + "Any other day of the month is refused rather than rounded.",
+      ),
+  })
+  .strict();
+
+export type ReadClientFinancialPackInput = z.infer<typeof readClientFinancialPackInputSchema>;
+
+export type ReadClientFinancialPackResult =
+  | {
+      ok: true;
+      status: "read";
+      /** The door's OWN envelope, key for key. Never re-shaped, never re-derived, never defaulted:
+       *  a NULL `value_cents` means "we do not know", and 0 means "we do". */
+      pack: Record<string, unknown>;
+    }
+  | ToolRefusalV22;
+
+/**
+ * THE SENTENCES THE ESTATE HAS FOR THIS LANE, one reason naming one thing.
+ *
+ * The four CLR10s are the READ'S OWN, and #1000's AC2 is that they reach the model as such: the
+ * code and the reason travel verbatim and the whole detail bag rides under `details`, because the
+ * dates the door names are the only thing that tells a person what to ask for instead. A sentence
+ * is written here only where the token is a fixed machine word the estate can speak about; any
+ * other reason is NAMED in the message rather than described, because an invented description is
+ * a refusal nobody can trace.
+ */
+export const CLIENT_FINANCIAL_PACK_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
+  invalid_client:
+    "I was not given a client to read the money band for.",
+  month_not_first_day:
+    "A month is named by its first day, and that is not one — so I did not guess which month you meant.",
+  as_of_in_future:
+    "That day has not happened yet in this client's books, so there are no actuals to report for it.",
+  as_of_outside_month:
+    "That day falls outside the month you named, and I will not silently read a different period.",
+  // The wake ceremony's own three. They are about the CONVERSATION'S authority rather than about
+  // the client's figures, and the read is never reached when one of them answers.
+  wake_credential_unavailable:
+    "I could not open a governed read of this client's figures for this conversation.",
+  wake_authority_absent:
+    "This read is made on a named person's authority, and this conversation carries none.",
+  authority_lost:
+    "Reading a client's money band is a bookkeeper's act, and the person this conversation acts "
+    + "for is not an active bookkeeper, admin or owner of this firm. Nothing was read.",
+  credential_client_pin:
+    "This conversation's authority is pinned to a different client, so I will not read this one's figures.",
+});
+
+/** The act a PERSON takes next, by reason. Silence is honest where there is nothing to do. */
+export const CLIENT_FINANCIAL_PACK_FIXES: Readonly<Record<string, string>> = Object.freeze({
+  month_not_first_day: "Name the month by its first day, for example 2026-03-01.",
+  as_of_in_future: "Ask again for a day that has already happened in this client's books.",
+  as_of_outside_month: "Ask for a day inside the month you named, or drop the month.",
+  authority_lost:
+    "A bookkeeper, admin or owner of this firm opens the conversation, or the client home shows "
+    + "the same figures to anyone who may see them.",
+});
+
+/** The typed `detail` a governed refusal carries, or null. A malformed bag is not a crash and not
+ *  a swallowed code: the reason becomes null and the code still travels. */
+function detailReasonV22(error: { detail?: unknown }): { reason: string | null; bag: Record<string, unknown> } {
+  const raw = typeof error.detail === "string" ? error.detail : null;
+  if (raw === null) return { reason: null, bag: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { reason: null, bag: {} };
+  }
+  if (!parsed || typeof parsed !== "object") return { reason: null, bag: {} };
+  const bag: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) bag[key] = value;
+  const reason = typeof bag.reason === "string" ? bag.reason : null;
+  return { reason, bag };
+}
+
+/**
+ * THE DOOR'S ANSWER, TURNED INTO THE TOOL ENVELOPE — and #1000's AC2 is that nothing is replaced
+ * by a generic message on the way.
+ *
+ * EXPORTED because it is the contract a reviewer has to be able to drive: the door call around it
+ * needs a database, this decision does not.
+ *
+ * THE ONE PLACE A CODE IS TRANSLATED, and it is named rather than hidden. A person who is not an
+ * active bookkeeper+ of the firm is refused by `clara.mint_wake_credential` with CLR10 and #630's
+ * typed `authority_lost` — BEFORE the read is reached at all, so there is no read refusal to
+ * carry. The chat lane's word for a lost or insufficient authority is CLR04 (`chatTurn.v22`'s
+ * opening lane answers exactly this shape), and the reason word is the door's own. Everything
+ * else keeps the code the database stated.
+ */
+export function clientFinancialPackRefusal(error: unknown): ToolRefusalV22 {
+  const e = (error ?? {}) as { code?: unknown; detail?: unknown };
+  const code = typeof e.code === "string" ? e.code : null;
+  if (code === null || !/^CLR\d\d$/.test(code)) {
+    return internalFaultV22("The money band could not be read. Nothing was reported from it.");
+  }
+  const { reason, bag } = detailReasonV22(e);
+  if (code === "CLR10" && reason === "authority_lost") {
+    return {
+      ok: false,
+      code: "CLR04",
+      reason,
+      fix: CLIENT_FINANCIAL_PACK_FIXES.authority_lost ?? null,
+      message: CLIENT_FINANCIAL_PACK_REFUSALS.authority_lost as string,
+      details: bag,
+    };
+  }
+  // A CLR03 with no typed detail is the credential itself — absent, expired, revoked, or of a kind
+  // this door is not allowlisted for. It is one state to a model: this conversation cannot make
+  // this read right now.
+  const named = code === "CLR03" && reason === null ? "wake_credential_unavailable" : reason;
+  const sentence = named === null ? null : CLIENT_FINANCIAL_PACK_REFUSALS[named] ?? null;
+  return {
+    ok: false,
+    code,
+    reason: named,
+    fix: named === null ? null : CLIENT_FINANCIAL_PACK_FIXES[named] ?? null,
+    message:
+      sentence
+      ?? `The money band could not be read: the database refused it (${code}${named ? `, ${named}` : ""}). Nothing was reported.`,
+    details: bag,
+  };
+}
+
+/**
+ * Read a client's governed cash/profit pack through the model lane's own door.
+ *
+ * THREE WALLS, AND THEN THE DATABASE ANSWERS EVERYTHING ELSE:
+ *   1. the conversation is about a client at all;
+ *   2. the client the model named IS that client (v21's provenance wall — silently substituting
+ *      the pin would answer about somebody the model did not name);
+ *   3. the wake credential is minted ON BEHALF OF the human this turn acts for, which is what
+ *      carries their live firm and their live standing into the read.
+ * The firm scope, the role floor, the date rules, the coverage words and every refusal are the
+ * door's, and this module adds none of its own.
+ */
+export async function runReadClientFinancialPack(
+  ctx: ToolCtx,
+  input: ReadClientFinancialPackInput,
+): Promise<ReadClientFinancialPackResult> {
+  if (!ctx.clientId) {
+    return noClientRefusalV22(
+      "client_financial_pack_needs_client_pin",
+      "This conversation is not bound to a client, so there is no money band of theirs to read.",
+    );
+  }
+  if (input.client_id !== ctx.clientId) {
+    return {
+      ok: false,
+      code: "CLR03",
+      reason: "client_not_in_conversation",
+      fix: "Open this conversation from the client whose figures you mean, then ask again.",
+      message: "That is not the client this conversation is about, so I will not read their money band here.",
+      details: { client_id: input.client_id },
+    };
+  }
+  let row: { pack?: unknown } | null;
+  try {
+    row = await readScoped(ctx, async (c: PgExec) => {
+      const r = await c.query(
+        "select clara.wake_get_client_financial_pack("
+        + "p_client => $1::uuid, p_as_of => $2::date, p_month => $3::date) as pack",
+        [input.client_id, input.as_of ?? null, input.month ?? null],
+      );
+      return (r.rows[0] ?? null) as { pack?: unknown } | null;
+    });
+  } catch (error) {
+    return clientFinancialPackRefusal(error);
+  }
+  const pack = row?.pack;
+  if (!pack || typeof pack !== "object") {
+    return internalFaultV22("The money band could not be read. Nothing can be reported from it.");
+  }
+  return { ok: true, status: "read", pack: pack as Record<string, unknown> };
+}
+
 export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
   return Object.assign({}, buildToolsV21(ctx, modelId, segment), {
+    [READ_CLIENT_FINANCIAL_PACK_TOOL]: tool({
+      description:
+        "Read this client's MONEY BAND — the same book cash and period profit the client home "
+        + "shows, with their coverage, their six months of history and their comparison against "
+        + "the period before. You name the client and, if you want a particular period, an as-of "
+        + "day and/or one named month by its first day; month-to-date is what you get by naming "
+        + "neither. Every figure comes back computed: report what the answer says and never work "
+        + "one out yourself, never add the parts up, and never call a figure that came back empty "
+        + "zero — an empty cash figure means nobody has said which accounts are cash yet.",
+      inputSchema: readClientFinancialPackInputSchema,
+      execute: (input: ReadClientFinancialPackInput) => runReadClientFinancialPack(ctx, input),
+    }),
     [READ_OPENING_SOURCE_TOOL]: tool({
       description:
         "Read the document already bound to one of this client's OPENING BASES into its opening "

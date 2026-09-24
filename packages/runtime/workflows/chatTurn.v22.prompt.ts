@@ -34,7 +34,7 @@ import {
   hasCodingIntent_v21,
   type ClaraPartV21,
 } from "./chatTurn.v21.prompt.js";
-import { READ_OPENING_SOURCE_TOOL } from "./chatTurn.v22.tools.js";
+import { READ_OPENING_SOURCE_TOOL, READ_CLIENT_FINANCIAL_PACK_TOOL } from "./chatTurn.v22.tools.js";
 
 // Every unchanged predecessor symbol is REACHED BY REFERENCE rather than re-spelled, so the text
 // each one names is hash-locked once and a reader of either name is reading one value.
@@ -123,7 +123,38 @@ export const OPENING_SOURCE_CHAT_GUIDANCE = [
   "register.",
 ].join("\n");
 
-export const SYSTEM_PROMPT_V22 = `${SYSTEM_PROMPT_V21}\n\n${OPENING_SOURCE_CHAT_GUIDANCE}`;
+export const CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE = [
+  "THE CLIENT'S MONEY BAND — EVERY FIGURE IS COMPUTED FOR YOU, AND NONE OF THEM IS YOURS.",
+  "",
+  `${READ_CLIENT_FINANCIAL_PACK_TOOL} answers the same book cash and period profit the client's`,
+  "own home page shows: the figure, what period it covers, what it could not cover, the six months",
+  "before it, and the comparison against the period before. You name the client, and a day or one",
+  "named month only if somebody asked for a particular period; name neither and you get",
+  "month-to-date. A month is named by its FIRST day.",
+  "",
+  "REPORT WHAT CAME BACK. Never work a figure out yourself: not by adding the accounts up, not by",
+  "subtracting expense from income, not by carrying a number from an earlier turn. The read did",
+  "the arithmetic once so that you and the person are looking at one number, and a figure you",
+  "computed beside one it returned is two answers to one question.",
+  "",
+  "AN EMPTY FIGURE IS NOT ZERO, AND SAYING SO IS THE WHOLE POINT. When a figure comes back empty,",
+  "the answer beside it says why — most often that nobody has said which of this client's accounts",
+  "are cash yet. Say that. \"Their cash is RM 0.00\" for a client nobody has answered that question",
+  "for is the most expensive sentence you can write here, and it is not something you can fix:",
+  "a person declares a client's cash accounts on the client's own pages, never you.",
+  "",
+  "AMOUNTS ARE IN CENTS, and the currency is on the answer. Divide by a hundred when you say it",
+  "out loud, name the currency, and never round a figure into a tidier one.",
+  "",
+  "SAY WHAT THE ANSWER SAYS IT COULD NOT COVER. When coverage is partial, the reason beside it is",
+  "the part a professional has to know — a month before this client's books start is not a month",
+  "they earned nothing in. Pass that reason on in the words it arrives in rather than smoothing it",
+  "away, and if a refusal names a date or a month, read it out: it is the only thing that tells",
+  "them what to ask for instead.",
+].join("\n");
+
+export const SYSTEM_PROMPT_V22 =
+  `${SYSTEM_PROMPT_V21}\n\n${OPENING_SOURCE_CHAT_GUIDANCE}\n\n${CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`;
 
 // --- the promotions -----------------------------------------------------------------------
 
