@@ -44,8 +44,11 @@ Minimal session state. Everything durable lives on GitHub (issues, PRs, the #597
 
 ## Next Steps
 
-1. The owner's signed-in walk of the step-8 lane-surface table, owed for waves 2, 3 and 4 (none has
-   had one done in its own window).
+1. The signed-in walk of the step-8 lane-surface tables of waves 2, 3 and 4 was done on 2026-09-25
+   through the owner's Chrome session, read-only (RELEASE-W4-RUNBOOK.md, Signed-in walk): every
+   surface renders on hosted data. Still owed by the owner, because each needs a write: one payroll
+   summary or agreement upload (then the lane-01 surfaces), one fresh invite (then the signed-out
+   preview of #871), and starting the firm-setup checklist (then the financial-year-end pair).
 2. The cut phase: ONE shared successor cut `chatTurn_v22` / `claraWork_v6` for #985, #1000, #1030 and
    #1037 (`statementFacts_v4`), carrying the successor contracts of #982, #1007, #986, #915, #931,
    #933, #937, #941, #942 and #949.

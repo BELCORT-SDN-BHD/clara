@@ -1022,3 +1022,38 @@ the 6e ceremony read `direct_clara_usage = true` against the runbook's expectati
 the login shell INHERITs the group role's schema USAGE, which is what lets it reach the one granted
 function; the EXECUTE surface itself is exactly as designed, so this is an explained deviation, not
 a defect.
+
+### Signed-in walk (owner session, 2026-09-25 02:53 to 03:00 MYT, read-only)
+
+The owner signed in on Chrome; the orchestrator drove the same browser session through the surfaces of the step-8 tables of waves 2, 3 and 4, reading each page after its live reads settled and clicking nothing that writes. Firm BELCORT (owner), client ROME SECRETARY SDN BHD (`7a045c7f-b7c3-4cf3-b3d9-c82312e35716`). Every surface rendered on hosted data without an error page or a broken component.
+
+| surface | what was seen |
+|---|---|
+| `/api/build-info` (signed in) | `git_sha` = `6da02a8dec786015a68209d08f3391af5156081e`, `runtime_url` = the Fly runtime |
+| `/` (Firm Home) | Needs you 5 / Needs review 2 with the oldest-waiting rows; the client portfolio; the legal-standing prompt (ToS v1 not yet accepted, beta does not block); firm setup 0 of 8; Recent activity; sweep runs (last finalized 02:48 MYT) |
+| `/clients/<id>` | client home: Money (book cash), Work attention facets, Documents and coding, Bank, Close, Last activity, all resolving after the live reads |
+| `/clients/<id>/documents` | the intake surface and the coding lane; no uploads on this client, so no payroll summary or agreement could be opened (waves 1 and 4 lanes 01: not exercisable on this data) |
+| `/clients/<id>/accruals` (wave 4 lane 03) | the Show filter offers Both sides / Expense / Revenue (#942's revenue side); the authority sentence; no accruals recorded |
+| `/clients/<id>/prepayments` (wave 4 lane 04, wave 3 lane 06) | Needs a decision block; the Term came from filter (the document's own service period / a person's statement, #939 and #940); no schedules |
+| `/clients/<id>/deferred-revenue` (wave 4 lane 04, new route family) | the recognition-schedules page with its four framing notes (never an invoice, never MyInvois, SST output never recognised), Needs a decision, the term-source filter; no schedules |
+| `/clients/<id>/registers?tab=fixedAssets` (waves 2, 3, 4 lane 05) | Account profiles, the Prepayment accounts roster panel (#940), Register / GL tie-out, Depreciation authority with Propose authority; the chart loads asynchronously |
+| `/clients/<id>/registers` (tabs) | Opening, AR/AP aging, Fixed assets, Adjustments, Staff advances, Chart of accounts; the Clara rail beside it with the owner's earlier conversation |
+| `/clients/<id>/accounting/claims` (wave 4 lane 02) | Staff expense claims list with Record staff expense claim; none recorded |
+| `/clients/<id>/accounting/adjustments` (wave 3 lane 05) | Periodic adjustments (stock count, supplied payroll obligation); none recorded |
+| `/clients/<id>/plans` | Authorised plans; none |
+| `/clients/<id>/bank` (wave 3 lane 08) | Accounts / Statements / Matching / Exceptions / Reconciliation / Agent tabs; open account proposals; add a bank account |
+| `/clients/<id>/journals` (wave 2 lane 01) | Drafts and review queue, Posted, Clarifications (0) |
+| `/clients/<id>/knowledge`, `/settings/knowledge` (wave 2 lane 02) | knowledge version 0; the client's identifiers (bank_account, ssm) and counterparties with the identity note; the firm register empty |
+| `/clients/<id>/reports` (wave 3 lane 07) | sealed reports (none), agent receipts, the analysis sandbox note, the freeform read log (five reads, one refused), month snapshots (one minted), Internal processing with the seeding panel READ-ONLY (retired lane, no Tick and no Decline) |
+| `/clients/<id>/close` | FY2025 open, the close gates by drawer with their live verdicts (two failing gates named: unmatched statement lines, FY-dated filings without an entry), close readiness, the close-prep hold, the SST future-method attestation |
+| `/work` (wave 2 lane 09) | five Work rows with state and origin; the Needs you list; firm-level questions; identifier promotions; sweep runs; running agent tasks |
+| `/activity` (wave 2 lane 08) | 25 events with actor, client and links; the kinds ladder; the note on the agent-act kinds not yet wired |
+| `/documents` | no unassigned sources |
+| `/settings/firm` (wave 2 lanes 06 and 10) | This firm, Legal standing (ToS v1 not accepted, DPA v1 accepted 04 Sept), Plan and payment (Clara Beta), Model usage by month with the CSV download, Processing capacity (the four caps, none set), Approvals, Signing capabilities |
+| `/settings/setup` (wave 4 lane 06, wave 2 lane 06) | 12 facts in three groups; the MyInvois TIN item is OFFERED to this firm and reads Optional (#1032 option A; the turnover band is unanswered, so it is not required); the financial-year-end month is asked; whether the pair (month and day) renders as a pair inside the answer form could not be seen without starting the checklist, which writes |
+| `/settings/members` (wave 2 lane 10, wave 3 lane 10, wave 4 lane 05) | the roster (one owner), Pending invites with one Expired invite reading its status; no live invite exists, so the signed-out invite preview (#871) could not be exercised without sending a new invite, which writes |
+| `/settings/vendor-bindings` (wave 3 lane 01) | history and revoke only; no Propose and no Sign control anywhere |
+| `/settings/compliance` | the SST watch for the client, Monitored, RM 0.00 |
+| `/operator` | admission capacity (4 firms admitted, unlimited); no open cases |
+
+Not exercisable on this data, read-only: a payroll summary, a hire-purchase or tenancy agreement and their posts (no such document is filed on hosted); the signed-out invite preview (no live invite); the firm-setup FYE pair's answer form (starting the checklist writes). These need one upload and one invite by the owner, after which the same walk covers them.
