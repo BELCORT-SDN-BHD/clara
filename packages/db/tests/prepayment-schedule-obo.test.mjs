@@ -60,6 +60,19 @@ function cell(name, fn) {
 // AC1 — A RUNTIME SESSION CONFIGURES A SCHEDULE OBO A BOOKKEEPER, AND IS REFUSED OBO A VIEWER.
 // ===========================================================================================
 
+// #939 AC4 (0317) — THIS FILE'S OWN LANE-SPECIFIC FRONTIER. 0307's stem is true long before 0317
+// exists, and 0317 adds ONE name to the human roster this file enumerates, so the expectation asks
+// the catalog rather than assuming it: the db-slice-frontiers matrix runs this battery against
+// chains where 0307 has applied and 0317 has not.
+let corrected = null;
+async function hasCorrection() {
+  if (corrected !== null) return corrected;
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'schedule_term_correction$'");
+  corrected = Number(r.rows[0].n) > 0;
+  return corrected;
+}
+
 cell("p915.obo.configures — on a real clara_runtime connection with no JWT, the twin configures a "
   + "schedule OBO a bookkeeper and records THAT human as its author; OBO a viewer it refuses CLR04 "
   + "insufficient_role and writes nothing; and the twin is the ONLY lane the runtime role holds",
@@ -606,6 +619,12 @@ async () => {
     "clara.list_prepayment_attention(uuid)",
     "clara.list_prepayment_schedules(uuid)",
     "clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)",
+    // #939 AC4 (0317) — the term-correction door joins the HUMAN roster and nothing else: the two
+    // assertions above still pin clara_runtime to the twin and the machine read, and the agent and
+    // wake roles to nothing. Asked at the frontier rather than assumed, because this battery also
+    // runs against chains where 0307 has applied and 0317 has not.
+    ...(await hasCorrection()
+      ? ["clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)"] : []),
     "clara.retire_prepayment_account(uuid,text,text,text)",
   ]);
   assert.equal(lane.find((r) => r.signature === HUMAN_SIG).runtime, false);
