@@ -331,6 +331,9 @@ test("H-43: TLS_CHECKED_DSN_VARS covers every lane DSN plus both base sources", 
     "CLARA_BANK_DATABASE_URL",
     "CLARA_STRIPE_WEBHOOK_DATABASE_URL",
     "CLARA_AUTH_WALL_DATABASE_URL",
+    // #871 (0309): the eighth lane's DSN, re-typed here on purpose — this cell is the SPELLING
+    // instrument and the SUPERSET cell below is the IDENTITY one.
+    "CLARA_INVITE_PREVIEW_DATABASE_URL",
     "WORKFLOW_POSTGRES_URL",
     "DATABASE_URL",
   ];
