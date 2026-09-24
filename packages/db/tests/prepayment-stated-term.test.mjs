@@ -28,7 +28,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 7;
+const EXPECTED_CELLS = 8;
 
 before(async () => {
   ready = await (async () => {
@@ -587,6 +587,87 @@ cell("p939.reads.term_source — both schedule reads return a human-stated sched
   const movedRow = movedList.schedules.find((r) => r.schedule_id === memoSchedule.schedule_id);
   assert.equal(movedRow.term_moved, true, "the list says the same thing the detail does");
   assert.equal(movedRow.term_current_start, newStart);
+});
+
+// ===========================================================================================
+// THE FIX ROUND (ADV-02) — THE STATED REASON IS BOOKKEEPER-FLOORED ON THE READS TOO.
+// ===========================================================================================
+
+cell("p939.reads.reason_floor — a VIEWER of the owning firm reads both schedule reads and gets no stated reason, no stater and no stated-at, with term_reason_withheld:true saying the fact exists and who may see it; a bookkeeper on the same schedule gets all three; and the wall matches the one clara.prepayment_stated_terms' own RLS policy applies to a direct read", async () => {
+  const scene = await statedTermScene("reasonfloor", {
+    cents: 90000, termMonthsBack: 4, termMonths: 3, memoCents: 60000 });
+  const carol = scene.w.users.carol;                      // a VIEWER of this same firm
+  const SECRET =
+    "#939 battery: the partner judged the term from a phone call with the client's CFO, and the "
+    + "call is the only record";
+  const stated = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd, reason: SECRET });
+  const schedule = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry, purpose: "Memo-only insurance",
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+
+  // ---- THE TABLE'S OWN WALL, measured first, because it is the wall the reads must match:
+  // `p_pst_human` admits `clara.actor_role_rank() >= clara.role_rank('bookkeeper')` and 0305's own
+  // comment says why ("this table holds a professional's STATED REASON, the same data class 0140
+  // walled off there"). `clara.document_service_periods` carries the identical policy.
+  const { humanQuery } = await import("./rig-helpers.mjs");
+  const direct = async (sub) => Number((await humanQuery(sub,
+    "select count(*)::int as n from clara.prepayment_stated_terms where source_entry_id = $1",
+    [scene.memoEntry])).rows[0].n);
+  assert.equal(await direct(scene.bob), 1, "the bookkeeper cannot see the row through the table");
+  assert.equal(await direct(carol), 0, "the table's own policy does not wall the viewer");
+
+  // ---- THE DETAIL READ. A definer read that projected the reason handed a viewer exactly what
+  // the policy above refuses them, which made that floor decorative.
+  const asViewer = await getPrepaymentSchedule(carol, schedule.schedule_id);
+  assert.equal(asViewer.term_reason, null, "the viewer was handed the stated reason");
+  assert.equal(asViewer.term_stated_by, null, "…and the professional who stated it");
+  assert.equal(asViewer.term_stated_at, null, "…and when");
+  assert.equal(asViewer.term_reason_withheld, true,
+    "the viewer is told the statement EXISTS and is withheld, never that there is none");
+  // EVERYTHING ELSE THE VIEWER COULD SEE BEFORE, THEY STILL SEE: this is a field wall, not a
+  // narrower read, and a viewer who lost the schedule would be a different defect.
+  assert.equal(asViewer.term_source, "human_stated");
+  assert.equal(asViewer.stated_term_id, stated.stated_term_id);
+  assert.equal(asViewer.term_live, true);
+  assert.equal(asViewer.term_start, scene.termStart);
+  assert.equal(asViewer.total_cents, 60000);
+
+  const asBookkeeper = await getPrepaymentSchedule(scene.bob, schedule.schedule_id);
+  assert.equal(asBookkeeper.term_reason, SECRET, "the floor now hides the reason from its OWNER");
+  assert.equal(asBookkeeper.term_stated_by, stated.stated_by);
+  assert.ok(asBookkeeper.term_stated_at);
+  assert.equal(asBookkeeper.term_reason_withheld, false,
+    "nothing is withheld from a reader above the floor");
+
+  // ---- THE LIST READ ANSWERS THE SAME WAY. Two reads that disagreed would leave the reason one
+  // click away from the surface that hid it.
+  const viewerList = await listPrepaymentSchedules(carol, scene.client);
+  const viewerRow = viewerList.schedules.find((r) => r.schedule_id === schedule.schedule_id);
+  assert.ok(viewerRow, "the viewer lost the schedule entirely -- this is a FIELD wall");
+  assert.equal(viewerRow.term_reason, null);
+  assert.equal(viewerRow.term_stated_by, null);
+  assert.equal(viewerRow.term_stated_at, null);
+  assert.equal(viewerRow.term_reason_withheld, true);
+  assert.equal(viewerRow.term_source, "human_stated", "…and still sees which carrier it rode");
+  assert.equal(viewerRow.term_live, true);
+
+  const bookkeeperList = await listPrepaymentSchedules(scene.bob, scene.client);
+  const bookkeeperRow = bookkeeperList.schedules.find((r) => r.schedule_id === schedule.schedule_id);
+  assert.equal(bookkeeperRow.term_reason, SECRET);
+  assert.equal(bookkeeperRow.term_reason_withheld, false);
+
+  // ---- NOTHING IS WITHHELD ON THE DOCUMENT LANE, because there is no stated trio to withhold:
+  // `withheld` must mean "there is something here you may not see", never "this field is null".
+  const docSchedule = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry, purpose: "Documented subscription",
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+  const docAsViewer = await getPrepaymentSchedule(carol, docSchedule.schedule_id);
+  assert.equal(docAsViewer.term_source, "document_service_period");
+  assert.equal(docAsViewer.term_reason, null);
+  assert.equal(docAsViewer.term_reason_withheld, false,
+    "the document lane has no stated reason at all, so nothing is being withheld");
 });
 
 // ===========================================================================================

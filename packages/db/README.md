@@ -5288,6 +5288,27 @@ dropped so a future reader who resolves it by name finds a sentence, not an abse
 lands, has NO caller anywhere in the `clara` schema's own text — the tail measures that by scanning
 `pg_proc.prosrc`, not by trusting the two bodies above to say so.
 
+### §E — the stated reason stops crossing the bookkeeper floor (ADV-02)
+
+`clara.prepayment_stated_terms` carries policy `p_pst_human`
+(`clara.actor_role_rank() >= clara.role_rank('bookkeeper')`), and 0305's own comment says why:
+"this table holds a professional's STATED REASON, the same data class 0140 walled off there".
+`clara.document_service_periods` carries the IDENTICAL policy, and the document-lane branch of the
+same reads projects only the DATES — `sp.basis` is never returned. But all four schedule reads are
+SECURITY DEFINER entering at `clara.role_rank('viewer')`, so the policy never ran for them, and each
+projected `term_reason`, `term_stated_by` and `term_stated_at` to any viewer of the firm. Driven on
+`clara_l04` before the fix: carol, a viewer of the owning firm, read `count(*) = 0` from the table
+directly and the whole stated sentence back from `clara.get_prepayment_schedule`,
+`clara.list_prepayment_schedules`, `clara.get_revenue_recognition_schedule` and
+`clara.list_revenue_recognition_schedules`. The impact was live —
+`apps/web/lib/navigation/tree.ts` gives both registers `minimumRole: 'viewer'`.
+
+The four reads are re-emitted whole (0305's and 0308's own text, never a splice) with one gate
+added. Below the floor the three fields come back null and a fifth, `term_reason_withheld`, is true
+— **only when a statement actually exists**, so a surface can say "recorded; visible to bookkeepers
+and above" instead of "none", and can never mistake an absent statement for a hidden one. It is a
+FIELD wall, not a narrower read: everything else a viewer could see, they still see.
+
 ### What this file deliberately does not do
 
 - It does not widen `clara.accounting_plans.authority_kind` or touch `clara._authority_ref_refusal`,
@@ -5313,6 +5334,10 @@ their measured pre-image, or a body already carrying `#1036`):
 | `clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)` | `acf5d120aa7f3a6e751ce3a21d02e7bdced202067540ec1d81a85396de4b82aa` |
 | `clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)` | `143d4526bea145be8529b77c95a1438fb0753c17c11dc57e4f742edfd3130c9f` |
 | `clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)` | `9be069dafd6884f9aed991e162bb64719d6e70d5841d11bb08011bbf8f7649c7` |
+| `clara.get_prepayment_schedule(uuid)` (§E) | `a97e8a660b2c8092fc2d867452081e98806507b2a6a322ddd95769e404d9dcd2` |
+| `clara.list_prepayment_schedules(uuid)` (§E) | `5e9312153959799fb74aced026513c71efcf1bd89665a71693546c38cafcb671` |
+| `clara.get_revenue_recognition_schedule(uuid)` (§E) | `7cb0eb58be588bf0faab283c9ddcfe83f702f7a1f2c2c133b97714cf6a019cad` |
+| `clara.list_revenue_recognition_schedules(uuid)` (§E) | `075a90ecfe7ee698610716534c5dfdc402ccf56c109f17fb93c03b5d6d031235` |
 
 UNCONDITIONAL neighbours (must not have moved; the file relies on their live shape but never
 touches them):
@@ -5357,7 +5382,11 @@ transaction and zero durable rows of any kind, the authority wall answering AHEA
 wall, the refusal's stability across a fresh credential, the absence of any body that writes a plan
 under `clara.agent_user_id()`, the template core's zero-caller census, and the wrapper's own
 unchanged shape — each refusal cell paired with the HUMAN door on the same scene, whose plan is
-driven through `clara._plan_admit_occurrence` and admits); `tests/plan-overlap-template-arm-retired.test.mjs` (`p929.containment` replaced by
+driven through `clara._plan_admit_occurrence` and admits);
+`tests/prepayment-stated-term.test.mjs` (`p939.reads.reason_floor`, new) and
+`tests/revenue-recognition.test.mjs` (`p941.reads.reason_floor`, new) — a viewer of the owning firm
+driven through all four reads beside a bookkeeper on the same schedule, with the table's own policy
+measured alongside so the read and the table are asserted to agree; `tests/plan-overlap-template-arm-retired.test.mjs` (`p929.containment` replaced by
 `p1036.containment-closed` — the residual it pinned is closed, not merely held shut by a flag, and
 the three containment facts it named are re-measured as unchanged rather than as a tripwire);
 `tests/f-a4-pr2a-wrapper.test.mjs` and `tests/f-a4-pr2a-books.test.mjs` (the whole Tier-A/B/C

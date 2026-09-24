@@ -44,7 +44,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 12;
+const EXPECTED_CELLS = 13;
 
 before(async () => {
   ready = await (async () => {
@@ -868,6 +868,61 @@ cell("p941.supersede.running — a corrected service period never moves a schedu
 // ===========================================================================================
 // AC "the web gains a Deferred revenue destination" — its READS, measured at the database seam.
 // ===========================================================================================
+
+cell("p941.reads.reason_floor — a VIEWER of the owning firm reads both recognition reads and gets no stated reason, no stater and no stated-at, with term_reason_withheld:true; a bookkeeper on the same schedule gets all three; the wall matches clara.prepayment_stated_terms' own RLS policy, and the viewer keeps every other field", async () => {
+  const scene = await deferredRevenueScene("reasonfloorDR", { cents: 90000, termMonths: 3 });
+  const carol = scene.w.users.carol;                      // a VIEWER of this same firm
+  const SECRET =
+    "#941 battery: the engagement partner set the service period from the signed side letter, "
+    + "which is not on the client file";
+  const stated = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd, reason: SECRET });
+  const schedule = await createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef });
+
+  // THE TABLE'S OWN WALL FIRST — the revenue lane shares `clara.prepayment_stated_terms` with the
+  // expense lane, so it shares its policy (`p_pst_human`, bookkeeper floor) and must share the
+  // floor its reads apply.
+  const { humanQuery } = await import("./rig-helpers.mjs");
+  const direct = async (sub) => Number((await humanQuery(sub,
+    "select count(*)::int as n from clara.prepayment_stated_terms where source_entry_id = $1",
+    [scene.receipt])).rows[0].n);
+  assert.equal(await direct(scene.bob), 1);
+  assert.equal(await direct(carol), 0, "the table's own policy does not wall the viewer");
+
+  const asViewer = await getRecognitionSchedule(carol, schedule.schedule_id);
+  assert.equal(asViewer.term_reason, null, "the viewer was handed the stated reason");
+  assert.equal(asViewer.term_stated_by, null);
+  assert.equal(asViewer.term_stated_at, null);
+  assert.equal(asViewer.term_reason_withheld, true);
+  // A FIELD WALL, NOT A NARROWER READ: everything else the viewer could see, they still see.
+  assert.equal(asViewer.term_source, "human_stated");
+  assert.equal(asViewer.stated_term_id, stated.stated_term_id);
+  assert.equal(asViewer.total_cents, 90000);
+  assert.equal(asViewer.term_live, true);
+
+  const asBookkeeper = await getRecognitionSchedule(scene.bob, schedule.schedule_id);
+  assert.equal(asBookkeeper.term_reason, SECRET);
+  assert.equal(asBookkeeper.term_stated_by, stated.stated_by);
+  assert.ok(asBookkeeper.term_stated_at);
+  assert.equal(asBookkeeper.term_reason_withheld, false);
+
+  const viewerList = await listRecognitionSchedules(carol, scene.client);
+  const viewerRow = viewerList.schedules.find((r) => r.schedule_id === schedule.schedule_id);
+  assert.ok(viewerRow, "the viewer lost the schedule entirely -- this is a FIELD wall");
+  assert.equal(viewerRow.term_reason, null);
+  assert.equal(viewerRow.term_stated_by, null);
+  assert.equal(viewerRow.term_stated_at, null);
+  assert.equal(viewerRow.term_reason_withheld, true);
+  assert.equal(viewerRow.term_source, "human_stated");
+
+  const bookkeeperList = await listRecognitionSchedules(scene.bob, scene.client);
+  const bookkeeperRow = bookkeeperList.schedules.find((r) => r.schedule_id === schedule.schedule_id);
+  assert.equal(bookkeeperRow.term_reason, SECRET);
+  assert.equal(bookkeeperRow.term_reason_withheld, false);
+});
 
 cell("p941.reads — the list carries the term provenance and the posted-period count, the detail projects each period beside the occurrence that posted it, and the attention band offers only receipts the door would admit: never an unenrolled account, never an ambiguous one, and never one already scheduled", async () => {
   const scene = await deferredRevenueScene("reads", { cents: 90000, termMonths: 3 });
