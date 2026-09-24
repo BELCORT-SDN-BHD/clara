@@ -194,11 +194,14 @@ set role clara_fn_owner;
 --     two halves together so a row cannot claim a region basis while carrying no region, nor
 --     carry regions while calling itself person-stated.
 --
---     RLS MATCHES THE DOCUMENTS ESTATE, policy for policy (clara.document_regions, 0007:788):
---     forced RLS, the owner's ALL policy, a firm-scoped SELECT for clara_authenticated and a
---     firm-scoped SELECT for clara_agent_ro. The runtime role gets NOTHING: a contract term is
---     written by a human door and read by human and agent surfaces; no worker needs it, and the
---     narrowest grant that works is the one this file takes.
+--     RLS STARTS FROM THE DOCUMENTS ESTATE'S SHAPE (clara.document_regions, 0007:788) but
+--     DELIBERATELY NARROWS IT: forced RLS, the owner's ALL policy, and a firm-scoped SELECT for
+--     clara_authenticated -- but NO grant for clara_agent_ro (see "NO AGENT-LANE GRANT" below,
+--     SPEC-08). This lane has doors -- clara.get_contract_terms and
+--     clara.get_tenancy_rent_plan_draft -- so the agent lane reads through them instead of a
+--     direct table grant. The runtime role gets NOTHING either: a contract term is written by a
+--     human door and read by human and agent surfaces through their own doors; no worker needs
+--     it, and the narrowest grant that works is the one this file takes.
 -- =====================================================================================
 -- REDO-SAFE (#957): `if not exists` rather than a bare `create table`, the packages/db/README.md
 -- rule for a redo target. A from-scratch chain creates it here; a redo over this file's own
