@@ -39,10 +39,13 @@ test("fa4p2a.W1 the extraction MOVED TEXT, not behaviour: the core carries the b
 
   if (await adjTemplateDoorsRetired()) {
     // [#927] THE DOOR IS RETIRED (migration 0282, owner ruling #788): its body is one typed
-    // refusal. What this cell exists to protect is the CORE -- the body the extraction moved, and
-    // the body the PARKED agent prepayment limb still reaches through
-    // clara._agent_prepayment_schedule_core -- so the core's half below is asserted in full and
-    // the door's half becomes the retirement.
+    // refusal. What this cell exists to protect is the CORE -- the body the extraction moved.
+    // [#1036] The agent prepayment limb no longer reaches it at all: wrapper 12
+    // (clara.wake_establish_prepayment_schedule) was rerouted onto clara._prepayment_schedule_core
+    // instead (migration 0315), and clara._agent_prepayment_schedule_core -- the one caller this
+    // core ever had beyond the retired door -- is itself retired to an unconditional refusal. The
+    // core survives, byte-unchanged and still callerless, as a non-regression pin; the door's half
+    // below is the retirement.
     assert.match(door, /adjustment_template_lane_retired/,
       "the retired door does not carry #927's own reason token");
     assert.doesNotMatch(door, /_propose_adjustment_template_core/,
