@@ -83,6 +83,32 @@ export const STATED_TERM_REASON = {
   entryNotFound: "prepayment_source_entry_not_found",
 };
 
+/** #939 AC4 — THE CORRECTION PATH'S OWN TOKENS. Decision 3 is "a mis-stated term is corrected by
+ *  superseding it and opening a new schedule from the next period; already-posted periods are never
+ *  touched", so each way that act can be REFUSED is named rather than answered by a constraint. The
+ *  four below are this lane's own; every other refusal the door can raise is one of the create
+ *  door's (`PREPAY_REASON`), because they are the same facts asked a second time. */
+export const CORRECTION_REASON = {
+  scheduleSuperseded: "prepayment_schedule_superseded",
+  termNotCorrected: "prepayment_term_not_corrected",
+  noOpenPeriod: "prepayment_correction_no_open_period",
+  nothingRemaining: "prepayment_correction_nothing_remaining",
+};
+
+/** The two axes `prepayment_term_not_corrected` distinguishes: the statement this schedule rode is
+ *  still the live one (nothing was corrected at all), and a re-statement that moved neither date
+ *  (ADV-02's own rule — `term_live` flips, `term_moved` does not, and only the second is grounds). */
+export const CORRECTION_AXIS = {
+  termLive: "term_live",
+  termUnmoved: "term_unmoved",
+};
+
+export const REPLACE_DOOR_SIG =
+  "clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)";
+
+export const REPLACE_REASON_TEXT =
+  "#939 battery: the client sent the policy schedule and the term we were told was a month out";
+
 export const STATED_TERM_DOOR_SIG =
   "clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)";
 export const EVALUATOR_V2_SIG =
@@ -290,6 +316,40 @@ export async function functionsMatching(pattern) {
     `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'clara' and p.proname ~ $1 order by 1`, [pattern]);
   return r.rows.map((x) => x.proname);
+}
+
+/** THE CORRECTION DOOR (#939 AC4). A bookkeeper who has already superseded the term states why,
+ *  cites a fresh instruction, and the estate opens the replacement schedule over the periods the
+ *  original never admitted. Named arguments, as every wrapper here. */
+export async function replacePrepaymentSchedule(sub, {
+  client, schedule, reason = REPLACE_REASON_TEXT, authorityRef, opKey = null,
+}) {
+  const r = await humanQuery(sub, namedCall("replace_prepayment_schedule", [
+    { name: "p_client", cast: "uuid" }, { name: "p_schedule", cast: "uuid" },
+    { name: "p_reason", cast: "text" }, { name: "p_authority_ref", cast: "jsonb" },
+    { name: "p_op_key", cast: "text" },
+  ]), [client, schedule, reason, JSON.stringify(authorityRef), opKey ?? opk("p939-replace")]);
+  return r.rows[0].result;
+}
+
+/** One schedule row's supersession stamp, read off the RELATION — the instrument for "the
+ *  predecessor stays on the record and names its successor", which is a claim about the row rather
+ *  than about the door's answer. */
+export async function scheduleSupersession(id) {
+  const r = await rootQuery(
+    `select id, superseded_by, superseded_at, replaces_schedule_id
+       from clara.prepayment_schedules where id = $1`, [id]);
+  return r.rows[0] ?? null;
+}
+
+/** How many LIVE schedules stand over one recognition entry. `scheduleCountFor` counts the whole
+ *  chain (which a correction lengthens on purpose); this counts the rule that must never break —
+ *  at most one schedule per recognition is live at a time. */
+export async function liveScheduleCountFor(sourceEntry) {
+  const r = await rootQuery(
+    `select count(*)::int as n from clara.prepayment_schedules
+      where source_entry_id = $1 and superseded_at is null`, [sourceEntry]);
+  return r.rows[0].n;
 }
 
 export const nowhereId = () => randomUUID();

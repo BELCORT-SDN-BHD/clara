@@ -21,14 +21,16 @@ import {
   STATED_TERM_REASON, STATED_TERM_DOOR_SIG, EVALUATOR_V2_SIG, PREPAY_REASON,
   createPrepaymentSchedule, scheduleTermSource, scheduleCountFor, unapprovedEntry, ambiguousAssetEntry,
   getPrepaymentSchedule, listPrepaymentSchedules, listPrepaymentAttention, memoOnlyIneligible,
-  scheduleRow, monthStartBack, opk, endAccountingPlan,
+  scheduleRow, monthStartBack, opk, endAccountingPlan, planRow,
+  replacePrepaymentSchedule, scheduleSupersession, liveScheduleCountFor,
+  CORRECTION_REASON, CORRECTION_AXIS, REPLACE_DOOR_SIG,
   wakeDuePlanOccurrences, occurrenceRows, workRow, claimWorkRun, settleWorkRun,
   mintClientObo, wakeRecordJournalEntry, receiptsForWork,
 } from "./prepayment-stated-term-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 10;
+const EXPECTED_CELLS = 11;
 
 before(async () => {
   ready = await (async () => {
@@ -499,6 +501,92 @@ cell("p939.supersede.running — a stated term corrected AFTER its schedule has 
     "configuring a REPLACEMENT schedule after ending the first one");
   assert.equal(await scheduleCountFor(scene.memoEntry), 1,
     "…and the recognition still carries exactly the one schedule it has always carried");
+});
+
+// ===========================================================================================
+// AC4, SECOND HALF — THE CORRECTION PATH ITSELF. "a new schedule from the next period is the only
+//   correction path" names an ACT, not only a prohibition, and until this door existed the estate
+//   performed none. Decision 3's other half — "already-posted periods are never touched" — is what
+//   makes the derivation PROSPECTIVE: the posted periods stand and the remaining balance is
+//   re-spread over what is left of the corrected term.
+// ===========================================================================================
+
+cell("p939.replace.clean — with nothing yet posted, correcting the term and then asking for the replacement opens a NEW schedule over the corrected term for the whole amount, ends the predecessor's plan, stamps the predecessor with its successor while leaving its own allocation byte-identical, and leaves exactly ONE live schedule over the recognition", async () => {
+  const scene = await statedTermScene("replaceClean", {
+    cents: 90000, termMonthsBack: 4, termMonths: 3, memoCents: 90000 });
+  const stated = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd });
+  const made = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+  assert.equal(made.period_count, 3, "the schedule this correction is about charges three months");
+  const rowBefore = await scheduleRow(made.schedule_id);
+
+  // ---- THE CORRECTION, through the door decision 3 names. The corrected term starts a month
+  // later and ends where it always did: two charged months instead of three.
+  const newStart = await monthStartBack(3);
+  const newEnd = await monthEndAfter(newStart, 1);
+  assert.notEqual(newStart, scene.termStart, "the correction really states different dates");
+  const corrected = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry, start: newStart, end: newEnd,
+    reason: "#939 battery: the policy schedule arrived and cover began a month later" });
+  assert.equal(corrected.superseded_id, stated.stated_term_id);
+
+  // ---- THE REPLACEMENT.
+  const replacement = await replacePrepaymentSchedule(scene.bob, {
+    client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef });
+  assert.ok(replacement.schedule_id, "the door names the schedule it wrote");
+  assert.notEqual(replacement.schedule_id, made.schedule_id, "a correction is a NEW schedule");
+  assert.equal(replacement.replaces_schedule_id, made.schedule_id,
+    "…and it names the one it replaced, so the chain reads forwards as well as back");
+
+  // THE DERIVED NUMBERS, from the worked example rather than from re-running the code's own
+  // arithmetic: nothing posted, so the whole 90000 sen is re-spread over the corrected term's TWO
+  // charged months — 45000 each, with no remainder to place.
+  assert.equal(replacement.term_start, newStart);
+  assert.equal(replacement.term_end, newEnd);
+  assert.equal(replacement.period_count, 2);
+  assert.equal(replacement.total_cents, 90000);
+  assert.deepEqual(
+    (replacement.period_lines ?? []).map((l) => Number(l.amount_cents)), [45000, 45000]);
+  assert.equal(replacement.term_source, "human_stated");
+  assert.equal(replacement.stated_term_id, corrected.stated_term_id,
+    "the replacement rides the statement that stands TODAY, not the one it is correcting");
+  assert.equal(replacement.expense_account_code, rowBefore.expense_account_code,
+    "a term correction corrects the TERM: the judged expense account is carried forward, never re-picked");
+  assert.equal(replacement.expense_account_basis, rowBefore.expense_account_basis);
+
+  // ---- THE PREDECESSOR. Its plan is ended, it is stamped, and its own row never moved.
+  const pred = await scheduleSupersession(made.schedule_id);
+  assert.equal(pred.superseded_by, replacement.schedule_id);
+  assert.ok(pred.superseded_at, "the predecessor carries its supersession stamp");
+  assert.equal((await planRow(made.plan_id)).status, "ended",
+    "the schedule it replaced stops posting, through the plan's own door");
+  const rowAfter = await scheduleRow(made.schedule_id);
+  assert.deepEqual(rowAfter.period_lines, rowBefore.period_lines,
+    "the predecessor's stored allocation is byte-identical — it is a derived record, never edited");
+  assert.equal(rowAfter.term_start, rowBefore.term_start);
+  assert.equal(rowAfter.term_end, rowBefore.term_end);
+  assert.equal(rowAfter.total_cents, rowBefore.total_cents);
+
+  // ---- AND THE REPLACEMENT IS THE ONE THAT STANDS.
+  assert.notEqual(replacement.plan_id, made.plan_id, "the replacement rides a plan of its own");
+  assert.equal((await planRow(replacement.plan_id)).status, "active");
+  assert.equal(await scheduleCountFor(scene.memoEntry), 2,
+    "both schedules are on the record — the chain is the audit trail");
+  assert.equal(await liveScheduleCountFor(scene.memoEntry), 1,
+    "…and exactly one of them is live");
+
+  // THE CREATE DOOR IS STILL NOT A SECOND CORRECTION PATH. It answers about the LIVE schedule,
+  // which is now the replacement.
+  const refused = await assertPair(CLR.conflict, PREPAY_REASON.scheduleExists,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.memoEntry,
+      expenseAccount: scene.target, authorityRef: scene.authorityRef }),
+    "configuring a third schedule over a recognition that already carries a replacement");
+  assert.equal(refused.detail.schedule_id, replacement.schedule_id,
+    "…and it names the schedule that STANDS, never the superseded one");
 });
 
 // ===========================================================================================
