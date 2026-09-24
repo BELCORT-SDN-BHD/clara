@@ -1444,24 +1444,47 @@ const AGREEMENT_0299_CLOCK_NAMES = [
 ];
 const TENANCY_0300_CLOCK_NAMES = ["_settle_rent_payable_core", "record_contract_terms"];
 
-// RIDERS WAVE 4, LANES 03/04/05 (0302, 0305, 0306, 0309, 0317) — SEVEN NAMES, and every one of
-// them reads a bare `now()` as an INSTANT stamped on a row or compared against a stored instant,
-// never as a date the books turn on. Each was read off the live body rather than the migration
-// text, and each body's ONLY bare-token occurrence is the one named below.
-//   · skip_plan_occurrence (0302, #938) — the `'at'` key of the jsonb state it writes on the
-//     skipped occurrence: WHEN the person skipped it, beside `skipped_by`. The occurrence's own
-//     due date is the plan's and is untouched.
-//   · record_prepayment_stated_term (0305, #939) — `superseded_at` on the append-only stated-term
-//     row the correction replaces. The TERM ITSELF is two dates the person states.
-//   · enrol_prepayment_account / retire_prepayment_account (0306, #940) — `retired_at` on the
-//     roster row (the enrolment door retires a superseded profile of the same account on its way
-//     in, which is why BOTH doors carry the stamp). Configuration lifetime, never a posting.
-//   · preview_invite_by_token (0309, #871) — the signed-out preview's own `v_now := now()`,
-//     spent on the rate window and on `i.expires_at <= now()`, i.e. comparing an instant with a
-//     stored instant. It derives no date and writes none: the read is STABLE.
-//   · replace_prepayment_schedule / replace_revenue_recognition_schedule (0317, #939 AC4 /
-//     #941 AC3) — `superseded_at` on the predecessor schedule row the successor supersedes. The
-//     successor's own periods come from the corrected term and the plan lane's arithmetic.
+// RIDERS WAVE 4, LANES 03/04/05 (0302, 0305, 0306, 0309, 0317) — SEVEN NAMES.
+//
+// THE ADJUDICATION, AND WHY IT NEEDED MORE THAN WAVE 3'S. Arm (D) catches a BARE clock token, and
+// a bare token is only a defect where the body derives a DATE from it — so wave 3's three doors
+// were cleared by the cheap proof that every column they stamp is TIMESTAMPTZ. That proof is NOT
+// available by inspection here: five of these seven write relations that carry DATE columns as
+// well as timestamptz ones (`prepayment_schedules.term_start/term_end`,
+// `prepayment_stated_terms.period_start/period_end`,
+// `revenue_recognition_schedules.term_start/term_end`,
+// `accounting_plan_occurrences.due_date/period_key`). Each body was therefore read on a live
+// 309-file catalog, twice: once for EVERY line carrying a clock token, and once for every
+// DATE-typed local it declares. The two lists are disjoint in all seven — which is exactly the
+// assignment-cast shape arm (D) exists to catch, absent — and every clock read lands on a
+// timestamptz target:
+//
+//   door (migration, ticket)                         its ONE clock line        the date it writes
+//   ------------------------------------------------ ------------------------- ------------------
+//   skip_plan_occurrence (0302, #938)                jsonb 'at' key            due_date/period_key
+//     from clara._plan_due_nth(r.effective_from, …) and clara._plan_occurrence_period_key(
+//     p.authority_from, r.effective_from, …) — the plan lane's own arithmetic over the plan's
+//     authority floor and the revision's effective_from. The clock reaches the audit state only.
+//   record_prepayment_stated_term (0305, #939)       superseded_at = now()     period_start/_end
+//     are the door's OWN ARGUMENTS: the two dates the PERSON states. Declares no date local.
+//   enrol_prepayment_account (0306, #940)            retired_at = now()        — none —
+//   retire_prepayment_account (0306, #940)           retired_at = now()        — none —
+//     (the enrolment door retires a superseded profile of the same account on its way in, which
+//     is why BOTH doors carry the stamp). prepayment_account_enrolments carries NO date column.
+//   preview_invite_by_token (0309, #871)             v_now := now()            — none —
+//     `v_now` is declared `timestamptz` and is only ever compared with `attempted_at`
+//     (timestamptz) across the 15-minute rate window, and with `i.expires_at`. The read is STABLE
+//     and invite_preview_attempts carries no date column.
+//   replace_prepayment_schedule (0317, #939 AC4)     superseded_at = now()     term_start/term_end
+//   replace_revenue_recognition_schedule (0317, #941 AC3)  superseded_at = now()  term_start/_end
+//     The ONLY two bodies here that declare date locals (`v_new_start`, `v_new_end`), and neither
+//     name appears on a clock line: they are assigned from `(v_corr ->> 'live_start')::date`,
+//     `(v_corr ->> 'live_end')::date` and `(v_rem ->> 'next_start')::date` — the CORRECTED TERM
+//     and the predecessor's remaining periods.
+//
+// So no clock read reaches a date column in any of the seven, no date local is fed from a clock
+// read, and the house legal date is not owed here: none of these bodies answers "what is today".
+// A body that later did would call clara._book_today() and belong on the arm (B) roster instead.
 const ACCRUAL_BILL_CONFLICT_0302_CLOCK_NAMES = ["skip_plan_occurrence"];
 const PREPAYMENT_STATED_TERM_0305_CLOCK_NAMES = ["record_prepayment_stated_term"];
 const PREPAYMENT_ACCOUNT_ROSTER_0306_CLOCK_NAMES = [
@@ -1784,6 +1807,15 @@ const KL_ROSTER_0220_FIRM_KNOWLEDGE = ["get_knowledge_applicability", "list_firm
 // (measured: 1,413 bytes of prosrc against the core's 38,889, and the arm (B) detector no longer
 // matches it). On a database pinned before 0307 the door still carries both mentions, so the
 // name is PUSHED BACK there instead of being deleted.
+//
+// THE GATE IS 0307's STEM AND NOT 0315's, and the difference is a real frontier. Gate A's report
+// attributes the relocation to #1036/0315 (`prepayment_wake_reroute`); the FILES say 0307. In
+// 0307 `clara._prepayment_schedule_core` spans lines 340-893 and all three of that file's
+// 'Asia/Kuala_Lumpur' literals (783, 790, 870) are inside it, while
+// `clara.create_prepayment_schedule` begins at 894 and carries none. 0315 and 0317 later RECUT
+// the core and keep the literals; they do not move them. Gating either side on 0315 would leave
+// every frontier pinned at 0307..0314 wrong in BOTH directions at once — the core missing from
+// the roster and the door still demanded on it.
 const KL_ROSTER_0223_PREPAYMENT = ["create_prepayment_schedule"];
 // WAVE 2026-09-15 END
 
