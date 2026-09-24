@@ -1034,14 +1034,20 @@ begin
   if position('contract_facts' in v_def) > 0 then
     raise notice '#948 §E3(1): clara._enqueue_invoice_facts_core already routes contract_facts -- splice already applied, nothing to do (redo)';
   else
-    v_next := v_def;
-
     -- SPLICE (1a): THE ROUTING ARM, immediately after the payroll arm and immediately before the
     -- skipped_kind dead end, which is where reading order puts it: the arm a kind falls into
     -- must be read before the arm every unrouted kind falls into.
+    --
+    -- THE FIRST SUBSTITUTION READS v_def DIRECTLY, and the four after it chain on v_next. That
+    -- is not cosmetic: apps/web/test/sqlFunctionCensus.ts reconstructs what a dynamic `execute`
+    -- installs by following the variable back to the body it was read from, and a bare
+    -- `v_next := v_def;` alias breaks that chain -- MEASURED, this block was written that way
+    -- first and the census refused it by name (`sql_function_census_unresolved_execute`), which
+    -- reddened do-action-floors.test.ts and three of its neighbours. The other four splices in
+    -- this file already start from v_def for the same reason.
     v_anchor := $a1$      v_lane:='payroll_facts'; v_engine:='llm-openai:gpt-5.6-terra:payroll-witness-v1';
     else$a1$;
-    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
     if v_n <> 1 then
       raise exception '#948 §E3 splice (1a): the payroll routing arm appears % time(s), expected 1', v_n using errcode = 'CLR10';
     end if;
@@ -1060,7 +1066,7 @@ begin
       -- mis-stamping it.
       v_lane:='contract_facts'; v_engine:='llm-openai:gpt-5.6-terra:agreement-witness-v1';
     else$a2$;
-    v_next := replace(v_next, v_anchor, v_repl);
+    v_next := replace(v_def, v_anchor, v_repl);
 
     -- SPLICE (1b): THE PER-LANE ENGINE-KIND SHORT-CIRCUIT. Without this arm a fully read
     -- agreement would read as un-extracted on every re-fire and re-buy a vendor read.
@@ -3275,15 +3281,25 @@ begin
       ('clara.claim_document_processing_task(uuid,text,boolean)', 'contract_facts'),
       ('clara.release_held_document_tasks(integer)', 'contract_facts')
       ) as t(sig, marker) loop
-    select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = r.sig::regprocedure;
+    select p.prosrc into v_def from pg_proc p where p.oid = r.sig::regprocedure;
     if position(r.marker in v_def) = 0 then
       raise exception '#948 tail: % does not carry %', r.sig, r.marker using errcode = 'CLR10';
     end if;
   end loop;
   -- The ROUTING ARMS specifically, counted at the assignment that makes each one -- a bare
   -- substring count over the whole body would also count comments and receipt arms (measured:
-  -- `llm_witness` appears 12 times in the live definition, only 2 of them as a lane assignment).
-  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+  -- `llm_witness` appears 12 times in the live body, only 2 of them as a lane assignment).
+  --
+  -- READ AS prosrc, NEVER AS THE CATALOG'S RENDERED DEFINITION, and that is a LINT CONTRACT
+  -- rather than a style choice: scripts/wiki-lint-checks.mjs classifies any `do` block that so
+  -- much as NAMES the rendering function as a change-of-record PATCH site, and then requires
+  -- every target it can attribute to sit in the wiki whitelist (its census-read exemption is
+  -- consulted only where attribution FAILED, so a literal signature cannot inherit it). A tail
+  -- that merely READS a body has no business being read as a patch. Measured twice: this block
+  -- was written the other way first and the lint refused it by name, and the marker counts below
+  -- are identical either way -- the rendered header is the only difference, and nothing here
+  -- asserts anything about a header.
+  select p.prosrc into v_def from pg_proc p
    where p.oid = 'clara._enqueue_invoice_facts_core(uuid)'::regprocedure;
   for r in select * from (values
       ($$v_lane:='llm_witness'$$, 2),
@@ -3301,7 +3317,7 @@ begin
 
   -- 7 · THE PERSIST DOOR KEEPS ITS clara_runtime GRANT AND NOW CALLS THE POST; the queue keeps
   --     its clara_authenticated grant and projects the new row kind exactly once.
-  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+  select p.prosrc into v_def from pg_proc p
    where p.oid = 'clara.persist_agreement_facts(uuid,jsonb,jsonb,integer)'::regprocedure;
   if position('_post_agreement_acquisition' in v_def) = 0 then
     raise exception '#948 tail: the persist door does not call the post -- the lane reads without posting'
@@ -3311,7 +3327,7 @@ begin
     raise exception '#948 tail: clara.list_review_queue lost its clara_authenticated grant' using errcode = 'CLR10';
   end if;
   v_code := regexp_replace(regexp_replace(
-    (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = 'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure),
+    (select p.prosrc from pg_proc p where p.oid = 'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure),
     '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
   v_n := (length(v_code) - length(replace(v_code, '''agreement_posting_blocked''::text row_kind', '')))
          / length('''agreement_posting_blocked''::text row_kind');

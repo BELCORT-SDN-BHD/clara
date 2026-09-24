@@ -73,13 +73,19 @@ const grammar = readFieldPathGrammar();
 // it until 0296 recut it (one namespace, `payroll`, joins the closed set), and a lint still
 // reading 0191 would have refused every lawful `payroll.*` literal in the estate's own tests. The
 // source of truth was never "0191" — it was "whatever the function is today".
+//
+// #948 — 0299 recut it again for `contract` (the agreement family's fact namespace, which names
+// the FACT FAMILY and not the document kind, so #949's tenancy terms read the same one). The
+// COUNT below re-bases with each such widening and is deliberately a literal rather than a
+// derivation: this cell's whole job is to notice that the closed set changed, and a count read
+// out of the same grammar it is checking would notice nothing.
 testCase("grammar: reads the real maxLength (128) and the roster from the migration that defines it last", () => {
   assertEqual(grammar.maxLength, 128, "maxLength");
   for (const ns of ["invoice", "statement", "myinvois", "opening_tb", "prior_gl", "payroll",
-    "pages", "tables", "rows", "sheets", "paragraphs"]) {
+    "contract", "pages", "tables", "rows", "sheets", "paragraphs"]) {
     if (!grammar.namespaces.has(ns)) throw new Error(`namespace roster missing "${ns}"`);
   }
-  assertEqual(grammar.namespaces.size, 11, "exactly the eleven registered namespaces, no more");
+  assertEqual(grammar.namespaces.size, 12, "exactly the twelve registered namespaces, no more");
 });
 
 testCase("fieldPathViolation: null passes (field_path is nullable by design)", () => {

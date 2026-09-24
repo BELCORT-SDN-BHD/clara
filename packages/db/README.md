@@ -5249,3 +5249,18 @@ take the marker branch). Inside one rolled-back transaction the lane database's
 `clara._assert_field_path` was restored to 0296's own body, measured back to the exact sha this
 file's prestate pins (`9783e0e7…`), and §A was run verbatim: it reported `OK (FIRST apply)`. The
 transaction was rolled back and the live body re-measured at its post-#948 sha.
+
+**Two lint contracts this file was measured against, both of them the hard way.**
+(a) `scripts/wiki-lint-checks.mjs` classifies any `do` block that so much as NAMES
+`pg_get_functiondef` as a change-of-record PATCH site, and then requires every target it can
+attribute to sit in the wiki whitelist — its census-read exemption is consulted only where
+attribution FAILED, so a literal signature cannot inherit it. §Z therefore reads `p.prosrc`, and
+the comment explaining why does not spell the rendering function's name (a mention inside the block
+is enough to re-classify it). (b) `apps/web/test/sqlFunctionCensus.ts` reconstructs what a dynamic
+`execute` installs by following the variable back to the body it was read from; a bare
+`v_next := v_def;` alias breaks that chain, and §E3(1)'s first cut had one —
+`sql_function_census_unresolved_execute` reddened `do-action-floors.test.ts` and three of its
+neighbours. Its first substitution now reads `v_def` directly, like the other four splices in the
+file, and the corrected FIRST-APPLY branch was exercised for real: in one rolled-back transaction
+the live router body was reversed through the block's own five (anchor, replacement) pairs, the
+pre-image installed, the block run, and all four arms re-read out of the catalog.
