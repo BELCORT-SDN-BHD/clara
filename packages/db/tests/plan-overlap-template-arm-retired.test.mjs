@@ -426,10 +426,10 @@ test("p1036.containment-closed -- clara._propose_adjustment_template_core has NO
     "clara.wake_engine_sources.close_prep moved -- #1036 must not touch it");
 
   // (5) AND THE FLAG NO LONGER MATTERS FOR SAFETY EITHER WAY, driven for real: with it flipped
-  //     true inside a rolled-back transaction, the wake still lands in clara.prepayment_schedules
-  //     and mints no adjustment_templates row -- `prepayment-wake-reroute.test.mjs`'s p1036.acted
-  //     drives this end to end; this cell only re-confirms the flag itself is inert to the
-  //     residual, not to the whole door's behaviour.
+  //     true inside a rolled-back transaction, the wake mints no adjustment_templates row -- it
+  //     refuses CLR03 wake_authority_absent and writes nothing at all, which
+  //     `prepayment-wake-reroute.test.mjs`'s p1036.refused drives end to end. This cell only
+  //     re-confirms the flag itself is inert to the residual, not the whole door's behaviour.
   await withTxn(async (c) => {
     await c.query(
       `update clara.wake_engine_sources
